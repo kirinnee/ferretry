@@ -124,6 +124,8 @@ function world(options: { fail?: { status: number; code: string } } = {}) {
   const half = cli.build!({
     manifest: cli.manifest,
     client,
+    clock: { now: () => new Date().toISOString() as never, nowMs: () => Date.now() },
+    sleep: async () => undefined,
     io: { out: (text: string) => out.push(text), err: (text: string) => err.push(text), isTty: false },
   });
   const run = async (verb: string, invocation: VerbInvocation) =>

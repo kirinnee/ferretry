@@ -1,21 +1,22 @@
 /**
- * THE ONE PLACE TERMINALS READS THE MACHINE DIRECTLY (interim).
+ * THE ONE PLACE TERMINALS READS THE MACHINE DIRECTLY (a permanent per-file exemption, DECISIONS-2 #21).
  *
  * Terminals proves who reads a terminal from `/proc` (I234–I237), lists a ferret's processes from `/proc`, and reads
- * the cgroup and block-device files under `/sys`. None of that is a declared root or a state file, and the kernel has
- * no port for it yet, so every adapter that needs it imports these names from here instead of `node:fs`/`node:os`:
+ * the cgroup and block-device files under `/sys`. None of that is a declared root or a state file, so every adapter that needs it imports these names from here instead of `node:fs`/`node:os`:
  * the calls, their order and their errors are today's, byte for byte, and `banned-globals` points at this one file.
- * When the kernel offers a read-only host port, this file is the only one that changes.
+ * What it reaches, so a reviewer can check the file against its reason: generic `node:fs` (lstat, readlink, realpath,
+ * open flags, access, stat, readFile, readdir), `Bun.file`, this process pid and uid, `process.kill` signals, the CPU and
+ * memory counts, `userInfo`, `process.platform` and `SHELL`.
  */
 export { constants, type Stats } from 'node:fs';
 export { access, type FileHandle, lstat, open, readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
-export { availableParallelism, homedir, totalmem, userInfo } from 'node:os';
+export { availableParallelism, totalmem, userInfo } from 'node:os';
 
 /** The platform this daemon runs on (`process.platform`). */
 export const hostPlatform: string = process.platform;
 
-/** This daemon's own environment, read for the login shell (`SHELL`) and nothing else. */
-export const hostEnvironment: Readonly<Record<string, string | undefined>> = process.env;
+/** The one environment variable Terminals reads, the login shell (`SHELL`): by name, never the whole environment. */
+export const hostEnvironment: Readonly<Record<string, string | undefined>> = { SHELL: process.env.SHELL };
 
 /** A whole file as text (today's `Bun.file(path).text()`). */
 export async function readText(path: string): Promise<string> {

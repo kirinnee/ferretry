@@ -17,6 +17,7 @@ import { launcherPorts, REAL_WORKER } from '../../support/process-workers.ts';
 import { wallClock } from '../../support/wall-clock.ts';
 import { workRoots } from '../../support/work-root.ts';
 import { waitFor } from '../../support/wait-for.ts';
+import { unprovenListenerProver } from '../../support/listener-prover.ts';
 
 /**
  * THE MACHINE'S AGENT BROWSER, AGAINST A REAL HEADLESS CHROME.
@@ -156,7 +157,7 @@ beforeAll(async () => {
         HOME: process.env.HOME,
       },
       undefined,
-      { stageDirectory: join(root, 'stage') },
+      { stageDirectory: join(root, 'stage'), listenerProver: unprovenListenerProver() },
     ),
     () => Date.now(),
   );

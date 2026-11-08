@@ -1,16 +1,12 @@
-import { readdir, readFile, readlink } from 'node:fs/promises';
-import { join } from 'node:path';
-import { loopbackListenersOn, PROC_TCP_TABLES } from '../../../proxy/wire/tcp-listeners.ts';
+import type { HostFactsPort } from '@ferretry/kernel/contract';
+import { loopbackListenersOn } from '../../../proxy/wire/tcp-listeners.ts';
 import { type ListenerProof, proveListener } from '../index.ts';
 
-// GAP (kernel port, banned-globals stays visible here): proving who holds a loopback port reads `/proc/net/tcp*` and
-// `/proc/<pid>/fd` — host/proc listener facts no 5.0 kernel port gives (port-kernel's `hostFacts` is not on 5.0).
+/** The `kernel.hostFacts` reads the prover makes: the socket tables, the process list, each process's stat and descriptors. */
+export type ListenerHostFacts = Pick<HostFactsPort, 'pids' | 'procFile' | 'procSystemFile' | 'procFds' | 'procFdLink'>;
 
-/** How the prover reads the host: its `/proc`, and this process's uid. Both are injected so a test can stage a
- *  fake `/proc` (tables, fd links, stat lines) in a temp directory instead of depending on a real squatter. */
+/** How the prover reads the host: this process's uid, injected so a test can judge a fake table. */
 export interface ListenerProverOptions {
-  /** Defaults to `/proc`. */
-  readonly procRoot?: string;
   /** `undefined` where the platform has no uids, which is a host this prover cannot judge. */
   readonly uid?: () => number | undefined;
 }
@@ -24,13 +20,8 @@ export interface ListenerProverPort {
 
 const SOCKET_LINK = /^socket:\[(\d+)\]$/u;
 
-/** A directory's entries, or none for one that is gone — a process that exited takes its `fd` directory along. */
-async function listing(directory: string): Promise<readonly string[]> {
-  return await readdir(directory).catch(() => []);
-}
-
 /**
- * Reads the kernel's evidence for `lib/browser/control/listener-proof.ts`: the socket tables, and the socket
+ * Reads the kernel's evidence (through `kernel.hostFacts`, which is REQUIRED: a prover with no evidence would answer `unknown`, and a caller that falls back on `unknown` must be handed a prover on purpose) for `lib/browser/control/listener-proof.ts`: the socket tables, and the socket
  * inodes held by the spawned process and its descendants (`/proc/<pid>/fd` links). Descendants count because a
  * supervised child is not always the pid the daemon holds — x11vnc runs under `timeout(1)`, which forks it.
  *
@@ -38,11 +29,12 @@ async function listing(directory: string): Promise<readonly string[]> {
  * (macOS) has no tables, which the pure judge turns into `unknown`.
  */
 export class ProcListenerProver implements ListenerProverPort {
-  private readonly procRoot: string;
   private readonly uid: () => number | undefined;
 
-  constructor(options: ListenerProverOptions = {}) {
-    this.procRoot = options.procRoot ?? '/proc';
+  constructor(
+    private readonly facts: ListenerHostFacts,
+    options: ListenerProverOptions = {},
+  ) {
     this.uid = options.uid ?? (() => process.getuid?.());
   }
 
@@ -66,19 +58,18 @@ export class ProcListenerProver implements ListenerProverPort {
   }
 
   private async tables(): Promise<readonly string[] | undefined> {
+    const facts = this.facts;
     const tables = await Promise.all(
-      PROC_TCP_TABLES.map(path =>
-        readFile(join(this.procRoot, path.replace(/^\/proc\//u, '')), 'utf8').catch(() => undefined),
-      ),
+      (['net/tcp', 'net/tcp6'] as const).map(table => facts.procSystemFile(table).catch(() => undefined)),
     );
     const present = tables.filter((table): table is string => table !== undefined);
     return present.length === 0 ? undefined : present;
   }
 
   private async socketInodes(pid: number): Promise<ReadonlySet<number>> {
-    const directory = join(this.procRoot, String(pid), 'fd');
-    const entries = await listing(directory);
-    const links = await Promise.all(entries.map(entry => readlink(join(directory, entry)).catch(() => '')));
+    const facts = this.facts;
+    const entries = await facts.procFds(pid).catch(() => []);
+    const links = await Promise.all(entries.map(entry => facts.procFdLink(pid, entry).catch(() => '')));
     const inodes = new Set<number>();
     for (const link of links) {
       const match = SOCKET_LINK.exec(link);
@@ -89,12 +80,8 @@ export class ProcListenerProver implements ListenerProverPort {
 
   /** Every process descended from `pid`, read from each `/proc/<n>/stat`'s parent field. */
   private async descendants(pid: number): Promise<readonly number[]> {
-    const entries = await listing(this.procRoot);
-    const parents = await Promise.all(
-      entries
-        .filter(entry => /^\d+$/u.test(entry))
-        .map(async entry => [Number(entry), await this.parentOf(entry)] as const),
-    );
+    const entries = await this.facts.pids().catch(() => []);
+    const parents = await Promise.all(entries.map(async entry => [entry, await this.parentOf(entry)] as const));
     const found: number[] = [];
     const frontier = [pid];
     for (let parent = frontier.shift(); parent !== undefined; parent = frontier.shift()) {
@@ -107,8 +94,8 @@ export class ProcListenerProver implements ListenerProverPort {
     return found;
   }
 
-  private async parentOf(entry: string): Promise<number | undefined> {
-    const stat = await readFile(join(this.procRoot, entry, 'stat'), 'utf8').catch(() => '');
+  private async parentOf(entry: number): Promise<number | undefined> {
+    const stat = await this.facts.procFile(entry, 'stat').catch(() => '');
     // `pid (comm) state ppid …` — the command name may hold spaces and parentheses, so the fields are read from
     // after its LAST closing parenthesis.
     const ppid = stat

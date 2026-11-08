@@ -15,7 +15,6 @@ import {
   parseRequestHead,
   proxyUnreachable,
 } from '../index.ts';
-import { ProcListenerProver } from '../../worker/control/adapters/listener-prover.ts';
 import { dial, openTunnel, type ProxyCredentials, Reader } from './tunnel.ts';
 
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -24,8 +23,8 @@ const CONNECT_TIMEOUT_MS = 15_000;
 export interface SignInRelayListen {
   /** A loopback port to take; absent (or `0`) lets the kernel pick a free one, which nobody can race. */
   readonly port?: number;
-  /** Who holds a port the bind found taken, for the refusal; defaults to this host's `/proc`. */
-  readonly holder?: (port: number) => Promise<number | undefined>;
+  /** Who holds a port the bind found taken, for the refusal. Required: the refusal names the holder from real evidence. */
+  readonly holder: (port: number) => Promise<number | undefined>;
 }
 
 /**
@@ -53,7 +52,7 @@ export class ProxySignInRelay {
     upstream: ProxyEndpoint,
     credentials: ProxyCredentials,
     connectTimeoutMs = CONNECT_TIMEOUT_MS,
-    listen: SignInRelayListen = {},
+    listen: SignInRelayListen,
   ): Promise<ProxySignInRelay> {
     const port = listen.port ?? 0;
     const server = createServer();
@@ -72,7 +71,7 @@ export class ProxySignInRelay {
       });
     } catch (error) {
       if (port === 0 || (error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
-      const holder = await (listen.holder ?? (taken => new ProcListenerProver().holder(taken)))(port);
+      const holder = await listen.holder(port);
       throw new BrowserControlError('launch_failed', listenerHeldRefusal(port, holder));
     }
     return relay;
