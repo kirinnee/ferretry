@@ -3,9 +3,9 @@ import { type ShellProviderProps, ShellProvider, useShell } from './context.tsx'
 import { Frame } from './frame.tsx';
 
 function Routed() {
-  const { routes } = useShell();
+  const { routes, runtime } = useShell();
   return (
-    <RouterProvider parseRoute={routes.parse}>
+    <RouterProvider parseRoute={routes.parse} onAddress={runtime.addressChanged}>
       <Frame />
     </RouterProvider>
   );

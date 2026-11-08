@@ -1,3 +1,4 @@
+import { type DeviceViewProps, provideToShell, type ShellProvides } from '@ferretry/app';
 import type { AppComponent, PanelProps, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
@@ -21,7 +22,7 @@ const loadSurfaces = (): Promise<Record<string, unknown>> => import(`./views/${'
  * over one runtime built for the daemon (`views/surfaces.tsx`). The ask page offers the `agenda.conversation` slot
  * (contract/slots.ts) where the ferret's conversation goes.
  */
-export default implementApp(manifest, {
+const half = implementApp(manifest, {
   build: ({ client }) => {
     let surfaces: Promise<Surfaces> | undefined;
     const surfacesOf = (): Promise<Surfaces> => {
@@ -47,4 +48,17 @@ export default implementApp(manifest, {
       },
     };
   },
+});
+
+/**
+ * Beside the half, Agenda claims the `#agenda/<id>?session=…&machine=…` link (shell contract S3): the shell takes it
+ * off the address and hands it to the one device view, which opens the ask on the machine that runs it.
+ */
+const deepLinkView = lazyComponent<DeviceViewProps>(
+  async () => (await import('./views/agenda-deep-link-view.tsx')).AgendaDeepLinkView as AppComponent<DeviceViewProps>,
+) as NonNullable<ShellProvides['device']>[string];
+
+export default provideToShell(half, {
+  fragments: [{ form: 'keyed', key: 'agenda' }],
+  device: { 'deep-link': deepLinkView },
 });

@@ -20,6 +20,7 @@ export {
   type DaemonlessScreenProps,
   type DaemonlessViews,
   type DeviceClaims,
+  type DeviceViewProps,
   type DirectoryFetch,
   type PairedOver,
   type PairingAttempt,
@@ -189,6 +190,10 @@ export {
 export { usePairedDaemons } from './shell/daemon-access.ts';
 /** @public The same plugin on every paired machine (§5.1; shell contract S2): each row's place and the plugin's own client. */
 export { type DaemonReach, useEveryDaemon } from './shell/every-daemon.ts';
+// ─── declared fragments, device views and the in-memory hand-off (shell contract S3) ─────────────────────────────
+export { type FragmentDecl, FRAGMENT_KEY } from './router/address.ts';
+export { type FragmentArrival, useFragment } from './shell/use-fragment.ts';
+export { handOff, type OwnScreenRef, useHandOff, useOwnScreen } from './shell/hand-off.ts';
 
 export {
   type AddressPlace,

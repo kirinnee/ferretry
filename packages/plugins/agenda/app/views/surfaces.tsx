@@ -4,7 +4,7 @@
  */
 
 import type { AppComponent, PanelProps, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
-import { createAgendaRuntime } from '../lib/agenda-runtime.ts';
+import { agendaRuntimeOf } from '../lib/agenda-runtime.ts';
 import { createAgendaAskScreen } from './agenda-ask-screen.tsx';
 import { createAgendaModePanel } from './agenda-mode-panel.tsx';
 import { createAgendaPanel } from './agenda-panel.tsx';
@@ -21,7 +21,7 @@ export interface AgendaSurfaces {
 }
 
 export const createSurfaces = (client: PluginClient): AgendaSurfaces => {
-  const runtime = createAgendaRuntime(client);
+  const runtime = agendaRuntimeOf(client);
   return {
     screens: { agenda: createAgendaScreen(runtime), 'agenda-ask': createAgendaAskScreen(runtime) },
     panels: { 'ferret-agenda': createAgendaPanel(runtime), 'ferret-agenda-mode': createAgendaModePanel(runtime) },

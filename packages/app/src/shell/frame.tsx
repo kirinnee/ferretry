@@ -1,3 +1,4 @@
+import { DeviceViews } from './device-views.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
 import { CommandBar } from '../ui/command-bar.tsx';
@@ -266,6 +267,8 @@ export function Frame() {
       {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
       raises it, and only the machine on screen may raise a background one (G95, G105). */}
       <PasskeyMount onScreen={daemon ?? runtime.daemons.snapshot().selected} />
+      {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
+      <DeviceViews />
     </div>
   );
 }

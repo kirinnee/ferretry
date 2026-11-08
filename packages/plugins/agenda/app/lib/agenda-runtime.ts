@@ -33,7 +33,25 @@ export interface AgendaRuntime {
   readonly itemOpened: (ferret: string, ask: string) => Promise<void>;
 }
 
-export const createAgendaRuntime = (client: AgendaCall & Partial<Pick<PluginClient, 'subscribe'>>): AgendaRuntime => {
+type RuntimeClient = AgendaCall & Partial<Pick<PluginClient, 'subscribe'>>;
+
+/** The runtimes already built, by the client they were built over: one per (machine, connection). */
+const RUNTIMES = new WeakMap<object, AgendaRuntime>();
+
+/**
+ * The ONE runtime of a client: the half's views and its device view share it, so a machine is read once whichever of
+ * them asks (shell contract S2, m9: one store per machine). The shell hands the same client object for the
+ * connection's life, so a reconnect keeps the runtime.
+ */
+export const agendaRuntimeOf = (client: RuntimeClient): AgendaRuntime => {
+  const known = RUNTIMES.get(client);
+  if (known !== undefined) return known;
+  const runtime = createAgendaRuntime(client);
+  RUNTIMES.set(client, runtime);
+  return runtime;
+};
+
+export const createAgendaRuntime = (client: RuntimeClient): AgendaRuntime => {
   const id = daemonOfClient(client);
   const connection = id === undefined ? THIS_MACHINE : daemonConnection({ daemonId: id });
   const agenda = new DaemonAgendaClient(new DaemonAgendaStore(), client);

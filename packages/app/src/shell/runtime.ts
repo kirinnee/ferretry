@@ -14,7 +14,15 @@ import { DaemonLayouts } from '../layout/daemon-layout.ts';
 import { noteClientDaemon } from '../connect/daemon-of.ts';
 import type { PasskeyProvision } from '../passkey/passkey.ts';
 import { AppHookCache, appHookProviders } from '../surfaces/app-hooks.ts';
-import type { DaemonlessScreenProps } from '../connect/provides.ts';
+import {
+  type DaemonlessScreenProps,
+  type RegisteredDeviceView,
+  registeredDeviceViews,
+  registeredFragments,
+} from '../connect/provides.ts';
+import { type AddressBrowser, AddressTaker, type HoldClock, REAL_CLOCK } from '../router/address.ts';
+import { viewsOf } from '../layout/engine.ts';
+import { HandOffs } from './hand-off.ts';
 import type { View } from '../surfaces/halves.ts';
 
 /**
@@ -52,6 +60,13 @@ export interface ShellRuntimeOptions {
    * trigger for every machine's grants (S1). Absent, that trigger never fires.
    */
   readonly onVisible?: (listener: () => void) => () => void;
+  /**
+   * The address this tab shows (`window`), read for the plugins' declared fragments (S3) at construction — before the
+   * first render and before any lazy chunk — and on every arrival. Absent, no fragment is ever read or held.
+   */
+  readonly address?: AddressBrowser;
+  /** The clock held fragments and hand-offs expire on; a test hands a fake one. */
+  readonly clock?: HoldClock;
 }
 
 const UNKNOWN: Authority = Object.freeze({ kind: 'unknown' });
@@ -84,6 +99,13 @@ export class ShellRuntime {
   #handlerWatched = false;
   /** The owner's layout per daemon (the Layouts plugin), read through each daemon's guarded client. */
   readonly layouts: DaemonLayouts;
+  /** The plugins' declared fragments, held off the address until their one taker comes (S3). */
+  readonly address: AddressTaker;
+  /** Values carried in memory to a plugin's own screen (S3). */
+  readonly handOffs: HandOffs;
+  /** Every plugin's device views, mounted once each at the frame root (S3). */
+  readonly deviceViews: readonly RegisteredDeviceView[];
+  readonly #addressBrowser: AddressBrowser | undefined;
   readonly #listeners = new Set<() => void>();
   #version = 0;
 
@@ -101,6 +123,12 @@ export class ShellRuntime {
       (daemon, id) => this.standing(daemon, id),
     );
     this.layouts = new DaemonLayouts(this);
+    const screens = viewsOf(options.surfaces).screens;
+    const screenOf = (plugin: string, screen: string) => screens.get(`${plugin}.${screen}`);
+    this.#addressBrowser = options.address;
+    this.address = new AddressTaker(registeredFragments(options.surfaces, screenOf), options.address, options.clock);
+    this.handOffs = new HandOffs(screenOf, options.clock ?? REAL_CLOCK);
+    this.deviceViews = registeredDeviceViews(options.surfaces);
     this.#routes = new Map(
       options.surfaces.flatMap(entry => entry.manifest.actions?.routes ?? []).map(route => [route.key, route]),
     );
@@ -108,6 +136,16 @@ export class ShellRuntime {
     this.daemons.registerCache({ clearDaemon: daemon => this.#drop(daemon) });
     this.daemons.subscribe(() => this.#changed());
   }
+
+  /**
+   * The address moved inside this document (the router pushed or replaced an entry, or Back/Forward): the declared
+   * fragments are read again, and a hand-off waiting for a screen not drawn there is dropped.
+   */
+  addressChanged = (): void => {
+    this.address.read();
+    const pathname = this.#addressBrowser?.location.pathname;
+    if (pathname !== undefined) this.handOffs.navigated(pathname);
+  };
 
   /** A number that changes on every runtime change: the React snapshot. */
   version = (): number => this.#version;

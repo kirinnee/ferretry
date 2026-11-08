@@ -173,8 +173,9 @@ describe('the device context', () => {
     expect(got.theme?.resolved).toBe('dark');
     expect(got.paired).toBe(1);
     expect(got.vim).toBe(false);
-    // Device state only: the theme, the OS answer, the install holder and the paired list — no client, no runtime.
-    expect(got.keys).toEqual(['daemons', 'install', 'systemDark', 'theme']);
+    // Device state only: the theme, the OS answer, the install holder, the paired list, the address taker and the
+    // in-memory hand-offs (S3) — no client, no runtime.
+    expect(got.keys).toEqual(['address', 'daemons', 'handOffs', 'install', 'systemDark', 'theme']);
     expect(NO_INSTALL_PROMPT.current()).toBeUndefined();
   });
 

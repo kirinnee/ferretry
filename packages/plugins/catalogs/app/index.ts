@@ -1,15 +1,7 @@
-import {
-  addressPlace,
-  type DaemonlessScreenProps,
-  type DaemonlessViews,
-  provideToShell,
-  type ScreenRef,
-} from '@ferretry/app';
+import { type DaemonlessScreenProps, type DaemonlessViews, provideToShell } from '@ferretry/app';
 import type { AppComponent, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
-import { type ArrivalHold, armArrivalHold } from './lib/arrival.ts';
-import { JOIN_PATH } from './lib/routes.ts';
 import { lazyComponent } from './lazy.ts';
 
 /**
@@ -33,14 +25,7 @@ const daemonlessScreen = (
   lazyComponent<DaemonlessScreenProps>(async () => build(await loadViews())) as DaemonlessViews[string];
 
 /** The views module's screen factories, as this module calls them. */
-type JoinFactory = (hold: ArrivalHold) => AppComponent<DaemonlessScreenProps>;
-type SharedFactory = () => AppComponent<DaemonlessScreenProps>;
-
-/**
- * The join screen as the shell's router knows it, so the hold strips at exactly the addresses the router draws it at.
- * `JOIN_PATH` is the path the manifest declares for it (pinned by `half.test.ts`).
- */
-const JOIN_SCREEN: ScreenRef = { plugin: manifest.id, id: 'join', path: JOIN_PATH, label: 'Join' };
+type DaemonlessFactory = () => AppComponent<DaemonlessScreenProps>;
 
 /** The per-machine slot of a daemon-less screen: never drawn (its route is under no `/d/<machine>/`), so it draws nothing. */
 const daemonlessPlaceholder = (): null => null;
@@ -68,14 +53,13 @@ export default provideToShell(
     }),
   }),
   {
-    // The factory runs before the first render and before any chunk loads: a share link's code leaves the address bar and
-    // the history entry HERE, so it does not wait for the views chunk, which may be slow or never arrive.
-    daemonless: () => {
-      const hold = armArrivalHold(globalThis, pathname => addressPlace(JOIN_SCREEN, pathname));
-      return {
-        join: daemonlessScreen(views => (views.createJoinScreen as JoinFactory)(hold)),
-        shared: daemonlessScreen(views => (views.createSharedScreen as SharedFactory)()),
-      };
-    },
+    // A share link's whole fragment on `/join` is the shell's to take (shell contract S3): it leaves the address bar
+    // and the history entry before the first render and before the views chunk is asked for, and is held in memory
+    // until the join screen takes it. Beneath `/join` it is stripped and dropped.
+    fragments: [{ form: 'path', screen: 'join' }],
+    daemonless: () => ({
+      join: daemonlessScreen(views => (views.createJoinScreen as DaemonlessFactory)()),
+      shared: daemonlessScreen(views => (views.createSharedScreen as DaemonlessFactory)()),
+    }),
   },
 );

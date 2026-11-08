@@ -1,5 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useSyncExternalStore } from 'react';
 import type { DaemonList } from '../daemons/daemon-list.ts';
+import type { AddressTaker } from '../router/address.ts';
+import type { HandOffs } from './hand-off.ts';
 import {
   type ResolvedMode,
   resolveThemeMode,
@@ -44,6 +46,10 @@ export interface DeviceContextValue {
   /** The operating system's answer to `system`, followed live by the shell root. */
   readonly systemDark: boolean;
   readonly install: InstallPromptHolder;
+  /** S3: the held fragments and their arrival counts. */
+  readonly address: AddressTaker;
+  /** S3: values carried in memory to a plugin's own screen. */
+  readonly handOffs: HandOffs;
   readonly daemons: DaemonListView;
 }
 

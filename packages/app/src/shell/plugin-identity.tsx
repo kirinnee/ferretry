@@ -30,13 +30,15 @@ export interface PluginIdentity {
   readonly place: PluginPlace;
   /** Absent on a daemon-less screen. */
   readonly reach?: PluginReach;
+  /** The daemon-less screen drawn here: the one place its declared path fragment may be taken (S3). */
+  readonly screen?: string;
 }
 
 const PluginIdentityContext = createContext<PluginIdentity | null>(null);
 
 /** The identity a place draws `plugin` with: the one rule for which client origin, and whether there is a reach. */
-export function identityOf(runtime: ShellRuntime, plugin: string, place: PluginPlace): PluginIdentity {
-  if (place === 'daemonless') return { plugin, place };
+export function identityOf(runtime: ShellRuntime, plugin: string, place: PluginPlace, screen?: string): PluginIdentity {
+  if (place === 'daemonless') return screen === undefined ? { plugin, place } : { plugin, place, screen };
   return { plugin, place, reach: runtime.reach(plugin, place === 'background' ? 'background' : 'ordinary') };
 }
 

@@ -29,7 +29,10 @@ export function ShellLine({
 }
 
 /** A view that throws while rendering is contained to its own box. */
-class ViewBoundary extends Component<{ readonly title: string; readonly children: ReactNode }, { failed: boolean }> {
+export class ViewBoundary extends Component<
+  { readonly title: string; readonly children: ReactNode },
+  { failed: boolean }
+> {
   override state = { failed: false };
 
   static getDerivedStateFromError(): { failed: boolean } {
@@ -102,7 +105,10 @@ function DaemonlessScreen({
 }) {
   const { runtime } = useShell();
   const router = useRouter();
-  const identity = useMemo(() => identityOf(runtime, screen.plugin, 'daemonless'), [runtime, screen.plugin]);
+  const identity = useMemo(
+    () => identityOf(runtime, screen.plugin, 'daemonless', screen.id),
+    [runtime, screen.plugin, screen.id],
+  );
   const View = runtime.daemonlessView(screen.plugin, screen.id);
   if (View === undefined) return <ShellLine>{skeletonSentence(screen.label)}</ShellLine>;
   return (

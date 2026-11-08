@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { AsksChanged } from '@ferretry/core-asks/contract';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
-import { createAgendaRuntime } from '../../../app/lib/agenda-runtime.ts';
+import { agendaRuntimeOf, createAgendaRuntime } from '../../../app/lib/agenda-runtime.ts';
 import { callFromFetch } from '../../support/app/call-from-fetch.ts';
 
 type Handler = (payload: unknown) => void;
@@ -49,5 +49,18 @@ describe('createAgendaRuntime', () => {
     await runtime.itemOpened('f1', 'A1');
     expect(calls.map(call => call.route)).toContain('POST /v1/push/seen');
     runtime.ferrets.stop();
+  });
+});
+
+describe('agendaRuntimeOf', () => {
+  it('builds one runtime per client: the half and its device view read a machine once (S2, m9)', () => {
+    const one = build();
+    const other = build();
+    const first = agendaRuntimeOf(one.client);
+    expect(agendaRuntimeOf(one.client)).toBe(first);
+    expect(one.handlers.size).toBe(2);
+    expect(agendaRuntimeOf(other.client)).not.toBe(first);
+    first.ferrets.stop();
+    agendaRuntimeOf(other.client).ferrets.stop();
   });
 });

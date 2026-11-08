@@ -7,7 +7,8 @@
  */
 
 import type { SignInRuleList, SignInRuleStaged, SignInRuleView } from '../../../contract/routes/index.ts';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { daemonOfClient } from '@ferretry/app';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   dropRuleStage,
   failureWords,
@@ -25,6 +26,7 @@ import {
   stagedFlags,
   timeWords,
 } from '../../lib/sign-in-rules.ts';
+import { RULE_LINKED_STAGE_GONE_WORDS, type RuleLinkHold } from '../../lib/rule-link.ts';
 import { SignInRuleCard } from '../accounts/sign-in-rule-card.tsx';
 import { SignInRuleSheetHost } from '../accounts/sign-in-rule-panel.tsx';
 import { RuleStillAsked } from '../accounts/sign-in-rule-sheet.tsx';
@@ -41,6 +43,8 @@ export interface SignInRulesSurfaceProps {
   readonly askPasskey?: Ask;
   /** How often the list is read again (the harness and tests). */
   readonly pollMs?: number;
+  /** Where a `#rules/<stage>` link this half's device view sent here waits for the list (absent: no link reaches it). */
+  readonly ruleLink?: RuleLinkHold;
 }
 
 type Read =
@@ -60,6 +64,7 @@ export function MachineRuleStage({
   staged,
   phase,
   canUsePasskey,
+  highlighted = false,
   onConfirm,
   onDeny,
 }: {
@@ -70,14 +75,22 @@ export function MachineRuleStage({
     | { readonly kind: 'dismissed' }
     | { readonly kind: 'failed'; readonly words: string };
   readonly canUsePasskey: boolean;
+  /** A `#rules/<stage>` link opened this row: it is ringed and scrolled to. */
+  readonly highlighted?: boolean;
   readonly onConfirm: () => void;
   readonly onDeny: () => void;
 }) {
   const working = phase.kind === 'working';
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (highlighted) ref.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [highlighted]);
   return (
     <article
-      className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+      className={`flex min-w-0 flex-col gap-2 rounded-control border bg-surface-2 p-3 ${highlighted ? 'border-accent ring-2 ring-accent' : 'border-border'}`}
       data-rule-stage={staged.stage}
+      ref={ref}
+      {...(highlighted ? { 'data-highlighted': '' } : {})}
     >
       <p className="m-0 text-ui font-medium text-fg" data-rule-machine="">
         A machine asked for this rule
@@ -135,7 +148,10 @@ export function MachineRuleStage({
 
 type StagePhase = Parameters<typeof MachineRuleStage>[0]['phase'];
 
-export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS }: SignInRulesSurfaceProps) {
+/** Where no link ever arrives: a surface drawn without its device view. */
+const NO_LINK_ARRIVES = (): (() => void) => () => {};
+
+export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS, ruleLink }: SignInRulesSurfaceProps) {
   const [read, setRead] = useState<Read>({ kind: 'loading' });
   const [busy, setBusy] = useState(false);
   const [failures, setFailures] = useState<Readonly<Record<string, string>>>({});
@@ -145,6 +161,21 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS }
   >(undefined);
   const [reads, setReads] = useState(0);
   const forbidden = useRef(false);
+  const daemon = daemonOfClient(client as never);
+  const link = useSyncExternalStore(ruleLink?.subscribe ?? NO_LINK_ARRIVES, () => ruleLink?.stageFor(daemon));
+  const [linked, setLinked] = useState<{ readonly stage: string; readonly listed: boolean } | undefined>(undefined);
+
+  // A `#rules/<stage>` link only picks a row to show. It is settled once the daemon's list has been read: listed, the row
+  // is highlighted; not listed, the owner is told so. Nothing here binds or asks for a passkey.
+  useEffect(() => {
+    if (link === undefined) return;
+    if (read.kind !== 'ready' && read.kind !== 'forbidden') return;
+    setLinked(
+      read.kind === 'ready' ? { stage: link, listed: read.list.stages.some(each => each.stage === link) } : undefined,
+    );
+    ruleLink?.settle(daemon);
+  }, [link, read, ruleLink, daemon]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` re-runs the read after a change
   useEffect(() => {
     let current = true;
@@ -266,9 +297,15 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS }
               {...(again.rule.username === undefined ? {} : { username: again.rule.username })}
             />
           )}
+          {linked !== undefined && !linked.listed ? (
+            <p className="m-0 text-ui text-warn" data-rule-linked-gone="" role="status">
+              {RULE_LINKED_STAGE_GONE_WORDS}
+            </p>
+          ) : null}
           {read.list.stages.map(staged => (
             <MachineRuleStage
               canUsePasskey={ask !== undefined}
+              highlighted={linked?.listed === true && linked.stage === staged.stage}
               key={staged.stage}
               onConfirm={() => confirmStage(staged)}
               onDeny={() => {

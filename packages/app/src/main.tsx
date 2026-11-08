@@ -34,8 +34,7 @@ import './styles/index.css';
 import './ui/design-system.css';
 
 const host = document.getElementById('root');
-// A document without `#root` is not this app's document; a silent fallback would hide what is serving the HTML.
-if (!host) throw new Error('missing #root — the host document is not this app’s index.html');
+if (!host) throw new Error('missing #root — the host document is not this app’s index.html'); // never a silent fallback
 
 /** This origin's localStorage, or `null` where the browser refuses it (a private window, a sandbox). */
 function localStore(): KeyValueStore | null {
@@ -124,6 +123,7 @@ const runtime = new ShellRuntime({
   passkey: () => passkey.passkey,
   daemonless: { views: daemonless.views, location: () => window.location.href },
   onVisible: whenBackOnScreen(document),
+  address: window, // the declared fragments leave the address bar here, before the first render (S3)
 });
 
 const themes = new ThemePreferenceStore(storage);

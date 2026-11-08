@@ -212,6 +212,8 @@ export function ShellProvider({
       theme: themes,
       systemDark: dark,
       install,
+      address: runtime.address,
+      handOffs: runtime.handOffs,
       daemons: { snapshot: runtime.daemons.snapshot, subscribe: runtime.daemons.subscribe },
     }),
     [themes, dark, install, runtime],
