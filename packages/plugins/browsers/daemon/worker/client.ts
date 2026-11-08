@@ -100,7 +100,7 @@ export const REQUEST_TIMEOUT_MS = 60_000;
 export const SHUTDOWN_TIMEOUT_MS = 2_000;
 
 /** Only the variables a browser needs; nothing else about this host leaks into the child (today's). */
-const FORWARDED_ENVIRONMENT = [
+export const FORWARDED_ENVIRONMENT = [
   'PATH',
   'HOME',
   'USER',

@@ -19,7 +19,7 @@ import type { BrowserSessionLauncher } from '../pages/service.ts';
 import type { ChildHandle, Clock, FetchPort, SpawnPort } from '@ferretry/kernel/contract';
 import type { BrowserAutomation } from '../pages/automation.ts';
 import type { BrowserHost } from '../adapters/host.ts';
-import { type ListenerProverPort, ProcListenerProver } from './control/adapters/listener-prover.ts';
+import type { ListenerProverPort } from './control/adapters/listener-prover.ts';
 import type { BrowserDisplayPort } from './control/adapters/login-runtime.ts';
 import { ProxySignInRelay } from '../proxy/adapters/sign-in-relay.ts';
 import { BrowserWorkerClient, type StartWorker, type WorkerClientOptions } from './client.ts';
@@ -78,8 +78,8 @@ export interface SessionBrowserModeOptions {
   readonly transport?: () => Promise<CdpTransport>;
   /** The DevTools port a PORT-transport Chrome is told to take. Defaults to a free one the kernel picks. */
   readonly cdpPort?: () => Promise<number>;
-  /** Proves the listener on that port is the spawned Chrome's. Defaults to this host's `/proc`. */
-  readonly listenerProver?: ListenerProverPort;
+  /** Proves the listener on that port is the spawned Chrome's. Required. */
+  readonly listenerProver: ListenerProverPort;
   /** Which loopback ports `browserPorts` asks for, read at every launch like the mode; absent means random. */
   readonly ports?: () => Promise<ResolvedBrowserPorts>;
   /**
@@ -121,7 +121,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     private readonly environment: Readonly<Record<string, string | undefined>>,
     private readonly connectWorker: (options: WorkerClientOptions) => Promise<BrowserWorkerClient> = options =>
       BrowserWorkerClient.connect(options),
-    private readonly modes: SessionBrowserModeOptions = {},
+    private readonly modes: SessionBrowserModeOptions,
   ) {}
 
   async launch(viewport: { readonly width: number; readonly height: number }): Promise<BrowserAutomation> {
@@ -159,13 +159,12 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         kind: 'port',
         port: fixed?.cdp ?? (await (this.modes.cdpPort ?? freePort)()),
       };
+      const prover = this.modes.listenerProver;
       if (proxy?.credentials !== undefined) {
-        relay = await ProxySignInRelay.start(
-          proxyEndpoint(proxy.setting.url),
-          proxy.credentials,
-          undefined,
-          fixed === undefined ? {} : { port: fixed.relay },
-        );
+        relay = await ProxySignInRelay.start(proxyEndpoint(proxy.setting.url), proxy.credentials, undefined, {
+          ...(fixed === undefined ? {} : { port: fixed.relay }),
+          holder: async taken => await prover.holder(taken),
+        });
       }
       const userAgent = honestChromeUserAgent(version, platform, host.arch);
       const chromeCommand = [
@@ -204,14 +203,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       // Recorded BEFORE anything else can fail: from here on, the Chrome holding the profile is this pid.
       await lease.updateChromePid(chrome.pid, version);
       const endpoint = `http://127.0.0.1:${cdp.port}`;
-      await waitForCdp(
-        this.ports,
-        endpoint,
-        cdp.port,
-        chrome,
-        diagnostics,
-        this.modes.listenerProver ?? new ProcListenerProver(),
-      );
+      await waitForCdp(this.ports, endpoint, cdp.port, chrome, diagnostics, prover);
       let worker: BrowserWorkerClient;
       try {
         worker = await this.connectWorker({

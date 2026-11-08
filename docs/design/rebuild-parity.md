@@ -10,13 +10,13 @@ Generator regression checks: `bun test scripts/rebuild/parity.test.ts` (first ob
 
 Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.json`, run by `scripts/validate/typecheck.sh`), with strict indexed-access checks.
 
-**2268 rows; 129 removed by design; 0 unplaced owners.**
+**2276 rows; 130 removed by design; 0 unplaced owners.**
 
 <!-- prettier-ignore -->
 | Kind | Count |
 | --- | ---: |
 | R: HTTP and socket endpoints | 428 |
-| V: fy commands (aliases are separate rows) | 505 |
+| V: fy commands (aliases are separate rows) | 513 |
 | T: MCP and agent tools | 51 |
 | S: App routes, features, panels, settings and sheets | 586 |
 | J: Daemon job, timer and watcher sites | 271 |
@@ -25,7 +25,7 @@ Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.j
 <!-- prettier-ignore -->
 | 5.0 owner | R | V | T | S | J | F | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| kernel | 12 | 22 | 3 | 19 | 48 | 56 | 160 |
+| kernel | 12 | 30 | 3 | 19 | 48 | 56 | 168 |
 | gate | 3 | 10 | 0 | 10 | 2 | 15 | 40 |
 | vault | 14 | 37 | 1 | 7 | 6 | 6 | 71 |
 | ferrets | 56 | 54 | 1 | 36 | 17 | 44 | 208 |
@@ -76,7 +76,7 @@ None.
 
 No unresolved Commander declarations.
 
-## kernel (160)
+## kernel (168)
 
 <!-- prettier-ignore -->
 | id | Kind | Today | Today’s source | Today’s module | 5.0 owner package | 5.0 name | Descriptor / detail | Check to add | Status |
@@ -241,6 +241,14 @@ No unresolved Commander declarations.
 | V-0244 | V | fy daemon stop | packages/cli/src/lib/daemon/commands.ts:69 | daemon | packages/core/kernel | fy daemon stop | stop the daemon and wait until it has released its address; flags (including inherited): --as-owner; -h, --help; -v, --version | packages/core/kernel/tests/unit/parity/commands.test.ts | [ ] |
 | V-0249 | V | fy daemon uninstall | packages/cli/src/lib/daemon/commands.ts:55 | daemon | packages/core/kernel | fy daemon uninstall | stop the daemon and remove its user service definition; flags (including inherited): --as-owner; -h, --help; -v, --version | packages/core/kernel/tests/unit/parity/commands.test.ts | [ ] |
 | V-0251 | V | fy daemon which | packages/cli/src/lib/daemon/commands.ts:145 | daemon | packages/core/kernel | fy daemon which | show the installed and currently running daemon identities; flags (including inherited): --as-owner; --json; -h, --help; -v, --version | packages/core/kernel/tests/unit/parity/commands.test.ts | [ ] |
+| V-0506 | V | fyd --check | packages/daemon/src/lib/runtime/arguments.ts:122 | runtime | packages/core/kernel | fyd --check | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-check.test.ts | [x] |
+| V-0507 | V | fyd --config | packages/daemon/src/lib/runtime/arguments.ts:107 | runtime | packages/core/kernel | fyd --config | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-overrides.test.ts | removed by design (5.0 reads configuration from $FY_HOME/config/; fyd refuses --config by name, exit 64) |
+| V-0508 | V | fyd --help | packages/daemon/src/lib/runtime/arguments.ts:143 | runtime | packages/core/kernel | fyd --help | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-arguments.test.ts | [x] |
+| V-0509 | V | fyd --host | packages/daemon/src/lib/runtime/arguments.ts:108 | runtime | packages/core/kernel | fyd --host | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-overrides.test.ts | [x] |
+| V-0510 | V | fyd --log-level | packages/daemon/src/lib/runtime/arguments.ts:115 | runtime | packages/core/kernel | fyd --log-level | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-overrides.test.ts | [x] |
+| V-0511 | V | fyd --port | packages/daemon/src/lib/runtime/arguments.ts:110 | runtime | packages/core/kernel | fyd --port | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-arguments.test.ts | [x] |
+| V-0512 | V | fyd --print-config | packages/daemon/src/lib/runtime/arguments.ts:122 | runtime | packages/core/kernel | fyd --print-config | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-print-config.test.ts | [x] |
+| V-0513 | V | fyd --version | packages/daemon/src/lib/runtime/arguments.ts:139 | runtime | packages/core/kernel | fyd --version | daemon option; honoured by the daemon entry | packages/core/kernel/tests/unit/host/fyd-arguments.test.ts | [x] |
 
 ## gate (40)
 

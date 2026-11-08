@@ -29,7 +29,7 @@
 import { afterAll, beforeAll, describe, test } from 'bun:test';
 import type { Browser, Page } from 'playwright-core';
 import should from 'should';
-import { sharedChromium } from './support/chromium.ts';
+import { sharedChromium } from '@ferretry/app/testing/browser';
 import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 
 interface LedgerHit {

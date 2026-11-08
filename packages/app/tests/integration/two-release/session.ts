@@ -73,9 +73,23 @@ export async function openApp(
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ grants: options.grants }),
   });
-  // Status only: the body is a live credential.
-  if (!mint.ok) throw new Error(`minting a pairing code answered HTTP ${mint.status}`);
-  const code = ((await mint.json()) as { code: string }).code;
+  // A refusal's body is its sentence and code (no credential); an answer's is the live code, never shown.
+  if (!mint.ok)
+    throw new Error(
+      `minting a pairing code answered HTTP ${mint.status}: ${(await mint.text()).slice(0, 400)}\n${daemon.diagnose()}`,
+    );
+  const text = await mint.text();
+  let code: unknown;
+  try {
+    code = (JSON.parse(text) as { code?: unknown }).code;
+  } catch {
+    code = undefined;
+  }
+  // The body is shown only when it holds no code (so it is no credential): its type and first bytes name what answered.
+  if (typeof code !== 'string')
+    throw new Error(
+      `minting a pairing code answered HTTP ${mint.status} (${mint.headers.get('content-type')}) with no code: ${text.slice(0, 300)}\n${daemon.diagnose()}`,
+    );
 
   const daemonId = daemon.host.identity.daemonId;
   const device = await crypto.generateDeviceKey();

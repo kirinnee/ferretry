@@ -10,7 +10,7 @@
  * It never touches the network: the `fetch` adapter refuses, and the run is under `scripts/ci/test.sh`'s `FY_*=off`
  * environment besides.
  */
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { chmod, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +35,8 @@ export interface StartedDaemon {
   readonly version: string;
   /** Reads the admin token Gate minted, waiting for it. The value is returned to the caller and never printed. */
   adminToken(): Promise<string>;
+  /** What a red run needs to explain itself: each plugin's mount outcome and the masked tail of `logs/fyd.log`. */
+  diagnose(): string;
   stop(): Promise<void>;
 }
 
@@ -116,15 +118,52 @@ export async function startDaemon(release: Release, options: { readonly version:
     url: `http://${run.host}:${run.port}`,
     home,
     version: options.version,
-    adminToken: async () =>
-      await until(
+    adminToken: async () => {
+      const token = await until(
         async () => (await readFile(join(home, 'state', 'gate', 'admin-token'), 'utf8')).trim() || undefined,
         15_000,
         'the admin token',
-      ),
+      );
+      // Gate writes the admin token, then the warden token, and only then accepts either (every bearer is refused until
+      // its load ends). A reader that took the admin file the moment it appeared was refused as anonymous.
+      await until(
+        async () => (await readFile(join(home, 'state', 'gate', 'warden-token'), 'utf8')).trim() || undefined,
+        15_000,
+        'the warden token',
+      );
+      await sleep(100);
+      return token;
+    },
+    diagnose: () => describeDaemon(host, home),
     stop: async () => {
       await host.stop();
       rmSync(parent, { recursive: true, force: true });
     },
   };
+}
+
+const LOG_TAIL = 6000;
+
+/** Every plugin's status and failure, and the tail of the daemon's log with both Gate tokens masked. */
+function describeDaemon(host: RunningHost, home: string): string {
+  const plugins = [...host.plugins]
+    .map(([id, record]) => `${id}: ${record.status}${record.failure === undefined ? '' : ` (${record.failure})`}`)
+    .join('\n');
+  const read = (path: string): string => {
+    try {
+      return readFileSync(path, 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  const admin = read(join(home, 'state', 'gate', 'admin-token')).trim();
+  const warden = read(join(home, 'state', 'gate', 'warden-token')).trim();
+  const log = read(join(home, 'logs', 'fyd.log'));
+  let masked = log;
+  for (const [secret, label] of [
+    [admin, '<admin-token>'],
+    [warden, '<warden-token>'],
+  ] as const)
+    if (secret !== '') masked = masked.split(secret).join(label);
+  return `plugins:\n${plugins}\nfyd.log (tail):\n${masked.slice(-LOG_TAIL)}`;
 }

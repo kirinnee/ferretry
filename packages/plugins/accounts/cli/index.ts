@@ -1,7 +1,7 @@
 import { implementCli, type VerbHandler } from '@ferretry/kernel/manifest';
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import manifest from '../manifest.ts';
-import { nowMs, ownSessionId, paneCredentialMarker, recipeReader, sleep, TerminalPrompt } from './adapters/terminal.ts';
+import { ownSessionId, paneCredentialMarker, recipeReader, shellTime, TerminalPrompt } from './adapters/terminal.ts';
 import { AccountController } from './lib/account-controller.ts';
 import { ProtocolAccountGateway } from './lib/account-gateway.ts';
 import { accountVerbs } from './lib/commands.ts';
@@ -25,6 +25,7 @@ import { ExitStatus } from './shell.ts';
 export default implementCli(manifest, {
   build(ctx) {
     const { client, io } = ctx;
+    const { nowMs, sleep } = shellTime(ctx);
     const exit = new ExitStatus();
     const out = { success: (message: string) => io.out(`${message}\n`) };
     const prompt = new TerminalPrompt();
@@ -74,7 +75,7 @@ export default implementCli(manifest, {
       return 1;
     };
     const answered: Readonly<Record<string, VerbHandler>> = {
-      ...rulesVerbs({ client, io }),
+      ...rulesVerbs({ client, io, clock: ctx.clock, sleep: ctx.sleep }),
       ...copyVerbs(copyControllers, io, exit),
       ...accountVerbs(controllers, io, exit),
     };

@@ -6,8 +6,8 @@ import {
 } from '../wire/ports.ts';
 import type { LoopbackMarkerReader } from './state.ts';
 
-// GAP (kernel port, banned-globals stays visible here): the loopback firewall marker is a root-owned file under
-// `/etc`, outside every declared root; no kernel port reads a host file outside the home.
+// Permanent per-file exemption (DECISIONS-2 #20): the loopback firewall marker is a root-owned file under `/etc`, a
+// host file outside every declared root, so it is read by its path here.
 
 /** Reads the marker the root script leaves. A missing or unparseable file is `undefined`, never an error. */
 export class FileLoopbackMarkerReader implements LoopbackMarkerReader {

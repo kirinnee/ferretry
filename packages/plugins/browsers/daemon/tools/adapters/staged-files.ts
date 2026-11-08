@@ -5,8 +5,8 @@ import type { Clock, FencedPath } from '@ferretry/kernel/contract';
 import type { StagedFileMover } from '../files.ts';
 import { STAGED_FILE_TTL_MS } from '../files-policy.ts';
 
-// GAP (kernel port, banned-globals stays visible here): a page's staged copies are opened `O_NOFOLLOW` in a private
-// folder so a link planted there is never followed; no kernel root handle opens a file that way.
+// Permanent per-file exemption (DECISIONS-2 #20): a page's staged copies are opened `O_NOFOLLOW` in a private folder so
+// a link planted there is never followed, which no kernel root handle does.
 
 /** Today's `SAVED_FILE_MODE`, `DIRECTORY_MODE` and `PRIVATE_DIRECTORY_MODE` (`agent-files/files.ts`). */
 const SAVED_FILE_MODE = 0o644;
@@ -17,7 +17,7 @@ const PRIVATE_FILE_MODE = 0o600;
 const PLACED_NAME = /^(\d+)-[0-9a-f-]+$/u;
 
 /**
- * The bytes the file tools write. GAP: the kernel's `RootHandle` writes text only, so the daemon's upload copies and a
+ * The bytes the file tools write. The kernel's `RootHandle` writes text only, so the daemon's upload copies and a
  * saved download or PDF are written here — the copy into a path the kernel's `work` root already fenced, opened
  * `O_NOFOLLOW` (never through a link) and `O_EXCL` unless asked to overwrite, bounded, never executable.
  */

@@ -115,7 +115,7 @@ export function bannedIn(file: string, where = file, browser = false): Finding[]
 
 /**
  * Code that runs OUTSIDE the kernel, so it has no kernel ports to reach the world through (lead decision 17). Each
- * entry is a package-relative folder or file, matched by prefix, with its reason; nothing else is exempt.
+ * entry is a package-relative folder or file, matched by prefix, with its reason; an entry ending in `.ts`/`.tsx` names ONE file and matches it exactly; nothing else is exempt.
  */
 export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folder: string; readonly reason: string }[] =
   [
@@ -131,12 +131,81 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       folder: 'daemon/worker/adapters/',
       reason: 'the agent-browser worker, its own process (lead decision, port-browsers r1)',
     },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/proxy/firewall/marker-reader.ts',
+      reason:
+        'reads the root-owned loopback firewall marker under /etc, a host file outside every declared root (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/tools/adapters/staged-files.ts',
+      reason:
+        'opens staged copies O_NOFOLLOW|O_EXCL (O_TRUNC when overwrite is set) and streams a bounded binary copy, which no root handle does; it also places the daemon upload copies and sweeps the upload directory with a recursive rm (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/worker/control/adapters/profile-store.ts',
+      reason:
+        'Chrome takes a real --user-data-dir: real profile directories, SingletonLock readlink, O_EXCL lease files (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/worker/control/adapters/login-runtime.ts',
+      reason:
+        'real directories and files that Xvfb, x11vnc and Chrome read by path: the Xauthority cookie and the VNC password file; it also probes the Chrome executable candidates with existsSync (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'browsers',
+      folder: 'daemon/adapters/host.ts',
+      reason:
+        'host facts: the named environment variables only, platform and architecture, the program search path, path existence (existsSync, for Chrome and worker discovery), this executable (realpathSync of execPath) and its worker (lead ruling, banned-globals r1)',
+    },
+    {
+      pkg: 'access',
+      folder: 'cli/adapters/pair/browser-opener.ts',
+      reason:
+        'fy itself opens a browser on the person desktop from their terminal, and writes the pairing redirect page (a live credential, wx 0600) into the state home and removes it with a recursive rm (lead ruling banned-globals r1)',
+    },
+    {
+      pkg: 'access',
+      folder: 'cli/adapters/pairing-redirect-sweep.ts',
+      reason:
+        'fy itself sweeps its own pairing redirect files, a live credential, in the home it runs in (lead ruling)',
+    },
+    {
+      pkg: 'access',
+      folder: 'cli/adapters/host.ts',
+      reason:
+        'fy at the person terminal: its state home (FY_HOME, the home directory) and the prompt it reads (lead ruling)',
+    },
+    {
+      pkg: 'accounts',
+      folder: 'cli/adapters/terminal.ts',
+      reason: 'fy at the person terminal: the hidden-read prompt and the pane session variables (lead ruling)',
+    },
+    {
+      pkg: 'terminals',
+      folder: 'cli/adapters/attach/tmux-attacher.ts',
+      reason: 'fy itself attaches the person terminal to tmux (lead ruling)',
+    },
+    {
+      pkg: 'terminals',
+      folder: 'daemon/adapters/host/fs.ts',
+      reason:
+        'the single host-fs seam for owner-named executables, output files, working-directory checks (stat of any cwd path) and login shells outside FY_HOME, and the /proc and /sys reads; it also reaches this process pid and uid, process.kill (signals), the CPU and memory counts, userInfo and process.platform; its one environment read is SHELL (lead ruling, DECISIONS-2 #21)',
+    },
   ];
+
+/** A `.ts`/`.tsx` entry is one file, matched exactly; any other entry is a folder, matched by prefix. */
+function matchesExemption(rel: string, entry: string): boolean {
+  return /\.tsx?$/u.test(entry) ? rel === entry : rel.startsWith(entry);
+}
 
 export function bannedScope(pkg: WorkspacePackage, file: string): boolean {
   if (pkg.kind !== 'core' && pkg.kind !== 'plugin') return false;
   const rel = relative(pkg.dir, file).split(sep).join('/');
-  if (OUTSIDE_THE_KERNEL.some(exempt => exempt.pkg === pkg.id && rel.startsWith(exempt.folder))) return false;
+  if (OUTSIDE_THE_KERNEL.some(exempt => exempt.pkg === pkg.id && matchesExemption(rel, exempt.folder))) return false;
   const area = areaOf(pkg, file);
   return area !== 'tests' && area !== 'kernel-host' && area !== 'kernel-testing' && area !== 'generated';
 }

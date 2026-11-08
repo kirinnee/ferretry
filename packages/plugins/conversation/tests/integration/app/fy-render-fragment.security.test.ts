@@ -23,7 +23,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser } from 'playwright-core';
 import should from 'should';
-import { sharedChromium } from './support/chromium.ts';
+import { sharedChromium } from '@ferretry/app/testing/browser';
 import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 
 let browser: Browser;

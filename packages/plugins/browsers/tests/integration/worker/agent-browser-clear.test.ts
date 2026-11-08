@@ -9,6 +9,7 @@ import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import type { BrowserAutomation } from '../../../daemon/pages/automation.ts';
 import type { BrowserInputFacts, BrowserInputFieldsPort } from '../../../daemon/target/lib/contracts.ts';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
+import { unprovenListenerProver } from '../../support/listener-prover.ts';
 
 /**
  * A GRANT FILL'S FIELD EMPTYING, IN A REAL CHROME (docs/input-requests.md, "Task plan fills"; invariant 19).
@@ -93,7 +94,12 @@ describe.if(process.platform === 'linux')('a grant fill’s field emptying, in a
         launcherPorts(),
         { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
         undefined,
-        { mode: async () => 'headless', platform: 'linux', transport: async () => 'port' },
+        {
+          mode: async () => 'headless',
+          platform: 'linux',
+          transport: async () => 'port',
+          listenerProver: unprovenListenerProver(),
+        },
       ),
       () => Date.now(),
     );
