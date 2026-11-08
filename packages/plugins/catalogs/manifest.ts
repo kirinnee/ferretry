@@ -7,7 +7,7 @@ import { definePlugin, memberRoute, panel, route, screen, verb } from '@ferretry
 import { AccessPort } from '@ferretry/plugin-access/contract';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
-import { SKILLS_ADD_SLOT } from '@ferretry/plugin-skills/contract';
+import { SKILLS_ADD_SLOT, SkillsPort } from '@ferretry/plugin-skills/contract';
 import {
   AUDIT,
   CATALOGS_WORDS,
@@ -66,7 +66,8 @@ export default definePlugin({
   // every link-store host, so making, refreshing or deleting a download link fails closed.
   needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
   /** Projects is optional: off, an install can only target the project folders the item providers name. */
-  uses: { connections: ConnectionsPort, projects: ProjectsPort },
+  // Skills: the app half reads the skills.add slot's props shape (add-skills page); no daemon call.
+  uses: { connections: ConnectionsPort, projects: ProjectsPort, skills: SkillsPort },
   provides: { catalogs: CatalogsPort },
 
   // The install mapping offers the person the NAMES of their secrets for a `${secret:NAME}` placeholder (never a value),
