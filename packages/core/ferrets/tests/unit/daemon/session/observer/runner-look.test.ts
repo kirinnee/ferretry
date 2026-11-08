@@ -3,6 +3,7 @@ import should from 'should';
 import type { JsonValue } from '@ferretry/std';
 import { turnPaneEvidenceOfLook } from '../../../../../daemon/adapters/session/observer/runner-look.ts';
 import { maskedStrings, promptOf } from '../../../../../daemon/lib/ferrets/prompt.ts';
+import { SessionStatusSchema } from '../../../../../contract/index.ts';
 import { lifecycleStatus } from '../../../../../daemon/lib/ferrets/session-document.ts';
 
 const REQUEST = {
@@ -114,5 +115,41 @@ describe('lifecycleStatus (the state document follows the ferret’s lifecycle)'
       undefined,
       undefined,
     ]);
+  });
+
+  it('should move every status by the one revive rule on each lifecycle edge, and never clear kill_failed', () => {
+    // Arrange: what each status moves to on [starting, working, idle, stopped]; `-` leaves it as it is.
+    const expected: Record<string, readonly string[]> = {
+      created: ['-', 'running', 'running', 'stopped'],
+      starting: ['-', 'running', 'running', 'stopped'],
+      retrying: ['-', 'running', 'running', 'stopped'],
+      running: ['-', '-', '-', 'stopped'],
+      thinking: ['-', '-', '-', 'stopped'],
+      tool_running: ['-', '-', '-', 'stopped'],
+      awaiting_question: ['-', '-', '-', 'stopped'],
+      awaiting_user: ['-', '-', '-', 'stopped'],
+      interrupted: ['-', '-', '-', 'stopped'],
+      rate_limited: ['-', '-', '-', 'stopped'],
+      waiting: ['-', '-', '-', 'stopped'],
+      // Revivable (`reviveRuling`): a revive brings each back, and the ferret is watched again.
+      completed: ['starting', 'running', 'running', '-'],
+      failed: ['starting', 'running', 'running', '-'],
+      stalled: ['starting', 'running', 'running', '-'],
+      stopped: ['starting', 'running', 'running', '-'],
+      // An unconfirmed stop: no registry edge confirms one, so none clears it.
+      kill_failed: ['-', '-', '-', '-'],
+    };
+
+    // Act
+    const answers = Object.fromEntries(
+      SessionStatusSchema.options.map(status => [
+        status,
+        (['starting', 'working', 'idle', 'stopped'] as const).map(edge => lifecycleStatus(status, edge) ?? '-'),
+      ]),
+    );
+
+    // Assert: every status is in the table (a new one must be decided here), and each moves as the table says.
+    should(Object.keys(expected).sort()).deepEqual([...SessionStatusSchema.options].sort());
+    should(answers).deepEqual(expected);
   });
 });
