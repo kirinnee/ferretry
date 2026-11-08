@@ -93,7 +93,7 @@ export default definePlugin({
     app: [
       appAction('permission.answer', {
         on: 'ferret',
-        label: 'Answer approval prompt',
+        label: 'Approve or deny',
         calls: 'POST /v1/ferrets/:ferretId/permission',
       }),
       appAction('dialog.answer', {
