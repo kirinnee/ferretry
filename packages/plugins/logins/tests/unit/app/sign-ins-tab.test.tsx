@@ -447,6 +447,128 @@ describe('the add-login panel', () => {
     await view.unmount();
   });
 
+  it('keeps a pasted gateway key and a user:password address out of every field and out of the staged change', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const gateway = {
+      ...PRESET,
+      id: 'custom-gateway',
+      label: 'Custom gateway',
+      variables: [
+        { name: 'ANTHROPIC_BASE_URL', kind: 'plain', required: true, allowEmpty: false, harnesses: ['claude-code'] },
+        {
+          name: 'ANTHROPIC_API_KEY',
+          kind: 'plain',
+          value: '',
+          required: true,
+          allowEmpty: true,
+          harnesses: ['claude-code'],
+        },
+      ],
+    };
+    const client = scripted(
+      {
+        'GET /v1/logins/presets': { presets: [gateway] },
+        [LIST]: loginList(),
+        [GRANTS]: OPEN,
+        [STAGE]: staged({ kind: 'login.enable', id: 'x' }),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    const view = await mount(<AddLoginPanel client={client} onAdded={id => added.push(id)} />);
+    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the preset');
+    await interact(() =>
+      must(view.container.querySelector('[data-add-login-paste]') as HTMLButtonElement | null, 'Paste').click(),
+    );
+    const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
+    await interact(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(
+        box,
+        'export ANTHROPIC_BASE_URL=https://bob:hunter2pass@llm.corp.example\nexport ANTHROPIC_API_KEY=sk-1234',
+      );
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-read]') as HTMLButtonElement | null, 'Read').click(),
+    );
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue').click(),
+    );
+    const form = must(view.container.querySelector('[data-add-login-form="custom-gateway"]'), 'the form');
+    // Neither value is in a field or anywhere on screen, and the sentence names the variables only.
+    expect(Array.from(form.querySelectorAll('input')).map(field => field.value)).toEqual(['', '', '']);
+    expect(form.querySelector('[data-paste-withheld]')?.textContent).toBe(
+      'ANTHROPIC_API_KEY reads as a key, so it was not filled in: a key is stored in the secret store, never typed into a field. ANTHROPIC_BASE_URL carried a user, a password or a query string, so it was not filled in: type the plain address.',
+    );
+    expect(view.container.innerHTML).not.toContain('sk-1234');
+    expect(view.container.innerHTML).not.toContain('hunter2pass');
+    // Typing the plain address and adding sends the deliberate empty key, and neither pasted value.
+    await interact(() => {
+      const address = must(form.querySelector('input') as HTMLInputElement | null, 'the address');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(address, 'https://llm.corp.example');
+      address.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(form.querySelector('[data-change-submit]'), 'Add');
+    await until(() => added.length > 0, 'the login to be added');
+    const body = calls.find(call => call.route === STAGE)?.body;
+    expect(body).toEqual({
+      kind: 'login.add',
+      id: 'claude-custom-gateway',
+      harness: 'claude-code',
+      store: 'environment',
+      preset: 'custom-gateway',
+      env: { ANTHROPIC_BASE_URL: 'https://llm.corp.example', ANTHROPIC_API_KEY: '' },
+    });
+    expect(JSON.stringify(calls)).not.toContain('sk-1234');
+    expect(JSON.stringify(calls)).not.toContain('hunter2pass');
+    await view.unmount();
+  });
+
+  it('forgets a paste when its form is cancelled or the paste screen is left', async () => {
+    const client = scripted({
+      'GET /v1/logins/presets': { presets: [{ ...PRESET, id: 'custom-gateway', label: 'Custom gateway' }] },
+      [LIST]: loginList(),
+      [GRANTS]: OPEN,
+    });
+    const view = await mount(<AddLoginPanel client={client} />);
+    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the preset');
+    const paste = async (): Promise<void> => {
+      await interact(() =>
+        must(view.container.querySelector('[data-add-login-paste]') as HTMLButtonElement | null, 'Paste').click(),
+      );
+      const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
+      await interact(() => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setter?.call(box, 'export ANTHROPIC_BASE_URL=https://llm.corp.example');
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await interact(() =>
+        must(view.container.querySelector('[data-paste-read]') as HTMLButtonElement | null, 'Read').click(),
+      );
+    };
+    await paste();
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-back]') as HTMLButtonElement | null, 'Back').click(),
+    );
+    expect(view.container.querySelector('[data-paste-variables]')).toBeNull();
+    await paste();
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue').click(),
+    );
+    const form = must(view.container.querySelector('[data-add-login-form="custom-gateway"]'), 'the form');
+    await interact(() =>
+      must(Array.from(form.querySelectorAll('button')).find(b => b.textContent === 'Cancel') ?? null, 'Cancel').click(),
+    );
+    expect(view.container.querySelector('[data-add-login-form]')).toBeNull();
+    // Opening the same provider again by hand starts from the preset, not from the cancelled paste.
+    await click(view.container.querySelector('[data-add-login-use="custom-gateway"]'), 'Use this provider');
+    expect(view.container.querySelector('[data-paste-secrets]')).toBeNull();
+    await view.unmount();
+  });
+
   it('shows the daemon’s refusal in its own words and adds nothing when it refuses', async () => {
     const added: string[] = [];
     const refused = Object.assign(new Error('claude-login is already a login on this machine. Use claude-login-2?'), {

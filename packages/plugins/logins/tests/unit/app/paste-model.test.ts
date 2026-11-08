@@ -8,6 +8,7 @@ import {
   pasteTarget,
   prefillFrom,
   readPaste,
+  withheldSentence,
 } from '../../../app/lib/paste-model.ts';
 
 /** One offered preset, shaped as the wire sends it. */
@@ -79,7 +80,8 @@ describe('prefillFrom', () => {
       ZAI_API_KEY: 'the-pasted-key',
     });
     expect(actual.values).toEqual({ ANTHROPIC_BASE_URL: 'https://api.z.ai/api/paas/v4' });
-    expect(Object.keys(actual.secrets)).toEqual(['ZAI_API_KEY']);
+    expect(actual.secrets).toEqual(['ZAI_API_KEY']);
+    expect(JSON.stringify(actual)).not.toContain('the-pasted-key');
   });
 
   it('leaves a variable the preset does not name behind, and takes no empty secret', () => {
@@ -89,7 +91,102 @@ describe('prefillFrom', () => {
       GATEWAY_API_KEY: '',
     });
     expect(actual.values).toEqual({});
-    expect(actual.secrets).toEqual({});
+    expect(actual.secrets).toEqual([]);
+  });
+});
+
+/** The custom gateway as Logins ships it: ANTHROPIC_API_KEY is a PLAIN variable the preset deliberately leaves empty. */
+const REAL_GATEWAY = preset({
+  id: CUSTOM_GATEWAY,
+  label: 'Custom gateway',
+  variables: [
+    { name: 'ANTHROPIC_BASE_URL', kind: 'plain', required: true, allowEmpty: false, harnesses: ['claude-code'] },
+    {
+      name: 'ANTHROPIC_API_KEY',
+      kind: 'plain',
+      value: '',
+      required: true,
+      allowEmpty: true,
+      harnesses: ['claude-code'],
+    },
+    {
+      name: 'ANTHROPIC_AUTH_TOKEN',
+      kind: 'secret',
+      secret: 'GATEWAY_API_KEY',
+      required: false,
+      allowEmpty: false,
+      harnesses: ['claude-code'],
+    },
+  ],
+});
+
+describe('prefillFrom — a pasted key never lands in a plain field', () => {
+  it('keeps the deliberate empty ANTHROPIC_API_KEY of the real custom gateway, and names it instead of filling it', () => {
+    const actual = prefillFrom(REAL_GATEWAY, {
+      ANTHROPIC_BASE_URL: 'https://llm.corp.example',
+      ANTHROPIC_API_KEY: 'sk-1234',
+    });
+    expect(actual.values).toEqual({ ANTHROPIC_BASE_URL: 'https://llm.corp.example' });
+    expect(actual.withheld).toEqual([{ name: 'ANTHROPIC_API_KEY', reason: 'credential-name' }]);
+    expect(JSON.stringify(actual)).not.toContain('sk-1234');
+  });
+
+  it('says nothing about an allowEmpty variable that held a harmless value, and still keeps its empty', () => {
+    const blank = preset({
+      id: 'x',
+      variables: [
+        {
+          name: 'API_TIMEOUT_MS',
+          kind: 'plain',
+          value: '',
+          required: false,
+          allowEmpty: true,
+          harnesses: ['claude-code'],
+        },
+      ],
+    });
+    const actual = prefillFrom(blank, { API_TIMEOUT_MS: '30000' });
+    expect(actual.values).toEqual({});
+    expect(actual.withheld).toEqual([]);
+  });
+
+  it('does not take an address with a user and password, nor one with a query string', () => {
+    const userinfo = prefillFrom(REAL_GATEWAY, { ANTHROPIC_BASE_URL: 'https://bob:hunter2pass@llm.corp.example' });
+    expect(userinfo.values).toEqual({});
+    expect(userinfo.withheld).toEqual([{ name: 'ANTHROPIC_BASE_URL', reason: 'url-userinfo' }]);
+    expect(JSON.stringify(userinfo)).not.toContain('hunter2pass');
+    const query = prefillFrom(REAL_GATEWAY, { ANTHROPIC_BASE_URL: 'https://llm.corp.example/v1?token=abc' });
+    expect(query.withheld).toEqual([{ name: 'ANTHROPIC_BASE_URL', reason: 'url-query' }]);
+  });
+
+  it('does not take a value with a token shape under a plain, innocently named variable', () => {
+    const plain = preset({
+      id: 'x',
+      variables: [
+        { name: 'EXTRA_NOTE', kind: 'plain', required: false, allowEmpty: false, harnesses: ['claude-code'] },
+      ],
+    });
+    const actual = prefillFrom(plain, { EXTRA_NOTE: 'sk-abcdefghijklmnop' });
+    expect(actual.values).toEqual({});
+    expect(actual.withheld).toEqual([{ name: 'EXTRA_NOTE', reason: 'token-shape' }]);
+  });
+});
+
+describe('withheldSentence', () => {
+  it('is null for nothing, and names variables and the reason, never a value', () => {
+    expect(withheldSentence([])).toBeNull();
+    expect(withheldSentence([{ name: 'ANTHROPIC_API_KEY', reason: 'credential-name' }])).toBe(
+      'ANTHROPIC_API_KEY reads as a key, so it was not filled in: a key is stored in the secret store, never typed into a field.',
+    );
+    expect(
+      withheldSentence([
+        { name: 'A_KEY', reason: 'token-shape' },
+        { name: 'B_TOKEN', reason: 'credential-name' },
+        { name: 'ANTHROPIC_BASE_URL', reason: 'url-userinfo' },
+      ]),
+    ).toBe(
+      'A_KEY, B_TOKEN read as a key, so it was not filled in: a key is stored in the secret store, never typed into a field. ANTHROPIC_BASE_URL carried a user, a password or a query string, so it was not filled in: type the plain address.',
+    );
   });
 });
 

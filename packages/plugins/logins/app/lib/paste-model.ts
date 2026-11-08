@@ -17,35 +17,52 @@ import {
   parseVariableBlock,
 } from '../../contract/detect.ts';
 import type { ProviderPresetView } from '../../contract/index.ts';
+import { plainPaste, type WithheldReason } from '../../contract/secret-shape.ts';
 
 /** The preset a paste falls back to when nothing is recognised: the one for any gateway. */
 export const CUSTOM_GATEWAY = 'custom-gateway';
 
-/** What a paste fills in: plain values by variable name, and secret values by secret NAME. */
+/** A pasted variable that was not put in a field, by NAME, and why. Never its value. */
+export interface Withheld {
+  readonly name: string;
+  readonly reason: Exclude<WithheldReason, 'allow-empty'>;
+}
+
+/**
+ * What a paste fills in: plain values by variable name, the secrets it carried by secret NAME only (the value is dropped
+ * where it is read), and the plain variables whose value was kept out of a field.
+ */
 export interface Prefill {
   readonly values: Readonly<Record<string, string>>;
-  readonly secrets: Readonly<Record<string, string>>;
+  readonly secrets: readonly string[];
+  readonly withheld: readonly Withheld[];
 }
 
 /**
  * A paste mapped onto a preset, by name: a plain variable takes its value; a variable the preset makes
  * a secret gives that secret's value, as does a pasted variable named like the secret itself
- * (`ZAI_API_KEY` for the secret behind `ANTHROPIC_AUTH_TOKEN`). Anything else is left behind.
+ * (`ZAI_API_KEY` for the secret behind `ANTHROPIC_AUTH_TOKEN`), named only. A plain variable whose name reads as a
+ * credential, whose value has a token shape or is an address with a user or query, or that the preset leaves empty on
+ * purpose, is NOT filled ({@link plainPaste}). Anything else is left behind.
  */
 export const prefillFrom = (preset: ProviderPresetView, pasted: Readonly<Record<string, string>>): Prefill => {
   const values: Record<string, string> = {};
-  const secrets: Record<string, string> = {};
+  const secrets: string[] = [];
+  const withheld: Withheld[] = [];
   for (const variable of preset.variables) {
     const value = pasted[variable.name];
     if (variable.kind === 'plain') {
-      if (value !== undefined) values[variable.name] = value;
+      if (value === undefined) continue;
+      const verdict = plainPaste(variable.name, value, variable.allowEmpty);
+      if (verdict.kind === 'take') values[variable.name] = verdict.value;
+      else if (verdict.reason !== 'allow-empty') withheld.push({ name: variable.name, reason: verdict.reason });
       continue;
     }
     const secret = variable.secret ?? variable.name;
     const given = value ?? pasted[secret];
-    if (given !== undefined && given !== '' && secrets[secret] === undefined) secrets[secret] = given;
+    if (given !== undefined && given !== '' && !secrets.includes(secret)) secrets.push(secret);
   }
-  return { values, secrets };
+  return { values, secrets, withheld };
 };
 
 /** The detection table, from the presets that declare clues. */
@@ -99,4 +116,21 @@ export const pasteTarget = (
 ): ProviderPresetView | undefined => {
   const usable = (id: string | undefined) => presets.find(preset => preset.id === id && preset.offered.available);
   return usable(detection.preset) ?? usable(CUSTOM_GATEWAY);
+};
+
+/** The sentence for the variables a paste left out of the form: names and a reason, never a value. */
+export const withheldSentence = (withheld: readonly Withheld[]): string | null => {
+  if (withheld.length === 0) return null;
+  const secret = withheld.filter(item => item.reason === 'credential-name' || item.reason === 'token-shape');
+  const address = withheld.filter(item => item.reason === 'url-userinfo' || item.reason === 'url-query');
+  return [
+    secret.length === 0
+      ? null
+      : `${secret.map(item => item.name).join(', ')} read${secret.length === 1 ? 's' : ''} as a key, so it was not filled in: a key is stored in the secret store, never typed into a field.`,
+    address.length === 0
+      ? null
+      : `${address.map(item => item.name).join(', ')} carried a user, a password or a query string, so it was not filled in: type the plain address.`,
+  ]
+    .filter(part => part !== null)
+    .join(' ');
 };

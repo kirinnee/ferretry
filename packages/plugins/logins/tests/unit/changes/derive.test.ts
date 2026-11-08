@@ -87,6 +87,25 @@ describe('deriveLoginChange', () => {
     should(message).not.containEql('sk-proj');
   });
 
+  it('should refuse an address with a user and password in it, naming the variable and never the value', () => {
+    const message = refusal(() =>
+      deriveLoginChange(
+        FILES,
+        {
+          kind: 'login.add',
+          id: 'url',
+          harness: 'claude-code',
+          store: 'environment',
+          env: { ANTHROPIC_BASE_URL: 'https://bob:hunter2pass@llm.corp.example' },
+        },
+        facts(),
+      ),
+    );
+
+    should(message).startWith('ANTHROPIC_BASE_URL in login url is an address with a user and password in it');
+    should(message).not.containEql('hunter2pass');
+  });
+
   it('should add an environment login from a preset holding the secret as a reference', () => {
     const edit = deriveLoginChange(
       FILES,

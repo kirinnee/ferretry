@@ -184,11 +184,53 @@ const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
 export function looksSecret(name: string, value: string): boolean {
   if (value.length < MIN_SECRET_VALUE_LENGTH || INDIRECT_VALUE.test(value)) return false;
   if (secretReferencesIn(value).length > 0) return false;
-  if (SECRET_VALUE_PREFIX.test(value)) return true;
+  return SECRET_VALUE_PREFIX.test(value) || namesACredential(name);
+}
+
+/** Whether a variable's NAME says it holds a credential (`API_KEY`, `…_TOKEN`, `AUTH`), whatever its value is. */
+export function namesACredential(name: string): boolean {
   const words = name
     .toUpperCase()
     .split(/[^A-Z0-9]+/u)
     .filter(Boolean);
   if (words.some(word => SECRET_NAME_WORDS.has(word))) return true;
   return words.some((word, index) => SECRET_NAME_PAIRS.has(`${word}_${words[index + 1] ?? ''}`));
+}
+
+/** Whether a value starts like a well-known token (`sk-…`, `ghp_…`, a JWT), whatever the variable is called. */
+export function hasTokenShape(value: string): boolean {
+  return SECRET_VALUE_PREFIX.test(value) || KNOWN_SHAPES.some(shape => shape.test(value));
+}
+
+/** What is wrong with a URL held as a plain value: a user and password in it, or a query string. */
+export function urlCarries(value: string): 'userinfo' | 'query' | undefined {
+  const rest = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^#]*)/iu.exec(value.trim());
+  if (rest === null) return undefined;
+  if ((rest[1] ?? '').includes('@')) return 'userinfo';
+  return (rest[2] ?? '').includes('?') ? 'query' : undefined;
+}
+
+/** Why a pasted value was not put in a plain field. */
+export type WithheldReason = 'credential-name' | 'token-shape' | 'allow-empty' | 'url-userinfo' | 'url-query';
+
+/** A pasted value for a plain field: taken as is, or withheld for a reason (never the value in a sentence). */
+export type PlainPaste =
+  | { readonly kind: 'take'; readonly value: string }
+  | { readonly kind: 'withheld'; readonly reason: WithheldReason };
+
+/**
+ * THE rule for a pasted value headed for a PLAIN field (one owner, shared by this browser's paste and the daemon's
+ * backstop): a variable the preset deliberately leaves empty keeps its `''` (a pasted value is not taken, and a credential is still named); a credential-named variable or a value
+ * with a token shape is never taken, however short; a URL with a user or a query string is not taken. It returns the
+ * verdict, never the value in a sentence.
+ */
+export function plainPaste(name: string, value: string, allowEmpty: boolean): PlainPaste {
+  if (value !== '' && !INDIRECT_VALUE.test(value) && secretReferencesIn(value).length === 0) {
+    if (namesACredential(name)) return { kind: 'withheld', reason: 'credential-name' };
+    if (hasTokenShape(value)) return { kind: 'withheld', reason: 'token-shape' };
+  }
+  const carried = urlCarries(value);
+  if (carried === 'userinfo') return { kind: 'withheld', reason: 'url-userinfo' };
+  if (carried === 'query') return { kind: 'withheld', reason: 'url-query' };
+  return allowEmpty ? { kind: 'withheld', reason: 'allow-empty' } : { kind: 'take', value };
 }

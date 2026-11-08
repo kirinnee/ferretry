@@ -14,7 +14,7 @@ import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
 import { readLogins, readPresets } from '../lib/logins-api.ts';
 import { HARNESS_NAMES, HARNESSES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
-import { type Prefill } from '../lib/paste-model.ts';
+import { type Prefill, withheldSentence } from '../lib/paste-model.ts';
 import { Button, ChangeApplyPanel } from '../ui.ts';
 import { PasteVariables } from './paste-variables.tsx';
 
@@ -62,7 +62,8 @@ function PresetForm({
   const [cloud, setCloud] = useState(preset.cloudCredential?.suggested ?? '');
   // The secrets a paste carried, by NAME only: this form takes a `${secret:NAME}` reference, so each
   // key is pasted into the secret store itself — its value never reaches this screen.
-  const pastedSecrets = prefill === undefined ? [] : Object.keys(prefill.secrets);
+  const pastedSecrets = prefill?.secrets ?? [];
+  const withheld = withheldSentence(prefill?.withheld ?? []);
 
   const add = async (): Promise<void> => {
     let taken: ReadonlySet<string>;
@@ -73,7 +74,11 @@ function PresetForm({
       return;
     }
     const id = suggestLoginId(harness, label.trim() === '' ? preset.id : label, taken);
-    const given = Object.fromEntries(Object.entries(env).filter(([, value]) => value.trim() !== ''));
+    // A variable the preset leaves empty on purpose is sent as its `''`; any other empty one is left out.
+    const kept = new Set(preset.variables.filter(variable => variable.allowEmpty).map(variable => variable.name));
+    const given = Object.fromEntries(
+      Object.entries(env).filter(([name, value]) => value.trim() !== '' || kept.has(name)),
+    );
     const result = await changes.apply({
       kind: 'login.add',
       id,
@@ -92,7 +97,12 @@ function PresetForm({
       {pastedSecrets.length === 0 ? null : (
         <p role="status" className="m-0 text-cell leading-base text-muted" data-paste-secrets="">
           A pasted key is never typed here: paste {pastedSecrets.join(', ')} into the secret store, then write the NAME
-          it is stored under as <span className="font-mono">{`\${secret:${pastedSecrets[0] ?? ''}}`}</span> below.
+          it is stored under as {'${secret:NAME}'} below.
+        </p>
+      )}
+      {withheld === null ? null : (
+        <p role="status" className="m-0 text-cell leading-base text-warn" data-paste-withheld="">
+          {withheld}
         </p>
       )}
       {harnesses.length > 1 ? (
@@ -257,7 +267,10 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
       <section className="flex min-w-0 flex-col gap-3" data-add-login="">
         <PasteVariables
           presets={catalog.presets}
-          onBack={() => setChoosing(null)}
+          onBack={() => {
+            setPrefill(undefined);
+            setChoosing(null);
+          }}
           onContinue={(presetId, filled) => {
             setPrefill(filled);
             setChoosing(presetId);
@@ -311,7 +324,10 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
                               preset={preset}
                               {...(prefill === undefined ? {} : { prefill })}
                               onAdded={done}
-                              onCancel={() => setChoosing(null)}
+                              onCancel={() => {
+                                setPrefill(undefined);
+                                setChoosing(null);
+                              }}
                             />
                           ) : (
                             <div>

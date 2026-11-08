@@ -13,7 +13,7 @@ import { LOGIN_NAME, LoginFileSchema, type LoginChange, type LoginFile } from '.
 import { credentialIssues, credentialOf, type Credential } from '../shared/credential.ts';
 import { credentialHarnesses, credentialVariables, hasHalves } from '../shared/halves.ts';
 import { type HarnessKind, harnessKey } from '../shared/harness.ts';
-import { looksLikeRawSecret, looksSecret } from '../shared/secret-shape.ts';
+import { looksLikeRawSecret, looksSecret, urlCarries } from '../../../contract/secret-shape.ts';
 import { credentialFromPreset, presetLoginRefusal } from '../presets/login.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 
@@ -85,6 +85,11 @@ function assertNoRawSecrets(env: Readonly<Record<string, string>>, owner: string
     if (looksSecret(name, value) || looksLikeRawSecret(name, value)) {
       refuse(
         `${name} in ${owner} looks like a secret, and a secret never sits in a login file. Save it in this machine's secret store and write \${secret:NAME} here instead.`,
+      );
+    }
+    if (urlCarries(value) === 'userinfo') {
+      refuse(
+        `${name} in ${owner} is an address with a user and password in it, and a secret never sits in a login file. Write the address without them and keep the password in this machine's secret store.`,
       );
     }
   }
