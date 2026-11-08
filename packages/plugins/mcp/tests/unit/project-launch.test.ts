@@ -120,6 +120,7 @@ function kernelRoots(
         writeText: missing('write a file'),
         writeBytes: missing('write a file'),
         copyTree: missing('copy a folder'),
+        copyShared: missing('copy a shared folder'),
         ensurePrivateDirectory: missing('make a folder'),
         makeDirectory: missing('make a folder'),
         list: missing('list a folder'),
@@ -130,6 +131,8 @@ function kernelRoots(
         syncDirectory: missing('syncDirectory'),
         fileIdentity: missing('fileIdentity'),
         remove: missing('remove a file'),
+        linkTo: missing('link'),
+        setMode: missing('change a mode'),
       };
     },
   };

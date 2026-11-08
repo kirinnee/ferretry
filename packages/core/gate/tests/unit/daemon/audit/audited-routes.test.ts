@@ -141,3 +141,11 @@ describe('an agent’s config call is recorded as today’s route was (round-2 r
       expect(draft?.subject).toBeUndefined();
     });
 });
+
+describe('DELETE /v1/config/file is told like PUT', () => {
+  test('a removal is fleet.configured with action config-remove, and nothing from the body', () => {
+    const rule = AUDITED_ROUTES.find(entry => entry.method === 'DELETE' && entry.path === '/v1/config/file');
+    expect(rule?.event).toBe('fleet.configured');
+    expect(rule?.detail).toEqual({ action: 'config-remove' });
+  });
+});

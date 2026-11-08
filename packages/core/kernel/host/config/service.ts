@@ -40,6 +40,10 @@ import type {
   ConfigFileStatus,
   ConfigFilesWriter,
   ConfigPort,
+  ConfigStateChange,
+  ConfigWriteAllDocument,
+  ConfigWriteAllOutcome,
+  ConfigWriteIssue,
   ConfigWriteOutcome,
   Log,
   StatePort,
@@ -70,8 +74,22 @@ import {
 } from './evaluate.ts';
 import { configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
-import { CONFIG_FILE_MAX_BYTES, configTextTooLarge, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
+import { readConfigDisk } from './disk.ts';
+import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
 import { isWithinList, patchedValue } from './patch.ts';
+import {
+  ALREADY_HELD_ISSUE,
+  type DocumentVerdict,
+  DUPLICATE_ISSUE,
+  firstStop,
+  heldSet,
+  judgeSet,
+  refusedDocument,
+  repeatedDocument,
+  UNREADABLE_ISSUE,
+} from './write-all.ts';
+import { configWriteSetFile, type WriteSetJournal } from './write-set-journal.ts';
+import { type ConfigFileMove, configFileMoves, type StampedConfigFile } from './state-change.ts';
 
 /** The most a configuration file may hold; a larger one is not read, and keeps its last good version. */
 export { CONFIG_FILE_MAX_BYTES };
@@ -123,7 +141,7 @@ export interface ConfigWriteOptions {
 }
 
 /** A write whose `${secret:NAME}` additions only the owner may make: a plugin's own, or an agent's. */
-const untrustedWrite = (writeOptions: ConfigWriteOptions): boolean =>
+const untrustedWrite = (writeOptions: Pick<ConfigWriteOptions, 'byPlugin' | 'byAgent'>): boolean =>
   writeOptions.byPlugin === true || writeOptions.byAgent === true;
 
 type Checked = ReturnType<typeof checkConfigText>;
@@ -217,6 +235,18 @@ export interface ConfigFiles {
     name: string | undefined,
     options?: ConfigWriteOptions,
   ): Promise<ConfigRemoveResult>;
+  /**
+   * Several of one plugin's files as ONE act (`ConfigPort.writeAll`): all checked and judged first, then written
+   * under an intent record ({@link configWriteSetFile}) whose removal is the commit. `judge` is asked per document with
+   * its path, as `write` asks its own; `ifMatch` is each document's own.
+   */
+  writeAll(
+    plugin: string,
+    documents: readonly ConfigWriteAllDocument[],
+    options?: Omit<ConfigWriteOptions, 'judge' | 'ifMatch' | 'refuseIfHeld'> & {
+      readonly judge?: (path: string, sentences: readonly string[], removal: boolean) => boolean;
+    },
+  ): Promise<ConfigWriteAllOutcome>;
   /** One file as it is on disk, with its etag and state; absent, the schema's modeline is not invented. */
   read(plugin: string, def: ConfigDef, name?: string): Promise<ConfigFileView | undefined>;
   held(): readonly HeldConfigEdit[];
@@ -226,6 +256,11 @@ export interface ConfigFiles {
   discard(id: string): Promise<boolean>;
   /** Scan, evaluate, remember. Boot calls it once before any plugin reads; the watcher calls it on a change. */
   reload(): Promise<void>;
+  /**
+   * Told every file of EVERY plugin that moved on disk or in state at a reload (`./state-change.ts`), with its plugin:
+   * what the host publishes as `kernel.config-changed`. The first load is the baseline. Answers the cancel.
+   */
+  onStateChange(listener: (plugin: string, move: ConfigFileMove) => void): Cancel;
   status(): ConfigStatus;
   /** Watch the tree and reload when it changes (debounced). Answers the stop. */
   startWatching(events?: ConfigTreeEvents): () => void;
@@ -247,6 +282,16 @@ export interface ConfigFiles {
   credentialRecordReferences(plugin: string): ReadonlySet<string>;
 }
 
+/** Located issues as the contract says them: where, what and the fix, never a value. */
+const writeIssues = (issues: readonly ConfigIssue[]): ConfigWriteIssue[] =>
+  issues.map(issue => ({
+    path: issue.path,
+    ...(issue.line === undefined ? {} : { line: issue.line }),
+    ...(issue.column === undefined ? {} : { column: issue.column }),
+    message: issue.message,
+    fix: issue.fix,
+  }));
+
 /** A write result as the contract says it: never thrown, `conflict` on its own. */
 function writeOutcome(result: ConfigWriteResult): ConfigWriteOutcome {
   if (result.kind === 'applied')
@@ -258,17 +303,7 @@ function writeOutcome(result: ConfigWriteResult): ConfigWriteOutcome {
     };
   if (result.kind === 'held') return { kind: 'held', etag: result.etag, id: result.id, sentences: result.sentences };
   if (result.reason === 'conflict') return { kind: 'conflict' };
-  return {
-    kind: 'refused',
-    reason: result.reason,
-    issues: result.issues.map(issue => ({
-      path: issue.path,
-      ...(issue.line === undefined ? {} : { line: issue.line }),
-      ...(issue.column === undefined ? {} : { column: issue.column }),
-      message: issue.message,
-      fix: issue.fix,
-    })),
-  };
+  return { kind: 'refused', reason: result.reason, issues: writeIssues(result.issues) };
 }
 
 /** An entry's state as the contract names it. */
@@ -318,6 +353,10 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   const state: StatePort =
     options.state ?? createStatePort({ home, pluginId: 'kernel', files: [acceptedConfigFile], fs });
   const declarations = [...options.defs];
+  /** The write-set intent record's own port (the kernel's state folder): only this service reads or writes it. */
+  const journalState: StatePort = createStatePort({ home, pluginId: 'kernel', files: [configWriteSetFile], fs });
+  /** Said once per damaged record, not on every load. */
+  let journalDamageSaid = false;
 
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -331,6 +370,10 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   let reported = new Set<string>();
   let issues: readonly ConfigIssue[] = [];
   const listeners = new Map<ConfigDef, Set<() => void>>();
+  /** `ConfigPort.watchState`'s listeners, by def: a file of that def moved on disk or in state. */
+  const stateListeners = new Map<ConfigDef, Set<(change: ConfigStateChange) => void>>();
+  /** The host's feed of every move, for the `kernel.config-changed` bus event. */
+  const moveListeners = new Set<(plugin: string, move: ConfigFileMove) => void>();
   /** Texts about to be written on the owner's behalf: consumed by the first load that finds exactly those bytes. */
   const acknowledged = new Map<string, { readonly etag: string; readonly text: string; readonly at: number }>();
   const acknowledgedRemovals = new Map<string, number>();
@@ -399,28 +442,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     }
   };
 
-  const readDisk = async (path: string): Promise<DiskState> => {
-    const absolute = `${root}/${path}`;
-    let info: Awaited<ReturnType<HostFs['info']>>;
-    try {
-      info = await fs.info(absolute);
-    } catch {
-      return { kind: 'unreadable' };
-    }
-    if (info === undefined) return { kind: 'absent' };
-    if (!info.regularFile || info.size > CONFIG_FILE_MAX_BYTES) return { kind: 'unreadable' };
-    try {
-      // Read with a hard bound, at most one byte past the cap: the size above was read before the bytes, and a file
-      // that grew in between is never read whole — only far enough to see it is over the cap.
-      const read = await fs.readTail(absolute, CONFIG_FILE_MAX_BYTES + 1);
-      if (read === undefined) return { kind: 'absent' };
-      if (read.from > 0 || read.bytes.byteLength > CONFIG_FILE_MAX_BYTES) return { kind: 'unreadable' };
-      const text = new TextDecoder().decode(read.bytes);
-      return configTextTooLarge(text) ? { kind: 'unreadable' } : { kind: 'text', text };
-    } catch {
-      return { kind: 'unreadable' };
-    }
-  };
+  const readDisk = async (path: string): Promise<DiskState> => await readConfigDisk(fs, `${root}/${path}`);
 
   /** Every slot there is: each declared file, each collection item on disk, and each accepted item whose file is gone. */
   const gatherSlots = async (extra: ConfigIssue[]): Promise<readonly Slot[]> => {
@@ -521,7 +543,62 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     }
   };
 
+  /**
+   * Puts every file of a write set and its accepted record back as they were before the set (`journal`), then removes
+   * the record. Idempotent: run again after a stop part-way through, it writes the same texts and records.
+   */
+  const rollBack = async (journal: WriteSetJournal): Promise<readonly string[]> => {
+    // A file is put back only while it still holds what the set wrote (or already its prior): one the owner changed
+    // since is theirs, and is left as it is.
+    const kept: string[] = [];
+    const putBack: (typeof journal.documents)[number][] = [];
+    for (const document of journal.documents) {
+      const absolute = `${root}/${document.path}`;
+      const current = await fs.readText(absolute).catch(() => undefined);
+      const now = current === undefined ? null : digest(current);
+      const before = document.prior === null ? null : digest(document.prior);
+      if (now !== document.written && now !== before) {
+        kept.push(document.path);
+        continue;
+      }
+      putBack.push(document);
+      if (document.prior === null) await fs.remove(absolute);
+      else await fs.writeAtomic(absolute, document.prior, PRIVATE_FILE_MODE);
+    }
+    for (const document of putBack) {
+      const name = acceptedName(document.path);
+      if (document.accepted === null) await state.remove(acceptedConfigFile, name);
+      else await state.write(acceptedConfigFile, document.accepted, name);
+    }
+    await journalState.remove(configWriteSetFile);
+    return kept;
+  };
+
+  /**
+   * A write set the daemon stopped in the middle of (its intent record is still there): put back whole before this
+   * load evaluates anything, so the last good version of every one of its files is in effect and none of the set is.
+   */
+  const recoverWriteSet = async (): Promise<void> => {
+    const read = await journalState.read(configWriteSetFile);
+    if (!read.ok) {
+      if (!journalDamageSaid)
+        log.warn(
+          `config: an interrupted write set cannot be read, so its files are judged as they are (${read.error.reason})`,
+        );
+      journalDamageSaid = true;
+      return;
+    }
+    journalDamageSaid = false;
+    if (read.value === undefined) return;
+    const kept = await rollBack(read.value);
+    log.warn(
+      `config: a write set of ${read.value.documents.length} file(s) for ${read.value.plugin} did not finish; ${String(read.value.documents.length - kept.length)} of them were put back as they were` +
+        (kept.length === 0 ? '' : `, and ${String(kept.length)} changed since were left as they are`),
+    );
+  };
+
   const loadAll = async (): Promise<void> => {
+    await recoverWriteSet();
     const extra: ConfigIssue[] = [];
     const slots = await gatherSlots(extra);
     const now = options.clock.nowMs();
@@ -595,6 +672,37 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         }
       }
     }
+    announceMoves(before, after);
+  };
+
+  /** Where each file stands at a load, for `./state-change.ts`: its state as the contract names it, its disk etag. */
+  const stampsOf = (all: ReadonlyMap<string, Settled>): ReadonlyMap<string, StampedConfigFile> =>
+    new Map(
+      [...all].map(([path, { slot, evaluated, diskEtag }]) => [
+        path,
+        {
+          ...(slot.name === undefined ? {} : { name: slot.name }),
+          stamp: { state: statusOf(evaluated).state, etag: diskEtag },
+        },
+      ]),
+    );
+
+  /** `watchState` and the host's feed: every file that moved on disk or in state, told once, after the load. */
+  const announceMoves = (before: ReadonlyMap<string, Settled>, after: ReadonlyMap<string, Settled>): void => {
+    for (const move of configFileMoves(stampsOf(before), stampsOf(after))) {
+      const declaration = (after.get(move.path) ?? before.get(move.path))?.slot.declaration as ConfigDeclaration;
+      const told = [
+        ...[...(stateListeners.get(declaration.def) ?? [])].map(listener => () => listener(move.change)),
+        ...[...moveListeners].map(listener => () => listener(declaration.plugin, move)),
+      ];
+      for (const tell of told) {
+        try {
+          tell();
+        } catch (error) {
+          log.warn(`a config listener failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
   };
 
   // ── reading ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -626,6 +734,15 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         set.add(listener);
         return () => void set.delete(listener);
       },
+      watchState(def, listener): Cancel {
+        own(def);
+        const set = stateListeners.get(def as ConfigDef) ?? new Set<(change: ConfigStateChange) => void>();
+        stateListeners.set(def as ConfigDef, set);
+        // Each subscription its own entry, so one listener handed in twice is cancelled one at a time.
+        const entry = (change: ConfigStateChange): void => listener(change);
+        set.add(entry);
+        return () => void set.delete(entry);
+      },
       fileState(def, name): ConfigFileStatus {
         own(def);
         const declaration = declared(pluginId, def as ConfigDef) as ConfigDeclaration;
@@ -654,6 +771,12 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
           judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
           ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
           ...(writeOptions.refuseIfHeld === true ? { refuseIfHeld: true as const } : {}),
+        }),
+      // The same judge as a single write, asked per document with that document's own path.
+      writeAll: async documents =>
+        await writeAll(pluginId, documents, {
+          byPlugin: true,
+          judge: (path, sentences, removal) => ownJudge(pluginId, () => path)(sentences, removal),
         }),
     };
   };
@@ -950,6 +1073,155 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return { kind: 'refused', reason: removed.reason, issues: [] };
   };
 
+  /** One document of a set, checked against the disk and judged for loosening, as `writeLocked` checks one write. */
+  interface Planned {
+    readonly slot: Slot;
+    /** The new text, or `undefined` for the file's removal. */
+    readonly text: string | undefined;
+    readonly checked: Checked | undefined;
+    readonly prior: string | undefined;
+    readonly stored: Awaited<ReturnType<typeof readStored>>;
+  }
+
+  const planDocument = async (
+    slot: Slot,
+    document: ConfigWriteAllDocument,
+    untrusted: boolean,
+  ): Promise<{ readonly verdict: DocumentVerdict; readonly planned?: Planned }> => {
+    const { def } = slot.declaration;
+    const ref = { path: slot.path, ...(slot.name === undefined ? {} : { name: slot.name }) };
+    const entry = settled.get(slot.path);
+    // A set never discards a held edit, and never carries one into effect: the owner settles it first.
+    if (entry?.evaluated.held !== undefined)
+      return { verdict: refusedDocument('already_held', ref, [ALREADY_HELD_ISSUE(slot.path)]) };
+    const disk = await readDisk(slot.path);
+    // What cannot be read could not be put back by a roll-back, so the set does not touch it.
+    if (disk.kind === 'unreadable')
+      return { verdict: refusedDocument('unreadable', ref, [UNREADABLE_ISSUE(slot.path)]) };
+    const prior = disk.kind === 'text' ? disk.text : undefined;
+    const found = prior === undefined ? ABSENT_CONFIG_ETAG : digest(prior);
+    if (conflictOf(slot, found, document.ifMatch) !== undefined) return { verdict: { kind: 'conflict', ...ref } };
+    // The intent record copies the file as it is; a file holding a raw secret is never copied into the kernel's state.
+    if (prior !== undefined) {
+      const was = check(def, slot.path, prior);
+      if (!was.ok && was.reason === 'raw_secret')
+        return { verdict: refusedDocument('raw_secret', ref, writeIssues(was.issues)) };
+    }
+    const stored = await readStored(slot.path);
+    const before = entry?.evaluated.value;
+    const { edit } = document;
+    if (typeof edit === 'object' && 'remove' in edit) {
+      // A removal is judged against the defaults, as `remove` judges it (K5).
+      const loosens = entry?.evaluated.inEffect === undefined ? [] : judgeLoosening(def, before, defaultsOf(def));
+      return {
+        verdict: { kind: 'ready', document: ref, removal: true, loosens, added: [] },
+        planned: { slot, text: undefined, checked: undefined, prior, stored },
+      };
+    }
+    const text = typeof edit === 'string' ? edit : patched(slot, prior, edit.patch);
+    if (text === undefined) return { verdict: refusedDocument('not_a_mapping', ref) };
+    const checked = check(def, slot.path, text);
+    if (!checked.ok) return { verdict: refusedDocument(checked.reason, ref, writeIssues(checked.issues)) };
+    const unchanged = digest(text) === entry?.evaluated.inEffect?.etag;
+    const added = unchanged || !untrusted ? [] : addedSecretReferenceSentences(before, checked.value);
+    const loosens = unchanged ? [] : [...judgeLoosening(def, before, checked.value), ...added];
+    return {
+      verdict: { kind: 'ready', document: ref, removal: false, loosens, added },
+      planned: { slot, text, checked, prior, stored },
+    };
+  };
+
+  const writeAll: ConfigFiles['writeAll'] = async (plugin, documents, writeOptions = {}) =>
+    await serial(async (): Promise<ConfigWriteAllOutcome> => {
+      // Each document's own def and name first: nothing is read for a set that names a file it may not write.
+      const slots: Slot[] = [];
+      for (const document of documents) {
+        const def = document.def as ConfigDef;
+        const declaration = declared(plugin, def);
+        if (declaration === undefined) return refusedDocument('not_declared', { path: claimOf(def) });
+        const slot = slotFor(declaration, document.name);
+        if (slot === undefined)
+          return refusedDocument('bad_name', {
+            path: claimOf(def),
+            ...(document.name === undefined ? {} : { name: document.name }),
+          });
+        slots.push(slot);
+      }
+      const twice = repeatedDocument(slots);
+      if (twice !== undefined) return refusedDocument('duplicate', { path: twice.path }, [DUPLICATE_ISSUE(twice.path)]);
+      // Every document checked before ANY is written: the first one refused or stale is the set's answer.
+      const plans: { readonly verdict: DocumentVerdict; readonly planned?: Planned }[] = [];
+      for (const [index, slot] of slots.entries())
+        plans.push(await planDocument(slot, documents[index] as ConfigWriteAllDocument, untrustedWrite(writeOptions)));
+      const stop = firstStop(plans.map(plan => plan.verdict));
+      if (stop !== undefined) return stop;
+      const ready = plans.map(plan => plan.verdict as Extract<DocumentVerdict, { kind: 'ready' }>);
+      const judged = judgeSet(
+        ready,
+        document =>
+          writeOptions.confirmedLoosening === true ||
+          askJudge(
+            {
+              judge: (sentences, removal) => writeOptions.judge?.(document.document.path, sentences, removal) === true,
+            },
+            document.loosens,
+            document.removal,
+          ),
+      );
+      if (judged.held.length > 0) return heldSet(judged, documents.length);
+      const planned = plans.map(plan => plan.planned as Planned);
+      if (planned.length === 0) return { kind: 'written', documents: [] };
+      // The intent record: every file and accepted record as they are now. From here until it is removed, a stop puts
+      // the whole set back on the next load; its removal below is the commit.
+      const journal: WriteSetJournal = {
+        plugin,
+        documents: planned.map(item => ({
+          path: item.slot.path,
+          prior: item.prior ?? null,
+          accepted: item.stored ?? null,
+          written: item.text === undefined ? null : digest(item.text),
+        })),
+      };
+      await journalState.write(configWriteSetFile, journal);
+      try {
+        landing = planned.flatMap(item =>
+          item.text === undefined || item.checked === undefined
+            ? []
+            : [{ path: item.slot.path, digest: digest(item.text), checked: item.checked }],
+        );
+        for (const item of planned) {
+          const absolute = `${root}/${item.slot.path}`;
+          if (item.text === undefined) await fs.remove(absolute);
+          else await fs.writeAtomic(absolute, item.text, PRIVATE_FILE_MODE);
+        }
+        // Each one in effect as written: the set was judged whole, so its records move with its files.
+        for (const item of planned)
+          await writeAccepted(
+            plugin,
+            item.slot.path,
+            item.text === undefined ? undefined : { etag: digest(item.text), text: item.text },
+          );
+        await journalState.remove(configWriteSetFile);
+      } catch (error) {
+        landing = [];
+        // Still running: the load puts the set back now (its intent record is there), the one way a crashed set is put
+        // back too. A load the failing disk stops leaves the record, and the next load tries again.
+        await load().catch(() => undefined);
+        throw error;
+      }
+      await load();
+      return {
+        kind: 'written',
+        documents: planned.map((item, index) => ({
+          path: item.slot.path,
+          ...(item.slot.name === undefined ? {} : { name: item.slot.name }),
+          etag: item.text === undefined ? ABSENT_CONFIG_ETAG : digest(item.text),
+          removed: item.text === undefined,
+          loosened: judged.loosened[index] ?? [],
+        })),
+      };
+    });
+
   const confirm = async (id: string): Promise<boolean> =>
     await serial(async () => {
       await load();
@@ -1051,6 +1323,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     write,
     writeAsOwner,
     remove,
+    writeAll,
     read,
     secretReferences: plugin => {
       const named = new Set<string>();
@@ -1069,6 +1342,11 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     confirm,
     discard,
     reload: async () => await serial(load),
+    onStateChange: listener => {
+      const entry = (plugin: string, move: ConfigFileMove): void => listener(plugin, move);
+      moveListeners.add(entry);
+      return () => void moveListeners.delete(entry);
+    },
     directories,
     status,
     startWatching,

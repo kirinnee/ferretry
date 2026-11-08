@@ -2,6 +2,7 @@ import type { Result } from '@ferretry/std';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import { basename, dirname, join, posix, relative } from 'node:path';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
+import type { StateFileDef } from '../contract/define.ts';
 import {
   type ComponentIdentity,
   FsError,
@@ -21,11 +22,15 @@ import type {
   RootName,
   RootsPort,
   RootStat,
+  RootDurableHeld,
   RootDurableRead,
+  RootFileHandle,
   RootIdentity,
+  RootLinkTarget,
   RootPublished,
   RootPublishOptions,
   RootWriteOptions,
+  SharedTreeSource,
 } from '../contract/ports.ts';
 import type { FileIdentity, HostFs, OpenedDirectory, OpenedFile } from './adapters/node-fs.ts';
 import {
@@ -41,14 +46,25 @@ import {
   same,
   within,
 } from './fence-guard.ts';
-import { isInternalRoot } from './internal-roots.ts';
+import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
+import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
+import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
+import { harnessFileRefusal, permittedMode, takesLinks } from './root-rules.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
-const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports']);
-const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports']);
-/** Internal roots only one plugin may have, whatever another manifest declares. */
-const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins', sessions: 'ferrets' };
+const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports', 'harness-home']);
+const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports', 'harness-home']);
+/**
+ * Roots only one plugin may have, whatever another manifest declares: the sign-in material (Logins), the session
+ * folders (Ferrets), and the fleet folder and the host harness homes the fleet is set up from (Runtimes).
+ */
+const ROOT_OWNERS: Partial<Record<RootName, string>> = {
+  credentials: 'logins',
+  sessions: 'ferrets',
+  fleet: 'runtimes',
+  'harness-home': 'runtimes',
+};
 
 /**
  * Whether a plugin may hold a root: an owned root (`credentials`, `sessions`) is its owner's alone. One fact, read by
@@ -57,6 +73,11 @@ const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins', 
 export function mayHoldRoot(plugin: string, name: RootName): boolean {
   const owner = ROOT_OWNERS[name];
   return owner === undefined || owner === plugin;
+}
+
+/** Whether a root is read-only through every handle (an owner's harness or import folder). One fact for both hosts. */
+export function isReadOnlyRoot(name: RootName): boolean {
+  return READ_ONLY_ROOTS.has(name);
 }
 
 /** The roots whose files and folders never get a group or other bit, whatever a caller asks for. */
@@ -79,17 +100,17 @@ function sessionFolder(subfolder: string | undefined): string | undefined {
 /**
  * The folder below an internal root's anchor that a handle scoped to `subfolder` names, or `undefined` when the
  * scope is refused. One fact for production and for the testing host, so a plugin test sees the isolation production
- * enforces. `sessions`: exactly one minted-id segment. `agent-homes`: one relative path (never absolute, never `..`,
- * no NUL), or none for the whole base. Any other root takes no such scope: it answers `''`.
+ * enforces. `sessions`: exactly one minted-id segment. `agent-homes` and `fleet`: one relative path (never absolute, never
+ * `..`, no NUL), or none for the whole base. Any other root takes no such scope: it answers `''`.
  */
 export function scopedSubfolder(name: RootName, subfolder: string | undefined): string | undefined {
   if (name === 'sessions') return sessionFolder(subfolder);
-  if (name !== 'agent-homes') return '';
+  if (name !== 'agent-homes' && name !== 'fleet') return '';
   if (subfolder === undefined || subfolder === '') return '';
   if (subfolder.startsWith('/') || subfolder.includes('\0') || subfolder.split('/').includes('..')) return undefined;
   return subfolder;
 }
-const DEFAULT_COPY_ENTRIES = 10_000;
+export const DEFAULT_COPY_ENTRIES = 10_000;
 const windowOk = (offset: number, length: number): boolean =>
   Number.isSafeInteger(offset) &&
   offset >= 0 &&
@@ -757,12 +778,27 @@ interface Checked {
 /** What `copyTree` may ask of a SOURCE handle: its own checks, never a path of its own choosing. */
 interface SourceAccess {
   readonly plugin: string;
+  /** The root the handle is on (`kernel.processes` accepts only some). */
+  readonly root?: RootName;
   readonly real: (path: FencedPath) => Promise<Checked>;
   readonly realParent: (path: FencedPath) => Promise<Checked>;
+  /** An EXISTING folder of this handle, held open and checked (`kernel.processes`): its real path and its lexical one. */
+  readonly folder: (path: FencedPath) => Promise<readonly string[]>;
+  /** The real path `linkTo` writes as a link's text: a name of this handle, resolved, fenced and proven ({@link linkTargetOf}). */
+  readonly linkTarget: (path: FencedPath, dangling: boolean) => Promise<string>;
 }
 
 /** Every handle the kernel made, with the plugin it was made for and its checked resolvers (for `copyTree`). */
 const HANDLES = new WeakMap<object, SourceAccess>();
+
+/** One minted shared tree: how to reach its folder again (the minter's own checks), and where it came from. */
+interface SharedEntry {
+  readonly source: SourceAccess;
+  readonly from: FencedPath;
+}
+
+/** Every shared tree the kernel minted (`RootsPort.share`), known by identity only. */
+const SHARED = new SharedTrees<SharedEntry>();
 
 interface HandleSetup {
   readonly fs: HostFs;
@@ -776,6 +812,8 @@ interface HandleSetup {
   readonly immutable: () => Promise<readonly string[]>;
   readonly random: () => string;
   readonly pins: PinRegistry | undefined;
+  /** Whether the plugin declared `permissions.setMode`. */
+  readonly setMode?: boolean;
 }
 
 /** What a held owner's root needs to judge every walk beneath it: the disk, the home it must not reach, the proven stores. */
@@ -973,6 +1011,166 @@ class HoldFailure {
 const HARD_LINK_RETRIES = 20;
 const HARD_LINK_RETRY_MS = 5;
 
+/**
+ * What a link `linkTo` writes may point at: `checked` (a name its OWN handle resolved and fenced, every link on the way
+ * resolved inside that root) when it EXISTS — the real path, a folder proven as `copyTree`'s source is, or a regular
+ * file proven as every read is (one name only, outside the fence by identity; `checked` resolved every link that
+ * leads somewhere, so a link still at the name leads nowhere and is `not_a_file`). A missing name only with `dangling`:
+ * its folder must exist and be exactly the folder the handle reached, and nothing (a dangling link included) may be at
+ * the name. A device or other special file is never a target.
+ */
+async function linkTargetOf(checked: Checked, dangling: boolean): Promise<string> {
+  const { full, scope } = checked;
+  const found = await scope.fs.identity(full);
+  if (found === undefined) {
+    if (!dangling) return refuse('outside');
+    const folder = await scope.fs.realpath(dirname(full)).catch(() => undefined);
+    if (folder !== dirname(full)) refuse('outside');
+    const held = await openCheckedFolder(scope, folder as string);
+    await held.close();
+    return full;
+  }
+  if (found.kind === 'directory') {
+    const held = await openCheckedFolder(scope, full);
+    await held.close();
+    return full;
+  }
+  const problem = await fileProblem(scope, full, found);
+  if (problem !== undefined) refuse(problem);
+  return full;
+}
+
+/**
+ * `setMode` through the checked folder: the leaf is looked at without following it (a link is refused), opened by the
+ * kind it showed (`O_NOFOLLOW` either way), proven to be the very object looked at, and `fchmod`ed through that
+ * descriptor. A file with a second name is refused: its mode is that other name's too.
+ */
+async function setModeChecked(scope: Scope, full: string, bits: number): Promise<void> {
+  const parent = dirname(full);
+  const folder = await openCheckedFolder(scope, parent);
+  try {
+    const at = await entry(scope, folder, parent, basename(full));
+    const found = await scope.fs.identity(at);
+    if (found === undefined) return refuse('outside');
+    if (found.kind === 'link') return refuse('link_escape');
+    if (found.kind === 'other') return refuse('device_file');
+    if (found.kind === 'file' && found.links > 1) return refuse('hard_link');
+    const opened =
+      found.kind === 'directory'
+        ? await scope.fs.openDirectory(at).catch(() => refuse('changed'))
+        : await scope.fs.openRead(at).catch(() => refuse('changed'));
+    try {
+      if (opened.identity.kind !== found.kind || !same(found, opened.identity)) refuse('changed');
+      if (opened.identity.kind === 'file' && opened.identity.links > 1) refuse('hard_link');
+      await opened.chmod(bits);
+    } finally {
+      await opened.close();
+    }
+  } finally {
+    await folder.close();
+  }
+}
+
+/** What a harness file handle needs: the disk, the home it must stay out of, and the one file it names. */
+interface HarnessFileSetup {
+  readonly fs: HostFs;
+  readonly home: string;
+  readonly absolutePath: string;
+}
+
+/**
+ * {@link RootsPort.harnessFile}: an owner's read-only root whose base is the file's folder and whose ONLY name is the
+ * file. The folder is checked like every owner's root (by name, by identity and on every link hop, outside the fence);
+ * the leaf is never followed — a link at the name, a file with a second name (no store is trusted for one here), a
+ * device or anything but a regular file is refused, and after the open the NAME must still reach the very file the
+ * descriptor holds. Nothing lists the folder, writes, or reaches another name.
+ */
+function harnessFileHandle(setup: HarnessFileSetup): RootFileHandle {
+  const { fs, home, absolutePath } = setup;
+  const folder = dirname(absolutePath);
+  const leaf = basename(absolutePath);
+  const noImmutable = async (): Promise<readonly string[]> => [];
+  /** The leaf by name in its checked folder, never followed. */
+  const placed = async (): Promise<Checked> => {
+    const resolved = await resolveChecked(fs, home, folder, true, folder, undefined);
+    if (!resolved.ok) return refuse(resolved.error);
+    const base = resolved.value.base;
+    const full = join(base.real, leaf);
+    if (base.fence !== undefined && fencedByName(base.fence, full)) refuse('fenced');
+    return { full, scope: { fs, base, ownerRoot: true, immutable: noImmutable } };
+  };
+  const read = async <T>(use: (file: OpenedFile) => Promise<T>): Promise<T> => {
+    const { full, scope } = await placed();
+    const named = await leafIdentity(scope, full);
+    if (named === undefined) {
+      const error = Object.assign(new Error('no such file'), { code: 'ENOENT' });
+      throw error;
+    }
+    // A link at the name is refused by name; a device, a folder or a second hard link is refused by `withCheckedFile`
+    // before anything is opened (no store is trusted for a second name here).
+    if (named.kind === 'link') return refuse('link_escape');
+    return await withCheckedFile(scope, full, async file => {
+      // The open followed nothing, but it opened what the name's REAL path reached: the name itself must still be that
+      // very file (a link swapped in, or a swap and back, answers `changed`).
+      const now = await leafIdentity(scope, full);
+      if (now?.kind !== 'file' || !same(now, file.identity) || file.identity.links !== 1) refuse('changed');
+      return await use(file);
+    });
+  };
+  const identityNow = async (): Promise<RootIdentity | undefined> => {
+    const { full, scope } = await placed();
+    const found = await leafIdentity(scope, full);
+    return found === undefined ? undefined : identityOfEntry(found);
+  };
+  return Object.freeze({
+    name: 'harness-home' as const,
+    path: absolutePath,
+    stat: async (): Promise<RootStat | undefined> => {
+      const { full, scope } = await placed();
+      return await statChecked(scope, full);
+    },
+    lstat: async (): Promise<RootLstat | undefined> => {
+      const { full, scope } = await placed();
+      const info = await leafIdentity(scope, full);
+      return info === undefined ? undefined : leafOf(info);
+    },
+    readText: async (limit?: number) => decoder.decode(await read(async file => await file.read(limit))),
+    readBytes: async (limit?: number | { readonly offset: number; readonly length: number }) => {
+      if (typeof limit === 'object') {
+        if (!windowOk(limit.offset, limit.length)) refuse('outside');
+        return (await read(async file => await file.readWindow(limit.offset, limit.length))).bytes;
+      }
+      return await read(async file => await file.read(limit));
+    },
+    fileIdentity: identityNow,
+    readDurable: async <T>(limit?: number, hold?: (read: RootDurableHeld) => Promise<T>): Promise<T | undefined> => {
+      try {
+        return await read(async file => {
+          const bytes = await file.read(limit);
+          await file.sync();
+          const done = { bytes, identity: identityOfEntry(file.identity) };
+          if (hold === undefined) return done as T;
+          try {
+            return await hold({
+              ...done,
+              stillNames: async () => {
+                const named = await identityNow();
+                return named?.device === done.identity.device && named.inode === done.identity.inode;
+              },
+            });
+          } catch (failure) {
+            throw new HoldFailure(failure);
+          }
+        });
+      } catch (error) {
+        if (error instanceof HoldFailure) throw error.cause;
+        if (errnoOf(error) === 'ENOENT') return undefined;
+        throw error;
+      }
+    },
+  });
+}
+
 function rootHandle(setup: HandleSetup): RootHandle {
   const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins } = setup;
   const ownerRoot = OWNER_ROOTS.has(name);
@@ -1014,7 +1212,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         if (error instanceof RootError && error.refusal === 'hard_link') {
           // Only a root this kernel publishes into (internal, writable) can hold its OWN leftover; a read-only, an
           // owner's or an outside root (`worktrees`) never loses a name to a read. At most one adoption per call.
-          if (!adoptionTried && !readOnly && isInternalRoot(name)) {
+          if (!adoptionTried && !readOnly && isKernelMadeRoot(name)) {
             adoptionTried = true;
             const adopted = await real(path)
               .then(async ({ full, scope }) => await adoptLeftoverName(scope, full, random))
@@ -1147,7 +1345,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
   };
   const handle: RootHandle = {
     name,
-    internal: isInternalRoot(name),
+    internal: isKernelMadeRoot(name),
     resolve: relativePath => {
       const root = base();
       if (root === undefined) return err(name === 'work' ? 'unknown_ferret' : 'outside');
@@ -1208,6 +1406,34 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
       if ((await leafIdentity(target.scope, target.full)) !== undefined) refuse('outside');
       await copyInto(known, from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+    },
+    copyShared: async (tree, to, options) => {
+      // The destination: an internal root the kernel makes, writable. Checked before the tree is even looked at.
+      if (!receivingRoot(name)) return refuseShared('not_internal');
+      writable();
+      const shared = SHARED.open(tree);
+      const sourceFolder = await shared.source.real(shared.from);
+      const checkedSource = await openCheckedFolder(sourceFolder.scope, sourceFolder.full).catch((error: unknown) => {
+        if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
+        throw error;
+      });
+      await checkedSource.close();
+      const target = await realParent(to, true);
+      // THE link rule: every shared tree is the minter's own internal state and the destination is `agent-homes`.
+      if (options?.link === true) {
+        // As the copy does, the missing folders on the way are made (0700) through the checked folder above them.
+        const made = await openFolderMaking(target.scope, dirname(target.full), 0o700, true);
+        try {
+          await fs.symlink(sourceFolder.full, await entry(target.scope, made.folder, made.real, basename(target.full)));
+        } finally {
+          await made.folder.close();
+        }
+        return 'linked';
+      }
+      // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
+      if ((await leafIdentity(target.scope, target.full)) !== undefined) refuse('outside');
+      await copyInto(shared.source, shared.from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+      return 'copied';
     },
     ensurePrivateDirectory: async path => {
       writable();
@@ -1282,6 +1508,36 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const { full, scope } = await real(path);
       await removeChecked(scope, full);
     },
+    linkTo: async (at: FencedPath, target: RootLinkTarget) => {
+      writable();
+      if (!takesLinks(name)) return refuse('read_only');
+      const known = HANDLES.get(target?.root ?? {});
+      if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
+      const pointsAt = await known.linkTarget(target.path, target.dangling === true);
+      const placed = await realParent(at, true);
+      // No link on the way: the folder `at` names, as this root names it, is the very folder reached.
+      const root = base() as string;
+      const lexical = lexicalInRoot(home, root, ownerRoot, at);
+      if (!lexical.ok) return refuse(lexical.error);
+      if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+        refuse('link_escape');
+      const made = await openFolderMaking(placed.scope, dirname(placed.full), 0o700, false);
+      try {
+        const leafAt = await entry(placed.scope, made.folder, made.real, basename(placed.full));
+        if ((await fs.identity(leafAt)) !== undefined) refuse('outside');
+        await fs.symlink(pointsAt, leafAt).catch(() => refuse('changed'));
+      } finally {
+        await made.folder.close();
+      }
+    },
+    setMode: async (path: FencedPath, mode: number) => {
+      if (setup.setMode !== true) return refuse('not_declared');
+      writable();
+      const bits = permittedMode(isKernelMadeRoot(name), mode);
+      if (bits === undefined) return refuse('outside');
+      const { full, scope } = await realParent(path);
+      await setModeChecked(scope, full, bits);
+    },
     pin: async (path, options) => {
       if (pins === undefined) return refuse('not_declared');
       const { full, scope } = await real(path);
@@ -1302,9 +1558,40 @@ function rootHandle(setup: HandleSetup): RootHandle {
         : fencedPin(pinned, { fs, home, immutable });
     },
   };
-  HANDLES.set(handle, { plugin, real: path => real(path), realParent: path => realParent(path) });
+  HANDLES.set(handle, {
+    plugin,
+    root: name,
+    real: path => real(path),
+    realParent: path => realParent(path),
+    folder: async path => {
+      const { full, scope } = await real(path);
+      const relative = full.startsWith(`${scope.base.real}/`) ? full.slice(scope.base.real.length + 1) : '';
+      if (!processFolderAllowed(name, relative))
+        throw new Error('kernel.processes accepts only a folder at or under fleet/homes/<id>');
+      // Held open and checked as `copyTree`'s source is: a folder, the one at that real path, inside the root.
+      const held = await openCheckedFolder(scope, full);
+      await held.close();
+      const root = base();
+      const lexical = root === undefined ? undefined : lexicalInRoot(home, root, ownerRoot, path);
+      return lexical?.ok === true && lexical.value !== full ? [full, lexical.value] : [full];
+    },
+    linkTarget: async (path, dangling) => await linkTargetOf(await real(path), dangling),
+  });
   return handle;
 }
+
+/**
+ * `kernel.processes`' own-root check ({@link OwnFolderSpellings}): the spellings of an existing folder of a handle the
+ * kernel made for `plugin` (its real path first, then the path as the root names it), or `undefined` for any other
+ * handle — another plugin's, or an object that only looks like one. A path the root refuses throws its refusal.
+ */
+export const ownFolderSpellings: OwnFolderSpellings = async (plugin, folder) => {
+  const known = HANDLES.get(folder.root);
+  if (known === undefined || known.plugin !== plugin) return undefined;
+  // Only a root the kernel itself bases (`fleet`, `agent-homes`): an owner root (`harness-home`) is any folder the caller names.
+  if (known.root === undefined || !PROCESS_FOLDER_ROOTS.has(known.root)) return undefined;
+  return await known.folder(folder.path);
+};
 
 /**
  * The one place a plugin's own state folder under the home is named: `<home>/state/<plugin>`. Its internal roots sit
@@ -1316,10 +1603,13 @@ export function pluginStateFolder(home: string, plugin: string): string {
 
 /**
  * The one place the base of an internal root under the home is named: `<home>/state/<plugin>/<name>` for the roots
- * the kernel makes (`agent-homes`, `downloads`, `credentials`, `sessions`), nothing for any other root. Both the folder the kernel
+ * the kernel makes per plugin (`agent-homes`, `downloads`, `credentials`, `sessions`), `<home>/<folder>` for one it makes at
+ * a fixed place (`fleet`: `<home>/fleet`, {@link HOME_ROOT_FOLDERS}), nothing for any other root. Both the folder the kernel
  * makes at boot and the base the roots port serves are this fact.
  */
 function internalRootBase(home: string, plugin: string, name: RootName): string | undefined {
+  const fixed = HOME_ROOT_FOLDERS[name];
+  if (fixed !== undefined) return `${home.replace(/\/+$/u, '')}/${fixed}`;
   return isInternalRoot(name) ? `${home.replace(/\/+$/u, '')}/${internalRootFolder(plugin, name)}` : undefined;
 }
 
@@ -1403,6 +1693,16 @@ export interface RootsOptions {
   readonly hardLinkRoots?: readonly string[];
   /** The kernel's pin registry, for `RootHandle.pin`; absent, every pin is refused. */
   readonly pins?: PinRegistry;
+  /** The manifest's `permissions.harnessFiles`, for `RootsPort.harnessFile`; absent, every one is refused. */
+  readonly harnessFiles?: readonly string[];
+  /** Whether the manifest declared `permissions.setMode`; absent, `RootHandle.setMode` is refused `not_declared`. */
+  readonly setMode?: boolean;
+  /** Whether the manifest declares `permissions.shareTrees` (`RootsPort.share`); absent, every share is refused. */
+  readonly shareTrees?: boolean;
+  /** The plugin's declared state files: a shared named tree must be one of its own opaque ones. */
+  readonly stateFiles?: readonly StateFileDef[];
+  /** Told the plugin's stop: every tree it minted is revoked then. Absent, its trees live as long as the port. */
+  readonly onStop?: (fn: () => void) => void;
 }
 
 /** The roots port for one plugin: only roots its manifest declared (§3.7); anything else throws. */
@@ -1419,7 +1719,33 @@ export function rootsPortFor(
   const immutable = (): Promise<readonly string[]> =>
     (proven ??= resolveImmutableRoots(fs, options.hardLinkRoots ?? HARD_LINK_ROOTS).catch(() => []));
   const home = absolute(layout.home, 'the home');
+  // Every tree this plugin mints lives until it stops.
+  const life = { live: true };
+  options.onStop?.(() => {
+    life.live = false;
+  });
   return {
+    harnessFile: absolutePath => {
+      const refusal = harnessFileRefusal({
+        plugin: layout.plugin,
+        mayHold: mayHoldRoot(layout.plugin, 'harness-home'),
+        roots: declared,
+        names: options.harnessFiles,
+        home,
+        absolutePath,
+      });
+      if (refusal !== undefined) throw new RootError(refusal);
+      return harnessFileHandle({ fs, home, absolutePath });
+    },
+    share: async (source: SharedTreeSource) => {
+      if (options.shareTrees !== true) return refuseShared('not_permitted');
+      const folder = ownStateTree(options.stateFiles ?? [], source.state, source.name);
+      if (folder === undefined) return refuseShared('not_own');
+      const base = absolute(join(pluginStateFolder(home, layout.plugin), folder), 'a shared tree');
+      const access = stateTreeAccess(fs, home, layout.plugin, base, immutable);
+      await existingFolder(access, base as FencedPath);
+      return SHARED.mint(basename(base), { source: access, from: base as FencedPath }, life);
+    },
     root: (name, scope) => {
       if (!allowed.has(name)) throw new RootError('not_declared');
       if (!mayHoldRoot(layout.plugin, name)) throw new RootError('not_declared');
@@ -1431,7 +1757,8 @@ export function rootsPortFor(
       })();
       const base = (): string | undefined => {
         switch (name) {
-          case 'agent-homes': {
+          case 'agent-homes':
+          case 'fleet': {
             const below = scopedSubfolder(name, subfolder);
             return below === undefined || internal === undefined
               ? undefined
@@ -1452,8 +1779,10 @@ export function rootsPortFor(
           case 'work':
             return scope?.ferret === undefined ? undefined : workFolders()?.folderOf(scope.ferret);
           case 'harness-history':
+          case 'harness-home':
           case 'imports':
-            // The owner-named folder, or the harness's documented history folder: absolute, given by the caller.
+            // The owner-named folder, the harness's documented history folder, or the harness's own home (CLAUDE_CONFIG_DIR,
+            // CODEX_HOME or the default under the owner's home): absolute, given by the caller.
             return subfolder?.startsWith('/') === true && !subfolder.includes('\0')
               ? absolute(subfolder, 'a root')
               : undefined;
@@ -1464,7 +1793,9 @@ export function rootsPortFor(
         return workFolders()?.check(scope.ferret, path) ?? err('unknown_ferret');
       };
       const scopedParent =
-        (name === 'agent-homes' || name === 'sessions') && subfolder !== undefined && subfolder !== ''
+        (name === 'agent-homes' || name === 'fleet' || name === 'sessions') &&
+        subfolder !== undefined &&
+        subfolder !== ''
           ? internal
           : undefined;
       return rootHandle({
@@ -1479,7 +1810,55 @@ export function rootsPortFor(
         immutable,
         random,
         pins: options.pins,
+        ...(options.setMode === true ? { setMode: true } : {}),
       });
     },
+  };
+}
+
+/** A shared tree's folder must exist, be a folder, and pass its source's own checks NOW (at mint, as at every copy). */
+async function existingFolder(source: SourceAccess, path: FencedPath): Promise<void> {
+  const folder = await source.real(path);
+  const opened = await openCheckedFolder(folder.scope, folder.full).catch((error: unknown) => {
+    if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
+    throw error;
+  });
+  await opened.close();
+}
+
+/**
+ * How a shared named tree of the minter's own state (`<home>/state/<plugin>/installed/<name>`) is reached: exactly as an
+ * internal root is — anchored at the home, the base EXACTLY where it is named with no link from the home down to it,
+ * and every name below resolved and checked again at each call (a link inside is never followed out).
+ */
+function stateTreeAccess(
+  fs: HostFs,
+  home: string,
+  plugin: string,
+  base: string,
+  immutable: () => Promise<readonly string[]>,
+): SourceAccess {
+  const real = async (path: FencedPath): Promise<Checked> => {
+    const resolved = await resolveChecked(fs, home, base, false, path, home);
+    if (!resolved.ok) return refuse(resolved.error);
+    return { full: resolved.value.full, scope: { fs, base: resolved.value.base, ownerRoot: false, immutable } };
+  };
+  const realParent = async (path: FencedPath): Promise<Checked> => {
+    const slash = path.lastIndexOf('/');
+    const leaf = path.slice(slash + 1);
+    if (slash <= 0 || leaf === '' || leaf === '.' || leaf === '..') return await real(path);
+    const parent = await real(path.slice(0, slash) as FencedPath);
+    const full = join(parent.full, leaf);
+    if (!within(parent.scope.base.real, full)) refuse('link_escape');
+    return { full, scope: parent.scope };
+  };
+  // Never in the handle table, so `kernel.processes`' own-root check never reaches a shared tree's folder, and `linkTo`
+  // never points a link at one.
+  return {
+    plugin,
+    real,
+    realParent,
+    folder: async () => refuse('not_declared'),
+    linkTarget: async () => refuse('not_declared'),
   };
 }

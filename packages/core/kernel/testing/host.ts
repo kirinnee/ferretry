@@ -1,23 +1,41 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
-import { isInternalRoot } from '../host/internal-roots.ts';
-import { mayHoldRoot, scopedSubfolder } from '../host/roots.ts';
+import { isKernelMadeRoot } from '../host/internal-roots.ts';
+import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
+import { harnessFileRefusal, permittedMode, takesLinks } from '../host/root-rules.ts';
+import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
-import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
-import { gatedPaths } from '../host/paths.ts';
+import { gatedOverrides, gatedPaths, gatedWhich } from '../host/paths.ts';
+import { handleReaders, locateCommand, whichCommand, whichForCommand } from '../host/which.ts';
+import {
+  NO_PROCESS_TABLE,
+  PROCESS_FOLDER_ROOTS,
+  type ProcessTable,
+  processesPortFor,
+  processFolderAllowed,
+} from '../host/processes.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
 import type { DaemonTimings } from '../contract/ports.ts';
 import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
-import { addedSecretReferenceSentences, ownSecretsPort, secretReferencesIn } from '../host/secrets.ts';
+import {
+  addedSecretReferenceSentences,
+  exactNetworkHosts,
+  ownSecretsPort,
+  secretReferencesIn,
+} from '../host/secrets.ts';
+import { outboundSecretTransport } from '../host/adapters/outbound-secret.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { err, hours, instantFromEpochMs, ok } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
 import type {
   Admission,
+  ChildEnvironment,
+  ChildEnvironmentOpener,
   GuardStamp,
   InputHolds,
   OutputGuard,
@@ -25,7 +43,7 @@ import type {
   RedactionScope,
   WorkFolders,
 } from '../contract/bound.ts';
-import { KERNEL_ONLY_PORTS, WITHHELD_SENTENCE } from '../contract/bound.ts';
+import { ChildEnvironmentPort, KERNEL_ONLY_PORTS, WITHHELD_SENTENCE } from '../contract/bound.ts';
 import type {
   ConfigCollectionDef,
   ConfigFileDef,
@@ -42,10 +60,15 @@ import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse, finalised, headersFrom, queryFrom } from '../contract/http.ts';
 import type {
   ChildHandle,
+  ConfigDocumentRef,
+  ConfigFileStatus,
   ConfigPort,
+  ConfigStateChange,
   KernelPorts,
   Log,
   LogFields,
+  RootDurableHeld,
+  RootFileHandle,
   RootHandle,
   RootName,
   SpawnOptions,
@@ -56,6 +79,22 @@ import type {
 } from '../contract/ports.ts';
 import { readConfigText } from '../host/config/yaml-text.ts';
 import { isWithinList, patchedValue } from '../host/config/patch.ts';
+import {
+  ABSENT_STAMP,
+  type ConfigFileStamp,
+  configChangedPayload,
+  configFileMoves,
+  type StampedConfigFile,
+} from '../host/config/state-change.ts';
+import {
+  type DocumentVerdict,
+  DUPLICATE_ISSUE,
+  firstStop,
+  heldSet,
+  judgeSet,
+  refusedDocument,
+  repeatedDocument,
+} from '../host/config/write-all.ts';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
 import {
@@ -63,13 +102,15 @@ import {
   hostPermitted,
   type ItemReachOf,
   NO_ITEMS,
+  PermissionError,
   spawnPermitted,
 } from '../host/permissions.ts';
 import { scratchPort } from '../host/scratch.ts';
+import { type DetachedCall, detachedAsked, detachedHandle, detachedRefusal } from '../host/detached.ts';
 import { PinRegistry } from '../host/pins.ts';
 import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import { matchingHook } from '../host/hooks.ts';
-import { CORE_IDS } from '../contract/ids.ts';
+import { CORE_IDS, type FerretId } from '../contract/ids.ts';
 import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from '../host/needer.ts';
 import type { ScratchPort } from '../contract/ports.ts';
 import { testIdentity } from './identity.ts';
@@ -94,6 +135,23 @@ import { MemoryStateFolder, SimulatedCrash } from './state.ts';
 
 // ─── options and results ──────────────────────────────────────────────────────────────────────────────────────────
 
+/** The real host's detached rule (`host/detached.ts`), with its sentence, before anything is started. */
+function refuseDetached(
+  manifest: Manifest,
+  items: ItemReachOf,
+  call: DetachedCall,
+  program: string,
+  spawnOptions: SpawnOptions,
+): void {
+  const spawnDeclared = spawnPermitted(
+    effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
+    items,
+    program,
+  );
+  const why = detachedRefusal(manifest.id, manifest.permissions?.detached, spawnDeclared, call, program, spawnOptions);
+  if (why !== undefined) throw new PermissionError(why);
+}
+
 export interface TestHostOptions {
   /** The halves under test, built in this order. No other plugin's code is loaded. */
   readonly plugins: readonly DaemonImplementation<any>[];
@@ -110,6 +168,11 @@ export interface TestHostOptions {
   readonly clock?: DrivenClock;
   /** Config values by `file` or `collection` (a collection is `{ name: value }`). Parsed with the declared schema. */
   readonly config?: Readonly<Record<string, unknown>>;
+  /**
+   * Hears a DETACHED `kernel.spawn.start` the real host's rule allowed (`host/detached.ts`), and answers its pid.
+   * Without it an allowed detached start throws, as any `start` here does. A refused one never reaches it.
+   */
+  readonly detachedStart?: (program: string, args: readonly string[], options: SpawnOptions) => number;
   /** Answers `kernel.spawn.run` for declared programs. Without it a spawn fails. */
   readonly spawn?: (
     program: string,
@@ -126,8 +189,29 @@ export interface TestHostOptions {
   readonly pinner?: SessionRootPinner;
   /** What `kernel.paths.home()` answers. Default: `/home/owner`. */
   readonly ownerHome?: string;
+  /**
+   * The files `kernel.roots.harnessFile` reads, by absolute path (`/home/owner/.claude.json` → its text). The rule
+   * over the path is the real host's (`host/root-rules.ts`); a path not here reads as absent. Default: none.
+   */
+  readonly harnessFiles?: Readonly<Record<string, string>>;
+  /** The kernel home the test roots' fence is judged against (`harnessFile` refuses a path in it). Default: `/test-home`. */
+  readonly fenceHome?: string;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
+  /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
+  readonly executables?: readonly string[];
+  /** The `PATH` `kernel.paths.which` searches after the caller's own folders. Default: none. */
+  readonly searchPath?: string;
+  /**
+   * The operator's environment `kernel.paths.locate` reads an override from (`FY_CLOUDFLARED` → its value); only a
+   * variable the manifest declared in `permissions.whichOverrides` is ever asked. Default: none set.
+   */
+  readonly operatorVariables?: Readonly<Record<string, string>>;
+  /**
+   * The Vault's handle opener, for `kernel.paths.whichFor` (`searchPathOf`). Default: a loaded Vault's provided
+   * `childEnvironments`, else none, so every handle is `unprovable`.
+   */
+  readonly childEnvironments?: ChildEnvironmentOpener;
   /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
   readonly scratch?: ScratchPort;
   /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
@@ -138,11 +222,16 @@ export interface TestHostOptions {
   readonly secrets?: readonly string[];
   /** What `kernel.hostFacts` answers to a plugin that declared `permissions.hostFacts`. Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /**
+   * The process table `kernel.processes` asks for a plugin that declared `permissions.processes` (`testProcessTable`).
+   * Absent: nothing is listed or signalled. The rule over it is the real host's (`host/processes.ts`).
+   */
+  readonly processes?: ProcessTable;
   /** What `kernel.updateHost` answers to a plugin that declared `permissions.updateHost`. */
   readonly updateHost?: UpdateHostPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
   readonly timings?: DaemonTimings;
-  /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
+  /** The Vault stand-in for `kernel.secrets` (`resolve` and `send`): name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
   /** The contract hash per package, as `kernel.contract.hash()` answers its own plugin (`surface` is `'member'` for the member-surface hash). Default: `unhashed`. */
   readonly contractHash?: (id: string, surface?: ContractSurface) => string;
@@ -178,6 +267,16 @@ export interface TestHost {
   readonly acts: readonly ActRecord[];
   /** Every event a half published, in order. */
   readonly published: readonly { readonly event: string; readonly payload: unknown }[];
+  /**
+   * Every `kernel.config-changed` the real host would publish on `GET /v1/bus`, in order: each declared file that moved
+   * in state or etag (the shared rule, `host/config/state-change.ts`). The same moves `ConfigPort.watchState` hears.
+   */
+  readonly configChanges: readonly {
+    readonly plugin: string;
+    readonly path: string;
+    readonly state: ConfigFileStatus['state'];
+    readonly etag: string;
+  }[];
   readonly logs: readonly {
     readonly level: string;
     readonly scope: string;
@@ -342,6 +441,75 @@ async function start(world: World): Promise<TestHost> {
   const stopController = new AbortController();
   const jobs = new Map<string, (signal: AbortSignal) => Promise<void>>();
   const configListeners = new Map<string, Set<() => void>>();
+  // `watchState` over the in-memory world: by file or collection key, the moves the shared rule finds there. The world
+  // holds values, not texts, so a file's etag is its value's JSON (as this host's writes answer) and a held edit (which
+  // the world never holds) is a stamp kept for its path until that path is written, removed or set again.
+  const stateListeners = new Map<string, Set<(change: ConfigStateChange) => void>>();
+  const configChanges: { plugin: string; path: string; state: ConfigFileStatus['state']; etag: string }[] = [];
+  const configOwners = new Map<
+    string,
+    { readonly plugin: string; readonly def: ConfigFileDef<any> | ConfigCollectionDef<any> }
+  >();
+  for (const plugin of options.plugins)
+    for (const def of plugin.manifest.data?.config ?? [])
+      configOwners.set(def.shape === 'file' ? def.file : def.collection, { plugin: plugin.manifest.id, def });
+  const configStamps = new Map<string, Map<string, StampedConfigFile>>();
+  /** Where every file of one key stands in the world now: valid or invalid by its schema, absent when not there. */
+  const worldStamps = (key: string): Map<string, StampedConfigFile> => {
+    const found = new Map<string, StampedConfigFile>();
+    const owner = configOwners.get(key);
+    if (owner === undefined) return found;
+    const { def } = owner;
+    const stampOf = (value: unknown): ConfigFileStamp =>
+      value === undefined
+        ? ABSENT_STAMP
+        : { state: def.schema.safeParse(value).success ? 'valid' : 'invalid', etag: JSON.stringify(value) };
+    const raw = world.config.get(key);
+    if (def.shape === 'file') {
+      if (raw !== undefined) found.set(def.file, { stamp: stampOf(raw) });
+      return found;
+    }
+    for (const [name, value] of Object.entries((raw ?? {}) as Record<string, unknown>))
+      if (def.name.test(name)) found.set(`${def.collection}/${name}.yaml`, { name, stamp: stampOf(value) });
+    return found;
+  };
+  for (const key of configOwners.keys()) configStamps.set(key, worldStamps(key));
+  /**
+   * The world moved under `key` (a write, a removal, a set, or an edit held at `held.path`): tell every file of it that
+   * moved. `subject` names the one path this act touched; another path's held stamp is kept. No subject: all of them.
+   */
+  const restamp = (
+    key: string,
+    subject?: { readonly path: string; readonly name?: string; readonly held?: string },
+  ): void => {
+    const owner = configOwners.get(key);
+    if (owner === undefined) return;
+    const before = configStamps.get(key) ?? new Map<string, StampedConfigFile>();
+    const after = worldStamps(key);
+    if (subject !== undefined)
+      for (const [path, stamped] of before)
+        if (path !== subject.path && stamped.stamp.state === 'held') after.set(path, stamped);
+    if (subject?.held !== undefined)
+      after.set(subject.path, {
+        ...(subject.name === undefined ? {} : { name: subject.name }),
+        stamp: { state: 'held', etag: subject.held },
+      });
+    configStamps.set(key, after);
+    for (const move of configFileMoves(before, after)) {
+      configChanges.push(configChangedPayload(owner.plugin, move));
+      for (const listener of [...(stateListeners.get(key) ?? [])]) {
+        try {
+          listener(move.change);
+        } catch (error) {
+          logs.push({
+            level: 'warn',
+            scope: 'test-host',
+            message: `a config listener failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      }
+    }
+  };
   const callers = new WeakMap<ApiRequest, TestCaller>();
   for (const state of world.states.values()) state.revive();
 
@@ -618,10 +786,14 @@ async function start(world: World): Promise<TestHost> {
       const added = addedSecretReferenceSentences(priorValue, checked.data);
       const sentences = [...judgeLoosening(def, priorValue, checked.data), ...added];
       const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
-      if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences)))
+      const subject = { path, ...(name === undefined ? {} : { name }) };
+      if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences))) {
+        restamp(key, { ...subject, held: etag });
         return { kind: 'held', etag, id: `${path}@held`, sentences };
+      }
       world.config.set(key, def.shape === 'file' ? next : { ...(all ?? {}), [name as string]: next });
       for (const listener of configListeners.get(key) ?? []) listener();
+      restamp(key, subject);
       return { kind: 'written', etag, loosened: sentences };
     };
     return {
@@ -645,6 +817,15 @@ async function start(world: World): Promise<TestHost> {
         set.add(listener);
         configListeners.set(key, set);
         return () => set.delete(listener);
+      },
+      watchState(def, listener) {
+        assertDeclared(def);
+        const key = keyOf(def);
+        const set = stateListeners.get(key) ?? new Set();
+        stateListeners.set(key, set);
+        const entry = (change: ConfigStateChange): void => listener(change);
+        set.add(entry);
+        return () => void set.delete(entry);
       },
       fileState(def, name) {
         assertDeclared(def);
@@ -691,17 +872,117 @@ async function start(world: World): Promise<TestHost> {
         const sentences =
           prior?.success === true ? judgeLoosening(def, prior.data, defaults.success ? defaults.data : undefined) : [];
         const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
-        if (sentences.length > 0 && !judged(manifest.id, path, true, sentences))
-          return writeOptions.refuseIfHeld === true
-            ? { kind: 'refused', reason: 'would_hold', issues: [], sentences }
-            : { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
+        const subject = { path, ...(name === undefined ? {} : { name }) };
+        if (sentences.length > 0 && !judged(manifest.id, path, true, sentences)) {
+          if (writeOptions.refuseIfHeld === true)
+            return { kind: 'refused', reason: 'would_hold', issues: [], sentences };
+          restamp(key, { ...subject, held: ABSENT_STAMP.etag });
+          return { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
+        }
         if (def.shape === 'file') world.config.delete(key);
         else if (all !== undefined) {
           const { [name as string]: _gone, ...rest } = all;
           world.config.set(key, rest);
         }
         for (const listener of configListeners.get(key) ?? []) listener();
+        restamp(key, subject);
         return { kind: 'written', etag: 'absent', loosened: sentences };
+      },
+      // The real writer's set over the in-memory values: each document checked as `write` checks one, every one before
+      // any lands, and the set's answer decided by the SAME rule (`host/config/write-all.ts`). The world holds nothing
+      // held and nothing unreadable, so `already_held` and `unreadable` never arise here.
+      async writeAll(documents) {
+        const refs: ConfigDocumentRef[] = [];
+        for (const document of documents) {
+          const { def, name } = document;
+          if (!declared.includes(def)) return refusedDocument('not_declared', { path: keyOf(def) });
+          if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
+            return refusedDocument('bad_name', { path: keyOf(def), ...(name === undefined ? {} : { name }) });
+          refs.push(
+            def.shape === 'file'
+              ? { path: def.file }
+              : { path: `${def.collection}/${name as string}.yaml`, name: name as string },
+          );
+        }
+        const twice = repeatedDocument(refs);
+        if (twice !== undefined)
+          return refusedDocument('duplicate', { path: twice.path }, [DUPLICATE_ISSUE(twice.path)]);
+        const nexts: unknown[] = [];
+        const verdicts: DocumentVerdict[] = documents.map((document, index): DocumentVerdict => {
+          const { def, name, edit } = document;
+          const ref = refs[index] as ConfigDocumentRef;
+          const all = world.config.get(keyOf(def)) as Record<string, unknown> | undefined;
+          const before = def.shape === 'file' ? all : all?.[name as string];
+          if (document.ifMatch !== undefined && document.ifMatch !== JSON.stringify(before ?? null))
+            return { kind: 'conflict', ...ref };
+          const prior = before === undefined ? undefined : def.schema.safeParse(before);
+          const priorValue = prior?.success === true ? prior.data : undefined;
+          if (typeof edit === 'object' && 'remove' in edit) {
+            const defaults = def.schema.safeParse({});
+            nexts[index] = undefined;
+            const loosens =
+              prior?.success === true
+                ? judgeLoosening(def, prior.data, defaults.success ? defaults.data : undefined)
+                : [];
+            return { kind: 'ready', document: ref, removal: true, loosens, added: [] };
+          }
+          let next: unknown;
+          if (typeof edit === 'string') {
+            const read = readConfigText(edit);
+            if (!read.ok) return refusedDocument('yaml', ref, [{ path: ref.path, message: 'this is not YAML' }]);
+            next = read.read.value ?? {};
+          } else next = patchedValue((before as Record<string, unknown> | undefined) ?? {}, edit.patch);
+          const checked = def.schema.safeParse(next);
+          if (!checked.success)
+            return refusedDocument(
+              'schema',
+              ref,
+              checked.error.issues.map(issue => ({ path: ref.path, message: issue.message })),
+            );
+          nexts[index] = next;
+          const added = addedSecretReferenceSentences(priorValue, checked.data);
+          return {
+            kind: 'ready',
+            document: ref,
+            removal: false,
+            loosens: [...judgeLoosening(def, priorValue, checked.data), ...added],
+            added,
+          };
+        });
+        const stop = firstStop(verdicts);
+        if (stop !== undefined) return stop;
+        const ready = verdicts as Extract<DocumentVerdict, { kind: 'ready' }>[];
+        const judgement = judgeSet(ready, document =>
+          judged(manifest.id, document.document.path, document.removal, document.loosens),
+        );
+        if (judgement.held.length > 0) return heldSet(judgement, documents.length);
+        // All checked and judged: every document lands, then each file's listeners hear it once.
+        const touched = new Set<string>();
+        for (const [index, document] of documents.entries()) {
+          const { def, name } = document;
+          const key = keyOf(def);
+          const next = nexts[index];
+          touched.add(key);
+          if (def.shape === 'file') {
+            if (next === undefined) world.config.delete(key);
+            else world.config.set(key, next);
+            continue;
+          }
+          const { [name as string]: _gone, ...rest } = (world.config.get(key) ?? {}) as Record<string, unknown>;
+          world.config.set(key, next === undefined ? rest : { ...rest, [name as string]: next });
+        }
+        for (const key of touched) for (const listener of configListeners.get(key) ?? []) listener();
+        for (const ref of refs)
+          restamp(ref.path.includes('/') ? ref.path.slice(0, ref.path.lastIndexOf('/')) : ref.path, ref);
+        return {
+          kind: 'written',
+          documents: ready.map((document, index) => ({
+            ...document.document,
+            etag: nexts[index] === undefined ? 'absent' : JSON.stringify(nexts[index]),
+            removed: document.removal,
+            loosened: judgement.loosened[index] ?? [],
+          })),
+        };
       },
     };
   };
@@ -717,118 +998,308 @@ async function start(world: World): Promise<TestHost> {
   /** The test roots' stand-in inodes, so `fileIdentity` can tell two publishes of one name apart. */
   const inodes = new Map<string, bigint>();
   let nextInode = 0n;
-  const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
-    root(name, scope) {
-      if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
-        throw new Error(`${manifest.id}: root ${name} is not declared`);
-      // The same scope rule as production (`scopedSubfolder`): a `sessions` handle is one minted ferret folder, an
-      // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
-      // see each other; a refused scope resolves nothing.
-      const below = scopedSubfolder(name, scope?.subfolder);
-      const prefix = below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`;
-      const fileStat = (path: string) => ({
-        kind: 'file' as const,
-        size: (world.roots.get(path) ?? '').length,
-        modified: clock.now(),
-        mode: 0o600,
-        links: 1,
-      });
-      const handle: RootHandle = {
-        name,
-        internal: isInternalRoot(name),
-        resolve(relative) {
-          if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
-            return { ok: false, error: 'outside' };
-          return { ok: true, value: `${prefix}/${relative}` as never };
-        },
-        readText: async path => {
-          const text = world.roots.get(path);
-          if (text === undefined) throw new Error(`no such file ${path}`);
-          return text;
-        },
-        readBytes: async (path, limit) => {
-          const bytes = new TextEncoder().encode(await handle.readText(path));
-          if (typeof limit === 'number') return bytes.slice(0, limit);
-          if (limit === undefined) return bytes;
-          if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
-            throw new Error('the window is out of range');
-          return bytes.slice(limit.offset, limit.offset + limit.length);
-        },
-        readTail: async (path, maxBytes) => {
-          if (maxBytes > MAX_ROOT_WINDOW_BYTES || maxBytes < 0) throw new Error('the tail is out of range');
-          const bytes = new TextEncoder().encode(await handle.readText(path));
-          return { bytes: bytes.slice(Math.max(0, bytes.length - maxBytes)), size: bytes.length };
-        },
-        writeText: async (path, text, writeOptions) => {
-          if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
-          if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
-          world.roots.set(path, text);
-        },
-        writeBytes: async (path, bytes, writeOptions) => {
-          if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
-          if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
-          world.roots.set(path, new TextDecoder().decode(bytes));
-        },
-        publish: async (path, bytes, publishOptions) => {
-          if (publishOptions?.exclusive === true && world.roots.has(path)) return { outcome: 'exists' };
-          world.roots.set(path, new TextDecoder().decode(bytes));
-          nextInode += 1n;
-          const inode = nextInode;
-          inodes.set(path, inode);
-          return { outcome: 'published', identity: { device: 1n, inode } };
-        },
-        readDurable: async (path, limit, hold) => {
-          const text = world.roots.get(path);
-          if (text === undefined) return undefined;
-          const bytes = new TextEncoder().encode(text);
-          const identity = { device: 1n, inode: inodes.get(path) ?? 0n };
-          const read = { bytes: limit === undefined ? bytes : bytes.slice(0, limit), identity };
-          if (hold === undefined) return read as never;
-          return await hold({
-            ...read,
-            stillNames: async () => world.roots.has(path) && (inodes.get(path) ?? 0n) === identity.inode,
-          });
-        },
-        syncDirectory: async () => {},
-        fileIdentity: async path => (world.roots.has(path) ? { device: 1n, inode: inodes.get(path) ?? 0n } : undefined),
-        copyTree: async (_source, from, to, copyOptions) => {
-          // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
-          for (const [key, text] of [...world.roots])
-            if (key.startsWith(`${from}/`)) world.roots.set(`${to}${key.slice(from.length)}`, text);
-          void copyOptions;
-        },
-        ensurePrivateDirectory: async () => {},
-        lstat: async path => {
-          if (world.roots.has(path)) return fileStat(path);
-          return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
-            ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
-            : undefined;
-        },
-        makeDirectory: async () => {},
-        realPath: async path => {
-          if (!world.roots.has(path) && ![...world.roots.keys()].some(p => p.startsWith(`${path}/`)))
-            throw new Error(`no such file ${path}`);
+  /** The test roots each handle was made for: its plugin, root, scope and key prefix (for `share` / `copyShared`). */
+  const testHandles = new WeakMap<
+    object,
+    {
+      readonly plugin: string;
+      readonly root: RootName;
+      readonly ferret?: FerretId;
+      readonly prefix: string | undefined;
+    }
+  >();
+  /**
+   * The test world's own-root check: a folder of a handle made for `plugin`, inside its scope, that exists (a file is
+   * beneath it). The world has no links, so its one spelling is the path itself.
+   */
+  const testFolderSpellings = async (
+    plugin: string,
+    folder: { readonly root: RootHandle; readonly path: string },
+  ): Promise<readonly string[] | undefined> => {
+    const known = testHandles.get(folder.root);
+    if (known === undefined || known.plugin !== plugin || known.prefix === undefined) return undefined;
+    if (!PROCESS_FOLDER_ROOTS.has(known.root)) return undefined;
+    const path = folder.path;
+    if (
+      typeof path !== 'string' ||
+      path.split('/').includes('..') ||
+      (path !== known.prefix && !path.startsWith(`${known.prefix}/`))
+    )
+      throw new Error(`${path} is outside the root`);
+    if (!processFolderAllowed(known.root, path.slice(known.prefix.length + 1)))
+      throw new Error('kernel.processes accepts only a folder at or under fleet/homes/<id>');
+    if (![...world.roots.keys()].some(key => key.startsWith(`${path}/`))) throw new Error(`no such folder ${path}`);
+    return [path];
+  };
+  /** `linkTo`'s links in the test world: the link's path → the target path it points at. */
+  const testLinks = new Map<string, string>();
+  /** `setMode`'s modes in the test world, by path; a path never set keeps the default (`0o600` for a file). */
+  const testModes = new Map<string, number>();
+  const testFolderExists = (path: string): boolean => [...world.roots.keys()].some(key => key.startsWith(`${path}/`));
+  const testHarnessFile = (manifest: Manifest, absolutePath: string): RootFileHandle => {
+    const refusal = harnessFileRefusal({
+      plugin: manifest.id,
+      mayHold: mayHoldRoot(manifest.id, 'harness-home'),
+      roots: manifest.permissions?.roots ?? [],
+      names: manifest.permissions?.harnessFiles,
+      home: options.fenceHome ?? '/test-home',
+      absolutePath,
+    });
+    if (refusal !== undefined) throw new RootError(refusal);
+    const text = (): string | undefined => options.harnessFiles?.[absolutePath];
+    const stat = () => {
+      const found = text();
+      return found === undefined
+        ? undefined
+        : { kind: 'file' as const, size: found.length, modified: clock.now(), mode: 0o600, links: 1 };
+    };
+    const bytes = (): Uint8Array => {
+      const found = text();
+      if (found === undefined) throw new Error(`no such file ${absolutePath}`);
+      return new TextEncoder().encode(found);
+    };
+    const identity = () => (text() === undefined ? undefined : { device: 1n, inode: 1n });
+    return Object.freeze({
+      name: 'harness-home' as const,
+      path: absolutePath,
+      stat: async () => stat(),
+      lstat: async () => stat(),
+      readText: async (limit?: number) => new TextDecoder().decode(bytes().slice(0, limit)),
+      readBytes: async (limit?: number | { readonly offset: number; readonly length: number }) => {
+        if (typeof limit === 'number') return bytes().slice(0, limit);
+        if (limit === undefined) return bytes();
+        if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
+          throw new RootError('outside');
+        return bytes().slice(limit.offset, limit.offset + limit.length);
+      },
+      fileIdentity: async () => identity(),
+      readDurable: async <T>(limit?: number, hold?: (read: RootDurableHeld) => Promise<T>) => {
+        if (text() === undefined) return undefined;
+        const read = { bytes: bytes().slice(0, limit), identity: { device: 1n, inode: 1n } };
+        if (hold === undefined) return read as T;
+        return await hold({ ...read, stillNames: async () => identity() !== undefined });
+      },
+    });
+  };
+  /** Every tree a test plugin minted: the files it holds now (a flat copy), and where it came from. */
+  const sharedTrees = new SharedTrees<{
+    readonly files: () => readonly (readonly [string, string])[];
+  }>();
+  const rootsFor = (manifest: Manifest): KernelPorts['roots'] => {
+    // As the real host: every tree a plugin minted is revoked when the host stops it.
+    const life = { live: true };
+    stopHandlers.push(() => {
+      life.live = false;
+    });
+    const under = (folder: string, entries: Iterable<readonly [string, string]>): (readonly [string, string])[] =>
+      [...entries]
+        .filter(([key]) => key.startsWith(`${folder}/`))
+        .map(([key, value]) => [key.slice(folder.length + 1), value]);
+    return {
+      harnessFile: absolutePath => testHarnessFile(manifest, absolutePath),
+      share: async source => {
+        if (manifest.permissions?.shareTrees !== true) return refuseShared('not_permitted');
+        const folder = ownStateTree(manifest.data?.state ?? [], source.state, source.name);
+        if (folder === undefined) return refuseShared('not_own');
+        const state = world.states.get(manifest.id);
+        const decoder = new TextDecoder();
+        // A planted link in the test store is metadata only and never copied, as the real copy skips a link.
+        const files = () =>
+          state === undefined
+            ? []
+            : [
+                ...under(folder, state.files),
+                ...under(
+                  folder,
+                  [...state.bytes].map(([key, bytes]): readonly [string, string] => [key, decoder.decode(bytes)]),
+                ),
+              ];
+        if (files().length === 0 && state?.directories.has(folder) !== true)
+          throw new Error(`no such folder ${folder}`);
+        return sharedTrees.mint(folder.slice(folder.lastIndexOf('/') + 1), { files }, life);
+      },
+      root(name, scope) {
+        if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
+          throw new Error(`${manifest.id}: root ${name} is not declared`);
+        // The same scope rule as production (`scopedSubfolder`): a `sessions` handle is one minted ferret folder, an
+        // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
+        // see each other; a refused scope resolves nothing.
+        const below = scopedSubfolder(name, scope?.subfolder);
+        const prefix = below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`;
+        const fileStat = (path: string) => ({
+          kind: 'file' as const,
+          size: (world.roots.get(path) ?? '').length,
+          modified: clock.now(),
+          mode: testModes.get(path) ?? 0o600,
+          links: 1,
+        });
+        /** A path of THIS handle's scope (no `..`), or the refusal production makes for one outside it. */
+        const ownPath = (path: string): string => {
+          if (
+            prefix === undefined ||
+            typeof path !== 'string' ||
+            path.split('/').includes('..') ||
+            !path.startsWith(`${prefix}/`)
+          )
+            throw new RootError('outside');
           return path;
-        },
-        list: async path =>
-          [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
-        entries: async path =>
-          [...world.roots.keys()]
-            .filter(p => p.startsWith(`${path}/`))
-            .map(p => ({ name: p.slice(path.length + 1), ...fileStat(p) })),
-        stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
-        remove: async path => {
-          world.roots.delete(path);
-        },
-        pin: async (path, pinOptions) => {
-          // The test world keeps no state home, so its pin fences nothing beneath the root.
-          const held = await pins.pin(manifest.id, path, pinOptions);
-          return Object.freeze({ ...held, fenced: async (rels: readonly string[]) => rels.map(() => false) });
-        },
-      };
-      return handle;
-    },
-  });
+        };
+        const handle: RootHandle = {
+          name,
+          internal: isKernelMadeRoot(name),
+          resolve(relative) {
+            if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
+              return { ok: false, error: 'outside' };
+            return { ok: true, value: `${prefix}/${relative}` as never };
+          },
+          readText: async path => {
+            const text = world.roots.get(path);
+            if (text === undefined) throw new Error(`no such file ${path}`);
+            return text;
+          },
+          readBytes: async (path, limit) => {
+            const bytes = new TextEncoder().encode(await handle.readText(path));
+            if (typeof limit === 'number') return bytes.slice(0, limit);
+            if (limit === undefined) return bytes;
+            if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
+              throw new Error('the window is out of range');
+            return bytes.slice(limit.offset, limit.offset + limit.length);
+          },
+          readTail: async (path, maxBytes) => {
+            if (maxBytes > MAX_ROOT_WINDOW_BYTES || maxBytes < 0) throw new Error('the tail is out of range');
+            const bytes = new TextEncoder().encode(await handle.readText(path));
+            return { bytes: bytes.slice(Math.max(0, bytes.length - maxBytes)), size: bytes.length };
+          },
+          writeText: async (path, text, writeOptions) => {
+            if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
+            if (writeOptions?.replaceExisting === true && !world.roots.has(path))
+              throw new Error(`no such file ${path}`);
+            world.roots.set(path, text);
+          },
+          writeBytes: async (path, bytes, writeOptions) => {
+            if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
+            if (writeOptions?.replaceExisting === true && !world.roots.has(path))
+              throw new Error(`no such file ${path}`);
+            world.roots.set(path, new TextDecoder().decode(bytes));
+          },
+          publish: async (path, bytes, publishOptions) => {
+            if (publishOptions?.exclusive === true && world.roots.has(path)) return { outcome: 'exists' };
+            world.roots.set(path, new TextDecoder().decode(bytes));
+            nextInode += 1n;
+            const inode = nextInode;
+            inodes.set(path, inode);
+            return { outcome: 'published', identity: { device: 1n, inode } };
+          },
+          readDurable: async (path, limit, hold) => {
+            const text = world.roots.get(path);
+            if (text === undefined) return undefined;
+            const bytes = new TextEncoder().encode(text);
+            const identity = { device: 1n, inode: inodes.get(path) ?? 0n };
+            const read = { bytes: limit === undefined ? bytes : bytes.slice(0, limit), identity };
+            if (hold === undefined) return read as never;
+            return await hold({
+              ...read,
+              stillNames: async () => world.roots.has(path) && (inodes.get(path) ?? 0n) === identity.inode,
+            });
+          },
+          syncDirectory: async () => {},
+          fileIdentity: async path =>
+            world.roots.has(path) ? { device: 1n, inode: inodes.get(path) ?? 0n } : undefined,
+          copyShared: async (tree, to, copyOptions) => {
+            if (!receivingRoot(name)) return refuseShared('not_internal');
+            const shared = sharedTrees.open(tree);
+            // As production: the destination lies inside the receiving handle's scope, is NEW, and the walk is bounded.
+            const place = ownPath(to);
+            if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
+              throw new RootError('outside');
+            const files = shared.files();
+            const folders = new Set(
+              files.flatMap(([key]) =>
+                key
+                  .split('/')
+                  .slice(0, -1)
+                  .map((_, index, parts) => parts.slice(0, index + 1).join('/')),
+              ),
+            );
+            if (files.length + folders.size > (copyOptions?.maxEntries ?? DEFAULT_COPY_ENTRIES))
+              throw new RootError('outside');
+            // the test roots are one flat map: a link and a copy both put every file under `to`
+            for (const [key, value] of files) world.roots.set(`${to}/${key}`, value);
+            return copyOptions?.link === true ? 'linked' : 'copied';
+          },
+          copyTree: async (_source, from, to, copyOptions) => {
+            // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
+            for (const [key, text] of [...world.roots])
+              if (key.startsWith(`${from}/`)) world.roots.set(`${to}${key.slice(from.length)}`, text);
+            void copyOptions;
+          },
+          ensurePrivateDirectory: async () => {},
+          lstat: async path => {
+            if (testLinks.has(path)) return { kind: 'symlink', size: 0, modified: clock.now(), mode: 0o777, links: 1 };
+            if (world.roots.has(path)) return fileStat(path);
+            return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
+              ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
+              : undefined;
+          },
+          makeDirectory: async () => {},
+          realPath: async path => {
+            if (!world.roots.has(path) && ![...world.roots.keys()].some(p => p.startsWith(`${path}/`)))
+              throw new Error(`no such file ${path}`);
+            return path;
+          },
+          list: async path =>
+            [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
+          entries: async path =>
+            [...world.roots.keys()]
+              .filter(p => p.startsWith(`${path}/`))
+              .map(p => ({ name: p.slice(path.length + 1), ...fileStat(p) })),
+          stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
+          remove: async path => {
+            world.roots.delete(path);
+          },
+          // The real host's rules (`host/root-rules.ts`) over the flat test world, with the same refusals.
+          linkTo: async (at, target) => {
+            if (isReadOnlyRoot(name) || !takesLinks(name)) throw new RootError('read_only');
+            const known = testHandles.get(target?.root ?? {});
+            if (known === undefined || known.plugin !== manifest.id) throw new RootError('not_declared');
+            const to = target.path as string;
+            const within = known.prefix;
+            if (within === undefined || to.split('/').includes('..') || (to !== within && !to.startsWith(`${within}/`)))
+              throw new RootError('outside');
+            if (testLinks.has(to)) throw new RootError('link_escape');
+            if (!world.roots.has(to) && !testFolderExists(to) && target.dangling !== true)
+              throw new RootError('outside');
+            const place = ownPath(at);
+            if (world.roots.has(place) || testFolderExists(place) || testLinks.has(place))
+              throw new RootError('outside');
+            testLinks.set(place, to);
+          },
+          setMode: async (path, mode) => {
+            if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');
+            if (isReadOnlyRoot(name)) throw new RootError('read_only');
+            const bits = permittedMode(isKernelMadeRoot(name), mode);
+            if (bits === undefined) throw new RootError('outside');
+            const place = ownPath(path);
+            if (testLinks.has(place)) throw new RootError('link_escape');
+            if (!world.roots.has(place) && !testFolderExists(place)) throw new RootError('outside');
+            testModes.set(place, bits);
+          },
+          pin: async (path, pinOptions) => {
+            // The test world keeps no state home, so its pin fences nothing beneath the root.
+            const held = await pins.pin(manifest.id, path, pinOptions);
+            return Object.freeze({ ...held, fenced: async (rels: readonly string[]) => rels.map(() => false) });
+          },
+        };
+        testHandles.set(handle, {
+          plugin: manifest.id,
+          root: name,
+          ...(scope?.ferret === undefined ? {} : { ferret: scope.ferret }),
+          prefix,
+        });
+        return handle;
+      },
+    };
+  };
 
   const kernelFor = (manifest: Manifest): KernelPorts => {
     let state = world.states.get(manifest.id);
@@ -837,6 +1308,29 @@ async function start(world: World): Promise<TestHost> {
       world.states.set(manifest.id, state);
     }
     const publishes = new Set((manifest.data?.publishes ?? []).map(event => event.name));
+    const declaredNetwork = effectivePermissions(manifest.id, manifest.permissions?.network ?? []);
+    const mayReach = (hostname: string, host: string): boolean =>
+      hostPermitted(
+        declaredNetwork,
+        options.items ?? NO_ITEMS,
+        hostname,
+        name =>
+          (
+            built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
+              | Readonly<Record<string, (() => readonly string[]) | undefined>>
+              | undefined
+          )?.[name],
+        host,
+      );
+    const fetchPort: FetchPort = {
+      async request(url, init) {
+        const parsed = new URL(url);
+        if (!mayReach(parsed.hostname, parsed.host))
+          throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
+        if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
+        return options.fetch(parsed, init);
+      },
+    };
     return {
       clock,
       log: logFor(manifest.id),
@@ -867,6 +1361,8 @@ async function start(world: World): Promise<TestHost> {
       },
       spawn: {
         async run(program, args, spawnOptions) {
+          if (detachedAsked(spawnOptions))
+            refuseDetached(manifest, options.items ?? NO_ITEMS, 'run', program, spawnOptions);
           if (
             !spawnPermitted(
               effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
@@ -879,6 +1375,8 @@ async function start(world: World): Promise<TestHost> {
           return options.spawn(program, args, spawnOptions);
         },
         async runBytes(program, args, spawnOptions) {
+          if (detachedAsked(spawnOptions))
+            refuseDetached(manifest, options.items ?? NO_ITEMS, 'runBytes', program, spawnOptions);
           const result = await this.run(program, args, spawnOptions);
           const all = new TextEncoder().encode(result.stdout);
           const cap = spawnOptions?.maxStdoutBytes ?? 1024 * 1024;
@@ -891,34 +1389,19 @@ async function start(world: World): Promise<TestHost> {
             timedOut: false,
           };
         },
-        start(program): ChildHandle {
+        start(program, args, spawnOptions): ChildHandle {
+          if (detachedAsked(spawnOptions)) {
+            refuseDetached(manifest, options.items ?? NO_ITEMS, 'start', program, spawnOptions);
+            if (options.detachedStart === undefined)
+              throw new Error(`${manifest.id}: detached ${program} with no detachedStart fake`);
+            return detachedHandle(options.detachedStart(program, args, spawnOptions));
+          }
           throw new Error(
             `${manifest.id}: the test host does not start long-lived ${program}; fake the port that does`,
           );
         },
       },
-      fetch: {
-        async request(url, init) {
-          const parsed = new URL(url);
-          if (
-            !hostPermitted(
-              effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
-              options.items ?? NO_ITEMS,
-              parsed.hostname,
-              name =>
-                (
-                  built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
-                )?.[name],
-              parsed.host,
-            )
-          )
-            throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
-          if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
-          return options.fetch(parsed, init);
-        },
-      },
+      fetch: fetchPort,
       scratch: options.scratch ?? scratchPort('fy-test-'),
       websocket: {
         connect(url) {
@@ -951,28 +1434,73 @@ async function start(world: World): Promise<TestHost> {
         },
       },
       identity,
-      paths: gatedPaths(
+      paths: gatedWhich(
         manifest.id,
-        manifest.permissions?.checkDirectory === true,
-        Object.freeze({
-          home: () => options.ownerHome ?? '/home/owner',
-          // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
-          checkDirectory: async (absolutePath: string) => {
-            const requested = absolutePath.trim();
-            if (!requested.startsWith('/'))
-              return err({
-                reason: 'not_absolute' as const,
-                message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
-              });
-            const real = options.directories?.[requested];
-            return real === undefined
-              ? err({
-                  reason: 'not_a_directory' as const,
-                  message: `session working directory is not a directory: ${requested}`,
-                })
-              : ok({ realPath: real });
-          },
-        }),
+        manifest.permissions?.which === true,
+        gatedPaths(
+          manifest.id,
+          manifest.permissions?.checkDirectory === true,
+          gatedOverrides(
+            manifest.id,
+            manifest.permissions?.whichOverrides,
+            Object.freeze({
+              home: () => options.ownerHome ?? '/home/owner',
+              // The real lookup (`host/which.ts`) over the test world: an executable is one the test named in
+              // `options.executables`, and `PATH` is `options.searchPath`.
+              which: async (name: string, whichOptions?: { readonly directories?: readonly string[] }) =>
+                await whichCommand(
+                  name,
+                  { path: options.searchPath, directories: whichOptions?.directories ?? [] },
+                  async path => (options.executables ?? []).includes(path),
+                ),
+              // The real rules (`host/which.ts`) over the test world, behind the real gates below.
+              locate: async (
+                name: string,
+                locateOptions: { readonly override: string; readonly directories?: readonly string[] },
+              ) =>
+                await locateCommand(name, locateOptions, {
+                  variable: variable =>
+                    Object.hasOwn(options.operatorVariables ?? {}, variable)
+                      ? options.operatorVariables?.[variable]
+                      : undefined,
+                  path: options.searchPath,
+                  probe: async path => (options.executables ?? []).includes(path),
+                }),
+              // Readers from the plugins under test's DECLARED manifests, as the real host computes them.
+              whichFor: async (name: string, env: ChildEnvironment) => {
+                let searchPath: string | undefined;
+                try {
+                  // As the real host: the Vault's bound opener (a loaded Vault's `childEnvironments`), else the option.
+                  const opener =
+                    (providedBy.get(ChildEnvironmentPort.name) as ChildEnvironmentOpener | undefined) ??
+                    options.childEnvironments;
+                  searchPath = opener?.searchPathOf(env, handleReaders(manifest.id, manifests));
+                } catch {
+                  searchPath = undefined;
+                }
+                return await whichForCommand(name, searchPath, async path =>
+                  (options.executables ?? []).includes(path),
+                );
+              },
+              // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
+              checkDirectory: async (absolutePath: string) => {
+                const requested = absolutePath.trim();
+                if (!requested.startsWith('/'))
+                  return err({
+                    reason: 'not_absolute' as const,
+                    message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
+                  });
+                const real = options.directories?.[requested];
+                return real === undefined
+                  ? err({
+                      reason: 'not_a_directory' as const,
+                      message: `session working directory is not a directory: ${requested}`,
+                    })
+                  : ok({ realPath: real });
+              },
+            }),
+          ),
+        ),
       ),
       updateHost:
         manifest.permissions?.updateHost === true && options.updateHost !== undefined
@@ -982,12 +1510,25 @@ async function start(world: World): Promise<TestHost> {
         manifest.permissions?.hostFacts === true && options.hostFacts !== undefined
           ? options.hostFacts
           : undeclaredHostFacts(manifest.id, options.hostFacts ?? NO_HOST_FACTS),
+      processes: processesPortFor(
+        manifest.id,
+        manifest.permissions?.processes,
+        testFolderSpellings,
+        options.processes ?? NO_PROCESS_TABLE,
+      ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
-      // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in
+      // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in;
+      // `send` places the value through this plugin's own fetch guard and `options.fetch`, as the real host does
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],
         () => ownedReferences(manifest),
         () => (options.vault === undefined ? undefined : { resolve: async name => options.vault?.[name] }),
+        {
+          hosts: exactNetworkHosts(declaredNetwork),
+          mayReach,
+          transport: outboundSecretTransport(fetchPort, clock),
+          log: logFor(manifest.id),
+        },
       ),
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
@@ -1196,6 +1737,7 @@ async function start(world: World): Promise<TestHost> {
     minted: world.minted,
     acts,
     published,
+    configChanges,
     logs,
     async request(method, path, init = {}) {
       const request = makeRequest(method, path, init);
@@ -1371,6 +1913,7 @@ async function start(world: World): Promise<TestHost> {
     setConfig(key, value) {
       world.config.set(key, value);
       for (const listener of configListeners.get(key) ?? []) listener();
+      restamp(key);
     },
     async runJob(id) {
       const run = jobs.get(id);

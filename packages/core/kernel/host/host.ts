@@ -13,6 +13,7 @@ import type {
 import {
   AdmissionPort,
   AgentControlPort,
+  type ChildEnvironment,
   type ChildEnvironmentOpener,
   ChildEnvironmentPort,
   SecretResolverPort,
@@ -26,10 +27,19 @@ import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse } from '../contract/http.ts';
 import type { ConfigStatus } from './config/service.ts';
+import { type ConfigFileMove, configChangedPayload } from './config/state-change.ts';
+import { configFrameShown } from './config/bus-frame.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
 import { beforeListen } from './before-listen.ts';
 import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
-import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged, SessionModes } from '../contract/kernel.ts';
+import {
+  Carriers,
+  ConfigChanged,
+  type DoctorCheck,
+  DoctorChecks,
+  PluginsChanged,
+  SessionModes,
+} from '../contract/kernel.ts';
 import type {
   Clock,
   ConfigFilesWriter,
@@ -56,7 +66,8 @@ import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { checkDirectory, gatedPaths } from './paths.ts';
+import { checkDirectory, gatedOverrides, gatedPaths, gatedWhich } from './paths.ts';
+import { type ExecutableProbe, handleReaders, locateCommand, whichCommand, whichForCommand } from './which.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import { type InstalledItems, installedItemReach } from './items.ts';
@@ -92,7 +103,8 @@ import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from './needer.ts';
 import { guardedToolResult } from './tool-result.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
-import { ownSecretsPort } from './secrets.ts';
+import { outboundSecretTransport } from './adapters/outbound-secret.ts';
+import { exactNetworkHosts, ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
@@ -101,6 +113,7 @@ import { doctorReport } from './doctor-report.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
+  allowDetachedSpawn,
   hostPermitted,
   effectivePermissions,
   openChildEnvironments,
@@ -112,7 +125,8 @@ import {
 } from './permissions.ts';
 import type { HostStatePort } from './state/state-port.ts';
 import { openHome, probeHome } from './home.ts';
-import { ensureInternalRootBases, rootsPortFor } from './roots.ts';
+import { ensureInternalRootBases, ownFolderSpellings, rootsPortFor } from './roots.ts';
+import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from './processes.ts';
 import { PinRegistry } from './pins.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import type { PathsPort, ScratchPort } from '../contract/ports.ts';
@@ -157,11 +171,23 @@ export interface HostConfig {
   status?(): ConfigStatus;
   reload(): Promise<void>;
   startWatching?(): () => void;
+  /**
+   * Every declared file of every plugin that moved on disk or in state at a reload, with its plugin: what the host
+   * publishes as `kernel.config-changed`. Absent: the event is never published. Answers the cancel.
+   */
+  onStateChange?(listener: (plugin: string, move: ConfigFileMove) => void): () => void;
   /** The `${secret:NAME}` names a plugin's own files in effect name. Absent: none, so `kernel.secrets` refuses. */
   secretReferences?(plugin: string): ReadonlySet<string>;
   /** The same names, from the plugin's credential-record defs alone (what a provider counts as its own). Absent: none. */
   credentialRecordReferences?(plugin: string): ReadonlySet<string>;
 }
+
+/** The kernel's own `GET /v1/config/file` declaration: what a `kernel.config-changed` frame is asked about as. */
+const CONFIG_FILE_READ = (() => {
+  const found = kernelManifest.actions?.routes?.find(declared => declared.key === 'GET /v1/config/file');
+  if (found === undefined) throw new Error('the kernel manifest declares no GET /v1/config/file');
+  return found;
+})();
 
 /** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
 export type ConfigJudge = (input: {
@@ -192,8 +218,19 @@ export interface HostAdapters {
   readonly hostname?: () => string;
   /** The owner's home directory (`homedir()`), for `kernel.paths.home()`. Absent: the process's `HOME`, else `/`. */
   readonly ownerHome?: () => string;
+  /** The daemon's inherited `PATH`, for `kernel.paths.which`. Absent: only the caller's own folders are searched. */
+  readonly searchPath?: () => string | undefined;
+  /** Whether a path is a regular file this process may execute, for `kernel.paths.which`. Absent: nothing is found. */
+  readonly executable?: ExecutableProbe;
+  /**
+   * The operator's value of ONE environment variable, for `kernel.paths.locate`'s override; only ever asked for a name
+   * the calling manifest declared in `permissions.whichOverrides`. Absent: no override is ever set.
+   */
+  readonly operatorVariable?: (name: string) => string | undefined;
   /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /** This user's process table, for `kernel.processes` (kernel-only). Absent: nothing is listed or signalled. */
+  readonly processTable?: ProcessTable;
   /** Gzips an opted-in route's answer. Absent: every answer is plain. */
   readonly compressor?: ResponseCompressor;
   /**
@@ -558,8 +595,18 @@ async function bootLocked(
     }
   }
 
-  // Shared kernel machinery.
-  const events = new EventBus(log);
+  // Shared kernel machinery. `kernel.config-changed` is the app's (`GET /v1/bus`): no plugin subscribes to it in-process,
+  // because it names every plugin's files; a plugin hears its own through `ConfigPort.watchState`.
+  const events = new EventBus(log, new Set([ConfigChanged.name]));
+  const stopConfigFeed = config.onStateChange?.((plugin, move) => {
+    try {
+      events.publish(ConfigChanged, configChangedPayload(plugin, move));
+    } catch {
+      // A path the event's bounds do not carry is a wake-up nobody gets; the file's own state is still read by status.
+      log.warn('a config change was not published on the bus', { plugin });
+    }
+  });
+  if (stopConfigFeed !== undefined) own(stopConfigFeed);
   const jobs = new JobRunner(
     clock,
     log,
@@ -613,9 +660,49 @@ async function bootLocked(
     );
 
   const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
-  const ownerPaths: PathsPort = Object.freeze({
+  /**
+   * `kernel.paths` for one plugin before its gates. `whichFor`'s readers come from the DECLARED manifests alone (the
+   * plugin itself and each one offering a hook it takes), never from anything the caller passes; the Vault answers a
+   * handle minted for any other plugin, a forged one and a spent one alike (`unprovable`).
+   */
+  const ownerPathsFor = (plugin: string): PathsPort => {
+    const readers = handleReaders(plugin, manifests);
+    const probe: ExecutableProbe = adapters.executable ?? (async () => false);
+    return Object.freeze({
+      ...ownerPaths,
+      locate: async (
+        name: string,
+        locateOptions: { readonly override: string; readonly directories?: readonly string[] },
+      ) =>
+        await locateCommand(name, locateOptions, {
+          // Asked only for the one variable `gatedOverrides` let through.
+          variable: variable => adapters.operatorVariable?.(variable),
+          path: adapters.searchPath?.(),
+          probe,
+        }),
+      whichFor: async (name: string, env: ChildEnvironment) => {
+        let searchPath: string | undefined;
+        try {
+          searchPath = bound.childEnvironments?.searchPathOf(env, readers);
+        } catch {
+          searchPath = undefined;
+        }
+        return await whichForCommand(name, searchPath, probe);
+      },
+    });
+  };
+  const ownerPaths: Pick<PathsPort, 'home' | 'checkDirectory' | 'which'> = Object.freeze({
     home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/',
     checkDirectory: async (absolutePath: string) => await checkDirectory(adapters.fs, absolutePath),
+    // No probe wired (a test host that gave none): nothing is found, never a guess.
+    which: async (name: string, whichOptions?: { readonly directories?: readonly string[] }) =>
+      adapters.executable === undefined
+        ? undefined
+        : await whichCommand(
+            name,
+            { path: adapters.searchPath?.(), directories: whichOptions?.directories ?? [] },
+            adapters.executable,
+          ),
   });
   /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
   const resolversOf =
@@ -630,7 +717,19 @@ async function bootLocked(
       { home, plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
       manifest.permissions?.roots ?? [],
       () => bound.workFolders,
-      { random: adapters.random, ...(pins === undefined ? {} : { pins }) },
+      {
+        random: adapters.random,
+        ...(pins === undefined ? {} : { pins }),
+        ...(manifest.permissions?.harnessFiles === undefined
+          ? {}
+          : { harnessFiles: manifest.permissions.harnessFiles }),
+        // Shared trees (`kernel.roots.share`): only a manifest that declares it mints; its own opaque named trees are the
+        // only state it may share; every tree it minted is revoked when it stops.
+        shareTrees: manifest.permissions?.shareTrees === true,
+        setMode: manifest.permissions?.setMode === true,
+        stateFiles: manifest.data?.state ?? [],
+        onStop: fn => lifecycle.onStop(fn),
+      },
     );
     const declaredNetwork = effectivePermissions(manifest.id, manifest.permissions?.network ?? []);
     const fetchPort = restrictFetch(manifest.id, declaredNetwork, adapters.fetch, items, resolversOf(manifest.id));
@@ -663,12 +762,21 @@ async function bootLocked(
         // refusal, and stays green if this line is deleted. `workersFor`'s rule is unit-tested (declared-workers.test.ts).
         { urls: () => implementations.get(manifest.id)?.workers },
       ),
-      spawn: restrictSpawn(
+      spawn: allowDetachedSpawn(
         manifest.id,
+        manifest.permissions?.detached,
         effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
-        openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
+        restrictSpawn(
+          manifest.id,
+          effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
+          openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
+          items,
+          pins,
+        ),
+        adapters.spawn,
         items,
-        pins,
+        // The program's name and pid, never its arguments: a link opener's URL may carry a query.
+        (program, pid) => log.info('a detached child was started', { plugin: manifest.id, program, pid }),
       ),
       scratch: adapters.scratch ?? NO_SCRATCH,
       fetch: fetchPort,
@@ -687,17 +795,39 @@ async function bootLocked(
         stopping: () => lifecycle.stopping(),
       }),
       identity: identityPort,
-      paths: gatedPaths(manifest.id, manifest.permissions?.checkDirectory === true, ownerPaths),
+      paths: gatedWhich(
+        manifest.id,
+        manifest.permissions?.which === true,
+        gatedPaths(
+          manifest.id,
+          manifest.permissions?.checkDirectory === true,
+          gatedOverrides(manifest.id, manifest.permissions?.whichOverrides, ownerPathsFor(manifest.id)),
+        ),
+      ),
       updateHost: updateHostOf(manifest, adapters, options.version),
       hostFacts:
         manifest.permissions?.hostFacts === true
           ? (adapters.hostFacts ?? NO_HOST_FACTS)
           : undeclaredHostFacts(manifest.id, adapters.hostFacts ?? NO_HOST_FACTS),
+      // The same rule as the testing host (`./processes.ts`), over this machine's table and this host's own handles.
+      processes: processesPortFor(
+        manifest.id,
+        manifest.permissions?.processes,
+        ownFolderSpellings,
+        adapters.processTable ?? NO_PROCESS_TABLE,
+      ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+      // `send` goes through this plugin's OWN guarded fetch, to the exact hosts its manifest names (`./secrets.ts`).
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],
         () => config.secretReferences?.(manifest.id) ?? new Set<string>(),
         () => bound.secretResolver,
+        {
+          hosts: exactNetworkHosts(declaredNetwork),
+          mayReach: (hostname, host) => hostPermitted(declaredNetwork, items, hostname, resolversOf(manifest.id), host),
+          transport: outboundSecretTransport(fetchPort, clock),
+          log: scopedLog(adapters.logSink, manifest.id),
+        },
       ),
       signer: signerFor(manifest.id, sessionSigner),
       ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
@@ -951,6 +1081,9 @@ async function bootLocked(
           return false;
         }
       },
+      // A config change names one file: shown only to a caller `GET /v1/config/file` would let read it.
+      frame: (request, name, payload) =>
+        name !== ConfigChanged.name || configFrameShown(bound.admission, request, payload, CONFIG_FILE_READ),
     },
     snapshot: () => frozen as PostBuildSnapshot,
     config: { writer: () => configWriter, admission: () => bound.admission, home },

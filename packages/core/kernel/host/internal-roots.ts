@@ -20,6 +20,18 @@ export function isInternalRoot(name: RootName): boolean {
 }
 
 /**
+ * The internal roots the kernel makes at a FIXED place under the home, one for the whole daemon rather than one per
+ * plugin under `state/<plugin>/`: `fleet` is `<home>/fleet` (today's fleet folder, already one of the fence's pinned
+ * paths, so no owner's root ever reaches it). Each is held by one plugin alone (`host/roots.ts`, `ROOT_OWNERS`).
+ */
+export const HOME_ROOT_FOLDERS: Readonly<Partial<Record<RootName, string>>> = Object.freeze({ fleet: 'fleet' });
+
+/** Whether a root is one the kernel makes and serves under the home: per plugin, or at a fixed place. */
+export function isKernelMadeRoot(name: RootName): boolean {
+  return isInternalRoot(name) || HOME_ROOT_FOLDERS[name] !== undefined;
+}
+
+/**
  * Whether a folder name directly inside a plugin's state folder is a kernel-made root's base. Case-INSENSITIVE: on a
  * case-insensitive disk (macOS APFS) `Sessions` is the folder `sessions`, so the comparison must not tell them
  * apart. Every root name is ASCII, so ASCII lowercasing is the whole fold.

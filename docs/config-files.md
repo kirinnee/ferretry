@@ -90,6 +90,32 @@ that is not there). Three rules, in order:
    version's own sub-keys survive. A named key whose new or current value is not a mapping is replaced, as any
    patch replaces a key. The schema, the loosening hold and the judge see the merged versions, and both are
    written or neither.
+4. **A change of several files lands whole or not at all.** A change that spans files — a runtime, its profile
+   and its model set — is ONE act in the kernel, `ConfigPort.writeAll`, never several writes a reader could see
+   half of. Every document of the set is checked as a single write checks one (its own file, its name, YAML, a
+   raw secret, the schema, its own `ifMatch`) and judged as a single write is judged — against the version in
+   effect, by the same Gate judge with the caller's actor, an added `${secret:NAME}` held for the owner whatever
+   the judge says — **before anything is written**. So one document refused refuses the set and names it; one
+   stale is a conflict that names it; and **one document that would be held holds the whole set**: nothing in it
+   is written or takes effect, and the answer names that document, what it loosens, and says the set is held, so
+   the owner makes the change in an act Gate's judge lets through. A set that touches a file with another edit
+   held is refused until that edit is confirmed or discarded (a set never discards a held edit and never carries
+   one into effect), as is one that touches a file the kernel cannot read back.
+
+   **What a crash does.** Before the first file is touched, the kernel writes an intent record
+   (`state/kernel/config-write-set.json`: every file of the set and its accepted record as they were) atomically
+   and synced. Files are then written one by one (each atomically, as a single write is), then their accepted
+   records, and the record's removal is the commit. A daemon that stops anywhere before that removal — between
+   two files included — finds the record on its next load (boot loads first) and puts every file and every
+   accepted record of the set back as they were before anything is evaluated: the last good version of every
+   document is in effect and none of the set is. A disk failure the daemon survives is put back the same way at
+   once, and the write throws. What it does not promise: the removal itself is not synced, so a power loss just
+   after a set was answered `written` can bring the record back and put the WHOLE set back — never half of it. A
+   record that cannot be read is said once in the log and left alone, and its files are judged as they are.
+
+   Gate's judge spends a remote device's one step-up proof on the first loosening it lets through, so a set with
+   **two** loosening documents is held for a remote device (the second ask finds the proof spent). It fails
+   closed; judging a set as one act is Gate's to add (declared GAP).
 
 What is in effect is recorded in the state home (`state/config-accepted.json`), file by file with its text,
 so a last good version survives a restart and a confirmed loosening is not asked about again. A missing or
@@ -143,14 +169,15 @@ left out.
 
 ## Routes
 
-| Route                       | Grant                                                                                                                                | Does                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| `GET /v1/config/status`     | `fleet.use`                                                                                                                          | every file, its state, every issue, every held edit    |
-| `GET /v1/config/file?path=` | the file's capability, `use`                                                                                                         | one file (or the starter a new one begins with) + etag |
-| `PUT /v1/config/file`       | the file's capability, `configure`; `If-Match: <etag>`                                                                               | write a file that checks; a loosening may be held      |
-| `POST /v1/config/confirm`   | the file's capability, `configure`; fresh passkey remotely                                                                           | confirm one held edit by its etag                      |
-| `PUT /v1/accounts/defaults` | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely to set or change a line, none to remove one (!A243)¹ | the owner sets or clears one default account line      |
-| `POST /v1/agent/config`     | the agent's session credential; Ferretry settings on                                                                                 | the `config.*` tools                                   |
+| Route                          | Grant                                                                                                                                | Does                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| `GET /v1/config/status`        | `fleet.use`                                                                                                                          | every file, its state, every issue, every held edit    |
+| `GET /v1/config/file?path=`    | the file's capability, `use`                                                                                                         | one file (or the starter a new one begins with) + etag |
+| `PUT /v1/config/file`          | the file's capability, `configure`; `If-Match: <etag>`                                                                               | write a file that checks; a loosening may be held      |
+| `DELETE /v1/config/file?path=` | the file's capability, `configure`; `If-Match: <etag>` (or `?etag=`) required                                                        | remove one declared file; a loosening removal is held  |
+| `POST /v1/config/confirm`      | the file's capability, `configure`; fresh passkey remotely                                                                           | confirm one held edit by its etag                      |
+| `PUT /v1/accounts/defaults`    | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely to set or change a line, none to remove one (!A243)¹ | the owner sets or clears one default account line      |
+| `POST /v1/agent/config`        | the agent's session credential; Ferretry settings on                                                                                 | the `config.*` tools                                   |
 
 **What `GET /v1/config/file` says differs in three values from the fixed file-kind list it replaces**: `kind` is the id of the
 plugin that declares the file (it was a file-kind name such as `machine`), `schema` is the schema file's name
@@ -165,7 +192,10 @@ owner decision !A243 accepts it as tap-free.
 
 The file's capability is `warden` for `warden.yaml` and `fleet` for everything else. A loosening `PUT` is in
 effect at once only for somebody at the machine or a device that proved a passkey for the act; anyone
-else's is written and held. `PUT /v1/config/file` is a person's route (`caller: 'person'`): a ferret's
+else's is written and held. `DELETE /v1/config/file` is bounded the same way: a declared file only, Gate asked per file
+as for a write, the etag it was read at required (`428` without one, `409` when the file moved), and a removal that
+loosens (a budget, a rule) is held with the file still in effect unless somebody at the machine asked. GAP: a remote
+device's passkey proof is never spent on a removal, so its loosening removal is held. `PUT /v1/config/file` is a person's route (`caller: 'person'`): a ferret's
 credential, or the admin token naming a ferret's session, is refused with `403 owner_only` before the body is read,
 so `fy config write` from inside a ferret is refused too. A ferret's one write door is `config.write`
 (`POST /v1/agent/config`), where every loosening is held. An agent never confirms. The agenda's Allow
@@ -783,6 +813,17 @@ what is shown until the new answer lands; an unsaved edit in a form or the file 
 on a timer. The revision is per boot (`epoch`), and it is how the app learns what it missed: the stream reopens
 whenever the app returns to the foreground or the network comes back, and if the first frame's revision moved —
 or names another boot — every screen reads again.
+
+**In the 5.0 kernel** a file's own moves are their own signal. `ConfigPort.watch` still fires only when the version
+in effect moves; `ConfigPort.watchState` fires when one of the plugin's OWN files moves on disk or in state — an edit
+written or held for the owner, a held edit confirmed or discarded, a file broken or fixed, one removed — with the
+file's state (`absent`, `valid`, `invalid`, `held`) and its disk etag, never its text, a value or a sentence. The same
+moves reach an open app as one `kernel.config-changed` frame each on `GET /v1/bus` — `{ plugin, path, state, etag }`,
+the etag the one `GET /v1/config/file` answers — so a held edit arriving or a broken file wakes a settings card or a
+file editor at once. A frame reaches only a caller `GET /v1/config/file` would let read that file (that route's
+admission, then the per-file read judge, so `warden.yaml` asks for `warden`, and anything undetermined shows nothing),
+and no plugin hears the event in-process. Like every bus event it is a wake-up, at most once: the reader still reads
+the file.
 
 ## Declared gaps
 

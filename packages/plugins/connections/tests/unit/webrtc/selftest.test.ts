@@ -6,7 +6,11 @@ import type {
   EnginePeerConnection,
   NodeDataChannelModule,
 } from '../../../daemon/adapters/webrtc/node-datachannel-engine.ts';
-import { webrtcSelftestProbe } from '../../../daemon/adapters/webrtc/selftest.ts';
+import {
+  switchedWebrtcSelftest,
+  webrtcSelftestProbe,
+  webrtcSwitchedOn,
+} from '../../../daemon/adapters/webrtc/selftest.ts';
 import manifest from '../../../manifest.ts';
 import implementation from '../../../daemon/index.ts';
 
@@ -93,5 +97,29 @@ describe('Connections declares the one webrtc engine selftest (R689)', () => {
     // Assert
     should(actual).startWith('engine unavailable — the WebRTC engine could not be loaded on ');
     should(actual).containEql('no addon for this target');
+  });
+});
+
+describe('webrtc selftest: switched by connections.yaml (kernel SelftestProbe.enabledBy, R689 parity)', () => {
+  it('R689 should be switched by Connections’ OWN connections.yaml def, with today’s consequence', () => {
+    // Arrange
+    const enabledBy = implementation.selftest?.webrtc?.enabledBy;
+
+    // Assert
+    should(enabledBy?.def).equal(manifest.data.config[0]);
+    should(enabledBy?.consequence).equal('devices reach this daemon directly or through the relay instead');
+  });
+
+  it('R689 should be on unless WebRTC says enabled: false', () => {
+    should(webrtcSwitchedOn({})).equal(true);
+    should(webrtcSwitchedOn({ webrtc: { enabled: true, iceServers: [] } })).equal(true);
+    should(webrtcSwitchedOn({ webrtc: { enabled: false, iceServers: [] } })).equal(false);
+  });
+
+  it('R689 should keep the probe itself unchanged: the same label and run', () => {
+    const probe = webrtcSelftestProbe();
+    const switched = switchedWebrtcSelftest(manifest.data.config[0] as never, probe);
+    should(switched.label).equal(probe.label);
+    should(switched.run).equal(probe.run);
   });
 });

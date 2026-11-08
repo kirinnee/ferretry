@@ -216,6 +216,14 @@ export interface ResolverEntry {
 /** A `permissions.spawn` entry: a program, or what installed items name. A resolver reaches hosts, never programs. */
 export type SpawnEntry = string | { readonly items: ItemKind };
 
+/**
+ * `permissions.processes`: the environment variables, by exact name, `kernel.processes.usersOf` may match. A name is
+ * a plain variable name (`[A-Za-z_][A-Za-z0-9_]*`); anything else, `'*'` included, matches no variable.
+ */
+export interface ProcessesPermission {
+  readonly environment: readonly string[];
+}
+
 /** What it may touch outside its own folder (§3.7). Anything undeclared is refused by the kernel ports. */
 export interface Permissions {
   readonly roots?: readonly RootName[];
@@ -243,6 +251,52 @@ export interface Permissions {
    * plugin that does not declare it is refused by name.
    */
   readonly checkDirectory?: true;
+  /**
+   * It resolves a bare executable name to a path through `kernel.paths.which` (Runtimes: whether an MCP server's command
+   * and a harness are installed). Bounded and never executing, but it tells what is installed where, so a plugin that
+   * does not declare it is refused by name.
+   */
+  readonly which?: true;
+  /**
+   * The operator variables `kernel.paths.locate` may read as one command's override (Connections:
+   * `['FY_CLOUDFLARED']`), by exact name, each `^FY_[A-Z0-9_]{1,60}$`; `'*'`, a pattern or any other spelling is a
+   * name that matches no variable, for a core plugin too. Only with `which`. Absent: every `locate` is refused, and no
+   * other variable is ever read.
+   */
+  readonly whichOverrides?: readonly string[];
+  /**
+   * It mints shared trees through `kernel.roots.share` (Skills: one skill folder handed, read-only, to the harness that
+   * receives the launch part). It hands another plugin read of a folder it owns, so a plugin that does not declare it
+   * is refused by name.
+   */
+  readonly shareTrees?: true;
+  /**
+   * It asks `kernel.processes` about this user's live processes and SIGTERMs one that runs from its own folder
+   * (Runtimes: an ended Codex ferret's app-server pair). `environment` lists, by exact name, the variables `usersOf`
+   * may match (`CODEX_HOME`); nothing else is matched, and `'*'` is a name that matches no variable. Absent: every
+   * member is refused naming the plugin.
+   */
+  readonly processes?: ProcessesPermission;
+  /**
+   * The basenames `kernel.roots.harnessFile` may open beside a harness home (Runtimes: `['.claude.json']`, the file
+   * Claude keeps its user-scope MCP servers in, BESIDE `~/.claude`). Each is matched exactly, as one plain file name;
+   * `'*'`, a pattern, a path, `.` or `..` is a name that matches no file. Only with `harness-home` in `roots` and only
+   * for the plugin that may hold it. Absent: every `harnessFile` is refused.
+   */
+  readonly harnessFiles?: readonly string[];
+  /**
+   * It may change the permission bits of an EXISTING name in its writable roots (`RootHandle.setMode`: the harness
+   * launch step that makes a copied tool executable). Opt-in: a plugin that holds a writable owner root (`work`,
+   * `worktrees`) could otherwise widen an existing folder or file there. `'*'` grants none. Absent: `setMode` is refused
+   * with `not_declared`.
+   */
+  readonly setMode?: true;
+  /**
+   * The programs `kernel.spawn.start` may start DETACHED (`SpawnOptions.detached`: its own process group, outliving the
+   * daemon; Browsers: the platform link opener, `xdg-open` / `open`). Each must also be in `spawn`. Matched as `spawn`
+   * matches a name; `'*'` or any pattern names no program, for a core piece too. Absent: every detached start is refused.
+   */
+  readonly detached?: readonly string[];
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
 }

@@ -4,6 +4,7 @@ import {
   type InstructionEntry,
   REFUSAL_CODES,
   type RefusalCode,
+  type SharedTree,
 } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import type { ChildEnvironment, InputRequestId } from '@ferretry/core-vault/contract';
@@ -61,7 +62,17 @@ export interface LaunchSpec {
 /** One piece a plugin adds to a launch (`launch.parts`): an MCP server, a skill, a shell, an instruction, env. */
 export type LaunchPart =
   | { readonly kind: 'mcp'; readonly name: string; readonly config: JsonValue }
-  | { readonly kind: 'skill'; readonly name: string; readonly path: FencedPath }
+  | {
+      readonly kind: 'skill';
+      readonly name: string;
+      readonly path: FencedPath;
+      /**
+       * The skill folder, shared by the plugin that holds it (`kernel.roots.share`, Skills) for the harness that
+       * materializes it in the ferret home (`RootHandle.copyShared`). Unforgeable and valid for this launch: it
+       * serialises as its folder name only, so a part read back from a record carries no usable tree.
+       */
+      readonly tree?: SharedTree;
+    }
   | { readonly kind: 'shell'; readonly name: string; readonly env: Readonly<Record<string, string>> }
   | { readonly kind: 'instruction'; readonly id: string; readonly text: string }
   /** Names and `${secret:NAME}` references only; never a value. */

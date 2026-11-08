@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { Carriers, DoctorChecks, defineConfig, PluginsChanged, policyRef, SessionModes } from './contract/index.ts';
+import {
+  Carriers,
+  ConfigChanged,
+  DoctorChecks,
+  defineConfig,
+  PluginsChanged,
+  policyRef,
+  SessionModes,
+} from './contract/index.ts';
 import { definePlugin, route, socket, tool } from './manifest/index.ts';
 import { AgentConfigCallSchemas, AGENT_CONFIG_TOOLS } from './contract/agent-config.ts';
 
@@ -125,6 +133,16 @@ export default definePlugin({
         audit: { record: FLEET_CONFIGURED },
         guard: { none: 'the answer names the path, the etag and what waits for the owner; never the text or a value' },
       }),
+      // Removing one declared file (kernel batch #11: the CLI's `rm` verbs over a config collection item). The same
+      // descriptor as `PUT`: Gate admits it per file, and a removal that loosens is held for the owner.
+      route('DELETE /v1/config/file', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: FLEET_USE,
+        noStore: true,
+        audit: { record: FLEET_CONFIGURED },
+        guard: { none: 'the answer names the path, the etag and what waits for the owner; never the text or a value' },
+      }),
       route('POST /v1/config/confirm', {
         minimum: 'operator',
         caller: 'person',
@@ -198,7 +216,7 @@ export default definePlugin({
       }),
     ],
   },
-  data: { publishes: [PluginsChanged], config: [PluginsConfig] },
+  data: { publishes: [PluginsChanged, ConfigChanged], config: [PluginsConfig] },
   hooks: {
     offers: [{ hook: Carriers }, { hook: SessionModes }, { hook: DoctorChecks }],
   },

@@ -60,7 +60,7 @@ export function wardenState(folder = new MemoryStateFolder()): StatePort & { rea
 export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(value: unknown): void } {
   let current = initial;
   const listeners = new Set<() => void>();
-  const port: Omit<ConfigPort, 'write' | 'writeAsOwner' | 'remove'> & { set(value: unknown): void } = {
+  const port: Omit<ConfigPort, 'write' | 'writeAsOwner' | 'remove' | 'writeAll'> & { set(value: unknown): void } = {
     file: (_def: ConfigFileDef<unknown>) => current as never,
     collection: (_def: ConfigCollectionDef<unknown>) => new Map() as never,
     fileState: () =>
@@ -71,12 +71,13 @@ export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(v
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    watchState: (): Cancel => () => {},
     set: value => {
       current = value;
       for (const listener of listeners) listener();
     },
   };
-  // Reads only: a test that needs the kernel config write adds `write`, `writeAsOwner` and `remove` itself.
+  // Reads only: a test that needs the kernel config write adds `write`, `writeAsOwner`, `remove` and `writeAll` itself.
   return port as ConfigPort & { set(value: unknown): void };
 }
 
@@ -110,6 +111,11 @@ export function fakeKernel(options: { readonly config?: ConfigPort; readonly sta
     redaction: { read: async (fn: (scope: { text(s: string): string }) => unknown) => await fn({ text: s => s }) },
     jobs: { add: () => undefined, kick: () => undefined },
     lifecycle: { onStop: () => undefined, stopping: () => false, signal: new AbortController().signal },
+    // No warden.yaml names a key here: the kernel answers not_configured, the guard not_set, and nothing is sent.
+    secrets: {
+      resolve: async () => ({ refused: 'not_configured' }),
+      send: async () => ({ kind: 'refused', refused: 'not_configured' }),
+    },
   } as unknown as KernelPorts;
   return { kernel, clock, published, logged };
 }

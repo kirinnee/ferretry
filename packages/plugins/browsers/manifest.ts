@@ -371,6 +371,8 @@ export default definePlugin({
       'xdg-open',
       'rundll32',
     ],
+    /** The link opener alone starts detached (today's `BunDetachedLauncher`): it outlives the daemon's process group. */
+    detached: ['open', 'xdg-open', 'rundll32'],
     /** Who holds a loopback port, proved from `/proc` (`daemon/worker/control/adapters/listener-prover.ts`). */
     hostFacts: true,
     /** Uploads come from the ferret's own folder, and downloads and PDFs are saved into it (S51). */

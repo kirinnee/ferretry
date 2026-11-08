@@ -305,6 +305,12 @@ export interface ChildEnvironment {
  */
 export interface ChildEnvironmentOpener {
   open(env: ChildEnvironment): Readonly<Record<string, string>> | undefined;
+  /**
+   * The handle's `PATH` value and NOTHING else, WITHOUT spending it (`kernel.paths.whichFor`, Q7): `undefined` when the
+   * handle is not one this Vault minted, is already spent, sets no `PATH`, was minted for a plugin not in `readers`
+   * (or for no named plugin), or its `PATH` was built from a `${secret:…}` reference. It reads exactly the `PATH` key.
+   */
+  searchPathOf(env: ChildEnvironment, readers: readonly string[]): string | undefined;
 }
 
 export const ChildEnvironmentPort = defineBoundPort<ChildEnvironmentOpener>('child-environment', 'vault');

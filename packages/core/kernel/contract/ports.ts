@@ -40,6 +40,11 @@ export interface KernelPorts {
   readonly paths: PathsPort;
   /** Read-only facts about this machine from `/proc` and `/sys`; only for a manifest with `permissions.hostFacts`. */
   readonly hostFacts: HostFactsPort;
+  /**
+   * This user's live processes, as pids and yes/no answers only, and SIGTERM to one that runs from this plugin's own
+   * folder; only for a manifest with `permissions.processes` ({@link ProcessesPort}).
+   */
+  readonly processes: ProcessesPort;
   /** The running build and its self-update launch; only for a manifest with `permissions.updateHost` (Updates). */
   readonly updateHost: UpdateHostPort;
   /**
@@ -214,6 +219,16 @@ export interface ConfigFileStatus {
   readonly sentences: readonly string[];
 }
 
+/**
+ * One file's move, as {@link ConfigPort.watchState} hears it: which collection item (`undefined` for a file), the
+ * state it is in now, and its disk etag now (`'absent'` when there is no file). Never a value, never a sentence.
+ */
+export interface ConfigStateChange {
+  readonly name?: string;
+  readonly state: ConfigFileStatus['state'];
+  readonly etag: string;
+}
+
 /** A whole new YAML text, or a patch of top-level keys (`undefined` removes a key); a patch keeps comments. */
 export type ConfigEdit = string | { readonly patch: Readonly<Record<string, unknown>> };
 
@@ -268,6 +283,16 @@ export interface ConfigPort {
   file<Shape>(def: ConfigFileDef<Shape>): Shape | undefined;
   collection<Shape>(def: ConfigCollectionDef<Shape>): ReadonlyMap<string, Shape>;
   watch(def: ConfigFileDef<any> | ConfigCollectionDef<any>, listener: () => void): Cancel;
+  /**
+   * Fires when one of THIS def's files moves on DISK or in state, which {@link watch} does not hear unless the version
+   * in effect moved too: an edit written or held for the owner, a held edit confirmed or discarded, a file that broke
+   * (`invalid`, its last good version still in effect) or was fixed, one removed (`absent`). One call per file that
+   * moved (a collection's item named by `name`), after the reload that saw it; the first load is the baseline, never a
+   * change. The change carries the file's state and its disk etag (the etag a write answers), NEVER its text, a value
+   * or a sentence ({@link ConfigFileStatus.sentences} stay with {@link fileState}). Another plugin's def throws, as
+   * {@link watch} does. A listener that throws is logged and never reaches the writer.
+   */
+  watchState(def: ConfigFileDef<any> | ConfigCollectionDef<any>, listener: (change: ConfigStateChange) => void): Cancel;
   /** Tells an absent file from an invalid one (and a held one); `name` picks a collection item. */
   fileState(def: ConfigFileDef<any> | ConfigCollectionDef<any>, name?: string): ConfigFileStatus;
   /**
@@ -322,7 +347,93 @@ export interface ConfigPort {
     name: string | undefined,
     options?: { readonly ifMatch?: string; readonly refuseIfHeld?: true },
   ): Promise<ConfigWriteOutcome>;
+  /**
+   * Writes SEVERAL of its own declared files as ONE act: every document lands, or none does (a change that spans a
+   * runtime, its profile and its model set, which must never be half in effect). Each document is checked exactly as
+   * {@link write} checks one — its own def (`not_declared`), its name (`bad_name`), YAML, a raw secret, the schema, its
+   * own `ifMatch` — and judged for loosening exactly as {@link write} and {@link writeAsOwner} are: against the version
+   * in effect, by the same Gate judge with the call's actor, and an added `${secret:NAME}` is held for the owner
+   * whatever the judge says. Every document is checked and judged BEFORE anything is written, so:
+   *
+   * - one document refused refuses the set (`refused`, naming that document), nothing written;
+   * - one document stale (its `ifMatch`, or the disk moved since the last reload) is a `conflict` naming it, nothing
+   *   written;
+   * - one document the judge would HOLD holds the WHOLE set (`held`): nothing in the set is written or takes effect,
+   *   and the outcome names every document that would be held, what each loosens, and says that the set is held.
+   *   Nothing is left on disk for the owner to confirm: the caller has the owner make the change in an act Gate's judge
+   *   lets through (a step-up), and it is then written whole.
+   *
+   * A document whose file has ANOTHER edit already held for the owner refuses the set (`already_held`): a set never
+   * discards a held edit and never carries one into effect. A document whose file cannot be read (a link, over the
+   * size cap) refuses it (`unreadable`), because the set could not put it back. The same file named twice refuses it
+   * (`duplicate`). An empty set is `written` with no documents.
+   *
+   * CRASH: before the first file is touched the kernel records the set's intent (each file's text and accepted record
+   * as they were) in its own state; the record is removed only once every file and every accepted record is written,
+   * and that removal is the commit. A daemon that stops anywhere before it — between two files included — puts every
+   * file of the set and its accepted record back as they were on its next load (boot loads first), so the last good
+   * version of every document is what is in effect, and none of the set is. A failure that does not stop the daemon
+   * (a disk error) puts them back at once and throws.
+   */
+  writeAll(documents: readonly ConfigWriteAllDocument[]): Promise<ConfigWriteAllOutcome>;
 }
+
+/** One document of a {@link ConfigPort.writeAll}: which of its own files, the edit (or its removal), the etag read. */
+export interface ConfigWriteAllDocument {
+  readonly def: ConfigFileDef<any> | ConfigCollectionDef<any>;
+  /** The collection item; `undefined` for a file. */
+  readonly name?: string;
+  /** A whole new YAML text, a patch of top-level keys, or the file's removal (judged like {@link ConfigPort.remove}). */
+  readonly edit: ConfigEdit | { readonly remove: true };
+  /** The etag the caller read this document at (`'absent'` for "nothing there"). */
+  readonly ifMatch?: string;
+}
+
+/** Where one document of a set is: its file under `config/` and, for a collection item, its name. Never a value. */
+export interface ConfigDocumentRef {
+  readonly path: string;
+  readonly name?: string;
+}
+
+/**
+ * What a {@link ConfigPort.writeAll} did, never thrown (only a disk failure the set was put back from throws):
+ * `written` (every document is in effect), `held` (one or more would be held, so NONE was written: `sentence` says so
+ * in words), `conflict` (that document moved since it was read), `refused` (that document, or the set, does not check).
+ */
+export type ConfigWriteAllOutcome =
+  | {
+      readonly kind: 'written';
+      readonly documents: readonly (ConfigDocumentRef & {
+        readonly etag: string;
+        readonly removed: boolean;
+        /** What this document loosened, when the judge let it into effect. */
+        readonly loosened: readonly string[];
+      })[];
+    }
+  | {
+      readonly kind: 'held';
+      /** Every document that would be held, and what each would loosen. */
+      readonly held: readonly (ConfigDocumentRef & { readonly sentences: readonly string[] })[];
+      /** The plain sentence: which document(s) loosen, that the set is held and that nothing in it was written. */
+      readonly sentence: string;
+    }
+  | ({ readonly kind: 'conflict' } & ConfigDocumentRef)
+  | {
+      readonly kind: 'refused';
+      readonly reason:
+        | 'yaml'
+        | 'raw_secret'
+        | 'schema'
+        | 'not_declared'
+        | 'bad_name'
+        | 'not_a_mapping'
+        | 'duplicate'
+        | 'already_held'
+        | 'unreadable';
+      /** The document refused; absent only when the document named no def this plugin declared. */
+      readonly document?: ConfigDocumentRef;
+      readonly issues: readonly ConfigWriteIssue[];
+    };
 
 /** One declared config file or collection item, named for the writer. */
 export interface ConfigTarget {
@@ -425,7 +536,57 @@ export type RootName =
    * Ferrets' per-ferret session folders (`state/ferrets/sessions/<ferret>`, the plaintext session credential file
    * among them): Ferrets alone, even if another plugin declares it.
    */
-  | 'sessions';
+  | 'sessions'
+  /**
+   * The fleet folder (`<home>/fleet`: the wrappers in `bin/`, one harness home per runtime in `homes/<id>/`, `assets/`,
+   * `shared/`, `setup/`, `ids.json`, `manifest.json`): Runtimes alone, even if another plugin declares it. Internal and
+   * writable, made `0700` by the kernel, and reached exactly as `agent-homes` is — every call through checked,
+   * no-follow descriptors, no link anywhere from the home down to it. A handle may be scoped to ONE relative folder in
+   * it (`{ subfolder: 'homes/<id>' }`: one runtime's harness home and nothing beside it).
+   */
+  | 'fleet'
+  /**
+   * One harness's OWN home on this machine, as the harness itself resolves it (`CLAUDE_CONFIG_DIR` or `~/.claude`,
+   * `CODEX_HOME` or `~/.codex`), for the first-run import's scan: an owner's root, READ-ONLY, Runtimes alone. The
+   * handle is scoped to the ABSOLUTE folder the caller names (`{ subfolder: '/home/me/.claude' }`, exactly as
+   * `harness-history` is), refuses everything inside the fence, and never follows a link out of that folder.
+   */
+  | 'harness-home';
+
+/**
+ * {@link RootHandle.linkTo}'s target: a name in one of THIS plugin's own root handles (maybe the same one). The link
+ * written points at its REAL path, resolved and fenced by that handle, never at text the caller chose.
+ */
+export interface RootLinkTarget {
+  readonly root: RootHandle;
+  readonly path: FencedPath;
+  /**
+   * The target may not exist yet (today's credential link: an empty sign-in slot's file is written by the harness
+   * THROUGH the link). Its folder must exist and is resolved and fenced; the missing leaf is judged by name. Without
+   * it a missing target is refused, so a link never dangles by accident.
+   */
+  readonly dangling?: true;
+}
+
+/**
+ * {@link RootsPort.harnessFile}: ONE file of the host's harness setup, read-only, and nothing beside it — no path
+ * argument, no listing, no write. Every read goes through one held descriptor of a regular file with exactly one name
+ * (`links === 1`) that is not a link; anything else is refused.
+ */
+export interface RootFileHandle {
+  readonly name: 'harness-home';
+  /** The file's absolute path, as the caller named it (never followed). */
+  readonly path: string;
+  stat(): Promise<RootStat | undefined>;
+  lstat(): Promise<RootLstat | undefined>;
+  readText(limitBytes?: number): Promise<string>;
+  readBytes(limitOrWindow?: number | RootReadWindow): Promise<Uint8Array>;
+  fileIdentity(): Promise<RootIdentity | undefined>;
+  readDurable<T = RootDurableRead>(
+    limitBytes?: number,
+    hold?: (read: RootDurableHeld) => Promise<T>,
+  ): Promise<T | undefined>;
+}
 
 /** `RootHandle.copyTree`: what to bring, and how. */
 export interface TreeCopyOptions {
@@ -529,9 +690,9 @@ export interface RootDurableHeld extends RootDurableRead {
 export interface RootHandle {
   readonly name: RootName;
   /**
-   * `true` for a root the kernel makes under the home (`agent-homes`, `downloads`, `credentials`, `sessions`), `false`
-   * for an owner's root (`work`, `imports`, `harness-history`) or one outside the home (`worktrees`). A consumer that
-   * must never sit on an owner's folder asserts it.
+   * `true` for a root the kernel makes under the home (`agent-homes`, `downloads`, `credentials`, `sessions`, `fleet`),
+   * `false` for an owner's root (`work`, `imports`, `harness-history`, `harness-home`) or one outside the home
+   * (`worktrees`). A consumer that must never sit on an owner's folder asserts it.
    */
   readonly internal: boolean;
   resolve(relative: string): Result<FencedPath, FolderRefusal>;
@@ -586,6 +747,17 @@ export interface RootHandle {
    * skipped, modes kept) or, with `link`, one link at `to` to the source folder's real path. Both ends are fenced.
    */
   copyTree(source: RootHandle, from: FencedPath, to: FencedPath, options?: TreeCopyOptions): Promise<void>;
+  /**
+   * Materializes a {@link SharedTree} another plugin minted (`RootsPort.share`: Skills' skill folder) at `to` in THIS
+   * root, which must be an internal, writable root (`agent-homes`): any other is refused. A copy keeps `copyTree`'s
+   * rules exactly (each file read off the disk through a checked descriptor, a link inside skipped, a file with a
+   * second hard link skipped, modes kept, `maxEntries`, both ends fenced, a NEW folder at `to`). `link` asks for one
+   * link at `to` to the tree's real path instead, and one link is made whenever it is asked for (a tree is always the
+   * minter's own opaque state tree, so there is nothing else to weigh). The answer says which was made. A link made
+   * stays until the harness removes it: revoking the tree stops new materializations only (a declared GAP).
+   * A tree that is forged, rebuilt from its JSON, or whose minter stopped is refused.
+   */
+  copyShared(tree: SharedTree, to: FencedPath, options?: TreeCopyOptions): Promise<SharedTreeCopied>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
   ensurePrivateDirectory(path: FencedPath): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
@@ -605,12 +777,67 @@ export interface RootHandle {
    */
   pin(path: FencedPath, options?: PinOptions): Promise<HeldRoot>;
   remove(path: FencedPath): Promise<void>;
+  /**
+   * A symlink at `at` (today's "stored once, never copied" link from a runtime home to the host's credential or
+   * history) whose text is the REAL path of `target` in one of THIS plugin's own root handles — the rule `copyTree`'s
+   * `link` keeps for a folder, for a file too. Only into an internal, writable root that takes links (`fleet`,
+   * `agent-homes`); any other root refuses `read_only`, and another plugin's handle (or a look-alike) `not_declared`.
+   * `at`'s folder must exist and be reached with no link on the way inside the root (`link_escape`); the link is made
+   * through that folder's checked, no-follow descriptor, and refused when anything (a link included) is at the name.
+   * A child that follows the link is the harness; the kernel's own reads still never follow it out of the root.
+   */
+  linkTo(at: FencedPath, target: RootLinkTarget): Promise<void>;
+  /**
+   * `fchmod` of an EXISTING file or folder at `path`, through a descriptor opened without following a link (a link at
+   * the name is refused, never followed): today's provisioner keeping or narrowing a mode. Only permission bits: an
+   * internal root keeps `mode & 0o700` (no group or other bit, ever), any other writable root `mode & 0o777` (never
+   * setuid, setgid or sticky). Refused on a read-only root (`read_only`), for a file with a second hard link
+   * (`hard_link`: its mode is also another name's) and for a mode that is not an integer in `0..0o7777`.
+   */
+  setMode(path: FencedPath, mode: number): Promise<void>;
 }
 
 export interface RootsPort {
   /** Only roots the manifest declared in `permissions.roots`; anything else throws at build. */
   root(name: RootName, scope?: { readonly ferret?: FerretId; readonly subfolder?: string }): RootHandle;
+  /**
+   * A read-only handle on exactly ONE file beside a harness home (`~/.claude.json`, which sits BESIDE `~/.claude`, so
+   * no `harness-home` scope reaches it): only for a plugin that may hold `harness-home` (Runtimes) and declared it in
+   * `permissions.roots`, and only for a basename listed in `permissions.harnessFiles`. The path must be absolute,
+   * normalized and outside the fence. Its folder is never listable: the handle names that one file and nothing else.
+   * Throws `not_declared` (or `outside` / `fenced` for the path) at the call.
+   */
+  harnessFile(absolutePath: string): RootFileHandle;
+  /**
+   * Mints a {@link SharedTree}: ONE existing folder of this plugin's own, handed read-only to whoever receives it
+   * (Skills' skill folder in a launch part, for the harness that materializes it with `RootHandle.copyShared`). Only
+   * with `permissions.shareTrees`, and only from what this plugin owns: one name of one of its own declared
+   * `opaque` named trees (`installed/*`), never a kernel-made root's folder (`credentials`, `sessions`) and never a folder
+   * of an owner's root (a project, an imports folder). Valid until this plugin stops.
+   */
+  share(source: SharedTreeSource): Promise<SharedTree>;
 }
+
+declare const sharedTreeBrand: unique symbol;
+
+/**
+ * One folder of its own state a plugin shares, with the plugin that receives it (§7.7, kernel batch #10). Opaque and
+ * unforgeable, like a Vault {@link ChildEnvironment}: no field, kept in a kernel table, so a copy, a spread or a JSON
+ * round trip (it serialises as `{ shared: <folder name> }` only, never a path) is nothing the kernel will open.
+ */
+export interface SharedTree {
+  readonly [sharedTreeBrand]: true;
+}
+
+/** What {@link RootsPort.share} shares: one name of one of the minter's own opaque named trees. */
+export type SharedTreeSource = { readonly state: StateFileDef; readonly name: string };
+
+/**
+ * What {@link RootHandle.copyShared} made at the destination: a copy, or (when a link was asked for) one link. A link
+ * lets the harness child write into the shared folder, so every ferret sharing it sees the change: "read-only" holds
+ * for a copy only, and a link made outlives the tree's revocation (both declared GAPs).
+ */
+export type SharedTreeCopied = 'copied' | 'linked';
 
 // events ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -745,6 +972,15 @@ export interface SpawnOptions {
    * `--remote-debugging-pipe` on 3 and 4). The daemon's ends are {@link ChildHandle.pipes}. At most 4.
    */
   readonly extraPipes?: number;
+  /**
+   * `start` only: the child gets its own session and process group (setsid), its stdio is ignored and it is
+   * unreferenced, so it outlives this daemon (Browsers' platform link opener). Only for a program the manifest lists in
+   * `permissions.detached` (a subset of `permissions.spawn`). Refused, before anything starts, with `run`/`runBytes`,
+   * `forFerret`, `extraPipes`, `stdin`, a pinned `cwd`, `timeout`, `signal` or a Vault {@link ChildEnvironment}. The
+   * handle's streams are empty and closed, `write` and `kill` throw, and `exited` is `null` at once: the kernel never
+   * waits on it. The kernel logs the program's name and pid, never its arguments.
+   */
+  readonly detached?: true;
 }
 
 export interface SpawnResult {
@@ -969,6 +1205,56 @@ export interface HostFactsPort {
   launchGuard(): HostLaunchGuard;
 }
 
+// processes ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A folder of one of THIS plugin's own root handles, named the way every root call names one: the kernel resolves it
+ * (links followed, fenced, checked to be an existing folder inside the root) and judges with ITS real path, so a
+ * plugin cannot point a {@link ProcessesPort} question at a folder it does not hold.
+ */
+export interface OwnFolder {
+  readonly root: RootHandle;
+  readonly path: FencedPath;
+}
+
+/** What a process signal came to: sent, the process was already gone, or the kernel would not send it. */
+export type ProcessSignalOutcome = 'signalled' | 'gone' | 'refused';
+
+/**
+ * This user's live processes, for a plugin that must stop what a child it started left behind (Runtimes: an ended
+ * Codex ferret's app-server pair). Only for a manifest with `permissions.processes`; every member of any other
+ * plugin's port is refused naming it. Today's Codex stopper's rules, held by the kernel so a plugin cannot widen them:
+ *
+ * - **Pids and yes/no only.** No member returns a command line, a program name or an environment: the kernel reads
+ *   `environ` and `cmdline` itself and answers with pids and booleans, so another process's secrets never cross.
+ * - **No guessing oracle.** `usersOf` asks only for a variable the manifest lists in `permissions.processes.environment`,
+ *   and its value is never free text: it is the real path of a folder of the plugin's OWN root.
+ * - **This user's processes only** (the daemon's uid), and never pid 0 or 1, the daemon itself or its ancestors.
+ * - **SIGTERM only**, and only to a process whose command line, read again right before the signal, still starts
+ *   with the real path of `under` plus `/`. A pid reused between that check and the signal is the one residual
+ *   (declared: no pidfd binding).
+ * - A question the host cannot answer is `undefined` or `false`, which a caller reads as "leave it running".
+ */
+export interface ProcessesPort {
+  /**
+   * Whether a live process of this user runs from beneath `under`: its command line starts with the folder's real
+   * path (or the path as the root names it) plus `/`. `false` for a process that is gone, another user's, unreadable,
+   * or one the kernel never signals. The command line itself is never returned.
+   */
+  runsFrom(pid: number, under: OwnFolder): Promise<boolean>;
+  /**
+   * The pids of this user's live processes whose environment holds EXACTLY `variable=<the folder's path>`, or
+   * `undefined` when the host cannot say (which a caller reads as "somebody might"). Refused (throws) for a variable
+   * the manifest does not list, or a folder that is not this plugin's own.
+   */
+  usersOf(variable: string, value: OwnFolder): Promise<readonly number[] | undefined>;
+  /**
+   * SIGTERM one process, only if it {@link runsFrom} `under` at the moment of the signal. `refused` for a pid the
+   * kernel never signals or one that no longer runs from there (a reused pid); `gone` when it had already exited.
+   */
+  terminate(pid: number, under: OwnFolder): Promise<ProcessSignalOutcome>;
+}
+
 /** What the running daemon executable is (today's update install facts seams). */
 export interface ExecutableFacts {
   /** `process.argv0`: the path the daemon was launched as (a link the install made, often). */
@@ -1030,7 +1316,54 @@ export interface PathsPort {
    * are refused with a sentence the owner can read.
    */
   checkDirectory(absolutePath: string): Promise<Result<CheckedDirectory, DirectoryRefusal>>;
+  /**
+   * A bare executable NAME (`npx`, `claude`) resolved to the path a shell would run, under the kernel's control: only
+   * for a manifest with `permissions.which`. The caller's `directories` (absolute; a harness's configured search
+   * folders) are searched first, then the daemon's inherited `PATH`; an empty, relative or odd entry is never searched,
+   * at most 64 folders are, and the first regular file (links followed) this process may execute wins. A name that is
+   * a path, or not one plain command name, is not looked up. NOTHING is executed and no shell is involved; the answer is
+   * that path or `undefined`, never the `PATH` itself.
+   */
+  which(name: string, options?: { readonly directories?: readonly string[] }): Promise<string | undefined>;
+  /**
+   * Today's harness-paths rule for ONE command: the operator's override variable (`FY_CLOUDFLARED`), else
+   * {@link which}. Only for a manifest with `permissions.which` AND `override` listed, exactly, in
+   * `permissions.whichOverrides` (`^FY_[A-Z0-9_]{1,60}$`); any other variable is refused naming the plugin, and no
+   * other variable is ever read. A set override must be ABSOLUTE, a regular file (links followed) this process may
+   * execute, and its basename must be `name` itself: otherwise it is `override_unusable` and the PATH is NOT searched
+   * (the operator named a binary; running a different one would leave them believing the opposite). An unset or blank
+   * override searches as `which` does. NOTHING is executed.
+   */
+  locate(
+    name: string,
+    options: { readonly override: string; readonly directories?: readonly string[] },
+  ): Promise<CommandLocation>;
+  /**
+   * Where ONE command resolves on the `PATH` a Vault {@link ChildEnvironment} handle WILL set, without spending the
+   * handle (today's launch guard searched a launch's own PATH). Only for a manifest with `permissions.which`, and only
+   * for a handle minted for this plugin or for a plugin that offers a hook this plugin takes (the edge a launch is
+   * handed on). The same name grammar, 64-folder bound and regular-file/`X_OK` rule as {@link which}; the daemon's
+   * own `PATH` is NOT searched. The answer is a path, `absent`, or `unprovable` — a handle this plugin may not read, a
+   * forged or spent one, one that sets no PATH, or one whose PATH was built from a `${secret:…}` reference — so a
+   * caller that must prove a negative fails closed. Never the PATH itself, never another variable.
+   */
+  whichFor(name: string, env: ChildEnvironment): Promise<HandleCommandLookup>;
 }
+
+/** {@link PathsPort.locate}'s answer. `override_unusable` names the variable and the path it holds: NO fallback. */
+export type CommandLocation =
+  | { readonly kind: 'found'; readonly path: string; readonly via: 'override' | 'path' }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'override_unusable'; readonly variable: string; readonly path: string };
+
+/**
+ * {@link PathsPort.whichFor}'s answer. `unprovable` says only that the handle's PATH could not be searched, never why
+ * (a foreign handle and a secret-derived PATH answer alike).
+ */
+export type HandleCommandLookup =
+  | { readonly kind: 'found'; readonly path: string }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unprovable' };
 
 /** {@link PathsPort.checkDirectory} accepted: the canonical path. */
 export interface CheckedDirectory {

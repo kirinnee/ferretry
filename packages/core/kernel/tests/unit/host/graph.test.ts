@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import { z } from 'zod';
 import { AdmissionPort, ChildEnvironmentPort } from '../../../contract/bound.ts';
-import { definePort } from '../../../contract/define.ts';
+import { defineEvent, definePort } from '../../../contract/define.ts';
+import { ConfigChanged } from '../../../contract/kernel.ts';
 import { dependentsOf, planGraph } from '../../../host/graph.ts';
 import type { Manifest } from '../../../manifest/types.ts';
 
 const AsksPort = definePort<object>('asks');
 const BoardPort = definePort<object>('board');
+const Announced = defineEvent('honest.announced', z.strictObject({}));
 
 const plugin = (id: string, extra: Partial<Manifest> = {}): Manifest => ({
   id,
@@ -96,6 +99,24 @@ describe('DD the ChildEnvironment opener reaches no half (lead decision 8)', () 
     expect(plan.refused.map(refusal => [refusal.plugin, refusal.reason, refusal.sentence])).toEqual([
       ['thief', 'kernel-only-port', 'thief asks for child-environment, which only the kernel may hold.'],
       ['peeker', 'kernel-only-port', 'peeker asks for child-environment, which only the kernel may hold.'],
+    ]);
+  });
+});
+
+describe('a kernel.* event is the kernel’s alone', () => {
+  test('a plugin that declares one in data.publishes is refused at plan; the kernel itself still starts', () => {
+    const plan = planGraph(
+      [
+        plugin('kernel', { data: { publishes: [ConfigChanged] } }),
+        plugin('forger', { data: { publishes: [ConfigChanged] } }),
+        plugin('honest', { data: { publishes: [Announced] } }),
+      ],
+      () => true,
+      none,
+    );
+    expect(plan.order.map(manifest => manifest.id)).toEqual(['kernel', 'honest']);
+    expect(plan.refused.map(refusal => [refusal.plugin, refusal.reason, refusal.sentence])).toEqual([
+      ['forger', 'kernel-event', 'forger publishes kernel.config-changed, which only the kernel may publish.'],
     ]);
   });
 });
