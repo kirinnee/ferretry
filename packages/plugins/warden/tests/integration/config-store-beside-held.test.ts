@@ -73,6 +73,27 @@ describe('an owner’s section save beside a held edit of warden.yaml, through t
     });
   });
 
+  it('should hold a section save that loosens beside a held edit: not in effect, the held price kept, both on disk', async () => {
+    // Arrange: price 2 in effect, the 0.042 correction held; the owner raises a cap (a loosening the judge refuses).
+    const { port, disk } = await heldPrice();
+    const store = new ConfigWardenConfigStore(port);
+    const inEffect = effectiveWardenConfig(port.file(WARDEN_CONFIG) ?? {});
+    const next = { ...inEffect, caps: { ...inEffect.caps, jevUsdPerDay: 5 } };
+
+    // Act
+    const waiting = await store.write(next, { caps: { jevUsdPerDay: 5 } } as WardenConfigPatch);
+
+    // Assert: answered held, the cap and the price in effect unchanged, the file holding both edits.
+    should(waiting.length).equal(2);
+    should(waiting.some(sentence => sentence.includes('0.042'))).equal(true);
+    const file = port.file(WARDEN_CONFIG) as WardenFile;
+    should(file.caps).equal(undefined);
+    should(file.guard?.usdPerMillionInputTokens).equal(2);
+    should(disk()).match(/jevUsdPerDay: 5/);
+    should(disk()).match(/usdPerMillionInputTokens: 0\.042 # per million/);
+    should(port.fileState(WARDEN_CONFIG).state).equal('held');
+  });
+
   it('should save a top-level key to both versions whole, the held price kept and still held', async () => {
     const { port, disk } = await heldPrice();
     const store = new ConfigWardenConfigStore(port);

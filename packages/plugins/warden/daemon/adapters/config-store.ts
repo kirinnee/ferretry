@@ -1,6 +1,7 @@
 import type { ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { DEFAULT_WARDEN_CONFIG, WARDEN_CONFIG, effectiveWardenConfig, type WardenFile } from '../../contract/index.ts';
 import type { WardenConfig, WardenConfigPatch, WardenConfigStore } from '../lib/index.ts';
+import { WARDEN_CONFIG_SECTIONS } from '../lib/protocol.ts';
 
 /** The kernel refused the edit of `warden.yaml` (its sentences never quote a value). */
 export class WardenConfigRefused extends Error {
@@ -30,7 +31,9 @@ export class WardenConfigRefused extends Error {
  */
 export class WardenConfigHeld extends Error {
   constructor() {
-    super('warden.yaml has a change waiting for your approval; confirm or discard it first, then save again.');
+    super(
+      'this save names no setting, so nothing was changed; warden.yaml still has a change waiting for your approval (confirm or discard it, or change a setting and save again).',
+    );
     this.name = 'WardenConfigHeld';
   }
 }
@@ -43,19 +46,8 @@ export class WardenConfigMoved extends Error {
   }
 }
 
-const SECTIONS: readonly string[] = [
-  'revive',
-  'autoMove',
-  'layers',
-  'guard',
-  'caps',
-  'mayActAlone',
-  'jevActs',
-  'events',
-  'investigation',
-  'failover',
-  'providerOutage',
-];
+/** Whether a setting is a section (a mapping of sub-settings) rather than a top-level setting. */
+const isSection = (key: string): boolean => (WARDEN_CONFIG_SECTIONS as readonly string[]).includes(key);
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -84,7 +76,7 @@ function wholeSettings(next: WardenConfig, inEffect: WardenFile): Record<string,
   for (const key of Object.keys(defaults)) {
     const value = values[key];
     const fallback = defaults[key];
-    if (SECTIONS.includes(key) && isPlainObject(value) && isPlainObject(fallback)) {
+    if (isSection(key) && isPlainObject(value) && isPlainObject(fallback)) {
       const had = isPlainObject(stated[key]) ? stated[key] : {};
       const section = Object.fromEntries(
         Object.entries(value).filter(([sub, inner]) => had[sub] !== undefined || !sameValue(inner, fallback[sub])),
@@ -128,9 +120,7 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
     // A save naming no key has nothing to make to either version; it is refused as before, writing nothing.
     if (keys.length === 0) throw new WardenConfigHeld();
     const values = config as unknown as Record<string, unknown>;
-    const within = keys.filter(
-      key => SECTIONS.includes(key) && isPlainObject(named[key]) && isPlainObject(values[key]),
-    );
+    const within = keys.filter(key => isSection(key) && isPlainObject(named[key]) && isPlainObject(values[key]));
     const ownerPatch = Object.fromEntries(
       keys.map(key => {
         if (!within.includes(key)) return [key, values[key]];
