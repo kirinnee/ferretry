@@ -12,7 +12,7 @@ import { AUDIT_KINDS, type AuditDraft, AuditLogFile, auditKind } from '../../../
 import { StateAuditJournal } from '../../../../daemon/adapters/audit/state-audit-journal.ts';
 import { isOwnersOwnRecord } from '../../../../daemon/lib/audit/policy.ts';
 import { recordedCallDraft } from '../../../../daemon/lib/audit/recorder.ts';
-import { AUDITED_ROUTES } from '../../../../daemon/lib/audit/routes.ts';
+import { AUDITED_ROUTES, type AuditedRouteRule } from '../../../../daemon/lib/audit/routes.ts';
 import { AuditKeptFile, AuditKeptRotatedFile, AuditRotatedFile } from '../../../../manifest.ts';
 
 const ANY_KIND = auditKind('fleet.configured') as PolicyRef<'audit'>;
@@ -214,6 +214,127 @@ describe('Admission.recorded: today’s audited-route rules, after the handler',
     expect(
       recordedCallDraft({ ...call, descriptor: { ...call.descriptor, audit: { skip: 'journals itself' } } }),
     ).toBeUndefined();
+  });
+});
+
+describe('what a rule may read out of the answer', () => {
+  const rule = (fields: Partial<AuditedRouteRule>): AuditedRouteRule => ({
+    method: 'POST',
+    path: '/v1/probe',
+    event: 'fleet.configured',
+    ...fields,
+  });
+  /** The call as the kernel tells it, with the answer's bytes exactly as built (not necessarily JSON). */
+  const answered = (text: string, status = 200): RecordedCall => {
+    const call = told('POST', '/v1/probe', { status });
+    return { ...call, response: { status, headers: new Map(), body: text } };
+  };
+  const draftFor = (
+    fields: Partial<AuditedRouteRule>,
+    call: RecordedCall,
+    configKind?: (path: string) => string | undefined,
+  ) => recordedCallDraft(call, { rules: [rule(fields)], ...(configKind === undefined ? {} : { configKind }) });
+
+  test('an answer that is not JSON is recorded without anything read from it', () => {
+    const fields = {
+      responseNames: 'names',
+      responseSettings: ['view'],
+      responseFields: { id: ['id'] },
+      responseConfigKind: 'path',
+      recordOnlyWhen: { field: 'changed', equals: true },
+    };
+    expect(draftFor(fields, answered('<html>not json</html>'))?.detail).toEqual({ status: 200 });
+  });
+
+  test('a refusal whose answer is not JSON keeps no code', () => {
+    expect(draftFor({ refusalCode: true }, answered('upstream said no', 409))?.detail).toEqual({ status: 409 });
+  });
+
+  test('a refusal code is kept only when it is identifier-shaped, never free text', () => {
+    const body = (code: unknown) => JSON.stringify({ code });
+    expect(draftFor({ refusalCode: true }, answered(body('signature_invalid'), 409))?.detail).toEqual({
+      code: 'signature_invalid',
+      status: 409,
+    });
+    expect(draftFor({ refusalCode: true }, answered(body('has spaces and a secret'), 409))?.detail).toEqual({
+      status: 409,
+    });
+    expect(draftFor({ refusalCode: true }, answered(body(7), 409))?.detail).toEqual({ status: 409 });
+  });
+
+  test('a rule reads a name from a nested path, and nothing that is not all strings', () => {
+    const names = (body: unknown) => draftFor({ responseNames: 'view.used' }, answered(JSON.stringify(body)))?.detail;
+    expect(names({ view: { used: ['A', 'B'] } })).toEqual({ used: 'A,B', status: 200 });
+    expect(names({ view: { used: 'ONE' } })).toEqual({ used: 'ONE', status: 200 });
+    expect(names({ view: { used: [] } })).toEqual({ status: 200 });
+    expect(names({ view: { used: ['A', 3] } })).toEqual({ status: 200 });
+    expect(names({ view: null })).toEqual({ status: 200 });
+  });
+
+  test('responseFields copies a boolean, a number, an identifier and a list of them, and never free text', () => {
+    const fields = {
+      responseFields: {
+        flag: ['on'],
+        count: ['view', 'count'],
+        ids: ['items', '*', 'id'],
+        sizes: ['items', '*', 'size'],
+        mixed: ['items', '*', 'mixed'],
+        words: ['title'],
+        absent: ['nothing', 'here'],
+      },
+    };
+    const body = {
+      on: true,
+      view: { count: 4 },
+      items: [
+        { id: 'a-1', size: 10, mixed: 'x' },
+        { id: 'b-2', size: 20, mixed: 5 },
+      ],
+      title: 'a sentence with spaces',
+    };
+    expect(draftFor(fields, answered(JSON.stringify(body)))?.detail).toEqual({
+      flag: true,
+      count: 4,
+      ids: 'a-1,b-2',
+      sizes: '10,20',
+      status: 200,
+    });
+  });
+
+  test('a path that walks into a non-object finds nothing, and a field answer with nothing in it adds no detail', () => {
+    const fields = { responseFields: { deep: ['view', 'count'] } };
+    expect(draftFor(fields, answered(JSON.stringify({ view: 'text' })))?.detail).toEqual({ status: 200 });
+    expect(draftFor(fields, answered(JSON.stringify({ view: [1, 2] })))?.detail).toEqual({ status: 200 });
+    expect(draftFor(fields, answered(JSON.stringify(null)))?.detail).toEqual({ status: 200 });
+  });
+
+  test('a long list of names is cut to fit one audit field and ends with how many were left out', () => {
+    const used = Array.from({ length: 60 }, (_, index) => `secret-${String(index).padStart(2, '0')}`);
+    const joined = draftFor({ responseNames: 'used' }, answered(JSON.stringify({ used })))?.detail?.used;
+    if (typeof joined !== 'string') throw new Error('a joined list is text');
+    expect(joined.length).toBeLessThanOrEqual(160);
+    const shown = joined.split(',').slice(0, -1);
+    expect(shown).toEqual(used.slice(0, shown.length));
+    expect(joined.endsWith(`,+${String(used.length - shown.length)}`)).toBe(true);
+  });
+
+  test('a config path is recorded as its KIND, and only when the kind is known and identifier-shaped', () => {
+    const kindOf = (path: string) =>
+      path === 'warden.yaml' ? 'warden' : path === 'odd.yaml' ? 'not an identifier!' : undefined;
+    const kind = (body: unknown) =>
+      draftFor({ responseConfigKind: 'path' }, answered(JSON.stringify(body)), kindOf)?.detail;
+    expect(kind({ path: 'warden.yaml' })).toEqual({ kind: 'warden', status: 200 });
+    expect(kind({ path: 'odd.yaml' })).toEqual({ status: 200 });
+    expect(kind({ path: 'unknown.yaml' })).toEqual({ status: 200 });
+    expect(kind({ path: 7 })).toEqual({ status: 200 });
+    expect(kind(null)).toEqual({ status: 200 });
+  });
+
+  test('a rule with the answer withheld still records the act, from what admission knew', () => {
+    const call = told('POST', '/v1/probe', { table: 'socket', status: 200 });
+    expect(draftFor({ responseNames: 'used', recordOnlyWhen: { field: 'ok', equals: true } }, call)?.detail).toEqual({
+      status: 200,
+    });
   });
 });
 
