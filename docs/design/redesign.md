@@ -2812,6 +2812,14 @@ the daemon plugin by plugin?). **Yes, per plugin, by one hash, and nothing finer
   lives in the kernel contract; `GET /v1/health` returns `{ protocol: 1, version: "5.0.0" }`. A mismatch is the one
   full-screen sentence: app newer, "This daemon needs an update" with the command; app older, "Reload to get the new
   app".
+- **The pre-auth `GET /v1/health` answer is exactly `{ protocol, version, features }`** and nothing else: no
+  credential, token, digest or caller fact, to anyone who asks. `features` lists one name, `session.credential.1`
+  (`SESSION_CREDENTIAL_FEATURE` in the kernel contract). A `fy` released before 5.0, running in a ferret's pane,
+  presents the ferret's own `fys_` credential only to a daemon that lists it, and after a `401` reads health again:
+  a missing name is its proof of an older daemon and its cue to retry with the host's admin token. A 5.0 daemon
+  always takes the ferret's credential, so it always lists the name, and its `401` is the answer — a pre-5.0 `fy`
+  never falls back to the admin token against it. Readers in this release treat `features` as optional. The kernel's
+  boot test pins the whole answer strictly (R-0097), so a new key in it fails.
 - **Every package has an effective contract hash** (review r13 finding 1). At build, the generator hashes each
   package's **own** published surface (routes, sockets, agent tools, events, ask sources, renderer keys, with the JSON
   schema of every body either side parses) and then folds in the effective hashes of **every contract its client
