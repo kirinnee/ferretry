@@ -35,6 +35,11 @@ import { CatalogLinkIdSchema } from './shared-catalog-link.ts';
 import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-catalog-review.ts';
 
 /** Most catalogs one machine keeps. Making one past it is refused `catalogs_full`. */
+export const SHARED_CATALOGS_PATH = '/v1/catalogs';
+
+/** `GET /v1/catalog-items`: the shared items this machine keeps, whichever catalogs list them. */
+export const CATALOG_ITEMS_PATH = '/v1/catalog-items';
+
 export const CATALOGS_MAX_PER_PUBLISHER = 256;
 
 /** Most shared items one machine keeps. A new item past it is refused `items_full`. */
@@ -147,7 +152,7 @@ export type OwnedCatalogList = z.infer<typeof OwnedCatalogListSchema>;
 // ── The shared items ─────────────────────────────────────────────────────────────────────────────
 
 /** One version of a shared item, and where it is in use. */
-const OwnedSharedItemVersionSchema = z.strictObject({
+export const OwnedSharedItemVersionSchema = z.strictObject({
   version: z.number().int().min(1),
   /** Bytes of the frozen copy, which is the same whichever catalog lists it. */
   size: z.number().int().min(1),
@@ -164,6 +169,7 @@ const OwnedSharedItemVersionSchema = z.strictObject({
     linkIds: z.array(CatalogLinkIdSchema).readonly().optional(),
   }),
 });
+export type OwnedSharedItemVersion = z.infer<typeof OwnedSharedItemVersionSchema>;
 /** Whether a catalog lists the item now, or did once and took it out. */
 const OwnedSharedItemCatalogSchema = z.strictObject({
   catalogId: SharedCatalogIdSchema,
@@ -336,6 +342,12 @@ export type ExportCatalogRequest = z.infer<typeof ExportCatalogRequestSchema>;
 
 /** How long the daemon keeps the Undo of a one-tap Add, in seconds. The app's own toast is shorter. */
 export const QUICK_ADD_UNDO_SECONDS = 60;
+
+/** `POST /v1/catalog-items/quick-add`. */
+export const QUICK_ADD_PATH = `${CATALOG_ITEMS_PATH}/quick-add`;
+
+/** `POST /v1/catalog-items/quick-add/undo`. */
+export const QUICK_ADD_UNDO_PATH = `${QUICK_ADD_PATH}/undo`;
 
 /**
  * What the frozen candidate of a one-tap Add shows, before it is listed anywhere: the preview of an item with no

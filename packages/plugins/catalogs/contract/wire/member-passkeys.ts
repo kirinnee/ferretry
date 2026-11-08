@@ -42,7 +42,7 @@ export type StepUpOptions = z.infer<typeof StepUpOptionsSchema>;
 
 export const MAX_JOIN_PROOF_PASSKEYS = 64 as const;
 
-const JoinProofOptionsSchema = StepUpOptionsSchema.extend({
+export const JoinProofOptionsSchema = StepUpOptionsSchema.extend({
   allowCredentials: z
     .array(z.strictObject({ type: z.literal('public-key'), id: Base64UrlSchema(1_366) }))
     .min(1)
