@@ -50,6 +50,7 @@
         "daemon/adapters/session/provenance/storage-session-provenance-store.ts",
         "daemon/adapters/session/effects/file-session-effect-ledger.ts",
         "daemon/adapters/session/resume/in-memory-launch-gate.ts",
+        "daemon/adapters/session/lifecycle/process-incarnation.ts",
         "daemon/adapters/session/resume/tmux-resume-launcher.ts",
         "daemon/adapters/session/resume/file-resume-turn-store.ts",
         "daemon/adapters/session/resume/storage-resume-repository.ts",
@@ -273,7 +274,8 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/layouts": {
-      "entry": ["app/views/*.tsx"]
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/terminals": {
       "entry": [],
@@ -282,12 +284,7 @@
         "daemon/adapters/tmux/pane-queue.ts",
         "daemon/adapters/tmux/harness-launch-guard.ts",
         "daemon/adapters/tmux/forget-ferret-identity.ts",
-        "daemon/adapters/tmux/tmux-release-reader.ts",
-        "app/components/terminal-snapshot.tsx",
-        "app/components/terminal-snapshot-model.ts",
-        "app/features/workspace/phone/terminal-key-bar.tsx",
-        "app/features/workspace/phone/terminal-keys.ts",
-        "app/lib/session-processes.ts"
+        "daemon/adapters/tmux/tmux-release-reader.ts"
       ]
     },
     "packages/plugins/browsers": {
