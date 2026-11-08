@@ -451,8 +451,11 @@ export function buildConversationA(deps: {
     }
     if (queued === undefined) return { ferret, disposition: 'sent', sendId: request.sendId, fate: 'accepted' };
     // In the harness's queue. `held` is proved by the pane (today's `queued`, proof `pane`); `left` left the composer
-    // and no queue shows it, so it stays `accepted` (only a transcript can say where it went). A settle that fails
-    // leaves the row `accepted` on the direct path: still true, and a repeat of this id types nothing.
+    // and no queue shows it, so it stays `accepted` (only a transcript can say where it went). A settle that fails is
+    // deliberately NOT surfaced, unlike the unconfirmed settle above: the message IS in the harness's queue, and an
+    // error would invite the caller to send it again under a new id, a second copy. The row then stays `accepted` on
+    // the direct path, so a repeat of this id is answered as a typed direct send (`delivered`, fate `accepted`, not `queued`) and types
+    // nothing (tested).
     const held = queued === 'held';
     const settledAt = kernel.clock.now();
     await ledger

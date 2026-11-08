@@ -21,7 +21,7 @@ import {
   type SharedDraftSent,
 } from '../../../seams/protocol.ts';
 import { DraftSentSchema } from '../../../../contract/index.ts';
-import { PEER_ACTOR_PREFIX } from '../../../seams/api.ts';
+import { ferretOf } from '@ferretry/core-gate/contract';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';
 import { type ApiResponse, decodeParameter, headerValue } from '../../../seams/api.ts';
@@ -53,8 +53,8 @@ import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '
  * declines to ABANDON a rendered question.
  *
  * WHO SENDS. The SENDER is the server-derived actor, never the body: a ferret's own session credential
- * makes it `peer:<that session>` whatever any header says (`caller: 'any'`), and the admin token plus
- * `x-ferretry-session-id` is the older honest-client form of the same. Being a ferret buys a SENDER
+ * makes it that ferret whatever any header says (`caller: 'any'`), and the admin token plus
+ * `x-ferretry-session-id` is the older honest-client form of the same (Gate stamps `ferret:<id>` for both). Being a ferret buys a SENDER
  * identity, never a different TARGET's: the path names where the message goes, as for every caller.
  */
 
@@ -194,13 +194,14 @@ function sendId(context: RouteContext): string {
 /**
  * The session that made this call, when a teammate did rather than a person.
  *
- * Taken from the actor the authorization boundary derived, never from the body. `from` decides two
- * things that matter — how the message is attributed to the receiver, and whose declared wait it
+ * Taken from Gate's own reading of the standing (`ferretOf`, as Agenda and Tidy do), never from the body
+ * and never parsed here: a ferret's own credential names the ferret first, and only an agent admin call
+ * falls back to the `ferret:<id>` actor Gate stamped. A warden or a person is no sender. `from` decides
+ * two things that matter — how the message is attributed to the receiver, and whose declared wait it
  * ends — and a caller able to name itself could end any other session's park.
  */
 function senderSessionId(context: RouteContext): string | undefined {
-  const actor = context.actor ?? '';
-  return actor.startsWith(PEER_ACTOR_PREFIX) ? actor.slice(PEER_ACTOR_PREFIX.length) : undefined;
+  return ferretOf(context);
 }
 
 /** Hands a running session its next turn. */

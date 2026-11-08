@@ -93,9 +93,10 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/send', {
         ...FERRET,
         audit: { record: MESSAGE_SENT_AUDIT },
-        // The one carve-out (today's): a composer_occupied refusal returns the person's own draft from the pane.
+        // The one carve-out (today's): a composer_occupied refusal returns the composer's text from the pane (the person's
+        // own draft, or a peer's message a queue left stranded there).
         guard: {
-          none: "answers an acknowledgement; no page or vault text, and no pane text except the person's own composer draft a composer_occupied refusal returns, as today",
+          none: "answers an acknowledgement; no page or vault text, and no pane text except the composer's text a composer_occupied refusal returns, as today",
         },
       }),
       route('POST /v1/ferrets/:ferretId/interrupt', { ...FERRET, audit: { record: TURN_INTERRUPTED_AUDIT }, ...ACK }),

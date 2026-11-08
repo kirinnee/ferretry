@@ -13,7 +13,9 @@ import type {
   RunnerDelivery,
 } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { ApiError, REFUSAL_SENTENCES, type RouteHandler } from '@ferretry/kernel/contract';
+import { ferretActor } from '@ferretry/core-gate/contract';
+import { ferretStanding, ownerStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
+import { ApiError, type CallStanding, REFUSAL_SENTENCES, type RouteHandler } from '@ferretry/kernel/contract';
 import { ferret as asFerret, fixedClock, owner, testHost, type TestCaller } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { err, ok, type Result } from '@ferretry/std';
@@ -125,10 +127,11 @@ async function conversation(
   f1: Partial<FerretSummary> = {},
   options: {
     /**
-     * The actor Gate stamps on a send ROUTE call (`peer:<id>` for a ferret's own credential). The test host stamps a
-     * ferret caller as `ferret`, never `peer:<id>`, so the send route is wrapped to carry this one instead.
+     * The standing Gate stamps on a send ROUTE call, built with Gate's own helpers (`ferretStanding`, `ferretActor`,
+     * `wardenStanding`) so a rename of what Gate stamps breaks this test rather than production. The test host's
+     * stand-in admission stamps no actor and no credential at all, so the send route is wrapped to carry this one.
      */
-    readonly sendActor?: string;
+    readonly sendStanding?: CallStanding;
   } = {},
 ) {
   ferrets.add({ id: F1, state: 'working', ...f1 });
@@ -155,12 +158,12 @@ async function conversation(
         throw new Error('Conversation entered kernel.act around the harness seam: that deadlocks the runner');
       }) as typeof ctx.kernel.act;
       const built = build({ ...ctx, kernel: { ...ctx.kernel, act, state } });
-      const actor = options.sendActor;
-      if (actor === undefined) return built;
+      const standing = options.sendStanding;
+      if (standing === undefined) return built;
       const routes = built.routes as Readonly<Record<string, RouteHandler | undefined>>;
       const handler = routes[SEND_ROUTE];
       if (handler === undefined) throw new Error('the conversation daemon half serves no send route');
-      const peer: RouteHandler = async call => await handler({ ...call, actor } as typeof call);
+      const peer: RouteHandler = async call => await handler({ ...call, ...standing } as typeof call);
       return { ...built, routes: { ...routes, [SEND_ROUTE]: peer } } as typeof built;
     },
   } as typeof served;
@@ -505,6 +508,30 @@ describe('a send to a ferret still working on its turn goes to the harness’s o
     await host.stop();
   });
 
+  test('held, but the row cannot be settled: still 200 queued (not an error), the row stays accepted on the direct path, a repeat types nothing', async () => {
+    const { host, ferrets, api, writes } = await conversation();
+    await busy(ferrets, async () => {
+      writes.fail = true;
+      return ok('held');
+    });
+
+    const response = await send(host);
+    writes.fail = false;
+
+    // The message IS in the harness's queue: an error here would invite the caller to send it again as a new id.
+    expect(response.status).toBe(200);
+    expect(response.json()).toMatchObject({ disposition: 'queued', sendId: 'req-1', fate: 'queued' });
+    expect(await rows(api)).toEqual([
+      { sendId: 'req-1', fate: 'accepted', path: 'direct', typedNotSent: undefined, unaccountedReason: undefined },
+    ]);
+    const again = await send(host);
+    expect(again.status).toBe(200);
+    // Answered from the row as any typed direct send is: the honest 'queued' was the first answer's.
+    expect(again.json()).toMatchObject({ disposition: 'delivered', sendId: 'req-1', fate: 'accepted' });
+    expect([ferrets.delivered.length, ferrets.queued.length]).toEqual([1, 1]);
+    await host.stop();
+  });
+
   test('left (out of the composer, no queue shows it): 200 sent, the row stays accepted on the busy path', async () => {
     const { host, ferrets, api } = await conversation();
     await busy(ferrets, async () => ok('left'));
@@ -678,15 +705,17 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
     await host.stop();
   });
 
-  // The test host stamps a ferret caller's actor as `ferret`, never Gate's `peer:<id>`, so the route cannot name the
-  // sender here and a label is not honoured: a peer's label and attribution are proved through the port below.
-  test('a ferret’s `fy send` through the route: 200, delivered once', async () => {
-    const { host, ferrets } = await conversation();
+  // Gate's standing for a ferret's own `fys_` token: `ferret:<id>` and the ferret credential, as admission stamps them.
+  test('a ferret’s `fy send` through the route: 200, delivered once, under its banner and label', async () => {
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: ferretStanding(CALLER) });
 
     const response = await send(host, 'req-cli', 'f1', CLI_BODY, asFerret(CALLER));
 
     expect(response.status).toBe(200);
-    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}hello there` }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from, row.fromName])).toEqual([
+      ['req-cli', 'agent', CALLER, LEAD_NAME],
+    ]);
     await host.stop();
   });
 
@@ -755,8 +784,8 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
     await host.stop();
   });
 
-  test('the ROUTE: a ferret’s own credential (Gate’s peer actor) types the CLI body under the banner, label and all', async () => {
-    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendActor: `peer:${CALLER}` });
+  test('the ROUTE: a ferret’s own credential (Gate’s `ferret:<id>` standing) types the CLI body under the banner, label and all', async () => {
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: ferretStanding(CALLER) });
 
     const response = await send(
       host,
@@ -784,6 +813,75 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
     await send(host, 'req-own', 'f1', { message: 'hello there', now: false, label: 'blocker' });
 
     expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    await host.stop();
+  });
+
+  test('the ROUTE: the owner’s own standing (Gate’s `admin-cli`) is typed bare and ledgered as the person', async () => {
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: ownerStanding() });
+
+    await send(host, 'req-own', 'f1', { message: 'hello there', now: false, label: 'blocker' });
+
+    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
+      ['req-own', 'human', undefined],
+    ]);
+    await host.stop();
+  });
+
+  test('the ROUTE: the admin token plus the session header (Gate stamps `ferret:<id>`) types under the banner', async () => {
+    const standing: CallStanding = {
+      actor: ferretActor(CALLER),
+      credential: { kind: 'authenticated', tokenClass: 'admin' },
+    };
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: standing });
+
+    await send(host, 'req-hdr', 'f1', { message: 'hello there', now: false, label: 'blocker' });
+
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'blocker')}hello there` }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
+      ['req-hdr', 'agent', CALLER],
+    ]);
+    await host.stop();
+  });
+
+  test('the ROUTE: a warden’s send is no peer’s — typed bare, ledgered as the person, its label not honoured', async () => {
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: wardenStanding(CALLER) });
+
+    await send(host, 'req-wdn', 'f1', { message: 'hello there', now: false, label: 'action' });
+
+    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
+      ['req-wdn', 'human', undefined],
+    ]);
+    await host.stop();
+  });
+
+  test('the ROUTE: a ferret credential names the sender before the actor does, so an actor cannot be moved to forge one', async () => {
+    const standing: CallStanding = { ...ferretStanding(CALLER), actor: ferretActor(ferretId('someone-else')) };
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: standing });
+
+    await send(host, 'req-frg', 'f1', { message: 'hello there' }, asFerret(CALLER));
+
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message')}hello there` }]);
+    expect((await api().sends(F1)).sends.map(row => row.from)).toEqual([CALLER]);
+    await host.stop();
+  });
+
+  // Tripwire: the r4 BLOCKER was the route keeping only a `peer:` actor, which Gate never stamps. An agent admin call
+  // whose actor is `peer:<id>` must name NO sender: a route that reads that prefix again types a banner here and fails.
+  test('the ROUTE reads no `peer:` actor: Gate never stamps one, so it names no sender and types the bare message', async () => {
+    const standing: CallStanding = {
+      actor: `peer:${CALLER}`,
+      credential: { kind: 'authenticated', tokenClass: 'admin' },
+    };
+    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: standing });
+
+    await send(host, 'req-old', 'f1', { message: 'hello there', now: false, label: 'action' });
+
+    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
+      ['req-old', 'human', undefined],
+    ]);
     await host.stop();
   });
 
