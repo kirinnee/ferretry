@@ -154,8 +154,8 @@ describe('the same send id twice is one message, across daemon runs', () => {
 
     const result = await api().send(F1, { kind: 'owner' }, { message: 'for f1', sendId: 'board-reopen-1' });
 
-    // new: it goes to the terminal seam, which is not connected yet, so it refuses in words and records nothing
-    expect(result).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    // new: it goes to the terminal seam; this Ferrets offers no harness, so it refuses in words and keeps nothing
+    expect(result).toMatchObject({ ok: false, error: { code: 'plugin_unavailable' } });
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
   });
@@ -166,8 +166,8 @@ describe('the same send id twice is one message, across daemon runs', () => {
 
     const retry = await api().send(F1, { kind: 'owner' }, { message: 'again', sendId: 'r-1' });
 
-    // new: it goes to the terminal seam (not connected yet), not answered "queued" for a message that is nowhere
-    expect(retry).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    // new: it goes to the terminal seam (this Ferrets offers no harness), not answered "queued" for a message that is nowhere
+    expect(retry).toMatchObject({ ok: false, error: { code: 'plugin_unavailable' } });
     expect((await api().queue(F1)).messages).toEqual([]);
     await host.stop();
   });

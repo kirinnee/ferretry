@@ -98,7 +98,7 @@ describe('conversation daemon half, through the kernel test host', () => {
     expect(response.json()).toMatchObject({ messages: [] });
   });
 
-  test('a send says plainly that the ferret’s terminal is not connected yet', async () => {
+  test('a send through a Ferrets that offers no harness seam says so plainly', async () => {
     const host = await boot();
     const response = await host.request('POST', '/v1/ferrets/f1/send', {
       as: owner(),
@@ -106,7 +106,7 @@ describe('conversation daemon half, through the kernel test host', () => {
       body: { message: 'hello' },
     });
     expect(response.status).toBe(503);
-    expect(response.json()).toMatchObject({ code: 'conversation_terminal_unavailable' });
+    expect(response.json()).toMatchObject({ code: 'plugin_unavailable' });
   });
 
   test('the shared draft refuses a caller Gate gave no actor to, rather than guessing it is the owner', async () => {
