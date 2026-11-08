@@ -54,7 +54,7 @@ export interface NotifiedFleet {
   readonly daemons: ReadonlyMap<DaemonId, { readonly sessions: readonly NotifiedView[] | null }>;
 }
 
-/** A ferret's page under its machine, as a daemon names it (`/session/<id>`, relative to the machine's pages). */
+/** A ferret's chat under its machine, as a daemon names it (`/ferrets/<id>/chat`, relative to the machine's pages). */
 const ferretPagePath = (daemonId: DaemonId, sessionId: string): string =>
   `${daemonHomeHref(daemonId)}${sessionNotificationPath(sessionId)}`;
 
