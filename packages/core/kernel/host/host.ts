@@ -658,6 +658,9 @@ async function bootLocked(
           flooded: plugin => log.warn('a worker flooded its grant channel, so the channel was closed', { plugin }),
         },
         { onStop: fn => lifecycle.onStop(fn), stopping: () => lifecycle.stopping() },
+        // GAP(kernel): this wiring itself is untested. Compiled-ness is this process's own module URL, so no unit test
+        // runs it compiled, and `fyd --check` in the release smoke starts only DECLARED workers: it proves no false
+        // refusal, and stays green if this line is deleted. `workersFor`'s rule is unit-tested (declared-workers.test.ts).
         { urls: () => implementations.get(manifest.id)?.workers },
       ),
       spawn: restrictSpawn(
