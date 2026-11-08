@@ -100,7 +100,22 @@ const outDirectoryFrom = (argv: readonly string[]): string => {
   return value;
 };
 
-export const buildFyRenderIntegrationFixture = async (directory: string): Promise<FyRenderFixtureManifest> => {
+/**
+ * The scene entry is the CALLER's: the visual scene belongs to the package whose render tests use it (Conversation),
+ * so this builder takes its absolute path rather than guessing one inside another package.
+ */
+const scenePathFrom = (argv: readonly string[]): string => {
+  const at = argv.indexOf('--scene');
+  const value = at === -1 ? undefined : argv[at + 1];
+  if (value === undefined || value.length === 0) throw new Error('❌ --scene <absolute-path> is required');
+  if (!isAbsolute(value)) throw new Error(`❌ --scene must be absolute, got ${value}`);
+  return value;
+};
+
+export const buildFyRenderIntegrationFixture = async (
+  directory: string,
+  scenePath: string,
+): Promise<FyRenderFixtureManifest> => {
   await mkdir(directory, { recursive: true });
 
   // The shell and both library bundles, written under the SAME private directory
@@ -108,10 +123,7 @@ export const buildFyRenderIntegrationFixture = async (directory: string): Promis
   const { artifacts } = await buildFyRenderShell(directory);
 
   const stylesheet = await bundleOne(resolve(packageRoot, 'src/styles/index.css'), 'the app stylesheet');
-  const scene = await bundleOne(
-    resolve(packageRoot, 'tests/integration/fixtures/fy-render-visual-scene.tsx'),
-    'the visual scene',
-  );
+  const scene = await bundleOne(scenePath, 'the visual scene');
   const appCss = `${stylesheet.css}\n${scene.css}`;
   const appJs = scene.js;
 
@@ -138,7 +150,7 @@ export const buildFyRenderIntegrationFixture = async (directory: string): Promis
 };
 
 if (import.meta.main) {
-  const manifest = await buildFyRenderIntegrationFixture(outDirectoryFrom(Bun.argv));
+  const manifest = await buildFyRenderIntegrationFixture(outDirectoryFrom(Bun.argv), scenePathFrom(Bun.argv));
   // One line of JSON on stdout, so the parent can read it without a file race.
   console.log(JSON.stringify(manifest));
 }
