@@ -4,6 +4,8 @@ import {
   type CallContext,
   jsonResponse,
   queryValue,
+  type Redaction,
+  type RedactionScope,
   type RouteHandler,
   textResponse,
 } from '@ferretry/kernel/contract';
@@ -12,6 +14,7 @@ import {
   FsError,
   type FsErrorCode,
   MAX_FILE_BYTES,
+  redactedDiffText,
   type SessionFilesystem,
   type SessionReadFence,
 } from '../../session/filesystem/index.ts';
@@ -138,13 +141,22 @@ async function changes(
 }
 
 /**
- * One path's unified diff, as text.
+ * One path's unified diff, as text, with every vault secret masked.
+ *
+ * The service's diff bytes are the real ones (they stay unchanged so nothing consuming a diff is corrupted); this
+ * route is the OUTBOUND projection, and it masks them through the read's `scope` as the last step before they leave.
+ * The secrets-policy refusal below runs first and is untouched: redaction adds to the gate, it does not replace it.
  *
  * A refused diff is a 403 rather than a badge: the body of this route is diff bytes and has nowhere to
  * carry a flag. A TRUNCATED diff is a 413 for a stronger reason — a partial diff is actively misleading in
  * a review surface, because the missing tail renders as content that was never removed.
  */
-async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext): Promise<ApiResponse> {
+async function diff(
+  filesystem: SessionFilesystem,
+  deps: FileBrowserDeps,
+  context: RouteContext,
+  scope: RedactionScope,
+): Promise<ApiResponse> {
   const { cwd, fence } = await deps.reach(context);
   const target = requiredPath(context);
   let view: Awaited<ReturnType<SessionFilesystem['diff']>>;
@@ -159,7 +171,7 @@ async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
   if (view.truncated) {
     throw new ApiError(413, `diff exceeds the ${MAX_FILE_BYTES}-byte response limit`, 'too_large');
   }
-  return textResponse(view.diff);
+  return textResponse(redactedDiffText(view.diff, scope));
 }
 
 /**
@@ -211,6 +223,11 @@ export interface FileBrowserDeps {
   reach(
     context: RouteContext,
   ): Promise<{ readonly id: string; readonly cwd: string; readonly fence?: SessionReadFence }>;
+  /**
+   * The vault's read-scoped redaction. The diff route opens ONE read and masks the diff text through it before it
+   * leaves; a vault that cannot open fails the read, so nothing unmasked is served (S19).
+   */
+  readonly redaction: Pick<Redaction, 'read'>;
 }
 
 /** The four route keys, as `manifest.ts` declares them (today's `/v1/sessions/:sessionId/fs…`, renamed). */
@@ -251,7 +268,9 @@ export function sessionFilesystemRoutes(deps: FileBrowserDeps): { readonly [K in
     'GET /v1/ferrets/:ferretId/fs/file': bound(file),
     'GET /v1/ferrets/:ferretId/fs/index': bound(index),
     'GET /v1/ferrets/:ferretId/fs/changes': bound(changes),
-    'GET /v1/ferrets/:ferretId/fs/diff': bound(diff),
+    'GET /v1/ferrets/:ferretId/fs/diff': bound((filesystem, routeDeps, context) =>
+      routeDeps.redaction.read(scope => diff(filesystem, routeDeps, context, scope)),
+    ),
     'GET /v1/ferrets/:ferretId/fs': bound(list),
   };
 }

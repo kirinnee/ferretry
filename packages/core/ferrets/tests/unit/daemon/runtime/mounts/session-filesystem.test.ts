@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { ApiError, type ApiResponse } from '@ferretry/kernel/contract';
+import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
+import { ApiError, type ApiResponse, type Redaction } from '@ferretry/kernel/contract';
 import { SessionFileIndexResponseSchema } from '../../../../../daemon/lib/protocol/session-search.ts';
 import should from 'should';
 import {
@@ -38,15 +39,24 @@ const person: FileBrowserDeps['reach'] = async context => ({
 
 type Ask = Omit<RequestOf, 'method' | 'path' | 'params'> & { readonly ferretId?: string };
 
-function fixture(root: FakeRootOptions = {}, git: SessionGitScript = {}, reach: FileBrowserDeps['reach'] = person) {
+/** A FAKE fixture secret, never a real credential. Tests assert on booleans so a failure never prints it. */
+const FIXTURE_SECRET = 'fixture-diff-secret-value-0001';
+const FIXTURE_NAME = 'DIFF_FIXTURE' as never;
+const noSecrets = (): Pick<Redaction, 'read'> => new FakeRedaction(new Map());
+const withSecret = (): Pick<Redaction, 'read'> => new FakeRedaction(new Map([[FIXTURE_NAME, FIXTURE_SECRET]]));
+
+function fixture(
+  root: FakeRootOptions = {},
+  git: SessionGitScript = {},
+  reach: FileBrowserDeps['reach'] = person,
+  redaction: Pick<Redaction, 'read'> = noSecrets(),
+) {
   const pinner = new FakeRootPinner(root);
-  const routes = sessionFilesystemRoutes({
-    filesystem: new SessionFilesystem(pinner, new FakeSessionGit(git)),
-    reach,
-  });
+  const filesystem = new SessionFilesystem(pinner, new FakeSessionGit(git));
+  const routes = sessionFilesystemRoutes({ filesystem, reach, redaction });
   const ask = async (key: FileBrowserRouteKey, { ferretId = 's1', ...spec }: Ask = {}): Promise<ApiResponse> =>
     await routes[key](requestOf({ ...spec, params: { ferretId } }));
-  return { pinner, ask };
+  return { pinner, filesystem, ask };
 }
 
 const tree = () => treeOf(['', directory([{ name: 'a.ts', type: 'file' }])], ['a.ts', textFile('body\n')]);
@@ -155,6 +165,7 @@ describe('a daemon whose file browser is not built', () => {
     const reached: string[] = [];
     const routes = sessionFilesystemRoutes({
       filesystem: undefined,
+      redaction: noSecrets(),
       reach: async context => {
         const id = context.params.get('ferretId') ?? '';
         reached.push(id);
@@ -218,6 +229,72 @@ describe('the diff route', () => {
     should(response.status).eql(200);
     should(response.body).eql('DIFF BODY');
     should(response.headers.get('content-type')).match(/text\/plain/);
+  });
+
+  it('R-0150 a file holding a vault secret comes back REDACTED in the diff response, while the internal diff keeps the real bytes', async () => {
+    // Arrange: the changed line holds a vault value.
+    const raw = `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-const key = "old";\n+const key = "${FIXTURE_SECRET}";\n`;
+    const { ask, filesystem } = fixture(
+      { tree: tree() },
+      { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+      person,
+      withSecret(),
+    );
+
+    // Act
+    const response = await ask(DIFF, { query: { path: 'a.ts' } });
+    const internal = await filesystem.diff(SESSION_CWD, 'a.ts');
+
+    // Assert (booleans, so a failure never prints the value)
+    const served = String(response.body);
+    should(response.status).eql(200);
+    should(served.includes(FIXTURE_SECRET)).be.false();
+    should(served.includes('[redacted:DIFF_FIXTURE]')).be.true();
+    should(served.includes('-const key = "old";')).be.true();
+    should(internal.diff === raw).be.true();
+    should(internal.diff.includes(FIXTURE_SECRET)).be.true();
+  });
+
+  it('R-0150 a vault that cannot open serves no diff at all', async () => {
+    // Arrange
+    const raw = `@@ -1 +1 @@\n+${FIXTURE_SECRET}\n`;
+    const broken: Pick<Redaction, 'read'> = {
+      read: async () => {
+        throw new Error('the vault could not open');
+      },
+    };
+    const { ask } = fixture(
+      { tree: tree() },
+      { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+      person,
+      broken,
+    );
+
+    // Act
+    const outcome = await ask(DIFF, { query: { path: 'a.ts' } }).then(
+      response => String(response.body),
+      (error: unknown) => (error instanceof Error ? error.message : ''),
+    );
+
+    // Assert
+    should(outcome.includes(FIXTURE_SECRET)).be.false();
+    should(outcome).eql('the vault could not open');
+  });
+
+  it('R-0150 the secrets-policy refusal still runs first, and a denied diff is still a 403', async () => {
+    // Arrange
+    const { ask } = fixture(
+      { tree: treeOf(['.env', textFile('TOKEN=1')]) },
+      { isTracked: () => true },
+      person,
+      withSecret(),
+    );
+
+    // Act
+    const refusal = await refusalOf(ask(DIFF, { query: { path: '.env' } }));
+
+    // Assert
+    should(refusal).eql({ status: 403, code: 'denied' });
   });
 
   it('should require the path parameter', async () => {
