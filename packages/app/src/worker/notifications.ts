@@ -199,6 +199,13 @@ export const notificationUrl = (raw: unknown, origin: string, machine: PushMachi
   return new URL(target.ask === null ? target.path : `${target.path}?ask=${target.ask}`, origin).href;
 };
 
+/** The path part of a stored address as it was written (an absolute address of this site, or a relative one), before any URL parsing. */
+const storedPath = (stored: string, origin: string): string => {
+  const written = stored.startsWith(origin) ? stored.slice(origin.length) : stored;
+  const path = written.split(/[?#]/u, 1)[0] ?? '';
+  return path.startsWith('/') ? path : `/${path}`;
+};
+
 /**
  * The `data.url` a notification carries back to its click, read through the same closed list: a notification with no
  * `data`, or one a page showed with a foreign address, still opens only what the rule allows. A relative address is read
@@ -212,6 +219,9 @@ export const notificationClickUrl = (stored: unknown, origin: string, machine: P
   // A relative address (a page's own `data.url`) is read against this site, like the browser would.
   const url = typeof stored === 'string' ? URL.parse(stored, origin) : null;
   if (url === null || url.origin !== origin) return appHome(origin);
+  // URL parsing resolves dot segments (`..`, `%2e%2e`) and turns `\` into `/` before the rule sees the path, so a stored
+  // path the parse CHANGED is refused outright: the click then judges exactly the bytes a push would have been judged on.
+  if (storedPath(stored as string, origin) !== url.pathname) return appHome(origin);
   const target = machineTarget(`${url.pathname}${url.search}`, machine);
   if (target === null) return appHome(origin);
   return new URL(target.ask === null ? target.path : `${target.path}?ask=${target.ask}`, origin).href;

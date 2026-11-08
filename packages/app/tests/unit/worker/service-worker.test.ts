@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { pluginWorkerFiles, refusePluginWorkers, workerInputGuard } from '../../../scripts/build-release.ts';
@@ -169,9 +169,22 @@ test('the release worker guard refuses a transitive non-worker import even witho
   try {
     await mkdir(join(directory, 'src/worker'), { recursive: true });
     await mkdir(join(directory, 'src/layout'), { recursive: true });
+    // A bare specifier resolves through the app's own node_modules, as it does for the real worker.
+    await symlink(join(import.meta.dir, '../../../node_modules'), join(directory, 'node_modules'));
     await writeFile(join(directory, 'src/worker/probe.ts'), "import './helper.ts';");
     await writeFile(join(directory, 'src/layout/probe.ts'), 'globalThis.Response = undefined;');
-    for (const specifier of ['../layout/probe.ts', 'node:events', 'path', 'bun:jsc']) {
+    // The kernel's contract barrel and a sibling contract file are refused too: only the push-envelope subpath is the worker's.
+    const kernelContract = realpathSync(
+      Bun.resolveSync('@ferretry/kernel/contract', join(import.meta.dir, '../../..')),
+    );
+    for (const specifier of [
+      '../layout/probe.ts',
+      'node:events',
+      'path',
+      'bun:jsc',
+      '@ferretry/kernel/contract',
+      join(dirname(kernelContract), 'route.ts'),
+    ]) {
       await writeFile(join(directory, 'src/worker/helper.ts'), `import '${specifier}';`);
       const failure = await Bun.build({
         entrypoints: [join(directory, 'src/worker/probe.ts')],

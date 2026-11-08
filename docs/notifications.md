@@ -378,6 +378,13 @@ paired machine opens that machine's home). **Declared gap:** with no window open
 itself, so the paired-machine check there is the shell's own route handling (`GAP(notification-open)` also covers that no
 shell root mounts the open handler yet).
 
+Two more facts about the click path, both pinned by tests. A stored address whose path the URL parse would **rewrite** (a dot
+segment, literal or `%2e`/`%2E`, or a backslash) is refused rather than judged after the rewrite, so a click and a push
+apply the same rule to the same bytes. And the app-wide registration accepts any machine id the shell can file a machine
+under (it may hold a `/`, as `%2F`) — there is no single daemon-id grammar to hold it to — so an odd-looking id survives,
+encoded and on this origin, until the page's `notificationTapTarget` finds no such paired machine; tighten `decodeMachineId`
+when the shell has one grammar for ids.
+
 It reuses an open app window when there is one, whichever worker controls it, and never a sign-in popup.
 
 Every push names a page, and the worker opens a page even when one does not:

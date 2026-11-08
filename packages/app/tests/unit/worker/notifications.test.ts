@@ -480,6 +480,23 @@ describe('notificationClickUrl (a tap reads back only what the worker wrote)', (
     }
   });
 
+  it('refuses a stored path the URL parse would rewrite, so a click judges what a push would have (dot segments, encoded or not)', () => {
+    for (const stored of [
+      '/d/%2e%2e/agenda',
+      '/d/%2E%2E/agenda',
+      '/d/%2e/agenda',
+      `/d/sha256%3Awork%2Fone/%2e%2e/%2e%2e/d/other`,
+      `/d/sha256%3Awork%2Fone/./ferrets/f1/chat`,
+      `/d/sha256%3Awork%2Fone\\ferrets/f1/chat`,
+      `${ORIGIN}/d/%2e%2e/agenda`,
+    ]) {
+      expect(notificationClickUrl(stored, ORIGIN, WORK)).toBe(APP);
+      expect(notificationClickUrl(stored, ORIGIN, null)).toBe(APP);
+    }
+    // The same machine-relative page, written plainly, is still read.
+    expect(notificationClickUrl('/agenda', ORIGIN, WORK)).toBe(`${HOME}/agenda`);
+  });
+
   it('resolves a relative address a page stored against this site', () => {
     expect(notificationClickUrl('/d/sha256%3Awork%2Fone/ferrets/f1/chat?ask=A3', ORIGIN, WORK)).toBe(
       `${HOME}/ferrets/f1/chat?ask=A3`,
