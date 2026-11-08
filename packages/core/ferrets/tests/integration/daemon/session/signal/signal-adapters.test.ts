@@ -454,3 +454,55 @@ describe('the signal terminal', () => {
     ]);
   });
 });
+
+describe('the storage signal repository when the storage itself fails', () => {
+  it('should raise a storage failure on a read instead of reading it as an absent session', async () => {
+    // Arrange: only a document the schema refuses is "no target"; a disk that cannot answer is a fault the caller must see.
+    const { opened } = await openStorage();
+    const failing = {
+      readConfig: async () => {
+        throw new Error('the state home is unreachable');
+      },
+      readState: async () => undefined,
+    } as unknown as typeof opened.storage;
+
+    // Act
+    const failure = await new StorageSignalRepository(failing, clock).read(ID).catch((error: unknown) => error);
+
+    // Assert
+    should((failure as Error).message).equal('the state home is unreachable');
+    await opened.storage.close();
+  });
+
+  it('should raise a storage failure while reading a transition back instead of calling the session unreadable', async () => {
+    // Arrange: the state is written and the journal entry appended, then the configuration read fails for a reason that is not a refusal.
+    const { opened } = await openStorage();
+    plantDocument(opened.folder, FerretConfigFile, ID, config({ mode: 'batch' }));
+    await opened.storage.writeState(ID, { id: 'session-1', turn: 0, status: 'running' });
+    const storage = opened.storage as unknown as {
+      append: (...args: unknown[]) => Promise<unknown>;
+      readConfig: (id: SessionId) => Promise<unknown>;
+    };
+    const append = storage.append.bind(storage);
+    const readConfig = storage.readConfig.bind(storage);
+    let appended = false;
+    storage.append = async (...args: unknown[]) => {
+      const written = await append(...args);
+      appended = true;
+      return written;
+    };
+    storage.readConfig = async (id: SessionId) => {
+      if (appended) throw new Error('the state home went away');
+      return await readConfig(id);
+    };
+
+    // Act
+    const failure = await new StorageSignalRepository(opened.storage, clock)
+      .transition(ID, { event: 'session.completed', status: 'completed' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should((failure as Error).message).equal('the state home went away');
+    await opened.storage.close();
+  });
+});
