@@ -398,7 +398,12 @@ export type RootName =
   | 'imports'
   | 'downloads'
   /** Logins' own sign-in material (`state/logins/credentials`): Logins alone, even if another plugin declares it. */
-  | 'credentials';
+  | 'credentials'
+  /**
+   * Ferrets' per-ferret session folders (`state/ferrets/sessions/<ferret>`, the plaintext session credential file
+   * among them): Ferrets alone, even if another plugin declares it.
+   */
+  | 'sessions';
 
 /** `RootHandle.copyTree`: what to bring, and how. */
 export interface TreeCopyOptions {
@@ -501,6 +506,12 @@ export interface RootDurableHeld extends RootDurableRead {
  */
 export interface RootHandle {
   readonly name: RootName;
+  /**
+   * `true` for a root the kernel makes under the home (`agent-homes`, `downloads`, `credentials`, `sessions`), `false`
+   * for an owner's root (`work`, `imports`, `harness-history`) or one outside the home (`worktrees`). A consumer that
+   * must never sit on an owner's folder asserts it.
+   */
+  readonly internal: boolean;
   resolve(relative: string): Result<FencedPath, FolderRefusal>;
   readText(path: FencedPath, limitBytes?: number): Promise<string>;
   /**
@@ -889,6 +900,17 @@ export type CgroupFile =
  * and no method takes a free path. Each throws as the read it replaces did (a vanished process, a missing file), so
  * a caller keeps its own catch.
  */
+/**
+ * Whether a daemon a test booted must refuse to launch a real harness, and where it looks for one. The kernel decides
+ * `active` ONCE at boot (`FERRETRY_TEST=1`, or the home's real path under `os.tmpdir()`, `/tmp` or `/var/folders`)
+ * and hands the daemon's `PATH`; no plugin reads the environment.
+ */
+export interface HostLaunchGuard {
+  readonly active: boolean;
+  /** The daemon's `PATH`; absent when it has none. */
+  readonly searchPath?: string;
+}
+
 export interface HostFactsPort {
   /** `process.platform`. */
   readonly platform: string;
@@ -921,6 +943,8 @@ export interface HostFactsPort {
    * disk's `queue/scheduler`): the device's name and the file's text.
    */
   blockScheduler(major: number, minor: number): Promise<{ readonly device: string; readonly scheduler: string }>;
+  /** The launch-guard fact (see {@link HostLaunchGuard}); like every host fact, refused to a plugin without `permissions.hostFacts`. */
+  launchGuard(): HostLaunchGuard;
 }
 
 /** What the running daemon executable is (today's update install facts seams). */

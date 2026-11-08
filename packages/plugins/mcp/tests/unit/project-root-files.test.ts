@@ -49,6 +49,7 @@ function kernelRoot(
     };
   return {
     name: 'imports',
+    internal: false,
     resolve: relative => {
       calls.push(`resolve:${relative}`);
       return ok((relative === '' ? base : `${base}/${relative}`) as FencedPath);

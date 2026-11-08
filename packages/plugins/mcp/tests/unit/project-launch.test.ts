@@ -91,6 +91,7 @@ function kernelRoots(
       };
       return {
         name: name as RootHandle['name'],
+        internal: false,
         resolve: relative => ok((relative === '' ? base : `${base}/${relative}`) as FencedPath),
         stat: async path => {
           const text = at(path);

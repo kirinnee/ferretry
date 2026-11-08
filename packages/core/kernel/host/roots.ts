@@ -41,13 +41,14 @@ import {
   same,
   within,
 } from './fence-guard.ts';
+import { isInternalRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports']);
 const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports']);
 /** Internal roots only one plugin may have, whatever another manifest declares. */
-const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins' };
+const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins', sessions: 'ferrets' };
 const DEFAULT_COPY_ENTRIES = 10_000;
 const windowOk = (offset: number, length: number): boolean =>
   Number.isSafeInteger(offset) &&
@@ -1087,6 +1088,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
   };
   const handle: RootHandle = {
     name,
+    internal: isInternalRoot(name),
     resolve: relativePath => {
       const root = base();
       if (root === undefined) return err(name === 'work' ? 'unknown_ferret' : 'outside');
@@ -1234,18 +1236,11 @@ function rootHandle(setup: HandleSetup): RootHandle {
 
 /**
  * The one place the base of an internal root under the home is named: `<home>/state/<plugin>/<name>` for the roots
- * the kernel makes (`agent-homes`, `downloads`, `credentials`), nothing for any other root. Both the folder the kernel
+ * the kernel makes (`agent-homes`, `downloads`, `credentials`, `sessions`), nothing for any other root. Both the folder the kernel
  * makes at boot and the base the roots port serves are this fact.
  */
 function internalRootBase(home: string, plugin: string, name: RootName): string | undefined {
-  switch (name) {
-    case 'agent-homes':
-    case 'downloads':
-    case 'credentials':
-      return `${home}/state/${plugin}/${name}`;
-    default:
-      return undefined;
-  }
+  return isInternalRoot(name) ? `${home}/state/${plugin}/${name}` : undefined;
 }
 
 /** One declared internal root whose base the kernel would not make or accept, and why. */
@@ -1263,7 +1258,7 @@ function errnoCode(error: unknown): string | undefined {
 }
 
 /**
- * Makes the base of every internal root a plugin DECLARED under the home (`state/<plugin>/agent-homes`, `downloads`,
+ * Makes the base of every internal root a plugin DECLARED under the home (`state/<plugin>/agent-homes`, `downloads`, `sessions`,
  * `credentials`), `0700`, before the plugin is built, so a fresh `FY_HOME` serves its first use. A root outside the
  * home (`worktrees`) and an owner's root are never made here. Each missing folder is made through its checked,
  * no-follow-opened parent ({@link ensureScopedBase}); each folder already there — from the home down to the base —
@@ -1365,7 +1360,8 @@ export function rootsPortFor(
       })();
       const base = (): string | undefined => {
         switch (name) {
-          case 'agent-homes': {
+          case 'agent-homes':
+          case 'sessions': {
             const below = internalSubfolder();
             return below === undefined || internal === undefined
               ? undefined
@@ -1390,7 +1386,10 @@ export function rootsPortFor(
         if (name !== 'work' || scope?.ferret === undefined) return undefined;
         return workFolders()?.check(scope.ferret, path) ?? err('unknown_ferret');
       };
-      const scopedParent = name === 'agent-homes' && subfolder !== undefined && subfolder !== '' ? internal : undefined;
+      const scopedParent =
+        (name === 'agent-homes' || name === 'sessions') && subfolder !== undefined && subfolder !== ''
+          ? internal
+          : undefined;
       return rootHandle({
         fs,
         home,

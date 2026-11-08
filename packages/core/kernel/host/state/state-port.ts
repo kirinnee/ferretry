@@ -13,6 +13,7 @@ import {
 import { StoreDamagedError, UndeclaredStateFileError } from './errors.ts';
 import { encodeDocument, stateLabel } from './format.ts';
 import type { HostFs } from './host-fs.ts';
+import { isInternalRootFolder } from '../internal-roots.ts';
 import { assertRecordSize } from './jsonl-scan.ts';
 import { readBytesFile, readJsonDocument, readJsonlLines, readJsonlRecords } from './readers.ts';
 import { KeyedSerialExecutor } from './serial-executor.ts';
@@ -375,6 +376,8 @@ export async function listCollection(fs: HostFs, root: string, def: StateFileDef
   const nested = after.includes('/');
   const names: string[] = [];
   for (const entry of await fs.list(folder)) {
+    // A root's base the kernel made inside the plugin's own state folder (`sessions/`) is not one of its names.
+    if (folder === root && isInternalRootFolder(entry.name)) continue;
     if (entry.name.startsWith('.') && !prefix.startsWith('.')) continue;
     if (!entry.name.startsWith(prefix)) continue;
     if (nested) {

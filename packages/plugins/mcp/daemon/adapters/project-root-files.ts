@@ -73,6 +73,7 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
   };
   return {
     name: handle.name,
+    internal: handle.internal,
     resolve: (relative: string): Result<FencedPath, FolderRefusal> => {
       if (relative !== PROJECT_MCP_FILE) return err('outside');
       const resolved = handle.resolve(PROJECT_MCP_FILE);

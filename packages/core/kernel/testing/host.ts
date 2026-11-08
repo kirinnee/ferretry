@@ -1,5 +1,6 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
+import { isInternalRoot } from '../host/internal-roots.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
@@ -683,6 +684,7 @@ async function start(world: World): Promise<TestHost> {
       });
       const handle: RootHandle = {
         name,
+        internal: isInternalRoot(name),
         resolve(relative) {
           if (relative.startsWith('/') || relative.split('/').includes('..')) return { ok: false, error: 'outside' };
           return { ok: true, value: `/${name}/${relative}` as never };
