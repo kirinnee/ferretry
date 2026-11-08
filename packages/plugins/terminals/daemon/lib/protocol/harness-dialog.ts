@@ -17,7 +17,7 @@ import { HarnessSchema } from './harness.ts';
  */
 
 /** Which dialog it is. `other` is any screen of the same shape this list does not name. */
-export const HarnessDialogKindSchema = z.enum([
+const HarnessDialogKindSchema = z.enum([
   /** Codex: hooks it has not been told to trust ("1 hook is new or changed"). */
   'hooks-review',
   /** Codex: the hook list "Review hooks" opens. Esc closes it and the session goes on. */
@@ -38,7 +38,7 @@ export const HarnessDialogKindSchema = z.enum([
 ]);
 export type HarnessDialogKind = z.infer<typeof HarnessDialogKindSchema>;
 
-export const HarnessDialogOptionSchema = z.strictObject({
+const HarnessDialogOptionSchema = z.strictObject({
   /** Its position in the list, from 1 — the harness's own digit where it draws one. */
   number: z.number().int().min(1).max(9),
   /** The choice in the harness's own words. */
@@ -51,7 +51,7 @@ export const HarnessDialogOptionSchema = z.strictObject({
 export type HarnessDialogOption = z.infer<typeof HarnessDialogOptionSchema>;
 
 /** The dialog's identity: a digest of everything a person decides on, so a changed dialog is a new id. */
-export const HarnessDialogIdSchema = z.string().regex(/^[0-9a-f]{16}$/u);
+const HarnessDialogIdSchema = z.string().regex(/^[0-9a-f]{16}$/u);
 
 export const HarnessDialogSchema = z
   .strictObject({
@@ -81,24 +81,3 @@ export const HarnessDialogSchema = z
     message: 'a dialog offers a way out: an option or Esc',
   });
 export type HarnessDialog = z.infer<typeof HarnessDialogSchema>;
-
-/** One answer: pick a numbered option, or press the Esc the footer offers. */
-export const HarnessDialogAnswerRequestSchema = z.discriminatedUnion('kind', [
-  z.strictObject({
-    kind: z.literal('choice'),
-    dialogId: HarnessDialogIdSchema,
-    number: z.number().int().min(1).max(9),
-  }),
-  z.strictObject({ kind: z.literal('escape'), dialogId: HarnessDialogIdSchema }),
-]);
-export type HarnessDialogAnswerRequest = z.infer<typeof HarnessDialogAnswerRequestSchema>;
-
-/**
- * What answering did. `cleared` is the pane's own word, read after the keys landed: the dialog the
- * person answered is no longer on screen. `false` means it is still up — say so; never send again.
- */
-export const HarnessDialogAnswerResultSchema = z.strictObject({
-  dialogId: HarnessDialogIdSchema,
-  cleared: z.boolean(),
-});
-export type HarnessDialogAnswerResult = z.infer<typeof HarnessDialogAnswerResultSchema>;

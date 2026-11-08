@@ -1,7 +1,7 @@
 import type { Instant } from '@ferretry/std';
 import type { BrowserLoginConnection, BrowserLoginState } from '../../../contract/wire/login.ts';
 import type { BrowserLoginStatus } from '../../../contract/index.ts';
-import type { BrowserProfileLease, BrowserProfilePort } from './profile.ts';
+import type { BrowserProfileLease } from './profile.ts';
 
 /**
  * The login window's status IS the wire contract — it is what the daemon answers
@@ -31,9 +31,4 @@ export interface BrowserLoginWindow {
   readonly password: string;
   readonly openedAt: Instant;
   readonly expiresAt: Instant;
-}
-
-export interface BrowserLoginDependencies {
-  readonly profile: BrowserProfilePort;
-  readonly closeAgentBrowsers: () => Promise<void>;
 }

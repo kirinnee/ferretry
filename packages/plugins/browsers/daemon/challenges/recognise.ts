@@ -2,7 +2,7 @@ import type { PageFacts } from '@ferretry/core-vault/contract';
 
 /** A challenge a page shows, as the card and the view name it (`PageFacts.challenge`). */
 export type BrowserChallenge = NonNullable<PageFacts['challenge']>;
-export type BrowserChallengeProvider = BrowserChallenge['provider'];
+type BrowserChallengeProvider = BrowserChallenge['provider'];
 
 /**
  * Whether a page appears to be asking the person on it to prove they are human — so the view can say so

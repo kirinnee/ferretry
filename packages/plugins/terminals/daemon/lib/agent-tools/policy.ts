@@ -8,10 +8,10 @@ import type { SurfaceKind } from '../protocol/surface-control.ts';
  */
 
 /** The longest output one answer carries (today's `AGENT_TOOL_MAX_OUTPUT_CHARS`). */
-export const AGENT_TOOL_MAX_OUTPUT_CHARS = 65_536;
+const AGENT_TOOL_MAX_OUTPUT_CHARS = 65_536;
 
 /** The bytes each named key sends — what a terminal receives when the key is pressed. */
-export const TERMINAL_KEY_BYTES: Readonly<Record<TerminalKey, string>> = {
+const TERMINAL_KEY_BYTES: Readonly<Record<TerminalKey, string>> = {
   enter: '\r',
   tab: '\t',
   escape: '\u001b',

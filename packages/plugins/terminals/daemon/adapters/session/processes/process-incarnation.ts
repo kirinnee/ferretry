@@ -7,7 +7,7 @@ import {
 } from '../../../lib/protocol/process-incarnation.ts';
 
 /** Linux: the kernel's start time in clock ticks, exact per incarnation. */
-export class ProcStatProcessIncarnation implements ProcessIncarnation {
+class ProcStatProcessIncarnation implements ProcessIncarnation {
   constructor(private readonly procRoot = '/proc') {}
 
   async startOf(pid: number): Promise<number | undefined> {
@@ -27,7 +27,7 @@ export class ProcStatProcessIncarnation implements ProcessIncarnation {
  * that second — and the reaper also requires the tmux pane id, which one server never reuses. `ps`
  * is named by absolute path so a daemon's minimal `PATH` can neither miss it nor be handed another.
  */
-export class PsProcessIncarnation implements ProcessIncarnation {
+class PsProcessIncarnation implements ProcessIncarnation {
   constructor(
     private readonly spawn: SpawnPort,
     private readonly psExecutable = 'ps',
@@ -47,7 +47,7 @@ export class PsProcessIncarnation implements ProcessIncarnation {
 }
 
 /** Any other platform: sessions refuse to start, saying why, rather than registering an unprovable pane. */
-export class UnsupportedProcessIncarnation implements ProcessIncarnation {
+class UnsupportedProcessIncarnation implements ProcessIncarnation {
   constructor(private readonly platform: string) {}
 
   async startOf(): Promise<number | undefined> {

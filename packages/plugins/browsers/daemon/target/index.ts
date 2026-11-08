@@ -27,22 +27,8 @@ import { TypedIdentities } from './sign-in/identities.ts';
 import type { BrowserSignInWatch } from './sign-in/watch.ts';
 import { type PageToolDeps, pageInputTools } from './tools/index.ts';
 
-export type { PageInputHost } from './adapter.ts';
-export { PageInputTarget, throwawayValue } from './adapter.ts';
-export type { BrowserSignInWatch, SignInAct } from './sign-in/watch.ts';
-export { NON_TYPING_KEYS, pageActLeavesSignIn, toolbarActLeavesSignIn } from './sign-in/watch.ts';
-export { TYPED_IDENTITY_TTL_MS, TypedIdentities } from './sign-in/identities.ts';
-export type {
-  ActedPage,
-  ActNote,
-  PageActs,
-  PageApprovals,
-  PageCaller,
-  PageInputAction,
-  PageInputOutcome,
-  PageToolHost,
-  ResolvedPage,
-} from './tools/index.ts';
+export { TypedIdentities } from './sign-in/identities.ts';
+export type { PageCaller, PageInputAction, PageInputOutcome, PageToolHost, ResolvedPage } from './tools/index.ts';
 
 /** What the page target is built from. */
 export interface PageTargetDeps extends Omit<PageToolDeps, 'kernel' | 'identities'> {

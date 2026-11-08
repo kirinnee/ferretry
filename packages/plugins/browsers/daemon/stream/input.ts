@@ -3,16 +3,16 @@ import { type BrowserInputEvent, BrowserInputEventSchema } from '../../contract/
 /** The key variant, named once so the release policy below can talk about it. */
 export type BrowserKeyInput = Extract<BrowserInputEvent, { kind: 'key' }>;
 
-export const MAX_KEY_NAME_CHARS = 128;
-export const MAX_KEY_TEXT_CHARS = 16;
-export const MAX_INSERT_TEXT_CHARS = 200_000;
-export const MAX_MOUSE_BUTTON_MASK = 31;
-export const MAX_CLICK_COUNT = 3;
-export const MAX_WHEEL_DELTA = 10_000;
-export const MAX_INPUT_MODIFIERS = 15;
-export const MAX_VIRTUAL_KEY_CODE = 0xffff;
+const MAX_KEY_NAME_CHARS = 128;
+const MAX_KEY_TEXT_CHARS = 16;
+const MAX_INSERT_TEXT_CHARS = 200_000;
+const MAX_MOUSE_BUTTON_MASK = 31;
+const MAX_CLICK_COUNT = 3;
+const MAX_WHEEL_DELTA = 10_000;
+const MAX_INPUT_MODIFIERS = 15;
+const MAX_VIRTUAL_KEY_CODE = 0xffff;
 /** Pointer coordinates are viewport-relative; anything past this is a malformed client, not a click. */
-export const MAX_COORDINATE = 1_000_000;
+const MAX_COORDINATE = 1_000_000;
 
 export type BrowserInputResult =
   | { readonly ok: true; readonly value: BrowserInputEvent }

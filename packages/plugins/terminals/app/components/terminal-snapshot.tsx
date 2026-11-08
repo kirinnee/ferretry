@@ -42,7 +42,7 @@ const PANE_PADDING_X_PX = 24;
 
 const POLL_MS = 3_000;
 
-/** The daemon read, injected so tests and the visual harness never open a socket. */
+/** The daemon read, injected so tests and the visual harness never open a socket. @pending terminals: GAP(app): app/components/terminal-snapshot.tsx and app/components/terminal-snapshot-model.ts (S-0270), app/features/workspace/phone/terminal-key-bar.tsx, app/features/workspace/phone/terminal-keys.ts and app/lib/session-processes.ts are ported and tested but no surface mounts them until the app wiring (kaizen) lands */
 export type PaneSnapshotReader = (daemon: DaemonConnection, scope: DaemonSessionScope) => Promise<string>;
 
 export interface TerminalSnapshotViewProps {

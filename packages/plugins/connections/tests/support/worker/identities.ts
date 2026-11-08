@@ -4,7 +4,7 @@ import type { DaemonIdentity, SessionCrypto } from '../../../worker/src/lib/inde
 /** One adapter for every test, because the protocol is only ever proved against real primitives. */
 export const relayCrypto = new WebCryptoSessionCrypto();
 
-export function toPem(der: ArrayBuffer): string {
+function toPem(der: ArrayBuffer): string {
   const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
   const lines = base64.match(/.{1,64}/gu) ?? [];
   return ['-----BEGIN PRIVATE KEY-----', ...lines, '-----END PRIVATE KEY-----', ''].join('\n');

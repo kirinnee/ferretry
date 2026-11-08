@@ -49,7 +49,7 @@ export interface CallInit {
 }
 
 /** One admitted call: the raw path params, the query and the body text. */
-export function call(init: CallInit = {}): CallContext {
+function call(init: CallInit = {}): CallContext {
   const body = init.body ?? '';
   return {
     request: {

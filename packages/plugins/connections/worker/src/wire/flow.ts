@@ -1,4 +1,4 @@
-/** Mirror of packages/core/kernel/host/session/wire/flow.ts, byte-copied; replace with kernel export when approved. */
+/** The subset of kernel packages/core/kernel/host/session/wire/flow.ts the relay worker uses; replace with a kernel export when approved. */
 /**
  * Backpressure, as a fixed window that cannot be argued upwards.
  *
@@ -38,33 +38,4 @@ export function grantCredit(window: SendWindow, frames: number): SendWindow {
   if (!Number.isSafeInteger(frames) || frames <= 0) return window;
   const ceiling = window.sent + CREDIT_WINDOW_FRAMES;
   return { ...window, allowed: Math.min(window.allowed + frames, ceiling) };
-}
-
-/** What a receiver owes its peer: frames consumed but not yet credited back. */
-export interface ReceiveWindow {
-  readonly consumed: number;
-  readonly credited: number;
-}
-
-export function newReceiveWindow(): ReceiveWindow {
-  return { consumed: 0, credited: 0 };
-}
-
-export function recordConsumed(window: ReceiveWindow): ReceiveWindow {
-  return { ...window, consumed: window.consumed + 1 };
-}
-
-/**
- * How much credit to return now, or zero to stay quiet.
- *
- * Credit is returned in batches of half a window. Returning one credit per frame would double the
- * frame count on the wire for no gain; waiting for the whole window would stall the sender.
- */
-export function creditToReturn(window: ReceiveWindow): number {
-  const owed = window.consumed - window.credited;
-  return owed >= Math.floor(CREDIT_WINDOW_FRAMES / 2) ? owed : 0;
-}
-
-export function recordCredited(window: ReceiveWindow, frames: number): ReceiveWindow {
-  return { ...window, credited: window.credited + frames };
 }

@@ -50,7 +50,7 @@ function ipv6GroupsOf(half: string): readonly number[] | undefined {
   return groups.some(Number.isNaN) ? undefined : groups;
 }
 
-export function isWildcardHost(host: string): boolean {
+function isWildcardHost(host: string): boolean {
   const bare = bareHost(host);
   if (bare === WILDCARD_BIND_HOST) return true;
   const groups = ipv6Groups(bare);
@@ -58,7 +58,7 @@ export function isWildcardHost(host: string): boolean {
   return groups.every(group => group === 0);
 }
 
-export function daemonAddress(host: string, port: number): string {
+function daemonAddress(host: string, port: number): string {
   const authorityHost = host.startsWith('[') && host.endsWith(']') ? host : host.includes(':') ? `[${host}]` : host;
   return `http://${authorityHost}:${String(port)}`;
 }

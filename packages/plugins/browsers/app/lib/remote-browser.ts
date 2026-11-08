@@ -43,7 +43,7 @@ export interface RemoteBrowserFrame {
 export type RemoteViewportMode = 'responsive' | 'desktop';
 
 /** The route of one session's browser: its status on GET, an action on POST. */
-export const SESSION_BROWSER_ROUTES = {
+const SESSION_BROWSER_ROUTES = {
   status: 'GET /v1/sessions/:sessionId/browser',
   act: 'POST /v1/sessions/:sessionId/browser',
   stream: 'GET /v1/sessions/:sessionId/browser/stream',
@@ -58,7 +58,7 @@ const assertScopeDaemon = (daemon: BrowserDaemon, scope: BrowserSessionScope): v
 };
 
 /** A session id the daemon answered for another session is a crossed response, not a state to show. */
-export class CrossedBrowserAnswerError extends Error {
+class CrossedBrowserAnswerError extends Error {
   constructor() {
     super('daemon returned another session');
     this.name = 'CrossedBrowserAnswerError';
@@ -71,13 +71,13 @@ export class CrossedBrowserAnswerError extends Error {
  * caller can act on it — a slow or crossed response must not publish another
  * session's state.
  */
-export const parseBrowserStatus = (scope: BrowserSessionScope, body: unknown): BrowserStatus => {
+const parseBrowserStatus = (scope: BrowserSessionScope, body: unknown): BrowserStatus => {
   const status = BrowserStatusSchema.parse(body);
   if (status.sessionId !== scope.sessionId) throw new CrossedBrowserAnswerError();
   return status;
 };
 
-export const parseBrowserActionResult = (scope: BrowserSessionScope, body: unknown): BrowserActionResult => {
+const parseBrowserActionResult = (scope: BrowserSessionScope, body: unknown): BrowserActionResult => {
   const result = BrowserActionResultSchema.parse(body);
   if (result.status.sessionId !== scope.sessionId) throw new CrossedBrowserAnswerError();
   return result;

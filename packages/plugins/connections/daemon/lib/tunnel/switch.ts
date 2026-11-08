@@ -45,7 +45,7 @@ export interface TunnelEntryStorePort {
 }
 
 /** What the `/v1/tunnel` routes ask. */
-export interface TunnelSwitchPort {
+interface TunnelSwitchPort {
   view(): TunnelStatusView;
   change(enabled: boolean): Promise<TunnelStatusView>;
 }

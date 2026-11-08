@@ -41,7 +41,7 @@ import { PaneDeliveryError, PaneNotReadyError, PaneStrandedError, TmuxPaneDelive
  */
 
 /** tmux session names for ferrets (today's `tmuxSessionPrefix` and `maxTmuxSessionNameLength`). */
-export const FERRET_TMUX_PREFIX = 'fy-';
+const FERRET_TMUX_PREFIX = 'fy-';
 const MAX_TMUX_SESSION_NAME_LENGTH = 80;
 
 /** A pane id as tmux prints one. */
@@ -66,7 +66,7 @@ interface PaneFacts {
   readonly cursorRow?: number;
 }
 
-export function parsePaneFacts(line: string): PaneFacts | undefined {
+function parsePaneFacts(line: string): PaneFacts | undefined {
   const [paneId = '', pid = '', dead = '', session = '', created = '', command, cursorRow] = line.trim().split('|');
   if (!PANE_ID.test(paneId) || session === '') return undefined;
   const process = Number(pid);
@@ -83,7 +83,7 @@ export function parsePaneFacts(line: string): PaneFacts | undefined {
 }
 
 /** Whether a tmux session is a ferret's: `fy-…`, and not one of Terminals' own shells (`fy-webterm-…`). */
-export function isFerretSession(session: string): boolean {
+function isFerretSession(session: string): boolean {
   return session.startsWith(FERRET_TMUX_PREFIX) && !session.startsWith(TERMINAL_TMUX_PREFIX);
 }
 

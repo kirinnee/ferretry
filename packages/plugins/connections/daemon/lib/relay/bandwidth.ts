@@ -10,7 +10,7 @@ export const HOSTED_RELAY_BANDWIDTH_REASONS = {
     day: 'hosted relay global daily bandwidth ceiling is reached',
   },
 } as const;
-export const HOSTED_RELAY_RESETS_MARK = '; resets ' as const;
+const HOSTED_RELAY_RESETS_MARK = '; resets ' as const;
 
 /**
  * A byte-ceiling refusal reason with its reset instant. The longest is 91 characters, inside the
@@ -21,7 +21,7 @@ export function hostedBandwidthReason(reason: string, retryAt: number): string {
 }
 
 /** What a `4433` reason says: whose allowance ran out, and over which window. */
-export interface HostedBandwidthRefusalReason {
+interface HostedBandwidthRefusalReason {
   readonly scope: 'daemon' | 'global';
   readonly window: 'minute' | 'day';
   /** The reset instant the relay carried, or `null` when it carried none or one that does not parse. */
@@ -37,7 +37,7 @@ export interface HostedBandwidthRefusal extends HostedBandwidthRefusalReason {
  * Read a `4433` reason without a clock, or `null` for one that is not a byte-ceiling refusal. A relay
  * deployed before the reset was carried says only the bare sentence, so `resetsAt` may be `null`.
  */
-export function readHostedBandwidthRefusal(reason: string): HostedBandwidthRefusalReason | null {
+function readHostedBandwidthRefusal(reason: string): HostedBandwidthRefusalReason | null {
   for (const scope of ['daemon', 'global'] as const) {
     for (const window of ['minute', 'day'] as const) {
       const sentence = HOSTED_RELAY_BANDWIDTH_REASONS[scope][window];

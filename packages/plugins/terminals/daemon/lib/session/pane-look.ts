@@ -49,7 +49,7 @@ export type PaneProcessObservation =
   | { readonly kind: 'unobservable'; readonly reason: string };
 
 /** A process as one look saw it, with the start that, with its pid, is its identity. */
-export type ObservedPaneProcess = PaneProcess & { readonly start: number };
+type ObservedPaneProcess = PaneProcess & { readonly start: number };
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -94,7 +94,10 @@ export class PaneLook {
   /** One liveness look: the masked screen and the process tree, each total. Never throws. */
   async liveness(ferret: string): Promise<LivenessSample> {
     const observed = await this.processes(ferret).catch(
-      (error): PaneProcessObservation => ({ kind: 'unobservable', reason: message(error) }),
+      (error): PaneProcessObservation => ({
+        kind: 'unobservable',
+        reason: message(error),
+      }),
     );
     // The SCREEN, not the scrollback: the work counters and background-terminal footer live on it, and any change to
     // the scrollback moves the screen too — at a fraction of the bytes per tick. Only a proved pane is read.
@@ -132,7 +135,10 @@ export class PaneLook {
   async still(ferret: string, browser: PaneBrowser): Promise<PaneBrowserStill> {
     if (!Number.isSafeInteger(browser.pid) || browser.pid <= 1) return { still: false, why: 'not-proved' };
     const observed = await this.processes(ferret).catch(
-      (error): PaneProcessObservation => ({ kind: 'unobservable', reason: message(error) }),
+      (error): PaneProcessObservation => ({
+        kind: 'unobservable',
+        reason: message(error),
+      }),
     );
     if (observed.kind === 'observed') {
       const view = classifyPaneProcesses(observed.processes);

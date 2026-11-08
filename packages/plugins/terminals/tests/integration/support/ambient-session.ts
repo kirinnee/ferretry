@@ -22,24 +22,6 @@ import { homedir, tmpdir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve, sep } from 'node:path';
 import { productName } from '../../../daemon/lib/cgroups/product.ts';
 
-/** What a pane's environment carries about the session and the daemon it belongs to. */
-export const AMBIENT_SESSION_VARIABLES = [
-  'FY_HOME',
-  'TMUX',
-  'TMUX_PANE',
-  'FY_SESSION_ID',
-  'FY_SESSION_MODE',
-  'FY_SESSION_TOKEN',
-  'FY_SESSION_BOARD_CAPABILITY',
-  'FY_MEDIA_DIR',
-  'FY_CREDENTIAL',
-  'FY_RUNTIME',
-  'FY_PACK',
-  'FY_PACK_ROUTING',
-  'FY_HYPERMEDIA',
-  'FY_LEARNING_PASSIVE',
-] as const;
-
 /**
  * The homes and sockets no test may touch, `PATH`-delimited. Its presence is also the mark that this
  * process tree has already been shed: `scripts/test/swept.sh` sets it before Bun starts, and a later
@@ -68,19 +50,13 @@ function strictlyWithin(base: string, path: string): boolean {
   return path !== base && within(base, path);
 }
 
-/** The socket a `TMUX` value names — `<socket>,<server pid>,<session index>` — when it names one. */
-export function tmuxSocketOf(value: string | undefined): string | undefined {
-  const socket = value?.split(',', 1)[0]?.trim();
-  return socket !== undefined && isAbsolute(socket) ? socket : undefined;
-}
-
 /** The state home a daemon on this account serves when nothing names another: `~/.<product>`. */
 function defaultStateHome(userHome: string): string | undefined {
   return isAbsolute(userHome) ? join(userHome, `.${productName}`) : undefined;
 }
 
 /** Every protected path this process knows of: what it inherited, and the account's default home. */
-export function protectedPaths(
+function protectedPaths(
   environment: Environment = process.env,
   userHome: string = process.env.FY_TEST_REAL_HOME ?? homedir(),
 ): readonly string[] {
@@ -90,39 +66,11 @@ export function protectedPaths(
 }
 
 /**
- * Removes the ambient session from `environment` once per process tree, and refuses a run whose
- * temporary directory lies inside a protected path. Idempotent: only the first call in a tree sheds.
- */
-export function shedAmbientSession(
-  environment: Environment = process.env,
-  userHome: string = process.env.FY_TEST_REAL_HOME ?? homedir(),
-  temporary: string = tmpdir(),
-): readonly string[] {
-  if (environment[PROTECTED_PATHS_VARIABLE] === undefined) {
-    const inherited = [environment.FY_HOME, tmuxSocketOf(environment.TMUX)].filter(
-      (path): path is string => path !== undefined && isAbsolute(path),
-    );
-    for (const name of AMBIENT_SESSION_VARIABLES) delete environment[name];
-    environment[PROTECTED_PATHS_VARIABLE] = inherited.join(delimiter);
-  }
-  const guarded = protectedPaths(environment, userHome);
-  const scratch = canonical(temporary);
-  for (const path of guarded) {
-    if (within(canonical(path), scratch))
-      throw new Error(
-        `refusing to run tests: the temporary directory ${scratch} lies inside ${path}, a real state home ` +
-          'or tmux socket — point TMPDIR somewhere disposable',
-      );
-  }
-  return guarded;
-}
-
-/**
  * Whether a teardown may kill what runs under `path`, or remove it: only a path strictly inside a
  * system temporary root (or this run's own temporary directory), and never one that is, holds, or lies
  * inside a protected home or socket. Throws, naming the path, rather than letting a fixture guess.
  */
-export function assertDisposable(
+function assertDisposable(
   path: string,
   what: string,
   environment: Environment = process.env,

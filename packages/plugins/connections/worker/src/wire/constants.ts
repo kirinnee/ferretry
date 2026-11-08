@@ -1,4 +1,4 @@
-/** Mirror of packages/core/kernel/host/session/wire/constants.ts, byte-copied; replace with kernel export when approved. */
+/** The subset of kernel packages/core/kernel/host/session/wire/constants.ts the relay worker uses; replace with a kernel export when approved. */
 /**
  * Every constant the wire format pins, in one place, because a reimplementation in another
  * language has to agree with all of them exactly.
@@ -10,19 +10,6 @@
 
 /** Wire identifier carried in the rendezvous claim so a peer can refuse an unknown dialect. */
 export const RELAY_PROTOCOL_ID = 'ferretry-relay/1' as const;
-
-/**
- * The END-TO-END dialect: the handshake and every sealed tunnel record carry this, never the claim.
- *
- * It moved to `/2` when the client started proving a device key, and the rendezvous identifier above
- * deliberately did NOT: nothing a relay parses changed, so no deployed relay has to be replaced and
- * none can tell the two dialects apart. A peer speaking the other end-to-end dialect is refused at the
- * handshake with `4426` — there is no negotiation and nothing older to fall back to.
- */
-export const SESSION_PROTOCOL_ID = 'ferretry-relay/2' as const;
-
-/** The end-to-end dialect a pre-device-key peer speaks, recognised only to refuse it in words. */
-export const PREVIOUS_SESSION_PROTOCOL_ID = 'ferretry-relay/1' as const;
 
 /** First byte of every frame. Not ASCII, so a text frame accidentally sent here fails loudly. */
 export const FRAME_MAGIC = 0xfe as const;
@@ -39,11 +26,8 @@ export const SESSION_ID_BYTES = 16 as const;
 /** Length of every challenge, hello and handshake nonce. */
 export const NONCE_BYTES = 32 as const;
 
-/** X25519 public keys and shared secrets, and the AEAD key derived from them. */
-export const X25519_PUBLIC_KEY_BYTES = 32 as const;
 export const SHARED_SECRET_BYTES = 32 as const;
-export const AEAD_KEY_BYTES = 32 as const;
-export const AEAD_NONCE_BYTES = 12 as const;
+
 export const AEAD_TAG_BYTES = 16 as const;
 
 /** Ed25519 material: a 44-byte SPKI encoding of the public key and a 64-byte signature. */
@@ -57,9 +41,6 @@ export const ED25519_SIGNATURE_BYTES = 64 as const;
  * everything a rendezvous can be holding for one session at once.
  */
 export const MAX_FRAME_BYTES = 65_536 as const;
-
-/** Largest plaintext one data frame can carry, after the header and the AEAD tag are paid for. */
-export const MAX_PLAINTEXT_BYTES = MAX_FRAME_BYTES - FRAME_HEADER_BYTES - AEAD_TAG_BYTES;
 
 /**
  * Frames a sender may have outstanding before the receiver grants more.
@@ -120,41 +101,8 @@ export const CONNECTION_RATE_WINDOW_SECONDS = 60 as const;
  */
 export const MAX_FRAME_SEQUENCE = 0xffff_ffff as const;
 
-/**
- * The sequence number of the handshake frame in each direction.
- *
- * Handshake frames are cleartext but they belong to the end-to-end stream, so they consume a
- * sequence number like anything else. One counter per direction across both kinds is what lets a
- * receiver notice that the frame it lost was the handshake rather than a record.
- */
-export const HANDSHAKE_FRAME_SEQUENCE = 0 as const;
-
 /** Signed by the daemon to prove it may claim a rendezvous under its own fingerprint. */
 export const CLAIM_SIGNATURE_LABEL = 'ferretry-relay-claim-v1' as const;
-
-/** Hashed over the handshake transcript both peers reconstruct independently. */
-export const HANDSHAKE_TRANSCRIPT_LABEL = 'ferretry-relay-handshake-v2' as const;
-
-/** Signed by the daemon over the handshake transcript hash, binding its identity to the ephemerals. */
-export const HANDSHAKE_SIGNATURE_LABEL = 'ferretry-relay-daemon-auth-v2' as const;
-
-/** HKDF info strings for the two directional record keys. */
-export const CLIENT_TO_DAEMON_KEY_LABEL = 'ferretry-relay-c2d-v2' as const;
-export const DAEMON_TO_CLIENT_KEY_LABEL = 'ferretry-relay-d2c-v2' as const;
-
-/**
- * Signed by the DEVICE key over a session's transcript hash, so the daemon learns which device holds
- * this channel. One label per act, so a proof made to open a session can never be presented as one
- * that registers a key or renews a lease.
- */
-export const DEVICE_AUTH_LABEL = 'ferretry-device-auth-v2' as const;
-export const DEVICE_PAIR_LABEL = 'ferretry-device-pair-v2' as const;
-export const DEVICE_RENEW_LABEL = 'ferretry-device-renew-v2' as const;
-/** Signed by the NEW key when a device replaces its key inside a session the old one opened. */
-export const DEVICE_ROTATE_LABEL = 'ferretry-device-rotate-v2' as const;
-
-/** Random bytes naming one running copy of the app; a step-up belongs to one of these. */
-export const APP_SESSION_BYTES = 16 as const;
 
 /**
  * What a daemon may ask a rendezvous for beyond `ferretry-relay/1`, and the query parameter it asks in.

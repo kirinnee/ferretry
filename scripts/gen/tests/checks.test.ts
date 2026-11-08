@@ -197,6 +197,37 @@ describe('ports-pending', () => {
     expect(found).toContain('pendingHalves alpha app was added; pendingHalves may only shrink');
     expect(found).not.toContain('pendingHalves catalogs app was added');
   });
+  test('pending only shrinks: a ruled id may re-enter only with a reason; any other new id fails', async () => {
+    const base = JSON.stringify({ format: 1, pending: ['alpha'], pendingHalves: { alpha: ALL } });
+    const stated = ws([{ id: 'alpha' }, { id: 'terminals' }], {
+      pending: ['alpha', 'terminals'],
+      pendingReasons: { terminals: ['GAP(ferrets): the tmux runner is not wired yet'] },
+      pendingHalves: { alpha: ALL, terminals: ALL },
+    });
+    stated.write('base.json', base);
+    const passing = messages(await run(portsPending, stated, { base: `file:${join(stated.root, 'base.json')}` }));
+    expect(passing).not.toContain('terminals was added');
+    expect(passing).not.toContain('terminals is back in "pending"');
+
+    const silent = ws([{ id: 'alpha' }, { id: 'usage' }], {
+      pending: ['alpha', 'usage'],
+      pendingHalves: { alpha: ALL, usage: ALL },
+    });
+    silent.write('base.json', base);
+    expect(messages(await run(portsPending, silent, { base: `file:${join(silent.root, 'base.json')}` }))).toContain(
+      'usage is back in "pending" by a one-time ruling but states no "pendingReasons" line',
+    );
+
+    const other = ws([{ id: 'alpha' }, { id: 'beta' }], {
+      pending: ['alpha', 'beta'],
+      pendingReasons: { beta: ['GAP(x): still open'] },
+      pendingHalves: { alpha: ALL, beta: ALL },
+    });
+    other.write('base.json', base);
+    expect(messages(await run(portsPending, other, { base: `file:${join(other.root, 'base.json')}` }))).toContain(
+      'beta was added; the list may only shrink',
+    );
+  });
   test('a shrinking list of skeletons passes', async () => {
     const f = ws([{ id: 'beta' }], { pending: ['beta'], pendingHalves: { beta: ALL } });
     f.write('base.json', JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: { beta: ALL } }));
