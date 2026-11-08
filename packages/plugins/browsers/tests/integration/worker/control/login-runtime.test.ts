@@ -156,6 +156,60 @@ describe('XvfbDisplay', () => {
     }
   });
 
+  it('should take the display even when the server error stream breaks, as a pipe closing with the child does', async () => {
+    // The default spawner drains stderr for the child's whole life; a pipe that breaks mid-drain is the normal end
+    // of that drain, never a failure of the display. The handle is scripted so the stream error is exact.
+    // Arrange
+    const root = await workspace();
+    const stream = (bytes: string | undefined): ReadableStream<Uint8Array> =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (bytes === undefined) {
+            controller.error(new Error('the stderr pipe broke'));
+            return;
+          }
+          controller.enqueue(new TextEncoder().encode(bytes));
+          controller.close();
+        },
+      });
+    const started: string[][] = [];
+    const subject = new XvfbDisplay({
+      processes: {
+        ...PROCESSES,
+        spawn: {
+          run: PROCESSES.spawn.run,
+          start: (program, args) => {
+            started.push([program, ...args]);
+            return {
+              pid: 88,
+              stdout: stream('41\n'),
+              stderr: stream(undefined),
+              write: () => undefined,
+              kill: () => undefined,
+              exited: running(),
+              pipes: [],
+              closePipes: () => undefined,
+            };
+          },
+        },
+      },
+      authorityDirectory: join(root, 'x11'),
+      executable: () => '/usr/bin/Xvfb',
+      pollIntervalMs: 1,
+    });
+
+    try {
+      // Act
+      const display = await subject.display();
+
+      // Assert
+      should(display).equal(':41');
+      should(started[0]?.[0]).equal('/usr/bin/Xvfb');
+    } finally {
+      await subject.close();
+    }
+  });
+
   it('should keep the cookie file private, encode it for the display it took, and remove it on close', async () => {
     // The script copies the file the moment the server starts, which is the only view of what the
     // SERVER was given: the placeholder entry must already hold the cookie the clients will present.

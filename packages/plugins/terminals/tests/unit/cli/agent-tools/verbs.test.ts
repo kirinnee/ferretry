@@ -221,3 +221,73 @@ describe('TerminalVerbs as the ferret itself', () => {
     should(tools).deepEqual([]);
   });
 });
+
+describe('TerminalVerbs on mistyped words', () => {
+  const noName: [string, string][] = [
+    ['open', 'open needs a name: a lowercase letter, then letters, digits or dashes'],
+    ['send', 'send needs the terminal’s name or id'],
+    ['read', 'read needs the terminal’s name or id'],
+    ['wait', 'wait needs the terminal’s name or id'],
+    ['close', 'close needs the terminal’s name or id'],
+    ['ask', 'ask needs the terminal’s name or id'],
+  ];
+  for (const [verb, sentence] of noName)
+    it(`should refuse ${verb} without a terminal, sending nothing`, async () => {
+      const { sut, calls, io } = harness();
+      const code = await (sut as unknown as Record<string, (i: ReturnType<typeof invocation>) => Promise<number>>)[
+        verb
+      ]!(invocation([], { ferret: 'f-1', text: 'x' }));
+      should(code).equal(2);
+      should(calls).deepEqual([]);
+      should(io.errors).deepEqual([`${sentence}\n`]);
+    });
+
+  it('should refuse a wait timeout outside what the daemon can hold', async () => {
+    const { sut, calls, io } = harness();
+    should(await sut.wait(invocation(['dev'], { ferret: 'f-1', text: 'x', timeout: '50' }))).equal(2);
+    should(await sut.wait(invocation(['dev'], { ferret: 'f-1', text: 'x', timeout: '999999' }))).equal(2);
+    should(calls).deepEqual([]);
+    should(io.errors[0]).match(/--timeout must be between 100 and 120000 milliseconds/u);
+  });
+
+  it('should open with a bare --ask as a switch, and with no folder or command', async () => {
+    const { sut, calls } = harness();
+    should(await sut.open(invocation(['dev'], { ferret: 'f-1', ask: true }))).equal(0);
+    should(calls[0]?.body).deepEqual({ tool: 'terminal_open', name: 'dev', askOwner: true });
+  });
+});
+
+describe('TerminalVerbs on who holds a terminal', () => {
+  const VIEW = {
+    sessionId: 'f-1',
+    driving: [],
+    takeovers: [],
+    handed: [],
+    opened: [],
+    asked: [],
+  };
+
+  it('should show who drives or holds what for a named ferret', async () => {
+    const { sut, calls, io } = harness(() => VIEW);
+    should(await sut.control(invocation([], { ferret: 'f-1' }))).equal(0);
+    should(calls[0]?.route).equal('GET /v1/ferrets/:ferretId/surfaces/terminals/control');
+    should(io.printed).deepEqual(['no ferret is driving a terminal in f-1, and none is taken over\n']);
+  });
+
+  it('should refuse to show it without a named ferret', async () => {
+    const { sut, calls, io } = harness(() => VIEW);
+    should(await sut.control(invocation([]))).equal(2);
+    should(calls).deepEqual([]);
+    should(io.errors[0]).match(/pass --ferret <id>/u);
+  });
+
+  it('should hand a terminal back or over, and refuse either without a terminal', async () => {
+    const { sut, calls } = harness(() => VIEW);
+    should(await sut.handback(invocation(['dev'], { ferret: 'f-1' }))).equal(0);
+    should(await sut.handover(invocation(['dev'], { ferret: 'f-1' }))).equal(0);
+    should(calls.map(call => (call.body as { action: string }).action)).deepEqual(['handback', 'handover']);
+    const none = harness(() => VIEW);
+    should(await none.sut.handback(invocation([], { ferret: 'f-1' }))).equal(2);
+    should(none.io.errors).deepEqual(['handback needs the terminal’s name or id\n']);
+  });
+});

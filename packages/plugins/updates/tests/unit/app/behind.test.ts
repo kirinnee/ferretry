@@ -52,3 +52,33 @@ describe('the update offer', () => {
     expect(refusalSentence('other', 'the daemon said this')).toBe('the daemon said this');
   });
 });
+
+describe('the update offer while an update is in flight, and the refusal sentences', () => {
+  test('an update waiting for no ferret to be mid-turn says so and names the target', () => {
+    const waiting = view({
+      job: { state: 'waiting-for-idle', target: '4.29.0', requestedAt: '2026-10-18T09:59:00.000Z', midTurn: 1 },
+    });
+    expect(updateOffer(waiting)).toEqual({
+      kind: 'busy',
+      sentence: 'Waiting for no ferret to be mid-turn, then updating to 4.29.0.',
+    });
+  });
+  test('a running update names the target', () => {
+    const running = view({ job: { state: 'running', target: '4.29.0', startedAt: '2026-10-18T09:59:00.000Z' } });
+    expect(updateOffer(running)).toEqual({ kind: 'busy', sentence: 'Updating to 4.29.0.' });
+  });
+  test('a daemon the app cannot update carries the plan’s explanation and steps', () => {
+    const offer = updateOffer(view({ method: apt, plan: planUpdate(apt, { product: 'ferretry', clientName: 'fy' }) }));
+    if (offer.kind !== 'steps') throw new Error('expected steps');
+    expect(offer.explanation.length).toBeGreaterThan(0);
+    expect(offer.steps.length).toBeGreaterThan(0);
+  });
+  test('every refusal code the update routes answer with has its own sentence', () => {
+    expect(refusalSentence(DAEMON_UPDATE_CODES.inProgress, 'x')).toBe('An update is already on its way.');
+    expect(refusalSentence(DAEMON_UPDATE_CODES.notAvailable, 'x')).toBe('There is no newer release to update to.');
+    expect(refusalSentence(DAEMON_UPDATE_CODES.notSelfUpdatable, 'x')).toBe(
+      'This daemon cannot update itself; follow the steps shown.',
+    );
+    expect(refusalSentence(undefined, 'fallback')).toBe('fallback');
+  });
+});
