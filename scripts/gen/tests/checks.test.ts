@@ -92,6 +92,13 @@ describe('manifest-match', () => {
     expect(found).toContain('misses routes "GET /v1/alpha"');
     expect(found).toContain('skeleton but beta is not in ports-pending.json');
   });
+  test('a skeleton half that pendingHalves names passes though its package is not in pending (gate, vault)', async () => {
+    const f = ws([withRoute('alpha', { daemon: implementedDaemon(['GET /v1/alpha']) }), withRoute('beta')], {
+      pending: ['alpha'],
+      pendingHalves: { beta: ['daemon', 'app', 'cli'] },
+    });
+    expect(messages(await run(manifestMatch, f))).not.toContain('beta is not in ports-pending.json');
+  });
 });
 
 const ALL = ['daemon', 'app', 'cli'];
