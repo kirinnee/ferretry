@@ -6,7 +6,9 @@
    utilities, base elements, then these classes (a component class still wins a tie with a utility).
 
    Plugins import no stylesheet of this: `src/main.tsx` loads it once, and `tailwind.config.ts` scans every plugin's
-   app half for the utilities it uses. A feature's own stylesheet comes with that feature's app half.
+   app half for the utilities it uses. A feature's own stylesheet comes with that feature's app half: a component
+   imports it, or the plugin lists it in `app/styles.css` (`styles/index.css` loads those through
+   `generated/plugin-styles.css`).
 
    THEME TOKENS LIVE IN `styles/themes.css`. Nothing here hardcodes a colour.
    ============================================================================ */

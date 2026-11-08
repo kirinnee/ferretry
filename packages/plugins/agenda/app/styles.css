@@ -1,0 +1,14 @@
+/* This plugin's app-half stylesheets, in today's PWA order (styles/index.css). Nothing in the app half imports them: the shell loads
+   every plugin's list through the generated `packages/app/src/generated/plugin-styles.css`. */
+@import './features/agenda/agenda-board.css';
+@import './features/agenda/agenda-card.css';
+@import './features/agenda/agenda.css';
+@import './features/agenda/agenda-item-card.css';
+@import './features/agenda/agenda-chat.css';
+@import './features/agenda/agenda-delivery.css';
+@import './features/agenda/agenda-updated.css';
+@import './features/agenda/agenda-config-change.css';
+@import './features/agenda/agenda-panel.css';
+@import './features/agenda/agenda-inbox.css';
+@import './features/permission-request/approval-card.css';
+@import './components/agenda-message.css';
