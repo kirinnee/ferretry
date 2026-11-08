@@ -14,6 +14,7 @@ import { boardReader } from './board.ts';
 import {
   ConfigWardenConfigStore,
   FileWardenArtifacts,
+  kernelSecretSender,
   StateWardenJevCheckLog,
   StateWardenReportFiles,
   StateWardenStateStore,
@@ -41,7 +42,6 @@ import {
 } from './lib/index.ts';
 import { parseWardenConfigPatch } from './lib/config.ts';
 import { JevTriageGuard } from './lib/jev.ts';
-import type { OutboundAuthorizerPort } from './lib/jev-ports.ts';
 import type {
   WardenAgendaView,
   WardenInvestigateView,
@@ -85,15 +85,6 @@ export interface WardenSubsystem {
   nudgeSweep(trigger: 'turnEnd' | 'question' | 'paneDied'): void;
   arm(): () => void;
 }
-
-/**
- * THE SEAM THAT KEEPS "NO UNATTENDED SPEND BY SURPRISE": the Jev guard is today's `JevTriageGuard`, but it spends the Jev
- * key only through an outbound authorizer. GAP(kernel): the key is read through the kernel's `secrets.resolve`
- * (OwnSecret, D2 #19), which `KernelPorts` does not carry on 5.0; the manifest already declares `secrets:
- * ['JEV_API_KEY']` and the `api.typesafe.ai` network. Until it does, every call answers `secret_missing`, which the guard
- * turns into `not_set`: no request leaves the machine and nothing is spent.
- */
-const NO_VAULT: OutboundAuthorizerPort = { send: async () => ({ kind: 'secret_missing' }) };
 
 /** A turn's wall-clock is the kernel's: monotonic time for the guard's latency. */
 const stopwatch = { monotonicMs: (): number => performance.now() };
@@ -241,7 +232,13 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
           await agenda.resolveSource(resolution.sessionId, 'agent-raised', resolution.sourceRef, resolution.note);
         },
       },
-      guard: () => new JevTriageGuard(NO_VAULT, stopwatch),
+      // THE SEAM THAT KEEPS "NO UNATTENDED SPEND BY SURPRISE": the Jev key is spent only by the kernel
+      // (`kernel.secrets.send`, D2 #19), and only once the OWNER wrote `jev.key: ${secret:JEV_API_KEY}` into warden.yaml;
+      // until then every call is `not_set` and nothing leaves the machine. The layer and its caps still gate each call.
+      // GAP(warden): this one line is untested through a sweep (5.0 Ferrets reports no state a Jev-triaged flag comes
+      // from); the guard over `kernelSecretSender` is tested on a host with the Warden's own manifest
+      // (tests/unit/jev-kernel-secret.test.ts).
+      guard: () => new JevTriageGuard(kernelSecretSender(kernel.secrets), stopwatch),
       evidence: { evidence: async () => ({ recentTurns: [] }) },
       redactor: { batch: async work => await kernel.redaction.read(scope => work({ text: text => scope.text(text) })) },
       remedies,
