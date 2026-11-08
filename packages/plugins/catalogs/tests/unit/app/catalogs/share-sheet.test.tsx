@@ -352,11 +352,11 @@ describe('ShareSheet result', () => {
     await view.unmount();
   });
 
-  it('draws the longest link the wire allows', async () => {
-    // The wire caps a link at 2,048 characters, which a version-40 symbol at level M holds.
+  it('N3 draws no QR for a link a phone cannot scan (past version 20), and still shows the link', async () => {
+    // The wire caps a link at 2,048 characters; a symbol past version 20 is too dense for a phone camera.
     const long = `${FAKE_LINK};pad=${'x'.repeat(1_500)}`;
     const { view } = await makeLink({}, { 'POST /v1/catalog-shares': () => mintResponse({ link: long }) });
-    expect(q('[data-share-qr-failure]')).toBeNull();
+    expect(q('[data-share-qr-failure]')).not.toBeNull();
     expect(q('[data-share-link]')).not.toBeNull();
     await view.unmount();
   });

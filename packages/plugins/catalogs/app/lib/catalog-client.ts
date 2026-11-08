@@ -16,7 +16,7 @@ export interface CatalogClient {
 
 export type CatalogRequestInit = Pick<RequestInit, 'method' | 'headers' | 'body'>;
 
-/** The one read beyond Catalogs' own routes: the NAMES of this machine's secrets, behind its `secretNamePicker` permission. */
+/** The one read beyond Catalogs' own routes: the NAMES of this machine's secrets, governed by the Vault route's own grant (operator, secrets.use), not by `secretNamePicker`. */
 export const SECRET_NAMES_PATH = '/v1/secrets';
 const SECRET_NAMES_ROUTE = 'GET /v1/secrets';
 
@@ -77,6 +77,12 @@ export function catalogClientOf(client: Pick<PluginClient, 'call'>): CatalogClie
   return {
     async request<T>(path: string, schema: z.ZodType<T>, init: CatalogRequestInit = {}): Promise<T> {
       const url = new URL(path, 'http://catalogs.invalid');
+      // The route-key call carries no headers and only a JSON string body: refuse what it cannot carry, never drop it.
+      for (const [name] of new Headers(init.headers)) {
+        if (name !== 'content-type') throw new Error(`The Catalogs client cannot carry the request header ${name}`);
+      }
+      if (init.body !== undefined && init.body !== null && typeof init.body !== 'string')
+        throw new Error('The Catalogs client carries only a JSON string body');
       const method = (init.method ?? 'GET').toUpperCase();
       if (method === 'GET' && url.pathname === SECRET_NAMES_PATH)
         return schema.parse(await client.call(SECRET_NAMES_ROUTE));

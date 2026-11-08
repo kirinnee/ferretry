@@ -181,7 +181,16 @@ describe('target', () => {
 
 describe('secrets', () => {
   const list = (health: 'ready' | 'damaged', names: readonly string[]): SecretList =>
-    ({ v: 1, health, secrets: names.map(name => ({ name })), references: [] }) as unknown as SecretList;
+    ({
+      v: 1,
+      health,
+      secrets: names.map(name => ({
+        name,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      })),
+      references: [],
+    }) as unknown as SecretList;
   it('offers this machine’s own names, sorted, and no sign-in tokens', () => {
     should(bindableSecretNames(null)).eql([]);
     should(bindableSecretNames(list('damaged', ['A']))).eql([]);

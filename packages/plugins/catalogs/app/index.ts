@@ -1,6 +1,7 @@
 import type { AppComponent, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { watchArrivals } from './lib/arrival.ts';
 import { lazyComponent } from './lazy.ts';
 
 type Factory = 'createSharingScreen' | 'createJoinScreen' | 'createSharedScreen';
@@ -23,14 +24,18 @@ const screenOf = (factory: Factory, client: PluginClient): AppComponent<ScreenPr
  * shell's member transport (`@ferretry/app` `MemberCarriers`), and fails closed while the shell offers none.
  */
 export default implementApp(manifest, {
-  build: ({ client }) => ({
-    screens: {
-      sharing: screenOf('createSharingScreen', client),
-      join: screenOf('createJoinScreen', client),
-      shared: screenOf('createSharedScreen', client),
-    },
-    panels: {},
-    settings: {},
-    renderers: {},
-  }),
+  build: ({ client }) => {
+    // A share link's live code leaves the address bar now, not when the lazy views arrive (it is held for the join screen).
+    if (typeof window !== 'undefined') watchArrivals(window);
+    return {
+      screens: {
+        sharing: screenOf('createSharingScreen', client),
+        join: screenOf('createJoinScreen', client),
+        shared: screenOf('createSharedScreen', client),
+      },
+      panels: {},
+      settings: {},
+      renderers: {},
+    };
+  },
 });

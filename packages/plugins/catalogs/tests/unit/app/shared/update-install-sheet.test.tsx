@@ -307,7 +307,12 @@ describe('the passkey', () => {
 describe('secrets', () => {
   const withToken = (change: Record<string, unknown> = {}) =>
     agree({ secrets: [{ placeholder: 'ACME_TOKEN' }], ...change });
-  const list = () => ({ v: 1, health: 'ready', secrets: [{ name: 'ACME_TOKEN' }], references: [] });
+  const list = () => ({
+    v: 1,
+    health: 'ready',
+    secrets: [{ name: 'ACME_TOKEN', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
+    references: [],
+  });
 
   it('reads the machine’s secret names when the review lists placeholders, and takes a pick and its undoing', async () => {
     const rig = await open({ [PREVIEW]: withToken(), [SECRETS]: list });
@@ -361,7 +366,12 @@ describe('answers that arrive late', () => {
       },
     });
     expect(previews).toBe(1);
-    late.resolve({ v: 1, health: 'ready', secrets: [{ name: 'LATE' }], references: [] });
+    late.resolve({
+      v: 1,
+      health: 'ready',
+      secrets: [{ name: 'LATE', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
+      references: [],
+    });
     await settle();
     await rig.unmount();
     lateFail.resolve(null);

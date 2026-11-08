@@ -59,3 +59,22 @@ describe('the Catalogs client by route key', () => {
     );
   });
 });
+
+describe('N2 the client refuses what it cannot carry instead of dropping it', () => {
+  it('throws on a header other than content-type and on a body that is not a string, sending nothing', async () => {
+    calls.length = 0;
+    const client = catalogClientOf(recording({}));
+    await expect(
+      client.request('/v1/catalogs/cat_1', z.unknown(), { method: 'PATCH', headers: { 'if-match': 'v1' }, body: '{}' }),
+    ).rejects.toThrow('cannot carry the request header if-match');
+    await expect(
+      client.request('/v1/catalogs/cat_1', z.unknown(), { method: 'PATCH', body: new Uint8Array([1]) }),
+    ).rejects.toThrow('only a JSON string body');
+    await client.request('/v1/catalogs/cat_1', z.unknown(), {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(calls).toHaveLength(1);
+  });
+});

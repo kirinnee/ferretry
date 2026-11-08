@@ -1,19 +1,29 @@
 /**
  * HOW A BROWSER REACHES A PUBLISHER IT IS NOT PAIRED WITH, as a catalog member: join with a share link, ask what a join
  * needs, and open a member request session. The carriers (the publisher's own address, the relays it published, the
- * discovered rendezvous) are Connections' (§4.8); the shell offers the transport and this half only asks it.
+ * discovered rendezvous) are Connections' (§4.8), but only as ADDRESSING AND TRANSPORT: the walk order, the deadlines,
+ * the tunnel record, the device key handle and the pinned session are fixed in `@ferretry/app` or built here, so a
+ * Connections implementation cannot weaken them. A refusal is final; only a transport failure advances the walk.
  *
  * GAP(connections): the shell does not offer a member transport yet, so {@link noMemberTransport} answers every ask
  * as "unreachable" and no publisher is reached from this half. Nothing is sent, and the share code is never spent.
+ * Connections' port must keep these guarantees, which are tested here against fake carriers: a leg whose dial throws
+ * moves on; a refusal is final; spent-unheard is reported; 4403/401 mean the key is refused; a lease replay is a GET only;
+ * a timeout closes the session. The walk-order cases (loopback, fingerprint, published relays, de-duplication) live in
+ * `@ferretry/app` `memberWalk`; the direct and relay deadlines and the real socket/heartbeat behaviour are Connections'.
  */
 
 import {
   DaemonCallError,
   memberCarriers,
   type MemberCarriers,
-  type MemberLeg,
   type MemberPublisher,
+  type MemberPurpose,
   type MemberSocket,
+  type MemberStep,
+  memberTunnelRequest,
+  memberTunnelResponse,
+  memberWalk,
   RELAY_CLOSE_CODES,
   RelayClientSession,
   type RelayClientSessionDependencies,
@@ -83,47 +93,65 @@ export const noMemberTransport: MemberTransport = {
 
 const MEMBER_REQUEST_TIMEOUT_MS = 30_000;
 
-const methodOf = (leg: MemberLeg): MemberCarrierMethod =>
-  leg.kind === 'direct' ? { kind: 'direct', daemonUrl: leg.address } : { kind: 'relay', relayUrl: leg.address };
+/** The persisted publisher address is ALWAYS the publisher's own, never the address of the step that reached it. */
+const methodOf = (step: MemberStep, publisher: MemberPublisher): MemberCarrierMethod =>
+  step.kind === 'direct'
+    ? { kind: 'direct', daemonUrl: publisher.daemonUrl }
+    : { kind: 'relay', relayUrl: step.address };
 
 const publisherOf = (seed: Pick<ShareLinkSeed, 'daemonId' | 'daemonUrl'>): MemberPublisher => ({
   daemonId: seed.daemonId,
   daemonUrl: seed.daemonUrl,
 });
 
+/** The session a walk builds over a socket; replaced only by tests. */
+export type MemberSessionFactory = (dependencies: RelayClientSessionDependencies) => RelayClientSession;
+
+const walkOf = (carriers: MemberCarriers, publisher: MemberPublisher, purpose: MemberPurpose): readonly MemberStep[] =>
+  memberWalk(publisher, purpose, { rendezvousUrl: carriers.rendezvousUrl });
+
 /** The join, `join-options` and member session walks over `carriers` (today's `relay-join.ts` and `member-client.ts`). */
-export function memberTransportOver(carriers: MemberCarriers, crypto: WebCryptoRelayCrypto): MemberTransport {
+export function memberTransportOver(
+  carriers: MemberCarriers,
+  crypto: WebCryptoRelayCrypto,
+  sessionOf: MemberSessionFactory = dependencies => new RelayClientSession(dependencies),
+): MemberTransport {
+  /** Dials a step and builds the session over its socket. THROWS when the carrier cannot address the publisher. */
   const open = (
-    leg: MemberLeg,
+    step: MemberStep,
     daemonId: string,
     mode: RelayClientSessionDependencies['mode'],
   ): { readonly socket: MemberSocket; readonly session: RelayClientSession } => {
-    const socket = leg.dial();
-    return { socket, session: new RelayClientSession({ crypto, daemonId, mode, socket }) };
+    const socket = carriers.dial(step.kind, step.address);
+    return { socket, session: sessionOf({ crypto, daemonId, mode, socket }) };
   };
 
   return {
     async join({ seed, clientName, keys, passkey }) {
-      const legs = carriers.legs(publisherOf(seed), 'join');
-      const key = carriers.deviceKeyHandle(keys.signingKey);
+      const publisher = publisherOf(seed);
+      const steps = walkOf(carriers, publisher, 'join');
+      const key = crypto.deviceKeyHandle(keys.signingKey);
       let spentUnheard = false;
-      for (const leg of legs) {
-        const { socket, session } = open(leg, seed.daemonId, {
-          kind: 'join',
-          code: seed.code,
-          clientName,
-          memberKey: keys.publicKey,
-          boxKey: keys.boxKey,
-          key,
-          ...(passkey === undefined ? {} : { passkey }),
-        });
+      for (const step of steps) {
+        let socket: MemberSocket | undefined;
+        let session: RelayClientSession | undefined;
         try {
-          const outcome = await leg.drive({
+          ({ socket, session } = open(step, seed.daemonId, {
+            kind: 'join',
+            code: seed.code,
+            clientName,
+            memberKey: keys.publicKey,
+            boxKey: keys.boxKey,
+            key,
+            ...(passkey === undefined ? {} : { passkey }),
+          }));
+          const outcome = await carriers.drive({
+            kind: step.kind,
             socket,
             session,
             settled: session.joined(),
             keepAlive: false,
-            deadlineMs: leg.deadlineMs,
+            deadlineMs: step.deadlineMs,
           });
           socket.close(1000, 'this join attempt is complete');
           return {
@@ -131,35 +159,40 @@ export function memberTransportOver(carriers: MemberCarriers, crypto: WebCryptoR
             response: MemberJoinedResponseSchema.parse(
               (outcome as Extract<typeof outcome, { kind: 'joined' }>).response,
             ),
-            carrier: methodOf(leg),
+            carrier: methodOf(step, publisher),
           };
         } catch (reason) {
-          socket.close(1000, 'this join attempt is over');
+          // A dial that threw opened nothing and sent nothing: the walk simply moves on.
+          socket?.close(1000, 'this join attempt is over');
           if (reason instanceof RelayJoinRefusedError) return { kind: 'refused', maybeSpentUnheard: spentUnheard };
           // The `join` record crossed and the session ended before the answer: the share may have been spent unheard.
-          if (session.credentialSent()) spentUnheard = true;
+          if (session?.credentialSent() === true) spentUnheard = true;
         }
       }
-      return { kind: 'unreachable', maybeSpentUnheard: spentUnheard, tried: legs.length };
+      return { kind: 'unreachable', maybeSpentUnheard: spentUnheard, tried: steps.length };
     },
 
     async joinOptions({ seed, keys }) {
-      const key = carriers.deviceKeyHandle(keys.signingKey);
-      for (const leg of carriers.legs(publisherOf(seed), 'join')) {
-        const { socket, session } = open(leg, seed.daemonId, {
-          kind: 'join-options',
-          code: seed.code,
-          memberKey: keys.publicKey,
-          origin: globalThis.location?.origin ?? '',
-          key,
-        });
+      const publisher = publisherOf(seed);
+      const key = crypto.deviceKeyHandle(keys.signingKey);
+      for (const step of walkOf(carriers, publisher, 'join')) {
+        let socket: MemberSocket | undefined;
         try {
-          const outcome = await leg.drive({
+          let session: RelayClientSession;
+          ({ socket, session } = open(step, seed.daemonId, {
+            kind: 'join-options',
+            code: seed.code,
+            memberKey: keys.publicKey,
+            origin: globalThis.location?.origin ?? '',
+            key,
+          }));
+          const outcome = await carriers.drive({
+            kind: step.kind,
             socket,
             session,
             settled: session.joined(),
             keepAlive: false,
-            deadlineMs: leg.deadlineMs,
+            deadlineMs: step.deadlineMs,
           });
           socket.close(1000, 'this join-options attempt is complete');
           const answer: JoinOptionsAnswer =
@@ -170,9 +203,9 @@ export function memberTransportOver(carriers: MemberCarriers, crypto: WebCryptoR
                   options: JoinProofOptionsSchema.parse(outcome.options),
                 }
               : (outcome as JoinOptionsAnswer);
-          return { kind: 'answer', answer, carrier: methodOf(leg) };
+          return { kind: 'answer', answer, carrier: methodOf(step, publisher) };
         } catch (reason) {
-          socket.close(1000, 'this join-options attempt is over');
+          socket?.close(1000, 'this join-options attempt is over');
           if (reason instanceof RelayJoinRefusedError) return { kind: 'refused' };
         }
       }
@@ -180,7 +213,7 @@ export function memberTransportOver(carriers: MemberCarriers, crypto: WebCryptoR
     },
 
     openClient(subscription) {
-      return Promise.resolve(openMemberClientOver(carriers, crypto, subscription));
+      return Promise.resolve(openMemberClientOver(carriers, crypto, subscription, sessionOf));
     },
   };
 }
@@ -192,36 +225,40 @@ function openMemberClientOver(
   carriers: MemberCarriers,
   crypto: WebCryptoRelayCrypto,
   subscription: MemberSubscription,
+  sessionOf: MemberSessionFactory,
 ): MemberClient {
-  const key = carriers.deviceKeyHandle(subscription.signingKey);
+  const key = crypto.deviceKeyHandle(subscription.signingKey);
   const appSession = toBase64Url(crypto.randomBytes(APP_SESSION_BYTES));
   let current: Promise<RelayClientSession> | undefined;
   let closed = false;
 
   const walk = async (): Promise<RelayClientSession> => {
-    const legs = carriers.legs(subscription, 'member');
-    for (const leg of legs) {
-      const socket = leg.dial();
-      const session = new RelayClientSession({
-        crypto,
-        daemonId: subscription.daemonId,
-        mode: { kind: 'member', member: { keyId: subscription.keyId, key, appSession } },
-        socket,
-      });
+    const steps = walkOf(carriers, subscription, 'member');
+    for (const step of steps) {
+      let socket: MemberSocket | undefined;
       try {
-        return await leg.drive({
+        socket = carriers.dial(step.kind, step.address);
+        const session = sessionOf({
+          crypto,
+          daemonId: subscription.daemonId,
+          mode: { kind: 'member', member: { keyId: subscription.keyId, key, appSession } },
+          socket,
+        });
+        return await carriers.drive({
+          kind: step.kind,
           socket,
           session,
           settled: session.ready(),
           keepAlive: true,
-          deadlineMs: leg.deadlineMs,
+          deadlineMs: step.deadlineMs,
         });
       } catch (reason) {
-        socket.close(1000, 'this member session attempt is over');
+        // A dial that threw opened nothing: the walk moves on. A rejected key is final.
+        socket?.close(1000, 'this member session attempt is over');
         if (reason instanceof RelaySessionError && reason.code === AUTH_REJECTED) throw new MemberRefusedError();
       }
     }
-    throw new MemberUnreachableError(legs.length);
+    throw new MemberUnreachableError(steps.length);
   };
 
   const session = async (): Promise<RelayClientSession> => {
@@ -239,10 +276,10 @@ function openMemberClientOver(
   };
 
   const send = async (path: string, init: RequestInit, carrying: RelayClientSession): Promise<Response> => {
-    const record = carriers.tunnelRequest(new URL(path, subscription.daemonUrl).toString(), init);
+    const record = memberTunnelRequest(new URL(path, subscription.daemonUrl).toString(), init);
     const signal = AbortSignal.timeout(MEMBER_REQUEST_TIMEOUT_MS);
     try {
-      return carriers.tunnelResponse(await carrying.request(record as never, signal));
+      return memberTunnelResponse(await carrying.request(record, signal));
     } catch (reason) {
       if (signal.aborted) carrying.close('the publisher did not answer a request in time');
       if (reason instanceof RelaySessionError && reason.code === AUTH_REJECTED) throw new MemberRefusedError();

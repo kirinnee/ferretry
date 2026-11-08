@@ -18,7 +18,7 @@ import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CatalogClient, catalogClientOf } from '../lib/catalog-client.ts';
 import { CatalogClientProvider } from '../lib/client-context.tsx';
-import { takeArrival } from '../lib/arrival.ts';
+import { heldArrival, holdArrival, releaseArrival } from '../lib/arrival.ts';
 import { daemonConnection } from '../lib/machine.ts';
 import { sharedMembers } from '../lib/members.ts';
 import { isSharingTab, SHARED_PATH } from '../lib/routes.ts';
@@ -88,10 +88,12 @@ export function createJoinScreen(client: PluginClient) {
   const own = catalogClientOf(client);
   return function JoinRoute(_props: ScreenProps) {
     const { navigate, entryKey } = useRouter();
-    // The first link is read as the page opens; each later one (a paste, a typed address) starts the join over.
-    const [link, setLink] = useState(() => ({ fragment: takeArrival(globalThis), nonce: 0 }));
+    // The address was already emptied when the half was built (`watchArrivals`); the code is only HELD here, so a render
+    // React throws away loses nothing. It is released once an effect has it.
+    const [link, setLink] = useState(() => ({ fragment: heldArrival(), nonce: 0 }));
     const read = useCallback((): void => {
-      const fragment = takeArrival(globalThis);
+      holdArrival(globalThis);
+      const fragment = releaseArrival();
       if (fragment !== '') setLink(held => ({ fragment, nonce: held.nonce + 1 }));
     }, []);
     const arrived = useRef(false);
@@ -99,6 +101,7 @@ export function createJoinScreen(client: PluginClient) {
     useEffect(() => {
       if (!arrived.current) {
         arrived.current = true;
+        releaseArrival(); // the first link is already on screen: release it, do not restart the join with it
         return;
       }
       read();

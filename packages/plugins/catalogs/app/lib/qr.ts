@@ -13,6 +13,9 @@ export interface QrMatrix {
   readonly modules: readonly (readonly boolean[])[];
 }
 
+/** The largest symbol a phone camera reads reliably (today's encoder was capped here too). */
+export const MAX_QR_VERSION = 20;
+
 export class QrEncodeError extends Error {
   constructor(message: string) {
     super(message);
@@ -31,6 +34,8 @@ export function encodeQr(value: string): QrMatrix {
     throw new QrEncodeError('this value is too long for a QR symbol; refusing rather than truncating it');
   }
   const size = code.getModuleCount();
+  if ((size - 17) / 4 > MAX_QR_VERSION)
+    throw new QrEncodeError('this value is too long for a QR symbol a phone can scan; refusing rather than drawing it');
   const modules = Array.from({ length: size }, (_row, y) =>
     Array.from({ length: size }, (_cell, x) => code.isDark(y, x)),
   );

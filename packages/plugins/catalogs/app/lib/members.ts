@@ -11,8 +11,13 @@ import { currentMemberTransport } from './member-transport.ts';
 
 let controller: SharedController | undefined;
 
-/** GAP(access): today names this browser from its user agent and a random suffix (Access's device naming); a plain name is used. */
-const CLIENT_NAME = 'Browser';
+/**
+ * How this browser is named on a publisher's People list: "Browser" and a random suffix, so one person's devices can be
+ * told apart when it is time to revoke one. GAP(access): today also names the user agent (Access's device naming).
+ */
+export function memberClientName(random: (length: number) => Uint8Array): string {
+  return `Browser ${Array.from(random(2), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+}
 
 export function sharedMembers(): SharedController {
   controller ??= (() => {
@@ -27,7 +32,7 @@ export function sharedMembers(): SharedController {
       origin: globalThis.location.origin,
       crypto,
       now: () => new Date(),
-      clientName: () => CLIENT_NAME,
+      clientName: () => memberClientName(length => crypto.randomBytes(length)),
     });
   })();
   return controller;

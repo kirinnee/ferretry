@@ -63,7 +63,12 @@ async function sheet(
   const asked: string[] = [];
   const closed: string[] = [];
   const fake = fakeClient({
-    'GET /v1/secrets': () => ({ v: 1, health: 'ready', secrets: [{ name: 'ACME_TOKEN' }], references: [] }),
+    'GET /v1/secrets': () => ({
+      v: 1,
+      health: 'ready',
+      secrets: [{ name: 'ACME_TOKEN', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
+      references: [],
+    }),
     ...handlers,
   });
   const view = await mount(

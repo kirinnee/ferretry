@@ -84,10 +84,9 @@ describe('the providers the shell takes', () => {
 
   test('member carriers only from Connections, and none offered is none (a publisher is then unreachable)', () => {
     const carriers = {
-      legs: () => [],
-      tunnelRequest: () => ({}),
-      tunnelResponse: () => new Response(null),
-      deviceKeyHandle: () => ({}) as never,
+      rendezvousUrl: undefined,
+      dial: () => ({}) as never,
+      drive: () => Promise.reject(new Error('not driven')),
     };
     const impostor = { ...carriers };
     const got = registeredConnect(

@@ -69,7 +69,15 @@ const baseHandlers = {
   'GET /v1/secrets': () => ({
     v: 1,
     health: 'ready',
-    secrets: [{ name: 'ZED' }, { name: 'ACME_TOKEN' }, { name: 'MCP_ACME_0123456789ABCDEF_ACCESS' }],
+    secrets: [
+      { name: 'ZED', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+      { name: 'ACME_TOKEN', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+      {
+        name: 'MCP_ACME_0123456789ABCDEF_ACCESS',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
     references: [],
   }),
 };
@@ -543,7 +551,12 @@ describe('a preview that is overtaken', () => {
     await settle();
     expect(q('[data-catalog-confirm]')).not.toBeNull();
     await giveText(fileText);
-    slowSecrets.release({ v: 1, health: 'ready', secrets: [{ name: 'ACME_TOKEN' }], references: [] });
+    slowSecrets.release({
+      v: 1,
+      health: 'ready',
+      secrets: [{ name: 'ACME_TOKEN', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
+      references: [],
+    });
     await settle();
     expect(q('[data-catalog-confirm]')).toBeNull();
     await view.unmount();

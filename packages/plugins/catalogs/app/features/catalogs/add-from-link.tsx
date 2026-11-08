@@ -1,16 +1,19 @@
 /**
  * "Subscribe with a link": the PRIMARY way to follow a catalog someone shared.
  *
- * A paste field and one button. A share link goes to the same /join page the phone's camera opens, so
- * there is one path into joining. Any other link is named in a sentence; nothing is sent from here and the
- * pasted text is cleared the moment it is handed over, because a share link holds a live code.
+ * A paste field and one button. A share link goes to the same /join page the phone's camera opens, so there is one path
+ * into joining. Any other link is named in a sentence; nothing is sent from here and the pasted text is cleared the
+ * moment it is read, because a share link holds a live code.
+ *
+ * GAP(shell): the shell mounts no daemon-less screen yet, so /join is not drawn and a link carried there would sit in
+ * the address bar and the history, unredeemed. Until it does, a valid share link is refused with a sentence and is
+ * NEVER written to the address bar or pushed into the history.
  */
 
 import { Link2 } from 'lucide-react';
 import { type FormEvent, useId, useState } from 'react';
 import { classifyCatalogLink } from '../../lib/catalog-link.ts';
 
-import { useOptionalRouter } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
 import { FailureLine } from './catalog-parts.tsx';
 
@@ -18,13 +21,10 @@ const ADD_FROM_LINK_TITLE = 'Subscribe with a link';
 const ADD_FROM_LINK_HELP =
   'Paste the invite link someone sent you. Subscribing installs nothing: you pick what to install.';
 
-interface AddCatalogFromLinkProps {
-  /** Opens the join page at `to` (path and fragment). Defaults to the router, or the address bar where there is none. */
-  readonly navigate?: (to: string) => void;
-}
+/** What a valid share link is answered with while the shell cannot draw the join page. */
+export const JOINING_FROM_A_LINK_UNAVAILABLE = "Joining from a link isn't available yet.";
 
-export function AddCatalogFromLink({ navigate }: AddCatalogFromLinkProps) {
-  const router = useOptionalRouter();
+export function AddCatalogFromLink() {
   const inputId = useId();
   const [text, setText] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
@@ -37,11 +37,7 @@ export function AddCatalogFromLink({ navigate }: AddCatalogFromLinkProps) {
       return;
     }
     setText('');
-    setProblem(null);
-    const to = `/join${link.fragment}`;
-    if (navigate !== undefined) navigate(to);
-    else if (router !== null) router.navigate(to);
-    else window.location.assign(to);
+    setProblem(JOINING_FROM_A_LINK_UNAVAILABLE);
   };
 
   return (

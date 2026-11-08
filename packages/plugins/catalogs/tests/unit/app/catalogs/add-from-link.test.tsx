@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { formatShareFragment } from '../../../../contract/wire/index.ts';
-import { AddCatalogFromLink } from '../../../../app/features/catalogs/add-from-link.tsx';
+import {
+  AddCatalogFromLink,
+  JOINING_FROM_A_LINK_UNAVAILABLE,
+} from '../../../../app/features/catalogs/add-from-link.tsx';
 import { CatalogMoreMenu } from '../../../../app/features/catalogs/catalog-more-menu.tsx';
 import { LINK_DAMAGED, LINK_OTHER } from '../../../../app/lib/catalog-link.ts';
 import { RouterProvider } from '@ferretry/app/testing';
@@ -28,45 +31,34 @@ const paste = async (value: string) => {
 };
 
 describe('AddCatalogFromLink', () => {
-  it('hands a share link to the join page and clears the field', async () => {
-    const joined: string[] = [];
-    const view = await mount(<AddCatalogFromLink navigate={to => joined.push(to)} />);
-    await paste(`https://app.example.test/join${hash}`);
-    expect(joined).toEqual([`/join${hash}`]);
-    expect((q('[data-catalog-link-input]') as HTMLInputElement).value).toBe('');
-    expect(q('[role="alert"]')).toBeNull();
-    await view.unmount();
-  });
-
-  it('opens /join with the fragment through the router', async () => {
+  it('B1 refuses a share link with a sentence and never writes its code to the address bar or the history', async () => {
+    const push = spyOn(window.history, 'pushState');
+    const assign = spyOn(window.location, 'assign').mockImplementation(() => {});
+    const before = window.location.hash;
     const view = await mount(
       <RouterProvider>
         <AddCatalogFromLink />
       </RouterProvider>,
     );
     await paste(`https://app.example.test/join${hash}`);
-    expect(`${window.location.pathname}${window.location.hash}`).toBe(`/join${hash}`);
-    await view.unmount();
-  });
-
-  it('follows the address bar where there is no router', async () => {
-    const assign = spyOn(window.location, 'assign').mockImplementation(() => {});
-    const view = await mount(<AddCatalogFromLink />);
-    await paste(`https://app.example.test/join${hash}`);
-    expect(assign).toHaveBeenCalledWith(`/join${hash}`);
+    expect(document.body.textContent).toContain(JOINING_FROM_A_LINK_UNAVAILABLE);
+    expect((q('[data-catalog-link-input]') as HTMLInputElement).value).toBe('');
+    expect(window.location.hash).toBe(before);
+    expect(window.location.hash).not.toContain('fy_share_');
+    expect(window.location.pathname).not.toBe('/join');
+    for (const call of push.mock.calls) expect(String(call[2] ?? '')).not.toContain('#');
+    expect(assign).not.toHaveBeenCalled();
     await view.unmount();
   });
 
   it('says plainly what any other link is, and drops the sentence when typing again', async () => {
-    const joined: string[] = [];
-    const view = await mount(<AddCatalogFromLink navigate={to => joined.push(to)} />);
+    const view = await mount(<AddCatalogFromLink />);
     await paste('https://example.com/skills');
     expect(document.body.textContent).toContain(LINK_OTHER);
     await typeInto(q('[data-catalog-link-input]'), 'x');
     expect(document.body.textContent).not.toContain(LINK_OTHER);
     await paste('https://app.example.test/join#v1;url=nope');
     expect(document.body.textContent).toContain(LINK_DAMAGED);
-    expect(joined).toEqual([]);
     await view.unmount();
   });
 });
