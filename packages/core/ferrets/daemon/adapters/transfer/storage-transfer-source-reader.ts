@@ -65,12 +65,8 @@ function present(value: string | undefined): string | null {
  * The provenance a stored configuration carries, parsed rather than trusted: the ONE parse of the `transcript` record
  * of a configuration document (its schema is the contract's, `contract/records.ts`).
  */
-function storedTranscriptProvenance(config: unknown): TranscriptProvenance | undefined {
-  const record =
-    typeof config === 'object' && config !== null && !Array.isArray(config)
-      ? (config as Readonly<Record<string, unknown>>)
-      : {};
-  const parsed = TranscriptProvenanceSchema.safeParse(record.transcript);
+function storedTranscriptProvenance(config: Readonly<Record<string, unknown>>): TranscriptProvenance | undefined {
+  const parsed = TranscriptProvenanceSchema.safeParse(config.transcript);
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -106,7 +102,7 @@ export class StorageTransferSourceReader implements TransferSourceReader {
       resumeMenuChoice: config.data.resumeMenuChoice,
       maxSnapshots: config.data.maxSnapshots,
       retry: config.data.retry,
-      transcriptProvenance: storedTranscriptProvenance(document) ?? null,
+      transcriptProvenance: storedTranscriptProvenance(document as Readonly<Record<string, unknown>>) ?? null,
       provenance: config.data.provenance,
     };
   }
