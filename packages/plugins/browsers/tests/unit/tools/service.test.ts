@@ -543,6 +543,9 @@ const BROWSERS_OFF =
   'This machine does not let agents control browsers: "What agents may control › Browsers" is off in this machine\'s settings. Ask the person to turn it on if you need it.';
 const FILES_OFF =
   'This machine does not let agents control files: "What agents may control › Files" is off in this machine\'s settings. Ask the person to turn it on if you need it.';
+// Today's `pageScriptsRefusal('fy')`: rebuild-ref packages/daemon/src/lib/agent-tools/policy.ts:108-110.
+const PAGE_SCRIPTS_OFF =
+  'browser.eval is off on this machine: "What agents may control › Page scripts" is off, and only the owner can turn it on — in the app (Settings › this machine › What agents may control › Page scripts), with `fy machine set agent-control scripts on`, or with agentControl.pageScripts: true in machine.yaml. Turning it on waits for their confirmation, because a page script can read what a page holds, sign-ins on the shared profile included. Ask them if you need it; the other browser tools work without it.';
 
 describe('the browser tools follow core’s AgentControlPort (What agents may control)', () => {
   it('AC1 refuses a ferret every page tool, with today’s code and sentence, while Browsers is off', async () => {
@@ -589,6 +592,22 @@ describe('the browser tools follow core’s AgentControlPort (What agents may co
     should(script.code).equal('forbidden');
   });
 
+  it('AC3 refuses with today’s code and sentence when looking the port up throws (a plugin still building)', async () => {
+    // Arrange — the kernel's `uses.current()` throws a TypeError until the plugin is built
+    const { tools } = await harness({
+      control: () => {
+        throw new TypeError('uses.current() before build');
+      },
+    });
+
+    // Act
+    const refused = await refusal(tools.call(agent, { tool: 'browser.open', name: 'app' }));
+
+    // Assert
+    should(refused.code).equal('forbidden');
+    should(refused.message).equal(BROWSERS_OFF);
+  });
+
   it('AC3 refuses when the reader throws or answers anything but a plain yes', async () => {
     // Arrange
     const throwing = await harness({
@@ -609,6 +628,29 @@ describe('the browser tools follow core’s AgentControlPort (What agents may co
     should(unknown.message).equal(BROWSERS_OFF);
   });
 
+  it('AC6 listing what is open follows Browsers too: refused while it is off, allowed once it is on', async () => {
+    // Arrange — today's `switchOf` maps every `browser.*` tool, `browser.list` included, to the Browsers switch
+    // (rebuild-ref packages/daemon/src/lib/agent-tools/service.ts:334-343): a page's title and address stay hidden.
+    let on: readonly AgentControlKind[] = ['browser'];
+    const { browser, tools } = await harness({
+      control: () => ({ allows: async (_ferret, kind) => on.includes(kind) }),
+    });
+    await tools.call(agent, { tool: 'browser.open', name: 'app', url: 'https://example.test/inbox' });
+    (browser.pages[0] as FakePage).title = 'Inbox';
+
+    // Act — the owner turns Browsers off, then on again
+    on = ['files', 'scripts'];
+    const refused = await refusal(tools.call(agent, { tool: 'browser.list' }));
+    on = ['browser'];
+    const listed = await tools.call(agent, { tool: 'browser.list' });
+
+    // Assert
+    should(refused.code).equal('forbidden');
+    should(refused.message).equal(BROWSERS_OFF);
+    should(JSON.stringify(refused)).not.containEql('Inbox');
+    should(listed.surfaces?.[0]?.title).equal('Inbox');
+  });
+
   it('AC4 file transfer follows Files alone, and page scripts follow Page scripts alone', async () => {
     // Arrange — Browsers on, Files off, Page scripts off
     const base = switches('browser');
@@ -625,7 +667,7 @@ describe('the browser tools follow core’s AgentControlPort (What agents may co
 
     // Assert — each refused for its OWN switch; the page tool is untouched
     should(upload.message).equal(FILES_OFF);
-    should(script.message).containEql('Page scripts');
+    should(script.message).equal(PAGE_SCRIPTS_OFF);
     should(script.message).not.equal(upload.message);
     should(read.summary).be.a.String();
   });
@@ -650,7 +692,7 @@ describe('the browser tools follow core’s AgentControlPort (What agents may co
 
     // Assert
     should(filesOn.browser.uploads).have.length(1);
-    should(stillOff.message).containEql('Page scripts');
+    should(stillOff.message).equal(PAGE_SCRIPTS_OFF);
     should(evaled.summary).be.a.String();
     should(noFiles.message).equal(FILES_OFF);
   });

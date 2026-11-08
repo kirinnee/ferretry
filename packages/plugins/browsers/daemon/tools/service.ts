@@ -210,9 +210,6 @@ const HOLD_ANSWERED_TOOLS: ReadonlySet<BrowserToolCall['tool']> = new Set([
 /** The tools that move a file between a page and the session's folder: they need the `files` switch as well as `browser`. */
 const FILE_TOOLS: ReadonlySet<BrowserToolCall['tool']> = new Set(['browser.upload', 'browser.download', 'browser.pdf']);
 
-/** The one tool the Browsers switch does not gate: listing what is open (today's `switchOf`). */
-const LISTING_TOOLS: ReadonlySet<BrowserToolCall['tool']> = new Set(['browser.list']);
-
 /** Each tool's `Op` (§4.7; the manifest names the same). */
 const TOOL_OPS: Readonly<Record<BrowserToolCall['tool'], Op>> = {
   'browser.list': 'read',
@@ -314,11 +311,9 @@ export class BrowserTools {
     let note: { placed(page: ActedPage | undefined): void } | undefined;
     const seen: { surface?: ResolvedSurface } = {};
     try {
-      if (
-        caller.kind === 'agent' &&
-        !LISTING_TOOLS.has(call.tool) &&
-        !(await this.ports.policy.allows(caller.sessionId, 'browser'))
-      )
+      // Every browser tool needs the Browsers switch, listing what is open included (today's `switchOf` maps every
+      // `browser.*` tool to `'browser'`): a page's title and address are what the switch keeps from an agent.
+      if (caller.kind === 'agent' && !(await this.ports.policy.allows(caller.sessionId, 'browser')))
         throw new BrowserToolError('forbidden', controlRefusal('browser'));
       if (
         caller.kind === 'agent' &&
