@@ -15,7 +15,11 @@ import type {
   DeliveryOutcome,
   PaneNotReadyReason,
   QueueOutcome,
+  RunnerComposerCleared,
+  RunnerComposerSubmitted,
   RunnerDelivery,
+  RunnerHeldAt,
+  RunnerPaneObservation,
   RunnerHandle,
   SitrepLine,
   BoundTranscriptReader,
@@ -267,6 +271,32 @@ export interface FerretHarness {
    * pending structured question (a stop would answer it by accident), and a session with no running turn.
    */
   interrupt(): Promise<Result<HarnessInterrupted, HarnessRefusal>>;
+  /**
+   * Additive (send path): ONE read of the ferret's pane for a send (the runner's `observe`). Reads only. `no_pane` when
+   * the ferret has no live pane or nothing could be read; `plugin_unavailable` when the runner cannot observe.
+   */
+  observe?(): Promise<Result<RunnerPaneObservation, HarnessRefusal>>;
+  /**
+   * Additive (send path): where the pane still shows `text` held (the runner's `heldAt`). Rejects, as the runner does,
+   * when the pane cannot be read: that proves nothing either way.
+   */
+  heldAt?(text: string): Promise<Result<RunnerHeldAt | undefined, HarnessRefusal>>;
+  /**
+   * Additive (send path): erases `text` from the composer only when it holds exactly that (the runner's `clearComposer`).
+   * Not wrapped in a second act here, for the reason `deliver` is not. Answers as `deliver` does for a refusal.
+   */
+  clearComposer?(text: string): Promise<Result<RunnerComposerCleared, HarnessDeliveryFailure>>;
+  /**
+   * Additive (send path): one Enter for a composer holding exactly `text` (the runner's `submitComposer`). Not wrapped
+   * in a second act here. Answers as `deliver` does for a refusal.
+   */
+  submitComposer?(text: string, strict?: boolean): Promise<Result<RunnerComposerSubmitted, HarnessDeliveryFailure>>;
+  /**
+   * Additive (send path, the send-now's stop): the harness's stop key under the same rule as {@link interrupt}, then the
+   * pane read once it settled (the runner's `stopActiveTurn`). `plugin_unavailable` when the harness names no stop or the
+   * runner cannot. The pane read is `undefined` when it could not be read.
+   */
+  stopActive?(): Promise<Result<RunnerPaneObservation | undefined, HarnessRefusal>>;
   /**
    * The seam's own ferret's transcript through its harness, already masked (rejects with 503 while the harness is off).
    * It is bound to that ferret and names no other.
