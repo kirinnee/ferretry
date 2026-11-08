@@ -162,3 +162,68 @@ describe('the ferret’s way to the daemon, through a restart', () => {
     await should(ferret(base).send({ method: 'GET', path: '/x' }, { repeatable: true })).be.rejected();
   });
 });
+
+describe('the ferret’s live streams', () => {
+  /** A loopback WebSocket server the test owns: it records who asked and greets every stream with one message. */
+  function streamServer(): { readonly url: string; readonly seen: (string | null)[]; stop(): Promise<void> } {
+    const seen: (string | null)[] = [];
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: (request, bun) => {
+        seen.push(request.headers.get('authorization'));
+        return bun.upgrade(request) ? undefined : new Response('no', { status: 400 });
+      },
+      websocket: {
+        open: socket => {
+          socket.send(JSON.stringify({ name: 'hello', payload: 1 }));
+        },
+        message: (socket, message) => {
+          socket.send(message);
+        },
+      },
+    });
+    return { url: `http://127.0.0.1:${String(server.port)}`, seen, stop: async () => await server.stop(true) };
+  }
+
+  it('should follow the event feed with the ferret’s own bearer and stop when cancelled', async () => {
+    const server = streamServer();
+    try {
+      const events: unknown[] = [];
+      const cancel = ferret(server.url).events(
+        event => events.push(event),
+        () => undefined,
+      );
+      for (let waited = 0; waited < 100 && events.length === 0; waited += 1) await Bun.sleep(20);
+      cancel();
+      should(events).eql([{ name: 'hello', payload: 1 }]);
+      should(server.seen).eql(['Bearer fys_ferret-1']);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('should open a terminal stream with the ferret’s own bearer and pass frames both ways until closed', async () => {
+    const server = streamServer();
+    try {
+      const frames: unknown[] = [];
+      let opened = false;
+      const stream = ferret(server.url).socket('/v1/stream', {
+        onOpen: () => {
+          opened = true;
+        },
+        onFrame: frame => frames.push(frame),
+        onClose: () => undefined,
+      });
+      for (let waited = 0; waited < 100 && !opened; waited += 1) await Bun.sleep(20);
+      should(opened).be.true();
+      stream.send('echo me');
+      for (let waited = 0; waited < 100 && frames.length < 2; waited += 1) await Bun.sleep(20);
+      stream.close();
+      should(frames.length).be.aboveOrEqual(2);
+      should(server.seen).eql(['Bearer fys_ferret-1']);
+    } finally {
+      await server.stop();
+    }
+  });
+});
