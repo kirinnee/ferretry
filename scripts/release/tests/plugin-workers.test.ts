@@ -76,6 +76,25 @@ describe('plugin worker programs the compile embeds', () => {
   });
 });
 
+describe("a plugin worker beside the entry's own worker programs", () => {
+  test('a plugin worker named like a *.worker.ts beside the entry fails the compile, naming it', () => {
+    const clash = () =>
+      pluginWorkers([half('a', ['w'], { w: at('/r/a/session.worker.ts') })], 'fyd.js', everything, [
+        'session.worker.js',
+      ]);
+    expect(clash).toThrow(
+      'a worker "w" would embed as session.worker.js, which a worker program beside the entry already holds',
+    );
+  });
+
+  test('a plugin worker with a different name passes beside them', () => {
+    const found = pluginWorkers([half('a', ['w'], { w: at('/r/a/job.worker.ts') })], 'fyd.js', everything, [
+      'session.worker.js',
+    ]);
+    expect(found.map(worker => worker.file)).toEqual(['job.worker.js']);
+  });
+});
+
 describe('the entry that hosts the plugins', () => {
   const files = new Set([
     '/r/packages/core/kernel/package.json',
