@@ -20,8 +20,8 @@
  * exactly the URL the worker asked for, which is what the browser would have done.
  *
  * What is proved, for a push from machine Beta while Alpha is also paired:
- *   - the app closed: the worker opens Beta's conversation, at the item;
- *   - the app open on Alpha's conversation, on Sessions, or on the same conversation at another item:
+ *   - the app closed: the worker opens Beta's chat, AT the ask (`/d/beta/ferrets/<id>/chat?ask=A3`);
+ *   - the app open on Alpha's conversation, on the machine's home, or on the same chat at another ask:
  *     the open window is brought forward and routed in the app — no second window, no reload;
  *   - several windows: the app window is the one routed, never the landing page beside it;
  *   - each machine's notification opens only its own machine's conversation;
@@ -35,7 +35,7 @@
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page, Worker } from 'playwright-core';
@@ -64,24 +64,27 @@ const origin = (): string => `http://127.0.0.1:${server.port}`;
 
 beforeAll(async () => {
   workDirectory = await mkdtemp(join(tmpdir(), 'ferretry-notification-open-'));
-  const scene = join(workDirectory, 'scene.js');
+  // `--outdir`, not `--outfile`: the scene's bundle comes with the font files it names, and bun refuses several outputs
+  // for one file.
+  const built = join(workDirectory, 'scene');
   run([
     'bun',
     'build',
     resolve(packageRoot, 'fixtures/notification-open-scene.tsx'),
     '--target',
     'browser',
-    '--outfile',
-    scene,
+    '--outdir',
+    built,
   ]);
+  const outputs = new Map<string, string | Uint8Array>();
+  for (const name of await readdir(built)) {
+    const bytes = new Uint8Array(await Bun.file(join(built, name)).arrayBuffer());
+    outputs.set(name === 'notification-open-scene.js' ? 'app/scene.js' : `app/${name}`, bytes);
+  }
   site = await signedRelease({
     directory: workDirectory,
     name: 'site',
-    files: new Map<string, string | Uint8Array>([
-      ['index.html', LANDING],
-      ['app/index.html', APP],
-      ['app/scene.js', new Uint8Array(await Bun.file(scene).arrayBuffer())],
-    ]),
+    files: new Map<string, string | Uint8Array>([['index.html', LANDING], ['app/index.html', APP], ...outputs]),
     identity: { commit: 'aaaaaaa', sequence: 1 },
     key: await releaseKey(workDirectory, 'key'),
   });
@@ -100,7 +103,13 @@ beforeAll(async () => {
             : pathname.slice(1);
       const bytes = site.get(path);
       if (bytes === undefined) return new Response('not found', { status: 404 });
-      const type = path.endsWith('.html') ? 'text/html' : path.endsWith('.js') ? 'text/javascript' : 'text/plain';
+      const type = path.endsWith('.html')
+        ? 'text/html'
+        : path.endsWith('.js')
+          ? 'text/javascript'
+          : path.endsWith('.woff2')
+            ? 'font/woff2'
+            : 'text/plain';
       return new Response(bytes as Uint8Array<ArrayBuffer>, {
         headers: { 'content-type': type, 'cache-control': 'no-store' },
       });
@@ -133,6 +142,9 @@ interface Shown {
     /** The address the app rendered this route for: equal to `path` once the render has caught up. */
     readonly path: string;
     readonly attention: string | null;
+    readonly daemon?: string;
+    readonly screen?: { readonly plugin: string; readonly id: string };
+    readonly params?: Readonly<Record<string, string>>;
     readonly entry: string;
   } | null;
   readonly opens: readonly string[];
@@ -448,15 +460,25 @@ const ASK = {
   kind: 'attention',
   title: '“Builder”: Pick a release window',
   tag: 'agenda-mvb9x0-c0ffee01',
-  url: '/session/mvb9x0-c0ffee01?attention=A3',
+  url: '/ferrets/mvb9x0-c0ffee01/chat?ask=A3',
 } as const;
 /**
- * Where a tap on that push lands: the address the push named, under the machine that sent it. The 5.0 router (`routeTable`
- * in @ferretry/app) knows no `session/<id>` screen at all (a conversation is `ferrets/:ferret/chat`), so it resolves this
- * address to `not-found` carrying the path; the machine is in the path, not in a route field.
+ * Where a tap on that push lands: the ferret's chat on the machine that sent it, AT the ask (`?ask=`). The 5.0 router
+ * (`routeTable` in @ferretry/app) draws it as Conversation's `chat` screen on that daemon; the scene reads the ask from
+ * the address with the Agenda's own `agendaTargetFromSearch`.
  */
-const BETA_ASK = '/d/beta/session/mvb9x0-c0ffee01?attention=A3';
-const ALPHA_ASK = '/d/alpha/session/mvb9x0-c0ffee01?attention=A2';
+const BETA_ASK = '/d/beta/ferrets/mvb9x0-c0ffee01/chat?ask=A3';
+const ALPHA_ASK = '/d/alpha/ferrets/mvb9x0-c0ffee01/chat?ask=A2';
+const chatRoute = (daemon: string, ferret: string, path: string, attention: string | null) => ({
+  kind: 'screen',
+  daemon,
+  screen: { plugin: 'conversation', id: 'chat' },
+  params: { ferret },
+  path,
+  attention,
+});
+const BETA_ROUTE = chatRoute('beta', 'mvb9x0-c0ffee01', BETA_ASK, 'A3');
+const ALPHA_ROUTE = chatRoute('alpha', 'mvb9x0-c0ffee01', ALPHA_ASK, 'A2');
 
 describe('a notification tap opens its conversation on the machine that sent it', () => {
   beforeAll(async () => {
@@ -469,7 +491,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     });
   }, 240_000);
 
-  lane('with the app closed, the worker opens Beta’s Inbox at the item', async () => {
+  lane('with the app closed, the worker opens Beta’s chat at the ask', async () => {
     const browserProfile = await profile();
     await push(browserProfile, 'beta', ASK);
     // Every window of the app is gone; only the browser's notification is left.
@@ -483,13 +505,13 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const window = await browserProfile.context.newPage();
     await window.goto(opened[0] ?? '');
     const landed = await settledOn(window, BETA_ASK);
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     await browserProfile.context.close();
   });
 
   lane('with the app on Alpha’s conversation, routes that window to Beta’s — no second window, no reload', async () => {
     const browserProfile = await profile();
-    const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
+    const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat');
     await retire(browserProfile);
     await app.evaluate(() => {
       (globalThis as unknown as { __sameDocument: boolean }).__sameDocument = true;
@@ -499,15 +521,15 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     expect(landed.opens).toEqual([BETA_ASK]);
-    expect(await tapped()).toEqual({ focused: [`${origin()}/d/alpha/session/mva1-aaaa0001`], opened: [] });
+    expect(await tapped()).toEqual({ focused: [`${origin()}/d/alpha/ferrets/mva1-aaaa0001/chat`], opened: [] });
     // Routed in the app: the same document, not a reload.
     expect(await app.evaluate(() => (globalThis as unknown as { __sameDocument?: boolean }).__sameDocument)).toBe(true);
     await browserProfile.context.close();
   });
 
-  lane('with the app on Sessions, opens Beta’s Inbox item', async () => {
+  lane('with the app on the machine’s home, opens Beta’s chat at the ask', async () => {
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/alpha');
     await retire(browserProfile);
@@ -516,14 +538,14 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
   });
 
-  lane('with the app on the same conversation at another item, moves to the tapped item', async () => {
+  lane('with the app on the same conversation at another item, moves to the tapped ask', async () => {
     const browserProfile = await profile();
-    const app = await appAt(browserProfile, '/d/beta/session/mvb9x0-c0ffee01?attention=A1');
+    const app = await appAt(browserProfile, '/d/beta/ferrets/mvb9x0-c0ffee01/chat?ask=A1');
     const before = await shown(app);
     await retire(browserProfile);
     await push(browserProfile, 'beta', ASK);
@@ -531,7 +553,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     // A new navigation, so the conversation re-targets even when the item is one it showed before.
     expect(landed.route?.entry).not.toBe(before.route?.entry);
     expect((await tapped()).opened).toEqual([]);
@@ -540,7 +562,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
   lane('with the landing page and the app both open, routes the app window and leaves the landing page', async () => {
     const browserProfile = await profile();
-    const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
+    const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat');
     await retire(browserProfile);
     // The landing page is the newest window, and the one the reader looked at last.
     const landing = await browserProfile.context.newPage();
@@ -551,7 +573,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     expect(await landing.evaluate(() => location.pathname)).toBe('/');
     expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
@@ -561,7 +583,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/alpha');
     await retire(browserProfile);
-    await push(browserProfile, 'alpha', { ...ASK, url: '/session/mvb9x0-c0ffee01?attention=A2' });
+    await push(browserProfile, 'alpha', { ...ASK, url: '/ferrets/mvb9x0-c0ffee01/chat?ask=A2' });
     await push(browserProfile, 'beta', ASK);
 
     // The same session id on both machines: the machine that sent it is what decides.
@@ -570,8 +592,8 @@ describe('a notification tap opens its conversation on the machine that sent it'
     await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const onBeta = await settledOn(app, BETA_ASK);
 
-    expect(onAlpha.route).toMatchObject({ kind: 'not-found', path: ALPHA_ASK });
-    expect(onBeta.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(onAlpha.route).toMatchObject(ALPHA_ROUTE);
+    expect(onBeta.route).toMatchObject(BETA_ROUTE);
     await browserProfile.context.close();
   });
 
@@ -583,8 +605,8 @@ describe('a notification tap opens its conversation on the machine that sent it'
     {
       name: 'an older daemon’s ask (url "/", a session)',
       payload: { sessionId: 'mvb9x0-c0ffee01', kind: 'question', title: 'Needs you', tag: 't', url: '/' },
-      expected: '/d/beta/session/mvb9x0-c0ffee01',
-      kind: 'not-found',
+      expected: '/d/beta/ferrets/mvb9x0-c0ffee01/chat',
+      kind: 'screen',
     },
     {
       name: 'a conversation link with no item',
@@ -593,10 +615,23 @@ describe('a notification tap opens its conversation on the machine that sent it'
         kind: 'failed',
         title: 'Failed',
         tag: 't',
-        url: '/session/mvb9x0-c0ffee01',
+        url: '/ferrets/mvb9x0-c0ffee01/chat',
       },
-      expected: '/d/beta/session/mvb9x0-c0ffee01',
-      kind: 'not-found',
+      expected: '/d/beta/ferrets/mvb9x0-c0ffee01/chat',
+      kind: 'screen',
+    },
+    {
+      // There is no /session/ alias: that path is outside the machine's pages, so the push opens the chat it is about.
+      name: 'the old /session/ spelling of an ask',
+      payload: {
+        sessionId: 'mvb9x0-c0ffee01',
+        kind: 'attention',
+        title: 'Needs you',
+        tag: 't',
+        url: '/session/mvb9x0-c0ffee01?attention=A3',
+      },
+      expected: '/d/beta/ferrets/mvb9x0-c0ffee01/chat',
+      kind: 'screen',
     },
     {
       name: 'a push about no conversation (kind only)',
@@ -605,7 +640,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
       kind: 'daemon-home',
     },
   ] as const;
-  // Three independent profiles, so the cases run side by side instead of paying each boot in turn.
+  // Independent profiles, so the cases run side by side instead of paying each boot in turn.
   lane(
     'a daemon that names no page still opens the conversation the push is about, or that machine’s sessions',
     async () => {
@@ -613,7 +648,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
         UNNAMED_PAGES.map(async ({ name, payload, expected, kind }) => {
           const browserProfile = await profile();
           try {
-            const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
+            const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat');
             await retire(browserProfile);
             await push(browserProfile, 'beta', payload);
 
@@ -638,7 +673,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
   lane('a window still starting when the tap lands is routed once the app is up, without a second window', async () => {
     const browserProfile = await profile();
     // The store is still loading — the router is not mounted — for as long as the test holds it.
-    const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001', { held: true });
+    const app = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat', { held: true });
     await retire(browserProfile);
     await push(browserProfile, 'beta', ASK);
 
@@ -649,13 +684,13 @@ describe('a notification tap opens its conversation on the machine that sent it'
     await app.evaluate(() => (globalThis as unknown as { __mountScene: () => void }).__mountScene());
     const landed = await settledOn(app, BETA_ASK);
 
-    expect(landed.route).toMatchObject({ kind: 'not-found', path: BETA_ASK });
+    expect(landed.route).toMatchObject(BETA_ROUTE);
     await browserProfile.context.close();
   });
 
   lane('a window that never answers (an app too old for the message) still ends on the conversation', async () => {
     const browserProfile = await profile();
-    const stale = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001', { wired: false });
+    const stale = await appAt(browserProfile, '/d/alpha/ferrets/mva1-aaaa0001/chat', { wired: false });
     await retire(browserProfile);
     await push(browserProfile, 'beta', ASK);
 
@@ -664,7 +699,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
     // A machine's worker controls no page, so it may not navigate that window: it opens the
     // conversation in one of its own instead of leaving the reader where they were.
-    expect(await stale.evaluate(() => location.pathname)).toBe('/d/alpha/session/mva1-aaaa0001');
+    expect(await stale.evaluate(() => location.pathname)).toBe('/d/alpha/ferrets/mva1-aaaa0001/chat');
     expect((await tapped()).opened).toEqual([`${origin()}${BETA_ASK}`]);
     await browserProfile.context.close();
   });
@@ -681,14 +716,16 @@ describe('a notification tap opens its conversation on the machine that sent it'
         const registration = await navigator.serviceWorker.getRegistration();
         await registration?.showNotification('Needs input', {
           tag: 'session-needs',
-          data: { url: '/d/beta/session/mvb9x0-c0ffee01', sessionId: 'mvb9x0-c0ffee01', eventKey: 'k', count: 1 },
+          data: { url: '/d/beta/ferrets/mvb9x0-c0ffee01/chat', sessionId: 'mvb9x0-c0ffee01', eventKey: 'k', count: 1 },
         });
       });
 
       await tap(browserProfile, '/', '/sw.verified.js');
-      const landed = await settledOn(app, '/d/beta/session/mvb9x0-c0ffee01');
+      const landed = await settledOn(app, '/d/beta/ferrets/mvb9x0-c0ffee01/chat');
 
-      expect(landed.route).toMatchObject({ kind: 'not-found', path: '/d/beta/session/mvb9x0-c0ffee01' });
+      expect(landed.route).toMatchObject(
+        chatRoute('beta', 'mvb9x0-c0ffee01', '/d/beta/ferrets/mvb9x0-c0ffee01/chat', null),
+      );
       await browserProfile.context.close();
     },
   );

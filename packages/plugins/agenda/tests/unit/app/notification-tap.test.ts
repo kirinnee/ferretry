@@ -2,10 +2,11 @@
  * Where a tap on each kind of push lands. The worker's click handler is
  * `notificationTapUrl(notificationUrl(url, origin, machine, sessionId), origin)`, so the proof is that
  * composition, per kind, against the page a daemon names (`agendaNotificationPath`) — plus the mark every
- * one of them wears. The rules are the Agenda's own (`lib/notification-tap.ts`); an ask's tap opens the ask's own
- * page (`/d/<daemon>/agenda/<ferret>/<ask>`), where today it opened the Inbox at that card.
+ * one of them wears. The rules are the Agenda's own (`lib/notification-tap.ts`); an ask's tap opens the ferret's
+ * chat AT the ask (`/d/<daemon>/ferrets/<ferret>/chat?ask=A3`), checked by the shell's route table.
  */
 import { describe, expect, it } from 'bun:test';
+import { routeTable, type ScreenRef } from '@ferretry/app';
 import { type AgendaId, agendaNotificationPath, MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import type { NotificationPayload as PushNotificationPayload } from '../../../app/lib/notify.ts';
 import { inboxTargetFromSearch, inboxTargetPath } from '../../../app/lib/agenda-inbox.ts';
@@ -23,6 +24,9 @@ const ORIGIN = 'https://ferretry.example.test';
 const MACHINE = { daemonId: 'laptop', label: 'Laptop' };
 const HOME = `${ORIGIN}/d/laptop`;
 const A3 = 'A3' as AgendaId;
+const CHAT: ScreenRef = { plugin: 'conversation', id: 'chat', path: 'ferrets/:ferret/chat', label: 'Chat' };
+const AGENDA: ScreenRef = { plugin: 'agenda', id: 'agenda', path: 'agenda', label: 'Agenda' };
+const ROUTES = routeTable([CHAT, AGENDA]);
 
 const push = (over: Partial<PushNotificationPayload>): PushNotificationPayload =>
   ({
@@ -41,6 +45,7 @@ const tapTarget = (payload: PushNotificationPayload): string =>
   notificationTapUrl(
     notificationUrl(payload.url, ORIGIN, MACHINE, 'sessionId' in payload ? payload.sessionId : undefined),
     ORIGIN,
+    ROUTES,
   );
 
 describe('inboxTargetPath / inboxTargetFromSearch', () => {
@@ -61,36 +66,38 @@ describe('inboxTargetPath / inboxTargetFromSearch', () => {
 });
 
 describe('a tap, per kind of push', () => {
-  it('an agenda item lands on that ask’s own page', () => {
-    const payload = push({ kind: 'attention', sessionId: 's1', url: agendaNotificationPath('s1', A3) });
-    expect(tapTarget(payload)).toBe(`${HOME}/agenda/s1/A3`);
+  it('writes an ask’s push as the ferret’s chat AT the ask, the one spelling', () => {
+    expect(agendaNotificationPath('s1', A3)).toBe('/ferrets/s1/chat?ask=A3');
+    expect(agendaNotificationPath('a b', 'A12' as AgendaId)).toBe('/ferrets/a%20b/chat?ask=A12');
   });
 
-  it('a machine notice lands on its ask’s page, never on a conversation page', () => {
-    const payload = push({
-      kind: 'attention',
-      sessionId: MACHINE_AGENDA_ID,
-      url: agendaNotificationPath(MACHINE_AGENDA_ID, A3),
-    });
-    expect(tapTarget(payload)).toBe(`${HOME}/agenda/${MACHINE_AGENDA_ID}/A3`);
-    // A push that named no page the worker may open still opens the Agenda, not a machine-agenda conversation.
+  it('an agenda item lands on its ferret’s chat with the ask named', () => {
+    const payload = push({ kind: 'attention', sessionId: 's1', url: agendaNotificationPath('s1', A3) });
+    expect(tapTarget(payload)).toBe(`${HOME}/ferrets/s1/chat?ask=A3`);
+  });
+
+  it('a push that named no page opens the Agenda for a machine notice, not a machine-agenda chat', () => {
     expect(tapTarget(push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/' }))).toBe(`${HOME}/agenda`);
   });
 
-  it('a ping, a deadline, a wake-up and a stop all carry their item, so all land on it', () => {
+  it('a ping, a deadline, a wake-up and a stop all carry their ask, so all land on it', () => {
     for (const kind of ['agenda', 'attention', 'question'] as const) {
       const payload = push({ kind, sessionId: 's9', url: agendaNotificationPath('s9', 'A12' as AgendaId) });
-      expect(tapTarget(payload)).toBe(`${HOME}/agenda/s9/A12`);
+      expect(tapTarget(payload)).toBe(`${HOME}/ferrets/s9/chat?ask=A12`);
     }
   });
 
-  it('a ferret that stopped or failed opens its conversation', () => {
-    expect(tapTarget(push({ kind: 'failed', sessionId: 's1', url: '/session/s1' }))).toBe(`${HOME}/session/s1`);
-    expect(tapTarget(push({ kind: 'completed', sessionId: 's1', url: '/session/s1' }))).toBe(`${HOME}/session/s1`);
+  it('a ferret that stopped or failed opens its chat', () => {
+    expect(tapTarget(push({ kind: 'failed', sessionId: 's1', url: '/ferrets/s1/chat' }))).toBe(
+      `${HOME}/ferrets/s1/chat`,
+    );
+    expect(tapTarget(push({ kind: 'completed', sessionId: 's1', url: '/ferrets/s1/chat' }))).toBe(
+      `${HOME}/ferrets/s1/chat`,
+    );
   });
 
-  it('an older daemon that named no page still opens the conversation it is about', () => {
-    expect(tapTarget(push({ kind: 'failed', sessionId: 's1', url: '/' }))).toBe(`${HOME}/session/s1`);
+  it('an older daemon that named no page still opens the chat it is about', () => {
+    expect(tapTarget(push({ kind: 'failed', sessionId: 's1', url: '/' }))).toBe(`${HOME}/ferrets/s1/chat`);
   });
 
   it('a pairing opens the machine itself', () => {
@@ -98,15 +105,37 @@ describe('a tap, per kind of push', () => {
   });
 
   it('a link off this site or off this machine never leaves the machine', () => {
-    for (const url of ['https://evil.test/x', '//evil.test/x', '/d/other/inbox?session=s1&agenda=A3']) {
+    for (const url of ['https://evil.test/x', '//evil.test/x', '/d/other/ferrets/s1/chat?ask=A3']) {
       expect(tapTarget(push({ kind: 'attention', sessionId: 's1', url }))).not.toContain('evil.test');
       expect(tapTarget(push({ kind: 'attention', sessionId: 's1', url })).startsWith(`${HOME}`)).toBe(true);
     }
   });
 
-  it('a conversation page with no item is left as the conversation', () => {
-    expect(notificationTapUrl(`${HOME}/session/s1`, ORIGIN)).toBe(`${HOME}/session/s1`);
-    expect(notificationTapUrl(`${HOME}/settings`, ORIGIN)).toBe(`${HOME}/settings`);
+  it('has no /session/ alias: the old path is outside the machine, so it opens the chat the push is about', () => {
+    expect(tapTarget(push({ kind: 'attention', sessionId: 's1', url: '/session/s1?ask=A3' }))).toBe(
+      `${HOME}/ferrets/s1/chat`,
+    );
+  });
+});
+
+describe('notificationTapUrl (the shell’s route table decides what a tap may open)', () => {
+  it('opens a page the table draws as named, ask and all', () => {
+    expect(notificationTapUrl(`${HOME}/ferrets/s1/chat?ask=A3`, ORIGIN, ROUTES)).toBe(`${HOME}/ferrets/s1/chat?ask=A3`);
+    expect(notificationTapUrl(`${HOME}/settings`, ORIGIN, ROUTES)).toBe(`${HOME}/settings`);
+  });
+
+  it('opens the machine’s home for a page the table does not draw, and the app for a foreign origin', () => {
+    expect(notificationTapUrl(`${HOME}/session/s1?ask=A3`, ORIGIN, ROUTES)).toBe(HOME);
+    expect(notificationTapUrl('https://evil.test/d/laptop/ferrets/s1/chat?ask=A3', ORIGIN, ROUTES)).toBe(
+      `${ORIGIN}/app/`,
+    );
+  });
+
+  it('never throws on junk', () => {
+    for (const junk of ['', 'not a url', '/d/%E0%A4%A/ferrets/s1/chat', 'javascript:alert(1)']) {
+      expect(() => notificationTapUrl(junk, ORIGIN, ROUTES)).not.toThrow();
+      expect(new URL(notificationTapUrl(junk, ORIGIN, ROUTES)).origin).toBe(ORIGIN);
+    }
   });
 });
 

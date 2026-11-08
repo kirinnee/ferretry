@@ -6,8 +6,9 @@
  * It is wired the way `main.tsx` and `AppShell` wire it: the entry point attaches the inbox to
  * `navigator.serviceWorker` before anything mounts, the app's real `RouterProvider` mounts once its
  * "store" has loaded, and `useNotificationOpen` routes through the router's own `navigate`. What the
- * page shows is the route the app would render — parsed by the real `parseRoute`, with the Agenda
- * item the real `agendaTargetFromSearch` reads — so the suite asserts what a reader would land on.
+ * page shows is the route the app would render — parsed by the shell's real route table, given Conversation's
+ * `chat` screen (`ferrets/:ferret/chat`), with the ask the real `agendaTargetFromSearch` reads from `?ask=` — so the
+ * suite asserts what a reader would land on: the ferret's chat, on its daemon, AT the ask.
  *
  * Two switches, read from `localStorage` so that no URL the worker opens carries them:
  *
@@ -22,6 +23,7 @@ import { createRoot } from 'react-dom/client';
 import { NotificationOpenContext, useNotificationOpen } from '../../../../app/hooks/use-notification-open.ts';
 import { agendaTargetFromSearch } from '../../../../app/lib/agenda-inbox.ts';
 import { attachNotificationOpens, NotificationOpenInbox } from '../../../../app/lib/notification-open.ts';
+import type { ScreenRef } from '@ferretry/app';
 import { RouterProvider } from '@ferretry/app/testing/router';
 import { useRouter } from '../../../../app/shell.ts';
 
@@ -32,6 +34,11 @@ const setting = (key: string): string | null => {
     return null;
   }
 };
+
+/** Conversation's chat screen, as its manifest declares it: the page an ask's push opens. */
+const SCREENS: readonly ScreenRef[] = [
+  { plugin: 'conversation', id: 'chat', path: 'ferrets/:ferret/chat', label: 'Chat' },
+];
 
 const wired = setting('scene-app') !== 'none';
 const held = setting('scene-hold') === '1';
@@ -74,7 +81,7 @@ if (host === null) throw new Error('missing #root');
 const mount = (): void => {
   createRoot(host).render(
     <NotificationOpenContext.Provider value={inbox}>
-      <RouterProvider>
+      <RouterProvider screens={SCREENS}>
         <Shown />
       </RouterProvider>
     </NotificationOpenContext.Provider>,

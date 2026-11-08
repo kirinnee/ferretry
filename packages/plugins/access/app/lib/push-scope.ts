@@ -25,15 +25,13 @@
 
 import type { PushNotificationPayload } from '../../contract/index.ts';
 import {
-  agendaTargetFromSearch,
   type DaemonId,
   daemonAgendaPath,
+  daemonFerretChatPath,
   daemonHomePath,
-  daemonSessionPath,
-  inboxTargetPath,
   isMachineAgendaId,
   notificationBrand,
-  parseRoute,
+  notificationTapTarget,
 } from '../shell-pairing.ts';
 
 /** The path every per-machine push registration lives under. Never a page the app serves. */
@@ -126,9 +124,9 @@ export const unverifiedNotification = (payload: PushNotificationPayload, origin:
  * the conversation the push is about (`sessionId`), else its sessions, else — when the notification
  * belongs to no machine — the app itself.
  *
- * A daemon names a conversation RELATIVE TO ITS OWN PAGES — `/session/<id>?attention=A3`
+ * A daemon names a conversation RELATIVE TO ITS OWN PAGES — `/ferrets/<id>/chat?ask=A3`
  * (`agendaNotificationPath`), since it never knows which name this browser files it under — so a
- * machine's worker reads `/session/…` as under that machine. The app-wide worker knows no machine, and
+ * machine's worker reads `/ferrets/…` as under that machine. The app-wide worker knows no machine, and
  * such a path falls through to the app itself.
  *
  * THE `sessionId` FALLBACK IS FOR DAEMONS THAT NAME NO PAGE. A daemon older than #768 sent every push —
@@ -145,40 +143,32 @@ export const notificationUrl = (
   const fallback = new URL(fallbackPath(machine, sessionId), origin);
   const target = typeof raw === 'string' ? URL.parse(machineRelative(raw, machine), origin) : null;
   if (target === null || target.origin !== origin) return fallback.href;
-  if (machine === null && target.pathname.startsWith(SESSION_RELATIVE)) return fallback.href;
+  if (machine === null && target.pathname.startsWith(FERRET_RELATIVE)) return fallback.href;
   if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
   return target.href;
 };
 
 /**
- * Where a TAP lands, given the page `notificationUrl` allowed: an Agenda push names its conversation AT
- * an item (`/d/<id>/session/<sid>?attention=A3`), and the item is a card the owner answers in the Inbox, so
- * the tap opens the Inbox at that card. The Inbox sends the reader on to the conversation itself when the
- * item is no longer open (answered elsewhere, snoozed, on the ferret's turn). Every other page — a
- * conversation with no item, settings — is returned untouched.
+ * Where a TAP lands, given the page `notificationUrl` allowed. An Agenda push already names the ferret's chat AT its ask
+ * (`/d/<id>/ferrets/<ferret>/chat?ask=A3`; the chat reads `?ask=`), so the tap opens exactly that — if the shell's route
+ * table draws it. An address the table does not know opens its machine's home, and a foreign or unreadable one the
+ * app's; it never throws.
  */
-export const notificationTapUrl = (allowed: string, origin: string): string => {
-  const url = URL.parse(allowed, origin);
-  if (url === null || url.origin !== origin) return allowed;
-  const route = parseRoute(url.pathname);
-  const item = agendaTargetFromSearch(url.search);
-  if (route.kind !== 'session' || item === null) return allowed;
-  return new URL(inboxTargetPath(route.daemonId, route.sessionId, item), origin).href;
-};
+export const notificationTapUrl = notificationTapTarget;
 
 /** Where a tap goes when the push named no page this worker may open. */
 const fallbackPath = (machine: PushMachine | null, sessionId: string | undefined): string => {
   if (machine === null) return '/app/';
   if (sessionId === undefined || sessionId.trim() === '') return machinePath(machine);
   if (isMachineAgendaId(sessionId)) return daemonAgendaPath(machine.daemonId as DaemonId);
-  return daemonSessionPath(machine.daemonId as DaemonId, sessionId);
+  return daemonFerretChatPath(machine.daemonId as DaemonId, sessionId);
 };
 
-/** The page prefix a daemon names its own conversations by, relative to its machine's pages. */
-const SESSION_RELATIVE = '/session/';
+/** The page prefix a daemon names its own ferrets by (`/ferrets/<id>/chat`), relative to its machine's pages. */
+const FERRET_RELATIVE = '/ferrets/';
 
 const machineRelative = (raw: string, machine: PushMachine | null): string =>
-  machine !== null && raw.startsWith(SESSION_RELATIVE) ? `${machinePath(machine)}${raw}` : raw;
+  machine !== null && raw.startsWith(FERRET_RELATIVE) ? `${machinePath(machine)}${raw}` : raw;
 
 /** The fixed, per-machine tag every filtered push collapses into — see `filteredPushNotification`. */
 export const FILTERED_PUSH_TAG_PREFIX = 'fy-quiet:';

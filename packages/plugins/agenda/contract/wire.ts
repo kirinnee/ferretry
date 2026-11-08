@@ -130,7 +130,7 @@ export type AgendaConfig = z.infer<typeof AgendaConfigSchema>;
 export const agendaAskBuzzTag = (ferret: string, ask: string): string => `agenda-${ferret}:${ask}`;
 /** The tag a stop's buzz goes out under: it is about the ferret, not one ask. */
 export const agendaStopBuzzTag = (ferret: string): string => `agenda-${ferret}`;
-/** Where a buzz opens: the ask's own page in the app (`/agenda/:ferret/:ask`). */
+/** The ask's own page in the Inbox (`/agenda/:ferret/:ask`). A buzz opens the ferret's chat instead (`agendaNotificationPath`). */
 export const agendaAskPath = (ferret: string, ask: string): string =>
   `/agenda/${encodeURIComponent(ferret)}/${encodeURIComponent(ask)}`;
 

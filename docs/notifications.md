@@ -337,15 +337,17 @@ in a clear.
 
 ## Where a tap goes
 
-The push's `url` is relative to the machine's own pages: `/session/<id>?attention=A3`
-(`agendaNotificationPath`). The daemon never knows which name a browser files it under. The
-browser's per-machine push worker places the path under that machine, so it opens
-`/d/<daemonId>/session/<id>?attention=A3` (`packages/pwa/src/lib/push-scope.ts`). It reuses an open app
+The push's `url` is relative to the machine's own pages: `/ferrets/<id>/chat?ask=A3`
+(`agendaNotificationPath`; `ask` is `ASK_LINK_PARAMETER`). The daemon never knows which name a browser files it
+under. The browser's per-machine push worker places the path under that machine, so it opens
+`/d/<daemonId>/ferrets/<id>/chat?ask=A3` (`notificationUrl` in `packages/app/src/worker/notifications.ts`). There is
+no other spelling of the path and no `/session/` alias. The page that tap lands on is checked by the shell's own route
+table (`notificationTapTarget`): an address it does not draw opens that machine's home, and one off this origin the app's. It reuses an open app
 window when there is one, whichever worker controls it, and never a sign-in popup.
 
 Every push names a page, and the worker opens a page even when one does not:
 
-- **A push with no item** (a legacy notify) opens the conversation it came from: `/session/<id>`
+- **A push with no item** opens the chat it came from: `/ferrets/<id>/chat`
   (`sessionNotificationPath`).
 - **A push that names no page it may open** opens the conversation its `sessionId` names, on its
   machine. A daemon older than #768 sent every push with `url: '/'`, an ask included. A push about no

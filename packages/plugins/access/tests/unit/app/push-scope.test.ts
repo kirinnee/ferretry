@@ -3,11 +3,13 @@
  * say and open (docs/cross-daemon.md §4a–§4c).
  */
 import { describe, expect, it, test } from 'bun:test';
+import { routeTable } from '@ferretry/app';
+import type { ScreenRef } from '@ferretry/app';
 import type { PushNotificationPayload } from '../../../contract/index.ts';
 import {
   daemonConnection,
   daemonId,
-  daemonSessionPath,
+  daemonFerretChatPath,
   NOTIFICATION_BADGE,
   NOTIFICATION_ICON,
 } from '../../../app/shell-pairing.ts';
@@ -16,6 +18,7 @@ import {
   filteredPushNotification,
   isPushScope,
   machineNotification,
+  notificationTapUrl,
   notificationUrl,
   PUSH_SCOPE_ROOT,
   pushMachineOf,
@@ -91,7 +94,7 @@ describe('machineNotification', () => {
   });
 
   it('keeps a link that is already one of the machine’s own pages', () => {
-    const own = `/d/${encodeURIComponent(WORK.daemonId)}/session/s1`;
+    const own = `/d/${encodeURIComponent(WORK.daemonId)}/ferrets/s1/chat`;
     expect(machineNotification({ ...payload, url: own }, WORK, ORIGIN).url).toBe(`${ORIGIN}${own}`);
   });
 
@@ -108,7 +111,7 @@ describe('machineNotification', () => {
 
 describe('notificationUrl (§4a: only this site; §4c: only this machine)', () => {
   it('opens this site’s own page, and the app for anything off this site', () => {
-    expect(notificationUrl('/d/x/session/1', ORIGIN, null)).toBe(`${ORIGIN}/d/x/session/1`);
+    expect(notificationUrl('/d/x/ferrets/1/chat', ORIGIN, null)).toBe(`${ORIGIN}/d/x/ferrets/1/chat`);
     expect(notificationUrl('https://evil.test/phish', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
     expect(notificationUrl('//evil.test/phish', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
     expect(notificationUrl('javascript:alert(1)', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
@@ -118,7 +121,7 @@ describe('notificationUrl (§4a: only this site; §4c: only this machine)', () =
 
   it('keeps a machine inside its own pages, even through a climbing or look-alike path', () => {
     const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
-    expect(notificationUrl(`${home}/session/s1`, ORIGIN, WORK)).toBe(`${home}/session/s1`);
+    expect(notificationUrl(`${home}/ferrets/s1/chat`, ORIGIN, WORK)).toBe(`${home}/ferrets/s1/chat`);
     expect(notificationUrl(home, ORIGIN, WORK)).toBe(home);
     for (const elsewhere of [
       '/d/sha256%3Ahome/settings',
@@ -131,32 +134,33 @@ describe('notificationUrl (§4a: only this site; §4c: only this machine)', () =
     }
   });
 
-  it('places a daemon’s machine-relative conversation link under THAT machine, item and all', () => {
+  it('places a daemon’s machine-relative chat link under THAT machine, ask and all', () => {
     const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
-    // The machine-relative link the Agenda writes for an item (today's `agendaNotificationPath('session 1', 'A3')`).
-    const link = '/session/session%201?attention=A3';
-    expect(notificationUrl(link, ORIGIN, WORK)).toBe(`${home}/session/session%201?attention=A3`);
+    // The machine-relative link the Agenda writes for an ask (`agendaNotificationPath('session 1', 'A3')`).
+    const link = '/ferrets/session%201/chat?ask=A3';
+    expect(notificationUrl(link, ORIGIN, WORK)).toBe(`${home}/ferrets/session%201/chat?ask=A3`);
     // A climb out of the machine from a relative link is still caught by the machine check.
-    expect(notificationUrl('/session/../../d/other', ORIGIN, WORK)).toBe(home);
+    expect(notificationUrl('/ferrets/../../d/other', ORIGIN, WORK)).toBe(home);
     // The app-wide worker knows no machine, so a relative link opens nothing but the app.
     expect(notificationUrl(link, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
   });
 
-  it('opens at the item whichever link parameter the daemon spelled, agenda or attention', () => {
+  it('writes the ask as `?ask=` and has no /session/ alias', () => {
     const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
-    expect(notificationUrl('/session/s1?attention=A3', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1?attention=A3`);
-    expect(notificationUrl('/session/s1?agenda=A3', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1?agenda=A3`);
+    expect(notificationUrl('/ferrets/s1/chat?ask=A3', ORIGIN, WORK, 's1')).toBe(`${home}/ferrets/s1/chat?ask=A3`);
+    // The old spelling is just another address outside the machine: the chat of the ferret the push is about.
+    expect(notificationUrl('/session/s1?attention=A3', ORIGIN, WORK, 's1')).toBe(`${home}/ferrets/s1/chat`);
   });
 
   it('opens the conversation a push is about when its daemon named no page (before #768, `fy attention notify`)', () => {
     const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
     // An older daemon's ask, and every push it sent: `url: '/'`, with the session it is about.
-    expect(notificationUrl('/', ORIGIN, WORK, 'session 1')).toBe(`${home}/session/session%201`);
+    expect(notificationUrl('/', ORIGIN, WORK, 'session 1')).toBe(`${home}/ferrets/session%201/chat`);
     // Off this site, or on another machine's pages: still this machine's copy of that conversation.
-    expect(notificationUrl('https://evil.test/', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1`);
-    expect(notificationUrl('/d/other/session/s1', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1`);
+    expect(notificationUrl('https://evil.test/', ORIGIN, WORK, 's1')).toBe(`${home}/ferrets/s1/chat`);
+    expect(notificationUrl('/d/other/ferrets/s1/chat', ORIGIN, WORK, 's1')).toBe(`${home}/ferrets/s1/chat`);
     // A page it did name, and may open, wins over the session.
-    expect(notificationUrl('/session/s1?attention=A3', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1?attention=A3`);
+    expect(notificationUrl('/ferrets/s1/chat?ask=A3', ORIGIN, WORK, 's1')).toBe(`${home}/ferrets/s1/chat?ask=A3`);
     expect(notificationUrl(`${home}/settings`, ORIGIN, WORK, 's1')).toBe(`${home}/settings`);
     // About no conversation (a blank id is none): the machine's sessions. The app-wide worker knows no
     // machine to open a session on, so the id changes nothing there.
@@ -167,7 +171,7 @@ describe('notificationUrl (§4a: only this site; §4c: only this machine)', () =
   it('shows an older daemon’s session push pointing at its conversation', () => {
     const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
     const shown = machineNotification({ ...payload, sessionId: 's1', kind: 'failed', url: '/' }, WORK, ORIGIN);
-    expect(shown.url).toBe(`${home}/session/s1`);
+    expect(shown.url).toBe(`${home}/ferrets/s1/chat`);
     expect(machineNotification({ ...payload, url: '/' }, WORK, ORIGIN).url).toBe(home);
   });
 
@@ -229,10 +233,35 @@ describe('a tap opens the machine the notification came from', () => {
     // The same session id on both machines: the URL is what keeps them apart. A session notification's page is
     // its machine's conversation path (today built by the notification ledger from the session's scope).
     const laptopConnection = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.test', deviceId: 'd' });
-    const spec = { url: daemonSessionPath(laptopConnection.daemonId, 's-1') };
-    expect(spec.url).toBe('/d/laptop/session/s-1');
-    expect(notificationUrl(spec.url, origin, laptop)).toBe(`${origin}/d/laptop/session/s-1`);
+    const spec = { url: daemonFerretChatPath(laptopConnection.daemonId, 's-1') };
+    expect(spec.url).toBe('/d/laptop/ferrets/s-1/chat');
+    expect(notificationUrl(spec.url, origin, laptop)).toBe(`${origin}/d/laptop/ferrets/s-1/chat`);
     // Studio's worker refuses to open the laptop's page, and falls back to its own sessions.
     expect(notificationUrl(spec.url, origin, studio)).toBe(`${origin}/d/studio`);
+  });
+});
+
+describe('notificationTapUrl (the tap lands on the page the shell’s route table draws)', () => {
+  const chat: ScreenRef = { plugin: 'conversation', id: 'chat', path: 'ferrets/:ferret/chat', label: 'Chat' };
+  const routes = routeTable([chat]);
+  const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
+  /** What the click handler opens, from a payload as the daemon sent it. */
+  const tapped = (url: string, sessionId?: string): string =>
+    notificationTapUrl(notificationUrl(url, ORIGIN, WORK, sessionId), ORIGIN, routes);
+
+  it('opens an ask’s push on the ferret’s chat with the ask named, the one spelling', () => {
+    expect(tapped('/ferrets/f1/chat?ask=A3', 'f1')).toBe(`${home}/ferrets/f1/chat?ask=A3`);
+  });
+
+  it('opens a push with no ask on the chat it is about', () => {
+    expect(tapped('/', 'f1')).toBe(`${home}/ferrets/f1/chat`);
+  });
+
+  it('fails closed on a foreign origin and on junk, and never throws', () => {
+    expect(notificationTapUrl('https://evil.test/d/x/ferrets/f1/chat?ask=A3', ORIGIN, routes)).toBe(`${ORIGIN}/app/`);
+    for (const junk of ['', 'not a url', '/d/%E0%A4%A/ferrets/f1/chat']) {
+      expect(() => notificationTapUrl(junk, ORIGIN, routes)).not.toThrow();
+      expect(new URL(notificationTapUrl(junk, ORIGIN, routes)).origin).toBe(ORIGIN);
+    }
   });
 });

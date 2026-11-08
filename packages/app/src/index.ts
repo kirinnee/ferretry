@@ -162,7 +162,16 @@ export {
 } from './daemons/machine-names.ts';
 export { type DaemonClientOf, useDaemonClients, usePairedDaemons } from './shell/daemon-access.ts';
 
-export { DEVICE_SETTINGS_HREF, daemonHomeHref, daemonSettingsHref, HOME_HREF } from './router/routes.ts';
+export {
+  DEVICE_SETTINGS_HREF,
+  daemonHomeHref,
+  daemonSettingsHref,
+  HOME_HREF,
+  type Route,
+  type RouteTable,
+  routeTable,
+} from './router/routes.ts';
+export { notificationTapTarget } from './router/tap-target.ts';
 
 // ─── the reference grammar (docs/reference-standard.md) ───────────────────────────────────────────────────────────
 export * from './references/grammar.ts';

@@ -166,4 +166,4 @@ export const displayCallsign = (raw: string | null | undefined): string => {
 };
 
 /** A machine's own pages (`/d/<id>`) and the app's home: the notification paths' roots. */
-export { daemonHomeHref, HOME_HREF } from '@ferretry/app';
+export { daemonHomeHref, HOME_HREF, notificationTapTarget } from '@ferretry/app';

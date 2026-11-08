@@ -338,3 +338,21 @@ describe('notificationWindow', () => {
     expect(notificationWindow([landing, join], ORIGIN)).toBe(landing);
   });
 });
+
+describe('notificationUrl (an ask’s push opens the ferret’s chat, AT the ask)', () => {
+  const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
+
+  it('places the daemon’s machine-relative chat path under its machine, query kept', () => {
+    expect(notificationUrl('/ferrets/f1/chat?ask=A3', ORIGIN, WORK)).toBe(`${home}/ferrets/f1/chat?ask=A3`);
+    expect(notificationUrl('/ferrets/a%20b/chat?ask=A12', ORIGIN, WORK)).toBe(`${home}/ferrets/a%20b/chat?ask=A12`);
+  });
+
+  it('opens the machine’s home for a machine-relative path that climbs out, and the app for a worker with no machine', () => {
+    expect(notificationUrl('/ferrets/../../d/other', ORIGIN, WORK)).toBe(home);
+    expect(notificationUrl('/ferrets/f1/chat?ask=A3', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  });
+
+  it('has no /session/ alias: that path is only ever outside the machine', () => {
+    expect(notificationUrl('/session/f1?ask=A3', ORIGIN, WORK)).toBe(home);
+  });
+});

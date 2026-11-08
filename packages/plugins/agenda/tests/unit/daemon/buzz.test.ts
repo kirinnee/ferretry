@@ -29,7 +29,12 @@ class MemoryLedger implements BuzzLedger {
   }
 }
 
-const WORDS = { tag: 'agenda-f1:A1', title: 'f1 is stopped · 1 needs you', body: 'Do it', url: '/agenda/f1/A1' };
+const WORDS = {
+  tag: 'agenda-f1:A1',
+  title: 'f1 is stopped · 1 needs you',
+  body: 'Do it',
+  url: '/ferrets/f1/chat?ask=A1',
+};
 
 function world(options: { reaches?: number; access?: boolean; ledger?: MemoryLedger } = {}) {
   const sent: Array<Parameters<AccessBuzzApi['buzz']>[0]> = [];
@@ -144,7 +149,7 @@ describe('buzz policy', () => {
       tag: 'agenda-f1:A3',
       title: 'Badge colour is at Released',
       body: 'Badge colour is at Released',
-      url: '/agenda/f1/A3',
+      url: '/ferrets/f1/chat?ask=A3',
     });
   });
 
@@ -155,7 +160,7 @@ describe('buzz policy', () => {
       tag: 'agenda-f1',
       title: 'build-bot is stopped · 2 need you',
       body: 'Approve the plan',
-      url: '/agenda/f1/A1',
+      url: '/ferrets/f1/chat?ask=A1',
     });
     expect(stopBuzzWords('f1', 'x'.repeat(60), [first]).title).toMatch(/is stopped · 1 needs you$/u);
   });

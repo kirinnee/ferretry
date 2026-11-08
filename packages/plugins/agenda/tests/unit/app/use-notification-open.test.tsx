@@ -117,7 +117,7 @@ describe('useNotificationOpen', () => {
     const inbox = new NotificationOpenInbox(ORIGIN);
     const acks: unknown[] = [];
     inbox.receive({
-      data: message('/d/b/session/s2?attention=A3'),
+      data: message('/d/b/ferrets/s2/chat?ask=A3'),
       ports: [{ postMessage: (value: unknown) => acks.push(value) }] as unknown as readonly MessagePort[],
     });
     const { source, listeners } = fakeSource();
@@ -136,7 +136,7 @@ describe('useNotificationOpen', () => {
 
     // Assert
     expect(acks).toEqual([NOTIFICATION_OPEN_ACK]);
-    expect(navigated).toEqual(['/d/b/session/s2?attention=A3', '/later']);
+    expect(navigated).toEqual(['/d/b/ferrets/s2/chat?ask=A3', '/later']);
     // The inbox already listens; the hook adds no second listener of its own.
     expect(listeners.size).toBe(0);
   });

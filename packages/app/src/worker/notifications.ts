@@ -77,13 +77,25 @@ const withinMachine = (pathname: string, machine: PushMachine): boolean => {
 };
 
 /**
+ * The page prefix a daemon names a ferret's page by, RELATIVE TO ITS OWN PAGES (`/ferrets/<ferret>/chat?ask=A3`): the
+ * daemon never knows which name a browser files it under, so a machine's worker places it under that machine. The app
+ * serves no page of its own at `/ferrets/`, so the prefix is never an ordinary address.
+ */
+const MACHINE_RELATIVE = '/ferrets/';
+
+const machineRelative = (raw: string, machine: PushMachine | null): string =>
+  machine !== null && raw.startsWith(MACHINE_RELATIVE) ? `${daemonHomeHref(machine.daemonId)}${raw}` : raw;
+
+/**
  * Where a notification tap may go: only this site, and — for a machine's own worker — only that machine's pages.
- * Anything else opens that machine's home, or — when the notification belongs to no machine — the app itself.
+ * A ferret's page a daemon names relative to its own pages opens under that machine. Anything else opens that
+ * machine's home, or — when the notification belongs to no machine — the app itself.
  */
 export const notificationUrl = (raw: unknown, origin: string, machine: PushMachine | null): string => {
   const fallback = new URL(machine === null ? HOME_HREF : daemonHomeHref(machine.daemonId), origin);
-  const target = typeof raw === 'string' ? URL.parse(raw, origin) : null;
+  const target = typeof raw === 'string' ? URL.parse(machineRelative(raw, machine), origin) : null;
   if (target === null || target.origin !== origin) return fallback.href;
+  if (machine === null && target.pathname.startsWith(MACHINE_RELATIVE)) return fallback.href;
   if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
   return target.href;
 };

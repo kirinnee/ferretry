@@ -7,16 +7,14 @@
  * ONE PUSH WORKER PER MACHINE: a machine's worker titles a push with the reader's label for that machine, tags it in
  * that machine's namespace and lets a tap open only that machine's pages (`/d/<daemonId>`); a push that reached the
  * app-wide registration says it is unverified and opens only the app. A daemon names a ferret's page RELATIVE TO ITS
- * OWN PAGES (`/session/<id>?ask=A3`, `agendaNotificationPath`), so a machine's worker reads it as under that machine;
- * a tap on one that names an ask opens that ask's own page (`inboxTargetPath`).
+ * OWN PAGES (`/ferrets/<id>/chat?ask=A3`, `agendaNotificationPath`), so a machine's worker reads it as under that
+ * machine; a tap on one opens the ferret's chat AT the ask (the chat reads `?ask=`), checked by the shell's route table.
  */
 
-import { isMachineAgendaId } from '@ferretry/core-asks/contract';
+import { isMachineAgendaId, sessionNotificationPath } from '@ferretry/core-asks/contract';
 import { agendaPagePath } from './agenda-links.ts';
-import { agendaTargetFromSearch, inboxTargetPath } from './agenda-inbox.ts';
-import type { DaemonId } from './machine.ts';
 import { notificationBrand, type NotificationPayload } from './notify.ts';
-import { daemonHomeHref, HOME_HREF } from '../shell.ts';
+import { daemonHomeHref, HOME_HREF, notificationTapTarget } from '../shell.ts';
 
 /** The machine one push registration serves, as this browser registered it. */
 export interface PushMachine {
@@ -33,19 +31,15 @@ const withinMachine = (pathname: string, machine: PushMachine): boolean => {
   return pathname === root || pathname.startsWith(`${root}/`);
 };
 
-/** The page prefix a daemon names its own ferrets by, relative to its machine's pages. */
-const SESSION_RELATIVE = '/session/';
-/** The prefix of the Agenda's own pages (`agendaAskPath`), which a daemon's buzz names relative to its machine. */
-const AGENDA_RELATIVE = '/agenda/';
+/** The page prefix a daemon names its own ferrets by (`/ferrets/<id>/chat`), relative to its machine's pages. */
+const FERRET_RELATIVE = '/ferrets/';
 
 const machineRelative = (raw: string, machine: PushMachine | null): string =>
-  machine !== null && (raw.startsWith(SESSION_RELATIVE) || raw.startsWith(AGENDA_RELATIVE))
-    ? `${machinePath(machine)}${raw}`
-    : raw;
+  machine !== null && raw.startsWith(FERRET_RELATIVE) ? `${machinePath(machine)}${raw}` : raw;
 
-/** A ferret's page under its machine. */
+/** A ferret's chat under its machine. */
 const ferretPath = (machine: PushMachine, sessionId: string): string =>
-  `${machinePath(machine)}${SESSION_RELATIVE}${encodeURIComponent(sessionId)}`;
+  `${machinePath(machine)}${sessionNotificationPath(sessionId)}`;
 
 /** Where a tap goes when the push named no page this worker may open. */
 const fallbackPath = (machine: PushMachine | null, sessionId: string | undefined): string => {
@@ -69,37 +63,17 @@ export const notificationUrl = (
   const fallback = new URL(fallbackPath(machine, sessionId), origin);
   const target = typeof raw === 'string' ? URL.parse(machineRelative(raw, machine), origin) : null;
   if (target === null || target.origin !== origin) return fallback.href;
-  if (machine === null && target.pathname.startsWith(SESSION_RELATIVE)) return fallback.href;
+  if (machine === null && target.pathname.startsWith(FERRET_RELATIVE)) return fallback.href;
   if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
   return target.href;
 };
 
-const FERRET_PAGE = /^\/d\/([^/]+)\/session\/([^/]+)\/?$/u;
-
-const decoded = (part: string): string | null => {
-  try {
-    return decodeURIComponent(part);
-  } catch {
-    return null;
-  }
-};
-
 /**
- * Where a TAP lands, given the page `notificationUrl` allowed: an Agenda push names its ferret AT an ask
- * (`/d/<id>/session/<sid>?ask=A3`), and the ask is answered on its own page, so the tap opens that. Every other page —
- * a ferret with no ask, settings — is returned untouched.
+ * Where a TAP lands, given the page `notificationUrl` allowed. An Agenda push already names the ferret's chat AT its ask
+ * (`/d/<id>/ferrets/<ferret>/chat?ask=A3`), so the tap opens exactly that — if the shell's route table draws it. An
+ * address the table does not know opens its machine's home, and a foreign or unreadable one the app's; it never throws.
  */
-export const notificationTapUrl = (allowed: string, origin: string): string => {
-  const url = URL.parse(allowed, origin);
-  if (url === null || url.origin !== origin) return allowed;
-  const match = FERRET_PAGE.exec(url.pathname);
-  const item = agendaTargetFromSearch(url.search);
-  if (match === null || item === null) return allowed;
-  const daemon = decoded(match[1] ?? '');
-  const sessionId = decoded(match[2] ?? '');
-  if (daemon === null || sessionId === null || sessionId === '') return allowed;
-  return new URL(inboxTargetPath(daemon as DaemonId, sessionId, item), origin).href;
-};
+export const notificationTapUrl = notificationTapTarget;
 
 /** A push as THIS machine's worker shows it: titled for the machine, tagged in its namespace, its own pages only. */
 export const machineNotification = (
