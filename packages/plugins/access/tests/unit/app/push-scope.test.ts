@@ -145,6 +145,12 @@ describe('notificationUrl (§4a: only this site; §4c: only this machine)', () =
     expect(notificationUrl(link, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
   });
 
+  it('places a machine ask’s Agenda link under that machine, ask kept; the app-wide worker opens the app', () => {
+    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
+    expect(notificationUrl('/agenda?ask=A3', ORIGIN, WORK)).toBe(`${home}/agenda?ask=A3`);
+    expect(notificationUrl('/agenda?ask=A3', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  });
+
   it('writes the ask as `?ask=` and has no /session/ alias', () => {
     const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
     expect(notificationUrl('/ferrets/s1/chat?ask=A3', ORIGIN, WORK, 's1')).toBe(`${home}/ferrets/s1/chat?ask=A3`);

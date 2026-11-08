@@ -352,6 +352,11 @@ describe('notificationUrl (an ask’s push opens the ferret’s chat, AT the ask
     expect(notificationUrl('/ferrets/f1/chat?ask=A3', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
   });
 
+  it('places a machine ask’s Agenda link under its machine, ask kept; the app-wide worker opens the app', () => {
+    expect(notificationUrl('/agenda?ask=A3', ORIGIN, WORK)).toBe(`${home}/agenda?ask=A3`);
+    expect(notificationUrl('/agenda?ask=A3', ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  });
+
   it('has no /session/ alias: that path is only ever outside the machine', () => {
     expect(notificationUrl('/session/f1?ask=A3', ORIGIN, WORK)).toBe(home);
   });

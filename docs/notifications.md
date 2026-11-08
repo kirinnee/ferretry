@@ -347,6 +347,8 @@ window when there is one, whichever worker controls it, and never a sign-in popu
 
 Every push names a page, and the worker opens a page even when one does not:
 
+- **A machine ask** (no ferret named, or the machine's own ledger) has no chat: it opens the machine's Agenda page at the ask,
+  `/agenda?ask=A3` (`askBuzzPath`), which becomes `/d/<daemonId>/agenda?ask=A3`. The Agenda reads `?ask=` (`useAskFocus`).
 - **A push with no item** opens the chat it came from: `/ferrets/<id>/chat`
   (`sessionNotificationPath`).
 - **A push that names no page it may open** opens the conversation its `sessionId` names, on its

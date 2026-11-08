@@ -76,6 +76,11 @@ describe('a tap, per kind of push', () => {
     expect(tapTarget(payload)).toBe(`${HOME}/ferrets/s1/chat?ask=A3`);
   });
 
+  it('a machine ask opens the machine’s Agenda page AT the ask', () => {
+    const payload = push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/agenda?ask=A3' });
+    expect(tapTarget(payload)).toBe(`${HOME}/agenda?ask=A3`);
+  });
+
   it('a push that named no page opens the Agenda for a machine notice, not a machine-agenda chat', () => {
     expect(tapTarget(push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/' }))).toBe(`${HOME}/agenda`);
   });

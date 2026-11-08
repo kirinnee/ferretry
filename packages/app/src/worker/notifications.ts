@@ -77,14 +77,18 @@ const withinMachine = (pathname: string, machine: PushMachine): boolean => {
 };
 
 /**
- * The page prefix a daemon names a ferret's page by, RELATIVE TO ITS OWN PAGES (`/ferrets/<ferret>/chat?ask=A3`): the
- * daemon never knows which name a browser files it under, so a machine's worker places it under that machine. The app
- * serves no page of its own at `/ferrets/`, so the prefix is never an ordinary address.
+ * The pages a daemon names RELATIVE TO ITS OWN PAGES, since it never knows which name a browser files it under: a
+ * ferret's chat (`/ferrets/<id>/chat?ask=A3`) and the machine's Agenda (`/agenda?ask=A3`, a machine ask). A machine's
+ * worker places them under that machine. The app serves no page of its own at either root, so neither is an ordinary
+ * address.
  */
-const MACHINE_RELATIVE = '/ferrets/';
+const isMachineRelative = (path: string): boolean =>
+  path.startsWith('/ferrets/') || path === '/agenda' || path.startsWith('/agenda/');
 
 const machineRelative = (raw: string, machine: PushMachine | null): string =>
-  machine !== null && raw.startsWith(MACHINE_RELATIVE) ? `${daemonHomeHref(machine.daemonId)}${raw}` : raw;
+  machine !== null && isMachineRelative(raw.split(/[?#]/u, 1)[0] ?? '')
+    ? `${daemonHomeHref(machine.daemonId)}${raw}`
+    : raw;
 
 /**
  * Where a notification tap may go: only this site, and — for a machine's own worker — only that machine's pages.
@@ -95,7 +99,7 @@ export const notificationUrl = (raw: unknown, origin: string, machine: PushMachi
   const fallback = new URL(machine === null ? HOME_HREF : daemonHomeHref(machine.daemonId), origin);
   const target = typeof raw === 'string' ? URL.parse(machineRelative(raw, machine), origin) : null;
   if (target === null || target.origin !== origin) return fallback.href;
-  if (machine === null && target.pathname.startsWith(MACHINE_RELATIVE)) return fallback.href;
+  if (machine === null && isMachineRelative(target.pathname)) return fallback.href;
   if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
   return target.href;
 };

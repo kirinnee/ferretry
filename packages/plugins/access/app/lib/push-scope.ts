@@ -143,7 +143,7 @@ export const notificationUrl = (
   const fallback = new URL(fallbackPath(machine, sessionId), origin);
   const target = typeof raw === 'string' ? URL.parse(machineRelative(raw, machine), origin) : null;
   if (target === null || target.origin !== origin) return fallback.href;
-  if (machine === null && target.pathname.startsWith(FERRET_RELATIVE)) return fallback.href;
+  if (machine === null && isMachineRelative(target.pathname)) return fallback.href;
   if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
   return target.href;
 };
@@ -164,11 +164,17 @@ const fallbackPath = (machine: PushMachine | null, sessionId: string | undefined
   return daemonFerretChatPath(machine.daemonId as DaemonId, sessionId);
 };
 
-/** The page prefix a daemon names its own ferrets by (`/ferrets/<id>/chat`), relative to its machine's pages. */
-const FERRET_RELATIVE = '/ferrets/';
+/**
+ * The pages a daemon names RELATIVE TO ITS OWN PAGES, since it never knows which name a browser files it under: a
+ * ferret's chat (`/ferrets/<id>/chat?ask=A3`) and the machine's Agenda (`/agenda?ask=A3`, a machine ask). A machine's
+ * worker places them under that machine. The app serves no page of its own at either root, so neither is an ordinary
+ * address.
+ */
+const isMachineRelative = (path: string): boolean =>
+  path.startsWith('/ferrets/') || path === '/agenda' || path.startsWith('/agenda/');
 
 const machineRelative = (raw: string, machine: PushMachine | null): string =>
-  machine !== null && raw.startsWith(FERRET_RELATIVE) ? `${machinePath(machine)}${raw}` : raw;
+  machine !== null && isMachineRelative(raw.split(/[?#]/u, 1)[0] ?? '') ? `${machinePath(machine)}${raw}` : raw;
 
 /** The fixed, per-machine tag every filtered push collapses into — see `filteredPushNotification`. */
 export const FILTERED_PUSH_TAG_PREFIX = 'fy-quiet:';

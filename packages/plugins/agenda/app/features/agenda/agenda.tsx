@@ -21,7 +21,8 @@
  *   lands, so a refusal is read on the card; once it has, a "Sent to …" line above the composer says what was picked.
  * - The same items, in four filters (Needs you · Resting · Snoozed · Resolved), are this ferret's Agenda tab in Info
  *   (`tab`): the agenda has no side bar of its own. Overview carries only a one-line count that opens the tab.
- * - `?ask=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request, and EVERY id
+ * - `?ask=A5` (a notification tap, a proved `!A5`) is read off the address by `useAskFocus` (`use-ask-focus.ts`, the one
+ *   hook that reads it) and arrives as a `focus` request, and EVERY id
  *   the ledger holds opens the same view, agenda mode or not: an open item to answer, a parked one with "Back to my
  *   list", a resolved one read-only (`agenda-settled.tsx`). A proved link is never a dead click; only an id the
  *   ledger does not hold is said out loud as no longer open.

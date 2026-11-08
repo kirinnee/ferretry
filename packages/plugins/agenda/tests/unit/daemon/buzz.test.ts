@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
-import type { AskSummary } from '@ferretry/core-asks/contract';
+import type { AgendaId, AskSummary } from '@ferretry/core-asks/contract';
 import { instantFromEpochMs } from '@ferretry/std';
-import type { BuzzRecord } from '../../../contract/index.ts';
+import { askBuzzPath, type BuzzRecord } from '../../../contract/index.ts';
 import type { AccessBuzzApi } from '../../../contract/others.ts';
 import {
   askBuzzKey,
@@ -151,6 +151,15 @@ describe('buzz policy', () => {
       body: 'Badge colour is at Released',
       url: '/ferrets/f1/chat?ask=A3',
     });
+  });
+
+  test('a machine ask (no ferret, or the machine agenda) opens the Agenda page AT the ask, never /ferrets//chat', () => {
+    for (const ferret of [undefined, '', 'machine-agenda']) {
+      const words = askBuzzWords({ id: 'A3', subject: 'Renew the cert', ferret } as BuzzableAsk);
+      expect(words.url).toBe('/agenda?ask=A3');
+    }
+    expect(askBuzzPath('', 'A12' as AgendaId)).toBe('/agenda?ask=A12');
+    expect(askBuzzPath('f1', 'A12' as AgendaId)).toBe('/ferrets/f1/chat?ask=A12');
   });
 
   test('words a stop with the count in the title and opens the first ask', () => {
