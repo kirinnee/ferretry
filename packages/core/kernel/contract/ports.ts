@@ -795,6 +795,16 @@ export interface RootHandle {
    * (`hard_link`: its mode is also another name's) and for a mode that is not an integer in `0..0o7777`.
    */
   setMode(path: FencedPath, mode: number): Promise<void>;
+  /**
+   * Moves the entry at `from` to `to`, both in THIS handle's root (the provisioner moving a file aside as evidence
+   * and moving it back to undo: a copy cannot, `copyTree` skips a link inside a home). Only into an internal, writable
+   * root that takes links (`fleet`, `agent-homes`); any other root refuses `read_only`. Both ends are fenced and
+   * every parent is opened without following a link (`link_escape`); the entry moves AS IS (a link stays a link and is
+   * never followed, a directory moves whole). `from` must exist and nothing may be at `to` (`outside`, never
+   * overwritten; a look then the move, a declared GAP). There is no copy fallback: a refused move (another device, a
+   * folder into itself) is `changed`, with no path or content in it.
+   */
+  rename(from: FencedPath, to: FencedPath): Promise<void>;
 }
 
 export interface RootsPort {

@@ -99,6 +99,7 @@ function kernelRoot(
     remove: record('remove'),
     linkTo: record('linkTo'),
     setMode: record('setMode'),
+    rename: record('rename'),
   };
 }
 

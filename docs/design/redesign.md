@@ -2538,6 +2538,10 @@ scoped handle:
   - `setMode(path, mode)` is an `fchmod` through an `O_NOFOLLOW` descriptor proven to be what was looked at. It keeps
     `mode & 0o700` on an internal root and `mode & 0o777` elsewhere, never setuid/setgid/sticky. It is refused on a
     read-only root and for a file with a second hard link.
+  - `rename(from, to)` moves an entry inside `fleet` or `agent-homes` AS IS (a link stays a link, a folder moves
+    whole; the provisioner's move-aside-as-evidence and undo, which a copy cannot do). Both ends are fenced with every
+    parent opened without following a link, an existing target is refused and never overwritten (a look then the move,
+    a declared GAP: no `renameat2`), and a move the disk refuses (another device) is `changed`, never a copy.
   - `kernel.roots.harnessFile(absolutePath)` (`permissions.harnessFiles`, by exact basename, Runtimes with
     `harness-home` only) reads ONE file beside a harness home (`~/.claude.json` sits beside `~/.claude`), read-only.
     Its folder is never listable. The leaf is never a link, never a second hard link, never a device, and the name
