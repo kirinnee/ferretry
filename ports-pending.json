@@ -19,7 +19,9 @@
     "onboarding",
     "terminals",
     "usage",
-    "board"
+    "board",
+    "projects",
+    "updates"
   ],
   "pendingReasons": {
     "runtimes": [
@@ -180,6 +182,16 @@
     "terminals": [
       "GAP(ferrets): the tmux adapters daemon/adapters/tmux/pane-queue.ts, daemon/adapters/tmux/harness-launch-guard.ts, daemon/adapters/tmux/forget-ferret-identity.ts and daemon/adapters/tmux/tmux-release-reader.ts are ported and tested but nothing composes them until Ferrets wires the deliver and runner seams and reads FERRETRY_TEST (scripts/test/swept.sh) to arm it (gustavo)",
       "GAP(app): app/components/terminal-snapshot.tsx and app/components/terminal-snapshot-model.ts (S-0270), app/features/workspace/phone/terminal-key-bar.tsx, app/features/workspace/phone/terminal-keys.ts and app/lib/session-processes.ts are ported and tested but no surface mounts them until the app wiring (kaizen) lands"
+    ],
+    "projects": [
+      "GAP(projects): app/hooks/use-project-scope.ts is not reached yet: it is reached by the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36) (owner: gustavo, ferrets port)",
+      "GAP(projects): app/lib/project-scope.ts is reached only through app/hooks/use-project-scope.ts: the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36) (owner: gustavo, ferrets port)",
+      "GAP(projects): app/hooks/use-work-project-names.ts has no caller yet, not even on rebuild/port-ferrets-b (today: packages/pwa/src/App.tsx:195 and packages/pwa/src/lib/pages/session-chat-page.tsx:108) (owner: gustavo, ferrets port)",
+      "GAP(projects): app/lib/work-project-names.ts is reached only through app/hooks/use-work-project-names.ts, which has no caller yet (today: packages/pwa/src/App.tsx:195 and packages/pwa/src/lib/pages/session-chat-page.tsx:108) (owner: gustavo, ferrets port)"
+    ],
+    "updates": [
+      "GAP(updates): app/lib/changelog.ts is not reached by a What's new surface (today: packages/pwa/src/features/whats-new/whats-new-host.tsx:21 and whats-new-sheet.tsx:22) (owner: kaizen, app shell)",
+      "GAP(updates): app/lib/install-prompt.ts is not reached by an install-as-app prompt (today: packages/pwa/src/main.tsx:58, packages/pwa/src/App.tsx:211, packages/pwa/src/features/install/install-app.tsx:19) (owner: kaizen, app shell)"
     ]
   },
   "pendingHalves": {
