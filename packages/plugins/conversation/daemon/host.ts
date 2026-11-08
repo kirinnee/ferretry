@@ -362,7 +362,9 @@ export function buildConversationA(deps: {
    * TODAY'S TWO TRANSPORTS: typed at the prompt, or — when the agent is still working on its turn — put in the harness's
    * own queue, which submits it at the next turn boundary (today's busy path, `routeSend` → `queue`). The queue is
    * tried ONCE and only after `deliver` proved it typed NOTHING (`PaneBusy`), so a message cannot reach the pane twice.
-   * A runner that cannot queue leaves the busy refusal standing. `onQueue` is told before the first key of the queue.
+   * A runner that cannot queue, or a long message whose file could not be written, typed nothing and leaves the busy
+   * refusal standing (the same send may go again). `sendId` names the send row, so a message that goes by file is
+   * `channel/queued-<sendId>.md`. `onQueue` is told before the first key of the queue.
    */
   const deliverOrQueue = async (
     bound: Awaited<ReturnType<typeof terminal.bind>>,

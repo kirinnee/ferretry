@@ -97,9 +97,11 @@ interface BoundTerminal {
   deliver(text: string): Promise<DeliveryOutcome>;
   /**
    * Puts one message into the BUSY pane's own queue (Ferrets' `queue`, the runner's `TmuxPaneQueue`), which the
-   * harness submits at its next turn boundary. Answers what the pane proved, or `undefined` when this runner cannot
-   * queue (nothing typed). Throws exactly as {@link deliver} does. `sendId` is the send's own id: a message long enough
-   * to go by file is written as `queued-<sendId>.md`, so the app can link it to the send's row and a retype rewrites it.
+   * harness submits at its next turn boundary. `sendId` is the send row's id: a message long enough to go by file is
+   * written to `channel/queued-<sendId>.md`, the name the app reads the send back by, and the pane is typed its pointer.
+   * Answers what the pane proved, or `undefined` when NOTHING was typed because the harness answered
+   * `plugin_unavailable`: the runner cannot queue, or a long message's file could not be written (no session folder
+   * bound, or the write failed). Throws exactly as {@link deliver} does.
    */
   queue(text: string, sendId: string): Promise<QueueOutcome | undefined>;
   /** Presses the harness's stop under its own rule and says what it did. Throws the answer for a refusal. */
