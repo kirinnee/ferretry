@@ -23,9 +23,9 @@ describe('the outbound diff projection (R-0150)', () => {
     const out = await project(raw);
     should(out.includes(ONE_LINE)).be.false();
     const stars = '*'.repeat(ONE_LINE.length);
-    should(out).eql(
-      `diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n ctx ${stars}\n-old ${stars}\n+new ${stars}\n`,
-    );
+    should(
+      out === `diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n ctx ${stars}\n-old ${stars}\n+new ${stars}\n`,
+    ).be.true();
   });
 
   it('R-0150 masks a value that spans lines, which a line-by-line mask would miss', async () => {
@@ -166,5 +166,31 @@ describe('the outbound diff projection (R-0150)', () => {
     should(out.includes(FIRST)).be.false();
     should(out.includes(SECOND)).be.false();
     should(out === `@@ -0,0 +1,2 @@\n+${'*'.repeat(FIRST.length)}\r\n+${'*'.repeat(SECOND.length)}\r\n`).be.true();
+  });
+
+  // The four stored/served combinations of a multi-line value and a CRLF or LF diff: all masked, all reported covered.
+  const LINES = ['fixture-crlf-first-0006', 'fixture-crlf-second-0007', 'fixture-crlf-third-0008'];
+  for (const stored of ['\n', '\r\n']) {
+    for (const served of ['\n', '\r\n']) {
+      it(`R-0150 a value stored with ${JSON.stringify(stored)} is masked and reported in a diff with ${JSON.stringify(served)} line ends`, async () => {
+        const value = LINES.join(stored);
+        const raw = `@@ -0,0 +1,3 @@\n${LINES.map(line => `+${line}${served}`).join('')}`;
+        const { text, covered } = await new FakeRedaction(new Map([['V' as never, value]])).read(scope =>
+          redactedDiff(raw, scope),
+        );
+        should(LINES.some(line => text.includes(line))).be.false();
+        should(covered).be.true();
+        should(text.split('\n').length === raw.split('\n').length).be.true();
+      });
+    }
+  }
+
+  it('R-0150 a one-line value stored with a trailing CR is masked in a CRLF diff and reported', async () => {
+    const raw = `@@ -0,0 +1,1 @@\n+KEY=${ONE_LINE}\r\n`;
+    const { text, covered } = await new FakeRedaction(new Map([['V' as never, `${ONE_LINE}\r`]])).read(scope =>
+      redactedDiff(raw, scope),
+    );
+    should(text.includes(ONE_LINE)).be.false();
+    should(covered).be.true();
   });
 });

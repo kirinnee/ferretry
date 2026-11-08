@@ -18,8 +18,8 @@ import type { RedactionScope } from '@ferretry/kernel/contract';
  * masked one line at a time.
  *
  * Positions are UTF-16 code UNITS, exactly as the scope reports them (Vault's own starring walks units): a character
- * outside the BMP is two places, never one. A CRLF line is matched without its `\r` (the scope sees the value as it
- * was stored with LF) and the `\r` is kept in the output.
+ * outside the BMP is two places, never one. A CRLF line is matched both as it is and without its `\r` (a value
+ * stored with `\r` and one stored with LF are both found); the `\r` is kept in the output.
  */
 export function redactedDiffText(diff: string, scope: RedactionScope): string {
   return redactedDiff(diff, scope).text;
@@ -82,19 +82,27 @@ interface Body {
   readonly text: string;
 }
 
-/** Which characters of each entry a look covers, entry by entry (the scope keeps every string's length). */
+/**
+ * Which characters of each entry a look covers, entry by entry (the scope keeps every string's length). A CRLF line
+ * is looked at three ways and the coverage is the union: as it is (a value stored with `\r` in it is found), without
+ * its `\r` (a value stored with LF is found) and with a CRLF break (a value stored with CRLF, in an LF diff). Only the break differs between the looks, so positions
+ * line up.
+ */
 function look(entries: readonly number[], body: readonly Body[], scope: RedactionScope, covered: boolean[][]): void {
   if (entries.length === 0) return;
-  // A CRLF line is matched without its `\r`; the `\r` is never covered, so positions line up.
-  const texts = entries.map(at => `${(body[at]?.text ?? '').replace(/\r$/, '')}\n`);
-  const masked = scope.lines(texts);
-  entries.forEach((at, position) => {
-    const before = texts[position] ?? '';
-    const after = masked[position] ?? before;
-    const row = covered[at];
-    if (row === undefined) return;
-    for (let unit = 0; unit < before.length - 1; unit++) if (after[unit] !== before[unit]) row[unit] = true;
-  });
+  const raws = entries.map(at => `${body[at]?.text ?? ''}\n`);
+  const stripped = raws.map(text => text.replace(/\r?\n$/, '\n'));
+  const expanded = stripped.map(text => `${text.slice(0, -1)}\r\n`);
+  for (const texts of [raws, stripped, expanded]) {
+    const masked = scope.lines(texts);
+    entries.forEach((at, position) => {
+      const before = texts[position] ?? '';
+      const after = masked[position] ?? before;
+      const row = covered[at];
+      if (row === undefined) return;
+      for (let unit = 0; unit < before.length - 1; unit++) if (after[unit] !== before[unit]) row[unit] = true;
+    });
+  }
 }
 
 function maskHunk(
@@ -154,7 +162,10 @@ function maskHunk(
     any = true;
     // Walk code UNITS, as the scope does: a code-point walk would shift the mask after any astral character.
     let masked = entry.line.charAt(0);
-    for (let unit = 0; unit < entry.text.length; unit++) masked += row[unit] === true ? '*' : entry.text.charAt(unit);
+    for (let unit = 0; unit < entry.text.length; unit++) {
+      const char = entry.text.charAt(unit);
+      masked += row[unit] === true && char !== '\r' ? '*' : char;
+    }
     return masked;
   });
   return { lines, covered: any };

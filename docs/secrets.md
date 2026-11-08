@@ -110,7 +110,9 @@ no download or open of the masked bytes. Matching is whole-value only, never a p
 - Not found, so not masked: a value inside compressed bytes, in a UTF-16 file, or a non-ASCII value in a file that is not
   UTF-8, and a value a diff shows only in part (a file, or one side of a diff, that holds only part of a value is shown
   as it is, even when the other side holds it whole — apart from an identical line, which takes the other side's mask).
-  A multi-line value is found in a CRLF file (the `\r` is left out of the look and kept in the output). Positions are
+  A value is found in a CRLF file whether it was stored with `\r` (a CRLF key file, `token\r`) or without (LF), and a CRLF-stored value in an LF file: all
+  three looks are made and the coverage is their union; the `\r` and the line breaks are kept in the output, so a masked
+  multi-line value keeps one mask per line. Positions are
   UTF-16 units, as Vault's own starring counts them.
 
 ### Text a component shows: recognised by shape

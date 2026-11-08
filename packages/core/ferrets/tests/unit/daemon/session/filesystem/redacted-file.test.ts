@@ -1,7 +1,11 @@
 import { describe, it } from 'bun:test';
 import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
 import should from 'should';
-import { redactedFileBase64, redactedFileText } from '../../../../../daemon/lib/session/filesystem/redacted-file.ts';
+import {
+  redactedFile,
+  redactedFileBase64,
+  redactedFileText,
+} from '../../../../../daemon/lib/session/filesystem/redacted-file.ts';
 
 /** FAKE fixture values only. Assertions are booleans so a failure never prints them. */
 const ONE_LINE = 'fixture-one-line-secret-0002';
@@ -10,8 +14,8 @@ const SECOND = 'fixture-second-row-0004';
 
 const mask = async (bytes: Buffer, value: string): Promise<Buffer> =>
   Buffer.from(
-    await new FakeRedaction(new Map([['V' as never, value]])).read(scope =>
-      redactedFileBase64(bytes.toString('base64'), scope),
+    await new FakeRedaction(new Map([['V' as never, value]])).read(
+      scope => redactedFileBase64(bytes.toString('base64'), scope).base64,
     ),
     'base64',
   );
@@ -47,7 +51,47 @@ describe('the outbound file projection, base64 (R-0151)', () => {
     should(out.includes(FIRST)).be.false();
     should(out.includes(SECOND)).be.false();
     should(out.length === text.length).be.true();
-    // the newline inside the value is masked like any other covered character; its CR stays before it
-    should(out === `head\r\n${'*'.repeat(FIRST.length)}\r*${'*'.repeat(SECOND.length)}\r\ntail\r\n`).be.true();
+    // one mask per original line: the line break inside the value is never starred, so no lines merge
+    should(out === `head\r\n${'*'.repeat(FIRST.length)}\r\n${'*'.repeat(SECOND.length)}\r\ntail\r\n`).be.true();
+  });
+
+  const LINES = ['fixture-file-first-0009', 'fixture-file-second-0010', 'fixture-file-third-0011'];
+  const SINGLE = 'fixture-file-token-0012';
+  const cases: [string, string, string][] = [];
+  for (const stored of ['\n', '\r\n']) {
+    for (const served of ['\n', '\r\n']) {
+      const value = LINES.join(stored);
+      cases.push([
+        `a 3-line value stored with ${JSON.stringify(stored)}`,
+        value,
+        `head${served}${LINES.join(served)}${served}tail${served}`,
+      ]);
+    }
+  }
+  cases.push(['a one-line value stored with a trailing CR', `${SINGLE}\r`, `KEY=${SINGLE}\r\nnext\r\n`]);
+  cases.push(['a one-line value stored without a CR', SINGLE, `KEY=${SINGLE}\r\nnext\r\n`]);
+
+  for (const [name, value, text] of cases) {
+    it(`R-0151 ${name} is masked, kept at its length and line count, and reported, as text and as base64`, async () => {
+      const redaction = new FakeRedaction(new Map([['V' as never, value]]));
+      const viaText = await redaction.read(scope => redactedFile(text, scope));
+      const viaBase64 = await redaction.read(scope => redactedFileBase64(Buffer.from(text).toString('base64'), scope));
+      const decoded = Buffer.from(viaBase64.base64, 'base64').toString('utf8');
+      const leaks = (out: string): boolean => [...LINES, SINGLE].some(part => out.includes(part));
+      should(leaks(viaText.text)).be.false();
+      should(leaks(decoded)).be.false();
+      should(viaText.covered && viaBase64.covered).be.true();
+      should(
+        viaText.text.length === text.length && viaText.text.split('\n').length === text.split('\n').length,
+      ).be.true();
+      should(decoded === viaText.text).be.true();
+    });
+  }
+
+  it('R-0151 a prefix of a value is not matched', async () => {
+    const out = await new FakeRedaction(new Map([['V' as never, SINGLE]])).read(scope =>
+      redactedFile(`KEY=${SINGLE.slice(0, -2)}\r\n`, scope),
+    );
+    should(out.covered).be.false();
   });
 });

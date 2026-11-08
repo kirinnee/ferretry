@@ -17,7 +17,7 @@ import {
   type FsFileView,
   redactedDiff,
   redactedFileBase64,
-  redactedFileText,
+  redactedFile,
   type SessionFilesystem,
   type SessionReadFence,
 } from '../../session/filesystem/index.ts';
@@ -223,9 +223,12 @@ async function file(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
 
 /** The one place file bytes leave the daemon: text masked through the read's scope, character for character. */
 function fileResponse(view: FsFileView, scope: RedactionScope, agent: boolean): ApiResponse {
-  const content = view.content === undefined ? undefined : redactedFileText(view.content, scope);
-  const base64 = view.base64 === undefined ? undefined : redactedFileBase64(view.base64, scope);
-  const redacted = content !== view.content || base64 !== view.base64;
+  const text = view.content === undefined ? undefined : redactedFile(view.content, scope);
+  const bytes = view.base64 === undefined ? undefined : redactedFileBase64(view.base64, scope);
+  const content = text?.text;
+  const base64 = bytes?.base64;
+  // The refusal rests on what the scope REPORTED, never on how the masked text compares to the original.
+  const redacted = text?.covered === true || bytes?.covered === true;
   if (redacted && agent) throw holdsSecret(view.path);
   return jsonResponse({
     ...view,

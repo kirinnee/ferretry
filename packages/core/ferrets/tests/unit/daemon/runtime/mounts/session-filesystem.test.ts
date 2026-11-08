@@ -481,6 +481,51 @@ describe('the diff route', () => {
     }
   });
 
+  it('R-0150 R-0151 a value stored with or without CR, in a CRLF or LF file: masked for a person, 403 for an agent', async () => {
+    const stored = [
+      `${FIXTURE_SECRET}\r`,
+      FIXTURE_SECRET,
+      `first-${FIXTURE_SECRET}\r\nsecond-${FIXTURE_SECRET}\r\nthird-${FIXTURE_SECRET}\r`,
+      `first-${FIXTURE_SECRET}\nsecond-${FIXTURE_SECRET}\nthird-${FIXTURE_SECRET}`,
+    ];
+    for (const [value, eol] of stored.flatMap(v => [[v, '\r\n'] as const, [v, '\n'] as const])) {
+      // a CRLF file holds every line break as CRLF; an LF file holds the value exactly as it was stored
+      const inside = eol === '\r\n' ? value.replace(/\r?\n/g, '\r\n') : value;
+      const body = `KEY=${inside}${eol}end${eol}`;
+      const raw = `@@ -0,0 +1,2 @@\n${body
+        .split('\n')
+        .filter(line => line !== '')
+        .map(line => `+${line}\n`)
+        .join('')}`;
+      for (const reach of [person, agent]) {
+        const { ask } = fixture(
+          { tree: treeOf(['a.ts', textFile(body)]) },
+          { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+          reach,
+          new FakeRedaction(new Map([[FIXTURE_NAME, value]])),
+        );
+        for (const [key, query] of [
+          [FILE, { path: 'a.ts' }],
+          [FILE, { path: 'a.ts', format: 'base64' }],
+          [DIFF, { path: 'a.ts' }],
+        ] as const) {
+          if (reach === agent) {
+            const refusal = await refusalOf(ask(key, { query }));
+            should(refusal?.status === 403 && refusal?.code === 'holds_secret').be.true();
+          } else {
+            const response = await ask(key, { query });
+            const wire = String(response.body);
+            const served = wire.includes('"base64"')
+              ? Buffer.from(String(JSON.parse(wire).base64), 'base64').toString('utf8')
+              : wire;
+            should(wire.includes(FIXTURE_SECRET)).be.false();
+            should(served.includes(FIXTURE_SECRET)).be.false();
+          }
+        }
+      }
+    }
+  });
+
   it('R-0150 an agent still reads a diff that holds no vault value', async () => {
     const { ask } = fixture(
       { tree: tree() },
