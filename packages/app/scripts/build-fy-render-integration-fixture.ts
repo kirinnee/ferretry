@@ -70,7 +70,8 @@ export interface FyRenderFixtureManifest {
 export const FY_RENDER_FIXTURE_MANIFEST_NAME = 'fy-render-fixture.json';
 
 /**
- * The app's whole stylesheet graph, bundled from the entry `main.tsx` imports.
+ * The app's whole stylesheet graph, bundled from the entries `main.tsx` imports (`styles/index.css`, then
+ * `ui/design-system.css` — see {@link APP_STYLESHEETS}).
  *
  * NOT read from `dist/`: a test whose fidelity depends on whether somebody ran
  * `bun run build` first is not evidence. Vite's output additionally carries xterm's
@@ -88,6 +89,14 @@ const bundleOne = async (entry: string, label: string): Promise<{ readonly js: s
   );
   return { css: css.join('\n'), js: await artifact.text() };
 };
+
+/**
+ * THE TWO STYLESHEETS `main.tsx` LOADS, in its order. Today's PWA kept the shared component rules (`.kt-overlay`, the
+ * `.md` fence, …) inside `styles/index.css`; 5.0 moved them to `ui/design-system.css`, so a fixture built from the
+ * index alone has a fullscreen overlay with no box (`.kt-overlay` gives it its top and height) and a fallback fence
+ * that never scrolls (`.md pre` gives it `overflow: auto`).
+ */
+export const APP_STYLESHEETS = ['src/styles/index.css', 'src/ui/design-system.css'] as const;
 
 const outDirectoryFrom = (argv: readonly string[]): string => {
   const at = argv.indexOf('--out');
@@ -122,9 +131,11 @@ export const buildFyRenderIntegrationFixture = async (
   // rather than into `public/`.
   const { artifacts } = await buildFyRenderShell(directory);
 
-  const stylesheet = await bundleOne(resolve(packageRoot, 'src/styles/index.css'), 'the app stylesheet');
+  const stylesheets = [];
+  for (const entry of APP_STYLESHEETS)
+    stylesheets.push(await bundleOne(resolve(packageRoot, entry), `the stylesheet ${entry}`));
   const scene = await bundleOne(scenePath, 'the visual scene');
-  const appCss = `${stylesheet.css}\n${scene.css}`;
+  const appCss = [...stylesheets.map(sheet => sheet.css), scene.css].join('\n');
   const appJs = scene.js;
 
   const appCssPath = resolve(directory, 'app.css');

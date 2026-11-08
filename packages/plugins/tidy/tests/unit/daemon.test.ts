@@ -59,6 +59,12 @@ describe('GET /v1/gc and POST /v1/gc', () => {
       code: 'unknown_parameter',
     });
   });
+  test('GET accepts a positive whole limit and still answers the wire plan', async () => {
+    const r = routes();
+    const listed = json(await r['GET /v1/gc'](call({ query: { limit: ['1'] } })));
+    expect(ScratchPlanListSchema.safeParse(listed).success).toBe(true);
+    expect(listed).toHaveLength(1); // the one stopped ferret
+  });
   test('POST sweeps and answers what it reclaimed', async () => {
     const r = routes();
     expect(json(await r['POST /v1/gc'](call({ body: { force: false } })))).toEqual({

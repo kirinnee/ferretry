@@ -30,9 +30,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
-import tailwindConfig from '../../../tailwind.config.ts';
 import { cachedText, cacheRootFor, hashFixtureInputs, sceneInputEnv, sceneInputPatterns } from './fixture-inputs.ts';
-import { contentFromPackage } from './scene-tailwind.ts';
+import { sceneTailwindConfig } from './scene-tailwind.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
 const workspace = resolve(packageRoot, '../..');
@@ -83,15 +82,14 @@ const cached = async (name: string, make: () => Promise<string>): Promise<string
   cacheRoot === undefined ? await make() : await cachedText(cacheRoot, name, make);
 
 // Bun inlines the `@import` graph; Tailwind then expands `@tailwind` exactly as the Vite build does,
-// so utility classes (`hidden`, `sr-only`, …) behave as they ship. `styles/index.css` carries every plugin's
-// `app/styles.css`; none of the plugin sheets or `design-system.css` has a Tailwind directive, so they follow the
+// so utility classes (`hidden`, `sr-only`, …) behave as they ship. Its content globs are anchored to `packages/app`
+// (`scene-tailwind.ts`): this runs in the asking plugin's folder, where they would match nothing.
+// `styles/index.css` carries every plugin's `app/styles.css`; none of the plugin sheets or `design-system.css` has a Tailwind directive, so they follow the
 // processed index in the order `main.tsx` loads them.
 const css = await cached('app.css', async () => {
   const index = resolve(packageRoot, 'src/styles/index.css');
   const imported = await stylesheet(index, 'the app stylesheet');
-  const processed = (
-    await postcss([tailwindcss(contentFromPackage(tailwindConfig, packageRoot))]).process(imported, { from: index })
-  ).css;
+  const processed = (await postcss([tailwindcss(sceneTailwindConfig)]).process(imported, { from: index })).css;
   const designSystem = await stylesheet(
     resolve(packageRoot, 'src/ui/design-system.css'),
     'the design system stylesheet',
