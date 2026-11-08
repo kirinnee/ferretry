@@ -12,7 +12,7 @@ import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
-import { mount } from '../../support/dom.ts';
+import { interact, mount } from '../../support/dom.ts';
 import { render } from '../../../src/testing/react.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
 
@@ -164,6 +164,34 @@ describe('an app hook another half offers', () => {
     );
     expect(said()).toBe('no greeting');
     expect(provider.builds).toEqual([]);
+    await view.unmount();
+  });
+
+  test('goes away when the provider stops being allowed after the hook was read, and says so to the reader', async () => {
+    const provider = providerOf('provider', 'hello');
+    const contracts: Record<string, string> = {};
+    const { view, runtime, said } = await draw(
+      [...CORE, entry(offererManifest, offererApp, 'h-offerer'), entry(provider.manifest, provider.app, 'h-provider')],
+      contracts,
+    );
+    expect(said()).toBe('hello');
+
+    // The daemon now serves another contract of the provider: its standing is no longer allowed, so it provides nothing.
+    contracts.provider = 'h-provider-next';
+    await interact(() =>
+      (runtime.connection('d1') as unknown as { client: { refresh(): Promise<void> } }).client.refresh(),
+    );
+    await settle();
+    expect(runtime.appHook('d1', HOOK)).toBeUndefined();
+    expect(said()).toBe('no greeting');
+
+    // And back again once the daemon serves the contract the app was built for.
+    delete contracts.provider;
+    await interact(() =>
+      (runtime.connection('d1') as unknown as { client: { refresh(): Promise<void> } }).client.refresh(),
+    );
+    await settle();
+    expect(said()).toBe('hello');
     await view.unmount();
   });
 

@@ -9,9 +9,15 @@
  *   (`planMove`), and sent as ONE `POST /v1/board/cards/:cardId` `{ action: 'move', to }`: the request today's Done
  *   sent. A card that is already closed sends nothing; one the board has no Done for is refused here, before any
  *   request. The daemon's route still decides: its refusal comes back in its own words.
+ *   Done is exactly-once per card while a move is in flight: a second tap (the screen and the side panel both showing
+ *   one ask, or two clicks in a frame) is answered by the first one's outcome and sends nothing more.
  * - `agenda.lane-proposal` — Edit on a lane proposal opens the project's lane editor (`laneEditDestination`).
  * - `agenda.card-reference` — `&F12` proves only against the card ids this machine holds (`createCardReferenceResolver`
  *   over `GET /v1/board/ids`, kept live by `board.changed`), and opens the card's page.
+ *
+ * Not here, on purpose: "Not good" and "Send back". Those were the to-test rows of today's task list, which 5.0 deleted;
+ * they are card asks answered through Asks (the card's own gate), so no Board move backs them and `board-move.ts` is
+ * reached only through Done's `planMove`.
  */
 
 import type { AppHookContext, AppHookProviders } from '@ferretry/app';
@@ -23,7 +29,7 @@ import type { BoardCardState } from './lib/board-store.ts';
 import { type CardReferenceResolver, createCardReferenceResolver } from './lib/card-reference-context.ts';
 import { laneEditDestination } from './lib/lane-proposal-link.ts';
 import { THIS_MACHINE } from './lib/machine.ts';
-import { cardPagePath } from './lib/paths.ts';
+import { boardPath, cardPagePath } from './lib/paths.ts';
 import { type BoardRuntime, boardRuntimeOf } from './views/runtime.ts';
 
 /** A card write's answer, as Agenda reads it. */
@@ -67,6 +73,8 @@ const STATUS: Readonly<Record<BoardCardState['status'], CardView['status']>> = {
 
 /** `agenda.card-answer` over one daemon's runtime. */
 const cardAnswer = (runtime: BoardRuntime) => {
+  // One Done per card at a time: a tap while its move is in flight gets that move's outcome, not a second request.
+  const doing = new Map<CardId, Promise<Write>>();
   const { store } = runtime;
   const actions = createBoardActions({
     store,
@@ -87,6 +95,24 @@ const cardAnswer = (runtime: BoardRuntime) => {
     views.set(state, view);
     return view;
   };
+  /** The card's one-tap Done: where it moves, planned as every owner move is, and sent as ONE request. */
+  const move = async (id: CardId): Promise<Write> => {
+    const state = store.taskState(THIS_MACHINE.daemonId, id);
+    if (state.status !== 'ready' || state.task === null) return refused(UNREAD);
+    const done = doneOf(state);
+    if (done === null) return refused(NO_DONE);
+    // A closed card's one-tap answer is Reopen: for a Done there is nothing left to do, and nothing is sent.
+    if (done.kind === 'reopen') return { ok: true };
+    const plan = planMove(state.laneSet, state.task.laneId, done.laneId);
+    if (plan.kind === 'stay') return { ok: true };
+    if (plan.kind === 'refused') return refused(plan.message);
+    if (plan.kind === 'ask-reason') return refused('Moving a card back needs a reason.');
+    const moved = await actions.moveCard(
+      { daemonId: THIS_MACHINE.daemonId, id, laneId: state.task.laneId, laneSet: state.laneSet },
+      plan.to,
+    );
+    return moved.ok ? { ok: true } : refused(moved.error.message, moved.error.status);
+  };
   return {
     subscribe: store.subscribe,
     watch: (card: string): (() => void) => {
@@ -97,24 +123,14 @@ const cardAnswer = (runtime: BoardRuntime) => {
       const id = cardIdOf(card);
       return id === undefined ? IDLE : viewOf(store.taskState(THIS_MACHINE.daemonId, id));
     },
-    done: async (card: string): Promise<Write> => {
+    done: (card: string): Promise<Write> => {
       const id = cardIdOf(card);
-      if (id === undefined) return refused(NOT_A_CARD);
-      const state = store.taskState(THIS_MACHINE.daemonId, id);
-      if (state.status !== 'ready' || state.task === null) return refused(UNREAD);
-      const done = doneOf(state);
-      if (done === null) return refused(NO_DONE);
-      // A closed card's one-tap answer is Reopen: for a Done there is nothing left to do, and nothing is sent.
-      if (done.kind === 'reopen') return { ok: true };
-      const plan = planMove(state.laneSet, state.task.laneId, done.laneId);
-      if (plan.kind === 'stay') return { ok: true };
-      if (plan.kind === 'refused') return refused(plan.message);
-      if (plan.kind === 'ask-reason') return refused('Moving a card back needs a reason.');
-      const moved = await actions.moveCard(
-        { daemonId: THIS_MACHINE.daemonId, id, laneId: state.task.laneId, laneSet: state.laneSet },
-        plan.to,
-      );
-      return moved.ok ? { ok: true } : refused(moved.error.message, moved.error.status);
+      if (id === undefined) return Promise.resolve(refused(NOT_A_CARD));
+      const pending = doing.get(id);
+      if (pending !== undefined) return pending;
+      const sent = move(id).finally(() => doing.delete(id));
+      doing.set(id, sent);
+      return sent;
     },
     start: async (
       card: string,
@@ -137,7 +153,7 @@ const cardAnswer = (runtime: BoardRuntime) => {
 };
 
 /** `agenda.card-reference` over one daemon's runtime. */
-const cardReference = (runtime: BoardRuntime) => {
+const cardReference = (runtime: BoardRuntime, daemon: string) => {
   const { store } = runtime;
   // The proof is the same function while the id list is the same set, so a reader re-renders only when it changes.
   let last: { readonly ids: ReadonlySet<string> | null; readonly proves: CardReferenceResolver } | undefined;
@@ -145,6 +161,7 @@ const cardReference = (runtime: BoardRuntime) => {
     subscribe: store.subscribe,
     watch: (): (() => void) => {
       store.watchIds(THIS_MACHINE);
+      // The id list has no release (`watchIds` keeps it live for the runtime's life), so there is nothing to give back.
       return () => undefined;
     },
     proves: (): CardReferenceResolver => {
@@ -153,13 +170,20 @@ const cardReference = (runtime: BoardRuntime) => {
         last = { ids, proves: createCardReferenceResolver([], ids ?? undefined) };
       return last.proves;
     },
-    href: (id: string): string => cardPagePath(id.toUpperCase()),
+    // Always under THIS hook's daemon, and only for a real card id: anything else opens the daemon's board.
+    href: (id: string): string => {
+      const card = cardIdOf(id);
+      return card === undefined ? boardPath(undefined, daemon) : cardPagePath(card, daemon);
+    },
   };
 };
 
 /** The half's `shell.hooks`: Agenda's three, each over this half's client on that daemon. */
 export const agendaHooks: AppHookProviders = {
   'agenda.card-answer': ({ client }: AppHookContext) => cardAnswer(boardRuntimeOf(client)),
-  'agenda.lane-proposal': () => ({ editorFor: laneEditDestination }),
-  'agenda.card-reference': ({ client }: AppHookContext) => cardReference(boardRuntimeOf(client)),
+  'agenda.lane-proposal': ({ daemon }: AppHookContext) => ({
+    editorFor: (ask: Parameters<typeof laneEditDestination>[0], answer: Parameters<typeof laneEditDestination>[1]) =>
+      laneEditDestination(ask, answer, daemon),
+  }),
+  'agenda.card-reference': ({ client, daemon }: AppHookContext) => cardReference(boardRuntimeOf(client), daemon),
 };

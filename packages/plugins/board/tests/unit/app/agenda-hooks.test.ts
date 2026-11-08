@@ -126,6 +126,31 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
     expect(sent[0]?.body).toEqual({ action: 'move', to: 'closed' });
   });
 
+  it('sends ONE move for taps that overlap, and every tap gets that move’s outcome', async () => {
+    const { client, sent } = scripted([card('F1', { laneId: 'tested' })]);
+    const answer = answerOver(client);
+    await read(answer, 'F1');
+
+    const [first, second, third] = await Promise.all([answer.done('F1'), answer.done('f1'), answer.done('F1')]);
+
+    expect(first).toEqual({ ok: true });
+    expect(second).toEqual(first);
+    expect(third).toEqual(first);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('lets a later tap send again once the move has settled (a refused one is not remembered)', async () => {
+    const { client, sent } = scripted([card('F1', { laneId: 'tested' })], {
+      refuse: { status: 409, message: 'stale' },
+    });
+    const answer = answerOver(client);
+    await read(answer, 'F1');
+
+    expect(await answer.done('F1')).toMatchObject({ ok: false, status: 409, message: 'stale' });
+    expect(await answer.done('F1')).toMatchObject({ ok: false, status: 409 });
+    expect(sent).toHaveLength(2);
+  });
+
   it('sends nothing for a card that is already closed, and counts it as closed', async () => {
     const { client, sent } = scripted([card('F1', { laneId: 'closed' })]);
     const answer = answerOver(client);
@@ -231,7 +256,9 @@ describe('agenda.lane-proposal: Edit opens the lane editor', () => {
   const choose = (choice: string) => ({ kind: 'respond', response: { kind: 'multiple-choice', choice } });
 
   it('opens the project’s lanes on Edit, and nothing on Accept or for another ask', () => {
-    expect(editorFor({ sourceRef: `lanes:${PROJECT}:2` }, choose('Edit'))).toBe(`/board/${PROJECT}?lanes=1`);
+    expect(editorFor({ sourceRef: `lanes:${PROJECT}:2` }, choose('Edit'))).toBe(
+      `/d/daemon%2Flaptop/board/${PROJECT}?lanes=1`,
+    );
     expect(editorFor({ sourceRef: `lanes:${PROJECT}:2` }, choose('Accept'))).toBeUndefined();
     expect(editorFor({ sourceRef: 'gate:F1:1' }, choose('Edit'))).toBeUndefined();
     expect(editorFor({ sourceRef: null }, { kind: 'dismiss' })).toBeUndefined();
@@ -261,7 +288,23 @@ describe('agenda.card-reference: `&F12` proves against this machine’s cards', 
     expect(reference.proves()).toBe(proves);
   });
 
-  it('opens the card’s page', () => {
-    expect(referenceOver(scripted([]).client).href('f12')).toBe('/card/F12');
+  it('opens the card’s page, on the daemon the hook was built for', () => {
+    expect(referenceOver(scripted([]).client).href('f12')).toBe('/d/daemon%2Flaptop/card/F12');
+  });
+
+  it('opens the daemon’s board, never a made-up page, for something that is not a card id', () => {
+    const reference = referenceOver(scripted([]).client);
+    expect(reference.href('../x')).toBe('/d/daemon%2Flaptop/board');
+    expect(reference.href('F12/../../x')).toBe('/d/daemon%2Flaptop/board');
+  });
+
+  it('follows the hook’s daemon, not the address the reader happens to be on', () => {
+    const location = (globalThis as { location?: unknown }).location;
+    Object.defineProperty(globalThis, 'location', { configurable: true, value: { pathname: '/d/elsewhere/agenda' } });
+    try {
+      expect(referenceOver(scripted([]).client).href('F12')).toBe('/d/daemon%2Flaptop/card/F12');
+    } finally {
+      Object.defineProperty(globalThis, 'location', { configurable: true, value: location });
+    }
   });
 });

@@ -42,7 +42,7 @@ export interface ShellModel {
   readonly scroll: ScrollMemory;
 }
 
-const ShellContext = createContext<ShellModel | null>(null);
+export const ShellContext = createContext<ShellModel | null>(null);
 
 /** The shell model, or `null` outside a shell (a harness, a test): a reader there follows the plain href. */
 export function useOptionalShell(): ShellModel | null {

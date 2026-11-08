@@ -21,14 +21,6 @@ export const AGENDA_LANE_PROPOSAL_HOOK = 'agenda.lane-proposal' as const;
 /** Whether `&F12` in an ask's words is a card, and where it opens. */
 export const AGENDA_CARD_REFERENCE_HOOK = 'agenda.card-reference' as const;
 
-/** Every app hook Agenda offers, in one list a test can pair against what a provider gives. */
-export const AGENDA_APP_HOOKS = [
-  AGENDA_CARD_ANSWER_HOOK,
-  AGENDA_LANE_PROPOSAL_HOOK,
-  AGENDA_CARD_REFERENCE_HOOK,
-] as const;
-export type AgendaAppHook = (typeof AGENDA_APP_HOOKS)[number];
-
 /** A card write's answer: done, or the refusal in words (`status` 0 when the request got no answer). */
 export type AgendaCardWrite<Value = undefined> =
   | ({ readonly ok: true } & (Value extends undefined ? unknown : { readonly value: Value }))
@@ -102,3 +94,17 @@ export const isAgendaCardAnswer = (value: unknown): value is AgendaCardAnswer =>
 export const isAgendaLaneProposal = (value: unknown): value is AgendaLaneProposal => functions(value, ['editorFor']);
 export const isAgendaCardReference = (value: unknown): value is AgendaCardReference =>
   functions(value, ['subscribe', 'watch', 'proves', 'href']);
+
+/**
+ * THE DECLARATION: every app hook Agenda offers, each with the narrowing that says a provided value has its shape. The
+ * `app-hooks` check (`scripts/validate/app-hooks.ts`) pairs this record with what the compiled-in halves provide, and
+ * fails the build when a hook has no provider, has two, is provided under a name nobody offers (a renamed hook), or is
+ * built into a value that does not pass its narrowing. At run time the shell gives such a hook as `undefined` and Agenda
+ * draws without it, so without the check a rename or a second provider would switch a card-moving answer off unseen.
+ */
+export const AGENDA_APP_HOOKS = {
+  [AGENDA_CARD_ANSWER_HOOK]: isAgendaCardAnswer,
+  [AGENDA_LANE_PROPOSAL_HOOK]: isAgendaLaneProposal,
+  [AGENDA_CARD_REFERENCE_HOOK]: isAgendaCardReference,
+} as const;
+export type AgendaAppHook = keyof typeof AGENDA_APP_HOOKS;

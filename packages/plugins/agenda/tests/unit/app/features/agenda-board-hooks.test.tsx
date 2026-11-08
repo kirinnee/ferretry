@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaCardRow, AgendaItem } from '@ferretry/core-asks/contract';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
-import type { AgendaCardAnswer, AgendaCardReference, AgendaCardView } from '../../../../contract/app-hooks.ts';
+import { fakeAnswer, fakeReference } from '../../../support/app/board-hooks.ts';
 import {
   AgendaBoardProviders,
   agendaBoardHooks,
@@ -33,54 +33,6 @@ afterEach(async () => {
 });
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
-
-/** A stand-in for Board's `agenda.card-answer` hook: one card on the board, every call recorded. */
-const fakeAnswer = (laneId = 'tested') => {
-  const calls: string[] = [];
-  const view: AgendaCardView = {
-    status: 'ready',
-    missing: false,
-    title: 'Pair a second phone',
-    closed: laneId === 'closed',
-  };
-  const answer: AgendaCardAnswer = {
-    subscribe: () => () => undefined,
-    watch: card => {
-      calls.push(`watch:${card}`);
-      return () => undefined;
-    },
-    card: () => view,
-    done: async card => {
-      calls.push(`done:${card}`);
-      return { ok: true };
-    },
-    start: async (card, key) => {
-      calls.push(`start:${card}:${key === '' ? 'no key' : 'key'}`);
-      return { ok: true, value: { started: true, ferret: 'mvuc7tsf-0c3d50df' } };
-    },
-    drop: async (card, reason) => {
-      calls.push(`drop:${card}:${reason}`);
-      return { ok: false, status: 403, message: 'only the owner closes cards' };
-    },
-  };
-  return { answer, calls };
-};
-
-/** A stand-in for Board's `agenda.card-reference` hook: `F12` is this machine's card, nothing else is. */
-const fakeReference = (): AgendaCardReference & { readonly watched: string[] } => {
-  const watched: string[] = [];
-  const proves = (id: string) => id.toUpperCase() === 'F12';
-  return {
-    watched,
-    subscribe: () => () => undefined,
-    watch: () => {
-      watched.push('ids');
-      return () => undefined;
-    },
-    proves: () => proves,
-    href: id => `/board-card/${id}`,
-  };
-};
 
 const bound = (
   provided: { cardAnswer?: unknown; laneProposal?: unknown; cardReference?: unknown },
