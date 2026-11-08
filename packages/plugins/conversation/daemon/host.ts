@@ -397,6 +397,8 @@ export function buildConversationA(deps: {
       readonly message: string;
       readonly sendId: string;
       readonly senderSessionId?: string | undefined;
+      /** The Warden is speaking (`ConversationCaller` `warden`): typed bare, recorded as the daemon's own. */
+      readonly warden?: true;
     },
   ): Promise<SendResult> => {
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
@@ -415,7 +417,7 @@ export function buildConversationA(deps: {
       fate: 'accepted',
       attempt: 1,
       attemptAt: at,
-      senderKind: request.senderSessionId === undefined ? 'human' : 'agent',
+      senderKind: request.warden === true ? 'daemon' : request.senderSessionId === undefined ? 'human' : 'agent',
       ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
       ...(fromName === undefined ? {} : { fromName }),
     });
@@ -623,6 +625,7 @@ export function buildConversationA(deps: {
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
             // The route and the port follow one rule: a ferret is the message's SENDER, never a different target's rule.
             ...(caller.kind === 'ferret' ? { senderSessionId: caller.ferret } : {}),
+            ...(caller.kind === 'warden' ? { warden: true as const } : {}),
           }),
         );
       } catch (error) {

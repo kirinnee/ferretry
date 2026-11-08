@@ -46,8 +46,16 @@ export interface ConversationRefusal {
   readonly message: string;
 }
 
-/** Who is calling a write: the owner, or a ferret (named). Gate stamped it; Conversation never decides it. */
-export type ConversationCaller = { readonly kind: 'owner' } | { readonly kind: 'ferret'; readonly ferret: FerretId };
+/**
+ * Who is calling a write: the owner, a ferret (named), or the Warden. Gate stamped it; Conversation never decides it.
+ * `warden` (additive, D2 #19) is Ferretry's own watchdog speaking: its words are typed bare, recorded as the DAEMON's
+ * (`senderKind: 'daemon'`, authored by Ferretry's Warden), never as the owner's own message and never as a ferret's:
+ * a notice is not kept, retried or counted as the owner's.
+ */
+export type ConversationCaller =
+  | { readonly kind: 'owner' }
+  | { readonly kind: 'ferret'; readonly ferret: FerretId }
+  | { readonly kind: 'warden' };
 
 /**
  * What other plugins and the app read and ask of Conversation (§2.3): messages, the queue, turns, questions,

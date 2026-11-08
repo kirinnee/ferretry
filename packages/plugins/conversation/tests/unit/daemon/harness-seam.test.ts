@@ -787,6 +787,58 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     await host.stop();
   });
 
+  test('D2 #19 the port’s send by the Warden is typed bare, ledgered as the daemon’s own (never the owner’s, never a ferret’s)', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    const sent = await api().send(
+      F1,
+      { kind: 'warden' },
+      { message: 'are you stuck?', sendId: 's-w', label: 'action' },
+    );
+
+    expect(sent.ok).toBe(true);
+    // Bare: no peer banner, so the agent does not read it as a teammate, and no sender id is named.
+    expect(ferrets.delivered).toEqual([{ text: 'are you stuck?' }]);
+    expect(ferrets.opens).toEqual([{ ferret: F1, caller: undefined }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
+      ['s-w', 'daemon', undefined],
+    ]);
+    await host.stop();
+  });
+
+  test('D2 #19 a Warden send to a ferret with no live pane types nothing, and its record is taken back', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.deliver = async () => err({ refused: 'no_pane' });
+    const { host, api } = await conversation(ferrets, OPEN, { state: 'stopped' });
+
+    const sent = await api().send(F1, { kind: 'warden' }, { message: 'are you stuck?', sendId: 's-w' });
+
+    expect(sent.ok).toBe(false);
+    expect(ferrets.delivered).toHaveLength(1);
+    expect(await live(api)).toEqual([]);
+    await host.stop();
+  });
+
+  test('D2 #19 a Warden send to a ferret this machine does not know is not_found: nothing typed, nothing kept', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    const sent = await api().send(ferretId('elsewhere'), { kind: 'warden' }, { message: 'are you stuck?' });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(ferrets.delivered).toEqual([]);
+    await host.stop();
+  });
+
+  test('D2 #19 a Warden send honours the closed gate and an fyi hold exactly as every caller does', async () => {
+    const closed = await conversation(undefined, CLOSED);
+    expect(await closed.api().send(F1, { kind: 'warden' }, { message: 'x' })).toMatchObject({
+      ok: false,
+      error: { code: 'conversation_terminal_unavailable' },
+    });
+    expect(closed.ferrets.delivered).toEqual([]);
+    await closed.host.stop();
+  });
+
   test('the send ROUTE names no caller: a ferret messaging its parent or a peer is not a ferret acting on a helper', async () => {
     const { host, ferrets } = await conversation();
 
