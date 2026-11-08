@@ -243,8 +243,9 @@ export interface PluginClient {
       readonly headers?: PluginCallHeaders;
       /**
        * Set by a caller that may stop waiting (its deadline passed, its screen closed): once it aborts, the call
-       * ends at once — a request in flight is cancelled, and a read parked behind an unlock or step-up prompt it does
-       * not own gets the daemon's original refusal back instead of staying parked. After the answer it does nothing.
+       * ends at once — a request in flight is cancelled, and a read parked behind an unlock prompt it does
+       * not own gets the daemon’s original refusal back instead of staying parked (a step-up wait is not released). After
+       * the answer it does nothing.
        */
       readonly signal?: AbortSignal;
     },
