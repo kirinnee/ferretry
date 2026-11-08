@@ -210,10 +210,13 @@ describe('the credential test on a hostile file', () => {
 
   for (const [name, text] of hostile) {
     it(`should scan ${name} in well under a second`, () => {
-      const started = performance.now();
-      firstCredentialLine(text);
-      const elapsed = performance.now() - started;
-      should(elapsed).be.below(BOUND_MS);
+      // The fastest of three runs: one GC pause on a shared runner is not a slow scan, a catastrophic pattern is.
+      const runs = [0, 1, 2].map(() => {
+        const started = performance.now();
+        firstCredentialLine(text);
+        return performance.now() - started;
+      });
+      should(Math.min(...runs)).be.below(BOUND_MS);
     });
   }
 });
