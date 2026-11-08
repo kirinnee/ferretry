@@ -333,8 +333,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // The launch environment: ONE store, written by every launch and read by `instructions` (stored over what the record
   // implies; RULING #30). Each section's flag is its OWNER's launch part: Pack's `FY_PACK`, Agenda's `FY_AGENDA` and
   // Conversation's `conversation-hypermedia` (FY_HYPERMEDIA, only when the owner set the ferret's switch) are registered.
+  // Lessons' `FY_LEARNING_PASSIVE` is registered too.
   // GAP(ports-pending: Ferrets): with no hypermedia switch set, the mode default the pane is handed is not recorded.
-  // GAP(ports-pending: Lessons): no `launch.parts` contribution of FY_LEARNING_PASSIVE yet.
   // Until each lands its section is not recorded, and `instructions` reads it as off: no stand-in. Each is one line in
   // ports-pending.json under its owner (ferrets, lessons).
   const launchEnvironment = new LaunchEnvironmentStore(

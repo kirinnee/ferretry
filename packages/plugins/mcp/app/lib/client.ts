@@ -29,6 +29,17 @@ import {
   McpOAuthSignedOutSchema,
   type McpOAuthStartRequest,
   McpOAuthStartRequestSchema,
+  type SessionMcpAdded,
+  SessionMcpAddedSchema,
+  type SessionMcpAddRequest,
+  SessionMcpAddRequestSchema,
+  type SessionMcpListing,
+  SessionMcpListingSchema,
+  type SessionMcpPreview,
+  SessionMcpPreviewSchema,
+  type SessionMcpPreviewRequest,
+  SessionMcpPreviewRequestSchema,
+  type SessionMcpScope,
 } from '../../contract/index.ts';
 
 /** The slice of the per-daemon client this half uses; a test hands a scripted one. */
@@ -100,3 +111,54 @@ export const cancelMcpSignIn = async (client: McpClient, flowId: string): Promis
 /** Deletes one server's stored tokens, asking the provider to revoke them when it can. */
 export const signOutMcp = async (client: McpClient, component: string): Promise<McpOAuthSignedOut> =>
   McpOAuthSignedOutSchema.parse(await client.call(SIGN_OUT_ROUTE, { params: { component } }));
+
+const LISTING_ROUTE = 'GET /v1/ferrets/:ferretId/mcp' as const;
+const PREVIEW_ROUTES = {
+  project: 'POST /v1/ferrets/:ferretId/mcp/project/preview',
+  login: 'POST /v1/ferrets/:ferretId/mcp/login/preview',
+} as const;
+const ADD_ROUTES = {
+  project: 'POST /v1/ferrets/:ferretId/mcp/project',
+  login: 'POST /v1/ferrets/:ferretId/mcp/login',
+} as const;
+const RESTART_ROUTE = 'POST /v1/restarts' as const;
+
+/** Whether a project file can be written for this ferret at all, and what it holds now. */
+export const readFerretMcpListing = async (
+  client: McpClient,
+  ferretId: string,
+  signal?: AbortSignal,
+): Promise<SessionMcpListing> =>
+  SessionMcpListingSchema.parse(
+    await client.call(LISTING_ROUTE, { params: { ferretId }, ...(signal === undefined ? {} : { signal }) }),
+  );
+
+/** What adding this server would change, in the given scope. Writes nothing. */
+export const previewFerretMcp = async (
+  client: McpClient,
+  ferretId: string,
+  scope: SessionMcpScope,
+  request: SessionMcpPreviewRequest,
+): Promise<SessionMcpPreview> =>
+  SessionMcpPreviewSchema.parse(
+    await client.call(PREVIEW_ROUTES[scope], {
+      params: { ferretId },
+      body: SessionMcpPreviewRequestSchema.parse(request),
+    }),
+  );
+
+/** Adds the server. A project add carries the previewed etag, so a file that changed meanwhile is refused. */
+export const addFerretMcp = async (
+  client: McpClient,
+  ferretId: string,
+  scope: SessionMcpScope,
+  request: SessionMcpAddRequest,
+): Promise<SessionMcpAdded> =>
+  SessionMcpAddedSchema.parse(
+    await client.call(ADD_ROUTES[scope], { params: { ferretId }, body: SessionMcpAddRequestSchema.parse(request) }),
+  );
+
+/** Restarts these ferrets' CLIs with their conversations (a busy one waits for its next idle moment). */
+export const restartFerrets = async (client: McpClient, ids: readonly string[]): Promise<void> => {
+  await client.call(RESTART_ROUTE, { body: { scope: 'ids', ids } });
+};

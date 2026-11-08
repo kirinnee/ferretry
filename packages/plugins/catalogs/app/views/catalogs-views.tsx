@@ -25,6 +25,8 @@ import { CatalogClientProvider } from '../lib/client-context.tsx';
 import type { ArrivalHold } from '../lib/arrival.ts';
 import { daemonConnection } from '../lib/machine.ts';
 import { sharedMembers } from '../lib/members.ts';
+import { fetchMachineSkillEntries } from '../lib/machine-skills.ts';
+import { useRegisteredProjects } from '../lib/registered-projects.ts';
 import { isSharingTab, SHARED_PATH } from '../lib/routes.ts';
 import type { InstallMachine } from '../features/shared/shared-item-sheet.tsx';
 import type { InstallHost } from '../features/catalogs/install-from-file-sheet.tsx';
@@ -49,14 +51,16 @@ function useInstallMachines(): readonly InstallMachine[] {
 }
 
 /** Installs go through THAT machine's own client: this one's, or another paired daemon's by the shell. */
-export function useInstallHost(own: CatalogClient, ownId: string): InstallHost {
+export function useInstallHost(own: CatalogClient, ownId: string, client: Pick<PluginClient, 'call'>): InstallHost {
   const clientOf = useDaemonClients('catalogs');
+  const projects = useRegisteredProjects(client);
   return useMemo(
     () => ({
       createClient: async connection =>
         connection.daemonId === ownId ? own : catalogClientOf(await clientOf(connection.daemonId)),
+      projects,
     }),
-    [clientOf, own, ownId],
+    [clientOf, own, ownId, projects],
   );
 }
 
@@ -70,7 +74,8 @@ export function createSharingScreen(client: PluginClient) {
       [id, paired],
     );
     const machines = useInstallMachines();
-    const installHost = useInstallHost(own, id);
+    const installHost = useInstallHost(own, id, client);
+    const loadMachineSkills = useCallback((signal: AbortSignal) => fetchMachineSkillEntries(client, signal), []);
     const { navigate } = useRouter();
     const tab = isSharingTab(params.tab) ? params.tab : undefined;
     return (
@@ -82,6 +87,7 @@ export function createSharingScreen(client: PluginClient) {
           members={sharedMembers()}
           machines={machines}
           installHost={installHost}
+          loadMachineSkills={loadMachineSkills}
         />
       </CatalogClientProvider>
     );

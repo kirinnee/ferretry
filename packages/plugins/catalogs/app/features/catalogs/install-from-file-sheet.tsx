@@ -85,7 +85,7 @@ const NO_RUNTIMES: TargetOptions['runtimes'] = [];
 type Project = { readonly name: string; readonly path: string };
 
 /** The projects this browser already knows for the machine, unless the host names some. */
-/** GAP(projects): the projects to offer are Projects' list, which Catalogs has no edge to; the host names them. */
+/** The host names them: the registered projects of the machine, read from Projects' own list (views/catalogs-views.tsx). */
 export function InstallFromFileSheet(props: InstallFromFileSheetProps) {
   return <InstallSheetBody {...props} projects={props.host?.projects ?? []} />;
 }
