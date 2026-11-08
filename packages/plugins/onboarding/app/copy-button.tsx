@@ -30,7 +30,10 @@ import { useState } from 'react';
 
 export type ClipboardWriter = (text: string) => Promise<void>;
 
-/** The real clipboard, which rejects rather than pretending on a browser that has none. */
+/**
+ * The real clipboard, which rejects rather than pretending on a browser that has none.
+ * @pending onboarding: the app half waits on the shell
+ */
 export const browserClipboardWriter =
   (): ClipboardWriter =>
   async (text: string): Promise<void> => {

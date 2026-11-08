@@ -11,7 +11,7 @@ export function startupModelArguments(model: string): readonly string[] {
 }
 
 /** A runtime command typed before turn one (the only one a Claude start needs). */
-export interface StartupRuntimeCommand {
+interface StartupRuntimeCommand {
   readonly action: 'effort';
   readonly effort: string;
 }

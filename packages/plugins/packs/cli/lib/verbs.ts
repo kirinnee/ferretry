@@ -5,16 +5,16 @@ import { absoluteOf, ambientFerret, type PackHost } from './host.ts';
 import { type ICellColour, PackCommandError, PackTableController } from './pack-table.ts';
 
 /** The shipped command name, which every printed command and stderr note names. */
-export const BINARY = 'fy';
+const BINARY = 'fy';
 
 type Options = VerbInvocation['options'];
 
 /** Whether a flag was given (`--json`, or `--json=true`). */
-export const flag = (options: Options, ...names: readonly string[]): boolean =>
+const flag = (options: Options, ...names: readonly string[]): boolean =>
   names.some(name => options[name] === true || options[name] === 'true');
 
 /** A flag's value; the last one when it was repeated. */
-export const text = (options: Options, name: string): string | undefined => {
+const text = (options: Options, name: string): string | undefined => {
   const value = options[name];
   if (typeof value === 'string') return value;
   return Array.isArray(value) ? (value[value.length - 1] as string | undefined) : undefined;

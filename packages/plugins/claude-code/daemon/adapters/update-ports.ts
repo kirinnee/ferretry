@@ -36,7 +36,7 @@ const NOWHERE = 'http://127.0.0.1:9';
  * The environment a probe adds on top of the host's: a home that holds no login, no settings and no history,
  * and every proxy variable pointed at {@link NOWHERE}, so neither question can read a login or reach the network.
  */
-export const PROBE_ENVIRONMENT: Readonly<Record<string, string>> = {
+const PROBE_ENVIRONMENT: Readonly<Record<string, string>> = {
   HOME: '/nonexistent/fy-harness-probe',
   CLAUDE_CONFIG_DIR: '/nonexistent/fy-harness-probe/.claude',
   HTTP_PROXY: NOWHERE,

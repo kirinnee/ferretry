@@ -1,14 +1,14 @@
 import type { LogLevel, RunOverrides } from './arguments.ts';
 import type { LogSink } from './log.ts';
 
-export const DEFAULT_PORT = 7457;
-export const DEFAULT_HOST = '127.0.0.1';
-export const DEFAULT_LOG_LEVEL: LogLevel = 'info';
+const DEFAULT_PORT = 7457;
+const DEFAULT_HOST = '127.0.0.1';
+const DEFAULT_LOG_LEVEL: LogLevel = 'info';
 
 /** Where an effective value came from: the command line, the environment, or the built-in default. */
-export type Origin = 'flag' | 'environment' | 'default';
+type Origin = 'flag' | 'environment' | 'default';
 
-export interface Setting<T> {
+interface Setting<T> {
   readonly value: T;
   readonly origin: Origin;
   /** The flag or variable that supplied it, when it was not the default. */

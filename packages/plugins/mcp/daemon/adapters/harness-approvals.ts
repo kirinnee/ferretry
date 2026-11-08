@@ -13,7 +13,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import type { McpProjectApprovals, McpProjectApprovalsRequest } from '../lib/inventory/project-sign-in.ts';
 
 /** The read a harness contract offers (`ClaudeCodeApi.approvedProjectServers`), as MCP needs it. */
-export interface HarnessApprovalsReader {
+interface HarnessApprovalsReader {
   approvedProjectServers?(query: {
     readonly ferret: FerretId;
     readonly root: string;

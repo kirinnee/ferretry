@@ -3,22 +3,24 @@
  * MCP server in every scope — held in memory, so the inventory reads exactly these and nothing else.
  */
 import type { McpOAuthConnection } from '../../../contract/index.ts';
+import { claudeApproval, claudeApprovalKeys, claudeProjectEntry } from '../../../daemon/lib/inventory/declarations.ts';
 import {
-  claudeApproval,
-  claudeApprovalKeys,
-  claudeProjectEntry,
   KnownAndFerretFolders,
+  type McpInventoryFolder,
+  mcpProjectKey,
+} from '../../../daemon/lib/inventory/folders.ts';
+import {
   McpDocumentUnreadable,
   type McpFerretView,
   type McpHarnessDocuments,
   type McpInventoryAccount,
   type McpInventoryComponent,
   type McpInventoryDeps,
-  type McpInventoryFolder,
-  mcpProjectKey,
+} from '../../../daemon/lib/inventory/service.ts';
+import {
   type McpProjectApprovals,
   type McpProjectApprovalsRequest,
-} from '../../../daemon/lib/inventory/index.ts';
+} from '../../../daemon/lib/inventory/project-sign-in.ts';
 
 export const CLAUDE_HOME = '/fy/fleet/homes/claude-work-id';
 export const CODEX_HOME = '/fy/fleet/homes/codex-work-id';

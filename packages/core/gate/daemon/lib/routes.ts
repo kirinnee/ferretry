@@ -27,10 +27,10 @@ import type { SecurityCaller, SecuritySettingsService } from './security/service
 import { GrantError, type GrantFailure, type GrantService } from './grants/service.ts';
 
 /** The largest body Gate's own routes accept: a security patch is six fields. */
-export const GATE_BODY_MAX_BYTES = 16 * 1024;
+const GATE_BODY_MAX_BYTES = 16 * 1024;
 
 /** Parses a JSON body against a schema (today's `parseBody`): 413 past the bound, 400 for bad JSON, 422 for a misfit. */
-export async function parseBody<S extends z.ZodType>(call: CallContext, schema: S): Promise<z.infer<S>> {
+async function parseBody<S extends z.ZodType>(call: CallContext, schema: S): Promise<z.infer<S>> {
   let text: string;
   try {
     text = await call.request.text(GATE_BODY_MAX_BYTES);
@@ -59,7 +59,7 @@ export async function parseBody<S extends z.ZodType>(call: CallContext, schema: 
  * The proof is passed as a claim, never as the admission snapshot's `freshStepUp`, so the service takes it inside its
  * queue and before its write.
  */
-export const securityCallerOf = (call: CallContext): SecurityCaller => {
+const securityCallerOf = (call: CallContext): SecurityCaller => {
   const claim = call.claimFreshStepUp;
   return {
     hostLocal: arrivedOnHost(call.request, call.credential?.tokenClass === 'admin'),

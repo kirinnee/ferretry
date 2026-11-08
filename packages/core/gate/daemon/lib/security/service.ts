@@ -43,7 +43,7 @@ export type SecurityDocument =
   | { readonly kind: 'damaged' };
 
 /** Where the settings live and how a change is saved. A save that cannot happen throws; nothing is applied. */
-export interface SecurityDocumentPort {
+interface SecurityDocumentPort {
   read(): SecurityDocument;
   /** Writes the whole `security` section. */
   write(settings: SecuritySettings): Promise<void>;
@@ -60,7 +60,7 @@ export interface SecurityCaller {
   readonly claimFreshPasskey?: () => boolean;
 }
 
-export interface SecuritySettingsChange {
+interface SecuritySettingsChange {
   readonly view: SecuritySettingsView;
   readonly devicesExpiring: number;
 }

@@ -43,7 +43,7 @@ export interface RuntimeModelCatalog {
 }
 
 /** What a login's catalog says about one model it serves: the tier and window a picker groups and describes by. */
-export interface DescribedModel {
+interface DescribedModel {
   readonly id: string;
   readonly displayName?: string;
   readonly tier?: 'best' | 'balanced' | 'fast';

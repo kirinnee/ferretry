@@ -7,10 +7,12 @@ import {
   codexServers,
   codexTrusted,
   displayAddress,
+  isFerretryLocalEntry,
+} from '../../../daemon/lib/inventory/declarations.ts';
+import {
   expandVariables,
   initializedNotification,
   initializeRequest,
-  isFerretryLocalEntry,
   MCP_CHECK_PROTOCOL_VERSION,
   parseMessage,
   responseFor,
@@ -18,7 +20,7 @@ import {
   sseEvents,
   toolsListRequest,
   toolsPage,
-} from '../../../daemon/lib/inventory/index.ts';
+} from '../../../daemon/lib/inventory/json-rpc.ts';
 import { variable } from './support.ts';
 
 describe('MCP declarations', () => {

@@ -33,7 +33,7 @@ export const API_KEY_SEED_NAME = 'claude-code-api-key-seed';
 export const API_KEY_SEED_SHELL = '/bin/sh';
 
 /** The longest tail Claude Code compares a key by. */
-export const API_KEY_TAIL_LENGTH = 20;
+const API_KEY_TAIL_LENGTH = 20;
 
 const APPROVED = `(.customApiKeyResponses.approved // [])`;
 

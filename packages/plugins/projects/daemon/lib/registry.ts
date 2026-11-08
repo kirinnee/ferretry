@@ -12,7 +12,7 @@ import {
 import type { ProjectFolders, RegistryClock, RegistryStore } from './ports.ts';
 
 /** A registration that did not become a record: the sentence is the daemon's own and goes back as a 422. */
-export class RegistrationRefused extends Error {
+class RegistrationRefused extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RegistrationRefused';

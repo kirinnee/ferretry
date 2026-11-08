@@ -138,7 +138,7 @@ export function useMcpServerActions(host: McpActionsHost | undefined, onSignedIn
 const DOT: Readonly<Record<McpTone, string>> = { ok: 'bg-ok', warn: 'bg-warn', err: 'bg-err', none: 'bg-faint' };
 
 /** A failure: the sentence, and the raw text behind Details. */
-export function PlainFailureText({ failure, spot }: { readonly failure: PlainFailure; readonly spot: string }) {
+function PlainFailureText({ failure, spot }: { readonly failure: PlainFailure; readonly spot: string }) {
   return (
     <div className="m-0 flex w-full min-w-0 flex-col gap-0.5 text-meta" role="alert" data-mcp-failure={spot}>
       <span className="break-words text-err">{failure.headline}</span>

@@ -15,7 +15,7 @@ import type { Environment } from './credential.ts';
  *   inherited variable (a parent that spawns `fy` with its own `cwd` leaves `PWD` stale): it is the CLI's real
  *   working directory, handed in by the caller.
  */
-export const PLUGIN_ENV_NAMES = [
+const PLUGIN_ENV_NAMES = [
   'FY_SESSION_ID',
   'FY_SESSION_MODE',
   'FY_HYPERMEDIA',

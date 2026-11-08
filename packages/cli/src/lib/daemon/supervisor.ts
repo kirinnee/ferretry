@@ -30,7 +30,7 @@ export class UnsupportedServiceManagerError extends Error {
 }
 
 /** Raised when a service-manager command fails; carries whatever it said. */
-export class ServiceManagerCommandError extends Error {
+class ServiceManagerCommandError extends Error {
   constructor(argv: readonly string[], stderr: string) {
     super(stderr.trim() === '' ? `${argv.join(' ')} failed` : stderr.trim());
     this.name = 'ServiceManagerCommandError';
@@ -41,7 +41,7 @@ export class ServiceManagerCommandError extends Error {
  * Raised when a lifecycle verb would act on a daemon it cannot tie to the state home it was asked
  * about. Nothing has been stopped, signalled or rewritten when this is thrown.
  */
-export class DaemonOwnershipError extends Error {
+class DaemonOwnershipError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DaemonOwnershipError';

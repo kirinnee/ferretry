@@ -157,7 +157,7 @@ export interface SessionTransportOptions {
  */
 export type RequestLane = 'request' | 'bulk';
 
-export const requestLane = (body: string | undefined): RequestLane =>
+const requestLane = (body: string | undefined): RequestLane =>
   body !== undefined && body.length > MAX_PLAINTEXT_BYTES / 2 ? 'bulk' : 'request';
 
 /** A body sent as JSON text; an answer read back as JSON when it parses, else kept as text. */

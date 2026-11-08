@@ -23,7 +23,7 @@ import {
 import type { ConfigText } from '../config-text.ts';
 
 /** The modeline `packs.yaml` starts with (the editor's JSON schema, served by the daemon). */
-export const PACKS_MODELINE = '# yaml-language-server: $schema=schemas/packs.json';
+const PACKS_MODELINE = '# yaml-language-server: $schema=schemas/packs.json';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

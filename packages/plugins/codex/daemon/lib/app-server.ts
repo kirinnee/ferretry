@@ -67,7 +67,7 @@ function reasoningEfforts(item: Record<string, unknown>): RuntimeReasoningChoice
 }
 
 /** The service tier id Codex's `/fast` switches to; its display name is "Fast". */
-export const CODEX_FAST_TIER = 'priority';
+const CODEX_FAST_TIER = 'priority';
 
 /**
  * Whether a model offers Codex's fast tier. `serviceTiers` is the account's statement of what a model

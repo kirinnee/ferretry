@@ -106,7 +106,7 @@ type Claim = z.output<typeof ClaimSchema>;
  */
 type HolderVerdict = 'running' | 'gone' | 'elsewhere' | 'unknown';
 
-export class DaemonLifecycleBusyError extends Error {
+class DaemonLifecycleBusyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DaemonLifecycleBusyError';
