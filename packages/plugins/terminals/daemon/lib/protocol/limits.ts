@@ -9,7 +9,7 @@
  * - `GET /v1/cgroups/config` — what is in force and why, in plain words ({@link LimitsView}).
  *
  * THE MATH LIVES HERE, once. The daemon turns {@link ResolvedLimits} into unit properties; the config
- * check turns two files into "did this raise a cap" ({@link limitsLoosening}); the app and `fy` print
+ * check turns two files into "did this raise a cap"; the app and `fy` print
  * the daemon's own sentences. Three programs that must agree on what "the default" is read it from here.
  *
  * Pure: no IO, no clock, no globals.
@@ -240,104 +240,6 @@ export function resolveLimits(config: LimitsConfig, host: LimitsHost): ResolvedL
     },
     warnings,
   };
-}
-
-// ── Loosening ────────────────────────────────────────────────────────────────────────────────────
-
-/** Words for each cap, so a held change reads as a sentence the owner can confirm. */
-const FLEET_WORDS = {
-  cpuWeight: 'the CPU weight of all ferrets together',
-  memoryHigh: 'the soft memory limit for all ferrets together',
-  memoryMax: 'the hard memory limit for all ferrets together',
-  swapMax: 'the swap all ferrets together may use',
-  tasksMax: 'the processes all ferrets together may run',
-  cpuPercent: 'the CPU share all ferrets together may use',
-} as const;
-
-const FERRET_WORDS = {
-  cpuWeight: 'the CPU weight of each ferret',
-  interactiveCpuWeight: 'the CPU weight of a ferret you started',
-  memoryHigh: 'the soft memory limit of each ferret',
-  memoryMax: 'the hard memory limit of each ferret',
-  tasksMax: 'the processes each ferret may run',
-  cpuPercent: 'the CPU share each ferret may use',
-} as const;
-
-/** A cap's comparable form when the budget is known: bytes or a count, `Infinity` for none. */
-const comparable = (cap: Cap | undefined): number => (cap === null ? Number.POSITIVE_INFINITY : (cap ?? 0));
-
-/**
- * One setting compared WITHOUT knowing the budget. Only edits that are provably not looser pass:
- * the same unit written lower, a percent under the default's own percent written where nothing was, no change. A change of
- * unit, or going back to the computed default, cannot be proved tighter, so it is held.
- */
-function symbolicRaised(before: unknown, after: unknown, defaultPercent: number | undefined): boolean {
-  if (before === after || JSON.stringify(before) === JSON.stringify(after)) return false;
-  if (after === undefined) return true;
-  if (before === undefined) {
-    // Nothing was written, so the baseline is the computed default, which needs the budget. Only a percent
-    // that sits under the default's own percent is provably tighter; `infinity`, bytes, and any percent
-    // above it cannot be shown to be below the default, so they are held.
-    const added = parseLimitSize(after);
-    return !(added?.kind === 'percent' && defaultPercent !== undefined && added.percent <= defaultPercent);
-  }
-  const was = parseLimitSize(before);
-  const now = parseLimitSize(after);
-  if (was === undefined || now === undefined)
-    return typeof after === 'number' && typeof before === 'number' && after > before;
-  if (now.kind === 'unlimited') return was.kind !== 'unlimited';
-  if (was.kind === 'unlimited') return false;
-  if (was.kind !== now.kind) return true;
-  return was.kind === 'bytes'
-    ? now.kind === 'bytes' && now.bytes > was.bytes
-    : now.kind === 'percent' && now.percent > was.percent;
-}
-
-const SIZE_FIELDS = new Set(['memoryHigh', 'memoryMax', 'swapMax']);
-
-/** The computed defaults that are a fixed percent of the budget, by `group.field`; the others need the budget. */
-const DEFAULT_PERCENTS: Readonly<Record<string, number>> = {
-  'fleet.swapMax': 10,
-  'perFerret.memoryHigh': 25,
-  'perFerret.memoryMax': 30,
-};
-
-/**
- * Each loosening an edit from `before` to `after` makes, in words; empty when it loosens nothing.
- *
- * Raising any cap or weight, taking a cap away, switching limits off and turning disk priority off all
- * LOOSEN: they let ferrets take more of the machine than the owner last agreed to. With the budget
- * known the comparison is on what each file RESOLVES to, so `memoryMax: 30G` against a computed 44.4 GiB
- * is a tightening and applies at once. Without it (`fy config check` on another host) only an edit
- * that is provably not looser passes.
- */
-function limitsLoosening(before: LimitsConfig, after: LimitsConfig, ceilingBytes?: number): readonly string[] {
-  const sentences: string[] = [];
-  const was = resolveLimits(before, { memoryCeilingBytes: ceilingBytes ?? GIBIBYTE });
-  const now = resolveLimits(after, { memoryCeilingBytes: ceilingBytes ?? GIBIBYTE });
-  if (was.enabled && !now.enabled)
-    sentences.push('ferret limits are switched off, so ferrets may take all of the machine');
-  if (was.ionice && !now.ionice) sentences.push('ferrets no longer run at a lower disk priority');
-  const check = (
-    group: 'fleet' | 'perFerret',
-    field: string,
-    words: string,
-    resolvedBefore: Cap | number | undefined,
-    resolvedAfter: Cap | number | undefined,
-  ): void => {
-    const writtenBefore = (before[group] as Record<string, unknown> | undefined)?.[field];
-    const writtenAfter = (after[group] as Record<string, unknown> | undefined)?.[field];
-    const raised =
-      ceilingBytes !== undefined || !SIZE_FIELDS.has(field)
-        ? comparable(resolvedAfter as Cap) > comparable(resolvedBefore as Cap)
-        : symbolicRaised(writtenBefore, writtenAfter, DEFAULT_PERCENTS[`${group}.${field}`]);
-    if (raised) sentences.push(`${words} was raised`);
-  };
-  for (const field of Object.keys(FLEET_WORDS) as (keyof typeof FLEET_WORDS)[])
-    check('fleet', field, FLEET_WORDS[field], was.fleet[field], now.fleet[field]);
-  for (const field of Object.keys(FERRET_WORDS) as (keyof typeof FERRET_WORDS)[])
-    check('perFerret', field, FERRET_WORDS[field], was.perFerret[field], now.perFerret[field]);
-  return sentences;
 }
 
 // ── The view ─────────────────────────────────────────────────────────────────────────────────────

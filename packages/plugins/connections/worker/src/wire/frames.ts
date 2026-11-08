@@ -1,4 +1,4 @@
-/** Mirror of packages/core/kernel/host/session/wire/frames.ts, byte-copied; replace with kernel export when approved. */
+/** The subset of kernel packages/core/kernel/host/session/wire/frames.ts the relay worker uses; replace with a kernel export when approved. */
 /**
  * The one binary framing every carrier uses.
  *

@@ -15,6 +15,9 @@ export interface TmuxLaunchGuard {
 /** The harnesses a generated runtime wrapper execs BY NAME, so a guard has to resolve both itself. */
 export const GUARDED_HARNESS_NAMES = ['claude', 'codex'] as const;
 
+/** The variable a test runner sets to say "everything this daemon launches must be a fake". @pending terminals: GAP(ferrets): the tmux adapters daemon/adapters/tmux/pane-queue.ts, daemon/adapters/tmux/harness-launch-guard.ts, daemon/adapters/tmux/forget-ferret-identity.ts and daemon/adapters/tmux/tmux-release-reader.ts are ported and tested but nothing composes them until Ferrets wires the deliver and runner seams and reads FERRETRY_TEST (scripts/test/swept.sh) to arm it (gustavo) */
+export const TEST_MODE_VARIABLE = 'FERRETRY_TEST';
+
 /** A launch a guard refused, naming the binary and the install it belongs to. */
 export class RealHarnessRefusedError extends Error {
   constructor(

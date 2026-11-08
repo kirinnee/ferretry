@@ -1,4 +1,4 @@
-/** Mirror of packages/core/kernel/host/session/wire/binary.ts, byte-copied; replace with kernel export when approved. */
+/** The subset of kernel packages/core/kernel/host/session/wire/binary.ts the relay worker uses; replace with a kernel export when approved. */
 /**
  * Byte helpers the wire format needs on both a daemon and a browser.
  *

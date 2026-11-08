@@ -20,7 +20,8 @@ import { Check } from 'lucide-react';
 import { useId, useState } from 'react';
 import { CARRIER_PREFERENCE_LABEL, CARRIER_PREFERENCES, type CarrierPreference } from '../../lib/carrier-preference.ts';
 import { cn } from '../../lib/class-names.ts';
-
+import type { TunnelStatusView } from '../../../contract/index.ts';
+type TunnelSwitchState = { readonly kind: 'unknown' } | { readonly kind: 'known'; readonly view: TunnelStatusView };
 import { Button } from '../../shell/primitives.tsx';
 
 /** What each preference does, in one line. WebRTC's says the relay only introduces — §15's own words. */
@@ -53,6 +54,25 @@ interface TunnelSwitchOffer {
   /** Turns the tunnel on. Rejects with the daemon's own sentence when it refuses. */
   readonly turnOn: () => Promise<void>;
 }
+
+/**
+ * A machine's switch as a selector offers it, or nothing until the machine has answered — and nothing
+ * for a daemon older than the switch, whose tunnel was never opt-in.
+ * @pending connections: GAP(app): app/lib/tunnel-switch.ts and app/lib/webrtc-carrier.ts are ported and tested but the app half builds no tunnel switch or WebRTC dialer yet
+ */
+export const tunnelSwitchOffer = (
+  state: TunnelSwitchState | undefined,
+  turnOn: () => Promise<unknown>,
+): TunnelSwitchOffer | undefined =>
+  state?.kind === 'known'
+    ? {
+        sentence: state.view.sentence,
+        off: !state.view.enabled,
+        turnOn: async () => {
+          await turnOn();
+        },
+      }
+    : undefined;
 
 /** Asked when a preference that walks the tunnel is chosen for a machine whose tunnel is off. */
 const TUNNEL_OFFER_QUESTION = 'Turn on a Cloudflare tunnel for this machine?';

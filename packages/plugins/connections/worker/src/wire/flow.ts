@@ -1,4 +1,4 @@
-/** Mirror of packages/core/kernel/host/session/wire/flow.ts, byte-copied; replace with kernel export when approved. */
+/** The subset of kernel packages/core/kernel/host/session/wire/flow.ts the relay worker uses; replace with a kernel export when approved. */
 /**
  * Backpressure, as a fixed window that cannot be argued upwards.
  *

@@ -112,13 +112,17 @@ export const processErrorText = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
 };
 
+/** @pending terminals: GAP(app): app/components/terminal-snapshot.tsx and app/components/terminal-snapshot-model.ts (S-0270), app/features/workspace/phone/terminal-key-bar.tsx, app/features/workspace/phone/terminal-keys.ts and app/lib/session-processes.ts are ported and tested but no surface mounts them until the app wiring (kaizen) lands */
+export const isForbidden = (error: unknown): boolean =>
+  (error instanceof DaemonCallError && error.status === 403) || grantRefusalNotice(error) !== null;
+
 /** The command as the agent wrote it when there is one. */
 export const processTitle = (entry: SessionProcess): string => entry.label ?? entry.command;
 
 type ProcessGroupKey = SessionProcess['kind'] | 'ended';
 
-/** One top-level entry with the processes it started, in the order the list shows them. */
-interface ProcessRow {
+/** One top-level entry with the processes it started, in the order the list shows them. @pending terminals: GAP(app): app/components/terminal-snapshot.tsx and app/components/terminal-snapshot-model.ts (S-0270), app/features/workspace/phone/terminal-key-bar.tsx, app/features/workspace/phone/terminal-keys.ts and app/lib/session-processes.ts are ported and tested but no surface mounts them until the app wiring (kaizen) lands */
+export interface ProcessRow {
   readonly process: SessionProcess;
   readonly children: readonly SessionProcess[];
 }

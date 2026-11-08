@@ -1,4 +1,4 @@
-/** Mirror of packages/core/kernel/host/session/wire/constants.ts, byte-copied; replace with kernel export when approved. */
+/** The subset of kernel packages/core/kernel/host/session/wire/constants.ts the relay worker uses; replace with a kernel export when approved. */
 /**
  * Every constant the wire format pins, in one place, because a reimplementation in another
  * language has to agree with all of them exactly.
