@@ -100,7 +100,8 @@ function look(entries: readonly number[], body: readonly Body[], scope: Redactio
       const after = masked[position] ?? before;
       const row = covered[at];
       if (row === undefined) return;
-      for (let unit = 0; unit < before.length - 1; unit++) if (after[unit] !== before[unit]) row[unit] = true;
+      const content = (body[at]?.text ?? '').replace(/\r$/, '').length;
+      for (let unit = 0; unit < content; unit++) if (after[unit] !== before[unit]) row[unit] = true;
     });
   }
 }

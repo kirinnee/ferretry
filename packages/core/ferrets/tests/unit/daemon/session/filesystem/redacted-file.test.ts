@@ -94,4 +94,43 @@ describe('the outbound file projection, base64 (R-0151)', () => {
     );
     should(out.covered).be.false();
   });
+
+  const EOF_LINES = ['fixture-eof-first-0021', 'fixture-eof-second-0022', 'fixture-eof-third-0023'];
+  const EOF_ONE = 'fixture-eof-token-0024';
+  const eofCases: [string, string, string][] = [];
+  for (const served of ['\n', '\r\n']) {
+    eofCases.push([
+      `tok\\r on a last line with no final newline, ${JSON.stringify(served)} file`,
+      `${EOF_ONE}\r`,
+      `head${served}KEY=${EOF_ONE}`,
+    ]);
+    eofCases.push([
+      `a CRLF-stored 3-line value with a trailing CR as the last lines, ${JSON.stringify(served)} file`,
+      `${EOF_LINES.join('\r\n')}\r`,
+      `head${served}${EOF_LINES.join(served)}`,
+    ]);
+  }
+  for (const [name, value, text] of eofCases) {
+    it(`R-0151 ${name} is masked as text, base64 and with a NUL byte, and reported`, async () => {
+      const redaction = new FakeRedaction(new Map([['V' as never, value]]));
+      const leaks = (out: string): boolean => [...EOF_LINES, EOF_ONE].some(part => out.includes(part));
+      const viaText = await redaction.read(scope => redactedFile(text, scope));
+      const viaB64 = await redaction.read(scope => redactedFileBase64(Buffer.from(text).toString('base64'), scope));
+      const withNul = Buffer.concat([Buffer.from([0, 10]), Buffer.from(text)]);
+      const viaNul = await redaction.read(scope => redactedFileBase64(withNul.toString('base64'), scope));
+      should(leaks(viaText.text)).be.false();
+      should(leaks(Buffer.from(viaB64.base64, 'base64').toString('latin1'))).be.false();
+      should(leaks(Buffer.from(viaNul.base64, 'base64').toString('latin1'))).be.false();
+      should(viaText.covered && viaB64.covered && viaNul.covered).be.true();
+      should(viaText.text.length === text.length).be.true();
+    });
+  }
+
+  it('R-0151 a value that is only a line break masks nothing and reports nothing', async () => {
+    const out = await new FakeRedaction(new Map([['V' as never, '\r']])).read(scope =>
+      redactedFile('KEY=abc\r\nnext\r\n', scope),
+    );
+    should(out.covered).be.false();
+    should(out.text === 'KEY=abc\r\nnext\r\n').be.true();
+  });
 });

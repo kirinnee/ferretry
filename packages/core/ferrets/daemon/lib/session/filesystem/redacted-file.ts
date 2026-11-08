@@ -42,17 +42,16 @@ export function redactedFileText(text: string, scope: RedactionScope): string {
 function coverage(text: string, scope: RedactionScope): boolean[] {
   const lines = text.split('\n').map((line, at, all) => (at < all.length - 1 ? `${line}\n` : line));
   const contents = lines.map(line => line.replace(/\r?\n?$/, ''));
-  const breaks = lines.map(line => (line.endsWith('\n') ? 1 : 0));
   const raw = scope.lines(lines);
-  const lf = scope.lines(contents.map((content, at) => (breaks[at] === 1 ? `${content}\n` : content)));
-  const crlf = scope.lines(contents.map((content, at) => (breaks[at] === 1 ? `${content}\r\n` : content)));
+  const lf = scope.lines(contents.map(content => `${content}\n`));
+  const crlf = scope.lines(contents.map(content => `${content}\r\n`));
   const row: boolean[] = [];
   lines.forEach((line, at) => {
     const content = contents[at] ?? '';
     for (let unit = 0; unit < line.length; unit++) {
       const inContent = unit < content.length;
       row.push(
-        (raw[at] ?? line).charAt(unit) !== line.charAt(unit) ||
+        (inContent && (raw[at] ?? line).charAt(unit) !== line.charAt(unit)) ||
           (inContent && (lf[at] ?? '').charAt(unit) !== content.charAt(unit)) ||
           (inContent && (crlf[at] ?? '').charAt(unit) !== content.charAt(unit)),
       );
