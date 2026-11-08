@@ -1,6 +1,6 @@
 import { ApiError, type KernelPorts, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
 import { type AskId, AskIdSchema, type AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretId, FerretsApi, SitrepLineSource } from '@ferretry/core-ferrets/contract';
+import type { FerretsApi, SitrepLineSource } from '@ferretry/core-ferrets/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
 import { err, milliseconds, ok } from '@ferretry/std';
@@ -31,14 +31,14 @@ import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './questions/li
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
 import { StateHypermediaSwitch } from './hypermedia/adapters/index.ts';
 import { hypermediaDefault, SessionHypermediaService, sessionHypermediaRoutes } from './hypermedia/lib/index.ts';
-import { MaybeTyped, terminalSeam } from './harness-seam.ts';
+import { type HarnessGate, MaybeTyped, terminalSeam } from './harness-seam.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferret-id.ts';
 import type { ClockPort } from './seams/ports.ts';
 import type { SessionView } from './seams/protocol.ts';
 
-/** Said by every route that needs more of the ferret's terminal than a typed message or an interrupt (the composer, a question's form, a retry). */
+/** Said by every route that needs the ferret's terminal and is not connected to it: a send, an interrupt, the composer, a question's form, a retry. */
 const TERMINAL_PENDING =
   "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
 
@@ -61,6 +61,14 @@ const refusalCode = (error: unknown): string =>
           >
         )[error.failure] ?? 'send_refused')
       : 'send_refused';
+
+/** What a send can carry that the harness seam does not type yet. */
+interface UnwiredSend {
+  readonly attachmentIds?: readonly string[] | undefined;
+  readonly label?: unknown;
+  readonly now?: boolean | undefined;
+  readonly replyExpected?: boolean | undefined;
+}
 
 /** One answer as the terminal seam takes it: the route's request, or the port's with a minted request id. */
 type AnswerToTerminal = Parameters<SessionAnswerSubsystem['answer']>[1];
@@ -105,18 +113,21 @@ export interface ConversationAHalf {
 
 /**
  * Part a of Conversation's daemon half: the queue, the send ledger, questions, turns and the shared draft, on the
- * kernel's state, clock, events and ids. A send and an interrupt type through Ferrets' harness seam. What needs more of
- * the pane (the composer actions, a send's retry, cancel and submit, answering a question's form, the harness's own
- * compact-at setting) is wired to a refusal that says so until the send path's pane looks are wired; the queue, the
- * ledger reads, the shared draft and its stream are real.
+ * kernel's state, clock, events and ids. A send and an interrupt are built over Ferrets' harness seam but wait behind
+ * the gate (`deps.gate`) until Ferrets answers a closed refusal for a send and presses the harness's own stop key.
+ * Everything else that needs the pane (the composer actions, a send's retry, cancel and submit, answering a question's
+ * form, the harness's own compact-at setting) is wired to a refusal that says so; the queue, the ledger reads, the
+ * shared draft and its stream are real.
  */
 export function buildConversationA(deps: {
   readonly kernel: KernelPorts;
   readonly ferrets: FerretsApi;
   readonly asks: Pick<AsksApi, 'get'>;
   readonly hooks: Pick<HookInvoker, 'observe' | 'transform'>;
+  /** Which of the harness seam's two actions are live (see {@link HarnessGate}). */
+  readonly gate: HarnessGate;
 }): ConversationAHalf {
-  const { kernel, ferrets, asks, hooks } = deps;
+  const { kernel, ferrets, asks, hooks, gate } = deps;
   const clock: ClockPort = { now: () => kernel.clock.now() };
   const queueSerial = new KeyedSerialExecutor();
   const draftSerial = new KeyedSerialExecutor();
@@ -176,12 +187,34 @@ export function buildConversationA(deps: {
     ...harness,
     answer: async (_ferret: string, _request: AnswerToTerminal): Promise<SessionView> => pending(),
   };
-  /** Stops the ferret's turn and answers its view, so a route can show what the call changed. */
-  const interruptFerret = async (ferret: string, caller?: FerretId): Promise<SessionView> => {
-    await (await terminal.bind(ferret, caller)).interrupt();
+  /**
+   * Stops the ferret's turn and answers its view, so a route can show what the call changed. Waits behind the gate before
+   * anything is opened: Ferrets' interrupt is the runner's raw `C-c`, which quits an idle Codex, answers a pending
+   * question by accident and ignores a terminal status, where today presses Escape and only on a pane doing work.
+   */
+  const interruptFerret = async (ferret: string): Promise<SessionView> => {
+    if (!gate.interrupt) return pending();
+    await (await terminal.bind(ferret)).interrupt();
     boundaries.markInterrupted(ferret);
     // Ferrets' record carries no turn count, so the view is the id and the status the interrupt just made true.
     return { id: ferret, status: 'interrupted', turn: 0 };
+  };
+  /**
+   * Whether a send may be typed at all, before anything is opened or kept (a repeat of a kept id is answered without it). Waits behind the gate:
+   * the runner throws, rather than answers, for a pane that is busy, behind a dialog or holding the person's draft, so a
+   * refusal that typed nothing cannot be told from a send that was typed. And refuses what the harness seam does not type
+   * yet: files, a hold-to-turn-end label, the type-now flag and a reply request would be dropped, and the send answered
+   * `sent` all the same (U3 carries them).
+   */
+  const mayGo = (request: UnwiredSend): void => {
+    if (!gate.send) pending();
+    if (
+      (request.attachmentIds?.length ?? 0) > 0 ||
+      request.label !== undefined ||
+      request.now !== undefined ||
+      request.replyExpected !== undefined
+    )
+      pending();
   };
   /**
    * Types one message. The send is ledgered as accepted BEFORE a key goes (the same id twice is one message), and a
@@ -191,11 +224,16 @@ export function buildConversationA(deps: {
    */
   const typeMessage = async (
     ferret: SessionId,
-    request: { readonly message: string; readonly sendId: string; readonly senderSessionId?: string | undefined },
-    caller?: FerretId,
+    request: UnwiredSend & {
+      readonly message: string;
+      readonly sendId: string;
+      readonly senderSessionId?: string | undefined;
+    },
   ): Promise<SendResult> => {
-    // Opened BEFORE the record: an unknown ferret, a refused caller or a seam that is off types nothing and keeps nothing.
-    const bound = await terminal.bind(ferret, caller);
+    mayGo(request);
+    // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
+    // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
+    const bound = await terminal.bind(ferret);
     const at = kernel.clock.now();
     const accepted = await ledger.accept(ferret, {
       sendId: request.sendId,
@@ -304,7 +342,11 @@ export function buildConversationA(deps: {
       {
         send: async (
           id: string,
-          request: { readonly message: string; readonly sendId: string; readonly senderSessionId?: string | undefined },
+          request: UnwiredSend & {
+            readonly message: string;
+            readonly sendId: string;
+            readonly senderSessionId?: string | undefined;
+          },
         ) =>
           (await keptSend(parseSessionId(id), request.sendId)) ??
           (await typeMessage(parseSessionId(id), { ...request, message: await prepared(id, request.message) })),
@@ -347,15 +389,16 @@ export function buildConversationA(deps: {
         const kept = await keptSend(ferret, request.sendId);
         if (kept !== undefined) return ok(kept);
         return ok(
-          await typeMessage(
-            ferret,
-            {
-              sendId: request.sendId ?? String(kernel.ids.mint('send')),
-              message: await prepared(ferret, request.message),
-            },
-            // A ferret acting is held to Ferrets' mayTouch rule; the owner is not.
-            caller.kind === 'ferret' ? caller.ferret : undefined,
-          ),
+          await typeMessage(ferret, {
+            sendId: request.sendId ?? String(kernel.ids.mint('send')),
+            message: await prepared(ferret, request.message),
+            ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+            ...(request.label === undefined ? {} : { label: request.label }),
+            ...(request.now === undefined ? {} : { now: request.now }),
+            ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+            // The route and the port follow one rule: a ferret is the message's SENDER, never a different target's rule.
+            ...(caller.kind === 'ferret' ? { senderSessionId: caller.ferret } : {}),
+          }),
         );
       } catch (error) {
         return err({
@@ -371,8 +414,15 @@ export function buildConversationA(deps: {
         return err({ code: 'unreadable', message: error instanceof Error ? error.message : String(error) });
       }
     },
-    interrupt: async (ferret, _request) => {
+    interrupt: async (ferret, request) => {
       try {
+        // As the route refuses it: a plain turn-stop answered `ok` would report an abandon that never happened.
+        if (request.toolUseId !== undefined)
+          throw new ApiError(
+            501,
+            `abandoning structured question ${request.toolUseId} is not served: a plain stop cannot tell the question you named from one that appeared afterwards`,
+            'question_abandon_unsupported',
+          );
         await interruptFerret(ferret);
         return ok(undefined);
       } catch (error) {

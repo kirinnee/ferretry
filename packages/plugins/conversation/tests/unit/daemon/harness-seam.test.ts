@@ -12,7 +12,11 @@ import { ApiError, REFUSAL_SENTENCES } from '@ferretry/kernel/contract';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import { err, ok, type Result } from '@ferretry/std';
 import { ConversationPort } from '../../../contract/index.ts';
-import daemon from '../../../daemon/index.ts';
+import { conversationDaemon } from '../../../daemon/index.ts';
+import { type HarnessGate, HARNESS_PENDING } from '../../../daemon/harness-seam.ts';
+
+/** Both actions live: what the seam does once Ferrets answers a closed refusal and presses a safe stop. */
+const OPEN: HarnessGate = { send: true, interrupt: true };
 
 const F1 = ferretId('f1');
 const CALLER = ferretId('lead');
@@ -71,13 +75,14 @@ class SeamlessFerrets extends HarnessFerrets {
  * The real daemon half. The kernel's `act` is a bomb: the runner's deliver already acts on the ferret's terminal, so an
  * act Conversation opened around it would deadlock both (the comment above `act()` in Ferrets' service). Any use fails.
  */
-async function conversation(ferrets: HarnessFerrets = new HarnessFerrets()) {
+async function conversation(ferrets: HarnessFerrets = new HarnessFerrets(), gate: HarnessGate = OPEN) {
   ferrets.add({ id: F1, state: 'working' });
   const acted: string[] = [];
+  const served = conversationDaemon(gate);
   const implementation = {
-    ...daemon,
-    build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => {
-      const build = daemon.build;
+    ...served,
+    build: (ctx: Parameters<NonNullable<typeof served.build>>[0]) => {
+      const build = served.build;
       if (build === undefined) throw new Error('the conversation daemon half has no build');
       const act = (async (target: unknown) => {
         acted.push(String(JSON.stringify(target)));
@@ -85,7 +90,7 @@ async function conversation(ferrets: HarnessFerrets = new HarnessFerrets()) {
       }) as typeof ctx.kernel.act;
       return build({ ...ctx, kernel: { ...ctx.kernel, act } });
     },
-  } as typeof daemon;
+  } as typeof served;
   const host = await testHost({
     plugins: [implementation],
     fakes: { ferrets, asks: new FakeAsks() },
@@ -229,14 +234,30 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
   });
 });
 
-describe('the caller is Ferrets’ to judge (mayTouch), so it is passed through, not decided here', () => {
-  test('the port’s send by a ferret opens the seam with that ferret as the caller', async () => {
+describe('a send has no target rule: no caller reaches Ferrets, and a ferret is the SENDER', () => {
+  test('the port’s send by a ferret opens the seam with NO caller, so it matches the route', async () => {
     const { host, ferrets, api } = await conversation();
 
     const sent = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1' });
 
     expect(sent.ok).toBe(true);
-    expect(ferrets.opens).toEqual([{ ferret: F1, caller: CALLER }]);
+    expect(ferrets.opens).toEqual([{ ferret: F1, caller: undefined }]);
+    await host.stop();
+  });
+
+  test('the port’s send by a ferret is ledgered as that ferret’s message, not the owner’s', async () => {
+    const { host, api } = await conversation();
+
+    await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1' });
+    await api().send(F1, { kind: 'owner' }, { message: 'hi', sendId: 's-2' });
+
+    const rows = (await api().sends(F1)).sends;
+    expect(rows.map(row => [row.sendId, row.senderKind, row.from])).toEqual(
+      expect.arrayContaining([
+        ['s-1', 'agent', CALLER],
+        ['s-2', 'human', undefined],
+      ]),
+    );
     await host.stop();
   });
 
@@ -249,23 +270,121 @@ describe('the caller is Ferrets’ to judge (mayTouch), so it is passed through,
     await host.stop();
   });
 
-  test('a forbidden open reaches the port’s caller as the refusal code forbidden', async () => {
-    const { host, ferrets, api } = await conversation();
-    ferrets.refuseOpen = new ApiError(403, 'a ferret acts only on itself and its helpers', 'forbidden');
-
-    const sent = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1' });
-
-    expect(sent).toMatchObject({ ok: false, error: { code: 'forbidden' } });
-    expect(ferrets.delivered).toEqual([]);
-    await host.stop();
-  });
-
   test('the send ROUTE names no caller: a ferret messaging its parent or a peer is not a ferret acting on a helper', async () => {
     const { host, ferrets } = await conversation();
 
     await send(host);
 
     expect(ferrets.opens).toEqual([{ ferret: F1, caller: undefined }]);
+    await host.stop();
+  });
+});
+
+describe('a send carrying what the seam does not type yet is refused 503, never answered sent', () => {
+  const post = async (host: Awaited<ReturnType<typeof conversation>>['host'], extra: Record<string, unknown>) =>
+    await host.request('POST', '/v1/ferrets/f1/send', {
+      as: owner(),
+      headers: { 'x-fy-request-id': 'req-x' },
+      body: { message: 'hello there', ...extra },
+    });
+
+  test.each([
+    ['attachmentIds', { attachmentIds: ['file-1'] }],
+    ['now', { now: true }],
+    ['replyExpected', { replyExpected: true }],
+  ] as const)('the route refuses %s: 503, nothing opened, typed or recorded', async (_name, extra) => {
+    const { host, ferrets, api } = await conversation();
+
+    const response = await post(host, extra);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([
+      503,
+      'conversation_terminal_unavailable',
+    ]);
+    expect(ferrets.opens).toEqual([]);
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test.each<[string, { attachmentIds?: string[]; label?: 'fyi'; now?: boolean; replyExpected?: boolean }]>([
+    ['attachmentIds', { attachmentIds: ['file-1'] }],
+    ['label', { label: 'fyi' }],
+    ['now', { now: true }],
+    ['replyExpected', { replyExpected: true }],
+  ])('the port refuses %s the same way', async (_name, extra) => {
+    const { host, ferrets, api } = await conversation();
+
+    const sent = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1', ...extra });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('an empty attachment list carries nothing, so it goes', async () => {
+    const { host, ferrets } = await conversation();
+
+    expect((await post(host, { attachmentIds: [] })).status).toBe(200);
+    expect(ferrets.delivered).toHaveLength(1);
+    await host.stop();
+  });
+});
+
+describe('a send and an interrupt wait behind the gate until Ferrets’ seam is safe (nothing is opened, typed or kept)', () => {
+  const waiting = async () => await conversation(new HarnessFerrets(), HARNESS_PENDING);
+
+  test('the route’s send is 503 conversation_terminal_unavailable: a refusal that typed nothing cannot be told from a typed send', async () => {
+    const { host, ferrets, api } = await waiting();
+
+    const response = await send(host);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([
+      503,
+      'conversation_terminal_unavailable',
+    ]);
+    expect(ferrets.opens).toEqual([]);
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('the port’s send says the same, so a retry of the same id never reads as sent', async () => {
+    const { host, ferrets, api } = await waiting();
+
+    const first = await api().send(F1, { kind: 'owner' }, { message: 'nudge', sendId: 's-1' });
+    const again = await api().send(F1, { kind: 'owner' }, { message: 'nudge', sendId: 's-1' });
+
+    expect(first).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    expect(again).toEqual(first);
+    expect(ferrets.opens).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('the route’s interrupt is 503 and presses nothing: the runner’s C-c would quit an idle Codex', async () => {
+    const { host, ferrets, acted } = await waiting();
+
+    const response = await host.request('POST', '/v1/ferrets/f1/interrupt', { as: owner(), body: {} });
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([
+      503,
+      'conversation_terminal_unavailable',
+    ]);
+    expect(ferrets.opens).toEqual([]);
+    expect(ferrets.interrupts).toBe(0);
+    expect(acted).toEqual([]);
+    await host.stop();
+  });
+
+  test('the port’s interrupt refuses with the same code and records no interrupted turn', async () => {
+    const { host, ferrets, api } = await waiting();
+
+    const result = await api().interrupt(F1, {});
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    expect(ferrets.interrupts).toBe(0);
     await host.stop();
   });
 });
@@ -328,6 +447,16 @@ describe('interrupt goes through the same seam', () => {
     expect(await api().interrupt(F1, {})).toEqual({ ok: true, value: undefined });
     ferrets.script.interrupt = async () => err({ refused: 'held' });
     expect(await api().interrupt(F1, {})).toMatchObject({ ok: false, error: { code: 'held' } });
+    await host.stop();
+  });
+
+  test('the port refuses a toolUseId as the route does (501): a plain stop would report an abandon that never happened', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    const result = await api().interrupt(F1, { toolUseId: 'toolu_1' });
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'question_abandon_unsupported' } });
+    expect(ferrets.interrupts).toBe(0);
     await host.stop();
   });
 });

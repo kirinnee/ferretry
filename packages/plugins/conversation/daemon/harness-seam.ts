@@ -1,10 +1,4 @@
-import type {
-  DeliveryOutcome,
-  FerretHarness,
-  FerretId,
-  FerretsApi,
-  HarnessRefusal,
-} from '@ferretry/core-ferrets/contract';
+import type { DeliveryOutcome, FerretHarness, FerretsApi, HarnessRefusal } from '@ferretry/core-ferrets/contract';
 import { ApiError, REFUSAL_SENTENCES } from '@ferretry/kernel/contract';
 import { SessionSendError } from './delivery/lib/mounts/session-send.ts';
 import { tryParseSessionId } from './seams/ferret-id.ts';
@@ -20,11 +14,27 @@ import { tryParseSessionId } from './seams/ferret-id.ts';
  */
 export interface TerminalSeam {
   /**
-   * Opens the ferret's terminal. Throws before anything can be typed when the ferret is unknown (404), Ferrets refuses
-   * the caller (403 `forbidden`, its mayTouch rule) or Ferrets offers no seam (503), so a send records nothing then.
+   * Opens the ferret's terminal. Throws before anything can be typed when the ferret is unknown (404) or Ferrets offers
+   * no seam (503), so a send records nothing then. It names no caller: sending and interrupting have no target rule
+   * (the path names where the message goes, for every caller), so Ferrets' mayTouch is not asked.
    */
-  bind(ferret: string, caller?: FerretId): Promise<BoundTerminal>;
+  bind(ferret: string): Promise<BoundTerminal>;
 }
+
+/**
+ * Which of the seam's two actions are live. Both wait CLOSED: Ferrets' `deliver` answers only `no_pane` and
+ * `plugin_unavailable` and THROWS for every other refusal (a busy pane, a dialog, a draft in the composer, a hold), so a
+ * refusal that typed nothing is indistinguishable from a send that was typed; and its `interrupt` presses the runner's
+ * raw `C-c`, which quits an idle Codex, where today presses the harness's own stop key and only on a pane doing work.
+ * Each opens when Ferrets answers a closed refusal taxonomy for `deliver` and a safe `interrupt`.
+ */
+export interface HarnessGate {
+  readonly send: boolean;
+  readonly interrupt: boolean;
+}
+
+/** Both actions wait: a send and an interrupt answer 503 until Ferrets' seam is safe to use. */
+export const HARNESS_PENDING: HarnessGate = { send: false, interrupt: false };
 
 /** One ferret's terminal, as Ferrets opened it. */
 interface BoundTerminal {
@@ -65,17 +75,17 @@ function refusalAnswer(ferret: string, refusal: HarnessRefusal): Error {
 }
 
 export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam {
-  /** The ferret's harness, or the answer for why there is none. `forbidden` (403) is Ferrets' and passes through. */
-  const open = async (ferret: string, caller: FerretId | undefined): Promise<FerretHarness> => {
+  /** The ferret's harness, or the answer for why there is none. */
+  const open = async (ferret: string): Promise<FerretHarness> => {
     if (ferrets.harness === undefined) throw new ApiError(503, SEAM_OFF, 'plugin_unavailable');
     const id = tryParseSessionId(ferret);
-    const harness = id === undefined ? undefined : await ferrets.harness(id, caller);
+    const harness = id === undefined ? undefined : await ferrets.harness(id);
     if (harness === undefined) throw new SessionSendError('not_found', `session not found: ${ferret}`);
     return harness;
   };
   return {
-    bind: async (ferret, caller) => {
-      const harness = await open(ferret, caller);
+    bind: async ferret => {
+      const harness = await open(ferret);
       return {
         deliver: async text => {
           const delivered = await harness.deliver({ text }).catch((error: unknown) => {
