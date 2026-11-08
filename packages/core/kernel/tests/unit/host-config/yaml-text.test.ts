@@ -314,7 +314,9 @@ describe('readConfigText — a file at the size limit is read in ONE pass, whate
       fill('a: &a\n  b:\n', () => '    - 1\n', '    - *a\n'),
       'sits inside the anchor',
     ],
-    ['one unresolved alias 5000 deep', deep, 'not set before it'],
+    // Either refusal is right: the parser reads 5 000 levels unless the stack this process has left runs out first (it
+    // depends on what ran before), and then it refuses the file itself, as too deeply nested.
+    ['one unresolved alias 5000 deep', deep, /not set before it|too deeply nested/u],
     ['one flat mapping', fill('', index => `k${index}: v\n`), undefined],
     ['one flow mapping', `${fill('{', index => `k${index}: 1, `)}z: 1}\n`, undefined],
     ['an alias to a list as every key', fill('a: &a [1, 2, 3]\n', index => `? *a\n: ${index}\n`), 'not a plain string'],
@@ -344,6 +346,7 @@ describe('readConfigText — a file at the size limit is read in ONE pass, whate
       // Assert
       should(took).be.below(BOUND_MS);
       if (refused === undefined) should(actual.ok).be.true();
+      else if (refused instanceof RegExp) should(actual.ok ? '' : actual.errors[0]?.message).match(refused);
       else should(actual.ok ? '' : actual.errors[0]?.message).containEql(refused);
     });
   }

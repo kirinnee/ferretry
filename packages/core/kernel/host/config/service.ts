@@ -302,6 +302,9 @@ const issueKey = (issue: ConfigIssue): string =>
 
 const duration = (ms: number): Duration => milliseconds(ms);
 
+/** How many texts of one file keep their check: the accepted one, the one on disk, and one being written. */
+const CHECKS_KEPT = 3;
+
 export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   const { home, fs, log, binary } = options;
   assertNoSharedPaths(options.defs);
@@ -325,6 +328,27 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   /** Texts about to be written on the owner's behalf: consumed by the first load that finds exactly those bytes. */
   const acknowledged = new Map<string, { readonly etag: string; readonly text: string; readonly at: number }>();
   const acknowledgedRemovals = new Map<string, number>();
+
+  /**
+   * The last {@link CHECKS_KEPT} checks of each file's texts. The check is pure in the definition, the path and the
+   * text, and every load evaluates every file — its accepted text and its disk text, which are most often the same —
+   * so without this one read, write or reload of any file parsed every declared file twice: seconds once a few of them
+   * are near the size cap. A text is compared whole, so only the very same text answers from here.
+   */
+  const checks = new Map<string, Map<string, ReturnType<typeof checkConfigText>>>();
+  const check = (def: ConfigDef, path: string, text: string): ReturnType<typeof checkConfigText> => {
+    let byText = checks.get(path);
+    const found = byText?.get(text);
+    if (found !== undefined) return found;
+    const checked = checkConfigText(def, path, text, binary);
+    if (byText === undefined) {
+      byText = new Map();
+      checks.set(path, byText);
+    }
+    if (byText.size >= CHECKS_KEPT) byText.delete(byText.keys().next().value as string);
+    byText.set(text, checked);
+    return checked;
+  };
 
   // ── slots ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -505,6 +529,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         accepted,
         digest,
         binary,
+        check: text => check(slot.declaration.def, slot.path, text),
       });
       // Compared with this plugin's own record, so another plugin's record is never removed by a load that accepts nothing.
       if (JSON.stringify(evaluated.accepted) !== JSON.stringify(mine))
@@ -521,6 +546,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     const wasLoaded = loaded;
     settled = next;
     loaded = true;
+    // Only the files that are there keep their checks: one removed (or never written) is forgotten.
+    for (const path of [...checks.keys()]) if (!next.has(path)) checks.delete(path);
     const held = heldOf(next);
     issues = [...[...next.values()].flatMap(item => item.evaluated.issues), ...extra, ...(await strayFiles())];
     report(issues, held);
@@ -697,7 +724,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (moved !== undefined) return moved;
     const text = typeof edit === 'string' ? edit : patched(slot, existing, edit.patch);
     if (text === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-    const checked = checkConfigText(def, slot.path, text, binary);
+    const checked = check(def, slot.path, text);
     if (!checked.ok) return { kind: 'refused', reason: checked.reason, issues: checked.issues };
     const etag = digest(text);
     const before = settled.get(slot.path)?.evaluated.value;
@@ -760,14 +787,14 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       // The version in effect, patched: what the owner's act means today.
       const effectiveText = patched(slot, inEffect?.text, edit.patch);
       if (effectiveText === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-      const effective = checkConfigText(def, slot.path, effectiveText, binary);
+      const effective = check(def, slot.path, effectiveText);
       if (!effective.ok) return { kind: 'refused', reason: effective.reason, issues: effective.issues };
       // The held version (the file on disk), patched. A held REMOVAL has no text to carry the patch.
       const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch);
       if (existing !== undefined && heldText === undefined)
         return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
       if (heldText !== undefined) {
-        const checkedHeld = checkConfigText(def, slot.path, heldText, binary);
+        const checkedHeld = check(def, slot.path, heldText);
         if (!checkedHeld.ok) return { kind: 'refused', reason: checkedHeld.reason, issues: checkedHeld.issues };
       }
       const before = entry.evaluated.value;

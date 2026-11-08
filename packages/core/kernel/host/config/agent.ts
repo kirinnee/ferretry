@@ -22,7 +22,7 @@ import { ApiError, type ApiResponse, errorResponse } from '../../contract/http.t
 import type { FerretId } from '../../contract/ids.ts';
 import type { ConfigFileIssue, ConfigFilesWriter, ConfigTarget } from '../../contract/ports.ts';
 import { AGENT_REACH_WORDS, agentMayName } from './agent-reach.ts';
-import { checkConfigText } from './check.ts';
+import { checkConfigText, countProblems, MAX_CONFIG_ISSUES, moreIssues } from './check.ts';
 import { type ConfigDeclaration, targetOfPath } from './claims.ts';
 import { rawTextHoldsSecret } from './secrets.ts';
 import { schemaFileName, schemaModeline } from './schemas.ts';
@@ -147,11 +147,18 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
     const files = view.files.filter(file => reachable(file.path));
     const issues = view.issues.filter(issue => reachable(issue.path));
     const pending = view.pending.filter(held => reachable(held.path));
-    const errors = issues.filter(issue => issue.severity === 'error').length;
+    const errors = countProblems(issues.filter(issue => issue.severity === 'error'));
+    // Each file's problems are capped by its check; many files' together are capped here, the rest counted (a file's
+    // own counting sentence among them) at the path of the first one left out, where `config_read` with it lists them.
+    const left = issues.slice(MAX_CONFIG_ISSUES);
+    const shown =
+      left.length === 0
+        ? issues
+        : [...issues.slice(0, MAX_CONFIG_ISSUES), moreIssues(left[0]?.path ?? '', countProblems(left))];
     return {
       summary: `${String(files.length)} configuration files in ${view.directory}; ${String(errors)} with errors; ${String(pending.length)} waiting for the owner's confirmation.`,
       files,
-      issues,
+      issues: shown,
     };
   };
 
@@ -189,9 +196,10 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
     const found = target(path);
     const checked = checkConfigText(found.def, path, text, sources.binary);
     if (checked.ok) return { summary: `${path} checks.`, issues: [] };
-    const errors = checked.issues.filter(issue => issue.severity === 'error');
+    // The issues list at most MAX_CONFIG_ISSUES and one sentence counting the rest: the count said is every one.
+    const errors = countProblems(checked.issues.filter(issue => issue.severity === 'error'));
     return {
-      summary: `${path} does not check: ${plural(errors.length)}. Fix each and validate again.`,
+      summary: `${path} does not check: ${plural(errors)}. Fix each and validate again.`,
       issues: issuesOf(checked.issues),
     };
   };

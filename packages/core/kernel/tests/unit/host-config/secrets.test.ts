@@ -499,4 +499,52 @@ describe('rawTextSecretLine — linear, and the same answers as the pattern it r
     // Assert
     should(disagreements).deepEqual([]);
   });
+
+  /**
+   * A fake match glued in front of a real key (R7): `x` + `sk-ant-AAAA-` + `sk-ant-…`. In the window that BORROWS the
+   * fake's first character, that character starts a match at index 0 which runs on through the real key; a scan that
+   * found it and only then skipped it resumed after its end, and the real key — cut by the window before — was found
+   * by neither. Every glued pair, at every offset around every window edge, padded with a word character or a blank.
+   */
+  const GLUED = [
+    [`sk-ant-${filler(4)}-`, `sk-ant-${filler(200)}`],
+    [`sk-${filler(4)}-`, `sk-${filler(200)}`],
+    [`glpat-${filler(4)}-`, `glpat-${filler(200)}`],
+    [`sk-or-${filler(4)}-`, `sk-or-${filler(200)}`],
+    [`xoxb-${filler(4)}-`, `xoxb-${filler(200)}`],
+  ] as const;
+
+  it('should find a real key glued behind a fake one at offset 4030, where the old scan did (R7 minor)', () => {
+    for (const [fake, real] of GLUED) {
+      // Arrange: `x` at 4030, so the fake's first character is the one window 2 borrows (4031).
+      const line = `${'a'.repeat(4030)}x${fake}${real}${'a'.repeat(9000)}`;
+
+      // Act / Assert
+      should(oldLooksLike(undefined, line)).be.true();
+      should(looksLikeRawSecret(undefined, line)).be.true();
+    }
+  });
+
+  it('should agree with the old scan on a glued fake and real key at every offset around every window edge', () => {
+    // Arrange
+    const disagreements: string[] = [];
+
+    // Act: windows start every 4 032 characters, each borrowing the one before (4 031, 8 063, …).
+    for (const edge of [4031, 8063, 12_095, 16_127]) {
+      for (let offset = -70; offset <= 70; offset += 1) {
+        for (const [index, [fake, real]] of GLUED.entries()) {
+          for (const pad of ['a', ' ', '-']) {
+            const at = edge + offset;
+            const word = `x${fake}${real}`;
+            const line = `${pad.repeat(at - 1)}${word}${pad.repeat(Math.max(0, 20_500 - at - word.length))}`;
+            if (looksLikeRawSecret(undefined, line) !== oldLooksLike(undefined, line))
+              disagreements.push(`${String(index)}@${String(at)}/${JSON.stringify(pad)}`);
+          }
+        }
+      }
+    }
+
+    // Assert
+    should(disagreements).deepEqual([]);
+  });
 });

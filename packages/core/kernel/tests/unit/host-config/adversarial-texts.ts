@@ -94,6 +94,12 @@ export function adversarialTexts(cap: number): readonly (readonly [label: string
     ['many verbatim tags', fill(cap, '- !<tag:x> x\n', 'l:\n')],
     ['many undeclared tag handles', fill(cap, '- !h!t x\n', 'l:\n')],
     ['many directives', fill(cap - 8, '%YAML 1.2\n', '', '---\na: 1\n')],
+    // YAML 1.1 tags the library would resolve inside the parse (its !!omap check is quadratic): never resolved.
+    ['a flow !!omap of many short keys', `${lines(cap - 1, index => `${index.toString(36)}:,`, 'note: !!omap [')}]`],
+    ['a top-level flow !!omap', `${lines(cap - 1, index => `${index.toString(36)}:,`, '!!omap [')}]`],
+    ['a block !!omap of many short keys', lines(cap, index => `  - ${index.toString(36)}: 1\n`, 'note: !!omap\n')],
+    ['a !!set of many keys', lines(cap, index => `  ? ${index.toString(36)}\n`, 'note: !!set\n')],
+    ['a !!pairs of many keys', lines(cap, index => `  - ${index.toString(36)}: 1\n`, 'note: !!pairs\n')],
     // Comments and long scalars.
     ['one long comment', fill(cap, 'c', '# ')],
     ['many comment lines', fill(cap, `# ${'c'.repeat(100)}\n`)],

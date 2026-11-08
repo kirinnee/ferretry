@@ -78,8 +78,21 @@ export interface ConfigSyntaxError {
  * Read with YAML 1.2's core schema: `off` and `no` are strings, not booleans, wherever they are read. A key written
  * twice is still refused, by {@link duplicateKeys}: the parser's own check compares every key with every key before it
  * in the same mapping, so one flat mapping of a few hundred KiB would take seconds to read.
+ *
+ * `resolveKnownTags: false`: a YAML 1.1 tag (`!!omap`, `!!set`, `!!pairs`, `!!binary`, `!!timestamp`) is NOT
+ * resolved while the text is parsed — its value is read as the plain list, mapping or string it is written as, like any
+ * other tag this file cannot use. The library resolves those tags inside the parse, before anything here can bound
+ * them, and its `!!omap` check compares every key with every key before it: 256 KiB of one took seconds. No
+ * configuration value is a Set, a Map, bytes or a Date (each is JSON-shaped), so nothing a file means is lost; the core
+ * tags (`!!str`, `!!int`, …) still resolve.
  */
-const PARSE_OPTIONS = { version: '1.2', uniqueKeys: false, prettyErrors: false, logLevel: 'error' } as const;
+const PARSE_OPTIONS = {
+  version: '1.2',
+  uniqueKeys: false,
+  resolveKnownTags: false,
+  prettyErrors: false,
+  logLevel: 'error',
+} as const;
 
 /** What an alias that cannot be read is, in words that never name the alias: a name can be anything a person typed. */
 const ALIAS_UNRESOLVED = 'an alias (*name) names an anchor (&name) that is not set before it';
@@ -321,29 +334,64 @@ export function readConfigText(
     // Not expected once every alias is resolved; if the library throws anyway, the file is refused, not the reload.
     return { ok: false, errors: [{ message: SYNTAX_UNKNOWN, position: { line: 1, column: 1 } }] };
   }
+  const pairs = pairIndex();
   return {
     ok: true,
     read: {
       value,
       locate: path => {
-        for (let depth = path.length; depth > 0; depth -= 1) {
-          const prefix = path.slice(0, depth);
-          // A key is where a person looks ("line 4: bogus"); an item in a list has no key, so its value.
-          const position = located(keyNode(document, prefix)) ?? located(document.getIn(prefix as unknown[], true));
-          if (position !== undefined) return position;
+        // Walked down from the top, one step per part: each mapping's keys are indexed once, the first time a path
+        // goes through it, so locating every issue of a file costs the depth of each path, never the width of the
+        // mappings on it (a lookup that scanned the keys made 20 000 issues in one mapping cost seconds).
+        let node: unknown = document.contents;
+        let deepest = located(node) ?? { line: 1, column: 1 };
+        for (const part of path) {
+          let next: unknown;
+          if (isMap(node)) {
+            const pair = pairs(node, part);
+            if (pair === undefined) break;
+            // A key is where a person looks ("line 4: bogus"); an item in a list has no key, so its value.
+            deepest = located(pair.key) ?? located(pair.value) ?? deepest;
+            next = pair.value;
+          } else if (isSeq(node)) {
+            const index = itemIndex(part);
+            next = index === undefined ? undefined : node.items[index];
+            if (next === undefined) break;
+            deepest = located(next) ?? deepest;
+          } else break;
+          node = next;
         }
-        return located(document.contents) ?? { line: 1, column: 1 };
+        return deepest;
       },
     },
   };
 }
 
-/** The KEY node of the pair at `path`, when its parent is a mapping. */
-function keyNode(document: Document, path: readonly PropertyKey[]): Node | undefined {
-  const parent = path.length === 1 ? document.contents : document.getIn(path.slice(0, -1) as unknown[], true);
-  if (!isMap(parent)) return undefined;
-  const pair = parent.items.find(item => isScalar(item.key) && item.key.value === path.at(-1));
-  return isNode(pair?.key) ? pair.key : undefined;
+type MapPair = YAMLMap['items'][number];
+
+/**
+ * A lookup of a mapping's pair by its key, as the library's `getIn` finds it (the first pair whose key is a scalar of
+ * that value), built for a mapping the first time it is asked about and kept: one pass over its keys, ever.
+ */
+function pairIndex(): (map: YAMLMap, key: PropertyKey) => MapPair | undefined {
+  const indexes = new Map<YAMLMap, Map<unknown, MapPair>>();
+  return (map, key) => {
+    let index = indexes.get(map);
+    if (index === undefined) {
+      index = new Map();
+      for (const pair of map.items) {
+        if (isScalar(pair.key) && !index.has(pair.key.value)) index.set(pair.key.value, pair);
+      }
+      indexes.set(map, index);
+    }
+    return index.get(key);
+  };
+}
+
+/** A list index the way the library reads one: a whole number, or a string of one, not below zero. */
+function itemIndex(part: PropertyKey): number | undefined {
+  const index = typeof part === 'string' && part !== '' ? Number(part) : part;
+  return typeof index === 'number' && Number.isInteger(index) && index >= 0 ? index : undefined;
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>

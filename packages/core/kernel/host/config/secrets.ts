@@ -81,7 +81,7 @@ const KNOWN_SHAPES: readonly RegExp[] = [
   /\bglpat-[A-Za-z0-9_-]{16,}/u,
 ];
 
-/** The same shapes, to list every match in one window (a match a window's edge may have faked is skipped, not final). */
+/** The same shapes, to list every match in one window from a chosen start (a match a cut may have faked is skipped). */
 const KNOWN_SHAPES_EVERYWHERE: readonly RegExp[] = KNOWN_SHAPES.map(shape => new RegExp(shape.source, 'gu'));
 
 /**
@@ -129,10 +129,15 @@ export function shannonEntropy(value: string): number {
  * Whether any known key shape is anywhere in `text`, no pattern ever seeing more than {@link SCAN_WINDOW} characters.
  *
  * Windows overlap by {@link SCAN_OVERLAP}, and each after the first starts one character early so a `\b` sees what is
- * really before it. A window's edges can still fake a match — the borrowed first character's own boundary is unknown,
- * and a match running into a cut may be ending only because the window does — so such a match is skipped here, and is
- * always whole, with its true context, in the neighbouring window: one at the borrowed character began a full overlap
- * before the previous window's end, and one running into the cut began inside the next window.
+ * really before it — and is searched from its SECOND character: the borrowed one is context only, never the start of a
+ * match. (A match let start there would be fake, since that character's own boundary is unknown; and skipping it after
+ * it was found was not enough, because the search goes on after the END of a match, and a fake one could swallow a
+ * real key that starts inside it: `sk-ant-AAAA-sk-ant-…` with the first `s` borrowed.) A shape at the borrowed
+ * character is found by the previous window, where it began a full overlap before the end.
+ *
+ * A match running into a cut may be ending only because the window does, so one that also begins inside the next
+ * window's own region is skipped: it is whole, with its true context, in that window. Nothing after it is lost — the
+ * search resumes at the cut, and any match after it would begin in that region too.
  */
 function holdsKnownShape(text: string): boolean {
   if (text.length <= SCAN_WINDOW) return KNOWN_SHAPES.some(shape => shape.test(text));
@@ -142,8 +147,8 @@ function holdsKnownShape(text: string): boolean {
     const window = text.slice(from, start + SCAN_WINDOW);
     const last = start + SCAN_WINDOW >= text.length;
     for (const shape of KNOWN_SHAPES_EVERYWHERE) {
-      for (const match of window.matchAll(shape)) {
-        if (from !== start && match.index === 0) continue;
+      shape.lastIndex = start - from;
+      for (let match = shape.exec(window); match !== null; match = shape.exec(window)) {
         const cut = !last && match.index + match[0].length === window.length;
         if (cut && from + match.index >= start + step) continue;
         return true;

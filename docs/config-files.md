@@ -60,9 +60,12 @@ that is not there). Three rules, in order:
    daemon accepted before stays in effect. Nothing half-applies. When the fleet does not assemble, every
    fleet change of that round is held back and the machine keeps the fleet it had. A YAML problem is said in
    a fixed sentence with its line — never the parser's own words, which quote the file. A YAML alias (`*name`)
-   that names no anchor set before it, sits inside its own anchor, or reads out too large (more than 10 000
-   values plus two per character of the file: an alias bomb) is such a problem; every file is read in one pass
-   whatever its aliases do.
+   that names no anchor set before it, sits inside its own anchor, or reads out too large is such a problem:
+   read out in full, the file may weigh no more than 10 000 plus two per character of its text, where each value
+   weighs 1 and a string weighs its length more (an alias bomb, or one long string aliased many times, does not
+   fit). So is a key that is a mapping or a list, and a YAML 1.1 tag (`!!omap`, `!!set`, `!!binary`, …) is not
+   resolved: its value reads as the plain list, mapping or string it is written as. Every file is read in one pass
+   whatever its aliases do. One answer lists at most 50 problems, and one more sentence counts the rest.
 2. **Loosening waits for the owner.** An edit that loosens what the machine may spend or what agents may do
    is HELD and the tighter version stays in effect: a Warden layer that spends switched on (Jev, LLM),
    a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; Pack mode switched on, Jev choosing sub-ferret models, a sub-ferret limit or depth raised; an agent control turned on (Ferretry
@@ -103,7 +106,9 @@ so a tightening is in effect the moment it is saved and an edit made just before
 
 A link is never followed — not by the daemon, not by `fy config check`. `GET /v1/config/file` returns a
 file's text to a caller off the machine, so a link planted in the directory would otherwise read any file
-the user can. A link, or a file over 256 KiB, is reported as unreadable and keeps its last good version.
+the user can. A link, or a file over 256 KiB, is reported as unreadable and keeps its last good version; a
+text over 256 KiB from an agent (`config_validate`, `config_write`) is refused in one fixed sentence before any
+of it is read.
 
 ## Secrets never go in a file
 
