@@ -237,7 +237,7 @@ worker turns each tag into its own machine's namespace (`fy-push:<daemonId>:<tag
 down another's lines.
 
 **What each device does with it** (owner decision !A324). Which push service delivers it is read from the
-registration's own subscription endpoint (`mustShowForEveryPush`, from the protocol's `PUSH_SERVICE_ALLOWS_SILENT`): only FCM (`fcm.googleapis.com`) and WNS
+registration's own subscription endpoint (`mustShowForEveryPush`, from `PUSH_SERVICE_ALLOWS_SILENT`, declared in the kernel contract's push envelope so the signed worker can apply it, and re-exported by Access): only FCM (`fcm.googleapis.com`) and WNS
 (`*.notify.windows.com`) are known to let a push show nothing; every other service — Apple's, Mozilla's, one not
 known — and an endpoint the worker cannot read need every push to show something.
 
@@ -345,6 +345,16 @@ itself — the three fields and their caps — is declared once, in the kernel c
 (`@ferretry/kernel/contract/push-envelope`): the worker imports that one file by its own subpath, and Access's push
 payload is built on the same fields, so the two cannot drift. The worker's build allows that file and zod, never the
 contract barrel.
+
+The same file declares what the worker reads beyond the three (ruling #53), as declarative data, because the worker runs
+no plugin code: a show's optional `tag`, `kind`, `count` (1–999) and `urgency`, a tags-only `clear`, and
+`readPushMessage`, which picks those fields by name and parses them strictly. Beside it,
+`@ferretry/kernel/contract/notification-filter` declares this device's filter document (its JSON text, under the
+IndexedDB names Agenda's mirror already uses) and `shouldShowPush`, the one show-or-hide decision; a document that does
+not parse reads as "show everything". GAP(worker-reads-message): the worker still reads only the three fields through
+`readPushEnvelope` until the shell's notification item (S6) moves it onto `readPushMessage` and the filter document,
+and Agenda writes version 2 of the document with it. A tag outside the kernel's grammar (`[A-Za-z0-9._:-]{1,128}`) is
+sent untagged by Access, never refused: the line is shown, but not replaced or cleared by tag.
 
 The daemon names a ferret's page relative to the machine's own pages — `/ferrets/<id>/chat?ask=A3`
 (`agendaNotificationPath`; `ask` is `ASK_LINK_PARAMETER`), or `/agenda?ask=A3` for a machine ask (`askBuzzPath`) — since

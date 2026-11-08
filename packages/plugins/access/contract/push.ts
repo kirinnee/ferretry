@@ -1,4 +1,10 @@
-import { PushEnvelopeFields } from '@ferretry/kernel/contract';
+import {
+  isPushServiceHost,
+  PUSH_COUNT_MAX,
+  PUSH_TAG_PATTERN,
+  PushEnvelopeFields,
+  PushTagSchema,
+} from '@ferretry/kernel/contract/push-envelope';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 
@@ -14,50 +20,18 @@ export const PushNotificationKindSchema = z.enum(['agenda', 'question', 'failed'
 export type PushNotificationKind = z.infer<typeof PushNotificationKindSchema>;
 
 /**
- * The push services a subscription may point at: the hosts every major browser's push service runs on.
- *
- * WHY AN ALLOWLIST. The daemon POSTs to the endpoint — at once, as an enrolment confirmation, and on every
- * later notification — from the host's own network position. An endpoint that could be any HTTPS URL
- * would make every paired device a way to send requests to the host's LAN, tailnet or cloud metadata
- * address. A browser only ever hands out an endpoint on its vendor's push service, so nothing a real
- * browser produces is refused. A browser whose push service is not here cannot enrol, which is the
- * declared cost.
+ * The push services a subscription may point at, and whether each lets a push show nothing (owner decision !A324):
+ * declared once in the kernel contract, because the signed service worker applies the clear rule and runs no plugin
+ * code. Re-exported here, never copied, so the allowlist the daemon enrols against and the rule the worker clears by
+ * cannot drift.
  */
-export const PUSH_SERVICE_HOSTS = ['fcm.googleapis.com', 'updates.push.services.mozilla.com'] as const;
-/** Push services that shard by subdomain: Apple's (Safari) and Microsoft's WNS (Edge). */
-export const PUSH_SERVICE_HOST_SUFFIXES = ['.push.apple.com', '.notify.windows.com'] as const;
-
-/**
- * Whether each push service above lets a site's push show nothing (docs/notifications.md § When an alert is cleared).
- * FCM and WNS do; Apple's revokes a subscription whose push shows nothing, and Mozilla's does once a small quota of
- * such pushes is spent. Keyed by the allowlist itself, so a service added there must be classified here.
- */
-export const PUSH_SERVICE_ALLOWS_SILENT: Readonly<
-  Record<(typeof PUSH_SERVICE_HOSTS)[number] | (typeof PUSH_SERVICE_HOST_SUFFIXES)[number], boolean>
-> = {
-  'fcm.googleapis.com': true,
-  'updates.push.services.mozilla.com': false,
-  '.push.apple.com': false,
-  '.notify.windows.com': true,
-};
-
-/** Whether a push service's host lets a push show nothing (`PUSH_SERVICE_ALLOWS_SILENT`); a host not listed does not. */
-export function pushServiceAllowsSilent(host: string): boolean {
-  const name = host.toLowerCase();
-  if ((PUSH_SERVICE_HOSTS as readonly string[]).includes(name))
-    return PUSH_SERVICE_ALLOWS_SILENT[name as (typeof PUSH_SERVICE_HOSTS)[number]];
-  const suffix = PUSH_SERVICE_HOST_SUFFIXES.find(each => name.endsWith(each) && name.length > each.length);
-  return suffix === undefined ? false : PUSH_SERVICE_ALLOWS_SILENT[suffix];
-}
-
-/** Whether a host is one of the push services above. Exact, lowercased, and never an IP literal. */
-export function isPushServiceHost(host: string): boolean {
-  const name = host.toLowerCase();
-  return (
-    (PUSH_SERVICE_HOSTS as readonly string[]).includes(name) ||
-    PUSH_SERVICE_HOST_SUFFIXES.some(suffix => name.endsWith(suffix) && name.length > suffix.length)
-  );
-}
+export {
+  isPushServiceHost,
+  PUSH_SERVICE_ALLOWS_SILENT,
+  PUSH_SERVICE_HOST_SUFFIXES,
+  PUSH_SERVICE_HOSTS,
+  pushServiceAllowsSilent,
+} from '@ferretry/kernel/contract/push-envelope';
 
 const PushEndpointSchema = z
   .url()
@@ -157,8 +131,14 @@ const PushPayloadBaseShape = {
   version: z.literal(1),
   eventKey: z.string().min(1),
   ...PushEnvelopeFields,
-  tag: z.string().min(1),
-  count: PositiveIntegerSchema,
+  /**
+   * The kernel's tag grammar, which the worker reads. A sender whose tag would not fit sends the push UNTAGGED
+   * ({@link fittingPushTag}) rather than refusing it: an untagged line is not replaced or cleared by tag, but it is
+   * shown, and a refused push is a lost alert.
+   */
+  tag: PushTagSchema.optional(),
+  /** Bounded by the kernel's show count, for the same reason. */
+  count: PositiveIntegerSchema.max(PUSH_COUNT_MAX),
   /**
    * A high-priority push: the service worker asks the platform to keep it on screen and to sound again. Only `high`
    * travels; an absent key is every other push. A service worker older than this field reads the payload as one it
@@ -188,11 +168,27 @@ export const PushNotificationPayloadSchema = z.union([
 ]);
 export type PushNotificationPayload = z.infer<typeof PushNotificationPayloadSchema>;
 
-/** The most tags one clear may name: an item's own tag, its approval's, the ferret's stop tag, and room to spare. */
+/**
+ * The tag a push goes out under, or none when it would not fit the kernel's tag grammar (`PUSH_TAG_PATTERN`): the push
+ * is then sent untagged, never refused. Every tag Access composes from its own ids fits (the paired-device id, the
+ * enrolment and passkey constants); a tag another plugin hands Access (a buzz) may not, since a ferret id alone may be
+ * 128 characters.
+ */
+export const fittingPushTag = (tag: string): string | undefined => (PUSH_TAG_PATTERN.test(tag) ? tag : undefined);
+
+/**
+ * The most tags one clear may name: an item's own tag, its approval's, the ferret's stop tag, and room to spare. A
+ * tighter SENDER bound than the kernel's `PUSH_CLEAR_MAX_TAGS` (32), which is what the worker reads; each tag is the
+ * kernel's `PushTagSchema` (an un-namespaced daemon tag: `attention-<sessionId>:<itemId>`, `pa-<id>`).
+ */
 export const PUSH_CLEAR_MAX_TAGS = 8;
 
-/** One un-namespaced daemon tag a clear names (`attention-<sessionId>:<itemId>`, `pa-<id>`): printable, bounded. */
-const PushTagSchema = z
+/**
+ * One tag a `seen` answer names. Not the kernel grammar: these are tags the page looks for among its own shown lines,
+ * never a push the worker reads, so a tag that was sent untagged simply finds nothing, and the answer is never refused
+ * for it. Printable and bounded, as today.
+ */
+const SeenTagSchema = z
   .string()
   .min(1)
   .max(200)
@@ -246,7 +242,7 @@ export const PUSH_SEEN_MAX_TAGS = 1 + 2 * (MAX_AGENDA_PER_SESSION + MAX_AGENDA_R
  */
 export const PushSeenResponseSchema = z.strictObject({
   cleared: z.boolean(),
-  tags: z.array(PushTagSchema).max(PUSH_SEEN_MAX_TAGS),
+  tags: z.array(SeenTagSchema).max(PUSH_SEEN_MAX_TAGS),
 });
 export type PushSeenResponse = z.infer<typeof PushSeenResponseSchema>;
 
