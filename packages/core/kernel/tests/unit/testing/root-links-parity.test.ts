@@ -54,7 +54,7 @@ const halves = (seen: Seen) => [
       api: 5,
       core: false,
       kinds: [],
-      permissions: { roots: ['downloads', 'harness-home'], harnessFiles: ['*', '.claude.json'] },
+      permissions: { roots: ['downloads', 'harness-home', 'agent-homes'], harnessFiles: ['*', '.claude.json'] },
     }),
     {
       build: ({ kernel }) => {
@@ -104,6 +104,8 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
   const settings = at(fleet, 'homes/claude-a/settings.json');
   const kindAt = async (path: FencedPath) => (await fleet.lstat(path))?.kind ?? null;
   const modeAt = async (path: FencedPath) => (await fleet.stat(path))?.mode ?? null;
+  const theirFleet = stranger.roots.root('agent-homes', { subfolder: 'other' });
+  await theirFleet.writeText(at(theirFleet, 'f.txt'), 'x');
   const claudeJson = `${places.owner}/.claude.json`;
   return [
     ['linkTo a harness credential into fleet', await answer(() => fleet.linkTo(place, credential))],
@@ -142,6 +144,10 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     ['setMode on a read-only root', await answer(() => harness.setMode(credential.path, 0o600))],
     ['setMode with a mode out of range', await answer(() => fleet.setMode(settings, 0o10000))],
     ['setMode on a missing name', await answer(() => fleet.setMode(at(fleet, 'homes/claude-a/none'), 0o600))],
+    [
+      'setMode by a plugin that did not declare it',
+      await answer(() => theirFleet.setMode(at(theirFleet, 'f.txt'), 0o600)),
+    ],
     ['setMode on a link', await answer(() => fleet.setMode(place, 0o600))],
     ['harnessFile read', await answer(() => runtimes.roots.harnessFile(claudeJson).readText())],
     ['harnessFile stat kind', await answer(async () => (await runtimes.roots.harnessFile(claudeJson).stat())?.kind)],
@@ -228,6 +234,7 @@ test('roots part 2 parity: linkTo, setMode and harnessFile answer every case ali
   expect(byCase['setMode on a read-only root']).toEqual({ refused: 'read_only' });
   expect(byCase['setMode with a mode out of range']).toEqual({ refused: 'outside' });
   expect(byCase['setMode on a missing name']).toEqual({ refused: 'outside' });
+  expect(byCase['setMode by a plugin that did not declare it']).toEqual({ refused: 'not_declared' });
   expect(byCase['setMode on a link']).toEqual({ refused: 'link_escape' });
   expect(byCase['harnessFile read']).toEqual({ ok: CLAUDE_JSON });
   expect(byCase['harnessFile stat kind']).toEqual({ ok: 'file' });

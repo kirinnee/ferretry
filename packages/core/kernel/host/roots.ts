@@ -49,7 +49,7 @@ import {
 import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
-import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS } from './processes.ts';
+import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
 import { harnessFileRefusal, permittedMode, takesLinks } from './root-rules.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
@@ -1565,6 +1565,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
     realParent: path => realParent(path),
     folder: async path => {
       const { full, scope } = await real(path);
+      const relative = full.startsWith(`${scope.base.real}/`) ? full.slice(scope.base.real.length + 1) : '';
+      if (!processFolderAllowed(name, relative))
+        throw new Error('kernel.processes accepts only a folder at or under fleet/homes/<id>');
       // Held open and checked as `copyTree`'s source is: a folder, the one at that real path, inside the root.
       const held = await openCheckedFolder(scope, full);
       await held.close();

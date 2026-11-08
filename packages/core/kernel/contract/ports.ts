@@ -752,9 +752,9 @@ export interface RootHandle {
    * root, which must be an internal, writable root (`agent-homes`): any other is refused. A copy keeps `copyTree`'s
    * rules exactly (each file read off the disk through a checked descriptor, a link inside skipped, a file with a
    * second hard link skipped, modes kept, `maxEntries`, both ends fenced, a NEW folder at `to`). `link` asks for one
-   * link at `to` to the tree's real path instead; it is made only when the kernel's shared-tree link rule allows it for
-   * this tree and this handle (a tree from the minter's own state; and only if the owner chose so, a project folder
-   * that is the receiving ferret's own work folder), and otherwise the tree is COPIED. The answer says which was made.
+   * link at `to` to the tree's real path instead, and one link is made whenever it is asked for (a tree is always the
+   * minter's own opaque state tree, so there is nothing else to weigh). The answer says which was made. A link made
+   * stays until the harness removes it: revoking the tree stops new materializations only (a declared GAP).
    * A tree that is forged, rebuilt from its JSON, or whose minter stopped is refused.
    */
   copyShared(tree: SharedTree, to: FencedPath, options?: TreeCopyOptions): Promise<SharedTreeCopied>;
@@ -835,7 +835,7 @@ export type SharedTreeSource = { readonly state: StateFileDef; readonly name: st
 /**
  * What {@link RootHandle.copyShared} made at the destination: a copy, or (when a link was asked for) one link. A link
  * lets the harness child write into the shared folder, so every ferret sharing it sees the change: "read-only" holds
- * for a copy only (a declared GAP).
+ * for a copy only, and a link made outlives the tree's revocation (both declared GAPs).
  */
 export type SharedTreeCopied = 'copied' | 'linked';
 

@@ -58,6 +58,16 @@ export const NO_PROCESS_TABLE: ProcessTable = Object.freeze({
 export const PROCESS_FOLDER_ROOTS: ReadonlySet<RootName> = new Set<RootName>(['fleet', 'agent-homes']);
 
 /**
+ * Whether a folder, named relative to its root, is one `kernel.processes` accepts. The `fleet` root takes only a folder
+ * at or under `homes/<id>` (today's stopper matched only inside one `fleet/homes/<id>`); `agent-homes` takes any.
+ */
+export const processFolderAllowed = (root: RootName, relative: string): boolean => {
+  if (root !== 'fleet') return true;
+  const parts = relative.split('/').filter(part => part !== '');
+  return parts.length >= 2 && parts[0] === 'homes';
+};
+
+/**
  * Every spelling of an {@link OwnFolder} the kernel accepts (its real path, and the path as the root names it), or
  * `undefined` when `folder.root` is not a handle the kernel made for `plugin`. A path the root refuses throws the
  * root's own refusal.

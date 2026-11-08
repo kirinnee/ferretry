@@ -5,7 +5,7 @@
  * the process table is the test's, on both sides.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { FencedPath } from '../../../contract/bound.ts';
 import type { KernelPorts, OwnFolder, RootHandle } from '../../../contract/ports.ts';
@@ -38,7 +38,7 @@ const halves = (seen: Seen) => [
       api: 5,
       core: false,
       kinds: [],
-      permissions: { roots: ['fleet'], processes: { environment: ['CODEX_HOME'] } },
+      permissions: { roots: ['fleet', 'harness-home'], processes: { environment: ['CODEX_HOME'] } },
     }),
     {
       build: ({ kernel }) => {
@@ -111,7 +111,11 @@ const answer = async (call: () => Promise<unknown>): Promise<Answer> => {
 };
 
 /** The eight-plus cases, run against one host's ports. */
-async function cases(seen: Seen, table: TestProcessTable): Promise<readonly (readonly [string, Answer])[]> {
+async function cases(
+  seen: Seen,
+  table: TestProcessTable,
+  ownerDir: string,
+): Promise<readonly (readonly [string, Answer])[]> {
   const runtimes = seen.runtimes as KernelPorts;
   const stranger = seen.stranger as KernelPorts;
   const borrower = seen.borrower as KernelPorts;
@@ -126,11 +130,19 @@ async function cases(seen: Seen, table: TestProcessTable): Promise<readonly (rea
   const home: OwnFolder = { root: fleet, path: at(fleet, 'homes/codex-a') };
   const packages: OwnFolder = { root: fleet, path: at(fleet, 'homes/codex-a/packages/app-server-daemon') };
   const forged: OwnFolder = { root: { ...fleet }, path: home.path };
+  const owner = runtimes.roots.root('harness-home', { subfolder: ownerDir });
+  const ownerFolder: OwnFolder = { root: owner, path: at(owner, 'x') };
+  await fleet.makeDirectory(at(fleet, 'bin'));
+  const outsideHomes: OwnFolder = { root: fleet, path: at(fleet, 'bin') };
+  const homesItself: OwnFolder = { root: fleet, path: at(fleet, 'homes') };
   const p = runtimes.processes;
   const out: (readonly [string, Answer])[] = [
     ['usersOf exact', await answer(() => p.usersOf('CODEX_HOME', home))],
     ['usersOf undeclared variable', await answer(() => p.usersOf('OPENAI_API_KEY', home))],
     ['usersOf a forged handle', await answer(() => p.usersOf('CODEX_HOME', forged))],
+    ['usersOf an owner-root folder', await answer(() => p.usersOf('CODEX_HOME', ownerFolder))],
+    ['usersOf a fleet folder outside homes', await answer(() => p.usersOf('CODEX_HOME', outsideHomes))],
+    ['usersOf homes itself', await answer(() => p.usersOf('CODEX_HOME', homesItself))],
     ['runsFrom the daemon', await answer(() => p.runsFrom(4242, packages))],
     ['runsFrom the TUI', await answer(() => p.runsFrom(4300, packages))],
     ['runsFrom another uid', await answer(() => p.runsFrom(4400, packages))],
@@ -152,7 +164,7 @@ async function onTestingHost() {
   const table = world('/fleet/homes/codex-a');
   const host = await testHost({ plugins: halves(seen), processes: table });
   try {
-    return await cases(seen, table);
+    return await cases(seen, table, '/home/owner/.x');
   } finally {
     await host.stop();
   }
@@ -160,6 +172,7 @@ async function onTestingHost() {
 
 async function onRealHost() {
   const parent = await realpath(await mkdtemp(`${tmpdir()}/fy-processes-parity-`));
+  await mkdir(`${parent}/owner`);
   parents.push(parent);
   const home = `${parent}/home`;
   const table = world(`${home}/fleet/homes/codex-a`);
@@ -177,7 +190,7 @@ async function onRealHost() {
   });
   if (outcome.kind !== 'running') throw new Error(outcome.sentence);
   try {
-    return await cases(seen, table);
+    return await cases(seen, table, `${parent}/owner`);
   } finally {
     await outcome.host.stop();
   }
@@ -196,6 +209,11 @@ test('processes parity: the real host and the testing host answer every case ali
   expect(byCase['usersOf a forged handle']).toEqual({
     refused: 'runtimes may ask about processes only with a folder of one of its own roots.',
   });
+  const notOwn = { refused: 'runtimes may ask about processes only with a folder of one of its own roots.' };
+  expect(byCase['usersOf an owner-root folder']).toEqual(notOwn);
+  const notHomes = { refused: 'kernel.processes accepts only a folder at or under fleet/homes/<id>' };
+  expect(byCase['usersOf a fleet folder outside homes']).toEqual(notHomes);
+  expect(byCase['usersOf homes itself']).toEqual(notHomes);
   expect(byCase['runsFrom the daemon']).toEqual({ ok: true });
   expect(byCase['runsFrom the TUI']).toEqual({ ok: false });
   expect(byCase['runsFrom another uid']).toEqual({ ok: false });

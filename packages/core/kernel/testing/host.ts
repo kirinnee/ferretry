@@ -10,7 +10,13 @@ import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { gatedOverrides, gatedPaths, gatedWhich } from '../host/paths.ts';
 import { handleReaders, locateCommand, whichCommand, whichForCommand } from '../host/which.ts';
-import { NO_PROCESS_TABLE, PROCESS_FOLDER_ROOTS, type ProcessTable, processesPortFor } from '../host/processes.ts';
+import {
+  NO_PROCESS_TABLE,
+  PROCESS_FOLDER_ROOTS,
+  type ProcessTable,
+  processesPortFor,
+  processFolderAllowed,
+} from '../host/processes.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
@@ -1020,6 +1026,8 @@ async function start(world: World): Promise<TestHost> {
       (path !== known.prefix && !path.startsWith(`${known.prefix}/`))
     )
       throw new Error(`${path} is outside the root`);
+    if (!processFolderAllowed(known.root, path.slice(known.prefix.length + 1)))
+      throw new Error('kernel.processes accepts only a folder at or under fleet/homes/<id>');
     if (![...world.roots.keys()].some(key => key.startsWith(`${path}/`))) throw new Error(`no such folder ${path}`);
     return [path];
   };
