@@ -220,13 +220,14 @@ export function buildBrowsers(
     },
     { now: () => kernel.clock.nowMs() },
   );
+  // "What agents may control" is read from core's AgentControlPort on every call; unbound, or an answer that is not a
+  // plain yes, refuses (fail closed). ONE policy for the browser tools and the page target.
+  const policy = agentControlPolicy(() => ctx.uses.agentControl.current());
   const tools = new BrowserTools({
     browser: pages,
     control,
     kernel,
-    // "What agents may control" is read from core's AgentControlPort on every call; unbound, or an answer that is not a
-    // plain yes, refuses (fail closed).
-    policy: agentControlPolicy(() => ctx.uses.agentControl.current()),
+    policy,
     files: rootFiles(kernel.roots, nodeStagedFiles(host.uploadDirectory, kernel.clock)),
     binaryName: 'fy',
     typedIdentities: identities,
@@ -242,6 +243,9 @@ export function buildBrowsers(
   const target = pageTarget({
     kernel,
     pages,
+    // The Browsers switch, at the one boundary every write into a page on a ferret's behalf passes (S2): the same policy,
+    // which reads the port fresh per call and never captures it, because the port binds after build.
+    control: policy,
     host: pageToolHost(tools),
     identities,
     vault,
@@ -273,6 +277,10 @@ export function buildBrowsers(
     provides: {
       browsers: {
         state: async () => pages.overview(),
+        // Ids and names only, for any caller and whatever the switches say. NEVER add a page's address here (#42 SF2):
+        // this read asks no "What agents may control › Browsers" switch, so Accounts' `account_hint {name}` would show an
+        // agent its page's host while Browsers is off. The address waits for its own Browsers-owned read that asks
+        // `AgentControlPort` and refuses with `agentControlRefusal('browser')` (GAP in ports-pending.json, accounts).
         pagesOf: async ferret => {
           const status = await pages.status(ferret);
           return status.pages.map(page => ({

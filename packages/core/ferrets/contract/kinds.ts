@@ -37,6 +37,14 @@ export interface LaunchSpec {
   readonly home: FencedPath;
   /** Instructions from the post-build snapshot, filtered by `when`, ordered. */
   readonly instructions: readonly InstructionEntry[];
+  /**
+   * The absolute folders, all inside THIS ferret's own session folder (`FERRET_READABLE_FOLDERS`), its agent is pointed
+   * into to read what it was sent. Set by Ferrets only (never a `launch.parts` taker), so no plugin can widen what an
+   * agent reads without asking. A harness that asks before reading outside the work folder lets its agent READ these
+   * (and only read) without asking, in its own spelling (Claude: `--allowedTools=Read(//<folder>/**)`); one whose
+   * sandbox already reads anywhere (Codex) adds nothing. Absent: nothing is pre-allowed.
+   */
+  readonly readable?: readonly FencedPath[];
   /** What `launch.parts` takers added for this ferret. */
   readonly parts: readonly LaunchPart[];
   /** The first message, when the owner gave one. */

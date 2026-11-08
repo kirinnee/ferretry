@@ -12,7 +12,17 @@ import type { ProjectInfo } from '../lib/sign-in-context.ts';
  * is refused; a session orders by the site lines alone, never a lost card).
  */
 
-/** TODO(contract): `BrowserPageRef.url` (Browsers porter; daemon-side, read under the page hold). */
+/**
+ * TODO(contract): a page's address (Browsers porter; daemon-side, read under the page hold).
+ *
+ * GAP(browsers), #42 SF2: the address MUST be read through Browsers and gated on the ferret's "What agents may control ›
+ * Browsers" switch, NEVER by adding `url` to `pagesOf` as it is: `pagesOf` knows no caller and asks no switch, so a
+ * `url` there hands an agent the host of its page while Browsers is off (today `account.hint` with a `name` was
+ * refused with `forbidden` and the Browsers sentence, rebuild-ref agent-tools/service.ts:356-359). The shape that
+ * keeps "no check in Accounts": a Browsers-owned `pageUrlFor(ferret, name)` that asks `AgentControlPort` and refuses
+ * with `agentControlRefusal('browser')`, and Accounts passing that refusal through instead of `.catch(() => undefined)`.
+ * Until then no address is offered, so `account_hint {name}` asks for the site and leaks nothing.
+ */
 type PageWithUrl = BrowserPageRef & { readonly url?: string };
 
 /** The address of the page `name` that `ferret` holds, or `undefined` (no such page, or no URL offered yet). */

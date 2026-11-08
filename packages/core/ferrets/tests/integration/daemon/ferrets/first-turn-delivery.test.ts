@@ -75,8 +75,10 @@ describe('M3 F-0344 a started ferret is handed its task once (today’s deliverF
     expect(runner.deliveries).toHaveLength(1);
     expect(firstTurnPointers(runner)).toHaveLength(1);
     const [pointer] = firstTurnPointers(runner);
-    expect(pointer?.delivery.text).toContain(`/ferrets/sessions/${id}/turns/turn-001.md`);
-    expect(pointer?.delivery.text.startsWith('Read the file ')).toBe(true);
+    // The pointer names the ABSOLUTE path the kernel resolved for this ferret's own `sessions` handle, where its turn
+    // document was written: the test host resolves that root at `/sessions/<ferret>` (production at
+    // `state/ferrets/sessions/<ferret>`, `internalRootFolder`), so a ferret reads exactly the file it was handed.
+    expect(pointer?.delivery.text.startsWith(`Read the file /sessions/${id}/turns/turn-001.md `)).toBe(true);
     // Admitted by the effect ledger before the first key: the runner was handed the pre-write step.
     expect(pointer?.delivery.beforeWrite).toBeDefined();
     // (That no harness ALSO gets the task on its command line is pinned per harness: Codex's argv unit tests.)

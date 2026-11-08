@@ -259,7 +259,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Product code reads YAML only through the bounded reader";
       entry = validator "scripts/validate/no-raw-yaml.sh";
-      files = "^(packages/.*\\.tsx?|scripts/validate/(no-raw-yaml\\.(sh|ts)|raw-yaml-allowlist\\.txt))$";
+      files = "^(packages/.*\\.([cm]?[jt]s|[jt]sx)|scripts/validate/(no-raw-yaml\\.(sh|ts)|raw-yaml-allowlist\\.txt))$";
       pass_filenames = false;
       language = "system";
     };
