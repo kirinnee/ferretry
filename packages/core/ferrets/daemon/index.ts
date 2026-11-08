@@ -50,6 +50,7 @@ import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
 import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
 import { helperDecision, noHelperAdmission } from './lib/ferrets/helper-admission.ts';
+import { boundedReason } from './lib/ferrets/auto-resume.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
@@ -700,9 +701,15 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     settle: async (ferret, handle, exited) => await service.settleGone(ferret, handle, exited),
     decide: async input => await hooks.decideAnswered(AutoResumeDecide, input),
+    // Why a resume was refused (a start.decide taker's sentence, a launch's message) is kept in the journal and the
+    // summary, so it is bounded as Runtimes' own refusal is.
     resume: async (ferret, message, expect) => {
-      const resumed = await service.resume(ferret, message, { actor: 'daemon', automatic: true, expect });
-      if (!resumed.ok) throw new Error(resumed.error.reason);
+      const resumed = await service
+        .resume(ferret, message, { actor: 'daemon', automatic: true, expect })
+        .catch((error: unknown) => {
+          throw new Error(boundedReason(error instanceof Error ? error.message : String(error)));
+        });
+      if (!resumed.ok) throw new Error(boundedReason(resumed.error.reason));
     },
     history: appendHistory,
     clock: { now: () => kernel.clock.now(), nowMs: () => kernel.clock.nowMs() },

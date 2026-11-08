@@ -5,6 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { milliseconds } from '@ferretry/std';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import type { TestHost } from '@ferretry/kernel/testing';
 import {
@@ -14,7 +15,10 @@ import {
   AutoResumeSummaryFile,
   FerretHistoryFiles,
   type FerretId,
+  FerretsPort,
   type FerretSummary,
+  StartDecide,
+  type StartDecideInput,
 } from '../../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../../contract/testing/index.ts';
 import { AUTO_RESUME_JOB } from '../../../../../daemon/modules/auto-resume.ts';
@@ -348,5 +352,199 @@ describe('W2-a auto-resume, mounted', () => {
     expect(runner.starts).toBe(launches);
     expect(types(h, id)).not.toContain('session.exited');
     await h.stop();
+  });
+  describe("a stop of a ferret the boot pass settled is the stopper's decision: nothing resumes it against them", () => {
+    for (const how of ['polite', 'now'] as const)
+      test(`W2-a an owner's ${how} Stop of a settled ferret while the pass still staggers wins: it is never launched`, async () => {
+        let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
+        const ids = [await start(h, 'acacia'), await start(h, 'baobab'), await start(h, 'catalpa')];
+        h = await hostRestart(h, runner);
+        const launches = runner.starts;
+        const pass = h.runJob(AUTO_RESUME_JOB);
+        await advance(h, 0);
+        expect(runner.starts).toBe(launches + 1);
+        // The two the cap holds back are settled and owed; the owner stops them before the 4 s stagger runs out.
+        const waiting: FerretId[] = [];
+        for (const id of ids) if ((await view(h, id)).cause?.kind === 'terminal_gone') waiting.push(id);
+        expect(waiting).toHaveLength(2);
+        for (const id of waiting)
+          expect((await h.request('POST', `/v1/ferrets/${id}/stop`, { query: { how } })).status).toBe(200);
+        for (let step = 0; step < 20; step += 1) await advance(h, 1_000);
+        await pass;
+        expect(runner.starts).toBe(launches + 1);
+        for (const id of waiting) {
+          expect((await view(h, id)).state).toBe('stopped');
+          expect((await view(h, id)).cause).toEqual({ kind: 'stopped' });
+          expect(types(h, id)).not.toContain('session.auto_resumed');
+          expect(types(h, id)).toContain('session.stopped');
+        }
+        await h.stop();
+      });
+
+    const stoppers: readonly [string, (h: TestHost, id: FerretId) => Promise<void>][] = [
+      [
+        'the owner (the route)',
+        async (h, id) => expect((await h.request('POST', `/v1/ferrets/${id}/stop`)).status).toBe(200),
+      ],
+      [
+        "another plugin (Ferrets' port: the Warden, a budget)",
+        async (h, id) => await h.provided(FerretsPort).stop(id, 'polite'),
+      ],
+    ];
+    for (const [who, stop] of stoppers)
+      test(`W2-a F-0109 a stop by ${who} wins over the ledger that outlived a crash mid-pass, on the next boot`, async () => {
+        let h!: TestHost;
+        let on = false;
+        let ledger: string | undefined;
+        const runtimes = fakeRuntimes(input => {
+          if (input.ask !== 'switch') return { allow: true };
+          // What the pass wrote down before it asked anything: the ledger a crash from here on leaves behind.
+          ledger ??= h.state('ferrets').raw(AutoResumeFile);
+          return on ? { allow: true } : { allow: false, reason: 'off' };
+        });
+        const booted = await boot([runtimes.plugin]);
+        h = booted.h;
+        const halted = await start(h, 'quince');
+        const owed = await start(h, 'rowan');
+        h = await hostRestart(h, booted.runner);
+        await runPass(h);
+        expect(ledger).toContain(halted);
+        expect(ledger).toContain(owed);
+        // The daemon died mid-pass: every ferret it settled is still on the ledger, still `terminal_gone`.
+        h.state('ferrets').plant(AutoResumeFile, ledger as string);
+        expect((await view(h, halted)).cause).toEqual({ kind: 'terminal_gone' });
+        await stop(h, halted);
+        expect((await view(h, halted)).cause).toEqual({ kind: 'stopped' });
+        on = true;
+        h = await h.restart();
+        const launches = booted.runner.starts;
+        await runPass(h);
+        // The ledger was live (the ferret nobody stopped came back); the stopped one was not resumed against the stop.
+        expect(booted.runner.starts).toBe(launches + 1);
+        expect((await view(h, owed)).state).not.toBe('stopped');
+        expect((await view(h, halted)).state).toBe('stopped');
+        expect((await view(h, halted)).cause).toEqual({ kind: 'stopped' });
+        expect(types(h, halted)).not.toContain('session.auto_resumed');
+        expect(h.state('ferrets').raw(AutoResumeFile) ?? '').not.toContain(halted);
+        await h.stop();
+      });
+  });
+
+  test("W2-a why a resume was refused is kept bounded (200 characters), as Runtimes' own refusal is", async () => {
+    const refusal = `${'a start.decide taker refused this resume '.repeat(20)}sk-live-tail`;
+    const taker = implementDaemon(
+      definePlugin({
+        id: 'packs',
+        title: 'packs (fake)',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        hooks: { takes: [{ hook: StartDecide }] },
+      }),
+      {
+        build: () => ({
+          hooks: {
+            'start.decide': async (input: StartDecideInput) =>
+              (input.by === 'resume' ? { allow: false, reason: refusal } : { allow: true }) as never,
+          },
+        }),
+      },
+    );
+    let { h, runner } = await boot([fakeRuntimes(yes).plugin, taker as never]);
+    const id = await start(h, 'sumac');
+    h = await hostRestart(h, runner);
+    await runPass(h);
+    const summary = JSON.parse(h.state('ferrets').raw(AutoResumeSummaryFile) ?? '{}') as {
+      skipped: { sessionId: string; reason: string }[];
+    };
+    expect(summary.skipped.map(entry => entry.sessionId)).toEqual([id]);
+    expect(summary.skipped[0]?.reason).toBe(refusal.slice(0, 200));
+    const skipped = events(h, id).find(event => event.type === 'session.auto_resume_skipped');
+    expect(JSON.stringify(skipped)).not.toContain('sk-live-tail');
+    await h.stop();
+  });
+
+  describe('fails closed, per question and per pass', () => {
+    // Late on BOTH clocks: the daemon bounds a decide on the kernel clock, this test host on a real-time timer, so an
+    // answer late on only one of them would prove nothing about the other.
+    test('W2-a a LATE yes (300 ms, past the 200 ms decide bound on the kernel clock and in real time) resumes nothing', async () => {
+      const plugin = implementDaemon(
+        definePlugin({
+          id: 'runtimes',
+          title: 'runtimes (fake)',
+          version: '5.0.0',
+          api: 5,
+          core: false,
+          kinds: [],
+          hooks: { takes: [{ hook: AutoResumeDecide }] },
+        }),
+        {
+          build: ctx => ({
+            hooks: {
+              'auto-resume.decide': async (input: AutoResumeDecideInput) => {
+                if (input.ask === 'runtime') {
+                  await ctx.kernel.clock.sleep(milliseconds(300));
+                  await Bun.sleep(300);
+                }
+                return { allow: true } as never;
+              },
+            },
+          }),
+        },
+      );
+      let { h, runner } = await boot([plugin as never]);
+      const id = await start(h, 'tupelo');
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      await runPass(h);
+      await advance(h, 1_000);
+      expect(runner.starts).toBe(launches);
+      expect((await view(h, id)).state).toBe('stopped');
+      const summary = JSON.parse(h.state('ferrets').raw(AutoResumeSummaryFile) ?? '{}') as {
+        skipped: { reason: string }[];
+      };
+      expect(summary.skipped[0]?.reason).toBe(NO_AUTO_RESUME_ANSWER);
+      await h.stop();
+    });
+
+    test('W2-a the runtime is asked per ferret: a yes for one and a no for the other resumes only the one', async () => {
+      let allowed: FerretId | undefined;
+      const runtimes = fakeRuntimes(input =>
+        input.ask === 'switch' || input.ferret === allowed ? { allow: true } : { allow: false, reason: 'not this one' },
+      );
+      let { h, runner } = await boot([runtimes.plugin]);
+      const a = await start(h, 'ulmus');
+      const b = await start(h, 'viburnum');
+      allowed = a;
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      await runPass(h);
+      expect(runner.starts).toBe(launches + 1);
+      expect((await view(h, a)).state).not.toBe('stopped');
+      expect((await view(h, b)).state).toBe('stopped');
+      expect(types(h, b)).toContain('session.auto_resume_skipped');
+      await h.stop();
+    });
+
+    test('W2-a the switch is asked again on every pass: on for one reboot, off for the next resumes nothing', async () => {
+      let on = true;
+      const runtimes = fakeRuntimes(input =>
+        input.ask === 'switch' ? (on ? { allow: true } : { allow: false, reason: 'off' }) : { allow: true },
+      );
+      let { h, runner } = await boot([runtimes.plugin]);
+      const id = await start(h, 'willow');
+      h = await hostRestart(h, runner);
+      await runPass(h);
+      expect((await view(h, id)).state).not.toBe('stopped');
+      const launches = runner.starts;
+      on = false;
+      h = await hostRestart(h, runner);
+      await runPass(h);
+      expect(runner.starts).toBe(launches);
+      expect((await view(h, id)).state).toBe('stopped');
+      expect(runtimes.asked.filter(input => input.ask === 'switch')).toHaveLength(2);
+      await h.stop();
+    });
   });
 });

@@ -14,8 +14,16 @@ export const AUTO_RESUME_ANSWERER = 'runtimes';
 export const NO_AUTO_RESUME_ANSWER =
   'Runtimes did not answer whether this may run, so nothing was resumed and nothing was spent';
 
-/** The longest reason kept from a taker's refusal: it lands in the ferret's journal and the machine's summary. */
+/**
+ * The longest reason kept from a taker's refusal, or from a resume the pass was refused: it lands in the ferret's
+ * journal and the machine's summary.
+ */
 const REASON_LIMIT = 200;
+
+/** A reason as it is kept: trimmed, and no longer than {@link REASON_LIMIT}. */
+export function boundedReason(reason: string): string {
+  return reason.trim().slice(0, REASON_LIMIT);
+}
 
 export type AutoResumeVerdict = { readonly allow: true } | { readonly allow: false; readonly reason: string };
 
@@ -33,6 +41,6 @@ export function autoResumeVerdict(answer: DecideAnswer): AutoResumeVerdict {
   const refusal = answer.decision.allow === false ? answer.decision : undefined;
   const refusedOwn = refusal !== undefined && answer.answers.at(-1)?.outcome === 'refused';
   if (refusedOwn && typeof refusal.reason === 'string' && refusal.reason.trim() !== '')
-    return { allow: false, reason: refusal.reason.trim().slice(0, REASON_LIMIT) };
+    return { allow: false, reason: boundedReason(refusal.reason) };
   return { allow: false, reason: NO_AUTO_RESUME_ANSWER };
 }

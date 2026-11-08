@@ -99,6 +99,20 @@ export const QUESTION_FILE_VARIABLE = 'FY_QUESTION_FILE';
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
 const DEFAULT_STOP_REASON = 'stopped by client';
 
+/**
+ * The end causes of today's `failed` phase (the Warden's `FAILED_ENDS`, the same five): an end NOBODY CHOSE (the
+ * terminal vanished, a signal, a non-zero exit) or a launch that never ran. Only the daemon itself writes one, never a
+ * caller's stop, and the auto-resume and the Warden read the first four as a death still owed a revive. A stop of a
+ * ferret stopped for one of these is written over it, as today's stop of a `failed` session went through.
+ */
+const FAILED_ENDS: ReadonlySet<FerretEndCause['kind']> = new Set([
+  'tmux_crashed',
+  'terminal_gone',
+  'signal',
+  'agent_crashed',
+  'start_failed',
+]);
+
 /** Everything the service reaches outside its own memory. The daemon half binds these to kernel ports. */
 export interface FerretsPorts {
   /** Resolves once the held ferret records are loaded (a read before then would see no ferret). */
@@ -676,7 +690,8 @@ export class FerretsService implements FerretsApi {
   ): Promise<void> {
     await this.ports.ready?.();
     const record = this.registry.get(ferret);
-    if (record === undefined || record.state === 'stopped') return;
+    if (record === undefined) return;
+    if (record.state === 'stopped') return await this.restateStop(record, reason, cause);
     this.ports.stopping?.(ferret);
     const harness = this.ports.harness(record.harness);
     const runner = this.ports.runner();
@@ -687,6 +702,21 @@ export class FerretsService implements FerretsApi {
     await this.settle(record, 'stopped', 'stopped', cause);
     // Today's `session.stopped` journal event, with the reason the caller gave or the lifecycle default.
     await this.ports.history?.(ferret, 'session.stopped', { reason: reason?.trim() || DEFAULT_STOP_REASON });
+  }
+
+  /**
+   * A stop of a ferret that is already stopped. When it ended FAILED ({@link FAILED_ENDS}: the boot pass's
+   * `terminal_gone`, a crash, a launch that never ran), this stop is the caller's decision and its cause is written over
+   * that one, with today's `session.stopped` event: today's stop of a `failed` session went through and left it
+   * `stopped`. Otherwise the auto-resume (during its pass, or from a ledger that outlived a crash mid-pass) and the Warden
+   * would still read the death as owed a revive and relaunch the ferret against the stop. Nothing is killed (there is no
+   * pane) and no token is left to revoke. An end somebody already decided (`stopped`, `completed`), a clean exit and a
+   * stopped record with no cause stand: nothing is written, as today's stop of a `stopped` session changed nothing.
+   */
+  private async restateStop(record: FerretRecord, reason: string | undefined, cause: FerretEndCause): Promise<void> {
+    if (record.cause === undefined || !FAILED_ENDS.has(record.cause.kind)) return;
+    await this.settle(record, 'stopped', 'stopped', cause);
+    await this.ports.history?.(record.id, 'session.stopped', { reason: reason?.trim() || DEFAULT_STOP_REASON });
   }
 
   /**
