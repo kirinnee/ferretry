@@ -19,6 +19,7 @@ import {
 const pending = {
   format: 1 as const,
   pending: ['vault', 'kernel2'],
+  halves: {},
   reasons: {
     vault: [
       'GAP(access): the export screen waits for the passkey mount; app/export-sheet.tsx stays until then',

@@ -258,6 +258,12 @@ export interface FerretsApi {
    */
   managedWorktrees?(): Promise<readonly ManagedWorktreeSummary[]>;
   /**
+   * The next free callsign of a session Ferretry starts ITSELF (additive; today's `SystemCallsignIssuer`): the
+   * Learning miner and Pack clean-up take `learning-000001` / `pack-00002A`, never a pool name. The counter is
+   * persisted (`system-callsigns.json`) and skips every id the running fleet still holds.
+   */
+  systemCallsign?(prefix: 'warden' | 'learning' | 'pack'): Promise<string>;
+  /**
    * What this ferret may control right now (today's "What agents may control"): `limits.yaml`'s `agentControl` over
    * today's defaults, read fresh on every call so a change applies to the ferret's very next action. A ferret this
    * daemon does not know may control nothing.

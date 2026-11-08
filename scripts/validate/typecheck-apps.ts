@@ -42,7 +42,14 @@ for (const path of new Set(sources.stdout.toString().trim().split('\n'))) {
   if (line < 1 || !lines[line - 1]?.trim().startsWith('// pending app port: '))
     problems.push(`${exclusion}: explain its missing facility with a preceding "// pending app port:" comment`);
 }
+const trackedPaths = new Set(sources.stdout.toString().trim().split('\n'));
+/** A pending app half that is only the skeleton `index.ts` has no unported source to exclude. */
+const onlySkeleton = (plugin: string): boolean => {
+  const own = [...trackedPaths].filter(path => new RegExp(`^packages/(?:core|plugins)/${plugin}/app/`, 'u').test(path));
+  return own.length > 0 && own.every(path => path.endsWith('/app/index.ts'));
+};
 for (const plugin of pendingApps.halves) {
+  if (onlySkeleton(plugin)) continue;
   if (
     !pendingApps.exclusions.some(
       entry => entry.plugin === plugin && /\/(?:core|plugins)\/[^/]+\/app$/u.test(entry.path),

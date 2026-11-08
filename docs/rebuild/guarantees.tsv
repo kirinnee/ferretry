@@ -832,8 +832,8 @@ R84	kept	kernel	-	behaviour as written	relay-protocol	R84
 R85	kept	kernel	-	behaviour as written	relay-protocol	R85
 R86	kept	connections	kernel	behaviour as written	relay-protocol	R86
 R87	kept	connections	worker:relay	Cloudflare WebSocket auto-responder	relay-protocol	R87
-R88	kept	app-shell	kernel	behaviour as written	relay-protocol	R88
-R89	kept	app-shell	kernel	behaviour as written	relay-protocol	R89
+R88	kept	connections	kernel	behaviour as written	relay-protocol	R88
+R89	kept	connections	kernel	behaviour as written	relay-protocol	R89
 R90	kept	connections	-	behaviour as written	relay-protocol	R90
 R91	kept	connections	-	behaviour as written	relay-protocol	R91
 R92	kept	connections	worker:relay	behaviour as written	relay-protocol	R92
@@ -1078,7 +1078,7 @@ R563	kept	terminals	-	`stream-close`	relay-protocol	R563
 R564	kept	connections	worker:relay	(§9 ref)	relay-protocol	R564
 R565	kept	kernel	-	behaviour as written	relay-protocol	R565
 R566	kept	terminals	-	`adapters/tmux/control-tmux-process.ts`	relay-protocol	R566
-R567	kept	app-shell	kernel	`openStream`	relay-protocol	R567
+R567	kept	app-shell	kernel	`SessionTransport.socket`	relay-protocol	R567
 R568	kept	app-shell	kernel	behaviour as written	relay-protocol	R568
 R569	split	access	kernel	-	relay-protocol	R569
 R570	kept	connections	access,kernel	behaviour as written	relay-protocol	R570

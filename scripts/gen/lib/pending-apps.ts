@@ -8,7 +8,11 @@ export interface PendingAppPort {
   readonly reason: string;
 }
 
+const HALF_NAMES: readonly string[] = ['daemon', 'app', 'cli'];
+
 export interface PendingApps {
+  /** Every half a plugin's pendingHalves entry names, by plugin id (the two-way skeleton rule reads this). */
+  readonly named: ReadonlyMap<string, ReadonlySet<string>>;
   /** A whole app half is not registered until its port removes it from pendingHalves. */
   readonly halves: ReadonlySet<string>;
   /** Partial app ports can exclude files while their already ported views remain registered. */
@@ -17,7 +21,7 @@ export interface PendingApps {
 
 export function readPendingApps(root: string): PendingApps {
   const file = join(root, 'ports-pending.json');
-  if (!existsSync(file)) return { halves: new Set(), exclusions: [] };
+  if (!existsSync(file)) return { named: new Map(), halves: new Set(), exclusions: [] };
   const value = JSON.parse(readFileSync(file, 'utf8')) as {
     format?: unknown;
     pendingHalves?: unknown;
@@ -25,12 +29,14 @@ export function readPendingApps(root: string): PendingApps {
   };
   if (value.format !== 1) throw new Error('ports-pending.json: format is not 1');
   const halves = new Set<string>();
+  const named = new Map<string, ReadonlySet<string>>();
   if (value.pendingHalves !== undefined) {
     if (typeof value.pendingHalves !== 'object' || value.pendingHalves === null || Array.isArray(value.pendingHalves))
       throw new Error('ports-pending.json: pendingHalves must name plugins and their pending halves');
     for (const [plugin, pending] of Object.entries(value.pendingHalves)) {
-      if (!Array.isArray(pending) || pending.some(half => half !== 'app'))
-        throw new Error(`ports-pending.json: ${plugin} pendingHalves supports only app`);
+      if (!Array.isArray(pending) || pending.some(half => typeof half !== 'string' || !HALF_NAMES.includes(half)))
+        throw new Error(`ports-pending.json: ${plugin} pendingHalves names only daemon, app or cli`);
+      named.set(plugin, new Set(pending as string[]));
       if (pending.includes('app')) halves.add(plugin);
     }
   }
@@ -58,5 +64,5 @@ export function readPendingApps(root: string): PendingApps {
       exclusions.push({ plugin, path, reason });
     }
   }
-  return { halves, exclusions };
+  return { named, halves, exclusions };
 }
