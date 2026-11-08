@@ -54,7 +54,8 @@ describe('Access takes the daemon identity from kernel.identity', () => {
     const response = await h.request('POST', '/v1/pair/code');
     expect(response.status).toBe(503);
     expect(response.json<{ code: string }>().code).toBe('plugin_failed');
-    expect(response.body).not.toContain('pairingId');
+    // A boolean, so a failure can never print the body (it could hold a live code).
+    expect(response.body.includes('pairingId')).toBe(false);
     await h.stop();
   });
 });
