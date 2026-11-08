@@ -81,7 +81,11 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
 
   /** `CODEX_HOME` is set by an `env` prefix: the Vault's environment is an opaque handle this code cannot add to. */
-  const command = async (spec: LaunchSpec, resume?: string): Promise<Result<readonly string[], StartRefusal>> => {
+  const command = async (
+    spec: LaunchSpec,
+    permissionMode: HarnessConfig['permissionMode'],
+    resume?: string,
+  ): Promise<Result<readonly string[], StartRefusal>> => {
     const location = await locate();
     if (location.outcome !== 'located') return err('unavailable');
     return ok([
@@ -89,10 +93,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       `CODEX_HOME=${spec.home}`,
       ...buildCodexLaunchArgv({
         executable: location.path,
-        harnessFlags: [
-          ...codexFixedArguments(permissionModeNow(), spec.folder),
-          ...codexCorrelationArguments(spec.home),
-        ],
+        harnessFlags: [...codexFixedArguments(permissionMode, spec.folder), ...codexCorrelationArguments(spec.home)],
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
@@ -106,11 +107,13 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     env: ChildEnvironment,
     harnessConversation?: string,
   ): Promise<Result<Started, StartRefusal>> => {
-    const argv = await command(spec, harnessConversation);
+    // ONE read of the permission mode per launch: the argv and the record describe the same setting.
+    const permissionMode = permissionModeNow();
+    const argv = await command(spec, permissionMode, harnessConversation);
     if (!argv.ok) return argv;
     await ensureHome(spec);
     await rollouts.launched(spec, harnessConversation);
-    await recordLaunchSettings(spec.ferret);
+    await recordLaunchSettings(spec.ferret, permissionMode);
     const running =
       harnessConversation === undefined
         ? await runner.start({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env })
@@ -125,9 +128,12 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
    * cannot be written, the one an earlier launch left is removed, so the answer for this process is `unknown` and never
    * an older launch's.
    */
-  const recordLaunchSettings = async (ferret: FerretId): Promise<void> => {
+  const recordLaunchSettings = async (
+    ferret: FerretId,
+    permissionMode: HarnessConfig['permissionMode'],
+  ): Promise<void> => {
     try {
-      await kernel.state.write(CODEX_LAUNCH_SETTINGS, codexLaunchSettingsRecord(permissionModeNow()), ferret);
+      await kernel.state.write(CODEX_LAUNCH_SETTINGS, codexLaunchSettingsRecord(permissionMode), ferret);
     } catch {
       try {
         await kernel.state.remove(CODEX_LAUNCH_SETTINGS, ferret);

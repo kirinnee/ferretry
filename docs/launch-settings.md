@@ -68,7 +68,10 @@ Restart to apply", with the reason, and a one-tap Restart. It reads
   at every start and resume) and compare it with their configuration on each read (`Harness.launchSettings`).
   The sections are the permission mode and the fixed layer, and for Claude Code also its settings and hooks
   items. Only hashes are kept, never a value, a path or an environment value, and the answer names a kind of
-  drift and nothing else.
+  drift and nothing else. The hashes are plain SHA-256 with no salt, so a low-entropy input (the permission
+  mode, or a short secret in a settings item) could be confirmed by guessing it: accepted, because the record is
+  0600 in the daemon's own state and no route serves it. A harness reads the configuration once per launch and
+  records exactly the settings it launched with.
 - **arguments** — today's second reason (the launch arguments a relaunch would build differ from the recorded
   ones) is not answered yet in 5.0: each harness builds the argv from the launch at each launch, and nothing
   records one to compare (declared gap below).
@@ -284,3 +287,6 @@ otherwise the recorded decision. A model the login has stopped serving falls bac
   Ferretry hands the launch, or one changed inside the project, is not detected; restart the ferret to load it.
 - The `arguments` reason is never answered in 5.0, and a new harness binary or version is not a setting, so
   neither shows as "Running with older settings".
+- A change of the runtime, the profile or the credential's environment since the launch is not detected either:
+  today's wrapper digest covered them, but in 5.0 nothing Runtimes or the Vault supply is compared. Restart the
+  ferret to apply it.

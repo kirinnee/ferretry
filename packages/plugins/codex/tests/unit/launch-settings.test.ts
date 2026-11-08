@@ -6,6 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import type { LaunchSpec, Runner, RunSpec } from '@ferretry/core-ferrets/contract';
 import type { FencedPath, FerretId, KernelPorts, RootHandle, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { state as kernelState } from '@ferretry/kernel/host';
 import { ok } from '@ferretry/std';
 import { CODEX_LAUNCH_SETTINGS, CODEX_ROLLOUTS, type HarnessConfig } from '../../contract/index.ts';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
@@ -80,6 +81,89 @@ const fresh = () => {
   return { folder, state: folder.port([CODEX_ROLLOUTS, CODEX_LAUNCH_SETTINGS]) };
 };
 
+/**
+ * The REAL kernel state port (the subsystem damage policy is the kernel's, not `MemoryStateFolder`'s) over an
+ * in-memory disk, holding one healthy record (`f2`) and one record of the named kind of bad (`f1`).
+ */
+const damagedShapes = {
+  'wrong schema': '{"format":1,"sections":{}}\n',
+  'not JSON': 'not json at all',
+  'a link (the disk refuses to read it)': undefined,
+} as const;
+
+async function realPortWithBadRecord(shape: keyof typeof damagedShapes, healthy: string) {
+  const memory = kernelState.createMemoryHostFs();
+  const base = '/fy/state/codex/launch-settings';
+  const link = `${base}/f1.json`;
+  await memory.writeAtomic(`${base}/f2.json`, healthy, 0o600);
+  await memory.writeAtomic(link, damagedShapes[shape] ?? '{}', 0o600);
+  const fs = {
+    ...memory,
+    readText: async (path: string) => {
+      if (shape.startsWith('a link') && path === link) throw new Error('ELOOP: a link is never followed');
+      return await memory.readText(path);
+    },
+    readBytes: async (path: string) => {
+      if (shape.startsWith('a link') && path === link) throw new Error('ELOOP: a link is never followed');
+      return await memory.readBytes(path);
+    },
+  };
+  const opening = await kernelState.openPluginState({
+    home: '/fy',
+    pluginId: 'codex',
+    files: [CODEX_ROLLOUTS, CODEX_LAUNCH_SETTINGS],
+    fs,
+    clock: { now: () => 0 as never },
+    kind: 'plugin',
+    liveTargets: true,
+  });
+  const changed: unknown[] = [];
+  const port = kernelState.createStatePort({
+    home: '/fy',
+    pluginId: 'codex',
+    files: [CODEX_ROLLOUTS, CODEX_LAUNCH_SETTINGS],
+    fs,
+    initialDamage: opening.damaged,
+    initialNarrowed: opening.narrowed,
+    changed: damage => changed.push(damage),
+  });
+  return { opening, port, changed, memory };
+}
+
+const HEALTHY_RECORD = `${JSON.stringify({ format: 1, sections: { 'permission-mode': 'a'.repeat(64), 'fixed-layer': 'b'.repeat(64) } })}\n`;
+
+describe('F-0422 one bad launch-settings record is that ferret’s nothing-to-say, never the whole plugin’s damage', () => {
+  for (const shape of Object.keys(damagedShapes) as (keyof typeof damagedShapes)[]) {
+    test(`F-0422 ${shape}: the plugin stays healthy at boot and on a read, the answer is unknown, and another ferret is unaffected`, async () => {
+      const { opening, port, changed } = await realPortWithBadRecord(shape, HEALTHY_RECORD);
+      expect(CODEX_LAUNCH_SETTINGS.onDamaged).not.toBe('subsystem');
+      expect(opening.damaged).toEqual([]);
+
+      const harness = over({ value: 'auto' }, port);
+      const bad = await harness.launchSettings?.(FERRET);
+      const good = await harness.launchSettings?.('f2' as FerretId);
+
+      expect(bad).toEqual({ kind: 'unknown' });
+      expect(port.damaged()).toEqual([]);
+      expect(changed).toEqual([]);
+      // The neighbour's record still reads: it is another ferret's, and answers a comparison.
+      expect(good?.kind).not.toBe('unknown');
+    });
+
+    test(`F-0422 ${shape}: the ferret's next launch still starts and clears the bad record, with the plugin healthy throughout`, async () => {
+      const { port, changed, memory } = await realPortWithBadRecord(shape, HEALTHY_RECORD);
+      const harness = over({ value: 'auto' }, port);
+
+      const started = await harness.start(spec, runner, {} as never);
+
+      expect(started.ok).toBe(true);
+      expect(port.damaged()).toEqual([]);
+      expect(changed).toEqual([]);
+      expect(await memory.readText('/fy/state/codex/launch-settings/f1.json')).toBeUndefined();
+    });
+  }
+});
+
 describe('F-0422 Codex records what a launch ran under', () => {
   test('F-0422 a start records two values-free fingerprints in state/codex/launch-settings/<ferret>.json and is current', async () => {
     const { folder, state } = fresh();
@@ -94,6 +178,26 @@ describe('F-0422 Codex records what a launch ran under', () => {
     for (const digest of Object.values(record.sections)) expect(digest).toMatch(/^[0-9a-f]{64}$/u);
     for (const value of [FOLDER, HOME, 'auto', 'on-request', 'workspace-write']) expect(raw).not.toContain(value);
     expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+  });
+
+  test('F-0422 a launch reads the permission mode once, so the argv and the record describe the same setting', async () => {
+    const { state } = fresh();
+    let reads = 0;
+    const flipping = {
+      get value(): HarnessConfig['permissionMode'] {
+        reads += 1;
+        return reads === 1 ? 'auto' : 'skip';
+      },
+    };
+    const harness = over(flipping, state);
+
+    expect((await harness.start(spec, runner, {} as never)).ok).toBe(true);
+    expect(reads).toBe(1);
+    // The one read was 'auto'; the next read (the comparison) is 'skip', so the record shows that mode as the launched one.
+    expect(await harness.launchSettings?.(FERRET)).toEqual({
+      kind: 'drifted',
+      sections: ['permission-mode', 'fixed-layer'],
+    });
   });
 
   test('F-0422 a permission mode changed since the launch names its sections, and a resume records afresh', async () => {

@@ -147,16 +147,21 @@ export class ClaudeHarness implements Harness {
   }
 
   async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
+    return await this.prepareHomeFrom(spec, this.launchInputs());
+  }
+
+  /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
+  private async prepareHomeFrom(spec: LaunchSpec, inputs: LaunchSettingsInputs): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
     // GAP (skills): `skill` parts are not materialized. `copyTree` takes only this plugin's own root handles, and no
     // root this manifest declares reaches a skill source; it waits for the Skills plugin to hand one over.
     const text = homeText({
       folder: spec.folder,
-      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
+      permissionMode: inputs.permissionMode,
       instructions: spec.instructions,
       parts: spec.parts,
-      settings: this.deps.config.collection(settingsCollection) as never,
-      hooks: this.deps.config.collection(hooksCollection) as never,
+      settings: inputs.settings as never,
+      hooks: inputs.hooks as never,
       effort: spec.effort,
     });
     const files: FencedPath[] = [];
@@ -317,19 +322,21 @@ export class ClaudeHarness implements Harness {
     if (!isConversationId(conversation.id)) throw new Error('the conversation id must be one plain name (S45)');
     const found = await this.discover();
     if (!found.found) return err('unavailable');
-    await this.prepareHome(spec);
-    const config = this.deps.config.file(configFile);
+    // ONE read of the configuration per launch: the home, the argv and the record all describe the same settings, so a
+    // reload between them cannot leave a record that differs from what the process runs on.
+    const inputs = this.launchInputs();
+    await this.prepareHomeFrom(spec, inputs);
     const command = launchCommand({
       binary: found.binary,
       home: spec.home,
-      permissionMode: config?.permissionMode ?? 'auto',
+      permissionMode: inputs.permissionMode,
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
       conversation,
       readable: spec.readable,
     });
     const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env };
-    await this.recordLaunchSettings(spec.ferret, config?.permissionMode ?? 'auto');
+    await this.recordLaunchSettings(spec.ferret, inputs);
     // Persist only the identity and cwd we chose, so a fresh daemon reads the same exact transcript.
     const home = this.home(spec.ferret);
     await home.writeText(
@@ -447,9 +454,9 @@ export class ClaudeHarness implements Harness {
   }
 
   /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
-  private launchInputs(permissionMode?: HarnessConfig['permissionMode']): LaunchSettingsInputs {
+  private launchInputs(): LaunchSettingsInputs {
     return {
-      permissionMode: permissionMode ?? this.deps.config.file(configFile)?.permissionMode ?? 'auto',
+      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
       settings: this.deps.config.collection(settingsCollection) as never,
       hooks: this.deps.config.collection(hooksCollection) as never,
     };
@@ -460,13 +467,9 @@ export class ClaudeHarness implements Harness {
    * cannot be written, the one an earlier launch left is removed, so the answer for this process is `unknown` and
    * never an older launch's.
    */
-  private async recordLaunchSettings(ferret: FerretId, permissionMode: HarnessConfig['permissionMode']): Promise<void> {
+  private async recordLaunchSettings(ferret: FerretId, inputs: LaunchSettingsInputs): Promise<void> {
     try {
-      await this.deps.state.write(
-        CLAUDE_CODE_LAUNCH_SETTINGS,
-        launchSettingsRecord(this.launchInputs(permissionMode)),
-        ferret,
-      );
+      await this.deps.state.write(CLAUDE_CODE_LAUNCH_SETTINGS, launchSettingsRecord(inputs), ferret);
     } catch {
       try {
         await this.deps.state.remove(CLAUDE_CODE_LAUNCH_SETTINGS, ferret);

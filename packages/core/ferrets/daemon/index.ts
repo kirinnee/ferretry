@@ -682,6 +682,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           const found = hooks.provider(Harnesses, key);
           return found === 'unavailable' ? undefined : found;
         },
+        after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
       }),
     }),
   );

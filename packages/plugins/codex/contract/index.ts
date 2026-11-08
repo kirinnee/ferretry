@@ -141,6 +141,7 @@ export const CODEX_LAUNCH_SETTINGS = defineState({
   store: 'json',
   format: 1,
   schema: CodexLaunchSettingsRecordSchema,
+  onDamaged: { narrower: 'a damaged launch record reads as unknown: nothing to say until the next launch' },
 });
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────

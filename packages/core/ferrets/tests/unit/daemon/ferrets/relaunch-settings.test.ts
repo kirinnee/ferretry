@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import type { TestHost } from '@ferretry/kernel/testing';
 import type { FerretId, HarnessLaunchSettings } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
-import { relaunchSettings } from '../../../../daemon/modules/relaunch-settings.ts';
+import { RELAUNCH_SETTINGS_TIMEOUT_MS, relaunchSettings } from '../../../../daemon/modules/relaunch-settings.ts';
 import type { SessionId } from '../../../../daemon/lib/session-id.ts';
 import { as, host } from './route-fixture.ts';
 
@@ -132,15 +132,59 @@ describe('R-0169 GET /v1/ferrets/:ferretId/relaunch-settings', () => {
   });
 });
 
+/** A timer that never fires: the harness answers first. */
+const never = () => () => {};
+
 describe('the relaunch-settings read over the harness hook', () => {
   const ID = 'f1' as unknown as SessionId;
+
+  test('R-0169 a harness that does not answer in time claims nothing, on the kernel clock, and never throws', async () => {
+    const harness = new FakeHarness();
+    harness.launchSettings = () => new Promise(() => {});
+    const timers: { delayMs: number; fire: () => void; cancelled: boolean }[] = [];
+    const served = relaunchSettings({
+      harnessOf: () => 'claude-code',
+      harness: () => harness,
+      after: (delayMs, fire) => {
+        const timer = { delayMs, fire, cancelled: false };
+        timers.push(timer);
+        return () => {
+          timer.cancelled = true;
+        };
+      },
+    });
+
+    const pending = served.drift(ID);
+    await Promise.resolve();
+    expect(timers.map(timer => timer.delayMs)).toEqual([RELAUNCH_SETTINGS_TIMEOUT_MS]);
+    timers[0]?.fire();
+
+    expect(await pending).toEqual({ current: true, reasons: [] });
+    expect(timers[0]?.cancelled).toBe(true);
+  });
+
+  test('R-0169 a prompt answer cancels the timer', async () => {
+    const harness = new FakeHarness();
+    harness.launchAnswers.set('f1' as FerretId, { kind: 'drifted', sections: ['settings'] });
+    let cancelled = 0;
+    const served = relaunchSettings({
+      harnessOf: () => 'claude-code',
+      harness: () => harness,
+      after: () => () => {
+        cancelled += 1;
+      },
+    });
+
+    expect(await served.drift(ID)).toEqual({ current: false, reasons: ['settings'] });
+    expect(cancelled).toBe(1);
+  });
 
   test('a ferret whose harness plugin is not loaded, or whose record names none, claims nothing', async () => {
     const harness = new FakeHarness();
     harness.launchAnswers.set('f1' as FerretId, { kind: 'drifted', sections: ['settings'] });
-    const gone = relaunchSettings({ harnessOf: () => 'claude-code', harness: () => undefined });
-    const unheld = relaunchSettings({ harnessOf: () => undefined, harness: () => harness });
-    const served = relaunchSettings({ harnessOf: () => 'claude-code', harness: () => harness });
+    const gone = relaunchSettings({ harnessOf: () => 'claude-code', harness: () => undefined, after: never });
+    const unheld = relaunchSettings({ harnessOf: () => undefined, harness: () => harness, after: never });
+    const served = relaunchSettings({ harnessOf: () => 'claude-code', harness: () => harness, after: never });
 
     expect(await gone.drift(ID)).toEqual({ current: true, reasons: [] });
     expect(await unheld.drift(ID)).toEqual({ current: true, reasons: [] });

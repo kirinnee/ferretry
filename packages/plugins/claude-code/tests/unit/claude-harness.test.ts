@@ -3,6 +3,7 @@ import type { LaunchSpec, Runner } from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
 import type { FerretId, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { state as kernelState } from '@ferretry/kernel/host';
 import { CLAUDE_CODE_HOOKS, CLAUDE_CODE_LAUNCH_SETTINGS, CLAUDE_CODE_SETTINGS } from '../../contract/index.ts';
 import { type Instant, ok } from '@ferretry/std';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
@@ -638,6 +639,91 @@ harnessConformance('Claude Code (real kernel roots)', () => {
 
 // ─── W2-c: what a launch ran under (Harness.launchSettings; today's FileLaunchSettingsDigest, F-0422) ──────────────
 
+/**
+ * The REAL kernel state port (the subsystem damage policy is the kernel's, not `MemoryStateFolder`'s) over an
+ * in-memory disk, holding one healthy record (`f2`) and one record of the named kind of bad (`f1`).
+ */
+const damagedShapes = {
+  'wrong schema': '{"format":1,"sections":{}}\n',
+  'not JSON': 'not json at all',
+  'a link (the disk refuses to read it)': undefined,
+} as const;
+
+async function realPortWithBadRecord(shape: keyof typeof damagedShapes, healthy: string) {
+  const memory = kernelState.createMemoryHostFs();
+  const base = '/fy/state/claude-code/launch-settings';
+  const link = `${base}/f1.json`;
+  await memory.writeAtomic(`${base}/f2.json`, healthy, 0o600);
+  await memory.writeAtomic(link, damagedShapes[shape] ?? '{}', 0o600);
+  const fs = {
+    ...memory,
+    readText: async (path: string) => {
+      if (shape.startsWith('a link') && path === link) throw new Error('ELOOP: a link is never followed');
+      return await memory.readText(path);
+    },
+    readBytes: async (path: string) => {
+      if (shape.startsWith('a link') && path === link) throw new Error('ELOOP: a link is never followed');
+      return await memory.readBytes(path);
+    },
+  };
+  const opening = await kernelState.openPluginState({
+    home: '/fy',
+    pluginId: 'claude-code',
+    files: [CLAUDE_CODE_LAUNCH_SETTINGS],
+    fs,
+    clock: { now: () => 0 as never },
+    kind: 'plugin',
+    liveTargets: true,
+  });
+  const changed: unknown[] = [];
+  const port = kernelState.createStatePort({
+    home: '/fy',
+    pluginId: 'claude-code',
+    files: [CLAUDE_CODE_LAUNCH_SETTINGS],
+    fs,
+    initialDamage: opening.damaged,
+    initialNarrowed: opening.narrowed,
+    changed: damage => changed.push(damage),
+  });
+  return { opening, port, changed, memory };
+}
+
+const HEALTHY_RECORD = `${JSON.stringify({ format: 1, sections: Object.fromEntries(['fixed-layer', 'hooks', 'permission-mode', 'settings'].map(name => [name, 'a'.repeat(64)])) })}\n`;
+
+describe('F-0422 one bad launch-settings record is that ferret’s nothing-to-say, never the whole plugin’s damage', () => {
+  for (const shape of Object.keys(damagedShapes) as (keyof typeof damagedShapes)[]) {
+    test(`F-0422 ${shape}: the plugin stays healthy at boot and on a read, the answer is unknown, and another ferret is unaffected`, async () => {
+      const { opening, port, changed } = await realPortWithBadRecord(shape, HEALTHY_RECORD);
+      expect(CLAUDE_CODE_LAUNCH_SETTINGS.onDamaged).not.toBe('subsystem');
+      // Boot: nothing the plugin answers `store_damaged` over.
+      expect(opening.damaged).toEqual([]);
+
+      const { harness } = build({ state: port });
+      const bad = await harness.launchSettings(FERRET);
+      const good = await harness.launchSettings('f2' as FerretId);
+
+      expect(bad).toEqual({ kind: 'unknown' });
+      // Runtime: the read did not flip the subsystem, and the host was never told of damage.
+      expect(port.damaged()).toEqual([]);
+      expect(changed).toEqual([]);
+      // The neighbour's record still reads (it names settings this config does not have, so it is not unknown).
+      expect(good.kind).not.toBe('unknown');
+    });
+
+    test(`F-0422 ${shape}: the ferret's next launch still starts and clears the bad record, with the plugin healthy throughout`, async () => {
+      const { port, changed, memory } = await realPortWithBadRecord(shape, HEALTHY_RECORD);
+      const { harness } = build({ state: port });
+
+      const started = await harness.start(spec(), runner({}), {} as never);
+
+      expect(started.ok).toBe(true);
+      expect(port.damaged()).toEqual([]);
+      expect(changed).toEqual([]);
+      expect(await memory.readText('/fy/state/claude-code/launch-settings/f1.json')).toBeUndefined();
+    });
+  }
+});
+
 describe('F-0422 Claude Code records what a launch ran under and compares it with its settings now', () => {
   /** A setting value and a path: neither may be kept in the record or leave in an answer. */
   const SECRET = 'sk-live-W2C-claude-0123456789';
@@ -677,6 +763,28 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     expect(Object.keys(record.sections).toSorted()).toEqual(['fixed-layer', 'hooks', 'permission-mode', 'settings']);
     for (const digest of Object.values(record.sections)) expect(digest).toMatch(/^[0-9a-f]{64}$/u);
     for (const value of [SECRET, '/work', 'auto', 'opus', 'API_TOKEN', HOME]) expect(raw).not.toContain(value);
+  });
+
+  test('F-0422 a launch reads the configuration once, so the home, the argv and the record cannot describe different settings', async () => {
+    const config = configured();
+    const reads = { file: 0, settings: 0, hooks: 0 };
+    const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+    const { harness } = build({
+      state,
+      config: {
+        file: () => (reads.file++, { searchPaths: [], permissionMode: config.permissionMode }),
+        collection: definition => {
+          if (definition === CLAUDE_CODE_SETTINGS) return reads.settings++, config.settings;
+          if (definition === CLAUDE_CODE_HOOKS) return reads.hooks++, config.hooks;
+          return new Map();
+        },
+      },
+    });
+
+    expect((await harness.start(spec(), runner({}), {} as never)).ok).toBe(true);
+    expect(reads).toEqual({ file: 1, settings: 1, hooks: 1 });
+    expect((await harness.resume(spec(), runner({}), {} as never, 'a-conversation-1')).ok).toBe(true);
+    expect(reads).toEqual({ file: 2, settings: 2, hooks: 2 });
   });
 
   test('F-0422 nothing changed since the launch is current; the effort a launch asked for is not a setting', async () => {
