@@ -56,14 +56,33 @@ function buildHalf(entry: SurfaceEntry, client: ShellPluginClient): BuiltHalf {
   };
 }
 
-/** Memoised halves per daemon. Cleared for a daemon when it is unpaired or its client is replaced. */
+/**
+ * Memoised halves per daemon, and the ONE client each was built with: a half's app hooks (`shell.hooks`) are built
+ * over that same client, so what a hook reads and what the half's views read is one store. Cleared for a daemon when
+ * it is unpaired or its client is replaced.
+ */
 export class HalfCache {
   readonly #byDaemon = new Map<string, Map<string, BuiltHalf>>();
+  readonly #clients = new Map<string, Map<string, ShellPluginClient>>();
 
   constructor(
     private readonly surfaces: ReadonlyMap<string, SurfaceEntry>,
     private readonly clientFor: (daemon: string, packageId: string) => ShellPluginClient | undefined,
   ) {}
+
+  /** The client a package's half on this daemon is (or will be) built with; `undefined` before the daemon answers. */
+  client(daemon: string, packageId: string): ShellPluginClient | undefined {
+    let clients = this.#clients.get(daemon);
+    if (clients === undefined) {
+      clients = new Map();
+      this.#clients.set(daemon, clients);
+    }
+    const known = clients.get(packageId);
+    if (known !== undefined) return known;
+    const client = this.clientFor(daemon, packageId);
+    if (client !== undefined) clients.set(packageId, client);
+    return client;
+  }
 
   get(daemon: string, packageId: string): BuiltHalf | undefined {
     const entry = this.surfaces.get(packageId);
@@ -75,7 +94,7 @@ export class HalfCache {
     }
     const cached = halves.get(packageId);
     if (cached !== undefined) return cached;
-    const client = this.clientFor(daemon, packageId);
+    const client = this.client(daemon, packageId);
     if (client === undefined) return undefined;
     const built = buildHalf(entry, client);
     halves.set(packageId, built);
@@ -84,6 +103,7 @@ export class HalfCache {
 
   clearDaemon(daemon: string): void {
     this.#byDaemon.delete(daemon);
+    this.#clients.delete(daemon);
   }
 }
 

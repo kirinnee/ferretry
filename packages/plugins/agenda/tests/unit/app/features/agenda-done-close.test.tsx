@@ -9,6 +9,7 @@ import type { DoneCloseResult, DoneCloseSource } from '../../../../app/lib/agend
 import { type InboxAction, swipeMap } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { daemonConnection } from '../../../../app/shell.ts';
 import {
   type BoardMove,
   type BoardRead,
@@ -16,7 +17,6 @@ import {
   deferred,
   fakeDoneCloseBoard,
   flush,
-  laneSetFor,
   laptop,
   moved,
   refusedMove,
@@ -28,7 +28,6 @@ afterEach(async () => {
   view = null;
 });
 
-const lanes = laneSetFor();
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 
 const closing = (extra: Partial<AgendaItem> = {}): AgendaItem =>
@@ -36,12 +35,12 @@ const closing = (extra: Partial<AgendaItem> = {}): AgendaItem =>
 
 type World = ReturnType<typeof fakeDoneCloseBoard>;
 
-/** The board a host hands the ask surfaces: a card on the classic lanes, read and moved through a fake. */
+/** The board Board's hook hands the ask surfaces: a card read and closed through a stand-in. */
 const world = (
   options: { readonly task?: () => Promise<BoardRead>; readonly act?: () => Promise<BoardMove> } = {},
 ): World =>
   fakeDoneCloseBoard({
-    task: options.task ?? (async () => ({ task: card('F1', { laneId: 'tested' }), laneSet: lanes })),
+    task: options.task ?? (async () => ({ task: card('F1', { laneId: 'tested' }) })),
     ...(options.act === undefined ? {} : { act: options.act }),
   });
 
@@ -107,11 +106,14 @@ describe('Done · closes on an agenda item: when it is offered', () => {
     expect(chip()).toBeNull();
   });
 
+  test('draws nothing when the board it was handed is another machine’s', async () => {
+    // The hook is built per daemon: a card on this machine is never closed through another machine's board.
+    await drawItem(closing(), { ...world(), daemonId: daemonConnection({ daemonId: 'daemon/desk' }).daemonId });
+    expect(chip()).toBeNull();
+  });
+
   test('draws nothing for a card that is already closed or gone', async () => {
-    await drawItem(
-      closing(),
-      world({ task: async () => ({ task: card('F1', { laneId: 'closed' }), laneSet: lanes }) }),
-    );
+    await drawItem(closing(), world({ task: async () => ({ task: card('F1', { laneId: 'closed' }) }) }));
     expect(chip()).toBeNull();
     await view?.unmount();
     await drawItem(closing(), world({ task: async () => null }));
@@ -145,7 +147,7 @@ describe('Done · closes: one tap', () => {
     await interact(() => flush());
     expect(app.moves).toEqual(['F1:move:closed']);
     expect(acted).toEqual([]);
-    gate.resolve(moved({ task: card('F1', { laneId: 'closed' }), laneSet: lanes }));
+    gate.resolve(moved({ task: card('F1', { laneId: 'closed' }) }));
     await interact(() => flush());
     expect(acted).toHaveLength(1);
   });
@@ -172,9 +174,7 @@ describe('Done · closes: one tap', () => {
     expect(errorLine()).toBe('Not closed: &F1: the card could not be read');
     await view?.unmount();
     const dropped = card('F1', { laneId: 'tested', dropped: { at: '2026-08-01T10:00:00.000Z', reason: 'no' } });
-    await drawItem(closing(), world({ task: async () => ({ task: dropped, laneSet: lanes }) }), action =>
-      acted.push(action),
-    );
+    await drawItem(closing(), world({ task: async () => ({ task: dropped }) }), action => acted.push(action));
     await interact(() => theChip().click());
     await interact(() => flush());
     expect(errorLine()).toBe('Not closed: &F1: the board has no Done for this card');
