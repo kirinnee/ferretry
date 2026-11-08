@@ -501,5 +501,6 @@ export default definePlugin({
     roots: ['worktrees', 'work', 'harness-history'],
     spawn: ['git', 'ps'],
     hostFacts: true,
+    checkDirectory: true,
   },
 });

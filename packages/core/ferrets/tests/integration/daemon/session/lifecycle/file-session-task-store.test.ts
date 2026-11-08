@@ -51,8 +51,8 @@ describe('FileSessionTaskStore replay proof', () => {
     // Act
     const failure = await rejection(store.writeAssignedTask(SESSION, 'the task\n'));
 
-    // Assert: treating it as absent would publish over something nobody could read.
-    should(failure).be.instanceOf(Error);
+    // Assert: treating it as absent would publish over something nobody could read. The loop is the reason.
+    should(failure.code).equal('ELOOP');
   });
 
   it('should refuse a path that opens but cannot be read, and release what it opened', async () => {
@@ -63,8 +63,9 @@ describe('FileSessionTaskStore replay proof', () => {
     // Act
     const failure = await rejection(store.writeAssignedTask(SESSION, 'the task\n'));
 
-    // Assert
-    should(failure).be.instanceOf(Error);
+    // Assert: the kernel's root refuses it as "not a file" (a directory is not a document).
+    should(failure.name).equal('RootError');
+    should((failure as unknown as { refusal: string }).refusal).equal('not_a_file');
   });
 
   it('should replace an earlier, different document at the same path', async () => {

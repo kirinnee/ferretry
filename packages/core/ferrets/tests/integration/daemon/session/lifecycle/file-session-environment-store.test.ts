@@ -38,20 +38,23 @@ async function subject(syncFails?: Error): Promise<{
       ? disk
       : {
           ...disk,
-          openDirectory: async path => ({
-            ...(await disk.openDirectory(path)),
-            // fails only once the credential has been renamed onto its name: the window the case is about
-            sync: async () => {
-              if (
-                await access(join(directory, 'environment.json')).then(
-                  () => true,
-                  () => false,
+          openDirectory: async path => {
+            const proven = await disk.openDirectory(path);
+            return {
+              ...proven,
+              // fails only once the credential has been renamed onto its name: the window the case is about
+              sync: async () => {
+                if (
+                  await access(join(directory, 'environment.json')).then(
+                    () => true,
+                    () => false,
+                  )
                 )
-              )
-                throw syncFails;
-              await (await disk.openDirectory(path)).sync();
-            },
-          }),
+                  throw syncFails;
+                await proven.sync();
+              },
+            };
+          },
         },
   );
   return {
@@ -80,7 +83,7 @@ describe('FileSessionEnvironmentStore', () => {
   });
 
   it('should not flatten a read failure that is not absence into "no secret"', async () => {
-    // Arrange: the path exists but is a directory, so the read fails with EISDIR — a real fault.
+    // Arrange: the path exists but is a directory, so the root refuses it as "not a file" — a real fault.
     const { store } = await subject();
     await mkdir(store.file(SESSION), { recursive: true });
 
@@ -88,7 +91,8 @@ describe('FileSessionEnvironmentStore', () => {
     const failure = await rejection(store.read(SESSION));
 
     // Assert: launching with half an environment would be worse than refusing to launch.
-    should(failure).be.instanceOf(Error);
+    should(failure.name).equal('RootError');
+    should((failure as unknown as { refusal: string }).refusal).equal('not_a_file');
     should(failure.code).not.equal('ENOENT');
   });
 

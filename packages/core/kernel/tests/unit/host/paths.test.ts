@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
-import { checkDirectory } from '../../../host/paths.ts';
+import { checkDirectory, gatedPaths } from '../../../host/paths.ts';
+import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
+import { testHost } from '../../../testing/index.ts';
 
 /** `kernel.paths.checkDirectory`: today's session working-directory resolver, rule for rule and sentence for sentence. */
 
@@ -69,5 +71,51 @@ describe('checkDirectory', () => {
     await checkDirectory(disk, `${parent}/new/deeper`);
 
     expect(await Bun.file(`${parent}/new`).exists()).toBe(false);
+  });
+});
+
+describe('TT kernel.paths.checkDirectory is gated by permissions.checkDirectory', () => {
+  const base = { home: () => '/h', checkDirectory: async () => ({ ok: true as const, value: { realPath: '/x' } }) };
+
+  test('a declared plugin is answered; an undeclared one is refused naming the plugin', async () => {
+    expect(await gatedPaths('ferrets', true, base).checkDirectory('/x')).toEqual({
+      ok: true,
+      value: { realPath: '/x' },
+    });
+    await expect(gatedPaths('stranger', false, base).checkDirectory('/home/me/.ssh')).rejects.toThrow(
+      'stranger did not declare permissions.checkDirectory',
+    );
+    expect(gatedPaths('stranger', false, base).home()).toBe('/h');
+  });
+
+  test('the test host mirrors the real host: only a manifest that declares it can probe', async () => {
+    const seen: Record<string, () => Promise<unknown>> = {};
+    const half = (id: string, checkDirectory?: true) =>
+      implementDaemon(
+        definePlugin({
+          id,
+          title: id,
+          version: '5.0.0',
+          api: 5,
+          core: false,
+          kinds: [],
+          ...(checkDirectory === undefined ? {} : { permissions: { checkDirectory } }),
+        }),
+        {
+          build: ctx => {
+            seen[id] = () => ctx.kernel.paths.checkDirectory('/work/a');
+            return {};
+          },
+        },
+      );
+    const host = await testHost({
+      plugins: [half('declared', true), half('undeclared')],
+      directories: { '/work/a': '/real/a' },
+    });
+    expect(await seen['declared']?.()).toEqual({ ok: true, value: { realPath: '/real/a' } });
+    await expect(seen['undeclared']?.() ?? Promise.resolve()).rejects.toThrow(
+      'undeclared did not declare permissions.checkDirectory',
+    );
+    await host.stop();
   });
 });

@@ -164,7 +164,11 @@ async function opened(path: string, flags: number, mode?: number): Promise<[File
     identity = fileIdentityOf(await handle.stat({ bigint: true }));
     return [handle, identity];
   } finally {
-    if (identity === undefined) await handle.close();
+    if (identity === undefined) {
+      await handle.close().catch(() => undefined);
+      // An exclusive create made this name, so a file this call cannot describe is one only this call can remove.
+      if ((flags & constants.O_EXCL) !== 0) await unlink(path).catch(() => undefined);
+    }
   }
 }
 
@@ -295,7 +299,11 @@ export function nodeFs(
         // The exclusive create above is what made this name ours, so a failure after it leaves a partial private
         // file that only this call can remove. A create that LOST (EEXIST) never reaches here and removes nothing.
         await handle.close().catch(() => undefined);
-        await unlink(path).catch(() => undefined);
+        // Only while the name still reaches the file this call created: a concurrent replacing write may have
+        // renamed its own file over it, and that one belongs to its publisher.
+        const named = await lstat(path, { bigint: true }).catch(() => undefined);
+        if (named !== undefined && named.dev === identity.device && named.ino === identity.inode)
+          await unlink(path).catch(() => undefined);
         throw error;
       }
       await handle.close();

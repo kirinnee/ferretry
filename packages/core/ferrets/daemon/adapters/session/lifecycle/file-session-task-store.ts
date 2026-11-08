@@ -18,13 +18,13 @@
  * one function so they cannot disagree — and replacing the inode under an identical file is not
  * free: anything holding the old one keeps reading a file no name points at, and the agent may be
  * mid-read of the very document it was told to open. So identical bytes are proved durable in place
- * (`RootHandle.readDurable` reads and fsyncs ONE descriptor), and the path is proved to still reach
+ * (`RootHandle.readDurable` with `hold` reads and fsyncs ONE descriptor and keeps it open until the end), and the path is proved to still reach
  * that file before the call returns — a concurrent writer that published over the name during the
  * directory sync is a refusal, never a silent claim about a document nothing points at.
  */
 
 import { dirname } from 'node:path';
-import type { FencedPath, RootHandle, RootIdentity } from '@ferretry/kernel/contract';
+import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
 import type { SessionId } from '../../../lib/session-id.ts';
 import type { SessionTaskStore } from '../../../lib/session/lifecycle/index.ts';
 
@@ -32,7 +32,7 @@ import type { SessionTaskStore } from '../../../lib/session/lifecycle/index.ts';
 const TURNS_DIRECTORY = 'turns';
 
 /** What this store asks of the kernel's root. */
-export type TaskRoot = Pick<RootHandle, 'resolve' | 'publish' | 'readDurable' | 'syncDirectory' | 'fileIdentity'>;
+export type TaskRoot = Pick<RootHandle, 'resolve' | 'publish' | 'readDurable' | 'syncDirectory'>;
 
 export class FileSessionTaskStore implements SessionTaskStore {
   constructor(
@@ -48,18 +48,20 @@ export class FileSessionTaskStore implements SessionTaskStore {
 
   async writeAssignedTask(id: SessionId, document: string): Promise<string> {
     const file = this.file(id);
-    // An exact replay proves what is already there rather than replacing it — and keeps the identity of
-    // what it proved until the very end, because the claim is about the file this path NAMES when the
-    // call returns, not about the one it named a moment ago. Differing bytes are about to be replaced
-    // anyway, so they take the publish path.
-    const proved = await this.root.readDurable(file);
-    if (proved !== undefined && new TextDecoder().decode(proved.bytes) === document) {
+    // An exact replay proves what is already there rather than replacing it — and HOLDS the file it proved until
+    // the very end (the descriptor pins the inode, so it cannot be freed and reused), because the claim is about the
+    // file this path NAMES when the call returns, not about the one it named a moment ago. Differing bytes are about
+    // to be replaced anyway, so they take the publish path.
+    const bytes = new TextEncoder().encode(document);
+    const replayed = await this.root.readDurable(file, undefined, async held => {
+      if (new TextDecoder().decode(held.bytes) !== document) return false;
       // The folder's own entry and the entry naming it, parent first.
       await this.root.syncDirectory(dirname(file) as FencedPath, { parent: true });
-      await this.assertStillNames(file, proved.identity);
-      return file;
-    }
-    await this.root.publish(file, new TextEncoder().encode(document), { mode: 0o600 });
+      await this.assertStillNames(file, held.stillNames);
+      return true;
+    });
+    if (replayed === true) return file;
+    await this.root.publish(file, bytes, { mode: 0o600 });
     return file;
   }
 
@@ -77,9 +79,8 @@ export class FileSessionTaskStore implements SessionTaskStore {
    * this call did not know it was in. A refusal fails the launch, which the lifecycle already records
    * and a retry re-drives against whatever is genuinely there.
    */
-  private async assertStillNames(file: FencedPath, proved: RootIdentity): Promise<void> {
-    const named = await this.root.fileIdentity(file);
-    if (named !== undefined && named.device === proved.device && named.inode === proved.inode) return;
+  private async assertStillNames(file: FencedPath, stillNames: () => Promise<boolean>): Promise<void> {
+    if (await stillNames()) return;
     throw new Error(
       `${file} stopped naming the turn-one document this write proved: another writer published over ` +
         'it, so this call refuses rather than overwriting a document it never read',

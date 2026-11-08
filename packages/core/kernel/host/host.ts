@@ -47,7 +47,7 @@ import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { checkDirectory } from './paths.ts';
+import { checkDirectory, gatedPaths } from './paths.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import { type InstalledItems, installedItemReach } from './items.ts';
@@ -658,7 +658,7 @@ async function bootLocked(
       stopping: () => lifecycle.stopping(),
     }),
     identity: identityPort,
-    paths: ownerPaths,
+    paths: gatedPaths(manifest.id, manifest.permissions?.checkDirectory === true, ownerPaths),
     updateHost: updateHostOf(manifest, adapters, options.version),
     hostFacts:
       manifest.permissions?.hostFacts === true
@@ -963,8 +963,7 @@ async function bootLocked(
     }
     for (const decl of manifest.actions?.agentTools ?? []) {
       const handle = (half?.tools as Readonly<Record<string, unknown>> | undefined)?.[decl.name] as
-        | ToolHandler
-        | undefined;
+        ToolHandler | undefined;
       tools.set(`${manifest.id}/${decl.name}`, { decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
   }

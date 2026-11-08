@@ -480,13 +480,18 @@ export interface RootPublishOptions {
 
 /** What a {@link RootHandle.publish} came to: the file the name now reaches, or that someone else's was there first. */
 export type RootPublished =
-  | { readonly outcome: 'published'; readonly identity: RootIdentity }
-  | { readonly outcome: 'exists' };
+  { readonly outcome: 'published'; readonly identity: RootIdentity } | { readonly outcome: 'exists' };
 
 /** {@link RootHandle.readDurable}: the bytes, and the identity of the file they were read from. */
 export interface RootDurableRead {
   readonly bytes: Uint8Array;
   readonly identity: RootIdentity;
+}
+
+/** {@link RootHandle.readDurableHeld}: what was read, and a question the caller asks while the file is still held. */
+export interface RootDurableHeld extends RootDurableRead {
+  /** Whether the NAME still reaches the very inode that was read (the descriptor pins it, so it cannot be reused). */
+  stillNames(): Promise<boolean>;
 }
 
 /**
@@ -523,9 +528,17 @@ export interface RootHandle {
   /**
    * Reads a file through one held descriptor and fsyncs THAT descriptor before answering, so the bytes returned are
    * the bytes made durable; `undefined` only when nothing is at the name. Fenced exactly as `readBytes`; a name that
-   * is mid-publish by `link` (two names for a moment) is waited out briefly rather than refused.
+   * is mid-publish by `link` (two names for a moment) is waited out briefly rather than refused (and
+   * a leftover second name of this root's own interrupted publish is removed). With `hold`, the descriptor stays OPEN
+   * until `hold` settles and its answer is returned (`hold` is not called when nothing is at the name), so a caller
+   * that syncs the folder and then asks `stillNames` compares against an inode that cannot have been freed and
+   * reused meanwhile.
    */
-  readDurable(path: FencedPath, limitBytes?: number): Promise<RootDurableRead | undefined>;
+  readDurable<T = RootDurableRead>(
+    path: FencedPath,
+    limitBytes?: number,
+    hold?: (read: RootDurableHeld) => Promise<T>,
+  ): Promise<T | undefined>;
   /**
    * Syncs one folder's entries, with `parent` the folder's own parent first (when that parent is still inside the root).
    * A platform that cannot sync a directory (`EINVAL`, `ENOTSUP`, `EPERM`) is tolerated; anything else throws.

@@ -4,6 +4,7 @@ import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
+import { gatedPaths } from '../host/paths.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
@@ -720,14 +721,17 @@ async function start(world: World): Promise<TestHost> {
           inodes.set(path, inode);
           return { outcome: 'published', identity: { device: 1n, inode } };
         },
-        readDurable: async (path, limit) => {
+        readDurable: async (path, limit, hold) => {
           const text = world.roots.get(path);
           if (text === undefined) return undefined;
           const bytes = new TextEncoder().encode(text);
-          return {
-            bytes: limit === undefined ? bytes : bytes.slice(0, limit),
-            identity: { device: 1n, inode: inodes.get(path) ?? 0n },
-          };
+          const identity = { device: 1n, inode: inodes.get(path) ?? 0n };
+          const read = { bytes: limit === undefined ? bytes : bytes.slice(0, limit), identity };
+          if (hold === undefined) return read as never;
+          return await hold({
+            ...read,
+            stillNames: async () => world.roots.has(path) && (inodes.get(path) ?? 0n) === identity.inode,
+          });
         },
         syncDirectory: async () => {},
         fileIdentity: async path => (world.roots.has(path) ? { device: 1n, inode: inodes.get(path) ?? 0n } : undefined),
@@ -848,8 +852,7 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
+                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
                 )?.[name],
               parsed.host,
             )
@@ -873,8 +876,7 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
+                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
                 )?.[name],
               parsed.host,
             )
@@ -891,25 +893,29 @@ async function start(world: World): Promise<TestHost> {
         },
       },
       identity,
-      paths: Object.freeze({
-        home: () => options.ownerHome ?? '/home/owner',
-        // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
-        checkDirectory: async (absolutePath: string) => {
-          const requested = absolutePath.trim();
-          if (!requested.startsWith('/'))
-            return err({
-              reason: 'not_absolute' as const,
-              message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
-            });
-          const real = options.directories?.[requested];
-          return real === undefined
-            ? err({
-                reason: 'not_a_directory' as const,
-                message: `session working directory is not a directory: ${requested}`,
-              })
-            : ok({ realPath: real });
-        },
-      }),
+      paths: gatedPaths(
+        manifest.id,
+        manifest.permissions?.checkDirectory === true,
+        Object.freeze({
+          home: () => options.ownerHome ?? '/home/owner',
+          // The test world keeps no disk: a directory is one the test named in `options.directories` (its real path).
+          checkDirectory: async (absolutePath: string) => {
+            const requested = absolutePath.trim();
+            if (!requested.startsWith('/'))
+              return err({
+                reason: 'not_absolute' as const,
+                message: `session working directory must be absolute: ${JSON.stringify(absolutePath)}`,
+              });
+            const real = options.directories?.[requested];
+            return real === undefined
+              ? err({
+                  reason: 'not_a_directory' as const,
+                  message: `session working directory is not a directory: ${requested}`,
+                })
+              : ok({ realPath: real });
+          },
+        }),
+      ),
       updateHost:
         manifest.permissions?.updateHost === true && options.updateHost !== undefined
           ? options.updateHost

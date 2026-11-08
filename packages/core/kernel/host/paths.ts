@@ -1,6 +1,6 @@
 import { err, ok, type Result } from '@ferretry/std';
 import { isAbsolute } from 'node:path';
-import type { CheckedDirectory, DirectoryRefusal } from '../contract/ports.ts';
+import type { CheckedDirectory, DirectoryRefusal, PathsPort } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 
 /**
@@ -25,4 +25,19 @@ export async function checkDirectory(
   if (real === undefined || found?.kind !== 'directory')
     return err({ reason: 'not_a_directory', message: `session working directory is not a directory: ${requested}` });
   return ok({ realPath: real });
+}
+
+/**
+ * What a plugin holds as `kernel.paths`. `checkDirectory` answers for ANY absolute path, with no root and no fence
+ * (`~/.ssh` answers like any other), so only a manifest that declares `permissions.checkDirectory` gets it; any
+ * other plugin's call is refused naming the plugin (the way `hostFacts` is).
+ */
+export function gatedPaths(plugin: string, declared: boolean, base: PathsPort): PathsPort {
+  if (declared) return base;
+  return Object.freeze({
+    home: base.home,
+    checkDirectory: async () => {
+      throw new Error(`${plugin} did not declare permissions.checkDirectory, so it probes no absolute path.`);
+    },
+  });
 }

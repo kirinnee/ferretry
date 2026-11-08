@@ -21,6 +21,7 @@ import type {
   RootName,
   RootsPort,
   RootStat,
+  RootDurableRead,
   RootIdentity,
   RootPublished,
   RootPublishOptions,
@@ -69,13 +70,7 @@ export interface RootLayout {
  * that cannot reach an entry through its checked folder, S44).
  */
 export type RootRefusal =
-  | FolderRefusal
-  | 'read_only'
-  | 'not_declared'
-  | 'hard_link'
-  | 'changed'
-  | 'not_a_file'
-  | 'no_descriptor_reach';
+  FolderRefusal | 'read_only' | 'not_declared' | 'hard_link' | 'changed' | 'not_a_file' | 'no_descriptor_reach';
 
 export class RootError extends Error {
   constructor(readonly refusal: RootRefusal) {
@@ -222,9 +217,24 @@ interface Scope {
  * Today's `openedFolderProblem`: the folder opened at `real` is a folder, is the one at `real` now (same real path,
  * same device and inode), is inside the root, and (an owner's root) is outside the fence by identity.
  */
-async function openCheckedFolder(scope: Scope, real: string): Promise<OpenedDirectory> {
+async function openCheckedFolder(scope: Scope, real: string): Promise<OpenedDirectory>;
+async function openCheckedFolder(
+  scope: Scope,
+  real: string,
+  tolerateUnsupported: true,
+): Promise<OpenedDirectory | undefined>;
+async function openCheckedFolder(
+  scope: Scope,
+  real: string,
+  tolerateUnsupported = false,
+): Promise<OpenedDirectory | undefined> {
   if (!within(scope.base.real, real)) refuse('link_escape');
-  const folder = await scope.fs.openDirectory(real).catch(() => refuse('changed'));
+  const folder = await scope.fs.openDirectory(real).catch((error: unknown) => {
+    // Today's `fsync*Directory` tolerated EINVAL/ENOTSUP/EPERM at the OPEN too: only the sync asks for this.
+    if (tolerateUnsupported && ['EINVAL', 'ENOTSUP', 'EPERM'].includes(errnoOf(error) ?? '')) return undefined;
+    return refuse('changed');
+  });
+  if (folder === undefined) return undefined;
   const problem = await folderProblem(scope, real, folder.identity);
   if (problem !== undefined) {
     await folder.close();
@@ -434,7 +444,8 @@ const identityOfEntry = (found: FileIdentity): RootIdentity => ({ device: found.
 
 /** Syncs one checked folder's entries, opened fresh through the fence and proven before the sync. */
 async function syncChecked(scope: Scope, real: string): Promise<void> {
-  const folder = await openCheckedFolder(scope, real);
+  const folder = await openCheckedFolder(scope, real, true);
+  if (folder === undefined) return;
   try {
     await folder.sync();
   } finally {
@@ -461,9 +472,9 @@ function ancestorsToPersist(scope: Scope, created: readonly string[], leafFolder
 /**
  * The durable publish (today's effect ledger, task store and environment store, one place): ancestors synced parent
  * first, the content in a new temp file (`O_EXCL | O_NOFOLLOW`, exactly `mode`, fsync'd by `writeNew`), moved onto
- * the leaf by `link(2)` (`exclusive`) or by rename, then the folder synced. The temp name is released on every path
- * out of a link (it stays a second name for the same inode) and on a failed rename, never after a successful rename
- * (the name is free again and another publisher may own it).
+ * the leaf by `link(2)` (`exclusive`) or by rename, then the folder synced. The temp name is released right after a
+ * link (before the folder sync) and on a failed link or rename, never after a successful rename (the name is free
+ * again and another publisher may own it).
  */
 async function publishChecked(
   scope: Scope,
@@ -489,17 +500,18 @@ async function publishChecked(
     const leafPath = await entry(scope, folder, parent, leaf);
     if (options.exclusive === true) {
       try {
-        try {
-          await scope.fs.link(tempPath, leafPath);
-        } catch (error) {
-          if (errnoOf(error) !== 'EEXIST') throw error;
-          return { outcome: 'exists' };
-        }
-        await folder.sync();
-        return { outcome: 'published', identity: identityOfEntry(made) };
-      } finally {
+        await scope.fs.link(tempPath, leafPath);
+      } catch (error) {
         await scope.fs.unlink(tempPath).catch(() => undefined);
+        if (errnoOf(error) !== 'EEXIST') throw error;
+        return { outcome: 'exists' };
       }
+      // The second name goes BEFORE the folder sync, so one directory fsync persists the new name and the removed
+      // temp together: a crash or a power cut can never leave the leaf with two names, and a loser reading while
+      // the winner syncs sees one name. A failed unlink leaves a leftover that `readDurable` knows how to adopt.
+      await scope.fs.unlink(tempPath).catch(() => undefined);
+      await folder.sync();
+      return { outcome: 'published', identity: identityOfEntry(made) };
     }
     try {
       await scope.fs.rename(tempPath, leafPath);
@@ -509,6 +521,36 @@ async function publishChecked(
     }
     await folder.sync();
     return { outcome: 'published', identity: identityOfEntry(made) };
+  } finally {
+    await folder.close();
+  }
+}
+
+/**
+ * A file with exactly one extra name, which is this root's own leftover `.<leaf>.<random>.tmp` from an interrupted
+ * exclusive publish (same folder, same device and inode): removes that name through the checked folder's descriptor
+ * and says so. A stranger's hard link (any other name, any other folder) is never touched, so it stays refused.
+ */
+async function adoptLeftoverName(scope: Scope, full: string): Promise<boolean> {
+  const target = await scope.fs.realpath(full);
+  const folderPath = dirname(target);
+  const leaf = basename(target);
+  const folder = await openCheckedFolder(scope, folderPath);
+  try {
+    const found = await scope.fs.identity(await entry(scope, folder, folderPath, leaf));
+    if (found?.kind !== 'file' || found.links !== 2) return false;
+    const names = (await scope.fs.list(folderPath)).filter(
+      name => name.length > leaf.length + 6 && name.startsWith(`.${leaf}.`) && name.endsWith('.tmp'),
+    );
+    let removed = false;
+    for (const name of names) {
+      const path = await entry(scope, folder, folderPath, name);
+      const sibling = await scope.fs.identity(path);
+      if (sibling?.kind !== 'file' || !same(found, sibling)) continue;
+      await scope.fs.unlink(path).catch(() => undefined);
+      removed = true;
+    }
+    return removed;
   } finally {
     await folder.close();
   }
@@ -851,6 +893,46 @@ function rootHandle(setup: HandleSetup): RootHandle {
   const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins } = setup;
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
+  /**
+   * Reads through one held descriptor and fsyncs THAT descriptor. `hold` (if any) runs while the descriptor is still
+   * open, so the inode it proved cannot be freed and reused before the caller's last compare (today's
+   * `assertStillNames`). `link` publishes by giving the file a second name for an instant: a reader that lands
+   * there first removes its OWN leftover temp name (an interrupted publish), then asks again after a brief wait. A
+   * file that really has several names stays refused after the last try.
+   */
+  const readDurable = async <T>(
+    path: FencedPath,
+    limit: number | undefined,
+    hold: (read: RootDurableRead, stillNames: () => Promise<boolean>) => Promise<T>,
+  ): Promise<T | undefined> => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const { full, scope } = await real(path);
+        return await withCheckedFile(scope, full, async file => {
+          const bytes = await file.read(limit);
+          await file.sync();
+          const read = { bytes, identity: identityOfEntry(file.identity) };
+          return await hold(read, async () => {
+            const named = await rootHandleIdentity(path);
+            return named !== undefined && named.device === read.identity.device && named.inode === read.identity.inode;
+          });
+        });
+      } catch (error) {
+        if (errnoOf(error) === 'ENOENT') return undefined;
+        if (error instanceof RootError && error.refusal === 'hard_link') {
+          const adopted = await real(path)
+            .then(async ({ full, scope }) => await adoptLeftoverName(scope, full))
+            .catch(() => false);
+          if (adopted) continue;
+          if (attempt < HARD_LINK_RETRIES) {
+            await new Promise<void>(resolve => setTimeout(resolve, HARD_LINK_RETRY_MS));
+            continue;
+          }
+        }
+        throw error;
+      }
+    }
+  };
   const real = async (path: FencedPath, create = false): Promise<Checked> => {
     const root = base();
     if (root === undefined) refuse(name === 'work' ? 'unknown_ferret' : 'outside');
@@ -932,6 +1014,26 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // a link is left alone (never entered), a device or a hard-linked file is never read
     }
   };
+  /**
+   * The device and inode the NAME reaches now. The leaf is `lstat`'d, never followed, while `readDurable` follows a
+   * leaf link that stays inside the root: a symlinked leaf therefore never matches the file it read, so an exact
+   * replay over a link is refused (stricter than today, which compared a followed `stat`).
+   */
+  const rootHandleIdentity = async (path: FencedPath): Promise<RootIdentity | undefined> => {
+    const { full, scope } = await realParent(path).catch((error: unknown) => {
+      if (errnoOf(error) === 'ENOENT') return { full: undefined, scope: undefined };
+      throw error;
+    });
+    // A folder that is not there holds no name; one that is must still pass the whole fence below.
+    if (full === undefined || (await scope.fs.identity(dirname(full))) === undefined) return undefined;
+    const folder = await openCheckedFolder(scope, dirname(full));
+    try {
+      const found = await scope.fs.identity(await entry(scope, folder, dirname(full), basename(full)));
+      return found === undefined ? undefined : identityOfEntry(found);
+    } finally {
+      await folder.close();
+    }
+  };
   const handle: RootHandle = {
     name,
     resolve: relativePath => {
@@ -960,27 +1062,10 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const { full, scope } = await realParent(path, true);
       return await publishChecked(scope, full, bytes, random, options);
     },
-    readDurable: async (path, limit) => {
-      // `link` publishes by giving the file a second name for an instant: a reader that lands in that instant is
-      // asked again rather than refused. A file that really has several names stays refused after the last try.
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          const { full, scope } = await real(path);
-          return await withCheckedFile(scope, full, async file => {
-            const bytes = await file.read(limit);
-            await file.sync();
-            return { bytes, identity: identityOfEntry(file.identity) };
-          });
-        } catch (error) {
-          if (errnoOf(error) === 'ENOENT') return undefined;
-          if (error instanceof RootError && error.refusal === 'hard_link' && attempt < HARD_LINK_RETRIES) {
-            await new Promise<void>(resolve => setTimeout(resolve, HARD_LINK_RETRY_MS));
-            continue;
-          }
-          throw error;
-        }
-      }
-    },
+    readDurable: async (path, limit, hold) =>
+      await readDurable(path, limit, async (read, stillNames) =>
+        hold === undefined ? (read as never) : await hold({ ...read, stillNames }),
+      ),
     syncDirectory: async (path, options) => {
       const { full, scope } = await real(path);
       const folder = await openCheckedFolder(scope, full);
@@ -989,21 +1074,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         await syncChecked(scope, dirname(full));
       await syncChecked(scope, full);
     },
-    fileIdentity: async path => {
-      const { full, scope } = await realParent(path).catch((error: unknown) => {
-        if (errnoOf(error) === 'ENOENT') return { full: undefined, scope: undefined };
-        throw error;
-      });
-      // A folder that is not there holds no name; one that is must still pass the whole fence below.
-      if (full === undefined || (await scope.fs.identity(dirname(full))) === undefined) return undefined;
-      const folder = await openCheckedFolder(scope, dirname(full));
-      try {
-        const found = await scope.fs.identity(await entry(scope, folder, dirname(full), basename(full)));
-        return found === undefined ? undefined : identityOfEntry(found);
-      } finally {
-        await folder.close();
-      }
-    },
+    fileIdentity: async path => await rootHandleIdentity(path),
     copyTree: async (source, from, to, options) => {
       writable();
       const known = HANDLES.get(source);

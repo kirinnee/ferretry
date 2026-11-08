@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { link, lstat, mkdir, mkdtemp, open, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
@@ -366,6 +379,187 @@ describe('RootHandle.readDurable, syncDirectory and fileIdentity', () => {
  * helper): a filesystem that cannot sync a directory says `EINVAL`, `ENOTSUP` or `EPERM`, and failing there would make
  * the daemon unusable rather than safer; every other failure means the entry is NOT durable and must propagate.
  */
+describe('a leftover second name and a slow winner', () => {
+  test('the temp name is gone BEFORE the folder is synced, so no sync ever persists two names', async () => {
+    const links: number[] = [];
+    const { root, work } = await world((_events, disk) => ({
+      ...disk,
+      openDirectory: async path => {
+        const opened = await disk.openDirectory(path);
+        return {
+          ...opened,
+          sync: async () => {
+            const found = await stat(`${work}/d/r.json`).catch(() => undefined);
+            if (found !== undefined) links.push(found.nlink);
+            await opened.sync();
+          },
+        };
+      },
+    }));
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+
+    expect(links.length).toBeGreaterThan(0);
+    expect(links.every(count => count === 1)).toBe(true);
+  });
+
+  test("a record with this root's own leftover temp link is still readable, and the leftover is removed", async () => {
+    const { root, work } = await world();
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+    // what a crash between the link and the unlink (or a power cut before the unlink was synced) leaves behind
+    await link(`${work}/d/r.json`, `${work}/d/.r.json.0f3a.tmp`);
+
+    const read = await root.readDurable(at(root, 'd/r.json'));
+
+    expect(decoder.decode(read?.bytes)).toBe('one');
+    expect(await readdir(`${work}/d`)).toEqual(['r.json']);
+    expect((await stat(`${work}/d/r.json`)).nlink).toBe(1);
+  });
+
+  test("the leftover of an interrupted publish does not wedge the next exclusive publish's loser either", async () => {
+    const { root, work } = await world();
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+    await link(`${work}/d/r.json`, `${work}/d/.r.json.0f3a.tmp`);
+
+    expect(await root.publish(at(root, 'd/r.json'), encoder.encode('two'), { exclusive: true })).toEqual({
+      outcome: 'exists',
+    });
+    expect(decoder.decode((await root.readDurable(at(root, 'd/r.json')))?.bytes)).toBe('one');
+  });
+
+  test('a stranger hard link stays refused: another name in the folder, or one in another folder', async () => {
+    const { root, work } = await world();
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+    await link(`${work}/d/r.json`, `${work}/d/notes.txt`);
+
+    expect(await refusalOf(async () => await root.readDurable(at(root, 'd/r.json')))).toBe('refused:hard_link');
+    expect(await readFile(`${work}/d/notes.txt`, 'utf8')).toBe('one');
+    // a temp-shaped name for a DIFFERENT file is not this file's leftover
+    await rm(`${work}/d/notes.txt`);
+    await writeFile(`${work}/d/.r.json.0f3a.tmp`, 'stranger');
+    expect(decoder.decode((await root.readDurable(at(root, 'd/r.json')))?.bytes)).toBe('one');
+    expect(await readFile(`${work}/d/.r.json.0f3a.tmp`, 'utf8')).toBe('stranger');
+  });
+
+  test('a loser that reads while the winner is inside its slow directory sync adopts the standing', async () => {
+    let stalled = false;
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => (release = resolve));
+    let reached: () => void = () => {};
+    const inSync = new Promise<void>(resolve => (reached = resolve));
+    const { root, work } = await world((_events, disk) => ({
+      ...disk,
+      openDirectory: async path => {
+        const opened = await disk.openDirectory(path);
+        return {
+          ...opened,
+          sync: async () => {
+            // the leaf folder's sync, after the link: the winner stalls here
+            if (
+              !stalled &&
+              (await lstat(`${work}/d/r.json`).then(
+                () => true,
+                () => false,
+              ))
+            ) {
+              stalled = true;
+              reached();
+              await gate;
+            }
+            await opened.sync();
+          },
+        };
+      },
+    }));
+    const winner = root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+    await inSync;
+
+    const loser = await root.publish(at(root, 'd/r.json'), encoder.encode('two'), { exclusive: true });
+    const standing = await root.readDurable(at(root, 'd/r.json'));
+    release();
+
+    expect(loser).toEqual({ outcome: 'exists' });
+    expect(decoder.decode(standing?.bytes)).toBe('one');
+    expect((await winner).outcome).toBe('published');
+  });
+});
+
+describe('readDurable held', () => {
+  test('keeps the descriptor through the hold and tells whether the name still reaches the proved file', async () => {
+    const { root } = await world();
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'));
+
+    const answers = await root.readDurable(at(root, 'd/r.json'), undefined, async held => {
+      const before = await held.stillNames();
+      await root.publish(at(root, 'd/r.json'), encoder.encode('two'));
+      return { before, after: await held.stillNames(), text: decoder.decode(held.bytes) };
+    });
+
+    expect(answers).toEqual({ before: true, after: false, text: 'one' });
+  });
+
+  test('nothing at the name never calls the hold', async () => {
+    const { root } = await world();
+    let called = false;
+
+    expect(
+      await root.readDurable(at(root, 'd/none.json'), undefined, async () => {
+        called = true;
+      }),
+    ).toBeUndefined();
+    expect(called).toBe(false);
+  });
+});
+
+describe('writeNew cleanup', () => {
+  test('a failed fill removes the name only while it is still the file this call created', async () => {
+    const parent = await mkdtemp(`${tmpdir()}/fy-roots-publish-`);
+    parents.push(parent);
+    const path = `${parent}/leaf.json`;
+    // the fill replaces the name with another publisher's file, then fails
+    async function* intruder(): AsyncGenerator<Uint8Array> {
+      await writeFile(`${parent}/other.json`, 'theirs');
+      await rename(`${parent}/other.json`, path);
+      throw Object.assign(new Error('no space'), { code: 'ENOSPC' });
+      yield new Uint8Array();
+    }
+
+    expect(await refusalOf(async () => await real.writeNew(path, intruder() as never, 0o600))).toBe(
+      'error:Error: no space',
+    );
+    expect(await readFile(path, 'utf8')).toBe('theirs');
+  });
+});
+
+describe('a directory that cannot be opened for the sync', () => {
+  for (const code of ['EINVAL', 'ENOTSUP', 'EPERM'])
+    test(`${code} at the OPEN of an ancestor being persisted is tolerated, like the sync itself`, async () => {
+      const opens = new Map<string, number>();
+      let failAt = Number.POSITIVE_INFINITY;
+      const build = () =>
+        world((_events, disk) => ({
+          ...disk,
+          openDirectory: async path => {
+            const count = (opens.get(path) ?? 0) + 1;
+            opens.set(path, count);
+            if (path.endsWith('/work') && count === failAt)
+              throw Object.assign(new Error('cannot open a directory here'), { code });
+            return await disk.openDirectory(path);
+          },
+        }));
+      // measure: how many times the base folder is opened by one publish; the LAST one is the ancestor's sync
+      const probe = await build();
+      await probe.root.publish(at(probe.root, 'd/x.json'), encoder.encode('x'));
+      const last = [...opens.entries()].find(([path]) => path.endsWith('/work'))?.[1] ?? 0;
+      opens.clear();
+      failAt = last;
+
+      const { root, work } = await build();
+      await root.publish(at(root, 'd/x.json'), encoder.encode('x'));
+
+      expect(await readFile(`${work}/d/x.json`, 'utf8')).toBe('x');
+    });
+});
+
 describe('directory sync tolerance', () => {
   /** Makes every `FileHandle.sync` in this process answer `code` while `use` runs; the real method comes back after. */
   async function whileSyncFails<T>(code: string, use: () => Promise<T>): Promise<T> {
