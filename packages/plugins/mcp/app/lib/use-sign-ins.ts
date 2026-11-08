@@ -8,7 +8,7 @@ import type { McpOAuthConnectionList } from '../../contract/index.ts';
 import { type McpClient, readMcpSignIns } from './client.ts';
 import { changeRefusalSentence } from './refusal.ts';
 
-export type McpSignInsRead =
+type McpSignInsRead =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly list: McpOAuthConnectionList }
   | { readonly kind: 'failed'; readonly reason: string };

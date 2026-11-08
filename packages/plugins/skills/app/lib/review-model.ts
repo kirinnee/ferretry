@@ -57,7 +57,7 @@ export function splitMarkers(text: string): readonly TextSegment[] {
 
 /** A file over this many bytes, or holding more markers than this, is shown closed until it is opened. */
 export const LARGE_FILE_BYTES = 64 * 1024;
-export const LARGE_FILE_MARKERS = 200;
+const LARGE_FILE_MARKERS = 200;
 
 export function isLargeFile(text: string): boolean {
   if (new TextEncoder().encode(text).length > LARGE_FILE_BYTES) return true;

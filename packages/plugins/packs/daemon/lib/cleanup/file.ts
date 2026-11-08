@@ -17,7 +17,7 @@ import type {
 } from '../../../contract/index.ts';
 
 /** `packs.yaml` as the writer holds it, with the etag a write is checked against. */
-export interface PacksFileText {
+interface PacksFileText {
   readonly file: PacksFile;
   readonly etag: string;
 }

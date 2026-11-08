@@ -22,10 +22,10 @@ const CODEX_TIER = { fast: 'priority', standard: 'default' } as const;
 /** The Codex config key its automatic compaction trigger is read from. */
 const CODEX_COMPACT_KEY = 'model_auto_compact_token_limit';
 /** Codex's subcommand for continuing a conversation it already has. */
-export const CODEX_RESUME = 'resume';
+const CODEX_RESUME = 'resume';
 
 /** The launch argument that starts Codex at a reasoning effort. */
-export function effortLaunchArguments(effort: string | undefined): readonly string[] {
+function effortLaunchArguments(effort: string | undefined): readonly string[] {
   return effort === undefined ? [] : ['-c', `${CODEX_EFFORT_KEY}=${tomlBasicString(effort)}`];
 }
 

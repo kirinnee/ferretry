@@ -5,8 +5,8 @@ import type { HostFs } from './adapters/node-fs.ts';
 import { probeHome } from './home.ts';
 
 /** The exit codes `--help` documents: the address is held by something else / by another of this daemon. */
-export const EXIT_FOREIGN_HOLDER = 69;
-export const EXIT_ALREADY_SERVING = 78;
+const EXIT_FOREIGN_HOLDER = 69;
+const EXIT_ALREADY_SERVING = 78;
 
 /**
  * What a connection attempt at the address found: nothing listening (`free`), something answering or resetting

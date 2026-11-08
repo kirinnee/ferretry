@@ -111,14 +111,14 @@ async function remoteServers(documents: McpHarnessDocuments, root: string): Prom
 }
 
 /** One local-scope server Ferretry writes for a signed-in project server. */
-export interface LocalScopeServer {
+interface LocalScopeServer {
   readonly type: 'http' | 'sse';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
 }
 
 /** What the launch's harness decided about one project server (its contract's `ProjectServerApproval`). */
-export type McpProjectApproval = 'approved' | 'pending' | 'disabled';
+type McpProjectApproval = 'approved' | 'pending' | 'disabled';
 
 /**
  * The harness's own answer to "which of these servers did you approve for this ferret in `root`" — the

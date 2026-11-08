@@ -52,6 +52,8 @@ export const ONE_TIME_PENDING_ALLOWANCE: readonly { readonly id: string; readonl
   { id: 'access', reason: 'ruling #26 (britnee): ported but unwired, back in pending' },
   { id: 'voice', reason: 'ruling #26 (britnee): ported but unwired, back in pending' },
   { id: 'warden', reason: 'ruling #26 (britnee): ported but unwired, back in pending' },
+  { id: 'projects', reason: 'ruling #28 (britnee): ported but unwired, back in pending' },
+  { id: 'updates', reason: 'ruling #28 (britnee): ported but unwired, back in pending' },
 ];
 
 export interface PortsPending {

@@ -78,7 +78,7 @@ export function selectCodexRollout(
  * would need a write to its parent, and the parent is outside every writable root. The proof costs
  * no access the ferret did not already have.
  */
-export const CODEX_CORRELATION_ROOT = 'codex-correlation';
+const CODEX_CORRELATION_ROOT = 'codex-correlation';
 
 /** The declared root's own name, under {@link CODEX_CORRELATION_ROOT}. */
 const CODEX_CORRELATION_LEAF = 'unreachable';

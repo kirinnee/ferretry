@@ -18,6 +18,7 @@ declare const __FY_CHANGELOG__: string | undefined;
 
 type ChangeKind = 'breaking' | 'features' | 'fixes' | 'performance' | 'reverts';
 
+/** @pending updates: app/lib/changelog.ts is not reached by a What's new surface (today: packages/pwa/src/features/whats-new/whats-new-host.tsx:21 and whats-new-sheet.tsx:22) */
 export interface ChangelogChange {
   /** The commit scope, shown as a small tag; absent when the subject carried none. */
   readonly scope?: string;

@@ -111,8 +111,8 @@ async function guarded<T>(path: string, act: () => Promise<T>): Promise<T> {
 }
 
 /** What the owner should know about the Global document, in the preview and in `GET /v1/lessons/global`. */
-export const GLOBAL_LESSONS_READ_NOTE = 'Every ferret reads this document at its next launch.';
-export const GLOBAL_LESSONS_EDIT_NOTE =
+const GLOBAL_LESSONS_READ_NOTE = 'Every ferret reads this document at its next launch.';
+const GLOBAL_LESSONS_EDIT_NOTE =
   'Change or remove a rule in it from Settings › Lessons or with `fy lesson global`; it is not a file on disk.';
 
 /** The Global lessons document: `state/lessons/global.json`, shown to the owner by name and edited through `/v1/lessons/global`. */

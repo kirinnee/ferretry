@@ -147,7 +147,7 @@ export interface DaemonLayout {
   readonly lifecycleLocks: readonly [string, ...string[]];
 }
 
-export class InvalidDaemonEnvironmentError extends Error {
+class InvalidDaemonEnvironmentError extends Error {
   constructor(
     readonly field: string,
     reason: string,
@@ -185,7 +185,7 @@ function requireDirectory(value: string, field: string): string {
  * the split harder to see rather than easier — the CLI would claim one directory and provision into
  * another. Pinning `FY_HOME` masks it entirely, which is why it survived.
  */
-export function resolveDaemonStateHome(homeDirectory: string, stateHome: string | undefined, product: string): string {
+function resolveDaemonStateHome(homeDirectory: string, stateHome: string | undefined, product: string): string {
   const home = requireDirectory(homeDirectory, 'home directory');
   return stateHome === undefined || stateHome.trim().length === 0
     ? join(home, `.${requireName(product, 'product name')}`)
@@ -212,7 +212,7 @@ function requireUserId(value: number, field: string): number {
 }
 
 /** The manager a platform implies. Anything else gets the direct-spawn fallback, never a guess. */
-export function managerForPlatform(platform: string): DaemonManagerKind {
+function managerForPlatform(platform: string): DaemonManagerKind {
   if (platform === 'linux') return 'systemd';
   if (platform === 'darwin') return 'launchd';
   return 'direct';

@@ -21,7 +21,9 @@
     "usage",
     "board",
     "access",
-    "voice"
+    "voice",
+    "projects",
+    "updates"
   ],
   "pendingReasons": {
     "runtimes": [
@@ -54,11 +56,13 @@
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
       "GAP(ferrets): the AskUserQuestion hook is installed, but Ferrets does not yet supply FY_QUESTION_FILE or consume and deliver the question",
       "the ten settings/hooks item verbs return 69 until the item-service route exists",
-      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read"
+      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read",
+      "GAP(claude-code): daemon/lib/harness/fast-mode.ts is not reached by Ferrets' start path: fastStartRefusal must refuse a fast start on a model without fast mode before anything is written (today: packages/daemon/bin/fyd.ts:2691-2697; 5.0 FerretsService.start has no such check) (owner: nelly)"
     ],
     "codex": [
       "GAP(kernel): skill launch parts are not materialized into the Codex home: RootHandle.copyTree (with link) exists, but its source must be one of Codex's own roots and no root Codex may declare reaches a skill part's folder (LaunchPart.path); needs a lead decision on that root",
-      "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet"
+      "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet",
+      "GAP(runtimes): daemon/adapters/app-server-catalog.ts is ported and tested (the model list read from a Codex account's own app-server) but nothing composes it until the model catalog read is wired to a catalog probe"
     ],
     "logins": [
       "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported",
@@ -182,7 +186,8 @@
     ],
     "onboarding": [
       "10 parity rows have no test files: tests/unit/parity/app.test.tsx, commands.test.ts and storage.test.ts do not exist, and R-0092 is not proved yet",
-      "the app half waits on the shell: about 12 components and 7 app tests are listed in app/NEEDS-APP-SHELL.txt"
+      "the app half waits on the shell: about 12 components and 7 app tests are listed in app/NEEDS-APP-SHELL.txt",
+      "GAP(shell): app/command-block.tsx, app/command-syntax.ts, app/connection-disclosure.ts, app/copy-button.tsx, app/device-kind.ts, app/first-run-entry.ts, app/landing-geometry.ts, app/link-costs.ts, app/onboarding-brand.tsx, app/onboarding-chooser.tsx, app/onboarding-connection-note.tsx, app/onboarding-doer-chooser.tsx, app/onboarding-model.ts, app/onboarding-page.tsx, app/onboarding-progress.ts, app/onboarding-stages.tsx, app/onboarding-target-chooser.tsx, app/onboarding-track.tsx, app/pending-connections.ts, app/setup-diagram.tsx, app/setup-handoff-panel.tsx, app/setup-handoff.ts, app/setup-qr.ts are ported and tested but nothing mounts them until the app shell builds the onboarding page (listed in app/NEEDS-APP-SHELL.txt)"
     ],
     "layouts": [
       "the default layout (and compact) names views no installed manifest declares: nav item `ferrets` and `side.holds: ferret` (Ferrets declares no `ferrets` or `ferret` screen) and the ferret.side panels `sitrep` and `usage` (Conversation's is `queue`, Usage's is `insights`), so the shell refuses the layout as served and draws the built-in default, and the Layout tab says so under In use",
@@ -244,6 +249,16 @@
       "GAP(voice): daemon/lib/speedups/index.ts is not reached by the daemon composition (daemon/index.ts imports the files directly, only tests import this index) (owner: voice port)",
       "GAP(voice): daemon/lib/stt/index.ts is not reached by the daemon composition (daemon/index.ts imports the files directly, only tests import this index) (owner: voice port)",
       "GAP(voice): the STT workers app/worker/parakeet-worker.ts, app/worker/sherpa-worker.ts, app/worker/vosk-worker.ts, app/worker/whisper-worker.ts, the Vite plugin app/vite-voice.ts and their helpers app/lib/stt/parakeet-vocabulary.ts, app/lib/stt/pthread-workers.ts are not reached: each worker URL is injected as the voice store's speechAssets option (app/lib/voice-store.tsx:92), but app/surfaces.tsx:33 calls createVoiceStore() without it, and no vite.config loads app/vite-voice.ts; today's code injects them from packages/pwa/src/main.tsx:62-65 (four ?worker&url imports) passed at :94. So the dependencies @huggingface/transformers, @lichess-org/vosk-browser, @sherpaw/asr, onnxruntime-web, parakeet.js are not reached either (owner: voice port)"
+    ],
+    "projects": [
+      "GAP(projects): app/hooks/use-project-scope.ts is not reached yet: it is reached by the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36) (owner: gustavo, ferrets port)",
+      "GAP(projects): app/lib/project-scope.ts is reached only through app/hooks/use-project-scope.ts: the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36) (owner: gustavo, ferrets port)",
+      "GAP(projects): app/hooks/use-work-project-names.ts has no caller yet, not even on rebuild/port-ferrets-b (today: packages/pwa/src/App.tsx:195 and packages/pwa/src/lib/pages/session-chat-page.tsx:108) (owner: gustavo, ferrets port)",
+      "GAP(projects): app/lib/work-project-names.ts is reached only through app/hooks/use-work-project-names.ts, which has no caller yet (today: packages/pwa/src/App.tsx:195 and packages/pwa/src/lib/pages/session-chat-page.tsx:108) (owner: gustavo, ferrets port)"
+    ],
+    "updates": [
+      "GAP(updates): app/lib/changelog.ts is not reached by a What's new surface (today: packages/pwa/src/features/whats-new/whats-new-host.tsx:21 and whats-new-sheet.tsx:22) (owner: kaizen, app shell)",
+      "GAP(updates): app/lib/install-prompt.ts is not reached by an install-as-app prompt (today: packages/pwa/src/main.tsx:58, packages/pwa/src/App.tsx:211, packages/pwa/src/features/install/install-app.tsx:19) (owner: kaizen, app shell)"
     ]
   },
   "pendingHalves": {

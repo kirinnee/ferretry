@@ -17,7 +17,7 @@ import {
  * the keys whose value changes, so the owner's comments survive, and whatever else the disk says (a broken value, an
  * unreloaded hand edit) is overwritten with the value in effect, never carried into effect.
  */
-export function wholeLessonsSettings(next: LessonsConfig, inEffect: LessonsFile): Record<string, unknown> {
+function wholeLessonsSettings(next: LessonsConfig, inEffect: LessonsFile): Record<string, unknown> {
   const stated = inEffect as Record<string, unknown>;
   const defaults = DEFAULT_LESSONS_CONFIG as Record<string, unknown>;
   const values = next as Record<string, unknown>;

@@ -103,6 +103,3 @@ export const ProjectRefusalSchema = z.strictObject({
   message: z.string().min(1),
 });
 export type ProjectRefusal = z.infer<typeof ProjectRefusalSchema>;
-
-/** `DELETE /v1/projects/:id` answers the record it removed. */
-export const RemoveProjectResponseSchema = ProjectInfoSchema;

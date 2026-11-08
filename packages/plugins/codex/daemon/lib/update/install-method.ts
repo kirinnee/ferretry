@@ -12,9 +12,8 @@ import { z } from 'zod';
 import type { HarnessInstallMethod } from '../../../contract/index.ts';
 import { CODEX_PACKAGES } from './version.ts';
 
-export type NixModuleManager = 'home-manager' | 'nix-darwin' | 'nixos';
-export type NixSystemManager = 'nix-darwin' | 'nixos';
-export type NodeVersionManager = 'nvm' | 'fnm' | 'asdf' | 'mise';
+type NixSystemManager = 'nix-darwin' | 'nixos';
+type NodeVersionManager = 'nvm' | 'fnm' | 'asdf' | 'mise';
 
 /** Every fact {@link classifyCodexInstall} reads, gathered by an adapter for the file a runtime launches. */
 export interface InstallFacts {
@@ -50,7 +49,7 @@ const userProfileRoots = (home: string): readonly string[] => {
 };
 
 /** Whether a resolved executable lives in the Nix store, which {@link classifyNixStorePath} then decides. */
-export const isNixStoreFile = (resolvedPath: string): boolean => resolvedPath.startsWith(STORE_PREFIX);
+const isNixStoreFile = (resolvedPath: string): boolean => resolvedPath.startsWith(STORE_PREFIX);
 
 type NixInstallMethod = Extract<HarnessInstallMethod, { kind: 'nix-profile' | 'nix-shell' | 'nix-module' | 'unknown' }>;
 
@@ -59,7 +58,7 @@ type NixInstallMethod = Extract<HarnessInstallMethod, { kind: 'nix-profile' | 'n
  * is an ephemeral `nix shell`; reached through a system profile is a module; reached through the user's profile is that
  * profile's element, or home-manager's generation.
  */
-export function classifyNixStorePath(facts: InstallFacts): NixInstallMethod {
+function classifyNixStorePath(facts: InstallFacts): NixInstallMethod {
   const launched = facts.launchedPath;
   if (isStorePath(launched)) {
     const storePath = launched.slice(0, launched.indexOf('/', STORE_PREFIX.length));
@@ -152,29 +151,6 @@ export function harnessInstallLabel(method: HarnessInstallMethod): string {
     case 'standalone':
     case 'unknown':
       return INSTALL_LABELS[method.kind];
-  }
-}
-
-/** The label, with the detail a person needs to recognise their own install. */
-export function describeHarnessInstall(method: HarnessInstallMethod): string {
-  switch (method.kind) {
-    case 'npm-global': {
-      const where = method.prefix === undefined ? '' : ` in ${method.prefix}`;
-      const node = method.nodeManager === undefined ? '' : ` (node from ${method.nodeManager})`;
-      return `${method.tool} global package ${method.package}${where}${node}`;
-    }
-    case 'homebrew':
-      return `Homebrew ${method.type} ${method.package}`;
-    case 'nix-profile':
-      return `nix profile element ${method.element}`;
-    case 'nix-shell':
-      return `nix shell store path ${method.storePath}`;
-    case 'nix-module':
-      return method.via === undefined ? `${method.manager} module` : `${method.manager} (via ${method.via}) module`;
-    case 'standalone':
-      return `standalone binary in ${method.directory}`;
-    case 'unknown':
-      return `unrecognised install (${method.reason})`;
   }
 }
 

@@ -13,7 +13,7 @@ import {
   type HarnessVerification,
 } from '../../contract/index.ts';
 
-export const CODEX_LABEL = 'Codex';
+const CODEX_LABEL = 'Codex';
 
 type Check = HarnessCliView['check'];
 type Job = NonNullable<HarnessCliView['job']>;
@@ -36,7 +36,7 @@ function compare(a: string, b: string): -1 | 0 | 1 | undefined {
 }
 
 /** The version a view says is installed, when it could be read. */
-export const installedVersion = (view: HarnessCliView): string | undefined =>
+const installedVersion = (view: HarnessCliView): string | undefined =>
   view.installed?.state === 'ok' ? view.installed.version : undefined;
 
 /** The newest release the view knows, from this check or the last good one. */
@@ -97,7 +97,7 @@ export function installWords(method: Method | null): string | undefined {
 }
 
 /** "3 minutes ago". */
-export function ageWords(at: string, now: number): string {
+function ageWords(at: string, now: number): string {
   const minutes = Math.floor(Math.max(0, now - Date.parse(at)) / 60_000);
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${String(minutes)} minute${minutes === 1 ? '' : 's'} ago`;

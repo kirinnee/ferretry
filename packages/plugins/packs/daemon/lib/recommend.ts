@@ -132,7 +132,7 @@ export function runtimeRefusal(
  * "spent $41.20 of its $40.00 daily trigger on this machine; back at 2026-10-31T07:00:00.000Z" — or
  * `undefined` when the login's budget holds nothing. The worse period speaks; a tie goes to the longer.
  */
-export function overBudget(credential: PackCredentialFacts | undefined): string | undefined {
+function overBudget(credential: PackCredentialFacts | undefined): string | undefined {
   const budget = credential?.budget;
   if (budget === undefined || budget.level === 'ok') return undefined;
   const periods = (['weekly', 'daily'] as const).flatMap(period => {

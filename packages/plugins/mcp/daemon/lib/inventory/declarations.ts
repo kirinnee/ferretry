@@ -11,7 +11,7 @@
 import type { McpApproval, McpTransport } from '../../../contract/index.ts';
 
 /** Claude Code's `oauth` block on an HTTP or SSE server: `clientId`, and the fixed `callbackPort` it was registered with. */
-export interface ClaudeOAuthClient {
+interface ClaudeOAuthClient {
   readonly clientId: string;
   readonly callbackPort?: number;
 }
@@ -58,7 +58,7 @@ const stringRecord = (value: unknown): Readonly<Record<string, string>> =>
     : {};
 
 /** An address ending in `/sse` is the legacy SSE transport, as both harnesses and the fleet adapter read it. */
-export const isSseAddress = (url: string): boolean => /\/sse\/?(?:[?#].*)?$/iu.test(url);
+const isSseAddress = (url: string): boolean => /\/sse\/?(?:[?#].*)?$/iu.test(url);
 
 /** What a person may be shown of an address: no credentials, no query, no fragment. */
 export function displayAddress(url: string): string {
@@ -71,7 +71,7 @@ export function displayAddress(url: string): string {
 }
 
 /** What a person may be shown of a command: the program, never its arguments (they can hold keys). */
-export const displayCommand = (command: string): string => command.trim().split(/\s+/u)[0] ?? command;
+const displayCommand = (command: string): string => command.trim().split(/\s+/u)[0] ?? command;
 
 export const displayTarget = (declaration: McpDeclaration): string =>
   declaration.transport === 'stdio' ? displayCommand(declaration.command) : displayAddress(declaration.url);

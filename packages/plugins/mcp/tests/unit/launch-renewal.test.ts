@@ -7,7 +7,7 @@ import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { ok } from '@ferretry/std';
 import { MCP_OAUTH_SECRETS, MCP_OAUTH_STATE, type McpItem, mcpOAuthSecretNames } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
-import type { ProjectMcpLaunchShare } from '../../daemon/lib/inventory/index.ts';
+import type { ProjectMcpLaunchShare } from '../../daemon/lib/inventory/project-sign-in.ts';
 import { McpLaunchParts } from '../../daemon/lib/launch-parts.ts';
 import manifest from '../../manifest.ts';
 import { leaks, PWA_REDIRECT, world, type World } from './oauth/support.ts';

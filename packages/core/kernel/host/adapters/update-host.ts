@@ -13,7 +13,7 @@ import { pluginStateRoot } from '../state/state-port.ts';
  * The client verb the launch runs: `<fy> update --run --to <target> --report <file>` (lead decision, batch 2 #1).
  * `update` is the fy shell's own verb, so it works with Updates off; `--run` is the transaction itself, not the plan.
  */
-export const UPDATE_LAUNCH_VERB: readonly string[] = Object.freeze(['update', '--run']);
+const UPDATE_LAUNCH_VERB: readonly string[] = Object.freeze(['update', '--run']);
 
 /** The operator / CI switch that keeps a compiled daemon off GitHub (`docs/updating.md`, `scripts/ci/test.sh`). */
 const UPDATE_CHECK_SWITCH = 'FY_UPDATE_CHECK';
@@ -22,7 +22,7 @@ const UPDATE_CHECK_SWITCH = 'FY_UPDATE_CHECK';
 const RELEASE = /^v?[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(?:-[0-9A-Za-z.]{1,40})?$/u;
 
 /** Starts a detached child with all three streams on `logFile` (appended, 0600). A suite watches the call instead. */
-export type DetachedUpdateSpawn = (
+type DetachedUpdateSpawn = (
   argv: readonly string[],
   options: { readonly environment: Readonly<Record<string, string | undefined>>; readonly logFile: string },
 ) => void;
