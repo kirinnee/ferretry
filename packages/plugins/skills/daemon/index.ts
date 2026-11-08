@@ -9,24 +9,17 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { RootSkillFiles } from './adapters/skill-files.ts';
-import { RootSkillFolderReader } from './adapters/skill-folder-reader.ts';
-import { StateLocalSkillInstallStore } from './adapters/install-store.ts';
 import { composerSkills } from './lib/composer.ts';
 import { MAX_SKILL_MANIFEST_BYTES, SkillsInventoryService } from './lib/inventory.ts';
-import { LocalSkillInstallService } from './lib/installs/service.ts';
-import { unavailable } from './lib/installs/ports.ts';
-import { installRoutes } from './install-routes.ts';
 import { inventoryRoutes } from './routes.ts';
 import { skillParts, type SkillFolderResolver } from './lib/launch-parts.ts';
 import { skillReferenceProvider } from './lib/reference-catalog.ts';
 
 /**
- * Skills (§2.3): the inventory of every skill a ferret sees, and the reviewed copy of one skill from this machine.
+ * Skills (§2.3): the inventory of every skill a ferret sees.
  *
- * SEAMS NOT BOUND HERE (declared GAPS, each refuses in words instead of guessing): runtime homes, the registered
- * projects, a project's skill files, a runtime's skill assets and the catalog installer's review belong to Runtimes,
- * Projects and Catalogs, whose contracts Skills may not import yet. The inventory therefore lists what a ferret's own
- * working folder holds; a project or runtime copy answers `local_skill_target_unknown` until those are bound.
+ * SEAMS NOT BOUND HERE (declared GAPS): runtime homes and the registered projects belong to Runtimes and Projects, whose
+ * contracts Skills may not import yet. The inventory therefore lists what a ferret's own working folder holds.
  */
 export default implementDaemon(manifest, {
   build(ctx) {
@@ -80,56 +73,13 @@ export default implementDaemon(manifest, {
         if (!view.skills.some(skill => skill.path === path)) return undefined;
         return await filesFor(summary.id, summary.folder).read(path, MAX_SKILL_MANIFEST_BYTES);
       },
-      installs: async () => await installs.list(),
     };
 
     // The store's folders are not addressable through a kernel port yet: no item resolves, so no part is added.
     const folderOf: SkillFolderResolver = () => undefined;
 
-    const sha256 = async (bytes: Uint8Array): Promise<Uint8Array> =>
-      new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)));
-    const mint = (prefix: 'lsp' | 'lsi'): string => String(kernel.ids.mint(prefix)).replace(/^.*?_/u, `${prefix}_`);
-
-    const installs = new LocalSkillInstallService({
-      crypto: { sha256 },
-      store: new StateLocalSkillInstallStore(kernel.state),
-      skills: { list: async () => await machine.machinePaths() },
-      skillTree: new RootSkillFolderReader((folder, boundary) => ({
-        root: kernel.roots.root('imports', { subfolder: folder }),
-        boundary: kernel.roots.root('imports', { subfolder: boundary }),
-      })),
-      fleetDirectory: '',
-      projectRoots: async () => [],
-      skillFiles: {
-        inspect: async () => unavailable('A project folder'),
-        apply: async () => unavailable('A project folder'),
-      },
-      runtimeSkills: {
-        inspect: async () => unavailable('A runtime profile'),
-        remove: async () => unavailable('A runtime profile'),
-      },
-      fleet: {
-        runtimes: async () => [],
-        profiles: async () => [],
-        storedComponent: async () => undefined,
-        install: async () => unavailable('A runtime profile'),
-        removeComponent: async () => unavailable('A runtime profile'),
-      },
-      reviewer: { review: () => unavailable('The catalog review') },
-      now: () => kernel.clock.nowMs(),
-      mint,
-    });
-
     return {
-      routes: {
-        ...inventoryRoutes(api),
-        ...installRoutes({
-          list: () => installs.list(),
-          preview: (scope, request, caller) => installs.preview(scope, request, caller),
-          apply: (scope, previewId, caller) => installs.apply(scope, previewId, caller),
-          remove: (scope, installId) => installs.remove(scope, installId),
-        }),
-      },
+      routes: inventoryRoutes(api),
       provides: { skills: api },
       hooks: {
         // The composer's `/` and `$` menus: one provider, because Claude's `/name` and Codex's `$name` are one skill.

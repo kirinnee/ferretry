@@ -246,7 +246,12 @@ function renamed(what: string): string {
     .replace(/--ping\b/g, '--buzz')
     .replace(/\btask_plan\b/g, 'card_plan');
 }
+/** Owner decision !A466 (2026-11-08): the local skill copy and the Add skills page that only offered it are gone from 5.0. */
+const REMOVED_BY_OWNER = 'removed by design (owner decision !A466, 2026-11-08: the local skill copy is gone)';
+const OWNER_REMOVED = /local-skill-install|add-skills-page\.tsx|machine-skills-group\.tsx/;
 function removal(kind: Kind, what: string, file: string, detail: string): string | undefined {
+  if ((OWNER_REMOVED.test(file) && !(kind === 'V' && what === 'fy skill')) || what === "screen 'add-skills'")
+    return REMOVED_BY_OWNER;
   if (/\balias of\b/.test(detail)) return 'removed by design (§1.4: no aliases)';
   if (
     kind === 'F' &&

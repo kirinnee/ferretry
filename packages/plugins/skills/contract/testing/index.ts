@@ -8,8 +8,6 @@ import {
   type FerretSkillsInventory,
   FerretSkillsInventorySchema,
   FerretSkillsSchema,
-  type LocalSkillInstallList,
-  LocalSkillInstallListSchema,
   type MachineSkillsInventory,
   MachineSkillsInventorySchema,
   type SkillsApi,
@@ -22,12 +20,10 @@ export interface FakeSkills extends SkillsApi {
   setFerret(ferret: string, inventory: FerretSkillsInventory, composer: FerretSkills): void;
   /** A SKILL.md the fake lists, by absolute path. */
   setFile(path: string, content: string): void;
-  setInstalls(installs: LocalSkillInstallList): void;
 }
 
 export function fakeSkills(): FakeSkills {
   let inventory = EMPTY_INVENTORY;
-  let installs: LocalSkillInstallList = { installs: [] };
   const ferrets = new Map<string, { inventory: FerretSkillsInventory; composer: FerretSkills }>();
   const files = new Map<string, string>();
   return {
@@ -35,7 +31,6 @@ export function fakeSkills(): FakeSkills {
     ferretInventory: async ferret => ferrets.get(ferret)?.inventory,
     forComposer: async ferret => ferrets.get(ferret)?.composer,
     file: async path => files.get(path),
-    installs: async () => installs,
     setInventory: next => {
       inventory = next;
     },
@@ -44,9 +39,6 @@ export function fakeSkills(): FakeSkills {
     },
     setFile: (path, content) => {
       files.set(path, content);
-    },
-    setInstalls: next => {
-      installs = next;
     },
   };
 }
@@ -57,8 +49,6 @@ export async function skillsConformance(make: () => SkillsApi): Promise<Result<t
   const api = make();
   if (!MachineSkillsInventorySchema.safeParse(await api.inventory()).success)
     failures.push('inventory() returns a MachineSkillsInventory');
-  if (!LocalSkillInstallListSchema.safeParse(await api.installs()).success)
-    failures.push('installs() returns an install list');
   const inventory = await api.ferretInventory('no-such-ferret');
   if (inventory !== undefined && !FerretSkillsInventorySchema.safeParse(inventory).success)
     failures.push('ferretInventory() returns a FerretSkillsInventory or undefined');

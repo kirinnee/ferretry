@@ -203,42 +203,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     refusalCode: true,
     detail: { action: 'catalog-remove', scope: 'runtime' },
   },
-  // Copying a skill from elsewhere on this machine (`mounts/local-skill-installs.ts`): the skill's NAME, never a
-  // file. `code` says why a refusal was one — a source the inventory does not list, a file edited here.
-  {
-    method: 'POST',
-    path: '/v1/skill-installs/local/project',
-    event: 'fleet.configured',
-    responseNames: 'install.name',
-    refusalCode: true,
-    detail: { action: 'local-skill-install', scope: 'project' },
-  },
-  {
-    method: 'DELETE',
-    path: '/v1/skill-installs/local/project/:installId',
-    event: 'fleet.configured',
-    subject: 'installId',
-    responseNames: 'name',
-    refusalCode: true,
-    detail: { action: 'local-skill-remove', scope: 'project' },
-  },
-  {
-    method: 'POST',
-    path: '/v1/skill-installs/local/runtime',
-    event: 'fleet.configured',
-    responseNames: 'install.name',
-    refusalCode: true,
-    detail: { action: 'local-skill-install', scope: 'runtime' },
-  },
-  {
-    method: 'DELETE',
-    path: '/v1/skill-installs/local/runtime/:installId',
-    event: 'fleet.configured',
-    subject: 'installId',
-    responseNames: 'name',
-    refusalCode: true,
-    detail: { action: 'local-skill-remove', scope: 'runtime' },
-  },
   // Stopping one of the ferret's processes from the Processes tab: an act on its pane, like Ctrl-C into the
   // Console, counted on the session the same way and never naming which one.
   {

@@ -46,7 +46,7 @@ import {
  *
  * Routes copied from today's `runtime/mounts/{shared-catalogs,catalog-members,catalog-links,catalog-installs}.ts`;
  * member routes from `catalog-members/shared-routes.ts`. `/v1/projects` and `/v1/skills*` (mounted from `catalogs.ts`
- * today) and `local-skill-installs.ts` are Projects' and Skills', not declared here — see the slice report.
+ * today) are Projects' and Skills', not declared here — see the slice report.
  * Every catalog is signed by the publisher's daemon identity; installing shows every file and command in full and
  * asks your yes for anything that runs one; a pin never auto-updates.
  */
