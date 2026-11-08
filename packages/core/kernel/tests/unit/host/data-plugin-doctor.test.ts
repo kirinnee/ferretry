@@ -32,7 +32,9 @@ const valid = {
 const GITHUB_KEY = ['ghp', '_', 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4'].join('');
 const ANTHROPIC_KEY = ['sk', '-ant-', 'abc123def456ghi789'].join('');
 
-async function doctorWith(plugin: Record<string, unknown>): Promise<{ body: string; sentences: string; logged: string }> {
+async function doctorWith(
+  plugin: Record<string, unknown>,
+): Promise<{ body: string; sentences: string; logged: string }> {
   const root = await mkdtemp(`${tmpdir()}/data-plugin-doctor-`);
   const home = `${root}/home`;
   const logged: string[] = [];

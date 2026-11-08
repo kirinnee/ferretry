@@ -281,7 +281,9 @@ describe('fy doctor', () => {
     };
 
     it('should exit 1 when a required host check is missing, and say the fix', async () => {
-      const { world, io, transport } = healthyWorld(report([check({ status: 'missing', summary: 'git is not on PATH' })], false));
+      const { world, io, transport } = healthyWorld(
+        report([check({ status: 'missing', summary: 'git is not on PATH' })], false),
+      );
       should(await runFy(['doctor'], world)).equal(1);
       should(transport.sent.map(request => request.path)).containEql('/v1/doctor');
       should(io.stdout()).containEql('FAIL  host git: git is not on PATH');

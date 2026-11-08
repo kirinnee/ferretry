@@ -26,7 +26,13 @@ export function createPluginHost(inputs: PluginHostInputs): PluginHost {
   const readFile = inputs.readFile ?? (path => Bun.file(path).text());
   const readStdin = inputs.readStdin ?? (() => Bun.stdin.text());
   const cwd = inputs.cwd ?? (() => process.cwd());
-  const pathExists = inputs.pathExists ?? (async absolute => await access(absolute).then(() => true, () => false));
+  const pathExists =
+    inputs.pathExists ??
+    (async absolute =>
+      await access(absolute).then(
+        () => true,
+        () => false,
+      ));
   return {
     cwd,
     clock: { now: () => clock.now(), nowMs: () => clock.nowMs() },

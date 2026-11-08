@@ -10,11 +10,7 @@ import { AdmissionPort, defineEvent, type ApiRequest, type SocketDownstream } fr
 import { bootHost, realAdapters } from '@ferretry/kernel/host';
 import { definePlugin, implementDaemon, route } from '@ferretry/kernel/manifest';
 import { fixedClock } from '@ferretry/kernel/testing';
-import {
-  cap,
-  DEFAULT_GATE_CONFIG,
-  LIMITED_DEVICE_GRANTS,
-} from '../../../contract/index.ts';
+import { cap, DEFAULT_GATE_CONFIG, LIMITED_DEVICE_GRANTS } from '../../../contract/index.ts';
 import { ADMIN, carried, FERRET_TOKEN, local, request, WARDEN, world, type World } from './support.ts';
 
 const roots: string[] = [];
@@ -143,7 +139,10 @@ test('V-0452 a member is refused the bus', async () => {
 
 test('V-0452 an admin token that arrived relayed is governed like a device, by the daemon-wide grants alone', async () => {
   const narrowed = world({ policy: { ...DEFAULT_GATE_CONFIG, grants: LIMITED_DEVICE_GRANTS as never } });
-  expect(await seen(narrowed, bus({ bearer: ADMIN, arrival: carried() }))).toEqual(['access.unlocked', 'board.card-moved']);
+  expect(await seen(narrowed, bus({ bearer: ADMIN, arrival: carried() }))).toEqual([
+    'access.unlocked',
+    'board.card-moved',
+  ]);
   // with nothing narrowed it is still governed: Warden is never a device's to see
   expect(await seen(world(), bus({ bearer: ADMIN, arrival: carried() }))).toEqual([
     'access.unlocked',

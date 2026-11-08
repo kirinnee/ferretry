@@ -388,13 +388,18 @@ describe('wait and instructions', () => {
     const running = sessionView({ id: 'lead', name: 'wren', state: 'working' });
     const reads: string[] = [];
     const asked: string[] = [];
-    const present = run({ [FERRET_ROUTES.get]: running }, undefined, async path => {
-      asked.push(path);
-      return path === 'out/';
-    }, async path => {
-      reads.push(path);
-      throw new Error('a marker poll must not read');
-    });
+    const present = run(
+      { [FERRET_ROUTES.get]: running },
+      undefined,
+      async path => {
+        asked.push(path);
+        return path === 'out/';
+      },
+      async path => {
+        reads.push(path);
+        throw new Error('a marker poll must not read');
+      },
+    );
     expect(await present.verb('wait <id>', ['lead'], { 'until-marker': 'out/' })).toBe(0);
     expect(asked).toEqual(['out/']);
     expect(reads).toEqual([]);

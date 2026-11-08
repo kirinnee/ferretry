@@ -157,8 +157,7 @@ export function consumedBy(graph: StartGraph, edges: readonly ImportEdge[]): Rea
     // registers under it (a terminal, a page), so a change to a taker's contract changes the offerer's hash.
     if ((m.hooks?.offers ?? []).some(offer => offer.hook.name === INPUT_TARGETS))
       for (const other of graph.ids)
-        if ((graph.manifests.get(other)?.hooks?.takes ?? []).some(take => take.hook.name === INPUT_TARGETS))
-          add(other);
+        if ((graph.manifests.get(other)?.hooks?.takes ?? []).some(take => take.hook.name === INPUT_TARGETS)) add(other);
   }
   for (const edge of edges) {
     const from = edge.fromPkg.id;

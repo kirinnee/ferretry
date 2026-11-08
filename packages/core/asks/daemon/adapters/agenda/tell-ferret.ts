@@ -7,7 +7,8 @@ export const MAX_TELL_CHARS = 4_096;
 const MAX_TELL_SEND_ID_CHARS = 256;
 
 /** The batch key of one tell: a digest of its send id, so the key is a fixed shape whatever the caller's id holds. */
-export const tellKeyOf = (sendId: string) => tellReplyKey(createHash('sha256').update(sendId).digest('hex').slice(0, 14));
+export const tellKeyOf = (sendId: string) =>
+  tellReplyKey(createHash('sha256').update(sendId).digest('hex').slice(0, 14));
 
 /**
  * `AsksApi.tell`: what the daemon owes a ferret goes into that ferret's reply batch, the one an owner's answer joins

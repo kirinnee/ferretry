@@ -81,7 +81,13 @@ describe('identity signer: the rendezvous claim', () => {
 
   it('offers no way to read the key: the signer has exactly its fixed-label methods', async () => {
     const signer = createIdentitySigner(await newDaemonIdentity());
-    expect(Object.keys(signer).sort()).toEqual(['sign', 'signCatalog', 'signLinkStoreRequest', 'signSecretOffer', 'signTunnel']);
+    expect(Object.keys(signer).sort()).toEqual([
+      'sign',
+      'signCatalog',
+      'signLinkStoreRequest',
+      'signSecretOffer',
+      'signTunnel',
+    ]);
     expect(Object.isFrozen(signer)).toBe(true);
   });
 });
@@ -218,7 +224,13 @@ describe('kernel.signer: each signature is offered only to the plugin that needs
   it('Connections may sign claims and tunnel requests; Catalogs may sign catalogs; nobody else signs anything', async () => {
     const signer = createIdentitySigner(await newDaemonIdentity());
     const nonce = nonceText();
-    expect(Object.keys(SIGNER_USERS).sort()).toEqual(['sign', 'signCatalog', 'signLinkStoreRequest', 'signSecretOffer', 'signTunnel']);
+    expect(Object.keys(SIGNER_USERS).sort()).toEqual([
+      'sign',
+      'signCatalog',
+      'signLinkStoreRequest',
+      'signSecretOffer',
+      'signTunnel',
+    ]);
     const connections = signerFor('connections', signer);
     expect((await connections.sign({ host, nonce })).signature.length).toBeGreaterThan(0);
     await expect(connections.signCatalog({ kind: 'manifest', canonical: utf8Bytes('{}') })).rejects.toThrow(TypeError);
@@ -339,9 +351,9 @@ describe('identity signer: link-store requests (Catalogs) — R594', () => {
       ),
     ).toBe(true);
     const context = { daemonId: identity.daemonId, host, nonce: bytes, body: upload };
-    expect(
-      (await verifyLinkStoreRequest(relayCrypto, context, { ...signed, nonce: toBase64Url(bytes) })).ok,
-    ).toBe(true);
+    expect((await verifyLinkStoreRequest(relayCrypto, context, { ...signed, nonce: toBase64Url(bytes) })).ok).toBe(
+      true,
+    );
     expect(linkStoreTranscript(context)).toEqual(expected);
   });
 
@@ -383,11 +395,21 @@ describe('identity signer: link-store requests (Catalogs) — R594', () => {
       nonce: bytes,
       canonicalBody: json({ request: 'delete', bundleId: 'lnk_abc' }),
     });
-    const base = { daemonId: identity.daemonId, host, nonce: bytes, body: { request: 'delete', bundleId: 'lnk_abc' } } as const;
+    const base = {
+      daemonId: identity.daemonId,
+      host,
+      nonce: bytes,
+      body: { request: 'delete', bundleId: 'lnk_abc' },
+    } as const;
     const request = { ...signed, nonce: toBase64Url(bytes) };
-    expect((await verifyLinkStoreRequest(relayCrypto, { ...base, host: 'other.example.test' }, request)).ok).toBe(false);
+    expect((await verifyLinkStoreRequest(relayCrypto, { ...base, host: 'other.example.test' }, request)).ok).toBe(
+      false,
+    );
     expect((await verifyLinkStoreRequest(relayCrypto, { ...base, nonce: nonce() }, request)).ok).toBe(false);
-    expect((await verifyLinkStoreRequest(relayCrypto, { ...base, body: { request: 'delete', bundleId: 'other' } }, request)).ok).toBe(false);
+    expect(
+      (await verifyLinkStoreRequest(relayCrypto, { ...base, body: { request: 'delete', bundleId: 'other' } }, request))
+        .ok,
+    ).toBe(false);
   });
 
   it('refuses a short nonce, an empty host, text that is not exactly a request, and anything signed for the wrong shape — before the key is used', async () => {
@@ -401,8 +423,12 @@ describe('identity signer: link-store requests (Catalogs) — R594', () => {
       },
     });
     const good = json({ request: 'delete', bundleId: 'lnk_abc' });
-    await expect(signer.signLinkStoreRequest({ host, nonce: new Uint8Array(8), canonicalBody: good })).rejects.toThrow(TypeError);
-    await expect(signer.signLinkStoreRequest({ host: '', nonce: nonce(), canonicalBody: good })).rejects.toThrow(TypeError);
+    await expect(signer.signLinkStoreRequest({ host, nonce: new Uint8Array(8), canonicalBody: good })).rejects.toThrow(
+      TypeError,
+    );
+    await expect(signer.signLinkStoreRequest({ host: '', nonce: nonce(), canonicalBody: good })).rejects.toThrow(
+      TypeError,
+    );
     for (const bad of [
       utf8Bytes('not json'),
       json({ request: 'delete' }),
@@ -412,7 +438,9 @@ describe('identity signer: link-store requests (Catalogs) — R594', () => {
       json({ ...upload, action: 'destroy' }),
       new Uint8Array([0xff, 0xfe]),
     ])
-      await expect(signer.signLinkStoreRequest({ host, nonce: nonce(), canonicalBody: bad })).rejects.toThrow(TypeError);
+      await expect(signer.signLinkStoreRequest({ host, nonce: nonce(), canonicalBody: bad })).rejects.toThrow(
+        TypeError,
+      );
     await expect(
       signer.signLinkStoreRequest({ host, nonce: nonce(), canonicalBody: '{}' as unknown as Uint8Array }),
     ).rejects.toThrow(TypeError);

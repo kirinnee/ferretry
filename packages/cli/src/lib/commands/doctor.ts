@@ -141,7 +141,12 @@ function hostFindings(report: NonNullable<DoctorInput['hostChecks']>): readonly 
     };
   });
   if (!report.ready)
-    findings.push({ state: 'fail', title: 'host checks', detail: 'the daemon reports it is not ready', fix: report.limitation });
+    findings.push({
+      state: 'fail',
+      title: 'host checks',
+      detail: 'the daemon reports it is not ready',
+      fix: report.limitation,
+    });
   return findings;
 }
 
@@ -171,7 +176,9 @@ export const doctorVerb: ShellVerb = async ctx => {
   if (probe.state === 'up') {
     try {
       const parsed = DoctorReportSchema.safeParse(await ctx.client('kernel').call('GET /v1/doctor'));
-      hostChecks = parsed.success ? parsed.data : { unreadable: 'the daemon’s answer was not in a shape this fy reads' };
+      hostChecks = parsed.success
+        ? parsed.data
+        : { unreadable: 'the daemon’s answer was not in a shape this fy reads' };
     } catch (error) {
       hostChecks = { unreadable: error instanceof Error ? error.message : String(error) };
     }

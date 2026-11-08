@@ -18,7 +18,12 @@ function run(...argv: string[]) {
   homes.push(parent);
   const home = join(parent, 'home');
   const child = Bun.spawnSync(['bun', FYD, ...argv], { env: { ...process.env, FY_HOME: home }, timeout: 20_000 });
-  return { code: child.exitCode, out: child.stdout.toString(), err: child.stderr.toString(), touched: existsSync(home) };
+  return {
+    code: child.exitCode,
+    out: child.stdout.toString(),
+    err: child.stderr.toString(),
+    touched: existsSync(home),
+  };
 }
 
 test('fyd --version prints the version, exits 0 and creates no home', () => {

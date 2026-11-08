@@ -111,7 +111,7 @@ describe('XX kernel.updateHost', () => {
     expect(launched).toEqual([]);
   });
 
-    test('a plugin without permissions.updateHost gets facts that refuse and launches that fail', async () => {
+  test('a plugin without permissions.updateHost gets facts that refuse and launches that fail', async () => {
     const seen: Record<string, UpdateHostPort> = {};
     const half = (id: string, updateHost?: true) =>
       implementDaemon(

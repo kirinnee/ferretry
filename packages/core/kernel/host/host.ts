@@ -799,7 +799,8 @@ async function bootLocked(
       // The thrown text may carry a path or a value a parser echoed: it stays in the local log and, for a core package
       // (the daemon does not boot), on the operator's own stderr. The record, and so `GET /v1/doctor`, says only which plugin.
       log.error('a plugin failed to build', { plugin: manifest.id, error: thrown });
-      if (isCore(manifest.id)) return { kind: 'refused', sentence: `${manifest.title} failed to build: ${thrown}`, trace };
+      if (isCore(manifest.id))
+        return { kind: 'refused', sentence: `${manifest.title} failed to build: ${thrown}`, trace };
       await failed(manifest.id, `${manifest.title} failed to build.`);
     }
   }
@@ -894,7 +895,10 @@ async function bootLocked(
     inventory,
     project,
     tools: {
-      owners: name => [...tools.keys()].filter(key => key.slice(key.indexOf('/') + 1) === name).map(key => key.slice(0, key.indexOf('/'))),
+      owners: name =>
+        [...tools.keys()]
+          .filter(key => key.slice(key.indexOf('/') + 1) === name)
+          .map(key => key.slice(0, key.indexOf('/'))),
       call: (plugin, name, input, request) => callTool(plugin, name, input, request),
     },
     bus: {

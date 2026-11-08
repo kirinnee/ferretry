@@ -19,6 +19,7 @@ interface Rig {
   readonly sent: { readonly url: string; readonly authorization: string | null }[];
   tokenReads: number;
   sleeps: number;
+  clockMs: number;
 }
 
 /** The admin transport's real wiring shape (`world.ts`): locality, then the own-listener check, then the token. */
@@ -41,9 +42,11 @@ function transportFor(rig: Rig, fetcher: Fetcher): HttpTransport {
     },
     restart: {
       patience: { expected: () => true, waiting: () => {} },
-      nowMs: () => 0,
-      sleep: async () => {
+      // The clock moves on each sleep, so a wait that loses its abort ends at the window and fails fast, not hangs.
+      nowMs: () => rig.clockMs,
+      sleep: async ms => {
         rig.sleeps += 1;
+        rig.clockMs += ms;
       },
     },
   });
@@ -56,6 +59,7 @@ const rigAt = (base: string, table: string): Rig => ({
   sent: [],
   tokenReads: 0,
   sleeps: 0,
+  clockMs: 0,
 });
 
 describe('the transport checks every attempt (S57)', () => {
@@ -163,7 +167,7 @@ describe('the event feed goes through the same checks as a request (S57)', () =>
   }
 
   function feedRig(base: string, table: string, opened: { url: string; authorization: string | undefined }[]) {
-    const rig: Rig = { base, table, checked: [], sent: [], tokenReads: 0, sleeps: 0 };
+    const rig: Rig = { base, table, checked: [], sent: [], tokenReads: 0, sleeps: 0, clockMs: 0 };
     const socket = new FakeFeedSocket();
     const ports: ListenerGuardPorts = { tables: async () => [rig.table], uid: () => OWN_UID };
     const transport = new HttpTransport({
@@ -303,6 +307,8 @@ describe('a send whose caller may stop waiting', () => {
     const caller = new AbortController();
     let fetches = 0;
     let sleeping: Promise<void> | undefined;
+    // A clock that moves on each sleep, so a loop that ignores the abort ends at the window and FAILS the test fast.
+    let clock = 0;
     const transport = new HttpTransport({
       baseUrl: async () => rig.base,
       authorization: async () => CREDENTIAL,
@@ -312,16 +318,22 @@ describe('a send whose caller may stop waiting', () => {
       },
       restart: {
         patience: { expected: () => true, waiting: () => {} },
-        nowMs: () => 0,
-        // A sleep that would outlast the test unless the signal ends it, like the real backoff of up to 2 s.
-        sleep: (_ms, signal) =>
-          (sleeping = new Promise<void>(resolve => {
+        nowMs: () => clock,
+        // With the signal, a sleep that would outlast the test unless the abort ends it, like the real backoff of up
+        // to 2 s. Without it (a caller signal that was dropped), the sleep ends by itself and the clock moves on.
+        sleep: (ms, signal) => {
+          if (signal === undefined) {
+            clock += ms;
+            return Promise.resolve();
+          }
+          return (sleeping = new Promise<void>(resolve => {
             const timer = setTimeout(resolve, 60_000);
-            signal?.addEventListener('abort', () => {
+            signal.addEventListener('abort', () => {
               clearTimeout(timer);
               resolve();
             });
-          })),
+          }));
+        },
       },
     });
     const sending = transport
