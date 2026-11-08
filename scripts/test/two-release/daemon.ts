@@ -118,12 +118,22 @@ export async function startDaemon(release: Release, options: { readonly version:
     url: `http://${run.host}:${run.port}`,
     home,
     version: options.version,
-    adminToken: async () =>
-      await until(
+    adminToken: async () => {
+      const token = await until(
         async () => (await readFile(join(home, 'state', 'gate', 'admin-token'), 'utf8')).trim() || undefined,
         15_000,
         'the admin token',
-      ),
+      );
+      // Gate writes the admin token, then the warden token, and only then accepts either (every bearer is refused until
+      // its load ends). A reader that took the admin file the moment it appeared was refused as anonymous.
+      await until(
+        async () => (await readFile(join(home, 'state', 'gate', 'warden-token'), 'utf8')).trim() || undefined,
+        15_000,
+        'the warden token',
+      );
+      await sleep(100);
+      return token;
+    },
     diagnose: () => describeDaemon(host, home),
     stop: async () => {
       await host.stop();
