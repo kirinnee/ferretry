@@ -2,8 +2,7 @@ import { sessionTarget, TmuxAddressError } from './address.ts';
 import type { TmuxLaunch } from './contracts.ts';
 import { CONTROL_SUBSCRIPTION_NAMES } from './control-protocol.ts';
 
-export const paneMetadataFormat =
-  '#{pane_dead}|#{pane_dead_status}|#{cursor_x}|#{cursor_y}|#{pane_height}|#{pane_width}';
+const paneMetadataFormat = '#{pane_dead}|#{pane_dead_status}|#{cursor_x}|#{cursor_y}|#{pane_height}|#{pane_width}';
 
 /**
  * Everything one turn-watch tick needs to know about a pane, in ONE question: what used to take a
@@ -21,7 +20,7 @@ export function paneActivityArguments(session: string): readonly string[] {
  * The active pane of every session's active window, in one listing: the pane `display-message -t
  * <session>` would have answered for, for every session at once.
  */
-export const paneIdentityTableFormat = '#{session_name}\t#{window_active}#{pane_active}\t#{pane_id}\t#{pane_pid}';
+const paneIdentityTableFormat = '#{session_name}\t#{window_active}#{pane_active}\t#{pane_id}\t#{pane_pid}';
 
 export function paneIdentityTableArguments(): readonly string[] {
   return ['list-panes', '-a', '-F', paneIdentityTableFormat];
@@ -157,7 +156,7 @@ export function killSessionArguments(session: string): readonly string[] {
 }
 
 /** How a listing of attached clients is read: whether each is a control client, and its name. */
-export const attachedClientFormat = '#{client_control_mode} #{client_name}';
+const attachedClientFormat = '#{client_control_mode} #{client_name}';
 
 /** The clients attached to `session`. */
 export function sessionClientsArguments(session: string): readonly string[] {

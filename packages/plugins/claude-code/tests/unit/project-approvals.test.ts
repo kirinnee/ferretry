@@ -20,6 +20,7 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
   const at = (path: FencedPath): Entry | undefined => files[path.slice('/home/f1/'.length)];
   return {
     name: 'agent-homes',
+    internal: true,
     resolve: relative =>
       refused.includes(relative) ? err('link_escape' as never) : ok(`/home/f1/${relative}` as FencedPath),
     stat: async path => {

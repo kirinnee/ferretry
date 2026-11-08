@@ -23,7 +23,7 @@ export const LOGIN_RECIPE_MAX_LENGTH = 4_000;
 export const LOGIN_RECIPE_PROPOSALS_MAX = 3;
 /** Most places one login keeps facts for (its login domains and terminal keys). */
 export const LOGIN_OBSERVED_MAX = 16;
-export const LOGIN_PROPOSAL_WHY_MAX_LENGTH = 280;
+const LOGIN_PROPOSAL_WHY_MAX_LENGTH = 280;
 
 /**
  * Characters that draw nothing, or nothing a person can tell apart, while a model still reads them: control and
@@ -58,7 +58,6 @@ export const LoginRecipeSchema = z
         `a recipe cannot contain ${RECIPE_FENCE_OPEN} or ${RECIPE_FENCE_CLOSE}`,
       ),
   );
-export type LoginRecipe = z.output<typeof LoginRecipeSchema>;
 
 /** `[[GOOGLE_KIRIN]]` in a recipe: another saved login's handle. */
 const REFERENCE = /\[\[([A-Z][A-Z0-9_]{0,63})\]\]/gu;
@@ -75,21 +74,20 @@ export function recipeRenamed(recipe: string, from: string, to: string): string 
 }
 
 /** One yes-or-no fact, as often as the daemon has seen it the same way in a row, and when it last did. */
-export const LoginObservedFlagSchema = z.strictObject({
+const LoginObservedFlagSchema = z.strictObject({
   value: z.boolean(),
   observedAt: InstantSchema,
   count: z.number().int().min(1).max(1_000_000),
 });
-export type LoginObservedFlag = z.infer<typeof LoginObservedFlagSchema>;
 
 /**
  * The second factor the daemon saw follow the password: `code` (a one-time code card on the same login, soon
  * after), `push` (the page waited on the sign-in host, then moved on with no code typed: an approval somewhere
  * else), `none` (the page moved on at once).
  */
-export const LOGIN_SECOND_FACTORS = ['push', 'code', 'none'] as const;
-export const LoginSecondFactorSchema = z.enum(LOGIN_SECOND_FACTORS);
-export type LoginSecondFactor = z.infer<typeof LoginSecondFactorSchema>;
+const LOGIN_SECOND_FACTORS = ['push', 'code', 'none'] as const;
+const LoginSecondFactorSchema = z.enum(LOGIN_SECOND_FACTORS);
+type LoginSecondFactor = z.infer<typeof LoginSecondFactorSchema>;
 
 export const LoginObservedSecondFactorSchema = z.strictObject({
   value: LoginSecondFactorSchema,
@@ -213,7 +211,6 @@ export function foldObservation(
 
 /** A proposal's handle. */
 export const LoginRecipeProposalIdSchema = z.string().regex(/^rp_[0-9a-f]{16}$/u);
-export type LoginRecipeProposalId = z.infer<typeof LoginRecipeProposalIdSchema>;
 
 const oneLine = (maximum: number) =>
   z
@@ -250,10 +247,9 @@ export const LoginRecipeProposeRequestSchema = z.strictObject({
   recipe: LoginRecipeSchema,
   why: oneLine(LOGIN_PROPOSAL_WHY_MAX_LENGTH),
 });
-export type LoginRecipeProposeRequest = z.input<typeof LoginRecipeProposeRequestSchema>;
 
 /** What a proposal came to: waiting for the owner, or applied at once because the owner allowed that. */
-export const LoginRecipeProposedSchema = z.strictObject({
+const LoginRecipeProposedSchema = z.strictObject({
   id: LoginRecipeProposalIdSchema,
   login: z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/u),
   state: z.enum(['pending', 'applied']),
@@ -263,7 +259,6 @@ export type LoginRecipeProposed = z.infer<typeof LoginRecipeProposedSchema>;
 
 /** The owner's answer to a proposal (`POST /v1/secrets/logins/:id/recipe/proposals/:pid`). */
 export const LoginRecipeDecisionSchema = z.strictObject({ decision: z.enum(['approve', 'decline']) });
-export type LoginRecipeDecision = z.infer<typeof LoginRecipeDecisionSchema>;
 
 /** One line of a recipe diff: kept, removed or added. */
 export interface RecipeDiffLine {

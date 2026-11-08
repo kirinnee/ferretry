@@ -6,7 +6,7 @@ import {
   MCP_OAUTH_FLOW_TTL_MS,
   McpOAuthRefusal,
   type McpOAuthRefusalCode,
-} from '../../../daemon/lib/oauth/index.ts';
+} from '../../../daemon/lib/oauth/service.ts';
 import { leaks, PWA_REDIRECT, world } from './support.ts';
 
 const SERVER = 'http://127.0.0.1:4100/mcp';

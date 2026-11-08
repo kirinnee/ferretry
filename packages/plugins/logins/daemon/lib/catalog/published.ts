@@ -43,7 +43,7 @@ export const PublishedModelCatalogVersionSchema = z.object({ version: VersionSch
 const CatalogIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/u);
 
 /** `catalog/models.json`, before each catalog and price in it is checked. */
-export const PublishedModelCatalogDocumentSchema = z.object({
+const PublishedModelCatalogDocumentSchema = z.object({
   version: VersionSchema,
   catalogs: z.record(CatalogIdSchema, z.unknown()),
   prices: z.record(CatalogIdSchema, z.unknown()).optional(),

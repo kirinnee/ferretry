@@ -15,11 +15,10 @@
 
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { DaemonConnection } from '../shell.ts';
-import type { QuotaSubject, ResolvedQuota } from '../lib/usage.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 
 /** The machines' facts the join is keyed on: a change of machine set re-joins, a re-render of the same set does not. */
-export const pairingKey = (machines: readonly DaemonConnection[]): string =>
+const pairingKey = (machines: readonly DaemonConnection[]): string =>
   machines.map(machine => machine.daemonId).join('\n');
 
 /**
@@ -52,30 +51,4 @@ export const useMachinesUsage = (store: DaemonUsageStore, machines: readonly Dae
     };
   }, [store, key]);
   useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-};
-
-const NO_SUBSCRIPTION = (): (() => void) => () => undefined;
-const NO_SNAPSHOT = (): null => null;
-
-/**
- * One session's quota for a surface that MAY have no usage store wired.
- *
- * The session page is one of those, and it is also the one surface that renders a quota for a
- * session the dashboard never mounted beside: so it joins the store's shared poll while it is on
- * screen, the same refcounted read the dashboard makes, rather than reading only whatever happened to
- * be cached. The feed is the daemon's PASSIVE reading — what the credentials already know — so
- * joining it never starts a model turn. `null` without a store, or before anything is known.
- */
-export const useOptionalSessionQuota = (
-  store: DaemonUsageStore | undefined,
-  daemon: DaemonConnection,
-  view: QuotaSubject,
-): ResolvedQuota | null => {
-  useEffect(() => store?.watch(daemon), [store, daemon]);
-  useSyncExternalStore(
-    store?.subscribe ?? NO_SUBSCRIPTION,
-    store?.getSnapshot ?? NO_SNAPSHOT,
-    store?.getSnapshot ?? NO_SNAPSHOT,
-  );
-  return store?.quotaFor(daemon.daemonId, view) ?? null;
 };

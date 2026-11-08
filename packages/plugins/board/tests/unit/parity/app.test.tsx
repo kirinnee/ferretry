@@ -251,6 +251,44 @@ describe('the board page and its views', () => {
     );
     expect(root.querySelector('[data-task="F1"]')?.textContent).toContain('Fix the scroller');
   });
+
+  it('S-0040 BoardSideTab: the panel reads only through its own client, for the ferret it sits beside', async () => {
+    const asked: string[] = [];
+    const spy = {
+      ...daemon,
+      call: async (route: string, init?: unknown) => {
+        asked.push(route);
+        return await (daemon as unknown as { call: (r: string, i?: unknown) => Promise<unknown> }).call(route, init);
+      },
+    } as unknown as PluginClient;
+    const own = app.build?.({ manifest, client: spy });
+    await draw<PanelProps>(
+      own?.panels['cards-of-ferret'],
+      { subject: LEAD },
+      node => node.querySelector('[data-task]') !== null,
+      'the side tab drew a card',
+    );
+    expect(asked).toContain('GET /v1/board');
+    expect(asked.every(route => route.startsWith('GET /v1/'))).toBe(true);
+  });
+
+  it('S-0040 BoardSideTab: fails closed on a refusal — no card is drawn from a board that was not read', async () => {
+    const refusing = {
+      call: async () => {
+        throw Object.assign(new Error('refused'), { status: 403, code: 'forbidden' });
+      },
+      subscribe: () => () => undefined,
+    } as unknown as PluginClient;
+    const own = app.build?.({ manifest, client: refusing });
+    const root = await draw<PanelProps>(
+      own?.panels['cards-of-ferret'],
+      { subject: LEAD },
+      node => (node.textContent ?? '') !== '',
+      'the side tab said something',
+    );
+    expect(root.querySelector('[data-task]')).toBeNull();
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain('The board could not be read');
+  });
 });
 
 describe('the lane editor and the board switch', () => {

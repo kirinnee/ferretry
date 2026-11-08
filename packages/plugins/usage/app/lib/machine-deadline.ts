@@ -22,7 +22,7 @@ export const realSchedule: DeadlineSchedule = (run, delayMs) => browserClock.aft
 export const MACHINE_READ_DEADLINE_MS = 20_000;
 
 /** The reason a read gave up waiting. Its message is the plain one a status line can show. */
-export class MachineDeadlineError extends Error {
+class MachineDeadlineError extends Error {
   readonly deadlineMs: number;
   constructor(deadlineMs: number) {
     super(`did not answer within ${Math.round(deadlineMs / 1000)}s`);

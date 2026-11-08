@@ -96,7 +96,7 @@ export interface TaskPlanAgendaPort {
 }
 
 /** The account store, as a plan reads it: the listing, and an account's immutable key. Never a value. */
-export interface TaskPlanAccountsPort {
+interface TaskPlanAccountsPort {
   /** Rejects when the store cannot tell: a plan with a sign-in line is then not raised. */
   listing(): Promise<PlanListing>;
   keyOf(account: AccountId): Promise<AccountKey | undefined>;

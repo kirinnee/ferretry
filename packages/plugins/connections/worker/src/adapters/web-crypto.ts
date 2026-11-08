@@ -22,7 +22,7 @@ interface WebCryptoPrivateKey extends PrivateKeyHandle {
 }
 
 /** A key handle from another adapter is a programming error, not a runtime condition to absorb. */
-export class SessionKeyHandleError extends Error {}
+class SessionKeyHandleError extends Error {}
 
 function handleOf(algorithm: PrivateKeyHandle['algorithm'], key: CryptoKey): WebCryptoPrivateKey {
   return { algorithm, key };

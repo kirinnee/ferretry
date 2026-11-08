@@ -11,7 +11,7 @@ import type {
   SkillEntry,
 } from '../../../contract/index.ts';
 
-export const NOW = instantFromEpochMs(Date.UTC(2026, 10, 7, 10));
+const NOW = instantFromEpochMs(Date.UTC(2026, 10, 7, 10));
 
 export const skill = (name: string, over: Partial<SkillEntry> = {}): SkillEntry => ({
   name,

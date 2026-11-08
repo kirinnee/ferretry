@@ -5,7 +5,7 @@ import type {
   EngineDataChannel,
   EnginePeerConnection,
   NodeDataChannelModule,
-} from '../../../daemon/adapters/webrtc/index.ts';
+} from '../../../daemon/adapters/webrtc/node-datachannel-engine.ts';
 import { webrtcSelftestProbe } from '../../../daemon/adapters/webrtc/selftest.ts';
 import manifest from '../../../manifest.ts';
 import implementation from '../../../daemon/index.ts';

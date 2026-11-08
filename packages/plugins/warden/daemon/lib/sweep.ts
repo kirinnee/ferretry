@@ -310,7 +310,7 @@ export interface WardenFleetSession extends WardenSessionView {
 /** Everything the daemon knows, live and terminal. Terminal history matters:
  *  a peer wait whose peer is a finished session is unanswerable, and telling
  *  that apart from a typo needs the whole index. */
-export interface WardenFleetReader {
+interface WardenFleetReader {
   fleet(): Promise<readonly WardenFleetSession[]>;
   /**
    * Whether the liveness monitor has stopped seeing altogether (`WardenLivenessMonitor.stalled`). Absent:
@@ -400,14 +400,14 @@ export interface WardenAgentInventory {
   defaultRuntime(): Promise<string | undefined>;
 }
 
-export interface WardenUsageReader {
+interface WardenUsageReader {
   accounts(): Promise<readonly WardenAccountHealth[]>;
 }
 
 /** Where a supervision decision is recorded for a human to read later. Fleet-wide
  *  rather than per session: most of these are about the warden, not about any one
  *  agent. */
-export interface WardenJournal {
+interface WardenJournal {
   record(type: string, data: Readonly<Record<string, unknown>>): void;
 }
 
@@ -419,7 +419,7 @@ export interface WardenJournal {
  * partially unreadable directory would silently resolve live escalations, so the
  * sweep is told it is blind and reconciles nothing that pass.
  */
-export interface WardenVerdictReader {
+interface WardenVerdictReader {
   recent(): Promise<readonly WardenEscalationVerdict[] | undefined>;
 }
 
@@ -443,12 +443,12 @@ export interface WardenAgendaPort {
 }
 
 /** What the daemon can read about a flagged ferret for Jev. Total: an unreadable ferret is no evidence. */
-export interface WardenTriageEvidenceReader {
+interface WardenTriageEvidenceReader {
   evidence(sessionId: string): Promise<WardenTriageEvidence>;
 }
 
 /** A finished warden's own cost, priced from its transcript. `undefined` until analytics can price it. */
-export interface WardenInvestigationCostReader {
+interface WardenInvestigationCostReader {
   costUsd(wardenSessionId: string): Promise<number | undefined>;
 }
 
@@ -546,12 +546,12 @@ export interface WardenBoardPort {
 }
 
 /** One session's agenda board, in the view's shape, for reading the Warden's own notifications back. */
-export interface WardenFeedReader {
+interface WardenFeedReader {
   board(sessionId: string): Promise<AgendaBoardInput | undefined>;
 }
 
 /** Where an orphaned card's notice stands: on one ferret's board. Throws when the Agenda refuses it. */
-export interface WardenOrphanList {
+interface WardenOrphanList {
   add(sessionId: string, notice: WardenCardNotice): Promise<void>;
   remove(resolution: OrphanResolution): Promise<void>;
 }
@@ -713,7 +713,7 @@ interface TriageBudget {
 }
 
 /** How many logins one spawn tries before it waits for the next sweep. */
-export const MAX_SPAWN_ATTEMPTS = 3;
+const MAX_SPAWN_ATTEMPTS = 3;
 
 /** What the owner's "Leave it longer" choices last. `until_change` is bounded so nothing is forever. */
 const LEAVE_MS: Readonly<Record<WardenLeaveDuration, number>> = {
@@ -723,7 +723,7 @@ const LEAVE_MS: Readonly<Record<WardenLeaveDuration, number>> = {
 };
 
 /** A lifetime as a person reads it: minutes under an hour, hours otherwise. */
-export function leftAloneFor(ms: number): string {
+function leftAloneFor(ms: number): string {
   const minutes = Math.round(ms / 60_000);
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.round((minutes / 60) * 10) / 10;
@@ -742,12 +742,12 @@ function streakNote(streak: number): string {
 }
 
 /** When a paced cap is back, as a person reads it: `07:00 UTC`. */
-export function pacedUntilLabel(pacedUntil: string | undefined): string {
+function pacedUntilLabel(pacedUntil: string | undefined): string {
   return pacedUntil === undefined ? 'the next hour' : `${pacedUntil.slice(11, 16)} UTC`;
 }
 
 /** Whether a cap is reached only for this hour, not for the day. */
-export function capPaced(spend: Pick<WardenSpend, 'capsPaced'>, cap: WardenCap): boolean {
+function capPaced(spend: Pick<WardenSpend, 'capsPaced'>, cap: WardenCap): boolean {
   return (spend.capsPaced ?? []).includes(cap);
 }
 

@@ -1,5 +1,5 @@
 /** The longest username a saved login keeps (today's `protocol/src/lib/login-entries.ts`; Accounts owns logins). */
-export const LOGIN_USERNAME_MAX_LENGTH = 256;
+const LOGIN_USERNAME_MAX_LENGTH = 256;
 
 /**
  * WHO A PAGE IS SIGNING IN, as the daemon saw the ferret type it (docs/input-requests.md, "Who is signing in").

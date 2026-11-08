@@ -1,16 +1,20 @@
 /**
  * The three Catalogs screens: `sharing` (a daemon's marketplace, three tabs), `join` (where a share link lands) and
- * `shared` (what is shared with this browser, across publishers). Each is built with the shell's client for one daemon
- * and draws through it; `join` and `shared` use no daemon of their own (member records ride the shell's member
- * transport), and a daemon is only needed to say where an install goes.
+ * `shared` (what is shared with this browser, across publishers). `sharing` is built with the shell's client for one
+ * daemon and draws through it. `join` and `shared` are DAEMON-LESS: the shell draws them with no daemon, handed only the
+ * daemon-less props (the route's parameters, `navigate`, the address read on demand) — NO client. Their member records
+ * ride this half's own member transport, and a machine to install on is only offered where a daemon's client exists
+ * (the Sharing page's Subscriptions tab).
  */
 
 import {
+  type DaemonlessScreenProps,
   daemonOfClient,
   daemonTitle,
   HOME_HREF,
   distinctDaemonName,
   useDaemonClients,
+  useOptionalRouter,
   usePairedDaemons,
   useRouter,
 } from '@ferretry/app';
@@ -18,7 +22,7 @@ import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CatalogClient, catalogClientOf } from '../lib/catalog-client.ts';
 import { CatalogClientProvider } from '../lib/client-context.tsx';
-import { heldArrival, holdArrival, releaseArrival } from '../lib/arrival.ts';
+import { fragmentOf, takeArrival } from '../lib/arrival.ts';
 import { daemonConnection } from '../lib/machine.ts';
 import { sharedMembers } from '../lib/members.ts';
 import { isSharingTab, SHARED_PATH } from '../lib/routes.ts';
@@ -84,24 +88,28 @@ export function createSharingScreen(client: PluginClient) {
   };
 }
 
-export function createJoinScreen(client: PluginClient) {
-  const own = catalogClientOf(client);
-  return function JoinRoute(_props: ScreenProps) {
-    const { navigate, entryKey } = useRouter();
-    // The address was already emptied when the half was built (`watchArrivals`); the code is only HELD here, so a render
-    // React throws away loses nothing. It is released once an effect has it.
-    const [link, setLink] = useState(() => ({ fragment: heldArrival(), nonce: 0 }));
+/**
+ * `/join`, where a share link lands. It reads the link's fragment off the address once, on mount, and takes it out of
+ * the address (by `replaceState`, keeping the entry's own history state); a second link opened in the same tab is read
+ * the same way, from the router's new entry or from `hashchange`, and starts the join over.
+ */
+export function createJoinScreen() {
+  return function JoinRoute({ navigate, location }: DaemonlessScreenProps) {
+    const [link, setLink] = useState(() => ({ fragment: fragmentOf(location()), nonce: 0 }));
     const read = useCallback((): void => {
-      holdArrival(globalThis);
-      const fragment = releaseArrival();
-      if (fragment !== '') setLink(held => ({ fragment, nonce: held.nonce + 1 }));
-    }, []);
+      const fragment = fragmentOf(location());
+      if (fragment === '') return;
+      takeArrival(globalThis);
+      setLink(held => ({ fragment, nonce: held.nonce + 1 }));
+    }, [location]);
+    const entryKey = useOptionalRouter()?.entryKey;
     const arrived = useRef(false);
     // biome-ignore lint/correctness/useExhaustiveDependencies: `entryKey` is the trigger; a second link navigates to the same path
     useEffect(() => {
       if (!arrived.current) {
+        // The first link is already held by the state above; it only has to leave the address.
         arrived.current = true;
-        releaseArrival(); // the first link is already on screen: release it, do not restart the join with it
+        takeArrival(globalThis);
         return;
       }
       read();
@@ -112,35 +120,21 @@ export function createJoinScreen(client: PluginClient) {
     }, [read]);
     const now = useCallback(() => new Date(), []);
     return (
-      <CatalogClientProvider client={own}>
-        <JoinScreen
-          key={link.nonce}
-          members={sharedMembers()}
-          fragment={link.fragment}
-          now={now}
-          onShared={() => navigate(SHARED_PATH)}
-          onHome={() => navigate(HOME_HREF)}
-        />
-      </CatalogClientProvider>
+      <JoinScreen
+        key={link.nonce}
+        members={sharedMembers()}
+        fragment={link.fragment}
+        now={now}
+        onShared={() => navigate(SHARED_PATH)}
+        onHome={() => navigate(HOME_HREF)}
+      />
     );
   };
 }
 
-export function createSharedScreen(client: PluginClient) {
-  const own = catalogClientOf(client);
-  return function SharedRoute(_props: ScreenProps) {
-    const { navigate } = useRouter();
-    const machines = useInstallMachines();
-    const installHost = useInstallHost(own, daemonOfClient(client) ?? THIS_DAEMON);
-    return (
-      <CatalogClientProvider client={own}>
-        <SharedWithMe
-          members={sharedMembers()}
-          machines={machines}
-          installHost={installHost}
-          onHome={() => navigate(HOME_HREF)}
-        />
-      </CatalogClientProvider>
-    );
+/** `/shared`, what is shared with this browser across publishers. No client, so no machine to install on is offered here. */
+export function createSharedScreen() {
+  return function SharedRoute({ navigate }: DaemonlessScreenProps) {
+    return <SharedWithMe members={sharedMembers()} machines={[]} onHome={() => navigate(HOME_HREF)} />;
   };
 }

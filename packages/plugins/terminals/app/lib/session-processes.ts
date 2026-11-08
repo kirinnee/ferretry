@@ -112,6 +112,7 @@ export const processErrorText = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
 };
 
+/** Whether Gate refused this read: a 403, or a grant refusal the notice can name. */
 export const isForbidden = (error: unknown): boolean =>
   (error instanceof DaemonCallError && error.status === 403) || grantRefusalNotice(error) !== null;
 

@@ -3,7 +3,7 @@ import { EXIT_USAGE } from '../args.ts';
 import { AttachTargetSchema } from '../protocol/attach-target.ts';
 import type { ITerminalAttacher } from './ports.ts';
 
-export const ATTACH_ROUTE = 'GET /v1/ferrets/:ferretId/attach';
+const ATTACH_ROUTE = 'GET /v1/ferrets/:ferretId/attach';
 
 /**
  * `fy attach <ferret>`: attach to the terminal a ferret runs in (today's `ReadsController.attach`). Only after both

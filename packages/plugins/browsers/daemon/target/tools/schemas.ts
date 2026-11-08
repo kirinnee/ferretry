@@ -19,27 +19,27 @@ import { z } from 'zod';
 import { BROWSER_REF_PATTERN } from '../lib/element.ts';
 
 /** The longest text one `browser_type` carries. */
-export const AGENT_TOOL_MAX_TEXT_CHARS = 16_384;
+const AGENT_TOOL_MAX_TEXT_CHARS = 16_384;
 /** The longest selector an agent may type into. */
-export const AGENT_TOOL_MAX_SELECTOR_CHARS = 1_024;
+const AGENT_TOOL_MAX_SELECTOR_CHARS = 1_024;
 /** The longest sentence an agent may leave the owner when it hands a page over. */
-export const AGENT_TOOL_MAX_ASK_CHARS = 280;
+const AGENT_TOOL_MAX_ASK_CHARS = 280;
 /** The most fields one form fill carries, and the most text in all. */
-export const BROWSER_MAX_FORM_FIELDS = 32;
-export const BROWSER_MAX_FORM_TEXT_CHARS = 65_536;
+const BROWSER_MAX_FORM_FIELDS = 32;
+const BROWSER_MAX_FORM_TEXT_CHARS = 65_536;
 /** The longest text one form field takes, the longest option and the longest value (a slider, a date, a colour). */
-export const BROWSER_MAX_FIELD_TEXT_CHARS = 16_384;
-export const BROWSER_MAX_OPTION_CHARS = 256;
-export const BROWSER_MAX_FIELD_VALUE_CHARS = 256;
+const BROWSER_MAX_FIELD_TEXT_CHARS = 16_384;
+const BROWSER_MAX_OPTION_CHARS = 256;
+const BROWSER_MAX_FIELD_VALUE_CHARS = 256;
 /** The longest a card's field label may be. */
-export const INPUT_FIELD_LABEL_MAX_LENGTH = 60;
+const INPUT_FIELD_LABEL_MAX_LENGTH = 60;
 /** How long a push approval waits for the owner, at least and at most. */
-export const PHONE_APPROVAL_MIN_WAIT_SECONDS = 30;
-export const PHONE_APPROVAL_MAX_WAIT_SECONDS = 300;
+const PHONE_APPROVAL_MIN_WAIT_SECONDS = 30;
+const PHONE_APPROVAL_MAX_WAIT_SECONDS = 300;
 
 const SelectorSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_SELECTOR_CHARS);
 
-export const BrowserRefSchema = z
+const BrowserRefSchema = z
   .string()
   .trim()
   .regex(BROWSER_REF_PATTERN, 'a ref is what a page snapshot names an element: e12, or f1e3 inside a frame');
@@ -48,7 +48,7 @@ export const BrowserRefSchema = z
 const ElementTargetShape = { selector: SelectorSchema.optional(), ref: BrowserRefSchema.optional() };
 
 /** Why these fields do not name exactly one element, as one sentence — or nothing (today's `browserTargetProblem`). */
-export function elementProblem(fields: {
+function elementProblem(fields: {
   readonly selector?: string | undefined;
   readonly ref?: string | undefined;
 }): string | undefined {
@@ -67,7 +67,7 @@ const refineElement = (
 };
 
 /** What the owner is asked to do when a page is handed to them: a short plain sentence, never a secret. */
-export const AskOwnerMessageSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_ASK_CHARS);
+const AskOwnerMessageSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_ASK_CHARS);
 
 /** `browser_type`: text into one element, Enter after it when `submit`, one key at a time when `slowly`. */
 export const BrowserTypeInputSchema = z
@@ -82,7 +82,7 @@ export const BrowserTypeInputSchema = z
 export type BrowserTypeInput = z.infer<typeof BrowserTypeInputSchema>;
 
 /** One field of a form: an element, and exactly one thing to do to it. */
-export const BrowserFormFieldSchema = z
+const BrowserFormFieldSchema = z
   .strictObject({
     ...ElementTargetShape,
     /** Replace what a text field holds. */
@@ -100,7 +100,6 @@ export const BrowserFormFieldSchema = z
     if (things !== 1)
       context.addIssue({ code: 'custom', message: 'a field needs exactly one of text, checked, option or value' });
   });
-export type BrowserFormField = z.infer<typeof BrowserFormFieldSchema>;
 
 /** `browser_fill_form`: several fields in one act. */
 export const BrowserFillFormInputSchema = z.strictObject({
@@ -121,7 +120,6 @@ export const BrowserAskOwnerInputSchema = z.strictObject({
   name: SurfaceKeySchema,
   message: AskOwnerMessageSchema.optional(),
 });
-export type BrowserAskOwnerInput = z.infer<typeof BrowserAskOwnerInputSchema>;
 
 const InputFieldLabelSchema = z
   .string()
@@ -134,7 +132,7 @@ const InputFieldLabelSchema = z
  * One field of a `browser_request_input` card: what it is called, how careful to be with it, and the element it goes
  * into (a snapshot's ref or a selector). `plain` is a value the ferret may see (an e-mail); `secret` is a password.
  */
-export const BrowserInputFieldSchema = z
+const BrowserInputFieldSchema = z
   .strictObject({
     id: InputFieldIdSchema,
     label: InputFieldLabelSchema.optional(),
@@ -142,7 +140,6 @@ export const BrowserInputFieldSchema = z
     ...ElementTargetShape,
   })
   .superRefine(refineElement);
-export type BrowserInputField = z.infer<typeof BrowserInputFieldSchema>;
 
 /** An ask the card follows in a multi-step sign-in (`A12`). */
 const ChainSchema = z.string().regex(/^A[1-9][0-9]*$/u);
@@ -152,7 +149,7 @@ const ChainSchema = z.string().regex(/^A[1-9][0-9]*$/u);
  * their phone, with nothing typed. No element: the number is read only from a provider's own challenge view, never
  * from where the ferret points, because the page may echo back text the ferret typed (secrev-1244 H1).
  */
-export const BrowserPushApprovalInputSchema = z.strictObject({
+const BrowserPushApprovalInputSchema = z.strictObject({
   push: z.literal(true),
   name: SurfaceKeySchema,
   secretHint: SecretNameSchema.optional(),
@@ -162,7 +159,7 @@ export const BrowserPushApprovalInputSchema = z.strictObject({
 export type BrowserPushApprovalInput = z.infer<typeof BrowserPushApprovalInputSchema>;
 
 /** A card of values the owner types into the page's fields. */
-export const BrowserValuesInputSchema = z.strictObject({
+const BrowserValuesInputSchema = z.strictObject({
   push: z.literal(false).optional(),
   name: SurfaceKeySchema,
   /** What the owner is told the values are for: shown as "the agent says", never as fact. */
@@ -180,8 +177,6 @@ export const BrowserValuesInputSchema = z.strictObject({
   chain: ChainSchema.optional(),
   secretHint: SecretNameSchema.optional(),
 });
-export type BrowserValuesInput = z.infer<typeof BrowserValuesInputSchema>;
 
 /** `browser_request_input`: a push approval, or a card of values. */
 export const BrowserRequestInputSchema = z.union([BrowserPushApprovalInputSchema, BrowserValuesInputSchema]);
-export type BrowserRequestInput = z.infer<typeof BrowserRequestInputSchema>;

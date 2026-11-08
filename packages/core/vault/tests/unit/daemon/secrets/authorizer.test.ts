@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { allowedDestination, type OutboundHttpRequest } from '../../../../contract/index.ts';
-import { OutboundProviderAuthorizer, SecretStoreError } from '../../../../daemon/lib/secrets/index.ts';
+import { OutboundProviderAuthorizer } from '../../../../daemon/lib/secrets/authorizer.ts';
+import { SecretStoreError } from '../../../../daemon/lib/secrets/types.ts';
 import { FixedVault, RecordingTransport } from '../support.ts';
 
 /**

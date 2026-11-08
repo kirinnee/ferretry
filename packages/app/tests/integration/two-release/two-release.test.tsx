@@ -5,6 +5,7 @@ import type { EventDef } from '@ferretry/kernel/contract';
 import { type StartedDaemon, startDaemon } from '../../../../../scripts/test/two-release/daemon.ts';
 import { builds, hits, hitTotal, resetCounters } from '../../../../../scripts/test/two-release/hits.ts';
 import { buildReleases, type Release } from '../../../../../scripts/test/two-release/releases.ts';
+import { UPDATE_DAEMON_COMMAND } from '../../../src/client/sentences.ts';
 import { DaemonCallError } from '../../../src/client/transport.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
@@ -12,7 +13,7 @@ import { App } from '../../../src/shell/app.tsx';
 import { ShellProvider, type ShellWindow } from '../../../src/shell/context.tsx';
 import { PluginView } from '../../../src/shell/views.tsx';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
-import { type AppSession, openApp } from './session.ts';
+import { type AppSession, openApp, turnUnlockOffAtTheMachine } from './session.ts';
 
 /**
  * THE TWO-RELEASE FIXTURE, the app's leg (redesign §10.5, §9.6).
@@ -25,16 +26,21 @@ import { type AppSession, openApp } from './session.ts';
  * "Nothing was attempted" is read three independent ways: the recording transport holds no request, socket or event
  * stream for the blocked package; the daemon's own hit counters are zero; and no half of the blocked package was built.
  *
- * Titles that start with a gap id (G1, G2, G3) are RED on 5.0 because a piece of 5.0 is not built: G1 Gate projects a
- * device's inventory with an empty surface map, so a paired device sees no plugin at all; G2 the kernel has no event
- * stream route. They turn green when the gap lands; none is skipped. G4 (Catalogs' member table) is a `todo`.
+ * Titles that start with a gap id (G1, G2, G3) are guarantee ids the checker reads, kept as prefixes. G1 (Gate projects
+ * a device's inventory with its surface map) has landed, so a paired device sees its plugins; G2 is the kernel's event
+ * bus socket (`GET /v1/bus`) reaching the app. None is skipped. G4 (Catalogs' member table) is a `todo`.
+ *
+ * The bus is not `unlockExempt`, so the leg that reads events has the owner turn the confirmation on opening off first
+ * (`turnUnlockOffAtTheMachine`); the (e) limited-device leg keeps it on.
  */
 
-const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access'] as const;
+/** The packages every release carries unchanged: the core pieces, Access, and Connections (its direct carrier serves the paired session). */
+const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access', 'connections'] as const;
 const FIXTURE_IDS = ['alpha', 'beta', 'gamma', 'delta'] as const;
 const OLDER = '4.9.0';
 const NEWER = '5.1.0';
-const UPDATE = '`fy daemon update`';
+/** The remedy the app names for an older daemon: its own constant, the one fact (redesign §9.6: `fy update`). */
+const UPDATE = `\`${UPDATE_DAEMON_COMMAND}\``;
 
 let A: Release;
 let Bb: Release;
@@ -107,10 +113,16 @@ async function pairDevice(daemon: StartedDaemon, grants: 'full' | 'limited'): Pr
 /** A daemon of `daemonRelease`, a device paired with `grants`, the app of release A over it, its inventory read. */
 async function open(
   daemonRelease: Release,
-  options: { readonly version: string; readonly grants: 'full' | 'limited' },
+  options: {
+    readonly version: string;
+    readonly grants: 'full' | 'limited';
+    /** The owner turns the confirmation on opening off before pairing (the bus is not `unlockExempt`). */
+    readonly unlockOff?: true;
+  },
 ): Promise<Scenario> {
   const daemon = await startDaemon(daemonRelease, { version: options.version });
   try {
+    if (options.unlockOff === true) await turnUnlockOffAtTheMachine(daemon);
     const device = await pairDevice(daemon, options.grants);
     return {
       ...device,
@@ -182,7 +194,9 @@ function expectNothingSentTo(scenario: Scenario, ...ids: ('alpha' | 'beta' | 'ga
 describe('(a) nothing changed: the app of this commit against a daemon of this commit, a full device', () => {
   let scenario: Scenario;
   beforeAll(async () => {
-    scenario = await open(A, { version: A.appVersion, grants: 'full' });
+    // Only this leg reads events, and the kernel's bus socket is not `unlockExempt`: a not-unlocked device off the host is
+    // served nothing, and a CI run has no hands for a passkey. The owner at the machine turns `unlockOnOpen` off first.
+    scenario = await open(A, { version: A.appVersion, grants: 'full', unlockOff: true });
   });
   afterAll(async () => {
     await scenario.stop();
@@ -243,7 +257,7 @@ describe('(a) nothing changed: the app of this commit against a daemon of this c
     expect(builds.gamma.app).toBe(1);
   });
 
-  test('G2 an unchanged event reaches its listener (the kernel has no event stream route)', async () => {
+  test('G2 an unchanged event reaches its listener over the kernel bus socket', async () => {
     const { DeltaChangedEvent } = await A.load('packages/plugins/delta/contract/index.ts');
     const heard: unknown[] = [];
     const cancel = clientOf(scenario, 'delta').subscribe(
@@ -254,7 +268,7 @@ describe('(a) nothing changed: the app of this commit against a daemon of this c
       await until(() => {
         scenario.daemon.host.events.publish(DeltaChangedEvent as EventDef, { item: 'one' });
         return heard.length > 0;
-      }, 'G2: delta.changed to reach the app (no event stream route on the kernel)');
+      }, 'G2: delta.changed to reach the app over the kernel bus socket');
     } finally {
       cancel();
     }
@@ -495,7 +509,7 @@ describe('(e) a limited device reads the inventory: daemon A', () => {
   });
   afterAll(stopAll);
 
-  test('G1 the limited device’s inventory is the core pieces, Access and the one plugin its grants admit', () => {
+  test('G1 the limited device’s inventory is the core pieces, Access, Connections (`GET /v1/carriers` asks no capability) and the one plugin its grants admit', () => {
     const connection = limited.session.runtime.connection(limited.session.daemonId);
     if (connection.kind !== 'connected' || connection.client.inventory?.kind !== 'read')
       throw new Error('no inventory');

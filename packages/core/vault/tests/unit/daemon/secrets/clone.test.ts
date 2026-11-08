@@ -14,13 +14,11 @@ import should from 'should';
 import {
   MAX_OPEN_SECRET_IMPORTS,
   SecretCloneError,
-  SecretDirectory,
   SecretExportService,
   SecretImportService,
-  SecretStoreError,
-  SecretVault,
-  UnknownSecretError,
-} from '../../../../daemon/lib/secrets/index.ts';
+} from '../../../../daemon/lib/secrets/clone.ts';
+import { SecretDirectory, SecretVault } from '../../../../daemon/lib/secrets/vault.ts';
+import { SecretStoreError, UnknownSecretError } from '../../../../daemon/lib/secrets/types.ts';
 import { FakeSecretCipher, MemorySecretDocuments } from '../support.ts';
 
 const crypto_ = new WebCryptoCloneCrypto();

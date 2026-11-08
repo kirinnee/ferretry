@@ -1,10 +1,8 @@
+import { type DaemonlessScreenProps, type DaemonlessViews, provideToShell } from '@ferretry/app';
 import type { AppComponent, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
-import { watchArrivals } from './lib/arrival.ts';
 import { lazyComponent } from './lazy.ts';
-
-type Factory = 'createSharingScreen' | 'createJoinScreen' | 'createSharedScreen';
 
 /**
  * The views module (React), loaded on first use. The specifier is a Vite dynamic-import path, which keeps this module
@@ -12,30 +10,46 @@ type Factory = 'createSharingScreen' | 'createJoinScreen' | 'createSharedScreen'
  */
 const loadViews = (): Promise<Record<string, unknown>> => import('./views/catalogs-views.tsx');
 
-const screenOf = (factory: Factory, client: PluginClient): AppComponent<ScreenProps> =>
+const sharingScreen = (client: PluginClient): AppComponent<ScreenProps> =>
   lazyComponent<ScreenProps>(async () =>
-    ((await loadViews())[factory] as (client: PluginClient) => AppComponent<ScreenProps>)(client),
+    ((await loadViews()).createSharingScreen as (client: PluginClient) => AppComponent<ScreenProps>)(client),
   );
 
 /**
- * Catalogs' app half (§2.3): the `sharing` page (Subscriptions, My catalogs, People), the `join` page a share link
- * lands on, and `shared`, what is shared with this browser. Every call to a daemon rides the half's own client by the
- * route keys Catalogs' manifest declares; a publisher this browser is not paired with is reached only through the
- * shell's member transport (`@ferretry/app` `MemberCarriers`), and fails closed while the shell offers none.
+ * A daemon-less screen: built with nothing but the shell's daemon-less props, so it cannot be given a client. The shell's
+ * `View` returns React nodes and this module holds no React, so the lazy component is handed over as one.
  */
-export default implementApp(manifest, {
-  build: ({ client }) => {
-    // A share link's live code leaves the address bar now, not when the lazy views arrive (it is held for the join screen).
-    if (typeof window !== 'undefined') watchArrivals(window);
-    return {
+const daemonlessScreen = (factory: 'createJoinScreen' | 'createSharedScreen'): DaemonlessViews[string] =>
+  lazyComponent<DaemonlessScreenProps>(async () =>
+    ((await loadViews())[factory] as () => AppComponent<DaemonlessScreenProps>)(),
+  ) as DaemonlessViews[string];
+
+/** The per-machine slot of a daemon-less screen: never drawn (its route is under no `/d/<machine>/`), so it draws nothing. */
+const daemonlessPlaceholder = (): null => null;
+
+/**
+ * Catalogs' app half (§2.3): the `sharing` page (Subscriptions, My catalogs, People), and — beside it — the daemon-less
+ * `join` page a share link lands on and `shared`, what is shared with this browser. The two daemon-less screens are
+ * mounted by the shell from `shell.daemonless`, with no daemon and no client: a recipient's browser usually holds no
+ * pairing, so the shell never builds this half for them. Every call to a daemon rides the half's own client by the route
+ * keys Catalogs' manifest declares; a publisher this browser is not paired with is reached only through the shell's
+ * member transport (`@ferretry/app` `MemberCarriers`), and fails closed while the shell offers none.
+ */
+export default provideToShell(
+  implementApp(manifest, {
+    build: ({ client }) => ({
       screens: {
-        sharing: screenOf('createSharingScreen', client),
-        join: screenOf('createJoinScreen', client),
-        shared: screenOf('createSharedScreen', client),
+        sharing: sharingScreen(client),
+        // `join` and `shared` are daemon-less: the shell draws them from `shell.daemonless`, never from a machine's half.
+        join: daemonlessPlaceholder,
+        shared: daemonlessPlaceholder,
       },
       panels: {},
       settings: {},
       renderers: {},
-    };
+    }),
+  }),
+  {
+    daemonless: () => ({ join: daemonlessScreen('createJoinScreen'), shared: daemonlessScreen('createSharedScreen') }),
   },
-});
+);

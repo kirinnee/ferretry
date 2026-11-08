@@ -48,7 +48,7 @@ const clip = (text: string, max: number): string => (text.length <= max ? text :
 const uses = (count: number): string => (count === 1 ? '1 use' : `${String(count)} uses`);
 
 /** "GitHub · kirinnee on github.com". */
-export const candidateWords = (candidate: TaskPlanCandidate): string =>
+const candidateWords = (candidate: TaskPlanCandidate): string =>
   `${candidate.account.label}${candidate.username === undefined ? '' : ` · ${candidate.username}`} ${placeWords(candidate.place)}`;
 
 /** "username, password and codes". */

@@ -85,7 +85,7 @@ export const CLIENT_HEADER = 'x-ferretry-client';
  * The per-assignment capability a warden presents to exercise a remedy. IT REFINES, IT NEVER ESTABLISHES: what makes a
  * caller a warden is the token it authenticated with, and nothing else.
  */
-export const WARDEN_CAPABILITY_HEADER = 'x-fy-warden-capability';
+const WARDEN_CAPABILITY_HEADER = 'x-fy-warden-capability';
 
 /** Everything admission reads, each a live answer asked per call; none of it comes from the request body. */
 export interface GateAdmissionDeps {

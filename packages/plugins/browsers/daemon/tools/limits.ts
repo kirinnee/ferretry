@@ -4,14 +4,7 @@
 export const AGENT_TOOL_MAX_TEXT_CHARS = 16_384;
 /** The most text one read or wait hands back. The tail is kept: the newest output is what matters. */
 export const AGENT_TOOL_MAX_OUTPUT_CHARS = 65_536;
-/**
- * The longest one daemon-side wait may last, and its default. Under the HTTP server's own 30 s idle
- * timeout on purpose: a longer wait would be cut by the server and read as a failure. A client that
- * wants longer waits again — `fy` and the MCP server both loop up to {@link AGENT_TOOL_MAX_TOTAL_WAIT_MS}.
- */
-export const AGENT_TOOL_MAX_WAIT_MS = 25_000;
-export const AGENT_TOOL_DEFAULT_WAIT_MS = 10_000;
-export const AGENT_TOOL_MAX_TOTAL_WAIT_MS = 120_000;
+
 /** The longest selector an agent may click, type into or read. */
 export const AGENT_TOOL_MAX_SELECTOR_CHARS = 1_024;
 /** The longest script one `browser.eval` carries. */

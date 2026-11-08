@@ -12,12 +12,8 @@ import {
 } from '../../../contract/index.ts';
 
 export type {
-  AnalyticsPricingCurrency,
-  AnalyticsPricingProvider,
   AnalyticsPricingRate,
   AnalyticsPricingRates,
-  AnalyticsPricingRateUnit,
-  AnalyticsPricingSource,
 } from '../../../contract/index.ts';
 
 /**
@@ -34,7 +30,7 @@ export type {
  * writing them onto a priced session would state that they were applied when nothing applied them,
  * and inventing a count to apply them to would be a heuristic charging an operator real money.
  */
-export interface EffectiveAnalyticsPricingRates {
+interface EffectiveAnalyticsPricingRates {
   readonly input: number;
   readonly cachedRead: number;
   readonly cacheWrite?: number;
@@ -103,7 +99,7 @@ const STORED_RATE_SLOTS = {
  */
 const ANALYTICS_STORED_RATE_UNIT: AnalyticsPricingRateUnit = 'million_tokens';
 
-export interface EffectiveAnalyticsPricingSnapshot {
+interface EffectiveAnalyticsPricingSnapshot {
   readonly pricingKey: string;
   readonly modelId: string;
   readonly provider: AnalyticsPricingRate['provider'];

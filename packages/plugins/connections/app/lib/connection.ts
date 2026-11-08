@@ -71,7 +71,7 @@ function isLoopbackUnderPublishedCsp(hostname: string): boolean {
  * store a carrier the browser then refuses to open, and refuses BEFORE the request exists, so the
  * person holding the phone gets a dead connection with nothing to read.
  */
-export const SocketEndpointSchema = z
+const SocketEndpointSchema = z
   .string()
   .max(2048)
   .transform((value, context) => {
@@ -112,14 +112,7 @@ export const ConnectionMethodSchema = z.discriminatedUnion('kind', [
 export type ConnectionMethod = z.infer<typeof ConnectionMethodSchema>;
 
 /** Every carrier kind, in the order the protocol walks them by default (§15 "The choice", Auto). */
-export const CONNECTION_KINDS = [
-  'direct',
-  'webrtc',
-  'tunnel',
-  'relay',
-] as const satisfies readonly ConnectionMethod['kind'][];
-
-export type ConnectionRole = 'client' | 'daemon';
+const CONNECTION_KINDS = ['direct', 'webrtc', 'tunnel', 'relay'] as const satisfies readonly ConnectionMethod['kind'][];
 
 /**
  * The socket URL for one role.
@@ -299,7 +292,7 @@ const kindRank = (method: ConnectionMethod): number => CONNECTION_KINDS.indexOf(
  * Ordering is separate from choosing so a caller cannot accidentally probe a relay before the
  * direct address it already has.
  */
-export function connectionPreferenceOrder(methods: readonly ConnectionMethod[]): readonly ConnectionMethod[] {
+function connectionPreferenceOrder(methods: readonly ConnectionMethod[]): readonly ConnectionMethod[] {
   return [...methods].sort((left, right) => kindRank(left) - kindRank(right));
 }
 
@@ -376,7 +369,7 @@ export type CarrierAttempt =
  * the very same daemon: the walk would exhaust every address to arrive at the answer it already had,
  * and report "nothing was reachable" for a daemon that replied every single time.
  */
-export function carrierWalkAdvances(
+function carrierWalkAdvances(
   attempt: CarrierAttempt,
 ): attempt is Extract<CarrierAttempt, { kind: 'transport-failure' }> {
   return attempt.kind === 'transport-failure';
@@ -434,7 +427,7 @@ export function chooseConnection(probes: readonly ConnectionProbe[]): Connection
 /**
  * One passed-over carrier, as a clause: never tried, connected and then lost, or unreachable — and why.
  */
-export function describeSkip(skip: ConnectionSkip): string {
+function describeSkip(skip: ConnectionSkip): string {
   const noun = describeConnectionMethod(skip.method).noun;
   if (skip.untried === true) return `${noun} was not tried (${skip.detail})`;
   if (skip.connected === true) return `${noun} connected, but the session on it failed (${skip.detail})`;

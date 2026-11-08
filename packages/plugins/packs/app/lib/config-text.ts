@@ -5,7 +5,7 @@
  */
 
 /** What a parsed file means: its plain value, or that it does not parse. */
-export type ConfigRead = { readonly ok: true; readonly value: unknown } | { readonly ok: false };
+type ConfigRead = { readonly ok: true; readonly value: unknown } | { readonly ok: false };
 
 export interface ConfigText {
   /** Parse one file; `ok: false` for text that is not YAML. */

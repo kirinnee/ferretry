@@ -11,8 +11,9 @@ import type {
   McpOAuthServer,
   McpOAuthStateDocument,
   McpOAuthStateStore,
-} from '../../../daemon/lib/oauth/index.ts';
-import { EMPTY_MCP_OAUTH_STATE, McpOAuthService, McpOAuthUnreachable } from '../../../daemon/lib/oauth/index.ts';
+} from '../../../daemon/lib/oauth/ports.ts';
+import { EMPTY_MCP_OAUTH_STATE, McpOAuthService } from '../../../daemon/lib/oauth/service.ts';
+import { McpOAuthUnreachable } from '../../../daemon/lib/oauth/ports.ts';
 import { FakeProvider, type FakeProviderOptions } from './fake-provider.ts';
 
 const ORIGIN = 'http://127.0.0.1:4100';

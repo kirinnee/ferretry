@@ -7,11 +7,8 @@
 export * from '../../../contract/lanes.ts';
 export {
   type LaneSetActionRequest,
-  type LaneSetActionRequestInput,
   LaneSetActionRequestSchema,
   laneEditProblems,
-  type MoveReasonProblem,
-  moveReasonProblem,
 } from '../../../contract/index.ts';
 export {
   type CardActorVia as BoardActorVia,

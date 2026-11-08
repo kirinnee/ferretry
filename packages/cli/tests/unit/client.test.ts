@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import { defineEvent } from '@ferretry/kernel/contract';
+import { definePlugin, tool } from '@ferretry/kernel/manifest';
 import should from 'should';
 import { z } from 'zod';
 import { pluginClient, type SendOptions } from '../../src/lib/client.ts';
@@ -8,7 +9,15 @@ import { PluginPausedError } from '../../src/lib/guard.ts';
 import { PERSON_ONLY_REFUSAL } from '../../src/lib/credential.ts';
 import { ToolClient } from '../../src/lib/tool-client.ts';
 import type { DaemonRequest } from '../../src/lib/request.ts';
-import { boardEntry, depsOf, FeedingTransport, inventoryOf, RecordingTransport, registryOf } from './fakes.ts';
+import {
+  boardEntry,
+  depsOf,
+  FeedingTransport,
+  inventoryOf,
+  RecordingTransport,
+  registryOf,
+  skeletonEntry,
+} from './fakes.ts';
 
 const registry = registryOf(boardEntry());
 const healthy = inventoryOf({ id: 'board', contract: 'h-board' });
@@ -500,5 +509,90 @@ describe('a call whose caller may stop waiting', () => {
     });
     caller.abort();
     should(answer).deepEqual({ id: 'c2' });
+  });
+});
+
+describe('a tool declared twice, and a feed that fails', () => {
+  const twin = definePlugin({
+    id: 'twin',
+    title: 'Twin',
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: [],
+    actions: {
+      agentTools: [
+        tool('card_show', {
+          minimum: 'authenticated',
+          audit: { skip: 'test' },
+          guard: { none: 'test' },
+          caller: 'any',
+        }),
+      ],
+    },
+  });
+
+  it('refuses a tool name that more than one plugin declares, before anything is contacted', async () => {
+    const { deps, transport, reads } = depsOf(registryOf(boardEntry(), skeletonEntry(twin)), healthy);
+    await should(pluginClient(deps, 'board').tool('card_show', {})).be.rejectedWith(
+      /more than one plugin declares the tool card_show/u,
+    );
+    should(transport.sent).deepEqual([]);
+    should(reads.count).equal(0);
+  });
+
+  it('ends every follower with the reason when the daemon closes the feed, and opens a new feed for the next follower', async () => {
+    // Arrange
+    const transport = new FeedingTransport();
+    const { deps } = depsOf(registry, healthy, { transport });
+    const moved = defineEvent('board.moved', z.strictObject({}));
+    const ended: string[] = [];
+    pluginClient(deps, 'board').follow(
+      moved,
+      () => undefined,
+      reason => ended.push('a:' + reason),
+    );
+    pluginClient(deps, 'board').follow(
+      moved,
+      () => undefined,
+      reason => ended.push('b:' + reason),
+    );
+    await Bun.sleep(10);
+
+    // Act
+    transport.close('daemon went away');
+    await Bun.sleep(10);
+    pluginClient(deps, 'board').follow(
+      moved,
+      () => undefined,
+      () => undefined,
+    );
+    await Bun.sleep(10);
+
+    // Assert
+    should(ended).deepEqual(['a:daemon went away', 'b:daemon went away']);
+    should(transport.opened).equal(2);
+  });
+
+  it('ends the follow with the transport’s own words when it fails to open the feed', async () => {
+    // Arrange
+    const transport = new (class extends FeedingTransport {
+      override events(): () => void {
+        throw new Error('feed refused');
+      }
+    })();
+    const { deps } = depsOf(registry, healthy, { transport });
+    const ended: string[] = [];
+
+    // Act
+    pluginClient(deps, 'board').follow(
+      defineEvent('board.moved', z.strictObject({})),
+      () => undefined,
+      reason => ended.push(reason),
+    );
+    await Bun.sleep(10);
+
+    // Assert
+    should(ended).deepEqual(['feed refused']);
   });
 });

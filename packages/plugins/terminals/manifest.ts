@@ -169,6 +169,14 @@ export default definePlugin({
         audit: SKIP_UNRECORDED,
         guard: 'secrets',
       }),
+      route('GET /v1/ferrets/:ferretId/snapshot', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: 'secrets',
+      }),
       route('GET /v1/terminals', {
         minimum: 'operator',
         caller: 'any',
@@ -270,7 +278,11 @@ export default definePlugin({
   },
 
   ui: {
-    panels: [panel('ferret.side', { id: 'terminals', order: 20 })],
+    panels: [
+      panel('ferret.side', { id: 'terminals', order: 20 }),
+      panel('ferret.side', { id: 'console', order: 21 }),
+      panel('ferret.side', { id: 'processes', order: 22 }),
+    ],
     settings: [settingsTab('terminals', { label: 'Terminals', order: 50 })],
     renderers: [renderer('reference', { prefix: '%terminal' })],
   },

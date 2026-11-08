@@ -66,7 +66,7 @@ interface Reservation {
 }
 
 /** The carrier an arrival opens its session on: the one the listener stamped, else the network's own. */
-export const arrivalCarrier = (arrival: Arrival): CarrierKey =>
+const arrivalCarrier = (arrival: Arrival): CarrierKey =>
   arrival.kind === 'carried' ? arrival.carrier : ('direct' as CarrierKey);
 
 /** The socket route a browser dials for a session: one set of bounds per arrival carrier. */

@@ -1,5 +1,5 @@
 /** The outbound-call seam the Jev guard sends through (today's `speedups/ports.ts`; the Vault's `authorizedSend` fills it). */
-export interface OutboundHttpRequest {
+interface OutboundHttpRequest {
   readonly method: 'GET' | 'POST';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
@@ -8,7 +8,7 @@ export interface OutboundHttpRequest {
   readonly maxResponseBytes: number;
 }
 
-export type OutboundOutcome =
+type OutboundOutcome =
   | { readonly kind: 'completion'; readonly payload: unknown }
   | { readonly kind: 'oversized' }
   | { readonly kind: 'unreadable' }
@@ -16,7 +16,7 @@ export type OutboundOutcome =
   | { readonly kind: 'timeout' }
   | { readonly kind: 'unreachable'; readonly cause?: unknown };
 
-export interface CredentialPlacement {
+interface CredentialPlacement {
   readonly header: string;
   readonly scheme?: string;
 }

@@ -4,9 +4,8 @@ import {
   hostedLinkStoreFetch,
   isHostedLinkStorePath,
   type LinkStoreBinding,
-  type RelayEnvironment,
-  relayFetch,
-} from '../../../worker/src/adapters/index.ts';
+} from '../../../worker/src/adapters/hosted-link-store-routes.ts';
+import { relayFetch, type RelayEnvironment } from '../../../worker/src/adapters/worker.ts';
 import relayWorker from '../../../worker/src/adapters/worker.ts';
 import {
   LinkStoreAdvertisementSchema,

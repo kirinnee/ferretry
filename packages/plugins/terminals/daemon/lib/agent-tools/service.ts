@@ -30,13 +30,13 @@ import type { AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.t
  */
 
 /** How often a wait looks again. */
-export const AGENT_TOOL_POLL_MS = 250;
+const AGENT_TOOL_POLL_MS = 250;
 const WAIT_SEARCH_LINES = 500;
 const WAIT_TAIL_LINES = 40;
 /** The one field a single-value terminal card has (today's `INPUT_SINGLE_FIELD_ID`). */
 const INPUT_SINGLE_FIELD_ID = 'value';
 
-export class AgentToolError extends Error {
+class AgentToolError extends Error {
   constructor(
     readonly code:
       | 'bad_request'
@@ -99,7 +99,7 @@ export interface AgentToolResult {
 }
 
 /** The act runner, bound to one terminal (`kernel.act` with the terminal's id as the target key). */
-export type TerminalAct = <O extends Op>(
+type TerminalAct = <O extends Op>(
   terminalId: string,
   op: O,
   fn: () => Promise<ResultOf<O>>,
@@ -128,7 +128,7 @@ const handedNote = (askOwner: true | string | undefined): string =>
   askOwner === undefined ? '' : ' and asked the owner to take over (wait for them)';
 
 /** The text a reading act returns, masked: what the agent may see (I103). */
-export function maskedText(scope: RedactionScope, text: string): string {
+function maskedText(scope: RedactionScope, text: string): string {
   return scope.text(text);
 }
 
@@ -136,7 +136,7 @@ export function maskedText(scope: RedactionScope, text: string): string {
  * Whether a wait for text is over, decided on the MASKED screen (I103): a value the daemon just typed is masked BEFORE
  * the match, so neither "matched" nor "not matched" can tell the agent whether a guess is in the hidden text.
  */
-export function waitMatches(scope: RedactionScope, screen: string, needle: string): boolean {
+function waitMatches(scope: RedactionScope, screen: string, needle: string): boolean {
   return scope.text(screen).includes(needle);
 }
 

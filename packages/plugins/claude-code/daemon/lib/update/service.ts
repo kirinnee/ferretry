@@ -46,7 +46,7 @@ import {
 export const HARNESS_CHECK_REUSE_MS = 5 * 60_000;
 
 /** How long a binary's `--version` answer is reused between looks. */
-export const HARNESS_PROBE_REUSE_MS = 30_000;
+const HARNESS_PROBE_REUSE_MS = 30_000;
 
 /** How long one update command may run. A cask download or a nix build on a slow link takes minutes. */
 const HARNESS_UPDATE_TIMEOUT_MINUTES = 15;

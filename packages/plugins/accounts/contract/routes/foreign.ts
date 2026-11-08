@@ -12,10 +12,9 @@ export const InstantSchema = z.iso.datetime({ offset: true });
 
 // TODO(contract): Asks' `AskIdSchema` brands the id (`AskId`); today's agenda id is a plain string. Same pattern.
 export const AgendaIdSchema = z.string().regex(/^A[1-9][0-9]*$/u);
-export type AgendaId = z.infer<typeof AgendaIdSchema>;
 
 // TODO(contract): today's `protocol/src/lib/session.ts` `AgentNameSchema`; Ferrets' `FerretNameSchema` is wider.
-export const AGENT_NAME_MAX_LENGTH = 32;
+const AGENT_NAME_MAX_LENGTH = 32;
 export const AgentNameSchema = z
   .string()
   .trim()
@@ -36,9 +35,9 @@ const Base64UrlSchema = (max: number) =>
 
 // TODO(contract): Access's ids (`protocol/src/lib/pairing.ts`); a plugin contract may not import Access's contract.
 export const PairedDeviceIdSchema = z.string().regex(/^fy_device_id_[A-Za-z0-9_-]{22}$/u, 'invalid device id');
-export type PairedDeviceId = z.infer<typeof PairedDeviceIdSchema>;
+
 /** A daemon id is the SHA-256 fingerprint of its persisted Ed25519 public key. */
-export const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u, 'invalid daemon id');
+const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u, 'invalid daemon id');
 export type DaemonId = z.infer<typeof DaemonIdSchema>;
 
 /**
@@ -56,7 +55,7 @@ export type StoredStepUpProof = z.infer<typeof StoredStepUpProofSchema>;
 
 // TODO(contract): Browsers' contract has no element ref schema (`protocol/src/lib/browser-target.ts`).
 /** A ref as a snapshot writes it: `e12`, or `f1e3` inside a frame. */
-export const BROWSER_REF_PATTERN = /^(?:f\d{1,6})?e\d{1,7}$/u;
+const BROWSER_REF_PATTERN = /^(?:f\d{1,6})?e\d{1,7}$/u;
 export const BrowserRefSchema = z
   .string()
   .trim()
@@ -82,4 +81,3 @@ export type InputFieldElement = z.infer<typeof InputFieldElementSchema>;
 
 // TODO(contract): Vault's contract has no store health (`protocol/src/lib/secrets.ts`).
 export const SecretStoreHealthSchema = z.enum(['ready', 'damaged']);
-export type SecretStoreHealth = z.infer<typeof SecretStoreHealthSchema>;

@@ -302,7 +302,7 @@ export type PairingCarrier = { readonly kind: 'direct'; readonly rateLimitKey: s
  * IT IS A SEAM, NOT A REGISTRY. Each owner satisfies it structurally, so revocation stays one act
  * instead of a list of cleanups every future subsystem has to remember to join.
  */
-export interface DeviceScopedState {
+interface DeviceScopedState {
   /** Forgets everything held for one device. Named ids that were never here are not an error. */
   forgetDevice(deviceId: string): Promise<unknown>;
 }
@@ -313,7 +313,7 @@ export interface DeviceScopedState {
  * Declared here, by its first consumer, so pairing depends on nothing above it; the runtime's
  * `PublishedCarrierSet` is the one production owner and `GET /v1/carriers` reads the same object.
  */
-export interface PublishedCarrierView {
+interface PublishedCarrierView {
   current(): readonly DaemonCarrier[];
 }
 

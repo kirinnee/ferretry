@@ -18,14 +18,15 @@
  * (the §14 rendezvous rule, the daemon list) come after `save`, so on failing them the key the person had before
  * this attempt is put back, and a re-pair of a known daemon never loses the key that still works.
  */
-import type { ConnectPorts, DeviceClaims, PairDirectInput, PairedDaemon, PairedOver } from '@ferretry/app';
+import type { ConnectPorts, DeviceClaims, PairDirectInput, PairedDaemon, PairedList, PairedOver } from '@ferretry/app';
 import { PairingResponseSchema } from '../../contract/index.ts';
 import { ConnectionMethodSchema, type RelayCarrier } from '../shell-pairing.ts';
 import type { DeviceKeyStore } from './device-keys.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 
 /** What the exchange touches of the shell's ports. */
-export type PairingPorts = Pick<ConnectPorts, 'daemons' | 'pairDirect'> & Partial<Pick<ConnectPorts, 'pair'>>;
+export type PairingPorts = Pick<ConnectPorts, 'pairDirect'> &
+  Partial<Pick<ConnectPorts, 'pair'>> & { readonly daemons: Pick<PairedList, 'add'> };
 
 export interface PairingExchangeDependencies {
   readonly ports: PairingPorts;

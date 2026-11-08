@@ -1,7 +1,7 @@
 import type { TerminalSize } from '../../../contract/index.ts';
 
 export const TERMINAL_TMUX_PREFIX = 'fy-webterm-';
-export const TERMINAL_SCROLLBACK_LINES = 5_000;
+
 export const TERMINAL_REATTACH_LINES = 2_000;
 export const TERMINAL_INPUT_CHUNK_BYTES = 512;
 

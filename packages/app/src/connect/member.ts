@@ -71,14 +71,27 @@ const loopbackAddress = (address: string): boolean => {
   }
 };
 
-/** A published address held to the protocol's rule: https (http only on loopback) for a daemon, wss/https (ws/http on loopback) for a rendezvous; no query or fragment on a rendezvous. */
+/**
+ * A published address held to the protocol's rule. A DIRECT address is today's `DaemonOriginSchema`: an http(s) origin
+ * with no credentials, path, query or fragment. A RENDEZVOUS is wss/https (ws/http on loopback) with no query or fragment.
+ */
 const dialable = (kind: MemberStep['kind'], address: string): boolean => {
   try {
     const url = new URL(address);
-    const secure = kind === 'direct' ? url.protocol === 'https:' : url.protocol === 'wss:' || url.protocol === 'https:';
-    const plain = kind === 'direct' ? url.protocol === 'http:' : url.protocol === 'ws:' || url.protocol === 'http:';
+    if (kind === 'direct') {
+      return (
+        (url.protocol === 'http:' || url.protocol === 'https:') &&
+        url.username === '' &&
+        url.password === '' &&
+        url.search === '' &&
+        url.hash === '' &&
+        url.pathname === '/'
+      );
+    }
+    const secure = url.protocol === 'wss:' || url.protocol === 'https:';
+    const plain = url.protocol === 'ws:' || url.protocol === 'http:';
     if (!secure && !(plain && isLoopbackHost(url.hostname))) return false;
-    return kind === 'direct' || (url.search === '' && url.hash === '');
+    return url.search === '' && url.hash === '';
   } catch {
     return false;
   }
@@ -91,8 +104,9 @@ const dialable = (kind: MemberStep['kind'], address: string): boolean => {
  *  - a MEMBER session: the publisher's own address, then each relay it published (a tunnel is not a member carrier; a
  *    published address is held to the protocol's own rule), then the discovered rendezvous if none of those is it;
  *  - a publisher fingerprint that is not a daemon id gets NO step, not even the direct one;
- *  - a LOOPBACK publisher address names the reader's own computer: beside any rendezvous it is not dialled at all,
- *    unless the app itself was opened on loopback, where it goes last; alone, it is kept.
+ *  - a LOOPBACK publisher address names the reader's own computer: beside ANY other candidate (a published direct
+ *    address or a relay) it is not dialled at all, unless the app itself was opened on loopback, where it goes last;
+ *    alone, it is kept.
  */
 export function memberWalk(
   publisher: MemberPublisher,
@@ -124,7 +138,7 @@ export function memberWalk(
   }
   const direct = stepOf('direct', publisher.daemonUrl);
   const rest = [...others, ...relays];
-  if (!loopbackAddress(publisher.daemonUrl) || relays.length === 0) return [direct, ...rest];
+  if (!loopbackAddress(publisher.daemonUrl) || rest.length === 0) return [direct, ...rest];
   return servedFromLoopback ? [...rest, direct] : rest;
 }
 

@@ -14,8 +14,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { connector, type DirectDial, pairOverCarriers, pairOverDirect } from './connect/connector.ts';
 import { directoryFetch } from './connect/directory.ts';
-import { registeredConnect, registeredPasskey } from './connect/provides.ts';
 import { setMemberCarriers } from './connect/member.ts';
+import { registeredConnect, registeredDaemonless, registeredPasskey } from './connect/provides.ts';
 import { DaemonList } from './daemons/daemon-list.ts';
 import { generated } from './generated/surfaces.ts';
 import { DeviceLayoutStore } from './layout/device-layout.ts';
@@ -82,23 +82,26 @@ const daemons = new DaemonList({
   forget: daemon => void registered.claims?.forget(daemon).catch(() => {}),
 });
 
-const registered = registeredConnect(generated.surfaces, {
+// The session layer's parts and the pairing walk (R582: direct first, then the one discovered rendezvous).
+const sessionPorts = {
   crypto,
   subtle: window.crypto.subtle,
   indexedDB: databases(),
-  openSocket,
-  after,
   now,
+  after,
   daemons,
   pairDirect: pairOverDirect(crypto, direct),
-  // Direct first, then the one discovered rendezvous (R582): Connections' walk, read per call.
   pair: pairOverCarriers(crypto, direct, after, () => registered.pairing),
+};
+const registered = registeredConnect(generated.surfaces, {
+  ...sessionPorts,
+  openSocket,
   ...(directory === undefined ? {} : { directory }),
 });
-setMemberCarriers(registered.member);
-for (const failure of registered.failures)
+setMemberCarriers(registered.member); // only this composition may install them: the barrel has no setter
+const daemonless = registeredDaemonless(generated.surfaces, sessionPorts); // pairing ports only, no daemon client
+for (const failure of [...registered.failures, ...daemonless.failures])
   console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
-
 // The one passkey prompt (Access's): its ceremony rides Access's own guarded client, read from the runtime per call.
 const passkey = registeredPasskey(generated.surfaces, {
   client: daemon => runtime.packageClient(daemon, 'access'),
@@ -118,6 +121,7 @@ const runtime = new ShellRuntime({
   daemons,
   connect: connector({ crypto, claims: registered.claims, carriers: registered.carriers, direct }),
   passkey: () => passkey.passkey,
+  daemonless: { views: daemonless.views, location: () => window.location.href },
 });
 
 const themes = new ThemePreferenceStore(storage);

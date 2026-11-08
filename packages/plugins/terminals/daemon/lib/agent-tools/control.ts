@@ -42,7 +42,7 @@ import type { AgentToolClock, ResolvedSurface, SurfaceEventSink } from './types.
  */
 
 /** How long one action keeps the driving marker up. */
-export const DRIVING_WINDOW_MS = 15_000;
+const DRIVING_WINDOW_MS = 15_000;
 
 const keyOf = (sessionId: string, surface: SurfaceKind, id: string): string => `${sessionId}\n${surface}\n${id}`;
 

@@ -27,13 +27,13 @@ const strings = (value: unknown): readonly string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 
 /** The approval keys Claude reads, from wherever one document holds them. */
-export interface ClaudeApprovalKeys {
+interface ClaudeApprovalKeys {
   readonly enableAll?: boolean;
   readonly enabled: readonly string[];
   readonly disabled: readonly string[];
 }
 
-export function claudeApprovalKeys(document: unknown): ClaudeApprovalKeys {
+function claudeApprovalKeys(document: unknown): ClaudeApprovalKeys {
   if (!isRecord(document)) return { enabled: [], disabled: [] };
   return {
     ...(typeof document.enableAllProjectMcpServers === 'boolean'
@@ -45,7 +45,7 @@ export function claudeApprovalKeys(document: unknown): ClaudeApprovalKeys {
 }
 
 /** One project's entry in a Claude home's `.claude.json` (`projects[<root>]`), or undefined. */
-export function claudeProjectEntry(claudeJson: unknown, root: string): unknown {
+function claudeProjectEntry(claudeJson: unknown, root: string): unknown {
   if (!isRecord(claudeJson) || !isRecord(claudeJson.projects)) return undefined;
   return claudeJson.projects[root];
 }
@@ -59,7 +59,7 @@ export function claudeProjectEntry(claudeJson: unknown, root: string): unknown {
  * at all. `enableAllProjectMcpServers` (in the project entry or any settings document) approves every
  * one. A deny anywhere wins over an allow anywhere, the way Claude's settings merge denials.
  */
-export function claudeApproval(
+function claudeApproval(
   name: string,
   projectEntry: unknown,
   settings: readonly ClaudeApprovalKeys[],

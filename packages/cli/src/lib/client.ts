@@ -218,7 +218,7 @@ export interface RawEvent {
 }
 
 /** The package that owns an event: the words before its first dot (`ferrets.changed` is Ferrets'). */
-export const eventOwner = (eventName: string): string => {
+const eventOwner = (eventName: string): string => {
   const dot = eventName.indexOf('.');
   return dot === -1 ? eventName : eventName.slice(0, dot);
 };
@@ -429,12 +429,11 @@ export function pluginClient(deps: ClientDeps, caller: Manifest['id']): Followin
       let closing = false;
       let ended = false;
       let socket: PluginSocket | undefined;
-      const end = (reason: string, code?: number): void => {
+      const end = (reason: string): void => {
         if (closing || ended) return;
         ended = true;
         socket?.close();
-        if (code === undefined) listeners.onClose(reason);
-        else listeners.onClose(reason, code);
+        listeners.onClose(reason);
       };
       // One chain, so frames reach the listener in the order they arrived although each is checked asynchronously.
       let chain: Promise<void> = Promise.resolve();

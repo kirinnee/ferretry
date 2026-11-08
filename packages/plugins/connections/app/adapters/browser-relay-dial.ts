@@ -1,6 +1,6 @@
 // Copied browserRelayDial from today’s pwa/lib/relay-carrier.ts; only native IO is injected.
 /** A carrier socket. The app shell supplies the sealed-session engine above these bytes. */
-export interface RelayClientSocket {
+interface RelayClientSocket {
   send(bytes: Uint8Array): void;
   sendText(text: string): void;
   close(code?: number, reason?: string): void;

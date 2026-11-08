@@ -13,7 +13,7 @@
  *
  * Pure.
  */
-import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
+import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { parseCloudCredential } from '../shared/environment.ts';
 import type { Credential } from '../shared/credential.ts';
 import type { HarnessKind } from '../shared/harness.ts';
@@ -49,16 +49,6 @@ function loginVariables(
   const variables: Record<string, PresetVariable> = {};
   for (const harness of loginHalves(preset, halves).toReversed()) Object.assign(variables, preset.halves[harness]?.env);
   return variables;
-}
-
-/** The variables a preset fills in before the person changes anything: plain values and secret references. */
-export function presetDefaultEnv(preset: ProviderPreset): Readonly<Record<string, string>> {
-  return Object.fromEntries(
-    Object.entries(loginVariables(preset)).map(([name, variable]) => [
-      name,
-      variable.secretName === undefined ? (variable.value ?? '') : secretReference(variable.secretName),
-    ]),
-  );
 }
 
 /**

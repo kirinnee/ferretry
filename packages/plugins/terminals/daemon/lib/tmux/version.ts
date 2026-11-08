@@ -17,7 +17,7 @@ export interface TmuxVersion {
 }
 
 /** The first release without the subscription crash. */
-export const SUBSCRIPTION_CRASH_FIXED_IN = { major: 3, minor: 7 } as const;
+const SUBSCRIPTION_CRASH_FIXED_IN = { major: 3, minor: 7 } as const;
 
 const VERSION = /^(?:tmux\s+)?((?:next-|openbsd-)?(\d+)\.(\d+)[a-z]?(?:-rc\d*)?)$/u;
 

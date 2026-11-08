@@ -9,7 +9,7 @@
 import type { LocalModels } from '../../contract/index.ts';
 
 export type LocalModel = LocalModels['models'][number];
-export type LocalModelsState = LocalModels['state'];
+type LocalModelsState = LocalModels['state'];
 
 /** The provider tile that runs Codex on Ollama (the `ollama-codex` runtime). */
 export const OLLAMA_PRESET_ID = 'ollama-codex';

@@ -6,10 +6,12 @@ import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { PluginLifecycle } from '../../../host/lifecycle.ts';
 import { hostPermitted, restrictFetch, workersFor } from '../../../host/permissions.ts';
 import { rootsPortFor } from '../../../host/roots.ts';
+import { WorkerGrantRefusal, fetchPort } from '../../../worker.ts';
 import {
   GRANT_REFUSAL_WINDOW_MS,
   MAX_GRANT_BODY_BYTES,
   MAX_GRANT_IN_FLIGHT,
+  MAX_GRANT_MESSAGES_PER_WINDOW,
   MAX_GRANT_REFUSALS_PER_WINDOW,
   WORKER_GRANTS_KEY,
 } from '../../../host/worker-grants/wire.ts';
@@ -84,6 +86,7 @@ async function harness(options: { hang?: boolean } = {}) {
   let now = 0;
   const flooded: string[] = [];
   const lifecycle = new PluginLifecycle();
+  let stopHandlers = 0;
   const workers = workersFor(
     fake,
     () => undefined,
@@ -97,13 +100,23 @@ async function harness(options: { hang?: boolean } = {}) {
       nowMs: () => now,
       flooded: plugin => flooded.push(plugin),
     },
-    { onStop: fn => lifecycle.onStop(fn), stopping: () => lifecycle.stopping() },
+    {
+      onStop: fn => {
+        stopHandlers += 1;
+        lifecycle.onStop(fn);
+      },
+      stopping: () => lifecycle.stopping(),
+    },
   );
   const replies: Reply[] = [];
+  const notices: true[] = [];
   const start = (grants: { network?: true | string[] } = { network: true }) => {
     const handle = workers.start(new URL('file:///not-a-real-worker.ts'), { roots: ['credentials'], ...grants });
     const port = data[WORKER_GRANTS_KEY]?.port as MessagePort;
-    port.onmessage = event => replies.push(event.data as Reply);
+    port.onmessage = event => {
+      if ((event.data as { closed?: boolean }).closed === true) notices.push(true);
+      else replies.push(event.data as Reply);
+    };
     return { handle, port };
   };
   const settle = async (): Promise<void> => {
@@ -113,6 +126,9 @@ async function harness(options: { hang?: boolean } = {}) {
     store,
     seen,
     replies,
+    notices,
+    data: () => data,
+    stopHandlers: () => stopHandlers,
     flooded,
     lifecycle,
     workers,
@@ -286,5 +302,68 @@ describe('worker grants hardening: in-flight cap and cancel', () => {
     port.postMessage(fetchOf(1));
     await h.settle();
     expect(h.seen).toHaveLength(2);
+  });
+});
+
+describe('worker grants hardening: every message is bounded, handlers do not pile up, a close ends the waits', () => {
+  test('n1 a flood of cancels (never refused) ends the channel at the message bound', async () => {
+    const h = await harness();
+    const { port } = h.start();
+    for (let i = 0; i < MAX_GRANT_MESSAGES_PER_WINDOW + 5; i += 1) port.postMessage({ kind: 'cancel', id: i });
+    await h.settle();
+    expect(h.flooded).toEqual(['logins']);
+    port.postMessage(fetchOf(1));
+    await h.settle();
+    expect(h.replies).toEqual([]);
+    expect(h.seen).toEqual([]);
+  });
+
+  test('n1 the count is per window: a passed window starts afresh, the next one still ends the channel', async () => {
+    const h = await harness();
+    const { port } = h.start();
+    for (let round = 0; round < 2; round += 1) {
+      for (let i = 0; i < MAX_GRANT_MESSAGES_PER_WINDOW - 10; i += 1) port.postMessage({ kind: 'cancel', id: i });
+      await h.settle();
+      if (round === 0) h.advance(GRANT_REFUSAL_WINDOW_MS);
+    }
+    expect(h.flooded).toEqual([]);
+    for (let i = 0; i < 20; i += 1) port.postMessage({ kind: 'cancel', id: i });
+    await h.settle();
+    expect(h.flooded).toEqual(['logins']);
+  });
+
+  test('n2 N worker starts and exits leave ONE stop handler, and a stop still ends every live worker', async () => {
+    const h = await harness();
+    for (let i = 0; i < 5; i += 1) {
+      h.start();
+      h.exit();
+    }
+    expect(h.stopHandlers()).toBe(1);
+    h.start();
+    h.start();
+    expect(h.stopHandlers()).toBe(1);
+    const before = h.terminated();
+    await h.lifecycle.stop(() => undefined);
+    expect(h.terminated() - before).toBeGreaterThanOrEqual(2);
+  });
+
+  test('n3 a request in flight when close() runs rejects with closed, and a new ask refuses at once', async () => {
+    const h = await harness({ hang: true });
+    // The worker side is the REAL client: the thread's own workerData, nothing re-wired.
+    const handle = h.workers.start(new URL('file:///not-a-real-worker.ts'), { roots: ['credentials'], network: true });
+    const request = fetchPort(h.data());
+    const pending = request.request('https://api.example.com/x');
+    const outcome = pending.then(
+      () => 'resolved',
+      (error: unknown) => (error instanceof WorkerGrantRefusal ? error.refusal : 'other'),
+    );
+    await h.settle();
+    await handle.terminate();
+    expect(await outcome).toBe('closed');
+    const later = await request.request('https://api.example.com/y').then(
+      () => 'resolved',
+      (error: unknown) => (error instanceof WorkerGrantRefusal ? error.refusal : 'other'),
+    );
+    expect(later).toBe('closed');
   });
 });

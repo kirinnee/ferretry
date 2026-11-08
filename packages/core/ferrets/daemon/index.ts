@@ -424,6 +424,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         sessionGit,
         () => kernel.clock.nowMs(),
       ),
+    redaction: kernel.redaction,
     reach: async call => {
       const id = await pathFerret(call);
       agentMayReach(call, id);
@@ -654,7 +655,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   const startFailure = (failure: { readonly code: string; readonly reason: string }): never => {
-    const status = failure.code === 'refused' ? 409 : failure.code === 'folder' ? 400 : 503;
+    const status =
+      failure.code === 'refused' || failure.code === 'unservable_model' ? 409 : failure.code === 'folder' ? 400 : 503;
     throw new ApiError(status, failure.reason, failure.code);
   };
 

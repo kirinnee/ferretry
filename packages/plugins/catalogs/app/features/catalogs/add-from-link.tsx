@@ -5,9 +5,10 @@
  * into joining. Any other link is named in a sentence; nothing is sent from here and the pasted text is cleared the
  * moment it is read, because a share link holds a live code.
  *
- * GAP(shell): the shell mounts no daemon-less screen yet, so /join is not drawn and a link carried there would sit in
- * the address bar and the history, unredeemed. Until it does, a valid share link is refused with a sentence and is
- * NEVER written to the address bar or pushed into the history.
+ * GAP(shell): the shell offers no way to hand a daemon-less screen a link without writing it to the address bar, and
+ * navigating to /join#<code> would push the live code into the history. Until it does, a valid share link is refused
+ * with a sentence and is NEVER written to the address bar or pushed into the history. (A link that ARRIVES, from a QR
+ * code or another app, lands on /join, which takes the code off the address at once.)
  */
 
 import { Link2 } from 'lucide-react';
@@ -21,7 +22,7 @@ const ADD_FROM_LINK_TITLE = 'Subscribe with a link';
 const ADD_FROM_LINK_HELP =
   'Paste the invite link someone sent you. Subscribing installs nothing: you pick what to install.';
 
-/** What a valid share link is answered with while the shell cannot draw the join page. */
+/** What a valid share link is answered with while there is no history-free way to carry it to the join page. */
 export const JOINING_FROM_A_LINK_UNAVAILABLE = "Joining from a link isn't available yet.";
 
 export function AddCatalogFromLink() {

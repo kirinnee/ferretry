@@ -16,9 +16,9 @@ import {
 } from '@ferretry/plugin-runtimes/contract';
 import should from 'should';
 import { parseArgs } from '../../src/lib/argv.ts';
-import { optionList } from '../../src/lib/machine/flags.ts';
+import { optionList, parseHarness } from '../../src/lib/machine/flags.ts';
 import { renderMachine, installTools, machineSettingsEdit, parseCloneBundle } from '../../src/lib/commands/machine.ts';
-import { MACHINE_ROUTES } from '../../src/lib/machine/gateway.ts';
+import { ClientMachineGateway, MACHINE_ROUTES } from '../../src/lib/machine/gateway.ts';
 import { runClone } from '../../src/lib/machine/clone-command.ts';
 import { runChange } from '../../src/lib/machine/change.ts';
 import type { IMachineGateway, MachineDeps } from '../../src/lib/machine/ports.ts';
@@ -542,6 +542,112 @@ describe('fy machine clone (V-0313)', () => {
   });
 });
 
+describe('fy machine clone, asked on a terminal and as data (V-0313)', () => {
+  /** A terminal that answers from a script, then "y" for anything after it; every question it was asked is kept. */
+  const scripted = (answers: string[]) => {
+    const asked: string[] = [];
+    return {
+      asked,
+      prompt: {
+        ask: async (question: string) => {
+          asked.push(question);
+          return answers.shift() ?? 'y';
+        },
+      },
+    };
+  };
+
+  it('V-0313 --forget --json prints which source was dropped and whether there was a record', async () => {
+    const { gateway } = fakeGateway();
+    const { deps, text } = depsOf(gateway);
+    await runClone(deps, undefined, undefined, { forget: 'known', json: true });
+    should(JSON.parse(text())).deepEqual({ source: 'known', forgotten: true });
+  });
+
+  it('V-0313 a first copy asked for as a --dry-run --json prints the daemon’s review and stages nothing', async () => {
+    const { gateway, calls } = fakeGateway({ review: reviewOf({ mode: 'first' }) });
+    const { deps, text } = depsOf(gateway);
+    await runClone(deps, 'f', bundle(), { dryRun: true, json: true });
+    should(JSON.parse(text()).fingerprint).equal('fp-1');
+    should(calls.staged).deepEqual([]);
+  });
+
+  it('V-0313 an update with nothing to copy, asked for as data, prints the review instead of a sentence', async () => {
+    const { gateway, calls } = fakeGateway({ review: reviewOf() });
+    const { deps, text } = depsOf(gateway);
+    await runClone(deps, 'f', bundle(), { json: true });
+    should(JSON.parse(text()).mode).equal('update');
+    should(text()).not.containEql('already here');
+    should(calls.staged).deepEqual([]);
+  });
+
+  it('V-0313 a failed apply that is not a stale review is passed on as it was', async () => {
+    const { gateway } = fakeGateway({ review: reviewOf({ items: [item('mcp/notes', 'theirs')] }) });
+    gateway.apply = async () => {
+      throw new Error('the daemon went away');
+    };
+    const { deps } = depsOf(gateway);
+    await expect(runClone(deps, 'f', bundle(), { yes: true })).rejects.toThrow('the daemon went away');
+  });
+
+  it('V-0313 on a terminal an item both machines changed is asked about: an unclear answer is asked again, "show" shows both', async () => {
+    const { gateway, calls } = fakeGateway({ review: reviewOf({ items: [item('mcp/notes', 'both')] }) });
+    const { asked, prompt } = scripted(['what', 's', 't']);
+    const { deps, text } = depsOf(gateway, { interactive: true, prompt });
+    await runClone(deps, 'f', bundle(), {});
+    should(asked.slice(0, 3)).deepEqual(
+      Array(3).fill('mcp/notes: both sides changed it. [k]eep mine / [t]ake theirs / [s]how both'),
+    );
+    should(text()).containEql('mcp/notes');
+    should((calls.staged.at(-1) as { decisions?: unknown }).decisions).deepEqual({ 'mcp/notes': 'take' });
+  });
+
+  it('V-0313 on a terminal "keep" and "theirs" are both understood', async () => {
+    const { gateway, calls } = fakeGateway({
+      review: reviewOf({ items: [item('mcp/notes', 'both'), item('mcp/other', 'both')] }),
+    });
+    const { prompt } = scripted(['keep', 'theirs']);
+    const { deps } = depsOf(gateway, { interactive: true, prompt });
+    await runClone(deps, 'f', bundle(), {});
+    should((calls.staged.at(-1) as { decisions?: unknown }).decisions).deepEqual({
+      'mcp/notes': 'keep',
+      'mcp/other': 'take',
+    });
+  });
+
+  it('V-0313 on a terminal a person who never gives a clear answer changes nothing', async () => {
+    const { gateway, calls } = fakeGateway({ review: reviewOf({ items: [item('mcp/notes', 'both')] }) });
+    const { asked, prompt } = scripted(['?', '?', '?']);
+    const { deps } = depsOf(gateway, { interactive: true, prompt });
+    await expect(runClone(deps, 'f', bundle(), {})).rejects.toThrow(
+      'No choice was made for mcp/notes. Nothing was changed.',
+    );
+    should(asked).have.length(3);
+    should(calls.staged).deepEqual([]);
+  });
+
+  it('V-0313 on a terminal a login the daemon cannot match is asked about: a name it offered, or an empty slot', async () => {
+    const login = (sourceId: string) => ({ sourceId, outcome: 'ask', candidates: ['a', 'b'] }) as never;
+    const { gateway, calls } = fakeGateway({ review: reviewOf({ logins: [login('work'), login('home')] }) });
+    const { asked, prompt } = scripted(['nope', 'B', 'slot']);
+    const { deps } = depsOf(gateway, { interactive: true, prompt });
+    await runClone(deps, 'f', bundle(), {});
+    should(asked[0]).equal('Which login here is work? a / b / slot (a new empty one)');
+    should((calls.staged.at(-1) as { logins?: unknown }).logins).deepEqual({ work: 'b', home: 'slot' });
+  });
+
+  it('V-0313 on a terminal a person who never names a login changes nothing', async () => {
+    const login = { sourceId: 'work', outcome: 'ask', candidates: ['a', 'b'] } as never;
+    const { gateway, calls } = fakeGateway({ review: reviewOf({ logins: [login] }) });
+    const { prompt } = scripted(['?', '?', '?']);
+    const { deps } = depsOf(gateway, { interactive: true, prompt });
+    await expect(runClone(deps, 'f', bundle(), {})).rejects.toThrow(
+      'No login was chosen for work. Nothing was changed.',
+    );
+    should(calls.staged).deepEqual([]);
+  });
+});
+
 describe('the machine verbs through the router, by row', () => {
   const allRoutes = () =>
     skeletonEntry(
@@ -668,5 +774,149 @@ describe('the machine verbs through the router, by row', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it('V-0312 a machine that has never auto-resumed says nothing about a last restart', () => {
+    const text = renderMachine(machineView({ lastAutoResume: null }), 'fy');
+    should(text).containEql('Auto-resume after restart: on');
+    should(text).not.containEql('Last restart');
+  });
+
+  it('V-0315 reports a tool that installed as a success, and ends the install with exit 0', async () => {
+    const { gateway, calls } = fakeGateway({
+      scan: {
+        tools: [
+          {
+            harness: 'codex',
+            label: 'Codex',
+            installed: false,
+            install: { kind: 'runnable', command: 'npm i -g codex' },
+          } as never,
+        ],
+      },
+      installOutcomes: [{ harness: 'codex', outcome: 'installed' }],
+    });
+    const { deps, text, out } = depsOf(gateway);
+    should(await installTools(deps, ['codex'], { yes: true })).equal(true);
+    should(calls.installs).deepEqual([['codex']]);
+    should(text()).containEql('ok: Codex is installed.');
+    should(out.exitCode).not.equal(1);
+  });
+
+  it('V-0312 a fy with no terminal adapters says so and is unavailable, before the daemon is asked anything', async () => {
+    const { world, io, transport } = fakeWorld();
+    should(await runFy(['machine'], world)).equal(69);
+    should(io.stderr()).equal('This fy has no local terminal adapters.\n');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('V-0316 fy machine set with no setting names the settings, and sends nothing', async () => {
+    const { world, io, transport } = wired([]);
+    should(await runFy(['machine', 'set'], world)).equal(1);
+    should(io.stderr()).containEql('Name the setting: fy machine set <setting> <value...>');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('V-0315 fy machine install with no tool names the choices, and sends nothing', async () => {
+    const { world, io, transport } = wired([]);
+    should(await runFy(['machine', 'install'], world)).equal(1);
+    should(io.stderr()).containEql('Name a tool: fy machine install claude, codex, or both.');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('V-0315 fy machine install --yes ends with exit 1 when the tool could not be installed', async () => {
+    const scan = {
+      machine: 'laptop',
+      format: 'present',
+      harnesses: [],
+      runtimes: [],
+      updates: [],
+      duplicates: [],
+      notes: [],
+      importing: { available: true },
+      tools: [
+        {
+          harness: 'codex',
+          label: 'Codex',
+          installed: false,
+          install: { kind: 'runnable', command: 'npm i -g codex' },
+        },
+      ],
+    };
+    const failed = {
+      outcomes: [
+        {
+          harness: 'codex',
+          outcome: 'failed',
+          cause: 'needs-admin',
+          reason: 'needs sudo',
+          manualCommand: 'sudo npm i -g codex',
+        },
+      ],
+    };
+    const { world, io } = wired([machineView(), scan, failed]);
+    should(await runFy(['machine', 'install', 'codex', '--yes'], world)).equal(1);
+    should(io.stderr()).containEql('Codex was not installed: needs sudo');
+  });
+
+  it('V-0313 fy machine clone --forget names no file and reads none', async () => {
+    const { world, io, transport } = wired([machineView(), { forgotten: true }]);
+    should(await runFy(['machine', 'clone', '--forget', 'desktop', '--yes'], world)).equal(0);
+    should(io.stderr()).equal('');
+    should(paths(transport.sent)).not.containEql('/v1/runtimes/clone/review');
+  });
+});
+
+describe('fy machine change confirmations (V-0316)', () => {
+  it('V-0316 a "no" at the question applies nothing, says so and exits 1', async () => {
+    const { gateway, calls } = fakeGateway();
+    const { deps, text, out } = depsOf(gateway, { interactive: true, prompt: { ask: async () => 'n' } });
+    await runChange(deps, { change: { kind: 'runtime.enable', name: 'x' }, destructive: true, options: {} });
+    should(calls.applied).deepEqual([]);
+    should(text()).containEql('warn: Nothing was changed.');
+    should(out.exitCode).equal(1);
+  });
+
+  it('V-0316 an apply that ended badly is reported as an error and exits 1', async () => {
+    const { gateway, calls } = fakeGateway({
+      outcome: {
+        outcome: 'applied',
+        apply: { outcome: 'rolled-back', failedOperation: 'write x', reason: 'disk full' },
+      } as AccountChangeOutcome,
+    });
+    const { deps, text, out } = depsOf(gateway);
+    await runChange(deps, { change: { kind: 'runtime.enable', name: 'x' }, destructive: false, options: {} });
+    should(calls.applied).have.length(1);
+    should(text()).containEql('err: Nothing changed. write x failed: disk full');
+    should(out.exitCode).equal(1);
+  });
+});
+
+describe('the machine gateway speaks the Runtimes routes', () => {
+  it('V-0316 applies a staged change by its id, to the apply route, and reads the daemon’s outcome', async () => {
+    const calls: { route: string; init: unknown }[] = [];
+    const gateway = new ClientMachineGateway({
+      call: async (route: string, init?: unknown) => {
+        calls.push({ route, init });
+        return { outcome: 'executed', executor: 'clone', summary: 'Copied.' };
+      },
+    } as never);
+
+    const outcome = await gateway.apply('fy_fprop_aaaaaaaaaaaaaaaaaaaaaa');
+
+    should(outcome).deepEqual({ outcome: 'executed', executor: 'clone', summary: 'Copied.' });
+    should(calls).deepEqual([
+      {
+        route: MACHINE_ROUTES.apply,
+        init: { params: { proposalId: 'fy_fprop_aaaaaaaaaaaaaaaaaaaaaa' }, body: {} },
+      },
+    ]);
+  });
+
+  it('V-0315 names a tool the machine does not know, as claude or codex', () => {
+    should(parseHarness(' Claude ')).equal('claude-code');
+    should(parseHarness('claude-code')).equal('claude-code');
+    should(parseHarness('CODEX')).equal('codex');
+    should(() => parseHarness('vim')).throw('"vim" is not a tool this machine knows: use claude or codex.');
   });
 });

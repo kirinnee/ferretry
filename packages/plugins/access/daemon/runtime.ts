@@ -525,7 +525,7 @@ class AccessPairingService extends AuditedPairingService {
  * The grants decision the push routes render (today's `CapabilityGuard` over the daemon-wide document): Gate's
  * policy in force AND the caller's own device record, from the presentation Gate stamped on the call.
  */
-export function gateGuard(gate: GateApi, clientName: string): CapabilityGuard {
+function gateGuard(gate: GateApi, clientName: string): CapabilityGuard {
   const evaluate = (presentation: Parameters<CapabilityGuard['decide']>[1]): GrantEvaluation => ({
     grants: gate.policy()?.grants,
     governed: isGovernedCaller({ loopback: presentation.local }),

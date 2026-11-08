@@ -47,7 +47,7 @@ export function ruleChallenge(body: SignInRuleBody, stage: SignInRuleStageId, no
 }
 
 /** The assertion alone, as the step-up service checks it: the record's proof without its stage and nonce. */
-export function assertionOf(proof: SignInRuleProof): StoredStepUpProof {
+function assertionOf(proof: SignInRuleProof): StoredStepUpProof {
   return {
     deviceId: proof.deviceId,
     credentialId: proof.credentialId,

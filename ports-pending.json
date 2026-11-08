@@ -16,7 +16,14 @@
     "skills",
     "layouts",
     "runtimes",
-    "onboarding"
+    "onboarding",
+    "terminals",
+    "usage",
+    "board",
+    "access",
+    "voice",
+    "projects",
+    "updates"
   ],
   "pendingReasons": {
     "runtimes": [
@@ -40,33 +47,38 @@
       "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
       "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost (a file with a top-level key the schema does not know is refused instead; the owner repairs it by hand); refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel",
-      "GAP(ferrets): the Warden's Info tab and its Ask-Warden action are Warden's contributions to Ferrets' Info (a `ferret.side` panel) and `ferrets.actions-row` slot; not contributed yet",
-      "the Ask the Warden to investigate now row (app/features/warden/ask-warden.tsx) is built and tested but not yet contributed to `ferrets.actions-row`: an app half has no action section to mount it in",
-      "no stream of configuration changes reaches an app half: the settings card reads on mount, after its own save and when the tab becomes visible again, not the moment another editor (the CLI, a file edit) changes warden.yaml"
+      "no stream of configuration changes reaches an app half: the settings card reads on mount, after its own save and when the tab becomes visible again, not the moment another editor (the CLI, a file edit) changes warden.yaml",
+      "GAP(warden): daemon/lib/auto-move-failures.ts is not reached by the auto-move service (the machine item of moves that could not be made) (owner: warden port)",
+      "GAP(warden): daemon/lib/orphan-list.ts is not reached by the machine-wide Asks item (the orphaned-card list) (owner: warden port)",
+      "GAP(warden): WardenReportRequest in app/features/warden/warden-verdicts.tsx is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/session-dashboard.tsx, sessions-page.tsx), so it stays until that branch lands (owner: nelly)"
     ],
     "claude-code": [
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
       "GAP(ferrets): the AskUserQuestion hook is installed, but Ferrets does not yet supply FY_QUESTION_FILE or consume and deliver the question",
       "the ten settings/hooks item verbs return 69 until the item-service route exists",
-      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read"
+      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read",
+      "GAP(claude-code): a fast start that names no model is not judged by start.decide: Claude Code picks the account's default model itself and the daemon cannot see it, so only a NAMED model is checked against fastStartRefusal (today the plan resolved the default; owner: nelly)"
     ],
     "codex": [
+      "GAP(codex): the fast-start catalog is the login-less one — read by the located codex binary in its own created folder under agent-homes/catalog with a scrubbed environment and a throwaway HOME (never the real HOME or ~/.codex), not the account wrapper's own catalog in the session's cwd (today: bin/fyd.ts:2692); a start naming no model is judged on the catalog's own default, where today judged the account's declared default; whether codex app-server answers model/list with no login is not verified by any unit test; tightened by design (#35): a fast Codex start with no catalog held (first boot ever, before the first read lands) is refused at once with \"Codex's model list is still loading; try again in about two minutes\" (the first read waits for the kernel's worker lane, which opens about two minutes after serve) where today waited for the read, and a failed first read keeps refusing where today allowed; when the read finds no Codex binary the refusal says \"Codex could not be found, so its fast mode cannot be checked\" instead (same code, still refused) (owner: nelly)",
       "GAP(kernel): skill launch parts are not materialized into the Codex home: RootHandle.copyTree (with link) exists, but its source must be one of Codex's own roots and no root Codex may declare reaches a skill part's folder (LaunchPart.path); needs a lead decision on that root",
-      "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet"
+      "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet",
+      "GAP(runtimes): daemon/adapters/app-server-catalog.ts is ported and tested (the model list read from a Codex account's own app-server) but only the fast-start check (start.decide) composes it; the Runtimes model catalog read is still not wired to a catalog probe"
     ],
     "logins": [
       "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported",
       "GAP(vault): `fy login add <provider>` does not prompt for, nor store, a provider's secret (store each with the Vault's own verbs and name it as `${secret:NAME}`), and `fy login add --from-env` preset detection is not ported; `fy login budget` is Usage's and `login models list --login` reads Runtimes",
       "GAP(runtimes): `fy login rm` and the app's Remove cannot refuse a login a runtime still uses, because Logins cannot see runtime usage without a Logins-to-Runtimes edge; Runtimes' own change path must check its runtimes first, then call Logins' reviewed change routes (`POST /v1/logins/changes`, `GET /v1/logins/changes/:changeId`, `POST /v1/logins/changes/:changeId/apply`, kinds `login.*`)",
       "the app's environment-variable editor (editing a login's `env` after it is made), the provider grid and one-click add, and the budget editor (Usage's) are not ported; the add panel makes a sign-in login or a provider login from a preset",
-      "GAP(kernel): the housekeeping worker's roots and network grants (kernel.workers.start) bound what the worker gets through rootPort and fetchPort only; the worker is an in-process thread and not a sandbox (it can still import node:fs, call the global fetch or start its own Worker), so S176 and S177 rest on the repo lints (banned-globals, fetch-binding, no-sync-io) and the worker bundle diet test, the same limit as the sqlite state grant; see packages/core/kernel/worker.ts and docs/design/housekeeping-worker.md section 2.4.1",
-      "GAP(kernel): kernel.fetch (the main-thread port) still forwards a Host header a plugin sets, because the guard judges the URL's host and today's port did not refuse it either; only the worker grant channel refuses Host"
+      "GAP(logins): Codex passive usage reading is not ported (today's `daemon/src/lib/fleet-reading/service.ts:226` in rebuild-ref), so nothing attributes a rollout to the credential whose session this daemon launched (`attributedTranscripts` in `daemon/lib/credentials/credentials-service.ts`)",
+      "GAP(kernel): the housekeeping worker's roots and network grants (kernel.workers.start) bound what the worker gets through rootPort and fetchPort only; the worker is an in-process thread and not a sandbox (it can still import node:fs, call the global fetch or start its own Worker), so S176 and S177 rest on the repo lints (banned-globals, fetch-binding, no-sync-io) and the worker bundle diet test, the same limit as the sqlite state grant; see packages/core/kernel/worker.ts and docs/design/housekeeping-worker.md section 2.4.1"
     ],
     "connections": [
-      "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH); the daemon half composes the carrier and says so out loud until a port exists",
+      "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH; daemon/adapters/tunnel/cloudflared-locator.ts is that finder); the daemon half composes the carrier and says so out loud until a port exists",
       "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written",
       "GAP(parity): R88 reconnect nudge and WebRTC networkChanged not wired: back online or back in the foreground, a daemon that is reconnecting waits for its backoff timer instead of being retried at once (today's connectionHealth.reconnecting/retryNow and webrtc networkChanged are passed to watchConnectionSignals; the app half builds no ConnectionHealth yet, so index.ts passes explicit no-ops)",
-      "GAP(parity): `fyd --check` runs the webrtc engine selftest even when webrtc is switched off in config (accepted, R689): today printed `webrtc … switched off in <config>` and did not start the engine; 5.0 gives a selftest no config port, so the engine always runs (loopback only, nothing bound on the daemon's address) and says `engine ready` for a daemon that will not use it. Matching today needs a kernel-passed boolean fact, not a config port"
+      "GAP(parity): `fyd --check` runs the webrtc engine selftest even when webrtc is switched off in config (accepted, R689): today printed `webrtc … switched off in <config>` and did not start the engine; 5.0 gives a selftest no config port, so the engine always runs (loopback only, nothing bound on the daemon's address) and says `engine ready` for a daemon that will not use it. Matching today needs a kernel-passed boolean fact, not a config port",
+      "GAP(app): app/lib/tunnel-switch.ts and app/lib/webrtc-carrier.ts are ported and tested but the app half builds no tunnel switch or WebRTC dialer yet"
     ],
     "browsers": [
       "GAP(kernel): the link opener (POST /v1/system/open-url) is not detached from the daemon, as today's was (detached, unref'd): kernel SpawnOptions has no `detached`, so stopping the daemon's process group can take the opener, and a browser it started directly, down with it; needs the kernel's additive detached spawn",
@@ -74,7 +86,8 @@
       "GAP(shell): today's link-behaviour facility (open a link in the in-app browser or the real one) is not in @ferretry/app, so the in-app link sheet and workspace host are ported but nothing in the shell mounts them yet",
       "GAP(app): the human sign-in window (Real window login) is ported as a client and a model; the panel does not offer the button until the shell can open an external window",
       "GAP(tests): today's visual tests browser-mode.visual, browser-proxy.visual and browser-tab.visual (tests/integration/features), with browser-pane-jumpy.visual and browser-tab-bars.visual, are not moved: plugin app halves have no visual harness yet",
-      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" (and \"This machine will ask you to confirm with your passkey\") where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
+      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" (and \"This machine will ask you to confirm with your passkey\") where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\"",
+      "GAP(daemon): daemon/holds/site.ts, daemon/stream/socket-downstream.ts, daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet (the holds site key, the viewer socket transport and the loopback firewall status) (the file's OUTSIDE_THE_KERNEL exemption is permanent, #20; only its consumer is pending)"
     ],
     "ferrets": [
       "GAP(composition): the session environment store (a session's plaintext credential file), the task store and the effect ledger (its exclusive `begin` publish leaves a second name after a crash, and only an internal root adopts and removes it, so on an owner root the record is wedged) are not constructed by any 5.0 route yet; when the Ferrets daemon half wires them, their root must be an INTERNAL, daemon-owned root, never the owner-visible `work` root (daemon/adapters/session/lifecycle/file-session-environment-store.ts, daemon/adapters/session/lifecycle/file-session-task-store.ts, daemon/adapters/session/effects/file-session-effect-ledger.ts); when wired, a composition test must prove each root is internal",
@@ -99,7 +112,8 @@
       "Last-screen snapshot (last-snapshot.txt) is not ported: the store is not built, so LastSnapshotWriter stays an optional port of the launchers and lastSnapshotAt a view field with no writer; F-0326 open (daemon/lib/session/snapshot/index.ts, daemon/lib/session/snapshot/types.ts)",
       "GAP(file-instance): the file-instance surface (today a `file:<path>` tab per open file in the side pane, pwa file-instance-surface.tsx) is not ported: the files tab opens an image through the shared image viewer in @ferretry/app/ui (Conversation draws with it too) but opens no instance tab for a file, so the tab-per-file behaviour waits on the Layouts side pane taking an instance tab (app/features/files/files-tab.tsx names it)",
       "GAP(owner?): the ferret-list row actions (today's sessions bar row-actions-host.tsx) and the combined Info tab Surfaces (terminals and browser pages, who drives, take over and hand back) have no owner: no 5.0 plugin draws a sidebar ferret list for row actions to hang on, and Surfaces is believed to be split into Terminals' and Browsers' own panels; the owner confirms or names one",
-      "GAP(live): production wires no LiveActivitySource into GET /v1/events (packages/core/ferrets/daemon/index.ts passes no extras), so ?live=1 is accepted and sends no live frames today; G161 holds because nothing is sent, and a test with a fake source pins what a wired one may send"
+      "GAP(live): production wires no LiveActivitySource into GET /v1/events (packages/core/ferrets/daemon/index.ts passes no extras), so ?live=1 is accepted and sends no live frames today; G161 holds because nothing is sent, and a test with a fake source pins what a wired one may send",
+      "GAP(ferrets): daemon/adapters/session/lifecycle/process-incarnation.ts (the pane process start identity that tells a reused PID apart: Linux /proc start ticks, macOS ps start seconds) is ported and tested but nothing builds it until Ferrets composes the durable terminal pane reaper (daemon/adapters/session/lifecycle/durable-terminal-pane-reap.ts) that reads it (gustavo)"
     ],
     "conversation": [
       "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",
@@ -133,7 +147,9 @@
       "GAP(board): the sign-in rule suggestion sheet does not offer the project scope, because the app half has no Board read (\"any\" and \"this ferret\" are offered)",
       "GAP(access): the device-revoke rule-count warning (\"revoking this device suspends N standing sign-in rules\") needs a slot in Access's revoke-device panel",
       "GAP(shells): the `#rules/<stage>` deep link and the \"Don't ask again\" offer on the input card are not drawn; they are not Accounts' surfaces, and dropping them removes no protection",
-      "66 kept rows owned by the daemon half, the CLI half and half a have no id-named test yet: G90 I130 I136 I137 I139 I141 I142 I143 I144 I146 I148 I149 I150 I156 I157 I158 I160 I161 I162 I163 I164 I166 I167 I168 I169 I170 I171 I172 I174 I175 I177 I178 I186 I195 I200 I201 I205 I207 I208 I212 I214 I216 I225 I226 I227 I228 I229 I230 I244 I34 S100 S109 S114 S135 S136 S137 S138 S139 S140 S68 S73 S76 S86 S93 S97 S98"
+      "66 kept rows owned by the daemon half, the CLI half and half a have no id-named test yet: G90 I130 I136 I137 I139 I141 I142 I143 I144 I146 I148 I149 I150 I156 I157 I158 I160 I161 I162 I163 I164 I166 I167 I168 I169 I170 I171 I172 I174 I175 I177 I178 I186 I195 I200 I201 I205 I207 I208 I212 I214 I216 I225 I226 I227 I228 I229 I230 I244 I34 S100 S109 S114 S135 S136 S137 S138 S139 S140 S68 S73 S76 S86 S93 S97 S98",
+      "GAP(agenda): the sign-in grant engine (`daemon/lib/sign-in-grants/**`) is built and tested (rules, ledger, matcher, clear, plans, sources) but nothing in production calls it until Agenda mounts `ask:sign-in-approval`",
+      "GAP(agenda): a paste plan's pre-approval (`secure.preapprove`, today's `proposePastes`) is not ported, so nothing turns its items into task-plan paste lines (`taskPlanLinesOfCopyItems` in `contract/routes/task-plan.ts`)"
     ],
     "agenda": [
       "GAP(agenda-inbox-machines): the Inbox reads the one machine this half is built for (runtime.client), where today's hook read every paired machine's list; the cross-machine count, machine filter and per-machine notes need a shell-level reader over every daemon's Agenda half, which is not built",
@@ -143,7 +159,6 @@
       "GAP(agenda-composer) and GAP(quote-target): the ask page offers the agenda.conversation slot (Q9); a reply typed there does not mark the Inbox replied, and Quote in composer needs Conversation's composer to register its quote target",
       "GAP(agenda-nav) and GAP(agenda-drawer): the Inbox nav entry, the needs-you group and the in-chat drawer have no 5.0 shell or Conversation slot to mount in",
       "GAP(answer-files), GAP(sign-in-rule-sweep), GAP(push-delivery), GAP(notification-open), GAP(item-opened): answer uploads, the sign-in rule sweep and push delivery/open run through ports Conversation, Accounts and Access must bind (Access's agendaItemOpenedHandler is an app function its contract does not expose, so opening an ask does not yet close this device's own buzz lines); the notification filter's sentence says the switch is that machine's own, as the rows are Access's now; app/NEEDS-APP-SHELL.txt lists every open gap",
-      "GAP(ferrets): the Info tab Agenda is Agenda's `ferret.side` panel for the ferret it sits beside; not contributed yet",
       "knip.production.json keeps these app files out of its unused-file report until their wire lands (app/NEEDS-APP-SHELL.txt names each gap): app/components/agenda-message.tsx (GAP(agenda): Agenda's card drawn in Conversation's conversation.row slot); app/hooks/use-agenda-deep-link.ts and app/lib/agenda-deep-link.ts (the shell root reads the fragment); app/hooks/use-agenda-replies.ts and app/features/agenda/agenda-replies-notice.tsx (the held-replies notice waits for the conversation surface); app/features/agenda/agenda.tsx, app/hooks/use-agenda.ts, app/features/agenda/agenda-line.tsx and app/lib/agenda-chat.ts (GAP(agenda-drawer): the in-chat agenda line and drawer have no mount); app/hooks/use-answered-suggestion-sweep.ts (GAP(sign-in-rule-sweep)); app/hooks/use-notifications.ts, app/hooks/use-notification-open.ts, app/lib/notification-ledger.ts, app/lib/notification-open.ts, app/lib/notification-preferences.ts and app/lib/notify.ts (GAP(notification-open)); app/lib/push-delivery.ts (GAP(push-delivery)); app/lib/notification-tap.ts (GAP(agenda-push-tap)); app/lib/item-conversation.ts (GAP(agenda-history-conversation)); app/features/agenda/agenda-inbox-composer.tsx and app/lib/answer-chip.ts (GAP(agenda-composer)); app/features/agenda/agenda-nav.tsx (GAP(agenda-nav)); app/features/permission-request/approval-card.tsx and app/lib/permission-request.ts (a copy of Claude Code's approval card, unmounted until the lead decides who keeps it)",
       "GAP(agenda-harness-prompt): the harness-prompt asks read and type into a ferret's transcript and stay unported until Conversation provides those seams (daemon/index.ts), so the reserved sourceRef grammar they need, app/lib/agenda-source-refs.ts, waits for them"
     ],
@@ -161,14 +176,20 @@
     "usage": [
       "S175, S176, S177 and S178 stay skipped (rows.test.ts) until the Logins sign-in usage read, the housekeeping worker and job runner (Ferrets) and the Vault sealed read are ported",
       "all 61 usage parity rows stay un-flipped until each is proved by name in a usage test",
-      "GAP(ferrets): the Info tab Usage and the ferret's limits (a ferret record carries none) are Usage's `ferret.side` panel; not contributed yet"
+      "GAP(ferrets): the Info tab Usage and the ferret's limits (a ferret record carries none) are Usage's `ferret.side` panel; not contributed yet",
+      "GAP(usage): app/hooks/use-spend-today.ts is not reached by the ferret.side spend panel (not contributed yet) (owner: usage port)",
+      "GAP(usage): app/lib/move-triggers.ts is not reached by Warden failover triggers (nothing reads them yet) (owner: usage port)",
+      "GAP(usage): daemon/adapters/usage/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: usage port)",
+      "GAP(usage): daemon/adapters/usage/provider-quota/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: usage port)",
+      "GAP(usage): daemon/lib/performance/fallbacks.ts is not reached by the performance profile report (the probe is not composed yet) (owner: usage port)",
+      "GAP(usage): daemon/lib/performance/sampler-tee.ts is not reached by the performance profile report (the probe is not composed yet) (owner: usage port)",
+      "GAP(usage): compaction history (F-0130) is Usage's (ruling #27): the Ferrets StorageLiveActivitySource has no history until Usage adds it (owner: nelly)",
+      "GAP(usage): SessionQuotaResolver in app/lib/usage.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/session-dashboard*.tsx), so it stays until that branch lands (owner: nelly)"
     ],
     "onboarding": [
       "10 parity rows have no test files: tests/unit/parity/app.test.tsx, commands.test.ts and storage.test.ts do not exist, and R-0092 is not proved yet",
-      "the app half waits on the shell: about 12 components and 7 app tests are listed in app/NEEDS-APP-SHELL.txt"
-    ],
-    "board": [
-      "GAP(ferrets): the Info tab Tasks (the ferret's cards) is Board's `ferret.side` panel; not contributed yet"
+      "the app half waits on the shell: about 12 components and 7 app tests are listed in app/NEEDS-APP-SHELL.txt",
+      "GAP(shell): app/command-block.tsx, app/command-syntax.ts, app/connection-disclosure.ts, app/copy-button.tsx, app/device-kind.ts, app/first-run-entry.ts, app/landing-geometry.ts, app/link-costs.ts, app/onboarding-brand.tsx, app/onboarding-chooser.tsx, app/onboarding-connection-note.tsx, app/onboarding-doer-chooser.tsx, app/onboarding-model.ts, app/onboarding-page.tsx, app/onboarding-progress.ts, app/onboarding-stages.tsx, app/onboarding-target-chooser.tsx, app/onboarding-track.tsx, app/pending-connections.ts, app/setup-diagram.tsx, app/setup-handoff-panel.tsx, app/setup-handoff.ts, app/setup-qr.ts are ported and tested but nothing mounts them until the app shell builds the onboarding page (listed in app/NEEDS-APP-SHELL.txt)"
     ],
     "layouts": [
       "the default layout (and compact) names views no installed manifest declares: nav item `ferrets` and `side.holds: ferret` (Ferrets declares no `ferrets` or `ferret` screen) and the ferret.side panels `sitrep` and `usage` (Conversation's is `queue`, Usage's is `insights`), so the shell refuses the layout as served and draws the built-in default, and the Layout tab says so under In use",
@@ -176,13 +197,79 @@
     ],
     "catalogs": [
       "GAP(connections): a publisher this browser is not paired with is unreachable: the shell offers no member transport yet. @ferretry/app declares MemberCarriers (connect/member.ts: the discovered rendezvous address, dial(kind, address) and drive(...) ONLY) and ShellProvides.member, Connections-only and not implemented; with none the join, join-options and member session walks answer unreachable and send nothing, so a share code is never spent. The walk order, deadlines, tunnel record and device key are fixed in @ferretry/app (memberWalk, memberTunnelRequest/Response, DIRECT/RELAY_MEMBER_DEADLINE_MS), not Connections'. FOR THE CONNECTIONS PORT: implement dial/drive (today's relay-carrier.ts driveRelaySession l.508, browserHeartbeat l.189, browserRelayDial) and port these real-socket tests, which need the real carrier and stay as todo in tests/unit/app/member-transport.test.ts: direct deadline stops a dial that never opens; relay deadline is the heartbeat grace; a rendezvous that closes before accepting is a transport failure; the heartbeat keeps a member session alive; a session that the carrier drops is not live",
-      "GAP(shell): the shell mounts no daemon-less screen (ScreenView draws the skeleton line when a screen has no daemon), so /join (where a share link lands) and /shared (what is shared with this browser) are built but not reachable until it does. Until then 'Subscribe with a link' refuses a valid share link with a sentence and never writes its code to the address bar or the history, and this half takes any fragment off /join at once (watchArrivals) and holds it in memory for the join screen; Subscriptions on the daemon's sharing page lists the same publishers",
+      "GAP(shell): /join (where a share link lands) and /shared (what is shared with this browser) are mounted by the shell from `shell.daemonless`, with no daemon and no client (@ferretry/app DaemonlessPorts: this half uses none of them and reaches a publisher only through its own member transport). /join takes any fragment off the address on mount and on every later arrival (history.replaceState keeping the entry's own state), so the code stays in memory only. Two things wait on the shell: 'Subscribe with a link' still refuses a valid share link with a sentence (the shell has no history-free way to carry a code to a daemon-less screen), and /shared offers no Install button (a daemon-less screen is given no client, so no machine to install on; Subscriptions on a machine's sharing page lists the same publishers and installs)",
       "GAP(runtimes): Install from a file or a publisher offers a runtime and profile only when the host names them (InstallHost.runtimes); Runtimes' profile list is not read because Catalogs has no edge to it, so the runtime choice is empty in the app",
       "GAP(projects): Install offers a project only when the host names it (InstallHost.projects); Projects' list is not read because Catalogs' app has no edge to it",
       "GAP(skills): My catalogs' Publish skills picker lists nothing (it says Skills has not offered its list) until Skills offers the machine skills list through its contract; the skill rows' Publish / Uninstall / installed-from in Skills and MCP are those halves' to contribute, and a copy of a skill from this machine (local-skill-installs) is Skills'",
       "GAP(access): this device's id is not read for the Sharing-off command (it keeps its <device> placeholder), the browser is named \"Browser\" and a random suffix (no user-agent) when it joins a publisher, and the share QR is drawn by qrcode-generator in this half, not by Access's encoder; the passkey ceremony wrappers (createPasskey / assertPasskey) were moved into @ferretry/app (passkey/ceremony.ts) as a second copy of Access's lib/passkeys.ts until Access repoints",
       "GAP(shell): the page theme switch on the Sharing page is not drawn (the shell offers none to a screen)",
       "tests/integration/app: catalog-review.visual.test.tsx and the versions screenshot harness are moved and never run locally; the visual suite reads the design-system sheet alone until @ferretry/app/testing/browser builds the app stylesheet"
+    ],
+    "terminals": [
+      "GAP(ferrets): the tmux adapters daemon/adapters/tmux/pane-queue.ts, daemon/adapters/tmux/harness-launch-guard.ts, daemon/adapters/tmux/forget-ferret-identity.ts and daemon/adapters/tmux/tmux-release-reader.ts are ported and tested but nothing composes them until Ferrets wires the deliver and runner seams and reads FERRETRY_TEST (scripts/test/swept.sh) to arm it (gustavo)"
+    ],
+    "access": [
+      "GAP(access): app/features/device-notice/devices-looked.ts is not reached by a panel of the app shell (the new-device notice) (owner: kaizen app shell)",
+      "GAP(access): app/features/device-notice/new-device-notice.tsx is not reached by a panel of the app shell (the new-device notice) (owner: kaizen app shell)",
+      "GAP(access): app/features/onboarding/device-kind.ts is not reached by the app shell onboarding (owner: kaizen app shell)",
+      "GAP(access): app/features/pairing/device-refused-notice.tsx is not reached by the app shell page shown to a refused device (owner: kaizen app shell)",
+      "GAP(access): app/features/pairing/pair-scanner.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/features/pairing/pairing-screen.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/features/settings/capability-list.tsx is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/features/settings/grants-api.ts is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/features/settings/grants-settings.tsx is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/features/settings/pair-phone.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/features/settings/security-api.ts is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/features/settings/security-log-settings.tsx is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/harness/pair-from-menu.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/hooks/use-qr-scan.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/device-preference.ts is not reached by a notification setting of the devices tab (owner: nelly)",
+      "GAP(access): app/lib/pair-exchange.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/pair-scan.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/pairing.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/push-clear.ts is not reached by the app shell notification handling (owner: kaizen app shell)",
+      "GAP(access): app/lib/push-seen.ts is not reached by the app shell notification handling (owner: kaizen app shell)",
+      "GAP(access): app/lib/qr-frame-decoder.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/security-log.ts is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): cli/lib/grants/commands.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): cli/lib/grants/controller.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): cli/lib/grants/gateway.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): cli/lib/grants/ports.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): cli/lib/grants/render.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): daemon/adapters/grants/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: nelly)",
+      "GAP(access): daemon/adapters/pairing/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: nelly)",
+      "GAP(access): daemon/adapters/push/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: nelly)",
+      "GAP(access): notificationTapUrl in app/lib/push-scope.ts is rewritten by the unmerged branch rebuild/fix-notification-tap, so it stays until that branch lands (owner: nelly)"
+    ],
+    "board": [
+      "GAP(board): app/lib/board-done.ts is not reached by the agenda answer handlers (no Board panel calls them) (owner: board port)",
+      "GAP(board): app/lib/board-move.ts is not reached by the agenda answer handlers (no Board panel calls them) (owner: board port)",
+      "GAP(board): app/lib/card-reference-context.ts is not reached by the card reference proof (no Board view mounts it) (owner: board port)",
+      "GAP(board): app/lib/lane-proposal-link.ts is not reached by the lane-proposal ask (no view opens the lane editor from it) (owner: board port)",
+      "GAP(board): cli/lib/lane-guide.ts is not reached by `task move --help` (no CLI verb prints it) (owner: board port)",
+      "GAP(board): linkNudgePullRequests in app/lib/board-nudge.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/agent-message-rows.tsx), so it stays until that branch lands (owner: nelly)"
+    ],
+    "voice": [
+      "GAP(voice): app/components/auto-read-chip.tsx is not reached by a chat surface (no manifest panel mounts auto-read) (owner: voice port)",
+      "GAP(voice): app/hooks/use-auto-read.ts is not reached by a chat surface (no manifest panel mounts auto-read) (owner: voice port)",
+      "GAP(voice): app/lib/stt/speed-bench-report.ts is not reached by the speed benchmark page (a realworld harness only) (owner: voice port)",
+      "GAP(voice): app/lib/voice-chat/auto-read.ts is not reached by a chat surface (no manifest panel mounts auto-read) (owner: voice port)",
+      "GAP(voice): app/lib/voice-chat/reply-picker.ts is not reached by a chat surface (no manifest panel mounts auto-read) (owner: voice port)",
+      "GAP(voice): app/lib/voice-chat/turn-endpointer-scoring.ts is not reached by the voice chat mode (no screen mounts the turn endpointer) (owner: voice port)",
+      "GAP(voice): app/lib/voice-chat/turn-endpointer.ts is not reached by the voice chat mode (no screen mounts the turn endpointer) (owner: voice port)",
+      "GAP(voice): daemon/lib/speedups/index.ts is not reached by the daemon composition (daemon/index.ts imports the files directly, only tests import this index) (owner: voice port)",
+      "GAP(voice): daemon/lib/stt/index.ts is not reached by the daemon composition (daemon/index.ts imports the files directly, only tests import this index) (owner: voice port)",
+      "GAP(voice): the STT workers app/worker/parakeet-worker.ts, app/worker/sherpa-worker.ts, app/worker/vosk-worker.ts, app/worker/whisper-worker.ts, the Vite plugin app/vite-voice.ts and their helpers app/lib/stt/parakeet-vocabulary.ts, app/lib/stt/pthread-workers.ts are not reached: each worker URL is injected as the voice store's speechAssets option (app/lib/voice-store.tsx:92), but app/surfaces.tsx:33 calls createVoiceStore() without it, and no vite.config loads app/vite-voice.ts; today's code injects them from packages/pwa/src/main.tsx:62-65 (four ?worker&url imports) passed at :94. So the dependencies @huggingface/transformers, @lichess-org/vosk-browser, @sherpaw/asr, onnxruntime-web, parakeet.js are not reached either (owner: voice port)"
+    ],
+    "projects": [
+      "GAP(projects): app/hooks/use-project-scope.ts is not reached yet: it is reached by the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36) (owner: gustavo, ferrets port)",
+      "GAP(projects): app/lib/project-scope.ts is reached only through app/hooks/use-project-scope.ts: the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36) (owner: gustavo, ferrets port)",
+      "GAP(projects): app/hooks/use-work-project-names.ts has no caller yet, not even on rebuild/port-ferrets-b (today: packages/pwa/src/App.tsx:195 and packages/pwa/src/lib/pages/session-chat-page.tsx:108) (owner: gustavo, ferrets port)",
+      "GAP(projects): app/lib/work-project-names.ts is reached only through app/hooks/use-work-project-names.ts, which has no caller yet (today: packages/pwa/src/App.tsx:195 and packages/pwa/src/lib/pages/session-chat-page.tsx:108) (owner: gustavo, ferrets port)"
+    ],
+    "updates": [
+      "GAP(updates): app/lib/changelog.ts is not reached by a What's new surface (today: packages/pwa/src/features/whats-new/whats-new-host.tsx:21 and whats-new-sheet.tsx:22) (owner: kaizen, app shell)",
+      "GAP(updates): app/lib/install-prompt.ts is not reached by an install-as-app prompt (today: packages/pwa/src/main.tsx:58, packages/pwa/src/App.tsx:211, packages/pwa/src/features/install/install-app.tsx:19) (owner: kaizen, app shell)"
     ]
   },
   "pendingHalves": {

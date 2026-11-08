@@ -17,10 +17,10 @@ import {
 } from '../lib/oauth/ports.ts';
 
 /** How long one request may take. */
-export const MCP_OAUTH_HTTP_TIMEOUT_MS = 15_000;
+const MCP_OAUTH_HTTP_TIMEOUT_MS = 15_000;
 
 /** The most of a body this reads. Metadata and token answers are a few kilobytes. */
-export const MCP_OAUTH_HTTP_MAX_BYTES = 256 * 1024;
+const MCP_OAUTH_HTTP_MAX_BYTES = 256 * 1024;
 
 async function boundedText(response: Response): Promise<string> {
   const reader = response.body?.getReader();
@@ -51,7 +51,7 @@ async function boundedText(response: Response): Promise<string> {
  * `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`, …) when it gave one in the expected shape, `TIMEOUT` for the request deadline.
  * The message is never used: it can carry the address, and an address can carry a query.
  */
-export function transportReason(error: unknown): string {
+function transportReason(error: unknown): string {
   if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return 'TIMEOUT';
   const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
   if (typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_]{1,63}$/u.test(code)) return code;

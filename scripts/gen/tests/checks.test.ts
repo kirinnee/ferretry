@@ -197,6 +197,49 @@ describe('ports-pending', () => {
     expect(found).toContain('pendingHalves alpha app was added; pendingHalves may only shrink');
     expect(found).not.toContain('pendingHalves catalogs app was added');
   });
+  test('pending only shrinks: a ruled id may re-enter only with a reason; any other new id fails', async () => {
+    const base = JSON.stringify({ format: 1, pending: ['alpha'], pendingHalves: { alpha: ALL } });
+    const stated = ws([{ id: 'alpha' }, { id: 'terminals' }], {
+      pending: ['alpha', 'terminals'],
+      pendingReasons: { terminals: ['GAP(ferrets): the tmux runner is not wired yet'] },
+      pendingHalves: { alpha: ALL, terminals: ALL },
+    });
+    stated.write('base.json', base);
+    const passing = messages(await run(portsPending, stated, { base: `file:${join(stated.root, 'base.json')}` }));
+    expect(passing).not.toContain('terminals was added');
+    expect(passing).not.toContain('terminals is back in "pending"');
+
+    const silent = ws([{ id: 'alpha' }, { id: 'usage' }], {
+      pending: ['alpha', 'usage'],
+      pendingHalves: { alpha: ALL, usage: ALL },
+    });
+    silent.write('base.json', base);
+    expect(messages(await run(portsPending, silent, { base: `file:${join(silent.root, 'base.json')}` }))).toContain(
+      'usage is back in "pending" by a one-time ruling but states no "pendingReasons" line',
+    );
+
+    const unwired = ws([{ id: 'alpha' }, { id: 'access' }], {
+      pending: ['alpha', 'access'],
+      pendingReasons: { access: ['GAP(access): app/x.tsx is not reached by any screen (owner: nelly)'] },
+      pendingHalves: { alpha: ALL, access: ALL },
+    });
+    unwired.write('base.json', base);
+    const unwiredFound = messages(
+      await run(portsPending, unwired, { base: `file:${join(unwired.root, 'base.json')}` }),
+    );
+    expect(unwiredFound).not.toContain('access was added');
+    expect(unwiredFound).not.toContain('access is back in "pending"');
+
+    const other = ws([{ id: 'alpha' }, { id: 'beta' }], {
+      pending: ['alpha', 'beta'],
+      pendingReasons: { beta: ['GAP(x): still open'] },
+      pendingHalves: { alpha: ALL, beta: ALL },
+    });
+    other.write('base.json', base);
+    expect(messages(await run(portsPending, other, { base: `file:${join(other.root, 'base.json')}` }))).toContain(
+      'beta was added; the list may only shrink',
+    );
+  });
   test('a shrinking list of skeletons passes', async () => {
     const f = ws([{ id: 'beta' }], { pending: ['beta'], pendingHalves: { beta: ALL } });
     f.write('base.json', JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: { beta: ALL } }));
@@ -1067,6 +1110,17 @@ describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', ()
       expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toContain(
         'no test named',
       );
+      expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
+    });
+
+    test("an integration test in another package that reuses the id does not make the integration job judge the owner's row", async () => {
+      const elsewhere = 'packages/plugins/beta/tests/integration/b.test.ts';
+      const f = planted(row('G1', 'kept'), titled('G1 holds'), {
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G1 a different fixture label', file: elsewhere }),
+      });
+      f.write(elsewhere, titled('G1 a different fixture label'));
+      expect(messages(await run(guarantees, f, { tier: 'unit', results: ['coverage/unit'] }))).toBe('');
       expect(messages(await run(guarantees, f, { tier: 'int', results: ['coverage/int'] }))).toBe('');
     });
 

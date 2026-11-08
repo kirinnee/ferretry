@@ -12,6 +12,10 @@ export {
   type CarrierDialer,
   type CarrierControl,
   type ConnectPorts,
+  type DaemonlessPorts,
+  type PairedList,
+  type DaemonlessScreenProps,
+  type DaemonlessViews,
   type DeviceClaims,
   type DirectoryFetch,
   type PairedOver,
@@ -21,6 +25,7 @@ export {
   type PairDirectInput,
   type PairingKey,
   provideToShell,
+  registeredDaemonless,
   type ShellAppImplementation,
   type ShellProvides,
 } from './connect/provides.ts';

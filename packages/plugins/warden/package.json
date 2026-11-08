@@ -26,7 +26,6 @@
     "@ferretry/app": "workspace:*",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/plugin-board": "workspace:*",
     "@ferretry/plugin-terminals": "workspace:*",
@@ -40,6 +39,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/react-test-renderer": "^19.0.0",
-    "react-test-renderer": "^19.0.0"
+    "react-test-renderer": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }

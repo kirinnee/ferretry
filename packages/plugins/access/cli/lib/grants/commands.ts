@@ -47,9 +47,9 @@ export function grantsSetHelp(bin: string): string {
   ].join('\n');
 }
 
-export const GRANTS_LS_SHAPE: VerbShape = { command: 'ls', args: [], switches: ['json'] };
-export const GRANTS_HISTORY_SHAPE: VerbShape = { command: 'history', args: [], switches: ['json'] };
-export const GRANTS_SET_SHAPE: VerbShape = {
+const GRANTS_LS_SHAPE: VerbShape = { command: 'ls', args: [], switches: ['json'] };
+const GRANTS_HISTORY_SHAPE: VerbShape = { command: 'history', args: [], switches: ['json'] };
+const GRANTS_SET_SHAPE: VerbShape = {
   command: 'set',
   args: ['capability'],
   switches: ['use', 'no-use', 'configure', 'no-configure'],

@@ -13,6 +13,7 @@ import {
 import { StoreDamagedError, UndeclaredStateFileError } from './errors.ts';
 import { encodeDocument, stateLabel } from './format.ts';
 import type { HostFs } from './host-fs.ts';
+import { isInternalRootFolder } from '../internal-roots.ts';
 import { assertRecordSize } from './jsonl-scan.ts';
 import { readBytesFile, readJsonDocument, readJsonlLines, readJsonlRecords } from './readers.ts';
 import { KeyedSerialExecutor } from './serial-executor.ts';
@@ -76,6 +77,13 @@ function validatePath(def: StateFileDef): void {
     wildcards > 1
   )
     throw new UndeclaredStateFileError(`state ${def.name}: "${def.path}" is not a path inside the plugin's folder`);
+  // A fixed file under a folder the kernel makes for a root (`sessions/`, `credentials/`, `downloads/`,
+  // `agent-homes/`) would mix state-port files into that root's base, written by the state port's rules rather than the
+  // root's. Refused for every plugin, the owner of the root included. (A collection is judged name by name instead.)
+  if (wildcards === 0 && isInternalRootFolder(segments[0] ?? ''))
+    throw new UndeclaredStateFileError(
+      `state ${def.name}: "${def.path}" sits under "${segments[0]}", a folder the kernel makes for a root`,
+    );
 }
 
 export function createStatePort(options: StatePortOptions): HostStatePort {
@@ -104,6 +112,9 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
    */
   const nameAllowed = (def: StateFileDef, name: string): boolean => {
     const plain = (segment: string): boolean => COLLECTION_NAME.test(segment) && segment !== '.' && segment !== '..';
+    // A name that would put a file at the top of the plugin's state folder under a kernel-made root's folder name
+    // (`sessions`) is refused here, as `listCollection` would hide it: write, read and list agree.
+    if (isInternalRootFolder(def.path.replace('*', () => name).split('/')[0] ?? '')) return false;
     if (!name.includes('/')) return plain(name);
     if (def.store !== 'opaque' || !def.path.endsWith('/*')) return false;
     const folder = def.path.slice(0, -1);
@@ -375,6 +386,8 @@ export async function listCollection(fs: HostFs, root: string, def: StateFileDef
   const nested = after.includes('/');
   const names: string[] = [];
   for (const entry of await fs.list(folder)) {
+    // A root's base the kernel made inside the plugin's own state folder (`sessions/`) is not one of its names.
+    if (folder === root && isInternalRootFolder(entry.name)) continue;
     if (entry.name.startsWith('.') && !prefix.startsWith('.')) continue;
     if (!entry.name.startsWith(prefix)) continue;
     if (nested) {

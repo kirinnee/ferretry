@@ -2,19 +2,20 @@ import { describe, it } from 'bun:test';
 import type { Clock } from '@ferretry/kernel/contract';
 import should from 'should';
 import { SecretUseRequestSchema } from '../../../../contract/index.ts';
+import { ChildEnvironments } from '../../../../daemon/lib/secrets/child-environments.ts';
 import {
-  ChildEnvironments,
   NO_RECIPES,
-  SecretDirectory,
   SecretUseError,
   SecretUseService,
-  SecretVault,
+  type SecretRecipes,
+} from '../../../../daemon/lib/secrets/use.ts';
+import { SecretDirectory, SecretVault } from '../../../../daemon/lib/secrets/vault.ts';
+import {
   UnknownSecretError,
   type SecretChildOutcome,
   type SecretChildRunner,
   type SecretChildSpec,
-  type SecretRecipes,
-} from '../../../../daemon/lib/secrets/index.ts';
+} from '../../../../daemon/lib/secrets/types.ts';
 import { EchoSecretChildRunner, FakeSecretCipher, MemorySecretDocuments } from '../support.ts';
 import { MaskSourceUnavailableError } from '../../../../daemon/lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from '../../../../daemon/lib/secrets/redaction.ts';
@@ -391,5 +392,38 @@ describe('a value the output limit cut in half', () => {
     // Assert
     should(wholeResult.stdout).equal(`tail ${TOKEN.slice(0, 8)}`);
     should(unrelatedResult.stdout).equal('nothing secret here�');
+  });
+});
+
+describe('use when the masks fail for another reason', () => {
+  it('S19 should let a failure that is not an unavailable mask source through as itself, not as a refusal', async () => {
+    // Arrange
+    const vault = await vaultHolding({ TOKEN });
+    let spawned = 0;
+    const runner: SecretChildRunner = {
+      run: async () => {
+        spawned += 1;
+        return { outcome: 'exited', exitCode: 0, stdout: '', stderr: '', truncated: false };
+      },
+    };
+    const broken = new Error('the mask store fell over');
+    const masks = {
+      scoped: async () => {
+        throw broken;
+      },
+    } as unknown as ConstructorParameters<typeof SecretUseService>[4];
+
+    // Act
+    const failure = await new SecretUseService(vault, runner, ENVS, NO_RECIPES, masks)
+      .run(request({ secrets: ['TOKEN'] }))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // Assert
+    should(failure).equal(broken);
+    should(failure).not.be.instanceof(SecretUseError);
+    should(spawned).equal(0);
   });
 });

@@ -6,10 +6,9 @@ import {
   flowState,
   pkcePair,
   sameText,
-  tokenAnswer,
-  tokenRefusal,
   VERIFIER_SHAPE,
-} from '../../../daemon/lib/oauth/index.ts';
+} from '../../../daemon/lib/oauth/pkce.ts';
+import { tokenAnswer, tokenRefusal } from '../../../daemon/lib/oauth/tokens.ts';
 import { testCrypto } from './support.ts';
 
 /** Bytes that are all the same value, so the encoding is checkable by hand. */

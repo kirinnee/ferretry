@@ -142,7 +142,7 @@ const projectSettingsPaths = (root: string): readonly string[] => [
   posix.join(root, '.claude', 'settings.local.json'),
 ];
 
-export const toWire = (server: ResolvedMcpServer, connections: readonly McpOAuthConnection[]): McpInventoryServer => {
+const toWire = (server: ResolvedMcpServer, connections: readonly McpOAuthConnection[]): McpInventoryServer => {
   const connection =
     server.signIn === undefined ? undefined : connections.find(entry => entry.component === server.signIn?.subject);
   return {

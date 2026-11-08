@@ -1,27 +1,3 @@
-/** Who a send is from, as the send ledger records it (Conversation owns the ledger; this is the part read here). */
-export interface LedgerSender {
-  readonly kind: string;
-  readonly feature?: string | undefined;
-}
-
-/** One send of the ledger: the queue's word when it travelled through the queue, else the record's own. */
-export interface LedgerSendRecord {
-  readonly by?: LedgerSender | undefined;
-  readonly queue?: { readonly by?: LedgerSender | undefined } | undefined;
-}
-
-/** The part of Ferretry that sends the board's nudges. */
-const FEATURE = 'Board';
-
-/** Who a send is from: the queue's word when it travelled through the queue, else the record's own. */
-const senderOfSend = (record: LedgerSendRecord): LedgerSender | undefined => record.queue?.by ?? record.by;
-
-/** Is this send the board's own automatic message to a ferret — never the owner's words? */
-export const isBoardNudge = (record: LedgerSendRecord): boolean => {
-  const by = senderOfSend(record);
-  return by?.kind === 'ferretry' && by.feature === FEATURE;
-};
-
 /** The pull requests of the cards a nudge can name. */
 export interface CardPullRequests {
   readonly id: string;
@@ -35,6 +11,7 @@ const PR = /\bPR #(\d+)\b/gu;
  * The nudge's one line with each `PR #n` it names turned into a link to that pull request, when the card it
  * is about links one. The card reference itself is the reader's to prove and open (docs/reference-standard.md);
  * a PR the card does not link stays plain words.
+ * @pending board: linkNudgePullRequests in app/lib/board-nudge.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/agent-message-rows.tsx), so it stays until that branch lands
  */
 export function linkNudgePullRequests(text: string, cards: readonly CardPullRequests[] | undefined): string {
   const written = CARD.exec(text)?.[1]?.toUpperCase();

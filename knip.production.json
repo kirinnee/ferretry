@@ -24,11 +24,18 @@
     "packages/cli": {
       "entry": ["bin/*.ts"],
       "project": ["src/**/*.ts", "bin/**/*.ts"],
-      "ignore": ["src/lib/tool-client.ts"]
+      "ignore": ["src/lib/tool-client.ts", "src/lib/update/status.ts"]
     },
     "packages/app": {
       "entry": ["src/main.tsx"],
-      "project": ["src/**/*.{ts,tsx,css}"]
+      "project": ["src/**/*.{ts,tsx,css}"],
+      "ignore": [
+        "src/worker/service-worker.ts",
+        "src/worker/notifications.ts",
+        "src/release/keeper.ts",
+        "src/release/loopback.ts",
+        "src/release/storage.ts"
+      ]
     },
     "packages/core/ferrets": {
       "entry": ["app/views/*.tsx"],
@@ -43,6 +50,7 @@
         "daemon/adapters/session/provenance/storage-session-provenance-store.ts",
         "daemon/adapters/session/effects/file-session-effect-ledger.ts",
         "daemon/adapters/session/resume/in-memory-launch-gate.ts",
+        "daemon/adapters/session/lifecycle/process-incarnation.ts",
         "daemon/adapters/session/resume/tmux-resume-launcher.ts",
         "daemon/adapters/session/resume/file-resume-turn-store.ts",
         "daemon/adapters/session/resume/storage-resume-repository.ts",
@@ -153,7 +161,14 @@
     },
     "packages/plugins/board": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/lib/board-done.ts",
+        "app/lib/board-move.ts",
+        "app/lib/card-reference-context.ts",
+        "app/lib/lane-proposal-link.ts",
+        "cli/lib/lane-guide.ts"
+      ]
     },
     "packages/plugins/claude-code": {
       "entry": ["app/views/*.tsx"],
@@ -165,7 +180,13 @@
     },
     "packages/plugins/projects": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/hooks/use-project-scope.ts",
+        "app/lib/project-scope.ts",
+        "app/hooks/use-work-project-names.ts",
+        "app/lib/work-project-names.ts"
+      ]
     },
     "packages/plugins/runtimes": {
       "entry": ["app/views/*.tsx"],
@@ -193,15 +214,22 @@
     },
     "packages/plugins/updates": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["app/lib/changelog.ts", "app/lib/install-prompt.ts"]
     },
     "packages/plugins/warden": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/lib/auto-move-failures.ts", "daemon/lib/orphan-list.ts"]
     },
     "packages/plugins/connections": {
       "entry": ["worker/src/adapters/worker.ts"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/lib/tunnel-switch.ts",
+        "app/lib/webrtc-carrier.ts",
+        "daemon/adapters/tunnel/cloudflared-locator.ts"
+      ]
     },
     "packages/plugins/catalogs": {
       "entry": ["worker/src/adapters/link-store-worker.ts"],
@@ -236,11 +264,149 @@
       "entry": ["app/views/surfaces.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
+    "packages/plugins/accounts": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/lib/sign-in-grants/**"]
+    },
     "packages/plugins/shells": {
-      "entry": ["app/views/*.tsx"]
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/layouts": {
-      "entry": ["app/views/*.tsx"]
+      "entry": ["app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
+    },
+    "packages/plugins/terminals": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "daemon/adapters/tmux/pane-queue.ts",
+        "daemon/adapters/tmux/harness-launch-guard.ts",
+        "daemon/adapters/tmux/forget-ferret-identity.ts",
+        "daemon/adapters/tmux/tmux-release-reader.ts"
+      ]
+    },
+    "packages/plugins/browsers": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "daemon/holds/site.ts",
+        "daemon/stream/socket-downstream.ts",
+        "daemon/proxy/firewall/marker-reader.ts",
+        "daemon/proxy/firewall/state.ts",
+        "daemon/proxy/wire/firewall.ts"
+      ]
+    },
+    "packages/plugins/access": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/features/device-notice/devices-looked.ts",
+        "app/features/device-notice/new-device-notice.tsx",
+        "app/features/onboarding/device-kind.ts",
+        "app/features/pairing/device-refused-notice.tsx",
+        "app/features/pairing/pair-scanner.tsx",
+        "app/features/pairing/pairing-screen.tsx",
+        "app/features/settings/capability-list.tsx",
+        "app/features/settings/grants-api.ts",
+        "app/features/settings/grants-settings.tsx",
+        "app/features/settings/pair-phone.tsx",
+        "app/features/settings/security-api.ts",
+        "app/features/settings/security-log-settings.tsx",
+        "app/harness/pair-from-menu.tsx",
+        "app/hooks/use-qr-scan.ts",
+        "app/lib/device-preference.ts",
+        "app/lib/pair-exchange.ts",
+        "app/lib/pair-scan.ts",
+        "app/lib/pairing.ts",
+        "app/lib/push-clear.ts",
+        "app/lib/push-seen.ts",
+        "app/lib/qr-frame-decoder.ts",
+        "app/lib/security-log.ts",
+        "cli/lib/grants/commands.ts",
+        "cli/lib/grants/controller.ts",
+        "cli/lib/grants/gateway.ts",
+        "cli/lib/grants/ports.ts",
+        "cli/lib/grants/render.ts",
+        "daemon/adapters/grants/index.ts",
+        "daemon/adapters/pairing/index.ts",
+        "daemon/adapters/push/index.ts"
+      ]
+    },
+    "packages/plugins/voice": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/components/auto-read-chip.tsx",
+        "app/hooks/use-auto-read.ts",
+        "app/lib/stt/parakeet-vocabulary.ts",
+        "app/lib/stt/pthread-workers.ts",
+        "app/lib/stt/speed-bench-report.ts",
+        "app/lib/voice-chat/auto-read.ts",
+        "app/lib/voice-chat/reply-picker.ts",
+        "app/lib/voice-chat/turn-endpointer-scoring.ts",
+        "app/lib/voice-chat/turn-endpointer.ts",
+        "app/vite-voice.ts",
+        "app/worker/parakeet-worker.ts",
+        "app/worker/sherpa-worker.ts",
+        "app/worker/vosk-worker.ts",
+        "app/worker/whisper-worker.ts",
+        "daemon/lib/speedups/index.ts",
+        "daemon/lib/stt/index.ts"
+      ],
+      "ignoreDependencies": [
+        "@huggingface/transformers",
+        "@lichess-org/vosk-browser",
+        "@sherpaw/asr",
+        "onnxruntime-web",
+        "parakeet.js"
+      ]
+    },
+    "packages/plugins/usage": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/hooks/use-spend-today.ts",
+        "app/lib/move-triggers.ts",
+        "daemon/adapters/usage/index.ts",
+        "daemon/adapters/usage/provider-quota/index.ts",
+        "daemon/lib/performance/fallbacks.ts",
+        "daemon/lib/performance/sampler-tee.ts"
+      ]
+    },
+    "packages/plugins/onboarding": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/command-block.tsx",
+        "app/command-syntax.ts",
+        "app/connection-disclosure.ts",
+        "app/copy-button.tsx",
+        "app/device-kind.ts",
+        "app/first-run-entry.ts",
+        "app/landing-geometry.ts",
+        "app/link-costs.ts",
+        "app/onboarding-brand.tsx",
+        "app/onboarding-chooser.tsx",
+        "app/onboarding-connection-note.tsx",
+        "app/onboarding-doer-chooser.tsx",
+        "app/onboarding-model.ts",
+        "app/onboarding-page.tsx",
+        "app/onboarding-progress.ts",
+        "app/onboarding-stages.tsx",
+        "app/onboarding-target-chooser.tsx",
+        "app/onboarding-track.tsx",
+        "app/pending-connections.ts",
+        "app/setup-diagram.tsx",
+        "app/setup-handoff-panel.tsx",
+        "app/setup-handoff.ts",
+        "app/setup-qr.ts"
+      ]
+    },
+    "packages/plugins/codex": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     }
   },
   "bun": false,

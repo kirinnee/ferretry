@@ -29,8 +29,7 @@ const oneLine = (text: string, max: number): string => text.replaceAll(ONE_LINE,
 const PER_FERRET = /^f\.([A-Za-z0-9_-]+)\.(warden[:-].+)$/u;
 
 /** Whether a notice is about the machine (one for every ferret the fault names), not about one ferret. */
-export const isFleetNotice = (sourceRef: string): boolean =>
-  parseWardenEscalationSourceRef(sourceRef)?.scope === 'fleet';
+const isFleetNotice = (sourceRef: string): boolean => parseWardenEscalationSourceRef(sourceRef)?.scope === 'fleet';
 
 /**
  * A warden notice's own identity (`warden:ask:…`) as an Asks entry. Asks is idempotent by `(source, entry)` across

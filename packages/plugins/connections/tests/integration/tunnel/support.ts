@@ -7,15 +7,6 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  NONCE_BYTES,
-  type TunnelProvision,
-  TunnelProvisionRequestSchema,
-  TunnelReleaseRequestSchema,
-  toBase64Url,
-  verifyTunnelRequest,
-} from '../../../worker/src/lib/index.ts';
-import { WebCryptoSessionCrypto } from '../../../worker/src/adapters/web-crypto.ts';
 
 const directories: string[] = [];
 
@@ -88,76 +79,3 @@ export function sha256(text: string): string {
 }
 
 export { waitFor } from '../support/wait-for.ts';
-
-const crypto_ = new WebCryptoSessionCrypto();
-
-/** The hosted service, faked on loopback. Every signed request is verified over the host it arrived on. */
-export class FakeHostedService {
-  readonly origin: string;
-  readonly paths: string[] = [];
-  readonly provisions: { readonly originPort: number; readonly daemonId: string }[] = [];
-  readonly releases: string[] = [];
-  readonly verdicts: boolean[] = [];
-  available = true;
-  provision: (originPort: number) => TunnelProvision = () => ({
-    version: 1,
-    tunnelUrl: 'https://quiet-otter.tunnels.example',
-    connectorToken: 'fake-connector-token-INTEGRATION',
-    renewAfterSeconds: 86_400,
-  });
-  readonly #nonces = new Map<string, Uint8Array>();
-  readonly #server: ReturnType<typeof Bun.serve>;
-
-  constructor() {
-    this.#server = Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      fetch: async request => await this.#answer(request),
-    });
-    this.origin = `http://127.0.0.1:${String(this.#server.port)}`;
-  }
-
-  async stop(): Promise<void> {
-    await this.#server.stop(true);
-  }
-
-  async #answer(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    this.paths.push(`${request.method} ${url.pathname}`);
-    if (url.pathname === '/v1/tunnel-service')
-      return Response.json({ version: 1, available: this.available }, { headers: { 'cache-control': 'no-store' } });
-    const body = (await request.json()) as Record<string, unknown>;
-    if (url.pathname === '/v1/tunnel/challenge') {
-      const nonce = crypto_.randomBytes(NONCE_BYTES);
-      this.#nonces.set(String(body.daemonId), nonce);
-      return Response.json({ version: 1, nonce: toBase64Url(nonce), deadlineSeconds: 60 });
-    }
-    const action = url.pathname === '/v1/tunnel/provision' ? 'provision' : 'release';
-    const parsed =
-      action === 'provision' ? TunnelProvisionRequestSchema.parse(body) : TunnelReleaseRequestSchema.parse(body);
-    const nonce = this.#nonces.get(parsed.daemonId) ?? new Uint8Array();
-    this.#nonces.delete(parsed.daemonId);
-    const originPort = 'originPort' in parsed ? (parsed.originPort as number) : undefined;
-    const verdict = await verifyTunnelRequest(
-      crypto_,
-      {
-        action,
-        daemonId: parsed.daemonId,
-        // ITS OWN host, as the Worker rebuilds the transcript — never the request's claim.
-        host: url.host,
-        nonce,
-        ...(originPort === undefined ? {} : { originPort }),
-      },
-      parsed,
-    );
-    this.verdicts.push(verdict.ok);
-    if (!verdict.ok)
-      return Response.json({ error: { code: 'tunnel_claim_rejected', message: verdict.reason } }, { status: 401 });
-    if (originPort === undefined) {
-      this.releases.push(parsed.daemonId);
-      return Response.json({ version: 1, released: true });
-    }
-    this.provisions.push({ originPort, daemonId: parsed.daemonId });
-    return Response.json(this.provision(originPort));
-  }
-}

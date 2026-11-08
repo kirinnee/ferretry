@@ -151,7 +151,7 @@ export class TerminalVerbs {
 }
 
 /** The ferret a person names: `--ferret`, `-s`, or `--session` as before. */
-export const ferretOf = (words: Words): string | undefined => {
+const ferretOf = (words: Words): string | undefined => {
   const named = words.text('ferret', 'session', 's')?.trim();
   return named === undefined || named === '' ? undefined : named;
 };

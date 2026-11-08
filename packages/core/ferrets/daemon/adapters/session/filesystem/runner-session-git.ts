@@ -46,6 +46,9 @@ const DIFF_SAFETY: readonly string[] = [
   // it. Deliberately NOT applied to every command: `status` derives its own rename detection from
   // `diff.renames`, and a Changes list needs renames.
   'diff.renames=false',
+  '-c',
+  // A blank context line is written as an empty line when this is on; pinned off so every body line keeps its marker.
+  'diff.suppressBlankEmpty=false',
   'diff',
   '--no-ext-diff',
   '--no-textconv',
@@ -296,6 +299,7 @@ export class RunnerSessionGit implements SessionGit {
    * both are bytes already read through the pinned descriptor chain and staged into a private scratch
    * directory, and `--no-index` then diffs those two files and nothing else.
    */
+  // read-scoped: none — internal diff bytes, never shown; the outbound projection redacts
   async diffSnapshots(
     rel: string,
     oldSide: DiffSide | undefined,

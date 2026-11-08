@@ -16,7 +16,7 @@ import { milliseconds } from '@ferretry/std';
 import type { ConnectorCommand, ConnectorProcess, ConnectorProcessPort } from '../../lib/tunnel/index.ts';
 
 /** How long a connector asked to stop has before it is killed. */
-export const CONNECTOR_STOP_GRACE_MS = 5_000;
+const CONNECTOR_STOP_GRACE_MS = 5_000;
 
 export class BunConnectorProcesses implements ConnectorProcessPort {
   constructor(

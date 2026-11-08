@@ -36,12 +36,12 @@ import type { InputTarget, InputTargetFacts } from '../../../contract/index.ts';
  */
 
 /** How long after a submit a new document counts as the page moving on. */
-export const NAVIGATION_WINDOW_MS = 10_000;
+const NAVIGATION_WINDOW_MS = 10_000;
 /** How long the daemon watches a page for the second factor after a submit. */
 export const SECOND_FACTOR_WINDOW_MS = 180_000;
 /** When the daemon looks for the value on the target after a submit, and when it looks again. */
-export const ECHO_LOOK_DELAY_MS = 1_500;
-export const ECHO_SECOND_LOOK_MS = 5_000;
+const ECHO_LOOK_DELAY_MS = 1_500;
+const ECHO_SECOND_LOOK_MS = 5_000;
 /** How often the page's document and host are looked at while watching. */
 const POLL_MS = 1_000;
 

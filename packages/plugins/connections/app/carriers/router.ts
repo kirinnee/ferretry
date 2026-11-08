@@ -59,25 +59,25 @@ import {
 } from './carrier-socket.ts';
 
 /** Said when WebRTC is passed over because this build has no dialer for it. */
-export const WEBRTC_UNAVAILABLE = 'WebRTC isn’t available in this build yet';
+const WEBRTC_UNAVAILABLE = 'WebRTC isn’t available in this build yet';
 /** Said when a walk that wanted a relay found none. */
-export const RELAY_UNAVAILABLE = 'there is no relay for this machine right now';
+const RELAY_UNAVAILABLE = 'there is no relay for this machine right now';
 /** Said to every session a new preference closes (today's `PREFERENCE_CHANGED_REASON`). */
 export const PREFERENCE_CHANGED_REASON = 'the connection preference for this machine changed';
 /** Said to every session an unpair or a re-pair closes (today's `clearDaemon` sentence). */
 export const PAIRING_CLEARED_REASON = 'this daemon was re-paired or unpaired';
 /** Said to a walk whose entry a republish replaced while it was in flight (today's `STALE_WALK_REASON`). */
-export const STALE_WALK_REASON =
+const STALE_WALK_REASON =
   'this daemon was re-paired, unpaired or republished, or its connection preference changed, while this request was in flight, so it was not carried to another carrier';
 /** Said to a session on a carrier the daemon's republished set no longer names (today's `#refreshed` sentence). */
 export const WITHDRAWN_CARRIER_REASON = 'this rendezvous is not named in the carriers this daemon publishes';
 /** The request paths that are carrier control (§15): they ride {@link CarrierRouter.control}. */
-export const CONTROL_PATHS: readonly string[] = Object.freeze(['/v1/tunnel']);
+const CONTROL_PATHS: readonly string[] = Object.freeze(['/v1/tunnel']);
 
 const WEBRTC: ConnectionMethod = { kind: 'webrtc' };
 
 /** The connection model's half of the health reporter (`connection-health.ts`). */
-export interface CarrierHealthReporter {
+interface CarrierHealthReporter {
   answered(daemonId: string): void;
   outage(daemonId: string, outage: CarrierOutage): void;
 }
@@ -123,10 +123,7 @@ export function daemonCarriers(daemon: PairedDaemon, hostedRelayUrl?: string): r
 }
 
 /** The hosted rendezvous for a daemon that authored none — dialled, never stored (`hostedRelayFallbackCarrier`). */
-export function hostedRelayFallback(
-  daemon: PairedDaemon,
-  hostedRelayUrl: string | undefined,
-): ConnectionMethod | undefined {
+function hostedRelayFallback(daemon: PairedDaemon, hostedRelayUrl: string | undefined): ConnectionMethod | undefined {
   if (hostedRelayUrl === undefined) return undefined;
   if (!DaemonIdSchema.safeParse(daemon.daemon).success) return undefined;
   if (daemonCarriers(daemon).some(carrier => carrier.kind === 'relay')) return undefined;
@@ -135,7 +132,7 @@ export function hostedRelayFallback(
 }
 
 /** Is this the same published address, dialled the same way? */
-export const sameCarrier = (left: ConnectionMethod, right: ConnectionMethod): boolean => {
+const sameCarrier = (left: ConnectionMethod, right: ConnectionMethod): boolean => {
   if (left.kind === 'direct') return right.kind === 'direct' && left.daemonUrl === right.daemonUrl;
   if (left.kind === 'webrtc') return right.kind === 'webrtc';
   if (left.kind === 'tunnel') return right.kind === 'tunnel' && left.tunnelUrl === right.tunnelUrl;

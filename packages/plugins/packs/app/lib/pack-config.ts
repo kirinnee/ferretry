@@ -11,7 +11,7 @@
 import type { ConfigText } from './config-text.ts';
 
 /** The file's address in the configuration-file routes. */
-export const PACKS_FILE = 'packs.yaml';
+const PACKS_FILE = 'packs.yaml';
 
 /** A configuration file as it is on disk, with the digest to edit against. */
 export interface ConfigFileView {

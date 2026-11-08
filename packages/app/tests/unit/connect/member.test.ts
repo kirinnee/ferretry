@@ -49,6 +49,40 @@ describe('S4 the member walk is a pure function the carrier cannot replace', () 
     expect(addresses(memberWalk(local, 'join', { servedFromLoopback: false }))).toEqual(['http://127.0.0.1:7777']);
   });
 
+  test('R2-N1 a loopback publisher address is dropped beside a published direct address too, from a hosted page', () => {
+    const local = publisher({
+      daemonUrl: 'http://127.0.0.1:7777',
+      carriers: [{ kind: 'direct', url: 'https://alt.example.test' }],
+    });
+    expect(addresses(memberWalk(local, 'member', { servedFromLoopback: false }))).toEqual(['https://alt.example.test']);
+    expect(addresses(memberWalk(local, 'member', { servedFromLoopback: true }))).toEqual([
+      'https://alt.example.test',
+      'http://127.0.0.1:7777',
+    ]);
+    // Alone it is kept.
+    expect(addresses(memberWalk(publisher({ daemonUrl: 'http://127.0.0.1:7777' }), 'member', {}))).toEqual([
+      'http://127.0.0.1:7777',
+    ]);
+  });
+
+  test('R2-N1 a published direct address is held to the daemon origin rule: http(s), no credentials, path, query or fragment', () => {
+    const published = (url: string) =>
+      addresses(
+        memberWalk(publisher({ carriers: [{ kind: 'direct', url }] }), 'member', { servedFromLoopback: false }),
+      );
+    expect(published('http://lan.example.test:8080')).toEqual([OWN, 'http://lan.example.test:8080']);
+    for (const bad of [
+      'https://user:pw@alt.example.test',
+      'https://alt.example.test/path',
+      'https://alt.example.test/?q=1',
+      'https://alt.example.test/#f',
+      'ftp://alt.example.test',
+      'not a url',
+    ]) {
+      expect(published(bad)).toEqual([OWN]);
+    }
+  });
+
   test('a member walk takes the published relays, drops tunnels and undialable entries, and de-duplicates the rendezvous', () => {
     const steps = memberWalk(
       publisher({

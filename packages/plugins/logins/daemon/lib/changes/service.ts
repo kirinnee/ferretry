@@ -100,7 +100,7 @@ export interface LoginChangeServiceDeps {
 }
 
 /** A small deterministic fingerprint of the logins in effect: what a staged change was derived from. */
-export function fingerprint(files: ReadonlyMap<string, LoginFile>): string {
+function fingerprint(files: ReadonlyMap<string, LoginFile>): string {
   const text = JSON.stringify([...files].toSorted(([a], [b]) => (a < b ? -1 : 1)));
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;

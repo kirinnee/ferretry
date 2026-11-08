@@ -2,7 +2,7 @@ import { ApiError, type ApiRequest } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
 
 /** Today's `MAX_TEXT_BODY_BYTES`: no browser route takes an upload, so a JSON body is bounded small. */
-export const MAX_BROWSER_BODY_BYTES = 512 * 1024;
+const MAX_BROWSER_BODY_BYTES = 512 * 1024;
 
 /**
  * Today's `parseBody` (`api/body.ts`), for the browser routes: the body, bounded, parsed against `schema`. The

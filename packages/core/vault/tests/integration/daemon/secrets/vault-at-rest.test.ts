@@ -14,7 +14,8 @@ import {
 } from '../../../../daemon/adapters/secrets/file-secret-document-store.ts';
 import { kernelSealedFiles, type SealedFiles } from '../../../../daemon/adapters/secrets/kernel-sealed-files.ts';
 import { FileSecretKey, WebCryptoSecretCipher } from '../../../../daemon/adapters/secrets/webcrypto-secret-cipher.ts';
-import { SecretDirectory, SecretStoreError, SecretVault } from '../../../../daemon/lib/secrets/index.ts';
+import { SecretDirectory, SecretVault } from '../../../../daemon/lib/secrets/vault.ts';
+import { SecretStoreError } from '../../../../daemon/lib/secrets/types.ts';
 
 /**
  * The vault against a REAL filesystem (the kernel's own state port over a temp home) and REAL WebCrypto (today's

@@ -11,7 +11,7 @@ import type { z } from 'zod';
 const LARGEST_PAYLOAD_BYTES = 32 * 1024 * 1024;
 const ENCODED_PAYLOAD_BYTES = Math.ceil(LARGEST_PAYLOAD_BYTES / 3) * 4;
 const ENVELOPE_BYTES = 4 * 1024 * 1024;
-export const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
+const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
 
 interface BodyLimits {
   readonly maxBytes?: number;
@@ -24,26 +24,6 @@ export async function parseBody<Schema extends z.ZodType>(
   limits: BodyLimits = {},
 ): Promise<z.output<Schema>> {
   return parseJson(schema, await readText(request, limits), 'body');
-}
-
-/** A body whose payload is entirely optional: an absent or whitespace-only body is the no-fields case. */
-export async function parseOptionalBody<Schema extends z.ZodType>(
-  request: ApiRequest,
-  schema: Schema,
-  limits: BodyLimits = {},
-): Promise<z.output<Schema>> {
-  const text = await readText(request, limits);
-  return text.trim() === '' ? parseValue(schema, {}, 'body') : parseJson(schema, text, 'body');
-}
-
-/** Parses query parameters against a schema, taking the first value given for each key. */
-export function parseQuery<Schema extends z.ZodType>(request: ApiRequest, schema: Schema): z.output<Schema> {
-  const single: Record<string, string> = {};
-  for (const [key, values] of request.query) {
-    const first = values[0];
-    if (first !== undefined) single[key] = first;
-  }
-  return parseValue(schema, single, 'query');
 }
 
 /** The body, bounded, or the one refusal a client is ever told about it: never the submitted bytes. */

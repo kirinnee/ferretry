@@ -52,7 +52,7 @@ import {
 /** The contract widens its defs for the manifest; the service reads them back with their shape. */
 const SHELLS_CONFIG = SHELLS_CONFIG_DEF as ConfigCollectionDef<ShellItem>;
 
-export type Refusal = {
+type Refusal = {
   readonly status: 404 | 409 | 422 | 500;
   readonly code: string;
   readonly sentence: string;
@@ -73,7 +73,7 @@ export interface ShellsDeps {
   readonly log: Log;
 }
 
-export type Added = { readonly lock: ShellLock; readonly held: readonly string[] | undefined };
+type Added = { readonly lock: ShellLock; readonly held: readonly string[] | undefined };
 
 export interface ShellsService {
   list(): Promise<readonly ShellSummary[]>;
@@ -93,7 +93,7 @@ export interface ShellsService {
  * called `claude-default` is the one runtime `claude-default` enters (Q18, option b: only when a runtime names one).
  * This is the one place that changes when Runtimes' contract gains the field.
  */
-export const shellNamedBy = (runtime: string | undefined, names: ReadonlySet<string>): string | undefined =>
+const shellNamedBy = (runtime: string | undefined, names: ReadonlySet<string>): string | undefined =>
   runtime !== undefined && names.has(runtime) ? runtime : undefined;
 
 export function createShellsService(deps: ShellsDeps): ShellsService {

@@ -143,7 +143,7 @@ export function LoginQuota({ quota, className = '', showUnknown = false, now = D
 const UNSETTLED: Readonly<Record<string, string>> = { checking: 'checking', refresh_due: 'refresh due' };
 
 /** One login's line: its status mark, its name, and its quota or the honest reason there is none. */
-export function LoginQuotaLine({ login, now }: { readonly login: LoginView; readonly now?: number }) {
+function LoginQuotaLine({ login, now }: { readonly login: LoginView; readonly now?: number }) {
   const unsettled = UNSETTLED[login.status.word];
   return (
     <span className="inline-flex items-center gap-1" data-quota-login={login.id}>

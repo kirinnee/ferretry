@@ -3,67 +3,31 @@
  * once and then taken out of the address with `replaceState`, not `pushState`: Back must never restore it, and it must
  * not linger in the history. Copied from today's `JoinRoute` (App.tsx `takeArrivalFromLocation`).
  *
- * The strip does NOT wait for the join screen: this half's `build` starts {@link watchArrivals}, which takes the
- * fragment off `/join` the moment the half is built (and on every later arrival) and HOLDS it in memory until the join
- * screen reads it. A views chunk that is slow, or fails to load, therefore never leaves a code in the address bar.
+ * WHO DOES IT: the `/join` screen, which the shell draws with no daemon at all (a recipient's browser usually holds no
+ * pairing). It takes the fragment on mount and on every later arrival (a second link opened in the same tab, a
+ * `hashchange`). The entry's own history state is passed back (`history.state`), so the router's trail and scroll
+ * identity for that entry survive the rewrite.
  */
 
 /** The slice of `window` this needs. */
 export interface ArrivalBrowser {
   readonly location: Pick<Location, 'pathname' | 'search' | 'hash'>;
-  readonly history: Pick<History, 'replaceState'>;
+  readonly history: Pick<History, 'state' | 'replaceState'>;
 }
 
-/** The slice of `window` the watcher needs. */
-export interface ArrivalWindow extends ArrivalBrowser {
-  addEventListener(type: 'hashchange' | 'popstate', listener: () => void): void;
+/** The fragment of an address, or empty when there is none. */
+export function fragmentOf(address: string): string {
+  try {
+    return new URL(address).hash;
+  } catch {
+    return '';
+  }
 }
 
-/** Where a share link lands. */
-const JOIN_PATH = '/join';
-
-/** The fragment now in the address, taken out of it. Empty when there was none (and then nothing is rewritten). */
+/** The fragment now in the address bar, taken out of it. Empty when there was none (and then nothing is rewritten). */
 export function takeArrival(browser: ArrivalBrowser): string {
   const fragment = browser.location.hash;
   if (fragment === '') return '';
-  browser.history.replaceState({}, '', `${browser.location.pathname}${browser.location.search}`);
+  browser.history.replaceState(browser.history.state, '', `${browser.location.pathname}${browser.location.search}`);
   return fragment;
-}
-
-let held = '';
-let watching: ArrivalWindow | undefined;
-
-/** Takes a fragment off the join page's address into memory. Anywhere else the address is left alone. */
-export function holdArrival(browser: ArrivalBrowser): void {
-  if (browser.location.pathname !== JOIN_PATH) return;
-  const fragment = takeArrival(browser);
-  if (fragment !== '') held = fragment;
-}
-
-/** The held fragment, without releasing it (a render may be thrown away and must find it again). */
-export function heldArrival(): string {
-  return held;
-}
-
-/** The held fragment, released: the join screen has it now. */
-export function releaseArrival(): string {
-  const fragment = held;
-  held = '';
-  return fragment;
-}
-
-/** Holds the arrival in the address now and on every later one. Once per window. */
-export function watchArrivals(browser: ArrivalWindow): void {
-  if (watching === browser) return;
-  watching = browser;
-  holdArrival(browser);
-  const hold = (): void => holdArrival(browser);
-  browser.addEventListener('hashchange', hold);
-  browser.addEventListener('popstate', hold);
-}
-
-/** For tests: forgets what is held and which window is watched. */
-export function resetArrivals(): void {
-  held = '';
-  watching = undefined;
 }

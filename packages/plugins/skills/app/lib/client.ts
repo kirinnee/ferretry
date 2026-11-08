@@ -35,11 +35,11 @@ import {
 /** The slice of the per-daemon client this half uses; a test hands a scripted one. */
 export type SkillsClient = Pick<PluginClient, 'call'>;
 
-export const FERRET_INVENTORY_ROUTE = 'GET /v1/ferrets/:ferretId/skills/inventory' as const;
-export const FERRET_SKILLS_ROUTE = 'GET /v1/ferrets/:ferretId/skills' as const;
-export const MACHINE_INVENTORY_ROUTE = 'GET /v1/skills' as const;
-export const SKILL_FILE_ROUTE = 'GET /v1/skills/file' as const;
-export const INSTALLS_ROUTE = 'GET /v1/skill-installs/local' as const;
+const FERRET_INVENTORY_ROUTE = 'GET /v1/ferrets/:ferretId/skills/inventory' as const;
+const FERRET_SKILLS_ROUTE = 'GET /v1/ferrets/:ferretId/skills' as const;
+const MACHINE_INVENTORY_ROUTE = 'GET /v1/skills' as const;
+const SKILL_FILE_ROUTE = 'GET /v1/skills/file' as const;
+const INSTALLS_ROUTE = 'GET /v1/skill-installs/local' as const;
 
 const PREVIEW_ROUTES = {
   project: 'POST /v1/skill-installs/local/project/preview',

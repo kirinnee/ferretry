@@ -28,7 +28,7 @@ import type {
   TunnelScheduler,
 } from '../../../daemon/lib/tunnel/index.ts';
 
-export const testCrypto = new WebCryptoSessionCrypto();
+const testCrypto = new WebCryptoSessionCrypto();
 
 /** A fresh daemon identity, the way the daemon imports its own. */
 export async function newDaemonIdentity(): Promise<

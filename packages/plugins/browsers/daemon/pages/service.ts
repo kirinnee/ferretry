@@ -34,7 +34,7 @@ import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '
 import type { WorkerStagedFile } from '../worker/protocol.ts';
 import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from '../target/sign-in/watch.ts';
 
-export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
+const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
 
 export class BrowserSessionError extends Error {
   constructor(
@@ -52,7 +52,7 @@ export interface BrowserSessionLauncher {
 }
 
 /** A timer the composition root owns. */
-export interface BrowserIdleTimer {
+interface BrowserIdleTimer {
   cancel(): void;
 }
 

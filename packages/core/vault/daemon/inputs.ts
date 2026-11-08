@@ -78,7 +78,7 @@ export interface Inputs {
 }
 
 /** The input card as Asks knows the source: the request it presents, answered on the input form, never as an ask. */
-export const INPUT_ASK_SOURCE_SPEC: AskSourceSpec = {
+const INPUT_ASK_SOURCE_SPEC: AskSourceSpec = {
   schema: InputAskRefSchema,
   title: 'Input request {request}',
   form: false,

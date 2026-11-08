@@ -55,6 +55,8 @@ export const FsFileSchema = z.object({
   /** Which rule refused it — the ignore file, line and pattern, a Git failure, or the denied name. */
   rule: z.string().optional(),
   rev: z.literal('head').optional(),
+  /** A private value was masked in what was served: this is not the file, so it is never offered as a download. */
+  redacted: z.boolean().optional(),
 });
 export type FsFile = z.infer<typeof FsFileSchema>;
 

@@ -16,15 +16,11 @@ import {
 import { Dispatcher, localArrival, type MountedRoute } from '@ferretry/kernel/host';
 import should from 'should';
 import { CloneableSecretNameSchema, SecretNameSchema } from '../../../../contract/index.ts';
-import {
-  ChildEnvironments,
-  HoldRegistry,
-  maskGrid,
-  maskLines,
-  SecretDirectory,
-  SecretStoreError,
-  VaultRedaction,
-} from '../../../../daemon/lib/secrets/index.ts';
+import { ChildEnvironments } from '../../../../daemon/lib/secrets/child-environments.ts';
+import { HoldRegistry } from '../../../../daemon/lib/secrets/output-guard.ts';
+import { maskGrid, maskLines, VaultRedaction } from '../../../../daemon/lib/secrets/read-scope.ts';
+import { SecretDirectory } from '../../../../daemon/lib/secrets/vault.ts';
+import { SecretStoreError } from '../../../../daemon/lib/secrets/types.ts';
 
 /**
  * The parts vault-a added around today's code: the kernel-bound `Redaction` (today's `SecretRedactor.batch` as one
@@ -108,6 +104,26 @@ describe('the read-scoped redaction', () => {
     should(masked.columns).equal(12);
     should(masked.rows[0]?.join('')).equal('abcd********');
     should(masked.rows[1]?.join('')).equal(`${'*'.repeat(TOKEN.length - 8)}x`);
+  });
+
+  it('R-0151 only the WHOLE value is matched: a prefix or a piece of it is left alone', async () => {
+    const redaction = new VaultRedaction(source({ TOKEN }));
+
+    const out = await redaction.read(scope => scope.lines([TOKEN.slice(0, -3), TOKEN.slice(3), TOKEN]));
+
+    should(out[0] === TOKEN.slice(0, -3)).be.true();
+    should(out[1] === TOKEN.slice(3)).be.true();
+    should(out[2] === '*'.repeat(TOKEN.length)).be.true();
+  });
+
+  it('R-0150 R-0151 the real scope counts UTF-16 units: astral characters before a value keep the mask on the value', async () => {
+    const redaction = new VaultRedaction(source({ TOKEN }));
+    const lead = '😀'.repeat(30);
+
+    const out = await redaction.read(scope => scope.lines([`${lead}${TOKEN}\n`]));
+
+    should((out[0] ?? '').includes(TOKEN)).be.false();
+    should(out[0] === `${lead}${'*'.repeat(TOKEN.length)}\n`).be.true();
   });
 
   it('should mask lines keeping each length, across a wrap', () => {

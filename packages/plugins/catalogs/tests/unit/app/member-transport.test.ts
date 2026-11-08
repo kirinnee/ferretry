@@ -41,35 +41,62 @@ interface FakeSession {
   credentialSent: () => boolean;
   request: (record: unknown, signal?: AbortSignal) => Promise<unknown>;
   close: (reason: string) => void;
+  /** The session's own sealed outcome, as the real one latches it. */
+  finish: (value: unknown) => void;
+  fail: (reason: unknown) => void;
 }
 
 const fakeSession = (): FakeSession => {
+  let settle: (value: unknown) => void = () => undefined;
+  let refuse: (reason: unknown) => void = () => undefined;
+  const outcome = new Promise<unknown>((resolve, reject) => {
+    settle = resolve;
+    refuse = reject;
+  });
+  outcome.catch(() => undefined);
   const session: FakeSession = {
     sent: false,
     closed: [],
     requests: [],
     asked: async () => ({ kind: 'response', status: 200, headers: {}, body: '{}' }),
     live: () => true,
-    joined: () => new Promise(() => undefined),
-    ready: () => new Promise(() => undefined),
+    joined: () => outcome,
+    ready: () => outcome,
     credentialSent: () => session.sent,
     request: (record, signal) => {
       session.requests.push(record);
       return session.asked(record, signal);
     },
     close: reason => void session.closed.push(reason),
+    finish: value => settle(value),
+    fail: reason => refuse(reason),
   };
   return session;
 };
 
 type Drive = (step: number, session: FakeSession, kind: 'direct' | 'relay') => Promise<unknown>;
 
+interface HarnessOptions {
+  dialThrows?: (kind: 'direct' | 'relay') => boolean;
+  /**
+   * A faithful carrier: whatever the scripted drive resolves or rejects with, the session settles with too. A test that
+   * wants a carrier that LIES (wraps an error, invents a value, never returns) turns this off and settles the session itself.
+   */
+  mirror?: boolean;
+  /** Throws instead of building the session of the nth build (0-based). */
+  buildThrows?: (build: number) => boolean;
+  /** The `daemonId` and `mode` every session was built with. */
+  built?: { daemonId: string; kind: string }[];
+}
+
 /** Fake carriers: records every dial and drive, and lets a test script each step. */
-const harness = (drive: Drive, options: { dialThrows?: (kind: 'direct' | 'relay') => boolean } = {}) => {
+const harness = (drive: Drive, options: HarnessOptions = {}) => {
   const dials: { kind: string; address: string }[] = [];
   const drives: { kind: string; deadlineMs: number; keepAlive: boolean }[] = [];
   const sessions: FakeSession[] = [];
   const sockets: { closed: number }[] = [];
+  const built: { daemonId: string; kind: string }[] = options.built ?? [];
+  const mirror = options.mirror ?? true;
   const carriers = {
     rendezvousUrl: RENDEZVOUS,
     dial: (kind, address) => {
@@ -86,15 +113,28 @@ const harness = (drive: Drive, options: { dialThrows?: (kind: 'direct' | 'relay'
     },
     drive: (async (input: { kind: 'direct' | 'relay'; session: unknown; deadlineMs: number; keepAlive: boolean }) => {
       drives.push({ kind: input.kind, deadlineMs: input.deadlineMs, keepAlive: input.keepAlive });
-      return await drive(drives.length - 1, input.session as FakeSession, input.kind);
+      const session = input.session as FakeSession;
+      try {
+        const value = await drive(drives.length - 1, session, input.kind);
+        if (mirror) session.finish(value);
+        return value;
+      } catch (reason) {
+        if (mirror) session.fail(reason);
+        throw reason;
+      }
     }) as MemberCarriers['drive'],
   } satisfies MemberCarriers;
-  const transport = memberTransportOver(carriers, new WebCryptoRelayCrypto(), () => {
+  let builds = 0;
+  const transport = memberTransportOver(carriers, new WebCryptoRelayCrypto(), dependencies => {
+    const build = builds;
+    builds += 1;
+    if (options.buildThrows?.(build) === true) throw new Error('the session could not be built');
+    built.push({ daemonId: dependencies.daemonId, kind: dependencies.mode.kind });
     const session = fakeSession();
     sessions.push(session);
     return session as unknown as RelayClientSession;
   });
-  return { transport, dials, drives, sessions, sockets };
+  return { transport, dials, drives, sessions, sockets, built };
 };
 
 const joinedAnswer = {
@@ -301,7 +341,8 @@ describe('S1 a member session reads a refused key, replays only a read, and does
   });
 
   it('does not replay a write after a lease ended', async () => {
-    const { transport, drives } = harness(async (_step, session) => {
+    const { transport, drives, sessions } = harness(async (_step, session) => {
+      session.live = () => false; // as the GET case: an ended lease leaves a session that is no longer live
       session.asked = async () => {
         throw new RelaySessionError('lease ended', 4441);
       };
@@ -312,6 +353,8 @@ describe('S1 a member session reads a refused key, replays only a read, and does
       RelaySessionError,
     );
     expect(drives).toHaveLength(1);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.requests).toHaveLength(1);
   });
 
   it('drops the session and fails when the publisher does not answer in time', async () => {
@@ -348,10 +391,239 @@ describe('S1 a member session reads a refused key, replays only a read, and does
   });
 });
 
+describe('R2-S1 this half holds the carrier to the deadline and decides finality from its own session', () => {
+  const never = (): Promise<never> => new Promise<never>(() => undefined);
+  /** Runs the callback of a recorded `setTimeout` call now: the deadline passes. */
+  const fire = (call: readonly unknown[] | undefined): void => {
+    const callback = call?.[0];
+    if (typeof callback !== 'function') throw new Error('no such deadline timer was set');
+    callback();
+  };
+  const clock = async (milliseconds: number): Promise<void> =>
+    await new Promise(resolve => setTimeout(resolve, milliseconds));
+
+  it('stops a join on a carrier that ignores the deadline, closes socket and session, and moves on', async () => {
+    const deadlines = spyOn(globalThis, 'setTimeout');
+    try {
+      const { transport, dials, sessions, sockets } = harness(
+        async (step, session) => {
+          if (step === 0) return await never(); // a drive that ignores deadlineMs
+          session.finish(joinedAnswer);
+          return joinedAnswer;
+        },
+        { mirror: false },
+      );
+      const pending = transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS });
+      // The direct leg's own deadline is the app's walk deadline.
+      const timer = deadlines.mock.calls.find(call => call[1] === DIRECT_MEMBER_DEADLINE_MS);
+      expect(timer).toBeDefined();
+      fire(timer);
+      const result = await pending;
+      expect(dials.map(dial => dial.kind)).toEqual(['direct', 'relay']);
+      expect(sessions[0]?.closed).toHaveLength(1);
+      expect(sockets[0]?.closed).toBeGreaterThanOrEqual(1);
+      expect(result).toMatchObject({ kind: 'joined', carrier: { kind: 'relay', relayUrl: RENDEZVOUS } });
+    } finally {
+      deadlines.mockRestore();
+    }
+  });
+
+  it('reports a share that may be spent when the code was sent and the carrier then outlived its deadline', async () => {
+    const deadlines = spyOn(globalThis, 'setTimeout');
+    try {
+      const { transport } = harness(
+        async (_step, session) => {
+          session.sent = true;
+          return await never();
+        },
+        { mirror: false },
+      );
+      const pending = transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS });
+      for (let leg = 0; leg < 2; leg += 1) {
+        await clock(0);
+        const timers = deadlines.mock.calls.filter(
+          call => call[1] === DIRECT_MEMBER_DEADLINE_MS || call[1] === RELAY_MEMBER_DEADLINE_MS,
+        );
+        fire(timers[leg]);
+      }
+      expect(await pending).toEqual({ kind: 'unreachable', maybeSpentUnheard: true, tried: 2 });
+    } finally {
+      deadlines.mockRestore();
+    }
+  });
+
+  it('stops a member session walk on a carrier that ignores the deadline and moves to the next', async () => {
+    const deadlines = spyOn(globalThis, 'setTimeout');
+    try {
+      const { transport, dials } = harness(
+        async (step, session) => {
+          if (step === 0) return await never();
+          session.finish(session);
+          return session;
+        },
+        { mirror: false },
+      );
+      const client = await transport.openClient(SUBSCRIPTION);
+      const pending = client.request('/v1/shared/me', z.unknown());
+      const timer = deadlines.mock.calls.find(call => call[1] === DIRECT_MEMBER_DEADLINE_MS);
+      fire(timer);
+      await pending;
+      expect(dials.map(dial => dial.kind)).toEqual(['direct', 'relay']);
+    } finally {
+      deadlines.mockRestore();
+    }
+  });
+
+  it('a refusal the session sealed stays a refusal when drive rejects with a generic Error: one dial', async () => {
+    const { transport, dials } = harness(
+      async (_step, session) => {
+        session.fail(new RelayJoinRefusedError());
+        throw new Error('drive wrapped the failure');
+      },
+      { mirror: false },
+    );
+    expect(await transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS })).toEqual({
+      kind: 'refused',
+      maybeSpentUnheard: false,
+    });
+    expect(dials).toHaveLength(1);
+  });
+
+  it('the same holds for join-options and for a rejected member key', async () => {
+    const options = harness(
+      async (_step, session) => {
+        session.fail(new RelayJoinRefusedError());
+        throw new Error('drive wrapped the failure');
+      },
+      { mirror: false },
+    );
+    expect(await options.transport.joinOptions({ seed: SEED, keys: KEYS })).toEqual({ kind: 'refused' });
+    expect(options.dials).toHaveLength(1);
+    const member = harness(
+      async (_step, session) => {
+        session.fail(new RelaySessionError('refused', RELAY_CLOSE_CODES.authRejected));
+        throw new Error('drive wrapped the failure');
+      },
+      { mirror: false },
+    );
+    const client = await member.transport.openClient(SUBSCRIPTION);
+    await expect(client.request('/v1/shared/me', z.unknown())).rejects.toBeInstanceOf(MemberRefusedError);
+    expect(member.dials).toHaveLength(1);
+  });
+
+  it('the joined value comes from the session, not from what drive resolves with', async () => {
+    const { transport } = harness(
+      async (_step, session) => {
+        session.finish(joinedAnswer);
+        return { kind: 'joined', response: { forged: true } };
+      },
+      { mirror: false },
+    );
+    expect(await transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS })).toMatchObject({
+      kind: 'joined',
+      response: { memberId: joinedAnswer.response.memberId },
+    });
+  });
+
+  it('a drive that resolves while the session has not settled is not a join', async () => {
+    const { transport, sessions } = harness(async () => joinedAnswer, { mirror: false });
+    expect(await transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS })).toEqual({
+      kind: 'unreachable',
+      maybeSpentUnheard: false,
+      tried: 2,
+    });
+    expect(sessions.every(session => session.closed.length === 1)).toBe(true);
+  });
+
+  it('the member session is the one this half built, not what drive resolves with', async () => {
+    const forged = fakeSession();
+    const { transport, sessions } = harness(
+      async (_step, session) => {
+        session.finish(session);
+        return forged;
+      },
+      { mirror: false },
+    );
+    const client = await transport.openClient(SUBSCRIPTION);
+    await client.request('/v1/shared/me', z.unknown());
+    expect(sessions[0]?.requests).toHaveLength(1);
+    expect(forged.requests).toHaveLength(0);
+  });
+});
+
+describe('R2-N2 a dialled socket is closed when building the session throws', () => {
+  it('closes the socket in a join, and in join-options, and the walk goes on', async () => {
+    const join = harness(async () => joinedAnswer, { buildThrows: build => build === 0 });
+    const result = await join.transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS });
+    expect(join.sockets[0]?.closed).toBe(1);
+    expect(result).toMatchObject({ kind: 'joined', carrier: { kind: 'relay' } });
+    const options = harness(async () => ({ kind: 'open', why: 'first-browser' }), {
+      buildThrows: build => build === 0,
+    });
+    expect(await options.transport.joinOptions({ seed: SEED, keys: KEYS })).toMatchObject({ kind: 'answer' });
+    expect(options.sockets[0]?.closed).toBe(1);
+  });
+});
+
+describe('R2-S2 the session is pinned to the publisher’s fingerprint', () => {
+  it('builds every join, join-options and member session with the seed’s or the subscription’s own daemon id', async () => {
+    const join = harness(async () => joinedAnswer);
+    await join.transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS });
+    expect(join.built).toEqual([{ daemonId: SEED.daemonId, kind: 'join' }]);
+    const options = harness(async () => ({ kind: 'open', why: 'first-browser' }));
+    await options.transport.joinOptions({ seed: SEED, keys: KEYS });
+    expect(options.built).toEqual([{ daemonId: SEED.daemonId, kind: 'join-options' }]);
+    const member = harness(async (_step, session) => session);
+    const client = await member.transport.openClient(SUBSCRIPTION);
+    await client.request('/v1/shared/me', z.unknown());
+    expect(member.built).toEqual([{ daemonId: SEED.daemonId, kind: 'member' }]);
+  });
+
+  it('keeps that id on every leg, whichever carrier the walk reaches', async () => {
+    const { transport, built } = harness(async () => {
+      throw new RelaySessionError('closed', 1006);
+    });
+    await transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS });
+    expect(built.map(entry => entry.daemonId)).toEqual([SEED.daemonId, SEED.daemonId]);
+  });
+});
+
+describe('R2-S2 which 401 and which close mean the key is refused', () => {
+  const answered = (status: number, body: unknown) => async () => ({
+    kind: 'response',
+    status,
+    headers: {},
+    body: JSON.stringify(body),
+  });
+
+  it('does not read any other 401 as a refused key', async () => {
+    const { transport } = harness(async (_step, session) => {
+      session.asked = answered(401, { error: 'that passkey did not check out', code: 'member_not_verified' });
+      return session;
+    });
+    const client = await transport.openClient(SUBSCRIPTION);
+    const reason = await client.request('/v1/shared/unlock', z.unknown(), { method: 'POST' }).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    expect(reason).not.toBeInstanceOf(MemberRefusedError);
+    expect(reason).toMatchObject({ status: 401, code: 'member_not_verified' });
+  });
+
+  it('reads a 4403 that ends an open session as the key being refused', async () => {
+    const { transport } = harness(async (_step, session) => {
+      session.asked = async () => {
+        throw new RelaySessionError('unknown device credential', RELAY_CLOSE_CODES.authRejected);
+      };
+      return session;
+    });
+    const client = await transport.openClient(SUBSCRIPTION);
+    await expect(client.request('/v1/shared/me', z.unknown())).rejects.toBeInstanceOf(MemberRefusedError);
+  });
+});
+
 describe('GAP(connections): guarantees that need the real carrier (ported with Connections’ dial and drive)', () => {
   it.todo('S1 the direct deadline stops a dial that never opens and the walk moves on (should not hang the join)');
-  it.todo('S1 a relay leg is held to the heartbeat grace, never longer, whatever the carrier is told');
   it.todo('S1 a rendezvous that closes before it accepts the session is a transport failure, not a refusal');
   it.todo('S1 the heartbeat keeps a member session alive, and a session the carrier dropped is no longer live');
-  it.todo('S1 a fingerprint that cannot address a session is refused by the pinned handshake before the code leaves');
 });

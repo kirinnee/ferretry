@@ -13,6 +13,7 @@ import type {
   WorkerHandle,
   WorkersPort,
 } from '../../contract/ports.ts';
+import { embeddedWorkerUrl } from './embedded-worker.ts';
 
 /**
  * The unrestricted spawn adapter; the host wraps it per plugin (`restrictSpawn`). The child sees the base the host
@@ -21,7 +22,7 @@ import type {
  * one the opener does not recognise, refuses the start: it is never passed through as if it were plain values.
  */
 /** The most extra pipes one child may have (Chrome's DevTools pipe needs two). */
-export const MAX_EXTRA_PIPES = 4;
+const MAX_EXTRA_PIPES = 4;
 
 /**
  * The NON-secret environment names `git` and `gh` children are given from the daemon's own environment, so a
@@ -172,8 +173,8 @@ export function bunSpawn(
 }
 
 /** Today's Git runner limits. */
-export const DEFAULT_STDOUT_LIMIT = 1024 * 1024;
-export const DEFAULT_STDERR_LIMIT = 64 * 1024;
+const DEFAULT_STDOUT_LIMIT = 1024 * 1024;
+const DEFAULT_STDERR_LIMIT = 64 * 1024;
 
 function checkedLimit(value: number | undefined, fallback: number, label: string): number {
   const limit = value ?? fallback;
@@ -257,7 +258,8 @@ export function bunWorkers(): WorkersPort {
         | { readonly workerData?: unknown; readonly transferList?: readonly unknown[] }
         | undefined;
       const data = given?.workerData;
-      const worker = new Worker(moduleUrl, {
+      // A compiled binary holds its worker programs embedded beside the entry, not where the plugin's URL points.
+      const worker = new Worker(embeddedWorkerUrl(moduleUrl), {
         ...(options?.name === undefined ? {} : { name: options.name }),
         ...(options?.env === undefined ? {} : { env: { ...options.env } }),
         ...(data === undefined ? {} : { workerData: data }),

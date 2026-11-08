@@ -15,7 +15,7 @@ import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema } from '../../../contract/ind
  */
 
 /** Whether the secret store can be read (today's `secrets.ts`; only the input service's saved-login listing reads it). */
-export const SecretStoreHealthSchema = z.enum(['ready', 'damaged']);
+const SecretStoreHealthSchema = z.enum(['ready', 'damaged']);
 
 /** An ISO-8601 instant with an explicit timezone (today's `common.ts`, kept as written). */
 const InstantSchema = z.iso.datetime({ offset: true });
@@ -37,7 +37,7 @@ const K = new Uint32Array([
  * SHA-256 (FIPS 180-4) as lowercase hex, synchronously, with no dependency. Synchronous because the fleet
  * materialiser that names a secret is pure and synchronous, and it must agree with the daemon to the bit.
  */
-export function sha256Hex(text: string): string {
+function sha256Hex(text: string): string {
   const data = new TextEncoder().encode(text);
   const length = Math.ceil((data.length + 9) / 64) * 64;
   const padded = new Uint8Array(length);
@@ -90,19 +90,6 @@ export function sha256Hex(text: string): string {
 
 // ─── from sign-in-rules.ts ───
 
-export const SIGN_IN_RULE_MAX_DAYS = 90;
-
-/** One day, in seconds: every rule lifetime is a whole number of these. */
-export const DAY_SECONDS = 86_400;
-
-export const SIGN_IN_RULE_MAX_SECONDS = SIGN_IN_RULE_MAX_DAYS * DAY_SECONDS;
-
-/** The shortest a rule may last. */
-export const SIGN_IN_RULE_MIN_SECONDS = 3_600;
-
-/** The optional use cap's ceiling. Absent: no count (the expiry, the hourly rate and the log still bound it). */
-export const SIGN_IN_RULE_MAX_USES = 1_000;
-
 // ─── from login-entries.ts ───
 
 /** A one-line text field: trimmed, at most `maximum` characters, no control or format characters. */
@@ -121,7 +108,7 @@ export const oneLine = (maximum: number) =>
  * board `project` (never a folder-resolved or Unfiled project, so the id is a registered project's uuid), or exactly
  * one `session` (not its children). A kind this build does not know is refused, never read as `any`.
  */
-export const SignInRuleScopeSchema = z.discriminatedUnion('kind', [
+const SignInRuleScopeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('any') }),
   z.strictObject({ kind: z.literal('project'), project: z.uuid() }),
   z.strictObject({ kind: z.literal('session'), session: oneLine(128) }),
@@ -129,14 +116,12 @@ export const SignInRuleScopeSchema = z.discriminatedUnion('kind', [
 
 export type SignInRuleScope = z.infer<typeof SignInRuleScopeSchema>;
 
-const unique = (values: readonly string[]): boolean => new Set(values).size === values.length;
-
 /**
  * WHY A RULE WAS SUSPENDED. Sticky: changing the pinned fact back does not resume it; only a new passkey does. The
  * first ten are also grant misses (a fill found them); `passkey-removed` follows the registry, and `store-write-failed`
  * keeps a rule suspended in memory when its file could not be written.
  */
-export const SIGN_IN_RULE_SUSPENSIONS = [
+const SIGN_IN_RULE_SUSPENSIONS = [
   'place-changed',
   'recipe-changed',
   'form-changed',
@@ -151,7 +136,7 @@ export const SIGN_IN_RULE_SUSPENSIONS = [
   'store-write-failed',
 ] as const;
 
-export const SignInRuleSuspensionSchema = z.enum(SIGN_IN_RULE_SUSPENSIONS);
+const SignInRuleSuspensionSchema = z.enum(SIGN_IN_RULE_SUSPENSIONS);
 
 export type SignInRuleSuspension = z.infer<typeof SignInRuleSuspensionSchema>;
 
@@ -161,7 +146,7 @@ export type SignInRuleSuspension = z.infer<typeof SignInRuleSuspensionSchema>;
  * WHY A PRE-APPROVAL DID NOT FILL, or why a line can't be pre-approved at all. Each has one fixed sentence
  * ({@link grantMissWords}); the ferret is never told which ({@link TASK_PLAN_MISS_AGENT_NOTE}).
  */
-export const GRANT_MISS_REASONS = [
+const GRANT_MISS_REASONS = [
   'expired',
   'other-session',
   'stopped',
@@ -229,41 +214,6 @@ export const SignInRuleIdSchema = z
 
 // ─── from sign-in-rules.ts ───
 
-/**
- * `POST /v1/sign-in-rules/stages`: what the owner ticked on the create sheet. `fields` are the username and password;
- * the code is its own tick (`totp`), which needs `totpAcknowledged` (the red one-factor warning) and the password.
- * `replaces` names the rule a resume, renew or widen approves again (same id, revision + 1). The daemon snapshots
- * every pin itself: nothing here names a domain, a key or an identity.
- */
-export const SignInRuleDraftSchema = z
-  .strictObject({
-    signIn: SignInIdSchema,
-    fields: z
-      .array(z.enum(['username', 'password']))
-      .min(1)
-      .max(2),
-    totp: z.boolean().optional(),
-    totpAcknowledged: z.literal(true).optional(),
-    scope: SignInRuleScopeSchema.optional(),
-    lifetimeSeconds: z.number().int().min(SIGN_IN_RULE_MIN_SECONDS).max(SIGN_IN_RULE_MAX_SECONDS).optional(),
-    uses: z.number().int().min(1).max(SIGN_IN_RULE_MAX_USES).optional(),
-    replaces: SignInRuleIdSchema.optional(),
-  })
-  .superRefine((draft, context) => {
-    const totp = draft.totp === true;
-    const problems = [
-      ...(unique(draft.fields) ? [] : ['tick each field once']),
-      ...(totp && draft.totpAcknowledged !== true
-        ? ['ticking the code makes the sign-in one factor: acknowledge it first']
-        : []),
-      ...(!totp && draft.totpAcknowledged !== undefined ? ['acknowledge the code warning only with the code'] : []),
-      ...(totp && !draft.fields.includes('password') ? ['a code is typed only after its own password'] : []),
-    ];
-    for (const message of problems) context.addIssue({ code: 'custom', message });
-  });
-
-export type SignInRuleDraft = z.infer<typeof SignInRuleDraftSchema>;
-
 const SIGN_IN_RULE_FACTORS_DOMAIN = 'ferretry.sign-in-rule.factors.v1';
 
 // ─── from account-ids.ts ───
@@ -277,15 +227,15 @@ export const TwoFactorIdSchema = z.string().regex(/^tf_[0-9a-f]{12}$/u, 'a 2FA k
 // ─── from login-entries.ts ───
 
 /** The longest label the owner gives a 2FA key ("Okta Verify on Pixel", "Phone ••42"). */
-export const TWO_FACTOR_LABEL_MAX_LENGTH = 60;
+const TWO_FACTOR_LABEL_MAX_LENGTH = 60;
 
 // ─── from accounts.ts ───
 
 /** A key's label: the OWNER's words, one line. A card names a key by it, never by a ferret's text. */
-export const TwoFactorLabelSchema = oneLine(TWO_FACTOR_LABEL_MAX_LENGTH);
+const TwoFactorLabelSchema = oneLine(TWO_FACTOR_LABEL_MAX_LENGTH);
 
 /** Who put a key there: the owner. Never a ferret. */
-export const TwoFactorAddedBySchema = z.enum(['owner']);
+const TwoFactorAddedBySchema = z.enum(['owner']);
 
 /** What every kind says, beside its kind. */
 const factorShape = <Time extends z.ZodType<string>>(time: Time) => ({
@@ -300,7 +250,7 @@ const factorShape = <Time extends z.ZodType<string>>(time: Time) => ({
 export const LOGIN_USERNAME_MAX_LENGTH = 256;
 
 /** How the code is made from the seed (RFC 6238). Not secret: an authenticator shows these. */
-export const TotpParametersSchema = z.strictObject({
+const TotpParametersSchema = z.strictObject({
   algorithm: z.enum(['SHA1', 'SHA256', 'SHA512']).default('SHA1'),
   digits: z.union([z.literal(6), z.literal(7), z.literal(8)]).default(6),
   period: z.number().int().min(15).max(120).default(30),
@@ -340,9 +290,9 @@ const emailShape = {
 };
 
 /** The app a push goes to, when the owner said. */
-export const PUSH_APPS = ['okta-verify', 'microsoft-authenticator', 'google', 'duo', 'other'] as const;
+const PUSH_APPS = ['okta-verify', 'microsoft-authenticator', 'google', 'duo', 'other'] as const;
 
-export const PushAppSchema = z.enum(PUSH_APPS);
+const PushAppSchema = z.enum(PUSH_APPS);
 
 const pushShape = { kind: z.literal('push'), app: PushAppSchema.optional() };
 
@@ -362,7 +312,7 @@ const CHECKED_ONLY_WITH_SEED = {
  * A 2FA key as the OWNER reads it: the record without its seal, and `automatic` (Ferretry holds the seed and makes
  * the codes). Never in a hint: a hint says a key's kind and label only ({@link TwoFactorKeyHintSchema}).
  */
-export const TwoFactorKeySummarySchema = z.discriminatedUnion('kind', [
+const TwoFactorKeySummarySchema = z.discriminatedUnion('kind', [
   z
     .strictObject({
       ...factorShape(InstantSchema),
@@ -398,21 +348,12 @@ export const factorFingerprint = (keys: readonly TwoFactorKeySummary[]): string 
 // ─── from browser-target.ts ───
 
 /** A ref as a snapshot writes it: `e12`, or `f1e3` inside a frame. */
-export const BROWSER_REF_PATTERN = /^(?:f\d{1,6})?e\d{1,7}$/u;
+const BROWSER_REF_PATTERN = /^(?:f\d{1,6})?e\d{1,7}$/u;
 
 export const BrowserRefSchema = z
   .string()
   .trim()
   .regex(BROWSER_REF_PATTERN, 'a ref is what a page snapshot names an element: e12, or f1e3 inside a frame');
-
-/** One resolved target. */
-export type BrowserTarget =
-  | { readonly kind: 'selector'; readonly selector: string }
-  | { readonly kind: 'ref'; readonly ref: string }
-  | { readonly kind: 'point'; readonly x: number; readonly y: number };
-
-/** A target that is an element — every act but a click can take only these. */
-export type BrowserElementTarget = Exclude<BrowserTarget, { readonly kind: 'point' }>;
 
 // ─── from surface-names.ts ───
 
@@ -421,13 +362,13 @@ export type BrowserElementTarget = Exclude<BrowserTarget, { readonly kind: 'poin
  * references written before names existed still work). A `%terminal:` / `%browser:` prefix is
  * accepted and dropped, so an agent can pass a reference exactly as a person wrote it.
  */
-export const SurfaceKeySchema = z
+const SurfaceKeySchema = z
   .string()
   .trim()
   .transform(value => value.replace(/^%(?:terminal|browser):/u, ''))
   .pipe(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u, 'not a surface name or id'));
 
-export const SurfaceKindSchema = z.enum(['terminal', 'browser']);
+const SurfaceKindSchema = z.enum(['terminal', 'browser']);
 
 export type SurfaceKind = z.infer<typeof SurfaceKindSchema>;
 
@@ -449,12 +390,12 @@ export type SurfaceKind = z.infer<typeof SurfaceKindSchema>;
  */
 
 /** An account's handle: a saved login's handle, unchanged. */
-export const AccountIdSchema = SecretNameSchema;
+const AccountIdSchema = SecretNameSchema;
 
 export type AccountId = z.infer<typeof AccountIdSchema>;
 
 /** An account's immutable key: today's saved login key, which every sealed name starts with. Never on a card. */
-export const AccountKeySchema = z.string().regex(/^L[0-9A-F]{24}$/u, 'an account key is L and 24 hex digits');
+const AccountKeySchema = z.string().regex(/^L[0-9A-F]{24}$/u, 'an account key is L and 24 hex digits');
 
 export type AccountKey = z.infer<typeof AccountKeySchema>;
 
@@ -473,12 +414,12 @@ export const SignInRuleRevisionSchema = z.number().int().min(1).max(1_000_000);
 // ─── from secure-copy.ts ───
 
 /** A plan card: at most this many planned pastes, each said in at most this many characters, waiting this long. */
-export const COPY_PLAN_MAX_ITEMS = 10;
+const COPY_PLAN_MAX_ITEMS = 10;
 
 // ─── from task-plan.ts ───
 
 /** Most lines on one plan. */
-export const TASK_PLAN_MAX_LINES = COPY_PLAN_MAX_ITEMS;
+const TASK_PLAN_MAX_LINES = COPY_PLAN_MAX_ITEMS;
 
 /**
  * The terminal tools a terminal sign-in line may be for: setuid-root programs that read the password with getpass.
@@ -516,14 +457,9 @@ export const ruleMissSuspends = (reason: GrantMissReason): boolean =>
  * agenda card closes in the words a tap fill closes with, because every ferret can read every agenda (C26): this line
  * is drawn on the owner's input card only.
  */
-export function grantFilledLineFor(
-  note: { readonly by: 'plan'; readonly line: number } | { readonly by: 'rule' },
-  place?: string,
-): string {
+export function grantFilledLineFor(note: { readonly by: 'plan'; readonly line: number }, place?: string): string {
   const at = place === undefined || place === '' ? '' : ` on ${place}`;
-  return note.by === 'plan'
-    ? `Filled under your task plan (line ${String(note.line + 1)})${at}.`
-    : `Filled under your standing sign-in rule${at}.`;
+  return `Filled under your task plan (line ${String(note.line + 1)})${at}.`;
 }
 
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
@@ -539,14 +475,14 @@ export const TaskPlanLineNumberSchema = z
 // ─── from login-entries.ts ───
 
 /** The fields an entry can hold, and which of them are secret. */
-export const LOGIN_FIELD_ROLES = ['username', 'password', 'totp'] as const;
+const LOGIN_FIELD_ROLES = ['username', 'password', 'totp'] as const;
 
-export const LoginFieldRoleSchema = z.enum(LOGIN_FIELD_ROLES);
+const LoginFieldRoleSchema = z.enum(LOGIN_FIELD_ROLES);
 
 // ─── from task-plan.ts ───
 
 /** A field a sign-in line fills: the account's username, its password, or a code Ferretry makes from its 2FA key. */
-export const SignInFieldSchema = LoginFieldRoleSchema;
+const SignInFieldSchema = LoginFieldRoleSchema;
 
 export type SignInField = z.infer<typeof SignInFieldSchema>;
 
@@ -584,7 +520,7 @@ export const LOGIN_LABEL_MAX_LENGTH = 80;
 export const LOGIN_MATCH_MAX = 16;
 
 /** Most entries one daemon keeps: a list a person can read, not a database. */
-export const MAX_LOGIN_ENTRIES = 256;
+const MAX_LOGIN_ENTRIES = 256;
 
 /**
  * The shortest password an entry keeps. A REDACTION constraint, exactly as {@link MIN_SECRET_VALUE_LENGTH}
@@ -592,8 +528,6 @@ export const MAX_LOGIN_ENTRIES = 256;
  * words. A shorter password can still be TYPED on a card; it just cannot be saved.
  */
 export const LOGIN_PASSWORD_MIN_LENGTH = MIN_SECRET_VALUE_LENGTH;
-
-export const LOGIN_PASSWORD_MAX_LENGTH = 1_024;
 
 /**
  * What an entry is for, as the daemon names a target: `program@host` for a terminal (`sudo@kirin-box`,
@@ -608,31 +542,12 @@ export const LoginMatchSchema = z
     'a program@host or a web host, lowercase',
   );
 
-export type LoginMatch = z.infer<typeof LoginMatchSchema>;
+type LoginMatch = z.infer<typeof LoginMatchSchema>;
 
 export type LoginFieldRole = z.infer<typeof LoginFieldRoleSchema>;
 
-export type TotpParameters = z.infer<typeof TotpParametersSchema>;
-
-/**
- * THE SENTENCE the owner reads before a 2FA key is SAVED, in the app, the CLI and the docs. It is the
- * reason TOTP is off by default and opted into per entry. It is about keeping the key, never about a fill: a ticked
- * code on a plan line or a standing rule says {@link AUTOMATED_CODE_WARNING}.
- */
-export const LOGIN_TOTP_WARNING =
-  "Keeping the password and the 2FA key in the same place means one compromise of this machine's vault defeats both factors.";
-
-/** The same warning, short, under every "Use code from Ferretry" button on a code card. */
-export const LOGIN_ONE_FACTOR_WARNING = 'Password and code both come from this machine: together they are one factor.';
-
 /** Most 2FA keys of one account that hold a seed: a re-enrolled second authenticator, a backup app. */
-export const MAX_SEEDS_PER_ACCOUNT = 4;
-
-/** A base32 TOTP seed, as authenticator setup pages show it (spaces and `=` padding allowed). */
-export const TotpSeedSchema = z
-  .string()
-  .transform(seed => seed.replaceAll(/[\s=-]/gu, '').toUpperCase())
-  .pipe(z.string().regex(/^[A-Z2-7]{16,128}$/u, 'a base32 2FA key of 16 to 128 characters'));
+const MAX_SEEDS_PER_ACCOUNT = 4;
 
 /**
  * WHERE THE SIGN-IN HAPPENS: a web host, exactly as a page's origin names it (`app.vercel.com`,
@@ -640,7 +555,7 @@ export const TotpSeedSchema = z
  * the work is on). A page card's one-tap choice is an entry whose login domain is the page's host EXACTLY:
  * no wildcard, no parent domain, no look-alike.
  */
-export const LoginDomainSchema = z
+const LoginDomainSchema = z
   .string()
   .max(260)
   .regex(/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$/u, 'a web host, lowercase, like app.vercel.com');
@@ -654,39 +569,20 @@ export const LoginDomainSchema = z
  * agent browser has passkeys switched off (docs/input-requests.md, "Passkeys are off"), so a login that needs
  * one is the owner's hands, never a saved login.
  */
-export const LOGIN_METHODS = ['password', 'google', 'github', 'microsoft', 'apple', 'sso'] as const;
+const LOGIN_METHODS = ['password', 'google', 'github', 'microsoft', 'apple', 'sso'] as const;
 
-export const LoginMethodKindSchema = z.enum(LOGIN_METHODS);
+const LoginMethodKindSchema = z.enum(LOGIN_METHODS);
 
-export type LoginMethodKind = z.infer<typeof LoginMethodKindSchema>;
+type LoginMethodKind = z.infer<typeof LoginMethodKindSchema>;
 
-export const LOGIN_SSO_NAME_MAX_LENGTH = 40;
-
-/** What the owner reads for each method, in the app, the CLI and the agent's hint. */
-export const LOGIN_METHOD_LABELS: Readonly<Record<LoginMethodKind, string>> = {
-  password: 'Password',
-  google: 'Sign in with Google',
-  github: 'Sign in with GitHub',
-  microsoft: 'Sign in with Microsoft',
-  apple: 'Sign in with Apple',
-  sso: 'Other SSO',
-};
-
-/** Words that name a passkey or a hardware authenticator: never a saved login's method. */
-const PASSKEY_WORDS =
-  /pass\s*-?\s*key|web\s*-?\s*authn|fido|u2f|security\s*-?\s*key|hardware\s*-?\s*key|yubi\s*-?\s*key/iu;
-
-/** Whether a sign-in method's name means a passkey: a change that says one is refused. */
-export const namesPasskey = (text: string): boolean => PASSKEY_WORDS.test(text);
-
-const PASSKEYS_OFF = 'passkeys are off: a saved login signs in with a password or a provider';
+const LOGIN_SSO_NAME_MAX_LENGTH = 40;
 
 /**
  * What is wrong with a method, as issues: an SSO method names its provider, only SSO does, and a password sign-in
  * goes via nothing. `link` is the provider it goes via, however the caller spells it (a handle here, an account key
  * in the stored sign-in of accounts.ts), so both shapes keep one rule.
  */
-export function loginMethodIssues(
+function loginMethodIssues(
   kind: LoginMethodKind,
   name: string | undefined,
   link: string | undefined,
@@ -703,7 +599,7 @@ export function loginMethodIssues(
   ];
 }
 
-export const LoginMethodSchema = z
+const LoginMethodSchema = z
   .strictObject({
     kind: LoginMethodKindSchema,
     /** `sso` only: the provider's name as the site's button says it ("Okta", "Company SSO"). */
@@ -715,35 +611,6 @@ export const LoginMethodSchema = z
     for (const issue of loginMethodIssues(method.kind, method.name, method.via, 'via'))
       context.addIssue({ code: 'custom', ...issue });
   });
-
-export type LoginMethod = z.infer<typeof LoginMethodSchema>;
-
-/**
- * A method as a CHANGE sends it: {@link LoginMethodSchema}, and an SSO name that says passkey is refused. Only a
- * write is judged by the word list, so a list that grows later never makes an entry already stored unreadable.
- */
-export const LoginMethodChangeSchema = LoginMethodSchema.refine(
-  method => method.name === undefined || !namesPasskey(method.name),
-  { path: ['name'], message: PASSKEYS_OFF },
-);
-
-/** "Sign in with Google", "Sign in with Okta (SSO)" or "Password", without the provider entry. */
-export function loginMethodWords(method: LoginMethod): string {
-  return method.kind === 'sso' ? `Sign in with ${method.name ?? 'SSO'} (SSO)` : LOGIN_METHOD_LABELS[method.kind];
-}
-
-/** The same, naming the provider's saved login: `Sign in with Google via 'Google (kirin@…)'`. */
-export function loginMethodSentence(method: LoginMethod, viaLabel: string | undefined): string {
-  const words = loginMethodWords(method);
-  return viaLabel === undefined || method.kind === 'password' ? words : `${words} via '${viaLabel}'`;
-}
-
-/** A password as a write sends it: no control character or line break, which would press keys. */
-export const LoginPasswordSchema = z
-  .string()
-  .min(LOGIN_PASSWORD_MIN_LENGTH)
-  .max(LOGIN_PASSWORD_MAX_LENGTH)
-  .regex(/^[^\p{Cc}]*$/u, 'a password with a control character or line break would press keys');
 
 // ─── from login-recipes.ts ───
 
@@ -764,7 +631,7 @@ export const LoginPasswordSchema = z
  * This file depends on nothing in `login-entries.ts`, which builds the entry and the hint from it.
  */
 
-export const LOGIN_RECIPE_MAX_LENGTH = 4_000;
+const LOGIN_RECIPE_MAX_LENGTH = 4_000;
 
 /**
  * Characters that draw nothing, or nothing a person can tell apart, while a model still reads them: control and
@@ -775,18 +642,18 @@ export const LOGIN_RECIPE_MAX_LENGTH = 4_000;
 const UNSEEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800]/u;
 
 /** Whether a text holds a character that hides from the reader (see {@link UNSEEN}); lines and tabs are allowed. */
-export const hidesCharacters = (text: string): boolean => UNSEEN.test(text.replaceAll(/[\n\t]/gu, ''));
+const hidesCharacters = (text: string): boolean => UNSEEN.test(text.replaceAll(/[\n\t]/gu, ''));
 
 /** The markers a hint fences a recipe with: a recipe may not contain them, so it cannot close its own fence. */
-export const RECIPE_FENCE_OPEN = '<<<recipe';
+const RECIPE_FENCE_OPEN = '<<<recipe';
 
-export const RECIPE_FENCE_CLOSE = 'recipe>>>';
+const RECIPE_FENCE_CLOSE = 'recipe>>>';
 
 /**
  * A recipe's text: lines and tabs, CRLF read as LF, no character that hides from the owner ({@link UNSEEN}), and
  * not the hint's fence markers.
  */
-export const LoginRecipeSchema = z
+const LoginRecipeSchema = z
   .string()
   .transform(text => text.replaceAll('\r\n', '\n').trim())
   .pipe(
@@ -804,46 +671,17 @@ export const LoginRecipeSchema = z
 // ─── from login-entries.ts ───
 
 /**
- * `PUT /v1/secrets/logins/:id`: create the entry, or change the parts named. A field left out is kept;
- * `null` removes it. Values travel IN only. Adding a seed needs `totpAcknowledged: true`, which the
- * client sends only after showing {@link LOGIN_TOTP_WARNING}.
- */
-export const PutLoginEntryRequestSchema = z
-  .strictObject({
-    label: oneLine(LOGIN_LABEL_MAX_LENGTH).optional(),
-    match: z.array(LoginMatchSchema).max(LOGIN_MATCH_MAX).optional(),
-    /** The whole method, replaced: `{ kind: 'password' }` goes back to a password sign-in. */
-    method: LoginMethodChangeSchema.optional(),
-    domains: z.array(LoginDomainSchema).max(LOGIN_MATCH_MAX).optional(),
-    username: oneLine(LOGIN_USERNAME_MAX_LENGTH).nullable().optional(),
-    password: LoginPasswordSchema.nullable().optional(),
-    totp: z.strictObject({ seed: TotpSeedSchema, parameters: TotpParametersSchema.optional() }).nullable().optional(),
-    totpAcknowledged: z.literal(true).optional(),
-    /** The recipe, replaced whole; `null` removes it. A text holding any saved or vault value is refused. */
-    recipe: LoginRecipeSchema.nullable().optional(),
-    autoApplyRecipe: z.boolean().optional(),
-  })
-  .superRefine((body, context) => {
-    if (body.totp !== undefined && body.totp !== null && body.totpAcknowledged !== true)
-      context.addIssue({
-        code: 'custom',
-        path: ['totpAcknowledged'],
-        message: `confirm the warning first: ${LOGIN_TOTP_WARNING}`,
-      });
-  });
-
-/**
  * Why a card's primary offer is first (accounts.ts `chosenSignIn`): the ferret named it, a project, folder or
  * site default chose it, or it is the only account that signs in here. Absent on every other offer.
  */
-export const SIGN_IN_CHOICE_REASONS = ['ferret', 'project', 'folder', 'site', 'only'] as const;
+const SIGN_IN_CHOICE_REASONS = ['ferret', 'project', 'folder', 'site', 'only'] as const;
 
-export const SignInChoiceReasonSchema = z.enum(SIGN_IN_CHOICE_REASONS);
+const SignInChoiceReasonSchema = z.enum(SIGN_IN_CHOICE_REASONS);
 
-export type SignInChoiceReason = z.infer<typeof SignInChoiceReasonSchema>;
+type SignInChoiceReason = z.infer<typeof SignInChoiceReasonSchema>;
 
 /** The longest project name a card's "Default for <project>" carries. */
-export const SIGN_IN_PROJECT_MAX_LENGTH = 128;
+const SIGN_IN_PROJECT_MAX_LENGTH = 128;
 
 /**
  * One saved login an input card may offer. `fills` is the field it would type (the password for a
@@ -863,7 +701,7 @@ export const SIGN_IN_PROJECT_MAX_LENGTH = 128;
  * saw it (`worked`, `failed`); absent: never tried. Owner view only, like the whole offer: a ferret never learns that a
  * seed exists.
  */
-export const InputCodeKeySchema = z.strictObject({
+const InputCodeKeySchema = z.strictObject({
   factor: TwoFactorIdSchema,
   label: oneLine(TWO_FACTOR_LABEL_MAX_LENGTH),
   checked: z.enum(['worked', 'failed']).optional(),
@@ -871,7 +709,7 @@ export const InputCodeKeySchema = z.strictObject({
 
 export type InputCodeKey = z.infer<typeof InputCodeKeySchema>;
 
-export const InputSavedOfferSchema = z
+const InputSavedOfferSchema = z
   .strictObject({
     id: LoginEntryIdSchema,
     label: oneLine(LOGIN_LABEL_MAX_LENGTH),
@@ -924,7 +762,7 @@ export const InputSavedOfferSchema = z
 export type InputSavedOffer = z.infer<typeof InputSavedOfferSchema>;
 
 /** A saved login named by another: its handle and its label, never what it holds. */
-export const LoginEntryRefSchema = z.strictObject({ id: LoginEntryIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
+const LoginEntryRefSchema = z.strictObject({ id: LoginEntryIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
 
 export type LoginEntryRef = z.infer<typeof LoginEntryRefSchema>;
 
@@ -932,7 +770,7 @@ export type LoginEntryRef = z.infer<typeof LoginEntryRefSchema>;
  * How the saved login this target is for signs in, when it is not a plain password: the card says "Sign in with
  * Google via 'Google (kirin@…)'", so the owner sees the ferret should be on the provider's page, not typing here.
  */
-export const InputSignInSchema = z.strictObject({
+const InputSignInSchema = z.strictObject({
   id: LoginEntryIdSchema,
   label: oneLine(LOGIN_LABEL_MAX_LENGTH),
   method: LoginMethodSchema,
@@ -1011,7 +849,7 @@ export function fillRoleFor(sensitivity: 'secret' | 'private' | 'code' | 'plain'
  * The handle "Save as" suggests for a target key: `sudo@kirin-box` → `SUDO_KIRIN_BOX`, `github.com` →
  * `GITHUB_COM`. Always a valid {@link LoginEntryIdSchema}; the owner can edit it.
  */
-export function suggestedLoginId(match: string): LoginEntryId {
+function suggestedLoginId(match: string): LoginEntryId {
   const words = match
     .toUpperCase()
     .replaceAll(/[^A-Z0-9]+/gu, '_')
@@ -1021,7 +859,7 @@ export function suggestedLoginId(match: string): LoginEntryId {
 }
 
 /** The label "Save as" suggests: `sudo on kirin-box`, or the web host itself. */
-export function suggestedLoginLabel(match: string): string {
+function suggestedLoginLabel(match: string): string {
   const at = match.indexOf('@');
   return (at === -1 ? match : `${match.slice(0, at)} on ${match.slice(at + 1)}`).slice(0, LOGIN_LABEL_MAX_LENGTH);
 }
@@ -1039,7 +877,7 @@ const OKTA_DOMAINS = ['okta.com', 'oktapreview.com', 'okta-emea.com'] as const;
  * and Microsoft's sign-in hosts exactly, and an organisation's own subdomain of Okta's (never the bare apex). Names a
  * new account only; it decides nothing.
  */
-export function providerNameOf(match: string): string | undefined {
+function providerNameOf(match: string): string | undefined {
   const host = match.toLowerCase();
   const exact = PROVIDER_HOSTS.get(host);
   if (exact !== undefined) return exact;
@@ -1081,15 +919,15 @@ export function suggestedNewAccount(
 // ─── from login-recipes.ts ───
 
 /** Most proposals one login holds at once: a fourth replaces the oldest. */
-export const LOGIN_RECIPE_PROPOSALS_MAX = 3;
+const LOGIN_RECIPE_PROPOSALS_MAX = 3;
 
 /** Most places one login keeps facts for (its login domains and terminal keys). */
-export const LOGIN_OBSERVED_MAX = 16;
+const LOGIN_OBSERVED_MAX = 16;
 
-export const LOGIN_PROPOSAL_WHY_MAX_LENGTH = 280;
+const LOGIN_PROPOSAL_WHY_MAX_LENGTH = 280;
 
 /** One yes-or-no fact, as often as the daemon has seen it the same way in a row, and when it last did. */
-export const LoginObservedFlagSchema = z.strictObject({
+const LoginObservedFlagSchema = z.strictObject({
   value: z.boolean(),
   observedAt: InstantSchema,
   count: z.number().int().min(1).max(1_000_000),
@@ -1100,13 +938,13 @@ export const LoginObservedFlagSchema = z.strictObject({
  * after), `push` (the page waited on the sign-in host, then moved on with no code typed: an approval somewhere
  * else), `none` (the page moved on at once).
  */
-export const LOGIN_SECOND_FACTORS = ['push', 'code', 'none'] as const;
+const LOGIN_SECOND_FACTORS = ['push', 'code', 'none'] as const;
 
-export const LoginSecondFactorSchema = z.enum(LOGIN_SECOND_FACTORS);
+const LoginSecondFactorSchema = z.enum(LOGIN_SECOND_FACTORS);
 
-export type LoginSecondFactor = z.infer<typeof LoginSecondFactorSchema>;
+type LoginSecondFactor = z.infer<typeof LoginSecondFactorSchema>;
 
-export const LoginObservedSecondFactorSchema = z.strictObject({
+const LoginObservedSecondFactorSchema = z.strictObject({
   value: LoginSecondFactorSchema,
   observedAt: InstantSchema,
   count: z.number().int().min(1).max(1_000_000),
@@ -1122,7 +960,7 @@ export const LoginObservedSecondFactorSchema = z.strictObject({
  * it. `noEchoAfterSubmit`: after the submit the daemon looked at the page text or the screen itself and the value
  * was not in it. `navigatedAway`: the page showed a new document within a few seconds of the submit.
  */
-export const LoginObservedSchema = z.strictObject({
+const LoginObservedSchema = z.strictObject({
   at: z
     .string()
     .max(320)
@@ -1160,7 +998,7 @@ export interface LoginObservation {
 }
 
 /** A proposal's handle. */
-export const LoginRecipeProposalIdSchema = z.string().regex(/^rp_[0-9a-f]{16}$/u);
+const LoginRecipeProposalIdSchema = z.string().regex(/^rp_[0-9a-f]{16}$/u);
 
 const loginRecipesOneLine = (maximum: number) =>
   z
@@ -1179,9 +1017,9 @@ const loginRecipesOneLine = (maximum: number) =>
  * words and is shown as such.
  */
 /** Who wrote the recipe as it stands: absent is the owner (typed or approved); `ferret` is an auto-applied proposal. */
-export const LoginRecipeAuthorSchema = z.literal('ferret');
+const LoginRecipeAuthorSchema = z.literal('ferret');
 
-export const LoginRecipeProposalSchema = z.strictObject({
+const LoginRecipeProposalSchema = z.strictObject({
   id: LoginRecipeProposalIdSchema,
   recipe: LoginRecipeSchema,
   base: LoginRecipeSchema.optional(),
@@ -1199,7 +1037,7 @@ export const COPY_MAX_LIFETIME_SECONDS = 14_400;
 export const COPY_AFTER_MASK_SECONDS = 600;
 
 /** The prefix a handle is written with. */
-export const COPY_HANDLE_PREFIX = 'sealed:';
+const COPY_HANDLE_PREFIX = 'sealed:';
 
 const boundedLine = (maximum: number) =>
   z
@@ -1209,7 +1047,7 @@ const boundedLine = (maximum: number) =>
     .regex(/^[^\p{Cc}\p{Cf}]*$/u, 'must be one line with no control characters');
 
 /** A copy's name, chosen by the agent: a lowercase letter, then lowercase letters, digits, `_` or `-`. */
-export const COPY_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/u;
+const COPY_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/u;
 
 export const CopyNameSchema = z
   .string()
@@ -1258,19 +1096,19 @@ export type CopyOrigin = z.infer<typeof CopyOriginSchema>;
  *   the transcript the daemon read; `unknown` means the transcript could not be read.
  * - `pageReadBeforeCapture`: the agent read, screenshotted or evaluated this page since it last navigated.
  */
-export const CopyExposureSchema = z.strictObject({
+const CopyExposureSchema = z.strictObject({
   transcript: z.enum(['clean', 'found', 'unknown']),
   pageReadBeforeCapture: z.boolean().optional(),
 });
 
 /** Where a copy stands. Only `live` can be pasted. A daemon restart lets go of every copy: it is then not listed at all. */
-export const CopyStateSchema = z.enum(['live', 'discarded', 'expired']);
+const CopyStateSchema = z.enum(['live', 'discarded', 'expired']);
 
 /**
  * EVERYTHING AN AGENT IS EVER TOLD ABOUT A COPY. `length` is in characters; `lines` counts line breaks plus
  * one. A command copy also says how the command ended and what it printed on stderr, masked.
  */
-export const CopyMetaSchema = z.strictObject({
+const CopyMetaSchema = z.strictObject({
   handle: z.string().regex(/^sealed:[a-z][a-z0-9_-]{0,39}$/u),
   name: CopyNameSchema,
   from: CopyOriginSchema,
@@ -1286,101 +1124,26 @@ export const CopyMetaSchema = z.strictObject({
 
 export type CopyMeta = z.infer<typeof CopyMetaSchema>;
 
-export const COPY_RULE_MAX_COUNT = 100;
-
-/** A program as the daemon names it: a base name, no path. tmux reports at most 15 characters of it on Linux. */
-const ProgramSchema = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[A-Za-z0-9._+-]+$/u, 'a program base name, like vercel or gh');
-
-/** `scheme://host[:port]`, as the browser reports a page's origin. */
-const OriginSchema = z
-  .string()
-  .max(256)
-  .regex(/^https?:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/u, 'an origin, like https://github.com');
-
-const SecretStoreNameSchema = z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/u, 'a secret name, like VERCEL_TOKEN');
-
-/** Where a paste's value comes FROM, as a rule or a plan names it: a program, or a page's origin. */
-export const CopyRouteFromSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('command'), program: ProgramSchema }),
-  z.strictObject({ kind: z.literal('browser'), origin: OriginSchema }),
-  z.strictObject({ kind: z.literal('clipboard'), origin: OriginSchema }),
-]);
-
-/**
- * Where a paste GOES: the program reading a terminal, a page's origin, or a secret-store name. A rule for the
- * secret store names the EXACT secret: no rule can write a secret it does not name (docs/secure-copy.md).
- */
-export const CopyRouteToSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('terminal'), program: ProgramSchema }),
-  z.strictObject({ kind: z.literal('browser'), origin: OriginSchema }),
-  z.strictObject({ kind: z.literal('secret'), name: SecretStoreNameSchema }),
-]);
-
-/** Who approved a rule or answered a plan: the owner at the machine, or a paired device. */
-export const RuleOwnerSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('host') }),
-  z.strictObject({ kind: z.literal('device'), deviceId: boundedLine(128) }),
-]);
-
-const RuleIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');
-
 export const CopyPlanIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');
-
-/**
- * A PRE-APPROVAL RULE: the owner allowed, in advance, pastes from this source to this destination. Matched on
- * what the DAEMON observed (the copy's program or origin, the destination's program or origin), never on the
- * agent's words. Each paste it allows is still raised, audited and shown in the log.
- */
-export const PasteRuleSchema = z.strictObject({
-  id: RuleIdSchema,
-  from: CopyRouteFromSchema,
-  to: CopyRouteToSchema,
-  /** Only this session's pastes, or any session's. */
-  sessionId: boundedLine(128).optional(),
-  expiresAt: InstantSchema.optional(),
-  /** Pastes it still allows; absent means no count. */
-  remaining: z.number().int().min(0).max(COPY_RULE_MAX_COUNT).optional(),
-  used: NonNegativeIntegerSchema,
-  createdAt: InstantSchema,
-  createdBy: RuleOwnerSchema,
-  /** The plan card it came from, when the ferret asked first. */
-  plan: CopyPlanIdSchema.optional(),
-});
-
-export type PasteRule = z.infer<typeof PasteRuleSchema>;
-
-/**
- * The owner's secure-copy settings, kept beside the rules. `allowProfileTargets` ("Copy rules may target programs in
- * my own profile", owner decision !A182): a `terminal:<program>` rule may also match a program reached through the
- * owner's own Nix profile (`~/.nix-profile`), which every process running as the owner, every ferret included, can
- * change. OFF unless the owner turns it on; turning it on LOOSENS, so a remote device needs a passkey for it.
- */
-export const PasteRuleSettingsSchema = z.strictObject({ allowProfileTargets: z.boolean() });
-
-export type PasteRuleSettings = z.infer<typeof PasteRuleSettingsSchema>;
 
 // ─── from accounts.ts ───
 
 /** Most accounts one daemon keeps (today's most saved logins). */
-export const MAX_ACCOUNTS = MAX_LOGIN_ENTRIES;
+const MAX_ACCOUNTS = MAX_LOGIN_ENTRIES;
 
 /** Most sign-ins one daemon keeps. */
-export const MAX_SIGN_INS = 512;
+const MAX_SIGN_INS = 512;
 
 /** Most sign-ins one account has. */
-export const MAX_SIGN_INS_PER_ACCOUNT = 16;
+const MAX_SIGN_INS_PER_ACCOUNT = 16;
 
 /** A key a target is matched on: a web host exactly as an origin names it, or `program@host` for a terminal. */
-export const PlaceKeySchema = LoginMatchSchema;
+const PlaceKeySchema = LoginMatchSchema;
 
 export type PlaceKey = LoginMatch;
 
 /** A website. A page is matched on its login domains only; `match` says what it is FOR and never matches a page. */
-export const SitePlaceSchema = z
+const SitePlaceSchema = z
   .strictObject({
     kind: z.literal('site'),
     /** Where the sign-in happens: a page whose host is one of these EXACTLY is matched (a saved login's `domains`). */
@@ -1391,7 +1154,7 @@ export const SitePlaceSchema = z
   .refine(place => place.domains.length + place.match.length > 0, 'a site sign-in names at least one host');
 
 /** The programs whose password is a REMOTE machine's, so their key names the destination. */
-export const REMOTE_TOOLS = ['ssh', 'scp', 'sftp'] as const;
+const REMOTE_TOOLS = ['ssh', 'scp', 'sftp'] as const;
 
 const isRemoteTool = (tool: string): boolean => (REMOTE_TOOLS as readonly string[]).includes(tool);
 
@@ -1404,7 +1167,7 @@ function terminalKey(place: {
 }
 
 /** A terminal tool: the program at the prompt, the machine it runs on and, for ssh, scp and sftp, where it goes. */
-export const TerminalPlaceSchema = z
+const TerminalPlaceSchema = z
   .strictObject({
     kind: z.literal('terminal'),
     tool: z.string().regex(/^[a-z0-9][a-z0-9._+-]{0,63}$/u, 'a program name, lowercase'),
@@ -1427,7 +1190,7 @@ export const TerminalPlaceSchema = z
     message: 'the program and host are too long to be a terminal key',
   });
 
-export const PlaceSchema = z.discriminatedUnion('kind', [SitePlaceSchema, TerminalPlaceSchema]);
+const PlaceSchema = z.discriminatedUnion('kind', [SitePlaceSchema, TerminalPlaceSchema]);
 
 export type Place = z.infer<typeof PlaceSchema>;
 
@@ -1454,19 +1217,19 @@ export function signInMatches(place: Place, key: string | undefined): boolean {
  * `totp` key can hold a value (a sealed seed), and only when the owner saved one with a passkey: every other kind is
  * a name and a few plain facts, so a card can say where the code went ("Code sent to ••42").
  */
-export const TWO_FACTOR_KINDS = ['totp', 'sms', 'email', 'push', 'security-key'] as const;
+const TWO_FACTOR_KINDS = ['totp', 'sms', 'email', 'push', 'security-key'] as const;
 
-export const TwoFactorKindSchema = z.enum(TWO_FACTOR_KINDS);
+const TwoFactorKindSchema = z.enum(TWO_FACTOR_KINDS);
 
-export type TwoFactorKind = z.infer<typeof TwoFactorKindSchema>;
+type TwoFactorKind = z.infer<typeof TwoFactorKindSchema>;
 
 /** The kinds that end in a code someone types (or, for a `totp` key with a seed, the daemon makes). */
-export const CODE_FACTOR_KINDS = ['totp', 'sms', 'email'] as const satisfies readonly TwoFactorKind[];
+const CODE_FACTOR_KINDS = ['totp', 'sms', 'email'] as const satisfies readonly TwoFactorKind[];
 
-export const isCodeFactor = (kind: TwoFactorKind): boolean => (CODE_FACTOR_KINDS as readonly string[]).includes(kind);
+const isCodeFactor = (kind: TwoFactorKind): boolean => (CODE_FACTOR_KINDS as readonly string[]).includes(kind);
 
 /** Most 2FA keys one account has. */
-export const MAX_FACTORS_PER_ACCOUNT = 8;
+const MAX_FACTORS_PER_ACCOUNT = 8;
 
 const VERIFIED_RANK = (key: TwoFactorKeySummary): number =>
   key.kind !== 'totp' || key.verified === undefined ? 1 : key.verified.worked ? 0 : 2;
@@ -1487,15 +1250,13 @@ export function automaticKeysInOfferOrder(keys: readonly TwoFactorKeySummary[]):
 }
 
 /** An account named by another: its handle and its label, never what it holds. */
-export const AccountRefSchema = z.strictObject({ id: AccountIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
-
-export type AccountRef = z.infer<typeof AccountRefSchema>;
+const AccountRefSchema = z.strictObject({ id: AccountIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
 
 /** The provider a sign-in goes via: its account and, when it has one on a site, that sign-in. */
-export const SignInViaSchema = z.strictObject({ account: AccountRefSchema, signIn: SignInIdSchema.optional() });
+const SignInViaSchema = z.strictObject({ account: AccountRefSchema, signIn: SignInIdSchema.optional() });
 
 /** An account as the OWNER reads it. `fields` says which secret fields exist, never what they hold. */
-export const AccountSummarySchema = z.strictObject({
+const AccountSummarySchema = z.strictObject({
   id: AccountIdSchema,
   label: oneLine(LOGIN_LABEL_MAX_LENGTH),
   username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
@@ -1511,7 +1272,7 @@ export const AccountSummarySchema = z.strictObject({
 export type AccountSummary = z.infer<typeof AccountSummarySchema>;
 
 /** A sign-in as the owner reads it. `method.via` is the provider account's handle. */
-export const SignInSummarySchema = z.strictObject({
+const SignInSummarySchema = z.strictObject({
   id: SignInIdSchema,
   account: AccountIdSchema,
   place: PlaceSchema,
@@ -1552,7 +1313,7 @@ const hasDotSegment = (path: string): boolean => path.split('/').some(segment =>
  * the permission, and a line can only choose among the sign-ins the daemon matched ({@link chosenSignIn}). Each map
  * is key → account handle, the key a login domain, a site's `match` host or a `tool@host`.
  */
-export const AccountDefaultsFileSchema = z.strictObject({
+const AccountDefaultsFileSchema = z.strictObject({
   /** Machine-wide: the starred account per key. */
   sites: DefaultsMapSchema.optional(),
   /** Per board project, by its id or its exact name. */
@@ -1580,7 +1341,7 @@ export const AccountDefaultsFileSchema = z.strictObject({
     .optional(),
 });
 
-export type AccountDefaultsFile = z.infer<typeof AccountDefaultsFileSchema>;
+type AccountDefaultsFile = z.infer<typeof AccountDefaultsFileSchema>;
 
 /** What {@link chosenSignIn} needs of a sign-in. */
 export interface SignInCandidate {
@@ -1717,22 +1478,6 @@ export function chosenSignIn(
   return matched.length === 1 && only !== undefined ? { signIn: only.id, why: 'only' } : undefined;
 }
 
-/** The few words a card says under its primary: "Ferret chose this", "Default for ferretry", "Only account here". */
-export function signInChoiceWords(choice: Pick<SignInChoice, 'why' | 'project'>, key: string): string {
-  switch (choice.why) {
-    case 'ferret':
-      return 'Ferret chose this';
-    case 'project':
-      return `Default for ${choice.project ?? 'this project'}`;
-    case 'folder':
-      return 'Default for this folder';
-    case 'site':
-      return `Default for ${key}`;
-    case 'only':
-      return 'Only account here';
-  }
-}
-
 // ─── from push.ts ───
 
 /**
@@ -1745,70 +1490,22 @@ export type PushSubject = 'one-time-code' | 'approve-on-phone' | 'other';
 
 // ─── from two-factor.ts ───
 
-/** What the mismatch check reads of the account a key is being saved to. */
-export interface FactorMismatchAccount {
-  readonly label: string;
-  readonly username?: string | undefined;
-}
-
-/** "GitHub · kirinnee": how an account is named on a card. */
-const accountWords = (account: FactorMismatchAccount): string =>
-  account.username === undefined ? account.label : `${account.label} · ${account.username}`;
-
-const twoDots = '••';
-
-/** One key on its own: "Code sent to ••42 (SMS)", "Code sent to kirin@… (email)", "Code from Authenticator app". */
-function oneKeyWords(key: TwoFactorKeySummary): string {
-  switch (key.kind) {
-    case 'sms':
-      return key.endsWith === undefined
-        ? `Code sent by SMS (${key.label})`
-        : `Code sent to ${twoDots}${key.endsWith} (SMS)`;
-    case 'email':
-      return key.to === undefined ? `Code sent by email (${key.label})` : `Code sent to ${key.to} (email)`;
-    default:
-      return `Code from ${key.label}`;
-  }
-}
-
-/** One key in a list: "SMS ••42", "email to kirin@…", "Authenticator app". */
-function shortKeyWords(key: TwoFactorKeySummary): string {
-  switch (key.kind) {
-    case 'sms':
-      return key.endsWith === undefined ? `SMS (${key.label})` : `SMS ${twoDots}${key.endsWith}`;
-    case 'email':
-      return key.to === undefined ? `email (${key.label})` : `email to ${key.to}`;
-    default:
-      return key.label;
-  }
-}
-
 /** A code key by its kind alone, for agenda text: no label, address or digits the owner wrote. */
 const KEY_KIND_WORDS = { totp: 'authenticator app', sms: 'SMS', email: 'email' } as const;
 
 /**
- * THE TITLE OF A CODE CARD, from the account's keys: the one a ferret named (`factor`) when the caller passes only
- * that one, else every key that ends in a code. One: where its code went ("Code sent to ••42 (SMS)"). Several: each
- * ("One-time code: SMS ••42 or Authenticator app"). None known: the account ("One-time code for GitHub · kirinnee") where
- * the caller may name it (the app, from the accounts it reads), and the PLACE alone ("One-time code for github.com")
- * where the words reach the agenda: agenda text is readable by every ferret, so it never names an account label or a
- * username. On that path the keys are said by KIND only ("One-time code for github.com, by email"): a key's label and
- * the address an email key goes to are the owner's words, and an address is often the username (secrev-1329a L6).
- * Every word is the OWNER's (the key's label and plain facts) or Ferretry's, never a ferret's.
+ * THE TITLE OF A CODE CARD, from the account's keys: the PLACE alone ("One-time code for github.com"), and the keys said
+ * by KIND only ("One-time code for github.com, by email"). The words reach the agenda, which every ferret can read, so
+ * they never name an account label, a username, a key's label or the address an email key goes to: an address is often
+ * the username (secrev-1329a L6). Every word is Ferretry's, never a ferret's.
  */
-export function factorAskWords(
-  keys: readonly TwoFactorKeySummary[],
-  named: FactorMismatchAccount | { readonly place: string },
-): string {
-  const codes = keys.filter(key => isCodeFactor(key.kind));
-  const [only] = codes;
-  if ('place' in named) {
-    const kinds = [...new Set(codes.map(key => KEY_KIND_WORDS[key.kind as keyof typeof KEY_KIND_WORDS]))];
-    return `One-time code for ${named.place}${kinds.length === 0 ? '' : `, by ${kinds.join(' or ')}`}`;
-  }
-  if (only === undefined) return `One-time code for ${accountWords(named)}`;
-  if (codes.length === 1) return oneKeyWords(only);
-  return `One-time code: ${codes.map(shortKeyWords).join(' or ')}`;
+export function factorAskWords(keys: readonly TwoFactorKeySummary[], named: { readonly place: string }): string {
+  const kinds = [
+    ...new Set(
+      keys.filter(key => isCodeFactor(key.kind)).map(key => KEY_KIND_WORDS[key.kind as keyof typeof KEY_KIND_WORDS]),
+    ),
+  ];
+  return `One-time code for ${named.place}${kinds.length === 0 ? '' : `, by ${kinds.join(' or ')}`}`;
 }
 
 // ─── from daemon/src/lib/secrets/accounts.ts ───

@@ -6,9 +6,7 @@ import {
 } from '../../../contract/index.ts';
 import { SecretStoreError, type SecretCipherPort } from '../../lib/secrets/types.ts';
 import type { SealedFiles } from './kernel-sealed-files.ts';
-
 /** AES-256-GCM, from the contract (spine D16). Bun ships WebCrypto, so this needs no dependency. */
-export { SECRET_CIPHER_ALGORITHM };
 
 /** Cryptographically secure random bytes (today's `node:crypto` `randomBytes`; the same source in Bun). */
 function randomBytes(length: number): Uint8Array {

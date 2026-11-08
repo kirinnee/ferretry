@@ -8,7 +8,7 @@ import {
   type LaneActor,
   laneGateProblems,
 } from '../../../daemon/lib/lanes/index.ts';
-import { lanes, PROJECT } from './support.ts';
+import { lanes, FERRETRY_ID } from './support.ts';
 
 /**
  * A GATE IS THE OWNER'S, ON THE LANES TOO (docs/board.md § Cards show progress): what a lane change would do to a gate
@@ -20,7 +20,7 @@ import { lanes, PROJECT } from './support.ts';
 const FERRET: LaneActor = { kind: 'ferret', name: 'Ada', ferretId: 'lead' };
 const OWNER: LaneActor = { kind: 'owner' };
 
-const current = (): LaneSet => lanes(PROJECT);
+const current = (): LaneSet => lanes(FERRETRY_ID);
 const layout = (set: LaneSet) => ({ lanes: [...set.lanes], variants: { ...set.variants } });
 const withLanes = (set: LaneSet, map: (lane: Lane) => Lane | undefined): ReturnType<typeof layout> => {
   const kept = set.lanes.flatMap(lane => {
@@ -117,7 +117,7 @@ describe('a lane change that takes a gate from the owner', () => {
   });
 
   it('waits for the owner when a ferret makes it, and the live set keeps its gate', () => {
-    const waiting = decideLaneChange(PROJECT, current(), { action: 'edit', ...removePlan() }, FERRET);
+    const waiting = decideLaneChange(FERRETRY_ID, current(), { action: 'edit', ...removePlan() }, FERRET);
     should(waiting).match({ ok: true, value: { change: 'pending', relocate: {} } });
     should(waiting.ok && waiting.value.next.lanes.some(lane => lane.id === 'plan')).be.true();
   });
@@ -129,11 +129,11 @@ describe('a lane change that takes a gate from the owner', () => {
   it('waits in a ferret’s proposal over a set it would disarm, and a first proposal is free', () => {
     const live: LaneSet = { ...current(), confirmedBy: null };
     const propose = { action: 'propose', template: 'pr-release-verify', renames: {} } as const;
-    should(decideLaneChange(PROJECT, live, propose, FERRET)).match({
+    should(decideLaneChange(FERRETRY_ID, live, propose, FERRET)).match({
       ok: false,
       error: { code: 'relocation-missing' },
     });
-    should(decideLaneChange(PROJECT, null, propose, FERRET)).match({ ok: true, value: { change: 'live' } });
+    should(decideLaneChange(FERRETRY_ID, null, propose, FERRET)).match({ ok: true, value: { change: 'live' } });
   });
 });
 
@@ -172,7 +172,7 @@ describe('a relocation judged where the cards end up (kyan R3)', () => {
     should(problems.map(problem => problem.laneId)).containEql('after');
     should(
       decideLaneChange(
-        PROJECT,
+        FERRETRY_ID,
         set,
         { action: 'edit', version: 1, layout: next, relocate: { review: 'after' } },
         FERRET,
@@ -185,7 +185,7 @@ describe('a relocation judged where the cards end up (kyan R3)', () => {
 
   it('refuses moving cards before Plan into a new lane after it on a pr board', () => {
     // Arrange — Todo removed, its cards sent into a new lane placed after Plan/Design
-    const set = lanes(PROJECT, 'pr');
+    const set = lanes(FERRETRY_ID, 'pr');
     const later: Lane = { id: 'later', name: 'Later', category: 'active' };
     const next = {
       lanes: set.lanes

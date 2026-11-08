@@ -438,6 +438,3 @@ export const DIRECTORY: HelperDirectory = {
   leadOf: async ferret => ({ child: 'lead', grandchild: 'child' })[ferret],
   addressOf: async ferret => (ferret === 'lead' ? 'lizzette' : ferret),
 };
-
-export const REFUSED =
-  /^You are a helper, so you can't .+\. You may .+\. For anything else ask your lead: fy send lizzette "…"$/;

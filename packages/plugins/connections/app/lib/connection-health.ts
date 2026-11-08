@@ -21,7 +21,7 @@ export const CONNECTION_STALL_MS = 30_000;
  * data, and a pill that flashes on and off for every one of them taught the owner the app was "ALWAYS
  * reconnecting". Only an outage older than this is shown; the stall banner later is unaffected.
  */
-export const RECONNECTING_GRACE_MS = 1_500;
+const RECONNECTING_GRACE_MS = 1_500;
 
 /** One carrier the last attempt tried and why it did not work — one entry per carrier, never per panel. */
 export interface CarrierFailure {
@@ -63,7 +63,7 @@ export type ConnectionHealthState =
     };
 
 /** What every surface reads. Owned by the composition root (`store.connectionHealth`). */
-export interface ConnectionHealth {
+interface ConnectionHealth {
   state(daemonId: DaemonId): ConnectionHealthState;
   /** Called on every state change for that daemon (including `stalled` flipping). */
   subscribe(daemonId: DaemonId, listener: () => void): () => void;
@@ -114,7 +114,7 @@ export interface CarrierOutage {
 }
 
 /** What the carrier router tells the health model. It never reads anything back. */
-export interface ConnectionHealthReporter {
+interface ConnectionHealthReporter {
   /** A request was answered — any status. */
   answered(daemonId: DaemonId): void;
   /** No carrier carried a request. */

@@ -26,7 +26,7 @@ export const CDP_PIPE_FROM_CHROME_FD = 4;
  * worker reply is itself capped well below this — so it only ever stops a pipe that has lost its framing from
  * growing one string without bound.
  */
-export const CDP_PIPE_MAX_MESSAGE_CHARS = 256 * 1024 * 1024;
+const CDP_PIPE_MAX_MESSAGE_CHARS = 256 * 1024 * 1024;
 
 /** Where framed requests for Chrome go: the worker's end of Chrome's fd 3. */
 export interface CdpPipeWriter {

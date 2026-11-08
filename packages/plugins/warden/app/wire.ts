@@ -17,13 +17,11 @@ import {
   WARDEN_SWEEP_INTERVALS,
   type WardenAccountSchema,
   type WardenActionKindSchema,
-  type WardenAutoMoveConfigSchema,
   type WardenClearedBySchema,
   type WardenConfig,
-  type WardenConfigPatchSchema,
+  type WardenFileSchema,
   type WardenConfigView,
   type WardenFailoverPolicySchema,
-  type WardenFile,
   type WardenLayersSchema,
   type WardenLayerStatusSchema,
   type WardenLeaveDurationSchema,
@@ -37,9 +35,7 @@ import {
   type WardenCapSchema,
   type WardenDayStatsSchema,
   type WardenJevCheckSchema,
-  type WardenJevCheckVerdictSchema,
   type WardenJevCheckWhySchema,
-  type WardenJevDayStatsSchema,
   type WardenJevPathStepSchema,
   type WardenReviveResultsSchema,
   type WardenSavingsSchema,
@@ -47,22 +43,15 @@ import {
   type WardenStatActionSchema,
 } from '../contract/index.ts';
 
-export {
-  DEFAULT_WARDEN_CONFIG,
-  WARDEN_AUTO_MOVE_TRIGGERS,
-  WARDEN_GUARD_THRESHOLD_RANGE,
-  WARDEN_LEAVE_DURATIONS,
-  WARDEN_SWEEP_INTERVALS,
-};
-export type { WardenConfig, WardenConfigView, WardenFile };
+export { DEFAULT_WARDEN_CONFIG, WARDEN_GUARD_THRESHOLD_RANGE, WARDEN_LEAVE_DURATIONS, WARDEN_SWEEP_INTERVALS };
+export type { WardenConfig, WardenConfigView };
 export type WardenAnomalyKind = z.infer<typeof WardenAnomalyKindSchema>;
 
 // ─── settings ────────────────────────────────────────────────────────────────────────────────────────────────────
-export type WardenConfigPatch = z.infer<typeof WardenConfigPatchSchema>;
+export type WardenConfigPatch = z.infer<typeof WardenFileSchema>;
 export type WardenAccount = z.infer<typeof WardenAccountSchema>;
 export type WardenLayers = z.infer<typeof WardenLayersSchema>;
 export type WardenMayActAlone = z.infer<typeof WardenMayActAloneSchema>;
-export type WardenAutoMoveConfig = z.infer<typeof WardenAutoMoveConfigSchema>;
 export type WardenAutoMoveTrigger = (typeof WARDEN_AUTO_MOVE_TRIGGERS)[number];
 export type WardenEffort = WardenConfig['investigation']['effort'];
 export type WardenEventTrigger = keyof WardenConfig['events'];
@@ -70,9 +59,9 @@ export type WardenFailoverPolicy = z.infer<typeof WardenFailoverPolicySchema>;
 export type WardenLeaveDuration = z.infer<typeof WardenLeaveDurationSchema>;
 export type WardenLogin = z.infer<typeof WardenLoginViewSchema>;
 export type WardenTriageReason = z.infer<typeof WardenTriageReasonSchema>;
-export type WardenLayerStatus = z.infer<typeof WardenLayerStatusSchema>;
+type WardenLayerStatus = z.infer<typeof WardenLayerStatusSchema>;
 export type WardenVerdictKind = z.infer<typeof WardenVerdictKindSchema>;
-export type WardenClearedBy = z.infer<typeof WardenClearedBySchema>;
+type WardenClearedBy = z.infer<typeof WardenClearedBySchema>;
 export type WardenActionKind = z.infer<typeof WardenActionKindSchema>;
 
 /** The settings sections the daemon merges key by key (a patch names only the keys that changed inside one). */
@@ -132,14 +121,14 @@ export interface WardenBlessingView {
   readonly untilChange?: true;
 }
 
-export interface WardenRecommendation {
+interface WardenRecommendation {
   readonly action: 'nudge' | 'stop' | 'resume' | 'restart' | 'move' | 'leave';
   readonly reason: string;
   readonly agent?: string;
 }
 
 /** What the warden ran on, when it wrote a verdict. */
-export interface WardenVerdictSpawn {
+interface WardenVerdictSpawn {
   readonly agent: string;
   readonly model: string;
   readonly [key: string]: unknown;
@@ -159,7 +148,7 @@ export interface WardenVerdict {
   readonly spawn?: WardenVerdictSpawn;
 }
 
-export interface WardenJudgement {
+interface WardenJudgement {
   readonly state: 'judged' | 'pending' | 'queued' | 'failed' | 'none';
   readonly verdict?: WardenVerdictKind;
   readonly reason: string;
@@ -251,12 +240,10 @@ export const WARDEN_REVIVE_ACTIONS: readonly WardenStatActionKind[] = ['revive',
 /** How long a revived ferret has to get moving before the revive counts as stalled. */
 export const WARDEN_REVIVE_PROGRESS_MINUTES = 10;
 
-// ─── Jev ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-export type WardenJevCheckVerdict = z.infer<typeof WardenJevCheckVerdictSchema>;
 export type WardenJevCheckWhy = z.infer<typeof WardenJevCheckWhySchema>;
-export type WardenJevAct = Exclude<WardenActionKind, 'bless' | 'close_leftover' | 'revive'>;
+type WardenJevAct = Exclude<WardenActionKind, 'bless' | 'close_leftover' | 'revive'>;
 
-export type WardenJevPathStep = z.infer<typeof WardenJevPathStepSchema>;
+type WardenJevPathStep = z.infer<typeof WardenJevPathStepSchema>;
 
 /** One check Jev made of a flag (the contract's: it names the ferret). */
 export type WardenJevCheck = z.infer<typeof WardenJevCheckSchema>;
@@ -310,7 +297,7 @@ export interface WardenFailoverStatus {
   readonly exhaustedSince?: string;
 }
 
-export type WardenGuardFailureCode =
+type WardenGuardFailureCode =
   | 'not_set'
   | 'vault_damaged'
   | 'misconfigured'
@@ -325,15 +312,15 @@ export type WardenGuardFailureCode =
   | 'malformed'
   | 'unredacted';
 
-export interface WardenTriageStatus {
+interface WardenTriageStatus {
   readonly jev: WardenLayerStatus;
   readonly llm: WardenLayerStatus;
   readonly guardFailure?: { readonly code: WardenGuardFailureCode; readonly at: string };
   readonly guardBackoffUntil?: string;
 }
 
-export type WardenSpend = z.infer<typeof WardenSpendSchema>;
-export type WardenSavings = z.infer<typeof WardenSavingsSchema>;
+type WardenSpend = z.infer<typeof WardenSpendSchema>;
+type WardenSavings = z.infer<typeof WardenSavingsSchema>;
 
 export interface WardenInvestigation {
   readonly id: string;
@@ -376,7 +363,6 @@ export interface WardenAction {
 export type WardenActorCounts = z.infer<typeof WardenActorCountsSchema>;
 export type WardenActionTally = z.infer<typeof WardenActionTallySchema>;
 export type WardenReviveResults = z.infer<typeof WardenReviveResultsSchema>;
-export type WardenJevDayStats = z.infer<typeof WardenJevDayStatsSchema>;
 export type WardenDayStats = z.infer<typeof WardenDayStatsSchema>;
 
 /** `GET /v1/warden/status`: the contract's view with the loose parts written out. */
@@ -411,26 +397,6 @@ export function wardenActionActor(action: Pick<WardenAction, 'actor' | 'by' | 'r
   if (action.by === 'jev') return 'jev';
   if (action.by === 'owner') return 'owner';
   return action.reportPath === undefined ? 'auto' : 'llm';
-}
-
-/** What an action came to for the tiles; a failed action and closing a leftover come to nothing. */
-export function wardenActionOutcome(action: Pick<WardenAction, 'action' | 'outcome'>): WardenOutcome | undefined {
-  if (action.outcome === 'failed') return undefined;
-  if (action.outcome === 'held') return 'asked';
-  switch (action.action) {
-    case 'bless':
-      return 'cleared';
-    case 'nudge':
-    case 'revive':
-    case 'resume':
-    case 'restart':
-    case 'failover':
-      return 'moved';
-    case 'stop':
-      return 'stopped';
-    case 'close_leftover':
-      return undefined;
-  }
 }
 
 const SYSTEM_CALLSIGN_PATTERN = /^(warden|learning|pack)-([0-9a-f]{6})$/iu;

@@ -8,12 +8,12 @@ import { normalizeProjectPath } from './folders.ts';
  * these fields of the list. A daemon with Ferrets off answers a refusal the page states, and the rest still draws.
  * (Today's `GET /v1/sessions` and `POST /v1/sessions` are these routes after the §1.4 rename.)
  */
-export const FERRETS_LIST_ROUTE = 'GET /v1/ferrets';
-export const FERRETS_START_ROUTE = 'POST /v1/ferrets';
+const FERRETS_LIST_ROUTE = 'GET /v1/ferrets';
+const FERRETS_START_ROUTE = 'POST /v1/ferrets';
 
 const FERRET_STATES = ['starting', 'working', 'idle', 'stopped'] as const;
 
-export const FerretRowSchema = z.looseObject({
+const FerretRowSchema = z.looseObject({
   id: z.string().min(1),
   name: z.string(),
   harness: z.string(),
@@ -27,10 +27,10 @@ export const readFerrets = async (client: ProjectsClient): Promise<readonly Ferr
   z.array(FerretRowSchema).parse(await client.call(FERRETS_LIST_ROUTE));
 
 /** The ferret a start made. */
-export const StartedFerretSchema = z.looseObject({ id: z.string().min(1) });
+const StartedFerretSchema = z.looseObject({ id: z.string().min(1) });
 
 /** The owner's start of a top-level interactive ferret in one project's folder; a blank runtime never leaves the app. */
-export const LaunchRequestSchema = z.strictObject({
+const LaunchRequestSchema = z.strictObject({
   runtime: z.string().trim().min(1),
   folder: z.string().min(1),
   /** Today's project start is the owner's terminal: interactive, never an autonomous ferret with no prompt. */

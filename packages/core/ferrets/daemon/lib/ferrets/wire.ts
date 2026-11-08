@@ -74,7 +74,7 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
 };
 
 /** Today's sentence for a start that names no folder. */
-export const START_NEEDS_FOLDER = 'a start must name the absolute working directory to run in';
+const START_NEEDS_FOLDER = 'a start must name the absolute working directory to run in';
 
 const OPTION_KEYS: ReadonlySet<string> = new Set(Object.keys(StartOptionsSchema.shape));
 

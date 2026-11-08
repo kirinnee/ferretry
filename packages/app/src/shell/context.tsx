@@ -49,6 +49,15 @@ export function useOptionalShell(): ShellModel | null {
   return useContext(ShellContext);
 }
 
+/**
+ * Draws its children with NO shell: every reader of the shell model below (the daemon-client hooks, a panel slot, a
+ * renderer view, the layout hooks) finds `null` and does what it does outside a shell. A daemon-less screen is drawn
+ * here, so no hook or component of this package can reach a paired daemon from it, by a daemon id read from anywhere.
+ */
+export function WithoutShell({ children }: { readonly children: ReactNode }) {
+  return <ShellContext.Provider value={null}>{children}</ShellContext.Provider>;
+}
+
 export function useShell(): ShellModel {
   const model = useContext(ShellContext);
   if (model === null) throw new Error('useShell must be rendered inside ShellProvider');

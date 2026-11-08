@@ -45,16 +45,3 @@ export function mergeAnalyticsWrites(earlier: AnalyticsStoreWrites, later: Analy
     forgets: [...earlier.forgets.filter(id => !named.has(id)), ...later.forgets],
   };
 }
-
-/**
- * Where the analytics store's writes are made durable, behind the reads that are answered from memory.
- *
- * `persist` applies one batch as one transaction: all of it lands or none of it does. It may be asked to
- * apply a batch it already applied — a thread presumed stuck can have committed before it was replaced —
- * which is safe because every write replaces by key.
- */
-export interface AnalyticsStorePersister {
-  persist(writes: AnalyticsStoreWrites): Promise<void>;
-  /** Checkpoints and closes the file. Nothing is persisted after it. */
-  close(): Promise<void>;
-}

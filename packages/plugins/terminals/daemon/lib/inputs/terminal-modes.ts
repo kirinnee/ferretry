@@ -16,7 +16,7 @@ export type ProgramRunner = (argv: readonly string[]) => Promise<string | undefi
 const TTY_PATH = /^\/dev\/[A-Za-z0-9._/-]+$/u;
 
 /** `stty` reads another terminal's modes with `-F` on Linux and `-f` on macOS. */
-export function sttyArguments(platform: string, ttyPath: string): readonly string[] | undefined {
+function sttyArguments(platform: string, ttyPath: string): readonly string[] | undefined {
   if (!TTY_PATH.test(ttyPath)) return undefined;
   if (platform === 'linux') return ['stty', '-F', ttyPath, '-a'];
   if (platform === 'darwin') return ['stty', '-f', ttyPath, '-a'];
@@ -24,7 +24,7 @@ export function sttyArguments(platform: string, ttyPath: string): readonly strin
 }
 
 /** `echo` / `-echo` from `stty -a`; every other word (`echoe`, `echok`, …) is a different flag. */
-export function parseEcho(output: string): InputEcho {
+function parseEcho(output: string): InputEcho {
   const words = output.split(/[\s;]+/u);
   if (words.includes('-echo')) return 'off';
   if (words.includes('echo')) return 'on';
@@ -32,7 +32,7 @@ export function parseEcho(output: string): InputEcho {
 }
 
 /** `icanon` / `-icanon` from `stty -a`, or `undefined` when neither is there. */
-export function parseCanonical(output: string): boolean | undefined {
+function parseCanonical(output: string): boolean | undefined {
   const words = output.split(/[\s;]+/u);
   if (words.includes('-icanon')) return false;
   if (words.includes('icanon')) return true;

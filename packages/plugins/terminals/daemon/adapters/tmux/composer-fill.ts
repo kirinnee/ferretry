@@ -114,10 +114,10 @@ export interface ComposerFillSettings extends LandingWindow {
 }
 
 /** The first look for landing evidence: an echo on a healthy host is drawn within a few tens of ms. */
-export const LANDING_FIRST_LOOK_MS = 100;
+const LANDING_FIRST_LOOK_MS = 100;
 
 /** Looks back off to this, so a stalled pane is not polled hot for the whole of its window. */
-export const LANDING_LOOK_CEILING_MS = 1_000;
+const LANDING_LOOK_CEILING_MS = 1_000;
 
 /**
  * Fresh frames a fill always reads before it stops looking, however the time is spent. A host where
@@ -125,7 +125,7 @@ export const LANDING_LOOK_CEILING_MS = 1_000;
  * window on captures, not sleeps — and the window counts only the sleeps — so this floor matters only
  * when a caller configures a window too short to hold it.
  */
-export const LANDING_MIN_LOOKS = 5;
+const LANDING_MIN_LOOKS = 5;
 
 /**
  * Frames a fill reads, a poll apart, for a composer it can place before it gives up typing nothing.

@@ -31,7 +31,7 @@ const parentOf = (ferret: FerretSummary): string | undefined => {
 };
 
 /** Ferrets keyed by their trimmed id; the first record of a repeated id wins. */
-export function ferretsById(ferrets: readonly FerretSummary[]): Map<string, FerretSummary> {
+function ferretsById(ferrets: readonly FerretSummary[]): Map<string, FerretSummary> {
   const byId = new Map<string, FerretSummary>();
   for (const ferret of ferrets) {
     const id = ferret.id.trim();
@@ -44,7 +44,7 @@ export function ferretsById(ferrets: readonly FerretSummary[]): Map<string, Ferr
  * Breadth-first walk: every ferret at or under `rootId`, with how deep it sits (the root is 0). The visited set
  * makes a malformed parent cycle terminate.
  */
-export function packDepths(byId: ReadonlyMap<string, FerretSummary>, rootId: string): Map<string, number> {
+function packDepths(byId: ReadonlyMap<string, FerretSummary>, rootId: string): Map<string, number> {
   const children = new Map<string, string[]>();
   for (const ferret of byId.values()) {
     const parent = parentOf(ferret);
@@ -142,14 +142,14 @@ export function packRowState(state: FerretState, blockers: number): PackRowState
 }
 
 /** What a row last said, before it is masked or cut: the whole text. */
-export interface LastCandidate {
+interface LastCandidate {
   readonly at: Instant;
   readonly source: 'note' | 'message';
   readonly text: string;
 }
 
 /** The newer of a ferret's non-card sitrep lines, in full; a note wins a tie. */
-export function newestLine(ferret: FerretSummary, lines: readonly SitrepLine[]): LastCandidate | undefined {
+function newestLine(ferret: FerretSummary, lines: readonly SitrepLine[]): LastCandidate | undefined {
   // A line with no time of its own is dated by when the ferret last changed state.
   const changed = InstantSchema.safeParse(ferret.stateAt);
   return lines
@@ -206,7 +206,7 @@ export const PACK_TABLE_LIMITS: PackTableLimits = {
  * The members that get an excerpt: live ones in tree order up to `excerptRows`, then recently ended ones up to
  * `endedRows` and whatever room is left. Returns their positions in `members`.
  */
-export function excerptEligible(members: readonly PackMember[], limits: PackTableLimits): ReadonlySet<number> {
+function excerptEligible(members: readonly PackMember[], limits: PackTableLimits): ReadonlySet<number> {
   const positions = members.map((_, index) => index);
   const live = positions.filter(index => !isEnded((members[index] as PackMember).ferret));
   const ended = positions.filter(index => isEnded((members[index] as PackMember).ferret));

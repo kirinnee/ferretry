@@ -194,6 +194,9 @@ export function workersFor(
   reach?: WorkerGrantSources,
   ending?: WorkerGrantEnding,
 ): WorkersPort {
+  // One entry per live granted worker, drained by ONE stop handler for the plugin: a worker that ends takes its entry out.
+  const live = new Set<() => void>();
+  let registered = false;
   return {
     start: (moduleUrl, options) => {
       const wanted = options?.state ?? [];
@@ -240,15 +243,28 @@ export function workersFor(
         throw error;
       }
       // The channel lives and dies with the thread: a dead worker's requests are not answered. It also ends with the
-      // plugin: a plugin that failed or stopped keeps no grant, and its thread is ended with it.
-      handle.onExit(() => served.close());
-      ending?.onStop(() => {
+      // plugin: a plugin that failed to build or stopped keeps no grant, and its thread is ended with it.
+      const entry = (): void => {
         served.close();
         void Promise.resolve(handle.terminate()).catch(() => undefined);
+      };
+      live.add(entry);
+      if (ending !== undefined && !registered) {
+        registered = true;
+        ending.onStop(() => {
+          const entries = [...live];
+          live.clear();
+          for (const end of entries) end();
+        });
+      }
+      handle.onExit(() => {
+        live.delete(entry);
+        served.close();
       });
       return {
         ...handle,
         terminate: async () => {
+          live.delete(entry);
           served.close();
           await handle.terminate();
         },

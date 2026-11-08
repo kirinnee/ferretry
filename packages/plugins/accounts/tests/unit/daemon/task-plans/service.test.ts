@@ -21,19 +21,17 @@ import { namesOnCard } from '../support/names-on-card.ts';
 import type { AskDraft } from '@ferretry/core-asks/contract';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { AuditEntry } from '../../../../daemon/lib/local-ports.ts';
+import { boundSelection } from '../../../../daemon/lib/task-plans/resolve.ts';
+import { type PasteRuleCaller, PasteRuleService } from '../../../../daemon/lib/secure-copy/rules.ts';
+import { SecureCopyError } from '../../../../daemon/lib/secure-copy/errors.ts';
+import { TASK_PLAN_HONEST_LIMIT } from '../../../../daemon/lib/task-plans/words.ts';
+import { SignInApprovalAsks, TaskPlanAsksAdapter } from '../../../../daemon/lib/sign-in-approval/asks.ts';
 import {
-  boundSelection,
-  type PasteRuleCaller,
-  PasteRuleService,
-  SecureCopyError,
-  TASK_PLAN_HONEST_LIMIT,
-  SignInApprovalAsks,
-  TaskPlanAsksAdapter,
   type TaskPlanCard,
   TaskPlanError,
   TaskPlanProofMissing,
   TaskPlanService,
-} from '../../../../daemon/lib/index.ts';
+} from '../../../../daemon/lib/task-plans/service.ts';
 import { FACTS } from '../support/facts.ts';
 
 const NOW = Date.parse('2026-11-01T12:00:00.000Z');

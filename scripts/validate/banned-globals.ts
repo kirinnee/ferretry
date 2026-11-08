@@ -122,6 +122,11 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
     { pkg: 'connections', folder: 'worker/', reason: 'the standalone Cloudflare relay Worker, deployed on its own' },
     { pkg: 'catalogs', folder: 'worker/', reason: 'the standalone Cloudflare catalog Worker, deployed on its own' },
     {
+      pkg: 'logins',
+      folder: 'scripts/publish-model-catalog.ts',
+      reason: 'a build-time script the app build runs to write dist/catalog; it never runs inside a daemon',
+    },
+    {
       pkg: 'connections',
       folder: 'daemon/adapters/webrtc/node-datachannel-engine.ts',
       reason: 'the WebRTC native engine (node-datachannel), loaded below the carrier rather than through a port',

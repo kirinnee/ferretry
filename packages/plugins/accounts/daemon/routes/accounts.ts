@@ -112,7 +112,7 @@ const ACCOUNT_DEFAULTS_FILE = 'accounts.yaml';
 /**
  * What a ferret is told when it tries to set a place's default account: only the owner does, and how a ferret asks.
  */
-export const ACCOUNT_DEFAULT_OWNER_ONLY = `${ownerOnlyWords('chooses the default account for a place')}: say which account and why on an agenda card, or, where "Ferretry settings" is on, write the line with config_write to ${ACCOUNT_DEFAULTS_FILE}, where it waits for them`;
+const ACCOUNT_DEFAULT_OWNER_ONLY = `${ownerOnlyWords('chooses the default account for a place')}: say which account and why on an agenda card, or, where "Ferretry settings" is on, write the line with config_write to ${ACCOUNT_DEFAULTS_FILE}, where it waits for them`;
 
 /** A domain failure's HTTP answer. A damaged store is a 500: the caller did nothing wrong. */
 const STORE_STATUS: Readonly<Record<SecretStoreError['failure'], number>> = {
