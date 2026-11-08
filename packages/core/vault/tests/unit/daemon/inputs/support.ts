@@ -36,6 +36,8 @@ export function inputRequestService(
     readonly crash?: () => boolean;
     /** What the terminal shows; the default is a sudo prompt. A function is asked at every look. */
     readonly facts?: InputTargetFacts | (() => InputTargetFacts);
+    /** Whether the daemon proves a code program holds the foreground (`ObserveResult.codeProgram`); asked at every look. */
+    readonly codeProgram?: () => boolean;
     /** Every other way the terminal is known besides its key. */
     readonly names?: readonly string[];
     /** The one live session; the default is {@link SESSION}. */
@@ -79,6 +81,7 @@ export function inputRequestService(
         return {
           ok: true,
           facts: typeof options.facts === 'function' ? options.facts() : (options.facts ?? FACTS),
+          ...(options.codeProgram?.() === true ? { codeProgram: true as const } : {}),
           ...(options.names === undefined ? {} : { names: options.names }),
         };
       },
@@ -141,5 +144,5 @@ export function inputRequestService(
             },
           }),
   });
-  return { service, writes, events, quarantine };
+  return { service, writes, events, quarantine, values };
 }

@@ -2,6 +2,10 @@ import { beforeAll, describe, it } from 'bun:test';
 import type { Clock as KernelClock } from '@ferretry/kernel/contract';
 import {
   CloneableSecretNameSchema,
+  SealedSecretBundleSchema,
+  SecretCloneNamesSchema,
+  SecretImportCompleteRequestSchema,
+  SecretImportResultSchema,
   MAX_SECRETS_PER_DAEMON,
   type SealedSecretBundle,
   type SecretCloneRefusal,
@@ -657,3 +661,116 @@ async function resign(unsigned: SecretImportOffer): Promise<SecretImportOffer> {
   const signature = await crypto_.signEd25519(targetIdentity.privateKey, message);
   return { ...fields, signature: toBase64Url(signature) };
 }
+
+describe('what a copy carries and never carries', () => {
+  const SIGN_IN = 'MCP_LINEAR_0123456789ABCDEF_ACCESS';
+
+  it('S145 a copy is typed so it cannot hold a sign-in token name: the request, the bundle names and the filing all use that type', async () => {
+    // Arrange / Act
+    const typed = CloneableSecretNameSchema.safeParse(SIGN_IN);
+    const request = SecretCloneNamesSchema.safeParse([SIGN_IN]);
+    const bundle = SealedSecretBundleSchema.shape.names.safeParse([SIGN_IN]);
+    const filed = SecretImportResultSchema.shape.imported.safeParse([SIGN_IN]);
+
+    // Assert — the name type, the request, the bundle header and the answer all refuse it; a stored key parses
+    should(typed.success).equal(false);
+    should(request.success).equal(false);
+    should(bundle.success).equal(false);
+    should(filed.success).equal(false);
+    should(CloneableSecretNameSchema.safeParse('API_KEY').success).equal(true);
+  });
+
+  it('S146 a bundle carrying a sign-in token name is refused whole and nothing is filed', async () => {
+    // Arrange — one allowed key and one sign-in, the source forced past the type that keeps a sign-in out
+    const { source, target } = await pair();
+    await source.directory.put(SIGN_IN, VALUE);
+    const offer = await target.imports.open();
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: ['API_KEY', SIGN_IN] as never });
+
+    // Act
+    const answer = await refusal(target.imports.complete(offer.importId, bundle));
+
+    // Assert — bundle_invalid, and not even the allowed key was filed
+    should(answer).equal('bundle_invalid');
+    should(await target.directory.list()).deepEqual([]);
+  });
+
+  it('S148 a copy never writes a key the machine already holds, and no request field can ask otherwise', async () => {
+    // Arrange — the target holds API_KEY under its own value; the source holds another
+    const clock = new Clock();
+    const { source, target } = await pair(clock);
+    await target.directory.put('API_KEY', 'fake-value-held-here');
+    const before = JSON.stringify(await target.documents.read());
+    const offer = await target.imports.open();
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
+
+    // Act
+    const result = await target.imports.complete(offer.importId, bundle);
+
+    // Assert — kept byte for byte; and the complete request admits nothing but the bundle (no replace flag)
+    should(result.kept).deepEqual(['API_KEY']);
+    should(result.imported).deepEqual([]);
+    should(JSON.stringify(await target.documents.read())).equal(before);
+    should(SecretImportCompleteRequestSchema.safeParse({ bundle, replace: true }).success).equal(false);
+    should(SecretImportCompleteRequestSchema.safeParse({ bundle, mode: 'replace' }).success).equal(false);
+  });
+
+  it('S149 a copy compares and returns timestamps and names only: no value or digest rides in the answer', async () => {
+    // Arrange
+    const clock = new Clock();
+    const { source, target } = await pair(clock);
+    const offer = await target.imports.open();
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
+    clock.ms += 60_000;
+
+    // Act
+    const result = await target.imports.complete(offer.importId, bundle);
+
+    // Assert — only the fields the contract names, an instant for the baseline, and no value or hash-shaped string
+    should(Object.keys(result).sort()).deepEqual(['filedAt', 'imported', 'importId', 'kept', 'sourceDaemonId'].sort());
+    should(SecretImportResultSchema.safeParse({ ...result, digest: 'a'.repeat(64) }).success).equal(false);
+    const text = JSON.stringify(result);
+    should(text).not.containEql(VALUE);
+    should(/[0-9a-f]{64}/u.test(text)).equal(false);
+  });
+
+  it('S152 the filedAt baseline is the instant the entry was created, and none is recorded when the entry was not', async () => {
+    // Arrange — the key is created by somebody else just before the filing turn
+    const clock = new Clock();
+    const { source, target } = await pair(clock);
+    clock.ms += 60_000;
+    const racing = Object.create(target.directory, {
+      putMissing: {
+        value: async (entries: Parameters<SecretDirectory['putMissing']>[0]) => {
+          await target.directory.put('API_KEY', 'fake-value-raced-in');
+          return await target.directory.putMissing(entries);
+        },
+      },
+    }) as SecretDirectory;
+    const imports = new SecretImportService({
+      crypto: crypto_,
+      identity: { load: async () => targetIdentity },
+      directory: racing,
+      clock: kernel(clock),
+    });
+    const racingOffer = await imports.open();
+    const racingBundle = await source.exports.seal(racingOffer.importId, {
+      offer: racingOffer,
+      names: named('API_KEY'),
+    });
+
+    // Act
+    const raced = await imports.complete(racingOffer.importId, racingBundle.bundle);
+
+    // Assert — it was not created at that instant by this copy, so no baseline is claimed
+    should(raced.imported).deepEqual([]);
+    should(raced.kept).deepEqual(['API_KEY']);
+    should(raced.filedAt).be.undefined();
+    // And the plain filing records exactly the creation instant
+    const plain = machine(targetIdentity, clock);
+    const plainOffer = await plain.imports.open();
+    const plainBundle = await source.exports.seal(plainOffer.importId, { offer: plainOffer, names: named('API_KEY') });
+    const filed = await plain.imports.complete(plainOffer.importId, plainBundle.bundle);
+    should((await plain.documents.read())?.entries.API_KEY?.createdAt).equal(filed.filedAt);
+  });
+});

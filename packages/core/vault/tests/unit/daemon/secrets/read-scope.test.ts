@@ -217,6 +217,28 @@ describe('the output guard', () => {
     should(guard.stillShowable(guard.stamp([pane]))).be.true();
   });
 
+  it('I73 one gate re-checks at publication: a screen read before quarantine began is discarded once quarantine began, after any await', async () => {
+    // Arrange — a read stamped before the hold; the hold begins while the read is still being built (an await)
+    const guard = new HoldRegistry();
+    const published: string[] = [];
+    const publish = async (target: typeof pane, body: string): Promise<void> => {
+      const stamp = guard.stamp([target]);
+      await Promise.resolve();
+      if (target === pane) guard.moved(pane);
+      // The gate, synchronously, right before the body leaves
+      if (guard.stillShowable(stamp)) published.push(body);
+    };
+
+    // Act
+    await publish(pane, 'screen of the pane the value went into');
+    await publish(other, 'screen of another pane');
+    const late = guard.stamp([pane]);
+
+    // Assert — the stale read of the held pane never left; another pane's read did; a read taken after the hold may
+    should(published).eql(['screen of another pane']);
+    should(guard.stillShowable(late)).be.true();
+  });
+
   it('should read a stamp it cannot check as not showable', () => {
     const guard = new HoldRegistry();
     should(guard.stillShowable({ generation: 0, targets: null as never })).be.false();
