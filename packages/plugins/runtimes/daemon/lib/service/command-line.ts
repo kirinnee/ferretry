@@ -13,7 +13,9 @@
  * - a secret-named key NESTED inside a value (ruling #40): `-c mcp_servers.x.env.API_KEY=v`,
  *   `--header=Authorization: Bearer v`, `X-Api-Key: v`, and a URL's secret-named query parameter (`?token=v`); a
  *   quoted nested value runs to its closing quote (`API_KEY="v,w"`), and a key in a glued flag's own part counts too
- *   (`--hdr,api_key:v more`);
+ *   (`--hdr,api_key:v more`). A pointer in a value hides nothing else in it (review r2 M1): the keys after it are read
+ *   (`API_KEY=${secret:X} CLIENT_SECRET=v`), and so is a piece of it set apart from the pointer
+ *   (`Authorization: v LOG_LEVEL=${secret:X}`, `KEY=v ${secret:X}`);
  * - the password of a URL's user (`scheme://user:PASS@host`), up to the LAST `@` before the host.
  *
  * Only the VALUE is replaced: the flag's own spelling, a nested key's name, a URL's user and host and every other
@@ -21,15 +23,18 @@
  * word starts with a token prefix, so it is no flag and reaches the last test, whose `looksSecret` under any name
  * hides at least what it hides under none. And every word ruling #37 hid is still hidden as much: #37's three tests
  * run first, whole, and a nested cut only ever cuts more of a word they would show (`-H<token> KEY=v` stays
- * `-H‹hidden›`).
+ * `-H‹hidden›`). Every way of reading a word with a value (the glued flag and its value, the value stuck to a
+ * one-letter flag, the whole word) is searched and what ANY of them cuts is cut, so no reading shows what another hid.
  *
  * NOT handled (declared GAPs): a JSON document inside a flag (`--settings '{"env":{"API_KEY":"v"}}'`, its keys are
- * quoted) and a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name). Also
- * a key glued into the value of a secret-named key whose value is a pointer, with no list separator between
- * (`password=${secret:X}?password:v`): that value is passed over whole, which keeps the scan linear.
+ * quoted) and a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name).
+ *
+ * LINEAR in the word, however many keys share one value: where a value ends, and whether it holds a pointer, are read
+ * from tables built once per text ({@link valueEnds}).
  *
  * Pure.
  */
+import { MIN_SECRET_VALUE_LENGTH, secretReferencePattern } from '@ferretry/core-vault/contract';
 import { HIDDEN_WORD_TEXT } from '../../../contract/index.ts';
 import { looksSecret, pointsElsewhere, secretNamed } from '../account/import.ts';
 import { sha256Hex } from '../foreign.ts';
@@ -57,6 +62,39 @@ function secretValue(name: string, value: string): boolean {
   return looksSecret(name, unquoted(value)) || value.split(PIECE_BREAK).some(piece => looksSecret('', piece));
 }
 
+// ── Cuts ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** A cut: the characters `[from, to)` of a text, shown as one `‹hidden›`. */
+type Cut = readonly [from: number, to: number];
+
+/** Cuts in order, with the ones that overlap or touch made one. */
+function merged(cuts: readonly Cut[]): readonly Cut[] {
+  const out: [number, number][] = [];
+  for (const [from, to] of [...cuts].sort((a, b) => a[0] - b[0])) {
+    const last = out.at(-1);
+    if (last !== undefined && from <= last[1]) last[1] = Math.max(last[1], to);
+    else out.push([from, to]);
+  }
+  return out;
+}
+
+/** A text with each cut shown as `‹hidden›`. */
+function withCuts(text: string, cuts: readonly Cut[]): string {
+  let out = '';
+  let shown = 0;
+  for (const [from, to] of merged(cuts)) {
+    out += `${text.slice(shown, from)}${HIDDEN_WORD_TEXT}`;
+    shown = to;
+  }
+  return `${out}${text.slice(shown)}`;
+}
+
+/** Every match of a global pattern in a text, read from its start. */
+function matchesOf(pattern: RegExp, text: string): readonly RegExpExecArray[] {
+  pattern.lastIndex = 0;
+  return [...text.matchAll(pattern)];
+}
+
 // ── Nested inside a value (ruling #40) ───────────────────────────────────────────────────────────
 
 /**
@@ -71,22 +109,118 @@ const NESTED_NAME = /(?<![A-Za-z0-9_.-]|\$\{)[0-9.-]*([A-Za-z_][A-Za-z0-9_.-]*)[
 /** What ends a nested value: a parameter separator (`a=1,b=2`, `?a=1&b=2`, `a=1; b=2`). */
 const NESTED_VALUE_END = new Set([',', ';', '&']);
 
-/**
- * The index just past a nested value starting at `start`: the next parameter separator that is not between a pair of
- * quotes, or the text's end. A quote runs to its matching one (`API_KEY="v,w"`, `KEY=a:'v,w'`), or to the text's end
- * when it has none, so a `,` inside a quoted value never ends it early (review r1 F3).
- */
-function nestedValueEnd(text: string, start: number): number {
-  for (let at = start; at < text.length; at++) {
+/** What sets a part of a value apart from a pointer next to it: a space, or a URL's fragment mark. */
+const PART_BREAK = /[\s#]+/u;
+
+/** For each index of a text, read once: where a nested value starting there ends, and what it holds. */
+interface ValueEnds {
+  /**
+   * The next parameter separator that is not between a pair of quotes, or the text's end. A quote runs to its
+   * matching one (`API_KEY="v,w"`, `KEY=a:'v,w'`), or to the text's end when it has none, so a `,` inside a quoted
+   * value never ends it early (review r1 F3).
+   */
+  readonly value: Int32Array;
+  /** The same, or the start of the next key not between a pair of quotes, if that comes first: a value's first piece. */
+  readonly piece: Int32Array;
+  /** The end of the first well-formed pointer (`${secret:NAME}`) that starts at or after it; past the end when none. */
+  readonly pointer: Int32Array;
+  /** The next `}`, or the text's end. */
+  readonly close: Int32Array;
+  /** Just past the last character before it that is not white space (0 when there is none). */
+  readonly shownEnd: Int32Array;
+}
+
+/** {@link ValueEnds} of a text whose keys start at `keyStarts`, built right to left in one pass (shown ends left to right). */
+function valueEnds(text: string, keyStarts: ReadonlySet<number>): ValueEnds {
+  const length = text.length;
+  const value = new Int32Array(length + 1).fill(length);
+  const piece = new Int32Array(length + 1).fill(length);
+  const pointer = new Int32Array(length + 1).fill(length + 1);
+  const close = new Int32Array(length + 3).fill(length);
+  const shownEnd = new Int32Array(length + 1);
+  const pointerEnds = new Map(
+    matchesOf(secretReferencePattern(), text).map(found => [found.index, found.index + found[0].length]),
+  );
+  let nextDouble = length;
+  let nextSingle = length;
+  for (let at = length - 1; at >= 0; at--) {
     const char = text[at] as string;
-    if (NESTED_VALUE_END.has(char)) return at;
-    if (char === '"' || char === "'") {
-      const close = text.indexOf(char, at + 1);
-      if (close < 0) return text.length;
-      at = close;
+    pointer[at] = pointerEnds.get(at) ?? (pointer[at + 1] as number);
+    close[at] = char === '}' ? at : (close[at + 1] as number);
+    if (NESTED_VALUE_END.has(char)) {
+      value[at] = at;
+      piece[at] = at;
+    } else if (char === '"' || char === "'") {
+      const match = char === '"' ? nextDouble : nextSingle;
+      value[at] = match >= length ? length : (value[match + 1] as number);
+      piece[at] = match >= length ? length : (piece[match + 1] as number);
+      if (char === '"') nextDouble = at;
+      else nextSingle = at;
+    } else {
+      value[at] = value[at + 1] as number;
+      piece[at] = keyStarts.has(at) ? at : (piece[at + 1] as number);
     }
   }
-  return text.length;
+  for (let at = 0; at < length; at++)
+    shownEnd[at + 1] = /\s/u.test(text[at] as string) ? (shownEnd[at] as number) : at + 1;
+  return { value, piece, pointer, close, shownEnd };
+}
+
+/**
+ * Whether a secret-named key's value `[start, end)` looks like a credential: `looksSecret` of it trimmed and unquoted,
+ * as always. The answers a value many keys share would make slow are read from the tables first, and are the ones
+ * `looksSecret` gives: a pointer in it, too short, or one `${…}` pointer and nothing else.
+ */
+function heldAt(text: string, ends: ValueEnds, name: string, start: number, end: number): boolean {
+  if ((ends.pointer[start] as number) <= end || end - start < MIN_SECRET_VALUE_LENGTH) return false;
+  if (text.startsWith('${', start) && ends.close[start + 2] === (ends.shownEnd[end] as number) - 1) return false;
+  return looksSecret(name, unquoted(text.slice(start, end).trim()));
+}
+
+/**
+ * Whether the first piece of a secret-named key's value, up to the next key or separator, holds a credential although
+ * the value as a whole holds none, because a pointer is in it (review r2 M1): the piece itself
+ * (`Authorization: v LOG_LEVEL=${secret:X}`), or a part of it that a space or `#` sets apart from a pointer
+ * (`KEY=v ${secret:X}`, `?token=v#${secret:Y}`). A part with a pointer in it is that pointer (`Bearer ${secret:X}`,
+ * `prefix${secret:X}`), and one too short to be a secret is none.
+ */
+function heldInPiece(name: string, piece: string): boolean {
+  return (
+    looksSecret(name, unquoted(piece.trim())) || piece.split(PART_BREAK).some(part => looksSecret(name, unquoted(part)))
+  );
+}
+
+/**
+ * The cuts of every secret-named key's value nested in a text, the key and the separator kept.
+ *
+ * Every key is read, in order. A value that looks like a credential is cut whole, and a key inside it is read only when
+ * its own value runs on past the cut. One that does not (a pointer in it, too short) hides nothing else: the first
+ * piece of it is judged on its own ({@link heldInPiece}), and the keys inside it are read on (review r2 M1:
+ * `API_KEY=${secret:X} CLIENT_SECRET=v`, `password=${secret:X}?password:v`).
+ */
+function nestedValueCuts(text: string): readonly Cut[] {
+  const keys = matchesOf(NESTED_NAME, text);
+  if (keys.length === 0) return [];
+  const ends = valueEnds(text, new Set(keys.map(key => key.index)));
+  const cuts: Cut[] = [];
+  let covered = 0;
+  for (const key of keys) {
+    const name = key[1] ?? '';
+    if (!secretNamed(name)) continue;
+    const start = key.index + key[0].length;
+    const end = ends.value[start] as number;
+    if (end <= covered) continue;
+    if (heldAt(text, ends, name, start, end)) {
+      cuts.push([start, end]);
+      covered = end;
+      continue;
+    }
+    const piece = text.slice(start, ends.piece[start]).trimEnd();
+    if (!heldInPiece(name, piece)) continue;
+    cuts.push([start, start + piece.length]);
+    covered = Math.max(covered, start + piece.length);
+  }
+  return cuts;
 }
 
 /**
@@ -96,30 +230,46 @@ function nestedValueEnd(text: string, start: number): number {
  */
 const URL_PASSWORD = /(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#@\s:]*:)([^/?#\s]*)@/gu;
 
-/** A text with each URL user's password cut, unless it only points at one. */
-const withoutUrlPasswords = (text: string): string =>
-  text.replace(URL_PASSWORD, (whole, before: string, password: string) =>
-    password === '' || pointsElsewhere(password) ? whole : `${before}${HIDDEN_WORD_TEXT}@`,
-  );
+/** The cut of each URL user's password in a text, unless it only points at one. */
+const urlPasswordCuts = (text: string): readonly Cut[] =>
+  matchesOf(URL_PASSWORD, text).flatMap(found => {
+    const [, before = '', password = ''] = found;
+    const from = found.index + before.length;
+    return password === '' || pointsElsewhere(password) ? [] : [[from, from + password.length] as const];
+  });
 
-/** A text with the value of every secret-named key nested in it cut, the key and the separator kept. */
-function withoutNestedValues(text: string): string {
-  let out = '';
-  let from = 0;
-  NESTED_NAME.lastIndex = 0;
-  for (let found = NESTED_NAME.exec(text); found !== null; found = NESTED_NAME.exec(text)) {
-    const name = found[1] ?? '';
-    if (!secretNamed(name)) continue;
-    const start = found.index + found[0].length;
-    const end = nestedValueEnd(text, start);
-    // A secret-named key whose value is no secret (a pointer, too short) is passed over whole, so a run of keys is
-    // read once.
-    NESTED_NAME.lastIndex = Math.max(end, start + 1);
-    if (!looksSecret(name, unquoted(text.slice(start, end).trim()))) continue;
-    out += `${text.slice(from, start)}${HIDDEN_WORD_TEXT}`;
-    from = end;
-  }
-  return `${out}${text.slice(from)}`;
+/**
+ * Cuts made in a text whose URL passwords were cut first, as places in the text itself: the nested keys are read with
+ * each password shown as `‹hidden›`, as they always were, and a cut that reaches into one reaches the whole password.
+ * One walk: the cuts' places, merged, only ever move forward.
+ */
+function throughPasswords(cuts: readonly Cut[], passwords: readonly Cut[]): readonly Cut[] {
+  let next = 0;
+  let grown = 0;
+  const place = (at: number, end: boolean): number => {
+    for (; next < passwords.length; next++) {
+      const [from, to] = passwords[next] as Cut;
+      const shownFrom = from + grown;
+      if (end ? at <= shownFrom : at < shownFrom) break;
+      if (at < shownFrom + HIDDEN_WORD_TEXT.length) return end ? to : from;
+      grown += HIDDEN_WORD_TEXT.length - (to - from);
+    }
+    return at - grown;
+  };
+  return merged(cuts).map(([from, to]) => [place(from, false), place(to, true)] as const);
+}
+
+/** The cuts of a value: each URL user's password, and each nested credential (inside one pair of quotes, kept). */
+function nestedCuts(value: string): readonly Cut[] {
+  const quoted = QUOTED.exec(value);
+  const inner = quoted?.[2] ?? value;
+  const offset = quoted === null ? 0 : 1;
+  const passwords = urlPasswordCuts(inner);
+  const nested =
+    passwords.length === 0
+      ? nestedValueCuts(inner)
+      : throughPasswords(nestedValueCuts(withCuts(inner, passwords)), passwords);
+  return [...passwords, ...nested].map(([from, to]) => [from + offset, to + offset] as const);
 }
 
 /**
@@ -134,15 +284,6 @@ function keyStartsBefore(word: string, limit: number): boolean {
   return false;
 }
 
-/** A value with every nested credential cut (inside one pair of quotes, kept), or `undefined` when it holds none. */
-function withoutNested(value: string): string | undefined {
-  const quoted = QUOTED.exec(value);
-  const inner = quoted?.[2] ?? value;
-  const cut = withoutNestedValues(withoutUrlPasswords(inner));
-  if (cut === inner) return undefined;
-  return quoted === null ? cut : `${quoted[1] ?? ''}${cut}${quoted[1] ?? ''}`;
-}
-
 // ── Words ────────────────────────────────────────────────────────────────────────────────────────
 
 export interface ShownWord {
@@ -150,33 +291,47 @@ export interface ShownWord {
   readonly hidden: boolean;
 }
 
+/** The cuts of a part of a word that starts `offset` characters into it, as places in the word. */
+const cutsAt = (offset: number, part: string): readonly Cut[] =>
+  nestedCuts(part).map(([from, to]) => [from + offset, to + offset] as const);
+
 /** One command-line word as it may be shown, judged with the word before it. */
 export function shownWord(word: string, before: string | undefined): ShownWord {
   const hidden = (text: string): ShownWord => ({ text, hidden: true });
   const glued = GLUED_VALUE.exec(word);
   const stuck = STUCK_VALUE.exec(word);
+  const [, gluedFlag = '', separator = '', gluedValue = ''] = glued ?? [];
+  const [, stuckFlag = '', stuckValue = ''] = stuck ?? [];
   // #37 first, whole: a value glued on or stuck to its flag, then the word under the flag before it. A nested cut
   // (#40) is only ever a FURTHER cut of a word #37 would show, so it never shows what #37 hid: `-H<token> KEY=v` is a
   // flag `-H<token>` with a value after a space, and stays `-H‹hidden›`.
-  const [, gluedFlag = '', separator = '', gluedValue = ''] = glued ?? [];
-  // A glued flag's own part may hold a nested key of its own (`--x&API_KEY:v;Bearer sk-…`): whatever cuts the value
-  // cuts that too.
-  const flagPart = (): string => withoutNested(gluedFlag) ?? gluedFlag;
-  if (glued !== null && secretValue(gluedFlag, gluedValue))
-    return hidden(`${flagPart()}${separator}${HIDDEN_WORD_TEXT}`);
-  const [, stuckFlag = '', stuckValue = ''] = stuck ?? [];
-  if (stuck !== null && secretValue('', stuckValue)) return hidden(`${stuckFlag}${HIDDEN_WORD_TEXT}`);
+  const stuckHidden = stuck !== null && secretValue('', stuckValue);
+  if (glued !== null && secretValue(gluedFlag, gluedValue)) {
+    // A token in what the glued reading calls the flag (`-H<token>,API_KEY=v`) is cut with everything after the letter,
+    // as the stuck reading cuts it (review r2 G1).
+    if (stuckHidden && secretValue('', gluedFlag.slice(stuckFlag.length)))
+      return hidden(`${stuckFlag}${HIDDEN_WORD_TEXT}`);
+    // A glued flag's own part may hold a nested key of its own (`--x&API_KEY:v;Bearer sk-…`), also one stuck to its
+    // letter (`-cAPI_KEY:v,PASSWORD=w`, review r2 M2): it is cut too.
+    const flagCuts = [
+      ...cutsAt(0, gluedFlag),
+      ...(stuck === null ? [] : cutsAt(stuckFlag.length, gluedFlag.slice(stuckFlag.length))),
+    ];
+    return hidden(`${withCuts(gluedFlag, flagCuts)}${separator}${HIDDEN_WORD_TEXT}`);
+  }
+  if (stuckHidden) return hidden(`${stuckFlag}${HIDDEN_WORD_TEXT}`);
   const name = before !== undefined && FLAG_WORD.test(before) && !word.startsWith('-') ? before : '';
   if (secretValue(name, word)) return hidden(HIDDEN_WORD_TEXT);
-  // #40: a flag's own value is searched (glued, else stuck); a word that is no flag with a value is searched whole, and
-  // so is one whose flag part itself holds a secret-named key (`--hdr,api_key:v more`, `--x&Api-Key=v,${secret:Y}`).
-  const gluedCut = glued === null ? undefined : withoutNested(gluedValue);
-  if (gluedCut !== undefined) return hidden(`${flagPart()}${separator}${gluedCut}`);
-  const stuckCut = stuck === null ? undefined : withoutNested(stuckValue);
-  if (stuckCut !== undefined) return hidden(`${stuckFlag}${stuckCut}`);
-  const whole = (glued === null && stuck === null) || keyStartsBefore(word, gluedFlag.length);
-  const cut = whole ? withoutNested(word) : undefined;
-  return cut === undefined ? { text: word, hidden: false } : hidden(cut);
+  // #40: every reading of the word is searched, and what any of them cuts is cut (review r2 M2, M3): a glued flag's own
+  // part and its value; the value stuck to a one-letter flag, where a key the glued reading fuses with the letter is
+  // seen (`-eAPI_KEY=v,token=w`); and the whole word, when it is no flag with a value, or when its flag part holds a
+  // secret-named key whose value runs on past the glued separator (`--hdr,api_key=v;token=w`).
+  const cuts = [
+    ...(glued === null ? [] : [...cutsAt(0, gluedFlag), ...cutsAt(gluedFlag.length + separator.length, gluedValue)]),
+    ...(stuck === null ? [] : cutsAt(stuckFlag.length, stuckValue)),
+    ...((glued === null && stuck === null) || keyStartsBefore(word, gluedFlag.length) ? cutsAt(0, word) : []),
+  ];
+  return cuts.length === 0 ? { text: word, hidden: false } : hidden(withCuts(word, cuts));
 }
 
 /** A command line's words as they may be shown, in order; `first` is the word before the first (an MCP command). */

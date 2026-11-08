@@ -213,6 +213,59 @@ describe('componentDetail — the #40 rule after review r1 (R-0082, F2, F3)', ()
   });
 });
 
+describe('componentDetail — the #40 rule after review r2 (R-0082, M1, M2, M3, G1)', () => {
+  const NESTED = 'nested-fake-value-0000';
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+  const POINTER = '${secret:OTHER_TOKEN}';
+
+  it('R-0082 should hide a secret-named key after a pointer, and a piece set apart from one, in flags and arguments (M1)', () => {
+    // Arrange
+    const words = [
+      `--env API_KEY=${POINTER} CLIENT_SECRET=${NESTED}`,
+      `--x=password=${POINTER}?password:${NESTED}`,
+      `--header=Authorization: ${NESTED} LOG_LEVEL=${POINTER}`,
+      `-c env.API_KEY=${NESTED} ${POINTER}`,
+    ];
+    const expected = [
+      hid(`--env API_KEY=${POINTER} CLIENT_SECRET=${HIDDEN}`),
+      hid(`--x=password=${POINTER}?password:${HIDDEN}`),
+      hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${POINTER}`),
+      hid(`-c env.API_KEY=${HIDDEN}`),
+    ];
+
+    // Assert
+    should(flagsOf(words)).deepEqual(expected);
+    should(argsOf(words)).deepEqual(expected);
+  });
+
+  it("R-0082 should read a key stuck to a one-letter flag and the last key of a glued flag's own part, with a second cut (M2, M3)", () => {
+    // Arrange
+    const words = [
+      `-eAPI_KEY=${NESTED},token=${NESTED}`,
+      `-HAuthorization: Bearer ${NESTED}, X-Api-Key: ${NESTED}`,
+      `--hdr,api_key=${NESTED};y=${POINTER};token=${NESTED}`,
+    ];
+    const expected = [
+      hid(`-eAPI_KEY=${HIDDEN},token=${HIDDEN}`),
+      hid(`-HAuthorization: ${HIDDEN}, X-Api-Key: ${HIDDEN}`),
+      hid(`--hdr,api_key=${HIDDEN};y=${POINTER};token=${HIDDEN}`),
+    ];
+
+    // Assert
+    should(flagsOf(words)).deepEqual(expected);
+    should(argsOf(words)).deepEqual(expected);
+  });
+
+  it("R-0082 should cut a token in a glued flag's own part after -H with everything after the letter (G1)", () => {
+    // Arrange
+    const words = [`-H${FAKE_TOKEN},API_KEY=${NESTED}`];
+
+    // Assert
+    should(flagsOf(words)).deepEqual([hid(`-H${HIDDEN}`)]);
+    should(argsOf(words)).deepEqual([hid(`-H${HIDDEN}`)]);
+  });
+});
+
 describe('componentDetail — one rule with the Resolved view (rulings #39, #40)', () => {
   it('R-0082 should show every launch flag word for word as the Resolved view does (the #37 and #40 families)', () => {
     // Arrange

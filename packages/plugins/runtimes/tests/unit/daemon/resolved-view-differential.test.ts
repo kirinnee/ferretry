@@ -14,6 +14,14 @@
  * And the generator builds COMPOUND words — a flag, a value glued or stuck to it, then a nested `KEY=v` (quoted or
  * not), then more — with a marker value it only ever puts under a secret-NAMED key: that marker must never be shown.
  *
+ * Review r2 (r3 round) added three dimensions, so the generator, not a reviewer, finds the next shape: pointers
+ * (`${secret:…}`) before a key, after its value (set apart by a space or `#`) and between keys (M1); a key stuck
+ * straight to a one-letter flag, with a second cut after it (`-eAPI_KEY=v,token=w`, M2); and a key in a glued flag's
+ * own part with a pointer and a second cut in the value (`--hdr,api_key=v;y=${secret:Z};token=w`, M3). And two more
+ * oracles: every word must hide at least what the r2 rule hid (`command-line-r2.ts`, frozen), and a compound word
+ * built only of harmless parts must be shown exactly as ruling #37 showed it — as written, unless #37's own name rule
+ * reads its flag part as a secret name (`--name,LOG_LEVEL:$API_TOKEN,x=v` names TOKEN) — so #40 cuts nothing of it.
+ *
  * Every secret value here is an obviously fake one.
  */
 import { describe, it } from 'bun:test';
@@ -24,6 +32,7 @@ import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
 import { todayFlag, todayServerLine } from './resolved-view-today.ts';
 import { HIDDEN, hidesAtLeast, hidesAtLeast37, lineHidesAtLeast, type Shown } from './command-line-family.ts';
 import { flags37, serverLine37 } from './command-line-37.ts';
+import { shownWordsR2 } from './command-line-r2.ts';
 
 const resolved = (input: ResolveInput): ResolvedProfile => {
   const result = resolveProfile(input);
@@ -141,14 +150,30 @@ const JOINS = ['', '=', ' ', ',', ';', '&', ':', '?', '  '];
  */
 const KEY_STARTS = ['=', ' ', ',', ';', '&', ':', '?', '  '];
 const VALUE_ENDS = [',', ';', '&'];
+// biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+const POINTERS = ['${secret:API_TOKEN}', '${secret:OTHER_TOKEN}'];
 /**
- * What may stand before a nested key in the same word, or in a value after one with no list separator between: any
- * value but a pointer. GAP candidates (review r2), both from `looksSecret`'s rule that a value with a pointer anywhere
- * in it holds none: a key glued into the value of a secret-named key that is a pointer is passed over with it
- * (`password=${secret:X}?password:v`; reading into it would make the scan quadratic), and a pointer after a secret in
- * the same value makes the whole value a pointer (`Authorization: v LOG_LEVEL=${secret:X}`).
+ * What may stand before a nested key in the same word: any value, a pointer too (review r2 M1: a pointer in a value
+ * hides nothing after it, `password=${secret:X}?password:v`).
  */
-const HEAD_VALUES = VALUES.filter(value => !value.startsWith('$'));
+const HEAD_VALUES = [...VALUES, ...POINTERS];
+/** One-letter flags a key may be stuck straight to (review r2 M2: `-eAPI_KEY=v`, `-HAuthorization: v`). */
+const LETTER_FLAGS = ['-e', '-H', '-c', '-k', '-p'];
+/** What sets a pointer apart from a value next to it, inside the same value: a space, or a URL's fragment mark. */
+const POINTER_BREAKS = [' ', '#', '  '];
+
+// Harmless parts only: a compound word made of these holds no nested secret, so #40 must cut nothing of it.
+const HARMLESS_FLAGS = ['--model', '--name', '--verbose', '--header', '-v', '-H', '-c', '-e'];
+const HARMLESS_VALUES = [
+  'not-a-real-secret-0000',
+  'short',
+  'claude-opus-5-5',
+  '/home/person/task-runner-default',
+  'a:b',
+  '$API_TOKEN',
+  ...POINTERS,
+  'https://person@h.example.invalid/x?model=m',
+];
 
 /** A small, seeded, repeatable generator (mulberry32). */
 function random(seed: number): () => number {
@@ -161,7 +186,13 @@ function random(seed: number): () => number {
   };
 }
 
-function commandLines(seed: number, count: number): readonly (readonly string[])[] {
+/** One generated command line: its words, and which of them were built of harmless parts only. */
+interface CommandLine {
+  readonly words: readonly string[];
+  readonly harmless: readonly boolean[];
+}
+
+function commandLines(seed: number, count: number): readonly CommandLine[] {
   const next = random(seed);
   const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)] as T;
   const maybe = (text: () => string): string => (next() < 0.5 ? text() : '');
@@ -169,34 +200,68 @@ function commandLines(seed: number, count: number): readonly (readonly string[])
   const nested = (): string => {
     const named = next() < 0.6;
     const key = pick(named ? NESTED_SECRET_KEYS : NESTED_HARMLESS_KEYS);
+    // A pointer may sit in the same value as the marker, set apart from it (review r2 M1): `v ${secret:X}`,
+    // `v#${secret:X}`, `${secret:X} v`. Glued straight to it (`v${secret:X}`) the value is composed with the pointer,
+    // and IS one, so it is never generated.
+    const marked = pick([
+      NESTED_SECRET,
+      `Bearer ${NESTED_SECRET}`,
+      `${NESTED_SECRET},${NESTED_SECRET}`,
+      `a${NESTED_SECRET}`,
+    ]);
     const value = named
-      ? pick([NESTED_SECRET, `Bearer ${NESTED_SECRET}`, `${NESTED_SECRET},${NESTED_SECRET}`, `a${NESTED_SECRET}`])
+      ? pick([
+          marked,
+          marked,
+          `${marked}${pick(POINTER_BREAKS)}${pick(POINTERS)}`,
+          `${pick(POINTERS)}${pick([' ', '  '])}${marked}`,
+        ])
       : pick(HEAD_VALUES);
     // A `,` inside a value is the value's only between a pair of quotes; unquoted it ends the value (a list).
     const quote = value.includes(',') ? pick(['"', "'"]) : pick(QUOTES);
     return `${key}${pick(NESTED_SEPARATORS)}${quote}${value}${quote}`;
   };
-  const word = (): string => {
+  /**
+   * What follows a nested key, one or two parts: a plain value after a list separator; a second nested key after a
+   * space or one; a pointer, alone or as a harmless key's value, between keys (review r2 M1, M3); a URL whose user's
+   * password is the marker.
+   */
+  const tail = (): string =>
+    Array.from({ length: 1 + Math.floor(next() * 2) }, () => {
+      const roll = next();
+      if (roll < 0.25) return `${pick(VALUE_ENDS)}${pick(VALUES)}`;
+      if (roll < 0.55) return `${pick([...VALUE_ENDS, ' '])}${nested()}`;
+      if (roll < 0.75) return `${pick([...VALUE_ENDS, ' '])}${pick(POINTERS)}`;
+      if (roll < 0.92) return `${pick([...VALUE_ENDS, ' '])}${pick(NESTED_HARMLESS_KEYS)}=${pick(POINTERS)}`;
+      return `${pick([...VALUE_ENDS, ' '])}https://person:${NESTED_SECRET}@h.example.invalid/x`;
+    }).join('');
+  /** A word of harmless parts only: a harmless flag, keys and values, glued or listed, pointers too. */
+  const harmlessWord = (): string => {
+    const part = (): string => `${pick(NESTED_HARMLESS_KEYS)}${pick(NESTED_SEPARATORS)}${pick(HARMLESS_VALUES)}`;
+    const parts = Array.from({ length: 1 + Math.floor(next() * 3) }, part).join(pick([...VALUE_ENDS, ' ']));
+    return `${maybe(() => `${pick(HARMLESS_FLAGS)}${pick(['=', ' ', ','])}`)}${parts}`;
+  };
+  const word = (): { text: string; harmless: boolean } => {
     const roll = next();
-    if (roll < 0.25) return pick(FLAGS);
+    const made = (text: string, harmless = false) => ({ text: text === '' ? 'x' : text, harmless });
+    if (roll < 0.2) return made(pick(FLAGS));
     const quote = pick(QUOTES);
     const value = `${quote}${pick(VALUES)}${quote}`;
-    if (roll < 0.45) return value;
-    if (roll < 0.7) return `${pick(FLAGS)}${pick(SEPARATORS)}${value}`;
-    if (roll < 0.92) {
+    if (roll < 0.36) return made(value);
+    if (roll < 0.56) return made(`${pick(FLAGS)}${pick(SEPARATORS)}${value}`);
+    if (roll < 0.76) {
       const head = `${maybe(() => pick(FLAGS))}${pick(JOINS)}${maybe(() => pick(HEAD_VALUES))}${pick(KEY_STARTS)}`;
-      // Then perhaps more: a plain value after a list separator, or a second nested key after a space or one — with no
-      // pointer in it, since a pointer anywhere after a key makes its whole value a pointer (GAP candidate, above).
-      const tail = maybe(() =>
-        next() < 0.5 ? `${pick(VALUE_ENDS)}${pick(VALUES)}` : `${pick([...VALUE_ENDS, ' '])}${nested()}`,
-      );
-      return `${head}${nested()}${tail}`;
+      return made(`${head}${nested()}${maybe(tail)}`);
     }
-    return Array.from({ length: 1 + Math.floor(next() * 24) }, () => pick([...SOUP])).join('');
+    // A key stuck straight to a one-letter flag, and a second cut after it (review r2 M2).
+    if (roll < 0.86) return made(`${pick(LETTER_FLAGS)}${nested()}${tail()}`);
+    if (roll < 0.94) return made(harmlessWord(), true);
+    return made(Array.from({ length: 1 + Math.floor(next() * 24) }, () => pick([...SOUP])).join(''));
   };
-  return Array.from({ length: count }, () =>
-    Array.from({ length: 1 + Math.floor(next() * 6) }, word).map(text => (text === '' ? 'x' : text)),
-  );
+  return Array.from({ length: count }, () => {
+    const made = Array.from({ length: 1 + Math.floor(next() * 6) }, word);
+    return { words: made.map(item => item.text), harmless: made.map(item => item.harmless) };
+  });
 }
 
 const SEED = Number(process.env.FLAG_FUZZ_SEED ?? 0x5eed);
@@ -276,18 +341,34 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
     let members = 0;
     let differed = 0;
     let nestedMembers = 0;
+    let harmlessMembers = 0;
+    let asWritten = 0;
 
     // Act
-    for (const words of lines) {
+    for (const { words, harmless } of lines) {
       const five = shownFlags(words);
       const ruled37 = flags37(words);
+      const ruledR2 = shownWordsR2(words);
       for (const [index, word] of words.entries()) {
         const today = todayFlag(word);
         const shown = five[index] ?? { value: '' };
+        const r2 = ruledR2[index];
         if (!hidesAtLeast37(ruled37[index] ?? { value: '' }, shown))
           breaches.push(`${JSON.stringify(words)} @${String(index)} (#37)`);
+        if (
+          r2 !== undefined &&
+          !hidesAtLeast37(r2.hidden ? { value: r2.text, hidden: true } : { value: r2.text }, shown)
+        )
+          breaches.push(`${JSON.stringify(words)} @${String(index)} (r2)`);
         if (shown.value.includes(NESTED_SECRET)) breaches.push(`${JSON.stringify(words)} @${String(index)} (nested)`);
         if (word.includes(NESTED_SECRET)) nestedMembers += 1;
+        if (harmless[index] === true) {
+          harmlessMembers += 1;
+          const ruled = ruled37[index] ?? { value: '' };
+          if (shown.value !== ruled.value || shown.hidden !== ruled.hidden)
+            breaches.push(`${JSON.stringify(words)} @${String(index)} (harmless)`);
+          if (ruled.hidden === undefined && shown.value === word) asWritten += 1;
+        }
         if (!tightened(word, words[index - 1])) {
           if (shown.value !== today.value || shown.hidden !== today.hidden)
             breaches.push(`${JSON.stringify(words)} @${String(index)}`);
@@ -304,6 +385,8 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
     should(members).be.above(0);
     should(differed).be.above(0);
     should(nestedMembers).be.above(CASES / 10);
+    should(harmlessMembers).be.above(CASES / 20);
+    should(asWritten).be.above(harmlessMembers / 2);
   });
 
   it(`should hide every MCP-argument byte today hides, and equal today off the tightened shapes (${String(CASES)} command lines)`, () => {
@@ -311,20 +394,29 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
     const lines = commandLines(SEED + 1, CASES);
     const breaches: string[] = [];
     let differed = 0;
+    let harmlessLines = 0;
 
     // Act
-    for (const words of lines) {
+    for (const { words, harmless } of lines) {
       const five = shownServer(words);
       const today = todayServerLine({ command: COMMAND, args: words });
+      const r2 = shownWordsR2([COMMAND, ...words])
+        .map(word => word.text)
+        .join(' ');
       const anyTightened = words.some((word, index) => tightened(word, index === 0 ? COMMAND : words[index - 1]));
       if (five !== today) differed += 1;
       if (anyTightened ? !lineHidesAtLeast(today, five) : five !== today) breaches.push(JSON.stringify(words));
       if (!lineHidesAtLeast(serverLine37(COMMAND, words), five)) breaches.push(`${JSON.stringify(words)} (#37)`);
+      if (!lineHidesAtLeast(r2, five)) breaches.push(`${JSON.stringify(words)} (r2)`);
       if (five.includes(NESTED_SECRET)) breaches.push(`${JSON.stringify(words)} (nested)`);
+      if (harmless.every(Boolean)) harmlessLines += 1;
+      if (harmless.every(Boolean) && five !== serverLine37(COMMAND, words))
+        breaches.push(`${JSON.stringify(words)} (harmless)`);
     }
 
     // Assert
     should(breaches.slice(0, 10)).deepEqual([]);
     should(differed).be.above(0);
+    should(harmlessLines).be.above(0);
   });
 });

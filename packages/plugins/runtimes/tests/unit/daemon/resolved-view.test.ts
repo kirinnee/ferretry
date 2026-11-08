@@ -5,6 +5,7 @@ import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
 import { hidesAtLeast, lineHidesAtLeast, nestedBreach, nestedFamily, nestedLineBreach } from './command-line-family.ts';
 import { todayFlag, todayServerLine } from './resolved-view-today.ts';
+import { shownWordsR2 } from './command-line-r2.ts';
 
 const HIDDEN = '‹hidden›';
 // Obviously fake: it only has to have the shape of a provider token so the secret rules see it.
@@ -802,5 +803,150 @@ describe('resolvedEntries — the #40 rule after review r1 (F2, F3)', () => {
 
     // Assert
     should(actual).deepEqual(words.map(as));
+  });
+});
+
+// ── Review r2 of the #40 rule (M1, M2, M3, G1, and what the r3 fuzz found) ───────────────────────────
+
+describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', () => {
+  const V = 'nested-fake-value-0000';
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+  const P = '${secret:OTHER_TOKEN}';
+
+  it('should hide a secret-named key after a pointer in the same value, and a piece set apart from one (M1)', () => {
+    // Act
+    const actual = shownFlags([
+      `--env API_KEY=${P} CLIENT_SECRET=${V}`,
+      `--x=password=${P}?password:${V}`,
+      `--header=Authorization: ${V} LOG_LEVEL=${P}`,
+      '-c',
+      `mcp_servers.x.env.API_KEY=${V} ${P}`,
+      `--url=https://h.example.invalid/?token=${V}#${P}`,
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`--env API_KEY=${P} CLIENT_SECRET=${HIDDEN}`),
+      hid(`--x=password=${P}?password:${HIDDEN}`),
+      hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${P}`),
+      as('-c'),
+      hid(`mcp_servers.x.env.API_KEY=${HIDDEN}`),
+      hid(`--url=https://h.example.invalid/?token=${HIDDEN}`),
+    ]);
+  });
+
+  it('should read a key stuck to a one-letter flag when the glued reading finds another cut: -eAPI_KEY=<v>,token=<v> (M2)', () => {
+    // Act
+    const actual = shownFlags([
+      `-eAPI_KEY=${V},token=${V}`,
+      `-HAuthorization: Bearer ${V}, X-Api-Key: ${V}`,
+      `-eapiKey=${V} access-token:${V}`,
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`-eAPI_KEY=${HIDDEN},token=${HIDDEN}`),
+      hid(`-HAuthorization: ${HIDDEN}, X-Api-Key: ${HIDDEN}`),
+      hid(`-eapiKey=${HIDDEN}`),
+    ]);
+  });
+
+  it("should read the last key of a glued flag's own part when its value has another cut: --hdr,api_key=<v>;y=<pointer>;token=<v> (M3)", () => {
+    // Act
+    const actual = shownFlags([`--hdr,api_key=${V};y=${P};token=${V}`, `--x&X-Api-Key=${V},y=${P},token=${V}`]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`--hdr,api_key=${HIDDEN};y=${P};token=${HIDDEN}`),
+      hid(`--x&X-Api-Key=${HIDDEN},y=${P},token=${HIDDEN}`),
+    ]);
+  });
+
+  it("should cut a token in a glued flag's own part with everything after the letter: -H<token>,API_KEY=<v> (G1)", () => {
+    // Act
+    const actual = shownFlags([`-H${FAKE_TOKEN},API_KEY=${V}`, `-Hghp_notarealtoken0000,API_KEY=${V}`]);
+
+    // Assert
+    should(actual).deepEqual([hid(`-H${HIDDEN}`), hid(`-H${HIDDEN}`)]);
+  });
+
+  it('should hide what the r3 fuzz found: a quoted value with a separator before a pointer, and a key stuck to its letter when #37 hides the glued value', () => {
+    // Act
+    const actual = shownFlags([`--opt x-api-key: '${V},${V}' apiKey=${P}`, `-cAPI_KEY:"${V}",PASSWORD='Bearer ${V}'`]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`--opt x-api-key: ${HIDDEN} apiKey=${P}`),
+      hid(`-cAPI_KEY:${HIDDEN},PASSWORD=${HIDDEN}`),
+    ]);
+  });
+
+  it("should hide the same shapes in an MCP server's arguments (M1, M2, M3, G1)", () => {
+    // Act
+    const actual = shownServer([
+      `API_KEY=${P} CLIENT_SECRET=${V}`,
+      `-eAPI_KEY=${V},token=${V}`,
+      `--hdr,api_key=${V};y=${P};token=${V}`,
+      `-H${FAKE_TOKEN},API_KEY=${V}`,
+    ]);
+
+    // Assert
+    should(actual).equal(
+      `run-server API_KEY=${P} CLIENT_SECRET=${HIDDEN} -eAPI_KEY=${HIDDEN},token=${HIDDEN} --hdr,api_key=${HIDDEN};y=${P};token=${HIDDEN} -H${HIDDEN}`,
+    );
+  });
+
+  it('should keep a value composed with a pointer, a pointer beside a harmless key and a flag a token is glued to as before (control)', () => {
+    // Arrange
+    const words = [
+      `--header=Authorization: Bearer ${P}`,
+      `--env=API_KEY=prefix${P}`,
+      `--env=API_KEY=${P}?model=short`,
+      `--env=API_KEY=${P} ${P}`,
+      `LOG_LEVEL=${P} model=${FAKE_SECRET}`,
+      `-emodel=claude-opus-5-5,LOG_LEVEL=${P}`,
+    ];
+
+    // Act
+    const actual = shownFlags([...words, `-password=${FAKE_TOKEN}`]);
+
+    // Assert
+    should(actual).deepEqual([...words.map(as), hid(`-password=${HIDDEN}`)]);
+  });
+
+  it("should cut a URL user's password whole, and as r2 did, when the user is itself a secret name and a key follows it", () => {
+    // Arrange
+    const words = [
+      `postgres://token:${V}@db.example.invalid/x`,
+      'postgres://token:short1@db.example.invalid',
+      `--url=https://h.example.invalid/x,https://password:p@ss${V}@h.example.invalid;model=m,api_key=${V}`,
+    ];
+
+    // Act
+    const actual = shownFlags(words);
+
+    // Assert — the nested `token:` key reads the password as `‹hidden›` and cuts the host with it, as r2 did.
+    should(actual).deepEqual([
+      hid(`postgres://token:${HIDDEN}`),
+      hid(`postgres://token:${HIDDEN}`),
+      hid(`--url=https://h.example.invalid/x,https://password:${HIDDEN};model=m,api_key=${HIDDEN}`),
+    ]);
+    should(shownWordsR2(words).map(word => word.text)).deepEqual(actual.map(word => word.value));
+  });
+
+  it('should read every key around pointers in one pass, however many share a value (linear)', () => {
+    // Arrange — pointers chained with no separator, with spaces, an unclosed `${…:-` run and quotes opening in turn.
+    const glued = `--set=${`password=${P}?`.repeat(20_000)}`;
+    const spaced = `--set=${`API_KEY=${P} `.repeat(20_000)}`;
+    const defaults = `--set=${'API_KEY=${A:-'.repeat(20_000)}}`;
+    const quotes = `--set=${`api_key=${P}'x `.repeat(20_000)}`;
+    const started = performance.now();
+
+    // Act
+    const actual = shownFlags([glued, spaced, defaults, quotes]);
+
+    // Assert
+    should(actual.map(word => word.value)).deepEqual([glued, spaced, defaults, quotes]);
+    should(performance.now() - started).be.below(2_000);
   });
 });

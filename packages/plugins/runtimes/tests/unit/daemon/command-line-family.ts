@@ -12,6 +12,12 @@
  * (`API_KEY="v,v"`, F3), a URL password holding a raw `@` (F3), and a token stuck to `-H` before a nested key
  * (`-H<token> KEY=v`, `-H<token>=KEY=v`, F2), which must stay as hidden as ruling #37 left it: `-H‹hidden›`.
  *
+ * Review r2 (r3 round) added: a pointer (`${secret:…}`) in the same value as a secret, after it, before it, as the
+ * value of a key before or after it, and glued in front of the key (M1); a key stuck straight to a one-letter flag with
+ * a second cut after it (`-eAPI_KEY=v,token=v`, M2); and a key in a glued flag's own part whose value has a pointer and
+ * a second cut (`--hdr,api_key=v;y=${secret:Z};token=v`, M3). Their controls (a value composed with a pointer,
+ * `Bearer ${secret:X}`, `prefix${secret:X}`) must be exact.
+ *
  * Also the oracle the differentials share: what "hides at least what today hides" means for one word and one line.
  *
  * Every secret here is an obviously fake one.
@@ -221,8 +227,108 @@ function stuckTokenCases(): NestedCase[] {
   return cases;
 }
 
+// biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+const POINTER = '${secret:OTHER_TOKEN}';
+const POINTER_KEYS = ['API_KEY', 'X-Api-Key', 'Authorization', 'mcp_servers.x.env.ACCESS_TOKEN', 'client.secret'];
+const POINTER_VALUES = [FAKE, `Bearer ${FAKE}`, `"${FAKE},${FAKE}"`];
+const POINTER_POSITIONS: readonly Position[] = ['next word', 'glued =', 'stuck', 'own word', 'list middle'];
+
+/**
+ * A pointer in the same value as a secret-named key's secret (review r2 M1): each arrangement, and what of it must
+ * stay. The pointer hides nothing that is set apart from it, and the key and every pointer stay.
+ */
+const POINTER_ARRANGEMENTS: readonly ((key: string, value: string) => { text: string; kept: string[] })[] = [
+  (key, value) => ({ text: `${key}${value} ${POINTER}`, kept: [] }),
+  (key, value) => ({ text: `${key}${value}#${POINTER}`, kept: [] }),
+  (key, value) => ({ text: `${key}${POINTER} ${value}`, kept: [] }),
+  (key, value) => ({ text: `LOG_LEVEL=${POINTER} ${key}${value}`, kept: [`LOG_LEVEL=${POINTER} `] }),
+  (key, value) => ({ text: `OTHER_TOKEN=${POINTER} ${key}${value}`, kept: [`OTHER_TOKEN=${POINTER} `] }),
+  (key, value) => ({ text: `${key}${value} LOG_LEVEL=${POINTER}`, kept: [` LOG_LEVEL=${POINTER}`] }),
+  (key, value) => ({ text: `password=${POINTER}?${key}${value}`, kept: [`password=${POINTER}?`] }),
+];
+
+/** Values composed with a pointer, or set apart from one by a harmless key: each IS no secret, and is shown exactly. */
+const POINTER_CONTROLS: readonly ((key: string) => string)[] = [
+  key => `${key}Bearer ${POINTER}`,
+  key => `${key}prefix${POINTER}`,
+  key => `${key}${POINTER}?model=short`,
+  key => `${key}${POINTER} ${POINTER}`,
+  () => `LOG_LEVEL=${POINTER} model=${FAKE}`,
+];
+
+/** The pointer family (review r2 M1). */
+function pointerCases(): NestedCase[] {
+  const cases: NestedCase[] = [];
+  const add = (text: string, position: Position, secret: boolean, kept: readonly string[], last: boolean) => {
+    const shape = placed(text, position);
+    const words = [BEFORE, ...shape.words, ...(last ? [] : [AFTER])];
+    cases.push({
+      label: JSON.stringify(words),
+      words,
+      at: shape.at,
+      secret,
+      body: FAKE,
+      kept: [...shape.kept, ...kept],
+    });
+  };
+  for (const key of POINTER_KEYS) {
+    for (const separator of ['=', ': ']) {
+      for (const position of POINTER_POSITIONS) {
+        for (const last of [true, false]) {
+          for (const value of POINTER_VALUES) {
+            for (const arrange of POINTER_ARRANGEMENTS) {
+              const { text, kept } = arrange(`${key}${separator}`, value);
+              add(text, position, true, [`${key}${separator.trimEnd()}`, ...kept], last);
+            }
+          }
+          for (const control of POINTER_CONTROLS) add(control(`${key}${separator}`), position, false, [], last);
+        }
+      }
+    }
+  }
+  return cases;
+}
+
+/**
+ * A key stuck straight to a one-letter flag with a second cut after it (review r2 M2), and a key in a glued flag's own
+ * part whose value has a pointer and a second cut (M3): both secrets must go, the flag and the key stay.
+ */
+function secondCutCases(): NestedCase[] {
+  const seconds = [
+    `,token=${FAKE}`,
+    ` https://person:${FAKE}@h.example.invalid`,
+    `, X-Api-Key: ${FAKE}`,
+    `;y=${POINTER};token=${FAKE}`,
+  ];
+  const cases: NestedCase[] = [];
+  for (const key of POINTER_KEYS) {
+    for (const separator of ['=', ':', ': ']) {
+      for (const value of POINTER_VALUES) {
+        for (const second of seconds) {
+          for (const flag of ['-e', '-H', '-c', '--hdr,', '--x&', '--set;']) {
+            // A flag part's key is glued by the flag's own separator, `=` or a space.
+            if (flag.startsWith('--') && separator === ':') continue;
+            for (const last of [true, false]) {
+              const words = [BEFORE, `${flag}${key}${separator}${value}${second}`, ...(last ? [] : [AFTER])];
+              const kept = [`${flag}${key}${separator.trimEnd()}`];
+              cases.push({ label: JSON.stringify(words), words, at: 1, secret: true, body: FAKE, kept });
+            }
+          }
+        }
+      }
+    }
+  }
+  return cases;
+}
+
 /** Every generated case of ruling #40. */
-export const nestedFamily = (): readonly NestedCase[] => [...nestedKeyCases(), ...urlCases(), ...stuckTokenCases()];
+export const nestedFamily = (): readonly NestedCase[] => [
+  ...nestedKeyCases(),
+  ...urlCases(),
+  ...stuckTokenCases(),
+  ...pointerCases(),
+  ...secondCutCases(),
+];
 
 /** What is wrong with what was shown, word by word, for one case; or nothing. */
 export function nestedBreach(
