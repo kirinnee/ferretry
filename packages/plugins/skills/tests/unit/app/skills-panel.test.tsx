@@ -22,6 +22,13 @@ const SKILLS = [
 ];
 
 describe('DOM tests: the Skills panel of a ferret', () => {
+  it('offers the skills.add slot in its header once it knows the ferret and its daemon', async () => {
+    const { Panel } = panelFor({ [INVENTORY]: ferretInventory([skill('review')]) });
+    await show(<Panel subject="f1" />);
+    await settle(() => q('[data-context-skills-active]') !== null, 'the header');
+    expect(q('[data-context-list="skills"]')).not.toBeNull();
+  });
+
   it('draws what this ferret can use, winners first, and says what it is', async () => {
     const { Panel, calls } = panelFor({ [INVENTORY]: ferretInventory(SKILLS) });
     await show(<Panel subject="f1" />);

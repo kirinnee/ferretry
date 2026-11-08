@@ -5,7 +5,7 @@ import {
   provideToShell,
   type ScreenRef,
 } from '@ferretry/app';
-import type { AppComponent, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
+import type { AppComponent, PanelProps, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { type ArrivalHold, armArrivalHold } from './lib/arrival.ts';
@@ -17,6 +17,18 @@ import { lazyComponent } from './lazy.ts';
  * free of React so the registry generator can load it before the app shell is in place.
  */
 const loadViews = (): Promise<Record<string, unknown>> => import('./views/catalogs-views.tsx');
+
+const loadAddSkills = (): Promise<Record<string, unknown>> => import('./views/add-skills-views.tsx');
+
+const addSkillsScreen = (client: PluginClient): AppComponent<ScreenProps> =>
+  lazyComponent<ScreenProps>(async () =>
+    ((await loadAddSkills()).createAddSkillsScreen as (client: PluginClient) => AppComponent<ScreenProps>)(client),
+  );
+
+const addSkillsPanel = (client: PluginClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadAddSkills()).createAddSkillsPanel as (client: PluginClient) => AppComponent<PanelProps>)(client),
+  );
 
 const sharingScreen = (client: PluginClient): AppComponent<ScreenProps> =>
   lazyComponent<ScreenProps>(async () =>
@@ -58,11 +70,12 @@ export default provideToShell(
     build: ({ client }) => ({
       screens: {
         sharing: sharingScreen(client),
+        'add-skills': addSkillsScreen(client),
         // `join` and `shared` are daemon-less: the shell draws them from `shell.daemonless`, never from a machine's half.
         join: daemonlessPlaceholder,
         shared: daemonlessPlaceholder,
       },
-      panels: {},
+      panels: { 'add-skills': addSkillsPanel(client) },
       settings: {},
       renderers: {},
     }),

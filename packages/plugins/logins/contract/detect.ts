@@ -16,6 +16,8 @@
  * put in a sentence. Nothing is found means "a custom gateway", with what was recognised said.
  *
  * Pure and total, and dependency-free so a browser can run it on a paste without sending anything.
+ * Logins owns it: the presets whose clues it reads are Logins' own, and the app half reads a paste
+ * with it in this browser.
  */
 
 /** A preset's clues, as a preset file declares them under `detect:`. */

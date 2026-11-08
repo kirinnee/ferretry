@@ -270,6 +270,7 @@
         "@ferretry/plugin-access": "workspace:*",
         "@ferretry/plugin-connections": "workspace:*",
         "@ferretry/plugin-projects": "workspace:*",
+        "@ferretry/plugin-skills": "workspace:*",
         "@ferretry/std": "workspace:*",
         "lucide-react": "^0.468.0",
         "qrcode-generator": "^2.0.4",
