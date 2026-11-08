@@ -4,7 +4,9 @@ import { blockedLine, remedyFor, type Remedy, wholeDaemonSentence } from '../cli
 import type { DaemonTransport } from '../client/transport.ts';
 import { type DaemonList, daemonTitle, type PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RouteDecl } from '@ferretry/kernel/manifest';
+import { DaemonReachCache } from './every-daemon.ts';
 import { GrantsCache } from './grants-cache.ts';
+import type { PluginReach } from './plugin-identity.tsx';
 import type { Authority, Axis, CapabilityName, ViewPlace } from './view-place.tsx';
 import { type BuiltHalf, HalfCache } from '../surfaces/halves.ts';
 import { indexSurfaces, type SurfaceEntry } from '../surfaces/registry.ts';
@@ -77,6 +79,8 @@ export class ShellRuntime {
   /** Every route a compiled manifest declares, by key: what `authorityOf` reads a capability from. */
   readonly #routes: ReadonlyMap<string, RouteDecl>;
   readonly #places = new Map<string, { readonly version: number; readonly place: ViewPlace }>();
+  /** Each plugin's rows on every daemon (S2), per client origin, over the one client cache. */
+  readonly #reach = new DaemonReachCache(this);
   #handlerWatched = false;
   /** The owner's layout per daemon (the Layouts plugin), read through each daemon's guarded client. */
   readonly layouts: DaemonLayouts;
@@ -197,6 +201,25 @@ export class ShellRuntime {
    */
   client(daemon: string, packageId: string, origin: ClientOrigin = 'ordinary'): ShellPluginClient | undefined {
     return this.#halves.client(daemon, packageId, origin);
+  }
+
+  /**
+   * One plugin's reader of its own rows on every paired daemon (S2), per client origin: the identity context hands it
+   * out (`plugin-identity.tsx`), never a hook that takes a package id.
+   */
+  reach(plugin: string, origin: ClientOrigin): PluginReach {
+    return this.#reach.reach(plugin, origin);
+  }
+
+  /** Whether this machine's grants read answered "unlock first" (S1's `locked`). */
+  isLocked(daemon: string): boolean {
+    return this.#grants.isLocked(daemon);
+  }
+
+  /** What a reach row of this daemon was read from besides its own fields: its inventory and its grants answer. */
+  stampOf(daemon: string): readonly unknown[] {
+    const connection = this.#connections.get(daemon);
+    return [connection?.kind === 'connected' ? connection.client.inventory : undefined, this.#grants.stateOf(daemon)];
   }
 
   /** Whether the daemon's event feed is live (a view's `online`). */

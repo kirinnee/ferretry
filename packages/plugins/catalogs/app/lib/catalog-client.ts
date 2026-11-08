@@ -98,3 +98,23 @@ export function catalogClientOf(client: Pick<PluginClient, 'call'>): CatalogClie
     },
   };
 }
+
+/** What an install on a machine with no Catalogs row says: not connected yet, or Catalogs is off there. */
+export const NO_MACHINE_SENTENCE = 'This device cannot reach Catalogs on that machine yet.';
+
+/**
+ * The catalog client of any paired machine: this half's own for the daemon it was built for, Catalogs' own row client
+ * (`useEveryDaemon`) on another, and a refusal saying so where there is none.
+ */
+export const machineCatalogClient =
+  (
+    own: CatalogClient,
+    ownId: string,
+    others: ReadonlyMap<string, PluginClient>,
+  ): ((connection: { readonly daemonId: string }) => Promise<CatalogClient>) =>
+  async connection => {
+    if (connection.daemonId === ownId) return own;
+    const other = others.get(connection.daemonId);
+    if (other === undefined) throw new Error(NO_MACHINE_SENTENCE);
+    return catalogClientOf(other);
+  };

@@ -117,6 +117,11 @@ export class GrantsCache {
     return this.#entries.get(daemon)?.state.kind === 'locked';
   }
 
+  /** This daemon's answer as an opaque token: a new one each time the answer is set, the same one in between. */
+  stateOf(daemon: string): unknown {
+    return this.#entries.get(daemon)?.state;
+  }
+
   /** What this device may do with (capability, axis) on this daemon. */
   authority(daemon: string, capability: string, axis: Axis): Authority {
     const state = this.#entries.get(daemon)?.state;

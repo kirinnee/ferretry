@@ -13,14 +13,14 @@ import {
   daemonTitle,
   HOME_HREF,
   distinctDaemonName,
-  useDaemonClients,
+  useEveryDaemon,
   useOptionalRouter,
   usePairedDaemons,
   useRouter,
 } from '@ferretry/app';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CatalogClient, catalogClientOf } from '../lib/catalog-client.ts';
+import { type CatalogClient, catalogClientOf, machineCatalogClient } from '../lib/catalog-client.ts';
 import { CatalogClientProvider } from '../lib/client-context.tsx';
 import type { ArrivalHold } from '../lib/arrival.ts';
 import { daemonConnection } from '../lib/machine.ts';
@@ -48,16 +48,26 @@ function useInstallMachines(): readonly InstallMachine[] {
   );
 }
 
-/** Installs go through THAT machine's own client: this one's, or another paired daemon's by the shell. */
+const NO_CLIENTS: ReadonlyMap<string, PluginClient> = new Map();
+
+/**
+ * Catalogs' own client on every paired daemon where it runs (`useEveryDaemon`), by daemon id: the same map while no
+ * client comes or goes, so a machine's feed or grants answer moving re-reads nothing.
+ */
+function useCatalogClients(): ReadonlyMap<string, PluginClient> {
+  const rows = useEveryDaemon();
+  const held = useRef(NO_CLIENTS);
+  const next = new Map(rows.map(row => [row.daemon, row.client]));
+  const same =
+    next.size === held.current.size && [...next].every(([daemon, client]) => held.current.get(daemon) === client);
+  if (!same) held.current = next.size === 0 ? NO_CLIENTS : next;
+  return held.current;
+}
+
+/** Installs go through THAT machine's own client: this one's, or Catalogs' own row on another paired daemon. */
 function useInstallHost(own: CatalogClient, ownId: string): InstallHost {
-  const clientOf = useDaemonClients('catalogs');
-  return useMemo(
-    () => ({
-      createClient: async connection =>
-        connection.daemonId === ownId ? own : catalogClientOf(await clientOf(connection.daemonId)),
-    }),
-    [clientOf, own, ownId],
-  );
+  const others = useCatalogClients();
+  return useMemo(() => ({ createClient: machineCatalogClient(own, ownId, others) }), [others, own, ownId]);
 }
 
 export function createSharingScreen(client: PluginClient) {

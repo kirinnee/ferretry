@@ -1,6 +1,6 @@
 /**
  * The factories a Warden view provides: the client of the daemon the view is on is the one this half was handed, and
- * any other paired daemon's comes from the shell (`useDaemonClients('warden')`).
+ * any other paired daemon's is the Warden's own row there (`useEveryDaemon` in `@ferretry/app`).
  */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
@@ -8,15 +8,18 @@ import type { DaemonConnection } from './machine.ts';
 import { wardenClientOf } from './warden-client.ts';
 import type { DaemonReach, WardenClientFactory } from './warden-client-context.tsx';
 
-/** The Warden's client on any paired daemon: this half's own for the daemon it was built for, the shell's otherwise. */
+/** What a read of a machine with no Warden row says: not paired here, not connected yet, or the Warden is off there. */
+const NO_REACH_SENTENCE = 'This device cannot reach the Warden on that machine yet.';
+
+/** The Warden's client on any paired daemon: this half's own for the daemon it was built for, its row's otherwise. */
 export const daemonReach =
-  (
-    home: DaemonConnection,
-    client: PluginClient,
-    otherDaemon: (daemonId: string) => Promise<PluginClient>,
-  ): DaemonReach =>
-  async connection =>
-    connection.daemonId === home.daemonId ? client : await otherDaemon(connection.daemonId);
+  (home: DaemonConnection, client: PluginClient, others: ReadonlyMap<string, PluginClient>): DaemonReach =>
+  async connection => {
+    if (connection.daemonId === home.daemonId) return client;
+    const other = others.get(connection.daemonId);
+    if (other === undefined) throw new Error(NO_REACH_SENTENCE);
+    return other;
+  };
 
 export const wardenClientFactory =
   (reach: DaemonReach): WardenClientFactory =>

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
-import { catalogClientOf, routeFor } from '../../../app/lib/catalog-client.ts';
+import {
+  catalogClientOf,
+  machineCatalogClient,
+  NO_MACHINE_SENTENCE,
+  routeFor,
+} from '../../../app/lib/catalog-client.ts';
 import manifest from '../../../manifest.ts';
 
 const calls: { route: string; init: unknown }[] = [];
@@ -76,5 +81,23 @@ describe('N2 the client refuses what it cannot carry instead of dropping it', ()
       body: '{}',
     });
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('the catalog client of any paired machine', () => {
+  const own = catalogClientOf(recording({ own: true }));
+  const elsewhere = recording({ elsewhere: true }) as PluginClient;
+  const clientOf = machineCatalogClient(own, 'd1', new Map([['d2', elsewhere]]));
+
+  it('answers the half’s own client for its machine and Catalogs’ row client for another', async () => {
+    expect(await clientOf({ daemonId: 'd1' })).toBe(own);
+    calls.length = 0;
+    const other = await clientOf({ daemonId: 'd2' });
+    await other.request('/v1/catalogs', z.unknown());
+    expect(calls.map(call => call.route)).toEqual(['GET /v1/catalogs']);
+  });
+
+  it('refuses, saying so, for a machine with no Catalogs row', async () => {
+    await expect(clientOf({ daemonId: 'd3' })).rejects.toThrow(NO_MACHINE_SENTENCE);
   });
 });

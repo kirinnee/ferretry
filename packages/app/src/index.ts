@@ -186,7 +186,9 @@ export {
   reconcileMachineOrder,
   replacedPairing,
 } from './daemons/machine-names.ts';
-export { type DaemonClientOf, useDaemonClients, usePairedDaemons } from './shell/daemon-access.ts';
+export { usePairedDaemons } from './shell/daemon-access.ts';
+/** @public The same plugin on every paired machine (§5.1; shell contract S2): each row's place and the plugin's own client. */
+export { type DaemonReach, useEveryDaemon } from './shell/every-daemon.ts';
 
 export {
   type AddressPlace,
