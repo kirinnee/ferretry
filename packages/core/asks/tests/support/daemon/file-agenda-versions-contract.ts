@@ -596,4 +596,42 @@ export function agendaVersionStoreContract() {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('closes the store and says why when its tables cannot be built', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agenda-version-build-'));
+    try {
+      const real = asksStateAt(root);
+      let closed = 0;
+      const failing = {
+        list: real.list.bind(real),
+        sqlite: (...args: Parameters<typeof real.sqlite>) => {
+          const db = real.sqlite(...args);
+          return new Proxy(db, {
+            get(target, key) {
+              if (key === 'transaction')
+                return () => {
+                  throw new Error('disk full');
+                };
+              if (key === 'close')
+                return () => {
+                  closed += 1;
+                  target.close();
+                };
+              const value = Reflect.get(target, key);
+              return typeof value === 'function' ? value.bind(target) : value;
+            },
+          });
+        },
+      };
+      const store = new SqliteAgendaVersionStore(failing);
+
+      await should(store.record(SESSION, [draft(entryOf(raised.ledger), 'created', T(1))])).be.rejectedWith(
+        'disk full',
+      );
+
+      should(closed).equal(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 }
