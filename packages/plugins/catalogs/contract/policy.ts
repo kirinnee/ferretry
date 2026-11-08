@@ -1,6 +1,6 @@
 /**
  * Catalogs' policy entries (§7.1), copied from today's `runtime/mounts/{shared-catalogs,catalog-members,catalog-links,
- * catalog-installs,local-skill-installs}.ts`, the member routes of `catalog-members/shared-routes.ts`, and their audit
+ * catalog-installs}.ts`, the member routes of `catalog-members/shared-routes.ts`, and their audit
  * rules. Gate owns the vocabulary; these are references into it.
  */
 import { auditKind, CAPABILITIES } from '@ferretry/core-gate/contract';

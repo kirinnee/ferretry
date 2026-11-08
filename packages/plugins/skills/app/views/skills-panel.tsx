@@ -4,8 +4,7 @@
  * The list is what THIS FERRET CAN USE, and its header says so in words ("16 active in this ferret"). A skill row puts the
  * skill into the composer — the harness's own spelling, `/name` for Claude and `$name` for Codex (`skillInsertText`) —
  * and nothing else: there is deliberately no send. It says where the skill came from (This project, This account or
- * Ferretry) and, when a same-named one elsewhere wins, that it is not active; Open reads its SKILL.md. "+ Add skills"
- * opens the copy-from-this-machine view in place.
+ * Ferretry) and, when a same-named one elsewhere wins, that it is not active; Open reads its SKILL.md.
  */
 import { type ComposerQuoteTarget, composerQuoteTarget, daemonFerretScope, daemonOfClient } from '@ferretry/app';
 import {
@@ -22,7 +21,6 @@ import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import type { FerretSkillsInventory, SkillEntry } from '../../contract/index.ts';
 import { readFerretSkillsInventory, readSkillFile } from '../lib/client.ts';
 import {
-  ADD_SKILLS_BUTTON,
   activeSkillsLine,
   appendSkillInvocation,
   NO_SKILLS,
@@ -36,7 +34,6 @@ import {
   sortedSkills,
   visibleSkills,
 } from '../lib/skills-model.ts';
-import { AddSkills } from './add-skills.tsx';
 import { SkillFileSheet } from './skill-file-sheet.tsx';
 
 /** This machine's own words for a failure: the panel is drawn per daemon and the daemon's name is the shell's. */
@@ -107,7 +104,6 @@ function SkillsList({
   onChipChange,
   onUse,
   onOpen,
-  onAdd,
   searchDebounceMs,
 }: {
   readonly read: ContextRead<FerretSkillsInventory>;
@@ -117,7 +113,6 @@ function SkillsList({
   readonly onChipChange: (chip: SkillChip) => void;
   readonly onUse: (invocation: string) => void;
   readonly onOpen: (skill: SkillEntry) => void;
-  readonly onAdd: () => void;
   readonly searchDebounceMs?: number;
 }): ReactNode {
   const { load, reload } = read;
@@ -151,9 +146,6 @@ function SkillsList({
         <p className="m-0 min-w-0 text-2xs text-faint" data-context-skills-active="">
           {activeSkillsLine(inventory)}
         </p>
-        <Button type="button" size="sm" onClick={onAdd} data-context-add-skills="">
-          {ADD_SKILLS_BUTTON}
-        </Button>
       </div>
       {visible.length === 0 ? (
         <ContextNote>{contextEmptyCopy(NO_SKILLS, total, query, chipLabel)}</ContextNote>
@@ -192,7 +184,6 @@ function FerretSkills({
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState<SkillChip>('all');
   const [opened, setOpened] = useState<SkillEntry | null>(null);
-  const [adding, setAdding] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const loader = useCallback((_signal: AbortSignal) => readFerretSkillsInventory(client, ferretId), [client, ferretId]);
   const read = useContextRead(loader, true);
@@ -210,17 +201,6 @@ function FerretSkills({
     setNote(delivered ? `Put ${invocation} in the chat box.` : `Open this ferret’s chat to use ${invocation}.`);
   };
 
-  if (adding && read.load.kind === 'ready')
-    return (
-      <AddSkills
-        client={client}
-        ferret={read.load.value}
-        onBack={() => {
-          setAdding(false);
-          read.reload();
-        }}
-      />
-    );
   return (
     <>
       <SkillsList
@@ -231,7 +211,6 @@ function FerretSkills({
         onChipChange={setChip}
         onUse={use}
         onOpen={setOpened}
-        onAdd={() => setAdding(true)}
       />
       {note === null ? null : (
         <p className="m-0 py-xs text-meta text-muted" role="status" data-context-skill-note="">

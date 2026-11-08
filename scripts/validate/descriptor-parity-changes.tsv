@@ -416,3 +416,10 @@ member	GET /v1/shared/contract	added	new by design, redesign.md §9.6
 route	GET /v1/plugins	added	new in 5.0: the inventory of installed plugins (id, on/off, contract hash) the app reads to mount a plugin's views only on a matching contract (design §9.6); no table of today's to copy
 route	GET /v1/glossary	added	new in 5.0: the one vocabulary every plugin's words are merged into at build, served as public vocabulary (design §1.3); no table of today's to copy
 socket	GET /v1/bus	added	new in 5.0: the plugin event bus, one { name, payload } frame per event the caller may see, with no socket of today's to copy
+route	DELETE /v1/skill-installs/local/project/:installId	removed	owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0
+route	DELETE /v1/skill-installs/local/runtime/:installId	removed	owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0
+route	GET /v1/skill-installs/local	removed	owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0
+route	POST /v1/skill-installs/local/project	removed	owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0
+route	POST /v1/skill-installs/local/project/preview	removed	owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0
+route	POST /v1/skill-installs/local/runtime	removed	owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0
+route	POST /v1/skill-installs/local/runtime/preview	removed	owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0

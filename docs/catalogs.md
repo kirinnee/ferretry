@@ -866,90 +866,6 @@ carries exactly one protocol payload: the
 applied install with its notes, the install list, or what was removed. The preview still goes out in full,
 as JSON on stderr, so a script never skips the review a person would have read.
 
-## Copying a skill from this machine
-
-A skill you already have on this machine can be copied into a project or a runtime without a catalog:
-another account's home (`~/.claude/skills`, a runtime's skills folder) or a registered project's
-`.claude/skills` / `.agents/skills`. It is the file installer's twin and keeps its rules
-(`packages/daemon/src/lib/local-skill-installs/`, wire in `packages/protocol/src/lib/local-skill-install.ts`).
-**Skills only**: an MCP server is never copied this way.
-
-| Route                                                | Capability             | What it does                                                                |
-| ---------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------- |
-| `POST /v1/skill-installs/local/project/preview`      | `filesystem.use`       | reads the source, answers the review and a `previewId`; writes nothing      |
-| `POST /v1/skill-installs/local/project`              | `filesystem.configure` | copies exactly that preview into a project folder                           |
-| `POST /v1/skill-installs/local/runtime/preview`      | `filesystem.use`       | the same, for a runtime and profile (it still reads files off this machine) |
-| `POST /v1/skill-installs/local/runtime`              | `fleet.configure`      | copies it as one fleet change                                               |
-| `GET /v1/skill-installs/local`                       | `fleet.use`            | what was copied, and where (project copies need `filesystem.use` too)       |
-| `DELETE /v1/skill-installs/local/project/:installId` | `filesystem.configure` | removes exactly the files that copy wrote                                   |
-| `DELETE /v1/skill-installs/local/runtime/:installId` | `fleet.configure`      | the same, for a runtime copy                                                |
-
-- **Person only.** Every route is `caller: 'person'`: **a ferret is refused on all seven**, previews and
-  list included (`403 forbidden`), because a copied skill is instructions a ferret will follow.
-- **The source is looked up, never opened on the caller's word.** The request names a `SKILL.md` path. The
-  daemon asks the same skills inventory as `GET /v1/skills` and re-resolves that path itself; a path the
-  inventory does not list (or no longer lists) is `local_skill_source_unknown`. Its folder is then read
-  without ever following a link, with the catalog's file-count and size caps. Links, binaries, oversized
-  and credential-named files, hard links and case collisions are **not copied and are said**
-  (`skipped`, with the reason, and the copy carries on without them); the executable bit is **not**
-  kept. A folder with no `SKILL.md` among the files it can carry, a name that is not a catalog name, or **more
-  files than a destination holds (64)** is `local_skill_source_invalid`, said at the **preview** so a copy that
-  could never be removed or updated is never made. The folder is read under the boundary the inventory listed it
-  under (the project root, or the fleet directory for an account home) and the real path of its folder is
-  checked against that boundary again when it is read, so a link swapped in since the listing is refused.
-- **The review is a catalog review.** Every file in full, hidden characters marked, the same warnings, and
-  the secret redaction the catalog review has. Where it is from is `origin` (account or project, and the
-  `SKILL.md` path), as this machine found it, never as the caller reported it.
-- **Your own files are shown whole, and a password is never copied.** The source is the person's own file on
-  this machine, shown to them and only to them (the routes are person-only), so the review draws every file
-  in full. A few shapes are certain enough to **refuse** the preview, naming the file and the line and never
-  showing the text (`local_skill_source_invalid`: "<file> line <n> holds what looks like a password or key. Remove
-  it, then copy the skill."): an address with a password in it (`scheme://user:pass@host`), a name that looks
-  like a secret given a value of 16 or more characters (`API_KEY=…`, `api_key = "…"`, YAML or JSON `token: …` /
-  `"token": "…"`; `$VAR`, `${VAR}` and `<…>` references are not values, and after `:` neither is a path or an
-  address), an `Authorization: Bearer <16+ characters>` header, `curl -u user:pass`, a credential in an address's query (`?token=…`, `&access_token=…`, `?api_key=…` with 16 or more characters), a PEM or PGP private key block (`-----BEGIN … PRIVATE KEY-----`, `-----BEGIN PGP PRIVATE KEY BLOCK-----`), and a well-known token on its own, even with a full stop right after it in prose (`ghp_…`, `github_pat_…`, `sk-…`, `xoxb-…`, `glpat-…`, `AKIA…`: the prefix list "See changes" owns, 20 or more characters with a digit in them, so `sk-learn-is-a-library` is prose). The scan is **linear** (a test feeds it 256 KiB of hostile text and holds it to well under a second). The text is read as "See
-  changes" reads it (invisible characters out, look-alike letters folded, and a name or value a line break split
-  put back together), by the same helpers (`catalog-installs/conservative-changes.ts`), so the two cannot drift. A broader test (`mayHoldSecret`, the one the "See changes" view uses) only **warns**, one
-  warning per file: "<file> mentions keys, tokens or passwords. Check it holds no secret value before you copy
-  it to <target>." Files are never rewritten.
-- **A preview writes nothing.** Previews live in memory for 600 seconds, up to 8 per caller, and are bound
-  to the caller that reviewed them. An apply writes **exactly** the bytes that were previewed (the preview
-  holds them; the source is not read a second time, so it cannot change between review and write). The
-  destination is judged again at apply, so a conflict that appeared since is still refused.
-- **A copy, never a link.** The files are written into the target and the two stay separate. A runtime copy is a
-  layer of a **profile**, so every runtime on that profile gets it (the preview's destination says so, and that it
-  replaces an earlier copy).
-- **It writes only through existing paths**: the project skill-folder port the catalog installer uses, and
-  for a runtime the fleet catalogue's `installCatalogItem` with a **synthetic provenance** (publisher
-  "This machine", catalog "Skills on this machine"; no signature exists because nobody published anything).
-  Removing a runtime copy goes through the fleet's own remove proposal.
-- **One passkey per apply.** A governed caller needs a fresh step-up for the act `catalog-install` (the
-  existing act: it is the same decision, installing instructions that will run, so no new act is minted);
-  the proof is claimed atomically and not given back. **Removing never asks.** A loopback caller is
-  ungoverned, and the CLI asks y/N.
-- **The record.** `<FY_HOME>/state/local-skill-installs.json`, mode `0600`, written by temp file and rename,
-  a sibling of the catalog install record with the same shape: each copy with the SHA-256 of every file it
-  wrote. Remove and update touch **only recorded files**, and a recorded file edited since is
-  `local_skill_conflict`. The record is a file on disk, so it is not trusted for where to act: a project copy is
-  removed or replaced only if its root is a project this machine knows and its folder is `.claude/skills/<name>`
-  or `.agents/skills/<name>` (and both agree with its key), otherwise `local_skill_target_unknown`. Anything at the destination that no record of ours wrote is a conflict, so a skill
-  you wrote by hand is never overwritten.
-- **Refusals** (`LOCAL_SKILL_REFUSALS`): `local_skill_source_unknown` (404), `local_skill_source_invalid`
-  (422), `local_skill_target_unknown` (404), `local_skill_preview_unknown` (404),
-  `local_skill_preview_expired` (410), `local_skill_conflict` (409), `local_skill_install_unknown` (404).
-  An unreadable record is `500`, never a fresh start.
-- **Audit.** `fleet.configured` with `detail.action` `local-skill-install` or `local-skill-remove` and the
-  scope: the skill's name, never a file ([audit.md](audit.md)).
-
-```
-fy skill install --from <skill folder or its SKILL.md> ( --to project --project <root> --harness claude|codex | --to runtime --runtime <r> --profile <p> ) [--yes] [--json]
-fy skill installs [--json]
-fy skill uninstall <installId> [--yes] [--json]
-```
-
-`install` previews, prints the whole review, asks y/N unless `--yes`, then applies. When the daemon wants
-a passkey it says so and changes nothing.
-
 ## Members (phase 2)
 
 **Status: the contract (2a) is written; 2b-1 and 2b-2 serve the publisher's half of it.** The relay's `join`
@@ -1464,42 +1380,6 @@ session** and **Refresh** at the top; the install review stays a sheet over it. 
 `.agents/skills` folder name, which suggests a running session may notice a new skill. Confirming that a _running
 session actually uses it_ needs a paid model run, which this slice did not make. Until it is checked the page claims
 only what is known; changing the sentence is one constant (`CODEX_NEXT`).
-
-### + Add skills, On this machine (&B131 A4)
-
-The Add skills page has a second group under the subscriptions, **On this machine**
-(`features/context-rail/machine-skills-group.tsx`, `machine-skills-model.ts`,
-`local-skill-install-sheet.tsx`). It is the app for ["Copying a skill from this machine"](#copying-a-skill-from-this-machine).
-
-- **What it lists**: the machine's skills inventory (`GET /v1/skills`: every account and every registered
-  project) **minus what this session already sees**. A skill is "already seen" when the session lists the same
-  `SKILL.md` path or the same name (case-folded). A skill listed by an account and a project at the same path is
-  one row. Each row has the name, "‹runtime› account" or "project ‹name›" with the agent, the description and
-  **Install** (or **Installed**, when the copy record holds a copy made from that path). The search field above
-  narrows both groups by every word typed.
-- **When it cannot be read** the group says so in one line ("Press Refresh to try again"), and the rest of the page still works. Refresh re-reads it too; if it still fails, the "Could not reach" line names this machine. An empty list says
-  that no other account or project has a skill this session lacks; a truncated inventory says some are not shown.
-- **Install** opens a sheet in two steps. First the **place**, defaulted exactly as the catalog installs above are
-  (**This project** when the session's folder is inside a registered project, otherwise **This account**). Then
-  **Review before installing** calls the preview route, and the review shows what the machine returned:
-  - the machine's **warning** sentences, each with its severity;
-  - **From** (the account or project and the path), **Into** (the destination), and **Replaces** when an earlier
-    copy would be replaced;
-  - **Not copied** (each file left behind, with the machine's reason);
-  - **every file in full**, with hidden characters marked, never hidden.
-- **A refusal has no Install button.** A password or key in a file is the machine's own sentence, "‹file› line ‹n›
-  holds what looks like a password or key. Remove it, then copy the skill.", shown as written (the daemon never
-  returns the text it matched). A source over the file cap, a skill that is gone, a place that is unknown, a
-  conflict and an expired preview each say what happened and that **nothing was installed**; an expired or unknown
-  preview offers **Preview again**. Changing the place drops a review that was already read.
-- **Install** asks the person's passkey (the `catalog-install` step-up) and applies exactly the previewed bytes.
-  A missing passkey says so and changes nothing.
-- **After it lands** the page says "Installed", where it went, any note the machine added, and the Skills list
-  re-reads. The sentence about the session is the one A2 uses, so the two sources never word it differently:
-  Claude "It is active in this session now.", Codex "It is active from the next session.", and a place the session
-  does not read says so.
-- **Wording**: the button is **Install** and the row **Installed**; **Add** is only the "+ Add skills" button. The
-  search field is labelled "Search skills" (it covers both groups).
 
 ## Links (catalogs 3f)
 
