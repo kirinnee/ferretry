@@ -275,6 +275,7 @@ route	POST /v1/sessions/:sessionId/composer	removed	session routes renamed /v1/s
 route	POST /v1/ferrets/:ferretId/composer	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/events	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/snapshot	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/snapshot	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/logs	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/logs	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/log-page	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
