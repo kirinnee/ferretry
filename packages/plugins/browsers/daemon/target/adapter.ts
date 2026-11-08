@@ -11,7 +11,8 @@ import type {
   TypeOptions,
   TypeResult,
 } from '@ferretry/core-vault/contract';
-import { type AgentControlReader, agentControlRefusal, ApiError, type FerretId } from '@ferretry/kernel/contract';
+import { agentControlRefusal, ApiError, type FerretId } from '@ferretry/kernel/contract';
+import type { AgentControlPolicy } from '../tools/service.ts';
 import type { BrowserInputFieldsPort, BrowserPushNumberRead } from './lib/contracts.ts';
 import type { ElementTarget } from './lib/element.ts';
 
@@ -26,12 +27,6 @@ export interface PageInputHost {
     work: (fields: BrowserInputFieldsPort, pageId: string) => Promise<T>,
   ): Promise<T>;
 }
-
-/**
- * "What agents may control › Browsers", as the page target reads it: core's `AgentControlPort` (Ferrets, the ONE reader
- * of the owner's switches), asked afresh for the ferret on every call. `undefined` while Ferrets is not serving.
- */
-export type PageControl = () => AgentControlReader | undefined;
 
 /** Today's refusal when Browsers is off (`forbidden` and `controlRefusal('browser')`, rebuild-ref agent-tools/service.ts:349-362). */
 const browsersOff = (): ApiError => new ApiError(403, agentControlRefusal('browser'), 'forbidden');
@@ -63,15 +58,18 @@ export class PageInputTarget implements InputTargetAdapter {
 
   constructor(
     private readonly host: PageInputHost,
-    private readonly control: PageControl,
+    /**
+     * "What agents may control" as the browser tools read it (`agentControlPolicy` over core's `AgentControlPort`, the
+     * ONE reader of the owner's switches): asked afresh for the ferret on every call, and failing closed itself.
+     */
+    private readonly control: AgentControlPolicy,
     private readonly dummy: () => string = throwawayValue,
   ) {}
 
-  /** Whether the ferret may control browsers right now; anything but the reader's plain yes is a no. */
+  /** Whether the ferret may control browsers right now; anything but the policy's plain yes is a no. */
   private async browsersOn(ferret: FerretId): Promise<boolean> {
     try {
-      const reader = this.control();
-      return reader !== undefined && (await reader.allows(ferret, 'browser')) === true;
+      return (await this.control.allows(ferret, 'browser')) === true;
     } catch {
       return false;
     }
@@ -134,7 +132,9 @@ export class PageInputTarget implements InputTargetAdapter {
     options?: TypeOptions,
   ): Promise<TypeResult> {
     if (target.kind !== 'page' || expected.kind !== 'page') return 'target_gone';
-    // Asked again at the write itself: a switch turned off after the look types nothing.
+    // Asked again at the write itself: a switch turned off after the look types nothing. `TypeResult` (Vault's contract)
+    // has no word for "Browsers is off", so this answers `target_gone`; the Vault then looks again (`refind`), and that
+    // look is refused with the Browsers sentence, so neither the owner nor the agent is told the page is gone (#42 N1).
     if (!(await this.browsersOn(ferret))) return 'target_gone';
     let began = false;
     try {
@@ -262,6 +262,10 @@ export class PageInputTarget implements InputTargetAdapter {
    * The push number the page shows (docs/input-requests.md, "Approve on your phone"), read by the browser in the page's
    * own queue, with the page's id so a page opened again under the name is told apart. Only a provider's own challenge
    * view is read: nothing the ferret points at. Nothing when the page is gone or this browser cannot read one.
+   *
+   * NOT GATED on the Browsers switch, and right only while that holds: nothing calls it in 5.0 yet, and whoever wires
+   * phone approvals (`push: true`) must call it only AFTER a gated `observe` (the card's raise) or the tools' gated
+   * `pageFor`, as today's phone approval did. A caller that reaches it first reads a page the switch says is off.
    */
   async pushNumber(
     ferret: FerretId,

@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import type { InputTargetFacts } from '@ferretry/core-vault/contract';
-import type { AgentControlReader, FerretId } from '@ferretry/kernel/contract';
+import type { FerretId } from '@ferretry/kernel/contract';
 import should from 'should';
+import type { AgentControlPolicy } from '../../../daemon/tools/service.ts';
 import { type PageInputHost, PageInputTarget, throwawayValue } from '../../../daemon/target/adapter.ts';
 import type {
   BrowserInputFacts,
@@ -11,7 +12,8 @@ import type {
 } from '../../../daemon/target/lib/contracts.ts';
 
 /** The owner's "What agents may control" switches with every kind on (the fixture default). */
-const ALL_ON = (): AgentControlReader => ({ allows: async () => true });
+/** Every switch on: the policy the browser tools and the page target share. */
+const ALL_ON: AgentControlPolicy = { allows: async () => true };
 
 /** A ferret's pages are asked for by the ferret's id. */
 const S1 = 's1' as FerretId;

@@ -20,9 +20,11 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import { ferret, type TestHost, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
 import daemon, { buildBrowsers } from '../../../daemon/index.ts';
-import { type PageControl, type PageInputHost, PageInputTarget } from '../../../daemon/target/adapter.ts';
+import { type PageInputHost, PageInputTarget } from '../../../daemon/target/adapter.ts';
 import type { BrowserInputFacts, BrowserInputFieldsPort } from '../../../daemon/target/lib/contracts.ts';
 import { TypedIdentities } from '../../../daemon/target/sign-in/identities.ts';
+import { agentControlPolicy } from '../../../daemon/tools/agent-control.ts';
+import type { AgentControlPolicy } from '../../../daemon/tools/service.ts';
 import { Tabs } from '../../support/tabs.ts';
 
 /** Today's sentence when Browsers is off, word for word (rebuild-ref agent-tools/policy.ts:96-101). */
@@ -125,7 +127,10 @@ describe('S2 the page target reads "What agents may control › Browsers" (Agent
     // Arrange — every other switch on, Browsers off.
     const { reader, asked } = switches('terminal', 'files', 'settings', 'scripts');
     const { host, calls } = page();
-    const target = new PageInputTarget(host, () => reader);
+    const target = new PageInputTarget(
+      host,
+      agentControlPolicy(() => reader),
+    );
 
     // Act — the Vault's `admit` looks first; a fill re-finds, then types; a secret's card probes.
     const looked = await refusalOf(async () => await target.observe(F1, APP, FIELDS));
@@ -155,7 +160,10 @@ describe('S2 the page target reads "What agents may control › Browsers" (Agent
     // Arrange
     const { reader, asked } = switches('browser');
     const { host, calls } = page();
-    const target = new PageInputTarget(host, () => reader);
+    const target = new PageInputTarget(
+      host,
+      agentControlPolicy(() => reader),
+    );
 
     // Act
     const looked = await target.observe(F1, APP, FIELDS);
@@ -173,7 +181,8 @@ describe('S2 the page target reads "What agents may control › Browsers" (Agent
 
   it('should fail closed: the port unbound, a lookup that throws, a reader that throws, or an answer that is not a plain yes', async () => {
     // Arrange
-    const controls: Record<string, PageControl> = {
+    // The port as the daemon half reads it, through the ONE policy the browser tools share (N2) …
+    const readers: Record<string, () => AgentControlReader | undefined> = {
       unbound: () => undefined,
       'lookup throws': () => {
         throw new TypeError('browsers: an optional port is unbound during build');
@@ -184,6 +193,16 @@ describe('S2 the page target reads "What agents may control › Browsers" (Agent
         },
       }),
       'truthy, not true': () => ({ allows: async () => 'yes' as unknown as boolean }),
+    };
+    // … and a policy that itself misbehaves, which the target still refuses.
+    const controls: Record<string, AgentControlPolicy> = {
+      ...Object.fromEntries(Object.entries(readers).map(([why, reader]) => [why, agentControlPolicy(reader)])),
+      'policy throws': {
+        allows: async () => {
+          throw new Error('the policy fell over');
+        },
+      },
+      'policy truthy, not true': { allows: async () => 1 as unknown as boolean },
     };
 
     for (const [why, control] of Object.entries(controls)) {
@@ -206,7 +225,10 @@ describe('S2 the page target reads "What agents may control › Browsers" (Agent
     // Arrange
     const owner = switches('browser');
     const { host, calls } = page();
-    const target = new PageInputTarget(host, () => owner.reader);
+    const target = new PageInputTarget(
+      host,
+      agentControlPolicy(() => owner.reader),
+    );
     const looked = await target.observe(F1, APP, FIELDS);
     should(looked.ok).be.true();
 
@@ -223,7 +245,10 @@ describe('S2 the page target reads "What agents may control › Browsers" (Agent
     // Arrange
     const { reader } = switches();
     const { host, calls } = page();
-    const target = new PageInputTarget(host, () => reader);
+    const target = new PageInputTarget(
+      host,
+      agentControlPolicy(() => reader),
+    );
 
     // Act
     const cleared = await target.arm(F1, APP, CLEAR_JOB);
