@@ -163,6 +163,46 @@ describe('the app half the shell builds', () => {
     expect(ask.querySelector('button')).toBeNull();
   });
 
+  it('S-0298 feature board: a &F7 reference links only a card the machine lists, whether or not its read answers', async () => {
+    // The machine lists F1 and F7 but refuses to read F7 in full; it has never heard of F404.
+    const listing: PluginClient = {
+      call: async (route: string, init?: { readonly params?: Readonly<Record<string, string>> }) => {
+        if (route === 'GET /v1/board/ids') return { ids: ['F1', 'F7'] };
+        if (route === 'GET /v1/board/cards/:cardId') {
+          const found = CARDS.find(entry => entry.id === init?.params?.cardId);
+          if (found === undefined) throw Object.assign(new Error('refused'), { status: 403 });
+          return { card: found, laneSet: laneSetFor() };
+        }
+        throw new Error(`no route ${route}`);
+      },
+      subscribe: () => () => undefined,
+    } as unknown as PluginClient;
+    const listed = app.build?.({ manifest, client: listing });
+
+    const proved = await draw<RendererProps>(
+      listed?.renderers['reference:&'],
+      { value: '&F7' },
+      node => node.querySelector('a') !== null,
+      'the listed card links although its read was refused',
+    );
+    expect(proved.querySelector('a')?.getAttribute('href')).toBe(cardPagePath('F7'));
+    await view?.unmount();
+
+    const unproved = await draw<RendererProps>(
+      listed?.renderers['reference:&'],
+      { value: '&F404' },
+      node => (node.textContent ?? '').includes('F404'),
+      'the unlisted card reads as plain text',
+    );
+    await settleUntil(
+      () => true,
+      () => 'settled',
+      interact,
+    );
+    expect(unproved.querySelector('a')).toBeNull();
+    expect(unproved.textContent).toBe('&F404');
+  });
+
   it('S-0298 feature board: the card is read-only status, so its page draws no answer surface', async () => {
     const root = await draw<ScreenProps>(
       half?.screens.card,
