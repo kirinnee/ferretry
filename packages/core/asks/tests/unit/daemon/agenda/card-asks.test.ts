@@ -7,6 +7,7 @@ import {
   applyCardAsk,
   type CardAskOperation,
   type CardAskOutcome,
+  restRefusal,
   sealCardAsks,
 } from '../../../../daemon/lib/agenda/card-asks.ts';
 
@@ -340,6 +341,25 @@ describe('a card’s own agenda, when its only ask is withdrawn', () => {
     should(after.questionAnswer).equal('Fixed it, try again');
   });
 
+  it('rests a touched sealed card agenda on the owner’s own answer that the withdrawn ask had kept in Needs you', () => {
+    // Arrange — the owner answered the agenda’s own question and talked on it, so it is no longer as the daemon left it
+    const { apply } = world();
+    const asked = changed(apply(sealCardAsks(cardAgenda()), attach('F1'), 1));
+    const answeredAndTalked = {
+      ...asked,
+      ownerAnswer: { at: at(2), response: { kind: 'multiple-choice', choice: 'hm' }, request: 1 },
+      history: [...(asked.history ?? []), talk],
+    } as unknown as AgendaItem;
+    should(agendaState(answeredAndTalked).state).equal('needs-you');
+
+    // Act
+    const after = changed(apply(answeredAndTalked, withdraw('F1'), 4));
+
+    // Assert
+    should(agendaState(after).state).equal('resting');
+    should(after.resting?.sub).equal('waiting-on-ferret');
+  });
+
   it('rests when the owner answered, as an answer is what the agenda holds', () => {
     // Arrange
     const { apply } = world();
@@ -459,5 +479,32 @@ describe('one plain line of the daemon’s (a card with nothing to try)', () => 
     // Assert — the thread goes back to the turn the ask woke it out of, as it would have without the line
     should(agendaState(withdrawn).state).equal(agendaState(thread()).state);
     should(withdrawn.waitingSince).equal(thread().waitingSince);
+  });
+});
+
+describe('why a ferret may not rest an agenda that carries a card ask', () => {
+  it('names the cards whose ask still waits on the owner', () => {
+    // Arrange
+    const { apply } = world();
+    const both = changed(apply(changed(apply(cardAgenda(), attach('F1'), 1)), attach('F2'), 2));
+
+    // Act
+    const refusal = restRefusal(both);
+
+    // Assert
+    should(refusal).equal(
+      'A1 carries the ask of &F1, &F2, which waits on the owner: it stays in Needs you until they answer',
+    );
+  });
+
+  it('has no refusal when no ask is open, or when the owner set every open ask aside with Not yet', () => {
+    // Arrange
+    const { apply } = world();
+    const asked = changed(apply(cardAgenda(), attach('F1'), 1));
+    const setAside = changed(apply(asked, { kind: 'not-yet', reference: reference('F1') }, 2));
+
+    // Assert
+    should(restRefusal(cardAgenda())).be.undefined();
+    should(restRefusal(setAside)).be.undefined();
   });
 });
