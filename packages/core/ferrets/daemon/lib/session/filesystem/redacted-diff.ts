@@ -8,33 +8,31 @@ import type { RedactionScope } from '@ferretry/kernel/contract';
  * (denied / ignored → 403) is a gate that runs before this and stays as it is; this adds to it.
  *
  * A secret that spans lines is not one run of text in a diff, because every line carries its marker (`+`, `-` or a
- * space). So the body lines of one hunk are masked in runs of the SAME marker: the markers come off, the run's
- * lines are joined with `\n` and masked as one text, and the markers go back on. A value added over several lines
- * (a key file) is therefore found whole, where masking line by line would not find it. Headers and hunk headers
- * (which can carry a source line) are masked one line at a time.
+ * space) and a changed value is split across them. So each hunk is looked at three ways and the coverage is the
+ * UNION (the way Terminals masks each row and the whole capture): runs of lines with the SAME marker, the hunk's
+ * OLD side (context + removed, in order) and its NEW side (context + added). Each look is matched as one text by the
+ * scope, so a value whose first and last lines are unchanged context and whose body is added is found whole.
+ *
+ * Masking is POSITIONAL: a covered character becomes `*` on the diff line it came from, one mask per original
+ * line, so line counts and hunk headers stay true. Headers and hunk headers (which can carry a source line) are
+ * masked one line at a time.
  */
 export function redactedDiffText(diff: string, scope: RedactionScope): string {
   const out: string[] = [];
-  let marker: ' ' | '+' | '-' | undefined;
-  let run: string[] = [];
+  let body: Body[] = [];
   let inHunk = false;
 
   const flush = (): void => {
-    if (marker !== undefined) {
-      const masked = scope.text(run.join('\n')).split('\n');
-      for (const line of masked) out.push(marker + line);
-    }
-    marker = undefined;
-    run = [];
+    out.push(...maskHunk(body, scope));
+    body = [];
   };
 
   for (const line of diff.split('\n')) {
     if (line.startsWith('diff --git')) inHunk = false;
     const lead = line.charAt(0);
-    if (inHunk && (lead === ' ' || lead === '+' || lead === '-')) {
-      if (marker !== lead) flush();
-      marker = lead;
-      run.push(line.slice(1));
+    // An empty line inside a hunk is a blank context line (`diff.suppressBlankEmpty`), not the end of the run.
+    if (inHunk && (lead === ' ' || lead === '+' || lead === '-' || line === '')) {
+      body.push({ line, marker: line === '' ? ' ' : (lead as Marker), text: line.slice(1) });
       continue;
     }
     flush();
@@ -43,4 +41,58 @@ export function redactedDiffText(diff: string, scope: RedactionScope): string {
   }
   flush();
   return out.join('\n');
+}
+
+type Marker = ' ' | '+' | '-';
+interface Body {
+  readonly line: string;
+  readonly marker: Marker;
+  readonly text: string;
+}
+
+/** Which characters of each entry a look covers, entry by entry (the scope keeps every string's length). */
+function look(entries: readonly number[], body: readonly Body[], scope: RedactionScope, covered: boolean[][]): void {
+  if (entries.length === 0) return;
+  const texts = entries.map(at => (body[at]?.text ?? '') + '\n');
+  const masked = scope.lines(texts);
+  entries.forEach((at, position) => {
+    const before = texts[position] ?? '';
+    const after = masked[position] ?? before;
+    const row = covered[at];
+    if (row === undefined) return;
+    for (let char = 0; char < before.length - 1; char++) if (after[char] !== before[char]) row[char] = true;
+  });
+}
+
+function maskHunk(body: readonly Body[], scope: RedactionScope): string[] {
+  if (body.length === 0) return [];
+  const covered = body.map(entry => Array.from<boolean>({ length: entry.text.length }).fill(false));
+  const all = body.map((_, at) => at);
+  // The same-marker runs, the old side and the new side.
+  let run: number[] = [];
+  for (const at of all) {
+    if (run.length > 0 && body[run[0] ?? 0]?.marker !== body[at]?.marker) {
+      look(run, body, scope, covered);
+      run = [];
+    }
+    run.push(at);
+  }
+  look(run, body, scope, covered);
+  look(
+    all.filter(at => body[at]?.marker !== '+'),
+    body,
+    scope,
+    covered,
+  );
+  look(
+    all.filter(at => body[at]?.marker !== '-'),
+    body,
+    scope,
+    covered,
+  );
+  return body.map((entry, at) => {
+    const row = covered[at] ?? [];
+    if (!row.includes(true)) return entry.line;
+    return entry.line.charAt(0) + [...entry.text].map((char, index) => (row[index] === true ? '*' : char)).join('');
+  });
 }

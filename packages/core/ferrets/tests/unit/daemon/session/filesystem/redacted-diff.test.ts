@@ -22,8 +22,9 @@ describe('the outbound diff projection (R-0150)', () => {
     const raw = `diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n ctx ${ONE_LINE}\n-old ${ONE_LINE}\n+new ${ONE_LINE}\n`;
     const out = await project(raw);
     should(out.includes(ONE_LINE)).be.false();
+    const stars = '*'.repeat(ONE_LINE.length);
     should(out).eql(
-      'diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n ctx [redacted:ONE]\n-old [redacted:ONE]\n+new [redacted:ONE]\n',
+      `diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n ctx ${stars}\n-old ${stars}\n+new ${stars}\n`,
     );
   });
 
@@ -32,7 +33,8 @@ describe('the outbound diff projection (R-0150)', () => {
     const out = await project(raw);
     should(out.includes(FIRST)).be.false();
     should(out.includes(SECOND)).be.false();
-    should(out.startsWith('@@ -0,0 +1,2 @@\n+[redacted:MULTI]')).be.true();
+    should(out.split('\n').length === raw.split('\n').length).be.true();
+    should(out.startsWith(`@@ -0,0 +1,2 @@\n+${'*'.repeat(FIRST.length)}\n+${'*'.repeat(SECOND.length)}`)).be.true();
   });
 
   it('R-0150 masks a value carried by a hunk header', async () => {
@@ -50,6 +52,48 @@ describe('the outbound diff projection (R-0150)', () => {
     const raw = `@@ -1 +1 @@\n--- ${ONE_LINE}\n+++ ${ONE_LINE}\n`;
     const out = await project(raw);
     should(out.includes(ONE_LINE)).be.false();
-    should(out.startsWith('@@ -1 +1 @@\n--- [redacted:ONE]\n+++ [redacted:ONE]')).be.true();
+    should(
+      out.startsWith(`@@ -1 +1 @@\n--- ${'*'.repeat(ONE_LINE.length)}\n+++ ${'*'.repeat(ONE_LINE.length)}`),
+    ).be.true();
+  });
+
+  const BEGIN = 'fixture-begin-line-0005';
+  const END = 'fixture-end-line-0006';
+  const BODY = 'fixture-body-line-0007';
+  const KEY = `${BEGIN}\n${BODY}\n${END}`;
+  const projectKey = async (diff: string): Promise<string> =>
+    await new FakeRedaction(new Map([['KEY' as never, KEY]])).read(scope => redactedDiffText(diff, scope));
+
+  it('R-0150 a multi-line value whose first and last lines are unchanged context is masked whole', async () => {
+    const raw = `@@ -1,3 +1,3 @@\n ${BEGIN}\n-old-body\n+${BODY}\n ${END}\n`;
+    const out = await projectKey(raw);
+    should(out.includes(BODY)).be.false();
+    should(out.includes(BEGIN)).be.false();
+    should(out.includes(END)).be.false();
+    should(out.split('\n').length === raw.split('\n').length).be.true();
+  });
+
+  it('R-0150 the removed side mirror: context ends around removed body lines are masked whole', async () => {
+    const raw = `@@ -1,3 +1,3 @@\n ${BEGIN}\n-${BODY}\n+new-body\n ${END}\n`;
+    const out = await projectKey(raw);
+    should(out.includes(BODY)).be.false();
+    should(out.includes(BEGIN)).be.false();
+    should(out.includes(END)).be.false();
+  });
+
+  it('R-0150 a blank context line (suppressBlankEmpty) does not break a run', async () => {
+    const key = `${BEGIN}\n\n${END}`;
+    const raw = `@@ -1,3 +1,3 @@\n ${BEGIN}\n\n ${END}\n`;
+    const out = await new FakeRedaction(new Map([['KEY' as never, key]])).read(scope => redactedDiffText(raw, scope));
+    should(out.includes(BEGIN)).be.false();
+    should(out.includes(END)).be.false();
+    should(out.split('\n').length === raw.split('\n').length).be.true();
+  });
+
+  it('R-0150 masking never collapses lines: one mask per original line', async () => {
+    const raw = `@@ -0,0 +1,3 @@\n+${BEGIN}\n+${BODY}\n+${END}\n`;
+    const out = await projectKey(raw);
+    should(out.split('\n').length === raw.split('\n').length).be.true();
+    should(out.includes('redacted')).be.false();
   });
 });

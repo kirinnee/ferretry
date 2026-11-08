@@ -64,6 +64,7 @@ const tree = () => treeOf(['', directory([{ name: 'a.ts', type: 'file' }])], ['a
 const LIST = 'GET /v1/ferrets/:ferretId/fs';
 const INDEX = 'GET /v1/ferrets/:ferretId/fs/index';
 const CHANGES = 'GET /v1/ferrets/:ferretId/fs/changes';
+const FILE = 'GET /v1/ferrets/:ferretId/fs/file';
 const DIFF = 'GET /v1/ferrets/:ferretId/fs/diff';
 const ALL: readonly FileBrowserRouteKey[] = [INDEX, CHANGES, DIFF, LIST];
 
@@ -249,10 +250,73 @@ describe('the diff route', () => {
     const served = String(response.body);
     should(response.status).eql(200);
     should(served.includes(FIXTURE_SECRET)).be.false();
-    should(served.includes('[redacted:DIFF_FIXTURE]')).be.true();
+    should(served.includes('*'.repeat(FIXTURE_SECRET.length))).be.true();
     should(served.includes('-const key = "old";')).be.true();
     should(internal.diff === raw).be.true();
     should(internal.diff.includes(FIXTURE_SECRET)).be.true();
+  });
+
+  it('R-0151 a file holding a vault secret comes back REDACTED, in text and in base64, while the file on disk keeps the real bytes', async () => {
+    const text = `const key = "${FIXTURE_SECRET}";\n`;
+    const { ask, filesystem } = fixture(
+      { tree: treeOf(['a.ts', textFile(text)]) },
+      { isTracked: () => true },
+      person,
+      withSecret(),
+    );
+
+    const served = await ask(FILE, { query: { path: 'a.ts' } });
+    const encoded = await ask(FILE, { query: { path: 'a.ts', format: 'base64' } });
+    const internal = await filesystem.readFile(SESSION_CWD, 'a.ts', {});
+
+    should(served.status).eql(200);
+    should(JSON.stringify(served.body).includes(FIXTURE_SECRET)).be.false();
+    should(JSON.stringify(served.body).includes('*'.repeat(FIXTURE_SECRET.length))).be.true();
+    const decoded = Buffer.from(
+      String((JSON.parse(String(encoded.body)) as { base64?: string }).base64),
+      'base64',
+    ).toString('utf8');
+    should(decoded.includes(FIXTURE_SECRET)).be.false();
+    should(decoded.includes('*'.repeat(FIXTURE_SECRET.length))).be.true();
+    should(internal.content === text).be.true();
+  });
+
+  it('R-0151 a denied file is still its badge when the vault cannot open, and an allowed one serves nothing', async () => {
+    const broken: Pick<Redaction, 'read'> = {
+      read: async () => {
+        throw new Error('the vault could not open');
+      },
+    };
+    const { ask } = fixture(
+      { tree: treeOf(['a.ts', textFile(FIXTURE_SECRET)]) },
+      { isTracked: () => true },
+      person,
+      broken,
+    );
+
+    const outcome = await ask(FILE, { query: { path: 'a.ts' } }).then(
+      response => JSON.stringify(response.body),
+      (error: unknown) => (error instanceof Error ? error.message : ''),
+    );
+
+    should(outcome.includes(FIXTURE_SECRET)).be.false();
+    should(outcome).eql('the vault could not open');
+  });
+
+  it('R-0151 a masked read is NOT a way to overwrite the file: no fs write route exists, so the masked body cannot be saved back', async () => {
+    const { ask } = fixture(
+      { tree: treeOf(['a.ts', textFile(FIXTURE_SECRET)]) },
+      { isTracked: () => true },
+      person,
+      withSecret(),
+    );
+    const { sessionFilesystemRoutes: routes } = await import(
+      '../../../../../daemon/lib/runtime/mounts/session-filesystem.ts'
+    );
+    const keys = Object.keys(routes({ filesystem: undefined, reach: person, redaction: noSecrets() }));
+
+    should(keys.every(key => key.startsWith('GET '))).be.true();
+    await ask(FILE, { query: { path: 'a.ts' } });
   });
 
   it('R-0150 a vault that cannot open serves no diff at all', async () => {
@@ -279,6 +343,53 @@ describe('the diff route', () => {
     // Assert
     should(outcome.includes(FIXTURE_SECRET)).be.false();
     should(outcome).eql('the vault could not open');
+  });
+
+  it('R-0150 a denied diff is still a 403 when the vault cannot open', async () => {
+    const broken: Pick<Redaction, 'read'> = {
+      read: async () => {
+        throw new Error('the vault could not open');
+      },
+    };
+    const { ask } = fixture({ tree: treeOf(['.env', textFile('TOKEN=1')]) }, { isTracked: () => true }, person, broken);
+
+    const refusal = await refusalOf(ask(DIFF, { query: { path: '.env' } }));
+
+    should(refusal).eql({ status: 403, code: 'denied' });
+  });
+
+  it('R-0150 the vault is opened only after the gates pass', async () => {
+    let opened = 0;
+    const counting: Pick<Redaction, 'read'> = {
+      read: async fn => {
+        opened += 1;
+        return await withSecret().read(fn);
+      },
+    };
+    const raw = `@@ -1 +1 @@\n+x\n`;
+    const make = (git: SessionGitScript, files: FakeRootOptions) => fixture(files, git, person, counting);
+
+    await refusalOf(make({ isTracked: () => true }, { tree: tree() }).ask(DIFF));
+    await refusalOf(
+      make({ isTracked: () => true }, { tree: treeOf(['.env', textFile('TOKEN=1')]) }).ask(DIFF, {
+        query: { path: '.env' },
+      }),
+    );
+    await refusalOf(
+      make({ isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: true }) }, { tree: tree() }).ask(
+        DIFF,
+        { query: { path: 'a.ts' } },
+      ),
+    );
+    const refused = opened;
+    const served = await make(
+      { isTracked: () => true, diffSnapshots: () => ({ diff: raw, truncated: false }) },
+      { tree: tree() },
+    ).ask(DIFF, { query: { path: 'a.ts' } });
+
+    should(refused).eql(0);
+    should(served.status).eql(200);
+    should(opened).eql(1);
   });
 
   it('R-0150 the secrets-policy refusal still runs first, and a denied diff is still a 403', async () => {

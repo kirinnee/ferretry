@@ -67,7 +67,7 @@ Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.j
 - Jobs count source sites, including adapter schedulers, one-shot/backoff timers and lifecycle arming calls. Multiple sites can participate in one runtime job.
 - Files are source declarations and parameterized path families, never a scan of a real home. Relative families retain their symbolic root and confinement-review note. Several modules may declare the same file.
 - Removed rows cite a section that explicitly deletes the old behavior/file. A rename or moved feature remains required. No converter is authorized by this list (§9.1).
-- R-0150 (the session file diff) is a deliberate 5.0 hardening, not a parity break: the diff text a caller receives now has every vault secret masked, on top of the unchanged secrets-policy 403.
+- R-0150 (the session file diff) and R-0151 (the session file read) are a deliberate 5.0 hardening, not a parity break: the text a caller receives now has every vault secret masked wherever it shows, on top of the unchanged secrets-policy gates.
 
 ## Unplaced rows
 

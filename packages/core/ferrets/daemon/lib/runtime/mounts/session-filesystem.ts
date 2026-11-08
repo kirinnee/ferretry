@@ -14,7 +14,10 @@ import {
   FsError,
   type FsErrorCode,
   MAX_FILE_BYTES,
+  type FsFileView,
   redactedDiffText,
+  redactedFileBase64,
+  redactedFileText,
   type SessionFilesystem,
   type SessionReadFence,
 } from '../../session/filesystem/index.ts';
@@ -151,12 +154,8 @@ async function changes(
  * carry a flag. A TRUNCATED diff is a 413 for a stronger reason — a partial diff is actively misleading in
  * a review surface, because the missing tail renders as content that was never removed.
  */
-async function diff(
-  filesystem: SessionFilesystem,
-  deps: FileBrowserDeps,
-  context: RouteContext,
-  scope: RedactionScope,
-): Promise<ApiResponse> {
+// read-scoped: none — gates and git only; the diff text leaves through diffResponse(scope), never from here
+async function diff(filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext): Promise<ApiResponse> {
   const { cwd, fence } = await deps.reach(context);
   const target = requiredPath(context);
   let view: Awaited<ReturnType<SessionFilesystem['diff']>>;
@@ -171,7 +170,14 @@ async function diff(
   if (view.truncated) {
     throw new ApiError(413, `diff exceeds the ${MAX_FILE_BYTES}-byte response limit`, 'too_large');
   }
-  return textResponse(redactedDiffText(view.diff, scope));
+  // The vault opens HERE and only here: every refusal above was decided without it, and a vault that cannot open
+  // serves no diff at all (it fails closed).
+  return await deps.redaction.read(scope => diffResponse(view.diff, scope));
+}
+
+/** The one place diff text leaves the daemon: masked through the read's scope. */
+function diffResponse(text: string, scope: RedactionScope): ApiResponse {
+  return textResponse(redactedDiffText(text, scope));
 }
 
 /**
@@ -179,6 +185,7 @@ async function diff(
  * folder, which this daemon keeps in its own state and does not serve through the working-tree walk: it answers
  * 404, as today's daemon did when it kept no media folder. `rev=head` reads the committed bytes.
  */
+// read-scoped: none — gates and file reads only; the bytes leave through fileResponse(scope), never from here
 async function file(filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext): Promise<ApiResponse> {
   fileQuery(context);
   if (queryValue(context.request, 'scope') === 'media')
@@ -187,17 +194,27 @@ async function file(filesystem: SessionFilesystem, deps: FileBrowserDeps, contex
   const target = requiredPath(context);
   const rev = queryValue(context.request, 'rev');
   const format = queryValue(context.request, 'format');
+  let view: Awaited<ReturnType<SessionFilesystem['readFile']>>;
   try {
-    return jsonResponse(
-      await filesystem.readFile(cwd, target, {
-        ...(rev === 'head' ? { rev: 'head' as const } : {}),
-        ...(format === 'base64' ? { base64: true } : {}),
-        ...(fence === undefined ? {} : { fence }),
-      }),
-    );
+    view = await filesystem.readFile(cwd, target, {
+      ...(rev === 'head' ? { rev: 'head' as const } : {}),
+      ...(format === 'base64' ? { base64: true } : {}),
+      ...(fence === undefined ? {} : { fence }),
+    });
   } catch (error) {
     return refuse(error);
   }
+  // The vault opens HERE and only here (after every gate); a vault that cannot open serves no bytes (fail closed).
+  return await deps.redaction.read(scope => fileResponse(view, scope));
+}
+
+/** The one place file bytes leave the daemon: text masked through the read's scope, character for character. */
+function fileResponse(view: FsFileView, scope: RedactionScope): ApiResponse {
+  return jsonResponse({
+    ...view,
+    ...(view.content === undefined ? {} : { content: redactedFileText(view.content, scope) }),
+    ...(view.base64 === undefined ? {} : { base64: redactedFileBase64(view.base64, scope) }),
+  });
 }
 
 /**
@@ -268,9 +285,7 @@ export function sessionFilesystemRoutes(deps: FileBrowserDeps): { readonly [K in
     'GET /v1/ferrets/:ferretId/fs/file': bound(file),
     'GET /v1/ferrets/:ferretId/fs/index': bound(index),
     'GET /v1/ferrets/:ferretId/fs/changes': bound(changes),
-    'GET /v1/ferrets/:ferretId/fs/diff': bound((filesystem, routeDeps, context) =>
-      routeDeps.redaction.read(scope => diff(filesystem, routeDeps, context, scope)),
-    ),
+    'GET /v1/ferrets/:ferretId/fs/diff': bound(diff),
     'GET /v1/ferrets/:ferretId/fs': bound(list),
   };
 }

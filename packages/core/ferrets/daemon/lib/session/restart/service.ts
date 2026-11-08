@@ -187,8 +187,13 @@ export class RestartService {
       // A person asking again starts the ferret's backoff over: the drain may try it at its next tick.
       this.#retries.delete(subject.id);
       // read-scoped: none — the only detail ever queued is RestartBusy's one fixed sentence, no interpolated text
-      const wait = (reason: RestartQueueReason, detail?: string): void => {
-        queued.push({ id: subject.id, ...named(subject), reason, ...(detail === undefined ? {} : { detail }) });
+      const wait = (reason: RestartQueueReason): void => {
+        queued.push({
+          id: subject.id,
+          ...named(subject),
+          reason,
+          ...(reason === 'in-flight' ? { detail: RESTART_BUSY_DETAIL } : {}),
+        });
         waiting.set(subject.id, {
           id: subject.id,
           ...named(subject),
@@ -206,7 +211,7 @@ export class RestartService {
           restarted.push({ id: subject.id, ...named(subject) });
           waiting.delete(subject.id);
         } catch (error) {
-          if (error instanceof RestartBusy) wait('in-flight', RESTART_BUSY_DETAIL);
+          if (error instanceof RestartBusy) wait('in-flight');
           else failed.push({ id: subject.id, ...named(subject), reason: message(error) });
         }
       }
