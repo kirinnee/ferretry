@@ -193,6 +193,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       folder: 'cli/index.ts',
       reason: 'hands fy own process environment to the tmux attach in the person terminal (lead ruling)',
     },
+    {
+      pkg: 'terminals',
+      folder: 'daemon/adapters/host/fs.ts',
+      reason:
+        'the single host-fs seam for owner-named executables, output files and login shells outside FY_HOME, and the /proc and /sys reads; its one environment read is SHELL (lead ruling, DECISIONS-2 #21)',
+    },
   ];
 
 export function bannedScope(pkg: WorkspacePackage, file: string): boolean {

@@ -14,8 +14,8 @@ export { availableParallelism, homedir, totalmem, userInfo } from 'node:os';
 /** The platform this daemon runs on (`process.platform`). */
 export const hostPlatform: string = process.platform;
 
-/** This daemon's own environment, read for the login shell (`SHELL`) and nothing else. */
-export const hostEnvironment: Readonly<Record<string, string | undefined>> = process.env;
+/** The one environment variable Terminals reads, the login shell (`SHELL`): by name, never the whole environment. */
+export const hostEnvironment: Readonly<Record<string, string | undefined>> = { SHELL: process.env.SHELL };
 
 /** A whole file as text (today's `Bun.file(path).text()`). */
 export async function readText(path: string): Promise<string> {
