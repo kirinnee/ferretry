@@ -480,7 +480,8 @@ export interface RootPublishOptions {
 
 /** What a {@link RootHandle.publish} came to: the file the name now reaches, or that someone else's was there first. */
 export type RootPublished =
-  { readonly outcome: 'published'; readonly identity: RootIdentity } | { readonly outcome: 'exists' };
+  | { readonly outcome: 'published'; readonly identity: RootIdentity }
+  | { readonly outcome: 'exists' };
 
 /** {@link RootHandle.readDurable}: the bytes, and the identity of the file they were read from. */
 export interface RootDurableRead {
@@ -488,7 +489,7 @@ export interface RootDurableRead {
   readonly identity: RootIdentity;
 }
 
-/** {@link RootHandle.readDurableHeld}: what was read, and a question the caller asks while the file is still held. */
+/** The `hold` argument of {@link RootHandle.readDurable}: what was read, and a question the caller asks while the file is still held. */
 export interface RootDurableHeld extends RootDurableRead {
   /** Whether the NAME still reaches the very inode that was read (the descriptor pins it, so it cannot be reused). */
   stillNames(): Promise<boolean>;
@@ -529,7 +530,7 @@ export interface RootHandle {
    * Reads a file through one held descriptor and fsyncs THAT descriptor before answering, so the bytes returned are
    * the bytes made durable; `undefined` only when nothing is at the name. Fenced exactly as `readBytes`; a name that
    * is mid-publish by `link` (two names for a moment) is waited out briefly rather than refused (and
-   * a leftover second name of this root's own interrupted publish is removed). With `hold`, the descriptor stays OPEN
+   * a leftover second name of this root's own interrupted publish is removed, but ONLY on an internal, writable root: on a read-only or owner root it stays refused as `hard_link`). With `hold`, the descriptor stays OPEN
    * until `hold` settles and its answer is returned (`hold` is not called when nothing is at the name), so a caller
    * that syncs the folder and then asks `stillNames` compares against an inode that cannot have been freed and
    * reused meanwhile.

@@ -534,8 +534,11 @@ async function publishChecked(
 
 /**
  * A file with exactly one extra name, which is this root's own leftover `.<leaf>.<random>.tmp` from an interrupted
- * exclusive publish (same folder, same device and inode): removes that name through the checked folder's descriptor
- * and says so. A stranger's hard link (any other name, any other folder) is never touched, so it stays refused.
+ * exclusive publish, or the private `.<leaf>.<random>.adopt` name an interrupted adoption moved it to (same folder, same device and inode): removes that name through the checked folder's descriptor
+ * and says so. If a stranger's file is renamed onto the candidate name in the look-to-move window it is linked back;
+ * when even that name was re-taken it stays under the private `.adopt` name (bytes kept, name lost; no kernel writer
+ * does this). "Internal" roots include ones other programs also write (agent homes, worktrees, downloads): only a
+ * same-inode second name is removed, so the bytes always stay at the leaf. A stranger's hard link (any other name, any other folder) is never touched, so it stays refused.
  */
 async function adoptLeftoverName(scope: Scope, full: string, random: () => string): Promise<boolean> {
   const target = await scope.fs.realpath(full);
@@ -546,7 +549,10 @@ async function adoptLeftoverName(scope: Scope, full: string, random: () => strin
     const found = await scope.fs.identity(await entry(scope, folder, folderPath, leaf));
     if (found?.kind !== 'file' || found.links !== 2) return false;
     const names = (await scope.fs.list(folderPath)).filter(
-      name => name.length > leaf.length + 6 && name.startsWith(`.${leaf}.`) && name.endsWith('.tmp'),
+      name =>
+        name.length > leaf.length + 6 &&
+        name.startsWith(`.${leaf}.`) &&
+        (name.endsWith('.tmp') || name.endsWith('.adopt')),
     );
     let removed = false;
     for (const name of names) {
@@ -563,8 +569,11 @@ async function adoptLeftoverName(scope: Scope, full: string, random: () => strin
       }
       const moved = await scope.fs.identity(aside);
       if (moved?.kind === 'file' && same(found, moved)) {
-        await scope.fs.unlink(aside).catch(() => undefined);
-        removed = true;
+        const unlinked = await scope.fs.unlink(aside).then(
+          () => true,
+          () => false,
+        );
+        if (unlinked) removed = true;
         continue;
       }
       // Not ours after all: put it back under its name (an existing name wins; then it stays under the private one).

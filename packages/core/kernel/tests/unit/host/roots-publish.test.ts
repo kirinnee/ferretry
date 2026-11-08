@@ -69,7 +69,12 @@ async function world(
     { home: `${parent}/home`, plugin: 'ferrets', worktrees: `${parent}/worktrees` },
     [kind],
     () => folders,
-    { random: () => `t${String((counter += 1))}` },
+    {
+      random: () => {
+        counter += 1;
+        return `t${String(counter)}`;
+      },
+    },
   ).root(kind, kind === 'work' ? { ferret: 'F1' as FerretId } : kind === 'downloads' ? undefined : { subfolder: work });
   return { parent, work, root, events };
 }
@@ -522,12 +527,15 @@ describe('writeNew cleanup', () => {
     parents.push(parent);
     const path = `${parent}/leaf.json`;
     // the fill replaces the name with another publisher's file, then fails
-    async function* intruder(): AsyncGenerator<Uint8Array> {
-      await writeFile(`${parent}/other.json`, 'theirs');
-      await rename(`${parent}/other.json`, path);
-      throw Object.assign(new Error('no space'), { code: 'ENOSPC' });
-      yield new Uint8Array();
-    }
+    const intruder = (): AsyncIterable<Uint8Array> => ({
+      [Symbol.asyncIterator]: () => ({
+        next: async (): Promise<IteratorResult<Uint8Array>> => {
+          await writeFile(`${parent}/other.json`, 'theirs');
+          await rename(`${parent}/other.json`, path);
+          throw Object.assign(new Error('no space'), { code: 'ENOSPC' });
+        },
+      }),
+    });
 
     expect(await refusalOf(async () => await real.writeNew(path, intruder() as never, 0o600))).toBe(
       'error:Error: no space',
@@ -678,6 +686,46 @@ describe('adopting a leftover on an internal root', () => {
 
     expect(await refusalOf(async () => await root.readDurable(at(root, 'd/r.json')))).toBe('refused:hard_link');
     expect(adoptions).toBe(1);
+  });
+});
+
+describe('adopting the private name an interrupted adoption left', () => {
+  test('a crash between the rename-aside and the unlink (a same-inode .adopt name) leaves the record readable and publishable', async () => {
+    const { root, work } = await world(undefined, 'downloads');
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+    await link(`${work}/d/r.json`, `${work}/d/.r.json.0f3a.adopt`);
+
+    expect(Buffer.from((await root.readDurable(at(root, 'd/r.json')))?.bytes ?? []).toString()).toBe('one');
+    expect(await readdir(`${work}/d`)).toEqual(['r.json']);
+    await root.publish(at(root, 'd/r.json'), encoder.encode('two'));
+    expect(await readFile(`${work}/d/r.json`, 'utf8')).toBe('two');
+  });
+
+  test('a different file under a .adopt name is left alone', async () => {
+    const { root, work } = await world(undefined, 'downloads');
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+    await writeFile(`${work}/d/.r.json.0f3a.adopt`, 'stranger');
+
+    expect(Buffer.from((await root.readDurable(at(root, 'd/r.json')))?.bytes ?? []).toString()).toBe('one');
+    expect(await readFile(`${work}/d/.r.json.0f3a.adopt`, 'utf8')).toBe('stranger');
+  });
+
+  test('a failed unlink of the moved-aside name is not reported as removed', async () => {
+    const built = await world(
+      (_events, disk) => ({
+        ...disk,
+        unlink: async path => {
+          if (path.includes('.adopt')) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+          await disk.unlink(path);
+        },
+      }),
+      'downloads',
+    );
+    const { root, work } = built;
+    await root.publish(at(root, 'd/r.json'), encoder.encode('one'), { exclusive: true });
+    await link(`${work}/d/r.json`, `${work}/d/.r.json.0f3a.tmp`);
+
+    expect(await refusalOf(async () => await root.readDurable(at(root, 'd/r.json')))).toBe('refused:hard_link');
   });
 });
 

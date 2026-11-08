@@ -35,7 +35,12 @@ export async function diskRoot(parent: string, observe: (disk: HostFs) => HostFs
     { home: `${parent}/home`, plugin: 'ferrets', worktrees: `${parent}/worktrees` },
     ['work'],
     () => folders,
-    { random: () => `t${String((counter += 1))}` },
+    {
+      random: () => {
+        counter += 1;
+        return `t${String(counter)}`;
+      },
+    },
   ).root('work', { ferret: 'F1' as FerretId });
   return { root, folder };
 }

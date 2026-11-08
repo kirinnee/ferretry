@@ -115,8 +115,8 @@ describe('TT kernel.paths.checkDirectory is gated by permissions.checkDirectory'
       plugins: [half('declared', true), half('undeclared')],
       directories: { '/work/a': '/real/a' },
     });
-    expect(await seen['declared']?.()).toEqual({ ok: true, value: { realPath: '/real/a' } });
-    await expect(seen['undeclared']?.() ?? Promise.resolve()).rejects.toThrow(
+    expect(await seen.declared?.()).toEqual({ ok: true, value: { realPath: '/real/a' } });
+    await expect(seen.undeclared?.() ?? Promise.resolve()).rejects.toThrow(
       'undeclared did not declare permissions.checkDirectory',
     );
     await host.stop();
@@ -155,8 +155,8 @@ describe('TT kernel.paths.checkDirectory is gated by permissions.checkDirectory'
     });
     try {
       if (outcome.kind !== 'running') throw new Error(outcome.sentence);
-      expect(await seen['declared']?.()).toMatchObject({ ok: true });
-      await expect(seen['undeclared']?.() ?? Promise.resolve()).rejects.toThrow(
+      expect(await seen.declared?.()).toMatchObject({ ok: true });
+      await expect(seen.undeclared?.() ?? Promise.resolve()).rejects.toThrow(
         'undeclared did not declare permissions.checkDirectory',
       );
     } finally {
