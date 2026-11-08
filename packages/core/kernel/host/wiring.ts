@@ -164,6 +164,8 @@ export function realAdapters(
     ownerHome: () => homedir(),
     // Today's lookup: the daemon's own PATH, read at each call (`Bun.which(name, { PATH: process.env.PATH })`).
     searchPath: () => process.env.PATH,
+    // `kernel.paths.locate`: the ONE override variable a manifest declared (`FY_CLOUDFLARED`), read at each call.
+    operatorVariable: name => process.env[name],
     executable: nodeExecutableProbe,
     pinner: platformRootPinner(),
     scratch: scratchPort(),

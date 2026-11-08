@@ -13,6 +13,7 @@ import type {
 import {
   AdmissionPort,
   AgentControlPort,
+  type ChildEnvironment,
   type ChildEnvironmentOpener,
   ChildEnvironmentPort,
   SecretResolverPort,
@@ -56,8 +57,8 @@ import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
-import { checkDirectory, gatedPaths, gatedWhich } from './paths.ts';
-import { type ExecutableProbe, whichCommand } from './which.ts';
+import { checkDirectory, gatedOverrides, gatedPaths, gatedWhich } from './paths.ts';
+import { type ExecutableProbe, handleReaders, locateCommand, whichCommand, whichForCommand } from './which.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import { type InstalledItems, installedItemReach } from './items.ts';
@@ -199,6 +200,11 @@ export interface HostAdapters {
   readonly searchPath?: () => string | undefined;
   /** Whether a path is a regular file this process may execute, for `kernel.paths.which`. Absent: nothing is found. */
   readonly executable?: ExecutableProbe;
+  /**
+   * The operator's value of ONE environment variable, for `kernel.paths.locate`'s override; only ever asked for a name
+   * the calling manifest declared in `permissions.whichOverrides`. Absent: no override is ever set.
+   */
+  readonly operatorVariable?: (name: string) => string | undefined;
   /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
   /** This user's process table, for `kernel.processes` (kernel-only). Absent: nothing is listed or signalled. */
@@ -627,7 +633,38 @@ async function bootLocked(
     );
 
   const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
-  const ownerPaths: PathsPort = Object.freeze({
+  /**
+   * `kernel.paths` for one plugin before its gates. `whichFor`'s readers come from the DECLARED manifests alone (the
+   * plugin itself and each one offering a hook it takes), never from anything the caller passes; the Vault answers a
+   * handle minted for any other plugin, a forged one and a spent one alike (`unprovable`).
+   */
+  const ownerPathsFor = (plugin: string): PathsPort => {
+    const readers = handleReaders(plugin, manifests);
+    const probe: ExecutableProbe = adapters.executable ?? (async () => false);
+    return Object.freeze({
+      ...ownerPaths,
+      locate: async (
+        name: string,
+        locateOptions: { readonly override: string; readonly directories?: readonly string[] },
+      ) =>
+        await locateCommand(name, locateOptions, {
+          // Asked only for the one variable `gatedOverrides` let through.
+          variable: variable => adapters.operatorVariable?.(variable),
+          path: adapters.searchPath?.(),
+          probe,
+        }),
+      whichFor: async (name: string, env: ChildEnvironment) => {
+        let searchPath: string | undefined;
+        try {
+          searchPath = bound.childEnvironments?.searchPathOf(env, readers);
+        } catch {
+          searchPath = undefined;
+        }
+        return await whichForCommand(name, searchPath, probe);
+      },
+    });
+  };
+  const ownerPaths: Pick<PathsPort, 'home' | 'checkDirectory' | 'which'> = Object.freeze({
     home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/',
     checkDirectory: async (absolutePath: string) => await checkDirectory(adapters.fs, absolutePath),
     // No probe wired (a test host that gave none): nothing is found, never a guess.
@@ -725,7 +762,11 @@ async function bootLocked(
       paths: gatedWhich(
         manifest.id,
         manifest.permissions?.which === true,
-        gatedPaths(manifest.id, manifest.permissions?.checkDirectory === true, ownerPaths),
+        gatedPaths(
+          manifest.id,
+          manifest.permissions?.checkDirectory === true,
+          gatedOverrides(manifest.id, manifest.permissions?.whichOverrides, ownerPathsFor(manifest.id)),
+        ),
       ),
       updateHost: updateHostOf(manifest, adapters, options.version),
       hostFacts:

@@ -1294,7 +1294,45 @@ export interface PathsPort {
    * that path or `undefined`, never the `PATH` itself.
    */
   which(name: string, options?: { readonly directories?: readonly string[] }): Promise<string | undefined>;
+  /**
+   * Today's harness-paths rule for ONE command: the operator's override variable (`FY_CLOUDFLARED`), else
+   * {@link which}. Only for a manifest with `permissions.which` AND `override` listed, exactly, in
+   * `permissions.whichOverrides` (`^FY_[A-Z0-9_]{1,60}$`); any other variable is refused naming the plugin, and no
+   * other variable is ever read. A set override must be ABSOLUTE, a regular file (links followed) this process may
+   * execute, and its basename must be `name` itself: otherwise it is `override_unusable` and the PATH is NOT searched
+   * (the operator named a binary; running a different one would leave them believing the opposite). An unset or blank
+   * override searches as `which` does. NOTHING is executed.
+   */
+  locate(
+    name: string,
+    options: { readonly override: string; readonly directories?: readonly string[] },
+  ): Promise<CommandLocation>;
+  /**
+   * Where ONE command resolves on the `PATH` a Vault {@link ChildEnvironment} handle WILL set, without spending the
+   * handle (today's launch guard searched a launch's own PATH). Only for a manifest with `permissions.which`, and only
+   * for a handle minted for this plugin or for a plugin that offers a hook this plugin takes (the edge a launch is
+   * handed on). The same name grammar, 64-folder bound and regular-file/`X_OK` rule as {@link which}; the daemon's
+   * own `PATH` is NOT searched. The answer is a path, `absent`, or `unprovable` — a handle this plugin may not read, a
+   * forged or spent one, one that sets no PATH, or one whose PATH was built from a `${secret:…}` reference — so a
+   * caller that must prove a negative fails closed. Never the PATH itself, never another variable.
+   */
+  whichFor(name: string, env: ChildEnvironment): Promise<HandleCommandLookup>;
 }
+
+/** {@link PathsPort.locate}'s answer. `override_unusable` names the variable and the path it holds: NO fallback. */
+export type CommandLocation =
+  | { readonly kind: 'found'; readonly path: string; readonly via: 'override' | 'path' }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'override_unusable'; readonly variable: string; readonly path: string };
+
+/**
+ * {@link PathsPort.whichFor}'s answer. `unprovable` says only that the handle's PATH could not be searched, never why
+ * (a foreign handle and a secret-derived PATH answer alike).
+ */
+export type HandleCommandLookup =
+  | { readonly kind: 'found'; readonly path: string }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unprovable' };
 
 /** {@link PathsPort.checkDirectory} accepted: the canonical path. */
 export interface CheckedDirectory {

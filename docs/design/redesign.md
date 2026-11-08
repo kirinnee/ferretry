@@ -1529,7 +1529,7 @@ fy plugin check <path>               runs the data-plugin checks without install
 | Other folders    | only its declared `roots`, through the `roots` port, fenced (§7.7)                                                                                                                                                               | kernel `roots` port, `banned-globals` check (no `fs`, `os.homedir`, `process.env`)                            |
 | Network          | only its declared hosts, through `kernel.fetch`                                                                                                                                                                                  | `banned-globals` (no `fetch`, sockets)                                                                        |
 | Processes        | only its declared programs, through `kernel.spawn` (inside a ferret's limits when it acts for one)                                                                                                                               | `banned-globals` (no `Bun.spawn`)                                                                             |
-| Commands on PATH | only with `permissions.which`, through `kernel.paths.which`: a bounded lookup that never executes (§7.7)                                                                                                                         | `gatedWhich` (refused by name without it); `banned-globals` keeps `process.env` out                           |
+| Commands on PATH | only with `permissions.which`, through `kernel.paths.which` / `locate` / `whichFor`: bounded lookups that never execute (§7.7)                                                                                                   | `gatedWhich` (refused by name without it); `banned-globals` keeps `process.env` out                           |
 | Other processes  | only with `permissions.processes`, through `kernel.processes`: pids and yes/no answers, SIGTERM to a process running from the plugin's own folder (§7.7)                                                                         | `processesPortFor` (refused by name without it); no member returns a command line or an environment           |
 | Shared folders   | only with `permissions.shareTrees`, one folder of its OWN `work`/`imports` handle or own opaque named tree, through `kernel.roots.share`; the receiver materializes it with `RootHandle.copyShared` into an internal root (§7.7) | the roots port (`host/shared-trees.ts`): a kernel-held table, so a tree cannot be forged or rebuilt from JSON |
 | Secret values    | by name only, through the Vault's `run` and `authorizeFetch`; never a value                                                                                                                                                      | Vault port has no getter                                                                                      |
@@ -2540,6 +2540,17 @@ scoped handle:
   (`permissions.which`): one plain command name, the caller's absolute folders then the daemon's `PATH`, empty and
   relative entries dropped, at most 64 folders, the first regular executable file wins. No shell, nothing executed;
   the answer is a path or absent, never the `PATH`.
+  - `kernel.paths.locate(name, { override, directories? })` is today's harness-paths override rule for one command
+    (Connections: `FY_CLOUDFLARED`). Only with `which` AND the variable listed, by exact name, in
+    `permissions.whichOverrides` (`^FY_[A-Z0-9_]{1,60}$`; `'*'` matches none); no other variable is read. A set
+    override must be absolute, plain, executable and named `name`, else it is `override_unusable` and `PATH` is NOT
+    searched; unset or blank, it is `which`.
+  - `kernel.paths.whichFor(name, env)` resolves one command on the `PATH` a Vault `ChildEnvironment` handle WILL set,
+    without spending it (Terminals' test-mode launch guard). The Vault's kernel-only opener answers `searchPathOf`
+    with the handle's `PATH` and nothing else, only for a handle minted for the caller or for a plugin offering a hook
+    the caller takes (readers computed from the declared manifests), and never a `PATH` built from a `${secret:…}`
+    reference. The answer is `found`, `absent` or `unprovable` (every unreadable handle alike), so a guard fails
+    closed; the daemon's own `PATH` is not searched.
 - A plugin that must stop what a child it started left behind (Runtimes: an ended Codex ferret's app-server pair)
   asks `kernel.processes` (`permissions.processes`, listing by exact name the environment variables it may match).
   Today's Codex stopper's rules, held by the kernel: `usersOf(variable, folder)` answers the pids of this user's

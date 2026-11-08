@@ -51,7 +51,7 @@ describe('resolving a child environment', () => {
   });
 
   test('a handle the bound opener recognises is opened into its values', () => {
-    const opener: ChildEnvironmentOpener = { open: () => ({ TOKEN: 'opened' }) };
+    const opener: ChildEnvironmentOpener = { open: () => ({ TOKEN: 'opened' }), searchPathOf: () => undefined };
     expect(resolveEnv(handle, opener)).toEqual({ TOKEN: 'opened' });
   });
 
@@ -60,6 +60,7 @@ describe('resolving a child environment', () => {
       open: () => {
         throw new Error('not mine');
       },
+      searchPathOf: () => undefined,
     };
     expect(() => resolveEnv(handle, opener)).toThrow('This child needs secrets the Vault did not open');
   });
@@ -72,7 +73,10 @@ describe('resolving a child environment', () => {
 
 describe('a started child', () => {
   test("options.stdin is written and closed, and the child sees the opened environment, not the caller's handle", async () => {
-    const spawn = bunSpawn({ PATH }, () => ({ open: () => ({ SECRET_SHAPE: 'opened-value' }) }));
+    const spawn = bunSpawn({ PATH }, () => ({
+      open: () => ({ SECRET_SHAPE: 'opened-value' }),
+      searchPathOf: () => undefined,
+    }));
     const child = spawn.start('sh', ['-c', 'cat; printf "%s" "$SECRET_SHAPE"'], {
       stdin: 'from stdin|',
       env: Object.freeze({}) as unknown as ChildEnvironment,

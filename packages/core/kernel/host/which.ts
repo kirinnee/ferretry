@@ -69,3 +69,105 @@ export async function whichCommand(
   }
   return undefined;
 }
+
+// locate ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** One operator override variable a manifest may declare: `FY_` and a short upper-case name. */
+const OVERRIDE_VARIABLE = /^FY_[A-Z0-9_]{1,60}$/u;
+
+/** Whether `variable` is one this plugin declared in `permissions.whichOverrides`, by exact name and grammar. */
+export function mayReadOverride(declared: readonly unknown[] | undefined, variable: unknown): variable is string {
+  return (
+    typeof variable === 'string' &&
+    OVERRIDE_VARIABLE.test(variable) &&
+    Array.isArray(declared) &&
+    declared.some(entry => entry === variable)
+  );
+}
+
+/** What `locateCommand` needs from its host: the one variable's value, the daemon's PATH and the probe. */
+export interface LocateSources {
+  /** The operator's value of the ONE declared variable asked for; never called with any other name. */
+  readonly variable: (name: string) => string | undefined;
+  readonly path: string | undefined;
+  readonly probe: ExecutableProbe;
+}
+
+/** The answer of {@link locateCommand}; the same shape as the contract's `CommandLocation`. */
+export type LocatedCommand =
+  | { readonly kind: 'found'; readonly path: string; readonly via: 'override' | 'path' }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'override_unusable'; readonly variable: string; readonly path: string };
+
+/**
+ * `kernel.paths.locate` (today's `CloudflaredLocator`, narrowed): the override variable's value, trimmed, when set and
+ * not blank, else {@link whichCommand}. A set override is the answer only when it is an absolute, plain path whose
+ * basename is `name` and the probe accepts it; anything else is `override_unusable` and the PATH is NOT searched,
+ * because the operator named a binary and a different one found on PATH would leave them believing the opposite. The
+ * caller has already been checked to have declared `override` ({@link mayReadOverride}); nothing is executed.
+ */
+export async function locateCommand(
+  name: unknown,
+  options: { readonly override: string; readonly directories?: readonly unknown[] },
+  sources: LocateSources,
+): Promise<LocatedCommand> {
+  if (!isCommandName(name)) return { kind: 'absent' };
+  const named = sources.variable(options.override)?.trim();
+  if (named !== undefined && named !== '') {
+    const plain = searchable(named);
+    const basename = plain?.slice(plain.lastIndexOf('/') + 1);
+    const usable =
+      plain !== undefined && plain === named && basename === name && (await sources.probe(plain).catch(() => false));
+    return usable
+      ? { kind: 'found', path: named, via: 'override' }
+      : { kind: 'override_unusable', variable: options.override, path: named };
+  }
+  const found = await whichCommand(name, { path: sources.path, directories: options.directories ?? [] }, sources.probe);
+  return found === undefined ? { kind: 'absent' } : { kind: 'found', path: found, via: 'path' };
+}
+
+// whichFor ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The answer of {@link whichForCommand}; the same shape as the contract's `HandleCommandLookup`. */
+export type HandleLookup =
+  | { readonly kind: 'found'; readonly path: string }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unprovable' };
+
+/** The plugins whose minted handles `plugin` may search: itself, and each plugin that offers a hook `plugin` takes. */
+export function handleReaders(
+  plugin: string,
+  manifests: readonly {
+    readonly id: string;
+    readonly hooks?: {
+      readonly offers?: readonly { readonly hook: { readonly name: string } }[];
+      readonly takes?: readonly { readonly hook: { readonly name: string } }[];
+    };
+  }[],
+): readonly string[] {
+  const taken = new Set(
+    manifests.find(manifest => manifest.id === plugin)?.hooks?.takes?.map(take => take.hook.name) ?? [],
+  );
+  const senders = manifests
+    .filter(manifest => manifest.id !== plugin)
+    .filter(manifest => (manifest.hooks?.offers ?? []).some(offer => taken.has(offer.hook.name)))
+    .map(manifest => manifest.id);
+  return Object.freeze([plugin, ...senders]);
+}
+
+/**
+ * `kernel.paths.whichFor`: {@link whichCommand} on the PATH a Vault handle WILL set, and on nothing else (the daemon's
+ * own PATH is not searched: a pane whose handle sets PATH sees that one). `searchPath` is the Vault's answer for this
+ * plugin's readers; `undefined` (a foreign, forged, spent or secret-derived handle, or one that sets no PATH) is
+ * `unprovable`, never `absent`, so a guard that must prove a negative fails closed. A PATH with no folder this lookup
+ * may search is `unprovable` too. The PATH itself never leaves.
+ */
+export async function whichForCommand(
+  name: unknown,
+  searchPath: string | undefined,
+  probe: ExecutableProbe,
+): Promise<HandleLookup> {
+  if (typeof searchPath !== 'string' || searchDirectories(searchPath).length === 0) return { kind: 'unprovable' };
+  const found = await whichCommand(name, { path: searchPath }, probe);
+  return found === undefined ? { kind: 'absent' } : { kind: 'found', path: found };
+}
