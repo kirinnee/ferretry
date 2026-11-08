@@ -1,24 +1,11 @@
 import type { SpawnPort } from '@ferretry/kernel/contract';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 import type { ControlTimer } from './control-tmux-process.ts';
+import { TIMED_OUT, within } from './bounded.ts';
 import type { TmuxReleaseReading } from '../../lib/tmux/version.ts';
 
 /** Long enough for a loaded host, short enough that a wedged tmux cannot hold a doctor report. */
 export const DEFAULT_RELEASE_TIMEOUT_MS = 2_000;
-
-const TIMED_OUT = Symbol('timed out');
-
-async function within<T>(work: Promise<T>, timeoutMs: number, after: ControlTimer): Promise<T | typeof TIMED_OUT> {
-  let timer: (() => void) | undefined;
-  const timeout = new Promise<typeof TIMED_OUT>(resolve => {
-    timer = after(timeoutMs, () => resolve(TIMED_OUT));
-  });
-  try {
-    return await Promise.race([work, timeout]);
-  } finally {
-    timer?.();
-  }
-}
 
 /**
  * Asks the installed tmux for its release (`tmux -V`) and this daemon's own server for the release it

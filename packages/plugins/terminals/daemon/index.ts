@@ -71,7 +71,8 @@ import { ControlModeTmuxProcess, type ControlChild } from './adapters/tmux/contr
 import { KernelTmuxProcess, TMUX_PROGRAM } from './adapters/tmux/kernel-tmux-process.ts';
 import { TmuxRunner, ferretTmuxSession } from './adapters/tmux/tmux-runner.ts';
 import { RealHarnessLaunchGuard } from './adapters/tmux/harness-launch-guard.ts';
-import { forgetFerretIdentity } from './adapters/tmux/forget-ferret-identity.ts';
+import { boundedSpawn } from './adapters/tmux/bounded.ts';
+import { IDENTITY_SCRUB_TIMEOUT_MS, forgetFerretIdentity } from './adapters/tmux/forget-ferret-identity.ts';
 import {
   releaseReader,
   tmuxReleaseDoctor,
@@ -624,10 +625,21 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     },
     provides: { terminals: provided },
     // At boot, before listeners: a tmux server an earlier daemon started inside a ferret's pane may still hold that
-    // ferret's identity. Best effort — a failure is never a boot failure, and no value is read or logged.
+    // ferret's identity. Best effort — a failure is never a boot failure, and no value is read or logged. Each client is
+    // killed at its bound, and a server that does not answer one is asked nothing more (one line says so).
     beforeListen: async () => {
       try {
-        const cleared = await forgetFerretIdentity(new KernelTmuxProcess(kernel.spawn, socketPath));
+        const cleared = await forgetFerretIdentity(
+          new KernelTmuxProcess(boundedSpawn(kernel.spawn, IDENTITY_SCRUB_TIMEOUT_MS), socketPath),
+          {
+            after: releaseAfter,
+            timeoutMs: IDENTITY_SCRUB_TIMEOUT_MS,
+            stalled: () =>
+              log.warn('the tmux server did not answer the identity scrub in time; its client was stopped', {
+                timeoutMs: IDENTITY_SCRUB_TIMEOUT_MS,
+              }),
+          },
+        );
         if (cleared.length > 0) log.info('cleared ferret identity from the tmux server', { count: cleared.length });
       } catch {
         log.warn('the tmux server identity scrub did not run');

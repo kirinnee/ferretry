@@ -200,7 +200,8 @@
       "the Layout tab edits the wide layout only: the `phone.*` keys (`fy layout set phone.nav.side bottom`) have no row in either scope"
     ],
     "terminals": [
-      "GAP(ferrets): the tmux adapter daemon/adapters/tmux/pane-queue.ts is ported and tested but nothing composes it until the Runner queue seam of Ferrets is wired to it (gustavo)"
+      "GAP(ferrets): the tmux adapter daemon/adapters/tmux/pane-queue.ts is ported and tested but nothing composes it until the Runner queue seam of Ferrets is wired to it (gustavo)",
+      "GAP(kernel): an armed launch guard cannot judge a launch whose environment handle sets PATH (every ferret with a Shells launch part), because the PATH value is opened only inside the kernel adapter at exec time; until the kernel or Vault resolves claude/codex on that PATH and hands Terminals the answer, such a launch is refused 409 real_harness (daemon/adapters/tmux/harness-launch-guard.ts)"
     ],
     "access": [
       "GAP(access): app/features/device-notice/devices-looked.ts is not reached by a panel of the app shell (the new-device notice) (owner: kaizen app shell)",
