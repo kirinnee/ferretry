@@ -37,6 +37,7 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
   };
   const handle: RootHandle = {
     name: 'work' as RootHandle['name'],
+    internal: false,
     resolve: requested => {
       const path = normalize(join(folder, requested));
       if (!inside(folder, path)) return err('outside');
