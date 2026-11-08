@@ -26,6 +26,7 @@ import { checkConfigText } from './check.ts';
 import { type ConfigDeclaration, targetOfPath } from './claims.ts';
 import { rawTextHoldsSecret } from './secrets.ts';
 import { schemaFileName, schemaModeline } from './schemas.ts';
+import { configTextTooLarge } from './yaml-text.ts';
 import type { ConfigStatus } from './service.ts';
 
 /** What the agent's door reads. */
@@ -159,18 +160,26 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
     const file = await writerOrFail().read(found);
     if (file === undefined) throw new ApiError(400, `${NOT_A_FILE}: ${path}`, 'bad_request');
     const state = file.status.state === 'invalid' ? 'invalid' : file.status.state === 'held' ? 'pending' : 'ok';
+    // A text over the cap is neither checked nor scanned nor shown: nothing could vouch that it holds no secret.
+    const tooLarge = file.text !== undefined && configTextTooLarge(file.text);
     // A file somebody hand-wrote a raw secret into is shown by its located issue, never by its text.
-    const checked = file.text === undefined ? undefined : checkConfigText(found.def, path, file.text, sources.binary);
+    const checked =
+      file.text === undefined || tooLarge ? undefined : checkConfigText(found.def, path, file.text, sources.binary);
     // A file that does not even parse was never scanned by the check, so its raw text is: a key pasted mid-edit counts.
     const holdsSecret =
       checked !== undefined &&
       !checked.ok &&
       (checked.reason === 'raw_secret' || (checked.reason === 'yaml' && rawTextHoldsSecret(file.text ?? '')));
+    const withheld = holdsSecret
+      ? '; its text is not shown because it holds a raw secret, which the owner must move into the secret store'
+      : tooLarge
+        ? '; its text is not shown because it is larger than a configuration file may be'
+        : '';
     return {
       summary: file.exists
-        ? `${file.path} (${state})${holdsSecret ? '; its text is not shown because it holds a raw secret, which the owner must move into the secret store' : ''}.`
+        ? `${file.path} (${state})${withheld}.`
         : `${file.path} does not exist yet; this is the starter a new one begins with.`,
-      text: holdsSecret ? '' : (file.text ?? `${schemaModeline(found.def, file.path)}\n`),
+      text: holdsSecret || tooLarge ? '' : (file.text ?? `${schemaModeline(found.def, file.path)}\n`),
       etag: file.etag,
       issues: issuesOf(file.issues ?? []),
     };

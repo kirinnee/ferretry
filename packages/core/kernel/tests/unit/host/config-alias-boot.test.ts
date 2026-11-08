@@ -11,11 +11,13 @@ import { AGENT_CONFIG_TEXT_MAX_BYTES } from '../../../contract/agent-config.ts';
 import { AdmissionPort } from '../../../contract/bound.ts';
 import { defineConfig } from '../../../contract/index.ts';
 import type { ConfigPort } from '../../../contract/ports.ts';
+import { CONFIG_FILE_MAX_BYTES } from '../../../host/config/yaml-text.ts';
 import { bootHost, type HostConfig, type RunningHost } from '../../../host/host.ts';
 import type { LogRecord } from '../../../host/log.ts';
 import { realAdapters } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
+import { adversarialTexts, PRIVATE_WORD } from '../host-config/adversarial-texts.ts';
 import { recordingAdmission } from './fixtures.ts';
 
 /**
@@ -27,7 +29,10 @@ const FAKE_NAME = 'private-anchor-zebraquartz';
 const KEY_NAME = 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const UNRESOLVED = `limit: 3\nnote: *${FAKE_NAME}\n`;
 const LOOP = `limit: 3\nnote: &${FAKE_NAME}\n  again: *${FAKE_NAME}\n`;
-/** Billion laughs: each anchor nine of the one before. The fifth (line 6) reads out past the budget. */
+/**
+ * Billion laughs: each anchor nine of the one before. The third (line 4) reads out past the budget: a value weighs its
+ * length, so nine copies of the name nine times over is already some 20 000 characters.
+ */
 const BOMB = `limit: 3\n${Array.from(
   { length: 10 },
   (_, level) =>
@@ -135,7 +140,7 @@ describe('an alias that cannot be read is a broken file, not a crash', () => {
   for (const [label, text, message, line] of [
     ['an unresolved alias', UNRESOLVED, 'names an anchor (&name) that is not set before it', 2],
     ['an alias loop', LOOP, 'sits inside the anchor (&name) it names', 3],
-    ['an alias bomb', BOMB, 'expand too far to read', 6],
+    ['an alias bomb', BOMB, 'expand too far to read', 4],
   ] as const) {
     test(`${label} at boot: boot continues and the last good version stays in effect`, async () => {
       const at = await home();
@@ -209,6 +214,39 @@ describe('a file at the size limit is read in one pass at boot and on reload', (
     expect(performance.now() - reloading).toBeLessThan(BOUND_MS);
     expect(world.limit()).toBe(7);
     namesNothing(world);
+  });
+});
+
+describe('every hostile shape at the size cap: boot reads it within the bound and never fails', () => {
+  for (const [label, text] of adversarialTexts(CONFIG_FILE_MAX_BYTES)) {
+    test(`${label}: boot answers in under ${BOUND_MS} ms, and the last good version stays unless the file checks`, async () => {
+      const at = await home();
+      await bootOnce(at, async first => {
+        await writeVoice(at, 'limit: 7\n');
+        await first.reload();
+      });
+      await writeVoice(at, text);
+
+      const booting = performance.now();
+      const world = await boot(at);
+      expect(performance.now() - booting).toBeLessThan(BOUND_MS);
+      if (world.voiceState() !== 'ok') expect(world.limit()).toBe(7);
+      namesNothing(world, PRIVATE_WORD);
+    });
+  }
+
+  test('a file over the cap at boot is not read: boot continues and the last good version stays', async () => {
+    const at = await home();
+    await bootOnce(at, async first => {
+      await writeVoice(at, 'limit: 7\n');
+      await first.reload();
+    });
+    await writeVoice(at, `note: ${PRIVATE_WORD}\n${'#'.repeat(CONFIG_FILE_MAX_BYTES)}`);
+
+    const world = await boot(at);
+    expect(world.limit()).toBe(7);
+    expect(world.voiceState()).toBe('invalid');
+    namesNothing(world, PRIVATE_WORD);
   });
 });
 

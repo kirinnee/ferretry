@@ -3,7 +3,7 @@ import type { ApiRequest } from '../contract/http.ts';
 import { ApiError, jsonResponse } from '../contract/http.ts';
 import { parseBody } from '../contract/body.ts';
 import { z } from 'zod';
-import type { Health, PluginInventory } from '../contract/kernel.ts';
+import { type Health, type PluginInventory, SESSION_CREDENTIAL_FEATURE } from '../contract/kernel.ts';
 import { CORE_IDS } from '../contract/ids.ts';
 import { PROTOCOL } from '../contract/session.ts';
 import type { DoctorReport } from '../contract/doctor.ts';
@@ -122,8 +122,9 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
     ...configRoutes(sources.config),
     'GET /v1/config/status': async () => jsonResponse(configStatusView(sources.agentConfig)),
     'POST /v1/agent/config': async call => {
-      // The route is served without a credential, so the CALLER is admitted before the body is read (today's order: no
-      // credential 401, an unknown one 403, whatever the body). The tool is known only from the body, but the three share
+      // The route is served without a credential, so the CALLER is admitted before the body is read, whatever the body: no
+      // credential, and an unknown or revoked one, are both 401 here (Gate refuses them before this handler; today
+      // answered 403 for a presented one). The tool is known only from the body, but the three share
       // one declaration shape (a test pins it), so `config_read`'s declaration admits for all of them.
       const decision = sources.admitTool(AGENT_CONFIG_TOOL_OF['config.read'], call.request);
       // Gate's refusal, with today's code and words for a call that carries no credential (round-2 m-c). Recorded, as
@@ -151,7 +152,14 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
         sources.recordTool(tool, call.request, decision, status);
       }
     },
-    'GET /v1/health': async () => jsonResponse({ protocol: PROTOCOL, version: sources.version } satisfies Health),
+    // Always lists the session-credential feature: a `fy` from before 5.0 reads its absence as an older daemon and
+    // falls back to the admin token after a 401 (see SESSION_CREDENTIAL_FEATURE).
+    'GET /v1/health': async () =>
+      jsonResponse({
+        protocol: PROTOCOL,
+        version: sources.version,
+        features: [SESSION_CREDENTIAL_FEATURE],
+      } satisfies Health),
     'GET /healthz': async () => {
       const live = sources.liveness();
       return jsonResponse(

@@ -69,10 +69,10 @@ import {
 } from './evaluate.ts';
 import { configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
-import { editConfigText, readConfigText } from './yaml-text.ts';
+import { CONFIG_FILE_MAX_BYTES, configTextTooLarge, editConfigText, readConfigText } from './yaml-text.ts';
 
 /** The most a configuration file may hold; a larger one is not read, and keeps its last good version. */
-export const CONFIG_FILE_MAX_BYTES = 256 * 1024;
+export { CONFIG_FILE_MAX_BYTES };
 
 /** How long an acknowledged write may take to land before the acknowledgement lapses. */
 export const ACKNOWLEDGEMENT_TTL_MS = 10 * 60_000;
@@ -374,7 +374,9 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (!info.regularFile || info.size > CONFIG_FILE_MAX_BYTES) return { kind: 'unreadable' };
     try {
       const text = await fs.readText(absolute);
-      return text === undefined ? { kind: 'absent' } : { kind: 'text', text };
+      if (text === undefined) return { kind: 'absent' };
+      // The size was read before the text: a file that grew in between is still over the cap, and is not read.
+      return configTextTooLarge(text) ? { kind: 'unreadable' } : { kind: 'text', text };
     } catch {
       return { kind: 'unreadable' };
     }

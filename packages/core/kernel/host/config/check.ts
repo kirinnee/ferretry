@@ -16,7 +16,7 @@ import {
   rawSecretFix,
   rawTextSecretLine,
 } from './secrets.ts';
-import { readConfigText, type TextPosition } from './yaml-text.ts';
+import { CONFIG_TOO_LARGE, configTextTooLarge, readConfigText, type TextPosition } from './yaml-text.ts';
 
 /** A located finding. */
 export interface ConfigIssue {
@@ -96,6 +96,15 @@ export function checkConfigText(
   text: string,
   binary: string,
 ): CheckedConfigText | RefusedConfigText {
+  // Bounded before ANY reading — parse, alias walk, raw scan: a text over the cap is refused in one fixed sentence and
+  // nothing else is said about it (a scan of it could only cost, and the sentence never quotes it).
+  if (configTextTooLarge(text)) {
+    return {
+      ok: false,
+      reason: 'yaml',
+      issues: [{ path, severity: 'error', message: CONFIG_TOO_LARGE, fix: 'make the file smaller' }],
+    };
+  }
   const read = readConfigText(text);
   if (!read.ok) {
     // A key in text that does not parse (in an undeclared tag handle, say) is refused as a key, by line only: the

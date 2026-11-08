@@ -156,7 +156,7 @@ describe('readConfigText — no message quotes the file', () => {
       console.warn = warn;
     });
 
-    it('should read a mapping whose key is a collection without printing that key', () => {
+    it('should refuse a mapping whose key is a collection, in a fixed sentence, without printing that key', () => {
       // Arrange
       const printed: unknown[] = [];
       process.emitWarning = ((warning: unknown) => printed.push(warning)) as typeof process.emitWarning;
@@ -166,7 +166,9 @@ describe('readConfigText — no message quotes the file', () => {
       const actual = readConfigText(`[${WORD}]: 1\n`);
 
       // Assert
-      should(actual.ok).be.true();
+      should(actual.ok ? [] : actual.errors).deepEqual([
+        { message: 'a key is not a plain string', position: { line: 1, column: 1 } },
+      ]);
       should(JSON.stringify(printed.map(String))).not.containEql(WORD);
     });
   });
@@ -315,7 +317,23 @@ describe('readConfigText — a file at the size limit is read in ONE pass, whate
     ['one unresolved alias 5000 deep', deep, 'not set before it'],
     ['one flat mapping', fill('', index => `k${index}: v\n`), undefined],
     ['one flow mapping', `${fill('{', index => `k${index}: 1, `)}z: 1}\n`, undefined],
-    ['an alias as every key', fill('a: &a [1, 2, 3]\n', index => `? *a\n: ${index}\n`), undefined],
+    ['an alias to a list as every key', fill('a: &a [1, 2, 3]\n', index => `? *a\n: ${index}\n`), 'not a plain string'],
+    ['an alias to a string as every key', fill('a: &a k\n', index => `? *a\n: ${index}\n`), undefined],
+    [
+      'a long string aliased on every line',
+      fill(`s: &s ${'x'.repeat(128 * 1024)}\nl:\n`, () => '  - *s\n'),
+      'expand too far',
+    ],
+    [
+      'a long string aliased under every key',
+      fill(`s: &s ${'x'.repeat(128 * 1024)}\nm:\n`, index => `  k${index}: *s\n`),
+      'expand too far',
+    ],
+    [
+      'a list as every key, beside many anchors',
+      fill(`a: [${Array.from({ length: 5_000 }, (_, index) => `&n${index} 1`).join(', ')}]\n`, () => '? [k]\n: 1\n'),
+      'not a plain string',
+    ],
   ] as const) {
     it(`should read ${label} in under ${BOUND_MS} ms`, () => {
       // Act

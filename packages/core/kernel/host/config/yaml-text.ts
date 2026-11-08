@@ -28,6 +28,33 @@ import {
   type YAMLSeq,
 } from 'yaml';
 
+/**
+ * The most a configuration file may hold, in UTF-8 bytes (today's `CONFIG_FILE_MAX_BYTES`). It is checked BEFORE
+ * anything reads the text — the parser, the alias walk, the raw-secret scan — at every door that hands a text in: the
+ * disk read at boot and reload, an accepted record read back, `config_read`, `config_validate` and `config_write`.
+ * Every cost below is then bounded by it: a file over it is refused in one fixed sentence and never parsed.
+ */
+export const CONFIG_FILE_MAX_BYTES = 256 * 1024;
+
+/** What a text over {@link CONFIG_FILE_MAX_BYTES} is told, in a FIXED sentence: nothing of the text. */
+export const CONFIG_TOO_LARGE = `the file is larger than the ${String(CONFIG_FILE_MAX_BYTES / 1024)} KiB a configuration file may be`;
+
+/**
+ * Whether `text` is over {@link CONFIG_FILE_MAX_BYTES} in UTF-8. Bounded whatever the text: a string longer than the cap
+ * in UTF-16 units is over it (every unit is at least one byte), and a shorter one is counted, stopping at the cap.
+ */
+export function configTextTooLarge(text: string): boolean {
+  if (text.length > CONFIG_FILE_MAX_BYTES) return true;
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    // A surrogate pair is 4 bytes, 2 per unit; the rest of the BMP is 1–3.
+    bytes += unit < 0x80 ? 1 : unit < 0x800 || (unit >= 0xd800 && unit <= 0xdfff) ? 2 : 3;
+    if (bytes > CONFIG_FILE_MAX_BYTES) return true;
+  }
+  return false;
+}
+
 /** A 1-based place in a file. */
 export interface TextPosition {
   readonly line: number;
@@ -60,10 +87,12 @@ const ALIAS_LOOP = 'an alias (*name) sits inside the anchor (&name) it names, so
 const ALIAS_EXCESSIVE = 'the aliases (*name) in this file expand too far to read';
 
 /**
- * How far aliases may expand a file: its value, every alias read out in full, may hold this many values plus
- * {@link ALIAS_EXPANSION_FACTOR} per character of its text. A file without aliases holds fewer values than it has
- * characters, and re-using a block a few times stays far inside it; an alias bomb (each anchor aliasing the one before
- * many times over) multiplies at every step and leaves it after a few.
+ * How far aliases may expand a file, in CHARACTERS: its value, every alias read out in full, may weigh this much plus
+ * {@link ALIAS_EXPANSION_FACTOR} per character of its text, where a value weighs 1 and a string 1 more per character.
+ * A file without aliases weighs at most about 2 per character (a value takes at least one character to write, a string
+ * at least its own length), and re-using a block a few times stays far inside it; an alias bomb multiplies at every
+ * step and leaves it after a few — and so does one long string aliased many times, which counting values alone missed
+ * (one 128 KiB string times 18 000 aliases was "18 000 values", and gigabytes once read out).
  */
 const ALIAS_EXPANSION_FLOOR = 10_000;
 const ALIAS_EXPANSION_FACTOR = 2;
@@ -149,8 +178,9 @@ type Collection = YAMLMap | YAMLSeq;
  * - its anchor's node is still open (the alias sits inside it): the alias loops. This is the ONLY way a value can reach
  *   itself — any other anchor an alias names was closed before the alias began, so following aliases only ever moves
  *   to text that ends earlier, and cannot come back;
- * - the value, every alias read out, holds more than the expansion budget: the aliases expand too far. A collection is
- *   totted up when it is left, from the sizes of its items, which are known by then — an alias's is its anchor's.
+ * - the value, every alias read out, weighs more than the expansion budget: the aliases expand too far. A collection is
+ *   totted up when it is left, from the weights of its items, which are known by then — an alias's is its anchor's;
+ * - a key is a mapping or a list (or an alias to one): refused as a key that is not a plain string.
  *
  * Each node is entered once and left once and each alias looked up once, so the cost is linear in the file. The
  * library's own alias resolution is not: it walks the whole document again for each alias, so it is never asked to.
@@ -164,13 +194,14 @@ function resolveAliases(
   const anchors = new Map<string, Node>();
   const open = new Set<Node>();
   const targets = new Map<Alias, Node>();
-  /** Each closed collection's size with every alias read out; a scalar is 1. */
+  /** Each closed collection's weight with every alias read out; a scalar is 1, and a string 1 more per character. */
   const expanded = new Map<Node, number>();
   const sizeOf = (item: unknown): number => {
     if (isPair(item)) return sizeOf(item.key) + sizeOf(item.value);
     if (isAlias(item)) return sizeOf(targets.get(item));
     if (isCollection(item)) return expanded.get(item) ?? 0;
-    return isScalar(item) ? 1 : 0;
+    if (!isScalar(item)) return 0;
+    return 1 + (typeof item.value === 'string' ? item.value.length : 0);
   };
   const budget = ALIAS_EXPANSION_FLOOR + ALIAS_EXPANSION_FACTOR * characters;
   const steps: Step[] = [{ node: document.contents, leaving: false }];
@@ -192,6 +223,17 @@ function resolveAliases(
       if (open.has(target)) return { ok: false, fault: { message: ALIAS_LOOP, at: node } };
       targets.set(node, target);
     } else if (isPair(node)) {
+      // A key that is a mapping or a list (written, or an alias to one) is refused here, before the value is built: no
+      // configuration value can hold one (it is JSON-shaped), and the library would stringify each such key with a copy
+      // of every anchor in the document, which costs anchors × keys.
+      const { key } = node;
+      if (isCollection(key)) return { ok: false, fault: { message: SYNTAX_SENTENCES.NON_STRING_KEY, at: key } };
+      if (isAlias(key)) {
+        // An alias key to a collection still open is a loop, and is said as one when the alias itself is reached.
+        const target = anchors.get(key.source);
+        if (isCollection(target) && !open.has(target))
+          return { ok: false, fault: { message: SYNTAX_SENTENCES.NON_STRING_KEY, at: key } };
+      }
       steps.push({ node: node.value, leaving: false }, { node: node.key, leaving: false });
     } else if (isNode(node)) {
       if (node.anchor !== undefined) anchors.set(node.anchor, node);
@@ -230,6 +272,8 @@ export function readConfigText(
 ):
   | { readonly ok: true; readonly read: ReadConfigText }
   | { readonly ok: false; readonly errors: readonly ConfigSyntaxError[] } {
+  // Bounded before anything reads it: every cost below is linear in a text this size.
+  if (configTextTooLarge(text)) return { ok: false, errors: [{ message: CONFIG_TOO_LARGE }] };
   const lineCounter = new LineCounter();
   const document = parseDocument(text, { ...PARSE_OPTIONS, lineCounter });
   if (document.errors.length > 0) {
@@ -376,7 +420,9 @@ export function editConfigText(
   current: unknown,
   modeline: string | undefined,
 ): string {
-  let document: Document = parseDocument(existing ?? '', PARSE_OPTIONS);
+  // A text over the cap is never parsed: like one that does not parse, it is replaced whole.
+  const readable = existing !== undefined && !configTextTooLarge(existing);
+  let document: Document = parseDocument(readable ? existing : '', PARSE_OPTIONS);
   if (document.errors.length > 0 || duplicateKeys(document).length > 0) document = parseDocument('', PARSE_OPTIONS);
   if (!isMap(document.contents)) document.contents = document.createNode({});
   editValue(document, [], target, current);
@@ -397,6 +443,7 @@ export function editConfigText(
  * mapping: a file nobody can read is fixed by a person, not overwritten by a verb.
  */
 export function setConfigKey(text: string, key: string, value: unknown): string {
+  if (configTextTooLarge(text)) throw new Error(`the file does not parse: ${CONFIG_TOO_LARGE}`);
   const document: Document = parseDocument(text, PARSE_OPTIONS);
   // The parser's message quotes the file; the line is enough for a person to find it.
   const error = document.errors[0];
