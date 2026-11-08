@@ -56,10 +56,11 @@ describe('XX child environment allow-list for git and gh', () => {
     const tools = toolEnvironment(FULL);
     expect(childEnvironment('gh', base, tools, {})).toEqual({ ...base, ...tools });
     expect(childEnvironment('/usr/bin/git', base, tools, {})).toEqual({ ...base, ...tools });
-    for (const other of ['ssh', 'sh', 'ps', 'github', '/opt/gh-evil/run']) expect(childEnvironment(other, base, tools, {})).toEqual(base);
+    for (const other of ['ssh', 'sh', 'ps', 'github', '/opt/gh-evil/run'])
+      expect(childEnvironment(other, base, tools, {})).toEqual(base);
   });
 
-  test('the caller\'s own env wins over the tool environment', () => {
+  test("the caller's own env wins over the tool environment", () => {
     const tools = toolEnvironment(FULL);
     expect(childEnvironment('gh', { PATH: '/p' }, tools, { XDG_CONFIG_HOME: '/mine' }).XDG_CONFIG_HOME).toBe('/mine');
   });

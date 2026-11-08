@@ -37,7 +37,11 @@ describe('rows another plugin offers the Actions menu', () => {
       question: 'Interrupt Hadi?',
       confirmLabel: 'Interrupt',
     });
-    expect(sections[0]?.entries[1]).toMatchObject({ kind: 'run', detail: 'later', unavailable: 'Send it a message first.' });
+    expect(sections[0]?.entries[1]).toMatchObject({
+      kind: 'run',
+      detail: 'later',
+      unavailable: 'Send it a message first.',
+    });
   });
 
   it('a withdrawn row leaves nothing behind', () => {

@@ -109,10 +109,19 @@ test('decision 18: a ferret’s own seam reads only ITS OWN transcript, never an
   (f.harness as { transcript: unknown }).transcript = {
     read: async (ferret: string) => {
       asked.push(ferret);
-      return [{ id: ferret, at: '2026-11-07T00:00:00.000Z' as never, role: 'assistant' as const, text: `secret of ${ferret}` }];
+      return [
+        {
+          id: ferret,
+          at: '2026-11-07T00:00:00.000Z' as never,
+          role: 'assistant' as const,
+          text: `secret of ${ferret}`,
+        },
+      ];
     },
     follow: async function* (ferret: string) {
       asked.push(ferret);
+      // A ferret with nothing to follow: the stream ends at once.
+      yield* [];
     },
     find: async (ferret: string) => {
       asked.push(ferret);

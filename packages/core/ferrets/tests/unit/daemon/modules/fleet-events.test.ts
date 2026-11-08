@@ -410,8 +410,19 @@ describe('GET /v1/events follows an archived ferret as today’s findSession did
 
   test('a live ferret and an archived one are both followed; one nobody holds is a 404', () => {
     const exists = known(['wren'], ['oak']);
-    expect(eventStreamScope(call([['sessionId', 'wren']]), exists)).toMatchObject({ kind: 'session', sessionId: 'wren' });
-    expect(eventStreamScope(call([['sessionId', 'oak'], ['after', '3']]), exists)).toEqual({
+    expect(eventStreamScope(call([['sessionId', 'wren']]), exists)).toMatchObject({
+      kind: 'session',
+      sessionId: 'wren',
+    });
+    expect(
+      eventStreamScope(
+        call([
+          ['sessionId', 'oak'],
+          ['after', '3'],
+        ]),
+        exists,
+      ),
+    ).toEqual({
       kind: 'session',
       sessionId: 'oak',
       after: 3,

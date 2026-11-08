@@ -144,7 +144,9 @@ export function signerFor(plugin: string, signer: IdentitySigner): IdentitySigne
     sign: async request => (allowed('sign'), await signer.sign(request)),
     signTunnel: async request => (allowed('signTunnel'), await signer.signTunnel(request)),
     signCatalog: async request => (allowed('signCatalog'), await signer.signCatalog(request)),
-    signLinkStoreRequest: async request => (allowed('signLinkStoreRequest'), await signer.signLinkStoreRequest(request)),
+    signLinkStoreRequest: async request => (
+      allowed('signLinkStoreRequest'), await signer.signLinkStoreRequest(request)
+    ),
     signSecretOffer: async request => (allowed('signSecretOffer'), await signer.signSecretOffer(request)),
   });
 }

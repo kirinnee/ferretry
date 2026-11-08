@@ -872,11 +872,11 @@ export class CatalogInstallService {
       if (secret === null) continue;
       // The same sentence whether or not the secret exists: a caller who may not list secrets learns nothing from it.
       if (own === undefined)
-        return refuse(
+        refuse(
           'catalog_bindings_invalid',
           `You may not bind ${placeholder} to a secret: this caller may not use secrets. Leave it unbound.`,
         );
-      if (!own.has(secret))
+      else if (!own.has(secret))
         refuse('catalog_bindings_invalid', `You have no secret called ${secret}, so ${placeholder} cannot use it.`);
     }
     if (held.target.scope !== 'project') return;
