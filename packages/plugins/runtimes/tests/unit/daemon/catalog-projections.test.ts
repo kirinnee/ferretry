@@ -25,6 +25,7 @@ import {
 } from '../../../daemon/lib/service/catalog.ts';
 import { type AccountModel, type AccountModelDocument, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { MachineAuthority } from '../../../contract/index.ts';
+import { shownWords, shownWordsEtag } from '../../../daemon/lib/service/command-line.ts';
 import { builtInModelCatalogs, builtInPresets } from '../lib/fixtures/built-ins.ts';
 
 const DIGEST = `sha256:${'0'.repeat(64)}`;
@@ -253,6 +254,7 @@ describe('componentCatalog', () => {
       kind: 'mcp',
       command: 'srv-bin',
       args: ['--x'],
+      argsEtag: shownWordsEtag(shownWords(['--x'], 'srv-bin')),
       env: [
         { name: 'API_TOKEN', hidden: true },
         { name: 'PLAIN', value: 'visible' },
@@ -270,6 +272,7 @@ describe('componentCatalog', () => {
       kind: 'settings',
       file: 'components/settings/cl-settings.json',
       flags: ['--verbose'],
+      flagsEtag: shownWordsEtag(shownWords(['--verbose'])),
       env: [
         { name: 'KEPT', value: 'old' },
         { name: 'SECRET_TOKEN', hidden: true },

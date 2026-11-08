@@ -17,19 +17,13 @@ import { type ResolvedProfile, type ResolveInput, resolveProfile } from '../../.
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
 import { todayFlag, todayServerLine } from './resolved-view-today.ts';
-
-const HIDDEN = '‹hidden›';
+import { HIDDEN, hidesAtLeast, lineHidesAtLeast, type Shown } from './command-line-family.ts';
 
 const resolved = (input: ResolveInput): ResolvedProfile => {
   const result = resolveProfile(input);
   if (!result.ok) throw new Error(`expected a resolution, got ${JSON.stringify(result.failure)}`);
   return result.resolved;
 };
-
-interface Shown {
-  readonly value: string;
-  readonly hidden?: true;
-}
 
 /** What 5.0's Resolved view says for these launch flags, in order. */
 function shownFlags(flags: readonly string[]): readonly Shown[] {
@@ -69,34 +63,6 @@ function tightened(word: string, before: string | undefined): boolean {
   if (/^-[A-Za-z][^-]/u.test(word) && word.length >= 10) return true;
   if (before?.startsWith('-') === true && !/[=\s]/u.test(before) && !word.startsWith('-')) return true;
   return /[\s"'`:,;=]/u.test(word);
-}
-
-/** Whether `five` shows nothing of `word` that `today` hides: today's hidden word stays hidden, a cut only ends it. */
-function hidesAtLeast(word: string, today: Shown, five: Shown): boolean {
-  if (today.hidden === true) return five.hidden === true && five.value === HIDDEN;
-  if (five.hidden !== true) return five.value === word;
-  if (!five.value.endsWith(HIDDEN)) return false;
-  const kept = five.value.slice(0, -HIDDEN.length);
-  return word.startsWith(kept) && kept.length < word.length;
-}
-
-/**
- * Whether `five` shows nothing `today` hides: with no cut it equals today; with cuts, the first piece starts today,
- * the last ends it, and every piece stands in order in today with something cut before it.
- */
-function lineHidesAtLeast(today: string, five: string): boolean {
-  const pieces = five.split(HIDDEN);
-  const first = pieces[0] ?? '';
-  const last = pieces.at(-1) ?? '';
-  if (pieces.length === 1) return today === five;
-  if (!today.startsWith(first) || !today.endsWith(last)) return false;
-  let from = first.length;
-  for (const piece of pieces.slice(1, -1)) {
-    const at = today.indexOf(piece, from + 1);
-    if (at < 0) return false;
-    from = at + piece.length;
-  }
-  return today.length - last.length > from;
 }
 
 // ── The generator ────────────────────────────────────────────────────────────────────────────────

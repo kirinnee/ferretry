@@ -8,19 +8,23 @@
  *
  * Nothing here composes a configuration document. A settings edit is sent as its entries, with
  * `{ keep: true }` for a value the daemon would not show, so a hidden value is kept without ever
- * travelling back.
+ * travelling back. A launch flag or MCP argument the daemon hid is sent the same way, as
+ * `{ keep: true, at }` — its position in the list as read — with the list's etag.
  *
  * Pure.
  */
 
 import {
   type AccountChange,
+  type CommandWord,
   type ComponentKind,
   ComponentNameSchema,
   type ComponentView,
   type EnvEntry,
   type EnvInput,
+  HIDDEN_WORD_TEXT,
   type HarnessScope,
+  type KeptWord,
   type LayeredProfileView,
   type ProfileScope,
 } from '../../../../contract/index.ts';
@@ -169,7 +173,12 @@ export interface ComponentDraft {
   readonly hiddenKeys: readonly string[];
   /** The fields an edit keeps untouched (an MCP server's or a settings component's environment, flags). */
   readonly keptEnv: readonly string[];
-  readonly flags: readonly string[];
+  /** Settings: the launch flags as read, a hidden one kept by its position. */
+  readonly flags: readonly (string | KeptWord)[];
+  /** The etag the flags and the MCP arguments were read with, sent back with a kept word. */
+  readonly wordsEtag?: string;
+  /** MCP: the arguments the daemon hid, as `body` shows each and where it stood in the list as read. */
+  readonly hiddenArgs: readonly { readonly shown: string; readonly at: number }[];
   /** Instructions or hooks text the daemon cut a secret out of: it cannot be saved from here. */
   readonly redacted: boolean;
   /** Hooks read from a folder rather than one file: edited in that folder. */
@@ -187,6 +196,7 @@ export const blankDraft = (kind: ComponentKind): ComponentDraft => ({
   hiddenKeys: [],
   keptEnv: [],
   flags: [],
+  hiddenArgs: [],
   redacted: false,
   directory: false,
   oauth: false,
@@ -198,11 +208,46 @@ const QUOTE_NEEDED = /[\s"'\\]/u;
 const shellWord = (word: string): string =>
   word === '' || QUOTE_NEEDED.test(word) ? `"${word.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"` : word;
 
+/** A command-line word as it may be shown: as written, or with its hidden value as `‹hidden›`. */
+const shownText = (word: CommandWord): string => (typeof word === 'string' ? word : word.shown);
+
 /** An MCP server's command line: `npx -y @modelcontextprotocol/server-github`, or its URL. */
 export function mcpCommandLine(detail: Extract<ComponentView['detail'], { kind: 'mcp' }>): string {
   if (detail.command === undefined) return detail.url ?? '';
-  return [detail.command, ...(detail.args ?? [])].map(shellWord).join(' ');
+  return [detail.command, ...(detail.args ?? []).map(shownText)].map(shellWord).join(' ');
 }
+
+/** The hidden words of a list as read, with where each stood. */
+const hiddenWords = (words: readonly CommandWord[] | undefined): readonly { shown: string; at: number }[] =>
+  (words ?? []).flatMap((word, at) => (typeof word === 'string' ? [] : [{ shown: word.shown, at }]));
+
+/**
+ * An MCP command line's arguments as an edit sends them: a word showing a hidden value, left as it was, is kept by
+ * where it stood (the first unused hidden word shown the same), so moving it moves its value with it. `bad` is a
+ * word holding `‹hidden›` that is no hidden word as shown: its value was never here to send.
+ */
+function mcpArguments(
+  draft: Pick<ComponentDraft, 'hiddenArgs'>,
+  words: readonly string[],
+): { readonly args: readonly (string | KeptWord)[]; readonly bad?: string } {
+  const used = new Set<number>();
+  const args: (string | KeptWord)[] = [];
+  for (const word of words) {
+    if (!word.includes(HIDDEN_WORD_TEXT)) {
+      args.push(word);
+      continue;
+    }
+    const kept = draft.hiddenArgs.find(hidden => hidden.shown === word && !used.has(hidden.at));
+    if (kept === undefined) return { args, bad: word };
+    used.add(kept.at);
+    args.push({ keep: true, at: kept.at });
+  }
+  return { args };
+}
+
+/** The etag a change sends: only with a kept word, which is all the daemon checks it for. */
+const etagFor = (words: readonly (string | KeptWord)[], etag: string | undefined): string | undefined =>
+  words.some(word => typeof word !== 'string') ? etag : undefined;
 
 /** Splits a command line into words, honouring double and single quotes and backslashes. */
 export function splitCommandLine(line: string): readonly string[] {
@@ -264,6 +309,8 @@ export function draftFromComponent(component: ComponentView): ComponentDraft {
         ...base,
         body: mcpCommandLine(detail),
         keptEnv: detail.env.map(entry => entry.name),
+        hiddenArgs: hiddenWords(detail.args),
+        ...(detail.argsEtag === undefined ? {} : { wordsEtag: detail.argsEtag }),
         oauth: detail.auth === 'oauth',
       };
     case 'skills':
@@ -275,7 +322,8 @@ export function draftFromComponent(component: ComponentView): ComponentDraft {
         body: entries.flatMap(entry => ('hidden' in entry ? [] : [`${entry.key} = ${entry.value}`])).join('\n'),
         hiddenKeys: entries.flatMap(entry => ('hidden' in entry ? [entry.key] : [])),
         keptEnv: detail.env.map(entry => entry.name),
-        flags: detail.flags ?? [],
+        flags: (detail.flags ?? []).map((word, at) => (typeof word === 'string' ? word : { keep: true as const, at })),
+        ...(detail.flagsEtag === undefined ? {} : { wordsEtag: detail.flagsEtag }),
       };
     }
     default:
@@ -330,8 +378,12 @@ export function draftProblem(
   if (draft.redacted) return 'This text holds a value that looks like a secret, so it can’t be saved from here.';
   if (draft.directory) return 'These hooks come from a folder, so they are edited in that folder.';
   switch (draft.kind) {
-    case 'mcp':
-      return splitCommandLine(draft.body).length === 0 ? 'Type the command that starts the server.' : undefined;
+    case 'mcp': {
+      const words = splitCommandLine(draft.body);
+      if (words.length === 0) return 'Type the command that starts the server.';
+      const bad = mcpArguments(draft, words.slice(1)).bad;
+      return bad === undefined ? undefined : `Type the hidden value again, or put “${bad}” back as it was.`;
+    }
     case 'skills':
       return lines(draft.body).length === 0 ? 'Name at least one skill.' : undefined;
     case 'settings': {
@@ -376,9 +428,15 @@ export function componentChange(draft: ComponentDraft, create: boolean): Account
       const env = keepAll(draft.keptEnv);
       const target = URL_LINE.test(line)
         ? { url: line, ...(draft.oauth ? { auth: 'oauth' as const } : {}) }
-        : (([command, ...args]) => ({ command: command as string, ...(args.length === 0 ? {} : { args }) }))(
-            splitCommandLine(line),
-          );
+        : (([command, ...words]) => {
+            const { args } = mcpArguments(draft, words);
+            const etag = etagFor(args, draft.wordsEtag);
+            return {
+              command: command as string,
+              ...(args.length === 0 ? {} : { args: [...args] }),
+              ...(etag === undefined ? {} : { argsEtag: etag }),
+            };
+          })(splitCommandLine(line));
       return put({ kind: 'mcp', ...target, ...(env === undefined ? {} : { env }), ...withHarness(draft.harness) });
     }
     case 'skills':
@@ -390,11 +448,13 @@ export function componentChange(draft: ComponentDraft, create: boolean): Account
         ...draft.hiddenKeys.filter(key => !typed.has(key)).map(key => [key, { keep: true as const }] as const),
       ]);
       const env = keepAll(draft.keptEnv);
+      const flagsEtag = etagFor(draft.flags, draft.wordsEtag);
       return put({
         kind: 'settings',
         harness: draft.harness ?? 'claude-code',
         entries,
         ...(draft.flags.length === 0 ? {} : { flags: [...draft.flags] }),
+        ...(flagsEtag === undefined ? {} : { flagsEtag }),
         ...(env === undefined ? {} : { env }),
       });
     }

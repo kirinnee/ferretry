@@ -10,7 +10,9 @@
  *   the passkey step-up). A caller never sends a configuration document: it names one intent.
  *
  * Nothing here can carry a login: a component's environment shows a value only when it is a `${secret:NAME}` reference
- * or its name does not look like a credential; an edit keeps a hidden value with `{ keep: true }`.
+ * or its name does not look like a credential; an edit keeps a hidden value with `{ keep: true }`. A launch flag or an
+ * MCP argument that carries a credential travels as `{ shown, hidden: true }` (its flag kept, its value cut), and an
+ * edit keeps it with `{ keep: true, at }` against the list's etag.
  * Every object is strict. Shapes owned by other subsystems come from `./shared.ts`.
  */
 import { z } from 'zod';
@@ -205,13 +207,27 @@ export const EnvEntrySchema = z.union([
 ]);
 export type EnvEntry = z.infer<typeof EnvEntrySchema>;
 
+/** What stands in a command-line word for the value that is not shown, and so can never be typed as one. */
+export const HIDDEN_WORD_TEXT = '‹hidden›';
+
+/**
+ * One launch flag or MCP argument as it may travel: as written, or — when it carries a credential — the fact that it
+ * is hidden, with the word as it may be shown (`--token=‹hidden›`, `‹hidden›` after `--token`).
+ */
+export const HiddenWordSchema = z.strictObject({ shown: NonEmptyStringSchema, hidden: z.literal(true) });
+export const CommandWordSchema = z.union([z.string(), HiddenWordSchema]);
+export type HiddenWord = z.infer<typeof HiddenWordSchema>;
+export type CommandWord = z.infer<typeof CommandWordSchema>;
+
 /** What a component holds, per kind. A file is named relative to the fleet's asset tree. */
 export const ComponentDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('instructions'), file: NonEmptyStringSchema }),
   z.strictObject({
     kind: z.literal('mcp'),
     command: NonEmptyStringSchema.optional(),
-    args: z.array(z.string()).readonly().optional(),
+    args: z.array(CommandWordSchema).readonly().optional(),
+    /** The etag of `args` as read, present with them: an edit that keeps a hidden argument sends it back. */
+    argsEtag: NonEmptyStringSchema.optional(),
     url: NonEmptyStringSchema.optional(),
     /** `oauth`: the server is signed in to from Ferretry (docs/mcp-oauth.md). */
     auth: z.literal('oauth').optional(),
@@ -221,7 +237,12 @@ export const ComponentDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('settings'),
     file: NonEmptyStringSchema.optional(),
-    flags: z.array(NonEmptyStringSchema).readonly().optional(),
+    flags: z
+      .array(z.union([NonEmptyStringSchema, HiddenWordSchema]))
+      .readonly()
+      .optional(),
+    /** The etag of `flags` as read, present with them: an edit that keeps a hidden flag sends it back. */
+    flagsEtag: NonEmptyStringSchema.optional(),
     env: z.array(EnvEntrySchema).readonly(),
   }),
   z.strictObject({
@@ -567,6 +588,24 @@ export type RuntimeCatalog = z.infer<typeof RuntimeCatalogSchema>;
 export const EnvInputSchema = z.record(z.string(), z.union([z.string(), z.strictObject({ keep: z.literal(true) })]));
 export type EnvInput = z.infer<typeof EnvInputSchema>;
 
+/** A word a person typed: never the text that stands in for a hidden value, so the mask can never be saved as one. */
+const typedWord = <T extends z.ZodString>(schema: T) =>
+  schema.refine(word => !word.includes(HIDDEN_WORD_TEXT), {
+    message: `${HIDDEN_WORD_TEXT} stands in for a hidden value and cannot be saved as one: keep the word, or type its value`,
+  });
+
+/**
+ * A launch flag or MCP argument as an edit sends it: a new word, or "keep the one at `at`" for a word the catalogue
+ * reported as hidden. `at` is the word's position in the list as it was read; the list's etag says which read.
+ */
+export const KeptWordSchema = z.strictObject({ keep: z.literal(true), at: NonNegativeIntegerSchema });
+export type KeptWord = z.infer<typeof KeptWordSchema>;
+
+/** A launch flag as an edit sends it. */
+export const FlagInputSchema = z.union([typedWord(NonEmptyStringSchema), KeptWordSchema]);
+/** An MCP argument as an edit sends it. */
+export const ArgInputSchema = z.union([typedWord(z.string()), KeptWordSchema]);
+
 /**
  * A settings file as an edit sends it, by dotted key: a new value, or "keep the one it has" for a
  * value the catalogue reported as hidden.
@@ -587,7 +626,9 @@ export const ComponentInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('mcp'),
     command: NonEmptyStringSchema.optional(),
-    args: z.array(z.string()).optional(),
+    args: z.array(ArgInputSchema).optional(),
+    /** The `argsEtag` the kept arguments were read with; needed by every `{ keep: true }` in `args`. */
+    argsEtag: NonEmptyStringSchema.optional(),
     url: NonEmptyStringSchema.optional(),
     /** `oauth` on a `url` server: signed in to from Ferretry (docs/mcp-oauth.md). */
     auth: z.literal('oauth').optional(),
@@ -602,7 +643,9 @@ export const ComponentInputSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('settings'),
     harness: HarnessKeySchema,
-    flags: z.array(NonEmptyStringSchema).optional(),
+    flags: z.array(FlagInputSchema).optional(),
+    /** The `flagsEtag` the kept flags were read with; needed by every `{ keep: true }` in `flags`. */
+    flagsEtag: NonEmptyStringSchema.optional(),
     env: EnvInputSchema.optional(),
     /** The file by entry, instead of `content`: the daemon writes the document. */
     entries: SettingsEntriesInputSchema.optional(),

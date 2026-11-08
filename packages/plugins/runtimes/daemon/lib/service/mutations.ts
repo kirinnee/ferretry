@@ -31,6 +31,7 @@ import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { skillSourceReference } from '../account/adapt.ts';
+import { shownWords, shownWordsEtag } from './command-line.ts';
 import { slugName } from '../account/document.ts';
 import type {
   AccountChange as WireAccountChange,
@@ -38,6 +39,7 @@ import type {
   CatalogInstallChange as WireCatalogInstallChange,
   ComponentInput as WireComponentInput,
   EnvInput,
+  KeptWord,
   RunningSession,
   SettingsEntriesInput,
 } from '../../../contract/index.ts';
@@ -261,6 +263,33 @@ function resolvedEnv(
   return Object.keys(env).length === 0 ? undefined : env;
 }
 
+/**
+ * The launch flags or MCP arguments an edit asks for, with every "keep" resolved against the words the component has
+ * (rulings #39, #40): the catalogue showed a word that carries a credential as hidden, so the form sends
+ * `{ keep: true, at }` with the list's etag instead of a value it never held. A keep takes the word at its position
+ * in the list as READ, so moving words in the edit moves no value; when the list has changed since (the etag no longer
+ * matches) or holds no word there, it is refused in the environment's words. A typed word can never be the hidden
+ * marker (the contract refuses it), so the marker is never saved as a value.
+ */
+function resolvedWords(
+  input: readonly (string | KeptWord)[] | undefined,
+  etag: string | undefined,
+  existing: unknown,
+  first: unknown,
+  owner: string,
+  what: 'flag' | 'argument',
+): string[] | undefined {
+  if (input === undefined) return undefined;
+  const stored = Array.isArray(existing) ? (existing as readonly string[]) : [];
+  const current = shownWordsEtag(shownWords(stored, typeof first === 'string' ? first : undefined));
+  return input.map(word => {
+    if (typeof word === 'string') return word;
+    const kept = etag === current ? stored[word.at] : undefined;
+    if (kept === undefined) refuse(`${owner} has no value for ${what} ${String(word.at + 1)} to keep; type one`);
+    return kept as string;
+  });
+}
+
 /** A parsed settings or hooks document, or a refusal naming what is wrong with it. */
 function assertDocument(text: string, format: SettingsFormat, what: string): void {
   try {
@@ -322,10 +351,11 @@ function componentBody(
       return { component: { file, ...harness }, ...(written === undefined ? {} : { file: written }) };
     case 'mcp': {
       const env = resolvedEnv(input.env, existingEnv, owner);
+      const args = resolvedWords(input.args, input.argsEtag, existing?.args, existing?.command, owner, 'argument');
       return {
         component: {
           ...(input.command === undefined ? {} : { command: input.command }),
-          ...(input.args === undefined ? {} : { args: [...input.args] }),
+          ...(args === undefined ? {} : { args }),
           ...(input.url === undefined ? {} : { url: input.url }),
           ...(input.auth === undefined ? {} : { auth: input.auth }),
           // A hand-registered client (`oauth`) has no field in the form: an edit that keeps the sign-in keeps it.
@@ -340,11 +370,12 @@ function componentBody(
     case 'settings': {
       if (content !== undefined) assertDocument(content, SETTINGS_FORMAT[input.harness], owner);
       const env = resolvedEnv(input.env, existingEnv, owner);
+      const flags = resolvedWords(input.flags, input.flagsEtag, existing?.flags, undefined, owner, 'flag');
       return {
         component: {
           harness: input.harness,
           ...(file === undefined ? {} : { file }),
-          ...(input.flags === undefined || input.flags.length === 0 ? {} : { flags: [...input.flags] }),
+          ...(flags === undefined || flags.length === 0 ? {} : { flags }),
           ...(env === undefined ? {} : { env }),
         },
         ...(written === undefined ? {} : { file: written }),

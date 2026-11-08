@@ -7,7 +7,9 @@
  * apply is handed the caller's governance rather than deciding it.
  */
 import { describe, it } from 'bun:test';
-import { deviceStanding, ferretStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
+import { LIMITED_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
+import { deviceStanding, ferretStanding, ownerStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallStanding } from '@ferretry/kernel/contract';
 import { instantFromEpochMs } from '@ferretry/std';
 import should from 'should';
 import type {
@@ -23,6 +25,8 @@ import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
 } from '../../../daemon/lib/service/catalog-service.ts';
+import { type CatalogFacts, componentCatalog } from '../../../daemon/lib/service/catalog.ts';
+import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { type Hosted, hostRuntimes, PROPOSAL_ID } from './support.ts';
 
 const ID = PROPOSAL_ID;
@@ -443,6 +447,111 @@ describe('the fleet catalogue mount', () => {
 
     // Assert
     should(staged.status).equal(403);
+    should(calls.proposed).be.empty();
+  });
+});
+
+// ── A credential in a component's flags and arguments (R-0082, rulings #39 and #40) ─────────────────────
+//
+// `GET /v1/runtimes/components` is `fleet.use`, `caller=any`: a ferret's own token and a `fy pair --limited` device
+// read it. The catalogue behind the route here is the REAL projection (`componentCatalog`) over a model whose flags
+// and arguments hold a credential in every shape #37 and #40 name, so what the route answers is what a caller gets.
+
+const LEAK_SECRET = 'not-a-real-secret-0000';
+const LEAK_TOKEN = 'sk-not-a-real-key-0000';
+
+const LEAK_MODEL = parseAccountModel({
+  version: 1,
+  components: {
+    settings: {
+      base: {
+        harness: 'claude',
+        file: 'components/settings/base.json',
+        flags: [
+          `--token=${LEAK_SECRET}`,
+          '--api-key',
+          LEAK_SECRET,
+          `-k=${LEAK_TOKEN}`,
+          `--header=Bearer ${LEAK_TOKEN}`,
+          '-c',
+          `mcp_servers.x.env.API_KEY=${LEAK_SECRET}`,
+        ],
+      },
+    },
+    mcp: {
+      remote: {
+        command: 'npx',
+        args: [
+          'mcp-remote',
+          `--header=Authorization: Bearer ${LEAK_SECRET}`,
+          `X-Api-Key: ${LEAK_SECRET}`,
+          `https://person:${LEAK_SECRET}@h.example.invalid/x?token=${LEAK_SECRET}&model=m`,
+          `-H${LEAK_TOKEN}`,
+        ],
+      },
+    },
+  },
+  profiles: { p: { layers: ['settings/base', 'mcp/remote'] } },
+});
+
+const LEAK_FACTS: CatalogFacts = {
+  format: 'present',
+  machineName: 'studio',
+  tools: { claude: '/usr/bin/claude', codex: undefined },
+  runningSessions: 0,
+  userHome: '/home/person',
+  acceptsAutoPermissionMode: true,
+};
+
+describe('the components read — no credential in a flag or argument for any caller (R-0082, #39, #40)', () => {
+  const callers: readonly [string, CallStanding][] = [
+    ['a ferret token', ferretStanding('f1' as never)],
+    ['a --limited paired device', deviceStanding('phone', LIMITED_DEVICE_GRANTS, true)],
+    ['the owner at the machine (the edit form)', ownerStanding()],
+  ];
+
+  for (const [who, standing] of callers) {
+    it(`R-0082 should answer ${who} the components with every flag and argument value hidden and the flags kept`, async () => {
+      // Arrange
+      const { assembly } = stub({ components: async () => componentCatalog(LEAK_MODEL, LEAK_FACTS) });
+      const hosted = await hostRuntimes(assembly);
+      hosted.as(standing);
+
+      // Act
+      const response = await hosted.host.request('GET', '/v1/runtimes/components');
+      const text = JSON.stringify(json(response));
+
+      // Assert
+      should(response.status).equal(200);
+      should(text).not.containEql(LEAK_SECRET);
+      should(text).not.containEql('not-a-real-key-0000');
+      for (const kept of ['--api-key', 'mcp_servers.x.env.API_KEY=', 'Authorization: ', 'X-Api-Key: ', '&model=m']) {
+        should(text).containEql(kept);
+      }
+      should(text).containEql('"hidden":true');
+    });
+  }
+
+  it('R-0294 should refuse an edit that types the hidden marker back as a flag or argument, before the service runs', async () => {
+    // Arrange
+    const { assembly, calls } = stub();
+    const hosted = await hostRuntimes(assembly);
+    const put = (component: object) => ({ change: { kind: 'component.put', name: 'base', create: false, component } });
+
+    // Act
+    const flag = await post(
+      hosted,
+      '/v1/runtimes/proposals',
+      put({ kind: 'settings', harness: 'claude-code', flags: ['--token', '‹hidden›'] }),
+    );
+    const arg = await post(
+      hosted,
+      '/v1/runtimes/proposals',
+      put({ kind: 'mcp', command: 'npx', args: ['--api-key=‹hidden›'] }),
+    );
+
+    // Assert
+    should([flag.status, arg.status]).deepEqual([400, 400]);
     should(calls.proposed).be.empty();
   });
 });

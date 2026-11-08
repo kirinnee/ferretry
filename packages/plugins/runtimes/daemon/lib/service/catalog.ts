@@ -48,6 +48,7 @@ import type {
   AutoResumeSummary,
   CatalogAct,
   CatalogFormat,
+  CommandWord,
   ComponentCatalog,
   ComponentContent,
   ComponentView,
@@ -74,6 +75,7 @@ import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.t
 import { runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
+import { shownWords, shownWordsEtag } from './command-line.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
@@ -246,30 +248,52 @@ const envEntries = (env: Readonly<Record<string, string>> | undefined): EnvEntry
     .toSorted(([left], [right]) => byName(left, right))
     .map(([name, value]) => (looksSecret(name, value) ? { name, hidden: true as const } : { name, value }));
 
+/**
+ * A component's launch flags or MCP arguments as they may travel (rulings #39, #40): each word through the one
+ * command-line rule (`./command-line.ts`), a word that carries a credential as `{ shown, hidden: true }`, and the
+ * etag an edit that keeps one sends back. For EVERY caller, the edit form's owner included: the form keeps a hidden
+ * word by its position (`{ keep: true, at }`) and never holds its value.
+ */
+function commandWords(
+  words: unknown,
+  first: unknown,
+): { readonly words: CommandWord[]; readonly etag: string } | undefined {
+  if (!Array.isArray(words)) return undefined;
+  const shown = shownWords(words as string[], typeof first === 'string' ? first : undefined);
+  return {
+    words: shown.map(word => (word.hidden ? { shown: word.text, hidden: true as const } : word.text)),
+    etag: shownWordsEtag(shown),
+  };
+}
+
 function componentDetail(kind: ComponentKind, component: Record<string, unknown>): ComponentDetail {
   const env = component.env as Readonly<Record<string, string>> | undefined;
   const text = (key: string) => (typeof component[key] === 'string' ? { [key]: component[key] as string } : {});
   switch (kind) {
     case 'instructions':
       return { kind, file: component.file as string };
-    case 'mcp':
+    case 'mcp': {
+      const args = commandWords(component.args, component.command);
       return {
         kind,
         ...text('command'),
-        ...(Array.isArray(component.args) ? { args: [...(component.args as string[])] } : {}),
+        ...(args === undefined ? {} : { args: args.words, argsEtag: args.etag }),
         ...text('url'),
         ...(component.auth === 'oauth' ? { auth: 'oauth' as const } : {}),
         env: envEntries(env),
       };
+    }
     case 'skills':
       return { kind, items: [...(component.items as string[])] };
-    case 'settings':
+    case 'settings': {
+      const flags = commandWords(component.flags, undefined);
       return {
         kind,
         ...text('file'),
-        ...(Array.isArray(component.flags) ? { flags: [...(component.flags as string[])] } : {}),
+        ...(flags === undefined ? {} : { flags: flags.words, flagsEtag: flags.etag }),
         env: envEntries(env),
       };
+    }
     case 'hooks':
       return { kind, ...text('file'), ...text('directory') };
     default:

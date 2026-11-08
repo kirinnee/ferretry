@@ -3,6 +3,8 @@ import should from 'should';
 import { type ResolvedProfile, type ResolveInput, resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
+import { hidesAtLeast, lineHidesAtLeast, nestedBreach, nestedFamily, nestedLineBreach } from './command-line-family.ts';
+import { todayFlag, todayServerLine } from './resolved-view-today.ts';
 
 const HIDDEN = '‹hidden›';
 // Obviously fake: it only has to have the shape of a provider token so the secret rules see it.
@@ -566,6 +568,141 @@ describe('resolvedEntries — every command-line shape of a flag and its value (
       return line.includes(`${BEFORE} ${family.flag}`) && line.includes(HIDDEN)
         ? []
         : [`${family.label}: lost the flag`];
+    });
+
+    // Assert
+    should(breaches).deepEqual([]);
+  });
+});
+
+// ── A credential nested inside a value (ruling #40) ──────────────────────────────────────────────────
+//
+// 4.291.5 and #37 showed a secret-named key inside a value under a harmless flag in full: codex `-c …API_KEY=<v>`,
+// `--header=Authorization: Bearer <v>`, `X-Api-Key: <v>`, a URL's user password and `?token=<v>`. 5.0 cuts the value
+// and keeps the key, the flag, the user, the host and the other parameters.
+
+describe('resolvedEntries — a credential nested inside a value (ruling #40)', () => {
+  it('should hide a secret-named key nested in a value and keep the key: -c …API_KEY=<v>, Authorization: Bearer <v>, X-Api-Key: <v>', () => {
+    // Act
+    const actual = shownFlags([
+      '-c',
+      `mcp_servers.x.env.API_KEY=${FAKE_SECRET}`,
+      `--header=Authorization: Bearer ${FAKE_SECRET}`,
+      `--header=X-Api-Key: ${FAKE_SECRET}`,
+      `-HAuthorization: Basic ${FAKE_SECRET}`,
+      `--set=a=1,api_key=${FAKE_SECRET},b=2`,
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      as('-c'),
+      hid(`mcp_servers.x.env.API_KEY=${HIDDEN}`),
+      hid(`--header=Authorization: ${HIDDEN}`),
+      hid(`--header=X-Api-Key: ${HIDDEN}`),
+      hid(`-HAuthorization: ${HIDDEN}`),
+      hid(`--set=a=1,api_key=${HIDDEN},b=2`),
+    ]);
+  });
+
+  it("should hide a URL user's password and a secret-named query parameter, keeping the user, the host and every other parameter", () => {
+    // Act
+    const actual = shownFlags([
+      `--url=postgres://person:${FAKE_SECRET}@db.example.invalid/app`,
+      'https://person:pw@h.example.invalid',
+      `--endpoint`,
+      `https://h.example.invalid/x?token=${FAKE_SECRET}&model=m&access_token=${FAKE_SECRET}`,
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`--url=postgres://person:${HIDDEN}@db.example.invalid/app`),
+      hid(`https://person:${HIDDEN}@h.example.invalid`),
+      as('--endpoint'),
+      hid(`https://h.example.invalid/x?token=${HIDDEN}&model=m&access_token=${HIDDEN}`),
+    ]);
+  });
+
+  it('should keep a pointer, a short value, a harmless key and a URL with no password as written (control)', () => {
+    // Arrange
+    const words = [
+      '-c',
+      'mcp_servers.x.env.API_KEY=$OPENAI_API_KEY',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+      '--header=Authorization: Bearer ${secret:MCP_TOKEN}',
+      '--set=api_key=short',
+      '--header=X-Request-Id: not-a-secret-0000',
+      'https://person@h.example.invalid/x?model=m&page=2',
+      'postgres://person:$DB_PASSWORD@db.example.invalid',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer whose default is a name, not a key
+      '--env=${API_TOKEN:-default-value}',
+    ];
+
+    // Act
+    const actual = shownFlags(words);
+
+    // Assert
+    should(actual).deepEqual(words.map(as));
+  });
+
+  it("should hide the same nested shapes in an MCP server's arguments", () => {
+    // Act
+    const actual = shownServer([
+      '--header',
+      `Authorization: Bearer ${FAKE_SECRET}`,
+      `https://person:${FAKE_SECRET}@h.example.invalid/x?api_key=${FAKE_SECRET}&model=m`,
+      '--plain',
+    ]);
+
+    // Assert
+    should(actual).equal(
+      `run-server --header Authorization: ${HIDDEN} https://person:${HIDDEN}@h.example.invalid/x?api_key=${HIDDEN}&model=m --plain`,
+    );
+  });
+
+  it('should read a run of keys and separators in one pass, not once from every character (linear)', () => {
+    // Arrange — a long value of secret-named keys with short values, and a long run with no separator.
+    const keys = `--set=${'token=ab,'.repeat(20_000)}`;
+    const run = `--set=${'a'.repeat(200_000)}`;
+    const started = performance.now();
+
+    // Act
+    const actual = shownFlags([keys, run]);
+
+    // Assert
+    should(actual.map(word => word.value)).deepEqual([keys, run]);
+    should(performance.now() - started).be.below(2_000);
+  });
+});
+
+describe('resolvedEntries — every nested credential shape (ruling #40, generated)', () => {
+  const cases = nestedFamily();
+
+  it(`should hide every nested secret of every launch-flag shape (${String(cases.length)} shapes), keep the key and flag, at least as much as today, and touch no control`, () => {
+    // Act
+    const breaches = cases.flatMap(family => {
+      const shown = shownFlags(family.words);
+      const floor = family.words.flatMap((word, index) =>
+        hidesAtLeast(word, todayFlag(word), shown[index] ?? { value: '' }) ? [] : [`${family.label}: under today`],
+      );
+      const breach = nestedBreach(family, shown);
+      return breach === undefined ? floor : [...floor, breach];
+    });
+
+    // Assert
+    should(cases.filter(family => family.secret).length).be.above(1000);
+    should(cases.filter(family => !family.secret).length).be.above(1000);
+    should(breaches).deepEqual([]);
+  });
+
+  it(`should hide every nested secret of every MCP-argument shape (${String(cases.length)} shapes), at least as much as today, and touch no control`, () => {
+    // Act
+    const breaches = cases.flatMap(family => {
+      const line = shownServer(family.words);
+      const today = todayServerLine({ command: 'run-server', args: family.words });
+      return [
+        ...(lineHidesAtLeast(today, line) ? [] : [`${family.label}: under today`]),
+        ...[nestedLineBreach(family, 'run-server', line)].filter(breach => breach !== undefined),
+      ];
     });
 
     // Assert
