@@ -150,6 +150,36 @@ describe('harness-refusals: deliver ANSWERS a closed refusal taxonomy instead of
   });
 });
 
+describe('ruling #45 (b): a long queued message with nowhere to be written is refused, never pasted inline', () => {
+  test('ruling #45 no session folder bound: a 1001-char queue answers plugin_unavailable and types nothing; 1000 still goes inline', async () => {
+    const f = await running();
+    expect(await f.seam.queue('z'.repeat(1_001), { sendId: 'send-1' })).toEqual({
+      ok: false,
+      error: { refused: 'plugin_unavailable' },
+    });
+    expect(f.runner.queued).toEqual([]);
+    expect(await f.seam.queue('z'.repeat(1_000))).toEqual({ ok: true, value: 'held' });
+    expect(f.runner.queued.map(entry => entry.text)).toEqual(['z'.repeat(1_000)]);
+  });
+
+  test('ruling #45 a file that cannot be written is a refusal that typed nothing, quoting nothing of the message', async () => {
+    const f = additivesFixture({
+      session: {
+        prepare: async () => {},
+        stamp: async () => {},
+        carry: async () => {},
+        queued: async () => await Promise.reject(new Error('disk full')),
+      },
+    });
+    await f.service.resume(f.id);
+    const seam = (await f.service.harness(f.id))!;
+    const answer = await seam.queue(`FIXTURE_MESSAGE ${'y'.repeat(1_500)}`, { sendId: 'send-1' });
+    expect(answer).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
+    expect(JSON.stringify(answer)).not.toMatch(/FIXTURE_MESSAGE|disk full/);
+    expect(f.runner.queued).toEqual([]);
+  });
+});
+
 describe('harness-refusals: interrupt presses the HARNESS’s stop key, only under shouldPressStopKey, never C-c', () => {
   test('harness-refusals interrupt at a working pane presses the harness’s Escape through the runner’s stopTurn, never the raw signal', async () => {
     const f = await running();
