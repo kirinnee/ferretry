@@ -134,6 +134,10 @@
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"]
     },
+    "packages/plugins/layouts": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "project": ["**/*.{ts,tsx}"]
+    },
     "packages/plugins/mcp": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"]

@@ -6,7 +6,7 @@
  */
 import type { Layout } from '../../contract/index.ts';
 
-export interface ChoiceOption {
+interface ChoiceOption {
   readonly id: string;
   readonly label: string;
   /** The tooltip: what this choice does. */
