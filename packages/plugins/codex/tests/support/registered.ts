@@ -96,8 +96,12 @@ export function registeredCodex() {
     };
     return handle as RootHandle;
   };
+  const jobs: { readonly id: string; readonly schedule: unknown; run(signal: AbortSignal): Promise<void> }[] = [];
+  const warnings: string[] = [];
   const kernel = {
     roots: { root },
+    jobs: { add: (job: (typeof jobs)[number]) => void jobs.push(job), kick: () => undefined },
+    log: { warn: (message: string) => void warnings.push(message) },
     state: {
       read: async (_def: unknown, name: string) => ok(state.get(name)),
       write: async (_def: unknown, value: unknown, name: string) => {
@@ -135,11 +139,12 @@ export function registeredCodex() {
       },
     },
   } as unknown as KernelPorts;
-  const build = () => {
+  const buildHalf = () => {
     const half = daemon.build?.({ manifest, kernel } as never);
     if (half === undefined) throw new Error('missing daemon half');
-    return half.hooks['harnesses:codex'] as Harness;
+    return half;
   };
+  const build = () => buildHalf().hooks['harnesses:codex'] as Harness;
   const runner = {
     start: async (spec: RunSpec) => {
       commands.push(spec);
@@ -163,6 +168,9 @@ export function registeredCodex() {
     }) as unknown as LaunchSpec;
   return {
     build,
+    buildHalf,
+    jobs,
+    warnings,
     files,
     reads,
     windows,

@@ -24,6 +24,28 @@ const message = (text: string) =>
   line('response_item', { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 
 describe('the registered Codex harness', () => {
+  test('(no guarantees row) the held fast-start catalog is read by jobs of its own, and start.decide answers at once before any read has landed', async () => {
+    const box = fixture();
+    const half = box.buildHalf();
+    expect(box.jobs.map(job => job.id).sort()).toEqual(['codex-fast-catalog', 'codex-fast-catalog-boot']);
+    expect(box.jobs.find(job => job.id === 'codex-fast-catalog-boot')?.schedule).toEqual({ onceAfterStart: true });
+    expect(box.jobs.find(job => job.id === 'codex-fast-catalog')?.schedule).toEqual({ every: 300_000 });
+    const decide = (half.hooks as unknown as Record<string, (input: unknown) => unknown>)['start.decide'];
+    const input = {
+      ferret: 'f1',
+      name: 'wren',
+      role: 'lead',
+      harness: 'codex',
+      folder: '/w',
+      by: 'owner',
+      model: 'gpt-x',
+      fast: true,
+    };
+    // Nothing has been read: not a promise, and not a refusal (GAP(codex)).
+    expect(decide?.(input)).toEqual({ allow: true });
+    box.cleanup();
+  });
+
   test('S42 homeFor names state/codex/agent-homes/<ferret> through its own root; the home is made private before any launch and no other home is used', async () => {
     const box = fixture();
     const harness = box.build();

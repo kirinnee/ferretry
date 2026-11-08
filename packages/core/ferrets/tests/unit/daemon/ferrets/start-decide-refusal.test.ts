@@ -4,6 +4,7 @@ import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import type { TestHost } from '@ferretry/kernel/testing';
 import { NamesFile, StartDecide, type StartDecideInput, StartRefusalCodeSchema } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
+import manifest from '../../../../manifest.ts';
 import { host } from './route-fixture.ts';
 
 /**
@@ -89,7 +90,7 @@ describe('a start.decide refusal carrying a code', () => {
     expect(refused.json<{ code: string }>().code).toBe('refused');
   });
 
-  test('(no guarantees row) a code that is not a string is dropped by the host and reads as refused', async () => {
+  test('(no guarantees row) a code that is not a string reads as refused (the closed list rejects it; the kernel tests pin the host drop)', async () => {
     const h = await fresh(() => ({ allow: false, reason: 'no thanks', code: { unservable_model: true } }));
     const refused = await start(h, {});
     expect(refused.json<{ code: string }>().code).toBe('refused');
@@ -115,5 +116,39 @@ describe('a start.decide refusal carrying a code', () => {
     expect(slow).toMatchObject({ fast: false });
     expect(slow).not.toHaveProperty('model');
     expect(both).toMatchObject({ model: 'opus-5', fast: true });
+  });
+
+  test('(no guarantees row) the start.decide offer sets no timeout of its own: a start waits the kernel default, not 15 s', () => {
+    const offer = manifest.hooks?.offers?.find(candidate => candidate.hook.name === StartDecide.name);
+    expect(offer).toBeDefined();
+    expect(offer).not.toHaveProperty('timeoutMs');
+  });
+
+  test('(no guarantees row) a resume refused with unservable_model is 409 unservable_model; an unknown code is a plain refused', async () => {
+    let code: string | undefined;
+    const seen: StartDecideInput[] = [];
+    const h = await fresh(
+      input =>
+        input.by === 'resume' && code !== undefined ? { allow: false, reason: 'not now', code } : { allow: true },
+      seen,
+    );
+    const id = (await start(h, { name: 'wren' })).json<{ id: string }>().id;
+    await h.request('POST', `/v1/ferrets/${id}/stop`, { body: {} });
+    code = 'unservable_model';
+    const refused = await h.request('POST', `/v1/ferrets/${id}/resume`, { body: {} });
+    expect(refused.status).toBe(409);
+    expect(refused.json<{ code: string }>().code).toBe('unservable_model');
+    code = 'teapot';
+    expect((await h.request('POST', `/v1/ferrets/${id}/resume`, { body: {} })).json<{ code: string }>().code).toBe(
+      'refused',
+    );
+    // A resume relaunches what was recorded: it names no model and asks for no fast mode, as today's resume judged none
+    // (rebuild-ref daemon/src/lib/session/resume/service.ts has no fast check; the only judgement is bin/fyd.ts:2691).
+    const resumes = seen.filter(input => input.by === 'resume');
+    expect(resumes.length).toBeGreaterThan(0);
+    for (const input of resumes) {
+      expect(input).not.toHaveProperty('model');
+      expect(input).not.toHaveProperty('fast');
+    }
   });
 });

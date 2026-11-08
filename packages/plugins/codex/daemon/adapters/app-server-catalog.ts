@@ -79,15 +79,23 @@ export class CodexAppServerCatalog {
   constructor(private readonly options: CodexAppServerOptions) {}
 
   /** The models this account advertises right now, in the order its picker will render them. */
-  async models(binary: string, cwd: FencedPath): Promise<readonly RuntimeModelChoice[]> {
+  async models(
+    binary: string,
+    cwd: FencedPath,
+    env?: Readonly<Record<string, string>>,
+  ): Promise<readonly RuntimeModelChoice[]> {
     if (!isAbsolute(binary))
       throw new CodexModelCatalogError('the Codex model catalog probe needs an absolute wrapper path');
     if (!isAbsolute(cwd))
       throw new CodexModelCatalogError('the Codex model catalog probe needs an absolute session directory');
 
     const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    // The child sees what the kernel gives a codex child, and nothing else from this host.
-    const child = this.options.spawn.start(binary, ['app-server', '--stdio'], { cwd });
+    // The child sees `env` when one is given (a scrubbed one, for a read no login asked for); otherwise what the
+    // kernel gives a codex child, and nothing else from this host.
+    const child = this.options.spawn.start(binary, ['app-server', '--stdio'], {
+      cwd,
+      ...(env === undefined ? {} : { env }),
+    });
     // ACCUMULATED AS IT ARRIVES, rather than awaited as one `Response.text()` that only settles at
     // EOF. Two reasons, and the second is why the first is not enough: a child still holding its
     // stderr open never reaches EOF, and killing one makes the stream error — so a single `.text()`
