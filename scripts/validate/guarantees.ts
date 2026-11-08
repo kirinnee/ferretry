@@ -240,8 +240,12 @@ export function passFindings(
   const findings: Finding[] = [];
   for (const row of rows) {
     if (row.status === 'removed' || skipped(row, pending, cut, strict)) continue;
-    if ((tests.get(row.id) ?? []).length === 0) continue;
     const folder = folderOf(row.owner);
+    // Only the owner's own tests can prove a row (the results below are filtered the same way), so a row whose
+    // tests in this tier all live in other packages has nothing for this tier to prove; guarantee-owner flags
+    // a row tested only outside its owner, and an unrelated suite reusing the id is not the row's test.
+    const owned = (tests.get(row.id) ?? []).filter(file => folder === undefined || file.startsWith(`${folder}/`));
+    if (owned.length === 0) continue;
     const mine = results.filter(
       result =>
         result.id === row.id && (folder === undefined || result.file === '' || result.file.startsWith(`${folder}/`)),

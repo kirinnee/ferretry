@@ -1,5 +1,7 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
+import { isInternalRoot } from '../host/internal-roots.ts';
+import { mayHoldRoot, scopedSubfolder } from '../host/roots.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
@@ -671,9 +673,14 @@ async function start(world: World): Promise<TestHost> {
   const inodes = new Map<string, bigint>();
   let nextInode = 0n;
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
-    root(name) {
-      if (!(manifest.permissions?.roots ?? []).includes(name))
+    root(name, scope) {
+      if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
         throw new Error(`${manifest.id}: root ${name} is not declared`);
+      // The same scope rule as production (`scopedSubfolder`): a `sessions` handle is one minted ferret folder, an
+      // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
+      // see each other; a refused scope resolves nothing.
+      const below = scopedSubfolder(name, scope?.subfolder);
+      const prefix = below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`;
       const fileStat = (path: string) => ({
         kind: 'file' as const,
         size: (world.roots.get(path) ?? '').length,
@@ -683,9 +690,11 @@ async function start(world: World): Promise<TestHost> {
       });
       const handle: RootHandle = {
         name,
+        internal: isInternalRoot(name),
         resolve(relative) {
-          if (relative.startsWith('/') || relative.split('/').includes('..')) return { ok: false, error: 'outside' };
-          return { ok: true, value: `/${name}/${relative}` as never };
+          if (prefix === undefined || relative.startsWith('/') || relative.split('/').includes('..'))
+            return { ok: false, error: 'outside' };
+          return { ok: true, value: `${prefix}/${relative}` as never };
         },
         readText: async path => {
           const text = world.roots.get(path);

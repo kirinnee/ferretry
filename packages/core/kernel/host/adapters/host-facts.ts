@@ -5,7 +5,8 @@
 import { readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { availableParallelism, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import type { CgroupFile, HostFactsPort, ProcPidFile, ProcSystemFile } from '../../contract/ports.ts';
+import type { CgroupFile, HostFactsPort, HostLaunchGuard, ProcPidFile, ProcSystemFile } from '../../contract/ports.ts';
+import { UNDECIDED_LAUNCH_GUARD } from './launch-guard.ts';
 
 const SEGMENT = /^[A-Za-z0-9_.@:+-]+$/u;
 const PROC_PID_FILES: ReadonlySet<ProcPidFile> = new Set(['stat', 'status', 'comm', 'cmdline', 'cgroup', 'statm']);
@@ -59,8 +60,10 @@ function deviceNumber(value: number, label: string): string {
   return String(value);
 }
 
-/** The real `/proc` and `/sys`; a suite points the roots at a fixture tree. */
-export function nodeHostFacts(roots: { readonly proc?: string; readonly sys?: string } = {}): HostFactsPort {
+/** The real `/proc` and `/sys`; a suite points the roots at a fixture tree. `launchGuard` is decided at boot by the kernel; left out, the guard fails closed (active). */
+export function nodeHostFacts(
+  roots: { readonly proc?: string; readonly sys?: string; readonly launchGuard?: () => HostLaunchGuard } = {},
+): HostFactsPort {
   const proc = roots.proc ?? '/proc';
   const sys = roots.sys ?? '/sys';
   const cgroupRoot = join(sys, 'fs', 'cgroup');
@@ -94,6 +97,7 @@ export function nodeHostFacts(roots: { readonly proc?: string; readonly sys?: st
       const scheduler = own ?? (await readFile(join(node, 'queue', 'scheduler'), 'utf8').catch(() => ''));
       return { device: basename(node), scheduler };
     },
+    launchGuard: roots.launchGuard ?? UNDECIDED_LAUNCH_GUARD,
   };
   return Object.freeze(port);
 }
@@ -119,5 +123,8 @@ export function undeclaredHostFacts(plugin: string, base: HostFactsPort): HostFa
     cgroupFile: refuse,
     cgroupChildren: refuse,
     blockScheduler: refuse,
+    launchGuard: () => {
+      throw new Error(`${plugin} did not declare permissions.hostFacts, so it reads no launch-guard fact.`);
+    },
   });
 }

@@ -12,6 +12,7 @@ function memoryRoot(files: Record<string, string>, outside: readonly string[] = 
   const isDir = (path: string): boolean => paths.some(candidate => candidate.startsWith(`${path}/`));
   return {
     name: 'work',
+    internal: false,
     resolve: given => {
       const relative = given.startsWith('/') ? given : given === '' ? '/w' : `/w/${given}`;
       return outside.some(prefix => relative === prefix || relative.startsWith(`${prefix}/`))
