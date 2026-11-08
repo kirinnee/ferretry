@@ -237,6 +237,12 @@ export interface Permissions {
   readonly secretNamePicker?: true;
   /** It reads this machine's `/proc` and `/sys` facts through `kernel.hostFacts` (today's Terminals). */
   readonly hostFacts?: true;
+  /**
+   * It asks `kernel.paths.checkDirectory` whether an owner-named absolute path is a directory (Ferrets' session
+   * working directory, today's resolver). The check answers for ANY absolute path with no root and no fence, so a
+   * plugin that does not declare it is refused by name.
+   */
+  readonly checkDirectory?: true;
   /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
   readonly updateHost?: true;
 }
@@ -313,6 +319,14 @@ export interface Manifest {
   readonly instructions?: readonly InstructionDecl[];
   readonly onboarding?: readonly OnboardingDecl[];
   readonly doctor?: readonly string[];
+
+  // `fyd --check` seams (DECISIONS-2 #22). None of them runs at boot.
+  /** Ids of PURE descriptive `fyd --check` lines: the half implements `preflight: { [id]: (facts) => lines }`. */
+  readonly preflight?: readonly string[];
+  /** Ids of bounded probes ONLY `fyd --check` runs: the half implements `selftest: { [id]: { label, run } }`. */
+  readonly selftest?: readonly string[];
+  /** Ids of the worker thread programs this plugin embeds: the half implements `workers: { [id]: URL }`, which `fyd --check` starts. */
+  readonly workers?: readonly string[];
 
   readonly permissions?: Permissions;
 }

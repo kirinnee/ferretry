@@ -52,7 +52,7 @@ export async function signLinkStoreRequest(
   if (signed.daemonId !== identity.daemonId) throw new Error('The link-store request signer changed identity.');
   return { ...signed, nonce: toBase64Url(context.nonce) };
 }
-export type CatalogVerificationRefusal =
+type CatalogVerificationRefusal =
   | 'signature_invalid'
   | 'item_mismatch'
   | 'not_canonical'

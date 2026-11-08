@@ -26,7 +26,7 @@ import { disabledUntilMs } from '../account/disabled.ts';
 import type { LoginView, LoginsApi } from '@ferretry/plugin-logins/contract';
 
 /** The runtime a start uses when nobody names one and the setting is empty, when it is an agent runtime here. */
-export const FALLBACK_DEFAULT_RUNTIME = 'claude-default';
+const FALLBACK_DEFAULT_RUNTIME = 'claude-default';
 
 export interface RuntimesApiDeps {
   /** `config/runtimes/*.yaml`, parsed, live. */

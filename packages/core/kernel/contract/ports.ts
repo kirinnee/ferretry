@@ -462,6 +462,39 @@ export interface RootWriteOptions {
   readonly replaceExisting?: boolean;
 }
 
+/** Which object a name reaches: the device and inode, so a caller can prove a path still names what it checked. */
+export interface RootIdentity {
+  readonly device: bigint;
+  readonly inode: bigint;
+}
+
+export interface RootPublishOptions {
+  /** POSIX mode of the file this publish creates. Default `0o600`. */
+  readonly mode?: number;
+  /**
+   * Create only: the name is taken by `link(2)` (create-if-absent in the kernel) and an existing name, a link
+   * included, is reported as `exists` and left exactly as it was. Without it the new file replaces the name by rename.
+   */
+  readonly exclusive?: boolean;
+}
+
+/** What a {@link RootHandle.publish} came to: the file the name now reaches, or that someone else's was there first. */
+export type RootPublished =
+  | { readonly outcome: 'published'; readonly identity: RootIdentity }
+  | { readonly outcome: 'exists' };
+
+/** {@link RootHandle.readDurable}: the bytes, and the identity of the file they were read from. */
+export interface RootDurableRead {
+  readonly bytes: Uint8Array;
+  readonly identity: RootIdentity;
+}
+
+/** The `hold` argument of {@link RootHandle.readDurable}: what was read, and a question the caller asks while the file is still held. */
+export interface RootDurableHeld extends RootDurableRead {
+  /** Whether the NAME still reaches the very inode that was read (the descriptor pins it, so it cannot be reused). */
+  stillNames(): Promise<boolean>;
+}
+
 /**
  * A scoped handle on one root: resolves symlinks before checking, refuses `..`, keeps today's link and device-file
  * checks, and refuses everything inside the fence for an owner's root.
@@ -484,6 +517,36 @@ export interface RootHandle {
   writeText(path: FencedPath, text: string, options?: RootWriteOptions): Promise<void>;
   /** The same, for bytes. */
   writeBytes(path: FencedPath, bytes: Uint8Array, options?: RootWriteOptions): Promise<void>;
+  /**
+   * A DURABLE publish (the state filesystem's contract): missing folders are made (`0700`) and, parent first, every
+   * ancestor this call created plus the folder's own parent are synced BEFORE anything is written; the bytes go into a
+   * new temp file in the same folder (`O_EXCL | O_NOFOLLOW`, exactly `mode`, fsync'd); that is moved onto the name
+   * (`exclusive`: by `link(2)`, losing reports `exists`; otherwise by rename); and the folder is synced last. The temp
+   * name is never left behind, and a name this call did not create is never removed. Every step goes through the
+   * fenced, descriptor-reached folder: no link is followed.
+   */
+  publish(path: FencedPath, bytes: Uint8Array, options?: RootPublishOptions): Promise<RootPublished>;
+  /**
+   * Reads a file through one held descriptor and fsyncs THAT descriptor before answering, so the bytes returned are
+   * the bytes made durable; `undefined` only when nothing is at the name. Fenced exactly as `readBytes`; a name that
+   * is mid-publish by `link` (two names for a moment) is waited out briefly rather than refused (and
+   * a leftover second name of this root's own interrupted publish is removed, but ONLY on an internal, writable root: on a read-only or owner root it stays refused as `hard_link`). With `hold`, the descriptor stays OPEN
+   * until `hold` settles and its answer is returned (`hold` is not called when nothing is at the name), so a caller
+   * that syncs the folder and then asks `stillNames` compares against an inode that cannot have been freed and
+   * reused meanwhile.
+   */
+  readDurable<T = RootDurableRead>(
+    path: FencedPath,
+    limitBytes?: number,
+    hold?: (read: RootDurableHeld) => Promise<T>,
+  ): Promise<T | undefined>;
+  /**
+   * Syncs one folder's entries, with `parent` the folder's own parent first (when that parent is still inside the root).
+   * A platform that cannot sync a directory (`EINVAL`, `ENOTSUP`, `EPERM`) is tolerated; anything else throws.
+   */
+  syncDirectory(path: FencedPath, options?: { readonly parent?: boolean }): Promise<void>;
+  /** The device and inode the NAME reaches now (the leaf never followed), or `undefined` when nothing is there. */
+  fileIdentity(path: FencedPath): Promise<RootIdentity | undefined>;
   /**
    * Brings a folder from one of THIS plugin's root handles (`source`, maybe this one) to `to` in this root: a copy
    * (each file read off the disk, never through a link: a link inside is skipped, a file with a second hard link is
@@ -570,6 +633,14 @@ export interface WorkerHandle {
 /** A declared `sqlite` / `sqlite-cache` state file a worker may open (a collection member names its `name`). */
 export type WorkerStateGrant = StateFileDef | { readonly def: StateFileDef; readonly name: string };
 
+/**
+ * One of THIS plugin's declared roots a worker may READ: the name, or the name with the scope its handle takes (a
+ * `subfolder` / `ferret` stays on the main thread; the worker only ever names the root). One grant per root name.
+ */
+export type WorkerRootGrant =
+  | RootName
+  | { readonly name: RootName; readonly scope?: { readonly ferret?: FerretId; readonly subfolder?: string } };
+
 export interface WorkerStartOptions {
   readonly name?: string;
   /**
@@ -578,6 +649,39 @@ export interface WorkerStartOptions {
    * inside this plugin's state folder; an undeclared or non-sqlite file refuses the start. No path is passed in.
    */
   readonly state?: readonly WorkerStateGrant[];
+  /**
+   * Roots the worker READS with `rootPort(name)` from `@ferretry/kernel/worker`, whatever the manifest says about
+   * writing: the worker side has no write, remove, copy, pin or real-path operation at all, and no path crosses into
+   * the thread. Only roots THIS plugin's manifest declares (`permissions.roots`); an undeclared one refuses the start.
+   * Every read is served by the main thread through the plugin's own root handle, so each is fenced as a main-thread
+   * read is, links and `..` included. Paths are relative to the root: an absolute path is
+   * refused `outside`, even one that falls inside it.
+   *
+   * GAP: this bounds what a worker gets THROUGH this port, no more. A worker is an in-process thread, not a sandbox:
+   * it can still `import 'node:fs'`, call the global `fetch` or start a `Worker` of its own. What stops plugin code
+   * doing that is the repo's lints (`banned-globals`, `fetch-binding`, `no-sync-io`) and the worker bundle diet
+   * test, not this grant; the `state` grant above has the same limit. "Cannot widen" means: through the grant
+   * channel, a forged message or a second `rootPort` gets nothing more than was granted.
+   */
+  readonly roots?: readonly WorkerRootGrant[];
+  /**
+   * HTTP from the worker with `fetchPort()` from `@ferretry/kernel/worker`, to ONLY the hosts THIS plugin's manifest
+   * declares in `permissions.network`: `true` for all of them, or a list that must be a subset. Each request passes
+   * the very guard `kernel.fetch` does (allowlist, no followed redirect), so a redirect to another host is a response
+   * the worker would have to ask for again, and is refused then. Undeclared refuses the start. A worker may not set
+   * the `Host` header, and a request body is capped at 8 MiB (`too_large`), as a response is.
+   *
+   * GAP: as for `roots`, the grant bounds the fetch THROUGH `fetchPort()` only; the thread is in-process, so
+   * nothing but the lints and the diet test keep plugin code off the global `fetch`. On the main thread,
+   * `kernel.fetch` still forwards a `Host` header a plugin sets (the guard judges the URL's host, as before);
+   * only the worker channel refuses it.
+   */
+  readonly network?: true | readonly string[];
+  /**
+   * The worker's whole environment. Absent, a worker sees the process environment (a Bun `Worker` copies it); given,
+   * it sees only these variables, `{}` being none. `fyd --check` starts its probes with `{}`.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 export interface WorkersPort {
@@ -869,6 +973,23 @@ export interface DaemonTimings {
 export interface PathsPort {
   /** The owner's home directory as the OS reports it (Accounts orders sign-ins by work folders under it, I184). */
   home(): string;
+  /**
+   * Read-only: whether an owner-named ABSOLUTE path is a directory, and its real path (links and platform aliases
+   * resolved). Never creates anything. A relative path, a path that does not exist and a path that is not a directory
+   * are refused with a sentence the owner can read.
+   */
+  checkDirectory(absolutePath: string): Promise<Result<CheckedDirectory, DirectoryRefusal>>;
+}
+
+/** {@link PathsPort.checkDirectory} accepted: the canonical path. */
+export interface CheckedDirectory {
+  readonly realPath: string;
+}
+
+/** {@link PathsPort.checkDirectory} refused: why, and the sentence for the person who named the path. */
+export interface DirectoryRefusal {
+  readonly reason: 'not_absolute' | 'not_a_directory';
+  readonly message: string;
 }
 
 /**

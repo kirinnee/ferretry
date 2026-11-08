@@ -27,7 +27,6 @@ import {
   type CarrierPeer,
   errorResponse,
   type FerretId,
-  type HolderId,
   isSessionEnd,
   type MemberStanding,
   type SessionEnd,
@@ -68,14 +67,14 @@ import {
 } from '../../contract/wire/index.ts';
 import { WebCryptoSessionCrypto as CatalogWireCrypto, toBase64Url } from '../../worker/src/kernel-wire/index.ts';
 
-export const kernelCrypto = new session.WebCryptoSessionCrypto();
+const kernelCrypto = new session.WebCryptoSessionCrypto();
 const wireCrypto = new CatalogWireCrypto();
 
 /** The one origin a member ceremony may run on: the hosted app Connections names. */
 export const APP_ORIGIN: string = HOSTED_APP_ORIGIN;
 export const LOOPBACK_URL = 'http://127.0.0.1:4141';
 export const DISCOVERED_RELAY = 'wss://relay.ferretry.test/v1/daemon';
-export const START = '2026-11-07T09:00:00.000Z';
+const START = '2026-11-07T09:00:00.000Z';
 export const MINUTE = 60_000;
 export const DAY = 24 * 60 * MINUTE;
 
@@ -89,7 +88,7 @@ function toPem(der: ArrayBuffer | Uint8Array): string {
 
 /** An accepting WebAuthn verifier: a member passkey ceremony is not what these tests are about. */
 export const CREDENTIAL = new TextEncoder().encode('credential-one');
-export function acceptingVerifier(): PasskeyVerifier & { refuse: boolean; counter: number } {
+function acceptingVerifier(): PasskeyVerifier & { refuse: boolean; counter: number } {
   const verifier = {
     refuse: false,
     counter: 0,
@@ -118,7 +117,7 @@ export function acceptingVerifier(): PasskeyVerifier & { refuse: boolean; counte
 }
 
 /** Who a test-host caller is, as Gate would stand them; the device's step-up the test controls. */
-export interface Callers {
+interface Callers {
   /** The device's own grants and whether it presented a step-up. */
   device: { grants: CapabilityGrants; stepUp: boolean };
   /** Acts a fresh passkey proof is held for: each is claimable ONCE (Gate's atomic claim). */
@@ -197,7 +196,7 @@ class CatalogsAdmission implements Admission {
   }
 }
 
-export interface CatalogsHalf {
+interface CatalogsHalf {
   readonly routes: Record<string, (call: never) => Promise<ApiResponse>>;
   readonly memberRoutes: Record<string, (call: never) => Promise<ApiResponse>>;
   readonly hooks: {
@@ -228,7 +227,7 @@ export interface CatalogsFixtureOptions {
  * The MCP plugin as Catalogs meets it: one `catalog.items:mcp` provider over servers the test edits. Reading the
  * inventory is all an item needs to be frozen; installing into a runtime or a project is refused here.
  */
-export function mcpItems(servers: McpSourceServer[]) {
+function mcpItems(servers: McpSourceServer[]) {
   const refuse = async (): Promise<never> => {
     throw new Error('the test MCP provider installs nothing');
   };
@@ -769,5 +768,3 @@ export async function unlockOnly(end: BrowserEnd): Promise<{ status: number; bod
     signature: b64('signature'),
   });
 }
-
-export type { HolderId };

@@ -32,22 +32,22 @@ import type { FleetApplyAuthority } from '../../../lib/shell-ports.ts';
 
 export type { FleetApplyAuthority } from '../../../lib/shell-ports.ts';
 
-export const MACHINE_ROUTE = 'GET /v1/runtimes/machine' as const;
-export const PROPOSE_ROUTE = 'POST /v1/runtimes/proposals' as const;
-export const APPLY_ROUTE = 'POST /v1/runtimes/proposals/:proposalId/apply' as const;
+const MACHINE_ROUTE = 'GET /v1/runtimes/machine' as const;
+const PROPOSE_ROUTE = 'POST /v1/runtimes/proposals' as const;
+const APPLY_ROUTE = 'POST /v1/runtimes/proposals/:proposalId/apply' as const;
 
 /** Agent permissions, the tools installed, whether it is set up, and what this caller may change. */
 export const readMachine = async (client: RuntimesClient): Promise<MachineView> =>
   MachineViewSchema.parse(await client.call(MACHINE_ROUTE));
 
 /** Stage one change. Nothing is written: the answer is the preview a person approves. */
-export const stageChange = async (client: RuntimesClient, change: AccountChange): Promise<AccountChangeView> =>
+const stageChange = async (client: RuntimesClient, change: AccountChange): Promise<AccountChangeView> =>
   AccountChangeViewSchema.parse(
     await client.call(PROPOSE_ROUTE, { body: AccountChangeRequestSchema.parse({ change }) }),
   );
 
 /** Apply exactly the change that was previewed. */
-export const applyChange = async (
+const applyChange = async (
   client: RuntimesClient,
   changeId: string,
   request: ProposalApplyRequest = {},

@@ -11,7 +11,7 @@ import {
   linkStoreRefusalBody,
   toBase64Url,
 } from '../../../worker/src/lib/index.ts';
-import { LINK_JSON_MAX_BYTES } from '../../../worker/src/adapters/index.ts';
+import { LINK_JSON_MAX_BYTES } from '../../../worker/src/adapters/link-store-worker.ts';
 import linkStoreWorker from '../../../worker/src/adapters/link-store-worker.ts';
 import { newDaemonIdentity, relayCrypto } from '../../support/worker/identities.ts';
 import {

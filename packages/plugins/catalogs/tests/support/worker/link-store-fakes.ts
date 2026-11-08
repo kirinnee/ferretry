@@ -8,14 +8,13 @@
  */
 import {
   type LinkObjectStorage,
-  type LinkStoreEnvironment,
   type LinkStoreObjectEnvironment,
   type LinkStoreRuntime,
   LinkBundleDurableObject,
   LinkOwnerDurableObject,
   LinkStoreControlDurableObject,
-  linkStoreFetch,
-} from '../../../worker/src/adapters/index.ts';
+} from '../../../worker/src/adapters/link-store-objects.ts';
+import { type LinkStoreEnvironment, linkStoreFetch } from '../../../worker/src/adapters/link-store-worker.ts';
 import type { HostedRelayControlNamespace } from '../../../worker/src/adapters/durable-storage.ts';
 import {
   type DaemonIdentity,

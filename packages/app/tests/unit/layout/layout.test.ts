@@ -27,6 +27,7 @@ const surfaces = [
       { id: 'ferrets', path: 'ferrets' },
       { id: 'ferret', path: 'ferret/:id' },
     ],
+    panels: [{ id: 'files', slot: 'ferret.side', order: 2 }],
   }),
   plugin('board', {
     screens: [{ id: 'board', path: 'board' }],
@@ -34,9 +35,9 @@ const surfaces = [
   }),
   plugin('usage', {
     screens: [{ id: 'insights', path: 'insights' }],
-    panels: [{ id: 'usage', slot: 'ferret.side', order: 3 }],
+    panels: [{ id: 'usage', slot: 'ferret.side', order: 4 }],
   }),
-  plugin('conversation', { panels: [{ id: 'sitrep', slot: 'ferret.side', order: 2 }] }),
+  plugin('conversation', { panels: [{ id: 'sitrep', slot: 'ferret.side', order: 3 }] }),
   // The ids and orders the real manifests declare for `composer.tools` (voice, conversation, runtimes, usage).
   plugin('voice', { panels: [{ id: 'dictation', slot: 'composer.tools', order: 20 }] }),
   plugin('conversation-files', { panels: [{ id: 'attachments', slot: 'composer.tools', order: 10 }] }),
@@ -179,7 +180,7 @@ describe('the frame plan', () => {
       'settings',
     ]);
     expect(plan.side.holds).toMatchObject({ kind: 'screen', screen: { plugin: 'ferrets', id: 'ferret' } });
-    expect(plan.panels('ferret.side').map(p => p.id)).toEqual(['cards-of-ferret', 'sitrep', 'usage']);
+    expect(plan.panels('ferret.side').map(p => p.id)).toEqual(['cards-of-ferret', 'files', 'sitrep', 'usage']);
     expect(plan.panels('composer.tools').map(p => p.id)).toEqual([
       'attachments',
       'dictation',
@@ -194,7 +195,7 @@ describe('the frame plan', () => {
       planFrame(layout, views)
         .panels('ferret.side')
         .map(p => p.id),
-    ).toEqual(['cards-of-ferret', 'sitrep', 'usage']);
+    ).toEqual(['cards-of-ferret', 'files', 'sitrep', 'usage']);
   });
 
   test('a screen id two plugins declare is reachable only qualified', () => {

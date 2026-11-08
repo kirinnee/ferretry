@@ -1,15 +1,16 @@
 import { afterEach, describe, it } from 'bun:test';
-import { type FileHandle, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { diskRoot } from '@ferretry/kernel/testing';
 import should from 'should';
 import {
   effectFileName,
   FileSessionEffectLedger,
-  fsyncEffectDirectory,
 } from '../../../../../daemon/adapters/session/effects/file-session-effect-ledger.ts';
 import { type SessionEffectKey, SessionEffectLedgerError } from '../../../../../daemon/lib/session/effects/index.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import { recordingSyncs } from '../../../../support/daemon/recording-syncs.ts';
 
 /**
  * The durable begun/settled ledger, against a real filesystem.
@@ -34,73 +35,49 @@ afterEach(async () => {
   directories.clear();
 });
 
-/**
- * A real state home, and a ledger whose temporary names are determinate.
- *
- * `synced` records the directories the ledger persisted, IN ORDER. The recorder wraps the real
- * `fsyncEffectDirectory` rather than standing in for it, so every case below still performs the real IO —
- * a stand-in would leave the whole file fsyncing nothing while still passing.
- */
+/** A real state home, and a ledger over the kernel's real root whose temporary names are determinate (t1, t2, ...). */
 async function ledger(label: string): Promise<{
   readonly subject: FileSessionEffectLedger;
   readonly sessions: string;
   readonly home: string;
   readonly synced: string[];
 }> {
-  const home = await mkdtemp(join(tmpdir(), `fy-effects-${label}-`));
-  directories.add(home);
-  const sessions = join(home, 'state', 'sessions');
+  const parent = await mkdtemp(join(tmpdir(), `fy-effects-${label}-`));
+  directories.add(parent);
   const synced: string[] = [];
-  let temporaries = 0;
-  return {
-    subject: new FileSessionEffectLedger(
-      sessionId => join(sessions, sessionId),
-      () => {
-        temporaries += 1;
-        return `t${temporaries}`;
-      },
-      async path => {
-        synced.push(path);
-        await fsyncEffectDirectory(path);
-      },
-    ),
-    sessions,
-    home,
-    synced,
-  };
+  const { root, folder: home } = await diskRoot(parent, recordingSyncs(synced));
+  const sessions = join(home, 'state', 'sessions');
+  return { subject: new FileSessionEffectLedger(root, sessionId => join(sessions, sessionId)), sessions, home, synced };
 }
 
 /**
- * A ledger whose file-durability step fails once, at the post-write pre-publication boundary.
+ * A ledger whose publication step fails once, at the post-write, pre-publication boundary.
  *
  * That instant is the one this whole adapter exists to be correct across, and it cannot be reached
- * from outside: no permission or path shape makes an fsync fail after an exclusive create already
- * succeeded. The seam varies WHEN durability fails and nothing about what is written.
+ * from outside: no permission or path shape makes the move fail after the synced temp file exists. The wrapper
+ * varies WHEN the move fails and nothing about what is written.
  */
 async function failingLedger(label: string): Promise<{
   readonly subject: FileSessionEffectLedger;
   readonly sessions: string;
   readonly failNextSync: () => void;
 }> {
-  const home = await mkdtemp(join(tmpdir(), `fy-effects-${label}-`));
-  directories.add(home);
-  const sessions = join(home, 'state', 'sessions');
+  const parent = await mkdtemp(join(tmpdir(), `fy-effects-${label}-`));
+  directories.add(parent);
   let failNext = false;
+  const { root, folder: home } = await diskRoot(parent, disk => ({
+    ...disk,
+    link: async (existing, destination) => {
+      if (failNext) {
+        failNext = false;
+        throw Object.assign(new Error('the publication step failed after the synced create'), { code: 'EIO' });
+      }
+      await disk.link(existing, destination);
+    },
+  }));
+  const sessions = join(home, 'state', 'sessions');
   return {
-    subject: new FileSessionEffectLedger(
-      sessionId => join(sessions, sessionId),
-      // Deterministic and REUSED, so a leaked temporary would collide with the retry rather than
-      // being hidden by a fresh random name.
-      () => 'fixed',
-      fsyncEffectDirectory,
-      async handle => {
-        if (failNext) {
-          failNext = false;
-          throw Object.assign(new Error('the durability step failed after the exclusive create'), { code: 'EIO' });
-        }
-        await handle.sync();
-      },
-    ),
+    subject: new FileSessionEffectLedger(root, sessionId => join(sessions, sessionId)),
     sessions,
     failNextSync: () => {
       failNext = true;
@@ -213,7 +190,8 @@ describe('FileSessionEffectLedger', () => {
     // is merely visible can still be erased — and the settled document it writes is published after.
     const session = join(sessions, SESSION);
     const effects = join(session, 'effects');
-    should(synced).eql([session, effects, effects]);
+    // (the publish then syncs the folder's parent again before it writes, and the folder last)
+    should(synced).eql([session, effects, session, effects]);
   });
 
   it('should refuse to admit a second attempt while the first has not settled', async () => {
@@ -425,14 +403,10 @@ describe('FileSessionEffectLedger', () => {
     const written = await ledger('restart-barrier');
     await written.subject.begin(key, FINGERPRINT, BEGUN_AT);
 
-    const restarted = new FileSessionEffectLedger(
-      sessionId => join(written.sessions, sessionId),
-      () => 'restarted',
-      async path => {
-        written.synced.push(`restarted:${path}`);
-        await fsyncEffectDirectory(path);
-      },
-    );
+    const restartedSyncs: string[] = [];
+    const parentOf = dirname(dirname(dirname(written.sessions)));
+    const restartedDisk = await diskRoot(parentOf, recordingSyncs(restartedSyncs));
+    const restarted = new FileSessionEffectLedger(restartedDisk.root, sessionId => join(written.sessions, sessionId));
     written.synced.length = 0;
 
     // Act: inspect, then a begin that loses the compare-and-set, then a settle.
@@ -446,8 +420,8 @@ describe('FileSessionEffectLedger', () => {
     should(admission).equal('unsettled');
     const session = join(written.sessions, SESSION);
     const effects = join(session, 'effects');
-    should(written.synced.filter(path => path === `restarted:${session}`).length).be.aboveOrEqual(3);
-    should(written.synced.filter(path => path === `restarted:${effects}`).length).be.aboveOrEqual(3);
+    should(restartedSyncs.filter(path => path === session).length).be.aboveOrEqual(3);
+    should(restartedSyncs.filter(path => path === effects).length).be.aboveOrEqual(3);
   });
 
   it('should persist the winner record for a begin that loses the compare-and-set', async () => {
@@ -521,7 +495,7 @@ describe('FileSessionEffectLedger', () => {
     const { subject, sessions } = await ledger('temp-collision');
     const effects = join(sessions, SESSION, 'effects');
     await mkdir(effects, { recursive: true, mode: 0o700 });
-    const foreign = join(effects, `${effectFileName(EFFECT)}.json.t1.tmp`);
+    const foreign = join(effects, `.${effectFileName(EFFECT)}.json.t1.tmp`);
     await writeFile(foreign, 'another attempt\n', { encoding: 'utf8', mode: 0o600 });
 
     // Act
@@ -595,23 +569,15 @@ describe('FileSessionEffectLedger', () => {
     // is already false and the cleanup on the way out must leave it alone. A name the ledger never
     // owned would only prove it does not delete arbitrary files; this proves it does not reclaim the
     // one name it would recognise as its own.
-    const home = await mkdtemp(join(tmpdir(), 'fy-effects-settle-ownership-'));
-    directories.add(home);
-    const sessions = join(home, 'state', 'sessions');
-    const effects = join(sessions, SESSION, 'effects');
-    const record = join(effects, `${effectFileName(EFFECT)}.json`);
-    const reused = join(effects, `${effectFileName(EFFECT)}.json.t2.tmp`);
+    const parent = await mkdtemp(join(tmpdir(), 'fy-effects-settle-ownership-'));
+    directories.add(parent);
     let settling = false;
     let plantedDuringSync = false;
-    let temporaries = 0;
-    const subject = new FileSessionEffectLedger(
-      sessionId => join(sessions, sessionId),
-      () => {
-        temporaries += 1;
-        return `t${temporaries}`;
-      },
-      async path => {
-        await fsyncEffectDirectory(path);
+    let planted: string | undefined;
+    let recordPath = '';
+    const { root, folder: home } = await diskRoot(
+      parent,
+      recordingSyncs([], async () => {
         if (!settling || plantedDuringSync) return;
         // GATED ON THE PUBLISHED RECORD, not on being the first sync of the call. `settle` persists
         // directories PARENT-FIRST, before it writes anything, so the first sync of the call arrives
@@ -620,13 +586,23 @@ describe('FileSessionEffectLedger', () => {
         // and requiring it to be `settled` is the post-rename condition stated as a fact rather than
         // as a count: the rename is what publishes that phase AND what frees this name, so a plant
         // that sees it is planting in exactly the window a real second attempt would.
-        const published = await readFile(record, 'utf8').catch(() => undefined);
+        const published = await readFile(recordPath, 'utf8').catch(() => undefined);
         if (published === undefined) return;
         if ((JSON.parse(published) as { readonly phase?: string }).phase !== 'settled') return;
         plantedDuringSync = true;
-        await writeFile(reused, 'another attempt\n', { encoding: 'utf8', mode: 0o600 });
-      },
+        await writeFile(planted as string, 'another attempt\n', { encoding: 'utf8', mode: 0o600 });
+      }),
     );
+    const sessions = join(home, 'state', 'sessions');
+    const effects = join(sessions, SESSION, 'effects');
+    const record = join(effects, `${effectFileName(EFFECT)}.json`);
+    // `t2` IS DELIBERATE: it is the exact name this `settle` owned and then freed by renaming its temporary onto the
+    // record. Ownership ends at a successful rename, so by the time the stranger takes the name back the cleanup on
+    // the way out must leave it alone: this proves the ledger does not reclaim the one name it would recognise.
+    const reused = join(effects, `.${effectFileName(EFFECT)}.json.t2.tmp`);
+    recordPath = record;
+    planted = reused;
+    const subject = new FileSessionEffectLedger(root, sessionId => join(sessions, sessionId));
     await subject.begin(key, FINGERPRINT, BEGUN_AT);
     settling = true;
 
@@ -664,95 +640,3 @@ async function plant(sessions: string, text: string): Promise<void> {
   await mkdir(dirname(file), { recursive: true, mode: 0o700 });
   await writeFile(file, text, { encoding: 'utf8', mode: 0o600 });
 }
-
-/** An errno-shaped rejection, exactly as the platform raises one. */
-function directoryRefusal(code: string): NodeJS.ErrnoException {
-  return Object.assign(new Error(`the platform refused a directory sync with ${code}`), { code });
-}
-
-/**
- * A directory handle that opens and then refuses to sync.
- *
- * The sync-side branch cannot be reached from outside on any filesystem this repository is
- * developed or tested against: all of them sync a directory successfully, which is why the branch
- * survived untested long enough to have the wrong shape. The fake varies only which errno the sync
- * raises — the open, the path and the close are still the helper's own.
- */
-function refusingToSync(code: string, closes: string[]): FileHandle {
-  return {
-    async sync(): Promise<void> {
-      throw directoryRefusal(code);
-    },
-    async close(): Promise<void> {
-      closes.push('closed');
-    },
-  } as unknown as FileHandle;
-}
-
-/**
- * The repo-standard directory-sync tolerance, across the whole open-then-sync operation.
- *
- * A filesystem that cannot sync a directory usually says so by refusing the READ-ONLY OPEN, not by
- * failing the fsync behind it — so tolerating only the sync left this helper's stated contract
- * untrue on exactly the platforms it was written for. Each case drives the real exported helper and
- * varies nothing but where the errno comes from.
- */
-describe('fsyncEffectDirectory', () => {
-  for (const code of ['EINVAL', 'ENOTSUP', 'EPERM']) {
-    it(`should tolerate ${code} raised by the directory open, not only by the sync`, async () => {
-      // Arrange
-      const opened: string[] = [];
-
-      // Act: resolving at all is the assertion — a helper that fell through would sync a handle it
-      // never received.
-      await fsyncEffectDirectory('/state/sessions', async path => {
-        opened.push(path);
-        throw directoryRefusal(code);
-      });
-
-      // Assert
-      should(opened).eql(['/state/sessions']);
-    });
-
-    it(`should tolerate ${code} raised by the sync, and still close the handle`, async () => {
-      // Arrange
-      const closes: string[] = [];
-
-      // Act
-      await fsyncEffectDirectory('/state/sessions', async () => refusingToSync(code, closes));
-
-      // Assert
-      should(closes).eql(['closed']);
-    });
-  }
-
-  it('should propagate an open failure that is not a platform refusal', async () => {
-    // Act + Assert: EIO is a real failure to persist, and a ledger that swallowed it would report a
-    // record durable that is not.
-    await should(
-      fsyncEffectDirectory('/state/sessions', async () => {
-        throw directoryRefusal('EIO');
-      }),
-    ).be.rejectedWith(/EIO/u);
-  });
-
-  it('should propagate a sync failure that is not a platform refusal, and still close the handle', async () => {
-    // Arrange
-    const closes: string[] = [];
-
-    // Act + Assert
-    await should(fsyncEffectDirectory('/state/sessions', async () => refusingToSync('EIO', closes))).be.rejectedWith(
-      /EIO/u,
-    );
-    should(closes).eql(['closed']);
-  });
-
-  it('should persist a real directory through its default opener', async () => {
-    // Arrange: the default argument is what production uses, so it has to be exercised unwrapped.
-    const home = await mkdtemp(join(tmpdir(), 'fy-effects-default-'));
-    directories.add(home);
-
-    // Act + Assert: a real open and a real fsync of a real directory.
-    await fsyncEffectDirectory(home);
-  });
-});

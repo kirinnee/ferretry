@@ -32,6 +32,7 @@ export const sceneInputPatterns: readonly string[] = [
   'packages/plugins/*/package.json',
   'packages/plugins/*/tests/integration/app/**',
   'packages/plugins/*/tests/support/**',
+  'packages/app/tests/integration/fixtures/**',
   'package.json',
   'bun.lock',
   'bunfig*.toml',

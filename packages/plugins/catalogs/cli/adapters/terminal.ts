@@ -20,7 +20,7 @@ interface CliExtras {
 const extras = (ctx: CliContext<never>): CliExtras => ctx as unknown as CliExtras;
 
 /** The shell's terminal carries no colour; today's `ConsoleIo` tinted `success` and `warn` and wrote both to stdout. */
-export class TerminalOutput implements ICatalogOutput, ICatalogInstallOutput {
+class TerminalOutput implements ICatalogOutput, ICatalogInstallOutput {
   #exitCode = 0;
   constructor(private readonly io: TerminalIo) {}
   report(message: string): void {
@@ -47,7 +47,7 @@ export class TerminalOutput implements ICatalogOutput, ICatalogInstallOutput {
 }
 
 /** A QR is written verbatim (today's `PlainScreen`). */
-export class TerminalScreen implements IShareScreen {
+class TerminalScreen implements IShareScreen {
   constructor(private readonly io: TerminalIo) {}
   write(text: string): void {
     this.io.out(text);
@@ -55,7 +55,7 @@ export class TerminalScreen implements IShareScreen {
 }
 
 /** A typed answer at the terminal; no terminal to ask at reads as no answer, which no question takes for yes. */
-export class TerminalPrompt implements ICatalogPrompt {
+class TerminalPrompt implements ICatalogPrompt {
   constructor(private readonly ask_: CliContext<never>['prompt']) {}
   async ask(message: string): Promise<string> {
     return (await this.ask_?.(message)) ?? '';
@@ -72,7 +72,7 @@ const NO_WRITER =
  * past the cap is never read), then a read bounded by `maxBytes`. The shell's reader has no cap of its own, so a
  * shell with no stat reads before it counts.
  */
-export class ShellCatalogFileReader implements ICatalogFileReader {
+class ShellCatalogFileReader implements ICatalogFileReader {
   readonly #read: CliContext<never>['readText'];
   readonly #stat: ((path: string) => Promise<number>) | undefined;
   readonly #texts = new Map<string, string>();

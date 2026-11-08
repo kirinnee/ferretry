@@ -72,7 +72,7 @@ export const claudeEffortLevels = (
   return choice === undefined ? CLAUDE_EFFORT_LEVELS : choice.reasoningEfforts.map(effort => effort.value);
 };
 
-export type { RuntimeControlApi, RuntimeControlCommand };
+export type { RuntimeControlCommand };
 
 /** The catalog reader of one daemon. `DaemonRuntimeModelCatalogStore` (bound to that daemon's client) satisfies it;
  *  tests and the harness can supply anything with the same shape. */
@@ -176,7 +176,7 @@ const defaultRequestId = (): string => crypto.randomUUID();
  * before it has said anything — the one the session was LAUNCHED on. The chip
  * reads the same fallback, so the chip and the checked choice always agree.
  */
-export const runtimeModelInForce = (view: RuntimeSessionView): string | undefined =>
+const runtimeModelInForce = (view: RuntimeSessionView): string | undefined =>
   view.state.observedModel?.trim() || launchedModel(view.config);
 
 /**

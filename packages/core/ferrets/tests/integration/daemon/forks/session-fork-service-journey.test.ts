@@ -74,6 +74,7 @@ import { TransferImportError, TransferPrepareError } from '../../../../daemon/li
 import { WARDEN_LABEL } from '../../../../daemon/lib/session/peers/warden-lifecycle.ts';
 import { harnessCatalogs } from '../../../unit/daemon/session/runtime-control/harness-fixture/catalogs.ts';
 import { planRuntimeSwitch } from '../../../unit/daemon/session/runtime-control/harness-fixture/runtime-switch.ts';
+import { diskPaths } from '@ferretry/kernel/testing';
 import { memoryStorage } from '../../../support/daemon/storage.ts';
 import {
   AT,
@@ -570,7 +571,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
         // The lifecycle's turn-one document IS the brief file: both are the one document the new agent is pointed at.
         tasks: { writeAssignedTask: async (held, document) => await brief.write(held, document) },
         effects,
-        directories: new NodeWorkingDirectoryResolver(),
+        directories: new NodeWorkingDirectoryResolver(diskPaths()),
         ids: {
           next: () => {
             happened.push(`create:${id}`);

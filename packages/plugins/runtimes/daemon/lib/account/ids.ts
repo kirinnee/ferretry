@@ -22,24 +22,24 @@ import { joinPath } from '../paths.ts';
 import { RuntimeNameSchema } from './schema.ts';
 
 /** The file, directly under the fleet directory, that holds every runtime's id. */
-export const RUNTIME_IDS_FILE = 'ids.json';
+const RUNTIME_IDS_FILE = 'ids.json';
 
 /** `<fleet>/ids.json`. */
 export const runtimeIdsPath = (fleetDirectory: string): string => joinPath(fleetDirectory, RUNTIME_IDS_FILE);
 
 /** Bumped only when the on-disk shape changes incompatibly. */
-export const RUNTIME_IDS_VERSION = 1 as const;
+const RUNTIME_IDS_VERSION = 1 as const;
 
-export const RuntimeIdEntrySchema = z.strictObject({
+const RuntimeIdEntrySchema = z.strictObject({
   id: AccountIdSchema,
   /** Wrapper names this runtime was launched as before, oldest first. They keep resolving. */
   formerNames: z.array(z.string().min(1)).default([]),
   /** Where its config directory already is, when that is not `<homes>/<id>`. Relative to the homes directory. */
   home: z.string().min(1).optional(),
 });
-export type RuntimeIdEntry = z.infer<typeof RuntimeIdEntrySchema>;
+type RuntimeIdEntry = z.infer<typeof RuntimeIdEntrySchema>;
 
-export const RuntimeIdsSchema = z
+const RuntimeIdsSchema = z
   .strictObject({
     version: z.literal(RUNTIME_IDS_VERSION),
     runtimes: z.record(RuntimeNameSchema, RuntimeIdEntrySchema).default({}),

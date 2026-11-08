@@ -2,6 +2,7 @@ import { ApiError, type RouteHandler, type SocketAccept } from '@ferretry/kernel
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type ConversationApi, LinkKept, QuestionSchema, ReferenceCatalog, SearchSources } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { PDF_WORKER_URL } from './attachments/adapters/decrypt-pdf.ts';
 import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
 import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
@@ -54,6 +55,8 @@ function declared<K extends string, H>(
  * neither part serves yet answers 503 with its sentence, never a missing route.
  */
 export default implementDaemon(manifest, {
+  // The PDF unlock thread: `fyd --check` starts and stops it, so a binary that did not carry it is seen at once.
+  workers: { 'pdf-decrypt': PDF_WORKER_URL },
   build: ctx => {
     const a = buildConversationA({
       kernel: ctx.kernel,

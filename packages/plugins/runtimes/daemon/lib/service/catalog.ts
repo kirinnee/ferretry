@@ -488,7 +488,7 @@ function redactExpansions(
  * A component's text with every secret-looking value replaced by {@link HIDDEN_TEXT}. `isSecret` is the rule for
  * a value beside its name (the fleet's `looksSecret` unless a caller needs a stricter one).
  */
-export function redactText(
+function redactText(
   text: string,
   isSecret: (name: string, value: string) => boolean = looksSecret,
 ): { readonly text: string; readonly redacted: boolean } {
@@ -539,7 +539,7 @@ const isTable = (value: unknown): value is Readonly<Record<string, unknown>> =>
  * A settings document as dotted keys, sorted: an object nests, and an array, a scalar or `{}` is one
  * entry. The inverse of what an edit by entry builds.
  */
-export function flattenSettings(settings: SettingsObject): readonly (readonly [string, unknown])[] {
+function flattenSettings(settings: SettingsObject): readonly (readonly [string, unknown])[] {
   const entries: (readonly [string, unknown])[] = [];
   const walk = (prefix: string, value: unknown): void => {
     if (prefix !== '' && !isTable(value)) {
@@ -555,8 +555,7 @@ export function flattenSettings(settings: SettingsObject): readonly (readonly [s
 }
 
 /** A settings value in words: a string as it is, anything else as its JSON text. */
-export const settingsValueText = (value: unknown): string =>
-  typeof value === 'string' ? value : JSON.stringify(value);
+const settingsValueText = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 
 function settingsEntries(settings: SettingsObject): SettingsEntry[] {
   return flattenSettings(settings).map(([key, value]) => {
@@ -966,8 +965,6 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
 export const KIND_WORDS = COMPONENT_KIND_WORDS;
 
 /** The plain words for a layer in a refusal: "profile base", "instructions main". */
-export { layerWords };
-
 /**
  * Why profile `name` cannot have these layers — one that is not a layer, is there twice, does not
  * exist, would include the profile itself (P3, E19), or would make it both Claude only and Codex only

@@ -34,11 +34,6 @@ import { CatalogChangesSchema } from './shared-catalog-diff.ts';
 import { CatalogLinkIdSchema } from './shared-catalog-link.ts';
 import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-catalog-review.ts';
 
-export const SHARED_CATALOGS_PATH = '/v1/catalogs';
-
-/** `GET /v1/catalog-items`: the shared items this machine keeps, whichever catalogs list them. */
-export const CATALOG_ITEMS_PATH = '/v1/catalog-items';
-
 /** Most catalogs one machine keeps. Making one past it is refused `catalogs_full`. */
 export const CATALOGS_MAX_PER_PUBLISHER = 256;
 
@@ -50,13 +45,13 @@ export const CATALOG_PUBLIC_UNAVAILABLE =
   'A public catalog is not available yet. Catalogs are shared with the people you add as members, and until members exist, as a file.';
 
 /** Where the source of a skill is: the SKILL.md path the skills inventory lists, or the skill's name. */
-export const CatalogSourceSkillSchema = z.strictObject({
+const CatalogSourceSkillSchema = z.strictObject({
   kind: z.literal('skill'),
   skill: z.string().min(1).max(4_096),
 });
 
 /** Where the source of an MCP setup is: an MCP inventory server id, or the server's name. */
-export const CatalogSourceMcpSchema = z.strictObject({
+const CatalogSourceMcpSchema = z.strictObject({
   kind: z.literal('mcp'),
   mcp: z.string().min(1).max(256),
 });
@@ -83,7 +78,7 @@ export type CatalogSourceProblem = z.infer<typeof CatalogSourceProblemSchema>;
 // ── The catalog and what it holds ────────────────────────────────────────────────────────────────
 
 /** One published version of an item. Its bytes never change. */
-export const CatalogItemVersionSchema = z.strictObject({
+const CatalogItemVersionSchema = z.strictObject({
   version: z.number().int().min(1),
   /** The digest the signed manifest lists for it. */
   digest: CatalogDigestSchema,
@@ -92,16 +87,14 @@ export const CatalogItemVersionSchema = z.strictObject({
   /** When the version was retired (versions, 3d); unset while it is in use. */
   retiredAt: InstantSchema.optional(),
 });
-export type CatalogItemVersion = z.infer<typeof CatalogItemVersionSchema>;
-
 /**
  * Whether the source has changed since the latest version was frozen.
  * `withdrawn` items are not looked at. `unavailable`: the skill or the server is not there any more.
  */
-export const CatalogSourceStateSchema = z.enum(['unchanged', 'changed', 'unavailable', 'withdrawn']);
+const CatalogSourceStateSchema = z.enum(['unchanged', 'changed', 'unavailable', 'withdrawn']);
 export type CatalogSourceState = z.infer<typeof CatalogSourceStateSchema>;
 
-export const OwnedCatalogItemSchema = z.strictObject({
+const OwnedCatalogItemSchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
   kind: CatalogItemKindSchema,
   name: CatalogItemNameSchema,
@@ -123,9 +116,7 @@ export const OwnedCatalogItemSchema = z.strictObject({
 export type OwnedCatalogItem = z.infer<typeof OwnedCatalogItemSchema>;
 
 /** A catalog is the default (where one tap adds) or one of the others. Kept by id, never by name. */
-export const CatalogRoleSchema = z.enum(['default', 'collection']);
-export type CatalogRole = z.infer<typeof CatalogRoleSchema>;
-
+const CatalogRoleSchema = z.enum(['default', 'collection']);
 export const OwnedCatalogSchema = z.strictObject({
   id: SharedCatalogIdSchema,
   name: CatalogLabelSchema,
@@ -156,7 +147,7 @@ export type OwnedCatalogList = z.infer<typeof OwnedCatalogListSchema>;
 // ── The shared items ─────────────────────────────────────────────────────────────────────────────
 
 /** One version of a shared item, and where it is in use. */
-export const OwnedSharedItemVersionSchema = z.strictObject({
+const OwnedSharedItemVersionSchema = z.strictObject({
   version: z.number().int().min(1),
   /** Bytes of the frozen copy, which is the same whichever catalog lists it. */
   size: z.number().int().min(1),
@@ -173,16 +164,12 @@ export const OwnedSharedItemVersionSchema = z.strictObject({
     linkIds: z.array(CatalogLinkIdSchema).readonly().optional(),
   }),
 });
-export type OwnedSharedItemVersion = z.infer<typeof OwnedSharedItemVersionSchema>;
-
 /** Whether a catalog lists the item now, or did once and took it out. */
-export const OwnedSharedItemCatalogSchema = z.strictObject({
+const OwnedSharedItemCatalogSchema = z.strictObject({
   catalogId: SharedCatalogIdSchema,
   state: z.enum(['live', 'withdrawn']),
   withdrawnAt: InstantSchema.optional(),
 });
-export type OwnedSharedItemCatalog = z.infer<typeof OwnedSharedItemCatalogSchema>;
-
 /** An item of the table: kept once, listed by any number of catalogs. */
 export const OwnedSharedItemSchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
@@ -350,12 +337,6 @@ export type ExportCatalogRequest = z.infer<typeof ExportCatalogRequestSchema>;
 /** How long the daemon keeps the Undo of a one-tap Add, in seconds. The app's own toast is shorter. */
 export const QUICK_ADD_UNDO_SECONDS = 60;
 
-/** `POST /v1/catalog-items/quick-add`. */
-export const QUICK_ADD_PATH = `${CATALOG_ITEMS_PATH}/quick-add`;
-
-/** `POST /v1/catalog-items/quick-add/undo`. */
-export const QUICK_ADD_UNDO_PATH = `${QUICK_ADD_PATH}/undo`;
-
 /**
  * What the frozen candidate of a one-tap Add shows, before it is listed anywhere: the preview of an item with no
  * catalog of its own yet. `digest` is the content digest, the same value the catalog's own preview answers.
@@ -375,9 +356,7 @@ export const QuickAddRequestSchema = z.union([
 export type QuickAddRequest = z.infer<typeof QuickAddRequestSchema>;
 
 /** The token of an Undo: 128 random bits, valid for {@link QUICK_ADD_UNDO_SECONDS} and good once. */
-export const QuickAddUndoTokenSchema = z.string().regex(/^cqu_[A-Za-z0-9_-]{22}$/u);
-export type QuickAddUndoToken = z.infer<typeof QuickAddUndoTokenSchema>;
-
+const QuickAddUndoTokenSchema = z.string().regex(/^cqu_[A-Za-z0-9_-]{22}$/u);
 /**
  * What a one-tap Add did. `added` (201) wrote the default catalog; `already` (200) found it listed there; `review`
  * (200) wrote NOTHING: a warning, a file left out, a missing summary, or an existing version with warnings means a
@@ -421,8 +400,6 @@ export type QuickAddAnswer = z.infer<typeof QuickAddAnswerSchema>;
 
 /** `POST /v1/catalog-items/quick-add/undo`. */
 export const QuickAddUndoRequestSchema = z.strictObject({ token: QuickAddUndoTokenSchema });
-export type QuickAddUndoRequest = z.infer<typeof QuickAddUndoRequestSchema>;
-
 /**
  * What Undo did: `retracted` took the item out as if it had never been listed (nobody had been shown that revision);
  * `withdrawn` is the ordinary withdrawal, kept as a record, because a member may already have read it.
@@ -443,7 +420,7 @@ export type QuickAddUndone = z.infer<typeof QuickAddUndoneSchema>;
  * `GET /v1/catalog-items/:itemId/versions/:version`: one frozen version, read in full — what an installer of
  * exactly that version would be shown. Read from the stored copy, never the source.
  */
-export const SharedItemVersionDetailSchema = z.strictObject({
+const SharedItemVersionDetailSchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
   version: z.number().int().min(1),
   kind: CatalogItemKindSchema,
@@ -460,21 +437,15 @@ export type SharedItemVersionDetail = z.infer<typeof SharedItemVersionDetailSche
 
 /** `POST /v1/catalog-items/:itemId/versions/preview`: nothing to say; the item remembers where its source is. */
 export const PreviewSharedItemVersionRequestSchema = z.strictObject({});
-export type PreviewSharedItemVersionRequest = z.infer<typeof PreviewSharedItemVersionRequestSchema>;
-
 /** `POST /v1/catalog-items/:itemId/versions`: the next version, only if the source still hashes to `digest`. */
 export const PublishSharedItemVersionRequestSchema = z.strictObject({ digest: CatalogDigestSchema });
-export type PublishSharedItemVersionRequest = z.infer<typeof PublishSharedItemVersionRequestSchema>;
-
 /** Where a published version went: one entry per catalog that lists the item live, each bumped by one revision. */
-export const PublishedSharedItemCatalogSchema = z.strictObject({
+const PublishedSharedItemCatalogSchema = z.strictObject({
   catalogId: SharedCatalogIdSchema,
   revision: z.number().int().min(1),
   /** The digest that catalog's signed manifest lists for this version. */
   digest: CatalogDigestSchema,
 });
-export type PublishedSharedItemCatalog = z.infer<typeof PublishedSharedItemCatalogSchema>;
-
 /** The answer to publishing a version at the item. */
 export const PublishedSharedItemSchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
@@ -491,12 +462,8 @@ export const MakeCurrentRequestSchema = z.strictObject({
   version: z.number().int().min(1),
   from: z.number().int().min(1),
 });
-export type MakeCurrentRequest = z.infer<typeof MakeCurrentRequestSchema>;
-
 /** `PATCH /v1/catalog-items/:itemId/versions/:version`: retire a version (it stops being offered) or bring it back. */
 export const RetireVersionRequestSchema = z.strictObject({ retired: z.boolean() });
-export type RetireVersionRequest = z.infer<typeof RetireVersionRequestSchema>;
-
 /** The answer to retiring or unretiring: the version's new state and every live catalog the change raised. */
 export const RetiredVersionSchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,

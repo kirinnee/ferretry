@@ -41,7 +41,7 @@ export interface PasskeyStore {
 }
 
 /** The verifier's verdicts, as this module consumes them. The verifier itself lives in `../passkeys`. */
-export type PasskeyVerdict<T> = ({ readonly ok: true } & T) | { readonly ok: false; readonly reason: string };
+type PasskeyVerdict<T> = ({ readonly ok: true } & T) | { readonly ok: false; readonly reason: string };
 
 /**
  * The WebAuthn verifier, as the step-up service needs it: every byte it checks, already decoded.
@@ -100,54 +100,6 @@ export interface StepUpRandom {
 
 export interface StepUpClock {
   nowMs(): number;
-}
-
-/** What the service needs to know about a device: its name, and when it was paired. */
-export interface StepUpDeviceDirectory {
-  device(deviceId: string): Promise<{ readonly name: string; readonly createdAt: string } | undefined>;
-}
-
-/**
- * Who is asking. `device` is the session's proven device; `hostLocal` is the boundary's own proof that
- * this is the OWNER at the machine (`arrivedOnHost`); `actor` names them in the audit. None comes
- * from a body.
- */
-export interface StepUpCaller {
-  readonly device?: { readonly deviceId: string; readonly appSession: string };
-  readonly hostLocal: boolean;
-  /**
-   * The transcript hash of the session carrying this request — what a key rotation's proof is signed
-   * over. Present only for a request a session carried; a rotation without one is refused.
-   */
-  readonly transcriptHash?: Uint8Array;
-  readonly actor?: string;
-}
-
-/**
- * Replacing a device's key inside a step-up (`docs/design/zero-trust.md` B6), as the step-up service
- * needs it. The verifier of the new key's proof, the swap, and the one fact that decides whether a
- * rotation is due: when the device's current key was put in place.
- */
-export interface DeviceKeyRotationPort {
-  /** When the device's current key was put in place, or nothing for a device that is gone. */
-  keyIssuedAt(deviceId: string): number | undefined;
-  /** Whether `proof` is `deviceKey`'s signature over this session's rotation message. Total. */
-  verify(input: {
-    readonly transcriptHash: Uint8Array;
-    readonly deviceId: string;
-    readonly deviceKey: string;
-    readonly proof: string;
-  }): Promise<boolean>;
-  /**
-   * Adopts the new key, closes every OTHER session the device holds so each reopens with it, and
-   * audits `device.key-rotated`. `false` when the device was gone by the time it was written.
-   */
-  rotate(input: {
-    readonly deviceId: string;
-    readonly deviceKey: string;
-    /** The carrying session's transcript hash, so that session is the one NOT closed. */
-    readonly transcriptHash: Uint8Array;
-  }): Promise<boolean>;
 }
 
 /**

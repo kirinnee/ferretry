@@ -22,9 +22,9 @@ import {
 import { useMachineChanges } from '../../../hooks/use-machine-changes.ts';
 import { type CallFailure, callFailure, type LiveRuntimesClient, type RuntimesClient } from '../../../lib/client.ts';
 
-export const COMPONENTS_ROUTE = 'GET /v1/runtimes/components' as const;
-export const PROFILES_ROUTE = 'GET /v1/runtimes/profiles' as const;
-export const RUNTIMES_ROUTE = 'GET /v1/runtimes' as const;
+const COMPONENTS_ROUTE = 'GET /v1/runtimes/components' as const;
+const PROFILES_ROUTE = 'GET /v1/runtimes/profiles' as const;
+const RUNTIMES_ROUTE = 'GET /v1/runtimes' as const;
 
 /** The six kinds, each component with its badges and "used by". */
 export const readComponents = async (client: RuntimesClient): Promise<ComponentCatalog> =>

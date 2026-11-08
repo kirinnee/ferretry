@@ -95,7 +95,7 @@ export interface FlatLayer {
 }
 
 /** Why a profile could not be flattened. Each is a document the schema would also refuse. */
-export type FlattenFailure =
+type FlattenFailure =
   | { readonly kind: 'unknown-profile'; readonly profile: string; readonly via: readonly string[] }
   | { readonly kind: 'unknown-component'; readonly reference: LayerReferenceText; readonly via: readonly string[] }
   | { readonly kind: 'invalid-layer'; readonly text: string; readonly via: readonly string[] }
@@ -181,7 +181,7 @@ export interface PartialSupport {
 }
 
 /** Whether a profile can be used with a credential of this harness at all (P5, E14). */
-export type ProfileAvailability =
+type ProfileAvailability =
   | { readonly available: true }
   | {
       readonly available: false;
@@ -198,7 +198,7 @@ export interface Contribution<T> {
 }
 
 /** One skill item and the newest layer that selected it. */
-export interface SkillItem {
+interface SkillItem {
   readonly item: string;
   readonly layer: FlatLayer;
 }
@@ -218,13 +218,13 @@ export interface FlagContribution {
 }
 
 /** One environment variable and the layer whose value won. */
-export interface EnvContribution {
+interface EnvContribution {
   readonly value: string;
   readonly layer: FlatLayer;
 }
 
 /** One value a layer set, as a conflict reports it. */
-export interface Setter {
+interface Setter {
   readonly value: unknown;
   readonly layer: FlatLayer;
 }
@@ -246,7 +246,7 @@ export interface Conflict {
 }
 
 /** One model of the winning set, marked against what this login can use (E23). */
-export interface ModelChoice {
+interface ModelChoice {
   readonly id: string;
   readonly available: boolean;
 }

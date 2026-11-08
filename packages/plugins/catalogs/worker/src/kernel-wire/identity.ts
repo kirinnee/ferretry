@@ -20,7 +20,7 @@ import type { SessionCrypto } from './crypto.ts';
 const DAEMON_ID_PREFIX = 'fy_daemon_';
 
 /** `fy_daemon_` + 43 base64url characters (R41). */
-export const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u, 'invalid daemon id');
+const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u, 'invalid daemon id');
 
 /** Compute the daemon identifier a public key must be known by. */
 export async function daemonIdFromPublicKey(crypto: SessionCrypto, publicKeySpki: Uint8Array): Promise<string | null> {

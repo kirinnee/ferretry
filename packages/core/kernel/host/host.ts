@@ -47,6 +47,7 @@ import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
+import { checkDirectory, gatedPaths } from './paths.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import { type InstalledItems, installedItemReach } from './items.ts';
@@ -90,6 +91,7 @@ import { doctorReport } from './doctor-report.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
+  hostPermitted,
   effectivePermissions,
   openChildEnvironments,
   restrictFetch,
@@ -598,7 +600,10 @@ async function bootLocked(
     );
 
   const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
-  const ownerPaths: PathsPort = Object.freeze({ home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/' });
+  const ownerPaths: PathsPort = Object.freeze({
+    home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/',
+    checkDirectory: async (absolutePath: string) => await checkDirectory(adapters.fs, absolutePath),
+  });
   /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
   const resolversOf =
     (id: string): ResolverOf =>
@@ -606,86 +611,98 @@ async function bootLocked(
       (
         records.get(id)?.half?.resolvers as Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
       )?.[name];
-  const portsFor = (manifest: Manifest, lifecycle: PluginLifecycle): KernelPorts => ({
-    clock,
-    log: scopedLog(adapters.logSink, manifest.id),
-    state: records.get(manifest.id)?.state?.port as StatePort,
-    config: config.port(manifest.id),
-    roots: rootsPortFor(
+  const portsFor = (manifest: Manifest, lifecycle: PluginLifecycle): KernelPorts => {
+    const rootsPort = rootsPortFor(
       adapters.fs,
       { home, plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
       manifest.permissions?.roots ?? [],
       () => bound.workFolders,
       { random: adapters.random, ...(pins === undefined ? {} : { pins }) },
-    ),
-    events: events.portFor(manifest.id, manifest.data?.publishes ?? []),
-    jobs: jobs.portFor(manifest.id),
-    workers: workersFor(adapters.workers, () => {
-      const port = records.get(manifest.id)?.state?.port as HostStatePort | undefined;
-      return port === undefined ? undefined : (def, name) => port.sqliteGrant(def, name);
-    }),
-    spawn: restrictSpawn(
-      manifest.id,
-      effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
-      openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
-      items,
-      pins,
-    ),
-    scratch: adapters.scratch ?? NO_SCRATCH,
-    fetch: restrictFetch(
-      manifest.id,
-      effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
-      adapters.fetch,
-      items,
-      resolversOf(manifest.id),
-    ),
-    websocket: restrictWebSocket(
-      manifest.id,
-      effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
-      websockets,
-      items,
-      resolversOf(manifest.id),
-    ),
-    carrierListener: carrierListenerPort({
-      manifest,
-      dispatcher: () => dispatcher,
-      daemonId: identityPort.daemonId,
-      onStop: lifecycle.onStop.bind(lifecycle),
-      stopping: () => lifecycle.stopping(),
-    }),
-    identity: identityPort,
-    paths: ownerPaths,
-    updateHost: updateHostOf(manifest, adapters, options.version),
-    hostFacts:
-      manifest.permissions?.hostFacts === true
-        ? (adapters.hostFacts ?? NO_HOST_FACTS)
-        : undeclaredHostFacts(manifest.id, adapters.hostFacts ?? NO_HOST_FACTS),
-    timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
-    secrets: ownSecretsPort(
-      manifest.permissions?.secrets ?? [],
-      () => config.secretReferences?.(manifest.id) ?? new Set<string>(),
-      () => bound.secretResolver,
-    ),
-    signer: signerFor(manifest.id, sessionSigner),
-    ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
-    act,
-    ids: { mint: prefix => ids.mint(prefix) },
-    redaction,
-    snapshot: {
-      current: () => {
-        if (frozen === undefined) throw new TypeError('the post-build snapshot is read after build, not during it');
-        return frozen;
+    );
+    const declaredNetwork = effectivePermissions(manifest.id, manifest.permissions?.network ?? []);
+    const fetchPort = restrictFetch(manifest.id, declaredNetwork, adapters.fetch, items, resolversOf(manifest.id));
+    return {
+      clock,
+      log: scopedLog(adapters.logSink, manifest.id),
+      state: records.get(manifest.id)?.state?.port as StatePort,
+      config: config.port(manifest.id),
+      roots: rootsPort,
+      events: events.portFor(manifest.id, manifest.data?.publishes ?? []),
+      jobs: jobs.portFor(manifest.id),
+      workers: workersFor(
+        adapters.workers,
+        () => {
+          const port = records.get(manifest.id)?.state?.port as HostStatePort | undefined;
+          return port === undefined ? undefined : (def, name) => port.sqliteGrant(def, name);
+        },
+        {
+          plugin: manifest.id,
+          roots: rootsPort,
+          fetch: fetchPort,
+          declaresNetwork: declaredNetwork.length > 0,
+          mayReach: (hostname, host) => hostPermitted(declaredNetwork, items, hostname, resolversOf(manifest.id), host),
+          nowMs: () => clock.nowMs(),
+          flooded: plugin => log.warn('a worker flooded its grant channel, so the channel was closed', { plugin }),
+        },
+        { onStop: fn => lifecycle.onStop(fn), stopping: () => lifecycle.stopping() },
+      ),
+      spawn: restrictSpawn(
+        manifest.id,
+        effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
+        openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
+        items,
+        pins,
+      ),
+      scratch: adapters.scratch ?? NO_SCRATCH,
+      fetch: fetchPort,
+      websocket: restrictWebSocket(
+        manifest.id,
+        effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
+        websockets,
+        items,
+        resolversOf(manifest.id),
+      ),
+      carrierListener: carrierListenerPort({
+        manifest,
+        dispatcher: () => dispatcher,
+        daemonId: identityPort.daemonId,
+        onStop: lifecycle.onStop.bind(lifecycle),
+        stopping: () => lifecycle.stopping(),
+      }),
+      identity: identityPort,
+      paths: gatedPaths(manifest.id, manifest.permissions?.checkDirectory === true, ownerPaths),
+      updateHost: updateHostOf(manifest, adapters, options.version),
+      hostFacts:
+        manifest.permissions?.hostFacts === true
+          ? (adapters.hostFacts ?? NO_HOST_FACTS)
+          : undeclaredHostFacts(manifest.id, adapters.hostFacts ?? NO_HOST_FACTS),
+      timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+      secrets: ownSecretsPort(
+        manifest.permissions?.secrets ?? [],
+        () => config.secretReferences?.(manifest.id) ?? new Set<string>(),
+        () => bound.secretResolver,
+      ),
+      signer: signerFor(manifest.id, sessionSigner),
+      ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
+      act,
+      ids: { mint: prefix => ids.mint(prefix) },
+      redaction,
+      snapshot: {
+        current: () => {
+          if (frozen === undefined) throw new TypeError('the post-build snapshot is read after build, not during it');
+          return frozen;
+        },
       },
-    },
-    lifecycle,
-    contract: {
-      hash: surface => {
-        if (surface === 'member' && (manifest.actions?.memberRoutes ?? []).length === 0)
-          throw new TypeError(`${manifest.id} declares no member routes, so it has no member-surface hash`);
-        return options.contractHash?.(manifest.id, surface) ?? 'unhashed';
+      lifecycle,
+      contract: {
+        hash: surface => {
+          if (surface === 'member' && (manifest.actions?.memberRoutes ?? []).length === 0)
+            throw new TypeError(`${manifest.id} declares no member routes, so it has no member-surface hash`);
+          return options.contractHash?.(manifest.id, surface) ?? 'unhashed';
+        },
       },
-    },
-  });
+    };
+  };
 
   // 4. Build in start order.
   const failed = async (id: string, why: string): Promise<void> => {

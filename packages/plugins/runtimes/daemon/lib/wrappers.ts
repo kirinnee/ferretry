@@ -58,13 +58,13 @@ export const MANAGED_MARKER =
   "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten";
 
 /** The executable each harness launches. */
-export const HARNESS_BINARIES: Readonly<Record<HarnessKind, string>> = {
+const HARNESS_BINARIES: Readonly<Record<HarnessKind, string>> = {
   claude: 'claude',
   codex: 'codex',
 };
 
 /** The variable each harness reads its configuration directory from. */
-export const HARNESS_HOME_ENV: Readonly<Record<HarnessKind, string>> = {
+const HARNESS_HOME_ENV: Readonly<Record<HarnessKind, string>> = {
   claude: 'CLAUDE_CONFIG_DIR',
   codex: 'CODEX_HOME',
 };

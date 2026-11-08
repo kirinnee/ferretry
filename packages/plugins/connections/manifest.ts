@@ -120,6 +120,9 @@ export default definePlugin({
     ],
   },
 
+  // `fyd --check` proves the WebRTC engine with two loopback peers; nothing runs it at boot.
+  selftest: ['webrtc'],
+
   permissions: {
     network: [new URL(HOSTED_RELAY_DIRECTORY_ORIGIN).host, { resolver: 'relay' }, 'stun.cloudflare.com'],
     spawn: ['cloudflared'],

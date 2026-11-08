@@ -33,7 +33,7 @@ import {
   SharedCatalogManifestEntrySchema,
 } from './shared-catalog.ts';
 import { CatalogLinkIdSchema, LinkBundleIdSchema } from '../wire.ts';
-export { CatalogLinkIdSchema, LinkBundleIdSchema, type CatalogLinkId } from '../wire.ts';
+export { CatalogLinkIdSchema, LinkBundleIdSchema } from '../wire.ts';
 
 export const CATALOG_LINK_FORMAT = 'ferretry-catalog-link' as const;
 export const CATALOG_LINK_BUNDLE_FORMAT = 'ferretry-catalog-link-bundle' as const;
@@ -55,13 +55,9 @@ export const LINK_MAX_LEASE_MS = 30 * 24 * 60 * 60 * 1000;
 /** The longest a one-time link lives. */
 export const LINK_ONE_TIME_MAX_MS = 24 * 60 * 60 * 1000;
 
-export type LinkBundleId = z.infer<typeof LinkBundleIdSchema>;
-
 /** 32 random bytes as base64url: the link's secret, which lives in the URL fragment only. */
 export const LinkKeySchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u, 'invalid link key');
-export type LinkKey = z.infer<typeof LinkKeySchema>;
-
-export const CATALOG_LINK_KINDS = ['one-time', 'public'] as const;
+const CATALOG_LINK_KINDS = ['one-time', 'public'] as const;
 export const CatalogLinkKindSchema = z.enum(CATALOG_LINK_KINDS);
 export type CatalogLinkKind = z.infer<typeof CatalogLinkKindSchema>;
 

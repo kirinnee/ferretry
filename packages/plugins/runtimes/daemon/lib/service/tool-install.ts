@@ -33,7 +33,7 @@ import {
 } from './foreign.ts';
 
 /** The package managers a harness may be installed through. */
-export type PackageManager = 'brew' | 'apt' | 'npm';
+type PackageManager = 'brew' | 'apt' | 'npm';
 
 /**
  * THE declared table: per harness, the arguments each manager is given, after the manager's own name.
@@ -44,9 +44,7 @@ export type PackageManager = 'brew' | 'apt' | 'npm';
  * an apt package, so neither has an `apt` entry and apt is never offered — adding one here is the whole
  * change if that ever stops being true.
  */
-export const TOOL_PACKAGES: Readonly<
-  Record<HarnessKind, Readonly<Partial<Record<PackageManager, readonly string[]>>>>
-> = {
+const TOOL_PACKAGES: Readonly<Record<HarnessKind, Readonly<Partial<Record<PackageManager, readonly string[]>>>>> = {
   claude: {
     brew: ['install', '--cask', HARNESS_PACKAGES.claude.cask],
     npm: ['install', '-g', HARNESS_PACKAGES.claude.npm],
@@ -106,7 +104,7 @@ const NEEDS_ADMIN = [
 ];
 
 /** The manager order this system offers, before the table and the machine narrow it. */
-export function managerOrder(platform: string): readonly PackageManager[] {
+function managerOrder(platform: string): readonly PackageManager[] {
   if (platform === 'darwin') return ['brew', 'npm'];
   if (platform === 'linux') return ['apt', 'npm'];
   return ['npm'];
@@ -134,13 +132,13 @@ function candidates(
  * Needs-admin is the one case that changes the words: `sudo` for npm and apt, and Homebrew unchanged
  * because it must run as the person, not as root.
  */
-export function manualCommand(manager: PackageManager, args: readonly string[], needsAdmin: boolean): string {
+function manualCommand(manager: PackageManager, args: readonly string[], needsAdmin: boolean): string {
   const command = display(manager, args);
   return needsAdmin && SUDO_REMEDY[manager] ? `sudo ${command}` : command;
 }
 
 /** What installing one harness on this machine would run, decided before anything runs. */
-export type ToolInstallPlan =
+type ToolInstallPlan =
   | {
       readonly harness: HarnessKind;
       readonly kind: 'runnable';
@@ -160,18 +158,14 @@ export type ToolInstallPlan =
     };
 
 /** Find one manager on this machine: the inherited `PATH` first, then its usual locations. */
-export function locateManager(manager: PackageManager, executables: ExecutableResolverPort): string | undefined {
+function locateManager(manager: PackageManager, executables: ExecutableResolverPort): string | undefined {
   return (
     executables.resolve(MANAGER_COMMAND[manager]) ?? MANAGER_LOCATIONS[manager].find(path => executables.runnable(path))
   );
 }
 
 /** Decide how one harness would be installed on this machine. Lookups and stats only. */
-export function planToolInstall(
-  harness: HarnessKind,
-  platform: string,
-  executables: ExecutableResolverPort,
-): ToolInstallPlan {
+function planToolInstall(harness: HarnessKind, platform: string, executables: ExecutableResolverPort): ToolInstallPlan {
   const offered = candidates(harness, platform);
   for (const { manager, args } of offered) {
     const executable = locateManager(manager, executables);
@@ -192,7 +186,7 @@ export function planToolInstall(
 // ─── the port ──────────────────────────────────────────────────────────────────────────────────────
 
 /** One package-manager run: an absolute executable and its arguments, never a shell string. */
-export interface PackageInstallRun {
+interface PackageInstallRun {
   readonly executable: string;
   readonly args: readonly string[];
   readonly environment: Readonly<Record<string, string | undefined>>;
@@ -203,13 +197,13 @@ export interface PackageInstallRun {
  * How one run ended. `tail` is the last few lines the manager printed, kept only so a failure can be
  * classified and quoted; it is never stored.
  */
-export type PackageInstallResult =
+type PackageInstallResult =
   | { readonly kind: 'exited'; readonly code: number; readonly tail: readonly string[] }
   | { readonly kind: 'timed-out'; readonly tail: readonly string[] }
   | { readonly kind: 'not-started'; readonly reason: string };
 
 /** Running one package manager with no stdin, so nothing it asks can wait for an answer. */
-export type PackageInstallPort = (run: PackageInstallRun) => Promise<PackageInstallResult>;
+type PackageInstallPort = (run: PackageInstallRun) => Promise<PackageInstallResult>;
 
 // ─── outcomes ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -236,7 +230,7 @@ export type ToolInstallOutcome =
     };
 
 /** One step of a running install, for a surface that shows progress. */
-export type ToolInstallProgress =
+type ToolInstallProgress =
   | { readonly harness: HarnessKind; readonly stage: 'running'; readonly command: string }
   | { readonly harness: HarnessKind; readonly stage: 'finished'; readonly outcome: ToolInstallOutcome };
 
@@ -253,7 +247,7 @@ function lastLine(tail: readonly string[]): string | undefined {
  * What a manager's last lines say: whether it needed admin rights it was not given, and the last thing
  * it said. Shared with the harness update (`harness-update/service.ts`), which reads the same managers.
  */
-export function readManagerTail(tail: readonly string[]): {
+function readManagerTail(tail: readonly string[]): {
   readonly needsAdmin: boolean;
   readonly said: string | undefined;
 } {
@@ -262,7 +256,7 @@ export function readManagerTail(tail: readonly string[]): {
 }
 
 /** Read how a run ended into an outcome. Pure, so every failure's words are tested without a manager. */
-export function classifyInstallResult(
+function classifyInstallResult(
   plan: Extract<ToolInstallPlan, { kind: 'runnable' }>,
   result: PackageInstallResult,
   timeoutMinutes: number,
@@ -304,7 +298,7 @@ export function classifyInstallResult(
  * the node beside it on a daemon whose inherited `PATH` is minimal. `NONINTERACTIVE` is Homebrew's own
  * switch for "never stop to ask".
  */
-export function installEnvironment(
+function installEnvironment(
   executable: string,
   environment: Readonly<Record<string, string | undefined>>,
 ): Readonly<Record<string, string | undefined>> {
@@ -331,7 +325,7 @@ export class ToolInstallRefusal extends Error {
   }
 }
 
-export interface ToolInstallServiceOptions {
+interface ToolInstallServiceOptions {
   /** `darwin`, `linux`, … — which managers this system offers. */
   readonly platform: string;
   /** The daemon's one executable resolver, so manager detection and harness detection agree. */
@@ -345,7 +339,7 @@ export interface ToolInstallServiceOptions {
 }
 
 /** One request: which harnesses. */
-export interface ToolInstallRequest {
+interface ToolInstallRequest {
   readonly harnesses: readonly HarnessKind[];
 }
 
@@ -354,7 +348,7 @@ export type ToolInstallPreview =
   | { readonly harness: HarnessKind; readonly installed: true; readonly path: string }
   | { readonly harness: HarnessKind; readonly installed: false; readonly plan: ToolInstallPlan };
 
-export class ToolInstallService {
+class ToolInstallService {
   /** One install at a time: two package managers writing one prefix at once corrupt it. */
   #running = false;
 

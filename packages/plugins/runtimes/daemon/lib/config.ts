@@ -75,7 +75,7 @@ const RESERVED_ENV_REASONS: Readonly<Record<ReservedEnvName, string>> = {
  * no reference, so it would be exported verbatim and the harness would authenticate with the text of
  * the reference — a credential failure whose cause is invisible in every place a person would look.
  */
-export const EnvValueSchema = z.string().check(ctx => {
+const EnvValueSchema = z.string().check(ctx => {
   const malformed = malformedSecretReference(ctx.value);
   if (malformed !== undefined) {
     ctx.issues.push({
@@ -125,15 +125,13 @@ export const AliasSchema = z
   .refine(value => value.claude !== undefined || value.codex !== undefined, {
     message: 'must list flags for at least one harness',
   });
-export type Alias = z.infer<typeof AliasSchema>;
-
 const positiveSeconds = (fallback: number) => z.number().int().positive().default(fallback);
 
 /** The schema default and the R3 comparison share this one value. */
-export const USAGE_JITTER_DEFAULT = 0.25;
+const USAGE_JITTER_DEFAULT = 0.25;
 
 /** A local proxy pool that reports runtime availability rather than a numeric usage window. */
-export const CliProxySourceSchema = z
+const CliProxySourceSchema = z
   .strictObject({
     url: z.url(),
     /** Literal value, or a `$NAME` reference resolved from the environment. */
@@ -146,8 +144,6 @@ export const CliProxySourceSchema = z
   .refine(source => (source.managementKey === undefined) !== (source.managementKeyFile === undefined), {
     message: 'set exactly one of managementKey or managementKeyFile',
   });
-export type CliProxySource = z.infer<typeof CliProxySourceSchema>;
-
 export const UsageSchema = z
   .strictObject({
     /** On by default: a usage read is cheap and consumes no quota. */

@@ -253,10 +253,15 @@ export function bunWorkers(): WorkersPort {
   return {
     start: (moduleUrl, options): WorkerHandle => {
       // `workerData` carries only what the host put there (the resolved sqlite grants); `state` itself is the host's.
-      const data = (options as { readonly workerData?: unknown } | undefined)?.workerData;
+      const given = options as
+        | { readonly workerData?: unknown; readonly transferList?: readonly unknown[] }
+        | undefined;
+      const data = given?.workerData;
       const worker = new Worker(moduleUrl, {
         ...(options?.name === undefined ? {} : { name: options.name }),
+        ...(options?.env === undefined ? {} : { env: { ...options.env } }),
         ...(data === undefined ? {} : { workerData: data }),
+        ...(given?.transferList === undefined ? {} : { transferList: [...given.transferList] }),
       } as WorkerOptions);
       return {
         post: (message, transfer) => worker.postMessage(message, [...(transfer ?? [])]),

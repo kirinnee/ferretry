@@ -286,13 +286,13 @@ export interface FleetSetupServiceDeps {
 // ── Constants ────────────────────────────────────────────────────────────────────────────────────
 
 /** Where the import record lives, in the fleet directory: what each import made and from what. */
-export const IMPORT_RECORD_FILE = 'setup/import.json';
+const IMPORT_RECORD_FILE = 'setup/import.json';
 
 /**
  * The most document text one Clone bundle carries. The bundle travels back as a change body, which
  * has its own ceiling, so a larger setup is copied without the documents that do not fit and says so.
  */
-export const CLONE_BUNDLE_MAX_BYTES = 384 * 1024;
+const CLONE_BUNDLE_MAX_BYTES = 384 * 1024;
 
 /** Stands in when only the machine's own controls are compared, which read no file. */
 const NO_CONFIG_TEXT: ConfigText = {
@@ -323,7 +323,7 @@ const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** The import record, or none when what is stored cannot be read: then nothing is ever offered as an update. */
-export function parseImportRecord(text: string | undefined): ImportRecord | undefined {
+function parseImportRecord(text: string | undefined): ImportRecord | undefined {
   if (text === undefined) return undefined;
   let raw: unknown;
   try {

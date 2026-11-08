@@ -361,6 +361,11 @@ export function writeWorkspace(root: string, variant: Variant): void {
       workspaces: ['packages/core/*', 'packages/plugins/*'],
     }),
   );
+  // The generator reads the client binary name from the CLI's `bin` key (the two-name model); the rig has no CLI otherwise.
+  files.set(
+    'packages/cli/package.json',
+    JSON.stringify({ name: 'fixture-cli', private: true, bin: { fx: './bin.ts' } }),
+  );
   // The core and Access app halves are left out of the app registry so the shell test draws only the fixture plugins.
   files.set(
     'ports-pending.json',

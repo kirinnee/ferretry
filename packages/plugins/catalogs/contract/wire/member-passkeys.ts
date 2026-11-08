@@ -42,7 +42,7 @@ export type StepUpOptions = z.infer<typeof StepUpOptionsSchema>;
 
 export const MAX_JOIN_PROOF_PASSKEYS = 64 as const;
 
-export const JoinProofOptionsSchema = StepUpOptionsSchema.extend({
+const JoinProofOptionsSchema = StepUpOptionsSchema.extend({
   allowCredentials: z
     .array(z.strictObject({ type: z.literal('public-key'), id: Base64UrlSchema(1_366) }))
     .min(1)
@@ -51,7 +51,7 @@ export const JoinProofOptionsSchema = StepUpOptionsSchema.extend({
 
 export type JoinProofOptions = z.infer<typeof JoinProofOptionsSchema>;
 
-export const DeviceKeyRotationSchema = z.strictObject({
+const DeviceKeyRotationSchema = z.strictObject({
   deviceKey: Base64UrlSchema(64),
   proof: Base64UrlSchema(128),
 });
@@ -110,5 +110,3 @@ export const UnlockGrantedSchema = z.strictObject({
 export type UnlockGranted = z.infer<typeof UnlockGrantedSchema>;
 
 export const PasskeyOptionsRequestSchema = z.strictObject({ origin: AppOriginSchema });
-
-export type PasskeyOptionsRequest = z.infer<typeof PasskeyOptionsRequestSchema>;

@@ -26,8 +26,6 @@ const PAIRING_DEVICE_NAME_MAX_LENGTH = 100 as const;
 
 /** A daemon id is the SHA-256 fingerprint of its persisted Ed25519 public key. */
 export const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u, 'invalid daemon id');
-export type DaemonId = z.infer<typeof DaemonIdSchema>;
-
 /** A daemon name is also rendered into remote browser UI, so it obeys the same text safety bound. */
 export const DaemonNameSchema = z
   .string()
@@ -220,8 +218,6 @@ const PublishedCarrierSchema = z.discriminatedUnion('kind', [
 ]);
 
 export const PublishedCarriersSchema = z.array(PublishedCarrierSchema).max(MAX_PUBLISHED_CARRIERS).readonly();
-export type PublishedCarriers = z.infer<typeof PublishedCarriersSchema>;
-
 // ─── harness names (Ferrets; today's `session-base.ts`) ───────────────────────────────────────────────────────────
 
 export const HarnessSchema = z.enum(['claude', 'codex']);
@@ -272,7 +268,7 @@ const ENV_REFERENCE = /^\$\{[A-Z_][A-Z0-9_]*(?::-[^}]*)?\}$/u;
  * - A value that looks like a raw key — a known provider prefix, or a long unbroken value under a name
  *   that says KEY / TOKEN / SECRET — is refused everywhere, with the way to store it instead.
  */
-export const mcpEnvRefusal = (scope: SessionMcpScope, name: string, value: string): string | null => {
+const mcpEnvRefusal = (scope: SessionMcpScope, name: string, value: string): string | null => {
   const trimmed = value.trim();
   if (SECRET_REFERENCE.test(trimmed))
     return scope === 'project'

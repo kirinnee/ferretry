@@ -37,7 +37,7 @@ export interface RuntimeSpellings {
 }
 
 /** Whether a session record names this runtime, by any spelling it is known by. */
-export function sessionRunsOn(record: RuntimeSessionRecord, runtime: RuntimeSpellings): boolean {
+function sessionRunsOn(record: RuntimeSessionRecord, runtime: RuntimeSpellings): boolean {
   const spellings = new Set([runtime.name, runtime.wrapper, ...(runtime.formerNames ?? [])]);
   if (runtime.id !== undefined) spellings.add(runtime.id);
   return spellings.has(record.agent) || (record.executable !== undefined && record.executable === runtime.wrapper);
