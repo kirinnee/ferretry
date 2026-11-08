@@ -64,6 +64,8 @@ const origin = (): string => `http://127.0.0.1:${server.port}`;
 
 beforeAll(async () => {
   workDirectory = await mkdtemp(join(tmpdir(), 'ferretry-notification-open-'));
+  // `--outdir`, not `--outfile`: the scene's graph imports stylesheets, so the build makes a `.css` beside the script
+  // and bun refuses to write two files to one path. Only the script is served (nothing here measures a style).
   const scene = join(workDirectory, 'scene.js');
   run([
     'bun',
@@ -71,8 +73,10 @@ beforeAll(async () => {
     resolve(packageRoot, 'fixtures/notification-open-scene.tsx'),
     '--target',
     'browser',
-    '--outfile',
-    scene,
+    '--outdir',
+    workDirectory,
+    '--entry-naming',
+    'scene.[ext]',
   ]);
   site = await signedRelease({
     directory: workDirectory,

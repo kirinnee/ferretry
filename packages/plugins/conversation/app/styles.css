@@ -1,0 +1,3 @@
+/* This plugin's app-half stylesheets, in today's PWA order (styles/index.css). Nothing in the app half imports them: the shell loads
+   every plugin's list through the generated `packages/app/src/generated/plugin-styles.css`. */
+@import './chat/compaction-card.css';
