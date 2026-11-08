@@ -236,6 +236,13 @@ export class TmuxRunner implements Runner {
    */
   readonly #frames = new Map<string, CapturedFrame>();
 
+  /**
+   * Moved as every stop ENDS (after it forgot the frame again). A look keeps the frame it captured only when this did not
+   * move while it ran: a look in flight across a stop's end would otherwise put back the pane text the stop forgot, and
+   * after a stop the watch never looks again to forget it. A look that lands before the stop ends is forgotten by it.
+   */
+  #stopEpoch = 0;
+
   constructor(private readonly options: TmuxRunnerOptions) {}
 
   async start(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>> {
@@ -379,6 +386,7 @@ export class TmuxRunner implements Runner {
     if (watch === undefined || !PANE_ID.test(handle)) return undefined;
     const tmux = this.options.tmux;
     const nothing = { kind: 'content' as const };
+    const epoch = this.#stopEpoch;
     const acted = await watch
       .act(targetRef('terminal', handle), 'read', async () => {
         const asked = await tmux.execute(['display-message', '-p', '-t', handle, paneActivityFormat]);
@@ -402,7 +410,7 @@ export class TmuxRunner implements Runner {
             return nothing;
           }
           frame = { activity, visible: captured.stdout, capturedAtSecond };
-          this.#frames.set(handle, frame);
+          if (this.#stopEpoch === epoch) this.#frames.set(handle, frame);
         }
         const visible = frame.visible;
         return await watch.redaction.read(scope => ({
@@ -522,16 +530,22 @@ export class TmuxRunner implements Runner {
   async stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void> {
     if (!PANE_ID.test(handle)) return;
     // Any stop forgets the pane text kept for the look: a polite one only interrupts, but the pane text is not kept.
+    // Forgotten again as it ends, so no look that overlaps the stop keeps any (`#stopEpoch`).
     this.#frames.delete(handle);
-    const facts = await this.facts(handle);
-    if (facts === undefined) return;
-    if (how === 'polite' && !facts.dead) {
-      // The harness's own interrupt first; the session goes once the pane is dead or the caller asks again `now`.
-      await this.options.tmux.execute(['send-keys', '-t', handle, 'C-c']);
-      return;
+    try {
+      const facts = await this.facts(handle);
+      if (facts === undefined) return;
+      if (how === 'polite' && !facts.dead) {
+        // The harness's own interrupt first; the session goes once the pane is dead or the caller asks again `now`.
+        await this.options.tmux.execute(['send-keys', '-t', handle, 'C-c']);
+        return;
+      }
+      // Only a ferret's session is ever killed through a handle: a pane id of a person's shell is not ours to end.
+      if (isFerretSession(facts.session)) await this.options.tmux.execute(killSessionArguments(facts.session));
+    } finally {
+      this.#stopEpoch += 1;
+      this.#frames.delete(handle);
     }
-    // Only a ferret's session is ever killed through a handle: a pane id of a person's shell is not ours to end.
-    if (isFerretSession(facts.session)) await this.options.tmux.execute(killSessionArguments(facts.session));
   }
 
   async signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate'): Promise<void> {
