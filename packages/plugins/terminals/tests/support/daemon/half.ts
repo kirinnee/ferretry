@@ -1,3 +1,4 @@
+import { unarmedHostFacts } from './host-facts.ts';
 import {
   DEFAULT_AGENT_CONTROL,
   NO_AGENT_CONTROL,
@@ -191,6 +192,7 @@ export async function terminalsHalf(
       })),
   });
   const host = await testHost({
+    hostFacts: unarmedHostFacts,
     plugins: [plugin],
     fakes: { ferrets: fakeFerrets(known), vault: fakeVault(raised) },
     gate: new StandInAdmission(() => (caller === 'ferret' ? ferretStanding(FERRET) : ownerStanding())),

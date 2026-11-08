@@ -41,11 +41,9 @@ describe('terminals manifest', () => {
     }
   });
   test('takes the terminal input target, the tmux runner and the %terminal reference menu', () => {
-    expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
-      'input.targets:terminal',
-      'runners:tmux',
-      'reference.catalog:%terminal',
-    ]);
+    expect(
+      manifest.hooks.takes.map(take => ('key' in take ? `${take.hook.name}:${take.key}` : take.hook.name)),
+    ).toEqual(['input.targets:terminal', 'runners:tmux', 'doctor.checks', 'reference.catalog:%terminal']);
   });
   test('uses neither Browsers nor the Warden, so their optional uses of Terminals make no cycle', () => {
     const edges = [...Object.keys(manifest.needs), ...Object.keys((manifest as { uses?: object }).uses ?? {})];

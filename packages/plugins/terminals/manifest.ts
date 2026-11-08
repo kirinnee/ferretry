@@ -1,4 +1,4 @@
-import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { type ConfigDef, defineConfig, defineState, DoctorChecks, neverLoosens } from '@ferretry/kernel/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { HoldsChanged, InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import { FerretsPort, Runners } from '@ferretry/core-ferrets/contract';
@@ -323,12 +323,17 @@ export default definePlugin({
     takes: [
       { hook: InputTargets, key: 'terminal' },
       { hook: Runners, key: 'tmux' },
+      /** The `tmux release` doctor row (it never starts a tmux server). */
+      { hook: DoctorChecks },
       /** The composer's `%terminal` menu is this plugin's: the terminals the ferret holds (reference.catalog). */
       { hook: ReferenceCatalog, key: '%terminal' },
     ],
   },
 
   doctor: ['tmux', 'user-slice'],
+
+  /** `fyd --check` asks the installed tmux and this daemon's own socket for their releases; nothing runs it at boot. */
+  selftest: ['tmux-release'],
 
   permissions: {
     /**
@@ -350,5 +355,7 @@ export default definePlugin({
     ],
     /** `downloads`: only to locate Terminals' state folder for tmux's socket (no kernel port names it). */
     roots: ['downloads'],
+    /** The kernel's launch-guard fact: whether this daemon is a test's, and the PATH a real harness would be found on. */
+    hostFacts: true,
   },
 });

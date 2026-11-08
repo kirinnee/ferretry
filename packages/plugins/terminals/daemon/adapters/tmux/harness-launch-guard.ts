@@ -1,4 +1,4 @@
-import { realpath } from '../host/fs.ts';
+import { locateCommand, realpath } from '../host/fs.ts';
 import { isAbsolute, resolve } from 'node:path';
 import {
   GUARDED_HARNESS_NAMES,
@@ -10,8 +10,6 @@ import {
 
 /** Finds a bare command name on a colon-separated search path, as the pane's shell would. */
 export type CommandLocator = (name: string, searchPath: string) => string | undefined;
-
-const locateOnPath: CommandLocator = (name, searchPath) => Bun.which(name, { PATH: searchPath }) ?? undefined;
 
 /**
  * Refuses a launch that would reach the owner's real Claude Code or Codex.
@@ -27,8 +25,9 @@ const locateOnPath: CommandLocator = (name, searchPath) => Bun.which(name, { PAT
  */
 export class RealHarnessLaunchGuard implements TmuxLaunchGuard {
   constructor(
+    /** The daemon's `PATH` as the kernel's launch-guard fact names it (`hostFacts.launchGuard().searchPath`). */
     private readonly daemonSearchPath: () => string | undefined,
-    private readonly locate: CommandLocator = locateOnPath,
+    private readonly locate: CommandLocator = locateCommand,
   ) {}
 
   async check(launch: TmuxLaunch): Promise<void> {

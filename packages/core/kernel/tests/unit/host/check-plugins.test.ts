@@ -8,7 +8,7 @@ import { nodeFs } from '../../../host/adapters/node-fs.ts';
 import { checkDeadlineMs, loadRegistry, runPluginChecks, type PluginCheckDeps } from '../../../host/check-plugins.ts';
 import { bootHost, type HostOptions } from '../../../host/host.ts';
 import { realAdapters } from '../../../host/wiring.ts';
-import type { WorkerHandle, WorkersPort } from '../../../contract/ports.ts';
+import type { SpawnOptions, SpawnPort, WorkerHandle, WorkersPort } from '../../../contract/ports.ts';
 import {
   definePlugin,
   implementDaemon,
@@ -948,5 +948,137 @@ describe('follow-up: the kernel owns its timers and its sentence', () => {
       expect(out[0]).toContain('its handle failed');
       expect(armed).toBe(0);
     }
+  });
+});
+
+describe('U1 a selftest that declares host gets its own state folder and a narrowed spawn', () => {
+  const seen: { program: string; options: SpawnOptions | undefined }[] = [];
+  const base: SpawnPort = {
+    run: async (program, _args, options) => {
+      seen.push({ program, options });
+      return { exitCode: 0, signal: null, stdout: 'ok', stderr: '' };
+    },
+    runBytes: async () => {
+      throw new Error('not used');
+    },
+    start: () => {
+      throw new Error('not used');
+    },
+  };
+  const hosted = (id: string, spawn: string[], probe: SelftestProbe): DaemonImplementation => {
+    const manifest = definePlugin({
+      id,
+      title: id,
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      selftest: ['probe'],
+      permissions: { spawn },
+    });
+    return {
+      half: 'daemon',
+      manifest,
+      build: () => ({}) as never,
+      selftest: { probe },
+    } as unknown as DaemonImplementation;
+  };
+
+  test("U1 stateDir is the calling plugin's OWN folder and nothing else of the home", async () => {
+    const out = await lines(
+      deps([hosted('terminals', ['tmux'], { label: 'tmux', host: true, run: async env => env.stateDir ?? 'none' })], {
+        spawn: base,
+      }),
+    );
+    expect(out[0]).toContain('/h/state/terminals');
+  });
+
+  test('U1 a probe that does not declare host gets only tempDir, signal and clock', async () => {
+    const out = await lines(
+      deps(
+        [
+          hosted('terminals', ['tmux'], {
+            label: 'tmux',
+            run: async env => Object.keys(env).sort().join(','),
+          }),
+        ],
+        { spawn: base },
+      ),
+    );
+    expect(out[0]).toContain('clock,signal,tempDir');
+  });
+
+  test('U1 an undeclared program is refused before anything starts', async () => {
+    seen.length = 0;
+    const out = await lines(
+      deps(
+        [
+          hosted('terminals', ['tmux'], {
+            label: 'tmux',
+            host: true,
+            run: async env => {
+              await env.spawn?.run('rm', ['-rf', '/']);
+              return 'ran';
+            },
+          }),
+        ],
+        { spawn: base },
+      ),
+    );
+    expect(out[0]).toContain('may not run rm');
+    expect(seen).toEqual([]);
+  });
+
+  test("U1 the child gets no cwd, no caller env and no ferret, and the selftest's own abort signal", async () => {
+    seen.length = 0;
+    await lines(
+      deps(
+        [
+          hosted('terminals', ['tmux'], {
+            label: 'tmux',
+            host: true,
+            run: async env => {
+              await env.spawn?.run('tmux', ['-V'], {
+                env: { SECRET: 'x' },
+                forFerret: 'f' as never,
+                cwd: '/etc' as never,
+              });
+              return 'ran';
+            },
+          }),
+        ],
+        { spawn: base },
+      ),
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.options?.env).toBeUndefined();
+    expect(seen[0]?.options?.cwd).toBeUndefined();
+    expect(seen[0]?.options?.forFerret).toBeUndefined();
+    expect(seen[0]?.options?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test('U1 the kernel timeout aborts the signal every child was started with', async () => {
+    let signal: AbortSignal | undefined;
+    const slow: SpawnPort = {
+      ...base,
+      run: async (_program, _args, options) => {
+        signal = options?.signal;
+        return await new Promise(() => {});
+      },
+    };
+    const out = await lines(
+      deps(
+        [
+          hosted('terminals', ['tmux'], {
+            label: 'tmux',
+            host: true,
+            run: async env => (await env.spawn?.run('tmux', ['-V']))?.stdout ?? '',
+          }),
+        ],
+        { spawn: slow, selftestTimeoutMs: 30 },
+      ),
+    );
+    expect(out[0]).toContain('! it did not finish within 30 ms');
+    expect(signal?.aborted).toBe(true);
   });
 });

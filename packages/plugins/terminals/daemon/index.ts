@@ -70,6 +70,10 @@ import {
 import { ControlModeTmuxProcess, type ControlChild } from './adapters/tmux/control-tmux-process.ts';
 import { KernelTmuxProcess, TMUX_PROGRAM } from './adapters/tmux/kernel-tmux-process.ts';
 import { TmuxRunner, ferretTmuxSession } from './adapters/tmux/tmux-runner.ts';
+import { RealHarnessLaunchGuard } from './adapters/tmux/harness-launch-guard.ts';
+import { forgetFerretIdentity } from './adapters/tmux/forget-ferret-identity.ts';
+import { releaseReader, tmuxReleaseDoctorCheck, tmuxReleaseSelftest } from './adapters/tmux/tmux-release-checks.ts';
+import type { TmuxReleaseReading } from './lib/tmux/version.ts';
 import { SurfaceControl } from './lib/agent-tools/control.ts';
 import {
   type AgentToolResult,
@@ -102,6 +106,8 @@ import { processIncarnationFor } from './adapters/session/processes/process-inca
 const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 /** How often finished ferrets' terminals are swept (J-0088). */
 const CLOSE_FINISHED_EVERY_MS = 5 * 60_000;
+/** How often the installed and running tmux releases are read again (the doctor reads the last answer). */
+const RELEASE_READ_EVERY_MS = 10 * 60_000;
 /** The CLI's binary name, as `packages/cli/package.json` declares it (the two-name model). */
 const BINARY_NAME = 'fy';
 
@@ -506,8 +512,13 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     const pane: RunnerPane = { tmuxSession: ferretTmuxSession(ferret), paneId, pid, processStartTicks: start };
     await panes.register(ferret, pane);
   };
+  // The kernel decides once whether this daemon is a test's (FERRETRY_TEST or a scratch home); Terminals never reads the
+  // environment. Armed, no launch may reach the owner's real Claude Code or Codex, found on the daemon's own PATH.
+  const hostGuard = kernel.hostFacts.launchGuard();
+  const launchGuard = hostGuard.active ? new RealHarnessLaunchGuard(() => hostGuard.searchPath) : undefined;
   const runner = new TmuxRunner({
     tmux,
+    ...(launchGuard === undefined ? {} : { launchGuard }),
     spawn: kernel.spawn,
     socketPath,
     instantOf: seconds => instantFromEpochMs(seconds * 1_000),
@@ -526,6 +537,20 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     schedule: { every: milliseconds(CLOSE_FINISHED_EVERY_MS) },
     run: async () => {
       await service.closeFinished('sweep');
+    },
+  });
+
+  // ─── the tmux release ─────────────────────────────────────────────────────────────────────────────────────────────
+  // Read-only questions on a one-shot client: `tmux -V` and `display-message` on this daemon's own socket. Neither starts a server.
+  const releaseAfter = (ms: number, fn: () => void): (() => void) => kernel.clock.after(milliseconds(ms), fn);
+  const reader = releaseReader(kernel.spawn, socketPath, releaseAfter);
+  let lastRelease: TmuxReleaseReading | undefined;
+  kernel.jobs.add({
+    id: 'terminals-tmux-release',
+    schedule: { every: milliseconds(RELEASE_READ_EVERY_MS) },
+    lane: 'worker',
+    run: async () => {
+      lastRelease = await reader.read();
     },
   });
 
@@ -599,7 +624,24 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       terminal_request_input: tool('terminal_request_input'),
     },
     provides: { terminals: provided },
+    // At boot, before listeners: a tmux server an earlier daemon started inside a ferret's pane may still hold that
+    // ferret's identity. Best effort — a failure is never a boot failure, and no value is read or logged.
+    beforeListen: async () => {
+      try {
+        const cleared = await forgetFerretIdentity(new KernelTmuxProcess(kernel.spawn, socketPath));
+        if (cleared.length > 0) log.info('cleared ferret identity from the tmux server', { count: cleared.length });
+      } catch {
+        log.warn('the tmux server identity scrub did not run');
+      }
+    },
     hooks: {
+      'doctor.checks': () => {
+        const check = tmuxReleaseDoctorCheck(async () => {
+          lastRelease ??= await reader.read();
+          return lastRelease;
+        });
+        return [{ id: check.id, order: 0, item: check }];
+      },
       'input.targets:terminal': inputTarget,
       'runners:tmux': runner,
       // The composer's `%terminal` menu (reference.catalog): the ferret's terminals. Asked only while Conversation is on.
@@ -616,4 +658,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   };
 }
 
-export default implementDaemon(manifest, { build: ctx => buildTerminals(ctx) });
+export default implementDaemon(manifest, {
+  build: ctx => buildTerminals(ctx),
+  selftest: { 'tmux-release': tmuxReleaseSelftest },
+});

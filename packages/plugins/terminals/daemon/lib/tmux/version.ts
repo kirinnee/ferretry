@@ -44,3 +44,44 @@ export interface TmuxReleaseReading {
   readonly program?: string;
   readonly server?: string;
 }
+
+/** What the doctor says about a reading: ok, a warning that names the fix, or a failure when tmux cannot be asked at all. */
+export interface TmuxReleaseVerdict {
+  readonly state: 'ok' | 'warn' | 'fail';
+  readonly detail: string;
+  readonly fix?: string;
+}
+
+/**
+ * Judges what tmux said about itself. Only release NAMES appear in the words (`3.6a`), never a path or a value. An
+ * absent server is not a problem (none is running until a ferret starts one); an absent program is.
+ */
+export function judgeTmuxRelease(reading: TmuxReleaseReading): TmuxReleaseVerdict {
+  const program = reading.program === undefined ? undefined : parseTmuxVersion(reading.program);
+  const server = reading.server === undefined ? undefined : parseTmuxVersion(reading.server);
+  if (reading.program === undefined || program === undefined)
+    return {
+      state: 'fail',
+      detail: 'tmux did not answer `tmux -V`',
+      fix: 'install tmux and put it on the daemon PATH',
+    };
+  const crashing = [program, server].filter(
+    (version): version is TmuxVersion => version !== undefined && hasSubscriptionCrash(version),
+  );
+  if (crashing.length > 0)
+    return {
+      state: 'warn',
+      detail: `tmux ${crashing.map(version => version.label).join(' / ')} can end every pane when one session ends; the daemon releases subscriptions first`,
+      fix: 'upgrade tmux to 3.7 or later',
+    };
+  if (server !== undefined && server.label !== program.label)
+    return {
+      state: 'warn',
+      detail: `the running tmux server is ${server.label}, the installed tmux is ${program.label}`,
+      fix: 'the server picks up the installed release the next time it starts',
+    };
+  return {
+    state: 'ok',
+    detail: `tmux ${program.label}${server === undefined ? ', no server running' : ', server current'}`,
+  };
+}

@@ -14,7 +14,7 @@ import type {
   TransformHook,
 } from '../contract/define.ts';
 import type { DoctorFinding } from '../contract/kernel.ts';
-import type { Cancel, Clock, KernelPorts, StatePort } from '../contract/ports.ts';
+import type { Cancel, Clock, KernelPorts, SpawnPort, StatePort } from '../contract/ports.ts';
 import type { CallContext, MemberRouteHandler, RouteHandler } from '../contract/route.ts';
 import type { SocketAccept } from '../contract/socket.ts';
 import type { Manifest, Needer } from './types.ts';
@@ -218,6 +218,17 @@ export type PreflightRun = (facts: PreflightFacts) => readonly CheckLine[];
  * the host's own exit uses copies taken before the registry is read, and code review keeps the rest honest.
  */
 export interface SelftestEnvironment {
+  /**
+   * ONLY for a probe that declares `host: true`: the calling plugin's OWN state folder (`<home>/state/<plugin>`) as
+   * TEXT, read-only, nothing opened or listed (DECISIONS-2 #27 Q1: Terminals names its tmux socket in it).
+   */
+  readonly stateDir?: string;
+  /**
+   * ONLY for a probe that declares `host: true`: the plugin's own spawn port narrowed to its `permissions.spawn`, under
+   * the selftest's own abort signal (the kernel's timeout kills the child), with no `cwd`, no caller `env` and an environment of the
+   * check's `PATH` alone.
+   */
+  readonly spawn?: SpawnPort;
   readonly tempDir: string;
   readonly signal: AbortSignal;
   readonly clock: Pick<Clock, 'after' | 'nowMs'>;
@@ -226,6 +237,8 @@ export interface SelftestEnvironment {
 /** A bounded probe ONLY `fyd --check` runs. `run` answers the text after `label`; a throw or a timeout is a failed line. */
 export interface SelftestProbe {
   readonly label: string;
+  /** Asks for `stateDir` and `spawn` in the environment; a probe that does not still gets only `{ tempDir, signal, clock }`. */
+  readonly host?: true;
   readonly run: (environment: SelftestEnvironment) => Promise<string>;
 }
 

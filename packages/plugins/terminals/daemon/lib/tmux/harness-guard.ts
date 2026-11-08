@@ -15,9 +15,6 @@ export interface TmuxLaunchGuard {
 /** The harnesses a generated runtime wrapper execs BY NAME, so a guard has to resolve both itself. */
 export const GUARDED_HARNESS_NAMES = ['claude', 'codex'] as const;
 
-/** The variable a test runner sets to say "everything this daemon launches must be a fake". @pending terminals: GAP(ferrets): the tmux adapters daemon/adapters/tmux/pane-queue.ts, daemon/adapters/tmux/harness-launch-guard.ts, daemon/adapters/tmux/forget-ferret-identity.ts and daemon/adapters/tmux/tmux-release-reader.ts are ported and tested but nothing composes them until Ferrets wires the deliver and runner seams and reads FERRETRY_TEST (scripts/test/swept.sh) to arm it (gustavo) */
-export const TEST_MODE_VARIABLE = 'FERRETRY_TEST';
-
 /** A launch a guard refused, naming the binary and the install it belongs to. */
 export class RealHarnessRefusedError extends Error {
   constructor(
@@ -55,30 +52,4 @@ const REAL_HARNESS_INSTALLS: readonly { readonly install: string; readonly patte
 /** The install a resolved executable belongs to, or `undefined` when it is not a real harness. */
 export function realHarnessInstall(path: string): string | undefined {
   return REAL_HARNESS_INSTALLS.find(candidate => candidate.pattern.test(path))?.install;
-}
-
-function within(root: string, path: string): boolean {
-  const bare = root.replace(/\/+$/, '');
-  return path === bare || path.startsWith(`${bare}/`);
-}
-
-export interface LaunchGuardModeInput {
-  /** The test-mode variable's value, if it is set. */
-  readonly flag: string | undefined;
-  /** The daemon's state home, as an absolute path. */
-  readonly home: string;
-  /** The machine's temporary roots, as absolute paths. */
-  readonly temporaryRoots: readonly string[];
-}
-
-/**
- * Whether the guard is on: the runner said so, or the state home is somebody's scratch directory.
- *
- * The second leg is what catches a test nobody remembered to mark. Every suite in this repository
- * builds its `FY_HOME` under the temporary directory, and no person keeps the home that holds their
- * sessions, tokens and fleet in a directory the operating system empties on reboot.
- */
-export function launchGuardActive(input: LaunchGuardModeInput): boolean {
-  if (input.flag === '1') return true;
-  return input.temporaryRoots.some(root => root !== '' && within(root, input.home));
 }
