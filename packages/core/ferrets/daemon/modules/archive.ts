@@ -22,10 +22,10 @@
 import type { Log } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import {
+  ArchiveCardStandingsSchema,
   type ArchiveKeepSource,
   type ArchiveSettings,
   type FerretId,
-  FerretIdSchema,
   type FerretState,
 } from '../../contract/index.ts';
 import { createSessionArchive, type SessionArchive } from '../adapters/session/archive/session-archive.ts';
@@ -46,15 +46,6 @@ export const ARCHIVE_ANSWER_TIMEOUT_MS = 10_000;
 /** How long ONE whole keeps check has, however many ferrets it asks about; past it every ferret asked about is kept. */
 export const ARCHIVE_KEEPS_DEADLINE_MS = 10_000;
 
-/** Board's answer, exactly as the contract types it: anything else is unreadable, never a guess. */
-const CardsAnswerSchema = z.array(
-  z.strictObject({
-    owner: FerretIdSchema,
-    assignee: FerretIdSchema.nullable(),
-    dropped: z.boolean(),
-    category: z.string().optional(),
-  }),
-);
 /** Agenda's answer: a boolean, and nothing that merely reads as one. */
 const OpenItemAnswerSchema = z.boolean();
 
@@ -82,7 +73,7 @@ export function archiveAfterMs(settings: ArchiveSettings | undefined): number | 
 export const hiddenFromLiveList = (state: FerretState, archived: boolean): boolean => archived && state === 'stopped';
 
 /** A card as the keep rule reads it. A lane category Ferrets does not know reads as unknown, which is "in flight". */
-const standing = (card: z.output<typeof CardsAnswerSchema>[number]): OpenCardStanding => ({
+const standing = (card: z.output<typeof ArchiveCardStandingsSchema>[number]): OpenCardStanding => ({
   owner: card.owner,
   assignee: card.assignee,
   dropped: card.dropped === true ? 'dropped' : null,
@@ -152,7 +143,9 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
       // Nobody answers for the cards: the archive reads that as "board unreadable" and keeps every ferret.
       if (asked.length === 0) throw new Error('no board is wired to say which ferrets are on an open card');
       const answers = await Promise.all(
-        asked.map(async source => await answer(deps, 'the board', CardsAnswerSchema, async () => await source.cards())),
+        asked.map(
+          async source => await answer(deps, 'the board', ArchiveCardStandingsSchema, async () => await source.cards()),
+        ),
       );
       return answers.flat().map(standing);
     },
