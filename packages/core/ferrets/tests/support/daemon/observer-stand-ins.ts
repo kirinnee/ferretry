@@ -268,11 +268,28 @@ function activeWork(pane: string): 'status' | 'spinner' | undefined {
   return SPINNER_PHRASE.test(pane) || SPINNER_MARK.test(pane) ? 'spinner' : undefined;
 }
 
-/** The pane parsers as the terminals plugin reads the working screens the observer's tests draw; no prompt, no dialog. */
+/** The questions both harnesses ask before a tool runs; only ever read together with a numbered choice list. */
+const PERMISSION_QUESTIONS = ['do you want to', 'would you like to', 'allow command', 'approve this'];
+const NUMBERED_CHOICE = /^\s*[│|]?\s*(?:[>›❯»▌]\s*)?[1-9][.)]\s+\S/u;
+const PERMISSION_WINDOW_LINES = 25;
+
+/**
+ * Whether the bottom of the frame is a permission prompt: a permission question and at least two numbered choices
+ * (the terminals plugin's `paneShowsPermissionPrompt`, as today's tmux module read it). The structured request is
+ * not drawn — the observer's turn tests only need to know the harness is blocked on a choice.
+ */
+export function scriptedPaneShowsPermissionPrompt(pane: string): boolean {
+  const lines = pane.replaceAll('\r\n', '\n').trimEnd().split('\n').slice(-PERMISSION_WINDOW_LINES);
+  if (lines.filter(line => NUMBERED_CHOICE.test(line)).length < 2) return false;
+  const lower = lines.join('\n').toLowerCase();
+  return PERMISSION_QUESTIONS.some(question => lower.includes(question));
+}
+
+/** The pane parsers as the terminals plugin reads the screens the observer's tests draw: work and a permission choice; no dialog. */
 export const SCRIPTED_PANE_PARSERS: PaneParsers = Object.freeze<PaneParsers>({
   parsePermissionPrompt: () => undefined,
   paneActiveWork: activeWork,
-  paneShowsPermissionPrompt: () => false,
+  paneShowsPermissionPrompt: scriptedPaneShowsPermissionPrompt,
   paneBlockingPrompt: () => undefined,
   parseHarnessDialog: () => undefined,
 });
