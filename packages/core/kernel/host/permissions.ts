@@ -3,6 +3,8 @@ import type { StateFileDef } from '../contract/define.ts';
 import { CORE_IDS } from '../contract/ids.ts';
 import type { FetchPort, SpawnOptions, SpawnPort, WebSocketPort, WorkersPort } from '../contract/ports.ts';
 import { WORKER_STATE_KEY } from '../worker.ts';
+import { serveWorkerGrants, type WorkerGrantSources } from './worker-grants/serve.ts';
+import { WORKER_GRANTS_KEY } from './worker-grants/wire.ts';
 import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
 import { hostAllowed, programAmong, programName, WILDCARD } from '../manifest/reach.ts';
 import type { PinRegistry } from './pins.ts';
@@ -176,10 +178,14 @@ export function openChildEnvironments(base: SpawnPort, opener: () => ChildEnviro
 /**
  * Workers for one plugin: each `state` grant is resolved by that plugin's own state port (declared, sqlite only, in
  * its folder) and handed to the worker as `workerData`; an ungrantable one refuses the start before a thread exists.
+ * `roots` and `network` are granted from `reach` (this plugin's own roots port and `kernel.fetch`): READ-ONLY roots and
+ * the manifest's own hosts, served over one channel the kernel keeps the main end of; anything the manifest does not
+ * declare refuses the start. The plugin's options are never forwarded as they are: only what is named below goes in.
  */
 export function workersFor(
   base: WorkersPort,
   grant: () => ((def: StateFileDef, name?: string) => { readonly path: string; readonly label: string }) | undefined,
+  reach?: WorkerGrantSources,
 ): WorkersPort {
   return {
     start: (moduleUrl, options) => {
@@ -197,12 +203,42 @@ export function workersFor(
           label: at.label,
         };
       });
+      const asked = (options?.roots?.length ?? 0) > 0 || options?.network !== undefined;
+      if (asked && reach === undefined) throw new TypeError('this plugin has no roots or network to grant a worker');
+      const served =
+        reach === undefined
+          ? undefined
+          : serveWorkerGrants(reach, { roots: options?.roots, network: options?.network });
       const forward = {
         ...(options?.name === undefined ? {} : { name: options.name }),
         ...(options?.env === undefined ? {} : { env: options.env }),
-        ...(grants.length === 0 ? {} : { workerData: { [WORKER_STATE_KEY]: grants } }),
+        ...(grants.length === 0 && served === undefined
+          ? {}
+          : {
+              workerData: {
+                ...(grants.length === 0 ? {} : { [WORKER_STATE_KEY]: grants }),
+                ...(served === undefined ? {} : { [WORKER_GRANTS_KEY]: served.data }),
+              },
+            }),
+        ...(served === undefined ? {} : { transferList: served.transfer }),
       };
-      return base.start(moduleUrl, forward);
+      if (served === undefined) return base.start(moduleUrl, forward);
+      let handle: ReturnType<WorkersPort['start']>;
+      try {
+        handle = base.start(moduleUrl, forward);
+      } catch (error) {
+        served.close();
+        throw error;
+      }
+      // The channel lives and dies with the thread: a dead worker's requests are not answered.
+      handle.onExit(() => served.close());
+      return {
+        ...handle,
+        terminate: async () => {
+          served.close();
+          await handle.terminate();
+        },
+      };
     },
   };
 }

@@ -570,6 +570,14 @@ export interface WorkerHandle {
 /** A declared `sqlite` / `sqlite-cache` state file a worker may open (a collection member names its `name`). */
 export type WorkerStateGrant = StateFileDef | { readonly def: StateFileDef; readonly name: string };
 
+/**
+ * One of THIS plugin's declared roots a worker may READ: the name, or the name with the scope its handle takes (a
+ * `subfolder` / `ferret` stays on the main thread; the worker only ever names the root). One grant per root name.
+ */
+export type WorkerRootGrant =
+  | RootName
+  | { readonly name: RootName; readonly scope?: { readonly ferret?: FerretId; readonly subfolder?: string } };
+
 export interface WorkerStartOptions {
   readonly name?: string;
   /**
@@ -578,6 +586,21 @@ export interface WorkerStartOptions {
    * inside this plugin's state folder; an undeclared or non-sqlite file refuses the start. No path is passed in.
    */
   readonly state?: readonly WorkerStateGrant[];
+  /**
+   * Roots the worker READS with `rootPort(name)` from `@ferretry/kernel/worker`, whatever the manifest says about
+   * writing: the worker side has no write, remove, copy, pin or real-path operation at all, and no path crosses into
+   * the thread. Only roots THIS plugin's manifest declares (`permissions.roots`); an undeclared one refuses the start.
+   * Every read is served by the main thread through the plugin's own root handle, so each is fenced as a main-thread
+   * read is, links and `..` included.
+   */
+  readonly roots?: readonly WorkerRootGrant[];
+  /**
+   * HTTP from the worker with `fetchPort()` from `@ferretry/kernel/worker`, to ONLY the hosts THIS plugin's manifest
+   * declares in `permissions.network`: `true` for all of them, or a list that must be a subset. Each request passes
+   * the very guard `kernel.fetch` does (allowlist, no followed redirect), so a redirect to another host is a response
+   * the worker would have to ask for again, and is refused then. Undeclared refuses the start.
+   */
+  readonly network?: true | readonly string[];
   /**
    * The worker's whole environment. Absent, a worker sees the process environment (a Bun `Worker` copies it); given,
    * it sees only these variables, `{}` being none. `fyd --check` starts its probes with `{}`.
