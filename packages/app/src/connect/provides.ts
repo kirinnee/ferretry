@@ -188,8 +188,15 @@ export interface ConnectPorts {
  */
 export type DaemonlessPorts = Pick<
   ConnectPorts,
-  'crypto' | 'subtle' | 'indexedDB' | 'now' | 'after' | 'daemons' | 'pairDirect' | 'pair'
->;
+  'crypto' | 'subtle' | 'indexedDB' | 'now' | 'after' | 'pairDirect' | 'pair'
+> & { readonly daemons: PairedList };
+
+/**
+ * THE PAIRED LIST AS A DAEMON-LESS SCREEN MAY USE IT: read it and follow it, choose one, forget one, and add the one a
+ * pairing just answered with. Nothing else of the {@link DaemonList}: not its carriers, not its caches, not a rename.
+ * It holds no client; it is the list a device-less visitor already sees.
+ */
+export type PairedList = Pick<DaemonList, 'snapshot' | 'subscribe' | 'select' | 'remove' | 'add'>;
 
 /**
  * THE PROPS OF A DAEMON-LESS SCREEN: where the page is (its route's parameters, an address read on demand) and how to

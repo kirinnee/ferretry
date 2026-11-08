@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { ReactNode } from 'react';
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
 import {
   type DaemonlessPorts,
@@ -10,8 +11,10 @@ import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
+import { useDaemonClients, usePairedDaemons } from '../../../src/shell/daemon-access.ts';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
+import { PanelSlot, ScreenView } from '../../../src/shell/views.tsx';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
@@ -36,17 +39,39 @@ const manifest = {
       { id: 'landing', path: '/landing/:tab', daemonless: true },
       { id: 'inside', path: 'inside' },
     ],
+    panels: [{ id: 'note', slot: 'daemon.status' }],
   },
 } as unknown as Manifest;
 
-const got: { props?: DaemonlessScreenProps } = {};
+const got: { props?: DaemonlessScreenProps; reach?: (daemon: string) => Promise<unknown> } = {};
 const current = (): DaemonlessScreenProps | undefined => got.props;
+const reached = (): ((daemon: string) => Promise<unknown>) | undefined => got.reach;
+/** What a daemon-less view could try with the shell's own hooks and components, given a daemon id it learned elsewhere. */
+function Reaching(): ReactNode {
+  got.reach = useDaemonClients('welcome');
+  return (
+    <>
+      <span data-testid="paired">{usePairedDaemons().length}</span>
+      <PanelSlot daemon="d1" slot="daemon.status" />
+    </>
+  );
+}
 const view = (props: DaemonlessScreenProps) => {
   got.props = props;
-  return <p data-testid="landing">landing {props.params.tab ?? '-'}</p>;
+  return (
+    <div>
+      <p data-testid="landing">landing {props.params.tab ?? '-'}</p>
+      <Reaching />
+    </div>
+  );
 };
 const half = provideToShell(
-  implementApp(manifest, { build: () => ({ screens: { inside: () => <p data-testid="inside">inside</p> } }) }),
+  implementApp(manifest, {
+    build: () => ({
+      screens: { inside: () => <p data-testid="inside">inside</p> },
+      panels: { note: () => <p data-testid="note">note</p> },
+    }),
+  }),
   // `inside` is a per-daemon screen: offering a daemon-less view for it must be ignored.
   { daemonless: () => ({ landing: view, inside: () => <p data-testid="smuggled">no</p> }) },
 );
@@ -130,10 +155,42 @@ describe('daemon-less screens', () => {
     await mounted.unmount();
   });
 
+  test('guard (a): no hook or component of the shell reaches a paired daemon from a daemon-less view, by a daemon id it knows', async () => {
+    delete got.props;
+    got.reach = undefined;
+    const { mounted, transport } = await open('/landing/start', true);
+    // The paired daemon exists and its id is known (a real screen would read it from the list); the view still has no reach.
+    await settle();
+    // The shell itself keeps its selected daemon's connection; the view adds nothing to it.
+    const before = transport.paths();
+    await expect(reached()?.('d1')).rejects.toThrow('no app shell');
+    await settle();
+    expect(transport.paths()).toEqual(before);
+    // A panel slot drawn inside it places nothing, and the paired list reads as empty there.
+    expect(
+      mounted.container
+        .querySelector('[data-testid="landing"]')
+        ?.parentElement?.querySelector('[data-slot="daemon.status"]'),
+    ).toBeNull();
+    expect(mounted.container.querySelector('[data-testid="note"]')).toBeNull();
+    expect(mounted.container.querySelector('[data-testid="paired"]')?.textContent).toBe('0');
+    await mounted.unmount();
+  });
+
   test('guard (b): a daemon-less route never resolves under a /d/<id>/ prefix', async () => {
     const { mounted } = await open('/d/d1/landing/start', true);
     expect(mounted.container.querySelector('[data-testid="landing"]')).toBeNull();
     expect(mounted.container.textContent).toContain('Nothing is here');
+    await mounted.unmount();
+  });
+
+  test('ScreenView itself draws a daemon-less screen under a daemon as the skeleton line, never its view', async () => {
+    const screen = { plugin: 'welcome', id: 'landing', path: '/landing/:tab', label: 'Landing' };
+    delete got.props;
+    // No provider at all: the defence-in-depth branch must answer before anything reads the shell.
+    const mounted = await mount(<ScreenView daemon="d1" screen={screen} params={{ tab: 'start' }} />);
+    expect(mounted.container.textContent).toContain('Landing is not built yet');
+    expect(got.props).toBeUndefined();
     await mounted.unmount();
   });
 

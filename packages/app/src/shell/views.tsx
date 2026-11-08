@@ -2,7 +2,7 @@ import { skeletonSentence } from '@ferretry/kernel/contract';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import type { PanelRef, ScreenRef } from '../layout/engine.ts';
 import { useRouter } from '../router/router.tsx';
-import { useOptionalShell, useRuntimeVersion, useShell } from './context.tsx';
+import { useOptionalShell, useRuntimeVersion, useShell, WithoutShell } from './context.tsx';
 
 /**
  * WHERE PLUGIN VIEWS ARE DRAWN. Every plugin screen, panel and settings tab goes through {@link PluginView}, which
@@ -78,6 +78,10 @@ export function PluginView({ daemon, plugin, section, id, props }: PluginViewPro
  * It is drawn with the route's parameters, the router's `navigate` and the address read on demand — and no daemon
  * client: it is never given a default daemon, the first, or the last used (`DaemonlessScreenProps` has no field for
  * one). A plugin that gave no view for it draws the skeleton line.
+ *
+ * The props are not the only way to a daemon: the shell context is another. The view is drawn under {@link WithoutShell},
+ * so `useDaemonClients`, `PanelSlot`, `RendererView` and every other reader of the shell find none and answer as they
+ * do outside a shell (a rejection, nothing drawn).
  */
 function DaemonlessScreen({
   screen,
@@ -92,7 +96,9 @@ function DaemonlessScreen({
   if (View === undefined) return <ShellLine>{skeletonSentence(screen.label)}</ShellLine>;
   return (
     <ViewBoundary title={runtime.titleOf(screen.plugin)}>
-      <View params={params} navigate={router.navigate} location={runtime.location} />
+      <WithoutShell>
+        <View params={params} navigate={router.navigate} location={runtime.location} />
+      </WithoutShell>
     </ViewBoundary>
   );
 }

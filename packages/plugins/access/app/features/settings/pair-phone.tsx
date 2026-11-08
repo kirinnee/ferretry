@@ -25,7 +25,7 @@
 
 import { QrCode, X } from 'lucide-react';
 import { useId, useRef } from 'react';
-import type { PairedDevicesView } from '../../../contract/index.ts';
+import type { GrantsView } from '../../../contract/index.ts';
 import { BottomSheet, type DaemonConnection, useDialogFocus } from '../../shell-pairing.ts';
 import { AddDeviceSurface, type PairingClientFactory, type PairingClock } from './add-device-settings.tsx';
 
@@ -37,15 +37,17 @@ export const PAIR_PHONE_DESCRIPTION =
   'Show a QR code another phone or browser scans to reach this machine. Revoke devices in Settings › Devices.';
 
 /**
- * Whether this caller may be offered the act at all, from the machine's own device list (Access's read): the host
- * itself always may; a paired device may when ITS grant holds `pairing.use`. A device that only needs a passkey
- * confirmation is offered it, because that confirmation is asked on the spot at the mint; a device whose grant
- * closes pairing is not offered a door that opens onto a refusal.
+ * Whether this caller may be offered the act at all, from the EFFECTIVE grant (Gate's `GET /v1/grants`, P58).
+ *
+ * Open when `pairing.use` is open, or when the only thing standing between the caller and it is a passkey
+ * confirmation — that is asked for at the mint, so hiding the entry would hide a door that does open. Every other
+ * refusal (switched off, not granted to this device, a document the daemon cannot read) closes it, and so does a view
+ * that does not mention pairing.
  */
-export function mayPairPhone(view: PairedDevicesView): boolean {
-  if (view.hostLocal) return true;
-  const own = view.devices.find(device => device.id === view.thisDeviceId);
-  return own?.grants.pairing.use === true;
+export function mayPairPhone(view: GrantsView): boolean {
+  const entry = view.capabilities.find(candidate => candidate.capability === 'pairing');
+  if (entry === undefined) return false;
+  return entry.use || entry.useRefusal === 'step-up-required';
 }
 
 export type PairPhonePresentation = 'sheet' | 'dialog';

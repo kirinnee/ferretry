@@ -2,7 +2,7 @@
  * "PAIR A PHONE" FROM THE COMMAND BAR (today's machine-menu entry and finder row) AND THE SHEET IT OPENS.
  *
  * The entry is Access's contribution to the bar (`shell.commands`), built per machine over Access's own client. It is
- * offered only when that machine's own device list says this caller may mint (`mayPairPhone`); a failed read offers
+ * offered only when that machine's effective grant (Gate's `GET /v1/grants`, P58) lets this caller mint (`mayPairPhone`); a failed read offers
  * nothing — Settings › Devices is still there and explains whatever went wrong. Choosing it asks for the sheet; the
  * sheet is drawn where Access's other overlays are (the one mount the frame gives Access, beside the passkey prompt),
  * so it opens over whatever page the person is on.
@@ -14,12 +14,12 @@ import type { PasskeyPorts, PluginCommandSource } from '@ferretry/app';
 import { distinctDaemonName } from '@ferretry/app';
 import { useCallback, useSyncExternalStore } from 'react';
 import { connectionRecord, pairingClientOf } from './daemon-scope.tsx';
-import { readPairedDevices } from './features/settings/add-device-api.ts';
+import { readGrants } from './features/settings/grants-api.ts';
 import { mayPairPhone, PAIR_PHONE_DESCRIPTION, PairPhoneSheet } from './features/settings/pair-phone.tsx';
 import { useLayoutMode } from './shell-pairing.ts';
 
 /** Which machine's "Pair a phone" sheet is open, if any: a machine id, never a code. */
-export class PairPhoneRequests {
+class PairPhoneRequests {
   #open: string | null = null;
   readonly #listeners = new Set<() => void>();
 
@@ -48,14 +48,14 @@ export class PairPhoneRequests {
 /** The one request line between the bar's entry and the sheet's mount. */
 export const pairPhoneRequests = new PairPhoneRequests();
 
-/** `shell.commands`: "Pair a phone with this machine", on a machine whose own device list lets this caller mint. */
+/** `shell.commands`: "Pair a phone with this machine", on a machine whose effective grant lets this caller mint. */
 export const pairPhoneCommands: PluginCommandSource = ({ client, daemon, changed }) => {
   let allowed = false;
   let asked = false;
   return () => {
     if (!asked) {
       asked = true;
-      void readPairedDevices(pairingClientOf(client))
+      void readGrants(pairingClientOf(client))
         .then(view => {
           allowed = mayPairPhone(view);
         })

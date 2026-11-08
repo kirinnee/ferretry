@@ -97,7 +97,7 @@ afterEach(async () => {
 const button = (text: string): HTMLButtonElement =>
   must([...(view?.container.querySelectorAll('button') ?? [])].find(b => b.textContent?.includes(text)) ?? null, text);
 
-/** Everything the code could leak through, watched while `run` happens. */
+/** Everything the code could leak through, watched while `run` happens: console, storage, IndexedDB and history. */
 async function watching(run: () => Promise<void>): Promise<{ readonly leaks: string[] }> {
   const leaks: string[] = [];
   const consoleKeys = ['log', 'debug', 'info', 'warn', 'error', 'trace'] as const;
@@ -107,20 +107,55 @@ async function watching(run: () => Promise<void>): Promise<{ readonly leaks: str
       if (JSON.stringify(args).includes(FAKE_CODE)) leaks.push(`console.${key}`);
     };
   }
-  const storages = [window.localStorage, window.sessionStorage];
   const setItem = Storage.prototype.setItem;
   Storage.prototype.setItem = function (key: string, value: string) {
     if (`${key}${value}`.includes(FAKE_CODE)) leaks.push('storage');
     return setItem.call(this, key, value);
   };
+  // IndexedDB: every write a store takes (where this DOM has one).
+  const idb = (globalThis as unknown as { IDBObjectStore?: { prototype: Record<string, unknown> } }).IDBObjectStore
+    ?.prototype;
+  const restoreIdb: (() => void)[] = [];
+  for (const method of ['put', 'add'] as const) {
+    const original = idb?.[method];
+    if (idb === undefined || typeof original !== 'function') continue;
+    idb[method] = function (this: unknown, ...args: unknown[]) {
+      if (
+        JSON.stringify(args, (_key, value) => (typeof value === 'object' ? value : String(value))).includes(FAKE_CODE)
+      )
+        leaks.push(`indexedDB.${method}`);
+      return (original as (...rest: unknown[]) => unknown).apply(this, args);
+    };
+    restoreIdb.push(() => {
+      idb[method] = original;
+    });
+  }
+  // History: nothing pushed or replaced may carry the code in its state or address, and the state left behind holds none.
+  const history = window.history;
+  const pushState = history.pushState.bind(history);
+  const replaceState = history.replaceState.bind(history);
+  const seen = (state: unknown, url: unknown): void => {
+    if (`${JSON.stringify(state ?? null)}${String(url ?? '')}`.includes(FAKE_CODE)) leaks.push('history');
+  };
+  history.pushState = (state: unknown, title: string, url?: string | URL | null) => {
+    seen(state, url);
+    pushState(state, title, url);
+  };
+  history.replaceState = (state: unknown, title: string, url?: string | URL | null) => {
+    seen(state, url);
+    replaceState(state, title, url);
+  };
   try {
     await run();
+    seen(history.state, window.location.href);
   } finally {
     consoleKeys.forEach((key, index) => {
       console[key] = originals[index] as never;
     });
     Storage.prototype.setItem = setItem;
-    void storages;
+    for (const restore of restoreIdb) restore();
+    history.pushState = pushState;
+    history.replaceState = replaceState;
   }
   return { leaks };
 }
@@ -190,6 +225,43 @@ describe('the /pair page', () => {
     });
     const moves: Navigation[] = [];
     view = await mount(<Page {...props('https://pwa.example.test/pair', moves)} />);
+    expect(view.container.textContent).toContain('Connect a daemon');
+    expect(moves).toEqual([]);
+  });
+
+  it('takes a SECOND link opened on the open page: shown for confirmation, and the fragment leaves the address again', async () => {
+    const { Page } = setup(async () => {
+      throw new Error('not used');
+    });
+    const moves: Navigation[] = [];
+    let href = 'https://pwa.example.test/pair';
+    const { leaks } = await watching(async () => {
+      view = await mount(<Page {...props('https://pwa.example.test/pair', moves)} location={() => href} />);
+      // A cold open: the paste path, no code, no navigation.
+      expect(view.container.textContent).toContain('Connect a daemon');
+      expect(moves).toEqual([]);
+      // A fragment-only navigation (the OS hands the scanned link to the open window): the page is not reloaded.
+      href = LINK;
+      await interact(() => {
+        window.dispatchEvent(new Event('hashchange'));
+      });
+    });
+    expect(must(view, 'the page').container.textContent).toContain('daemon.example.test');
+    expect(must(view, 'the page').container.textContent).not.toContain(FAKE_CODE);
+    expect(moves).toEqual([{ to: '/pair', replace: true }]);
+    expect(moves.some(move => move.to.includes('#') || move.to.includes(FAKE_CODE))).toBe(false);
+    expect(leaks).toEqual([]);
+  });
+
+  it('a hashchange with no fragment changes nothing', async () => {
+    const { Page } = setup(async () => {
+      throw new Error('not used');
+    });
+    const moves: Navigation[] = [];
+    view = await mount(<Page {...props('https://pwa.example.test/pair', moves)} />);
+    await interact(() => {
+      window.dispatchEvent(new Event('hashchange'));
+    });
     expect(view.container.textContent).toContain('Connect a daemon');
     expect(moves).toEqual([]);
   });

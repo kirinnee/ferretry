@@ -13,6 +13,7 @@ export {
   type CarrierControl,
   type ConnectPorts,
   type DaemonlessPorts,
+  type PairedList,
   type DaemonlessScreenProps,
   type DaemonlessViews,
   type DeviceClaims,

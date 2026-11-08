@@ -7,12 +7,20 @@
  * shell opens over the carriers Connections' walk gives (the daemon's own address first, then the one discovered
  * rendezvous; protocol §14). Today's `ConnectionPicker` (`pwa/src/App.tsx`), moved.
  *
- * THE CODE: read once from the address at mount (`location()`), then the entry is REPLACED with its bare path so
+ * THE CODE: read from the address (`location()`) when the page opens and again whenever a SECOND link reaches the open
+ * page (a `hashchange`, or the router's new entry for the same path), then the entry is REPLACED with its bare path so
  * history, a bookmark or the share sheet never hold it; kept only in this screen's state; never logged, never in a
- * live region, never in an error sentence, never stored. A sealed refusal ends the attempt: nothing here retries.
+ * live region, never in an error sentence, never stored. A second link restarts the screen for that link. A sealed
+ * refusal ends the attempt: nothing here retries.
  */
-import { type DaemonlessPorts, type DaemonlessScreenProps, daemonHomeHref, distinctDaemonName } from '@ferretry/app';
-import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
+import {
+  type DaemonlessPorts,
+  type DaemonlessScreenProps,
+  daemonHomeHref,
+  distinctDaemonName,
+  useOptionalRouter,
+} from '@ferretry/app';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { accessClaims, accessKeyStore } from './connect.ts';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
@@ -39,7 +47,7 @@ export interface PairPageEnvironment {
 }
 
 /** The camera, or `null` where this browser has no QR decoder of its own to offer (the paste path stays). */
-export function browserQrScan(loadDecoder?: () => Promise<DecodePixels>): QrScanHost | null {
+function browserQrScan(loadDecoder?: () => Promise<DecodePixels>): QrScanHost | null {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return null;
   const native = (window as { BarcodeDetector?: new (options: { formats: string[] }) => QrDetectorLike })
     .BarcodeDetector;
@@ -67,9 +75,31 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
   const store = environment.store ?? accessKeyStore(ports);
   const claims = accessClaims(ports, { store });
   return function PairPage({ navigate, location }: DaemonlessScreenProps) {
-    // Read ONCE, at mount. A later render must not re-read an address the screen has already emptied, and must not
-    // resurrect a code the reader declined.
-    const [arrival] = useState<PairingArrival>(() => pairingArrival(location()));
+    // Read at mount, and again only when a new link arrives (below). A plain render must not re-read an address the
+    // screen has already emptied, and must not resurrect a code the reader declined.
+    const [link, setLink] = useState<{ readonly arrival: PairingArrival; readonly nonce: number }>(() => ({
+      arrival: pairingArrival(location()),
+      nonce: 0,
+    }));
+    // A second link opened on this page reloads nothing: it is a fragment-only navigation, so the page is read again
+    // from the router's new entry or from `hashchange`. The screen restarts for it (the new key); its own mount
+    // effect then takes the fragment out of the address, replacing the entry.
+    const readSecondLink = useCallback((): void => {
+      if (new URL(location()).hash === '') return;
+      const arrival = pairingArrival(location());
+      setLink(held => ({ arrival, nonce: held.nonce + 1 }));
+    }, [location]);
+    const entryKey = useOptionalRouter()?.entryKey;
+    const seenEntry = useRef(entryKey);
+    useEffect(() => {
+      if (seenEntry.current === entryKey) return;
+      seenEntry.current = entryKey;
+      readSecondLink();
+    }, [entryKey, readSecondLink]);
+    useEffect(() => {
+      window.addEventListener('hashchange', readSecondLink);
+      return () => window.removeEventListener('hashchange', readSecondLink);
+    }, [readSecondLink]);
     // `/pair?refused=<machine>`: that machine no longer accepts this browser (it was removed, or went unused too long).
     // A machine id is not a secret; the code never rides the query.
     const [refusedBy, setRefusedBy] = useState<string | null>(() => new URL(location()).searchParams.get('refused'));
@@ -91,7 +121,8 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           />
         )}
         <PairingScreen
-          arrival={arrival}
+          key={link.nonce}
+          arrival={link.arrival}
           scanHost={scanHost}
           onArrivalTaken={takeArrival}
           connections={connections}
