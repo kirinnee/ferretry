@@ -166,6 +166,20 @@ export interface ArchiveCardStanding {
 }
 
 /**
+ * Board's whole answer exactly as {@link ArchiveCardStanding} types it, which Ferrets parses at its boundary: anything
+ * else (an owner that is not a ferret id, a `dropped` that is not a boolean, an extra key) is unreadable, never a guess,
+ * and one bad standing makes the whole answer unreadable. Board parses its own answer with it too, so the two cannot drift.
+ */
+export const ArchiveCardStandingsSchema = z.array(
+  z.strictObject({
+    owner: FerretIdSchema,
+    assignee: FerretIdSchema.nullable(),
+    dropped: z.boolean(),
+    category: z.string().optional(),
+  }),
+);
+
+/**
  * A fact another plugin owns that keeps a finished ferret in the live set. Ferrets imports no plugin, so each owner
  * contributes its half: Board says which ferrets own or hold a card still in flight, Agenda says whether a ferret's own
  * board holds an item still open. A source that throws, or that nobody contributes, keeps every ferret live.

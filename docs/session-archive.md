@@ -183,6 +183,21 @@ not yet heard about is kept, and the session lanes the commit-boundary check hol
 the hook and counts as that half not answering. A ferret the daemon still holds as running is kept too, whatever its
 state document says, and so is one whose registry record does not say `mode: auto`.
 
+Both halves are taken. **Board** answers every card as stored, closed and dropped included: its owner, its assignee,
+whether it was dropped and its lane's category as Board resolves it; Ferrets' rule keeps the owner and assignee of every
+card that is not dropped and not in a `closed` or `shipped` lane, and a lane Board cannot name counts as in flight.
+**Agenda** answers whether the ferret's own board holds an item still open (an unanswered ask, an open notice or a
+parked item). Each is read afresh on every pass. A board that cannot be read, an answer that is not that ferret's own
+board, and an agenda board with entries that did not parse all reject, which keeps the ferret live.
+
+**Board answers only ferret ids.** It stores a card's owner and assignee as plain text, and Ferrets parses its whole
+answer against `ArchiveCardStandingsSchema` (in Ferrets' contract, beside `ArchiveCardStanding`), so one standing that
+is not a ferret id would make every pass keep every ferret. Board therefore leaves out a party that is not a ferret id:
+such a string can never match a ferret the archive decides about, so nobody is kept less than before. A card whose owner
+is not a ferret id but whose assignee is answers with the assignee as its owner (the rule keeps owner and assignee
+alike); a card with neither names no ferret and is left out. Board checks its answer with the same schema before it
+leaves, so a standing Ferrets would refuse is a rejection there too (keep live).
+
 ## Declared gaps
 
 - **A ferret that stopped before it was stamped is kept.** A stop writes `finishedAt` on the ferret's state document, which
@@ -196,7 +211,15 @@ state document says, and so is one whose registry record does not say `mode: aut
   registry-walking jobs (the ancestry snapshot, the restart drain, the sweeps) and the roster other plugins read through
   Ferrets still see it as a stopped ferret. Only `GET /v1/ferrets` and the session store's index leave it out.
 - **Board and Agenda do not revive.** A card or an agenda item attached to an archived ferret does not bring it back
-  (above); a write or a pin does.
+  (above); a write or a pin does. Today a card write (`fyd.ts:2087`) and an agenda ledger write (`fyd.ts:9746`) both
+  revived the session and its leads; that is NOT carried, because it needs a retain or revive port in Ferrets' contract,
+  which only the lead can grant. Once the archive is on, a ferret archived and then handed a new card or ask stays out of
+  `GET /v1/ferrets` until something writes to it or pins it.
+- **A quarantined card keeps nobody.** A card Board cannot read is not in its snapshot, so it is not answered and keeps
+  nobody, as today. Agenda's unparsed entries, by contrast, keep their ferret (above), so the two treat damaged data
+  differently: Board's way keeps the archive working while any card is quarantined.
+- **A switched-off Board or Agenda stops the archive quietly.** `config/plugins.yaml` can turn either plugin off; no pass
+  then runs (fail safe), and only a debug log says so, so an owner who names `afterHours` sees nothing happen.
 - **Who answers is not checked.** The hook says which KIND of keep a contribution is, not which plugin sent it: the
   kernel names no contributor, so any plugin that contributes `kind: 'board'` counts as Board for "both have answered".
   It cannot remove the real Board's keeps (the answers are a union), but it can let passes run while the real Board is
@@ -233,3 +256,5 @@ state document says, and so is one whose registry record does not say `mode: aut
 | The job, the answer parsing       | `packages/core/ferrets/daemon/modules/archive.ts`                    |
 | The keep hook                     | `packages/core/ferrets/contract/hooks.ts` (`ArchiveKeeps`)           |
 | The live list and the pin revival | `packages/core/ferrets/daemon/index.ts`                              |
+| Board's half of the keep hook     | `packages/plugins/board/daemon/adapters/archive-keeps.ts`            |
+| Agenda's half of the keep hook    | `packages/plugins/agenda/daemon/lib/archive-keeps.ts`                |
