@@ -80,6 +80,7 @@ describe('the command bar', () => {
   it('renders nothing while closed', async () => {
     const view = await mount(<CommandBar open={false} focusSignal={0} onClose={() => {}} sources={[places]} />);
     expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+    await view.unmount();
   });
 
   it('keeps focus in the query box, arrows through results and runs the active one on Enter', async () => {
@@ -98,5 +99,6 @@ describe('the command bar', () => {
     await interact(() => pressKey(input, 'Enter'));
     expect(ran).toEqual(['agenda']);
     expect(closed).toBe(1);
+    await view.unmount();
   });
 });

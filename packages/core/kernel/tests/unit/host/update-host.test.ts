@@ -35,6 +35,7 @@ describe('XX kernel.updateHost', () => {
       binary: 'fy',
       release: '5.0.0',
       process: facts,
+      environment: {}, // not the process's: CI exports FY_UPDATE_CHECK=off, which would turn `checks` off
       resolveLink: async path => `${path}-resolved`,
       spawn: () => {
         throw new Error('no launch here');
@@ -49,6 +50,7 @@ describe('XX kernel.updateHost', () => {
       binary: 'fy',
       release: '5.0.0',
       process: { ...facts, main: '/src/fyd.ts' },
+      environment: {},
       resolveLink: async () => {
         throw new Error('gone');
       },

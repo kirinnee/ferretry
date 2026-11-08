@@ -21,16 +21,16 @@ import {
   type ComposerAutocompleteCandidate,
   type ComposerTriggerMatch,
   rankComposerCandidates,
-} from '../../../src/components/composer-autocomplete.ts';
-import { ComposerAutocompletePopover } from '../../../src/components/composer-autocomplete-popover.tsx';
-import { createDirectReferenceProviders } from '../../../src/components/composer-autocomplete-providers.ts';
-import { ReferenceSurfaceProvider } from '@ferretry/app';
+} from '../../../../app/composer/composer-autocomplete.ts';
+import { ComposerAutocompletePopover } from '../../../../app/composer/composer-autocomplete-popover.tsx';
+import { createDirectReferenceProviders } from '../../../../app/composer/composer-autocomplete-providers.ts';
+import { type DaemonId, ReferenceSurfaceProvider } from '@ferretry/app';
 import { transcriptEntriesFromLog } from '../../../../app/chat/chat-refresh.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
-import { createAgentReferenceResolver } from '@ferretry/app';
-import type { ComposerReferenceTask } from '../../../src/lib/composer-reference-catalogs.ts';
+import { fleetAgentResolver } from '../../../support/app/agents.ts';
+import type { ComposerReferenceTask } from '../../../../app/composer/composer-reference-catalogs.ts';
 import { daemonConnection } from '../../../../app/composer/seam.ts';
-import { daemonSessionScope } from '../../../../app/composer/seam.ts';
+import { daemonFerretScope } from '../../../../app/composer/seam.ts';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
 
 const params = new URLSearchParams(window.location.search);
@@ -164,7 +164,7 @@ const busyProject = (): ComposerReferenceTask[] =>
   }));
 
 const manyRows = (included: boolean, query: string): ComposerAutocompleteCandidate[] => {
-  const scope = daemonSessionScope(daemon, SESSION);
+  const scope = daemonFerretScope(daemon, SESSION);
   const [, , sigil] = createDirectReferenceProviders({
     daemon,
     scope,
@@ -262,7 +262,7 @@ function Scene() {
           so the foot shows its quiet "Open chat" link beside "Show more" and the ticks. */}
       <ReferenceSurfaceProvider
         surface={{
-          agentReferenceResolver: createAgentReferenceResolver(daemon.daemonId, FLEET),
+          agentReferenceResolver: fleetAgentResolver(daemon.daemonId as DaemonId, FLEET),
           onNavigate: () => undefined,
         }}
       >

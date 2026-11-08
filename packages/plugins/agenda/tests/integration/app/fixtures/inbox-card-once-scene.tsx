@@ -6,11 +6,13 @@ import { inboxParked } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonId } from '../../../../app/shell.ts';
 import { agendaItem, choices, fakeInbox, InboxHarness } from '../../../support/app/agenda-inbox.tsx';
 import { sessionView } from '../../../support/app/sessions.ts';
-import { laptop, PROJECT } from '../../../unit/app/board-support.ts';
+import { laptop } from '../../../unit/app/board-support.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 
+/** A board project's id; the gate item only names it. */
+const PROJECT = '00000000-0000-4000-8000-000000000001';
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 const UNTIL = '2026-08-02T09:00:00.000Z';
 const phone = window.innerWidth < 768;

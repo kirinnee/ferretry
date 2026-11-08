@@ -10,6 +10,8 @@ pathIgnorePatterns = ["**/tests/integration/**", "**/tests/sit/**", "**/tests/re
 coverageReporter = ["lcov"]
 coverageDir = "coverage/unit"
 coverageSkipTestFiles = true
+# Every unit file shares one process: this puts back what a DOM file leaves (nodes, the WebSocket global).
+preload = ["./packages/app/tests/support/dom-leak-guard.ts"]
 # Unit ledger = the domain tier only: every `lib/` directory of a workspace package, at any depth
 # (scripts/ci/coverage-ledger.sh judges only those). tests/** never counts.
 coveragePathIgnorePatterns = [
