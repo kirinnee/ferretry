@@ -465,7 +465,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     // An echo-off code prompt stays a code only from a code program this account cannot replace (never the ps name).
     overrides.inputs?.programs ?? ExecutableCodePrograms.forPlatform(hostPlatform, hostUserId),
     // Who can read the TTY, proved by the kernel for EVERY process of the foreground group, never by the name ps shows.
-    overrides.inputs?.proofs ?? KernelProgramProof.forPlatform(hostPlatform, run, hostUserId),
+    overrides.inputs?.proofs ?? KernelProgramProof.forPlatform(hostPlatform, run, hostUserId, kernel.paths.home()),
   );
   const inputTarget: InputTargetAdapter = {
     masking: 'cells',

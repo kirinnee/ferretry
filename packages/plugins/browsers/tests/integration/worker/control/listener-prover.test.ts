@@ -1,9 +1,12 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { ProcListenerProver } from '../../../../daemon/worker/control/adapters/listener-prover.ts';
+import {
+  type ListenerHostFacts,
+  ProcListenerProver,
+} from '../../../../daemon/worker/control/adapters/listener-prover.ts';
 
 /**
  * The prover reads a `/proc` the test stages in a temp directory — socket tables, `fd` links and `stat` lines —
@@ -69,6 +72,17 @@ async function procRoot(tables: readonly string[] | undefined, processes: readon
   return root;
 }
 
+/** The kernel's `hostFacts` reads, over a `/proc` laid out in a temp directory. */
+function factsOver(root: string): ListenerHostFacts {
+  return {
+    pids: async () => (await readdir(root)).filter(name => /^\d+$/u.test(name)).map(Number),
+    procFile: async (pid, file) => await readFile(join(root, String(pid), file), 'utf8'),
+    procSystemFile: async file => await readFile(join(root, file), 'utf8'),
+    procFds: async pid => await readdir(join(root, String(pid), 'fd')),
+    procFdLink: async (pid, fd) => await readlink(join(root, String(pid), 'fd', fd)),
+  };
+}
+
 describe('ProcListenerProver', () => {
   it('should prove a listener the spawned process holds itself', async () => {
     // Arrange
@@ -76,7 +90,7 @@ describe('ProcListenerProver', () => {
       [row(PORT, OWNER, 9_001)],
       [{ pid: SUPERVISOR, ppid: 1, fds: ['/dev/null', 'pipe:[5]', 'socket:[9001]', 'socket:[7]'] }],
     );
-    const subject = new ProcListenerProver({ procRoot: root, uid: () => OWNER });
+    const subject = new ProcListenerProver(factsOver(root), { uid: () => OWNER });
 
     // Act
     const actual = await subject.prove(PORT, SUPERVISOR);
@@ -98,7 +112,7 @@ describe('ProcListenerProver', () => {
         { pid: 301, ppid: 1, stat: null },
       ],
     );
-    const subject = new ProcListenerProver({ procRoot: root, uid: () => OWNER });
+    const subject = new ProcListenerProver(factsOver(root), { uid: () => OWNER });
 
     // Act
     const actual = await subject.prove(PORT, SUPERVISOR);
@@ -119,8 +133,8 @@ describe('ProcListenerProver', () => {
     );
 
     // Act
-    const stranger = await new ProcListenerProver({ procRoot: squatted, uid: () => OWNER }).prove(PORT, SUPERVISOR);
-    const own = await new ProcListenerProver({ procRoot: collided, uid: () => OWNER }).prove(PORT, SUPERVISOR);
+    const stranger = await new ProcListenerProver(factsOver(squatted), { uid: () => OWNER }).prove(PORT, SUPERVISOR);
+    const own = await new ProcListenerProver(factsOver(collided), { uid: () => OWNER }).prove(PORT, SUPERVISOR);
 
     // Assert
     should(stranger).deepEqual({ kind: 'foreign', uid: STRANGER });
@@ -130,7 +144,7 @@ describe('ProcListenerProver', () => {
   it('should call a port nobody listens on absent, even for a process that already exited', async () => {
     // Arrange
     const root = await procRoot([row(PORT + 1, OWNER, 9_001)], []);
-    const subject = new ProcListenerProver({ procRoot: root, uid: () => OWNER });
+    const subject = new ProcListenerProver(factsOver(root), { uid: () => OWNER });
 
     // Act
     const actual = await subject.prove(PORT, SUPERVISOR);
@@ -145,8 +159,8 @@ describe('ProcListenerProver', () => {
     const tabled = await procRoot([row(PORT, OWNER, 9_001)], [{ pid: SUPERVISOR, ppid: 1, fds: ['socket:[9001]'] }]);
 
     // Act
-    const macos = await new ProcListenerProver({ procRoot: bare, uid: () => OWNER }).prove(PORT, SUPERVISOR);
-    const uidless = await new ProcListenerProver({ procRoot: tabled, uid: () => undefined }).prove(PORT, SUPERVISOR);
+    const macos = await new ProcListenerProver(factsOver(bare), { uid: () => OWNER }).prove(PORT, SUPERVISOR);
+    const uidless = await new ProcListenerProver(factsOver(tabled), { uid: () => undefined }).prove(PORT, SUPERVISOR);
 
     // Assert
     should(macos).deepEqual({ kind: 'unknown' });
@@ -157,12 +171,12 @@ describe('ProcListenerProver', () => {
     // Arrange
     const root = await procRoot([row(PORT, STRANGER, 9_002)], []);
     const bare = await procRoot(undefined, []);
-    const subject = new ProcListenerProver({ procRoot: root, uid: () => OWNER });
+    const subject = new ProcListenerProver(factsOver(root), { uid: () => OWNER });
 
     // Act
     const held = await subject.holder(PORT);
     const free = await subject.holder(PORT + 1);
-    const unreadable = await new ProcListenerProver({ procRoot: bare }).holder(PORT);
+    const unreadable = await new ProcListenerProver(factsOver(bare)).holder(PORT);
 
     // Assert
     should(held).equal(STRANGER);
@@ -173,7 +187,7 @@ describe('ProcListenerProver', () => {
   it.if(process.platform === 'linux')("should prove a real listener against this host's own /proc", async () => {
     // Arrange: the test's own process holds the socket, so it is the "spawned" pid; any other pid is not.
     const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
-    const subject = new ProcListenerProver();
+    const subject = new ProcListenerProver(factsOver('/proc'));
 
     try {
       // Act

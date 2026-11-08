@@ -15,11 +15,11 @@ import {
   xauthorityEntry,
   xvfbLaunchArguments,
 } from '../index.ts';
-import { type ListenerProverPort, ProcListenerProver } from './listener-prover.ts';
+import type { ListenerProverPort } from './listener-prover.ts';
 import type { BrowserLoginChild, BrowserLoginRuntime } from './login-window.ts';
 
-// GAP (kernel port, banned-globals stays visible here): the display cookie and the one-shot VNC password are private
-// files (0600 in a 0700 folder, written by rename) no kernel port writes; spawns and time already go through
+// Permanent per-file exemption (DECISIONS-2 #20): the display cookie and the one-shot VNC password are private files
+// (0600 in a 0700 folder, written by rename) that Xvfb and x11vnc read by path, which no kernel port writes; spawns and time already go through
 // `kernel.spawn` and the clock (`LoginProcesses`).
 
 /**
@@ -51,8 +51,8 @@ import type { BrowserLoginChild, BrowserLoginRuntime } from './login-window.ts';
 /**
  * How the window reaches the host's processes and time: `kernel.spawn` (Xvfb, x11vnc, `timeout` and the window's
  * Chrome, each a name `permissions.spawn` declares) and the kernel clock, bound by the daemon half; a test hands in
- * real ones over the host's adapters. The platform and environment are the host facts no kernel port gives yet
- * (`../../../adapters/host.ts`, a declared GAP).
+ * real ones over the host's adapters. The platform and environment are host facts of the operating system itself
+ * (`../../../adapters/host.ts`, a permanent per-file exemption, DECISIONS-2 #20).
  */
 export interface LoginProcesses {
   readonly spawn: Pick<SpawnPort, 'start' | 'run'>;
@@ -435,8 +435,8 @@ export interface BrowserLoginRuntimeOptions extends BrowserLoginTiming {
   /** Whether anything is accepting TCP on loopback at this port — asked only where the listener cannot be proven. */
   readonly probePort?: (port: number) => Promise<boolean>;
   readonly freePort?: () => Promise<number>;
-  /** Proves the VNC port is held by the x11vnc this window started. Defaults to this host's `/proc`. */
-  readonly listenerProver?: ListenerProverPort;
+  /** Proves the VNC port is held by the x11vnc this window started. Required. */
+  readonly listenerProver: ListenerProverPort;
   /** Which loopback ports `browserPorts` asks for, read at every window start; absent means random. */
   readonly ports?: () => Promise<ResolvedBrowserPorts>;
 }
@@ -494,7 +494,7 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
       });
     this.probePort = options.probePort ?? (port => loopbackAccepts(port));
     this.freePortOf = options.freePort ?? (() => loopbackFreePort());
-    this.prover = options.listenerProver ?? new ProcListenerProver();
+    this.prover = options.listenerProver;
   }
 
   async display(): Promise<string> {

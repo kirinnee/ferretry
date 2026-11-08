@@ -362,6 +362,8 @@ export default definePlugin({
       'xdg-open',
       'rundll32',
     ],
+    /** Who holds a loopback port, proved from `/proc` (`daemon/worker/control/adapters/listener-prover.ts`). */
+    hostFacts: true,
     /** Uploads come from the ferret's own folder, and downloads and PDFs are saved into it (S51). */
     roots: ['work'],
     /** Chrome's own DevTools endpoint on loopback, which the launcher waits for. */

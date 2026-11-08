@@ -1,5 +1,5 @@
 import { lstat, readdir, readFile, readlink, stat } from '../host/fs.ts';
-import { homedir, userInfo } from '../host/fs.ts';
+import { userInfo } from '../host/fs.ts';
 import { basename } from 'node:path';
 import type { ProfileProgram, ProgramProofPort, ProgramRunner, ProvenProgram } from '../../lib/inputs/index.ts';
 import { GETPASS_PROGRAMS, parseUids } from '../../lib/inputs/index.ts';
@@ -63,8 +63,9 @@ const TTY_PATH = /^\/dev\/[A-Za-z0-9._/-]+$/u;
 export class KernelProgramProof implements ProgramProofPort {
   constructor(private readonly host: ProcessHost) {}
 
-  static forPlatform(platform: string, run: ProgramRunner, account?: number): KernelProgramProof {
-    if (platform === 'linux') return new KernelProgramProof(linuxHost(account));
+  /** `home` is the owner's home directory, from `kernel.paths.home()`; only the Linux profile proof reads it. */
+  static forPlatform(platform: string, run: ProgramRunner, account?: number, home?: string): KernelProgramProof {
+    if (platform === 'linux') return new KernelProgramProof(linuxHost(account, home));
     if (platform === 'darwin') return new KernelProgramProof(darwinHost(run));
     return new KernelProgramProof(UNPROVEN);
   }
@@ -279,7 +280,7 @@ export const PROC_FILES: ProcFiles = {
 };
 
 /** Linux: `/proc` for the uids, the name and the scan; the exe proof for the program. */
-export function linuxHost(account: number | undefined): ProcessHost {
+export function linuxHost(account: number | undefined, home?: string): ProcessHost {
   const executables = ExecutableCodePrograms.forPlatform('linux', account);
   return {
     uids: async pid => parseStatusUids(await readFile(`/proc/${String(pid)}/status`, 'utf8')),
@@ -288,7 +289,7 @@ export function linuxHost(account: number | undefined): ProcessHost {
     heldElsewhere: async ttyPath => await strangerHolds(PROC_FILES, ttyPath, account, process.pid),
     profile: async pid => {
       const chain = profileChainOf(
-        homedir(),
+        home,
         accountName(() => userInfo().username),
       );
       const runs = await readlink(`/proc/${String(pid)}/exe`);
