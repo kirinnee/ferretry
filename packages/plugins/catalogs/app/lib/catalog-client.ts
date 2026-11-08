@@ -122,7 +122,8 @@ export const machineCatalogClient =
       if (row !== undefined) return catalogClientOf(row);
       const why = source.whyNone?.(connection.daemonId);
       if (why !== undefined && !why.waiting) throw new Error(why.line);
-      if (why === undefined || Date.now() >= deadline) throw new Error(why?.line ?? NO_MACHINE_SENTENCE);
+      // The shell allowing the plugin before the row map has caught up (`why === undefined`) is one more loop, not an end.
+      if (source.whyNone === undefined || Date.now() >= deadline) throw new Error(why?.line ?? NO_MACHINE_SENTENCE);
       await new Promise(resolve => setTimeout(resolve, ROW_POLL_MS));
     }
   };

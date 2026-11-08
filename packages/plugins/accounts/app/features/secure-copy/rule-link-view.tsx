@@ -9,6 +9,8 @@
  *   selected one, else the first (v4's rule);
  * - the link is decided against the PAIRED list (known at boot), not the connected rows: a machine that is paired but
  *   has no row yet (still connecting) is waited for — bounded by two minutes — and is never called "not on this machine";
+ *   a paired machine the shell says will never have an Accounts row (it is off, missing or a different version there)
+ *   is opened at once, where the shell draws that machine's own blocked line;
  * - a link that names a machine this device is not paired with is dropped and said so, in one line;
  * - with no paired machine there is nowhere to look, and the link is dropped.
  *
@@ -22,9 +24,10 @@ import {
   useDevicePaired,
   useEveryDaemon,
   useFragment,
+  useNoReaches,
   useOptionalRouter,
 } from '@ferretry/app';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ruleDeepLinkFromFragment } from '../../../contract/routes/index.ts';
 import { RULE_LINKED_ELSEWHERE_WORDS, type RuleLinkHold } from '../../lib/rule-link.ts';
 
@@ -48,6 +51,8 @@ export function ruleLinkView(hold: RuleLinkHold) {
     const [elsewhere, setElsewhere] = useState(false);
     const [link, setLink] = useState<ReturnType<typeof ruleDeepLinkFromFragment>>(null);
     const here = onScreen(router);
+    const pairedIds = useMemo(() => daemons.map(daemon => daemon.daemon), [daemons]);
+    const reasons = useNoReaches(pairedIds);
     // Each arrival is taken once; the link then waits in state for the machine it opens on.
     const handled = useRef(0);
     useEffect(() => {
@@ -63,23 +68,23 @@ export function ruleLinkView(hold: RuleLinkHold) {
     }, [link]);
     useEffect(() => {
       if (link === null) return;
-      const paired = daemons.map(daemon => daemon.daemon);
-      const first = paired[0];
+      const first = pairedIds[0];
       if (first === undefined) return setLink(null);
       const wanted =
-        link.machine ?? (here !== undefined && paired.includes(here) ? here : selected !== null ? selected : first);
-      if (!paired.includes(wanted)) {
+        link.machine ?? (here !== undefined && pairedIds.includes(here) ? here : selected !== null ? selected : first);
+      if (!pairedIds.includes(wanted)) {
         // Only a machine this device is not paired with is "not on this machine".
         setLink(null);
         if (link.machine !== undefined) setElsewhere(true);
         return;
       }
-      // Paired but no row yet: still connecting (or the plugin is not on there yet) — wait, bounded by the hold.
-      if (!rows.some(row => row.daemon === wanted)) return;
+      // Paired but no row yet: still connecting (or its plugin list is being read) — wait, bounded by the hold. A machine
+      // the shell says will never have a row opens its page anyway, where that machine's blocked line says why.
+      if (!rows.some(row => row.daemon === wanted) && reasons.get(wanted)?.waiting !== false) return;
       setLink(null);
       hold.hold(link.stage, wanted);
       navigate(daemonSettingsHref(wanted, SECURE_COPY.plugin, SECURE_COPY.tab));
-    }, [link, daemons, selected, rows, here, navigate]);
+    }, [link, pairedIds, selected, rows, reasons, here, navigate]);
     if (!elsewhere) return null;
     return (
       <div

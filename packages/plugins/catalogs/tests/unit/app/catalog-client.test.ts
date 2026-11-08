@@ -116,4 +116,12 @@ describe('the catalog client of any paired machine', () => {
     });
     await expect(off({ daemonId: 'd3' })).rejects.toThrow('Catalogs is off on this daemon.');
   });
+
+  it('R2-n1 a row the shell allows before the row map has caught up is one more loop, not an end', async () => {
+    const rows = new Map<string, PluginClient>();
+    const client = machineCatalogClient(own, 'd1', { clients: () => rows, whyNone: () => undefined });
+    const pending = client({ daemonId: 'd2' });
+    setTimeout(() => rows.set('d2', elsewhere), 150);
+    await pending;
+  });
 });

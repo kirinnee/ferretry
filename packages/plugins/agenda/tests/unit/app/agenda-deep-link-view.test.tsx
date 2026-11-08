@@ -8,7 +8,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { DaemonReach } from '@ferretry/app';
+import type { DaemonReach, NoReach } from '@ferretry/app';
 import {
   deviceViewHarness,
   fakeReachRow,
@@ -54,6 +54,8 @@ const B = `fy_daemon_${'b'.repeat(43)}`;
 const rowOf = (daemon: string, client: PluginClient, locked = false): DaemonReach =>
   fakeReachRow({ daemon, client, locked, machine: `${daemon.slice(10, 11)}-host` });
 
+const OFF_THERE: NoReach = { waiting: false, line: 'Agenda is off on this daemon.' };
+
 const settle = async (): Promise<void> => {
   for (let i = 0; i < 10; i += 1) await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
 };
@@ -65,9 +67,15 @@ afterEach(async () => {
 });
 
 /** `paired`: the machines this device is paired with (default: the machines that have a row). */
-async function open(href: string, rows: readonly DaemonReach[], paired: readonly string[] = rows.map(r => r.daemon)) {
+async function open(
+  href: string,
+  rows: readonly DaemonReach[],
+  paired: readonly string[] = rows.map(r => r.daemon),
+  noReach: Readonly<Record<string, NoReach>> = {},
+) {
   const harness = deviceViewHarness({ plugin: 'agenda', fragments: half.shell.fragments ?? [], href });
   harness.setPaired(paired);
+  harness.setNoReach(noReach);
   harness.setRows(rows);
   const went: string[] = [];
   const View = agendaDeepLinkView({});
@@ -186,6 +194,37 @@ describe("Agenda's device view", () => {
     const { harness, went } = await open(`/app/${agendaLink('A8', 'sess-1', B)}`, [rowOf(A, a.client)], [A, B]);
     expect(went).toEqual([]);
     await interact(() => harness.setRows([rowOf(A, a.client), rowOf(B, b.client)]));
+    await settle();
+    expect(went).toEqual([`/d/${B}/agenda/sess-1/A8`]);
+  });
+
+  it('R2-m3 a link naming a paired machine where Agenda is off opens that machine’s page at once, not after two minutes', async () => {
+    const a = machineClient(A, ['x']);
+    const { went } = await open(`/app/${agendaLink('A8', 'sess-1', B)}`, [rowOf(A, a.client)], [A, B], {
+      [B]: OFF_THERE,
+    });
+    expect(went).toEqual([`/d/${B}/agenda/sess-1/A8`]);
+  });
+
+  it('R2-m3 an unnamed link is not held up by a machine where Agenda will never have a row', async () => {
+    const a = machineClient(A, ['x']);
+    const { harness, went } = await open(`/app/${agendaLink('A8', 'sess-9')}`, [rowOf(A, a.client)], [A, B], {
+      [B]: OFF_THERE,
+    });
+    expect(went).toEqual([]);
+    // It was decided (no machine runs it) and dropped, not left waiting on B.
+    harness.setRows([rowOf(A, a.client), rowOf(B, machineClient(B, ['sess-9']).client)]);
+    await settle();
+    expect(went).toEqual([]);
+  });
+
+  it('R2-m3 a machine still being reached is waited for, and opens the moment the shell says it will never have a row', async () => {
+    const a = machineClient(A, ['x']);
+    const { harness, went } = await open(`/app/${agendaLink('A8', 'sess-1', B)}`, [rowOf(A, a.client)], [A, B], {
+      [B]: { waiting: true, line: 'Checking what this daemon offers…' },
+    });
+    expect(went).toEqual([]);
+    await interact(() => harness.setNoReach({ [B]: OFF_THERE }));
     await settle();
     expect(went).toEqual([`/d/${B}/agenda/sess-1/A8`]);
   });

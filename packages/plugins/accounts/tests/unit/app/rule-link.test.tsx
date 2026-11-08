@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { DaemonReach } from '@ferretry/app';
+import { type DaemonReach, type NoReach, useFragment } from '@ferretry/app';
 import {
   deviceViewHarness,
   fakeReachRow,
@@ -37,6 +37,7 @@ const B = `fy_daemon_${'b'.repeat(43)}`;
 const C = `fy_daemon_${'c'.repeat(43)}`;
 const OTHER_STAGE = `srs_${'e'.repeat(24)}` as typeof STAGE_ID;
 
+const OFF_THERE: NoReach = { waiting: false, line: 'Accounts is off on this daemon.' };
 const row = (daemon: string): DaemonReach => fakeReachRow({ daemon, client: {} as PluginClient });
 const secureCopy = (daemon: string): string => `/d/${daemon}/settings/accounts/secure-copy`;
 
@@ -54,9 +55,11 @@ async function open(
   wrap: (node: ReactNode) => ReactNode = node => node,
   paired: readonly string[] = rows.map(r => r.daemon),
   selected?: string,
+  noReach: Readonly<Record<string, NoReach>> = {},
 ) {
   const harness = deviceViewHarness({ plugin: 'accounts', fragments: half.shell.fragments ?? [], href });
   harness.setPaired(paired, selected);
+  harness.setNoReach(noReach);
   harness.setRows(rows);
   const hold = new RuleLinkHold();
   const View = ruleLinkView(hold);
@@ -102,6 +105,28 @@ describe('the #rules link', () => {
 
   it('m3 naming no machine on a home route, opens on the SELECTED machine, not the first row', async () => {
     const { went } = await open(ruleDeepLink(ORIGIN, STAGE_ID), [row(A), row(B)], n => n, [A, B], B);
+    expect(went).toEqual([secureCopy(B)]);
+  });
+
+  it('R2-m3 a link naming a paired machine where Accounts is off opens its Secure copy page at once, not after two minutes', async () => {
+    const { hold, went } = await open(ruleDeepLink(ORIGIN, STAGE_ID, B), [row(A)], n => n, [A, B], undefined, {
+      [B]: OFF_THERE,
+    });
+    expect(went).toEqual([secureCopy(B)]);
+    expect(hold.stageFor(B)).toBe(STAGE_ID);
+  });
+
+  it('R2-m3 an unnamed link whose selected machine will never have a row opens there too', async () => {
+    const { went } = await open(ruleDeepLink(ORIGIN, STAGE_ID), [row(A)], n => n, [A, B], B, { [B]: OFF_THERE });
+    expect(went).toEqual([secureCopy(B)]);
+  });
+
+  it('R2-m3 a machine still being reached is waited for, and opens the moment the shell says it will never have a row', async () => {
+    const { harness, went } = await open(ruleDeepLink(ORIGIN, STAGE_ID, B), [row(A)], n => n, [A, B], undefined, {
+      [B]: { waiting: true, line: 'Checking what this daemon offers…' },
+    });
+    expect(went).toEqual([]);
+    await interact(() => harness.setNoReach({ [B]: OFF_THERE }));
     expect(went).toEqual([secureCopy(B)]);
   });
 
@@ -193,7 +218,7 @@ describe('the #rules link', () => {
 });
 
 describe('the #agenda link Accounts prints', () => {
-  it('the real builder’s output is the keyed #agenda fragment the shell strips whole and holds for Agenda', async () => {
+  it('the real builder’s output is the keyed #agenda fragment the shell strips whole and holds, whole, for Agenda', async () => {
     const fragment = agendaDeepLinkFragment('A8', 'sess-1', B as never);
     const harness = deviceViewHarness({
       plugin: 'agenda',
@@ -201,6 +226,20 @@ describe('the #agenda link Accounts prints', () => {
       href: `/app/${fragment}`,
     });
     expect(harness.address()).toBe('/app/');
+    // The held value is what Agenda's parser expects — `#agenda/<id>?session=…&machine=…` — read by a keyed taker
+    // of the same key, with no Agenda import.
+    const held: { value?: string | undefined } = {};
+    function Taker(): ReactNode {
+      const { arrival, take } = useFragment('agenda');
+      if (arrival > 0 && held.value === undefined) held.value = take();
+      return null;
+    }
+    view = await mount(
+      <harness.Harness>
+        <Taker />
+      </harness.Harness>,
+    );
+    expect(held.value).toBe(`#agenda/A8?session=sess-1&machine=${B}`);
   });
 });
 

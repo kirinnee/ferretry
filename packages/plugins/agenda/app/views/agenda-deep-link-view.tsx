@@ -5,13 +5,24 @@
  * halves never race for it — and this view, over every machine (`useEveryDaemon`), opens the ask on the machine that
  * runs its session: the one the link names when it is paired, else the one whose session list holds it.
  *
- * - A machine that has not been read yet, or is paired and has no row yet (a cold open), makes the link wait; a LOCKED machine is read as "not this one" (R3 n4), so a
- *   link from an older `fy` never waits on a machine that is not on screen, and nothing prompts.
+ * - A machine that has not been read yet, or is paired and has no row yet because it is still being reached (a cold
+ *   open), makes the link wait; a LOCKED machine, and a machine where Agenda is off, paused or a different version (the
+ *   shell says it will never have a row), are read as "not this one" (R3 n4), so a link from an older `fy` never waits
+ *   on a machine that is not on screen, and nothing prompts. A link that NAMES such a machine opens its page at once,
+ *   where the shell says why Agenda is not there.
  * - A link no machine runs, a link that names no session, and a link still waiting after two minutes are dropped.
  * - Nothing in the link reaches a daemon: it only picks which page opens.
  */
 
-import { type DaemonReach, type DeviceViewProps, useDevicePaired, useEveryDaemon, useFragment } from '@ferretry/app';
+import {
+  type DaemonReach,
+  type DeviceViewProps,
+  type NoReach,
+  useDevicePaired,
+  useEveryDaemon,
+  useFragment,
+  useNoReaches,
+} from '@ferretry/app';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   type AgendaDeepLink,
@@ -38,13 +49,15 @@ interface LinkMachine {
 
 /**
  * Every PAIRED machine's session ids (`null` until read), live; a locked machine lists none. A paired machine with no
- * row yet (still connecting, or its inventory not read) is `null` too: the link waits for it, as v4 did for every
- * paired machine — a cold open has no row at all while the link is already taken.
+ * row yet that is still being reached (or whose plugin list is being read) is `null` too: the link waits for it — a cold
+ * open has no row at all while the link is already taken. One that will never have a row (`reasons` says it is not
+ * waiting: off, missing, a different version) lists none, like a locked one.
  */
 function useLinkMachines(
   fleet: AgendaFleet,
   paired: readonly string[],
   rows: readonly DaemonReach[],
+  reasons: ReadonlyMap<string, NoReach>,
 ): readonly LinkMachine[] {
   const sources = useMemo(
     () =>
@@ -53,10 +66,11 @@ function useLinkMachines(
         return {
           daemon,
           row,
+          never: reasons.get(daemon)?.waiting === false,
           ferrets: row === undefined || row.locked ? undefined : fleet.runtimeOf(row.client).ferrets,
         };
       }),
-    [fleet, paired, rows],
+    [fleet, paired, rows, reasons],
   );
   const subscribe = useCallback(
     (listener: () => void) => {
@@ -68,22 +82,24 @@ function useLinkMachines(
     [sources],
   );
   const held = useRef<{
+    readonly sources: unknown;
     readonly snapshots: readonly (FleetSnapshot | undefined)[];
     readonly machines: readonly LinkMachine[];
-  }>({ snapshots: [], machines: [] });
+  }>({ sources: null, snapshots: [], machines: [] });
   const read = useCallback((): readonly LinkMachine[] => {
     const snapshots = sources.map(source => source.ferrets?.getSnapshot());
     const last = held.current;
-    if (last.snapshots.length === snapshots.length && last.snapshots.every((snapshot, i) => snapshot === snapshots[i]))
-      if (last.machines.length === sources.length) return last.machines;
-    const machines = sources.map(({ daemon, row }, i): LinkMachine => {
+    // The same sources and the same snapshots: nothing a machine is read from has moved (a reason, a row or a lock does).
+    if (last.sources === sources && last.snapshots.every((snapshot, i) => snapshot === snapshots[i]))
+      return last.machines;
+    const machines = sources.map(({ daemon, row, never }, i): LinkMachine => {
       const id = daemonId(daemon);
-      if (row === undefined) return { daemonId: id, sessionIds: null };
+      if (row === undefined) return { daemonId: id, sessionIds: never ? [] : null };
       if (row.locked) return { daemonId: id, sessionIds: [] };
       const sessions = snapshots[i]?.daemons.get(id)?.sessions ?? null;
       return { daemonId: id, sessionIds: sessions === null ? null : sessions.map(session => session.config.id) };
     });
-    held.current = { snapshots, machines };
+    held.current = { sources, snapshots, machines };
     return machines;
   }, [sources]);
   return useSyncExternalStore(subscribe, read, read);
@@ -120,13 +136,16 @@ function DeepLink({ navigate, fleet }: DeviceViewProps & { readonly fleet: Agend
     () => (link === null ? NO_PAIRED : pairedList.map(daemon => daemon.daemon)),
     [link, pairedList],
   );
-  const machines = useLinkMachines(fleet, paired, link === null ? NO_ROWS : rows);
+  const reasons = useNoReaches(paired);
+  const machines = useLinkMachines(fleet, paired, link === null ? NO_ROWS : rows, reasons);
   useEffect(() => {
     if (link === null || link.sessionId === undefined) return;
     // A link that names a paired machine opens there once its row exists (the plugin is on and allowed there), not
-    // before: a machine still connecting is waited for, never called "not this one".
+    // before: a machine still connecting is waited for, never called "not this one". A machine the shell says will
+    // never have a row (the plugin is off, missing or a different version there) opens its page now, where the shell
+    // says why.
     const named = machines.find(machine => machine.daemonId === link.machine);
-    if (named !== undefined && !rows.some(row => row.daemon === named.daemonId)) return;
+    if (named?.sessionIds === null && !rows.some(row => row.daemon === named.daemonId)) return;
     const found = machineForAgendaLink(link, machines);
     if (found === 'wait') return;
     setLink(null);

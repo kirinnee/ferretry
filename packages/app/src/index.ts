@@ -147,7 +147,13 @@ export type { PluginCommandContext, PluginCommandSource } from './shell/command-
 /** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */
 export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
 /** @public This device's theme, read on any screen, daemon-less ones included (§5.2: a device setting; shell contract S9). */
-export { type DeviceTheme, useDevicePaired, useDeviceTheme } from './shell/device-context.tsx';
+export {
+  type DevicePaired,
+  type DevicePairedMachine,
+  type DeviceTheme,
+  useDevicePaired,
+  useDeviceTheme,
+} from './shell/device-context.tsx';
 /** @public Where a per-daemon view is drawn — its machine, feed and authority — and how a control shows for it (§5.2; shell contract S1). */
 export {
   type Authority,
@@ -189,7 +195,7 @@ export {
 } from './daemons/machine-names.ts';
 export { usePairedDaemons } from './shell/daemon-access.ts';
 /** @public The same plugin on every paired machine (§5.1; shell contract S2): each row's place and the plugin's own client. */
-export { type DaemonReach, useEveryDaemon, useNoReach } from './shell/every-daemon.ts';
+export { type DaemonReach, useEveryDaemon, useNoReach, useNoReaches } from './shell/every-daemon.ts';
 export type { NoReach } from './shell/plugin-identity.tsx';
 // ─── declared fragments, device views and the in-memory hand-off (shell contract S3) ─────────────────────────────
 export { type FragmentDecl, FRAGMENT_KEY } from './router/address.ts';

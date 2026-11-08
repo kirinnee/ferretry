@@ -1,7 +1,8 @@
-import { createContext, type ReactNode, useCallback, useContext, useSyncExternalStore } from 'react';
-import type { DaemonList, DaemonListSnapshot } from '../daemons/daemon-list.ts';
+import { createContext, type ReactNode, useCallback, useContext, useRef, useSyncExternalStore } from 'react';
+import { type DaemonList, type DaemonListSnapshot, daemonTitle } from '../daemons/daemon-list.ts';
 import type { AddressTaker } from '../router/address.ts';
 import type { HandOffs } from './hand-off.ts';
+import { usePluginIdentity } from './plugin-identity.tsx';
 import {
   type ResolvedMode,
   resolveThemeMode,
@@ -104,16 +105,45 @@ export function useDeviceTheme(): DeviceTheme | null {
   };
 }
 
-const NO_PAIRED: DaemonListSnapshot = Object.freeze({ daemons: Object.freeze([]), selected: null });
+/** One paired machine as a device view sees it: which one and what it is called — never where it is or how it connects. */
+export interface DevicePairedMachine {
+  readonly daemon: string;
+  readonly title: string;
+}
+
+/** The paired machines and the selected id, narrowed to what a device view needs to tell "connecting" from "not paired". */
+export interface DevicePaired {
+  readonly daemons: readonly DevicePairedMachine[];
+  readonly selected: string | null;
+}
+
+const NO_PAIRED: DevicePaired = Object.freeze({ daemons: Object.freeze([]), selected: null });
+
+const project = (snapshot: DaemonListSnapshot): DevicePaired =>
+  Object.freeze({
+    daemons: Object.freeze(
+      snapshot.daemons.map(paired => Object.freeze({ daemon: paired.daemon, title: daemonTitle(paired) })),
+    ),
+    selected: snapshot.selected,
+  });
 
 /**
- * THE PAIRED LIST, DAEMON-LESS SAFE (S9): every paired daemon and the selected id, live — what a device view needs to
- * tell a machine that is still connecting (paired, no row yet) from one this device is not paired with. It reads the
- * device context, so it answers in a device view, a daemon-less screen and a per-daemon view alike (unlike
- * `usePairedDaemons`, which `WithoutShell` hides); it carries no client. Empty outside an app shell.
+ * THE PAIRED MACHINES, FOR A DEVICE VIEW (S9): each paired daemon's id and title and the selected id, live — what a
+ * device view needs to tell a machine that is still connecting (paired, no row yet) from one this device is not
+ * paired with. It carries NO address, carrier or device id, and it answers only where the shell gave the plugin a
+ * `reach` (a device view, a device panel, a per-daemon or background view): a daemon-less screen — the kind a stranger's
+ * link opens — and code outside any place get the empty list, so no machine is named without a tap (MA4). Empty
+ * outside an app shell too.
  */
-export function useDevicePaired(): DaemonListSnapshot {
+export function useDevicePaired(): DevicePaired {
   const list = useOptionalDevice()?.daemons;
-  const read = useCallback(() => list?.snapshot() ?? NO_PAIRED, [list]);
+  const reached = usePluginIdentity()?.reach !== undefined;
+  const held = useRef<{ readonly source: DaemonListSnapshot; readonly view: DevicePaired } | null>(null);
+  const read = useCallback((): DevicePaired => {
+    if (list === undefined || !reached) return NO_PAIRED;
+    const source = list.snapshot();
+    if (held.current?.source !== source) held.current = { source, view: project(source) };
+    return held.current.view;
+  }, [list, reached]);
   return useSyncExternalStore(list?.subscribe ?? noSubscription, read, read);
 }

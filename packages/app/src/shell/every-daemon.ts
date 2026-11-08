@@ -1,5 +1,5 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { useSyncExternalStore } from 'react';
+import { useCallback, useRef, useSyncExternalStore } from 'react';
 import type { ClientOrigin } from '../client/daemon-client.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import { appHookProviders } from '../surfaces/app-hooks.ts';
@@ -53,6 +53,34 @@ const noReason = (): undefined => undefined;
  */
 export function useNoReach(): (daemon: string) => NoReach | undefined {
   return usePluginIdentity()?.reach?.whyNone ?? noReason;
+}
+
+const NO_REASONS: ReadonlyMap<string, NoReach> = new Map();
+
+const sameReasons = (a: ReadonlyMap<string, NoReach>, b: ReadonlyMap<string, NoReach>): boolean =>
+  a.size === b.size &&
+  [...a].every(([daemon, why]) => b.get(daemon)?.waiting === why.waiting && b.get(daemon)?.line === why.line);
+
+/**
+ * WHY THE CALLING PLUGIN HAS NO ROW, LIVE, FOR THESE MACHINES (S2): `useNoReach` as a value, for a view that decides
+ * what to do from it — the reasons, by daemon id, for every machine in `daemons` where the plugin has no row, and the
+ * view is drawn again when one appears, goes or changes (still being reached → off). The same map while none does.
+ * `daemons` must be stable between renders (memoise it). Empty outside a shell and on a daemon-less screen.
+ */
+export function useNoReaches(daemons: readonly string[]): ReadonlyMap<string, NoReach> {
+  const reach = usePluginIdentity()?.reach;
+  const held = useRef(NO_REASONS);
+  const read = useCallback((): ReadonlyMap<string, NoReach> => {
+    if (reach === undefined) return NO_REASONS;
+    const next = new Map<string, NoReach>();
+    for (const daemon of daemons) {
+      const why = reach.whyNone(daemon);
+      if (why !== undefined) next.set(daemon, why);
+    }
+    if (!sameReasons(held.current, next)) held.current = next.size === 0 ? NO_REASONS : next;
+    return held.current;
+  }, [reach, daemons]);
+  return useSyncExternalStore(reach?.subscribe ?? noSubscription, read, read);
 }
 
 /**

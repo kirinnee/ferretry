@@ -106,6 +106,14 @@ describe('daemonReach — a machine still connecting (m2)', () => {
     await expect(reach(d2)).rejects.toThrow('Warden is off on this daemon.');
   });
 
+  it('R2-n1 a row the shell allows before the row map has caught up is one more loop, not an end', async () => {
+    const rows = new Map<string, PluginClient>();
+    const reach = daemonReach(home, own, { clients: () => rows, whyNone: () => undefined });
+    const pending = reach(d2);
+    setTimeout(() => rows.set('d2', other), 150);
+    expect(await pending).toBe(other);
+  });
+
   it('m2 gives up with the machine’s sentence when the wait runs out', async () => {
     const reach = daemonReach(home, own, {
       clients: () => new Map(),

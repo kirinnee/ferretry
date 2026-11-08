@@ -41,7 +41,8 @@ export const daemonReach =
       if (row !== undefined) return row;
       const why = source.whyNone?.(connection.daemonId);
       if (why !== undefined && !why.waiting) throw new Error(why.line);
-      if (why === undefined || Date.now() >= deadline) throw new Error(why?.line ?? NO_REACH_SENTENCE);
+      // The shell allowing the plugin before the row map has caught up (`why === undefined`) is one more loop, not an end.
+      if (source.whyNone === undefined || Date.now() >= deadline) throw new Error(why?.line ?? NO_REACH_SENTENCE);
       await pause(ROW_POLL_MS);
     }
   };

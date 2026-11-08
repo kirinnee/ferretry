@@ -7,7 +7,7 @@ import { WithoutShell } from '../shell/context.tsx';
 import { DeviceProvider, NO_INSTALL_PROMPT } from '../shell/device-context.tsx';
 import type { DaemonReach } from '../shell/every-daemon.ts';
 import { HandOffs } from '../shell/hand-off.ts';
-import { WithPluginIdentity } from '../shell/plugin-identity.tsx';
+import { type NoReach, WithPluginIdentity } from '../shell/plugin-identity.tsx';
 import type { Authority } from '../shell/view-place.tsx';
 import { memoryStore } from '../storage/records.ts';
 import { ThemePreferenceStore } from '../theme/preferences.ts';
@@ -61,6 +61,11 @@ export interface DeviceViewHarness {
   readonly setRows: (rows: readonly DaemonReach[]) => void;
   /** The machines this device is paired with, in this order (a machine may be paired and have no row yet), and the selected one. */
   readonly setPaired: (daemons: readonly string[], selected?: string) => void;
+  /**
+   * Why the plugin has no row on a machine (`useNoReach`), by daemon id: a paired machine named here and with no row
+   * is answered with this; every other machine answers `undefined`. Live: the views are told, as the shell tells them.
+   */
+  readonly setNoReach: (reasons: Readonly<Record<string, NoReach>>) => void;
   /** A link arrives on the open page (a `hashchange`): the shell reads it, and a declared part leaves the address. */
   readonly arrive: (href: string) => void;
   /** What the address bar holds now (path, query and fragment). */
@@ -117,13 +122,14 @@ export function deviceViewHarness(options: {
   });
   let rows: readonly DaemonReach[] = [];
   const rowListeners = new Set<() => void>();
+  let noReach: Readonly<Record<string, NoReach>> = {};
   const reach = {
     subscribe: (listener: () => void) => {
       rowListeners.add(listener);
       return () => void rowListeners.delete(listener);
     },
     rows: () => rows,
-    whyNone: () => undefined,
+    whyNone: (daemon: string) => noReach[daemon],
   };
   const device = {
     theme: new ThemePreferenceStore(memoryStore()),
@@ -150,6 +156,10 @@ export function deviceViewHarness(options: {
     ),
     setRows: next => {
       rows = next;
+      for (const listener of [...rowListeners]) listener();
+    },
+    setNoReach: reasons => {
+      noReach = reasons;
       for (const listener of [...rowListeners]) listener();
     },
     setPaired: (ids, selected) => {
