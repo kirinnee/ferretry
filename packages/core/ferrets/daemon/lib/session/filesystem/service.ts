@@ -717,6 +717,7 @@ export class SessionFilesystem {
    * when Git confirms it is tracked in this cwd — itself a containment proof, since the index is queried
    * with literal pathspecs relative to the session cwd. An arbitrary missing path still 404s.
    */
+  // read-scoped: none — internal diff bytes, never shown; the outbound projection redacts
   async diff(
     cwd: string,
     relativePath: string,
@@ -825,7 +826,16 @@ export class SessionFilesystem {
       head ? { bytes: head.bytes, mode: head.mode } : undefined,
       working ? { bytes: working, mode: executable ? 0o100755 : 0o100644 } : undefined,
     );
-    return { path: rel, diff: rendered.diff, kind, ...(rendered.truncated ? { truncated: true } : {}) };
+    return {
+      path: rel,
+      diff: rendered.diff,
+      kind,
+      ...(rendered.truncated ? { truncated: true } : {}),
+      sides: {
+        ...(head ? { head: head.bytes } : {}),
+        ...(working ? { working } : {}),
+      },
+    };
   }
 
   /**

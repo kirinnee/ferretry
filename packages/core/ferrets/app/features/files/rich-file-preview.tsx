@@ -228,6 +228,13 @@ export const RichFilePreview = ({ scope, path, revision }: RichFilePreviewProps)
   // scroller, so it costs no reading position, and a dismiss would only be a
   // second way to lose the only report the preview gets.
   const stale = <StaleNotice what="this preview" status={preview} onRetry={preview.reload} />;
+  // Masked bytes are not the file: they are never offered to open or download as if they were.
+  const masked = preview.data.redacted === true;
+  const maskedNote = masked ? (
+    <div className="kt-fs-note" data-tone="warn" role="status">
+      private values masked — this is not the file
+    </div>
+  ) : null;
   if (!preview.data.base64 || bytes === null)
     return (
       <div className="kt-fs-note" data-tone="warn" role="status">
@@ -252,6 +259,7 @@ export const RichFilePreview = ({ scope, path, revision }: RichFilePreviewProps)
     return (
       <div className="kt-rich-file">
         {stale}
+        {maskedNote}
         <div className="kt-rich-file-table scroll-thin">
           <table>
             <tbody>
@@ -275,7 +283,9 @@ export const RichFilePreview = ({ scope, path, revision }: RichFilePreviewProps)
             Table preview is capped at 400 rows, 40 columns, and 2,000 characters per cell.
           </div>
         )}
-        {url && <PreviewActions href={url} filename={path.split('/').at(-1) ?? 'file.csv'} canOpen={false} />}
+        {url && !masked && (
+          <PreviewActions href={url} filename={path.split('/').at(-1) ?? 'file.csv'} canOpen={false} />
+        )}
       </div>
     );
   }
@@ -289,6 +299,7 @@ export const RichFilePreview = ({ scope, path, revision }: RichFilePreviewProps)
   return (
     <div className="kt-rich-file">
       {stale}
+      {maskedNote}
       {kind === 'html' && (
         <iframe
           className="kt-rich-file-frame"
@@ -329,7 +340,7 @@ export const RichFilePreview = ({ scope, path, revision }: RichFilePreviewProps)
           )}
         </>
       )}
-      <PreviewActions href={url} filename={filename} canOpen={kind === 'pdf' || kind === 'raster'} />
+      {!masked && <PreviewActions href={url} filename={filename} canOpen={kind === 'pdf' || kind === 'raster'} />}
     </div>
   );
 };

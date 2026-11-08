@@ -3,6 +3,7 @@ import type { LaunchInstructionSectionId } from '../../../../../daemon/lib/proto
 import type { RestartQueueEntry } from '../../../../../contract/index.ts';
 import should from 'should';
 import {
+  RESTART_BUSY_DETAIL,
   RESTART_RETRY_BASE_MS,
   RESTART_RETRY_CAP_MS,
   RestartBusy,
@@ -66,7 +67,7 @@ const make = (w: World): RestartService => {
     restart: async (id, requestedBy) => {
       w.askedBy.push(requestedBy);
       w.attempts.push(w.clock.now - Date.parse(AT));
-      if (w.busy.has(id)) throw new RestartBusy('a test run is open');
+      if (w.busy.has(id)) throw new RestartBusy();
       const broken = w.broken.get(id);
       if (broken !== undefined) throw new Error(broken);
       w.restarted.push(id);
@@ -123,11 +124,12 @@ describe('RestartService.restart', () => {
     should(result.restarted).eql([]);
   });
 
-  it('should queue a refused ferret as in-flight with the sentence the inventory gave', async () => {
+  it('should queue a refused ferret as in-flight with the one fixed sentence, whatever the inventory knew', async () => {
     const w = world([idle('a', 'Wren')]);
     w.busy.add('a');
     const result = await make(w).restart({ scope: 'all' });
-    should(result.queued).eql([{ id: 'a', name: 'Wren', reason: 'in-flight', detail: 'a test run is open' }]);
+    should(result.queued).eql([{ id: 'a', name: 'Wren', reason: 'in-flight', detail: RESTART_BUSY_DETAIL }]);
+    should(RESTART_BUSY_DETAIL).equal('A restart now would lose work that is still in flight.');
     should(w.queue[0]?.onlyIfOutdated).be.false();
   });
 

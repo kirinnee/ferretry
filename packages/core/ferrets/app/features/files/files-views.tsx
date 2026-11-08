@@ -367,6 +367,9 @@ export interface FileBodyProps {
   };
 }
 
+/** Said wherever masked bytes are shown: the daemon replaced a private value, so this is not the real file. */
+const MASKED_NOTICE = 'private values masked — this is not the file';
+
 export const FileBody = ({ file, path, raw = false, selection, targetLineRef, preview }: FileBodyProps) => {
   const refusal = fileRefusal(file);
   const content = file.content ?? '';
@@ -387,6 +390,11 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, pr
     [refusal, raw, renderedMarkdown, content, lang],
   );
   const highlightingOff = !raw && html === null && lang !== undefined && content.length > HIGHLIGHT_LIMIT;
+  const maskedNote = file.redacted ? (
+    <Note tone="warn" role="status">
+      {MASKED_NOTICE}
+    </Note>
+  ) : null;
   const highlightNote = highlightingOff ? (
     <div className="kt-fs-note" role="status">
       Syntax highlighting is off above {HIGHLIGHT_LIMIT.toLocaleString()} characters.
@@ -413,19 +421,24 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, pr
   if (!content) return <Note role="status">This file is empty.</Note>;
   if (!raw && renderedMarkdown)
     return (
-      <div className="kt-fs-md">
-        <Markdown text={content} />
-      </div>
+      <>
+        {maskedNote}
+        <div className="kt-fs-md">
+          <Markdown text={content} />
+        </div>
+      </>
     );
   if (selection)
     return (
       <>
+        {maskedNote}
         {highlightNote}
         <SourceLines content={content} html={html} lang={lang} selection={selection} targetLineRef={targetLineRef} />
       </>
     );
   return (
     <>
+      {maskedNote}
       {highlightNote}
       <div className="kt-fs-code scroll-thin">
         {raw || html === null ? (
