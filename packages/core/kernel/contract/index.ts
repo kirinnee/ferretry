@@ -16,6 +16,7 @@ export * from './kernel.ts';
 export * from './policy.ts';
 export * from './pinned.ts';
 export * from './ports.ts';
+export * from './push-envelope.ts';
 export * from './refusals.ts';
 export * from './run.ts';
 export * from './route.ts';
