@@ -1,3 +1,5 @@
+import { FERRET_CHANNEL_FOLDER } from '../../../contract/sessions-root.ts';
+
 /**
  * How the daemon hands an agent a message through a FILE, and how the app reads that hand-off back.
  *
@@ -36,4 +38,36 @@ const ASSIGNED_TASK_HEADING = '# Assigned task\n\n';
 /** The turn-one document an agent reads. */
 export function assignedTaskDocument(prompt: string): string {
   return `${ASSIGNED_TASK_HEADING}${prompt}\n`;
+}
+
+/** What surrounds the path in a queued-message pointer, typed into a BUSY pane (today's protocol, word for word). */
+const QUEUED_POINTER_HEAD = 'Read the queued message file at ';
+const QUEUED_POINTER_TAIL = ' completely now, then follow every instruction inside it.';
+
+/** What is typed into a BUSY pane when the message was too long to type and went to `payloadFile`. */
+export function queuedMessageInstruction(payloadFile: string): string {
+  return `${QUEUED_POINTER_HEAD}${payloadFile}${QUEUED_POINTER_TAIL}`;
+}
+
+/**
+ * The longest message typed INLINE into a busy pane's own queue (today's `nativeQueueInlineMaxChars`). A longer one is
+ * written to a file in the ferret's own `channel/` folder and the queue is handed the one-line pointer instead: a long
+ * paste into a working harness's composer is the one the queue proof least often recognises.
+ */
+const NATIVE_QUEUE_INLINE_MAX_CHARS = 1_000;
+
+/** Whether a native-queue ride must go through a file rather than the composer (today's `isFileBackedQueue`). */
+export function isFileBackedQueue(payload: string): boolean {
+  return payload.length > NATIVE_QUEUE_INLINE_MAX_CHARS;
+}
+
+/** A send id that may name a queued-message file: the protocol's closed grammar (`queued-[\w-]{1,128}`). */
+const QUEUED_NAME = /^[\w-]{1,128}$/u;
+
+/**
+ * The queued-message file for `sendId`, relative to the ferret's own session folder: `channel/queued-<send id>.md`, the
+ * name the app reads back out of the pointer (`turn-handoff.ts`). An id outside the grammar names no file.
+ */
+export function queuedPayloadFile(sendId: string): string | undefined {
+  return QUEUED_NAME.test(sendId) ? `${FERRET_CHANNEL_FOLDER}/queued-${sendId}.md` : undefined;
 }

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ApiError, type Log, type RootHandle, type RootsPort } from '@ferretry/kernel/contract';
 import { FERRET_READABLE_FOLDERS, FERRET_SESSIONS_ROOT } from '../../contract/sessions-root.ts';
 import { type Duration, milliseconds } from '@ferretry/std';
@@ -24,7 +24,7 @@ import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.ts';
 import type { FerretSessionPort, ReviveTurn, ReviveTurnRequest } from '../lib/ferrets/service.ts';
 import { type SessionDocumentSeed, sessionDocument, sessionStateDocument } from '../lib/ferrets/session-document.ts';
-import { assignedTaskDocument } from '../lib/protocol/turn-handoff.ts';
+import { assignedTaskDocument, queuedPayloadFile } from '../lib/protocol/turn-handoff.ts';
 import { firstTurnInstruction } from '../lib/session/lifecycle/policy.ts';
 import type { SessionEffectKey } from '../lib/session/effects/types.ts';
 import { defaultSessionResumeSettings } from '../lib/session/resume/settings.ts';
@@ -185,6 +185,7 @@ export class SessionFiles {
         const id = parseSessionId(ferret);
         return await this.turnStore(id).list(id, options);
       },
+      queued: async (ferret, payload, sendId) => await this.writeQueued(parseSessionId(ferret), payload, sendId),
     };
   }
 
@@ -304,6 +305,22 @@ export class SessionFiles {
       this.deps.log.warn('a revive turn could not be counted, so the ferret was not relaunched', { ferret: id });
       throw error;
     }
+  }
+
+  /**
+   * A message too long to type into a busy pane, written to the ferret's own `channel/queued-<send id>.md` (today's
+   * `FileSendTurnStore.writeQueuedPayload`): the folder made `0700` first, the file published durably and `0600`
+   * through a temporary name, so an agent that opens the path the instant it is told never reads half a message. The
+   * same send id rewrites the same file; an absent or out-of-grammar one takes a fresh id. Answers the absolute path.
+   */
+  private async writeQueued(id: SessionId, payload: string, sendId: string | undefined): Promise<string> {
+    const root = this.root(id);
+    await new OwnFolder(root).ensure();
+    const relative = (sendId === undefined ? undefined : queuedPayloadFile(sendId)) ?? queuedPayloadFile(randomUUID());
+    const named = relative === undefined ? undefined : root.resolve(relative);
+    if (named === undefined || !named.ok) throw new Error('a queued message file of this ferret could not be named');
+    await root.publish(named.value, new TextEncoder().encode(`${payload}\n`), { mode: 0o600 });
+    return named.value;
   }
 
   /** The ferret's own `sessions` handle: one minted folder, internal, private. */

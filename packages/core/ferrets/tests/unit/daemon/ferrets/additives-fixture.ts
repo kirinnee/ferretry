@@ -20,7 +20,7 @@ import {
   ferretId,
   T0,
 } from '../../../../contract/testing/index.ts';
-import { FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
+import { type FerretSessionPort, FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 
@@ -81,6 +81,8 @@ export interface AdditivesOptions {
   readonly empty?: boolean;
   /** Bind a QUEUEING act runner (one serial queue per pane) and a runner that acts per write, as the real ones do. */
   readonly queueing?: { readonly held: Set<string>; readonly code?: 'held' | 'quarantined' | 'input_pending' };
+  /** The ferret's session files, when a test binds them (unbound by default, as before). */
+  readonly session?: FerretSessionPort;
 }
 
 /** A Ferrets service over fakes; with `queueing`, a runner that acts per write on the kernel's real act rules. */
@@ -125,6 +127,7 @@ export function additivesFixture(options: AdditivesOptions = {}) {
     },
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
     asks: { open: async () => [] },
+    ...(options.session === undefined ? {} : { session: options.session }),
   };
   const service = new FerretsService(registry, tokens, ports);
   return {

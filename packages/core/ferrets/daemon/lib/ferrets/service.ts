@@ -16,8 +16,10 @@ import type {
   FerretPrompt,
   HarnessDeliveryFailure,
   HarnessInterrupted,
+  HarnessQueueOptions,
   HarnessRefusal,
   RunnerDeliveryFailure,
+  RunnerLook,
   MoveFailure,
   MoveOptions,
   ResumeOptions,
@@ -50,6 +52,7 @@ import { claimStartName, displayAgentName, type SessionNameClaims } from '../nam
 import { normalizeCallsign } from '../names/policy.ts';
 import type { NameAllocationErrorCode } from '../names/types.ts';
 import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
+import { isFileBackedQueue, queuedMessageInstruction } from '../protocol/turn-handoff.ts';
 import {
   diedParked,
   FerretDetailsSchema,
@@ -171,6 +174,24 @@ export interface FerretsPorts {
 }
 
 /**
+ * Whether one look shows the ferret mid-turn (today's `paneMidTurn`, from the pane alone): the harness's own working
+ * line is on screen and no prompt is. A permission prompt or a harness dialog is not "busy" (the delivery answers it as
+ * a dialog), and a look that saw nothing proves nothing, so neither is answered early. Read from the pane, never the
+ * record: a ferret the turn watch still calls `working` but whose pane shows neither work nor a prompt goes on to the
+ * delivery's own wait, because typing into an idle prompt as if it were a queue is the worse mistake.
+ */
+function midTurn(look: RunnerLook | undefined): boolean {
+  return (
+    look !== undefined &&
+    look.working &&
+    !look.atPrompt &&
+    !look.permission &&
+    look.prompt === undefined &&
+    look.dialog === undefined
+  );
+}
+
+/**
  * What a launch asks of the ferret's private session files, before the harness is asked for anything.
  *
  * `prepare` makes the ferret's folder on the `sessions` root and narrows an existing one to `0700`; a refusal stops
@@ -214,6 +235,14 @@ export interface FerretSessionPort {
   revive?(ferret: FerretId, request: ReviveTurnRequest): Promise<ReviveTurn | undefined>;
   /** The ferret's turn documents, oldest first (`FerretsApi.turns`). */
   turns?(ferret: FerretId, options: { readonly strict: boolean }): Promise<readonly FerretTurnDocument[]>;
+  /**
+   * Additive (ruling #45, today's `writeQueuedPayload`): writes a message too long to type into a busy pane to THIS
+   * ferret's own `channel/queued-<send id>.md` (durably, `0600`, through a temporary file, so an agent that opens it the
+   * instant it is told never reads half of it; the same id rewrites the same file) and answers its absolute path. An
+   * absent or out-of-grammar `sendId` takes a fresh id. Written before any key, so it is the message's only copy if the
+   * transport then goes wrong. Unbound: a long queued message is refused, never typed inline.
+   */
+  queued?(ferret: FerretId, payload: string, sendId?: string): Promise<string>;
   /**
    * The absolute folders of THIS ferret's own session folder its agent may read without asking
    * (`FERRET_READABLE_FOLDERS`, today's `handoffFolders`), handed to the harness as `LaunchSpec.readable`. Unbound:
@@ -1002,19 +1031,37 @@ export class FerretsService implements FerretsApi {
       deliver: async (delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>> => {
         const found = pane();
         if (!found.ok) return found;
+        // Ruling #45: one look first. A ferret visibly at work is answered busy NOW, nothing typed, rather than after
+        // the delivery's readiness wait gives up on a prompt that will not come until the turn ends.
+        if (midTurn(await found.value.runner.look?.(found.value.handle).catch(() => undefined)))
+          return err({ refused: 'not_ready', why: 'busy' });
         // The runner guards each write with kernel.act on this pane itself; a hold it meets types nothing.
         const delivered = await written(async () => await found.value.runner.deliver(found.value.handle, delivery));
         if (delivered.ok) this.ports.delivered?.(ferret);
         return delivered;
       },
-      queue: async (text: string): Promise<Result<QueueOutcome, HarnessDeliveryFailure>> => {
+      queue: async (
+        text: string,
+        options?: HarnessQueueOptions,
+      ): Promise<Result<QueueOutcome, HarnessDeliveryFailure>> => {
         const found = pane();
         if (!found.ok) return found;
         const { handle, runner } = found.value;
         const queue = runner.queue?.bind(runner);
         if (queue === undefined) return err({ refused: 'plugin_unavailable' });
+        // Ruling #45 (today's `native-file` path): a long message goes by file, written BEFORE any key, and the queue
+        // is typed the one-line pointer. With nowhere to write it, it is refused rather than pasted inline.
+        let typed = text;
+        if (isFileBackedQueue(text)) {
+          const write = this.ports.session?.queued?.bind(this.ports.session);
+          if (write === undefined) return err({ refused: 'plugin_unavailable' });
+          // A file that could not be written typed nothing: answered as a refusal, so the message may go again.
+          const file = await write(ferret, text, options?.sendId).catch(() => undefined);
+          if (file === undefined) return err({ refused: 'plugin_unavailable' });
+          typed = queuedMessageInstruction(file);
+        }
         // As `deliver`: the runner acts on this pane for each write it makes, so it is NOT wrapped in a second act here.
-        const queued = await written(async () => await queue(handle, text));
+        const queued = await written(async () => await queue(handle, typed));
         if (queued.ok) this.ports.delivered?.(ferret);
         return queued;
       },
