@@ -486,7 +486,8 @@ export default definePlugin({
       { hook: Runners },
       { hook: Logins },
       { hook: LaunchParts },
-      { hook: StartDecide },
+      // 15 s: Codex's catalog read (a child, bounded at 10 s) answers a start that asked for fast mode.
+      { hook: StartDecide, timeoutMs: 15_000 },
       { hook: SitrepLines },
       { hook: FerretChanged },
       { hook: FerretStopping },

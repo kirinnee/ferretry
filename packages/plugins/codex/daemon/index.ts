@@ -16,7 +16,9 @@ import { HostPrograms } from './adapters/host-programs.ts';
 import { NpmCodexLatest } from './adapters/npm-latest.ts';
 import { packageRunner } from './adapters/package-run.ts';
 import { HostCodexProbe } from './adapters/probe.ts';
-import { codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
+import { CodexAppServerCatalog } from './adapters/app-server-catalog.ts';
+import { CodexRuntimeCatalogCache, codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
+import { fastStartDecision } from './lib/fast-mode.ts';
 import { codexProjectApprovals } from './lib/project-approvals.ts';
 
 export default implementDaemon(manifest, {
@@ -76,6 +78,25 @@ export default implementDaemon(manifest, {
       return read.ok ? read.value : undefined;
     };
 
+    // The live model catalog, held as Codex holds its own, read only by a start that asks for fast mode. It runs under
+    // the probe home with no login's environment (GAP(codex): the catalog is the unauthenticated one, declared in
+    // ports-pending.json); a read that fails is `[]`, which refuses nothing.
+    const appServer = new CodexAppServerCatalog({
+      spawn: kernel.spawn,
+      clock: kernel.clock,
+      clientName: 'ferretry',
+      clientVersion: manifest.version,
+    });
+    const catalogs = new CodexRuntimeCatalogCache(
+      async binary => await appServer.models(binary, probeHome.value),
+      () => kernel.clock.nowMs(),
+    );
+    const catalogChoices = async () => {
+      const location = await locate();
+      if (location.outcome !== 'located') return [];
+      return await catalogs.get(location.path, probeHome.value);
+    };
+
     const start: typeof service.start = async request => {
       const result = await service.start(request);
       void service
@@ -99,6 +120,7 @@ export default implementDaemon(manifest, {
       // answers `not-taken` for a Codex launch without asking, so this is the contract's answer, not MCP's gate.
       provides: { codex: { view, discovery, approvedProjectServers: codexProjectApprovals } },
       hooks: {
+        'start.decide': input => fastStartDecision(input, catalogChoices),
         'harnesses:codex': codexHarness({
           kernel,
           locate,

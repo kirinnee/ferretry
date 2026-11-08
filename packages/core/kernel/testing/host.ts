@@ -443,7 +443,11 @@ async function start(world: World): Promise<TestHost> {
               (taker.impl as (i: unknown) => HookDecision | Promise<HookDecision>)(input),
               hook.timeoutMs,
             );
-            if (!answer.allow) return answer;
+            // The real host's rule: a string `code` passes through, anything else is dropped.
+            if (!answer.allow)
+              return typeof answer.code === 'string'
+                ? { allow: false, reason: answer.reason, code: answer.code }
+                : { allow: false, reason: answer.reason };
           } catch (error) {
             return { allow: false, reason: `${taker.id}: ${error instanceof Error ? error.message : String(error)}` };
           }

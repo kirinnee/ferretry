@@ -11,7 +11,7 @@ import {
   CodexUpdateFinished,
 } from './contract/index.ts';
 import { cap } from '@ferretry/core-gate/contract';
-import { Harnesses } from '@ferretry/core-ferrets/contract';
+import { Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
 
 /**
  * Codex (§2.3): a harness, the same way as Claude Code. It takes `harnesses:codex` from Ferrets and needs a `runners`
@@ -76,7 +76,7 @@ export default definePlugin({
   },
 
   hooks: {
-    takes: [{ hook: Harnesses, key: CODEX }],
+    takes: [{ hook: Harnesses, key: CODEX }, { hook: StartDecide }],
   },
 
   onboarding: [{ id: 'harness', title: 'Codex', order: 21 }],

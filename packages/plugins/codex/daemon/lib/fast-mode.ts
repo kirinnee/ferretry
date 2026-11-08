@@ -14,7 +14,12 @@
  * service tier of its own is assumed to be on the model's default; that is a declared gap.
  */
 
+import type { StartDecideInput, StartRefusalCode } from '@ferretry/core-ferrets/contract';
+import { ALLOW, type HookDecision } from '@ferretry/kernel/contract';
 import type { RuntimeModelCatalog, RuntimeModelChoice } from './models.ts';
+
+/** The code Ferrets maps to `409 unservable_model` (its closed list; typed against it). */
+const UNSERVABLE_MODEL: StartRefusalCode = 'unservable_model';
 import type { FastModeFacts } from './runtime-switch.ts';
 
 /** What a session's records say about its model and fast mode (the fields the planner reads, nothing else). */
@@ -73,4 +78,24 @@ export function fastModeFacts(view: FastView, catalog: RuntimeModelCatalog): Fas
     ...(choice?.label !== undefined || model !== undefined ? { model: choice?.label ?? (model as string) } : {}),
     ...(current === undefined ? {} : { current }),
   };
+}
+
+/**
+ * The `start.decide` answer for a start that asks for fast mode: refuse it, with the code Ferrets maps to `409
+ * unservable_model`, when the live Codex catalog says the model has none. Only this harness's own starts, and only when
+ * fast was asked (the catalog costs a child, so a start that did not ask never reads it).
+ *
+ * The model is the one the start NAMED, else the catalog's own default. `readChoices` is the catalog cache; a read that
+ * fails is `[]`, which refuses nothing (as today): the session then runs on the tier it was given.
+ */
+export async function fastStartDecision(
+  input: StartDecideInput,
+  readChoices: () => Promise<readonly RuntimeModelChoice[]>,
+): Promise<HookDecision> {
+  if (input.harness !== 'codex' || input.fast !== true) return ALLOW;
+  const choices = await readChoices().catch((): readonly RuntimeModelChoice[] => []);
+  const model = input.model ?? choices.find(choice => choice.isDefault === true)?.value;
+  if (model === undefined) return ALLOW;
+  const refusal = fastStartRefusal(model, choices);
+  return refusal === undefined ? ALLOW : { allow: false, reason: refusal, code: UNSERVABLE_MODEL };
 }
