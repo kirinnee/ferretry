@@ -8,7 +8,9 @@ import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
 import { toolEnvironment } from './adapters/process.ts';
 import { answerArguments, EXIT_USAGE } from './arguments.ts';
+import { nodeFs } from './adapters/node-fs.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
+import { checkHost, processAlive, tcpProbe } from './check.ts';
 import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
 import { listenLocal } from './listener.ts';
@@ -35,7 +37,7 @@ async function main(): Promise<number> {
   }
   const { configFile, host: hostOverride, logLevel } = answer.overrides;
   const unserved = [
-    answer.kind !== 'boot' && `--${answer.kind}`,
+    answer.kind === 'print-config' && '--print-config',
     configFile !== undefined && '--config',
     hostOverride !== undefined && '--host',
     logLevel !== undefined && '--log-level',
@@ -50,6 +52,17 @@ async function main(): Promise<number> {
     process.stderr.write(`${usage.daemonName}: FY_PORT ${String(port)} is not a port number.\n`);
     return EXIT_USAGE;
   }
+  if (answer.kind === 'check')
+    return await checkHost({
+      fs: nodeFs(() => crypto.randomUUID()),
+      home,
+      host: '127.0.0.1',
+      port,
+      daemonName: usage.daemonName,
+      probe: tcpProbe,
+      alive: processAlive,
+      say: line => void process.stdout.write(`${line}\n`),
+    });
   // Nothing is written before the home is decided (§9.3): until boot creates `logs/`, a line is dropped.
   const sink = fileLogSink(line => {
     try {
