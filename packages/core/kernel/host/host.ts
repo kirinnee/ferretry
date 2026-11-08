@@ -113,7 +113,8 @@ import {
 } from './permissions.ts';
 import type { HostStatePort } from './state/state-port.ts';
 import { openHome, probeHome } from './home.ts';
-import { ensureInternalRootBases, rootsPortFor } from './roots.ts';
+import { ensureInternalRootBases, ownFolderSpellings, rootsPortFor } from './roots.ts';
+import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from './processes.ts';
 import { PinRegistry } from './pins.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import type { PathsPort, ScratchPort } from '../contract/ports.ts';
@@ -199,6 +200,8 @@ export interface HostAdapters {
   readonly executable?: ExecutableProbe;
   /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /** This user's process table, for `kernel.processes` (kernel-only). Absent: nothing is listed or signalled. */
+  readonly processTable?: ProcessTable;
   /** Gzips an opted-in route's answer. Absent: every answer is plain. */
   readonly compressor?: ResponseCompressor;
   /**
@@ -711,6 +714,13 @@ async function bootLocked(
         manifest.permissions?.hostFacts === true
           ? (adapters.hostFacts ?? NO_HOST_FACTS)
           : undeclaredHostFacts(manifest.id, adapters.hostFacts ?? NO_HOST_FACTS),
+      // The same rule as the testing host (`./processes.ts`), over this machine's table and this host's own handles.
+      processes: processesPortFor(
+        manifest.id,
+        manifest.permissions?.processes,
+        ownFolderSpellings,
+        adapters.processTable ?? NO_PROCESS_TABLE,
+      ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],

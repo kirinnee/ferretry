@@ -33,6 +33,13 @@ export {
 export { type DrivenClock, fixedClock } from './clock.ts';
 export { type TestIdentity, testIdentity } from './identity.ts';
 export {
+  TEST_PROCESS_UID,
+  type TestProcess,
+  type TestProcessTable,
+  type TestProcessTableSpec,
+  testProcessTable,
+} from './processes.ts';
+export {
   type OpenSocket,
   type RequestInit2 as TestRequestInit,
   type TestHost,
