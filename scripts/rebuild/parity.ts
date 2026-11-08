@@ -163,6 +163,8 @@ function ownerOf(file: string, what = ''): string {
   if (/\/fleet\/setup/.test(semantic)) return 'onboarding';
   if (/\/diagnostics\/profile/.test(semantic)) return 'usage';
   if (/\/skill-installs/.test(semantic)) return 'skills';
+  // The Add skills page lists the skills of the catalogs this device subscribes to: Catalogs' page, reached from Skills' slot.
+  if (/add-skills-page\.tsx/.test(file) || what === "screen 'add-skills'") return 'catalogs';
   if (/agent-pins\.json/.test(semantic)) return 'ferrets';
   if (/\bboard(?:[ ._-]|$)|boardimporter|cardstarts|unfiledrefiler/.test(semantic)) return 'board';
   if (/sweepdeadlines/.test(semantic)) return 'asks';
@@ -246,12 +248,14 @@ function renamed(what: string): string {
     .replace(/--ping\b/g, '--buzz')
     .replace(/\btask_plan\b/g, 'card_plan');
 }
-/** Owner decision !A466 (2026-11-08): the local skill copy and the Add skills page that only offered it are gone from 5.0. */
+/**
+ * Owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0, with the "from this machine" group of the Add
+ * skills page. The page itself stays, as Catalogs' (its catalogs group), so only the machine group's file is removed.
+ */
 const REMOVED_BY_OWNER = 'removed by design (owner decision !A466, 2026-11-08: the local skill copy is gone)';
-const OWNER_REMOVED = /local-skill-install|add-skills-page\.tsx|machine-skills-group\.tsx/;
+const OWNER_REMOVED = /local-skill-install|machine-skills-group\.tsx/;
 function removal(kind: Kind, what: string, file: string, detail: string): string | undefined {
-  if ((OWNER_REMOVED.test(file) && !(kind === 'V' && what === 'fy skill')) || what === "screen 'add-skills'")
-    return REMOVED_BY_OWNER;
+  if (OWNER_REMOVED.test(file) && !(kind === 'V' && what === 'fy skill')) return REMOVED_BY_OWNER;
   if (/\balias of\b/.test(detail)) return 'removed by design (§1.4: no aliases)';
   if (
     kind === 'F' &&

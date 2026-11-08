@@ -161,11 +161,6 @@
         "daemon/lib/env-profiles.ts",
         "daemon/lib/harness-env.ts",
         "daemon/lib/harness.ts",
-        "daemon/lib/identity.ts",
-        "daemon/lib/account/store-inspection.ts",
-        "daemon/lib/presets/detect.ts",
-        "daemon/lib/presets/login.ts",
-        "daemon/lib/presets/catalog.ts",
         "daemon/lib/service/publication.ts"
       ]
     },
