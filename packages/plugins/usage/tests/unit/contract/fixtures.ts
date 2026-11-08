@@ -1,7 +1,6 @@
 import type { AnalyticsResponse } from '../../../contract/index.ts';
 
 export const INSTANT = '2026-07-30T12:00:00Z';
-export const LATER_INSTANT = '2026-07-30T12:01:00Z';
 
 export const analyticsResponse = {
   query: '',

@@ -25,9 +25,9 @@ export interface FerretScope {
 }
 
 /** The hand-off to the ferret's composer: a card reference to type into it. Conversation listens for it. */
-export const COMPOSE_REFERENCE_EVENT = 'ferretry:compose-reference';
+const COMPOSE_REFERENCE_EVENT = 'ferretry:compose-reference';
 
-export interface ComposeReference {
+interface ComposeReference {
   readonly ferret: string;
   readonly reference: string;
 }

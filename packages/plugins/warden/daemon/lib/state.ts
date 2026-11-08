@@ -247,7 +247,7 @@ const QueueMetaSchema = z.object({
  * The flags the live FLEET warden was sent about: while it runs they are being looked at, so none of
  * them is put in front of the owner as a Warden notification (`owner-routes.ts`). Cleared once that warden is gone and its report judges them.
  */
-export interface WardenSweepCoverage {
+interface WardenSweepCoverage {
   readonly wardenId: string;
   readonly reportPath: string;
   readonly anomalies: readonly { readonly sessionId: string; readonly kind: WardenAnomalyKind }[];

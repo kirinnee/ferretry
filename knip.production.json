@@ -153,7 +153,14 @@
     },
     "packages/plugins/board": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/lib/board-done.ts",
+        "app/lib/board-move.ts",
+        "app/lib/card-reference-context.ts",
+        "app/lib/lane-proposal-link.ts",
+        "cli/lib/lane-guide.ts"
+      ]
     },
     "packages/plugins/claude-code": {
       "entry": ["app/views/*.tsx"],
@@ -197,7 +204,8 @@
     },
     "packages/plugins/warden": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": ["daemon/lib/auto-move-failures.ts", "daemon/lib/orphan-list.ts"]
     },
     "packages/plugins/connections": {
       "entry": ["worker/src/adapters/worker.ts"],
@@ -271,6 +279,69 @@
         "daemon/proxy/firewall/marker-reader.ts",
         "daemon/proxy/firewall/state.ts",
         "daemon/proxy/wire/firewall.ts"
+      ]
+    },
+    "packages/plugins/access": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/features/device-notice/devices-looked.ts",
+        "app/features/device-notice/new-device-notice.tsx",
+        "app/features/onboarding/device-kind.ts",
+        "app/features/pairing/device-refused-notice.tsx",
+        "app/features/pairing/pair-scanner.tsx",
+        "app/features/pairing/pairing-screen.tsx",
+        "app/features/settings/capability-list.tsx",
+        "app/features/settings/grants-api.ts",
+        "app/features/settings/grants-settings.tsx",
+        "app/features/settings/pair-phone.tsx",
+        "app/features/settings/security-api.ts",
+        "app/features/settings/security-log-settings.tsx",
+        "app/harness/pair-from-menu.tsx",
+        "app/hooks/use-qr-scan.ts",
+        "app/lib/device-preference.ts",
+        "app/lib/pair-exchange.ts",
+        "app/lib/pair-scan.ts",
+        "app/lib/pairing.ts",
+        "app/lib/push-clear.ts",
+        "app/lib/push-seen.ts",
+        "app/lib/qr-frame-decoder.ts",
+        "app/lib/security-log.ts",
+        "cli/lib/grants/commands.ts",
+        "cli/lib/grants/controller.ts",
+        "cli/lib/grants/gateway.ts",
+        "cli/lib/grants/ports.ts",
+        "cli/lib/grants/render.ts",
+        "daemon/adapters/grants/index.ts",
+        "daemon/adapters/pairing/index.ts",
+        "daemon/adapters/push/index.ts"
+      ]
+    },
+    "packages/plugins/voice": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/components/auto-read-chip.tsx",
+        "app/hooks/use-auto-read.ts",
+        "app/lib/stt/speed-bench-report.ts",
+        "app/lib/voice-chat/auto-read.ts",
+        "app/lib/voice-chat/reply-picker.ts",
+        "app/lib/voice-chat/turn-endpointer-scoring.ts",
+        "app/lib/voice-chat/turn-endpointer.ts",
+        "daemon/lib/speedups/index.ts",
+        "daemon/lib/stt/index.ts"
+      ]
+    },
+    "packages/plugins/usage": {
+      "entry": [],
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/hooks/use-spend-today.ts",
+        "app/lib/move-triggers.ts",
+        "daemon/adapters/usage/index.ts",
+        "daemon/adapters/usage/provider-quota/index.ts",
+        "daemon/lib/performance/fallbacks.ts",
+        "daemon/lib/performance/sampler-tee.ts"
       ]
     }
   },

@@ -34,7 +34,7 @@ export interface AccessClaimsOptions {
 export type ClaimPorts = Pick<ConnectPorts, 'crypto' | 'indexedDB'>;
 
 /** The store the claims, the rotation and the pairing exchange all share. */
-export const accessKeyStore = (ports: Pick<ConnectPorts, 'indexedDB'>): DeviceKeyStore =>
+const accessKeyStore = (ports: Pick<ConnectPorts, 'indexedDB'>): DeviceKeyStore =>
   new IndexedDbDeviceKeyStore(ports.indexedDB ?? undefined);
 
 export function accessClaims(ports: ClaimPorts, options: AccessClaimsOptions = {}): DeviceClaims {

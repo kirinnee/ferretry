@@ -71,13 +71,13 @@ export interface ReflexEvent {
 }
 
 /** A tick is late enough to discount when it ran this long after it was due. */
-export const LIVENESS_LAG_MS = 30_000;
+const LIVENESS_LAG_MS = 30_000;
 
 /** On-time looks in a row that saw nothing of a ferret before it counts as unwatched. */
-export const MISSED_LOOKS_LIMIT = 3;
+const MISSED_LOOKS_LIMIT = 3;
 
 /** Ticks without one that saw anything before the monitor itself counts as stalled: five minutes at 30 s. */
-export const STALLED_TICKS = 10;
+const STALLED_TICKS = 10;
 
 export class WardenLivenessMonitor {
   private readonly tracks = new Map<string, LivenessTrack>();

@@ -71,7 +71,8 @@
     },
     "packages/plugins/board": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}"]
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["app/lib/card-reference-context.ts", "app/lib/lane-proposal-link.ts"]
     },
     "packages/plugins/claude-code": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
@@ -115,7 +116,13 @@
     },
     "packages/plugins/voice": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/realworld/dev/**/*.ts"],
-      "project": ["**/*.{ts,tsx}"]
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["daemon/lib/speedups/index.ts"]
+    },
+    "packages/plugins/access": {
+      "entry": ["tests/**/*.test.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"],
+      "ignore": ["app/features/pairing/device-refused-notice.tsx", "app/lib/device-preference.ts"]
     }
   },
   "rules": {

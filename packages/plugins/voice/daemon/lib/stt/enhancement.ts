@@ -68,7 +68,7 @@ export function enhancementErrorView(error: SttEnhancementError): SttEnhancement
  * default model vary; a new provider is one frozen entry plus a member on the
  * protocol union.
  */
-export interface EnhancementProviderDefinition {
+interface EnhancementProviderDefinition {
   readonly id: SttEnhancementProvider;
   readonly label: string;
   /** Name of the secret-store entry holding the API key. The value is never read here. */
@@ -132,10 +132,7 @@ export function enhancementProviderViews(table: EnhancementProviderTable): reado
  * function, which passes a truthy check and then fails much later with the
  * wrong error code.
  */
-export function findEnhancementProvider(
-  table: EnhancementProviderTable,
-  provider: string,
-): EnhancementProviderDefinition {
+function findEnhancementProvider(table: EnhancementProviderTable, provider: string): EnhancementProviderDefinition {
   const definition = Object.hasOwn(table, provider) ? table[provider] : undefined;
   if (definition === undefined) throw new SttEnhancementError('provider_unknown', 'unknown enhancement provider');
   return definition;

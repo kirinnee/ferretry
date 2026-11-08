@@ -1,7 +1,7 @@
 /** The wire schema enforces the same ceiling; this exists to say *why* before a round trip. */
 const MAX_CARD_TITLE_WORDS = 5;
 
-export const CARD_TITLE_GUIDANCE =
+const CARD_TITLE_GUIDANCE =
   'Keep the card title to 5 words or fewer; move scope and implementation detail into the description.';
 
 function titleWordCount(title: string): number {

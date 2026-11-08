@@ -44,7 +44,7 @@ export const taskAsker = (task: object): TaskAsker | null => {
 export const isAgentTask = (task: object): boolean => taskAsker(task) === 'agent';
 
 /** Whether the daemon says a person asked for this card; a daemon that says nothing reads as "no". */
-export const askedByPerson = (task: object): boolean => declared(task, 'askedBy') === 'person';
+const askedByPerson = (task: object): boolean => declared(task, 'askedBy') === 'person';
 
 /** A FERRET card by the older rule: one a ferret asked for, or a sub-card no person asked for. Only an older daemon needs it. */
 const isFerretCard = (task: { readonly parent: CardRef | null }): boolean =>

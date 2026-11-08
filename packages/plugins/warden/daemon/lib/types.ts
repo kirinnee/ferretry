@@ -32,7 +32,7 @@ export function isTerminalStatus(status: WardenSessionStatus): boolean {
 }
 
 /** A teammate's declared wait (`fy signal waiting`). */
-export interface WardenDeclaredWait {
+interface WardenDeclaredWait {
   readonly since?: string;
   readonly until?: string;
   readonly condition?: string;

@@ -151,8 +151,6 @@ export const WardenFileSchema = z.strictObject({
   blessMinutes: NonNegative.optional(),
 });
 export type WardenFile = z.infer<typeof WardenFileSchema>;
-/** `PATCH /v1/warden/config`: the same partial shape. */
-export const WardenConfigPatchSchema = WardenFileSchema;
 
 /**
  * ON, AND FREE: the sweep runs every two minutes and its rules flag what they find, but both triage layers are off, so

@@ -41,7 +41,7 @@ export interface PasskeyStore {
 }
 
 /** The verifier's verdicts, as this module consumes them. The verifier itself lives in `../passkeys`. */
-export type PasskeyVerdict<T> = ({ readonly ok: true } & T) | { readonly ok: false; readonly reason: string };
+type PasskeyVerdict<T> = ({ readonly ok: true } & T) | { readonly ok: false; readonly reason: string };
 
 /**
  * The WebAuthn verifier, as the step-up service needs it: every byte it checks, already decoded.

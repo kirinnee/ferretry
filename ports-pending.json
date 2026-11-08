@@ -19,7 +19,9 @@
     "onboarding",
     "terminals",
     "usage",
-    "board"
+    "board",
+    "access",
+    "voice"
   ],
   "pendingReasons": {
     "runtimes": [
@@ -43,7 +45,9 @@
       "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
       "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost (a file with a top-level key the schema does not know is refused instead; the owner repairs it by hand); refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel",
-      "no stream of configuration changes reaches an app half: the settings card reads on mount, after its own save and when the tab becomes visible again, not the moment another editor (the CLI, a file edit) changes warden.yaml"
+      "no stream of configuration changes reaches an app half: the settings card reads on mount, after its own save and when the tab becomes visible again, not the moment another editor (the CLI, a file edit) changes warden.yaml",
+      "GAP(warden): daemon/lib/auto-move-failures.ts is not reached by the auto-move service (the machine item of moves that could not be made) (owner: warden port)",
+      "GAP(warden): daemon/lib/orphan-list.ts is not reached by the machine-wide Asks item (the orphaned-card list) (owner: warden port)"
     ],
     "claude-code": [
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
@@ -162,7 +166,13 @@
     "usage": [
       "S175, S176, S177 and S178 stay skipped (rows.test.ts) until the Logins sign-in usage read, the housekeeping worker and job runner (Ferrets) and the Vault sealed read are ported",
       "all 61 usage parity rows stay un-flipped until each is proved by name in a usage test",
-      "GAP(ferrets): the Info tab Usage and the ferret's limits (a ferret record carries none) are Usage's `ferret.side` panel; not contributed yet"
+      "GAP(ferrets): the Info tab Usage and the ferret's limits (a ferret record carries none) are Usage's `ferret.side` panel; not contributed yet",
+      "GAP(usage): app/hooks/use-spend-today.ts is not reached by the ferret.side spend panel (not contributed yet) (owner: usage port)",
+      "GAP(usage): app/lib/move-triggers.ts is not reached by Warden failover triggers (nothing reads them yet) (owner: usage port)",
+      "GAP(usage): daemon/adapters/usage/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: usage port)",
+      "GAP(usage): daemon/adapters/usage/provider-quota/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: usage port)",
+      "GAP(usage): daemon/lib/performance/fallbacks.ts is not reached by the performance profile report (the probe is not composed yet) (owner: usage port)",
+      "GAP(usage): daemon/lib/performance/sampler-tee.ts is not reached by the performance profile report (the probe is not composed yet) (owner: usage port)"
     ],
     "onboarding": [
       "10 parity rows have no test files: tests/unit/parity/app.test.tsx, commands.test.ts and storage.test.ts do not exist, and R-0092 is not proved yet",
@@ -175,6 +185,57 @@
     "terminals": [
       "GAP(ferrets): the tmux adapters daemon/adapters/tmux/pane-queue.ts, daemon/adapters/tmux/harness-launch-guard.ts, daemon/adapters/tmux/forget-ferret-identity.ts and daemon/adapters/tmux/tmux-release-reader.ts are ported and tested but nothing composes them until Ferrets wires the deliver and runner seams and reads FERRETRY_TEST (scripts/test/swept.sh) to arm it (gustavo)",
       "GAP(app): app/components/terminal-snapshot.tsx and app/components/terminal-snapshot-model.ts (S-0270), app/features/workspace/phone/terminal-key-bar.tsx, app/features/workspace/phone/terminal-keys.ts and app/lib/session-processes.ts are ported and tested but no surface mounts them until the app wiring (kaizen) lands"
+    ],
+    "access": [
+      "GAP(access): app/features/device-notice/devices-looked.ts is not reached by a panel of the app shell (the new-device notice) (owner: kaizen app shell)",
+      "GAP(access): app/features/device-notice/new-device-notice.tsx is not reached by a panel of the app shell (the new-device notice) (owner: kaizen app shell)",
+      "GAP(access): app/features/onboarding/device-kind.ts is not reached by the app shell onboarding (owner: kaizen app shell)",
+      "GAP(access): app/features/pairing/device-refused-notice.tsx is not reached by the app shell page shown to a refused device (owner: kaizen app shell)",
+      "GAP(access): app/features/pairing/pair-scanner.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/features/pairing/pairing-screen.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/features/settings/capability-list.tsx is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/features/settings/grants-api.ts is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/features/settings/grants-settings.tsx is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/features/settings/pair-phone.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/features/settings/security-api.ts is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/features/settings/security-log-settings.tsx is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): app/harness/pair-from-menu.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/hooks/use-qr-scan.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/device-preference.ts is not reached by a notification setting of the devices tab (owner: nelly)",
+      "GAP(access): app/lib/pair-exchange.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/pair-scan.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/pairing.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/push-clear.ts is not reached by the app shell notification handling (owner: kaizen app shell)",
+      "GAP(access): app/lib/push-seen.ts is not reached by the app shell notification handling (owner: kaizen app shell)",
+      "GAP(access): app/lib/qr-frame-decoder.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
+      "GAP(access): app/lib/security-log.ts is not reached by a settings tab (the manifest declares only the devices tab) (owner: nelly)",
+      "GAP(access): cli/lib/grants/commands.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): cli/lib/grants/controller.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): cli/lib/grants/gateway.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): cli/lib/grants/ports.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): cli/lib/grants/render.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
+      "GAP(access): daemon/adapters/grants/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: nelly)",
+      "GAP(access): daemon/adapters/pairing/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: nelly)",
+      "GAP(access): daemon/adapters/push/index.ts is not reached by the daemon composition (daemon/index.ts imports the adapter files directly, only tests import this index) (owner: nelly)",
+      "GAP(access): notificationTapUrl in app/lib/push-scope.ts is rewritten by the unmerged branch rebuild/fix-notification-tap, so it stays until that branch lands (owner: nelly)"
+    ],
+    "board": [
+      "GAP(board): app/lib/board-done.ts is not reached by the agenda answer handlers (no Board panel calls them) (owner: board port)",
+      "GAP(board): app/lib/board-move.ts is not reached by the agenda answer handlers (no Board panel calls them) (owner: board port)",
+      "GAP(board): app/lib/card-reference-context.ts is not reached by the card reference proof (no Board view mounts it) (owner: board port)",
+      "GAP(board): app/lib/lane-proposal-link.ts is not reached by the lane-proposal ask (no view opens the lane editor from it) (owner: board port)",
+      "GAP(board): cli/lib/lane-guide.ts is not reached by `task move --help` (no CLI verb prints it) (owner: board port)"
+    ],
+    "voice": [
+      "GAP(voice): app/components/auto-read-chip.tsx is not reached by a chat surface (no manifest panel mounts auto-read) (owner: voice port)",
+      "GAP(voice): app/hooks/use-auto-read.ts is not reached by a chat surface (no manifest panel mounts auto-read) (owner: voice port)",
+      "GAP(voice): app/lib/stt/speed-bench-report.ts is not reached by the speed benchmark page (a realworld harness only) (owner: voice port)",
+      "GAP(voice): app/lib/voice-chat/auto-read.ts is not reached by a chat surface (no manifest panel mounts auto-read) (owner: voice port)",
+      "GAP(voice): app/lib/voice-chat/reply-picker.ts is not reached by a chat surface (no manifest panel mounts auto-read) (owner: voice port)",
+      "GAP(voice): app/lib/voice-chat/turn-endpointer-scoring.ts is not reached by the voice chat mode (no screen mounts the turn endpointer) (owner: voice port)",
+      "GAP(voice): app/lib/voice-chat/turn-endpointer.ts is not reached by the voice chat mode (no screen mounts the turn endpointer) (owner: voice port)",
+      "GAP(voice): daemon/lib/speedups/index.ts is not reached by the daemon composition (daemon/index.ts imports the files directly, only tests import this index) (owner: voice port)",
+      "GAP(voice): daemon/lib/stt/index.ts is not reached by the daemon composition (daemon/index.ts imports the files directly, only tests import this index) (owner: voice port)"
     ]
   },
   "pendingHalves": {

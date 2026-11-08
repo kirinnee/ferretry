@@ -50,6 +50,9 @@ export const ONE_TIME_PENDING_ALLOWANCE: readonly { readonly id: string; readonl
   { id: 'terminals', reason: 'ruling #23 (britnee): left with open work, back in pending' },
   { id: 'usage', reason: 'ruling #23 (britnee): left with open work, back in pending' },
   { id: 'board', reason: 'ruling #23 (britnee): left with open work, back in pending' },
+  { id: 'access', reason: 'ruling #26 (britnee): ported but unwired, back in pending' },
+  { id: 'voice', reason: 'ruling #26 (britnee): ported but unwired, back in pending' },
+  { id: 'warden', reason: 'ruling #26 (britnee): ported but unwired, back in pending' },
 ];
 
 export interface PortsPending {

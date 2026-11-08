@@ -218,6 +218,18 @@ describe('ports-pending', () => {
       'usage is back in "pending" by a one-time ruling but states no "pendingReasons" line',
     );
 
+    const unwired = ws([{ id: 'alpha' }, { id: 'access' }], {
+      pending: ['alpha', 'access'],
+      pendingReasons: { access: ['GAP(access): app/x.tsx is not reached by any screen (owner: nelly)'] },
+      pendingHalves: { alpha: ALL, access: ALL },
+    });
+    unwired.write('base.json', base);
+    const unwiredFound = messages(
+      await run(portsPending, unwired, { base: `file:${join(unwired.root, 'base.json')}` }),
+    );
+    expect(unwiredFound).not.toContain('access was added');
+    expect(unwiredFound).not.toContain('access is back in "pending"');
+
     const other = ws([{ id: 'alpha' }, { id: 'beta' }], {
       pending: ['alpha', 'beta'],
       pendingReasons: { beta: ['GAP(x): still open'] },

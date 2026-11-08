@@ -13,7 +13,7 @@
 import { type Document, isMap, isNode, isScalar, isSeq, LineCounter, type Node, parseDocument } from 'yaml';
 
 /** A 1-based place in a file. */
-export interface TextPosition {
+interface TextPosition {
   readonly line: number;
   readonly column: number;
 }
@@ -90,7 +90,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /** Structural equality over plain JSON-shaped values. */
-export function sameConfigValue(left: unknown, right: unknown): boolean {
+function sameConfigValue(left: unknown, right: unknown): boolean {
   if (left === right) return true;
   if (Array.isArray(left) && Array.isArray(right)) {
     return left.length === right.length && left.every((item, index) => sameConfigValue(item, right[index]));
@@ -172,20 +172,5 @@ export function editConfigText(
   const header = document.commentBefore ?? '';
   const line = modeline.replace(/^#/u, '');
   document.commentBefore = header === '' ? line : `${line}\n${header}`;
-  return document.toString({ lineWidth: 0 });
-}
-
-/**
- * The text of a file with ONE top-level key set to `value`, or removed when `value` is `undefined` —
- * every other key, and every comment, exactly as it was. Throws when the text does not parse or is not a
- * mapping: a file nobody can read is fixed by a person, not overwritten by a verb.
- */
-export function setConfigKey(text: string, key: string, value: unknown): string {
-  const document: Document = parseDocument(text, PARSE_OPTIONS);
-  if (document.errors.length > 0) throw new Error(`the file does not parse: ${document.errors[0]?.message ?? ''}`);
-  if (document.contents === null) document.contents = document.createNode({});
-  if (!isMap(document.contents)) throw new Error('the file is not a mapping of keys');
-  if (value === undefined) document.delete(key);
-  else document.set(key, document.createNode(value));
   return document.toString({ lineWidth: 0 });
 }

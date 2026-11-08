@@ -12,10 +12,10 @@ export type PasskeysChangedListener = (change: PasskeysChange) => Promise<void> 
 export type PasskeysChangedFailure = (error: unknown, change: PasskeysChange) => void;
 
 /** How long a removal waits for its listeners before it answers anyway. */
-export const PASSKEYS_CHANGED_WAIT_MS = 5_000;
+const PASSKEYS_CHANGED_WAIT_MS = 5_000;
 
 /** A listener that had not settled when the removal stopped waiting for it. It goes on running; this is reported. */
-export class PasskeysChangedListenerTimedOut extends Error {
+class PasskeysChangedListenerTimedOut extends Error {
   constructor(waitedMs: number) {
     super(`a passkeys-changed listener had not finished after ${waitedMs} ms; the removal answered without it`);
     this.name = 'PasskeysChangedListenerTimedOut';

@@ -39,7 +39,7 @@ export interface WardenVerdictView {
   readonly spawn?: WardenVerdictSpawnInfo;
 }
 
-export interface WardenReportRequest {
+interface WardenReportRequest {
   readonly connection: DaemonConnection;
   readonly verdict: WardenVerdictView;
 }

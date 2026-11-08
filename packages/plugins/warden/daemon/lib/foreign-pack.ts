@@ -6,7 +6,7 @@
 import { type PaneLimit, paneLimitHolds } from './foreign-pane-limit.ts';
 
 export type PackQuotaState = 'plenty' | 'some' | 'low' | 'exhausted' | 'unknown';
-export interface PackQuotaWindow {
+interface PackQuotaWindow {
   readonly label: '5h' | 'week' | 'month' | 'key' | 'tools';
   readonly usedPercent?: number;
   readonly leftPercent?: number;
@@ -85,14 +85,6 @@ export interface PackRefusal {
 const PLENTY_LEFT_PERCENT = 50;
 const LOW_LEFT_PERCENT = 20;
 
-const WINDOW_WORDS: Readonly<Record<PackQuotaWindow['label'], string>> = {
-  '5h': 'the 5h window',
-  week: 'the week',
-  month: 'the month',
-  key: "the key's limit",
-  tools: 'the tool allowance',
-};
-
 const SHORT_LABEL: Readonly<Record<PackQuotaWindow['label'], string>> = {
   '5h': '5h',
   week: 'wk',
@@ -104,7 +96,7 @@ const SHORT_LABEL: Readonly<Record<PackQuotaWindow['label'], string>> = {
 const round = (value: number): number => Math.round(value);
 
 /** `18:00Z` for an instant today, `Oct 23 18:00Z` for another day, in UTC so every reader agrees. */
-export function shortInstant(instant: string, now: string | undefined): string {
+function shortInstant(instant: string, now: string | undefined): string {
   const at = new Date(instant);
   if (Number.isNaN(at.getTime())) return instant;
   const time = at.toISOString().slice(11, 16);
@@ -214,14 +206,6 @@ export const QUOTA_RANK: Readonly<Record<PackQuotaState, number>> = {
   exhausted: 3,
 };
 
-/** Why a candidate was moved down, in words: its tightest window ("91% of the week used"). */
-export function quotaReason(runtime: string, quota: PackQuota, now?: string): string {
-  const window = quota.windows.find(candidate => candidate.label === quota.tightest);
-  if (window === undefined || window.usedPercent === undefined) return `${runtime}, ${quota.summary}`;
-  const reset = window.resetsAt === undefined ? '' : `, resets ${shortInstant(window.resetsAt, now)}`;
-  return `${runtime}, ${String(window.usedPercent)}% of ${WINDOW_WORDS[window.label]} used${reset}`;
-}
-
 const usdWords = (amount: number): string => `$${amount.toFixed(2)}`;
 export interface PackFleetFacts {
   readonly runtimes: readonly FleetRuntimeView[];
@@ -320,7 +304,7 @@ export function runtimeRefusal(
  * "spent $41.20 of its $40.00 daily trigger on this machine; back at 2026-10-31T07:00:00.000Z" — or
  * `undefined` when the login's budget holds nothing. The worse period speaks; a tie goes to the longer.
  */
-export function overBudget(credential: FleetCredentialView | undefined): string | undefined {
+function overBudget(credential: FleetCredentialView | undefined): string | undefined {
   const budget = credential?.budget;
   if (budget === undefined || budget.level === 'ok') return undefined;
   const periods = (['weekly', 'daily'] as const).flatMap(period => {
@@ -336,7 +320,7 @@ export function overBudget(credential: FleetCredentialView | undefined): string 
 }
 
 /** Whether a runtime offers a model, from its catalog when its login reads one, else its model set. */
-export function offers(runtime: FleetRuntimeView, model: string): boolean {
+function offers(runtime: FleetRuntimeView, model: string): boolean {
   if (runtime.models !== undefined)
     return runtime.models.choices.some(choice => choice.id === model) || runtime.models.catalog.customIds;
   return (

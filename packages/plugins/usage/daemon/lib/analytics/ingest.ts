@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /** What a ferret's session reads as to the index: running until it stops, then how its last turn ended. */
-export const SessionStatusSchema = z.enum(['running', 'completed', 'failed', 'stalled', 'stopped']);
+const SessionStatusSchema = z.enum(['running', 'completed', 'failed', 'stalled', 'stopped']);
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 
 /**
