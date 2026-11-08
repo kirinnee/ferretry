@@ -701,7 +701,12 @@ no file holds and no route returns.
 "What agents may control › **Ferretry settings**" decides whether an agent may use the `config.*` tools. It
 is **off by default**, and turning it on from another device needs a passkey like the other controls. It is a
 kill switch, not a boundary: an agent with plain file access can edit the files too. The real guard is rule
-2 — an agent's loosening waits for the owner either way.
+2 — an agent's loosening waits for the owner either way, and so does a `${secret:NAME}` reference it adds: an
+agent's write is as untrusted as a plugin's own. The tools reach only the files they always did (`machine.yaml`,
+`warden.yaml`, `learning.yaml`, `voice.yaml`, `pack.yaml`, `limits.yaml`, `models-guide.yaml`,
+`account-defaults.yaml`, `logins/`, `profiles/`, `runtimes/`, `presets/`, `models/` and `components/`); any other
+file, and every person-only one (`gate.yaml`, `plugins.yaml`), is refused on read, check and write. A file that does not
+parse is never shown if its text holds anything shaped like a secret.
 
 The built-in **Set up Ferretry** skill teaches any agent the layout, the schemas, the commands and the rules.
 Every agent runtime's system prompt carries its short form (where the files are, no secret values,
