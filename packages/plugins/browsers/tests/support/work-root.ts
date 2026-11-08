@@ -71,6 +71,7 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     readTail: unused('readTail'),
     writeBytes: unused('writeBytes'),
     copyTree: unused('copyTree'),
+    copyShared: unused('copyShared'),
     ensurePrivateDirectory: unused('ensurePrivateDirectory'),
     entries: unused('entries'),
     lstat: unused('lstat'),
@@ -82,5 +83,5 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     syncDirectory: unused('syncDirectory'),
     fileIdentity: unused('fileIdentity'),
   };
-  return { root: () => handle };
+  return { root: () => handle, share: unused('share') };
 }
