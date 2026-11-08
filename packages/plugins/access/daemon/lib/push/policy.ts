@@ -1,5 +1,6 @@
 import {
   type Buzz,
+  fittingPushCount,
   fittingPushTag,
   type PushDeviceView,
   PushDeviceViewSchema,
@@ -61,7 +62,7 @@ export function enrolmentConfirmation(deviceName: string): PushNotificationPaylo
     body: `${deviceName} will be told when this machine needs you.`,
     tag: 'push-enrolment',
     url: '/',
-    count: 1,
+    count: fittingPushCount(1),
   });
 }
 
@@ -81,6 +82,6 @@ export function buzzPayload(message: Buzz): PushNotificationPayload {
     body: message.body,
     ...(tag === undefined ? {} : { tag }),
     url: message.url,
-    count: 1,
+    count: fittingPushCount(1),
   });
 }

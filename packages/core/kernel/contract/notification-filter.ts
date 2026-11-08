@@ -67,10 +67,18 @@ export const DEFAULT_NOTIFICATION_FILTER_DOCUMENT: NotificationFilterDocument = 
 });
 
 /**
+ * The longest stored document text that is parsed: 64 KiB. The largest real document is about 45 KB (64 kinds of 40 and
+ * 200 machines of 200), so a longer text is not one a person wrote, and it is read as the default WITHOUT parsing it.
+ */
+const NOTIFICATION_FILTER_DOCUMENT_MAX_LENGTH = 65_536;
+
+/**
  * The document a stored value holds, else the default. Total: it never throws.
  *
  * - The stored value is the document's JSON TEXT, and this parses it. A value that is not a string (a structured record
  *   included) is not the stored encoding and reads as the default, so writer and reader keep one encoding.
+ * - A text longer than 64 KiB reads as the default, unparsed, so a hostile page cannot make the worker walk a huge or
+ *   deeply nested document on every push.
  * - Anything else that does not parse — garbage, `null`, a v1 category record, a key the schema does not name — reads as
  *   the default.
  * - ONE OVER-BOUND FIELD RESETS THE WHOLE DOCUMENT to the default (a 201st muted machine, a 65th hidden kind, a minute
@@ -79,7 +87,9 @@ export const DEFAULT_NOTIFICATION_FILTER_DOCUMENT: NotificationFilterDocument = 
  */
 export function readNotificationFilterDocument(raw: unknown): NotificationFilterDocument {
   try {
-    if (typeof raw !== 'string') return DEFAULT_NOTIFICATION_FILTER_DOCUMENT;
+    if (typeof raw !== 'string' || raw.length > NOTIFICATION_FILTER_DOCUMENT_MAX_LENGTH) {
+      return DEFAULT_NOTIFICATION_FILTER_DOCUMENT;
+    }
     const parsed = NotificationFilterDocumentSchema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : DEFAULT_NOTIFICATION_FILTER_DOCUMENT;
   } catch {

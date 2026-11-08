@@ -603,6 +603,33 @@ describe('the tag grammar and the push-service table are the kernel’s (K-push,
     ).be.false();
   });
 
+  it('should clamp a count above the kernel bound to it, so a grouping sender never throws and the message still reads', () => {
+    // Arrange
+    const over = [kernel.PUSH_COUNT_MAX + 1, 1_000, 1_000_000];
+
+    // Act / Assert
+    should(push.fittingPushCount(1)).equal(1);
+    should(push.fittingPushCount(kernel.PUSH_COUNT_MAX)).equal(kernel.PUSH_COUNT_MAX);
+    for (const count of over) {
+      should(push.fittingPushCount(count)).equal(kernel.PUSH_COUNT_MAX);
+      const payload = push.PushNotificationPayloadSchema.parse({
+        ...sessionPayload,
+        count: push.fittingPushCount(count),
+      });
+      should(kernel.readPushMessage(payload)).deepEqual({
+        type: 'show',
+        show: {
+          title: payloadBase.title,
+          body: payloadBase.body,
+          url: payloadBase.url,
+          tag: 'session-1',
+          count: kernel.PUSH_COUNT_MAX,
+          kind: 'agenda',
+        },
+      });
+    }
+  });
+
   it('should read every payload Access composes as the worker’s show or clear, tagged or untagged', () => {
     // Arrange
     const { tag: _tag, ...untagged } = sessionPayload;
