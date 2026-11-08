@@ -63,7 +63,6 @@ export const harnessKeyOfKind = (kind: HarnessKind): HarnessKey => (kind === 'cl
  * silently empties a caller's selection.
  */
 const AccountModeSchema = z.enum(['interactive', 'auto']);
-export type AccountMode = z.infer<typeof AccountModeSchema>;
 
 /**
  * One model an account may be asked to serve. `available` is mandatory and explicit — there is no
