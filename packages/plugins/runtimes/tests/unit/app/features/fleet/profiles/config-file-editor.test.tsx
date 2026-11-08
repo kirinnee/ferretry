@@ -201,6 +201,39 @@ describe('Edit as YAML over the kernel’s /v1/config/file', () => {
     expect(root.querySelector('[data-config-submit]')?.hasAttribute('disabled')).toBe(true);
   });
 
+  it('reads the file again when the kernel says THIS file moved (held, broken, discarded), and ignores any other', async () => {
+    // Arrange: a client that hears the kernel's config frames.
+    const calls: Call[] = [];
+    const script: Script = {};
+    const listeners = new Set<(payload: unknown) => void>();
+    const client = {
+      ...configClient(script, calls),
+      subscribe: (event: { name: string }, listener: (payload: unknown) => void) => {
+        if (event.name === 'kernel.config-changed') listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    } as unknown as RuntimesClient;
+    mounted = await mountSettled(
+      <ConfigFileEditor client={client} path={PATH} onClose={() => {}} onChanged={() => {}} />,
+    );
+    const frame = async (payload: { plugin: string; path: string; state: string }) => {
+      for (const listener of listeners) listener({ ...payload, etag: 'e7' });
+      await settle();
+    };
+    const reads = () => calls.filter(call => call.route === GET).length;
+
+    // Act + Assert: another plugin's file of the same path, and another path of ours, wake nothing.
+    await frame({ plugin: 'warden', path: PATH, state: 'held' });
+    await frame({ plugin: 'runtimes', path: 'profiles/Other.yaml', state: 'held' });
+    expect(reads()).toBe(1);
+
+    // Act + Assert: this file, held for the owner, is read again.
+    await frame({ plugin: 'runtimes', path: PATH, state: 'held' });
+    expect(reads()).toBe(2);
+    await frame({ plugin: 'runtimes', path: PATH, state: 'invalid' });
+    expect(reads()).toBe(3);
+  });
+
   it('reads the file again in place when the machine says a profile moved, and keeps a draft the person started', async () => {
     // Arrange: a client that hears this machine's runtimes.changed.
     const calls: Call[] = [];

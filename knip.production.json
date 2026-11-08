@@ -150,6 +150,7 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
         "daemon/adapters/account-model-files.ts",
+        "daemon/adapters/config-write-all.ts",
         "daemon/adapters/file-provisioner.ts",
         "daemon/adapters/host-harness-scan.ts",
         "daemon/adapters/manifest-file.ts",

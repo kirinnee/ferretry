@@ -42,3 +42,15 @@ export function autoResumeAnswer(deps: AutoResumeAnswerDeps): (input: unknown) =
     return resolved.ok ? { allow: true } : { allow: false, reason: resolved.sentence };
   };
 }
+
+/**
+ * The "Auto-resume after restart" switch as `runtimes.yaml` says it: left out (or no file at all) is ON, as today; a
+ * file that is broken with no last good version in effect says nothing (`undefined`), which the answer reads as no.
+ */
+export function autoResumeSwitch(
+  state: 'absent' | 'valid' | 'invalid' | 'held',
+  file: { readonly autoResume?: boolean } | undefined,
+): boolean | undefined {
+  if (state === 'absent') return true;
+  return file === undefined ? undefined : (file.autoResume ?? true);
+}

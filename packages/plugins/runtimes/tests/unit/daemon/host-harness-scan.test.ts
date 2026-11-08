@@ -103,8 +103,9 @@ describe('host setup filesystem aliases', () => {
       '/fixture/home/.codex/auth.json': { kind: 'file', text: inert },
     });
     expect(result.scans[0]?.skills).toEqual([]);
-    expect(result.scans[0]?.problems.join(' ')).toContain('same descriptor');
-    expect(result.listed).toEqual([]);
+    expect(result.scans[0]?.problems.join(' ')).toContain('links');
+    // Only the skills folder itself is listed; the linked entry is never entered, and nothing is opened.
+    expect(result.listed).toEqual(['/fixture/home/.claude/skills']);
     expect(result.opened).toEqual([]);
     expect(result.followed).toEqual([]);
     expect(JSON.stringify(result.scans)).not.toContain(inert);
@@ -139,20 +140,16 @@ describe('host setup filesystem aliases', () => {
     }
   });
 
-  it('reports ordinary documents and skill folders unreadable when checked opens are unavailable', async () => {
+  it('S144 reads an ordinary document and refuses a sign-in file named inside a skills folder, never opening it', async () => {
     const result = await fixtureScan({
       '/fixture/home/.claude/CLAUDE.md': { kind: 'file', text: 'ordinary instructions' },
       '/fixture/home/.claude/skills': { kind: 'directory', names: ['ordinary-skill', 'auth.json'] },
       '/fixture/home/.claude/skills/auth.json': { kind: 'file', text: inert },
     });
-    expect(result.scans[0]?.instructions).toMatchObject({
-      kind: 'unreadable',
-      reason: expect.stringContaining('same descriptor'),
-    });
-    expect(result.scans[0]?.problems.join(' ')).toContain('same descriptor');
+    expect(result.scans[0]?.instructions).toMatchObject({ kind: 'text', text: 'ordinary instructions' });
+    expect(result.scans[0]?.problems.join(' ')).toContain('sign-in files');
     expect(result.scans[0]?.skills).toEqual([]);
-    expect(result.opened).toEqual([]);
-    expect(result.listed).toEqual([]);
+    expect(result.opened).toEqual(['/fixture/home/.claude/CLAUDE.md']);
     expect(JSON.stringify(result.scans)).not.toContain(inert);
   });
 

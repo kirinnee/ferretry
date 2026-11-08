@@ -40,9 +40,10 @@ import {
   type RuntimesFile,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { endedSeams } from './host-assembly.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
-import { autoResumeAnswer } from './lib/service/auto-resume-answer.ts';
+import { autoResumeAnswer, autoResumeSwitch } from './lib/service/auto-resume-answer.ts';
 import { DisableExpiryWatch, earliestExpiry, keepUnpublished, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
@@ -237,7 +238,9 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
           'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
-            switchOn: () => assembly.autoResume?.(),
+            switchOn: () =>
+              assembly.autoResume?.() ??
+              autoResumeSwitch(config.fileState(runtimesFile).state, config.file(runtimesFile)),
             resolve: async id => await api.resolve(id),
           }),
         },
@@ -251,4 +254,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
   });
 }
 
-export default runtimesDaemon();
+/** The assembly of this build: the services stay unwired where the kernel offers no way yet, the rest is the host's. */
+const hostAssembly: RuntimesAssembler = ctx => ({ ...unavailableAssembly(ctx), ended: endedSeams(ctx.kernel) });
+
+export default runtimesDaemon(hostAssembly);

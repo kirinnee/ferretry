@@ -20,10 +20,10 @@
  * The login is an opaque host pointer. Only Logins contract status and email facts are consumed.
  * Missing host discovery facts are reported as unknown. No sign-in file is opened.
  *
- * Nothing is launched. Setup contents remain unreadable until the host supplies descriptor-checked reads;
- * path-based metadata checks alone cannot make reading a document or traversing a skill safe.
+ * Nothing is launched. Every read goes through {@link HostFiles} over the kernel roots (`root-host-files.ts`):
+ * a `harness-home` root scoped to the harness home, and the one declared file beside it (`~/.claude.json`).
  *
- * The reads go through {@link HostFiles}; GAP(kernel): the host's harness homes have no root the plugin may declare.
+ * A home the person moved with `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is reachable only if the caller names it (GAP(kernel): the person's shell variables are not readable by a plugin).
  */
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { hostCodexHome } from '../lib/account/credentials.ts';
@@ -35,12 +35,13 @@ import {
   type HostSkill,
   scannedMcpServers,
 } from '../lib/account/import.ts';
+import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import type { HostEntry, HostFiles } from './ports.ts';
 
 /** Resolving a bare command name on this machine's `PATH`. The daemon's one harness locator. */
 interface HostCommandResolver {
-  resolve(name: string): string | undefined;
+  resolve(name: string): string | undefined | Promise<string | undefined>;
 }
 
 export interface HostHarnessScanDeps {
@@ -65,16 +66,16 @@ export interface HostHarnessScanDeps {
 // filenames also named by account/credentials.ts; refuse them in every component, before any host call.
 const SIGN_IN_FILES = new Set(['.credentials.json', 'auth.json']);
 
-// The state-home-guard's checked-folder rule: metadata and reads must use the SAME descriptor.
-// GAP(kernel): HostFiles exposes only path calls, with no checked open or descriptor identity.
-// An lstat pass alone cannot protect a subsequent read/list from a swapped file or ancestor.
-const CHECKED_READ_UNAVAILABLE =
-  'checked host reads are unavailable: the host cannot check and read through the same descriptor';
+const DEFAULT_MAX_SKILL_FILES = 2_000;
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export class HostHarnessScanner {
-  constructor(private readonly deps: HostHarnessScanDeps) {}
+  readonly #maxSkillFiles: number;
+
+  constructor(private readonly deps: HostHarnessScanDeps) {
+    this.#maxSkillFiles = deps.maxSkillFiles ?? DEFAULT_MAX_SKILL_FILES;
+  }
 
   /** Both harnesses, installed or not, in a stable order. */
   async scan(): Promise<readonly HostHarnessScan[]> {
@@ -89,8 +90,8 @@ export class HostHarnessScanner {
     const [instructions, settings, mcp, skills] = await Promise.all([
       this.#read(home, join(home, 'CLAUDE.md')),
       this.#read(home, join(home, 'settings.json')),
-      this.#read(configured === undefined ? this.deps.userHome : home, claudeJson),
-      this.#skills(home, join(home, 'skills')),
+      this.#read(configured === undefined ? undefined : home, claudeJson),
+      this.#skills('claude', home, join(home, 'skills')),
     ]);
     const login = await this.#login('claude');
     return await this.#complete({
@@ -128,7 +129,7 @@ export class HostHarnessScanner {
       this.#read(home, join(home, 'AGENTS.md')),
       this.#read(home, join(home, 'config.toml')),
       this.#read(home, join(home, 'hooks.json')),
-      this.#skills(home, join(home, 'skills')),
+      this.#skills('codex', home, join(home, 'skills')),
     ]);
     const login = await this.#login('codex');
     return await this.#complete({
@@ -144,7 +145,7 @@ export class HostHarnessScanner {
 
   /** The located command and the MCP commands this machine lacks, added to what was read. */
   async #complete(scan: Omit<HostHarnessScan, 'command' | 'missingCommands'>): Promise<HostHarnessScan> {
-    const command = this.deps.commands.resolve(scan.harness);
+    const command = await this.deps.commands.resolve(scan.harness);
     const partial: HostHarnessScan = { ...scan, missingCommands: [] };
     const missing = new Set<string>();
     for (const server of scannedMcpServers(partial)) {
@@ -158,7 +159,7 @@ export class HostHarnessScanner {
       // A path is checked where it points, never looked up on PATH.
       return isAbsolute(command) && ((await this.deps.files.stat(command))?.size ?? 0) > 0;
     }
-    return this.deps.commands.resolve(command) !== undefined;
+    return (await this.deps.commands.resolve(command)) !== undefined;
   }
 
   /** Host links are opaque. Unknown facts stay unknown; never inspect a harness sign-in file. */
@@ -216,30 +217,91 @@ export class HostHarnessScanner {
     return undefined;
   }
 
-  async #read(home: string, path: string): Promise<HostDocumentRead> {
+  /**
+   * One setup document. `home` is the harness home it must lie in (every component is checked, none a link, none a
+   * sign-in file); `undefined` for the ONE file beside a home (`~/.claude.json`), which the kernel serves alone.
+   * The read goes through the same root handle that checked the path, which holds the file open and proves it is the
+   * file the name reached (no path-based read can be redirected by a swapped file or ancestor).
+   */
+  async #read(home: string | undefined, path: string): Promise<HostDocumentRead> {
     try {
-      const info = await this.#inspect(home, path);
+      const info = home === undefined ? await this.#inspectFile(path) : await this.#inspect(home, path);
       if (info === undefined) return { kind: 'absent', source: path };
       if (info.kind !== 'file') return { kind: 'unreadable', source: path, reason: 'it is not a file' };
       if (info.size > this.deps.maxDocumentBytes) return { kind: 'too-large', source: path, bytes: info.size };
-      // Never fall back to readText(path): the checked entry could have been replaced since lstat.
-      return { kind: 'unreadable', source: path, reason: CHECKED_READ_UNAVAILABLE };
+      const text = await this.deps.files.readText(path);
+      // Gone between the check and the read: absent, as if the check had run a moment later.
+      if (text === undefined) return { kind: 'absent', source: path };
+      return { kind: 'text', source: path, text, bytes: new TextEncoder().encode(text).byteLength };
     } catch (error) {
       return { kind: 'unreadable', source: path, reason: errorText(error) };
     }
   }
 
-  /** Skill traversal also needs a held folder; a path-based list can follow a replaced ancestor. */
-  async #skills(home: string, directory: string): Promise<{ found: HostSkill[]; problems: string[] }> {
+  /** The one file beside a home: never a link, never a sign-in file. */
+  async #inspectFile(path: string): Promise<HostEntry | undefined> {
+    if (SIGN_IN_FILES.has(basename(path))) throw new Error('sign-in files are not readable setup documents');
+    const info = await this.deps.files.lstat(path);
+    if (info?.kind === 'link') throw new Error('symbolic links are not readable setup paths');
+    return info;
+  }
+
+  /** Every skill folder: one per item, each with a digest of its whole content. */
+  async #skills(
+    harness: HarnessKind,
+    home: string,
+    directory: string,
+  ): Promise<{ found: HostSkill[]; problems: string[] }> {
     try {
       const info = await this.#inspect(home, directory);
-      if (info === undefined) return { found: [], problems: [] };
-      // A file where the folder would be is no skills, as it always was: nothing is opened, so nothing is at risk.
-      if (info.kind !== 'directory') return { found: [], problems: [] };
-      // No list/readBytes fallback: even an ordinary skill folder can hide a sign-in file or alias.
-      throw new Error(CHECKED_READ_UNAVAILABLE);
+      // A file where the folder would be is no skills, as it always was.
+      if (info?.kind !== 'directory') return { found: [], problems: [] };
+      const found: HostSkill[] = [];
+      const problems: string[] = [];
+      for (const item of [...((await this.deps.files.list(directory)) ?? [])].toSorted()) {
+        if (item.startsWith('.') || isHarnessOwnedSkillEntry(harness, item)) continue;
+        const source = join(directory, item);
+        try {
+          if ((await this.#inspect(home, source))?.kind !== 'directory') continue;
+          const digest = await this.#digest(home, source);
+          if (digest === undefined) {
+            problems.push(
+              `Skill "${item}" has more than ${String(this.#maxSkillFiles)} files, so it was not imported.`,
+            );
+            continue;
+          }
+          found.push({ item, source, digest });
+        } catch (error) {
+          problems.push(`Skill "${item}" at ${source} could not be read (${errorText(error)}).`);
+        }
+      }
+      return { found, problems };
     } catch (error) {
       return { found: [], problems: [`Your skills folder ${directory} could not be read (${errorText(error)}).`] };
     }
+  }
+
+  /** A digest over every file's relative path and bytes, in a stable order; `undefined` when too many. */
+  async #digest(home: string, root: string): Promise<string | undefined> {
+    const all: string[] = [];
+    const pending = [root];
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      for (const name of (await this.deps.files.list(next)) ?? []) {
+        const path = join(next, name);
+        const info = await this.#inspect(home, path).catch(() => ({ kind: 'link' as const, size: 0 }));
+        if (info?.kind === 'directory') pending.push(path);
+        else all.push(path);
+        if (all.length > this.#maxSkillFiles) return undefined;
+      }
+    }
+    const hasher = new Bun.CryptoHasher('sha256');
+    for (const path of all.toSorted()) {
+      hasher.update(`${relative(root, path)}\0`);
+      const info = await this.#inspect(home, path).catch(() => ({ kind: 'link' as const, size: 0 }));
+      // A link (or anything the guard refuses, a sign-in file included) counts as a link, never read.
+      hasher.update(info?.kind === 'file' ? ((await this.deps.files.readBytes(path)) ?? new Uint8Array()) : 'link\0');
+      hasher.update('\0');
+    }
+    return hasher.digest('hex');
   }
 }
