@@ -19,7 +19,11 @@ export function isInternalRoot(name: RootName): boolean {
   return INTERNAL.has(name);
 }
 
-/** Whether a folder name directly inside a plugin's state folder is a kernel-made root's base. */
+/**
+ * Whether a folder name directly inside a plugin's state folder is a kernel-made root's base. Case-INSENSITIVE: on a
+ * case-insensitive disk (macOS APFS) `Sessions` is the folder `sessions`, so the comparison must not tell them
+ * apart. Every root name is ASCII, so ASCII lowercasing is the whole fold.
+ */
 export function isInternalRootFolder(name: string): boolean {
-  return INTERNAL.has(name);
+  return INTERNAL.has(name.toLowerCase());
 }
