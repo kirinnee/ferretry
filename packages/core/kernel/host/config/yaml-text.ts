@@ -55,6 +55,32 @@ export function configTextTooLarge(text: string): boolean {
   return false;
 }
 
+/**
+ * The most `%` directive lines a file may hold. The parser costs about 7 µs for every one (a 256 KiB file of bare `%`
+ * lines is 131 072 of them and took a second and a half), and no configuration file needs more than the one or two
+ * YAML itself has directives for: past this many, the file is refused in the fixed sentence for a directive, without
+ * being parsed.
+ */
+const MAX_DIRECTIVE_LINES = 64;
+
+/** A `%` at the start of a line, in any of the line endings YAML knows. */
+const DIRECTIVE_LINE = /(?:^|[\r\n])%/gu;
+
+/**
+ * The line of the first `%` directive past {@link MAX_DIRECTIVE_LINES}, or `undefined` when the text has no more than
+ * that. One scan that stops at the first excess line, so it costs the text, never the parser's per-line price.
+ */
+function directiveFlood(text: string): number | undefined {
+  let seen = 0;
+  for (const match of text.matchAll(DIRECTIVE_LINE)) {
+    seen += 1;
+    if (seen <= MAX_DIRECTIVE_LINES) continue;
+    const at = match.index + match[0].length - 1;
+    return text.slice(0, at).split(/\r\n|\r|\n/u).length;
+  }
+  return undefined;
+}
+
 /** A 1-based place in a file. */
 export interface TextPosition {
   readonly line: number;
@@ -68,8 +94,23 @@ export interface ReadConfigText {
   locate(path: readonly PropertyKey[]): TextPosition | undefined;
 }
 
+/**
+ * The most syntax errors one read lists. The rest are counted ({@link ConfigTextRefusal.omitted}), never built: a text
+ * of 256 KiB can hold a hundred thousand parser errors, and locating each one before an answer keeps fifty cost a second
+ * of garbage.
+ */
+export const MAX_SYNTAX_ERRORS = 50;
+
+/** A text that did not read: its first {@link MAX_SYNTAX_ERRORS} errors, and how many more there were. */
+interface ConfigTextRefusal {
+  readonly ok: false;
+  readonly errors: readonly ConfigSyntaxError[];
+  /** Errors past {@link MAX_SYNTAX_ERRORS}, counted and not listed; absent when every error is listed. */
+  readonly omitted?: number;
+}
+
 /** A syntax error, located. */
-export interface ConfigSyntaxError {
+interface ConfigSyntaxError {
   readonly message: string;
   readonly position?: TextPosition;
 }
@@ -280,11 +321,7 @@ function aliasError(lineCounter: LineCounter, fault: AliasFault): ConfigSyntaxEr
  * aliases cannot be read (an alias to an anchor that is not set, an alias inside its own anchor, or too many): a
  * broken file is refused and its last good version stays in effect, it never throws into a reload.
  */
-export function readConfigText(
-  text: string,
-):
-  | { readonly ok: true; readonly read: ReadConfigText }
-  | { readonly ok: false; readonly errors: readonly ConfigSyntaxError[] } {
+export function readConfigText(text: string): { readonly ok: true; readonly read: ReadConfigText } | ConfigTextRefusal {
   return readText(text).read;
 }
 
@@ -307,22 +344,30 @@ export function readConfigTextToEdit(text: string): {
 function readText(text: string): { readonly read: ConfigTextRead; readonly whole: boolean } {
   // Bounded before anything reads it: every cost below is linear in a text this size.
   if (configTextTooLarge(text)) return { read: { ok: false, errors: [{ message: CONFIG_TOO_LARGE }] }, whole: true };
+  const flood = directiveFlood(text);
+  if (flood !== undefined) {
+    // Refused before the parser sees it: it would take a second and a half to say the same thing at every one.
+    return {
+      whole: true,
+      read: { ok: false, errors: [{ message: SYNTAX_SENTENCES.BAD_DIRECTIVE, position: { line: flood, column: 1 } }] },
+    };
+  }
   const lineCounter = new LineCounter();
   const document = parseDocument(text, { ...PARSE_OPTIONS, lineCounter });
   if (document.errors.length > 0) {
+    // Only the errors that are listed are located: the rest are counted.
+    const listed = document.errors.slice(0, MAX_SYNTAX_ERRORS).map(error => {
+      const position = lineCounter.linePos(error.pos[0]);
+      // Never the parser's own message: it quotes the file.
+      return {
+        message: SYNTAX_SENTENCES[error.code] ?? SYNTAX_UNKNOWN,
+        position: { line: position.line, column: position.col },
+      };
+    });
+    const omitted = document.errors.length - listed.length;
     return {
       whole: true,
-      read: {
-        ok: false,
-        errors: document.errors.map(error => {
-          const position = lineCounter.linePos(error.pos[0]);
-          // Never the parser's own message: it quotes the file.
-          return {
-            message: SYNTAX_SENTENCES[error.code] ?? SYNTAX_UNKNOWN,
-            position: { line: position.line, column: position.col },
-          };
-        }),
-      },
+      read: omitted === 0 ? { ok: false, errors: listed } : { ok: false, errors: listed, omitted },
     };
   }
   const duplicates = duplicateKeys(document);
@@ -499,8 +544,8 @@ export function editConfigText(
   current: unknown,
   modeline: string | undefined,
 ): string {
-  // A text over the cap is never parsed: like one that does not parse, it is replaced whole.
-  const readable = existing !== undefined && !configTextTooLarge(existing);
+  // A text over the cap, or with a flood of directives, is never parsed: like one that does not parse, it is replaced whole.
+  const readable = existing !== undefined && !configTextTooLarge(existing) && directiveFlood(existing) === undefined;
   let document: Document = parseDocument(readable ? existing : '', PARSE_OPTIONS);
   if (document.errors.length > 0 || duplicateKeys(document).length > 0) document = parseDocument('', PARSE_OPTIONS);
   if (!isMap(document.contents)) document.contents = document.createNode({});
@@ -523,6 +568,7 @@ export function editConfigText(
  */
 export function setConfigKey(text: string, key: string, value: unknown): string {
   if (configTextTooLarge(text)) throw new Error(`the file does not parse: ${CONFIG_TOO_LARGE}`);
+  if (directiveFlood(text) !== undefined) throw new Error(`the file does not parse: ${SYNTAX_SENTENCES.BAD_DIRECTIVE}`);
   const document: Document = parseDocument(text, PARSE_OPTIONS);
   // The parser's message quotes the file; the line is enough for a person to find it.
   const error = document.errors[0];

@@ -1,6 +1,7 @@
 import type { FerretDetails, FerretRecord, FerretState } from '../../../contract/index.ts';
 import type { SessionConfig } from '../protocol/session.ts';
 import type { SessionStatus } from '../protocol/session-base.ts';
+import { isTurnStatus } from '../session/peers/turn.ts';
 
 /**
  * The supervision fields today's start wrote into every session document it made (today's `SESSION_START_DEFAULTS`,
@@ -37,6 +38,25 @@ function sessionStatusOf(state: FerretState): SessionStatus {
       return 'awaiting_user';
     case 'stopped':
       return 'stopped';
+  }
+}
+
+/**
+ * The session status a ferret's state document moves to when its LIFECYCLE moves (U4), or `undefined` to leave it: the
+ * document is made once with the status of that moment (`starting`), and today's lifecycle moved it to `running` when
+ * the launch settled and to `stopped` at a stop. Only those edges are followed. A turn (`working` ↔ `idle`) is the
+ * turn watch's `turnState`, never a status, and a status something else decided (`rate_limited`, `awaiting_question`,
+ * `kill_failed`, …) is left as it is — except by a stop, which ends every live one. Pure.
+ */
+export function lifecycleStatus(current: SessionStatus, state: FerretState): SessionStatus | undefined {
+  switch (state) {
+    case 'starting':
+      return current === 'stopped' ? 'starting' : undefined;
+    case 'working':
+    case 'idle':
+      return current === 'starting' || current === 'stopped' ? 'running' : undefined;
+    case 'stopped':
+      return current === 'starting' || isTurnStatus(current) ? 'stopped' : undefined;
   }
 }
 

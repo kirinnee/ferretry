@@ -42,6 +42,11 @@ export interface TurnPaneEvidence {
   readonly request?: PermissionRequest | undefined;
   /** The harness's own dialog on screen — hooks to review, an update, a sign-in — read as data. */
   readonly dialog?: HarnessDialog | undefined;
+  /**
+   * Additive (U4): a digest of the masked frame this evidence was read from. Two looks with the same frame read the same
+   * screen, which is how the turn watch knows a pane is quiet. No decision reads it.
+   */
+  readonly frame?: string | undefined;
 }
 
 /** What the transcript's tail says about the current turn. */

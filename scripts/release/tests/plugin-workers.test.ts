@@ -76,6 +76,49 @@ describe('plugin worker programs the compile embeds', () => {
   });
 });
 
+describe('a plugin worker whose file name cannot be a URL path', () => {
+  for (const [label, name] of [
+    ['a #', 'a%23b.worker.ts'],
+    ['a ?', 'a%3Fb.worker.ts'],
+    ['a %', 'a%25b.worker.ts'],
+  ] as const)
+    test(`with ${label} in it fails the compile, naming the plugin and the worker`, () => {
+      expect(() => pluginWorkers([half('a', ['w'], { w: at(`/r/a/${name}`) })], 'fyd.js', everything)).toThrow(
+        'a worker "w" is a file whose name has a #, ? or % in it',
+      );
+    });
+
+  test('with a broken percent escape fails the compile instead of throwing a URI error', () => {
+    expect(() => pluginWorkers([half('a', ['w'], { w: at('/r/a/bad%zz.worker.ts') })], 'fyd.js', everything)).toThrow(
+      'a worker "w" has a file name that is not valid text',
+    );
+  });
+
+  test('a space, a dot and a dash are fine', () => {
+    const found = pluginWorkers([half('a', ['w'], { w: at('/r/a/my%20job-1.worker.ts') })], 'fyd.js', everything);
+    expect(found.map(worker => worker.file)).toEqual(['my job-1.worker.js']);
+  });
+});
+
+describe("a plugin worker beside the entry's own worker programs", () => {
+  test('a plugin worker named like a *.worker.ts beside the entry fails the compile, naming it', () => {
+    const clash = () =>
+      pluginWorkers([half('a', ['w'], { w: at('/r/a/session.worker.ts') })], 'fyd.js', everything, [
+        'session.worker.js',
+      ]);
+    expect(clash).toThrow(
+      'a worker "w" would embed as session.worker.js, which a worker program beside the entry already holds',
+    );
+  });
+
+  test('a plugin worker with a different name passes beside them', () => {
+    const found = pluginWorkers([half('a', ['w'], { w: at('/r/a/job.worker.ts') })], 'fyd.js', everything, [
+      'session.worker.js',
+    ]);
+    expect(found.map(worker => worker.file)).toEqual(['job.worker.js']);
+  });
+});
+
 describe('the entry that hosts the plugins', () => {
   const files = new Set([
     '/r/packages/core/kernel/package.json',

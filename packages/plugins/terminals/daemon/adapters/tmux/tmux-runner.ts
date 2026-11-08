@@ -7,6 +7,7 @@ import {
   type RunnerDelivery,
   type RunnerDeliveryFailure,
   type RunnerHandle,
+  type RunnerLook,
   type RunnerStop,
   type RunnerStopOutcome,
   runnerDeliveryFailure,
@@ -19,6 +20,7 @@ import type { RunnerKey } from '@ferretry/core-ferrets/contract';
 import {
   type ActRunner,
   type Log,
+  type Redaction,
   type RefusalCode,
   REFUSAL_SENTENCES,
   type SpawnPort,
@@ -26,7 +28,7 @@ import {
 import { targetRef } from '@ferretry/core-vault/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { sessionTarget } from '../../lib/tmux/address.ts';
-import { killSessionArguments, remainOnExitArguments } from '../../lib/tmux/commands.ts';
+import { killSessionArguments, paneActivityFormat, remainOnExitArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
 import { TmuxController } from '../../lib/tmux/controller.ts';
 import { scriptLine } from '../../lib/tmux/script.ts';
@@ -35,7 +37,14 @@ import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
 import { LaunchGuardRefusal, RealHarnessRefusedError, type TmuxLaunchGuard } from '../../lib/tmux/harness-guard.ts';
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
 import { captureFrame, ComposerUnconfirmedError, type DeliverySleep } from './composer-fill.ts';
-import { paneShowsActiveWork } from '../../lib/tmux/pane.ts';
+import {
+  type CapturedFrame,
+  capturedFrameIsCurrent,
+  paneShowsActiveWork,
+  paneStateFrom,
+  parsePaneActivity,
+} from '../../lib/tmux/pane.ts';
+import { type FrameDigest, turnLookOf } from '../../lib/tmux/turn-look.ts';
 import {
   PaneDeliveryError,
   type PaneNotReadyCause,
@@ -207,12 +216,25 @@ export interface TmuxRunnerOptions {
   readonly launchGuard?: TmuxLaunchGuard;
   /** Where a refused launch is said. */
   readonly log?: Pick<Log, 'warn'>;
+  /**
+   * The turn watch's read (`Runner.look`, U4): every look is an act on the pane (`kernel.act(terminal %n, 'read')`, so a
+   * hold refuses it), its screen masked inside one `Redaction.read` before it is parsed. Absent: `look` answers nothing.
+   */
+  readonly look?: { readonly act: ActRunner; readonly redaction: Redaction; readonly digest: FrameDigest };
 }
 
 export class TmuxRunner implements Runner {
   readonly key = 'tmux' as RunnerKey;
   /** One launch at a time: `update-environment` is a server-wide option, set and put back inside one launch. */
   #launching: Promise<unknown> = Promise.resolve();
+
+  /**
+   * The last frame each watched pane was captured in (today's `PaneFrames`), by pane id: a look asks tmux ONE question
+   * for the pane's activity stamp and captures the screen again only when that stamp says it may have changed. Held as
+   * tmux printed it and masked on every look, so a value the Vault learns later is masked in a frame captured before.
+   * Forgotten when the pane is gone, dead, or stopped (politely or not).
+   */
+  readonly #frames = new Map<string, CapturedFrame>();
 
   constructor(private readonly options: TmuxRunnerOptions) {}
 
@@ -347,6 +369,53 @@ export class TmuxRunner implements Runner {
   }
 
   /**
+   * One look at the live ferret pane behind `handle` for the turn watch (`Runner.look`): the activity stamp, the screen
+   * captured again only when it may have changed (re-proving then that the pane is still a live ferret's own), masked
+   * and parsed. Everything inside ONE act on the pane: a hold refuses the whole read and nothing is captured. Total: a
+   * pane that is gone, dead, not a ferret's, unreadable or held answers `undefined`. Never writes.
+   */
+  async look(handle: RunnerHandle): Promise<RunnerLook | undefined> {
+    const watch = this.options.look;
+    if (watch === undefined || !PANE_ID.test(handle)) return undefined;
+    const tmux = this.options.tmux;
+    const nothing = { kind: 'content' as const };
+    const acted = await watch
+      .act(targetRef('terminal', handle), 'read', async () => {
+        const asked = await tmux.execute(['display-message', '-p', '-t', handle, paneActivityFormat]);
+        const activity = asked.code === 0 ? parsePaneActivity(asked.stdout) : undefined;
+        if (activity === undefined || activity.dead || activity.paneId !== handle) {
+          this.#frames.delete(handle);
+          return nothing;
+        }
+        let frame = this.#frames.get(handle);
+        if (frame === undefined || !capturedFrameIsCurrent(frame, activity)) {
+          // A fresh capture re-proves the pane is a live ferret's own: a person's shell is never read.
+          const facts = await this.facts(handle);
+          if (facts === undefined || facts.dead || !isFerretSession(facts.session)) {
+            this.#frames.delete(handle);
+            return nothing;
+          }
+          const capturedAtSecond = Math.floor(Date.parse(this.options.now()) / 1_000);
+          const captured = await tmux.execute(['capture-pane', '-p', '-t', handle]);
+          if (captured.code !== 0) {
+            this.#frames.delete(handle);
+            return nothing;
+          }
+          frame = { activity, visible: captured.stdout, capturedAtSecond };
+          this.#frames.set(handle, frame);
+        }
+        const visible = frame.visible;
+        return await watch.redaction.read(scope => ({
+          kind: 'content' as const,
+          data: turnLookOf(paneStateFrom(activity, scope.text(visible)), watch.digest) as never,
+        }));
+      })
+      .catch(() => undefined);
+    if (acted === undefined || !acted.ok) return undefined;
+    return acted.value.data === undefined ? undefined : (acted.value.data as unknown as RunnerLook);
+  }
+
+  /**
    * The exact live ferret pane behind `handle`, bound for writing: every target is rebound to this handle, every read
    * re-proves the pane is the one first seen, and every write is acted on under `kernel.act` and guarded in the server.
    */
@@ -452,6 +521,8 @@ export class TmuxRunner implements Runner {
 
   async stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void> {
     if (!PANE_ID.test(handle)) return;
+    // Any stop forgets the pane text kept for the look: a polite one only interrupts, but the pane text is not kept.
+    this.#frames.delete(handle);
     const facts = await this.facts(handle);
     if (facts === undefined) return;
     if (how === 'polite' && !facts.dead) {

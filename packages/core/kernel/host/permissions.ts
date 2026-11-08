@@ -3,6 +3,7 @@ import type { StateFileDef } from '../contract/define.ts';
 import { CORE_IDS } from '../contract/ids.ts';
 import type { FetchPort, SpawnOptions, SpawnPort, WebSocketPort, WorkersPort } from '../contract/ports.ts';
 import { WORKER_STATE_KEY } from '../worker.ts';
+import { embeddedWorkerFile, isCompiledModule } from './adapters/embedded-worker.ts';
 import { serveWorkerGrants, type WorkerGrantSources } from './worker-grants/serve.ts';
 import { WORKER_GRANTS_KEY } from './worker-grants/wire.ts';
 import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
@@ -182,6 +183,27 @@ export interface WorkerGrantEnding {
 }
 
 /**
+ * The worker programs a plugin declares (its half's `workers`), for the one rule that needs them: in a COMPILED binary
+ * a worker program is found by its file stem alone, so the URL a plugin starts must carry the stem of a program the
+ * plugin declares — a typo or an undeclared spelling that happens to share a declared stem would start that program
+ * instead of failing. From source the URL is the file itself and nothing is checked.
+ */
+export interface DeclaredWorkers {
+  readonly urls: () => Readonly<Record<string, URL>> | undefined;
+  /** Whether the binary is compiled; this process's own answer unless a test asks how a compiled one behaves. */
+  readonly compiled?: boolean;
+}
+
+/** The embedded file of a worker URL, or `undefined` when its name cannot be read (broken percent escapes). */
+function stemOf(url: URL): string | undefined {
+  try {
+    return embeddedWorkerFile(url);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Workers for one plugin: each `state` grant is resolved by that plugin's own state port (declared, sqlite only, in
  * its folder) and handed to the worker as `workerData`; an ungrantable one refuses the start before a thread exists.
  * `roots` and `network` are granted from `reach` (this plugin's own roots port and `kernel.fetch`): READ-ONLY roots and
@@ -193,12 +215,19 @@ export function workersFor(
   grant: () => ((def: StateFileDef, name?: string) => { readonly path: string; readonly label: string }) | undefined,
   reach?: WorkerGrantSources,
   ending?: WorkerGrantEnding,
+  declared?: DeclaredWorkers,
 ): WorkersPort {
   // One entry per live granted worker, drained by ONE stop handler for the plugin: a worker that ends takes its entry out.
   const live = new Set<() => void>();
   let registered = false;
   return {
     start: (moduleUrl, options) => {
+      if (declared !== undefined && moduleUrl.protocol === 'file:' && (declared.compiled ?? isCompiledModule())) {
+        const stem = stemOf(moduleUrl);
+        const known = Object.values(declared.urls() ?? {}).map(stemOf);
+        if (stem === undefined || !known.includes(stem))
+          throw new TypeError('this plugin declares no worker program by that file name');
+      }
       const wanted = options?.state ?? [];
       const resolve = grant();
       if (wanted.length > 0 && resolve === undefined) throw new TypeError('this plugin has no state to grant a worker');
