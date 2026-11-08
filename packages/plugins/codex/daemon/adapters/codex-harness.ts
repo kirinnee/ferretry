@@ -141,6 +141,9 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
   return {
     key: 'codex',
+    // Today's stop key. NOT safe when idle: at an idle Codex prompt a stop key is one of the ways the TUI quits, so an
+    // interrupt presses it only while the pane shows active work (`shouldPressStopKey`).
+    turnStop: { key: 'Escape', safeWhenIdle: false },
 
     async discover(): Promise<HarnessInstall | HarnessMissing> {
       const location = await locate();

@@ -384,8 +384,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     // The registry the worktrees module keeps (built below); read only, through its own lifecycle chain.
     managedWorktrees: async () => await worktrees.service.records(),
-    // The harness seam writes only through the act runner, so Vault's input holds apply to it as to terminal_send.
-    act: kernel.act,
     // Bound below, once the moves are built (the moves resume through this very service).
     move: async (ferret, runtime, options) =>
       await moves.move.move(ferret, {

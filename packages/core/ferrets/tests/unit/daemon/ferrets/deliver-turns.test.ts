@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import type { ActRunner, RootHandle } from '@ferretry/kernel/contract';
+import type { RootHandle } from '@ferretry/kernel/contract';
 import { diskPaths, diskSessionsRoot, type MemoryStateFolder } from '@ferretry/kernel/testing';
 import { err, ok, type Result } from '@ferretry/std';
 import {
@@ -72,7 +72,6 @@ interface World {
   readonly storage: Awaited<ReturnType<typeof memoryStorage>>['storage'];
   readonly state: MemoryStateFolder;
   readonly folderOf: (id: string) => string;
-  readonly acts: string[];
   readonly warnings: string[];
 }
 
@@ -131,11 +130,6 @@ async function world(
   });
   const runner = new ScriptedRunner();
   const harness = new FakeHarness();
-  const acts: string[] = [];
-  const act: ActRunner = async (target, op, run) => {
-    acts.push(`${op} ${target.key}`);
-    return ok(await run({} as never));
-  };
   let next = records.length;
   const ports: FerretsPorts = {
     now: () => T0,
@@ -160,7 +154,6 @@ async function world(
     instructions: () => [],
     folder: path => ok(fenced(path)),
     changed: () => {},
-    act,
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
     asks: { open: async () => [] },
     session: files.port,
@@ -178,7 +171,6 @@ async function world(
     storage,
     state,
     folderOf: id => folders[id] ?? '',
-    acts,
     warnings,
     reuse: { state, handles, folders },
   };
@@ -477,8 +469,8 @@ describe('F-0344 today’s deliverFirstTurn: a start types its assigned task’s
     expect(w.runner.deliveries[0]?.handle).toBe(w.registry.get(id as never)?.handle as never);
     // Settled: the ledger now answers a replay of this start as one that must type nothing.
     expect(await w.files.port.admitFirstTurn?.(id as never, 'Build the thing.')).toBe('settled');
-    // Not wrapped in an act of the seam's own: the runner acts per write itself.
-    expect(w.acts).toEqual([]);
+    // Not wrapped in an act of Ferrets' own: the runner acts per write itself, and Ferrets holds no act runner.
+    expect(w.runner.deliveries).toHaveLength(1);
   });
 
   test('a start with no prompt has no first turn: nothing is typed and no turn document is written', async () => {
@@ -762,11 +754,10 @@ describe('FerretHarness.queue: the runner’s own queue, never wrapped in a seco
     expect(w.runner.queued).toEqual([
       { handle: w.registry.get(id as never)?.handle as never, text: 'FIXTURE queued words' },
     ]);
-    // The runner acts per write itself; an outer act here would wait on the inner one forever.
-    expect(w.acts).toEqual([]);
-    // Contrast: an interrupt IS acted on by the seam, because the runner's signal is a raw key.
+    // The runner acts per write itself; an outer act here would wait on the inner one forever. An interrupt is the
+    // runner's own guarded stop key too (harness-refusals), so nothing on this seam is acted on twice.
     await seam?.interrupt();
-    expect(w.acts).toHaveLength(1);
+    expect(w.runner.pressed).toEqual([{ handle: w.registry.get(id as never)?.handle as never, key: 'Escape' }]);
   });
 
   test('a stopped ferret has no pane to queue into, and a runner that cannot queue answers plugin_unavailable', async () => {
