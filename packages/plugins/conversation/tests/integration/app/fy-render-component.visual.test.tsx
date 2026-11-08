@@ -36,7 +36,7 @@ import should from 'should';
 import { THEME_FAMILIES } from '@ferretry/app';
 import { fakeTilePng } from '../../support/app/fake-tile.ts';
 import { FY_RENDER_VISUAL_CASES } from './fixtures/fy-render-visual-cases.ts';
-import { sharedChromium } from './support/chromium.ts';
+import { sharedChromium } from '@ferretry/app/testing/browser';
 import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 
 /** Set to capture PNGs. Never inside the repository — the artifacts are not source. */
