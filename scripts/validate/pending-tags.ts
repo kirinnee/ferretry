@@ -77,6 +77,18 @@ export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
     'loaded lazily by `import(`./views/${"surfaces"}.tsx`)` in app/index.ts, a template import knip cannot follow.',
   ],
   [
+    'knip.production.json#workspaces["packages/plugins/catalogs"].ignoreDependencies:react-dom',
+    'only app/features/catalogs/catalog-add-toast.tsx (createPortal) imports it, and that file waits for its caller (catalogs GAP(conversation) line in ports-pending.json); the dependency leaves with that GAP.',
+  ],
+  [
+    'knip.json#ignoreIssues["packages/plugins/catalogs/contract/wire/shared-catalog-diff.ts"]',
+    'Every export of this frozen wire file (`contract/wire`), not one name: the ignore is file-wide. Today the one knip reports is `CatalogChangeFlagSchema`, built into the diff shapes in the same file and a named word of the contract vocabulary a consumer may import. The contract is not edited after day 1 (a per-name `@public` tag would be a contract edit), so its exports stay and knip is told they are intended; a new export here needs the lead anyway. Not a pending-port gap.',
+  ],
+  [
+    'knip.json#ignoreIssues["packages/plugins/catalogs/contract/wire/shared-catalog-owner.ts"]',
+    'Every export of this frozen wire file (`contract/wire`), not one name: the ignore is file-wide. Today the one knip reports is `OwnedSharedItemVersionSchema`, built into the owner shapes in the same file and a named word of the contract vocabulary a consumer may import. The contract is not edited after day 1 (a per-name `@public` tag would be a contract edit), so its exports stay and knip is told they are intended; a new export here needs the lead anyway. Not a pending-port gap.',
+  ],
+  [
     'knip.json#ignoreIssues["packages/plugins/shells/contract/wire.ts"]',
     '`ShellCacheKeySchema` (wire.ts) is a second name for `NarHashSchema`, kept as its own word of the cache vocabulary; knip reports that alias as a duplicate export. Not a pending-port gap.',
   ],
