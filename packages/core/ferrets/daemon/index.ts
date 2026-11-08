@@ -86,7 +86,7 @@ import { PinService } from './lib/pins/index.ts';
 import { pinRoutes } from './lib/runtime/mounts/pins.ts';
 import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
 import { sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
-import { ARCHIVE_PASS_JOB, ARCHIVE_TICK_MS, buildArchive } from './modules/archive.ts';
+import { ARCHIVE_PASS_JOB, ARCHIVE_TICK_MS, buildArchive, hiddenFromLiveList } from './modules/archive.ts';
 import { sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
 import { FerretRestarts, restartService } from './lib/ferrets/restarts.ts';
 import { sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
@@ -834,7 +834,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   kernel.jobs.add({
     id: ARCHIVE_PASS_JOB,
     schedule: { every: milliseconds(ARCHIVE_TICK_MS) },
-    run: async () => await archive.tick(),
+    run: async signal => await archive.tick(signal),
   });
   const archived = sessionArchiveRoutes(archive.subsystem);
   /** Whether the archive took this ferret out of the live set (a read: it writes nothing and revives nothing). */
@@ -992,7 +992,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       'GET /v1/ferrets': async call => {
         await ready();
         await storeLoaded.catch(() => undefined);
-        const live = (await service.list()).filter(summary => !isArchived(summary.id));
+        // Hidden only while ARCHIVED AND STOPPED: a ferret the record holds in any other state is live whatever the archive
+        // flag says (an adopted live pane writes only the record, and a revival's document write may still be on its way).
+        const live = (await service.list()).filter(
+          summary => !hiddenFromLiveList(summary.state, isArchived(summary.id)),
+        );
         return fleetList.answer(await outdatedMarks.list(live), headerValue(call.request, 'if-none-match'));
       },
       'GET /v1/ferrets/:ferretId/subtree': async call => {

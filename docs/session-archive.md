@@ -36,8 +36,9 @@ and the live list. See **Declared gaps**.
 | An open agenda item             | the session's own agenda board                                              |
 | A live child, in any form       | the rule itself (5 above)                                                   |
 
-A session that is revived, resumed, forked from, or written to for any reason comes back (below), so none of these is
-decided once and for ever.
+A session that is revived, resumed, pinned, or written to for any reason comes back (below), so none of these is
+decided once and for ever. (One that is only **forked from** is read, not written, so it stays archived: see **Declared
+gaps**.)
 
 ## Where an archived session is
 
@@ -48,9 +49,10 @@ subsystem that writes into a session directory (the agenda, the channel, the boa
 second path to teach it, a crash can never strand half a move, and losing the registry only makes every session live
 again at the next boot's reconcile — the safe direction.
 
-An archived session is **out of**: the session store's index and the live ferret list, `GET /v1/ferrets` (each ferret
-is in exactly one of `GET /v1/ferrets` and `GET /v1/archived-sessions`). Nothing is deleted to do it: the list
-leaves out what the archive document names, so a revival puts it back with no other write.
+An archived session is **out of**: the session store's index and the live ferret list, `GET /v1/ferrets` (a stopped ferret is in
+exactly one of `GET /v1/ferrets` and `GET /v1/archived-sessions`; one whose record says it is running is listed live even
+while the archive still names it, see **Coming back**). Nothing is deleted to do it: the list leaves out what the archive
+document names for a stopped ferret, so a revival puts it back with no other write.
 
 An archived session is **still in** the ferret registry (its record is untouched) and therefore in every walk of the
 registry — see **Declared gaps**.
@@ -81,8 +83,12 @@ Three facts were derived from the live list, and would have changed silently whe
 ## Coming back
 
 A **write** brings an archived session back into the live set: an event appended, its state or config written or
-updated. That covers resume, revive, send and any other path that changes it — they all write through the
-same storage. The live index row is rebuilt first, then the registry entry is removed. If rebuilding any session or
+updated. That covers resume, revive, send and any other path that writes the session's own documents.
+**Adopting a live pane back into a ferret** (`attach`, the Ferrets port's way for another plugin to hand one over) is not
+one of them: it writes only the ferret's registry record (`working`), and the session's documents follow the registry
+afterwards, on their own lane. `GET /v1/ferrets` therefore does not wait for that write: it leaves out an archived ferret
+only while its record says **stopped**, so a ferret that is starting, working or idle is always listed, whatever the
+archive says. The live index row is rebuilt first, then the registry entry is removed. If rebuilding any session or
 ancestor fails, archive membership stays available for retry. Retention also repairs a missing live row when the
 session has no registry entry, so a retry can recover an incomplete restoration.
 
@@ -171,7 +177,9 @@ hook. While either is missing no pass runs, and a half that fails keeps every fe
 "keep live", never "archive". **Every answer is parsed** at the Ferrets boundary: Board's must be a list of exactly
 `{ owner, assignee, dropped, category? }` with ferret ids (never callsigns) and a boolean `dropped`, Agenda's must be a
 boolean, and an answer of any other shape, one that throws and one that does not come within 10 seconds all read as
-"unreadable", which keeps every ferret it was asked about. A contributed item that is not a keep source is refused by
+"unreadable", which keeps every ferret it was asked about. The 10 seconds is one deadline for a WHOLE check (however many
+ferrets it asks about), not one per question, and it also ends when the daemon stops the job: every ferret the check had
+not yet heard about is kept, and the session lanes the commit-boundary check holds are released at that deadline. A contributed item that is not a keep source is refused by
 the hook and counts as that half not answering. A ferret the daemon still holds as running is kept too, whatever its
 state document says, and so is one whose registry record does not say `mode: auto`.
 

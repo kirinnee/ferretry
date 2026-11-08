@@ -4,9 +4,11 @@ import {
   FerretConfigFile,
   FerretFiles,
   type FerretId,
+  FerretsPort,
   FerretStateFile,
   type FerretSummary,
 } from '../../../../contract/index.ts';
+import { ARCHIVE_PASS_JOB } from '../../../../daemon/modules/archive.ts';
 import {
   archiveWorld,
   archived,
@@ -518,5 +520,99 @@ describe('the session archive: a record that does not say it is autonomous is ke
     await tickArchive(again);
     expect(await archivedIds(again)).toEqual([]);
     await again.stop();
+  });
+});
+
+describe('the session archive: a running ferret is never hidden from the live list (u6-r2 MAJOR)', () => {
+  const liveIds = async (h: Parameters<typeof archived>[0]): Promise<string[]> =>
+    (await h.request('GET', '/v1/ferrets')).json<FerretSummary[]>().map(summary => summary.id);
+
+  test.each([['healthy'], ['config'], ['state']] as const)(
+    'a ferret adopted back to working through attach stays in GET /v1/ferrets with its %s document, archived or not',
+    async damage => {
+      const { h } = await archiveWorld({ afterHours: 24 });
+      const id = await startFerret(h, 'aniya');
+      await finishFerret(h, id);
+      await pass(h, 25 * HOUR_MS);
+      await tickArchive(h);
+      expect(await archivedIds(h)).toEqual([id]);
+      const other = await startFerret(h, 'bodhi');
+      await settle(h);
+      const handle = (JSON.parse(h.state('ferrets').raw(FerretFiles, other) as string) as { handle: never }).handle;
+      // An adopted live pane writes only the record: with a document the revival cannot read, the archive flag stays.
+      if (damage === 'config') h.state('ferrets').plant(FerretConfigFile, '{damaged', id);
+      if (damage === 'state') h.state('ferrets').plant(FerretStateFile, '{damaged', id);
+      const attached = await h.provided(FerretsPort, 'board').attach(id, handle);
+      expect(attached.ok).toBe(true);
+      await settle(h);
+      const record = JSON.parse(h.state('ferrets').raw(FerretFiles, id) as string) as { state: string };
+      expect(record.state).toBe('working');
+      expect(await liveIds(h)).toContain(id);
+      await h.stop();
+    },
+  );
+});
+
+describe('the session archive: a hung Board or Agenda holds the sessions for one deadline, not one per question (u6-r2 minor 2)', () => {
+  test('with the commit-boundary check hung over more candidates than one batch, a resume completes at ONE 10 s deadline and nothing is archived', async () => {
+    const { h, agenda } = await archiveWorld({ afterHours: 24 });
+    const ids: FerretId[] = [];
+    // More candidates than one batch of Agenda reads (8): a per-question limit would need a second 10 s round.
+    for (let at = 0; at < 9; at += 1) ids.push(await startFerret(h, `ferret${String(at)}`));
+    for (const id of ids) await finishFerret(h, id);
+    await pass(h, 25 * HOUR_MS);
+    let calls = 0;
+    // The first look answers (nothing open); the look at the commit boundary hangs.
+    agenda.answer = () => (++calls <= ids.length ? false : new Promise<never>(() => {}));
+    const tick = h.runJob(ARCHIVE_PASS_JOB);
+    for (let turn = 0; turn < 20; turn += 1) {
+      await h.clock.advance(0);
+      await Bun.sleep(1);
+    }
+    expect(calls).toBeGreaterThan(ids.length);
+    let resumed = false;
+    const resume = h.request('POST', `/v1/ferrets/${ids[0]}/resume`, { body: {} }).then(answer => {
+      resumed = true;
+      return answer;
+    });
+    for (let turn = 0; turn < 20; turn += 1) {
+      await h.clock.advance(0);
+      await Bun.sleep(1);
+    }
+    expect(resumed).toBe(false);
+    await h.clock.advance(10_000);
+    for (let turn = 0; turn < 40; turn += 1) {
+      await h.clock.advance(0);
+      await Bun.sleep(1);
+    }
+    // The lanes were released at the one deadline: the resume is through, and the hung check kept everyone.
+    expect(resumed).toBe(true);
+    expect((await resume).status).toBeLessThan(300);
+    await tick.catch(() => undefined);
+    expect(await archivedIds(h)).toEqual([]);
+    await h.stop();
+  });
+});
+
+describe('the session archive: one unreadable archived document does not fail the whole list (u6-r2 minor 3)', () => {
+  test('GET /v1/archived-sessions answers the readable ones, leaves the damaged one out, and says how many it left out', async () => {
+    const { h } = await archiveWorld({ afterHours: 24 });
+    const good = await startFerret(h, 'aniya');
+    const bad = await startFerret(h, 'bodhi');
+    await finishFerret(h, good);
+    await finishFerret(h, bad);
+    await pass(h, 25 * HOUR_MS);
+    await tickArchive(h);
+    expect(await archivedIds(h)).toEqual([bad, good].sort());
+    h.state('ferrets').plant(FerretStateFile, '{damaged', bad);
+    const answer = await h.request('GET', '/v1/archived-sessions', { query: { limit: '100' } });
+    expect(answer.status).toBe(200);
+    expect(answer.json<{ sessions: { config: { id: string } }[] }>().sessions.map(view => view.config.id)).toEqual([
+      good,
+    ]);
+    expect(
+      h.logs.filter(line => line.message === 'archived sessions with unreadable documents were left out of the list'),
+    ).toEqual([expect.objectContaining({ level: 'warn', fields: { skipped: 1 } })]);
+    await h.stop();
   });
 });

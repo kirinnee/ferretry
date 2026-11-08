@@ -1,14 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
-import { ArchiveFile, ArchiveKeeps, type ArchiveKeepSource, type FerretId } from '../../../../contract/index.ts';
+import {
+  ArchiveFile,
+  ArchiveKeeps,
+  type ArchiveKeepSource,
+  FERRET_STATES,
+  type FerretId,
+} from '../../../../contract/index.ts';
 import { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
 import {
   ARCHIVE_ANSWER_TIMEOUT_MS,
+  ARCHIVE_KEEPS_DEADLINE_MS,
   ARCHIVE_PASS_EVERY_MS,
   ARCHIVE_TICK_MS,
   archiveAfterMs,
   buildArchive,
+  hiddenFromLiveList,
 } from '../../../../daemon/modules/archive.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { RecordingLog, SESSION_STORE_FILES, sessionConfig, sessionState } from '../../../support/daemon/storage.ts';
@@ -35,6 +43,14 @@ class Timers {
     this.pending.set(id, { delayMs, fire });
     return () => this.pending.delete(id);
   };
+  /** Fires what is due within `maxMs` (every timer this archive arms is at most 10 s), and nothing set further out. */
+  fireWithin(maxMs: number): void {
+    for (const [id, timer] of [...this.pending]) {
+      if (timer.delayMs > maxMs) continue;
+      this.pending.delete(id);
+      timer.fire();
+    }
+  }
   fireAll(): void {
     for (const [id, timer] of [...this.pending]) {
       this.pending.delete(id);
@@ -346,7 +362,11 @@ describe('a garbage answer from Board or Agenda never archives (parsed at the Fe
     const hanging: ArchiveKeepSource = { kind: 'board', cards: async () => await new Promise<never>(() => {}) };
     const ticking = mount(w, { now: T0 }, { keeps: [hanging, agendaSaying(false)], timers }).tick();
     await untilAsked(timers);
-    expect([...timers.pending.values()].map(timer => timer.delayMs)).toEqual([ARCHIVE_ANSWER_TIMEOUT_MS]);
+    // The question's own bound, and the one deadline of the whole check that holds it.
+    expect([...timers.pending.values()].map(timer => timer.delayMs)).toEqual([
+      ARCHIVE_KEEPS_DEADLINE_MS,
+      ARCHIVE_ANSWER_TIMEOUT_MS,
+    ]);
     timers.fireAll();
     await ticking;
     expect(w.storage.archivedCount()).toBe(0);
@@ -407,5 +427,71 @@ describe('a store whose archive did not load', () => {
     clock.now += ARCHIVE_PASS_EVERY_MS;
     await archive.tick();
     expect(loads).toBe(2);
+  });
+});
+
+describe('the archive module: hiddenFromLiveList and the check deadline (u6-r2)', () => {
+  test.each(FERRET_STATES.map(state => [state] as const))(
+    'a %s ferret is left out of the live list only when it is archived and stopped',
+    state => {
+      expect(hiddenFromLiveList(state, false)).toBe(false);
+      expect(hiddenFromLiveList(state, true)).toBe(state === 'stopped');
+    },
+  );
+
+  test('ONE deadline covers a whole keeps check: more ferrets than one batch are kept when it fires, with no second round of timers', async () => {
+    const ids = Array.from({ length: 20 }, (_, at) => `aa-${String(at)}`);
+    const w = await world(ids);
+    const timers = new Timers();
+    let asked = 0;
+    const hanging: ArchiveKeepSource = {
+      kind: 'agenda',
+      hasOpenItem: async () => {
+        asked += 1;
+        return await new Promise<never>(() => {});
+      },
+    };
+    const ticking = mount(w, { now: T0 }, { keeps: [board, hanging], timers }).tick();
+    await untilAsked(timers);
+    expect(timers.pending.size).toBeGreaterThan(0);
+    // One firing of the timers that are due ends the pass: nothing is left waiting for another round of 10 s.
+    timers.fireWithin(ARCHIVE_KEEPS_DEADLINE_MS);
+    await ticking;
+    // The second batch of Agenda reads is never asked: the deadline stopped the check, not the question timers.
+    await Bun.sleep(5);
+    expect(asked).toBe(8);
+    expect(w.storage.archivedCount()).toBe(0);
+    expect(timers.pending.size).toBe(0);
+  });
+
+  test('a stopped job ends a pass that is waiting on a hung Agenda: nothing archived, no timer left behind', async () => {
+    const w = await world(['aa-1']);
+    const timers = new Timers();
+    const hanging: ArchiveKeepSource = { kind: 'agenda', hasOpenItem: async () => await new Promise<never>(() => {}) };
+    const controller = new AbortController();
+    const ticking = mount(w, { now: T0 }, { keeps: [board, hanging], timers }).tick(controller.signal);
+    await untilAsked(timers);
+    controller.abort();
+    await ticking;
+    expect(w.storage.archivedCount()).toBe(0);
+    // The check's own deadline is cancelled; only the hung question's bound is left to lapse on its own.
+    expect([...timers.pending.values()].map(timer => timer.delayMs)).toEqual([ARCHIVE_ANSWER_TIMEOUT_MS]);
+  });
+
+  test('a job already stopped starts no pass at all', async () => {
+    const w = await world(['aa-1']);
+    const controller = new AbortController();
+    controller.abort();
+    let asked = 0;
+    const counting: ArchiveKeepSource = {
+      kind: 'agenda',
+      hasOpenItem: async () => {
+        asked += 1;
+        return false;
+      },
+    };
+    await mount(w, { now: T0 }, { keeps: [board, counting] }).tick(controller.signal);
+    expect(asked).toBe(0);
+    expect(w.storage.archivedCount()).toBe(0);
   });
 });

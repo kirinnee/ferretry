@@ -21,7 +21,13 @@
  */
 import type { Log } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { type ArchiveKeepSource, type ArchiveSettings, type FerretId, FerretIdSchema } from '../../contract/index.ts';
+import {
+  type ArchiveKeepSource,
+  type ArchiveSettings,
+  type FerretId,
+  FerretIdSchema,
+  type FerretState,
+} from '../../contract/index.ts';
 import { createSessionArchive, type SessionArchive } from '../adapters/session/archive/session-archive.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import type { SessionArchiveSubsystem } from '../lib/runtime/mounts/session-archive.ts';
@@ -37,6 +43,8 @@ export const ARCHIVE_TICK_MS = 60_000;
 export const ARCHIVE_PASS_EVERY_MS = 60 * 60_000;
 /** How long Board or Agenda has to answer one question; an answer that does not come in time keeps the ferret. */
 export const ARCHIVE_ANSWER_TIMEOUT_MS = 10_000;
+/** How long ONE whole keeps check has, however many ferrets it asks about; past it every ferret asked about is kept. */
+export const ARCHIVE_KEEPS_DEADLINE_MS = 10_000;
 
 /** Board's answer, exactly as the contract types it: anything else is unreadable, never a guess. */
 const CardsAnswerSchema = z.array(
@@ -65,6 +73,13 @@ export function archiveAfterMs(settings: ArchiveSettings | undefined): number | 
   const hours = settings?.afterHours;
   return typeof hours === 'number' ? hours * HOUR_MS : undefined;
 }
+
+/**
+ * Whether the LIVE list leaves a ferret out: only one the archive took AND the record holds stopped. A ferret in any
+ * other state (starting, working, idle) is running, so it is listed whatever the archive flag says: an adopted live pane
+ * writes only the record, and a revival's document write may still be on its way.
+ */
+export const hiddenFromLiveList = (state: FerretState, archived: boolean): boolean => archived && state === 'stopped';
 
 /** A card as the keep rule reads it. A lane category Ferrets does not know reads as unknown, which is "in flight". */
 const standing = (card: z.output<typeof CardsAnswerSchema>[number]): OpenCardStanding => ({
@@ -99,8 +114,8 @@ export interface ArchiveDeps {
 export interface MountedArchive {
   /** The routes' view: count and list always, and `run` only while a pass may run. */
   readonly subsystem: SessionArchiveSubsystem;
-  /** What the kernel job calls every {@link ARCHIVE_TICK_MS}: runs a pass only when one is due. */
-  tick(): Promise<void>;
+  /** What the kernel job calls every {@link ARCHIVE_TICK_MS}: runs a pass only when one is due; `signal` stops it. */
+  tick(signal?: AbortSignal): Promise<void>;
 }
 
 /**
@@ -168,6 +183,9 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
       passLimit: deps.passLimit ?? ARCHIVE_PASS_LIMIT_DEFAULT,
       sources,
       yieldToLoop: deps.yieldToLoop,
+      after: deps.after,
+      keepsDeadlineMs: ARCHIVE_KEEPS_DEADLINE_MS,
+      log: deps.log,
     });
   // The read side never archives: it is built with archiving off, so the routes can neither start nor revive a thing.
   const reading = build(undefined).subsystem;
@@ -184,7 +202,8 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
 
   return {
     subsystem: reading,
-    tick: async () => {
+    tick: async signal => {
+      if (signal?.aborted === true) return;
       const afterMs = archiveAfterMs(deps.settings());
       if (afterMs === undefined) return;
       if (deps.nowMs() < dueAtMs) return;
@@ -197,7 +216,7 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
       try {
         // A store whose archive could not be loaded fails the pass like any other failure: tried again an hour later.
         await deps.loaded();
-        const result = await run();
+        const result = await run(signal);
         // Another pass is still running: its own end decides the next one.
         if (result === undefined) return;
         dueAtMs = deps.nowMs() + (result.deferred > 0 ? ARCHIVE_TICK_MS : ARCHIVE_PASS_EVERY_MS);

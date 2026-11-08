@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { fixture, ended } from './session-archive-commit-contract.ts';
+import { archiveDeadline } from './archive-deadline.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { createSessionArchive } from '../../../daemon/adapters/session/archive/session-archive.ts';
@@ -60,6 +61,7 @@ export function sessionArchiveConfigRetentionContract(): void {
           hasOpenAgendaItem: async () => false,
         },
         yieldToLoop: async () => {},
+        ...archiveDeadline(),
       });
     const disabled = archive(undefined);
     expect(disabled.enabled).toBe(false);
