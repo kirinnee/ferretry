@@ -517,6 +517,20 @@ describe('clone settings: controls are one keyed document', () => {
     });
   });
 
+  it('the controls are compared and planned with no config layer at all', () => {
+    const analysis = analyse([controls({ agentControl: { files: false } })], undefined, undefined);
+    should(reviewCloneSettings(analysis)[0]?.keys.map(row => row.key)).eql(['agentControl.files']);
+    const plan = planCloneSettings(analysis, { controls: { 'agentControl.files': 'take' } });
+    should(plan.files).eql([]);
+    should(plan.controls?.taken).eql({ agentControl: { files: false } });
+  });
+
+  it('a settings file with no config layer is refused, and nothing is half applied', () => {
+    should(() => analyse([controls({}), warden()], undefined, undefined)).throw(CloneRefusal, {
+      message: 'This machine cannot merge settings documents yet. Leave them out and copy the rest.',
+    });
+  });
+
   it('taking some fields is a smaller change with only those fields', () => {
     const analysis = analyseCloneSettings(
       [controls({ agentPermissions: 'skip', agentControl: { files: false, ferretrySettings: true } })],
