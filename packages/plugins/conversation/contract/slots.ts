@@ -89,3 +89,10 @@ export interface ComposerAccount {
 export interface ComposerToolsProps {
   readonly account?: ComposerAccount;
 }
+
+/**
+ * The slot AGENDA's ask page offers (Agenda's contract/slots.ts owns the name and its props `{ ferret, ask }`; lead
+ * decision Q9). Conversation contributes the ferret's conversation and composer to it. The name is written here because
+ * Agenda already uses Conversation, so Conversation cannot import Agenda's contract; the shell's slot test pairs the two.
+ */
+export const AGENDA_CONVERSATION_SLOT = 'agenda.conversation' as const;

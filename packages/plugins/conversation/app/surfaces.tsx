@@ -24,6 +24,9 @@ import { CompactAtPanel } from './compact-at/compact-at-panel.tsx';
 import { LinksScreen } from './links/links-screen.tsx';
 import { QuestionRenderer } from './questions/question-renderer.tsx';
 import { QueuePanel } from './queue/queue-page.tsx';
+import { AgendaConversationPanel } from './slots/agenda-conversation-panel.tsx';
+import { FilesSearchPanel } from './slots/files-search-panel.tsx';
+import { InterruptRowPanel } from './slots/interrupt-row-panel.tsx';
 import { HypermediaPanel } from './toolbar/hypermedia-panel.tsx';
 
 /** A surface body inside the client context. */
@@ -43,6 +46,9 @@ export interface ConversationSurfaces {
     readonly 'compact-at': AppComponent<PanelProps>;
     readonly hypermedia: AppComponent<PanelProps>;
     readonly 'chat-width': AppComponent<PanelProps>;
+    readonly 'files-search': AppComponent<PanelProps>;
+    readonly 'interrupt-row': AppComponent<PanelProps>;
+    readonly 'agenda-conversation': AppComponent<PanelProps>;
   };
   readonly settings: { readonly conversation: AppComponent<SettingsProps> };
   readonly renderers: { readonly 'ask:question': AppComponent<RendererProps> };
@@ -59,6 +65,9 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     'compact-at': scoped<PanelProps>(client, CompactAtPanel),
     hypermedia: scoped<PanelProps>(client, HypermediaPanel),
     'chat-width': scoped<PanelProps>(client, ChatWidthPanel),
+    'files-search': scoped<PanelProps>(client, FilesSearchPanel),
+    'interrupt-row': scoped<PanelProps>(client, InterruptRowPanel),
+    'agenda-conversation': scoped<PanelProps>(client, AgendaConversationPanel),
   },
   settings: { conversation: scoped<SettingsProps>(client, ConversationSettings) },
   renderers: { 'ask:question': scoped<RendererProps>(client, QuestionRenderer) },
