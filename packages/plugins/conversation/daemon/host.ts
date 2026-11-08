@@ -31,23 +31,51 @@ import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './questions/li
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
 import { StateHypermediaSwitch } from './hypermedia/adapters/index.ts';
 import { hypermediaDefault, SessionHypermediaService, sessionHypermediaRoutes } from './hypermedia/lib/index.ts';
+import {
+  type HarnessGate,
+  INTERRUPT_UNAVAILABLE,
+  MaybeTyped,
+  SEND_EXTRAS_UNAVAILABLE,
+  SEND_UNAVAILABLE,
+  terminalSeam,
+} from './harness-seam.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferret-id.ts';
 import type { ClockPort } from './seams/ports.ts';
 import type { SessionView } from './seams/protocol.ts';
 
-/** Said by every route that needs to type into, or read the screen of, a ferret's terminal. */
+/** Said by every route that needs the ferret's terminal and is not connected to it: a send, an interrupt, the composer, a question's form, a retry. */
 const TERMINAL_PENDING =
   "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
 
-const pending = (): never => {
-  throw new ApiError(503, TERMINAL_PENDING, 'conversation_terminal_unavailable');
+const pending = (sentence: string = TERMINAL_PENDING): never => {
+  throw new ApiError(503, sentence, 'conversation_terminal_unavailable');
 };
 const pendingRefusal = (): ConversationRefusal => ({
   code: 'conversation_terminal_unavailable',
   message: TERMINAL_PENDING,
 });
+
+/** The code a refusal answers with on the port: the route's own code, else the word of a send refusal. */
+const refusalCode = (error: unknown): string =>
+  error instanceof ApiError
+    ? (error.code ?? 'send_refused')
+    : error instanceof SessionSendError
+      ? ((
+          { not_found: 'not_found', refused: 'send_refused', failed: 'session_send_failed' } as Readonly<
+            Record<string, string>
+          >
+        )[error.failure] ?? 'send_refused')
+      : 'send_refused';
+
+/** What a send can carry that the harness seam does not type yet. */
+interface UnwiredSend {
+  readonly attachmentIds?: readonly string[] | undefined;
+  readonly label?: unknown;
+  readonly now?: boolean | undefined;
+  readonly replyExpected?: boolean | undefined;
+}
 
 /** One answer as the terminal seam takes it: the route's request, or the port's with a minted request id. */
 type AnswerToTerminal = Parameters<SessionAnswerSubsystem['answer']>[1];
@@ -92,18 +120,21 @@ export interface ConversationAHalf {
 
 /**
  * Part a of Conversation's daemon half: the queue, the send ledger, questions, turns and the shared draft, on the
- * kernel's state, clock, events and ids. Everything that must TYPE into a ferret's terminal (send, interrupt, the
- * composer actions, answering a question, the harness's own compact-at setting) is wired to a refusal that says so,
- * until Terminals and the harnesses give Conversation the pane seam; the queue, the ledger reads, the shared draft
- * and its stream are real.
+ * kernel's state, clock, events and ids. A send and an interrupt are built over Ferrets' harness seam but wait behind
+ * the gate (`deps.gate`) until Ferrets answers a closed refusal for a send and presses the harness's own stop key.
+ * Everything else that needs the pane (the composer actions, a send's retry, cancel and submit, answering a question's
+ * form, the harness's own compact-at setting) is wired to a refusal that says so; the queue, the ledger reads, the
+ * shared draft and its stream are real.
  */
 export function buildConversationA(deps: {
   readonly kernel: KernelPorts;
   readonly ferrets: FerretsApi;
   readonly asks: Pick<AsksApi, 'get'>;
   readonly hooks: Pick<HookInvoker, 'observe' | 'transform'>;
+  /** Which of the harness seam's two actions are live (see {@link HarnessGate}). */
+  readonly gate: HarnessGate;
 }): ConversationAHalf {
-  const { kernel, ferrets, asks, hooks } = deps;
+  const { kernel, ferrets, asks, hooks, gate } = deps;
   const clock: ClockPort = { now: () => kernel.clock.now() };
   const queueSerial = new KeyedSerialExecutor();
   const draftSerial = new KeyedSerialExecutor();
@@ -121,7 +152,7 @@ export function buildConversationA(deps: {
   });
   const ledger = new StateSendLedger(kernel.state, clock);
   const channel = new StateSendChannel(kernel.state);
-  void channel; // handed to the send service when the terminal seam lands
+  void channel; // handed to the send service when the full send path (queue, tracker) is wired
 
   const presence = new SharedDraftPresence();
   const drafts = new SharedDraftService(
@@ -153,15 +184,86 @@ export function buildConversationA(deps: {
     if (!out.ok) throw new ApiError(422, out.error, 'message_refused');
     return out.value.text;
   };
-  /** THE TERMINAL SEAM: typing into a ferret's terminal waits on the runner's deliver (Ferrets, Vault) and refuses until then. */
+  /**
+   * THE TERMINAL SEAM: typing and interrupting go through Ferrets' harness seam (`FerretsApi.harness`), whose runner acts
+   * on the ferret's terminal itself, so nothing here wraps a call in an act of its own. Answering a question's form is
+   * the structured-question drive, which still waits on its own wiring.
+   */
+  const harness = terminalSeam(ferrets);
   const terminal = {
-    deliver: async (_ferret: string, _message: string): Promise<never> => pending(),
-    interrupt: async (_ferret: string): Promise<never> => pending(),
+    ...harness,
     answer: async (_ferret: string, _request: AnswerToTerminal): Promise<SessionView> => pending(),
   };
-  const interruptFerret = async (ferret: string): Promise<void> => {
-    await terminal.interrupt(ferret);
+  /**
+   * Stops the ferret's turn and answers its view, so a route can show what the call changed. Waits behind the gate before
+   * anything is opened: Ferrets' interrupt is the runner's raw `C-c`, which quits an idle Codex, answers a pending
+   * question by accident and ignores a terminal status, where today presses Escape and only on a pane doing work.
+   */
+  const interruptFerret = async (ferret: string): Promise<SessionView> => {
+    if (!gate.interrupt) return pending(INTERRUPT_UNAVAILABLE);
+    await (await terminal.bind(ferret)).interrupt();
     boundaries.markInterrupted(ferret);
+    // Ferrets' record carries no turn count, so the view is the id and the status the interrupt just made true.
+    return { id: ferret, status: 'interrupted', turn: 0 };
+  };
+  /**
+   * Whether a send may be typed at all, before anything is opened or kept (a repeat of a kept id is answered without it). Waits behind the gate:
+   * the runner throws, rather than answers, for a pane that is busy, behind a dialog or holding the person's draft, so a
+   * refusal that typed nothing cannot be told from a send that was typed. And refuses what the harness seam does not type
+   * yet: files, a hold-to-turn-end label, the type-now flag and a reply request would be dropped, and the send answered
+   * `sent` all the same (U3 carries them).
+   */
+  const mayGo = (request: UnwiredSend): void => {
+    if (!gate.send) pending(SEND_UNAVAILABLE);
+    if (
+      (request.attachmentIds?.length ?? 0) > 0 ||
+      request.label !== undefined ||
+      request.now !== undefined ||
+      request.replyExpected !== undefined
+    )
+      pending(SEND_EXTRAS_UNAVAILABLE);
+  };
+  /**
+   * Types one message. The send is ledgered as accepted BEFORE a key goes (the same id twice is one message), and a
+   * refusal that typed nothing takes the record back so the id may start over; a runner that threw mid-write keeps it,
+   * because what reached the pane is uncertain. Proof that the harness took it is the tracker's, so the fate stays
+   * `accepted` here.
+   */
+  const typeMessage = async (
+    ferret: SessionId,
+    request: UnwiredSend & {
+      readonly message: string;
+      readonly sendId: string;
+      readonly senderSessionId?: string | undefined;
+    },
+  ): Promise<SendResult> => {
+    mayGo(request);
+    // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
+    // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
+    const bound = await terminal.bind(ferret);
+    const at = kernel.clock.now();
+    const accepted = await ledger.accept(ferret, {
+      sendId: request.sendId,
+      acceptedAt: at,
+      acceptedTurn: 0,
+      path: 'direct',
+      message: request.message,
+      matchText: request.message,
+      fate: 'accepted',
+      attempt: 1,
+      attemptAt: at,
+      senderKind: request.senderSessionId === undefined ? 'human' : 'agent',
+      ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
+    });
+    if (!accepted.created) return (await keptSend(ferret, request.sendId)) ?? { ferret, disposition: 'sent' };
+    try {
+      await bound.deliver(request.message);
+    } catch (error) {
+      if (error instanceof MaybeTyped) throw error.answer;
+      await ledger.withdraw(ferret, request.sendId, 'nothing was typed').catch(() => undefined);
+      throw error;
+    }
+    return { ferret, disposition: 'sent', sendId: request.sendId, fate: 'accepted' };
   };
 
   /**
@@ -245,10 +347,17 @@ export function buildConversationA(deps: {
   const mounts: MountRoute[] = [
     ...sessionSendRoutes(
       {
-        send: async (id: string, request: { readonly message: string; readonly sendId: string }) =>
+        send: async (
+          id: string,
+          request: UnwiredSend & {
+            readonly message: string;
+            readonly sendId: string;
+            readonly senderSessionId?: string | undefined;
+          },
+        ) =>
           (await keptSend(parseSessionId(id), request.sendId)) ??
-          (await terminal.deliver(id, await prepared(id, request.message))),
-        interrupt: async (id: string) => await interruptFerret(id).then(pending),
+          (await typeMessage(parseSessionId(id), { ...request, message: await prepared(id, request.message) })),
+        interrupt: async (id: string) => await interruptFerret(id),
         sends: records,
         sendStatus: async (id, sendId) => {
           const parsed: SessionId = parseSessionId(id);
@@ -282,18 +391,28 @@ export function buildConversationA(deps: {
 
   const api: ConversationAHalf['api'] = {
     currentTurn: async ferret => boundaries.current(ferret),
-    send: async (ferret, _caller, request) => {
+    send: async (ferret, caller, request) => {
       try {
         const kept = await keptSend(ferret, request.sendId);
         if (kept !== undefined) return ok(kept);
-        await terminal.deliver(ferret, await prepared(ferret, request.message));
+        return ok(
+          await typeMessage(ferret, {
+            sendId: request.sendId ?? String(kernel.ids.mint('send')),
+            message: await prepared(ferret, request.message),
+            ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+            ...(request.label === undefined ? {} : { label: request.label }),
+            ...(request.now === undefined ? {} : { now: request.now }),
+            ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+            // The route and the port follow one rule: a ferret is the message's SENDER, never a different target's rule.
+            ...(caller.kind === 'ferret' ? { senderSessionId: caller.ferret } : {}),
+          }),
+        );
       } catch (error) {
         return err({
-          code: (error instanceof ApiError ? error.code : undefined) ?? 'send_refused',
+          code: refusalCode(error),
           message: error instanceof Error ? error.message : String(error),
         });
       }
-      return err(pendingRefusal());
     },
     ownerWords: async (ferret, options) => {
       try {
@@ -302,13 +421,20 @@ export function buildConversationA(deps: {
         return err({ code: 'unreadable', message: error instanceof Error ? error.message : String(error) });
       }
     },
-    interrupt: async ferret => {
+    interrupt: async (ferret, request) => {
       try {
+        // As the route refuses it: a plain turn-stop answered `ok` would report an abandon that never happened.
+        if (request.toolUseId !== undefined)
+          throw new ApiError(
+            501,
+            `abandoning structured question ${request.toolUseId} is not served: a plain stop cannot tell the question you named from one that appeared afterwards`,
+            'question_abandon_unsupported',
+          );
         await interruptFerret(ferret);
-      } catch {
-        // refused below, with the sentence
+        return ok(undefined);
+      } catch (error) {
+        return err({ code: refusalCode(error), message: error instanceof Error ? error.message : String(error) });
       }
-      return err(pendingRefusal());
     },
     queue: async ferret => ({ messages: [...(await queue.list(ferret))] }),
     editQueued: async (ferret, message, request) => {
