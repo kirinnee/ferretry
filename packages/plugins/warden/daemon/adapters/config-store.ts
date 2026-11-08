@@ -11,17 +11,17 @@ export class WardenConfigRefused extends Error {
 }
 
 /**
- * `warden.yaml` already holds an edit waiting for the owner, and this save changes a SECTION of it, so it is refused
- * before anything is written: the held edit stays held and the settings in effect stay as they are.
+ * `warden.yaml` already holds an edit waiting for the owner, and this save names no setting, so there is nothing to make
+ * to either version: it is refused before anything is written, the held edit stays held and the settings in effect
+ * stay as they are.
  *
  * Today the owner's own save is made to BOTH versions (the one in effect and the held one), key by key inside a
  * section, so a tightening applies at once and a held edit is neither lost nor put into effect (docs/config-files.md
- * rule 3). The kernel's `ConfigPort.writeAsOwner` makes a patch of TOP-LEVEL keys to both versions, so on 5.0:
- * - a save of top-level settings only (`enabled`, the minutes, `accounts`, …) while an edit is held goes through
- *   `writeAsOwner`, exactly today's both-versions write;
- * - a save that changes a section (`caps`, `guard`, `mayActAlone`, …) while an edit is held is refused (this error),
- *   because the same whole section written to the held version would put that version's own sub-keys back to what is
- *   in effect (the 2026-10-29 price incident). GAP(kernel): it needs an owner patch that reaches inside a section;
+ * rule 3). On 5.0 that is the kernel's `ConfigPort.writeAsOwner`:
+ * - a save while an edit is held sends only what the owner changed: a top-level setting (`enabled`, the minutes,
+ *   `accounts`, …) whole, and of a section (`caps`, `guard`, `mayActAlone`, …) only the sub-keys it changed, with
+ *   the section named in `within` so the kernel merges them one level deep into each version. The held version keeps
+ *   its own sub-keys (the 2026-10-29 price incident) and stays held;
  * - a broken file is OVERWRITTEN with the value in effect: every setting is written from the settings in effect plus
  *   the owner's patch, so such an edit is never put into effect, but it is lost (today's fail-safe) (a file with a
  *   top-level key the schema does not know is refused instead; the owner repairs it by hand);
@@ -100,8 +100,7 @@ function wholeSettings(next: WardenConfig, inEffect: WardenFile): Record<string,
  * through the kernel's config write port, which checks the schema, refuses a raw secret, keeps the comments and HOLDS a
  * loosening for the owner unless Gate's judge lets this call put it into effect. A save writes the WHOLE settings (the
  * ones in effect plus the owner's patch), so it can loosen only what the owner asked for. A save while another edit is
- * held goes to BOTH versions through `writeAsOwner` when it changes top-level settings only, and is refused
- * (`WardenConfigHeld`, nothing written) when it changes a section (see {@link WardenConfigHeld}).
+ * held goes to BOTH versions through `writeAsOwner`, a section merged sub-key by sub-key (see {@link WardenConfigHeld}).
  */
 export class ConfigWardenConfigStore implements WardenConfigStore {
   constructor(private readonly config: ConfigPort) {}
@@ -119,16 +118,32 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
   /**
    * The owner's save while another edit of `warden.yaml` waits (docs/config-files.md rule 3): made to BOTH versions by
    * the kernel's `writeAsOwner`, which asks Gate's judge about the owner's patch alone, never about the held edit.
-   * Only the top-level keys the owner changed are sent, as `next` means them; a save that changes a section is
-   * refused (`WardenConfigHeld`), because the port patches whole top-level keys.
+   * Only what the owner changed is sent, as `next` means it: a top-level key whole, and of a section only the sub-keys
+   * the patch names, the section named in `within` so the kernel merges them one level deep into each version and the
+   * held version keeps its own sub-keys.
    */
   async #writeBesideHeld(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
-    const keys = Object.keys(patch).filter(key => (patch as Record<string, unknown>)[key] !== undefined);
+    const named = patch as Record<string, unknown>;
+    const keys = Object.keys(named).filter(key => named[key] !== undefined);
     // A save naming no key has nothing to make to either version; it is refused as before, writing nothing.
-    if (keys.length === 0 || keys.some(key => SECTIONS.includes(key))) throw new WardenConfigHeld();
+    if (keys.length === 0) throw new WardenConfigHeld();
     const values = config as unknown as Record<string, unknown>;
-    const ownerPatch = Object.fromEntries(keys.map(key => [key, values[key]]));
-    return outcomeOf(await this.config.writeAsOwner(WARDEN_CONFIG, undefined, { patch: ownerPatch }));
+    const within = keys.filter(
+      key => SECTIONS.includes(key) && isPlainObject(named[key]) && isPlainObject(values[key]),
+    );
+    const ownerPatch = Object.fromEntries(
+      keys.map(key => {
+        if (!within.includes(key)) return [key, values[key]];
+        const section = values[key] as Record<string, unknown>;
+        return [key, Object.fromEntries(Object.keys(named[key] as object).map(sub => [sub, section[sub]]))];
+      }),
+    );
+    return outcomeOf(
+      await this.config.writeAsOwner(WARDEN_CONFIG, undefined, {
+        patch: ownerPatch,
+        ...(within.length === 0 ? {} : { within }),
+      }),
+    );
   }
 }
 
