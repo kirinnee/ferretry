@@ -40,6 +40,7 @@ import type {
   ConfigFileStatus,
   ConfigFilesWriter,
   ConfigPort,
+  ConfigStateChange,
   ConfigWriteAllDocument,
   ConfigWriteAllOutcome,
   ConfigWriteIssue,
@@ -87,6 +88,7 @@ import {
   UNREADABLE_ISSUE,
 } from './write-all.ts';
 import { configWriteSetFile, type WriteSetJournal } from './write-set-journal.ts';
+import { type ConfigFileMove, configFileMoves, type StampedConfigFile } from './state-change.ts';
 
 /** The most a configuration file may hold; a larger one is not read, and keeps its last good version. */
 export { CONFIG_FILE_MAX_BYTES };
@@ -253,6 +255,11 @@ export interface ConfigFiles {
   discard(id: string): Promise<boolean>;
   /** Scan, evaluate, remember. Boot calls it once before any plugin reads; the watcher calls it on a change. */
   reload(): Promise<void>;
+  /**
+   * Told every file of EVERY plugin that moved on disk or in state at a reload (`./state-change.ts`), with its plugin:
+   * what the host publishes as `kernel.config-changed`. The first load is the baseline. Answers the cancel.
+   */
+  onStateChange(listener: (plugin: string, move: ConfigFileMove) => void): Cancel;
   status(): ConfigStatus;
   /** Watch the tree and reload when it changes (debounced). Answers the stop. */
   startWatching(events?: ConfigTreeEvents): () => void;
@@ -362,6 +369,10 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   let reported = new Set<string>();
   let issues: readonly ConfigIssue[] = [];
   const listeners = new Map<ConfigDef, Set<() => void>>();
+  /** `ConfigPort.watchState`'s listeners, by def: a file of that def moved on disk or in state. */
+  const stateListeners = new Map<ConfigDef, Set<(change: ConfigStateChange) => void>>();
+  /** The host's feed of every move, for the `kernel.config-changed` bus event. */
+  const moveListeners = new Set<(plugin: string, move: ConfigFileMove) => void>();
   /** Texts about to be written on the owner's behalf: consumed by the first load that finds exactly those bytes. */
   const acknowledged = new Map<string, { readonly etag: string; readonly text: string; readonly at: number }>();
   const acknowledgedRemovals = new Map<string, number>();
@@ -667,6 +678,37 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         }
       }
     }
+    announceMoves(before, after);
+  };
+
+  /** Where each file stands at a load, for `./state-change.ts`: its state as the contract names it, its disk etag. */
+  const stampsOf = (all: ReadonlyMap<string, Settled>): ReadonlyMap<string, StampedConfigFile> =>
+    new Map(
+      [...all].map(([path, { slot, evaluated, diskEtag }]) => [
+        path,
+        {
+          ...(slot.name === undefined ? {} : { name: slot.name }),
+          stamp: { state: statusOf(evaluated).state, etag: diskEtag },
+        },
+      ]),
+    );
+
+  /** `watchState` and the host's feed: every file that moved on disk or in state, told once, after the load. */
+  const announceMoves = (before: ReadonlyMap<string, Settled>, after: ReadonlyMap<string, Settled>): void => {
+    for (const move of configFileMoves(stampsOf(before), stampsOf(after))) {
+      const declaration = (after.get(move.path) ?? before.get(move.path))?.slot.declaration as ConfigDeclaration;
+      const told = [
+        ...[...(stateListeners.get(declaration.def) ?? [])].map(listener => () => listener(move.change)),
+        ...[...moveListeners].map(listener => () => listener(declaration.plugin, move)),
+      ];
+      for (const tell of told) {
+        try {
+          tell();
+        } catch (error) {
+          log.warn(`a config listener failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
   };
 
   // ── reading ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -697,6 +739,15 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         listeners.set(def, set);
         set.add(listener);
         return () => void set.delete(listener);
+      },
+      watchState(def, listener): Cancel {
+        own(def);
+        const set = stateListeners.get(def as ConfigDef) ?? new Set<(change: ConfigStateChange) => void>();
+        stateListeners.set(def as ConfigDef, set);
+        // Each subscription its own entry, so one listener handed in twice is cancelled one at a time.
+        const entry = (change: ConfigStateChange): void => listener(change);
+        set.add(entry);
+        return () => void set.delete(entry);
       },
       fileState(def, name): ConfigFileStatus {
         own(def);
@@ -1296,6 +1347,11 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     confirm,
     discard,
     reload: async () => await serial(load),
+    onStateChange: listener => {
+      const entry = (plugin: string, move: ConfigFileMove): void => listener(plugin, move);
+      moveListeners.add(entry);
+      return () => void moveListeners.delete(entry);
+    },
     directories,
     status,
     startWatching,

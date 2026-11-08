@@ -38,6 +38,24 @@ export const DoctorChecks = defineHook('doctor.checks', { mode: 'contribute', it
 export const PluginsChanged = defineEvent('kernel.plugins-changed', z.strictObject({ generation: z.number().int() }));
 
 /**
+ * One declared config file moved on disk or in state (written, held for the owner, confirmed, discarded, broken,
+ * fixed, removed): what an open settings card or file editor re-reads on, over `GET /v1/bus` (it replaces today's
+ * `/v1/events?topic=config` stream). The file's path under `config/`, its plugin, its state and its disk etag (the one
+ * `GET /v1/config/file` answers) — NEVER its text, a value or a sentence. A frame reaches only a caller whom
+ * `GET /v1/config/file` would let read that file. It is the app's: no plugin hears it in-process (a plugin hears its
+ * own files through `ConfigPort.watchState`).
+ */
+export const ConfigChanged = defineEvent(
+  'kernel.config-changed',
+  z.strictObject({
+    plugin: z.string().min(1).max(64),
+    path: z.string().min(1).max(512),
+    state: z.enum(['absent', 'valid', 'invalid', 'held']),
+    etag: z.string().min(1).max(128),
+  }),
+);
+
+/**
  * The feature name `GET /v1/health` lists so that a `fy` released before 5.0 never opens the host's admin token against
  * this daemon. Such a `fy`, in a ferret's pane, presents the ferret's own `fys_` credential only to a daemon whose health
  * lists this name; and after a `401` it reads health again and, when the name is missing, takes that as PROOF of an

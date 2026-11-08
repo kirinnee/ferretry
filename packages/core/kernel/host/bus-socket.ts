@@ -3,7 +3,8 @@
  * `PluginClient.subscribe` in the CLI and the app's session transport. An event is shown to a caller only when the
  * plugin that publishes it is one that caller's admission lets it discover (the same projection `GET /v1/plugins`
  * answers with: "a plugin with a route, tool or event its grants admit"), asked once on arrival and again immediately
- * before the write. The feed is server-only; a reader that falls behind is closed rather than buffered without end.
+ * before the write. An event that names something narrower than its publisher (`kernel.config-changed` names one
+ * config file) is asked about as well, frame by frame and at the same two moments ({@link BusSources.frame}). The feed is server-only; a reader that falls behind is closed rather than buffered without end.
  */
 import {
   SOCKET_MAX_FRAME_BYTES,
@@ -29,6 +30,11 @@ export interface BusSources {
   publisher(name: string): string | undefined;
   /** Whether this caller's admission lets it discover `plugin` now. */
   admits(request: ApiRequest, plugin: string): boolean;
+  /**
+   * Whether THIS frame may reach this caller now, beyond its publisher: `kernel.config-changed` only when
+   * `GET /v1/config/file` would let the caller read the file it names. Any other event: true. A throw is a no.
+   */
+  frame(request: ApiRequest, name: string, payload: unknown): boolean;
 }
 
 const encoder = new TextEncoder();
@@ -51,7 +57,7 @@ class BusHandler implements SocketHandler {
   #deliver(name: string, payload: unknown): void {
     if (this.#closed) return;
     const owner = this.sources.publisher(name);
-    if (owner === undefined || !this.sources.admits(this.request, owner)) return;
+    if (owner === undefined || !this.#shows(owner, name, payload)) return;
     let text: string;
     try {
       text = JSON.stringify({ name, payload });
@@ -60,8 +66,18 @@ class BusHandler implements SocketHandler {
     }
     // A frame the socket could not carry is a wake-up this reader misses; the reader polls on its own as well.
     if (encoder.encode(text).length > SOCKET_MAX_FRAME_BYTES) return;
-    this.downstream.send(text, () => this.sources.admits(this.request, owner));
+    this.downstream.send(text, () => this.#shows(owner, name, payload));
     if (this.downstream.bufferedBytes() > BUS_MAX_BUFFER_BYTES) this.#end(BUS_CLOSES.slowReader);
+  }
+
+  /** The publisher's admission and the frame's own, both asked now; a frame check that throws shows nothing. */
+  #shows(owner: string, name: string, payload: unknown): boolean {
+    if (!this.sources.admits(this.request, owner)) return false;
+    try {
+      return this.sources.frame(this.request, name, payload);
+    } catch {
+      return false;
+    }
   }
 
   fromClient(): void {
