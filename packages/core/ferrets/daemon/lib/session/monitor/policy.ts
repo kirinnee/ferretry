@@ -31,6 +31,7 @@ function condition(wait: DeclaredWait): string {
  * here: the wake has to tell a teammate whether its own deadline elapsed or the daemon's backstop
  * ended an open-ended park, and those are different things to be told.
  */
+// read-scoped: none — returns a deadline instant and a basis word, no text
 export function waitDeadline(wait: DeclaredWait, settings: SessionMonitorSettings): WaitDeadline {
   const atMs = declaredWaitDeadlineMs(wait, settings.backstopMs);
   if (atMs === undefined) return { basis: 'unreadable' };
