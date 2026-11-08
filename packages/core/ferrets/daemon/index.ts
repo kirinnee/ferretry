@@ -55,7 +55,8 @@ import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
 import {
   type HelperAdmission,
   needsHelperAdmission,
-  UNBOUND_HELPER_ADMISSION,
+  askHelperAdmission,
+  unboundHelperAdmission,
 } from './lib/ferrets/helper-admission.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
@@ -146,7 +147,10 @@ function resumeActorOf(call: CallContext): ResumeActor {
 /** A random ferret id: base-36 time + 8 hex characters (today's `TimeSessionIdFactory`). */
 const mintId = (nowMs: number): FerretId => `${nowMs.toString(36)}-${randomBytes(4).toString('hex')}` as FerretId;
 
-function build(ctx: DaemonContext<typeof manifest>, helperAdmission: HelperAdmission): DaemonHalf<typeof manifest> {
+function build(
+  ctx: DaemonContext<typeof manifest>,
+  helperAdmission: HelperAdmission | undefined,
+): DaemonHalf<typeof manifest> {
   const { kernel, hooks, needs } = ctx;
   const log = kernel.log.child('ferrets');
   let generation = 0;
@@ -347,9 +351,14 @@ function build(ctx: DaemonContext<typeof manifest>, helperAdmission: HelperAdmis
     decide: async input => {
       // Today's pack.admit is mandatory for an ordinary child, a start or a resume alike. The optional start.decide
       // hook returns allow with no takers and cannot prove Packs admitted it, so a child is asked of the definite
-      // admission first (unbound: 503 `helper_admission_unavailable`, nothing launched), then of start.decide.
+      // admission first (unbound: 503 `helper_admission_unavailable`, nothing launched), then of start.decide. A bound
+      // one is asked as the kernel asks a start.decide taker: within StartDecide's own bound, allow === true only.
       if (needsHelperAdmission(input)) {
-        const admitted = await helperAdmission.admit(input);
+        if (helperAdmission === undefined) throw unboundHelperAdmission();
+        const admitted = await askHelperAdmission(helperAdmission, input, {
+          timeoutMs: StartDecide.timeoutMs,
+          after: (ms, fn) => kernel.clock.after(milliseconds(ms), fn),
+        });
         if (!admitted.allow) return admitted;
       }
       return await hooks.decide(StartDecide, input);
@@ -961,14 +970,13 @@ function build(ctx: DaemonContext<typeof manifest>, helperAdmission: HelperAdmis
 
 /** What Ferrets' daemon half is built with, beyond its context. */
 export interface FerretsDaemonOptions {
-  /** The definite helper admission; absent, `UNBOUND_HELPER_ADMISSION` (fail closed). */
+  /** The definite helper admission; absent, every helper start answers `unboundHelperAdmission` (fail closed). */
   readonly helperAdmission?: HelperAdmission;
 }
 
 /** Ferrets' daemon half (§2.2), built with the seams it is given. */
 export function ferretsDaemon(options: FerretsDaemonOptions = {}): DaemonImplementation<typeof manifest> {
-  const helperAdmission = options.helperAdmission ?? UNBOUND_HELPER_ADMISSION;
-  return implementDaemon(manifest, { build: ctx => build(ctx, helperAdmission) });
+  return implementDaemon(manifest, { build: ctx => build(ctx, options.helperAdmission) });
 }
 
 /** Ferrets' daemon half (§2.2) as every daemon builds it: helper admission unbound (GAP(provenance)). */

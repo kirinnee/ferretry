@@ -362,9 +362,10 @@ describe('a resume Ferrets did not answer cleanly', () => {
   });
 
   it('should record a resume and a restart that relaunched and then failed as failed remedies', async () => {
-    // Arrange
+    // Arrange: one stopped ferret to resume, one working ferret to restart (stop, then the same resume).
     const { ferrets, remedies, acted } = subject();
     ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.add({ id: ferretId('f2'), state: 'working' });
     ferrets.resume = async (_ferret, _message, options) => {
       options?.decided?.('relaunching');
       return err({ code: 'failed', reason: 'the turn could not be handed over' } as never);
@@ -372,12 +373,16 @@ describe('a resume Ferrets did not answer cleanly', () => {
 
     // Act
     const resumed = await remedies.resume('f1', 'carry on').catch((error: unknown) => error);
+    const restarted = await remedies.restart('f2', 'carry on').catch((error: unknown) => error);
 
-    // Assert: the remedy row stays `failed` (more honest than today's `done`), with the relaunch named in the error.
+    // Assert: the remedy rows stay `failed` (more honest than today's `done`), with the relaunch named in the error.
     should((resumed as Error).message).eql(
       'resume relaunched the ferret, then failed: the turn could not be handed over',
     );
-    should(acted).eql(['f1 resume failed']);
+    should((restarted as Error).message).eql(
+      'restart relaunched the ferret, then failed: the turn could not be handed over',
+    );
+    should(acted).eql(['f1 resume failed', 'f2 restart failed']);
   });
 });
 
