@@ -1,4 +1,5 @@
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
+import { useMemo } from 'react';
 import { GrantsSurface } from './features/settings/grants-settings.tsx';
 import { SecurityLogSurface } from './features/settings/security-log-settings.tsx';
 import { connectionOfClient, gateRouteClient } from './lib/gate-client.ts';
@@ -49,25 +50,29 @@ export function notificationsOffPanel(client: PluginClient) {
 
 /**
  * Settings › ‹machine› › Grants: what a caller NOT on this host may do, from Gate's `/v1/grants` through this half's
- * client. A widen from a remote device is refused by Gate and the screen shows its sentence (G111-G113).
+ * client. A widen from a remote device is refused by Gate and the screen shows its sentence whole.
+ *
+ * The connection is made ONCE per mounted tab: the screen's load effect depends on it, so a new object on every shell
+ * re-render (a machine pairing or dropping) would clear Gate's refusal and read the route again.
  */
 export function grantsTab(client: PluginClient) {
   const routed = gateRouteClient(client);
   const createClient = async () => routed;
   return function GrantsTab() {
-    const connection = connectionOfClient(client);
+    const connection = useMemo(() => connectionOfClient(client), []);
     return connection === undefined ? null : <GrantsSurface connection={connection} createClient={createClient} />;
   };
 }
 
-/** Settings › ‹machine› › Audit log: recent pairings, removals and refusals, from Gate's `/v1/audit`. */
+/**
+ * Settings › ‹machine› › Audit log: recent pairings, removals and refusals, from Gate's `/v1/audit`. The connection is
+ * stable for the life of the tab, as for Grants.
+ */
 export function auditTab(client: PluginClient) {
   const routed = gateRouteClient(client);
   const createClient = async () => routed;
   return function AuditTab() {
-    const connection = connectionOfClient(client);
-    return connection === undefined ? null : (
-      <SecurityLogSurface connection={connection} createClient={createClient} />
-    );
+    const connection = useMemo(() => connectionOfClient(client), []);
+    return connection === undefined ? null : <SecurityLogSurface connection={connection} createClient={createClient} />;
   };
 }
