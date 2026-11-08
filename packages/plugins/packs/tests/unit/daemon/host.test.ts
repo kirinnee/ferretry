@@ -19,7 +19,7 @@ import daemon from '../../../daemon/index.ts';
 import { LEARNING_MINER_LABEL, WARDEN_LABEL } from '../../../daemon/lib/admission.ts';
 import { NO_CLEAN_UP_FOLDER, REWRITE_UNCHECKED } from '../../../daemon/lib/cleanup/service.ts';
 import { RESULT_UNCHECKED } from '../../../daemon/lib/result.ts';
-import { launchEnvironment, startDecision } from '../../../daemon/lib/hooks.ts';
+import { launchEnvironment, limitedParent, startDecision } from '../../../daemon/lib/hooks.ts';
 import manifest from '../../../manifest.ts';
 
 let who: CallStanding = ownerStanding();
@@ -47,6 +47,15 @@ async function host(setup: (ferrets: FakeFerrets) => void = () => {}) {
 const lead = ferretId('lead');
 
 describe('the start.decide and launch.parts decisions', () => {
+  test('G12 R-0332 a started child is judged against its parent, and a resume is answered without the limits (today)', () => {
+    expect(limitedParent({ parent: 'lead', by: 'owner' })).toBe('lead');
+    expect(limitedParent({ parent: 'lead', by: 'ferret' })).toBe('lead');
+    expect(limitedParent({ parent: 'lead', by: 'pack' })).toBe('lead');
+    expect(limitedParent({ by: 'owner' })).toBeUndefined();
+    // Today's pack.admit ran on the start path only (fyd.ts:2643): a resume relaunches an admitted ferret.
+    expect(limitedParent({ parent: 'lead', by: 'resume' })).toBeUndefined();
+    expect(startDecision(undefined, DEFAULT_PACK_CONFIG.limits)).toEqual({ allow: true });
+  });
   test('a start with no known parent is not refused', () => {
     expect(startDecision(undefined, DEFAULT_PACK_CONFIG.limits)).toEqual({ allow: true });
   });
