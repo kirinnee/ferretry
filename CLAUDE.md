@@ -211,7 +211,7 @@ theft. `--with-access-token` and `--with-api-key` stay host-and-CLI-only at ever
 
 What this machine records about who reached it — pairings, revocations, grant and fleet changes,
 terminals opened, secrets used — is [docs/audit.md](docs/audit.md): a bounded `0600` append-only log of
-**names and ids only**, read through `GET /v1/audit`, `fy daemon audit` and Settings › ‹machine› › Machine › Security log.
+**names and ids only**, read through `GET /v1/audit`, `fy daemon audit` and Settings › ‹machine› › Machine › Audit log.
 
 A machine's configuration is **one human-editable YAML file per building block** under
 `$FY_HOME/config/` (`machine.yaml`, `logins/`, `components/<kind>/`, `profiles/`, `runtimes/`, `warden.yaml`,

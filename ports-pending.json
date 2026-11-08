@@ -207,7 +207,6 @@
       "GAP(access): app/features/settings/pair-phone.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
       "GAP(access): app/harness/pair-from-menu.tsx is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
       "GAP(access): app/hooks/use-qr-scan.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
-      "GAP(access): app/lib/device-preference.ts is not reached by a notification setting of the devices tab (owner: nelly)",
       "GAP(access): app/lib/pair-exchange.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
       "GAP(access): app/lib/pair-scan.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",
       "GAP(access): app/lib/pairing.ts is not reached by the pairing screen (no screen or settings contribution of the manifest mounts it) (owner: kaizen app shell)",

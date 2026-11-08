@@ -315,7 +315,6 @@
         "app/features/settings/pair-phone.tsx",
         "app/harness/pair-from-menu.tsx",
         "app/hooks/use-qr-scan.ts",
-        "app/lib/device-preference.ts",
         "app/lib/pair-exchange.ts",
         "app/lib/pair-scan.ts",
         "app/lib/pairing.ts",

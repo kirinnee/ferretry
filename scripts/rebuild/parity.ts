@@ -234,17 +234,22 @@ function ownerOf(file: string, what = ''): string {
 }
 
 function renamed(what: string): string {
-  return what
-    .replace(/\/v1\/sessions(?=\/|\b)/g, '/v1/ferrets')
-    .replace(/^fy task\b/, 'fy card')
-    .replace(/^fy card status\b/, 'fy card progress')
-    .replace(/^fy (?:credentials?|login)\b/, 'fy login')
-    .replace(/^fy learning\b/, 'fy lesson')
-    .replace(/^fy harness update(?: \[harness\])?$/, 'fy harness {claude-code|codex} update')
-    .replace(/^fy migrate\b/, 'fy ferret move')
-    .replace(/^fy import conversations\b/, 'fy link')
-    .replace(/--ping\b/g, '--buzz')
-    .replace(/\btask_plan\b/g, 'card_plan');
+  return (
+    what
+      .replace(/\/v1\/sessions(?=\/|\b)/g, '/v1/ferrets')
+      .replace(/^fy task\b/, 'fy card')
+      .replace(/^fy card status\b/, 'fy card progress')
+      .replace(/^fy (?:credentials?|login)\b/, 'fy login')
+      .replace(/^fy learning\b/, 'fy lesson')
+      .replace(/^fy harness update(?: \[harness\])?$/, 'fy harness {claude-code|codex} update')
+      .replace(/^fy migrate\b/, 'fy ferret move')
+      .replace(/^fy import conversations\b/, 'fy link')
+      // The Settings tab for the record of security acts: "audit" is the glossary's word and "security log" its banned
+      // alias (redesign.md Gate word table; britnee ruling #29). Same contents, new label.
+      .replace(/^settings\/navigation security-log: Security log$/, 'settings/navigation audit: Audit log')
+      .replace(/--ping\b/g, '--buzz')
+      .replace(/\btask_plan\b/g, 'card_plan')
+  );
 }
 function removal(kind: Kind, what: string, file: string, detail: string): string | undefined {
   if (/\balias of\b/.test(detail)) return 'removed by design (§1.4: no aliases)';
@@ -300,7 +305,11 @@ function add(kind: Kind, what: string, file: string, line: number, descriptor = 
     todayOwner: moduleName(file),
     owner: actualOwner,
     name5,
-    descriptor: compact(descriptor),
+    descriptor: compact(
+      name5 === what || !/^settings\/navigation audit: /.test(name5)
+        ? descriptor
+        : `${descriptor}; renamed by design (redesign.md Gate word table: "audit", not "security log"; ruling #29): same contents`,
+    ),
     check,
     status: removal(kind, what, file, descriptor) ?? '[ ]',
   });
