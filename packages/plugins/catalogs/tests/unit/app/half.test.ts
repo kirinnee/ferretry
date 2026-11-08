@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { type DaemonlessPorts, registeredDaemonless, type SurfaceEntry } from '@ferretry/app';
 import half from '../../../app/index.ts';
+import { JOIN_PATH } from '../../../app/lib/routes.ts';
 import manifest from '../../../manifest.ts';
 
 describe('the Catalogs app half', () => {
@@ -19,6 +20,10 @@ describe('the Catalogs app half', () => {
     const registered = registeredDaemonless([entry as unknown as SurfaceEntry], {} as DaemonlessPorts);
     expect(registered.failures).toEqual([]);
     expect([...registered.views.keys()].sort()).toEqual(['catalogs.join', 'catalogs.shared']);
+  });
+
+  it('R4-S1 the hold is armed on the join screen’s declared path, so it strips where the router draws that screen', () => {
+    expect(manifest.ui?.screens?.find(screen => screen.id === 'join')?.path).toBe(JOIN_PATH);
   });
 
   it('the daemon-less factory takes the shell’s ports and builds no client from them', () => {

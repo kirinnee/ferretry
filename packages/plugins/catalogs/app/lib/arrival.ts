@@ -9,7 +9,15 @@
  * and holds the fragment in memory until the `/join` view comes for it. This file holds no React, so it loads with the
  * eager module. The entry's own history state is passed back (`history.state`), so the router's trail and scroll
  * identity for that entry survive the rewrite.
+ *
+ * WHICH ADDRESSES: the ones the shell's router draws the join screen at, decided by the router's own parse
+ * (`@ferretry/app` `addressPlace`), never by comparing a string: `/join/`, `/app/join` and `/j%6Fin` are the join
+ * screen as much as `/join` is, and a gate of its own would drift from the router. A link beneath the join address
+ * (`/join/x`, which the router draws as not-found) leaves the address too, and is dropped: no join screen is drawn
+ * there to take it, and a held code must never reach a join the person did not see begin.
  */
+
+import type { AddressPlace } from '@ferretry/app';
 
 /** The slice of `window` the strip needs. */
 export interface ArrivalBrowser {
@@ -53,18 +61,23 @@ const isWindow = (candidate: Partial<ArrivalWindow>): candidate is ArrivalWindow
 
 /**
  * Arms the hold: strips a link already in the address now, and every one that arrives by `hashchange`, but only while
- * the page is at `path` (a fragment on any other page is not a share link and is left alone). Where there is no window
- * (the registry generator and every non-browser caller that only inspects the half) there is no address, so nothing is
- * read and nothing is ever held.
+ * `place` says the page is at the join screen or beneath it (a fragment on any other page is not a share link and is
+ * left alone). Only a link AT the join screen is held or delivered. Where there is no window (the registry generator and
+ * every non-browser caller that only inspects the half) there is no address, so nothing is read and nothing is ever held.
  */
-export function armArrivalHold(candidate: Partial<ArrivalWindow>, path: string): ArrivalHold {
+export function armArrivalHold(
+  candidate: Partial<ArrivalWindow>,
+  place: (pathname: string) => AddressPlace,
+): ArrivalHold {
   const browser = isWindow(candidate) ? candidate : undefined;
   let waiting = '';
   const listeners = new Set<(fragment: string) => void>();
   const read = (): void => {
-    if (browser === undefined || browser.location.pathname !== path) return;
+    if (browser === undefined) return;
+    const here = place(browser.location.pathname);
+    if (here === 'elsewhere') return;
     const fragment = takeArrival(browser);
-    if (fragment === '') return;
+    if (fragment === '' || here === 'beneath') return;
     if (listeners.size === 0) waiting = fragment;
     else for (const listener of [...listeners]) listener(fragment);
   };

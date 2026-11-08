@@ -82,11 +82,11 @@ export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
   ],
   [
     'knip.json#ignoreIssues["packages/plugins/catalogs/contract/wire/shared-catalog-diff.ts"]',
-    '`CatalogChangeFlagSchema` (a frozen wire schema, `contract/wire`) is built into the diff shapes in the same file and is a named word of the contract vocabulary a consumer may import; the contract is not edited after day 1, so the export stays and knip is told it is intended. Not a pending-port gap.',
+    'Every export of this frozen wire file (`contract/wire`), not one name: the ignore is file-wide. Today the one knip reports is `CatalogChangeFlagSchema`, built into the diff shapes in the same file and a named word of the contract vocabulary a consumer may import. The contract is not edited after day 1 (a per-name `@public` tag would be a contract edit), so its exports stay and knip is told they are intended; a new export here needs the lead anyway. Not a pending-port gap.',
   ],
   [
     'knip.json#ignoreIssues["packages/plugins/catalogs/contract/wire/shared-catalog-owner.ts"]',
-    '`OwnedSharedItemVersionSchema` (a frozen wire schema, `contract/wire`) is built into the owner shapes in the same file and is a named word of the contract vocabulary a consumer may import; the contract is not edited after day 1, so the export stays and knip is told it is intended. Not a pending-port gap.',
+    'Every export of this frozen wire file (`contract/wire`), not one name: the ignore is file-wide. Today the one knip reports is `OwnedSharedItemVersionSchema`, built into the owner shapes in the same file and a named word of the contract vocabulary a consumer may import. The contract is not edited after day 1 (a per-name `@public` tag would be a contract edit), so its exports stay and knip is told they are intended; a new export here needs the lead anyway. Not a pending-port gap.',
   ],
   [
     'knip.json#ignoreIssues["packages/plugins/shells/contract/wire.ts"]',

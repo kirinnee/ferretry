@@ -42,8 +42,8 @@ afterEach(() => {
 });
 
 /** Lets the lazily loaded views arrive and their effects run. */
-async function until(done: () => boolean): Promise<void> {
-  for (let turn = 0; turn < 200 && !done(); turn += 1) {
+async function until(done: () => boolean, turns = 200): Promise<void> {
+  for (let turn = 0; turn < turns && !done(); turn += 1) {
     await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
   }
 }
@@ -79,6 +79,9 @@ async function boot(blocked?: ComponentType) {
 }
 
 const FRAGMENT = '#v1;code=fy_share_x';
+/** What Catalogs' join screen draws: while it starts, and for a link it cannot read (every link here is a fake). */
+const WORKING = 'Working…';
+const INVALID_TITLE = 'This link does not work';
 
 describe('R3-B1 the code leaves the address before any Catalogs chunk is asked for', () => {
   test('R3-B1 arming the daemon-less screens alone takes the code off the address and the history entry: no chunk, no React', () => {
@@ -187,22 +190,32 @@ describe('R2-B1 a share link arriving on /join', () => {
     }
   });
 
-  test('R3-N4 a real second link (pushState, popstate, then hashchange) leaves the address once and restarts the join once', async () => {
+  test('R3-N4 R4-N1 a real second link (pushState, popstate, then hashchange) leaves the address once and restarts the join once', async () => {
     go('/join');
     const { mounted } = await boot();
-    await until(() => mounted.container.textContent !== '');
+    await until(() => mounted.container.textContent?.includes(INVALID_TITLE) === true);
+    // The join screen draws "Working…" only when it (re)starts: each one counted is one restart of the join.
+    let restarts = 0;
+    const watch = new MutationObserver(records => {
+      for (const record of records)
+        for (const node of record.addedNodes) if (node.textContent?.includes(WORKING) === true) restarts += 1;
+    });
+    watch.observe(mounted.container, { childList: true, subtree: true });
     const replace = spyOn(window.history, 'replaceState');
     try {
       window.history.pushState(null, '', '/join#v1;code=fy_share_z');
       window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
       window.dispatchEvent(new HashChangeEvent('hashchange'));
-      await until(() => window.location.hash === '');
+      await until(() => window.location.hash === '' && mounted.container.textContent?.includes(INVALID_TITLE) === true);
+      await until(() => false, 20);
       expect(window.location.hash).toBe('');
       const stripping = replace.mock.calls.filter(call => call[2] === '/join');
-      expect(stripping.length).toBeGreaterThan(0);
+      expect(stripping.length).toBe(1);
       expect(replace.mock.calls.every(call => !String(call[2] ?? '').includes('#'))).toBe(true);
+      expect(restarts).toBe(1);
       await mounted.unmount();
     } finally {
+      watch.disconnect();
       replace.mockRestore();
     }
   });
@@ -216,6 +229,49 @@ describe('R2-B1 a share link arriving on /join', () => {
       const stripping = replace.mock.calls.filter(call => call[2] === '/join?x=1');
       expect(stripping).toEqual([]);
       expect(window.location.search).toBe('?x=1');
+      await mounted.unmount();
+    } finally {
+      replace.mockRestore();
+    }
+  });
+});
+
+describe('R4-S1 a share link at every address the router draws the join screen at', () => {
+  for (const address of ['/join/', '/app/join', '/app/join/', '/j%6Fin']) {
+    test(`R4-S1 ${address}${FRAGMENT}: the join screen is drawn and the code is off the address and the history entry`, async () => {
+      go(`${address}${FRAGMENT}`);
+      const lengthBefore = window.history.length;
+      const push = spyOn(window.history, 'pushState');
+      const replace = spyOn(window.history, 'replaceState');
+      try {
+        const { mounted } = await boot();
+        await until(() => mounted.container.textContent?.includes(INVALID_TITLE) === true);
+        expect(mounted.container.textContent).toContain(INVALID_TITLE);
+        expect(window.location.hash).toBe('');
+        expect(window.location.pathname).toBe(address);
+        expect(window.history.length).toBe(lengthBefore);
+        expect(push).not.toHaveBeenCalled();
+        const written = [...push.mock.calls, ...replace.mock.calls].map(call => String(call[2] ?? ''));
+        expect(written.filter(url => url.includes('#'))).toEqual([]);
+        expect(written).toContain(address);
+        await mounted.unmount();
+      } finally {
+        push.mockRestore();
+        replace.mockRestore();
+      }
+    });
+  }
+
+  test('R4-S1 a fragment on a page that is not the join screen is kept (no collateral strip)', async () => {
+    go('/settings#theme');
+    const replace = spyOn(window.history, 'replaceState');
+    try {
+      const { mounted } = await boot();
+      await until(() => mounted.container.textContent !== '');
+      expect(window.location.hash).toBe('#theme');
+      // The router may stamp its own state on the entry (a write with no address); no write takes the fragment away.
+      const addresses = replace.mock.calls.map(call => call[2]).filter(url => url !== undefined && url !== null);
+      expect(addresses.filter(url => !String(url).includes('#theme'))).toEqual([]);
       await mounted.unmount();
     } finally {
       replace.mockRestore();

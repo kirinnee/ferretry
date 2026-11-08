@@ -175,6 +175,8 @@ export {
 export { type DaemonClientOf, useDaemonClients, usePairedDaemons } from './shell/daemon-access.ts';
 
 export {
+  type AddressPlace,
+  addressPlace,
   DEVICE_SETTINGS_HREF,
   daemonHomeHref,
   daemonSettingsHref,
