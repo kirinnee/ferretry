@@ -69,6 +69,13 @@ export interface DaemonClientOptions {
   readonly passkey?: { readonly daemon: PairedDaemon; readonly handler: PasskeyHandler };
 }
 
+/**
+ * Who a package client's calls are on behalf of, for the passkey (S2): `ordinary` asks as the request's method says
+ * (a read waits for its machine to be on screen, a press asks at once); `background` makes EVERY call a background
+ * read, whatever its method, so a background view never raises a prompt for a machine that is not on screen.
+ */
+export type ClientOrigin = 'ordinary' | 'background';
+
 /** The shell's widening of the leaf's `PluginClient`: the same guard over sockets. */
 export interface ShellPluginClient extends PluginClient {
   socket(
@@ -197,10 +204,14 @@ export class DaemonClient {
     return () => this.#changeListeners.delete(listener);
   }
 
-  /** The client one package's half talks through. Every call is guarded by the OWNER of the route it names. */
-  forPackage(caller: string): ShellPluginClient {
+  /**
+   * The client one package's half talks through. Every call is guarded by the OWNER of the route it names. With
+   * `origin: 'background'` every call it sends is a background read for the passkey ({@link ClientOrigin}).
+   */
+  forPackage(caller: string, options: { readonly origin?: ClientOrigin } = {}): ShellPluginClient {
+    const background = options.origin === 'background';
     return {
-      call: (route, init) => this.#call(caller, route, init),
+      call: (route, init) => this.#call(caller, route, init, background),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
       socket: (key, params, listeners, query) => this.#socket(caller, key, params, listeners, query),
       feed: {
@@ -261,7 +272,12 @@ export class DaemonClient {
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
   }
 
-  async #call<Answer>(caller: string, route: string, init: Parameters<PluginClient['call']>[1] = {}): Promise<Answer> {
+  async #call<Answer>(
+    caller: string,
+    route: string,
+    init: Parameters<PluginClient['call']>[1] = {},
+    background = false,
+  ): Promise<Answer> {
     const owner = this.#routeOwner.get(route);
     if (owner === undefined) throw new TypeError(`${caller} called ${route}, which no compiled manifest declares`);
     await this.#admit(caller, owner);
@@ -278,7 +294,7 @@ export class DaemonClient {
     };
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
     const answer = await this.#confirmed(
-      method,
+      background ? 'background' : requestOrigin(method),
       await this.#transport.request(request),
       async () => {
         await this.#admit(caller, owner);
@@ -297,15 +313,14 @@ export class DaemonClient {
    * be read yet); a dismissed prompt returns the refusal unchanged, and a second refusal of the same kind is the answer.
    */
   async #confirmed(
-    method: string,
+    origin: PromptOrigin,
     first: TransportAnswer,
     resend: () => Promise<TransportAnswer>,
     signal?: AbortSignal,
   ): Promise<TransportAnswer> {
     const passkey = this.#passkey;
-    if (passkey === undefined || first.status < 400) return first;
     // G95: a read is the page's own work, so its prompt waits for its machine to be on screen; a press asks at once.
-    const origin = requestOrigin(method);
+    if (passkey === undefined || first.status < 400) return first;
     let answer = first;
     let need = this.#need(answer);
     if (need?.kind === 'unlock') {

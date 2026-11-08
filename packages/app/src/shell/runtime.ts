@@ -1,4 +1,4 @@
-import { DaemonClient, type ShellPluginClient } from '../client/daemon-client.ts';
+import { type ClientOrigin, DaemonClient, type ShellPluginClient } from '../client/daemon-client.ts';
 import type { Standing } from '../client/inventory.ts';
 import { blockedLine, remedyFor, type Remedy, wholeDaemonSentence } from '../client/sentences.ts';
 import type { DaemonTransport } from '../client/transport.ts';
@@ -60,7 +60,6 @@ export class ShellRuntime {
   readonly #connections = new Map<string, Connection>();
   readonly #halves: HalfCache;
   readonly #hooks = new AppHookCache();
-  readonly #packageClients = new Map<string, ShellPluginClient>();
   /** The owner's layout per daemon (the Layouts plugin), read through each daemon's guarded client. */
   readonly layouts: DaemonLayouts;
   readonly #listeners = new Set<() => void>();
@@ -74,7 +73,11 @@ export class ShellRuntime {
     this.#connect = options.connect;
     this.#passkey = options.passkey ?? (() => undefined);
     this.#daemonless = options.daemonless ?? { views: new Map(), location: () => '' };
-    this.#halves = new HalfCache(this.byId, (daemon, id) => this.#clientFor(daemon, id));
+    this.#halves = new HalfCache(
+      this.byId,
+      (daemon, id, origin) => this.#clientFor(daemon, id, origin),
+      (daemon, id) => this.standing(daemon, id),
+    );
     this.layouts = new DaemonLayouts(this);
     this.daemons.registerCache({ clearDaemon: daemon => this.#drop(daemon) });
     this.daemons.subscribe(() => this.#changed());
@@ -158,24 +161,20 @@ export class ShellRuntime {
   appHook(daemon: string, name: string): unknown {
     const providers = appHookProviders(this.surfaces, name);
     const only = providers.length === 1 ? providers[0] : undefined;
-    if (only === undefined || this.standing(daemon, only.plugin).state !== 'allowed') return undefined;
+    if (only === undefined) return undefined;
     const client = this.#halves.client(daemon, only.plugin);
     if (client === undefined) return undefined;
     return this.#hooks.get(daemon, only.plugin, name, client, only.provide);
   }
 
   /**
-   * The guarded client one package talks through on a daemon, only once it is allowed there; the same object for as
-   * long as that connection lives, so a watcher can tell a replaced client from the one it holds.
+   * The guarded client one package talks through on a daemon, from THE ONE CLIENT CACHE (`HalfCache`), only while it
+   * is allowed there: the client its half is built with, the same object for as long as that connection lives (a
+   * reconnect keeps it), so a watcher can tell a replaced client from the one it holds. Shell-internal: no hook hands a
+   * package id in; plugins reach their own client through their views and `reach` (S2).
    */
-  packageClient(daemon: string, packageId: string): ShellPluginClient | undefined {
-    if (this.standing(daemon, packageId).state !== 'allowed') return undefined;
-    const key = `${daemon}\u0000${packageId}`;
-    const known = this.#packageClients.get(key);
-    if (known !== undefined) return known;
-    const client = this.#clientFor(daemon, packageId);
-    if (client !== undefined) this.#packageClients.set(key, client);
-    return client;
+  client(daemon: string, packageId: string, origin: ClientOrigin = 'ordinary'): ShellPluginClient | undefined {
+    return this.#halves.client(daemon, packageId, origin);
   }
 
   async #open(paired: PairedDaemon, connecting: Connection): Promise<void> {
@@ -202,6 +201,7 @@ export class ShellRuntime {
       surfaces: this.surfaces,
       ...(handler === undefined ? {} : { passkey: { daemon: paired, handler } }),
     });
+    // An inventory change (start, a reconnect, `kernel.plugins-changed`) rebuilds the halves and hooks; the clients stay.
     client.onChange(() => {
       this.#halves.clearDaemon(paired.daemon);
       this.#hooks.clearDaemon(paired.daemon);
@@ -212,10 +212,10 @@ export class ShellRuntime {
     await client.start();
   }
 
-  #clientFor(daemon: string, packageId: string): ShellPluginClient | undefined {
+  #clientFor(daemon: string, packageId: string, origin: ClientOrigin): ShellPluginClient | undefined {
     const connection = this.#connections.get(daemon);
     if (connection?.kind !== 'connected') return undefined;
-    const client = connection.client.forPackage(packageId);
+    const client = connection.client.forPackage(packageId, { origin });
     noteClientDaemon(client, daemon);
     return client;
   }
@@ -229,11 +229,9 @@ export class ShellRuntime {
       connection.transport.close?.();
     }
     this.#connections.delete(daemon);
-    this.#halves.clearDaemon(daemon);
+    // The only place a daemon's clients go: a re-pair opens a new connection, so its clients are new objects.
+    this.#halves.dropDaemon(daemon);
     this.#hooks.clearDaemon(daemon);
-    for (const key of [...this.#packageClients.keys()]) {
-      if (key.startsWith(`${daemon}\u0000`)) this.#packageClients.delete(key);
-    }
     this.layouts.stop(daemon);
   }
 

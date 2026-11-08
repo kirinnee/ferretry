@@ -151,7 +151,7 @@ async function drawApp(scenario: Scenario, path: string) {
   );
 }
 
-/** The package client of an id, even when it is blocked (`ShellRuntime.packageClient` answers nothing for a blocked one). */
+/** The package client of an id, even when it is blocked (`ShellRuntime.client` answers nothing for a blocked one). */
 function clientOf(scenario: Scenario, caller: string) {
   const connection = scenario.session.runtime.connection(scenario.session.daemonId);
   if (connection.kind !== 'connected') throw new Error('the app is not connected');

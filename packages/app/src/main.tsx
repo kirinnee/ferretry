@@ -104,7 +104,7 @@ for (const failure of [...registered.failures, ...daemonless.failures])
   console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
 // The one passkey prompt (Access's): its ceremony rides Access's own guarded client, read from the runtime per call.
 const passkey = registeredPasskey(generated.surfaces, {
-  clientOf: (daemon, plugin) => runtime.packageClient(daemon, plugin),
+  clientOf: (daemon, plugin) => runtime.client(daemon, plugin),
   daemons,
   origin: window.location.origin,
   credentials: {

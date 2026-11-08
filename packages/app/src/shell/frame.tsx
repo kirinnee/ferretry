@@ -206,7 +206,7 @@ function ShellCommandBar(props: {
         : buildPluginCommandSources({
             surfaces: runtime.surfaces,
             daemon,
-            clientOf: plugin => runtime.packageClient(daemon, plugin),
+            clientOf: plugin => runtime.client(daemon, plugin),
             navigate: href => router.navigate(href),
             screenHref: (...address) => screenHrefRef.current(...address),
             changed,

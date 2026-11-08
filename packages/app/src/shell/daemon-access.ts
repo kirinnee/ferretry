@@ -44,7 +44,7 @@ function clientOf(runtime: ShellRuntime, daemon: string, packageId: string): Pro
       if (reading) return;
       settled = true;
       stop();
-      const client = runtime.packageClient(daemon, packageId);
+      const client = runtime.client(daemon, packageId);
       if (client === undefined) reject(new Error(refusal(runtime, daemon, packageId)));
       else resolve(client);
     };
