@@ -11,6 +11,7 @@ import should from 'should';
 import type { AgendaService } from '../../../../daemon/lib/agenda/index.ts';
 import type { GateAnswer, GateAnswerOutcome } from '../../../../daemon/lib/routes/agenda-gates.ts';
 import { agendaRoutes } from '../../../../daemon/lib/routes/agenda.ts';
+import { answerGate } from '../../../../daemon/lib/routes/agenda-gates.ts';
 import { agendaService, jsonBody, NO_HELD_REPLIES } from './support.ts';
 
 /** The gate items as the route sees them: what each answer is told to come to, and what it was asked. */
@@ -287,5 +288,67 @@ describe('Not needed on a gate item over the agenda route', () => {
     // Assert
     should(device.status).equal(404);
     should(ferret.status).equal(404);
+  });
+});
+
+describe('a gate answer asked of the gate items directly', () => {
+  const direct = (actor: string): CallContext =>
+    ({
+      request: {},
+      params: new Map(),
+      actor,
+      credential: { kind: 'authenticated', tokenClass: 'admin' },
+    }) as unknown as CallContext;
+  const humanAnswer = {
+    sessionId: 's1',
+    id: 'A1' as never,
+    response: { kind: 'multiple-choice', choice: 'Done' } as const,
+    actor: { kind: 'human' } as const,
+  };
+
+  it('names the owner a ferret when the board hears a ferret behind the human answer', async () => {
+    // Arrange
+    const gates = new FakeGates(async () => ({ handled: false }));
+
+    // Act
+    const outcome = await answerGate(gates, direct('ferret:s9'), humanAnswer);
+
+    // Assert
+    should(outcome).be.undefined();
+    should(gates.asked[0]?.caller).eql({ kind: 'ferret', sessionId: 's9' });
+  });
+
+  it('refuses a human answer from a caller the board would not let through', async () => {
+    // Arrange
+    const gates = new FakeGates(async () => ({ handled: false }));
+
+    // Act
+    const refusal = answerGate(gates, direct('stranger'), humanAnswer);
+
+    // Assert
+    await should(refusal).be.rejectedWith({
+      status: 403,
+      code: 'forbidden',
+      message: 'only a ferret in its own pane or the owner may write to the board',
+    });
+    should(gates.asked).be.empty();
+  });
+});
+
+describe('files with a gate answer nobody handled', () => {
+  it('refuses them rather than dropping them, when the answer names the gate but is no gate item’s', async () => {
+    // Arrange
+    const gates = new FakeGates(async () => ({ handled: false }));
+    const files = { from: 's1', ids: [`att_${'a'.repeat(64)}`] };
+
+    // Act
+    const response = await post(gates, HOST, { ...answer, gate: true, attachments: files });
+
+    // Assert
+    should(response).eql({
+      status: 400,
+      body: { error: 'files can only come with the answer to a card ask', code: 'invalid' },
+    });
+    should(gates.asked).have.length(1);
   });
 });
