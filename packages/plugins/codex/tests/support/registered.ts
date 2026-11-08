@@ -78,6 +78,12 @@ export function registeredCodex() {
         if (text === undefined) throw new Error('missing');
         return new TextEncoder().encode(text).slice(limit.offset, limit.offset + limit.length);
       },
+      readTail: async (path, maxBytes) => {
+        const text = files.get(path);
+        if (text === undefined) throw new Error('missing');
+        const bytes = new TextEncoder().encode(text);
+        return { bytes: bytes.slice(Math.max(0, bytes.length - maxBytes)), size: bytes.length };
+      },
       writeText: async (path, text) => {
         files.set(path, text);
       },

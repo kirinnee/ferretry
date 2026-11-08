@@ -295,7 +295,19 @@ export interface RunnerLook {
   readonly request?: JsonValue;
   /** The harness's own dialog on screen, read as data (masked). */
   readonly dialog?: JsonValue;
+  /**
+   * Additive (U5): the LAST lines of the masked frame (at most {@link RUNNER_LOOK_STATUS_LINES} lines and
+   * {@link RUNNER_LOOK_STATUS_BYTES} characters), where a harness paints its status line. The live readout reads its verb
+   * and a compaction's progress from it and from nothing else, and re-masks the verb before it leaves; it is never kept,
+   * logged, journalled or sent as text. Absent: the runner offers no status lines.
+   */
+  readonly status?: string;
 }
+
+/** How many of a frame's last lines {@link RunnerLook.status} carries (the live readout's status window). */
+export const RUNNER_LOOK_STATUS_LINES = 25;
+/** The most characters {@link RunnerLook.status} carries, counted from its end. */
+export const RUNNER_LOOK_STATUS_BYTES = 4_096;
 
 /**
  * Whether a rejection of {@link Runner.settled} says the first turn was seen parked behind the harness's startup
@@ -410,6 +422,69 @@ export interface ConversationFinder {
   list(folder?: FencedPath): Promise<readonly FoundConversation[]>;
 }
 
+// ─── transcript tail (U5): what the turn watch and the live readout read from a conversation ─────────────────────────
+
+/**
+ * One record of a harness's conversation as the turn watch and the live readout read it: WHAT happened and WHEN, never
+ * what was said. No record carries message, reasoning or tool text, so nothing here needs masking; the one sentence a
+ * record may carry is a usage-limit `notice`, already masked and bounded by the harness.
+ */
+export type HarnessTailRecord =
+  | {
+      /** A message. `inputSource` marks one the harness itself wrote into the user channel (never something the owner said). */
+      readonly kind: 'message';
+      readonly role: 'user' | 'assistant' | 'developer' | 'system';
+      readonly at?: Instant;
+      readonly inputSource?: 'native-queue' | 'harness';
+    }
+  | {
+      /** Reasoning, a tool call or a tool result: the agent is mid-turn. */
+      readonly kind: 'work';
+      readonly at?: Instant;
+    }
+  | { readonly kind: 'turn'; readonly state: 'started' | 'completed' | 'aborted'; readonly at?: Instant }
+  | {
+      /** One model call's spend. `call` names the call when the harness writes several records for one. */
+      readonly kind: 'usage';
+      readonly at?: Instant;
+      readonly call?: string;
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly cachedInputTokens?: number;
+      readonly cacheCreationInputTokens?: number;
+      readonly contextTokens?: number;
+    }
+  | {
+      readonly kind: 'compaction';
+      readonly at?: Instant;
+      readonly trigger?: 'manual' | 'auto';
+      readonly tokensBefore?: number;
+      readonly tokensAfter?: number;
+    }
+  | {
+      /** A turn's error. `code` is the harness's own; `notice` is its first sentence, masked and short. */
+      readonly kind: 'error';
+      readonly at?: Instant;
+      readonly code?: string;
+      readonly notice?: string;
+    };
+
+/**
+ * The transcript a harness proved to be one ferret's, as a stat: `file` names it (compared, never opened by Ferrets and
+ * never leaving the daemon), and the pair `size`/`mtimeMs` moves whenever the harness writes to it.
+ */
+export interface HarnessTranscriptStamp {
+  readonly file: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+
+/** The newest records of a ferret's transcript, oldest first. `unresolved`: no transcript is proved to be this ferret's yet. */
+export type HarnessTranscriptTail =
+  | { readonly kind: 'unresolved' }
+  | { readonly kind: 'unreadable' }
+  | { readonly kind: 'read'; readonly records: readonly HarnessTailRecord[] };
+
 /** The value of `harnesses:<key>` (§4.3). */
 export interface Harness {
   readonly key: HarnessKey;
@@ -457,6 +532,18 @@ export interface Harness {
    * names no safe stop, and an interrupt is refused rather than guessed.
    */
   readonly turnStop?: HarnessStop;
+  /**
+   * Additive (U5): one stat of the transcript this harness proved to be the ferret's own (the same file `transcript` and
+   * `usage` read), or `undefined` while none is proved or the file cannot be read. Cheap by contract: the live readout
+   * and the transcript-change signal ask it every half second to learn whether the file was written. Absent: the
+   * harness offers no transcript tail, and the ferret's turn is decided from its pane alone.
+   */
+  transcriptStamp?(ferret: FerretId): Promise<HarnessTranscriptStamp | undefined>;
+  /**
+   * Additive (U5): the newest `limit` records of that transcript as {@link HarnessTailRecord}s: kinds, roles and
+   * instants, never message text. Ferrets asks only when the stamp moved. Absent: see {@link transcriptStamp}.
+   */
+  transcriptTail?(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail>;
   readonly transcript: TranscriptReader;
   readonly usage: UsageReader;
   readonly dialogs?: DialogReader;
