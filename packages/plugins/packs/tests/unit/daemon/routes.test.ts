@@ -135,3 +135,55 @@ describe('a valid Packs body is read as before', () => {
     expect(reached).toEqual(['switch f1 true']);
   });
 });
+
+describe('the routes that answer from the subsystem', () => {
+  const routing = { text: 'Use the cheapest model that can do it.', source: 'default' as const };
+  const subsystem = {
+    service: {
+      inventory: async () => ({ at: '2026-11-07T10:00:00.000Z', runtimes: [], models: [], routing }),
+      recommend: async () => ({ routing, available: [] }),
+    },
+    routing: {
+      file: { undo: async () => ({ outcome: 'nothing', message: 'There was no earlier prompt to go back to.' }) },
+    },
+    result: async () => undefined,
+  } as unknown as PackSubsystem;
+  const routes = packRoutes(subsystem, {} as Redaction);
+  const person = { request: { text: async () => '{}' }, params: new Map() } as never;
+  const ferret = {
+    request: { text: async () => '{}' },
+    params: new Map(),
+    credential: { tokenClass: 'ferret', ferret: 'f9' },
+  } as never;
+  const bodyOf = async (promise: Promise<unknown>) => JSON.parse(((await promise) as { body: string }).body);
+
+  test('GET /v1/pack/inventory answers the inventory the service read', async () => {
+    expect(await bodyOf(routes['GET /v1/pack/inventory']())).toMatchObject({ runtimes: [], models: [], routing });
+  });
+
+  test('POST /v1/pack/recommend answers the recommendation for a request body it takes', async () => {
+    const call = { request: { text: async () => '{"task":"fix it"}' }, params: new Map() } as never;
+    expect(await bodyOf(routes['POST /v1/pack/recommend'](call))).toEqual({ routing, available: [] });
+  });
+
+  test('POST /v1/pack/routing/undo answers what the undo did for a person', async () => {
+    expect(await bodyOf(routes['POST /v1/pack/routing/undo'](person))).toEqual({
+      outcome: 'nothing',
+      message: 'There was no earlier prompt to go back to.',
+    });
+  });
+
+  test('POST /v1/pack/routing/undo is refused to a ferret’s own credential', async () => {
+    expect(await refused(routes['POST /v1/pack/routing/undo'](ferret))).toMatchObject({
+      status: 403,
+      code: 'forbidden',
+    });
+  });
+
+  test('a ferret id in the path that is empty or cannot be decoded is 400 invalid_ferret_id', async () => {
+    for (const id of ['', '%E0%A4%A'])
+      expect(
+        await refused(routes['GET /v1/ferrets/:ferretId/result']({ params: new Map([['ferretId', id]]) } as never)),
+      ).toMatchObject({ status: 400, code: 'invalid_ferret_id' });
+  });
+});
