@@ -106,7 +106,7 @@ also what it is.
 Single-owned constants in `packages/protocol/src/lib/fy-render-caps.ts` (`@ferretry/protocol/fy-render-caps`);
 this table and the tests read the same numbers. The caps live in protocol — above every consumer —
 because a daemon or CLI validating a saved picture reads the same numbers the reader enforces, and
-`packages/pwa/src/lib/fy-render-bounds.ts` re-exports them unchanged beside the sandbox-frame limits
+`packages/app/src/fy-render/bounds.ts` re-exports them unchanged beside the sandbox-frame limits
 that stay with the shells.
 
 | Type      | Payload cap                      | Also refused                                                                                                                                                                                                                                                                                                          |
@@ -427,7 +427,7 @@ SVG re-admission see it, and neither is touched.
 ### Mermaid in the theme
 
 **A diagram is painted from the same tokens.** The parent resolves the theme (as above), turns it into
-Mermaid's `base`-theme `themeVariables` (`lib/fy-render-palette.ts`: nodes in the accent's soft wash
+Mermaid's `base`-theme `themeVariables` (`packages/app/src/fy-render/palette.ts`: nodes in the accent's soft wash
 with the accent itself as the border and body ink as the text, cluster and label edges in `--border-strong`
 (the theme's strong edge), lines muted, notes the warn wash, a pie and a git graph on the
 `chart` palette, the page's font) and sends them as data with the render command. The shell admits only
@@ -541,7 +541,7 @@ every shell unframeable in production), both pinned by `pages-config.sh`.
   scroll in (the parent says so with a `layout` message). It stays invisible until its first draw. A
   replaced element cannot draw outside its box: a `position: fixed` cover inside the page is fixed to
   the frame.
-- **The theme contract** (`src/lib/fy-render-html-kit.ts` owns it). The parent reads a fixed list of
+- **The theme contract** (`packages/app/src/fy-render/html-kit.ts` owns it). The parent reads a fixed list of
   app tokens (`FY_RENDER_HTML_TOKENS`: ink, surfaces, lines, accent, status tones, `--viz-1`…`--viz-8`,
   type, radii, spacing) plus the column's ink and font from the block's computed style and sends them in
   `FyRenderHtmlPaint`; the shell admits each by one rule — a listed name and a bounded value that cannot

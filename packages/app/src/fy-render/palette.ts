@@ -54,7 +54,7 @@ export const THEME_TOKENS = [
   'border-strong',
   'border-soft',
 ] as const;
-export type ThemeToken = (typeof THEME_TOKENS)[number];
+export type FyRenderThemeToken = (typeof THEME_TOKENS)[number];
 
 /**
  * The page's theme, resolved: each token as a `#rrggbb` (or `#rrggbbaa`) literal, the body font stack, the
@@ -71,10 +71,10 @@ export interface ResolvedTheme {
   readonly backdrop: string;
   /** The theme's smallest corner (`--radius-xs`) in px: a bar is square in a square family. */
   readonly radius: number;
-  readonly colors: Readonly<Record<ThemeToken, string>>;
+  readonly colors: Readonly<Record<FyRenderThemeToken, string>>;
 }
 
-const TONE_TOKEN: Readonly<Record<Exclude<ChartTone, number>, ThemeToken>> = {
+const TONE_TOKEN: Readonly<Record<Exclude<ChartTone, number>, FyRenderThemeToken>> = {
   accent: 'accent',
   bad: 'err',
   good: 'ok',
@@ -86,14 +86,14 @@ const TONE_TOKEN: Readonly<Record<Exclude<ChartTone, number>, ThemeToken>> = {
 export function toneColor(tone: ChartTone, theme: ResolvedTheme): string {
   if (typeof tone === 'number') {
     const slot = (((tone - 1) % CHART_PALETTE_SLOTS) + CHART_PALETTE_SLOTS) % CHART_PALETTE_SLOTS;
-    return theme.colors[`viz-${slot + 1}` as ThemeToken];
+    return theme.colors[`viz-${slot + 1}` as FyRenderThemeToken];
   }
   return theme.colors[TONE_TOKEN[tone]];
 }
 
 /** The palette in slot order, for a pie's slices. */
 export const paletteColors = (theme: ResolvedTheme): readonly string[] =>
-  Array.from({ length: CHART_PALETTE_SLOTS }, (_, index) => theme.colors[`viz-${index + 1}` as ThemeToken]);
+  Array.from({ length: CHART_PALETTE_SLOTS }, (_, index) => theme.colors[`viz-${index + 1}` as FyRenderThemeToken]);
 
 /** A fixed-width hex hash of a string (FNV-1a, 32 bit). A cache key, not a security property. */
 const fnv1a = (value: string): string => {

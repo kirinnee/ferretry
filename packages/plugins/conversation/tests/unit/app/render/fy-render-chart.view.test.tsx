@@ -6,12 +6,7 @@ import { FyRenderChart, type FyRenderChartModules } from '../../../../app/render
 import type { ChartHandle, ChartMount } from '../../../../app/render/fy-render-chart-engine.ts';
 import type { FyRenderSandboxFailure } from '../../../../app/render/fy-render-sandbox.tsx';
 import { readChart } from '../../../../app/render/fy-render-chart-model.ts';
-import {
-  paletteKey,
-  type ResolvedTheme,
-  THEME_TOKENS,
-  type ThemeToken,
-} from '../../../../app/render/fy-render-palette.ts';
+import { paletteKey, type ResolvedTheme, THEME_TOKENS, type FyRenderThemeToken } from '@ferretry/app';
 
 /**
  * The chart component, mounted in a real document with Chart.js replaced by a recorder, so what is claimed
@@ -39,7 +34,7 @@ const theme = (mode: 'light' | 'dark', shade = 1): ResolvedTheme => ({
       token,
       `#${shade.toString(16).padStart(2, '0')}00${(index + 1).toString(16).padStart(2, '0')}`,
     ]),
-  ) as Record<ThemeToken, string>,
+  ) as Record<FyRenderThemeToken, string>,
   font: 'system-ui',
   mode,
   backdrop: '',

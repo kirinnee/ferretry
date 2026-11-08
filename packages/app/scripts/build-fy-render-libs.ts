@@ -36,7 +36,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createScanner, LanguageVariant, SyntaxKind, tokenIsIdentifierOrKeyword } from 'typescript/unstable/ast';
-import { FY_RENDER_HTML_KIT_CSS } from '../../plugins/conversation/app/render/fy-render-html-kit.ts';
+import { FY_RENDER_HTML_KIT_CSS } from '../src/fy-render/html-kit.ts';
 
 const packageRoot = resolve(import.meta.dir, '..');
 const shellDirectory = resolve(packageRoot, 'scripts/fy-render-shell');
@@ -633,7 +633,7 @@ const htmlShellDocument = (bootstrap: string): string => `<!doctype html>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="robots" content="noindex" />
     <title>fy-render interactive page</title>
-    <!-- The app's look (src/lib/fy-render-html-kit.ts): a transparent root, element defaults and the
+    <!-- The app's look (packages/app/src/fy-render/html-kit.ts): a transparent root, element defaults and the
          .fy-* components, in @layer fy so every author rule beats it. Tokens arrive at runtime. -->
     <style>${FY_RENDER_HTML_KIT_CSS}</style>
   </head>

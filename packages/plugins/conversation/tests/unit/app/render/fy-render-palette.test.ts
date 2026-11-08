@@ -12,9 +12,9 @@ import {
   paletteKey,
   type ResolvedTheme,
   THEME_TOKENS,
-  type ThemeToken,
+  type FyRenderThemeToken,
   toneColor,
-} from '../../../../app/render/fy-render-palette.ts';
+} from '@ferretry/app';
 
 /**
  * The theme, as data a renderer can use: which token paints which part of a chart or a diagram, the key
@@ -23,10 +23,13 @@ import {
  */
 
 /** A theme whose every token is a distinct, recognisable hex literal: `#0000NN` for the Nth token. */
-const theme = (mode: 'light' | 'dark' = 'dark', overrides: Partial<Record<ThemeToken, string>> = {}): ResolvedTheme => {
+const theme = (
+  mode: 'light' | 'dark' = 'dark',
+  overrides: Partial<Record<FyRenderThemeToken, string>> = {},
+): ResolvedTheme => {
   const colors = Object.fromEntries(
     THEME_TOKENS.map((token, index) => [token, `#0000${(index + 1).toString(16).padStart(2, '0')}`]),
-  ) as Record<ThemeToken, string>;
+  ) as Record<FyRenderThemeToken, string>;
   return {
     backdrop: '#0a0b0c',
     colors: { ...colors, ...overrides },
@@ -78,7 +81,7 @@ describe('fy-render palette — tones', () => {
     should(toneColor('bad', read)).equal(read.colors.err);
     should(toneColor('muted', read)).equal(read.colors.muted);
     for (let slot = 1; slot <= CHART_PALETTE_SLOTS; slot += 1)
-      should(toneColor(slot, read)).equal(read.colors[`viz-${slot}` as ThemeToken]);
+      should(toneColor(slot, read)).equal(read.colors[`viz-${slot}` as FyRenderThemeToken]);
     // Past the last slot wraps, rather than painting nothing.
     should(toneColor(CHART_PALETTE_SLOTS + 1, read)).equal(read.colors['viz-1']);
     should(paletteColors(read)).have.length(CHART_PALETTE_SLOTS);

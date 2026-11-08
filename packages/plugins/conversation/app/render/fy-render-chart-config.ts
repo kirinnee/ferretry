@@ -15,7 +15,7 @@ import type { ChartConfiguration, ChartDataset, ChartType, TooltipItem } from 'c
 import type {} from 'chartjs-plugin-zoom';
 import type { ChartAxis, ChartFrame, ChartSpec } from './fy-render-chart-model.ts';
 import { formatChartValue } from './fy-render-chart-format.ts';
-import { paletteColors, type ResolvedTheme, toneColor } from './fy-render-palette.ts';
+import { paletteColors, type ResolvedTheme, toneColor } from '@ferretry/app';
 
 export interface ChartInteraction {
   /** Animate a draw and a frame change. Off under `prefers-reduced-motion: reduce`. */

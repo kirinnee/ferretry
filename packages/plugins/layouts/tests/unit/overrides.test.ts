@@ -21,8 +21,8 @@ describe('fy layout set: one change, checked whole', () => {
   });
 
   test('a slot name with a dot is one key: panels.ferret.side', () => {
-    const result = setPaths(DEFAULT_LAYOUT, {}, [{ path: 'panels.ferret.side', value: 'sitrep' }]);
-    expect(result.ok && result.overrides.panels).toEqual({ 'ferret.side': ['sitrep'] });
+    const result = setPaths(DEFAULT_LAYOUT, {}, [{ path: 'panels.ferret.side', value: 'queue' }]);
+    expect(result.ok && result.overrides.panels).toEqual({ 'ferret.side': ['queue'] });
   });
 
   test('composer.tools and phone paths land where the layout keeps them', () => {

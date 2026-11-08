@@ -4,7 +4,7 @@ import { ensureDom } from '@ferretry/app/testing';
 
 ensureDom();
 import { readChart } from '../../../../app/render/fy-render-chart-model.ts';
-import { type ResolvedTheme, THEME_TOKENS, type ThemeToken } from '../../../../app/render/fy-render-palette.ts';
+import { type ResolvedTheme, THEME_TOKENS, type FyRenderThemeToken } from '@ferretry/app';
 
 /**
  * The engine against the REAL Chart.js. The unit DOM has no 2D context, so the canvas is handed one that
@@ -49,7 +49,7 @@ afterAll(() => {
 });
 
 const theme: ResolvedTheme = {
-  colors: Object.fromEntries(THEME_TOKENS.map(token => [token, '#123456'])) as Record<ThemeToken, string>,
+  colors: Object.fromEntries(THEME_TOKENS.map(token => [token, '#123456'])) as Record<FyRenderThemeToken, string>,
   font: 'system-ui',
   mode: 'dark',
   backdrop: '#0b0b0d',

@@ -9,8 +9,9 @@
  *    Scrolled to the middle and to the end, the head must sit on the scroller's top edge, a one-row answer card's
  *    options on its bottom edge, and nothing may be left behind either of them at the end of the scroll. A reply card
  *    answers in the composer, so it has no dock.
- *  - The chat at its tail (Conversation's `Transcript` with this half's `AgendaLine`) is not drawn here: only the
- *    shell composes the two, so it is `packages/app/tests/integration/chat-tail.visual.test.ts`.
+ *  - The chat at its tail (Conversation's `Transcript` with this half's `AgendaLine`) is not drawn here:
+ *    neither plugin imports the other, so Conversation draws its transcript against a stand-in row
+ *    (`packages/plugins/conversation/tests/integration/app/chat-tail.visual.test.ts`).
  *
  * Set `FY_STICKY_GAP_SHOTS_DIR` to keep `<viewport>-<scheme>-<scene>.png`.
  */
