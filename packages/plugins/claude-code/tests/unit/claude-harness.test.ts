@@ -437,6 +437,27 @@ describe('ClaudeHarness', () => {
     expect(panes.require(FERRET)).toBe('%7');
   });
 
+  test('a start and a resume turn the spec’s readable folders into one read-only allowance each, and nothing more', async () => {
+    // Arrange: the folders Ferrets hands for this ferret's own session (LaunchSpec.readable).
+    const { harness } = build();
+    const own = '/fy/state/ferrets/sessions/f1';
+    const readable = [`${own}/turns`, `${own}/channel`, `${own}/attachments`];
+    const started: { command?: readonly string[] } = {};
+    const resumed: { command?: readonly string[] } = {};
+
+    // Act
+    await harness.start(spec({ readable }), runner(started), {} as never);
+    // A resume launches through the runner's start too, with `--resume`.
+    await harness.resume(spec({ readable }), runner(resumed), {} as never, 'conv-1');
+
+    // Assert: today's spelling, one per folder, on both; never the session folder itself (environment.json).
+    const expected = readable.map(folder => `--allowedTools=Read(/${folder}/**)`);
+    for (const command of [started.command, resumed.command])
+      expect(command?.filter(argument => argument.includes('allowedTools'))).toEqual(expected);
+    expect(resumed.command).toContain('--resume');
+    expect(started.command?.some(argument => argument === `--allowedTools=Read(/${own}/**)`)).toBe(false);
+  });
+
   test('the runner is handed an argv that never carries the API key or its tail', async () => {
     const { harness } = build();
     const fakeKey = `sk-ant-fake-${'0'.repeat(28)}`;

@@ -204,6 +204,12 @@ export interface FerretSessionPort {
   revive?(ferret: FerretId, request: ReviveTurnRequest): Promise<ReviveTurn | undefined>;
   /** The ferret's turn documents, oldest first (`FerretsApi.turns`). */
   turns?(ferret: FerretId, options: { readonly strict: boolean }): Promise<readonly FerretTurnDocument[]>;
+  /**
+   * The absolute folders of THIS ferret's own session folder its agent may read without asking
+   * (`FERRET_READABLE_FOLDERS`, today's `handoffFolders`), handed to the harness as `LaunchSpec.readable`. Unbound:
+   * nothing is pre-allowed.
+   */
+  readable?(ferret: FerretId): Promise<readonly FencedPath[]>;
 }
 
 /** What a revive's turn is made from: the message (none: the mode's default), the ferret's mode and who asked. */
@@ -1156,6 +1162,9 @@ export class FerretsService implements FerretsApi {
     const issued = issueToken(record.id, this.ports.now());
     this.tokens.add(issued.entry);
     await this.ports.saveTokens(this.tokens.snapshot());
+    // Today's read allowance for what the ferret is sent (`handoffFolders` → `--allowedTools=Read(…)`): its own session
+    // folder's hand-off folders only. One that cannot be named pre-allows nothing (the agent asks), never more.
+    const readable = (await this.ports.session?.readable?.(record.id).catch(() => undefined)) ?? [];
     const base: Omit<LaunchSpec, 'parts'> = {
       ferret: record.id,
       name: record.name,
@@ -1177,6 +1186,7 @@ export class FerretsService implements FerretsApi {
         ),
       ...(prompt === undefined ? {} : { prompt }),
       ...(conversation === undefined ? {} : { harnessConversation: conversation }),
+      ...(readable.length === 0 ? {} : { readable }),
     };
     const parts = (
       await Promise.all(

@@ -309,6 +309,7 @@ export class ClaudeHarness implements Harness {
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
       conversation,
+      readable: spec.readable,
     });
     const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env };
     // Persist only the identity and cwd we chose, so a fresh daemon reads the same exact transcript.

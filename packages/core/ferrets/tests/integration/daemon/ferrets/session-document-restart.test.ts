@@ -5,9 +5,11 @@ import { FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/c
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import { Harnesses, Runners } from '../../../../contract/index.ts';
-import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
-import ferrets from '../../../../daemon/index.ts';
+import type { HookDecision } from '@ferretry/kernel/contract';
+import { FerretsPort, Harnesses, Runners, type StartDecideInput } from '../../../../contract/index.ts';
+import { FakeHarness, FakeRunner, ferretId } from '../../../../contract/testing/index.ts';
+import { ferretsDaemon } from '../../../../daemon/index.ts';
+import type { HelperAdmission } from '../../../../daemon/lib/ferrets/helper-admission.ts';
 import { SessionConfigSchema } from '../../../../daemon/lib/protocol/session.ts';
 
 /**
@@ -16,10 +18,10 @@ import { SessionConfigSchema } from '../../../../daemon/lib/protocol/session.ts'
  * spawn-ancestry rule (unchanged: an indexed ferret with no document refuses every stamp) finds a document for every
  * ferret the fleet holds, including one that ran before the writer existed and holds only its journal.
  *
- * A CHILD start through this route is refused by Packs' helper admission (`helper_admission_unavailable`) before the
- * stamp is reached, because that admission is not bound in this build; the test pins that it is refused by THAT and
- * by nothing in the stamp. The child's stamp itself is proved on the service (unit test `deliver-turns.test.ts`, "a
- * ferret that ran before the writer … so a child of it is stamped").
+ * A CHILD start needs the definite helper admission, which no daemon binds in this build (unbound: 503
+ * `helper_admission_unavailable`, pinned by `routes.test.ts` and `helper-admission.test.ts`). Here Ferrets is built
+ * with an INJECTED admission that admits (G12): after the restart the child is admitted, and the strict ancestry stamps
+ * it with the lead as its parent. A Warden resume of that child is asked of the same admission (as a `resume`).
  *
  * CI only (integration tier). Fixture values only.
  */
@@ -51,9 +53,21 @@ const runnerPlugin = (runner: FakeRunner) =>
     { build: () => ({ hooks: { 'runners:tmux': runner } }) },
   );
 
-async function boot(): Promise<TestHost> {
+/** An injected helper admission that admits every child and records what it was asked. */
+const admitting = () => {
+  const asked: StartDecideInput[] = [];
+  const seam: HelperAdmission = {
+    admit: async (input): Promise<HookDecision> => {
+      asked.push(input);
+      return { allow: true };
+    },
+  };
+  return { asked, seam };
+};
+
+async function boot(helperAdmission: HelperAdmission): Promise<TestHost> {
   return await testHost({
-    plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(new FakeRunner())],
+    plugins: [ferretsDaemon({ helperAdmission }), harnessPlugin(new FakeHarness()), runnerPlugin(new FakeRunner())],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
   });
@@ -69,15 +83,18 @@ const document = (h: TestHost, id: string) => {
 };
 
 describe('ruling #31b: the session-document writer, across a daemon restart', () => {
-  test('a started ferret is documented and stamped; after a restart the fleet still stamps, and a child is refused only by helper admission', async () => {
+  test('G12 a started ferret is documented and stamped; after a restart the fleet still stamps, and an admitted child is stamped under its lead', async () => {
     // Arrange: a lead started through the real start route, then stopped (its journal is written).
-    const first = await boot();
+    const admission = admitting();
+    const first = await boot(admission.seam);
     const started = await start(first, { folder: '/work/a', prompt: 'Lead the work.' });
     expect(started.status).toBeLessThan(300);
     const { id: lead } = started.json<{ id: string }>();
     await first.settle();
     expect(document(first, lead)?.provenance).toBeDefined();
-    expect((await first.request('POST', `/v1/ferrets/${lead}/stop?how=now`, { body: {} })).status).toBeLessThan(300);
+    expect(
+      (await first.request('POST', `/v1/ferrets/${lead}/stop`, { query: { how: 'now' }, body: {} })).status,
+    ).toBeLessThan(300);
 
     // A ferret from before the writer, INDEXED: started and stopped through the real routes (so the session store
     // indexed its journal as it wrote it), then its session document taken away, leaving the journal alone — exactly
@@ -87,7 +104,9 @@ describe('ruling #31b: the session-document writer, across a daemon restart', ()
     expect(made.status).toBeLessThan(300);
     const { id: olderId } = made.json<{ id: string }>();
     await first.settle();
-    expect((await first.request('POST', `/v1/ferrets/${olderId}/stop?how=now`, { body: {} })).status).toBeLessThan(300);
+    expect(
+      (await first.request('POST', `/v1/ferrets/${olderId}/stop`, { query: { how: 'now' }, body: {} })).status,
+    ).toBeLessThan(300);
     await first.settle();
     const files = first.state('ferrets').files;
     files.delete(`${olderId}/config.json`);
@@ -106,9 +125,26 @@ describe('ruling #31b: the session-document writer, across a daemon restart', ()
     expect(next.status).toBeLessThan(300);
     const { id: other } = next.json<{ id: string }>();
     expect(document(second, other)?.provenance).toBeDefined();
-    // The child reaches Packs' admission, which is not bound, and is refused there, not by its stamp. GAP(provenance):
-    // when Packs binds helper admission, this flips to "stamped" (the child's document carries the lead as parent).
-    expect(child.status).toBe(503);
-    expect(child.json<{ code: string }>().code).toBe('helper_admission_unavailable');
+    // The child was asked of the injected admission, admitted, and stamped by the strict ancestry under its lead.
+    expect(admission.asked).toHaveLength(1);
+    expect(admission.asked[0]).toMatchObject({ parent: lead, role: 'helper', by: 'owner' });
+    expect(child.status).toBeLessThan(300);
+    const { id: childId } = child.json<{ id: string }>();
+    await second.settle();
+    const stamped = document(second, childId);
+    expect(stamped?.parent).toBe(lead);
+    expect(stamped?.provenance).toBeDefined();
+
+    // A Warden resume of the stopped child goes through the same admission, as a resume, and relaunches it.
+    expect(
+      (await second.request('POST', `/v1/ferrets/${childId}/stop`, { query: { how: 'now' }, body: {} })).status,
+    ).toBeLessThan(300);
+    await second.settle();
+    const resumed = await second
+      .provided(FerretsPort)
+      .resume(ferretId(childId), 'carry on', { automatic: true, actor: 'warden' });
+    expect(resumed.ok).toBe(true);
+    expect(admission.asked).toHaveLength(2);
+    expect(admission.asked[1]).toMatchObject({ ferret: childId, parent: lead, role: 'helper', by: 'resume' });
   });
 });
