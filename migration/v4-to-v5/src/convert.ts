@@ -6,7 +6,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type LockProbe, preflight } from './preflight.ts';
 import type { ConversionReport, StepReport } from './report.ts';
-import { STEPS, type Step } from './steps/index.ts';
+import { type HostFacts, STEPS, type Step } from './steps/index.ts';
 import { v4Paths } from './v4/layout.ts';
 import { writeHomeJson } from './v5/home.ts';
 import { v5Writer } from './v5/write.ts';
@@ -17,6 +17,8 @@ export interface ConvertOptions {
   readonly dryRun: boolean;
   readonly lock: LockProbe;
   readonly now: () => Date;
+  /** The machine facts steps may read (service definitions, environment); absent reads none. */
+  readonly host?: HostFacts;
   readonly steps?: readonly Step[];
 }
 
@@ -36,6 +38,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     v4: v4Paths(options.from),
     v5: v5Writer(options.to, { dryRun: options.dryRun }),
     dryRun: options.dryRun,
+    ...(options.host === undefined ? {} : { host: options.host }),
   };
 
   const reports: StepReport[] = [];

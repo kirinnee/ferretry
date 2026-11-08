@@ -99,14 +99,29 @@ describe('conversation daemon half, through the kernel test host', () => {
   });
 
   test('a send says plainly that the ferret’s terminal is not connected yet', async () => {
+    // The harness gate is open, so a send reaches the terminal seam. This host's Ferrets fake offers no harness (the
+    // seam is optional on the port), so the honest answer is that Conversation has no way to reach the terminal: 503,
+    // said in a sentence, and the send is refused BEFORE its record, so nothing is typed and nothing is kept.
     const host = await boot();
-    const response = await host.request('POST', '/v1/ferrets/f1/send', {
-      as: owner(),
-      headers: { 'x-fy-request-id': 'req-1' },
-      body: { message: 'hello' },
-    });
+    const send = async () =>
+      await host.request('POST', '/v1/ferrets/f1/send', {
+        as: owner(),
+        headers: { 'x-fy-request-id': 'req-1' },
+        body: { message: 'hello' },
+      });
+    const response = await send();
     expect(response.status).toBe(503);
-    expect(response.json()).toMatchObject({ code: 'conversation_terminal_unavailable' });
+    expect(response.json()).toEqual({
+      code: 'plugin_unavailable',
+      error: "Ferrets does not offer a way to reach this ferret's terminal, so Conversation cannot type into it yet.",
+    });
+    expect(host.state('conversation').raw(SENDS_STATE, 'f1')).toBeUndefined();
+    // Nothing was kept, so the same send again is refused again, never read back as sent.
+    const again = await send();
+    expect(again.status).toBe(503);
+    expect(again.json()).toMatchObject({ code: 'plugin_unavailable' });
+    const queue = await host.request('GET', '/v1/ferrets/f1/queue', { as: owner() });
+    expect(queue.json()).toMatchObject({ messages: [] });
   });
 
   test('the shared draft refuses a caller Gate gave no actor to, rather than guessing it is the owner', async () => {
