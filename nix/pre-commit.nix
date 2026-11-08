@@ -251,6 +251,19 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # No product code parses YAML with a reader of its own unless the ledger says why it is safe. One long
+    # string aliased many times made `Bun.YAML.parse` of a 256 KiB gate.yaml cost 2.3 s and 5.4 GB at every
+    # boot; the kernel's bounded reader refuses it in one pass. See scripts/validate/no-raw-yaml.sh and
+    # scripts/validate/raw-yaml-allowlist.txt.
+    a-no-raw-yaml = {
+      enable = true;
+      name = "Product code reads YAML only through the bounded reader";
+      entry = validator "scripts/validate/no-raw-yaml.sh";
+      files = "^(packages/.*\\.([cm]?[jt]s|[jt]sx)|scripts/validate/(no-raw-yaml\\.(sh|ts)|raw-yaml-allowlist\\.txt))$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # A dead-code keep marker (`@pending`, `@public`, a knip `ignore`, any other knip setting that keeps code
     # alive) must name an open gap of a pending port, a kept guarantee row, a declared surface or an
     # ALLOWED_KNIP reason, so the knip gates cannot be quieted by a tag. A package.json change can make a

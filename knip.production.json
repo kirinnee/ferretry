@@ -46,8 +46,6 @@
         "daemon/lib/protocol/auto-resume.ts",
         "daemon/adapters/session/lifecycle/process-incarnation.ts",
         "daemon/adapters/session/resume/tmux-resume-launcher.ts",
-        "daemon/adapters/session/resume/file-resume-turn-store.ts",
-        "daemon/adapters/session/resume/storage-resume-repository.ts",
         "daemon/lib/session/health/watched-panes.ts",
         "daemon/lib/session/events/index.ts",
         "daemon/lib/session/events/service.ts",
@@ -155,8 +153,7 @@
     },
     "packages/plugins/board": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["app/lib/board-done.ts", "app/lib/board-move.ts", "app/lib/lane-proposal-link.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/claude-code": {
       "entry": ["app/views/*.tsx"],
@@ -221,7 +218,13 @@
     },
     "packages/plugins/catalogs": {
       "entry": ["worker/src/adapters/link-store-worker.ts"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/features/catalogs/catalog-item-row.tsx",
+        "app/features/catalogs/catalog-add-toast.tsx",
+        "app/features/shared/shared-entry.tsx"
+      ],
+      "ignoreDependencies": ["react-dom"]
     },
     "packages/plugins/conversation": {
       "entry": ["app/surfaces.tsx"],
@@ -267,8 +270,7 @@
     },
     "packages/plugins/terminals": {
       "entry": [],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/adapters/tmux/pane-queue.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/browsers": {
       "entry": [],

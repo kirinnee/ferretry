@@ -25,12 +25,10 @@
 
 import { dirname } from 'node:path';
 import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
+import { ferretTurnFile } from '../../../../contract/sessions-root.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 import type { SessionTaskStore } from '../../../lib/session/lifecycle/index.ts';
 import { assertOwnSession, assertSessionsRoot, OwnFolder } from '../sessions-root.ts';
-
-/** The directory a session's turn documents live in, beneath the session's own directory. */
-const TURNS_DIRECTORY = 'turns';
 
 /** What this store asks of the kernel's root. */
 export type TaskRoot = Pick<
@@ -51,7 +49,7 @@ export class FileSessionTaskStore implements SessionTaskStore {
 
   file(id: SessionId): FencedPath {
     assertOwnSession(this.ferret, id, 'the session task store');
-    const resolved = this.root.resolve(`${TURNS_DIRECTORY}/turn-001.md`);
+    const resolved = this.root.resolve(ferretTurnFile(1));
     if (!resolved.ok) throw new Error(`the session's turn document is outside its root (${resolved.error})`);
     return resolved.value;
   }

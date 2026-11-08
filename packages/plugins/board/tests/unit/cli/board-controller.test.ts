@@ -1514,6 +1514,29 @@ describe('fy card patch', () => {
     should(sent(gateway)).be.empty();
   });
 
+  it('should refuse a file whose aliases will not expand, in a sentence, and send nothing', async () => {
+    // Arrange: YAML that parses, but whose aliases would grow to a hundred thousand nodes.
+    const bomb = [
+      'revision: 1',
+      'a: &a [x, x, x, x, x, x, x, x, x, x]',
+      'b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]',
+      'c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]',
+      'd: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]',
+      'summary: [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]',
+    ].join('\n');
+    const { gateway, controller } = harness(undefined, undefined, new FakeFiles({ 'f1.yaml': bomb }));
+
+    // Act: a refusal (`CliInputError`), which the verb prints and exits 1 on — never a crash.
+    const message = await refusal(() => controller.patch('F1', { file: 'f1.yaml' }));
+
+    // Assert
+    should(message).equal(
+      'card patch &F1 changed nothing:\n  f1.yaml could not be read as a patch: Excessive alias count indicates a resource exhaustion attack',
+    );
+    should(gateway.cardCalls).be.empty();
+    should(sent(gateway)).be.empty();
+  });
+
   it('should print the editable document with show --yaml', async () => {
     // Arrange
     const { log, controller } = harness();

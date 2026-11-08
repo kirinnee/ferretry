@@ -6,7 +6,8 @@ import {
   agendaListSnapshot,
   type AgendaSnapshot,
 } from '@ferretry/core-asks/contract';
-import { LANE_PROPOSAL_ANSWERS } from '../../../../app/lib/lane-edit.ts';
+import type { AgendaLaneEditor } from '../../../../contract/app-hooks.ts';
+import { LANE_PROPOSAL_ANSWERS, testLaneEditor } from '../../../support/app/agenda-inbox.tsx';
 import { projectionSnapshot } from '../../../support/app/agenda-projection.ts';
 import type { ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
@@ -120,8 +121,8 @@ interface HostProps {
   readonly boardSteps?: (daemonId: string, cardId: string) => string | null;
   /** The half's client, for the item view's lifecycle reads; absent: the test's machine. */
   readonly client?: AgendaCall;
-  /** Where Edit on a lane-proposal card goes (Board's lane editor, spelt by the host). */
-  readonly laneEditor?: (projectId: string) => string | undefined;
+  /** Where Edit on a lane-proposal card goes (Board's `agenda.lane-proposal` hook). */
+  readonly laneEditor?: AgendaLaneEditor;
 }
 
 let current: Agenda | undefined;
@@ -1077,8 +1078,8 @@ describe('Edit on a lane-proposal card in the conversation', () => {
     sourceRef: laneProposalReference(PROJECT_ID, 2),
   });
   const choose = (label: string) => ({ kind: 'respond', response: { kind: 'multiple-choice', choice: label } });
-  // The host spells Board's lane editor; this half hard-codes no Board path.
-  const laneEditor = (projectId: string) => `/d/agenda/projects/${projectId}/lanes`;
+  // The editor Board's `agenda.lane-proposal` hook answers; this half hard-codes no Board path.
+  const laneEditor = testLaneEditor;
 
   const mountInRouter = () => {
     const view = render(
@@ -1098,7 +1099,7 @@ describe('Edit on a lane-proposal card in the conversation', () => {
       view.root.findByType(AgendaItemView).props.onAct(choose(LANE_PROPOSAL_ANSWERS.edit));
     });
     expect(calls).toEqual(['respond:L1']);
-    expect(window.location.pathname).toBe(`/d/agenda/projects/${PROJECT_ID}/lanes`);
+    expect(window.location.pathname).toBe(`/lane-editor/lanes:${PROJECT_ID}:2`);
   });
 
   test('leaves the page alone on Accept', async () => {

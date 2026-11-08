@@ -13,15 +13,19 @@ export interface ChoiceAnswer {
   readonly response: { readonly kind: 'multiple-choice'; readonly choice: string } | { readonly kind: string };
 }
 
-/** The lane editor `action` opens (the project's lanes page), or `undefined` when it is not the Edit answer of a lane proposal. */
+/**
+ * The lane editor `action` opens (the project's lanes page, on `daemon` when named), or `undefined` when it is not the
+ * Edit answer of a lane proposal.
+ */
 export const laneEditDestination = (
   item: { readonly sourceRef?: string | null | undefined },
   action: ChoiceAnswer | { readonly kind: string },
+  daemon?: string,
 ): string | undefined => {
   if (action.kind !== 'respond') return undefined;
   const response = (action as ChoiceAnswer).response;
   if (response.kind !== 'multiple-choice') return undefined;
   if (((response as { readonly choice: string }).choice ?? '').trim() !== LANE_PROPOSAL_ANSWERS.edit) return undefined;
   const proposal = parseLaneProposalReference(item.sourceRef ?? null);
-  return proposal === undefined ? undefined : projectLanesPath(proposal.projectId);
+  return proposal === undefined ? undefined : projectLanesPath(proposal.projectId, daemon);
 };

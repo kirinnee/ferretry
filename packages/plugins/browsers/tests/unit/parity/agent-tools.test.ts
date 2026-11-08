@@ -57,7 +57,9 @@ async function built(): Promise<TestHost> {
   );
   return await testHost({
     plugins: [half],
-    uses: { ferrets: FERRETS },
+    // Every switch on: this test proves the half answers each tool; the switch refusals are tools/service.test.ts's.
+    // Unbound, the agent-control port fails closed and refuses every tool, `browser.list` included (today's `switchOf`).
+    uses: { ferrets: FERRETS, agentControl: { allows: async () => true } },
     fakes: { vault: new FakeVault(), gate: new FakeGate() },
     gate,
   });

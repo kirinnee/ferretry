@@ -5,8 +5,8 @@ import {
   FileSessionTransferBriefWriter,
   FileSessionTransferTargetPlanStore,
 } from '../../../../../daemon/adapters/transfer/index.ts';
-import { transferPorts } from '../../../../../daemon/modules/transfer.ts';
-import { TransferBriefFiles, TransferPlanFiles } from '../../../../../contract/transfer-state.ts';
+import { type TransferPortsParts, transferPorts } from '../../../../../daemon/modules/transfer.ts';
+import { TransferPlanFiles } from '../../../../../contract/transfer-state.ts';
 import type { TransferAttachmentStore } from '../../../../../daemon/lib/transfer/ports.ts';
 
 /**
@@ -23,6 +23,7 @@ function parts(): {
   readonly asked: string[];
   readonly state: ReturnType<MemoryStateFolder['port']>;
   readonly attachments: TransferAttachmentStore;
+  readonly briefs: TransferPortsParts['briefs'];
 } {
   const folder = new MemoryStateFolder();
   const asked: string[] = [];
@@ -38,14 +39,19 @@ function parts(): {
       throw new Error('not asked');
     },
   };
-  return { folder, asked, state: folder.port([TransferPlanFiles, TransferBriefFiles]), attachments: unusedStore };
+  // The brief is a target's own turn one on the `sessions` root: construction must not even open that folder.
+  const briefs: TransferPortsParts['briefs'] = id => {
+    asked.push(`briefs ${id}`);
+    throw new Error('not asked');
+  };
+  return { folder, asked, state: folder.port([TransferPlanFiles]), attachments: unusedStore, briefs };
 }
 
 describe('transfer module ports factory', () => {
   test('calling the factory makes the three ports over the given ports, and leaves nothing behind', () => {
-    const { folder, asked, state, attachments } = parts();
+    const { folder, asked, state, attachments, briefs } = parts();
 
-    const ports = transferPorts({ state, attachments });
+    const ports = transferPorts({ state, attachments, briefs });
 
     expect(ports.planStore).toBeInstanceOf(FileSessionTransferTargetPlanStore);
     expect(ports.briefWriter).toBeInstanceOf(FileSessionTransferBriefWriter);
@@ -58,8 +64,8 @@ describe('transfer module ports factory', () => {
 
   test('every call constructs new ports, so the fork owns the instances it was handed', () => {
     const given = parts();
-    const first = transferPorts({ state: given.state, attachments: given.attachments });
-    const second = transferPorts({ state: given.state, attachments: given.attachments });
+    const first = transferPorts({ state: given.state, attachments: given.attachments, briefs: given.briefs });
+    const second = transferPorts({ state: given.state, attachments: given.attachments, briefs: given.briefs });
 
     expect(second.planStore).not.toBe(first.planStore);
     expect(second.briefWriter).not.toBe(first.briefWriter);

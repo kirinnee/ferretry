@@ -10,7 +10,7 @@ import { buildTerminals } from '../../../daemon/index.ts';
 import { CgroupLaunchPlanner, EnforcementRuntime, FleetMemoryWatcher } from '../../../daemon/lib/cgroups/index.ts';
 import { GIBIBYTE, LimitsViewSchema } from '../../../daemon/lib/protocol/limits.ts';
 import manifest from '../../../manifest.ts';
-import { fakeFerrets, fakeVault, FERRET, ScriptedTmux } from '../../support/daemon/half.ts';
+import { ALL_ON, fakeFerrets, fakeVault, FERRET, ScriptedTmux } from '../../support/daemon/half.ts';
 
 afterEach(() => mock.restore());
 
@@ -36,6 +36,7 @@ async function subject(effectiveLimits?: () => Promise<LimitsFile>, platform = '
     hostFacts: unarmedHostFacts,
     plugins: [plugin],
     fakes: { ferrets, vault: fakeVault([]) },
+    uses: { agentControl: ALL_ON },
     gate: new StandInAdmission(() => (caller === 'ferret' ? ferretStanding(FERRET) : ownerStanding())),
     spawn: (program, args) => {
       commands.push({ program, args });

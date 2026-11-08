@@ -1,6 +1,8 @@
 import type { AppImplementation, Manifest } from '@ferretry/kernel/manifest';
+import type { MemberCarriers } from './member.ts';
 import type { NavigateOptions } from '../router/router.tsx';
 import type { PluginCommandSource } from '../shell/command-sources.ts';
+import type { AppHookProviders } from '../surfaces/app-hooks.ts';
 import type { View } from '../surfaces/halves.ts';
 import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RelayPairingOutcome, SessionDeviceClaim } from '../session/session-client.ts';
@@ -226,6 +228,8 @@ export interface ShellProvides {
   readonly carriers?: (ports: ConnectPorts) => readonly CarrierDialer[];
   /** Connections only: the carriers a pairing walks. */
   readonly pairing?: (ports: ConnectPorts) => PairingCarriers;
+  /** Connections only; NOT IMPLEMENTED YET: the carriers a member session walks to a publisher this browser is not paired with. */
+  readonly member?: (ports: ConnectPorts) => MemberCarriers;
   /**
    * Access only: the passkey handler every daemon call consults on a refusal, and the prompts the shell mounts
    * (`passkey/passkey.ts`). Built with the runtime, after the session parts: its ceremony rides Access's own client.
@@ -236,6 +240,12 @@ export interface ShellProvides {
    * session parts (claims, carriers, pairing) it is NOT built before the bootstrap read: the bar builds it on a daemon.
    */
   readonly commands?: PluginCommandSource;
+  /**
+   * Any plugin: values for the app hooks another plugin's half offers (`<offerer>.<name>`, named in the offerer's
+   * contract), each built per daemon over this plugin's own guarded client (`shell/app-hooks.ts`). Like `commands`,
+   * built on a daemon, after its bootstrap read, and only while this plugin may run there.
+   */
+  readonly hooks?: AppHookProviders;
   /**
    * Any plugin: the views of the screens its manifest declares `daemonless: true`, built once before any daemon is
    * contacted, over the {@link DaemonlessPorts} and nothing else. A screen id the manifest does not declare as
@@ -273,6 +283,7 @@ export interface RegisteredConnect {
   readonly claims: DeviceClaims | undefined;
   readonly carriers: readonly CarrierDialer[];
   readonly pairing: PairingCarriers | undefined;
+  readonly member: MemberCarriers | undefined;
   readonly failures: readonly { readonly plugin: string; readonly reason: string }[];
 }
 
@@ -284,6 +295,7 @@ export interface RegisteredConnect {
 export function registeredConnect(surfaces: readonly SurfaceEntry[], ports: ConnectPorts): RegisteredConnect {
   let claims: DeviceClaims | undefined;
   let pairing: PairingCarriers | undefined;
+  let member: MemberCarriers | undefined;
   const carriers: CarrierDialer[] = [];
   const failures: { plugin: string; reason: string }[] = [];
   const attempt = <T>(plugin: string, build: () => T): T | undefined => {
@@ -305,13 +317,17 @@ export function registeredConnect(surfaces: readonly SurfaceEntry[], ports: Conn
     if (makeCarriers !== undefined && CARRIER_TAKERS.includes(entry.id)) {
       carriers.push(...(attempt(entry.id, () => makeCarriers(ports)) ?? []));
     }
+    const makeMember = provides.member;
+    if (makeMember !== undefined && member === undefined && CARRIER_TAKERS.includes(entry.id)) {
+      member = attempt(entry.id, () => makeMember(ports));
+    }
     const makePairing = provides.pairing;
     if (makePairing !== undefined && pairing === undefined && CARRIER_TAKERS.includes(entry.id)) {
       pairing = attempt(entry.id, () => makePairing(ports));
     }
   }
   carriers.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { claims, carriers, pairing, failures };
+  return { claims, carriers, pairing, member, failures };
 }
 
 /** The passkey provision the registered halves gave, and the failure to build it (said, never thrown). */

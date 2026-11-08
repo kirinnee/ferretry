@@ -41,7 +41,11 @@ export {
   type RelayClientSocket,
   RelayPairingRefusedError,
   type RelayPairingOutcome,
+  RelayClientSession,
+  type RelayClientSessionDependencies,
+  RelayJoinRefusedError,
   RelaySessionError,
+  type RelayTunnelAnswer,
   RelayStreamRefusedError,
   type SessionDeviceClaim,
 } from './session/session-client.ts';
@@ -57,7 +61,7 @@ export {
   type SessionKeyRotation,
   toBase64Url,
 } from './session/session-transport.ts';
-export { RelayKeyHandleError } from './session/webcrypto.ts';
+export { RelayKeyHandleError, WebCryptoRelayCrypto } from './session/webcrypto.ts';
 export {
   DaemonIdSchema,
   HEARTBEAT_GRACE_SECONDS,
@@ -139,6 +143,8 @@ export { type DeviceLayout, useDeviceLayout } from './shell/use-device-layout.ts
 export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
 /** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */
 export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
+/** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */
+export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,
@@ -171,6 +177,8 @@ export {
 export { type DaemonClientOf, useDaemonClients, usePairedDaemons } from './shell/daemon-access.ts';
 
 export {
+  type AddressPlace,
+  addressPlace,
   DEVICE_SETTINGS_HREF,
   daemonHomeHref,
   daemonSettingsHref,
@@ -358,3 +366,20 @@ export { useChatScrollSlot } from './scroll/chat-scroll.ts';
 export * from './scroll/transcript-follow.ts';
 export * from './scroll/use-stick-to-bottom.ts';
 export { RECONNECTING_GRACE_MS } from './shared/reconnecting-grace.ts';
+export * from './passkey/ceremony.ts';
+
+// ─── a member session to a publisher this browser is not paired with (Connections provides; not implemented yet) ───
+// `setMemberCarriers` is deliberately NOT exported: only the shell's composition root (`main.tsx`) installs carriers.
+export {
+  DIRECT_MEMBER_DEADLINE_MS,
+  type MemberCarriers,
+  type MemberPublisher,
+  type MemberPurpose,
+  type MemberSocket,
+  type MemberStep,
+  memberCarriers,
+  memberTunnelRequest,
+  memberTunnelResponse,
+  memberWalk,
+  RELAY_MEMBER_DEADLINE_MS,
+} from './connect/member.ts';

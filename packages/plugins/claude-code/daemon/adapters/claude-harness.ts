@@ -86,6 +86,11 @@ export class ClaudeHarness implements Harness {
   readonly key = 'claude-code' as const;
   /** Claude spends an Anthropic sign-in, an API key, or a proxy or endpoint that speaks the Anthropic API. */
   readonly accepts = ['anthropic', 'api-key', 'proxy', 'endpoint'] as const;
+  /**
+   * Today's stop key, harmless at an idle prompt (today's `STOP_KEY_SAFE_WHEN_IDLE`): at an interactive pane it clears a
+   * half-typed composer or closes a menu, which is what "stop" means to the person pressing it.
+   */
+  readonly turnStop = { key: 'Escape', safeWhenIdle: true } as const;
   readonly #delivered = new Set<string>();
 
   constructor(private readonly deps: ClaudeHarnessDeps) {}
@@ -304,6 +309,7 @@ export class ClaudeHarness implements Harness {
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
       conversation,
+      readable: spec.readable,
     });
     const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env };
     // Persist only the identity and cwd we chose, so a fresh daemon reads the same exact transcript.

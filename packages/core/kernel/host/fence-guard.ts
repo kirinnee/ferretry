@@ -1,6 +1,7 @@
 import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
-import { BEFORE_SUFFIX, insideFence } from '../contract/home.ts';
+import { BEFORE_SUFFIX, insideFence, internalRootFolder } from '../contract/home.ts';
 import type { FileIdentity, HostFs } from './adapters/node-fs.ts';
+import { INTERNAL_ROOT_FOLDERS } from './internal-roots.ts';
 
 /**
  * The fence's own guard (§7.7, §9.3, S40–S49), copied from today's state-home guard
@@ -42,7 +43,9 @@ export interface Fence {
 /**
  * The home's key files and folders, relative to the home: today's `stateHomeFence(home).pinned`
  * (`packages/fleet/src/lib/state-home-fence.ts`), exactly. Each is recognised by IDENTITY wherever a walk meets it, so
- * one bind-mounted or hard-linked alone into a work folder is refused under any name.
+ * one bind-mounted or hard-linked alone into a work folder is refused under any name. The list is kept whole: its
+ * v4 places (`fleet`, `fleet/homes`, `state/sessions`) still pin a home that holds them and cost nothing where absent;
+ * where 5.0 keeps those folders is {@link internalRootPins}.
  */
 export const PINNED_KEY_PATHS: readonly string[] = [
   'api-token',
@@ -56,6 +59,19 @@ export const PINNED_KEY_PATHS: readonly string[] = [
   'fleet/homes',
   'state/sessions',
 ];
+
+/**
+ * The 5.0 home's private folders, pinned like the key paths: every internal root the kernel makes for a plugin
+ * (`state/<plugin>/<root>`, {@link internalRootFolder}: Ferrets' `state/ferrets/sessions` holds each ferret's
+ * `environment.json` and turns, a harness's `agent-homes` its sign-in), for every plugin folder `state` holds. It is
+ * today's `state/sessions` and `fleet/homes` pin at the place 5.0 keeps them, derived from the kernel's own layout so
+ * the pin and the base the kernel serves can never name two places. A `-before-` folder is fenced whole already.
+ */
+export function internalRootPins(stateEntries: readonly string[]): readonly string[] {
+  return stateEntries
+    .filter(plugin => !BEFORE_SUFFIX.test(plugin))
+    .flatMap(plugin => INTERNAL_ROOT_FOLDERS.map(root => internalRootFolder(plugin, root)));
+}
 
 /** The folders of the home that today's fence holds beside the home itself (`NodeStateHomes([home, state, config])`). */
 const HOME_FOLDERS: readonly string[] = ['state', 'config'];
@@ -83,8 +99,8 @@ export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
   const name = basename(named);
   for (const entry of await fs.list(parent))
     if (entry.startsWith(`${name}-before-`) && BEFORE_SUFFIX.test(entry)) folders.push(join(parent, entry));
-  for (const entry of await fs.list(join(real, 'state')))
-    if (BEFORE_SUFFIX.test(entry)) folders.push(join(real, 'state', entry));
+  const stateEntries = await fs.list(join(real, 'state'));
+  for (const entry of stateEntries) if (BEFORE_SUFFIX.test(entry)) folders.push(join(real, 'state', entry));
   const identities = [];
   for (const folder of folders) {
     const identity = await fs.identity(folder);
@@ -104,7 +120,7 @@ export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
     places.push(place);
     identities.push(identity);
   }
-  for (const key of PINNED_KEY_PATHS) {
+  for (const key of [...PINNED_KEY_PATHS, ...internalRootPins(stateEntries)]) {
     const identity = await fs.identity(join(real, key));
     if (identity !== undefined) identities.push(identity);
   }

@@ -28,6 +28,7 @@ export * from './handover.ts';
 export * from './move.ts';
 export * from './handover-state.ts';
 export * from './transfer-state.ts';
+export * from './sessions-root.ts';
 export * from './move-state.ts';
 
 /**

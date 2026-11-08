@@ -3,7 +3,7 @@ import type { ApiRequest } from '../contract/http.ts';
 import { ApiError, jsonResponse } from '../contract/http.ts';
 import { parseBody } from '../contract/body.ts';
 import { z } from 'zod';
-import type { Health, PluginInventory } from '../contract/kernel.ts';
+import { type Health, type PluginInventory, SESSION_CREDENTIAL_FEATURE } from '../contract/kernel.ts';
 import { CORE_IDS } from '../contract/ids.ts';
 import { PROTOCOL } from '../contract/session.ts';
 import type { DoctorReport } from '../contract/doctor.ts';
@@ -67,13 +67,15 @@ export interface KernelHalfSources {
   admitTool(name: string, request: ApiRequest): AdmissionDecision;
   /**
    * Tells Gate about one call to a kernel tool made through `POST /v1/agent/config`, as the tool door tells it
-   * (`Admission.recorded`, table `tool`), with the standing `admitTool` gave: the record names the ferret. Never
-   * the body. Never changes the answer.
+   * (`Admission.recorded`, table `tool`), with the standing `admitTool` gave: the record names the ferret. A call
+   * `admitTool` REFUSED (no credential, an unknown or revoked one) is told too, with no standing, as today's audited
+   * route recorded every answer of that route: the record then names nobody, only the status. Never the body. Never
+   * changes the answer.
    */
   recordTool(
     name: string,
     request: ApiRequest,
-    decision: Extract<AdmissionDecision, { readonly outcome: 'admitted' }>,
+    admitted: Extract<AdmissionDecision, { readonly outcome: 'admitted' }> | undefined,
     status: number,
   ): void;
 }
@@ -120,12 +122,18 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
     ...configRoutes(sources.config),
     'GET /v1/config/status': async () => jsonResponse(configStatusView(sources.agentConfig)),
     'POST /v1/agent/config': async call => {
-      // The route is served without a credential, so the CALLER is admitted before the body is read (today's order: no
-      // credential 401, an unknown one 403, whatever the body). The tool is known only from the body, but the three share
+      // The route is served without a credential, so the CALLER is admitted before the body is read, whatever the body: no
+      // credential, and an unknown or revoked one, are both 401 here (Gate refuses them before this handler; today
+      // answered 403 for a presented one). The tool is known only from the body, but the three share
       // one declaration shape (a test pins it), so `config_read`'s declaration admits for all of them.
       const decision = sources.admitTool(AGENT_CONFIG_TOOL_OF['config.read'], call.request);
-      // Gate's refusal, with today's code and words for a call that carries no credential (round-2 m-c).
-      if (decision.outcome === 'refused') return agentDoorRefusal(decision.response);
+      // Gate's refusal, with today's code and words for a call that carries no credential (round-2 m-c). Recorded, as
+      // today's audited route recorded it (R4 m2): a revoked ferret token still trying the door is what the log is for.
+      if (decision.outcome === 'refused') {
+        const response = agentDoorRefusal(decision.response);
+        sources.recordTool(AGENT_CONFIG_TOOL_OF['config.read'], call.request, undefined, response.status);
+        return response;
+      }
       // Recorded here, not by the Dispatcher (which admitted the route with no standing): as the tool the body names
       // (`config_read`'s until the body is read), with the standing that admitted the caller (round-3 review N2b).
       let tool: AgentConfigToolName = AGENT_CONFIG_TOOL_OF['config.read'];
@@ -144,7 +152,14 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
         sources.recordTool(tool, call.request, decision, status);
       }
     },
-    'GET /v1/health': async () => jsonResponse({ protocol: PROTOCOL, version: sources.version } satisfies Health),
+    // Always lists the session-credential feature: a `fy` from before 5.0 reads its absence as an older daemon and
+    // falls back to the admin token after a 401 (see SESSION_CREDENTIAL_FEATURE).
+    'GET /v1/health': async () =>
+      jsonResponse({
+        protocol: PROTOCOL,
+        version: sources.version,
+        features: [SESSION_CREDENTIAL_FEATURE],
+      } satisfies Health),
     'GET /healthz': async () => {
       const live = sources.liveness();
       return jsonResponse(

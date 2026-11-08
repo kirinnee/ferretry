@@ -18,6 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { check as actRunner } from '../validate/act-runner.ts';
+import { check as appHooks } from '../validate/app-hooks.ts';
 import { check as bannedGlobals } from '../validate/banned-globals.ts';
 import { check as contextImports } from '../validate/context-imports.ts';
 import { check as contractConsumes } from '../validate/contract-consumes.ts';
@@ -46,6 +47,7 @@ export const CHECKS: readonly Check[] = [
   contractConsumes,
   contractGraph,
   pluginGraph,
+  appHooks,
   coreClosed,
   manifestMatch,
   screenPaths,
@@ -70,6 +72,7 @@ const SCOPED = new Set([
   'context-imports',
   'contract-consumes',
   'manifest-match',
+  'app-hooks',
   'screen-paths',
   'read-scoped',
   'act-runner',

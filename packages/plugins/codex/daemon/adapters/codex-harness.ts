@@ -20,6 +20,7 @@ import type {
   Started,
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
+import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlTables } from '../lib/index.ts';
 import type { HarnessConfig } from '../../contract/index.ts';
@@ -88,7 +89,6 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
-        ...(spec.prompt === undefined ? {} : { prompt: spec.prompt }),
       }),
     ]);
   };
@@ -141,6 +141,9 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
   return {
     key: 'codex',
+    // Today's stop key. NOT safe when idle: at an idle Codex prompt a stop key is one of the ways the TUI quits, so an
+    // interrupt presses it only while the pane shows active work (`shouldPressStopKey`).
+    turnStop: { key: 'Escape', safeWhenIdle: false },
 
     async discover(): Promise<HarnessInstall | HarnessMissing> {
       const location = await locate();
@@ -204,6 +207,10 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     async deliver(_ferret, _handle, message): Promise<Delivery> {
       return refused(message.id, 'Codex messages are sent through Conversation, which owns the send path');
     },
+
+    // Today's RuntimeSupervisedLauncher: a pane that died starting because Codex could not reach the network is told
+    // so in words. The sentence is fixed text; the screen is only matched, never quoted.
+    startFailure: screen => codexLaunchFailure(screen),
 
     transcript: rollouts.transcript,
     usage: rollouts.usage,

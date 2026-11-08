@@ -22,15 +22,22 @@ const packageRoot = import.meta.dir;
 
 const shotsDir = process.env.FY_CHAT_TAIL_SHOTS_DIR ?? '';
 
+// The stand-in agenda row keeps the REAL row's sizing contract (Agenda's `agenda-chat.css`, `.fy-agenda-line`): ONE
+// row, never wrapped, its own height (44px, taller than the pill even at the 44px touch floor a coarse pointer gives
+// it), and what is running truncates instead of wrapping. A looser stand-in (40px, a label free to wrap) grew a line
+// on a phone the moment the pill took its width beside "Wrangling… 3s", so the scroller shrank for a reason the real
+// row does not have: the "never resizes anything" case measured the fixture, not Conversation.
 const SCENE_CSS = `
   html, body, #root { height: 100%; margin: 0; }
   .scene-chat { box-sizing: border-box; display: flex; flex-direction: column; inset: 0; position: fixed; }
   .scene-chat .fy-chat-log { flex: 1 1 0; }
-  .scene-agenda-row { align-items: center; box-sizing: border-box; display: flex; gap: 8px; min-height: 40px; padding: 0 8px; }
-  .scene-agenda-row__jump { display: flex; flex: 0 0 auto; }
+  .scene-agenda-row { align-items: center; box-sizing: border-box; display: flex; flex-wrap: nowrap; font-size: var(--text-sm); gap: 8px; justify-content: flex-end; min-height: 44px; min-width: 0; padding: 0 8px; }
+  .scene-agenda-row__jump { align-items: center; display: flex; flex: none; margin-inline-end: auto; min-width: 0; }
   .scene-agenda-row__jump:empty { display: none; }
-  .scene-agenda-row__live { flex: 1 1 auto; min-width: 0; }
-  .scene-agenda-row__main { background: none; border: 0; color: inherit; font: inherit; margin-left: auto; padding: 8px; }
+  .scene-agenda-row__jump .fy-jump-latest { padding-block: 6px; }
+  .scene-agenda-row__live { align-items: center; display: flex; flex: 1 1 0; min-width: 0; overflow: hidden; }
+  .scene-agenda-row__live > * { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scene-agenda-row__main { background: none; border: 0; color: inherit; flex: 0 1 auto; font: inherit; min-width: 0; overflow: hidden; padding: 8px; white-space: nowrap; }
   .scene-composer { border: 1px solid var(--fy-border, #888); border-radius: 12px; box-sizing: border-box; height: 56px; padding: 16px; }
 `;
 

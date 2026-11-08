@@ -182,7 +182,8 @@ describe('the registered Codex harness', () => {
       expect(command.find(arg => arg.startsWith('notice='))).toContain('hide_gpt-5.1-codex-max_migration_prompt');
       expect(command).toContain(`${spec.home}/codex-correlation/unreachable`);
     }
-    expect(box.commands[0]?.command.at(-1)).toBe('hello');
+    // The start's task is typed as its turn-one pointer by Ferrets, never put on the argv as well (no double delivery).
+    expect(box.commands[0]?.command).not.toContain('hello');
     expect(box.commands[1]?.command).toContain('native-conversation');
   });
 

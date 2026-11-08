@@ -9,11 +9,14 @@
  * agent could really start in it.
  */
 
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import type { MemoryStateFolder } from '@ferretry/kernel/testing';
-import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
+import { dirname, join, resolve } from 'node:path';
+import { diskSessionsRoots, type MemoryStateFolder } from '@ferretry/kernel/testing';
+import { TransferPlanFiles } from '../../../../contract/transfer-state.ts';
+import type { RootHandle } from '@ferretry/kernel/contract';
+import type { SessionId } from '../../../../daemon/lib/session-id.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import { ForkFiles } from '../../../../contract/index.ts';
 import type { DaemonStorage } from '../../../../daemon/adapters/storage/session-storage.ts';
@@ -34,8 +37,8 @@ export const AT = '2026-08-06T09:00:00.000Z';
 export const SOURCE_ID = '20260806-source';
 export const TARGET_ID = '20260806-target';
 
-/** Every declared file a fork touches: the session store's, the receipts, and the target's plan and brief. */
-const FORK_STATE_FILES = [...SESSION_STORE_FILES, ForkFiles, TransferPlanFiles, TransferBriefFiles] as const;
+/** Every declared file a fork touches on the state port: the session store's, the receipts and the target's plan. */
+const FORK_STATE_FILES = [...SESSION_STORE_FILES, ForkFiles, TransferPlanFiles] as const;
 
 const directories = new Set<string>();
 
@@ -45,20 +48,44 @@ export async function cleanup(): Promise<void> {
   directories.clear();
 }
 
-/** A session store over a memory state folder, and the state port a fork's own files are read and written through. */
+/**
+ * A session store over a memory state folder, the state port a fork's own files are read and written through, and
+ * every ferret's REAL private folder on the kernel's `sessions` root, where a target's brief is its `turns/turn-001.md`.
+ */
 export async function openStorage(_label: string): Promise<{
   storage: DaemonStorage;
   folder: MemoryStateFolder;
   state: ReturnType<MemoryStateFolder['port']>;
   sessionDirectory: (id: string) => string;
+  briefs: (id: SessionId) => RootHandle;
+  /** The brief on disk now, or `undefined` when there is none (read directly, beside the store). */
+  briefText: (id: string) => string | undefined;
+  /** Puts bytes at the brief's name directly, as a crash or a hand edit would leave them. */
+  plantBrief: (id: string, text: string) => void;
 }> {
   const opened = await memoryStorage({ clock: { now: () => AT } });
+  const parent = await mkdtemp(join(tmpdir(), 'fy-fork-sessions-'));
+  directories.add(parent);
+  const sessions = await diskSessionsRoots(parent);
+  const briefFile = (id: string): string => join(sessions.folderOf(id), 'turns', 'turn-001.md');
   return {
     storage: opened.storage,
     folder: opened.folder,
     state: opened.folder.port(FORK_STATE_FILES),
-    // A name, never a place on disk: the fork reads it only as the string a rollout is later correlated by.
-    sessionDirectory: (id: string) => `/state/ferrets/${id}`,
+    // The target's own private folder: the string a rollout is later correlated by, and where its brief is.
+    sessionDirectory: (id: string) => sessions.folderOf(id),
+    briefs: id => sessions.root(id),
+    briefText: id => {
+      try {
+        return readFileSync(briefFile(id), 'utf8');
+      } catch {
+        return undefined;
+      }
+    },
+    plantBrief: (id, text) => {
+      mkdirSync(dirname(briefFile(id)), { recursive: true, mode: 0o700 });
+      writeFileSync(briefFile(id), text, { mode: 0o600 });
+    },
   };
 }
 

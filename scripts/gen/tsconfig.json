@@ -4,6 +4,7 @@
   "include": [
     "./**/*.ts",
     "../validate/act-runner.ts",
+    "../validate/app-hooks.ts",
     "../validate/banned-globals.ts",
     "../validate/context-imports.ts",
     "../validate/contract-consumes.ts",

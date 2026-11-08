@@ -146,8 +146,29 @@ describe('the Codex harness', () => {
     const command = seen[0]?.spec.command ?? [];
     should(command.slice(0, 3)).eql(['env', `CODEX_HOME=${HOME}`, '/opt/bin/codex']);
     should(command).containEql('gpt-5.6-codex');
+    // The task reaches the agent once, as the turn-one pointer Ferrets types: never also on the argv.
+    should(command).not.containEql('hello');
     should(seen[0]?.spec.cwd).equal(FOLDER);
     should(seen[0]?.call).equal('start');
+  });
+
+  it('launch-argv parity: a Codex start carries no read allowance for its hand-off folders, as today', async () => {
+    // Today (rebuild-ref `packages/daemon/src/lib/session/send/handoff.ts:63-65`) `handoffReadArguments('codex', …)` is
+    // `[]`: Codex's sandbox (`workspace-write`, `packages/fleet/src/lib/account/fixed-layer.ts:201`) reads anywhere and
+    // limits only writes, so `buildLaunchArgv` (`launch/argv.ts:171`) added nothing. 5.0 hands Codex the same
+    // `LaunchSpec.readable` Ferrets hands Claude, and its argv must not change for it.
+    const { harness } = harnessOver(LOCATED);
+    const plain = fakeRunner();
+    const handed = fakeRunner();
+    const readable = ['turns', 'channel', 'attachments'].map(
+      folder => `/fy/state/ferrets/sessions/f1/${folder}` as FencedPath,
+    );
+    await harness.start(specOf(), plain.runner, ENV);
+    await harness.start(specOf({ readable }), handed.runner, ENV);
+    const command = handed.seen[0]?.spec.command ?? [];
+    should(command).eql(plain.seen[0]?.spec.command);
+    should(command.some(argument => argument.includes('allowedTools') || argument.includes('/fy/state/'))).be.false();
+    should(command).containEql('sandbox_mode="workspace-write"');
   });
 
   it('resumes by the harness conversation id, and reports it back', async () => {

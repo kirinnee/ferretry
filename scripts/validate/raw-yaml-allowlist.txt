@@ -1,0 +1,49 @@
+# Product files that parse YAML with a reader of their own, each with why that is safe — and, under each, the exports
+# that reach that parse and the only files that may load them.
+#
+# Enforced by scripts/validate/no-raw-yaml.sh. Every daemon-side reader of text a person or an agent can write goes
+# through the kernel's bounded reader (packages/core/kernel/host/config/yaml-text.ts) or the value the kernel already
+# checked; a file belongs here only when it IS that reader, or when what it parses can never be such a text in the
+# daemon. Three kinds of line, exact both ways (a stale or missing line fails):
+#
+#   path  # reason                             the FILE may parse YAML itself
+#   path::export  <- a.ts, b.ts  # reason      an EXPORT of that file reaches a parse; only those callers load it
+#   path::export  <- *  # reason               open to every caller: the kernel's bounded reader alone
+#
+# A new importer of a listed parser is a use too (laundering): add it to the line only with why it is safe there.
+
+packages/core/kernel/host/config/yaml-text.ts  # the kernel's bounded reader itself: size cap, alias budget by length, no YAML 1.1 tags, duplicate keys in one pass
+packages/core/kernel/host/config/yaml-text.ts::readConfigText  <- *  # the sanctioned door: every daemon-side read of a config text goes through it
+packages/core/kernel/host/config/yaml-text.ts::readConfigTextToEdit  <- *  # the same bounded read, handing back the document an edit starts from
+packages/core/kernel/host/config/yaml-text.ts::editConfigText  <- *  # bounded read, then a comment-preserving edit
+packages/core/kernel/host/config/yaml-text.ts::setConfigKey  <- *  # bounded read, then one key set
+
+packages/plugins/logins/daemon/lib/shared/yaml-text.ts  # parses only the built-in catalog and preset texts shipped in the repo (catalog.ts, presets/catalog.ts call it with origin 'built-in'), never a file on disk
+packages/plugins/logins/daemon/lib/shared/yaml-text.ts::readConfigText  <- packages/plugins/logins/daemon/lib/catalog/catalog.ts, packages/plugins/logins/daemon/lib/presets/catalog.ts  # both callers pass the origin 'built-in': a text shipped in the repo, never one a person or an agent wrote
+
+packages/plugins/board/cli/lib/patch-document.ts  # CLI side: a patch document the person hands their own `fy card patch` process, never read by the daemon
+packages/plugins/board/cli/lib/patch-document.ts::readPatchText  <- packages/plugins/board/cli/lib/card-patch.ts, packages/plugins/board/cli/lib/board-progress.ts  # the person's own CLI process reads a file they named; the daemon never sees the text
+
+packages/plugins/usage/cli/lib/config-text.ts  # CLI side: edits usage.yaml text in the person's own process; the daemon reads that file through the kernel's check
+packages/plugins/usage/cli/lib/config-text.ts::readConfigValue  <- packages/plugins/usage/cli/lib/budget.ts  # the usage CLI, in the person's own process
+packages/plugins/usage/cli/lib/config-text.ts::setConfigKey  <- packages/plugins/usage/cli/lib/budget.ts  # the usage CLI, in the person's own process
+
+packages/plugins/usage/app/lib/config-text.ts  # app side: runs in the person's own browser on the usage.yaml text the daemon serves (bounded by the 256 KiB cap; a pathological text can only stall that tab, never the daemon)
+packages/plugins/usage/app/lib/config-text.ts::readConfigValue  <- packages/plugins/usage/app/lib/usage-file.ts  # browser side only
+packages/plugins/usage/app/lib/config-text.ts::setConfigKey  <- packages/plugins/usage/app/lib/usage-file.ts  # browser side only
+
+packages/plugins/voice/app/lib/config-text.ts  # app side: runs in the person's own browser on the voice.yaml text the daemon serves (bounded by the 256 KiB cap; a pathological text can only stall that tab, never the daemon)
+packages/plugins/voice/app/lib/config-text.ts::readConfigText  <- packages/plugins/voice/app/lib/stt/voice-cleanup.ts  # browser side only
+packages/plugins/voice/app/lib/config-text.ts::editConfigText  <- packages/plugins/voice/app/lib/stt/voice-cleanup.ts  # browser side only
+
+packages/plugins/browsers/app/lib/browsers-config.ts  # app side: runs in the person's own browser on the browsers.yaml text the daemon serves (bounded by the 256 KiB cap; a pathological text can only stall that tab, never the daemon)
+packages/plugins/browsers/app/lib/browsers-config.ts::readBrowsersConfig  <- packages/plugins/browsers/app/features/settings/browser-tab.tsx  # the settings tab, in the person's own browser
+packages/plugins/browsers/app/lib/browsers-config.ts::writeBrowsersConfig  <- packages/plugins/browsers/app/features/settings/browser-tab.tsx  # the settings tab, in the person's own browser
+
+packages/plugins/conversation/app/render/fy-render-chart-model.ts  # app side: a chart fence in a message, parsed in the viewer's own browser; never a file the daemon reads
+packages/plugins/conversation/app/render/fy-render-chart-model.ts::readChart  <- packages/plugins/conversation/app/render/fy-render-chart.tsx  # the chart renderer, in the viewer's own browser
+
+packages/plugins/conversation/app/render/fy-render-map-model.ts  # app side: a map fence in a message, parsed in the viewer's own browser; never a file the daemon reads
+packages/plugins/conversation/app/render/fy-render-map-model.ts::readMap  <- packages/plugins/conversation/app/render/fy-render-map.tsx  # the map renderer, in the viewer's own browser
+
+packages/app/src/prose/highlight.ts  # highlight.js's YAML grammar: it colours code for display and never builds a value from the text

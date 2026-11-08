@@ -8,21 +8,29 @@ import { type ChildEnvironment, SECRET_REFERENCE_SOURCE } from '@ferretry/core-v
 import type { FencedPath, FerretId, FolderRefusal, WorkFolders } from '@ferretry/kernel/contract';
 import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretry/std';
 import type { FerretState, FerretSummary, HarnessKey, LoginKindKey, PackId } from '../ids.ts';
-import type {
-  AttachRefusal,
-  DeliveryOutcome,
-  RunnerDelivery,
-  Delivery,
-  Harness,
-  LaunchSpec,
-  LoginKind,
-  OutboundMessage,
-  Runner,
-  RunnerHandle,
-  RunningFerret,
-  RunSpec,
-  StartRefusal,
-  Started,
+import {
+  type AttachRefusal,
+  type DeliveryOutcome,
+  HARNESS_STOP_KEYS,
+  type HarnessStop,
+  type RunnerDelivery,
+  type RunnerDeliveryFailure,
+  type Delivery,
+  type Harness,
+  type LaunchSpec,
+  type LoginKind,
+  type OutboundMessage,
+  type QueueOutcome,
+  type Runner,
+  type RunnerHandle,
+  runnerDeliveryFailure,
+  type RunnerStop,
+  type RunnerStopOutcome,
+  type RunningFerret,
+  type RunSpec,
+  shouldPressStopKey,
+  type StartRefusal,
+  type Started,
 } from '../kinds.ts';
 import type { FerretsApi, ManagedWorktreeSummary, Sitrep, StartFailure, StartRequest } from '../port.ts';
 import { type AgentControl, DEFAULT_AGENT_CONTROL, NO_AGENT_CONTROL } from '../state.ts';
@@ -37,12 +45,31 @@ export const emptyChildEnvironment = (): ChildEnvironment =>
 
 // ─── runner ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** A runner rejection carrying the contract's closed failure, as a real runner's errors carry it. */
+export class FakeRunnerFailure extends Error {
+  constructor(readonly deliveryFailure: RunnerDeliveryFailure) {
+    super(`the fake runner: ${deliveryFailure.kind}`);
+    this.name = 'FakeRunnerFailure';
+  }
+}
+
 /** An in-memory runner: handles `%1`, `%2`, …; `attach` adopts a live handle without starting anything. */
 export class FakeRunner implements Runner {
   readonly key = 'tmux' as const;
   starts = 0;
   /** Every delivery made, with the handle it went to. */
   readonly deliveries: { readonly handle: RunnerHandle; readonly delivery: RunnerDelivery }[] = [];
+  /** Every message queued, with the handle it went to. */
+  readonly queued: { readonly handle: RunnerHandle; readonly text: string }[] = [];
+  /** What the next `queue` proves: `held` unless a test says otherwise. */
+  queueOutcome: QueueOutcome = 'held';
+  /** Every turn stop asked for, and every key one actually pressed (only ever a harness stop key). */
+  readonly stops: { readonly handle: RunnerHandle; readonly stop: RunnerStop }[] = [];
+  readonly pressed: { readonly handle: RunnerHandle; readonly key: string }[] = [];
+  /** Whether the pane shows active work, as `stopTurn` reads it before deciding. */
+  working = true;
+  /** Set by a test: the closed failure the next `deliver` / `queue` / `stopTurn` rejects with, instead of writing. */
+  fail: RunnerDeliveryFailure | undefined;
   readonly #live = new Map<string, RunningFerret & { readonly ferret: FerretId }>();
   #next = 0;
 
@@ -77,10 +104,30 @@ export class FakeRunner implements Runner {
   }
   async signal(): Promise<void> {}
   async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
-    if (!this.#live.has(handle)) throw new Error(`no pane ${handle}`);
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     await delivery.beforeWrite?.();
     this.deliveries.push({ handle, delivery });
     return delivery.text.startsWith('/') ? 'handled-local' : 'turn-started';
+  }
+  async queue(handle: RunnerHandle, text: string): Promise<QueueOutcome> {
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    this.queued.push({ handle, text });
+    return this.queueOutcome;
+  }
+  async stopTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome> {
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    this.stops.push({ handle, stop });
+    if (!shouldPressStopKey(this.working, stop)) return { pressed: false, working: this.working };
+    this.pressed.push({ handle, key: stop.key });
+    return { pressed: true, working: false };
+  }
+  #fail(): void {
+    const failure = this.fail;
+    this.fail = undefined;
+    if (failure !== undefined) throw new FakeRunnerFailure(failure);
   }
 }
 
@@ -91,6 +138,14 @@ export interface RunnerSubject {
   adoptable(): Promise<RunnerHandle>;
   /** How many processes this runner has started (attach must not add one). */
   starts(): number;
+  /**
+   * Required of a runner that offers `stopTurn`: lets the suite set whether the pane behind a handle shows active work,
+   * and see every key that actually reached it, so "only under the rule" is checked against the pane, not the answer.
+   */
+  readonly stopPane?: {
+    working(handle: RunnerHandle, working: boolean): void | Promise<void>;
+    keys(handle: RunnerHandle): readonly string[] | Promise<readonly string[]>;
+  };
 }
 
 /** The `runners` conformance suite, with spine D15: `attach` adopts a live handle WITHOUT restarting it. */
@@ -142,6 +197,63 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
       await expect(subject.runner.deliver('%99999' as RunnerHandle, { text: 'hello' })).rejects.toThrow();
       expect(subject.starts()).toBe(before);
     });
+    test('harness-refusals: a handle with nothing behind it is answered as nothing typed, never as typed-unconfirmed', async () => {
+      const subject = await make();
+      const failure = await subject.runner.deliver('%99999' as RunnerHandle, { text: 'hello' }).then(
+        () => undefined,
+        (error: unknown) => runnerDeliveryFailure(error),
+      );
+      // A runner may leave the rejection unclassified; one that classifies it must say nothing was typed.
+      if (failure !== undefined) expect(failure.kind).not.toBe('unconfirmed');
+    });
+    test('harness-refusals shouldPressStopKey: a turn stop presses only a harness stop key, and only under the rule', async () => {
+      const subject = await make();
+      const stopTurn = subject.runner.stopTurn?.bind(subject.runner);
+      if (stopTurn === undefined) return;
+      const pane = subject.stopPane;
+      if (pane === undefined) throw new Error('a runner with stopTurn must give the suite stopPane to check the rule');
+      const started = await subject.runner.start(subject.spec);
+      if (!started.ok) throw new Error('start refused');
+      const handle = started.value.handle;
+      // Idle, with a key that is not harmless there (Codex quits on it): never pressed, and the pane got no key.
+      await pane.working(handle, false);
+      expect(await stopTurn(handle, { key: 'Escape', whenIdle: false })).toMatchObject({ pressed: false });
+      expect(await pane.keys(handle)).toEqual([]);
+      // Idle, with a key harmless there: pressed once.
+      expect(await stopTurn(handle, { key: 'Escape', whenIdle: true })).toMatchObject({ pressed: true });
+      expect(await pane.keys(handle)).toEqual(['Escape']);
+      // Working: pressed once even when the key is not harmless at an idle prompt.
+      await pane.working(handle, true);
+      expect(await stopTurn(handle, { key: 'Escape', whenIdle: false })).toMatchObject({ pressed: true });
+      const keys = await pane.keys(handle);
+      expect(keys).toEqual(['Escape', 'Escape']);
+      for (const key of keys) expect(HARNESS_STOP_KEYS).toContain(key as (typeof HARNESS_STOP_KEYS)[number]);
+      await subject.runner.stop(handle, 'now');
+    });
+    test('harness-refusals: a turn stop at a handle with nothing behind it is not_ready/exited and starts nothing', async () => {
+      const subject = await make();
+      const stopTurn = subject.runner.stopTurn?.bind(subject.runner);
+      if (stopTurn === undefined) return;
+      const before = subject.starts();
+      const gone = await stopTurn('%99999' as RunnerHandle, { key: 'Escape', whenIdle: true }).then(
+        () => 'resolved' as const,
+        (error: unknown) => runnerDeliveryFailure(error),
+      );
+      expect(gone).toEqual({ kind: 'not_ready', why: 'exited' });
+      expect(subject.starts()).toBe(before);
+    });
+    test('a queue into a live ferret answers held, typed or left; to a handle with nothing behind it, rejects', async () => {
+      const subject = await make();
+      // Optional on the kind: a runner that cannot queue has nothing to prove here.
+      if (subject.runner.queue === undefined) return;
+      const started = await subject.runner.start(subject.spec);
+      if (!started.ok) throw new Error('start refused');
+      expect(['held', 'typed', 'left']).toContain(await subject.runner.queue(started.value.handle, 'hello'));
+      const before = subject.starts();
+      await expect(subject.runner.queue('%99999' as RunnerHandle, 'hello')).rejects.toThrow();
+      expect(subject.starts()).toBe(before);
+      await subject.runner.stop(started.value.handle, 'now');
+    });
     test('attach after stop is refused', async () => {
       const subject = await make();
       const handle = await subject.adoptable();
@@ -165,6 +277,8 @@ export class FakeHarness implements Harness {
   /** Every launch spec `prepareHome` was handed, in order. */
   readonly prepared: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
+  /** The harness's turn stop; a test sets it to `undefined` for a harness that names none. */
+  turnStop: HarnessStop | undefined = { key: 'Escape', safeWhenIdle: true };
   constructor(
     readonly key: HarnessKey = 'claude-code',
     /** This harness's own `agent-homes` folder: `homeFor` answers `<homes>/<ferret>`. */
@@ -271,6 +385,13 @@ export function harnessConformance(name: string, make: () => HarnessSubject | Pr
       expect(await runner.alive(started.value.running.handle)).toBe(true);
       await harness.stop(spec.ferret, started.value.running.handle, runner, 'now');
       expect(await runner.alive(started.value.running.handle)).toBe(false);
+    });
+    test('harness-refusals: a harness’s turn stop, when it names one, is a closed stop key — never C-c', async () => {
+      const { harness } = await make();
+      if (harness.turnStop === undefined) return;
+      expect(HARNESS_STOP_KEYS).toContain(harness.turnStop.key);
+      expect(harness.turnStop.key).not.toBe('C-c');
+      expect(typeof harness.turnStop.safeWhenIdle).toBe('boolean');
     });
     test('deliver is idempotent by message id', async () => {
       const subject = await make();

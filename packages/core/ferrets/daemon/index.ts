@@ -11,7 +11,12 @@ import {
   type PinnedWorkingDirectory,
   queryValue,
 } from '@ferretry/kernel/contract';
-import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/kernel/manifest';
+import {
+  type DaemonContext,
+  type DaemonHalf,
+  type DaemonImplementation,
+  implementDaemon,
+} from '@ferretry/kernel/manifest';
 import { err, milliseconds, ok } from '@ferretry/std';
 import {
   type FerretId,
@@ -47,6 +52,12 @@ import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
 import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
+import {
+  type HelperAdmission,
+  needsHelperAdmission,
+  askHelperAdmission,
+  unboundHelperAdmission,
+} from './lib/ferrets/helper-admission.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
@@ -96,6 +107,7 @@ import { movesDeps } from './moves-deps.ts';
 import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
 import { ferretsPort } from './lib/ferrets/port.ts';
 import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
+import type { ResumeActor } from './lib/session/resume/types.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -118,10 +130,27 @@ function callerIsAgent(call: CallContext): boolean {
   return call.actor !== 'admin-ui' && call.actor !== 'admin-cli';
 }
 
+/**
+ * Who asked for a resume, for the author recorded beside its turn document (today's `resumeTurnAuthor` input):
+ * ATTRIBUTION only, never authority, which the route has already decided. The warden is the Warden; a ferret's token,
+ * or the admin token with a ferret behind it, is a peer ferret; a device and the admin UI or CLI are the owner.
+ */
+function resumeActorOf(call: CallContext): ResumeActor {
+  const credential = call.credential;
+  if (credential?.tokenClass === 'warden') return 'warden';
+  if (credential?.tokenClass === 'ferret' || callerFerret(call) !== undefined) return 'peer';
+  if (credential?.tokenClass === 'device') return 'device';
+  if (call.actor === 'admin-cli' || call.actor === 'admin-ui') return call.actor;
+  return 'unknown';
+}
+
 /** A random ferret id: base-36 time + 8 hex characters (today's `TimeSessionIdFactory`). */
 const mintId = (nowMs: number): FerretId => `${nowMs.toString(36)}-${randomBytes(4).toString('hex')}` as FerretId;
 
-function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest> {
+function build(
+  ctx: DaemonContext<typeof manifest>,
+  helperAdmission: HelperAdmission | undefined,
+): DaemonHalf<typeof manifest> {
   const { kernel, hooks, needs } = ctx;
   const log = kernel.log.child('ferrets');
   let generation = 0;
@@ -255,14 +284,34 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
           ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
         };
       }),
+    // What a ferret's session document is made from (ruling #31b): its record and its start options.
+    seed: id => {
+      const record = registry.get(id as unknown as FerretId);
+      return record === undefined ? undefined : { record, details: registry.detailsOf(record.id) };
+    },
     log,
   });
+  // Every held ferret gets its session document once the records and the store's archive are loaded, before any start
+  // or resume reads the fleet's lineage (which refuses while an indexed ferret has none). Each stamp waits for it.
+  void sessionFiles
+    .backfill(async () => {
+      await loaded;
+      await storeLoaded.catch(() => undefined);
+      return registry.list().map(ferret => ferret.id);
+    })
+    .catch((error: unknown) =>
+      log.warn('the ferret session documents could not be checked at boot', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   // The launch environment: ONE store, written by every launch and read by `instructions` (stored over what the record
-  // implies; RULING #30). Each section's flag is its OWNER's launch part; Pack's `FY_PACK` is the only one registered.
-  // GAP(ports-pending: Conversation): `hypermediaLaunchEnvironment` (FY_HYPERMEDIA) is not registered as `launch.parts`.
+  // implies; RULING #30). Each section's flag is its OWNER's launch part: Pack's `FY_PACK` and Conversation's
+  // `conversation-hypermedia` (FY_HYPERMEDIA, only when the owner set the ferret's switch) are registered.
+  // GAP(ports-pending: Ferrets): with no hypermedia switch set, the mode default the pane is handed is not recorded.
   // GAP(ports-pending: Agenda): no `launch.parts` contribution of FY_AGENDA yet.
   // GAP(ports-pending: Lessons): no `launch.parts` contribution of FY_LEARNING_PASSIVE yet.
-  // Until each lands its section is not recorded, and `instructions` says the pane was not handed the switches: no stand-in.
+  // Until each lands its section is not recorded, and `instructions` reads it as off: no stand-in. Each is one line in
+  // ports-pending.json under its owner (ferrets, agenda, lessons).
   const launchEnvironment = new LaunchEnvironmentStore(
     {
       read: async ferret => {
@@ -300,14 +349,18 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return found === 'unavailable' ? undefined : found;
     },
     decide: async input => {
-      // Today's pack.admit is mandatory for an ordinary child. The optional start.decide hook returns allow with
-      // no takers and cannot prove Packs admitted it. Until its definite admission seam is bound, do no launch.
-      if (input.parent !== undefined || input.role === 'helper')
-        throw new ApiError(
-          503,
-          'Packs helper admission is not bound, so no helper is started',
-          'helper_admission_unavailable',
-        );
+      // Today's pack.admit is mandatory for an ordinary child, a start or a resume alike. The optional start.decide
+      // hook returns allow with no takers and cannot prove Packs admitted it, so a child is asked of the definite
+      // admission first (unbound: 503 `helper_admission_unavailable`, nothing launched), then of start.decide. A bound
+      // one is asked as the kernel asks a start.decide taker: within StartDecide's own bound, allow === true only.
+      if (needsHelperAdmission(input)) {
+        if (helperAdmission === undefined) throw unboundHelperAdmission();
+        const admitted = await askHelperAdmission(helperAdmission, input, {
+          timeoutMs: StartDecide.timeoutMs,
+          after: (ms, fn) => kernel.clock.after(milliseconds(ms), fn),
+        });
+        if (!admitted.allow) return admitted;
+      }
       return await hooks.decide(StartDecide, input);
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
@@ -351,8 +404,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     // The registry the worktrees module keeps (built below); read only, through its own lifecycle chain.
     managedWorktrees: async () => await worktrees.service.records(),
-    // The harness seam writes only through the act runner, so Vault's input holds apply to it as to terminal_send.
-    act: kernel.act,
     // Bound below, once the moves are built (the moves resume through this very service).
     move: async (ferret, runtime, options) =>
       await moves.move.move(ferret, {
@@ -612,7 +663,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       ferrets: () => registry.list(),
       waitingOf: ferret => registry.waitingOf(ferret),
       stop: async (ferret, reason) => await service.stop(ferret, 'polite', reason),
-      resume: async ferret => await service.resume(ferret),
+      // The daemon's own restart: its turn is drawn as Ferretry's Restart, never as the owner's words.
+      resume: async ferret => await service.resume(ferret, undefined, { actor: 'daemon' }),
       history: appendHistory,
       // An entry that does not parse is dropped on its own; the rest survive, and a queue that cannot be read is empty.
       loadQueue: async () => {
@@ -882,6 +934,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const { message } = parseResumeBody(await body(call));
         const resumed = await service.resume(id, message, {
           confirmRestore: confirmRestore(call, callerIsAgent(call)),
+          actor: resumeActorOf(call),
         });
         if (!resumed.ok) return startFailure(resumed.error);
         return jsonResponse({ id: resumed.value });
@@ -915,5 +968,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 }
 
-/** Ferrets' daemon half (§2.2). */
-export default implementDaemon(manifest, { build });
+/** What Ferrets' daemon half is built with, beyond its context. */
+export interface FerretsDaemonOptions {
+  /** The definite helper admission; absent, every helper start answers `unboundHelperAdmission` (fail closed). */
+  readonly helperAdmission?: HelperAdmission;
+}
+
+/** Ferrets' daemon half (§2.2), built with the seams it is given. */
+export function ferretsDaemon(options: FerretsDaemonOptions = {}): DaemonImplementation<typeof manifest> {
+  return implementDaemon(manifest, { build: ctx => build(ctx, options.helperAdmission) });
+}
+
+/** Ferrets' daemon half (§2.2) as every daemon builds it: helper admission unbound (GAP(provenance)). */
+export default ferretsDaemon();

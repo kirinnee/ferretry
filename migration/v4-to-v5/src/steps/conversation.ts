@@ -4,7 +4,8 @@
  * `defineState` declarations, under `state/conversation/` (§9.2).
  *
  * - `state/session-message-token.key` → `message-token.key`, byte for byte, never opened.
- * - `sessions/<sid>/turns/` → `<sid>/turns/` (opaque), every file byte for byte, links omitted.
+ * - `sessions/<sid>/turns/` → `state/ferrets/sessions/<sid>/turns/` (the one place v5 reads them: Ferrets' internal
+ *   `sessions` root, not Conversation's folder), every file byte for byte, links omitted.
  * - `shared-drafts/<sid>.json` + `<sid>.items/<askId>.json` → `<sid>/drafts` (opaque): the drafts repository's one
  *   document `{chat, items}`, each snapshot parsed by v5's `DraftSnapshotSchema` (`sessionId` becomes `ferret`).
  * - `links.json` from every ferret v4 kept from an existing conversation (`transcript.identity` `adopted`).
@@ -57,11 +58,11 @@ import {
   SENDS_STATE,
   SendUnaccountedReasonSchema,
   StoredRenderMetaSchema,
-  TURNS_STATE,
 } from '@ferretry/plugin-conversation/contract';
 import { chmod, mkdir, readdir, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { FERRET_SESSIONS_FOLDER, FERRET_TURNS_FOLDER } from '@ferretry/core-ferrets/contract';
 import type { KeptItem, StepReport } from '../report.ts';
 import { moveSealed } from '../sealed.ts';
 import {
@@ -98,7 +99,12 @@ export const V5_CONVERSATION = 'state/conversation';
 const at = (path: string, name?: string) => join(V5_CONVERSATION, name === undefined ? path : path.replace('*', name));
 export const V5_MESSAGE_TOKEN_KEY_FILE = at(MESSAGE_TOKEN_KEY_STATE.path);
 export const V5_LINKS_FILE = at(LINKS_STATE.path);
-export const v5TurnsFolder = (ferret: string) => at(TURNS_STATE.path, ferret);
+/**
+ * A ferret's turns folder in 5.0: `<FERRET_SESSIONS_FOLDER>/<ferret>/<FERRET_TURNS_FOLDER>`, the facts Ferrets' contract
+ * owns (`contract/sessions-root.ts`), so this step and 5.0's readers (`FileSessionTaskStore` `turns/turn-001.md`,
+ * `FileResumeTurnStore` `turns/turn-NNN.md`) name one folder. Conversation's `TURNS_STATE` is read by nothing.
+ */
+export const v5TurnsFolder = (ferret: string) => join(FERRET_SESSIONS_FOLDER, ferret, FERRET_TURNS_FOLDER);
 export const v5DraftsFile = (ferret: string) => at(DRAFTS_STATE.path, ferret);
 export const v5QueueFile = (ferret: string) => at(QUEUE_STATE.path, ferret);
 export const v5SendsFile = (ferret: string) => at(SENDS_STATE.path, ferret);

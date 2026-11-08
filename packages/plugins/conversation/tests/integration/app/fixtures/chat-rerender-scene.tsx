@@ -10,9 +10,11 @@
  *   ?theme=<family>-<mode>
  */
 
+import { ReferenceSurfaceProvider } from '@ferretry/app';
 import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { transcriptEntriesFromLog } from '../../../../app/chat/chat-refresh.ts';
+import { chatReferenceSurface } from '../../../../app/chat/reference-surface.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
 
 const params = new URLSearchParams(window.location.search);
@@ -23,6 +25,16 @@ declare global {
     __appendMessages: (count: number) => void;
   }
 }
+
+const DAEMON = 'daemon-rerender';
+const SESSION = 'mvrerend-5e7d0b1e';
+
+/**
+ * THE CHAT'S OWN REFERENCE SURFACE, as `session-chat-page.tsx` provides it. In 5.0 the `fy-render` fence is
+ * Conversation's, handed to Markdown through this surface (`fyRenderFences`); a bare `Transcript` draws the block as an
+ * ordinary code fence, so there would be no frame to interact with.
+ */
+const surface = chatReferenceSurface({ daemonId: DAEMON, ferretId: SESSION });
 
 const WINDOW = 14;
 const INITIAL_TOTAL = 14;
@@ -96,7 +108,9 @@ function Scene() {
   const entries = useMemo(() => transcriptEntriesFromLog(windowAt(total), NOW), [total]);
   return (
     <div className="scene-chat">
-      <Transcript agentName="Janella" daemonId="daemon-rerender" entries={entries} sessionId="mvrerend-5e7d0b1e" />
+      <ReferenceSurfaceProvider surface={surface}>
+        <Transcript agentName="Janella" daemonId={DAEMON} entries={entries} sessionId={SESSION} />
+      </ReferenceSurfaceProvider>
     </div>
   );
 }

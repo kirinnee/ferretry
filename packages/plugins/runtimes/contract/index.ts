@@ -17,6 +17,7 @@ import {
 } from './config.ts';
 import type { ApplyOutcomeSchema, CatalogInstallChangeSchema } from './wire/index.ts';
 
+export * from './codex-launch.ts';
 export * from './config.ts';
 export * from './wire/index.ts';
 

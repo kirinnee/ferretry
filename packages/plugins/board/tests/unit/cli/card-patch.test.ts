@@ -132,3 +132,26 @@ describe('card patch: the card progress merges by key', () => {
     should(!unknown.ok && unknown.problems).deepEqual(['progress.later: not a field a patch changes']);
   });
 });
+
+describe('card patch: a file that parses but is not a value', () => {
+  /** Five lines whose aliases would expand to a hundred thousand nodes: YAML the reader refuses to build. */
+  const ALIAS_BOMB = [
+    'revision: 1',
+    'a: &a [x, x, x, x, x, x, x, x, x, x]',
+    'b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]',
+    'c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]',
+    'd: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]',
+    'summary: [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]',
+  ].join('\n');
+
+  it('should say why in one sentence instead of throwing', () => {
+    // Act
+    const result = parseCardPatch(ALIAS_BOMB, 'f1.yaml');
+
+    // Assert
+    should(result.ok).be.false();
+    should(!result.ok && result.problems).deepEqual([
+      'f1.yaml could not be read as a patch: Excessive alias count indicates a resource exhaustion attack',
+    ]);
+  });
+});

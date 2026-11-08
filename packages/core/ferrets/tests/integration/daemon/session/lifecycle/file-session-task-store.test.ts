@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { diskSessionsRoot } from '@ferretry/kernel/testing';
@@ -51,10 +51,12 @@ describe('FileSessionTaskStore replay proof', () => {
     // Act
     const failure = await rejection(store.writeAssignedTask(SESSION, 'the task\n'));
 
-    // Assert: treating it as absent would publish over something nobody could read. The kernel root refuses the
-    // endless link as `fenced` (its hop bound), a RootError rather than the platform's ELOOP.
-    should(failure.name).equal('RootError');
-    should(failure.refusal).equal('fenced');
+    // Assert: treating it as absent would publish over something nobody could read. On the internal `sessions` root
+    // the kernel's base-anchored check meets the link first, so the refusal is the platform's own ELOOP (an owner's
+    // root answers `fenced` at its hop bound instead; that is the kernel's to pin) — never a typed refusal, never "absent".
+    should(failure.code).equal('ELOOP');
+    should(failure.refusal).be.undefined();
+    should((await lstat(file)).isSymbolicLink()).equal(true);
   });
 
   it('should refuse a path that opens but cannot be read, and release what it opened', async () => {
