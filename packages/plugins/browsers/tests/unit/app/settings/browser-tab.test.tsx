@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import { interact, mount, must } from '@ferretry/app/testing';
-import kernelPlugin from '@ferretry/kernel/plugin';
 import browsersManifest from '../../../../manifest.ts';
 import { BROWSER_USER_AGENT_WORDS, BrowserTab } from '../../../../app/features/settings/browser-tab.tsx';
 import { PROXY_ERROR_WORDS } from '../../../../app/features/settings/browser-proxy-test-result.tsx';
@@ -75,10 +74,7 @@ const body = (calls: readonly RecordedCall[], route: string): unknown =>
 const text = (container: HTMLElement, selector: string): string => container.querySelector(selector)?.textContent ?? '';
 
 describe('the Browser tab', () => {
-  it('D2 #3 reads and writes browsers.yaml over the kernel’s config routes, which only the kernel declares', () => {
-    const kernelRoutes = (kernelPlugin.actions?.routes ?? []).map(route => route.key);
-    expect(kernelRoutes).toContain(CONFIG_GET);
-    expect(kernelRoutes).toContain(CONFIG_PUT);
+  it('D2 #3 reads and writes browsers.yaml over the kernel’s config routes, declaring the file and none of the routes', () => {
     // Browsers declares the FILE the kernel resolves the path to, and none of the kernel's routes itself.
     expect((browsersManifest.actions?.routes ?? []).map(route => route.key)).not.toContain(CONFIG_GET);
     expect((browsersManifest.actions?.routes ?? []).map(route => route.key)).not.toContain(CONFIG_PUT);

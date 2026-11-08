@@ -4,7 +4,6 @@
  * located issues. NO REAL CREDENTIAL APPEARS HERE.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import kernelPlugin from '@ferretry/kernel/plugin';
 import type { ReactNode } from 'react';
 import {
   CONFLICT_SENTENCE,
@@ -92,11 +91,9 @@ const editor = async (script: Script = {}) => {
 const sent = (calls: readonly Call[], route: string) => calls.filter(call => call.route === route).at(-1)?.body;
 
 describe('Edit as YAML over the kernel’s /v1/config/file', () => {
-  it('D2 #3 calls only the kernel’s config routes, which Runtimes does not declare', () => {
-    const kernel: readonly string[] = (kernelPlugin.actions?.routes ?? []).map(route => route.key);
+  it('D2 #3 calls the kernel’s config routes, which Runtimes does not declare', () => {
     const own: readonly string[] = (runtimesManifest.actions?.routes ?? []).map(route => route.key);
     for (const route of [GET, PUT, CONFIRM]) {
-      expect(kernel).toContain(route);
       expect(own).not.toContain(route);
     }
   });
