@@ -434,9 +434,13 @@ export class GateItems implements CardWriteObserver {
     const byCard = new Map<CardId, OpenCardAskEntry[]>();
     for (const open of await this.ports.obligations.open())
       byCard.set(open.cardId, [...(byCard.get(open.cardId) ?? []), open]);
+    if (byCard.size === 0) return;
+    // The cards come from ONE pass over the board; a derivation per card with an open ask would read the whole board each
+    // time. A card the pass did not have (written since) is looked for on its own.
+    const known = new Map((await this.ports.board.cards()).map(each => [each.task.id, each] as const));
     for (const [cardId, opens] of byCard) {
       signal?.throwIfAborted();
-      const card = await this.ports.board.card(cardId).catch(() => undefined);
+      const card = known.get(cardId) ?? (await this.ports.board.card(cardId).catch(() => undefined));
       const gate = card === undefined ? undefined : gateOf(card, this.ports.lanes);
       const wanted = gate === undefined ? undefined : gateReference(gate);
       const newest = (entry: string): number => parseGateReference(entry)?.entry ?? 0;

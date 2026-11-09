@@ -184,8 +184,12 @@ const fixture = (
       building: 0,
     };
   };
+  const boardCalls = { card: 0 };
   const board: GateBoard = {
-    card: read,
+    card: async id => {
+      boardCalls.card += 1;
+      return await read(id);
+    },
     cards: async () =>
       (await Promise.all([...store.cards.keys()].map(read))).flatMap(each => (each === undefined ? [] : [each])),
     act: async (id, request, caller, expect) => {
@@ -236,6 +240,7 @@ const fixture = (
     store,
     service,
     obligations,
+    boardCalls,
     warnings,
     told,
     answer,
@@ -290,6 +295,18 @@ describe('a card at a gate has one obligation through Asks, never an ask of its 
     should(raised).equal(0);
     should(w.obligations.scans.all).equal(2);
     should(w.obligations.scans.perCard).equal(0);
+    should(w.obligations.openEntries()).have.length(100);
+  });
+
+  it('should look at no card on its own while sweeping 100 cards that hold an open ask', async () => {
+    const cards = Array.from({ length: 100 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(cards);
+    for (const each of cards) await w.service.trigger(each.id, 'release.running');
+    w.boardCalls.card = 0;
+
+    await w.gates.sweep();
+
+    should(w.boardCalls.card).equal(0);
     should(w.obligations.openEntries()).have.length(100);
   });
 
