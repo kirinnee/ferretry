@@ -51,15 +51,6 @@ export interface FoundationPaths {
   readonly archivedSessions: string;
   readonly temporary: string;
   /**
-   * The daemon's durable Ed25519 identity document, holding its PKCS#8 PEM.
-   *
-   * STATE, not config: pairing mints it on the first boot, an operator never writes it, and its
-   * SHA-256 fingerprint is the `daemonId` in the pairing QR that every browser pins. Named here
-   * because TWO subsystems now read it — pairing, which owns writing it, and the relay claim, which
-   * must sign with the very same key or every paired browser computes a mismatch.
-   */
-  readonly daemonIdentity: string;
-  /**
    * Where a change to the grants is written down, one JSON line per change.
    *
    * IN THE STATE HOME, so it is keyed by daemon by construction — a state home has exactly one owner,
@@ -145,7 +136,6 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     sessions: join(state, 'sessions'),
     archivedSessions: join(state, 'archived-sessions.json'),
     temporary: join(state, 'tmp'),
-    daemonIdentity: join(state, 'daemon-identity.json'),
     grantAudit: join(state, 'grant-audit.jsonl'),
     securityAudit: join(state, 'security-audit.jsonl'),
     catalogs: join(state, 'catalogs'),
