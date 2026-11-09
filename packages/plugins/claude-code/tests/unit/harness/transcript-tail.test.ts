@@ -1,6 +1,6 @@
 /** U5: the records the turn watch and the live readout read from the END of a Claude transcript: kinds and counts, no text. */
 import { describe, expect, test } from 'bun:test';
-import { parseTail, windowHoldsOneCutRecord } from '../../../daemon/lib/harness/transcript.ts';
+import { parseTail, markCutWindow } from '../../../daemon/lib/harness/transcript.ts';
 import type { Instant } from '@ferretry/std';
 
 const AT = (n: number): Instant => `2026-11-08T10:00:${String(n).padStart(2, '0')}.000Z` as Instant;
@@ -109,11 +109,40 @@ describe('parseTail', () => {
     ]);
   });
 
-  test('a window that holds nothing but the end of one record is told apart from one that holds whole lines', () => {
-    expect(windowHoldsOneCutRecord('{"type":"user","uuid":"x","timest')).toBe(true);
-    expect(windowHoldsOneCutRecord('ngs"}\n')).toBe(true);
-    expect(windowHoldsOneCutRecord(`ngs"}\n${user(2, 'x')}\n`)).toBe(false);
-    expect(windowHoldsOneCutRecord('ngs"}\n{"type":"summary"')).toBe(false);
+  test('BG-041 a cut window that reads no message, work or turn boundary whole is marked as at work; one that does is not', () => {
+    const work = { kind: 'work' } as const;
+    const usage = { kind: 'usage', contextTokens: 1 } as const;
+    const message = { kind: 'message', role: 'assistant' } as const;
+    // Nothing read, bookkeeping only, or an unfinished line after the cut one: at work.
+    expect(markCutWindow([], true)).toEqual([work]);
+    expect(markCutWindow([usage], true)).toEqual([usage, work]);
+    expect(markCutWindow([{ kind: 'compaction' }, { kind: 'error' }], true)).toEqual([
+      { kind: 'compaction' },
+      { kind: 'error' },
+      work,
+    ]);
+    // A record that says where the turn stands decides it, and a whole window is never marked.
+    expect(markCutWindow([message], true)).toEqual([message]);
+    expect(markCutWindow([work], true)).toEqual([work]);
+    expect(markCutWindow([{ kind: 'turn', state: 'completed' }, usage], true)).toEqual([
+      { kind: 'turn', state: 'completed' },
+      usage,
+    ]);
+    expect(markCutWindow([], false)).toEqual([]);
+    expect(markCutWindow([usage], false)).toEqual([usage]);
+  });
+
+  test('BG-041 a developer or system note after the cut record decides nothing (the turn fold skips it), so the window is marked; a message after it still decides', () => {
+    const work = { kind: 'work' } as const;
+    const assistant = { kind: 'message', role: 'assistant' } as const;
+    const completed = { kind: 'turn', state: 'completed' } as const;
+    for (const role of ['developer', 'system'] as const) {
+      const note = { kind: 'message', role } as const;
+      expect(markCutWindow([note], true)).toEqual([note, work]);
+      // A finished turn still finishes: a final message (or its boundary) after the note adds no mark.
+      expect(markCutWindow([note, assistant], true)).toEqual([note, assistant]);
+      expect(markCutWindow([note, completed], true)).toEqual([note, completed]);
+    }
   });
 
   test('text the harness wrote into the user channel is marked, and a window cut mid-record skips its first line', () => {
