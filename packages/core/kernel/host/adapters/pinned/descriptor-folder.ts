@@ -46,6 +46,18 @@ export interface HeldFolder {
 const codeOf = (error: unknown): string | undefined => (error as { code?: string }).code;
 
 const LOOK = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_CLOEXEC;
+/** The look for a file that only has write permission: the same open, for writing, still without truncating, blocking or following. */
+const LOOK_WRITE = constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_CLOEXEC;
+/** Errnos of an open that name an entry which is there (permission, a socket, a running program, a folder opened for writing). */
+const PRESENT_BUT_NOT_OPENABLE: ReadonlySet<string> = new Set([
+  'EACCES',
+  'EPERM',
+  'ENXIO',
+  'EOPNOTSUPP',
+  'ENOTSUP',
+  'ETXTBSY',
+  'EISDIR',
+]);
 const CREATE =
   constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_CLOEXEC;
 
@@ -115,16 +127,20 @@ export function folderSteps(
       throw Object.assign(new Error(`EBADF: refusing to ${verb}: that folder is not held`), { code: 'EBADF' });
     return other;
   };
-  const look = async (leaf: string): Promise<HeldIdentity | undefined> => {
-    await proveHeld('look', folder);
+  /**
+   * One open of `leaf` just to read what it is: its identity, `undefined` when nothing is there, or the errno of an
+   * entry that IS there but this open may not take (the answer today's `lstat` never needed an open to give).
+   */
+  const attempt = async (leaf: string, flags: number): Promise<HeldIdentity | undefined | string> => {
     let fd: number;
     try {
-      fd = calls.openat(folder.fd, leaf, LOOK, 0);
+      fd = calls.openat(folder.fd, leaf, flags, 0);
     } catch (error) {
       const code = codeOf(error);
       if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
       // `O_NOFOLLOW` on a link: the leaf IS a link, and it was not opened (Linux and macOS answer ELOOP).
       if (code === 'ELOOP') return { ...EMPTY, kind: 'link' };
+      if (code !== undefined && PRESENT_BUT_NOT_OPENABLE.has(code)) return code;
       throw error;
     }
     try {
@@ -132,6 +148,21 @@ export function folderSteps(
     } finally {
       await closeOf(fd);
     }
+  };
+  /**
+   * What is at `leaf`, never followed, as today's `lstat` answers it: an entry this process may not open for reading
+   * (a mode-0 file, a folder without read permission, a socket) must still be SEEN. A write-only open reads the full
+   * identity of a file that only has write permission; a folder answers `EISDIR` to it; anything else that is there but
+   * cannot be opened is reported as `other` with no identity: the callers treat it as present, and a write that
+   * needs its kind or mode refuses it (`outside`) rather than guess.
+   */
+  const look = async (leaf: string): Promise<HeldIdentity | undefined> => {
+    await proveHeld('look', folder);
+    const read = await attempt(leaf, LOOK);
+    if (read !== 'EACCES') return typeof read === 'string' ? { ...EMPTY, kind: 'other' } : read;
+    const write = await attempt(leaf, LOOK_WRITE);
+    if (write === 'EISDIR') return { ...EMPTY, kind: 'directory' };
+    return typeof write === 'string' ? { ...EMPTY, kind: 'other' } : write;
   };
   return {
     identity: look,

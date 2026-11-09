@@ -477,6 +477,88 @@ for (const [provider, make] of PROVIDERS) {
     });
   });
 
+  describe(`BG-001 BG-003 an entry this process may not open is still seen, as lstat saw it [${provider}]`, () => {
+    // The fake layer answers an open of `name` the way the kernel answers for an entry the caller has no permission for:
+    // `read` for a read-only open, `write` for a write-only one (a code, or `undefined` to let the real open through).
+    const unopenable = (
+      inner: DescriptorCalls,
+      name: string,
+      answers: { readonly read: string; readonly write?: string },
+      opened: string[],
+    ): DescriptorCalls => ({
+      ...inner,
+      openat: (fd, leaf, flags, mode) => {
+        if (leaf !== name || creates('openat', [fd, leaf, flags])) return inner.openat(fd, leaf, flags, mode);
+        const code = (flags & 0o3) === constants.O_WRONLY ? answers.write : answers.read;
+        opened.push(code ?? 'open');
+        if (code === undefined) return inner.openat(fd, leaf, flags, mode);
+        throw Object.assign(new Error(`${code}: open`), { code });
+      },
+    });
+
+    const CASES: readonly (readonly [string, { read: string; write?: string }])[] = [
+      ['a mode-000 file', { read: 'EACCES', write: 'EACCES' }],
+      ['a folder without read permission (0300)', { read: 'EACCES', write: 'EISDIR' }],
+      ['a unix socket', { read: 'ENXIO', write: 'ENXIO' }],
+      ['a socket as macOS answers it', { read: 'EOPNOTSUPP', write: 'EOPNOTSUPP' }],
+    ];
+
+    for (const [what, answers] of CASES) {
+      test(`BG-001 a rename of ${what} succeeds, as on a host with /proc, and the open error never reaches the caller`, async () => {
+        const opened: string[] = [];
+        const f = await fresh(() => unopenable(make(), 'src', answers, opened));
+        await writeFile(`${f.dir}/src`, 'AAA', { mode: 0o600 });
+        await f.fleet.rename(at(f.fleet, 'homes/claude-a/src'), at(f.fleet, 'homes/claude-a/dst'));
+        expect(opened.length).toBeGreaterThan(0);
+        expect(await readFile(`${f.dir}/dst`, 'utf8')).toBe('AAA');
+        expect(await gone(`${f.dir}/src`)).toBe(true);
+      });
+
+      test(`BG-001 ${what} at the destination counts as taken: the rename is refused outside, nothing moves`, async () => {
+        const f = await fresh(() => unopenable(make(), 'dst', answers, []));
+        await writeFile(`${f.dir}/src`, 'AAA', { mode: 0o600 });
+        await writeFile(`${f.dir}/dst`, 'BBB', { mode: 0o600 });
+        expect(
+          await refusalOf(() => f.fleet.rename(at(f.fleet, 'homes/claude-a/src'), at(f.fleet, 'homes/claude-a/dst'))),
+        ).toBe('outside');
+        expect(await readFile(`${f.dir}/src`, 'utf8')).toBe('AAA');
+        expect(await readFile(`${f.dir}/dst`, 'utf8')).toBe('BBB');
+      });
+
+      test(`BG-003 replaceExisting over ${what} is refused outside when it cannot be read as a file, and the entry stays`, async () => {
+        const f = await fresh(() => unopenable(make(), 'leaf', answers, []));
+        await writeFile(`${f.dir}/leaf`, 'OLD', { mode: 0o600 });
+        expect(
+          await refusalOf(() =>
+            f.fleet.writeText(at(f.fleet, 'homes/claude-a/leaf'), 'NEW', { replaceExisting: true }),
+          ),
+        ).toBe('outside');
+        expect(await readFile(`${f.dir}/leaf`, 'utf8')).toBe('OLD');
+        expect(await readdir(f.dir)).toEqual(['leaf']);
+      });
+    }
+
+    test('BG-003 replaceExisting over a file that only has write permission replaces it and keeps its mode (a 0200 file)', async () => {
+      const opened: string[] = [];
+      const f = await fresh(() => unopenable(make(), 'leaf', { read: 'EACCES' }, opened));
+      await writeFile(`${f.dir}/leaf`, 'OLD', { mode: 0o600 });
+      await f.fleet.writeText(at(f.fleet, 'homes/claude-a/leaf'), 'NEW', { replaceExisting: true });
+      expect(opened).toEqual(['EACCES', 'open']);
+      expect(await readFile(`${f.dir}/leaf`, 'utf8')).toBe('NEW');
+      expect(((await lstat(`${f.dir}/leaf`)).mode & 0o7777).toString(8)).toBe('600');
+      expect(await readdir(f.dir)).toEqual(['leaf']);
+    });
+
+    test('BG-001 an open that fails for any other reason (a descriptor limit) is still a raw failure, never "something is there"', async () => {
+      const f = await fresh(() => unopenable(make(), 'src', { read: 'EMFILE' }, []));
+      await writeFile(`${f.dir}/src`, 'AAA', { mode: 0o600 });
+      await expect(
+        f.fleet.rename(at(f.fleet, 'homes/claude-a/src'), at(f.fleet, 'homes/claude-a/dst')),
+      ).rejects.toMatchObject({ code: 'EMFILE' });
+      expect(await readFile(`${f.dir}/src`, 'utf8')).toBe('AAA');
+    });
+  });
+
   describe(`BG-003 the temp file is never open to another user while it is created [${provider}]`, () => {
     test('BG-003 a create whose mode is ignored (an arbitrary 0o777) is still owner-only at the create, and exact after the fchmod', async () => {
       const seen: Seen = { umasks: [], modes: [] };
