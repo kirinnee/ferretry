@@ -4,7 +4,7 @@
  * Gate is stood in for by `StandInAdmission`, which applies the descriptor's minimum honestly.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import { ferretStanding, ownerStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
 import type { CallStanding } from '@ferretry/kernel/contract';
 import type { TestHost } from '@ferretry/kernel/testing';
 import { FyEventStreamFrameSchema } from '../../../daemon/lib/protocol/session.ts';
@@ -63,6 +63,16 @@ describe('R-0424 the journal stream is a socket served by Ferrets', () => {
 
     expect(socket.response).toBeUndefined();
     expect(kinds(socket.frames)).toEqual(['idle']);
+  });
+
+  test('R-0424 a warden credential is refused 403 (the operator minimum excludes it) and no stream opens', async () => {
+    const h = await serving(() => wardenStanding(ferretId('wren')));
+
+    const socket = await h.socket('/v1/events', { query: { sessionId: 'wren' } });
+
+    expect(socket.response?.status).toBe(403);
+    expect(socket.handler).toBeUndefined();
+    expect(socket.frames).toEqual([]);
   });
 
   test('R-0424 a ferret nobody holds is a 404 and a stream asking for one that is not there opens nothing', async () => {
