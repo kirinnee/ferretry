@@ -195,6 +195,8 @@ export default definePlugin({
     ],
   },
 
+  onboarding: [{ id: 'device', title: 'This device', order: 10 }],
+
   ui: {
     // Daemon-less on purpose: the page a pairing link opens on a device that has no daemon yet (first contact is direct).
     screens: [screen('pair', { path: '/pair', daemonless: true })],
@@ -204,6 +206,8 @@ export default definePlugin({
       panel('daemon.status', { id: 'unlock', order: 10 }),
       panel('daemon.status', { id: 'notifications-off', order: 20 }),
       panel('device.settings', { id: 'notifications', order: 30 }),
+      // The first-run step's body (Onboarding's steps screen offers this slot): what kind of device this is.
+      panel('onboarding.step', { id: 'onboarding-step', order: 10 }),
     ],
   },
 

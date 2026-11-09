@@ -10,8 +10,9 @@ import {
   type ThemeMode,
 } from '../theme/preferences.ts';
 import { useRuntimeVersion, useShell } from './context.tsx';
+import { firstRunEntry, ONBOARDING_SCREEN } from './first-run.ts';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
-import { useSyncExternalStore, type MouseEvent } from 'react';
+import { useEffect, useSyncExternalStore, type MouseEvent } from 'react';
 
 /** An in-app link: a plain click navigates in place; a modifier or middle click is the browser's (a new tab). */
 export function Link({
@@ -44,12 +45,29 @@ export function Link({
   );
 }
 
-/** Home: every paired daemon, grouped by machine (§5.1). */
+/**
+ * Home: every paired daemon, grouped by machine (§5.1). With none paired, FIRST RUN: the person goes to Onboarding's
+ * daemon-less `/onboarding` screen (replacing this entry, so Back does not return to an empty home) — the shell draws
+ * no setup steps of its own. If no Onboarding is installed there is nowhere to send them, so the plain sentence stays.
+ */
 export function DaemonListPage() {
-  const { runtime } = useShell();
+  const { runtime, views, routes } = useShell();
+  const router = useRouter();
   useRuntimeVersion(runtime);
   const groups = runtime.daemons.groups();
+  const snapshot = runtime.daemons.snapshot();
+  const entry = firstRunEntry({
+    pairedDaemonIds: snapshot.daemons.map(paired => paired.daemon),
+    selectedDaemonId: snapshot.selected,
+    setupJourney: false,
+  });
+  const onboarding = views.screens.get(ONBOARDING_SCREEN);
+  const sendTo = entry.kind === 'onboarding' && onboarding !== undefined ? routes.href(onboarding, {}) : undefined;
+  useEffect(() => {
+    if (sendTo !== undefined) router.navigate(sendTo, { replace: true });
+  }, [sendTo, router]);
   if (groups.length === 0) {
+    if (sendTo !== undefined) return <ShellLine>Opening setup…</ShellLine>;
     return (
       <section className="fy-page">
         <h1>No daemons yet</h1>

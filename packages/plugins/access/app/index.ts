@@ -1,9 +1,11 @@
-import { provideToShell } from '@ferretry/app';
+import { forSubject, provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
+import { createElement } from 'react';
 import manifest from '../manifest.ts';
 import { accessClaims } from './connect.ts';
 import { accessPasskey } from './step-up-shell.tsx';
 import { daemonlessPlaceholder, PAIR_SCREEN_ID, pairPage } from './pair-page.tsx';
+import { DeviceStep } from './features/onboarding/device-step.tsx';
 import { pairPhoneCommands } from './pair-phone-host.tsx';
 import { devicesTab, newDevicesPanel, notificationsOffPanel, notificationsPanel, UnlockPanel } from './surfaces.tsx';
 
@@ -24,6 +26,8 @@ export default provideToShell(
         unlock: UnlockPanel,
         notifications: notificationsPanel(client),
         'notifications-off': notificationsOffPanel(client),
+        // The first-run step's body: what kind of device this is, only for its own step.
+        'onboarding-step': forSubject('access.device', () => createElement(DeviceStep, {})),
       },
     }),
   }),

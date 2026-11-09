@@ -84,12 +84,18 @@ describe('the onboarding screen', () => {
     expect(fake.listeners).toHaveLength(0);
   });
 
-  it('the half declares exactly the manifest screen, and it hands the shell the controller', () => {
+  it('the half declares exactly the manifest screens: the daemon-less first run and the per-machine steps', () => {
     const fake = fakeClient({ 'GET /v1/onboarding': VIEW });
     const half = app.build?.({ manifest: app.manifest, client: fake.client });
-    expect(Object.keys(half?.screens ?? {})).toEqual(['onboarding']);
-    const screen = half?.screens.onboarding({ params: {} }) as ReturnType<typeof onboardingScreen>;
-    expect(typeof screen.load).toBe('function');
+    expect(Object.keys(half?.screens ?? {}).sort()).toEqual(['onboarding', 'steps']);
+    // `onboarding` is daemon-less: the shell draws it from `shell.daemonless`, never from a machine's half.
+    expect(half?.screens.onboarding({ params: {} })).toBeNull();
+    expect(app.manifest.ui?.screens?.filter(screen => screen.daemonless === true).map(screen => screen.id)).toEqual([
+      'onboarding',
+    ]);
+    const make = (app as unknown as { shell: { daemonless: (ports: unknown) => Record<string, unknown> } }).shell
+      .daemonless;
+    expect(Object.keys(make({}))).toEqual(['onboarding']);
   });
 
   it('says the linked sign-in costs in one line, the same words as the terminal', () => {

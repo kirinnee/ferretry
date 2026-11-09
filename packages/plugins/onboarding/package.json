@@ -20,7 +20,8 @@
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",
-    "@ferretry/core-gate": "workspace:*"
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/app": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {
@@ -32,8 +33,6 @@
     "playwright-core": "^1.56.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0",
-    "qrcode-generator": "^2.0.4",
-    "@ferretry/app": "workspace:*"
+    "lucide-react": "^0.468.0"
   }
 }

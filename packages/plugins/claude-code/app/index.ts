@@ -2,6 +2,7 @@ import type { AppComponent, PanelProps, SettingsProps } from '@ferretry/kernel/m
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { lazyComponent } from './lazy.ts';
+import { forSubject } from '@ferretry/app';
 
 type ViewName = 'claude-code-settings' | 'permission-panel' | 'dialog-panel';
 
@@ -24,6 +25,16 @@ export default implementApp(manifest, {
       }),
     },
     panels: {
+      // Draws only for its own first-run step; any other step's subject is nothing, and loads nothing.
+      'onboarding-step': forSubject(
+        'claude-code.harness',
+        lazyComponent<PanelProps>(async () => {
+          const view = await loadView('claude-code-settings');
+          return (view.createSettings as (client: unknown) => AppComponent<SettingsProps>)(
+            client,
+          ) as AppComponent<PanelProps>;
+        }),
+      ),
       'permission-request': lazyComponent<PanelProps>(async () => {
         const view = await loadView('permission-panel');
         return (view.createPanel as (client: unknown) => AppComponent<PanelProps>)(client);

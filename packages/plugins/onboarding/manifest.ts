@@ -63,7 +63,11 @@ export default definePlugin({
 
   ui: {
     // Daemon-less on purpose: the first run happens before any daemon is paired.
-    screens: [screen('onboarding', { path: '/onboarding', daemonless: true })],
+    screens: [
+      screen('onboarding', { path: '/onboarding', daemonless: true }),
+      // The steps every plugin declared, on one machine: it OFFERS the `onboarding.step` slot (contract/slots.ts).
+      screen('steps', { path: 'onboarding/steps' }),
+    ],
   },
 
   data: {

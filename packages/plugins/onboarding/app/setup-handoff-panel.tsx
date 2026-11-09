@@ -28,7 +28,7 @@
 
 import { Share2 } from 'lucide-react';
 
-import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
+import { type ClipboardWriter, CopyButton } from '@ferretry/app/ui';
 import type { HandoffReceiver } from './onboarding-model.ts';
 import { qrModules } from './setup-qr.ts';
 
