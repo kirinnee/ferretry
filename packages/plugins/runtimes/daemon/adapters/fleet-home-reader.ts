@@ -38,8 +38,9 @@
  *    whose `SKILL.md` is a hard link is not listed: nothing could read it.
  *  - `skillManifest()` reads `SKILL.md` plain or through a link inside the home; a link out of the home is not read.
  *  - `document()` follows a link for the three documents ONLY, wherever it leads (a home-manager link into a store), as
- *    today's MCP document reader did, under the bounds of `document-link.ts` (a regular file of one name, at most 16 MiB,
- *    that parses as the document, never the daemon's home, never a sign-in file) and with a refusal that names only the
+ *    today's MCP document reader did, under the bounds of `document-link.ts` (a regular file, with a second name only in a
+ *    proven-immutable store, at most 16 MiB, that parses as the document, never the daemon's home, never a sign-in file)
+ *    and with a refusal that names only the
  *    link. That is NARROWER than today's reader, which opened any file. A link to nothing answers absent, as there.
  *  - `skillTree()` and `skillFile()` never follow a link inside a skill folder: a link is a link (tree) or unreadable
  *    (file), as today's skill-folder reader does.

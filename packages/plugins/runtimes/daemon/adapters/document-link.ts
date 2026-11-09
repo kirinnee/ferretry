@@ -8,8 +8,10 @@
  *
  *  - the target is judged by its REAL path: a sign-in file's name (any case) is refused, and a target in the daemon's home
  *    or any private place is refused by the kernel's fence (this root is an owner's root, so the fence applies);
- *  - the target must be a REGULAR FILE (never a folder, a pipe, a socket or a device) with a single name, and no larger than
- *    the caller's bound or the 16 MiB cap below, whichever is smaller;
+ *  - the target must be a REGULAR FILE (never a folder, a pipe, a socket or a device), and no larger than the caller's bound
+ *    or the 16 MiB cap below, whichever is smaller; a file with a second name is read only where the kernel's own hard-link
+ *    rule (S49) allows it, which is a proven-immutable store (an optimised `/nix/store` shares names) and nowhere else, so
+ *    a home-manager link keeps working and a hard link to a private file stays refused;
  *  - the bytes are read through the kernel's held descriptor on a root scoped to the target's own folder, and kept only when
  *    the real path's name still reaches the very file that was opened (a swap of the TARGET itself after the judge is
  *    discarded; a swap of a FOLDER ABOVE it is the residual below);
@@ -84,7 +86,9 @@ export async function readLinkedDocument(
     const placed = reach.resolve(target);
     if (!placed.ok) return refused;
     const found = await reach.lstat(placed.value);
-    if (found?.kind !== 'file' || found.links > 1) return refused;
+    // A second name is the KERNEL's call, made again at the read (S49: allowed only in a proven-immutable store such as
+    // `/nix/store`, where optimised files share names; refused anywhere else): no rule of its own is kept here.
+    if (found?.kind !== 'file') return refused;
     const bound = Math.min(limitBytes, DOCUMENT_CAP);
     if (found.size > bound) return { kind: 'too_big', bound };
     // One byte more than was judged: a target that GREW after the judge comes back longer than `found.size` and is refused,

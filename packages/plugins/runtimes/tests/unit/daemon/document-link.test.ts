@@ -12,6 +12,8 @@ import { spawnSync } from 'node:child_process';
 import { appendFile, link, mkdir, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RootsPort } from '@ferretry/kernel/contract';
+import { nodeFs } from '../../../../../core/kernel/host/adapters/node-fs.ts';
+import { rootsPortFor } from '../../../../../core/kernel/host/roots.ts';
 import type { RuntimeHomeReader } from '../../../contract/index.ts';
 import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
@@ -22,6 +24,31 @@ afterEach(cleanupWorlds);
 
 const LINKED = '00000000-0000-4000-8000-0000000000a1';
 const SECRET = 'SECRET-VALUE-THAT-MUST-NEVER-SURFACE';
+
+/**
+ * The kernel's real roots over a host whose `store` folder (and the folders above it) LOOK root-owned and closed to this
+ * process, with `store` named as the hard-link root: a stand-in for an optimised `/nix/store`, which a test cannot make
+ * root-owned. Only `identity` and `writable` of those paths are changed; every judgement is still the kernel's.
+ */
+function storeRoots(world: FleetWorld, store: string): RootsPort {
+  const base = nodeFs(() => crypto.randomUUID());
+  const inChain = (path: string): boolean =>
+    path === store || path.startsWith(`${store}/`) || `${store}/`.startsWith(path.endsWith('/') ? path : `${path}/`);
+  return rootsPortFor(
+    {
+      ...base,
+      identity: async path => {
+        const found = await base.identity(path);
+        return found === undefined || !inChain(path) ? found : { ...found, owner: 0, mode: found.mode & ~0o022 };
+      },
+      writable: async path => (inChain(path) ? false : await base.writable(path)),
+    },
+    { home: world.home, plugin: 'runtimes', worktrees: join(world.parent, 'worktrees') },
+    ['fleet', 'harness-home'],
+    () => undefined,
+    { harnessFiles: ['.claude.json'], setMode: true, hardLinkRoots: [store] },
+  );
+}
 
 type Hook = (method: 'realPath' | 'lstat', path: string) => Promise<void>;
 
@@ -234,6 +261,36 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
     expect(everythingOf(error)).not.toContain(store);
     expect(everythingOf(error)).not.toContain('two.json');
     expect((error as Error).message).toContain('settings.json');
+  });
+
+  it('BG-033 S49 a second name is the kernel’s call: a store-shaped target with links > 1 is read; a target outside the store with links > 1 is refused; a sign-in basename in the store is still refused', async () => {
+    const { world, store, linked, reader } = await seed({}, undefined, w => storeRoots(w, join(w.parent, 'store')));
+    await writeFile(join(store, 'optimised.json'), '{"from":"store"}');
+    await link(join(store, 'optimised.json'), join(store, 'optimised-again.json'));
+    await symlink(join(store, 'optimised.json'), join(linked, 'settings.json'));
+    expect(await reader().document('settings.json', 1000)).toBe('{"from":"store"}');
+
+    const outside = join(world.parent, 'outside');
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, 'two.json'), `{"k":"${SECRET}"}`);
+    await link(join(outside, 'two.json'), join(outside, 'two-again.json'));
+    await symlink(join(outside, 'two.json'), join(linked, '.claude.json'));
+    const refusedOutside = await reader()
+      .document('.claude.json', 1000)
+      .catch((failure: unknown) => failure);
+    expect(refusedOutside).toBeInstanceOf(Error);
+    expect(everythingOf(refusedOutside)).not.toContain('SECRET');
+    expect(everythingOf(refusedOutside)).not.toContain(outside);
+
+    await writeFile(join(store, '.credentials.json'), `{"k":"${SECRET}"}`);
+    await link(join(store, '.credentials.json'), join(store, 'shared.json'));
+    await symlink(join(store, '.credentials.json'), join(linked, 'config.toml'));
+    const refusedSignIn = await reader()
+      .document('config.toml', 1000)
+      .catch((failure: unknown) => failure);
+    expect(refusedSignIn).toBeInstanceOf(Error);
+    expect(everythingOf(refusedSignIn)).not.toContain('SECRET');
+    expect(everythingOf(refusedSignIn)).not.toContain(store);
   });
 
   it('BG-033 a file over the bound is refused, content-free: the caller’s bound, and the 16 MiB cap whatever the caller asks', async () => {

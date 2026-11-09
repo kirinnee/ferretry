@@ -1392,12 +1392,12 @@ A home the fleet places outside its own folder (an operator's own folder, a home
 `settings.json` and `config.toml` link into a store) is read **read-only**, and each reader treats a link by its own rule.
 "Inside" means the link's real path is inside that account home.
 
-| Reader                       | A link inside the home                                  | A link out of the home (a store, `~/.ssh`)                                                 | A link to nothing, a loop, a sign-in file                   |
-| ---------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| Skills list (`skills()`)     | followed, listed (when its `SKILL.md` is a plain file)  | skipped silently                                                                           | skipped silently                                            |
-| A skill's `SKILL.md`         | read                                                    | not read                                                                                   | not read                                                    |
-| A file inside a skill folder | never followed (a link is listed as a link, unreadable) | never followed                                                                             | never followed                                              |
-| The three documents          | followed, read                                          | **followed**, read (one regular file of one name, at most 16 MiB, parsing as the document) | refused in one sentence naming the link; to nothing: absent |
+| Reader                       | A link inside the home                                  | A link out of the home (a store, `~/.ssh`)                                                                                   | A link to nothing, a loop, a sign-in file                   |
+| ---------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Skills list (`skills()`)     | followed, listed (when its `SKILL.md` is a plain file)  | skipped silently                                                                                                             | skipped silently                                            |
+| A skill's `SKILL.md`         | read                                                    | not read                                                                                                                     | not read                                                    |
+| A file inside a skill folder | never followed (a link is listed as a link, unreadable) | never followed                                                                                                               | never followed                                              |
+| The three documents          | followed, read                                          | **followed**, read (a regular file, a second name only in a proven-immutable store, at most 16 MiB, parsing as the document) | refused in one sentence naming the link; to nothing: absent |
 
 Against the readers of the same homes before, reader by reader:
 
@@ -1413,11 +1413,25 @@ Against the readers of the same homes before, reader by reader:
   session picker followed every link, and the skill-folder reader (tree and file) followed none; here `SKILL.md` follows a
   link inside the home only, and a walk or a file read follows none.
 - **The three documents.** They follow a link out of the home, as the MCP document reader did, but under bounds that
-  reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file, the daemon's
+  reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file outside a proven-immutable store, the daemon's
   home, a sign-in file, or something that does not parse as the document is refused, and the refusal names only the link.
 
 A hard-linked `SKILL.md` is not listed. A file read is checked after it was read: if the name no longer reaches the file
-that was judged, the bytes are dropped.
+that was judged, the bytes are dropped, and a followed document that grew after it was judged is refused rather than
+returned cut short. A second name on a followed document is the kernel's own hard-link rule (S49): allowed only inside a
+proven-immutable store such as `/nix/store`, so a home-manager link into an optimised store keeps working, and refused
+everywhere else.
+
+Three things the document follow still leaves, declared:
+
+- **A swap of a folder above the target.** A folder above the target swapped for a link to another folder after the
+  judge can make the read return that folder's same-named file: a regular file of one name that parses, outside the
+  daemon's private places, and never one with a sign-in file's name.
+- **A link to nothing in the daemon's home.** It answers absent, like any link to nothing, so whoever owns the link can
+  tell whether a name exists there, never a byte of it; the MCP document reader answered the same.
+- **A target under `/proc`, `/sys` or `/etc`.** It reads as a regular file of size 0, so it is read into memory (at
+  most 16 MiB) and then dropped because it does not parse as the document; nothing of it is returned, as the MCP
+  document reader also read it.
 
 ## Links (catalogs 3f)
 
