@@ -112,6 +112,18 @@ describe('a registered project’s skills over the real imports root', () => {
     expect(await files.read(`${w.skills}/stolen/SKILL.md`, 1000)).toBeUndefined();
   });
 
+  test('R-0198 a kernel that refuses to open the folder reads nothing, and never throws', async () => {
+    const w = await world();
+    const refusing = new ProjectSkillFiles(
+      async () => [w.project],
+      () => {
+        throw new Error('refused');
+      },
+    );
+    expect(await refusing.list(w.skills, 10)).toEqual([]);
+    expect(await refusing.read(`${w.skills}/good/SKILL.md`, 1000)).toBeUndefined();
+  });
+
   test('R-0198 a root nobody registered, and a project with no skills folder, read nothing', async () => {
     const w = await world();
     expect(await w.files([]).list(w.skills, 10)).toEqual([]);

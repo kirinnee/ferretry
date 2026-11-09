@@ -7,9 +7,9 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { link, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RootsPort } from '@ferretry/kernel/contract';
-import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
-import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { fleetHomes } from '../../daemon/adapters/fleet-home-reader.ts';
+import { FleetPublication } from '../../daemon/lib/service/publication.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 
@@ -40,6 +40,9 @@ describe('assetSkills lists the fleet’s installed skills as plain folders only
   });
 
   it('lists nothing while there is no asset tree, or while it is a link', async () => {
+    // A linked `assets` or `assets/skills` is refused by the kernel's no-follow `fleet` root before the reader's own
+    // lstat checks (`plain(fleet, 'assets')`, `plain(fleet, 'assets/skills')`) are reached, so this case proves the
+    // kernel's guard; those two checks are the reader's second layer and are not separately pinned here.
     const world = await fleetWorld();
     expect(await reader(world).skills(10)).toEqual([]);
     await mkdir(join(world.parent, 'elsewhere', 'skills', 'x'), { recursive: true });
