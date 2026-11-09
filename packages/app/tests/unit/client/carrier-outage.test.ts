@@ -9,6 +9,7 @@ import {
   isCarrierGone,
   isCarrierOutage,
   isDeviceRefusal,
+  SESSION_CONCLUDED_CLOSE_CODE,
   type TransportRequest,
 } from '../../../src/client/transport.ts';
 import { MachineDeadlineError } from '../../../src/client/machine-deadline.ts';
@@ -108,7 +109,7 @@ describe('S12 a carrier outage is not a refusal', () => {
   });
 
   test('M2 which failures say the carrier went away, pinned to the session wire’s own codes', () => {
-    const gone = [
+    const gone: readonly number[] = [
       1000,
       1006,
       RELAY_CLOSE_CODES.claimTimeout,
@@ -120,11 +121,10 @@ describe('S12 a carrier outage is not a refusal', () => {
       RELAY_CLOSE_CODES.hostedCapacity,
       RELAY_CLOSE_CODES.hostedBandwidth,
       RELAY_CLOSE_CODES.relayInternal,
-      RELAY_SESSION_CONCLUDED_CLOSE_CODE,
       RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
     ];
     for (const code of gone) expect([code, isCarrierGone(new RelaySessionError('x', code))]).toEqual([code, true]);
-    const answers = [
+    const answers: readonly number[] = [
       RELAY_CLOSE_CODES.protocolError,
       RELAY_CLOSE_CODES.claimRejected,
       RELAY_CLOSE_CODES.authRejected,
@@ -136,11 +136,33 @@ describe('S12 a carrier outage is not a refusal', () => {
       RELAY_CLOSE_CODES.flowViolation,
     ];
     for (const code of answers) expect([code, isCarrierGone(new RelaySessionError('x', code))]).toEqual([code, false]);
+    // n4: every code the session wire names is classified one way or the other, so a code added later fails here until
+    // somebody decides which it is.
+    const classified = new Set([...gone, ...answers]);
+    for (const code of Object.values(RELAY_CLOSE_CODES)) expect([code, classified.has(code)]).toEqual([code, true]);
     expect(isCarrierGone(new MachineDeadlineError(20_000))).toBe(true);
     expect(isCarrierGone(new RelayRequestNotSentError('x'))).toBe(true);
     expect(isCarrierGone(Object.assign(new Error('x'), { name: 'RelaySessionError', code: 'closed' }))).toBe(false);
     expect(isCarrierGone(new Error('x'))).toBe(false);
     expect(isCarrierGone('closed')).toBe(false);
+  });
+
+  test('M2 a 4440 is an outage only for a session that was serving; before acceptance it is a protocol violation', async () => {
+    expect(SESSION_CONCLUDED_CLOSE_CODE).toBe(RELAY_SESSION_CONCLUDED_CLOSE_CODE);
+    expect(isCarrierGone(new RelaySessionError('raced', RELAY_SESSION_CONCLUDED_CLOSE_CODE, true))).toBe(true);
+    const violation = new RelaySessionError('no outcome stated', RELAY_SESSION_CONCLUDED_CLOSE_CODE);
+    expect(isCarrierGone(violation)).toBe(false);
+    expect(isCarrierGone(new RelaySessionError('no outcome stated', RELAY_SESSION_CONCLUDED_CLOSE_CODE, false))).toBe(
+      false,
+    );
+    const { client } = dying(() => violation);
+    await client.start();
+    const failure = await client
+      .forPackage('board')
+      .call('GET /v1/board')
+      .catch(e => e);
+    expect(failure).toBe(violation);
+    expect(isCarrierOutage(failure)).toBe(false);
   });
 
   test('a daemon refusal is not marked', async () => {
@@ -192,20 +214,26 @@ describe('S12 a daemon that refuses this device', () => {
 
   test('a refused call is device_refused (not an outage) and tells the shell ONCE', async () => {
     const original = new RelaySessionError('unknown device credential', RELAY_CLOSE_CODES.authRejected);
-    const { client } = dying(() => original);
+    const { client, transport } = dying(() => original);
     await client.start();
     let told = 0;
     client.onRefused(() => (told += 1));
-    for (let i = 0; i < 2; i += 1) {
-      const failure = (await client
+    const call = async () =>
+      (await client
         .forPackage('board')
         .call('GET /v1/board')
         .catch(e => e)) as DaemonCallError;
-      expect(failure.code).toBe(DEVICE_REFUSED_CODE);
-      expect(failure.carrier).toBeUndefined();
-      expect(failure.cause).toBe(original);
-      expect(failure.message).toContain('no longer accepts this browser');
-    }
+    const first = await call();
+    expect(first.code).toBe(DEVICE_REFUSED_CODE);
+    expect(first.carrier).toBeUndefined();
+    expect(first.cause).toBe(original);
+    expect(first.message).toContain('no longer accepts this browser');
+    // n3: once refused, this client never dials again: a later call gets the same answer without a request.
+    const dialled = transport.requests.length;
+    const second = await call();
+    expect(second.code).toBe(DEVICE_REFUSED_CODE);
+    expect(second.message).toContain('no longer accepts this browser');
+    expect(transport.requests.length).toBe(dialled);
     expect(told).toBe(1);
   });
 

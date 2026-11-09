@@ -286,6 +286,10 @@ export class ShellRuntime {
   /**
    * A notification of this machine was tapped and routed (S6): tells each plugin that asked (`notificationOpened`), over
    * its OWN guarded client, only where it is allowed. A plugin's failure costs only itself.
+   *
+   * FIRES ONLY FOR A MACHINE THAT IS ALREADY CONNECTED: a plugin whose client does not exist yet (the machine is still
+   * connecting, is refused, or was unpaired) is skipped, not held, so a tap that cold-starts the app does not reach a
+   * plugin whose machine has not connected by then (declared in `ports-pending.json`).
    */
   notificationOpened(daemon: string, tap: { readonly url: string; readonly tag?: string }): void {
     for (const { plugin, opened } of registeredNotificationOpened(this.surfaces)) {

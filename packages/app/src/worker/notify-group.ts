@@ -77,11 +77,10 @@ export const groupedNotificationBody = (latest: string, count: number): string =
 const MAX_GROUP_COUNT = 100;
 
 /**
- * The kinds of push that are about one session (Access's `failed`, `completed` and `question`): the only ones whose
- * repeats merge into "+N more", as in v4, where only a push carrying a `sessionId` merged. A fleet-style summary already
- * counts sessions, so merging it would count them twice.
+ * The one kind of push whose repeats never merge into "+N more": the paired-device notice. As in v4, where every push
+ * but `device-paired` carried a `sessionId` and so merged (Access's `agenda`, `failed`, `completed` and `question`).
  */
-const SESSION_KINDS: ReadonlySet<string> = new Set(['failed', 'completed', 'question']);
+const UNMERGED_KIND = 'device-paired';
 
 /** One push, ready to show on one machine's registration. */
 export interface ShownPush {
@@ -142,9 +141,9 @@ const activeCount = (existing: readonly NotificationDataLike[]): number =>
 
 /**
  * Merges one incoming push with whatever is already showing under the same tag. A genuinely newer line replaces the
- * entry silently and carries the latest words plus a "+N more" tail. The count merge applies only to the kinds v4 merged,
- * the pushes about a SESSION ({@link SESSION_KINDS}); every other kind (an agenda item, the paired-device notice, a kind
- * this app does not know) shows its own count, and an approval is never merged. v4 also skipped an exact `eventKey`
+ * entry silently and carries the latest words plus a "+N more" tail. The count merge applies to every kind but the
+ * paired-device notice ({@link UNMERGED_KIND}), as v4's did for every push that carried a `sessionId`; a push with no
+ * kind shows its own count, and an approval is never merged. v4 also skipped an exact `eventKey`
  * twin; the kernel's envelope has no event key, so a push service's re-delivery of a session push bumps the count
  * (declared in `ports-pending.json`).
  */
@@ -163,8 +162,8 @@ export const planNotificationPresentation = (
     if (existing.some(item => item.latestBody === shown.body)) return { action: 'skip' };
     return { action: 'show', body: shown.body, count: 1, data: data(1) };
   }
-  const aboutSession = shown.kind !== undefined && SESSION_KINDS.has(shown.kind);
-  const active = aboutSession ? activeCount(existing) : 0;
+  const merges = shown.kind !== undefined && shown.kind !== UNMERGED_KIND;
+  const active = merges ? activeCount(existing) : 0;
   const count = active > 0 ? Math.max(shown.count, Math.min(MAX_GROUP_COUNT, active + 1)) : shown.count;
   return { action: 'show', body: groupedNotificationBody(shown.body, count), count, data: data(count) };
 };

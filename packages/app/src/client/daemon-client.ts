@@ -439,6 +439,9 @@ export class DaemonClient {
 
   /** One request, its answer told to the grants cache under the generation it was sent in. */
   async #sent(request: Parameters<DaemonTransport['request']>[0]): Promise<TransportAnswer> {
+    // Once this machine has refused this device (`4403`) nothing more is dialled on this client: a call that captured
+    // the client before the refusal gets the same answer without asking the daemon again.
+    if (this.#refused) throw new DaemonCallError(0, DEVICE_REFUSED_CODE, DEVICE_NOT_ACCEPTED_SENTENCE);
     const generation = this.#generation;
     let answer: TransportAnswer;
     try {

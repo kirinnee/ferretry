@@ -94,18 +94,16 @@ describe('S6 grouping', () => {
     expect(plan([{ count: 'x' }, { count: -3 }, { count: 1.5 }, {}]).count).toBe(1);
   });
 
-  test('no merge for a push with no kind, for the paired-device notice, for an agenda item or for a kind this app does not know', () => {
+  test('no merge for a push with no kind or for the paired-device notice', () => {
     const { kind: _unused, ...kindless } = shown() as Record<string, unknown>;
     expect((planNotificationPresentation(kindless as never, [{ count: 3 }]) as { count: number }).count).toBe(1);
-    for (const kind of ['device-paired', 'agenda', 'fleet-summary'])
-      expect([
-        kind,
-        (planNotificationPresentation(shown({ kind }), [{ count: 3 }]) as { count: number }).count,
-      ]).toEqual([kind, 1]);
+    expect(
+      (planNotificationPresentation(shown({ kind: 'device-paired' }), [{ count: 3 }]) as { count: number }).count,
+    ).toBe(1);
   });
 
-  test('M3 only the session kinds v4 merged merge: a failed, completed or question repeat bumps the count', () => {
-    for (const kind of ['failed', 'completed', 'question'])
+  test('M3 every kind but device-paired merges, as in v4: an agenda, failed, completed or question repeat bumps the count', () => {
+    for (const kind of ['agenda', 'failed', 'completed', 'question'])
       expect([
         kind,
         (planNotificationPresentation(shown({ kind }), [{ count: 3 }]) as { count: number }).count,

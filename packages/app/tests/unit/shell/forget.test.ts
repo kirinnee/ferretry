@@ -148,4 +148,54 @@ describe('S12 forget', () => {
       expect(dials).toBe(dialled);
     });
   }
+
+  test('C1 n3 a re-pair after a refusal dials again and connects', async () => {
+    const surfaces = [...CORE];
+    const identity = await newDaemonIdentity();
+    const device = await testDevice('dev');
+    let dials = 0;
+    const refusing = new SessionTransport({
+      crypto: relayCrypto,
+      daemonId: identity.daemonId,
+      device: device.claim,
+      dial: events => {
+        dials += 1;
+        queueMicrotask(() => events.onClose(RELAY_CLOSE_CODES.authRejected, 'forged'));
+        return { send() {}, sendText() {}, close() {} };
+      },
+    });
+    const fine = new FakeTransport((request: TransportRequest) =>
+      request.path === '/v1/plugins' ? json(inventoryOf(surfaces)) : json({ protocol: 1, version: '5.0.0' }),
+    );
+    const daemons = new DaemonList({ storage: memoryStore(), now: () => 1 });
+    const input = { daemon: 'refused', machine: 'laptop', deviceId: 'dev', address: 'http://127.0.0.1:40245' };
+    daemons.add(input);
+    let connects = 0;
+    const runtime = new ShellRuntime({
+      appVersion: '5.0.0',
+      surfaces,
+      daemons,
+      // the first connection is refused; once the person pairs again the machine accepts this device
+      connect: async () => {
+        connects += 1;
+        return connects === 1 ? refusing : fine;
+      },
+    });
+    runtime.connection('refused');
+    await settle();
+    expect(runtime.isRefused('refused')).toBe(true);
+    expect(connects).toBe(1);
+    const dialled = dials;
+
+    daemons.add(input);
+    await settle();
+    expect(runtime.isRefused('refused')).toBe(false);
+    runtime.connection('refused');
+    await settle();
+    expect(connects).toBe(2);
+    expect(dials).toBe(dialled);
+    expect(runtime.connection('refused').kind).toBe('connected');
+    expect(runtime.wholeDaemonLine('refused')).toBeUndefined();
+    expect(fine.requests.some(request => request.path === '/v1/plugins')).toBe(true);
+  });
 });
