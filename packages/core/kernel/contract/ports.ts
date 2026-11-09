@@ -1047,6 +1047,13 @@ export interface SpawnOptions {
   readonly detached?: true;
 }
 
+/**
+ * What `run` answers. A child that ended by a SIGNAL (its `timeout` ran out, its abort `signal` fired, or something
+ * killed it) has no exit code of its own: `exitCode` is `null` and `signal` names the signal (`'SIGTERM'`). A child that
+ * exited by itself answers its code and `signal: null`. So `exitCode === null` means a signal ended the child. It is
+ * not a perfect timeout test: a child that catches the signal and exits by itself (say, with 143) still answers its own
+ * code, so a timeout is not always told apart from a program's own non-zero verdict.
+ */
 export interface SpawnResult {
   readonly exitCode: number | null;
   readonly signal: string | null;
