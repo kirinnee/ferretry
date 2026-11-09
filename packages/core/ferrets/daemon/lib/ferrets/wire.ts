@@ -63,13 +63,19 @@ const ResumeBodySchema = z.strictObject({ message: z.string().min(1).optional() 
 
 const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   const parsed = schema.safeParse(value);
-  if (!parsed.success)
+  if (!parsed.success) {
+    // The sentence names each failing path and why, never the submitted value (as the kernel's `parseValue` does), so a
+    // caller is told WHICH field was refused (a malformed attachment, say) rather than only that something was.
+    const detail = parsed.error.issues
+      .map(issue => `${issue.path.length === 0 ? 'body' : issue.path.join('.')}: ${issue.message}`)
+      .join('; ');
     throw new ApiError(
       400,
-      'the request body is not valid',
+      `the request body is not valid — ${detail}`,
       'invalid_request',
       parsed.error.issues.map(issue => ({ path: issue.path, message: issue.message })),
     );
+  }
   return parsed.data;
 };
 

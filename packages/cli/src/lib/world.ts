@@ -45,6 +45,8 @@ export interface PluginHost {
   sleep(delay: Duration, signal?: AbortSignal): Promise<void>;
   /** As today's `readRecipe`: UTF-8 text from a path relative to the working directory; `-` reads standard input. No size cap. */
   readText(path: string): Promise<string>;
+  /** The raw bytes of a path by the same rules as `readText` (relative to the working directory, `-` is standard input, no size cap). */
+  readBytes(path: string): Promise<Uint8Array>;
   /** As today's `existsSync(resolve(cwd, path))`: a directory or an unreadable file exists; `-` is a file name. */
   exists(path: string): Promise<boolean>;
   /** The CLI's real working directory, never the inherited `PWD`, which a parent's `cwd:` option leaves stale. */

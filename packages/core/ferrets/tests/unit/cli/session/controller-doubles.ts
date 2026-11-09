@@ -82,8 +82,8 @@ export class RecordingApi implements ISessionApi {
     return this.responses.suggestNames ?? [];
   }
 
-  async start(body: StartBody): Promise<{ readonly id: string }> {
-    this.record('start', body);
+  async start(body: StartBody, requestId?: string): Promise<{ readonly id: string }> {
+    this.record('start', ...(requestId === undefined ? [body] : [body, requestId]));
     return { id: 'ses-1' };
   }
 

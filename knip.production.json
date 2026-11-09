@@ -194,8 +194,7 @@
         "daemon/reader/lib/session/conversation-index.ts",
         "daemon/reader/lib/session/reader.ts",
         "daemon/reader/lib/session/tail-cache.ts",
-        "daemon/reader/lib/session/log-page.ts",
-        "daemon/attachments/adapters/raw-deflate.ts"
+        "daemon/reader/lib/session/log-page.ts"
       ]
     },
     "packages/plugins/mcp": {

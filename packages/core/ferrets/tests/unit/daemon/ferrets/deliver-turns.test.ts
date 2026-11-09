@@ -7,6 +7,7 @@ import { err, ok, type Result } from '@ferretry/std';
 import {
   FerretConfigFile,
   type FerretRecord,
+  type OpeningAttachmentsSource,
   type RunnerHandle,
   type RunnerLook,
   type RunningFerret,
@@ -85,6 +86,7 @@ async function world(
     readonly folders: Readonly<Record<string, string>>;
   },
   backfill = true,
+  openingSource?: OpeningAttachmentsSource,
 ): Promise<World & { readonly reuse: NonNullable<typeof reuse> }> {
   let handles = reuse?.handles;
   let folders = reuse?.folders;
@@ -151,6 +153,7 @@ async function world(
     // Packs' admission stands in here: this fixture lets a helper start, so the stamp's ancestry is what decides.
     decide: async () => ({ allow: true }),
     launchParts: () => [],
+    openingAttachments: () => openingSource,
     sitrepSources: () => [],
     instructions: () => [],
     folder: path => ok(fenced(path)),
@@ -1016,5 +1019,97 @@ describe('ruling #31b: the start writes the session document, and strict ancestr
       expect(child.error.reason).toBe('where this ferret came from could not be recorded, so it was not started');
       expect(child.error.reason).not.toContain('FIXTURE_SECRET');
     }
+  });
+});
+
+/**
+ * `fy start -f` (V-0443): the files a start was given are planned by the attachment owner (a stand-in here; Conversation's
+ * own is proved in its package), written into the ferret's own `attachments/` folder, and named in the opening turn.
+ */
+describe('V-0443 a start carries its attachments with the opening message', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00]);
+  const BASE64 = Buffer.from(PNG).toString('base64');
+  /** An owner that plans each file straight into the folder it is told, and words one line for each. */
+  const owner = (log: string[] = []): OpeningAttachmentsSource => ({
+    plan: ({ attachments, directory }) => {
+      log.push(directory);
+      return ok({
+        section: `\n## Attachments\n\n${attachments.map(item => `- ${item.filename}`).join('\n')}\n`,
+        files: attachments.map(item => ({ file: `${directory}/${item.filename}`, contents: new Uint8Array(PNG) })),
+      });
+    },
+  });
+  const attached = { initialAttachments: [{ filename: 'shot.png', mime: 'image/png', base64: BASE64 }] };
+  const options = (extra: Record<string, unknown>) => ({ options: extra });
+
+  test('V-0443 the planned files are written 0600 into the ferret’s own attachments folder BEFORE the task that names them, and the opening turn carries the section', async () => {
+    const asked: string[] = [];
+    const w = await world([], undefined, true, owner(asked));
+    const id = await started(w, 'Fix the layout shown in the screenshot.', options(attached));
+    expect(asked).toEqual([`${w.folderOf(id)}/attachments`]);
+    const written = `${w.folderOf(id)}/attachments/shot.png`;
+    expect([...new Uint8Array(await readFile(written))]).toEqual([...PNG]);
+    expect((await stat(written)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${w.folderOf(id)}/attachments`)).mode & 0o777).toBe(0o700);
+    // The turn the agent is told to open names the file; the request's own words come first.
+    expect(await readFile(turnFile(w, id, 1), 'utf8')).toBe(
+      '# Assigned task\n\nFix the layout shown in the screenshot.\n\n## Attachments\n\n- shot.png\n\n',
+    );
+    expect(w.runner.deliveries.at(-1)?.delivery.text).toBe(turnFileInstruction(turnFile(w, id, 1)));
+  });
+
+  test('V-0443 the attachments are this start’s request alone: their bytes are never written into the ferret’s details', async () => {
+    const w = await world([], undefined, true, owner());
+    const id = await started(w, 'Fix it.', options({ ...attached, label: 'batch' }));
+    const details = JSON.stringify(w.registry.detailsOf(id as never) ?? {});
+    expect(details).toContain('batch');
+    expect(details).not.toContain('initialAttachments');
+    expect(details).not.toContain(BASE64);
+  });
+
+  test('V-0443 a start with files and no opening message, no owner for attachments, a refusal from the owner or a file that would leave the folder is refused before anything is written', async () => {
+    const refusing: OpeningAttachmentsSource = {
+      plan: () => err('a start may carry at most 16 attachments; this one carries 17'),
+    };
+    const escaping: OpeningAttachmentsSource = {
+      plan: ({ directory }) =>
+        ok({ section: '', files: [{ file: `${directory}/../environment.json`, contents: 'x' }] }),
+    };
+    const nested: OpeningAttachmentsSource = {
+      plan: ({ directory }) => ok({ section: '', files: [{ file: `${directory}/deep/shot.png`, contents: 'x' }] }),
+    };
+    const cases: readonly [string, OpeningAttachmentsSource | undefined, string | undefined, string][] = [
+      ['no prompt', owner(), undefined, 'attachments belong to an opening message'],
+      ['no owner', undefined, 'Fix it.', 'the plugin that owns them is off'],
+      ['the owner refuses', refusing, 'Fix it.', 'at most 16 attachments'],
+      ['a file leaves the folder', escaping, 'Fix it.', 'outside the ferret'],
+      ['a file goes into a sub-folder', nested, 'Fix it.', 'outside the ferret'],
+    ];
+    for (const [, source, prompt, reason] of cases) {
+      const w = await world([], undefined, true, source);
+      const result = await w.service.start({
+        folder: '/work',
+        by: 'owner',
+        ...(prompt === undefined ? {} : { prompt }),
+        options: { ...attached, ...(prompt === undefined ? { mode: 'interactive' as const } : {}) },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('refused');
+        expect(result.error.reason).toContain(reason);
+      }
+      expect(w.registry.list()).toEqual([]);
+      expect(w.runner.starts).toBe(0);
+      expect(await readdir(w.folderOf(IDS[0])).catch(() => [])).toEqual([]);
+    }
+  });
+
+  test('V-0443 a start without attachments is unchanged: the task is its prompt alone and no attachments folder is made', async () => {
+    const asked: string[] = [];
+    const w = await world([], undefined, true, owner(asked));
+    const id = await started(w, 'Build the thing.');
+    expect(asked).toEqual([]);
+    expect(await readFile(turnFile(w, id, 1), 'utf8')).toBe('# Assigned task\n\nBuild the thing.\n');
+    expect(await readdir(w.folderOf(id))).not.toContain('attachments');
   });
 });

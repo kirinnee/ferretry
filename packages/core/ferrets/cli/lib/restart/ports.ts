@@ -2,7 +2,8 @@ import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus 
 
 /** The three restart calls (`/v1/restarts`): restart now-or-queue, read the status, clear the queue. */
 export interface IRestartGateway {
-  restart(request: RestartRequest): Promise<RestartResult>;
+  /** `requestId` is the caller's idempotency key (`--request-id`): a repeat with the same key is answered, not run again. */
+  restart(request: RestartRequest, requestId?: string): Promise<RestartResult>;
   restartStatus(): Promise<RestartStatus>;
   cancelRestarts(): Promise<RestartCancelResult>;
 }
