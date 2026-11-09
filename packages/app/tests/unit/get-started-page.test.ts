@@ -31,21 +31,33 @@ const inlineScripts = inlineScriptsOf(page);
 const scriptSrc = scriptSrcOf(headers);
 
 type Emitted = { type: string; fileName: string; source: string };
+type Bundle = Readonly<Record<string, { type: string; fileName?: string; source?: unknown }>>;
 interface BuildPlugin {
   readonly name: string;
-  readonly generateBundle: (this: { emitFile: (file: Emitted) => void; error: (message: string) => never }) => void;
+  readonly generateBundle: (
+    this: { emitFile: (file: Emitted) => void; error: (message: string) => never },
+    options: unknown,
+    bundle: Bundle,
+  ) => void;
 }
 
-/** Runs a plugin's `generateBundle` the way rollup would, collecting what it emits and what it rejects with. */
-function build(plugin: BuildPlugin): { readonly emitted: Emitted[]; readonly error: string | undefined } {
+/** Runs a plugin's `generateBundle` the way rollup would (over `bundle`, the build's other files), collecting what it emits and what it rejects with. */
+function build(
+  plugin: BuildPlugin,
+  bundle: Bundle = {},
+): { readonly emitted: Emitted[]; readonly error: string | undefined } {
   const emitted: Emitted[] = [];
   try {
-    plugin.generateBundle.call({
-      emitFile: file => emitted.push(file),
-      error: message => {
-        throw new Error(message);
+    plugin.generateBundle.call(
+      {
+        emitFile: file => emitted.push(file),
+        error: message => {
+          throw new Error(message);
+        },
       },
-    });
+      {},
+      bundle,
+    );
   } catch (error: unknown) {
     return { emitted, error: error instanceof Error ? error.message : String(error) };
   }
@@ -106,6 +118,64 @@ describe('S14 the get-started page', () => {
       writeFileSync(bare, '/*\n  Content-Security-Policy: default-src self\n');
       const noPolicy = getStartedPagePlugin({ version: release.version, headersPath: bare });
       expect(build(noPolicy as unknown as BuildPlugin).error).toContain(cspHashOf(script));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('S14 m3 every HTML page the build emits is checked, not just this one', () => {
+  const landing = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8');
+  const real = () => getStartedPagePlugin({ version: release.version }) as unknown as BuildPlugin;
+  const asBundle = (pages: Record<string, string>): Bundle =>
+    Object.fromEntries(
+      Object.entries(pages).map(([name, source]) => [name, { type: 'asset', fileName: name, source }]),
+    );
+
+  it('the landing page’s inline scripts (its paired-device redirect among them) are all listed in script-src', () => {
+    expect(inlineScriptsOf(landing).length).toBeGreaterThan(0);
+    expect(unlistedScriptHashes(landing, headers)).toEqual([]);
+  });
+
+  it('the real pages pass together', () => {
+    const { error, emitted } = build(real(), asBundle({ 'index.html': landing, 'app/index.html': '<html></html>' }));
+    expect(error).toBeUndefined();
+    expect(emitted.map(file => file.fileName)).toEqual(['get-started/index.html']);
+  });
+
+  it('a planted drift on index.html fails the build, naming the page and the hash, and emits nothing', () => {
+    const script = inlineScriptsOf(landing)[0] ?? '';
+    const drifted = landing.replace(script, `${script}\n/* drift */`);
+    const { error, emitted } = build(real(), asBundle({ 'index.html': drifted }));
+    expect(error).toContain('The index.html page');
+    expect(error).toContain(cspHashOf(`${script}\n/* drift */`));
+    expect(emitted).toEqual([]);
+  });
+
+  it('a planted drift on the app page fails the same way, and a non-page file is not read as one', () => {
+    const rogue = '<script>alert(1)</script>';
+    const { error } = build(real(), asBundle({ 'app/index.html': rogue }));
+    expect(error).toContain('The app/index.html page');
+    expect(error).toContain(cspHashOf('alert(1)'));
+    const notAPage: Bundle = {
+      'assets/app.js': { type: 'chunk', source: rogue },
+      'a.txt': { type: 'asset', source: rogue },
+    };
+    expect(build(real(), notAPage).error).toBeUndefined();
+  });
+
+  it('n2 hashes the STAMPED page: a placeholder inside a script cannot pass on the strength of its unstamped text', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fy-get-started-'));
+    try {
+      const stamped = join(dir, 'index.html');
+      const body = 'window.__v = "%FY_RELEASE_VERSION%";';
+      writeFileSync(stamped, `<script>${body}</script>`);
+      const bare = join(dir, '_headers');
+      // The header lists the hash of the UNSTAMPED text, which is what the old check read.
+      writeFileSync(bare, `/*\n  Content-Security-Policy: script-src 'self' ${cspHashOf(body)}\n`);
+      const plugin = getStartedPagePlugin({ version: release.version, pagePath: stamped, headersPath: bare });
+      const { error } = build(plugin as unknown as BuildPlugin);
+      expect(error).toContain(cspHashOf(body.replace('%FY_RELEASE_VERSION%', release.version)));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
