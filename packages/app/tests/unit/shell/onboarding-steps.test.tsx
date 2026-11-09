@@ -53,7 +53,8 @@ function boot(options: { paired: boolean; steps?: typeof declaredSteps }) {
   const transport = new FakeTransport((request: TransportRequest) => {
     if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
     if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
-    if (request.path === '/v1/onboarding') return json({ steps: options.steps ?? declaredSteps, complete: false });
+    if (request.path === '/v1/onboarding')
+      return json({ steps: options.steps ?? declaredSteps, complete: false, setUp: false });
     if (request.path.startsWith('/v1/onboarding/steps/')) {
       answered.push(`${request.method} ${request.path} ${JSON.stringify(request.body)}`);
       const [plugin, id] = request.path.split('/').slice(-2);

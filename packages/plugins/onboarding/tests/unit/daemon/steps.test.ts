@@ -74,7 +74,7 @@ describe('joining steps with progress', () => {
   });
 
   test('a snapshot with no steps is an empty, complete view', () => {
-    expect(viewOf([], undefined)).toEqual({ steps: [], complete: true });
+    expect(viewOf([], undefined, false)).toEqual({ steps: [], complete: true, setUp: false });
   });
 });
 
@@ -89,7 +89,7 @@ describe('completeness', () => {
         'shells:nix': { state: 'skipped', at: AT },
       },
     };
-    expect(viewOf(ENTRIES, progress).complete).toBe(true);
+    expect(viewOf(ENTRIES, progress, false).complete).toBe(true);
   });
 
   test('one pending step keeps the run incomplete', () => {
@@ -101,7 +101,7 @@ describe('completeness', () => {
         'logins:login': { state: 'found', at: AT },
       },
     };
-    const view = viewOf(ENTRIES, progress);
+    const view = viewOf(ENTRIES, progress, false);
     expect(view.complete).toBe(false);
     expect(isComplete(view.steps)).toBe(false);
   });

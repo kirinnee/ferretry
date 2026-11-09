@@ -51,6 +51,7 @@ function pairedList(start: Listing) {
 const VIEW = {
   steps: [{ plugin: 'logins', id: 'login', title: 'Sign in', order: 30, state: 'pending' as const }],
   complete: false,
+  setUp: false,
 };
 
 function clientOf(call: (route: string) => unknown): { client: PluginClient; stopped: () => number } {
@@ -147,7 +148,7 @@ describe('S14 the steps screen', () => {
   });
 
   it('says so when a machine has nothing to set up, and still links to the machine', async () => {
-    const { client } = clientOf(() => ({ steps: [], complete: true }));
+    const { client } = clientOf(() => ({ steps: [], complete: true, setUp: false }));
     noteClientDaemon(client, 'd1');
     const Steps = createStepsScreen(client);
     const view = await mount(<Steps params={{}} />);
@@ -175,7 +176,7 @@ describe('S14 the steps screen', () => {
       { plugin: 'shells', id: 'nix', title: 'Shells', order: 80, state: 'found' as const },
       { plugin: 'runtimes', id: 'runtimes', title: 'Name your runtimes', order: 40, state: 'done' as const },
     ];
-    const { client } = clientOf(() => ({ steps, complete: false }));
+    const { client } = clientOf(() => ({ steps, complete: false, setUp: false }));
     noteClientDaemon(client, 'd1');
     const Steps = createStepsScreen(client);
     const view = await mount(<Steps params={{}} />);
@@ -193,7 +194,7 @@ describe('S14 the steps screen', () => {
   });
 
   it('M2 the Setup tab is the way back to the steps page: it counts what is pending and links there', async () => {
-    const pending = { steps: [VIEW.steps[0], { ...VIEW.steps[0], id: 'b' }], complete: false };
+    const pending = { steps: [VIEW.steps[0], { ...VIEW.steps[0], id: 'b' }], complete: false, setUp: false };
     const { client } = clientOf(() => pending);
     noteClientDaemon(client, 'd1');
     const Tab = createSetupTab(client);
@@ -211,7 +212,7 @@ describe('S14 the steps screen', () => {
       [[VIEW.steps[0]], '1 setup step on this machine has not been looked at yet.'],
       [[{ ...VIEW.steps[0], state: 'done' as const }], 'Every setup step on this machine has an answer.'],
     ] as const) {
-      const one = clientOf(() => ({ steps, complete: false }));
+      const one = clientOf(() => ({ steps, complete: false, setUp: false }));
       noteClientDaemon(one.client, 'd1');
       const OneTab = createSetupTab(one.client);
       const drawn = await mount(<OneTab />);

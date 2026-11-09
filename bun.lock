@@ -471,6 +471,7 @@
         "@ferretry/app": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },

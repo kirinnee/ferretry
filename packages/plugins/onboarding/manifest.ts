@@ -7,6 +7,7 @@ import {
   OnboardingChanged,
   OnboardingPort,
 } from './contract/index.ts';
+import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 
 /**
@@ -25,6 +26,8 @@ export default definePlugin({
   kinds: ['onboarding', 'command', 'view'],
   words: ONBOARDING_WORDS,
 
+  // Runtimes is optional: it says whether the machine is set up (it has a runtime). Off, the answer is "not set up".
+  uses: { runtimes: RuntimesPort },
   provides: { onboarding: OnboardingPort },
 
   actions: {

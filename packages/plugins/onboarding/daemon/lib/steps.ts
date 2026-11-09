@@ -36,9 +36,13 @@ export function joinProgress(entries: readonly OnboardingEntry[], progress: Prog
 /** Complete = none pending. No steps at all is complete: there is nothing left to ask. */
 export const isComplete = (steps: readonly StepView[]): boolean => steps.every(step => step.state !== 'pending');
 
-export function viewOf(entries: readonly OnboardingEntry[], progress: Progress | undefined): OnboardingView {
+export function viewOf(
+  entries: readonly OnboardingEntry[],
+  progress: Progress | undefined,
+  setUp: boolean,
+): OnboardingView {
   const steps = joinProgress(entries, progress);
-  return { steps: [...steps], complete: isComplete(steps) };
+  return { steps: [...steps], complete: isComplete(steps), setUp };
 }
 
 export function findEntry(

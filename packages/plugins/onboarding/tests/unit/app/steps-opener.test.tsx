@@ -31,13 +31,13 @@ const step = (state: 'pending' | 'found' | 'done') => ({
 });
 
 /** One machine's Onboarding client: `GET /v1/onboarding` answers these step states (or fails). */
-function machineClient(daemon: string, state: 'pending' | 'found' | 'done' | 'fails') {
+function machineClient(daemon: string, state: 'pending' | 'found' | 'done' | 'fails', setUp = false) {
   const calls: string[] = [];
   const client = {
     call: async (route: string) => {
       calls.push(route);
       if (state === 'fails') throw new Error('unreachable');
-      return { steps: [step(state)], complete: state !== 'pending' };
+      return { steps: [step(state)], complete: state !== 'pending', setUp };
     },
     subscribe: () => () => {},
   } as unknown as PluginClient;
@@ -134,6 +134,21 @@ describe('m2 a just-paired machine opens its steps page by itself', () => {
     await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
     expect(b.calls).toEqual(['GET /v1/onboarding']);
     expect(went).toEqual([]);
+  });
+
+  it('m2 a set-up machine with no recorded step answers does not open, as v4 skipped one', async () => {
+    const b = machineClient(B, 'pending', true);
+    const { harness, went } = await open([]);
+    await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
+    expect(b.calls).toEqual(['GET /v1/onboarding']);
+    expect(went).toEqual([]);
+  });
+
+  it('m2 a machine that is not set up opens', async () => {
+    const b = machineClient(B, 'pending', false);
+    const { harness, went } = await open([]);
+    await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
+    expect(went).toEqual([`/d/${B}/onboarding/steps`]);
   });
 
   it('opens nothing when the steps cannot be read', async () => {

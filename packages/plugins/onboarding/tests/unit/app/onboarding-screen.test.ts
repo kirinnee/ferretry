@@ -36,6 +36,7 @@ function fakeClient(answers: Record<string, unknown>) {
 const VIEW = {
   steps: [{ plugin: 'logins', id: 'login', title: 'Sign in', order: 30, state: 'pending' as const }],
   complete: false,
+  setUp: false,
 };
 
 describe('the onboarding screen', () => {

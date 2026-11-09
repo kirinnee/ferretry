@@ -51,7 +51,7 @@ export class FakeDaemon implements OnboardClient {
   async view(): Promise<OnboardingView> {
     this.calls.push('view');
     if (this.viewFails !== undefined) throw this.viewFails;
-    return { steps: [...this.steps], complete: this.steps.every(each => each.state !== 'pending') };
+    return { steps: [...this.steps], complete: this.steps.every(each => each.state !== 'pending'), setUp: false };
   }
 
   async record(plugin: string, id: string, answer: StepAnswerRequest): Promise<StepView | undefined> {

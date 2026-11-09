@@ -42,6 +42,12 @@ export const OnboardingViewSchema = z.strictObject({
   steps: z.array(StepViewSchema),
   /** Every step is found, done, later or skipped (none pending). */
   complete: z.boolean(),
+  /**
+   * This machine already has at least one runtime (Runtimes' own `setUp`, read through its `list`). False when Runtimes
+   * is off or cannot be read. It is the machine's fact, not a step answer: a machine set up without `fy onboard` has
+   * every step `pending` and is still set up.
+   */
+  setUp: z.boolean(),
 });
 export type OnboardingView = z.infer<typeof OnboardingViewSchema>;
 

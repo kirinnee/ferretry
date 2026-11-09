@@ -18,6 +18,7 @@ export function fakeOnboarding(): FakeOnboarding {
   const view = (): OnboardingView => ({
     steps: [...steps].sort((a, b) => a.order - b.order),
     complete: steps.every(step => step.state !== 'pending'),
+    setUp: false,
   });
   return {
     view: async () => view(),

@@ -21,6 +21,7 @@
     "@ferretry/std": "workspace:*",
     "zod": "4.4.3",
     "@ferretry/core-gate": "workspace:*",
+    "@ferretry/plugin-runtimes": "workspace:*",
     "@ferretry/app": "workspace:*"
   },
   "sideEffects": false,

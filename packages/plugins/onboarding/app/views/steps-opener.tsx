@@ -10,9 +10,8 @@
  *   your fleet) is the way to the same page, so nothing moves under them.
  * - Each machine is decided once. Opening is a navigation, never a write: nothing is answered or recorded. It REPLACES
  *   the entry Access navigated to (v4 went to setup instead of home), so Back never lands on a second one.
- * - DIFFERENCE FROM v4 (declared as GAP(onboarding-steps)): v4 asked the machine whether it was set up (`setUp`) and
- *   skipped one that was. That fact is Runtimes' (`MachineView.setUp`), and Onboarding has no edge to Runtimes, so
- *   "not set up" here means a step with no recorded answer.
+ * - As v4 did, a machine that is already set up (the steps answer says `setUp`: it has a runtime) and has no recorded
+ *   step answers is skipped. The daemon reads that fact from Runtimes; Runtimes off means `setUp: false`.
  */
 
 import { type DeviceViewProps, useDevicePaired, useEveryDaemon, useOptionalRouter } from '@ferretry/app';
@@ -49,6 +48,8 @@ export function createStepsOpener() {
           .then(
             view => {
               if (where.current || !view.steps.some(step => step.state === 'pending')) return;
+              // v4 skipped a set-up machine that has no step answers recorded (every step still `pending`).
+              if (view.setUp && view.steps.every(step => step.state === 'pending')) return;
               go.current(stepsHref(row.daemon), { replace: true });
             },
             () => {
