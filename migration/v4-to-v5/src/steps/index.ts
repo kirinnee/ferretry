@@ -51,6 +51,11 @@ export interface StepContext {
   readonly previewV4Home?: string;
   /** With `preview`: the environment every preview ferret's shells get (see `ConvertOptions.previewShellEnv`). */
   readonly previewShellEnv?: Readonly<Record<string, string>>;
+  /**
+   * With `preview`: the OWNER ran `prepare --owner`, so the preview's own authored files are recorded as accepted
+   * (the owner's act). Absent: nothing of the preview's own is accepted.
+   */
+  readonly previewOwner?: boolean;
   /** Absent in tests that do not read the host: a step needing it then reads nothing and says so. */
   readonly host?: HostFacts;
 }

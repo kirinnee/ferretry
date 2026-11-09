@@ -8,6 +8,8 @@ set -euo pipefail
 #   dry-run   print what would be copied, left out, converted and started. Touches nothing.
 #   prepare   copy a snapshot of v4 (credentials left out by path), convert it into the preview home, prove v4 unchanged,
 #             write the `fy5` wrapper. Never stops or writes to v4.
+#             --owner (OWNER ONLY, never an agent): records the two files the preview writes itself (terminals.yaml and
+#             claude-code/settings/fy-preview.yaml) as accepted. Without it they are held and `start` stops the daemon.
 #   build     compile fy, fyd and the browser worker from a CLEAN rebuild/5.0 checkout with the preview app origin, prove
 #             the compiled binaries name that origin, and only then install them into <target>/libexec (bin holds shims
 #             that pin the preview). Refuses unless the preview signing key is committed on that checkout
@@ -17,8 +19,9 @@ set -euo pipefail
 #             launches directly and never reconfigures v4's slices; start REFUSES if a manager is still reachable, or if a
 #             login shell with the guard environment finds a `fy` other than the preview's. Once the daemon is up, start
 #             opens a terminal through the daemon's own route and requires the preview's `fy` and FY_HOME in it (terminals
-#             carry Terminals' `environment` setting); a miss stops start and closes that terminal.
-#   terminal-check  repeat that terminal proof against the running preview daemon (needs a ferret in the preview)
+#             carry Terminals' `environment` setting); a miss closes that terminal, STOPS the preview daemon and exits 1.
+#             A stopped ferret record is enough; with no ferret record yet it proves what the runtime reads live instead.
+#   terminal-check  repeat that terminal proof against the running preview daemon (does not stop it on a miss)
 #   stop      SIGTERM the process proven to hold the preview home's own daemon lock (never v4's, never a unit)
 #   status    fy5 daemon status
 #   proof     compare v4 now with the snapshot `prepare` took (kept in ~/.ferretry-v5-proof/, outside the preview home);
@@ -40,6 +43,7 @@ command="${1:-}"
 v4_home="${HOME}/.ferretry"
 target="${HOME}/.ferretry-v5"
 source_dir=""
+owner_flag=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
   --v4)
@@ -53,6 +57,10 @@ while [ "$#" -gt 0 ]; do
   --source)
     source_dir="${2:?--source needs a folder}"
     shift 2
+    ;;
+  --owner)
+    owner_flag=(--owner)
+    shift
     ;;
   *)
     echo "unknown argument: $1" >&2
@@ -79,10 +87,10 @@ prepare)
   # Never opens a v4 file before the preview home is known to be new.
   if [ -e "${target}" ] && [ -n "$(ls -A "${target}" 2>/dev/null)" ]; then
     echo "${target} already exists; run '$0 clean' first. If clean refuses it (a prepare that died before its marker), remove it yourself:" >&2
-    echo "  rm -rf '${target}' '${target}.staging'   (and, if it exists, its proof file in ~/.ferretry-v5-proof/)" >&2
+    echo "  rm -rf '${target}' '${target}.staging' '${target}.conversion-report.json'   (and, if it exists, its proof file in ~/.ferretry-v5-proof/)" >&2
     exit 1
   fi
-  run_tool prepare
+  run_tool prepare ${owner_flag[@]+"${owner_flag[@]}"}
   run_tool wrapper
   ;;
 build)
@@ -139,7 +147,15 @@ start)
   run_tool start-checks
   fy5 daemon start
   # 3. A terminal the daemon opens carries the preview environment: proved through the daemon's own route.
-  run_tool terminal-check
+  # On ANY miss the daemon just started is stopped again: terminals it opens may reach v4's `fy`.
+  if ! run_tool terminal-check; then
+    if run_tool stop; then
+      echo "refusing to go on: the preview daemon was stopped because the terminal proof failed (nothing is left running)." >&2
+    else
+      echo "refusing to go on: the terminal proof failed AND the preview daemon could not be stopped; run '$0 stop' now." >&2
+    fi
+    exit 1
+  fi
   ;;
 terminal-check) run_tool terminal-check ;;
 stop) run_tool stop ;;
@@ -155,7 +171,7 @@ clean)
   run_tool clean
   ;;
 *)
-  echo "usage: $0 <dry-run|prepare|build|start|terminal-check|stop|status|proof|clean> [--v4 <home>] [--target <home>] [--source <5.0 checkout>]" >&2
+  echo "usage: $0 <dry-run|prepare|build|start|terminal-check|stop|status|proof|clean> [--v4 <home>] [--target <home>] [--source <5.0 checkout>] [--owner (prepare, owner only)]" >&2
   exit 64
   ;;
 esac

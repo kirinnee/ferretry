@@ -291,6 +291,10 @@ export function terminalEnvironmentNameProblem(name: string): string | undefined
     return `"${name.slice(0, 64)}" is not a usable variable name: use capital letters, digits and underscores, and do not start with a digit`;
   if (name.startsWith('LD_') || name.startsWith('DYLD_'))
     return `${name} is refused: it changes which programs and libraries every command loads`;
+  if (name.startsWith('FY_SESSION_'))
+    return `${name} is refused: FY_SESSION_* names are a ferret's own identity and launch mode, so a terminal never inherits one`;
+  if (name === 'FY_TOKEN')
+    return "FY_TOKEN is refused: it would hand the admin token to every terminal, a ferret's included, and write it in plain text in a config file";
   if (TERMINAL_ENVIRONMENT_REFUSED.has(name))
     return `${name} is refused: the daemon, the kernel or the login shell sets it, or it names a ferret's own identity`;
   return undefined;
@@ -301,6 +305,7 @@ export function terminalEnvironmentValueProblem(name: string, value: string): st
   if (value.includes('${secret:'))
     return `${name} names a secret: a secret reaches a command only through the secret store, never through a terminal environment`;
   if (value.includes('\0')) return `${name} holds a NUL character`;
+  if (value.includes('\n') || value.includes('\r')) return `${name} holds a newline or carriage return`;
   if (new TextEncoder().encode(value).length > TERMINAL_ENVIRONMENT_VALUE_MAX_BYTES)
     return `${name} is longer than ${String(TERMINAL_ENVIRONMENT_VALUE_MAX_BYTES)} bytes`;
   return undefined;

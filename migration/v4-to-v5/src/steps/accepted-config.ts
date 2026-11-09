@@ -13,7 +13,9 @@
  * as accepted with its own text: v5 then starts with exactly what v4 enforced, confirmations included. When ANY v4
  * file was not (a held edit, an invalid file, a file v4 never accepted, a deletion still held), nothing is recorded and
  * the report names those files: v5 judges every file against its defaults and holds any loosening until the owner
- * confirms it again — the safe direction to be wrong in, never wider than v4.
+ * confirms it again — the safe direction to be wrong in, never wider than v4. The one exception is the files the
+ * PREVIEW itself authors (`terminals.yaml`, the `fy-preview` settings item): they are recorded either way, but ONLY when
+ * the owner ran `prepare --owner` (the flag is the owner's act of accepting them; without it nothing of theirs is recorded).
  *
  * Runs LAST, after every step that writes config. Texts are hashed and written, never reported.
  */
@@ -24,6 +26,7 @@ import { join, relative } from 'node:path';
 import { z } from 'zod';
 import type { StepReport } from '../report.ts';
 import { readV4Json } from '../v4/documents.ts';
+import { PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
 import type { Step, StepContext } from './index.ts';
 
 export const V4_CONFIG_ACCEPTED = 'state/config-accepted.json';
@@ -34,6 +37,17 @@ const ACCEPTED_BODY = acceptedConfigFile.schema;
 if (ACCEPTED_BODY === undefined) throw new Error('the kernel declares accepted-config with no schema');
 
 const V4AcceptedRecord = z.record(z.string(), z.strictObject({ etag: z.string().min(1), text: z.string() }));
+
+/**
+ * The plugin that owns a file only the preview itself writes (Terminals' `terminals.yaml`, Claude Code's `fy-preview`
+ * settings item), else `undefined`. The kernel reads an accepted record only for the plugin it names, so these carry it.
+ */
+const previewOwner = (path: string): string | undefined =>
+  path === join('config', 'terminals.yaml')
+    ? 'terminals'
+    : path === join('config', 'claude-code', 'settings', `${PREVIEW_SETTINGS_ITEM}.yaml`)
+      ? 'claude-code'
+      : undefined;
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -83,26 +97,40 @@ export const acceptedConfigStep: Step = {
     const base = { id: this.id, title: this.title, sealed: [] };
     try {
       const configs = [...ctx.v5.writtenConfigs()].sort(([a], [b]) => a.localeCompare(b));
+      // Only when the OWNER ran `prepare --owner`: accepting the preview's own files is the owner's act, never an agent's.
+      const ownerRan = ctx.preview === true && ctx.previewOwner === true;
+      const record = async (entries: readonly (readonly [string, string])[]): Promise<void> => {
+        for (const [path, text] of entries) {
+          const name = acceptedName(relative('config', path));
+          const plugin = ownerRan ? previewOwner(path) : undefined;
+          await ctx.v5.stamped(
+            { path: join(V5_ACCEPTED_DIR, `${name}.json`), format: acceptedConfigFile.format, schema: ACCEPTED_BODY },
+            { etag: sha256(text), text, ...(plugin === undefined ? {} : { plugin }) },
+          );
+        }
+      };
       const held = await notInEffect(ctx);
-      if (held.paths.length > 0)
+      if (held.paths.length > 0) {
+        // The preview's own authored files are the owner's act (the owner runs `prepare`), so they are recorded as accepted
+        // whatever v4's record says: a held terminals.yaml would open every terminal with only {PATH, HOME} and reach v4's `fy`.
+        const own = ownerRan ? configs.filter(([path]) => previewOwner(path) !== undefined) : [];
+        await record(own);
         return {
           ...base,
           status: 'converted',
-          kept: [],
+          kept:
+            own.length === 0
+              ? []
+              : [{ what: "the preview's own config files recorded as accepted", count: own.length }],
           notCarried: [
             {
               what: `${V4_CONFIG_ACCEPTED} (v4 was not enforcing as written: ${held.paths.join(', ')})`,
-              why: 'v4 was holding an unconfirmed edit, refusing a file, or had never accepted it, so what it enforced is not the text on disk. Nothing is recorded as accepted: v5 judges every file against its defaults and holds any loosening until the owner confirms it again (never wider than v4)',
+              why: "v4 was holding an unconfirmed edit, refusing a file, or had never accepted it, so what it enforced is not the text on disk. Nothing is recorded as accepted (the preview's own files excepted): v5 judges every file against its defaults and holds any loosening until the owner confirms it again (never wider than v4)",
             },
           ],
         };
-      for (const [path, text] of configs) {
-        const name = acceptedName(relative('config', path));
-        await ctx.v5.stamped(
-          { path: join(V5_ACCEPTED_DIR, `${name}.json`), format: acceptedConfigFile.format, schema: ACCEPTED_BODY },
-          { etag: sha256(text), text },
-        );
       }
+      await record(configs);
       return {
         ...base,
         status: 'converted',

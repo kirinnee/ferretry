@@ -173,8 +173,9 @@ function terminalsConfig(kernel: KernelPorts): TerminalsConfig {
 }
 
 /**
- * The configured terminal environment as it is NOW (no cached copy). A file the kernel holds as invalid, or one it
- * cannot read, gives none: terminals still open, with no extra environment.
+ * The configured terminal environment as it is NOW (no cached copy). The kernel keeps the LAST GOOD file in effect when a
+ * later one is invalid, so that environment stays; only a file never accepted (or one that cannot be read) gives none,
+ * and terminals still open, with no extra environment.
  */
 function liveTerminalEnvironment(kernel: KernelPorts): Readonly<Record<string, string>> {
   try {

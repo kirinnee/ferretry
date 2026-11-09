@@ -3,7 +3,7 @@
  * home from a v4 home and proves v4 was left alone. Neither starts a daemon. Every path is a parameter so a test
  * runs both in temp folders.
  */
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { convert } from '../src/convert.ts';
@@ -46,6 +46,22 @@ export function heldSection(report: ConversionReport): string {
   return held.length === 0
     ? 'HELD OUT OF THE PREVIEW: nothing (no Codex runtime, ferret or route was found)'
     : `HELD OUT OF THE PREVIEW (${held.length}):\n${held.join('\n')}`;
+}
+
+/**
+ * Writes the report as a NEW file with mode 0600: a stale plain file is removed first (it would keep its own mode), a
+ * link (it would be followed) or anything else is refused, and `wx` refuses to write through one made in between.
+ */
+export async function writeReport(path: string, text: string): Promise<void> {
+  const existing = await lstat(path).catch(() => undefined);
+  if (existing !== undefined) {
+    if (!existing.isFile())
+      throw new Error(
+        `${path} exists and is not a plain file (a link or a folder); remove it yourself and run prepare again`,
+      );
+    await rm(path);
+  }
+  await writeFile(path, text, { mode: 0o600, flag: 'wx' });
 }
 
 export async function dryRun(
@@ -128,6 +144,15 @@ export interface PrepareInputs {
   /** Where the host keeps `$XDG_RUNTIME_DIR` and the user id, for the lifecycle claim files the proof stats. */
   readonly runtimeDir?: string | undefined;
   readonly uid?: number | undefined;
+  /** The owner ran `prepare --owner`: the preview's own two files are recorded as accepted. Never set by an agent. */
+  readonly owner?: boolean;
+}
+
+/** What `prepare` prints about the preview's own two files: accepted by the owner's flag, or what to do without it. */
+export function ownerNote(owner: boolean, target: string): string {
+  return owner
+    ? "the preview's own config/terminals.yaml and config/claude-code/settings/fy-preview.yaml were recorded as accepted (--owner)."
+    : `NOT ACCEPTED (no --owner): config/terminals.yaml and config/claude-code/settings/fy-preview.yaml are held like any other unconfirmed file, so terminals cannot carry the preview environment and \`preview.sh start\` will stop the daemon. Confirm each with \`${join(target, 'bin', PREVIEW.wrapper)} config confirm <file>\` (needs the running daemon, which start stops), or the owner re-runs prepare with --owner.`;
 }
 
 export interface Prepared {
@@ -173,6 +198,7 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
       preview: true,
       previewV4Home: v4Home,
       previewShellEnv: previewShellEnv(target, PREVIEW.port),
+      ...(inputs.owner === true ? { previewOwner: true } : {}),
     });
   } finally {
     await rm(emptyHost, { recursive: true, force: true });
@@ -218,10 +244,10 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   await writeFile(join(target, PREVIEW_MARKER), PREVIEW_MARKER_TEXT, { mode: 0o600 });
   // The report sits BESIDE the preview home (as `src/main.ts` writes it), never inside it: names and counts only.
   const reportPath = reportPathFor(target);
-  await writeFile(reportPath, `${JSON.stringify(result.report, null, 2)}\n`, { mode: 0o600 });
+  await writeReport(reportPath, `${JSON.stringify(result.report, null, 2)}\n`);
   return {
     report: result.report,
-    summary: `${summarise(result.report)}\n${heldSection(result.report)}\nreport: ${reportPath}`,
+    summary: `${summarise(result.report)}\n${heldSection(result.report)}\n${ownerNote(inputs.owner === true, target)}\nreport: ${reportPath}`,
     proof,
     changedWhileCopying: staged.changed,
     gate,
@@ -248,7 +274,7 @@ export async function cleanPreview(v4Home: string, target: string, home: string 
   const guarded = guardTarget(v4Home, target, home);
   if (!hasMarker(guarded.target))
     throw new Error(
-      `${guarded.target} has no ${PREVIEW_MARKER} marker, so it is not a preview home; nothing was removed. If a prepare died before its marker, remove it yourself: rm -rf '${guarded.target}' '${guarded.staging}' (and, if it exists, the proof file ${proofPathFor(home, guarded.target)})`,
+      `${guarded.target} has no ${PREVIEW_MARKER} marker, so it is not a preview home; nothing was removed. If a prepare died before its marker, remove it yourself: rm -rf '${guarded.target}' '${guarded.staging}' '${reportPathFor(guarded.target)}' (and, if it exists, the proof file ${proofPathFor(home, guarded.target)})`,
     );
   await rm(guarded.target, { recursive: true, force: true });
   await rm(guarded.staging, { recursive: true, force: true });

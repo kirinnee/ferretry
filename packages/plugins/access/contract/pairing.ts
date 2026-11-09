@@ -1,4 +1,4 @@
-import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract/hosted-app';
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
 import { durationWords, InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { CAPABILITY_NAMES, type CapabilityName, CapabilityGrantsSchema } from '@ferretry/core-gate/contract';

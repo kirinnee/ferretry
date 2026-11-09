@@ -7,7 +7,7 @@
  * marked preview home. `stop` SIGTERMs the process that holds the preview home's daemon lock. Nothing here starts a
  * daemon, a service or a terminal.
  */
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -24,12 +24,15 @@ const USAGE =
 
 async function main(argv: readonly string[]): Promise<number> {
   let parsed: ReturnType<
-    typeof parseArgs<{ options: { v4: { type: 'string' }; target: { type: 'string' } }; allowPositionals: true }>
+    typeof parseArgs<{
+      options: { v4: { type: 'string' }; target: { type: 'string' }; owner: { type: 'boolean' } };
+      allowPositionals: true;
+    }>
   >;
   try {
     parsed = parseArgs({
       args: [...argv],
-      options: { v4: { type: 'string' }, target: { type: 'string' } },
+      options: { v4: { type: 'string' }, target: { type: 'string' }, owner: { type: 'boolean' } },
       allowPositionals: true,
       strict: true,
     });
@@ -63,6 +66,7 @@ async function main(argv: readonly string[]): Promise<number> {
         target,
         lock: hostLockProbe(),
         now: () => new Date(),
+        ...(parsed.values.owner === true ? { owner: true } : {}),
         ...(parsed.values.v4 === undefined ? {} : { v4Given: parsed.values.v4 }),
       });
       console.log(done.summary);
@@ -108,6 +112,14 @@ async function main(argv: readonly string[]): Promise<number> {
         callerEnv: process.env,
         run: realRun,
         sleep: ms => Bun.sleep(ms),
+        readText: async path => {
+          try {
+            return await readFile(path, 'utf8');
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+            throw error;
+          }
+        },
       });
       for (const line of done.passed) console.log(`ok: ${line}`);
       for (const line of done.problems) console.error(line);

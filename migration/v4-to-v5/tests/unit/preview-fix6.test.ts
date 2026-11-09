@@ -130,7 +130,7 @@ describe('MAJOR-1 terminalCheck', () => {
 
   test('fails with a sentence when there is no ferret, the daemon is not answering, or open is refused', async () => {
     const none = fake({ ps: { code: 0, stdout: '[]' } });
-    expect((await check(none.run)).problems.join(' ')).toContain('no ferret');
+    expect((await check(none.run)).problems.join(' ')).toContain('could not be read');
     expect(verbs(none.calls)).toEqual(['ps']);
     const junk = fake({ ps: { code: 0, stdout: 'not json' } });
     expect((await check(junk.run)).ok).toBe(false);
@@ -151,7 +151,8 @@ describe('MAJOR-1 terminalCheck', () => {
     const refused = fake({ open: 2 });
     const opened = await check(refused.run);
     expect(opened.problems.join(' ')).toContain('refused to open a terminal');
-    expect(verbs(refused.calls).at(-1)).toBe('close');
+    // Nothing the check did not open is closed.
+    expect(verbs(refused.calls).at(-1)).toBe('open');
   });
 });
 
@@ -376,7 +377,8 @@ describe('Nit C a sidecar that vanishes is a torn try inside the same budget', (
       error => (error as Error).message,
     );
     expect(attempts).toEqual([1, 2, 3]);
-    expect(message).toContain('failed integrity_check on 3 copies');
+    expect(message).toContain('a sidecar file vanished before it could be copied, on 3 tries');
+    expect(message).not.toContain('integrity_check');
 
     const other = await copySqlite(from, join(root, 'out3.sqlite'), {
       copySidecar: async () => {

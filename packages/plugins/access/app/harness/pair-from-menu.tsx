@@ -13,7 +13,7 @@
  * reads the same in every capture. These are the same frozen values the settings gallery uses.
  */
 
-import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract/hosted-app';
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
 import { CAPABILITY_NAMES, type CapabilityGrants } from '@ferretry/core-gate/contract';
 import { InstantSchema } from '@ferretry/std';
 import { useState } from 'react';

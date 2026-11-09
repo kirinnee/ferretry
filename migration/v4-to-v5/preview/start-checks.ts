@@ -15,7 +15,10 @@
  * 2. LOGIN SHELLS FIND THE PREVIEW'S `fy` (MAJOR-B). With the guard environment a preview ferret's shells get
  *    (`src/v5/preview-env.ts`), `bash -lc` and `zsh -lic` must resolve `fy` to the preview's shim, not to v4's.
  */
+import { acceptedName } from '@ferretry/kernel/contract';
+import { TerminalsConfigSchema } from '@ferretry/plugin-terminals/contract';
 import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import { previewShellEnv } from '../src/v5/preview-env.ts';
 import { PREVIEW } from './plan.ts';
 
@@ -149,15 +152,81 @@ export const CHECK_COMMAND = `printf 'fy=%s\\nhome=%s\\n' "$(command -v fy)" "$F
 export interface TerminalCheckInput extends StartChecksInput {
   /** Waits between tries while the daemon is still coming up; absent, the daemon is asked once. */
   readonly sleep?: (ms: number) => Promise<void>;
+  /** Reads a text file of the preview home (`undefined` when it is absent); absent, no file can be read. */
+  readonly readText?: (path: string) => Promise<string | undefined>;
 }
 
 const COMING_UP_TRIES = 15;
+
+/** Where the kernel keeps what it put into effect for `terminals.yaml` (the converter writes it in `prepare`). */
+const TERMINALS_FILE = join('config', 'terminals.yaml');
+const TERMINALS_ACCEPTED = join('state', 'kernel', 'accepted-config', `${acceptedName('terminals.yaml')}.json`);
+
+/** What the daemon will read for `terminals.yaml` at its next boot, from the files in the preview home. */
+type TerminalsFileState =
+  | { readonly state: 'ok' }
+  | { readonly state: 'missing' | 'invalid' | 'held' | 'wrong'; readonly sentence: string };
+
+const confirm = (target: string): string => `${join(target, 'bin', PREVIEW.wrapper)} config confirm terminals.yaml`;
+
+/**
+ * The state of the preview's terminal environment as the runtime reads it: the file parses, the kernel has it ACCEPTED
+ * for Terminals (a file with no matching record is held, and nothing of it is in effect), and its `environment` is the
+ * preview's. A sentence for each miss that names the state and the remedy.
+ */
+export async function terminalsFileState(
+  target: string,
+  readText: (path: string) => Promise<string | undefined>,
+): Promise<TerminalsFileState> {
+  const file = join(target, TERMINALS_FILE);
+  const text = await readText(file);
+  if (text === undefined)
+    return {
+      state: 'missing',
+      sentence: `${file} is missing, so terminals open with only PATH and HOME. Run preview.sh clean, then prepare again.`,
+    };
+  let parsed: ReturnType<typeof TerminalsConfigSchema.safeParse>;
+  try {
+    parsed = TerminalsConfigSchema.safeParse(parseYaml(text));
+  } catch {
+    parsed = TerminalsConfigSchema.safeParse(undefined);
+  }
+  if (!parsed.success)
+    return {
+      state: 'invalid',
+      sentence: `${file} is invalid (${parsed.error.issues[0]?.message ?? 'it does not parse'}), so the daemon keeps the last good one or none. Fix it, or run preview.sh clean and prepare again.`,
+    };
+  let accepted: { text?: unknown; plugin?: unknown } | undefined;
+  try {
+    accepted = JSON.parse((await readText(join(target, TERMINALS_ACCEPTED))) ?? 'null') as typeof accepted;
+  } catch {
+    accepted = undefined;
+  }
+  if (accepted?.plugin !== 'terminals' || accepted.text !== text)
+    return {
+      state: 'held',
+      sentence: `${file} is held, not in effect: the daemon has not accepted this text, so terminals open with only PATH and HOME and would find v4's fy. \`${confirm(target)}\` needs the running daemon, and start stops the daemon on this miss (terminals would reach v4's fy), so the remedy is: the OWNER runs preview.sh clean, then preview.sh prepare --owner (that flag records it as accepted). No agent does this.`,
+    };
+  const wanted = previewShellEnv(target, PREVIEW.port);
+  const have = parsed.data.environment ?? {};
+  const same =
+    Object.keys(wanted).length === Object.keys(have).length &&
+    Object.entries(wanted).every(([name, value]) => have[name] === value);
+  return same
+    ? { state: 'ok' }
+    : {
+        state: 'wrong',
+        sentence: `${file} is in effect but its environment is not the preview's (FY_HOME ${target}, port ${String(PREVIEW.port)}). Run preview.sh clean and prepare again.`,
+      };
+}
 
 /**
  * 3. A TERMINAL THE PREVIEW DAEMON OPENS carries the preview environment (MAJOR-1). Run AFTER the daemon is up and only
  * inside the owner's real preview: it opens a terminal through the daemon's own route (`fy5 terminal open --ferret`, the
  * route the owner's web terminal uses; a ferret's tool opens it the same way), has it print `command -v fy` and
- * `$FY_HOME`, and requires the preview's shim and the preview home. A miss says so, and the terminal is closed either way.
+ * `$FY_HOME`, and requires the preview's shim and the preview home. A miss says so, and the terminal the check opened is
+ * closed either way. With no ferret record at all it proves what the runtime reads live (`terminalsFileState`).
+ * `preview.sh start` stops the daemon on any miss.
  */
 export async function terminalCheck(input: TerminalCheckInput): Promise<StartChecks> {
   const { target, callerEnv, run } = input;
@@ -167,33 +236,53 @@ export async function terminalCheck(input: TerminalCheckInput): Promise<StartChe
   const passed: string[] = [];
   const refuse = (sentence: string): StartChecks => ({ ok: false, problems: [...problems, sentence], passed });
 
+  // Every record, stopped ones too (`ps` alone hides them, and the preview writes every ferret as stopped): a terminal
+  // belongs to a ferret but the ferret need not be running.
   let ferret: string | undefined;
+  let answered = false;
   for (let attempt = 0; attempt < COMING_UP_TRIES && ferret === undefined; attempt++) {
-    const listed = await run([fy5, 'ps', '--json'], asCaller);
+    const listed = await run([fy5, 'ps', '-a', '--json'], asCaller);
     if (listed.code === 0) {
       try {
         const rows: unknown = JSON.parse(listed.stdout);
-        const first = Array.isArray(rows) ? (rows[0] as { id?: unknown } | undefined) : undefined;
-        if (typeof first?.id === 'string') ferret = first.id;
+        if (Array.isArray(rows)) {
+          answered = true;
+          const first = rows[0] as { id?: unknown } | undefined;
+          if (typeof first?.id === 'string') ferret = first.id;
+        }
       } catch {
-        // an answer that is not JSON is read as no ferret below
+        // an answer that is not JSON is read as not answering below
       }
       break;
     }
     if (input.sleep !== undefined && attempt < COMING_UP_TRIES - 1) await input.sleep(1_000);
     else break;
   }
-  if (ferret === undefined)
-    return refuse(
-      `could not prove the terminal environment: ${fy5} ps --json gave no ferret to open a terminal under (the preview daemon is not answering, or the preview has no ferret yet). Start a Claude ferret with ${fy5} start, then run preview.sh terminal-check.`,
+  if (ferret === undefined) {
+    if (!answered)
+      return refuse(
+        `could not prove the terminal environment: ${fy5} ps -a --json did not answer with a list of ferrets (the preview daemon is not answering).`,
+      );
+    // No ferret record: nothing can open a terminal yet, so prove what the runtime reads live instead.
+    const file =
+      input.readText === undefined
+        ? ({ state: 'missing', sentence: `${join(target, TERMINALS_FILE)} could not be read` } as const)
+        : await terminalsFileState(target, input.readText);
+    if (file.state !== 'ok') return refuse(`could not prove the terminal environment: ${file.sentence}`);
+    passed.push(
+      `the preview has no ferret yet, so no terminal could be opened: terminals.yaml is in effect with the preview environment (FY_HOME ${target}); the live terminal proof runs on the next preview.sh terminal-check`,
     );
+    return { ok: true, problems, passed };
+  }
 
   const opened = await run([fy5, 'terminal', 'open', CHECK_TERMINAL, '--ferret', ferret, CHECK_COMMAND], asCaller);
+  // `open` is refused when that ferret already has a terminal of this name, and answers no id: so a success is the proof
+  // the terminal is the check's own. Nothing is closed when open failed (it could be the ferret's own terminal).
+  if (opened.code !== 0)
+    return refuse(
+      `could not prove the terminal environment: the preview daemon refused to open a terminal (${fy5} terminal open answered ${String(opened.code)}). Nothing was closed.`,
+    );
   try {
-    if (opened.code !== 0)
-      return refuse(
-        `could not prove the terminal environment: the preview daemon refused to open a terminal (${fy5} terminal open answered ${String(opened.code)}).`,
-      );
     await run(
       [fy5, 'terminal', 'wait', CHECK_TERMINAL, '--ferret', ferret, '--text', DONE_WORD, '--timeout', '20000'],
       asCaller,
@@ -202,10 +291,19 @@ export async function terminalCheck(input: TerminalCheckInput): Promise<StartChe
     const found = /^fy=(.*)$/mu.exec(read.stdout)?.[1]?.trim() ?? '';
     const home = /^home=(.*)$/mu.exec(read.stdout)?.[1]?.trim() ?? '';
     const shim = join(target, 'bin', 'fy');
-    if (read.code !== 0 || found !== shim || home !== target)
+    if (read.code !== 0 || found !== shim || home !== target) {
+      const file =
+        input.readText === undefined
+          ? undefined
+          : await terminalsFileState(target, input.readText).catch(() => undefined);
+      const why =
+        file === undefined || file.state === 'ok'
+          ? `terminals.yaml reads as accepted with the preview environment, so check the daemon's own log and ${join(target, TERMINALS_FILE)}.`
+          : file.sentence;
       return refuse(
-        `refusing to go on: a terminal the preview daemon opened found fy at ${found === '' ? 'nowhere' : found} and FY_HOME ${home === '' ? 'unset' : home}, not ${shim} and ${target}. A terminal you or a ferret opens would run v4's fy against v4's home. The terminal was closed. Check \`environment\` in ${join(target, 'config', 'terminals.yaml')}, then run preview.sh terminal-check.`,
+        `refusing to go on: a terminal the preview daemon opened found fy at ${found === '' ? 'nowhere' : found} and FY_HOME ${home === '' ? 'unset' : home}, not ${shim} and ${target}. A terminal you or a ferret opens would run v4's fy against v4's home. The terminal was closed. ${why}`,
       );
+    }
     passed.push(`a terminal the preview daemon opened finds the preview's fy (${shim}) and FY_HOME ${target}`);
     return { ok: true, problems, passed };
   } finally {

@@ -37,6 +37,8 @@ export interface ConvertOptions {
    * login shell finds the preview's `fy`. The preview driver owns it (`src/v5/preview-env.ts`).
    */
   readonly previewShellEnv?: Readonly<Record<string, string>>;
+  /** With `preview`: the owner ran `prepare --owner` (see `StepContext.previewOwner`). */
+  readonly previewOwner?: boolean;
 }
 
 export type ConvertResult =
@@ -60,6 +62,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
           preview: true,
           ...(options.previewV4Home === undefined ? {} : { previewV4Home: options.previewV4Home }),
           ...(options.previewShellEnv === undefined ? {} : { previewShellEnv: options.previewShellEnv }),
+          ...(options.previewOwner === true ? { previewOwner: true } : {}),
         }
       : {}),
     ...(options.host === undefined ? {} : { host: options.host }),

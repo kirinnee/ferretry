@@ -1,4 +1,4 @@
-import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract/hosted-app';
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
 
 /** The hosted app's origin: where a pairing link, a catalog and a share link point. Owned by the kernel's `hosted-app` module. */
 export { HOSTED_APP_ORIGIN };

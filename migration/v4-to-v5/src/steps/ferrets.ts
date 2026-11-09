@@ -103,6 +103,7 @@ export const ferretsStep: Step = {
       // or token row. It would be a Codex ferret again the day a Codex login is added.
       const heldRuntimes = await heldRuntimeNames(ctx);
       const held: NotCarried[] = [];
+      const heldIds = new Set<string>();
       const sourceRecords = (await configs(ctx.v4.sessions)).filter(config => {
         if (!holdsCodex(ctx)) return true;
         const isCodex = config.harness !== 'claude';
@@ -111,8 +112,16 @@ export const ferretsStep: Step = {
           what: `ferret ${config.id} (${isCodex ? 'Codex' : `on the held runtime ${runtimeOf(config)}`})`,
           why: CODEX_HELD_SENTENCE,
         });
+        heldIds.add(config.id);
         return false;
       });
+      // A carried helper may name a lead that was held out: its `parent` then dangles. Harmless for v4 reach, but said.
+      for (const config of sourceRecords)
+        if (config.parent !== undefined && heldIds.has(config.parent))
+          held.push({
+            what: `ferret ${config.id} (a helper whose parent ${config.parent} is held out of the preview)`,
+            why: `its parent field names ${config.parent}, which is not in the preview, so the link dangles`,
+          });
       const ledgers = await prepareLedgers(ctx, sourceRecords);
       const details: DetailsSource[] = [];
       const tokens: { ferret: string; digest: string; issuedAt: string; revoked?: true; cutOff?: true }[] = [];

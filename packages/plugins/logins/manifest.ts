@@ -1,5 +1,5 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract/hosted-app';
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';

@@ -93,6 +93,7 @@ export async function copySqlite(
     // transaction (main copied, then the writer commits and deletes its journal before the journal is copied) can still
     // pass the check: the second pass in `stage` (size or mtime moved) catches that case and copies the file again.
     // Either way a torn copy only ever breaks the preview, never v4.
+    let vanished = 0;
     for (let attempt = 1; attempt <= SQLITE_COPY_TRIES; attempt++) {
       options.onAttempt?.(attempt);
       await rm(copy, { force: true });
@@ -110,7 +111,10 @@ export async function copySqlite(
           torn = true;
         }
       }
-      if (torn) continue;
+      if (torn) {
+        vanished++;
+        continue;
+      }
       let source: Database | undefined;
       try {
         // Not read-only: a hot journal in the COPY is rolled back (a WAL replayed) there, on first read.
@@ -133,7 +137,14 @@ export async function copySqlite(
         source?.close();
       }
     }
-    throw new Error(`failed integrity_check on ${SQLITE_COPY_TRIES} copies`);
+    // Say what really failed: a sidecar that vanished mid-copy ran no integrity check at all.
+    throw new Error(
+      vanished === SQLITE_COPY_TRIES
+        ? `a sidecar file vanished before it could be copied, on ${SQLITE_COPY_TRIES} tries (v4 was writing throughout)`
+        : vanished === 0
+          ? `failed integrity_check on ${SQLITE_COPY_TRIES} copies`
+          : `${SQLITE_COPY_TRIES} copies were torn (a sidecar file vanished, or integrity_check failed)`,
+    );
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

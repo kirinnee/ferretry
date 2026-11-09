@@ -149,6 +149,9 @@ describe('the terminal environment: the file', () => {
     'FY_SESSION_TOKEN',
     'FY_SESSION_ID',
     'FY_SESSION_BOARD_CAPABILITY',
+    'FY_SESSION_MODE',
+    'FY_SESSION_ANYTHING',
+    'FY_TOKEN',
   ])('refuses %s, located at the variable', name => {
     const found = issues({ [name]: 'x' });
     expect(found).toHaveLength(1);
@@ -171,6 +174,16 @@ describe('the terminal environment: the file', () => {
     expect(issues({ A: 'x'.repeat(4097) })).toEqual(['environment.A: A is longer than 4096 bytes']);
     expect(issues({ A: 'x'.repeat(4096) })).toEqual([]);
     expect(issues({ A: 'é'.repeat(2049) })).toHaveLength(1);
+  });
+
+  it('says why FY_SESSION_* and FY_TOKEN are refused', () => {
+    expect(issues({ FY_SESSION_MODE: 'auto' })[0]).toContain("ferret's own identity and launch mode");
+    expect(issues({ FY_TOKEN: 'x' })[0]).toContain('admin token');
+  });
+
+  it('refuses a newline and a carriage return in a value', () => {
+    expect(issues({ A: 'a\nb' })).toEqual(['environment.A: A holds a newline or carriage return']);
+    expect(issues({ A: 'a\rb' })).toEqual(['environment.A: A holds a newline or carriage return']);
   });
 
   it('reports every bad variable as its own issue', () => {
