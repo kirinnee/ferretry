@@ -551,7 +551,25 @@ export type RootName =
    * handle is scoped to the ABSOLUTE folder the caller names (`{ subfolder: '/home/me/.claude' }`, exactly as
    * `harness-history` is), refuses everything inside the fence, and never follows a link out of that folder.
    */
-  | 'harness-home';
+  | 'harness-home'
+  /**
+   * A project folder's own files the plugin writes on the owner's behalf (MCP's `<root>/.mcp.json`, Skills'
+   * `<root>/.claude/skills/<name>/**`): an owner's root, WRITABLE, and narrowed twice. The handle is scoped PER CALL to ONE
+   * absolute folder (`{ subfolder: '/home/me/project' }`, exactly as `harness-home` is) and to the relative paths the
+   * manifest declared in `permissions.projectFiles`; a name outside that set is refused `not_declared` whatever the
+   * folder holds. A write is as `work`'s is, with this root's one extra rule that a link at ANY level (inside the folder)
+   * and a file with a second hard link are refused, never followed. It refuses everything inside the fence.
+   *
+   * GAP, stated exactly (redesign §7.7, `ports-pending.json` writeChecked): the write is a checked, no-follow DESCRIPTOR
+   * write only on a host with descriptor reach (`/proc/self/fd`). On a host without it (macOS today) the temp create and
+   * the rename are by path, so a folder swapped for a link between the check and the syscall can make a write overwrite
+   * one same-named file outside the folder; writes are not refused there. Even with reach the parent is proved, not held
+   * (an ABA swap is not seen). No link is made into or out of this root, `copyTree` included.
+   *
+   * Whether the folder is one Projects or Ferrets names is the PLUGIN ADAPTER's rule, never the kernel's (declared limit,
+   * redesign §7.7, which lists what an adapter must check).
+   */
+  | 'project-files';
 
 /**
  * {@link RootHandle.linkTo}'s target: a name in one of THIS plugin's own root handles (maybe the same one). The link
