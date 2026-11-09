@@ -69,7 +69,7 @@ import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './dr
 import { StateQueueStore } from './queue/adapters/index.ts';
 import { answerOf } from './queue/lib/answer.ts';
 import { NotifyingSessionQueueStore, QueueRefused, SessionQueueService } from './queue/lib/index.ts';
-import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
+import { sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
 import { StateHypermediaSwitch } from './hypermedia/adapters/index.ts';
 import { hypermediaDefault, SessionHypermediaService, sessionHypermediaRoutes } from './hypermedia/lib/index.ts';
@@ -210,9 +210,6 @@ const payloadOf = (message: string): string => {
 const bannerLabel = (label: unknown): PeerMessageLabel | undefined =>
   PEER_MESSAGE_LABELS.find(known => known === label);
 
-/** One answer as the terminal seam takes it: the route's request, or the port's with a minted request id. */
-type AnswerToTerminal = Parameters<SessionAnswerSubsystem['answer']>[1];
-
 /** What part a builds: its routes, its sockets, the half of the port it owns and its sitrep lines. */
 export interface ConversationAHalf {
   readonly routes: Readonly<Record<string, RouteHandler>>;
@@ -323,11 +320,7 @@ export function buildConversationA(deps: {
    * on the ferret's terminal itself, so nothing here wraps a call in an act of its own. Answering a question's form is
    * the structured-question drive, which still waits on its own wiring.
    */
-  const harness = terminalSeam(ferrets);
-  const terminal = {
-    ...harness,
-    answer: async (_ferret: string, _request: AnswerToTerminal): Promise<SessionView> => pending(),
-  };
+  const terminal = terminalSeam(ferrets);
   /**
    * THE ONE LANE PER FERRET (as today's `serial.run(id, …)`): a typed send, a send-now's stop, cancel, Enter, the person's
    * draft, the tracker's re-submit and an interrupt all run one at a time on a ferret, so a Cancel can never clear a
@@ -1041,15 +1034,12 @@ export function buildConversationA(deps: {
     return question;
   };
   /**
-   * Answers through the terminal seam. An answer that landed ends the question, so `question.json` goes with it (the
-   * route's subsystem "returns only after … state cleared its exact bound tool id"): the route, the port and the sitrep
-   * then say none instead of the question already answered.
+   * Answering a question's form is the structured-question drive, which waits on its own wiring (see the conversation line
+   * in `ports-pending.json`): until then every answer is refused and `question.json` stays. When it lands, an answer that
+   * landed ends the question, so `question.json` goes with it (the route's subsystem "returns only after … state cleared
+   * its exact bound tool id") through {@link clearAskedQuestion}.
    */
-  const answerQuestion = async (ferret: string, request: AnswerToTerminal): Promise<SessionView> => {
-    const view = await terminal.answer(ferret, request);
-    await clearAskedQuestion(kernel.state, questionSerial, ferret, request.toolUseId);
-    return view;
-  };
+  const answerQuestion = async (): Promise<SessionView> => pending();
 
   const hypermediaSwitch = new StateHypermediaSwitch(kernel.state);
   const hypermedia = new SessionHypermediaService({
@@ -1229,17 +1219,7 @@ export function buildConversationA(deps: {
       }
     },
     question: async ferret => await askedQuestion(ferret),
-    answer: async (ferret, request) => {
-      try {
-        await answerQuestion(ferret, { ...request, requestId: String(kernel.ids.mint('answer')) });
-      } catch (error) {
-        return err({
-          code: (error instanceof ApiError ? error.code : undefined) ?? 'answer_refused',
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
-      return ok(undefined);
-    },
+    answer: async () => err(pendingRefusal()),
     compactAt: async () => undefined,
     setCompactAt: async () => err(pendingRefusal()),
     draft: async (ferret, slot) => await drafts.read(ferret, slot === 'chat' ? undefined : slot),

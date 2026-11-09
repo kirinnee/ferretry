@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import type { TranscriptEntry } from '@ferretry/core-ferrets/contract';
 import type { Instant } from '@ferretry/std';
 import should from 'should';
-import { EntriesSendEvidence } from '../../../../daemon/delivery/adapters/entries-send-evidence.ts';
+import { EntriesSendEvidence } from '../../../daemon/delivery/adapters/entries-send-evidence.ts';
 
 const at = (value: string): Instant => value as Instant;
 const user = (id: string, text: string, when: string): TranscriptEntry => ({ id, role: 'user', text, at: at(when) });
