@@ -18,12 +18,13 @@ set -euo pipefail
 #   everything else                          no tag trigger; every job that can write, use an environment or read a
 #                                             secret is gated on main (the preview's own workflow on rebuild/5.0).
 #   THE TAG RULESET (scripts/local/setup-release-tag-ruleset.sh) refuses Write-role collaborators only. On this
-#   repository every agent pushes as the owner (Admin), so it does NOT stop an agent's tag. What stops a 5.0 tag from
+#   repository every agent pushes as the owner (Admin), so it does NOT stop an agent's tag. What stops a tag from
 #   publishing is cd.yaml's main-only job: the tagged commit must be on main, and EVERY other job of cd.yaml (compile,
 #   the macOS smoke, GoReleaser publish, the Casks commit inside it, the signature) depends on it, directly or through
 #   another job. This script proves that dependency below. Declared gap: an agent with the owner's credential can still
-#   push a v* tag; it cannot publish from a 5.0 commit made after main-only existed (a tag runs the workflow file AT THE
-#   TAGGED COMMIT, so an older commit runs the file it carries).
+#   push a v* tag; it cannot publish from a 5.0 commit made after this guard lands. Any commit made before it (all current
+#   5.0 history) can still publish if tagged (a tag runs the workflow file AT THE TAGGED COMMIT, so an older commit runs
+#   the file it carries).
 #
 # WHAT IS CHECKED (per workflow, with yq and jq; `--root <dir>` checks another checkout).
 #   1. Release (semantic-release): its only trigger is a `workflow_run` of CI on `main`, and its job repeats the
@@ -137,4 +138,4 @@ for workflow in "${workflows[@]}"; do
 done
 
 ((status == 0)) || exit 1
-echo "✅ every job of cd.yaml sits behind main-only, so a tag off main publishes nothing (for commits that carry this file); the tag ruleset refuses Write-role collaborators only and does not stop an agent pushing as the owner (Admin); the preview deploys from rebuild/5.0 alone"
+echo "✅ every job of cd.yaml sits behind main-only, so a tag off main publishes nothing for commits made after this guard lands (any commit made before it, all current 5.0 history, can still publish if tagged); the tag ruleset refuses Write-role collaborators only and does not stop an agent pushing as the owner (Admin); the preview deploys from rebuild/5.0 alone"

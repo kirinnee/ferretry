@@ -120,6 +120,8 @@ export async function prepareLedgers(ctx: StepContext, records: readonly V4Confi
   kept.push({ what: 'fork receipts', count: forkCount });
   return {
     kept,
+    /** Folders of the managed worktrees v4 lists (the preview swaps a ferret working in one of them). */
+    worktreeFolders: (registry?.worktrees ?? []).map(record => record.path),
     async write() {
       for (const write of writes) await write();
     },

@@ -12,11 +12,16 @@ set -euo pipefail
 #             the compiled binaries name that origin, and only then install them into <target>/libexec (bin holds shims
 #             that pin the preview). Refuses unless the preview signing key is committed on that checkout
 #             (packages/app/release-signing-key.preview.pub, from setup-pwa-release-v5.sh).
-#   start     fy5 daemon start         (port 7458, own home, own terminal socket, no service unit)
+#   start     two read-only checks, then fy5 daemon start (port 7458, own home, own terminal socket, no service unit).
+#             The daemon runs with NO reachable user systemd manager (a private XDG_RUNTIME_DIR, no session bus), so 5.0 runs
+#             launches directly and never reconfigures v4's slices; start REFUSES if a manager is still reachable, or if a
+#             login shell with the guard environment finds a `fy` other than the preview's. In a preview terminal you open
+#             yourself, `fy` may be v4's: type ~/.ferretry-v5/bin/fy or use fy5.
 #   stop      SIGTERM the process proven to hold the preview home's own daemon lock (never v4's, never a unit)
 #   status    fy5 daemon status
-#   proof     compare v4 now with the snapshot `prepare` took (run it after a start and a stop); names only
-#   clean     remove the preview home, only if `prepare` marked it. Refuses while the preview daemon answers.
+#   proof     compare v4 now with the snapshot `prepare` took (kept in ~/.ferretry-v5-proof/, outside the preview home);
+#             run it after a start and a stop; names only
+#   clean     remove the preview home and its proof, only if `prepare` marked it. Refuses while the preview daemon answers.
 #
 # fy5 itself refuses `update` and `daemon stop|restart|update|install|uninstall|reset|which|logs`: on a box with v4's service unit they answer
 # for v4's unit and write claim files beside it. Use this script's `stop` instead.
@@ -121,7 +126,17 @@ build)
   done
   echo "installed fy, fyd and fyd-browser-worker into ${target}/libexec"
   ;;
-start) fy5 daemon start ;;
+start)
+  # Two read-only checks first, with the preview's exact environments; a failure refuses to start (nothing is started).
+  #   1. the daemon's environment reaches NO user systemd manager (else it would reset v4's slices);
+  #   2. bash -lc and zsh -lic with the guard environment find the preview's own fy (else a login shell finds v4's).
+  [ -x "${target}/bin/fy5" ] || {
+    echo "refusing to start: ${target}/bin/fy5 is missing; run '$0 prepare' first" >&2
+    exit 1
+  }
+  run_tool start-checks
+  fy5 daemon start
+  ;;
 stop) run_tool stop ;;
 status) fy5 daemon status ;;
 proof) run_tool proof ;;

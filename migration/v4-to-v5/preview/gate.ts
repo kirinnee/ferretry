@@ -2,9 +2,9 @@
  * The last gate: which fields of the converted home could make the preview EXECUTE something of v4's, or RESOLVE a path
  * into v4's home, v4's worktree folder or the user's harness homes (`~/.claude*`, `~/.codex*`).
  *
- * Only fields that are executed or resolved as paths are gated: a ferret's `command`, `agent`, `cwd`, `folder`, `env`
- * and flags, and every command, argument, environment value, home, path and file of a runtime, profile, component,
- * preset or MCP server. Free text (messages, events, prompts, notes, agenda text) is NOT gated and NOT redacted: a path
+ * A ferret's `command`, `agent`, `cwd`, `folder`, `env` and flags are gated by key. In config/runtimes, profiles, mcp,
+ * components, endpoints and the harness settings (STRICT_FOLDERS) EVERY string value and every key is gated, except a
+ * short allowlist of free-text keys (description, label, title, name, notes ...). Free text (messages, events, prompts, notes, agenda text) is NOT gated and NOT redacted: a path
  * written in a message cannot make the daemon write anywhere. The gate answers file names and field names, never a value.
  */
 import { readdir, readFile, realpath } from 'node:fs/promises';
@@ -57,6 +57,31 @@ const lastWord = (key: string): string =>
     .filter(Boolean)
     .at(-1)
     ?.toLowerCase() ?? '';
+
+/**
+ * Folders the gate reads STRICTLY: in these, a runtime, profile, MCP server, component, endpoint or harness setting can
+ * name something to EXECUTE or a path to RESOLVE under any key (codex `notify`, Claude `apiKeyHelper`, `writable_roots`,
+ * `additionalDirectories`, a `projects."/abs"` key). A key-name list cannot know them all, so EVERY string value and
+ * every object key is checked, except the free-text keys below. Both layouts: the converted home and a raw v4 copy.
+ */
+const STRICT_FOLDERS =
+  /^config\/(runtimes|profiles|mcp|components|endpoints|presets|models|model-sets|skills|claude-code|codex)\//u;
+
+/** Keys whose value is prose for a person: never executed, never resolved as a path. The one allowlist of the strict gate. */
+const FREE_TEXT_KEYS: ReadonlySet<string> = new Set([
+  'description',
+  'label',
+  'title',
+  'name',
+  'notes',
+  'note',
+  'summary',
+  'comment',
+  'comments',
+  'text',
+  'message',
+  'prompt',
+]);
 
 /** Everything the gate looks for, built once from every spelling of the homes involved. */
 export interface Needles {
@@ -141,9 +166,15 @@ export function valueHits(value: string, needles: Needles, only: 'both' | 'harne
 export function gatedFields(
   document: unknown,
   needles: Needles,
-  options: { readonly skipTop?: ReadonlySet<string>; readonly harnessOnly?: ReadonlySet<string> } = {},
+  options: {
+    readonly skipTop?: ReadonlySet<string>;
+    readonly harnessOnly?: ReadonlySet<string>;
+    /** Check every string value and every key, except under a free-text key (see {@link STRICT_FOLDERS}). */
+    readonly strict?: boolean;
+  } = {},
 ): string[] {
   const hits: string[] = [];
+  const strict = options.strict === true;
   const visit = (value: unknown, path: string, gated: boolean, only: 'both' | 'harness'): void => {
     if (typeof value === 'string') {
       if (gated && valueHits(value, needles, only)) hits.push(path);
@@ -151,6 +182,9 @@ export function gatedFields(
     else if (value !== null && typeof value === 'object')
       for (const [key, inner] of Object.entries(value)) {
         if (path === '' && options.skipTop?.has(key) === true) continue;
+        if (strict && FREE_TEXT_KEYS.has(key.toLowerCase())) continue;
+        // A key that is itself a path (codex `projects."/abs"`): named by its place, never by the key's text.
+        if (strict && valueHits(key, needles, only)) hits.push(path === '' ? '<path key>' : `${path}.<path key>`);
         const harnessOnly = only === 'harness' || (path === '' && options.harnessOnly?.has(key) === true);
         visit(
           inner,
@@ -160,7 +194,7 @@ export function gatedFields(
         );
       }
   };
-  visit(document, '', false, 'both');
+  visit(document, '', strict, 'both');
   return hits;
 }
 
@@ -196,11 +230,10 @@ export function gateOneFile(relativePath: string, text: string, needles: Needles
   if (!scope.some(pattern => pattern.test(relativePath))) return [];
   const parsed = parseDocument(relativePath, text);
   if (!parsed.ok) return mode === 'converted' ? [`${relativePath}: unreadable, so it cannot be proven clean`] : [];
-  const fields = gatedFields(
-    parsed.value,
-    needles,
-    mode === 'raw' && relativePath.startsWith('state/') ? { skipTop: RAW_REWRITTEN, harnessOnly: RAW_FOLDER } : {},
-  );
+  const fields = gatedFields(parsed.value, needles, {
+    ...(mode === 'raw' && relativePath.startsWith('state/') ? { skipTop: RAW_REWRITTEN, harnessOnly: RAW_FOLDER } : {}),
+    strict: STRICT_FOLDERS.test(relativePath),
+  });
   return fields.map(field => `${relativePath}: ${field}`);
 }
 

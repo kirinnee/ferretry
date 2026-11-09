@@ -32,6 +32,11 @@ export interface ConvertOptions {
    * inside its `-worktrees` sibling, is written with the preview's own empty `workspace` folder instead.
    */
   readonly previewV4Home?: string;
+  /**
+   * With `preview`: the environment every preview ferret's shells get (the harness settings item `fy-preview`), so a
+   * login shell finds the preview's `fy`. The preview driver owns it (`src/v5/preview-env.ts`).
+   */
+  readonly previewShellEnv?: Readonly<Record<string, string>>;
 }
 
 export type ConvertResult =
@@ -51,7 +56,11 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     v5: v5Writer(options.to, { dryRun: options.dryRun }),
     dryRun: options.dryRun,
     ...(options.preview === true
-      ? { preview: true, ...(options.previewV4Home === undefined ? {} : { previewV4Home: options.previewV4Home }) }
+      ? {
+          preview: true,
+          ...(options.previewV4Home === undefined ? {} : { previewV4Home: options.previewV4Home }),
+          ...(options.previewShellEnv === undefined ? {} : { previewShellEnv: options.previewShellEnv }),
+        }
       : {}),
     ...(options.host === undefined ? {} : { host: options.host }),
   };

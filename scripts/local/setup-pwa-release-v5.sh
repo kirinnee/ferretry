@@ -41,7 +41,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
   --dry-run) dry_run=1 && shift ;;
   --force) force=1 && shift ;;
-  --repo) repo="${2:-}" && shift 2 ;;
+  --repo)
+    [[ $# -ge 2 ]] || { echo "❌ --repo needs a value (owner/name)" >&2 && exit 64; }
+    repo="$2" && shift 2
+    ;;
   *) echo "❌ usage: setup-pwa-release-v5.sh [--dry-run] [--repo <owner/name>] [--force]" >&2 && exit 64 ;;
   esac
 done

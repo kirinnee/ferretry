@@ -4,7 +4,7 @@
  * read. The v4 files that change on their own while v4 runs are named as volatile and are not hashed.
  */
 import { createHash } from 'node:crypto';
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 
@@ -137,6 +137,15 @@ async function identityLine(path: string): Promise<string> {
   return info === undefined ? 'absent' : `ino=${info.ino} mode=${(info.mode & 0o7777).toString(8)}`;
 }
 
+/** SHA-256 of a regular file, or `absent`; only ever called on a claim (lock) file, never a credential. */
+async function contentHash(path: string): Promise<string> {
+  const info = await lstat(path).catch(() => undefined);
+  if (info === undefined) return 'absent';
+  if (!info.isFile()) return 'not-a-file';
+  const bytes = await readFile(path).catch(() => undefined);
+  return bytes === undefined ? 'unreadable' : sha256(bytes);
+}
+
 async function statLine(path: string): Promise<string> {
   const info = await lstat(path).catch(() => undefined);
   return info === undefined
@@ -166,7 +175,9 @@ export async function snapshot(home: string, host?: string | HostFacts): Promise
   const onHost: Record<string, string> = {};
   if (facts !== undefined) {
     for (const path of HOST_PATHS) onHost[path] = await identityLine(join(facts.userHome, path));
-    for (const [name, path] of Object.entries(claimPaths(home, facts))) onHost[name] = await identityLine(path);
+    // A claim file is a lock, not a credential: its content hash is kept too, so a claim that existed and was reused still shows.
+    for (const [name, path] of Object.entries(claimPaths(home, facts)))
+      onHost[name] = `${await identityLine(path)} hash=${await contentHash(path)}`;
   }
   return { hashes, stats, identities, live, host: onHost };
 }
@@ -191,8 +202,16 @@ export function compare(before: Snapshot, after: Snapshot): Verdict {
   return { unchanged: changed.length === 0, changed, v4Wrote: differs(before.live, after.live) };
 }
 
-/** The before-snapshot `prepare` keeps beside the preview home's marker, so `preview.sh proof` can compare later. */
-export const PROOF_FILE = '.fy-preview-proof.json';
+/**
+ * Where `prepare` keeps the before-snapshot: `~/.ferretry-v5-proof/` (0700), OUTSIDE the preview home (its ferrets run
+ * as the same user and could rewrite a proof kept there) and outside every v4 path. One file per preview home, named
+ * by a hash of the marked home's resolved path, so the proof belongs to that marker and no other. `clean` removes it.
+ */
+export const PROOF_FOLDER = '.ferretry-v5-proof';
+
+/** The proof file for a preview home (a resolved path) of the user whose home directory is `userHome`. */
+export const proofPathFor = (userHome: string, target: string): string =>
+  join(userHome, PROOF_FOLDER, `${createHash('sha256').update(target).digest('hex').slice(0, 24)}.json`);
 
 const Lines = z.record(z.string(), z.string());
 const SnapshotSchema = z.strictObject({
@@ -209,9 +228,33 @@ export function parseSnapshot(text: string): Snapshot {
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new Error(`${PROOF_FILE} is not readable; run prepare again after clean`);
+    throw new Error(`the proof file is not readable; run prepare again after clean`);
   }
   const parsed = SnapshotSchema.safeParse(raw);
-  if (!parsed.success) throw new Error(`${PROOF_FILE} is not a before-snapshot; run prepare again after clean`);
+  if (!parsed.success) throw new Error(`the proof file is not a before-snapshot; run prepare again after clean`);
   return parsed.data;
+}
+
+/**
+ * Writes the before-snapshot (0600) into the 0700 proof folder. Refuses a proof folder that is a link or lies inside
+ * v4's home or the preview home: the proof must sit where neither v4 nor a preview ferret's own tree reaches.
+ */
+export async function writeProof(userHome: string, target: string, v4Home: string, before: Snapshot): Promise<string> {
+  const folder = join(userHome, PROOF_FOLDER);
+  for (const guarded of [v4Home, `${v4Home}-worktrees`, target])
+    if (folder === guarded || folder.startsWith(`${guarded}/`))
+      throw new Error(`${folder} must not be inside ${guarded}; the proof is kept outside both`);
+  const existing = await lstat(folder).catch(() => undefined);
+  if (existing !== undefined && !existing.isDirectory()) throw new Error(`${folder} is not a folder; refused`);
+  await mkdir(folder, { recursive: true, mode: 0o700 });
+  await chmod(folder, 0o700);
+  const path = proofPathFor(userHome, target);
+  await writeFile(path, `${JSON.stringify(before)}\n`, { mode: 0o600 });
+  return path;
+}
+
+/** Removes this preview home's proof file, and the proof folder when nothing else is in it. */
+export async function removeProof(userHome: string, target: string): Promise<void> {
+  await rm(proofPathFor(userHome, target), { force: true });
+  await rmdir(join(userHome, PROOF_FOLDER)).catch(() => undefined);
 }

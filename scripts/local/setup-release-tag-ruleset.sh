@@ -13,11 +13,12 @@ set -euo pipefail
 #
 # WHAT THIS RULESET IS, HONESTLY. The ruleset refuses Write-role collaborators only. On this repository every agent
 # pushes as the owner (Admin), and Admin is the bypass actor the release token needs, so the ruleset does NOT stop an
-# agent's `v*` tag: an agent with the owner's credential can still push one. What stops a 5.0 tag from publishing is
+# agent's `v*` tag: an agent with the owner's credential can still push one. What stops a tag from publishing is
 # `cd.yaml`'s main-only job: the tagged commit must be on main, and every publishing job and the Casks commit depend on
 # it (scripts/validate/release-guards.sh holds that). Caveat: a tag runs the workflow file AT THE TAGGED COMMIT, so the
 # job only covers commits that already carry it. Declared gap: "an agent with the owner's credential can still push a v*
-# tag; it cannot publish from a 5.0 commit".
+# tag; it cannot publish from a 5.0 commit made after this guard lands. Any commit made before it (all current 5.0
+# history) can still publish if tagged."
 #
 # WHAT IT DOES. Creating, moving or deleting a tag matching `refs/tags/v*` is refused to everyone EXCEPT the bypass
 # actors: by default the repository role Admin, which is the actor behind `RELEASE_TOKEN` when that token is a
@@ -76,7 +77,7 @@ if [[ ${dry_run} -eq 1 ]]; then
   echo "📝 dry run: nothing below is executed"
   echo "📝 repository: ${repo}"
   echo "📝 bypass: the repository role '${role}'${app_id:+ and the GitHub App ${app_id}} can create, move or delete a v* tag; Write-role collaborators are refused"
-  echo "📝 NOT a guard against an agent that pushes with the owner's (Admin) credential: what stops a 5.0 tag from publishing is cd.yaml's main-only job"
+  echo "📝 NOT a guard against an agent that pushes with the owner's (Admin) credential: what stops a tag from publishing is cd.yaml's main-only job (only for commits made after it landed)"
   echo "   [dry-run] after the write: gh api repos/${repo}/rulesets/<id>  (read it back and print the bypass actors by name)"
   echo "   [dry-run] gh api repos/${repo}/rulesets  (find a ruleset named ${name})"
   echo "   [dry-run] gh api --method POST|PUT repos/${repo}/rulesets[/<id>] --input - <<< '${ruleset}'"
@@ -100,4 +101,4 @@ back="$(gh api "repos/${repo}/rulesets/${ruleset_id}")"
 echo "📝 bypass actors on the ruleset ${name} (${ruleset_id}), as GitHub holds them:"
 jq -r '.bypass_actors[] | "   - \(.actor_type) \(.actor_id) (\(if .actor_type == "RepositoryRole" then ({"5":"Admin","2":"Maintain","4":"Write","1":"Read","3":"Triage"}[(.actor_id | tostring)] // "unknown role") else "see the repository settings" end)), bypass_mode \(.bypass_mode)"' <<<"${back}"
 echo "✅ ruleset ${name} applied: Write-role collaborators can no longer push a v* tag."
-echo "⚠️  an agent using the owner's (Admin) credential still can; it cannot publish from a 5.0 commit, because cd.yaml's main-only job needs the tagged commit on main."
+echo "⚠️  an agent using the owner's (Admin) credential still can. cd.yaml's main-only job needs the tagged commit on main, so it cannot publish from a 5.0 commit made after this guard lands. Any commit made before it (all current 5.0 history) can still publish if tagged."

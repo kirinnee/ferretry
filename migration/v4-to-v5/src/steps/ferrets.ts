@@ -116,7 +116,7 @@ export const ferretsStep: Step = {
           harness: config.harness === 'claude' ? 'claude-code' : 'codex',
           runner: 'tmux',
           runtime,
-          folder: previewFolder(ctx, config.cwd),
+          folder: previewFolder(ctx, config.cwd, ledgers.worktreeFolders),
           state:
             stopped || preview
               ? 'stopped'

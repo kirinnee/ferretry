@@ -200,3 +200,27 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(result.err).toContain('sign must use pwa-release-v5');
   });
 });
+
+describe('the honest wording about a 5.0 commit that can publish', () => {
+  const honest =
+    'it cannot publish from a 5.0 commit made after this guard lands. Any commit made before it (all current 5.0 history) can still publish if tagged.';
+
+  test('the gate says an older 5.0 commit can still publish if tagged', () => {
+    const { out } = gate(checkout());
+    expect(out).toContain('can still publish if tagged');
+  });
+
+  test('the ruleset script says the whole honest sentence in its header and its warning', () => {
+    const text = readFileSync(join(repository, 'scripts/local/setup-release-tag-ruleset.sh'), 'utf8');
+    const flat = text.replace(/\n# /gu, ' ');
+    expect(flat.split(honest).length - 1).toBeGreaterThanOrEqual(2);
+  });
+
+  test('no script claims a 5.0 commit cannot publish without the made-after qualifier', () => {
+    for (const file of ['scripts/local/setup-release-tag-ruleset.sh', 'scripts/validate/release-guards.sh']) {
+      const text = readFileSync(join(repository, file), 'utf8').replace(/\n#\s*/gu, ' ');
+      for (const match of text.matchAll(/cannot publish from a 5\.0 commit(?! made after this guard lands)/gu))
+        throw new Error(`${file}: unqualified claim at ${match.index}`);
+    }
+  });
+});

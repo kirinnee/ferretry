@@ -22,7 +22,7 @@ import { cleanPreview, dryRun, prepare, proofNow, shimText, stagingFor, wrapperT
 import { gateFiles } from '../../preview/gate.ts';
 import { guardTarget, hasMarker, PREVIEW_MARKER } from '../../preview/paths.ts';
 import { decide, PREVIEW, SKIPPED_STEPS, stepPlan } from '../../preview/plan.ts';
-import { claimPaths, compare, PROOF_FILE, snapshot } from '../../preview/proof.ts';
+import { claimPaths, compare, PROOF_FOLDER, proofPathFor, snapshot } from '../../preview/proof.ts';
 import { stage, walk } from '../../preview/stage.ts';
 import { stopPreview } from '../../preview/stop.ts';
 
@@ -394,9 +394,11 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
 
   test('MAJOR-3 free text that names a v4 path does not refuse the home, and is not redacted', async () => {
     await liveFerretWithV4Paths();
-    await fixtureOf.session('talk1', { prompt: `read ${v4}/fleet/notes.md and /home/example/.claude/settings.json` });
+    await fixtureOf.session('talk1', {
+      prompt: `read ${v4}/fleet/notes.md and ${join(root, 'home')}/.claude/settings.json`,
+    });
     const target = fixtureOf.to;
-    const done = await prepare({ v4Home: v4, target, lock, now, home: '/home/example' });
+    const done = await prepare({ v4Home: v4, target, lock, now, home: join(root, 'home') });
     expect(done.gate).toEqual([]);
     expect(done.report?.complete).toBe(true);
     const config = JSON.parse(await readFile(join(target, 'state/ferrets/talk1/config.json'), 'utf8'));
@@ -472,8 +474,8 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
     expect(text).toContain('config/runtimes/r.yaml: command');
     expect(text).not.toContain(SENTINEL);
     expect(text).toContain('KNOWN GAPS');
-    expect(text).toContain('No resource limits in the preview');
-    expect(text).toContain('RESOURCE LIMITS: none in the preview');
+    expect(text).toContain('limits.yaml is NOT read for launches');
+    expect(text).toContain('RESOURCE LIMITS: limits.yaml is NOT read');
   });
 
   test('MAJOR-2 the runtimes limits config says enabled: false, whatever v4 said', async () => {
@@ -938,7 +940,9 @@ describe('the proof after a start and a stop (m4)', () => {
       home,
     });
     expect(done.report?.complete).toBe(true);
-    const saved = await readFile(join(target, PROOF_FILE), 'utf8');
+    const saved = await readFile(proofPathFor(home, await realpath(target)), 'utf8');
+    expect(proofPathFor(home, await realpath(target)).startsWith(join(home, PROOF_FOLDER))).toBe(true);
+    expect(await readdir(target)).not.toContain('proof.json');
     expect(saved).not.toContain(SENTINEL);
     expect((await proofNow(v4, target, home)).unchanged).toBe(true);
     await put('config/machine.yaml', 'timeZone: Asia/Tokyo\n');

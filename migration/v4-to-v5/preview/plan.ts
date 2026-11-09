@@ -19,6 +19,8 @@ export const PREVIEW = {
   appOrigin: 'https://ferretry-v5.pages.dev',
   /** The daemon's terminal socket in 5.0 is `<home>/state/terminals/tmux.sock`: a separate home is a separate socket. */
   tmuxSocket: 'state/terminals/tmux.sock',
+  /** The private folder the daemon's XDG_RUNTIME_DIR names, so no user systemd manager is reachable (relative to the home). */
+  xdgRunFolder: 'xdg-run',
 } as const;
 
 // ─── what may be copied ─────────────────────────────────────────────────────────────────────────────────────────
@@ -268,16 +270,19 @@ export function stepPlan(steps: readonly Step[] = STEPS): StepPlan {
  * `prepare`. A gap is a thing the owner must know, not a promise that it is handled.
  */
 export const GAPS: readonly string[] = [
-  "The preview's ferrets can read the preview's own private files until the fence unit lands.",
+  "The preview's ferrets run as you and can read and change ~/.ferretry; nothing fences them (the fence unit has not landed). This includes the preview's own private files.",
   'Onboarding\'s "import from this machine", and adding a login with `store: host`, would use YOUR real sign-in (the one under your home folder). Do neither in the preview; add logins fresh.',
-  "No resource limits in the preview: limits.yaml says `enabled: false`, so no preview ferret is placed in a systemd slice. If it were on, the preview would reconfigure v4's live `ferretry_fleet.slice`, which has the same name.",
-  "Ferrets whose folder was inside v4's home or v4's worktree folder lost their folder: they point at an empty `workspace` folder in the preview home, so a resumed one never runs in a live v4 checkout. Ferrets in any other folder keep that folder and CAN change real files there when you resume them.",
+  "limits.yaml is not read for launches: Ferrets offers no effectiveLimits, so Terminals launches with the defaults whatever limits.yaml says (v4 honoured it). What keeps the preview off v4's systemd slices is NOT that file: the preview daemon starts with no reachable user systemd manager (XDG_RUNTIME_DIR is a private folder in the preview home, DBUS_SESSION_BUS_ADDRESS is dropped), so every launch runs directly, with no slice, scope or `systemctl set-property`. `preview.sh start` refuses to start if it can still reach your manager. Do not start the preview daemon any other way, and do not turn limits on in the preview: a daemon that reached your systemd would reset v4's `ferretry_fleet.slice` and per-ferret slices to the 5.0 defaults.",
+  "Ferrets whose folder was inside v4's home or v4's worktree folder, inside a worktree v4's ledger lists, or under any `.worktrees` folder lost their folder: they point at an empty `workspace` folder in the preview home, so a resumed one never runs in a live v4 checkout. A preview ferret in a primary checkout shares that checkout with v4's agents: it keeps its folder and CAN change real files there when you resume it.",
   'Every ferret is stopped and nothing resumes by itself. Starting one in the preview starts a new agent; it does not continue the v4 conversation.',
-  "An agent with your GitHub credential can still push a `v*` tag; it cannot publish from a 5.0 commit. What stops a 5.0 tag from publishing is cd.yaml's main-only job (the tagged commit must be on main). The tag ruleset refuses Write-role collaborators only; every agent here pushes as you (Admin), so it does not stop an agent's tag.",
+  "An agent with your GitHub credential can still push a `v*` tag. What stops a tag from publishing is cd.yaml's main-only job (the tagged commit must be on main), and it cannot publish from a 5.0 commit made after this guard lands. Any commit made before it (all current 5.0 history) can still publish if tagged. The tag ruleset refuses Write-role collaborators only; every agent here pushes as you (Admin), so it does not stop an agent's tag.",
   'The preview signing key is only as safe as push access to rebuild/5.0: whoever can push that branch can change what the v5 app signs.',
   "`fy5` pins the preview address, so the preview CLI never talks to v4. A tool started OUTSIDE `fy5` (a bare `fy` from your normal shell) is v4's, and is not stopped by anything here.",
+  "A login shell finds v4's `fy` first on this box (/etc/profile.d/nix.sh puts the nix profile ahead of the preview's `bin`). Preview Claude ferrets get the guard `__ETC_PROFILE_NIX_SOURCED=1` plus FY_HOME, FY_PORT and FY_URL through a harness settings item (`config/claude-code/settings/fy-preview.yaml`), and `preview.sh start` refuses to start unless `bash -lc` and `zsh -lic` with that environment find the preview's `fy`. Codex ferrets and the web and agent terminals cannot carry it (5.0's Codex settings items are not applied, and its terminals config has no environment): in a preview terminal you open yourself, `fy` may be v4's: type `~/.ferretry-v5/bin/fy` or use `fy5`.",
   'Harness updates started from the preview (Claude Code or Codex "update") run npm or the native updater on YOUR installed tools. They only run when you ask for them.',
-  "The preview daemon asks the user systemd manager one read-only question when it starts (`systemctl --user show-environment`) and runs an `ionice` probe. It changes nothing of v4's.",
+  'The preview daemon asks the user systemd manager one read-only question when it starts (`systemctl --user show-environment`) and runs an `ionice` probe. In the preview the question is answered "no manager" by design (see the limits line). It changes nothing of v4\'s.',
   "tmux: the preview uses its own socket under its home (<home>/state/terminals/tmux.sock), so it is a different tmux server from v4's.",
-  "The lifecycle claim files beside v4's service unit are only written by a lifecycle verb (stop, restart, install, uninstall, reset, update). `fy5` refuses those; `preview.sh proof` checks that none appeared.",
+  "The lifecycle claim files beside v4's service unit are only written by a lifecycle verb (stop, restart, install, uninstall, reset, update). `fy5` refuses those; `preview.sh proof` checks that none appeared, and compares a content hash of each claim file that existed (they are locks, not credentials).",
+  'Names the preview shares with v4 but only reads: /etc/ferretry/loopback-firewall.conf, /run/ferretry/loopback-firewall.json, and the `ferretry_voice.slice` read.',
+  "5.0 does not read `browserPorts`, so the preview's browser ports are random. That is harmless; it is only noted so nobody chases it.",
 ];

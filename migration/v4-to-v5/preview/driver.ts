@@ -10,10 +10,21 @@ import { convert } from '../src/convert.ts';
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
+import { previewShellEnv } from '../src/v5/preview-env.ts';
 import { gateFiles, gateForecast, type Spellings } from './gate.ts';
 import { ALLOWED, GAPS, LEFT_BEHIND, PREVIEW, SESSION_FILES, stepPlan } from './plan.ts';
 import { guardTarget, hasMarker, PREVIEW_MARKER, PREVIEW_MARKER_TEXT } from './paths.ts';
-import { compare, parseSnapshot, PROOF_FILE, snapshot, VOLATILE, type HostFacts, type Verdict } from './proof.ts';
+import {
+  compare,
+  parseSnapshot,
+  proofPathFor,
+  removeProof,
+  snapshot,
+  VOLATILE,
+  writeProof,
+  type HostFacts,
+  type Verdict,
+} from './proof.ts';
 import { stage, walk } from './stage.ts';
 
 const mib = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
@@ -72,8 +83,9 @@ export async function dryRun(
       ? 'GATE FORECAST: no file of the copy would be hit (a lower bound: the converter rewrites some ferret fields).'
       : `GATE FORECAST: ${forecast.length} field(s) the gate would hit (the home would be refused):`,
     ...forecast.map(line => `  ${line}`),
-    `FOLDERS: a ferret whose folder is inside v4's home or its worktree folder gets ${join(target, PREVIEW_WORKSPACE)} instead (it lost its folder).`,
-    "RESOURCE LIMITS: none in the preview (limits.yaml: enabled: false), so v4's systemd fleet slice is never touched.",
+    `FOLDERS: a ferret whose folder is inside v4's home or its worktree folder, inside a worktree v4's ledger lists, or under a .worktrees folder gets ${join(target, PREVIEW_WORKSPACE)} instead (it lost its folder). A ferret in a primary checkout keeps it, and shares that checkout with v4's agents.`,
+    `RESOURCE LIMITS: limits.yaml is NOT read for launches in 5.0. The preview daemon starts with XDG_RUNTIME_DIR set to ${join(target, PREVIEW.xdgRunFolder)} (private) and no DBUS_SESSION_BUS_ADDRESS, so it reaches no user systemd manager: launches run directly, with no slice, scope or set-property, and \`preview.sh start\` refuses to start if it can reach your manager.`,
+    "LOGIN SHELLS: preview Claude ferrets get __ETC_PROFILE_NIX_SOURCED=1, FY_HOME, FY_PORT and FY_URL in a harness settings item so bash -l and zsh -li find the preview's fy; `preview.sh start` refuses to start unless they do. In a preview terminal you open yourself, `fy` may be v4's: type `~/.ferretry-v5/bin/fy` or use `fy5`.",
     '',
     '',
     'KNOWN GAPS:',
@@ -144,6 +156,7 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
       steps: stepPlan().run,
       preview: true,
       previewV4Home: v4Home,
+      previewShellEnv: previewShellEnv(target, PREVIEW.port),
     });
   } finally {
     await rm(emptyHost, { recursive: true, force: true });
@@ -183,7 +196,8 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
       gate,
     };
   }
-  await writeFile(join(target, PROOF_FILE), `${JSON.stringify(before)}\n`, { mode: 0o600 });
+  // Outside the preview home (its ferrets run as you and could rewrite a proof kept there) and outside every v4 path.
+  await writeProof(home, target, v4Home, before);
   await writeFile(join(target, PREVIEW_MARKER), PREVIEW_MARKER_TEXT, { mode: 0o600 });
   return {
     report: result.report,
@@ -201,10 +215,9 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
 export async function proofNow(v4Home: string, target: string, home: string = homedir()): Promise<Verdict> {
   const guarded = guardTarget(v4Home, target, home);
   if (!hasMarker(guarded.target)) throw new Error(`${guarded.target} is not a preview home made by prepare`);
-  const saved = await readFile(join(guarded.target, PROOF_FILE), 'utf8').catch(() => {
-    throw new Error(
-      `${join(guarded.target, PROOF_FILE)} is missing: prepare did not finish, or the folder was changed`,
-    );
+  const proofPath = proofPathFor(home, guarded.target);
+  const saved = await readFile(proofPath, 'utf8').catch(() => {
+    throw new Error(`${proofPath} is missing: prepare did not finish, or the proof was removed`);
   });
   const facts: HostFacts = { userHome: home, runtimeDir: process.env.XDG_RUNTIME_DIR, uid: process.getuid?.() };
   return compare(parseSnapshot(saved), await snapshot(guarded.v4Home, facts));
@@ -219,7 +232,8 @@ export async function cleanPreview(v4Home: string, target: string, home: string 
     );
   await rm(guarded.target, { recursive: true, force: true });
   await rm(guarded.staging, { recursive: true, force: true });
-  return `removed ${guarded.target}`;
+  await removeProof(home, guarded.target);
+  return `removed ${guarded.target}, its staging copy and its proof`;
 }
 
 /** Names the wrapper passes through from the caller's environment (and `LC_*`): nothing else reaches the binary. */
@@ -279,30 +293,40 @@ export function wrapperText(home: string, v4Home: string): string {
   return [
     '#!/bin/sh',
     "# fy5: the 5.0 preview CLI. Generated; it sets the preview home, port and address, never v4's.",
+    '# shellcheck disable=SC2154 # "value" is assigned through eval below',
     'set -eu',
-    '# The verb is the first word that is not a flag, the subcommand the next.',
-    'verb=""; sub=""',
-    'for word in "$@"; do',
-    '  case "$word" in',
-    '  -*) ;;',
-    '  *)',
-    '    if [ -z "$verb" ]; then verb="$word"; else sub="$word"; break; fi',
-    '    ;;',
-    '  esac',
-    'done',
-    'case "$verb" in',
+    "# The daemon (`daemon start`, and the start check's `__daemon-probe <command>`, which runs <command> in the daemon's",
+    '# exact environment) gets NO reachable user systemd manager: XDG_RUNTIME_DIR is a private folder of the preview home and',
+    "# DBUS_SESSION_BUS_ADDRESS is dropped, so 5.0 launches directly and never reconfigures v4's systemd slices. Every other",
+    '# verb (`pair`, `status`, ...) keeps both.',
+    'daemon=0; probe=0; verb=""; sub=""',
+    'if [ "${1:-}" = "__daemon-probe" ]; then',
+    '  daemon=1; probe=1; shift',
+    'else',
+    '  # The verb is the first word that is not a flag, the subcommand the next.',
+    '  for word in "$@"; do',
+    '    case "$word" in',
+    '    -*) ;;',
+    '    *)',
+    '      if [ -z "$verb" ]; then verb="$word"; else sub="$word"; break; fi',
+    '      ;;',
+    '    esac',
+    '  done',
+    '  case "$verb" in',
     '  update)',
     '    echo "fy5 does not run update: it would swap programs and restart under v4\'s service unit." >&2',
     '    exit 64',
     '    ;;',
-    'esac',
-    'case "$verb:$sub" in',
-    `${refused})`,
-    '  echo "fy5 does not run this daemon verb: it answers for v4\'s service unit or writes claim files beside it." >&2',
-    '  echo "Use the preview script instead: preview.sh start | stop | status | clean." >&2',
-    '  exit 64',
-    '  ;;',
-    'esac',
+    '  esac',
+    '  case "$verb:$sub" in',
+    `  ${refused})`,
+    '    echo "fy5 does not run this daemon verb: it answers for v4\'s service unit or writes claim files beside it." >&2',
+    '    echo "Use the preview script instead: preview.sh start | stop | status | clean." >&2',
+    '    exit 64',
+    '    ;;',
+    '  daemon:start) daemon=1 ;;',
+    '  esac',
+    'fi',
     "# PATH: the preview's own bin first (every bare fy, fyd and fyd-browser-worker is then the preview's), and nothing",
     "# under v4's home or its worktree folder.",
     `path="${home}/bin"`,
@@ -318,13 +342,19 @@ export function wrapperText(home: string, v4Home: string): string {
     'PATH="$path"',
     '# Nothing from a v4 ferret or the surrounding shell may reach the preview: the binary runs in an EMPTY environment',
     '# that holds only the allowlist below, and the preview home, port and address. FY_*, CLAUDE_*, CODEX_* never pass.',
-    `set -- "${home}/libexec/fy" "$@"`,
+    `if [ "$probe" = 0 ]; then set -- "${home}/libexec/fy" "\$@"; fi`,
     `for name in ${ENV_ALLOWLIST.join(' ')} $(env | sed -n 's/^\\(LC_[A-Za-z0-9_]*\\)=.*/\\1/p'); do`,
+    '  case "$daemon:$name" in 1:XDG_RUNTIME_DIR|1:DBUS_SESSION_BUS_ADDRESS) continue ;; esac',
     '  if eval "[ \\"\\${$name+set}\\" = set ]"; then',
     '    eval "value=\\${$name}"',
     '    set -- "$name=$value" "$@"',
     '  fi',
     'done',
+    'if [ "$daemon" = 1 ]; then',
+    `  run="${home}/${PREVIEW.xdgRunFolder}"`,
+    '  (umask 077; mkdir -p "$run"); chmod 700 "$run"',
+    '  set -- "XDG_RUNTIME_DIR=$run" "$@"',
+    'fi',
     `exec env -i FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" FY_UPDATE_CHECK=off "$@"`,
     '',
   ].join('\n');

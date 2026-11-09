@@ -22,16 +22,21 @@ export function inside(parent: string, child: string) {
 export const PREVIEW_WORKSPACE = 'workspace';
 
 /**
- * The preview's folder for a ferret: `folder` unchanged, unless it lies inside v4's home or v4's managed worktree root
- * (its `-worktrees` sibling), where a resumed ferret would run a new agent in a live v4 checkout. Those ferrets get the
- * preview's own empty `workspace` folder, and the dry run and the gaps say they lost their folder.
+ * The preview's folder for a ferret: `folder` unchanged, unless a resumed ferret there would run a new agent in a
+ * checkout a live v4 agent works in: a folder inside v4's home or its managed worktree root (the `-worktrees` sibling),
+ * inside a worktree v4's ledger lists (`worktrees`, from the copied `state/worktrees.json`), or with a `/.worktrees/`
+ * segment (the repo-local worktrees most checkouts on this box are). Those ferrets get the preview's own empty
+ * `workspace` folder, and the dry run and the gaps say they lost their folder. A primary checkout keeps its folder.
  */
-export function previewFolder(ctx: StepContext, folder: string): string {
+export function previewFolder(ctx: StepContext, folder: string, worktrees: readonly string[] = []): string {
   const home = ctx.previewV4Home;
   if (ctx.preview !== true || home === undefined) return folder;
-  return inside(home, folder) !== undefined || inside(`${home}-worktrees`, folder) !== undefined
-    ? ctx.v5.resolve(PREVIEW_WORKSPACE)
-    : folder;
+  const shared =
+    inside(home, folder) !== undefined ||
+    inside(`${home}-worktrees`, folder) !== undefined ||
+    worktrees.some(path => inside(path, folder) !== undefined) ||
+    /(^|\/)\.worktrees(\/|$)/u.test(folder);
+  return shared ? ctx.v5.resolve(PREVIEW_WORKSPACE) : folder;
 }
 
 /** Rewrite metadata only. Never read a transcript or follow its former home links. */

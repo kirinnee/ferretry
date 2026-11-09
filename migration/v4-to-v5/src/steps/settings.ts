@@ -31,7 +31,7 @@
  * that looks like a raw secret fails the step naming the file and key; `${secret:NAME}` references are kept verbatim.
  */
 import { CODEX_CONFIG } from '@ferretry/plugin-codex/contract';
-import { CLAUDE_CODE_CONFIG } from '@ferretry/plugin-claude-code/contract';
+import { CLAUDE_CODE_CONFIG, CLAUDE_CODE_SETTINGS } from '@ferretry/plugin-claude-code/contract';
 import { INSTRUCTION_ITEMS_FOLDER, LimitsConfigFile } from '@ferretry/core-ferrets/contract';
 import { AccountsConfigSchema } from '@ferretry/plugin-accounts/contract';
 import { AGENDA_CONFIG } from '@ferretry/plugin-agenda/contract';
@@ -57,6 +57,7 @@ import {
   YAML_OPTIONS,
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
+import { PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
@@ -453,10 +454,25 @@ async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: r
   const ordered = [...listing.files].sort((a, b) => Number(a.label === machine) - Number(b.label === machine));
   for (const file of ordered) await planFile(ctx, plan, file, resolve);
   if (ctx.preview === true) {
-    // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say), and it never
-    // touches v4's systemd fleet slice: with limits off every launch is direct execution (no `systemctl set-property`).
+    // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say). `limits.yaml` is
+    // written off too, but NOTHING relies on it: 5.0 does not read that file for launches (Ferrets offers no
+    // `effectiveLimits`), so what keeps the preview off v4's systemd slices is its daemon having no reachable user
+    // systemd manager (preview/driver.ts `wrapperText`, checked by `preview.sh start`).
     forceFlag(plan, RUNTIMES_CONFIG, 'autoResume', false);
     forceFlag(plan, LimitsConfigFile, 'enabled', false);
+    if (ctx.previewShellEnv !== undefined) {
+      // Login shells re-prepend the nix profile (v4's `fy`): every preview Claude ferret's environment carries the guard.
+      const item = new Document(
+        {
+          description:
+            'The 5.0 preview: keeps login shells on the preview fy (written by the preview, not carried from v4)',
+          settings: { env: { ...ctx.previewShellEnv } },
+        },
+        YAML_OPTIONS,
+      );
+      place(plan, CLAUDE_CODE_SETTINGS, PREVIEW_SETTINGS_ITEM, 'the preview', item);
+      count(plan, 'preview shell environment (settings item)');
+    }
   }
   return { ...plan, ignored: listing.ignored };
 }
