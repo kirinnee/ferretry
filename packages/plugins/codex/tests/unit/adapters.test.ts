@@ -121,9 +121,9 @@ describe('asking the Codex binary about itself', () => {
   it('says why a version could not be read: no version printed, killed at the deadline, or a refused spawn', async () => {
     should((await probeOver(() => ({ stdout: 'nothing' })).probe.version('/opt/bin/codex')).state).equal('unreadable');
     should(
-      await probeOver(program => (program === '/opt/bin/codex' ? { exitCode: null } : {})).probe.version(
-        '/opt/bin/codex',
-      ),
+      await probeOver(program =>
+        program === '/opt/bin/codex' ? { exitCode: null, signal: 'SIGTERM' } : {},
+      ).probe.version('/opt/bin/codex'),
     ).containDeep({ state: 'unreadable', reason: 'it did not answer within 20 seconds' });
     should(
       await probeOver(program => (program === '/opt/bin/codex' ? 'throws' : {})).probe.version('/opt/bin/codex'),

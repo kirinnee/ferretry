@@ -338,7 +338,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     return { host, opener, gate };
   }
 
-  test('G27 answers the host and launches the address as one argv element, and the log keeps the host only', async () => {
+  test('R-0401 G27 answers the host and launches the address as one argv element, and the log keeps the host only', async () => {
     const { host: built, opener, gate } = await mounted();
 
     const answer = await built.request('POST', '/v1/system/open-url', {
@@ -353,7 +353,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     expect(JSON.stringify(gate.audits)).not.toContain('SECRET');
   });
 
-  test('G27 refuses credentials and a non-http(s) scheme with 400, and launches nothing', async () => {
+  test('R-0401 G27 refuses credentials and a non-http(s) scheme with 400, and launches nothing', async () => {
     const { host: built, opener } = await mounted();
 
     const credentials = await built.request('POST', '/v1/system/open-url', {
@@ -366,7 +366,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     expect(opener.launched).toEqual([]);
   });
 
-  test('G27 refuses a relayed caller with 403 and launches nothing', async () => {
+  test('R-0401 G27 refuses a relayed caller with 403 and launches nothing', async () => {
     const { host: built, opener, gate } = await mounted();
 
     const answer = await built.request('POST', '/v1/system/open-url', {
@@ -379,7 +379,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     expect(gate.audits).toEqual([]);
   });
 
-  test('G27 refuses a caller with no credential with 401 and launches nothing', async () => {
+  test('R-0401 G27 refuses a caller with no credential with 401 and launches nothing', async () => {
     const { host: built, opener } = await mounted();
 
     const answer = await built.request('POST', '/v1/system/open-url', {
@@ -403,7 +403,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     expect(opener.launched).toEqual([]);
   });
 
-  test('G27 answers 429 with a retry-after on the eleventh opening in ten seconds', async () => {
+  test('R-0401 G27 answers 429 with a retry-after on the eleventh opening in ten seconds', async () => {
     const { host: built } = await mounted();
     for (let index = 0; index < OPEN_URL_LIMIT; index += 1)
       await built.request('POST', '/v1/system/open-url', { body: { url: 'https://example.com/' } });

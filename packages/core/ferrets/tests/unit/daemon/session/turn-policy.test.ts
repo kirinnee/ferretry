@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { HarnessDialog } from '../../../../daemon/lib/protocol/session-dialog.ts';
+import { eventOfRecord } from '../../../../daemon/adapters/session/live/harness-transcript.ts';
 import {
   limitPatch,
   observeTurn,
   parseContinueAt,
+  transcriptTurnPhase,
   type TurnEvidence,
   usageLimitOf,
 } from '../../../../daemon/lib/session/peers/turn.ts';
@@ -133,6 +135,24 @@ describe('the status and quota to record beside a turn change', () => {
       now,
     );
     expect(patch).toEqual({ status: 'running', quota: undefined });
+  });
+
+  test('BG-041 a developer note alone reads no phase (so a cut window holding only it must be marked), and the mark makes one idle frame unable to end the turn', () => {
+    const note = eventOfRecord('codex', { kind: 'message', role: 'developer' });
+    const mark = eventOfRecord('codex', { kind: 'work' });
+    const idleFrame = { frame: 'f', working: false, atPrompt: true, permission: false } as never;
+    const state = { status: 'running', turn: 3 } as TurnEvidence['state'];
+
+    // The fold skips a developer or system note: alone it says nothing, so one idle frame ended the turn.
+    expect(transcriptTurnPhase([note])).toBe('unknown');
+    expect(observeTurn({ state, transcript: 'unknown', pane: idleFrame })).toEqual({
+      state: 'your-turn',
+      confirmed: true,
+    });
+    // With the mark the harnesses add for a window that holds no deciding record, the turn is at work and the lone
+    // idle frame is not confirmed: the transcript and the pane disagree, so it needs its second look.
+    expect(transcriptTurnPhase([note, mark])).toBe('working');
+    expect(observeTurn({ state, transcript: 'working', pane: idleFrame })).toMatchObject({ confirmed: false });
   });
 
   test('a limit the dialog shows limits the session and records the notice', () => {

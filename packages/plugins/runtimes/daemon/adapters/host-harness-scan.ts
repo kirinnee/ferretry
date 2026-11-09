@@ -26,7 +26,7 @@
  * A home the person moved with `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is reachable only if the caller names it (GAP(kernel): the person's shell variables are not readable by a plugin).
  */
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
-import { hostCodexHome } from '../lib/account/credentials.ts';
+import { hostCodexHome, isSignInName } from '../lib/account/credentials.ts';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import {
   type HostDocumentRead,
@@ -62,10 +62,6 @@ export interface HostHarnessScanDeps {
   readonly maxSkillFiles?: number;
 }
 
-// Logins and the harness contracts expose no sign-in filename list. These are the Claude/Codex
-// filenames also named by account/credentials.ts; refuse them in every component, before any host call.
-const SIGN_IN_FILES = new Set(['.credentials.json', 'auth.json']);
-
 const LINK_REFUSED = 'symbolic links are not readable setup paths';
 
 const DEFAULT_MAX_SKILL_FILES = 2_000;
@@ -88,11 +84,10 @@ export class HostHarnessScanner {
     const named = this.deps.claudeConfigDir?.trim() ?? '';
     const configured = named !== '' && isAbsolute(named) ? named : undefined;
     const home = configured ?? join(this.deps.userHome, '.claude');
-    const claudeJson = configured === undefined ? join(this.deps.userHome, '.claude.json') : join(home, '.claude.json');
     const [instructions, settings, mcp, skills] = await Promise.all([
       this.#read(home, join(home, 'CLAUDE.md')),
       this.#read(home, join(home, 'settings.json')),
-      this.#read(configured === undefined ? undefined : home, claudeJson),
+      configured === undefined ? this.#readUserClaudeJson() : this.#read(home, join(home, '.claude.json')),
       this.#skills('claude', home, join(home, 'skills')),
     ]);
     const login = await this.#login('claude');
@@ -202,7 +197,7 @@ export class HostHarnessScanner {
       throw new Error('the path is outside its harness home');
     }
     const components = inside === '' ? [] : inside.split(sep);
-    if ([basename(home), ...components].some(name => SIGN_IN_FILES.has(name.toLowerCase()))) {
+    if ([basename(home), ...components].some(isSignInName)) {
       throw new Error('sign-in files are not readable setup documents');
     }
     let current = home;
@@ -220,13 +215,25 @@ export class HostHarnessScanner {
 
   /**
    * One setup document. `home` is the harness home it must lie in (every component is checked, none a link, none a
-   * sign-in file); `undefined` for the ONE file beside a home (`~/.claude.json`), which the kernel serves alone.
-   * The read goes through the same root handle that checked the path, which holds the file open and proves it is the
-   * file the name reached (no path-based read can be redirected by a swapped file or ancestor).
+   * sign-in file). The read goes through the same root handle that checked the path, which holds the file open and
+   * proves it is the file the name reached (no path-based read can be redirected by a swapped file or ancestor).
    */
-  async #read(home: string | undefined, path: string): Promise<HostDocumentRead> {
+  async #read(home: string, path: string): Promise<HostDocumentRead> {
+    return await this.#document(path, () => this.#inspect(home, path));
+  }
+
+  /** The ONE file beside a home, `~/.claude.json`, which the kernel serves alone. Its path is built here, never passed in. */
+  async #readUserClaudeJson(): Promise<HostDocumentRead> {
+    return await this.#document(this.#userClaudeJson(), () => this.#inspectUserClaudeJson());
+  }
+
+  #userClaudeJson(): string {
+    return join(this.deps.userHome, '.claude.json');
+  }
+
+  async #document(path: string, inspect: () => Promise<HostEntry | undefined>): Promise<HostDocumentRead> {
     try {
-      const info = home === undefined ? await this.#inspectFile(path) : await this.#inspect(home, path);
+      const info = await inspect();
       if (info === undefined) return { kind: 'absent', source: path };
       if (info.kind !== 'file') return { kind: 'unreadable', source: path, reason: 'it is not a file' };
       if (info.size > this.deps.maxDocumentBytes) return { kind: 'too-large', source: path, bytes: info.size };
@@ -240,10 +247,12 @@ export class HostHarnessScanner {
   }
 
   /**
-   * The one file beside a home: never a link. Its name is the constant `.claude.json`, which no sign-in file is called, so
-   * no name check is made here (a name check on a constant could never fire).
+   * The one file beside a home: never a link. It takes no path: the file is `~/.claude.json`, built by
+   * `#userClaudeJson`, so the sign-in name check below holds by construction (BG-033 keeps it as the guard).
    */
-  async #inspectFile(path: string): Promise<HostEntry | undefined> {
+  async #inspectUserClaudeJson(): Promise<HostEntry | undefined> {
+    const path = this.#userClaudeJson();
+    if (isSignInName(basename(path))) throw new Error('sign-in files are not readable setup documents');
     const info = await this.deps.files.lstat(path);
     if (info?.kind === 'link') throw new Error(LINK_REFUSED);
     return info;

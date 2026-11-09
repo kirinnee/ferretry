@@ -597,8 +597,8 @@ describe('how an apply ends', () => {
     const failure = await rejection(service.apply(staged.id, OWNER));
     // C2: the documents landed before the plan failed, so the sentence says they stay written (not only the cause).
     should(failure).match({ code: 'fleet_change_failed' });
-    should((failure as Error).message).startWith('the kernel went away; the configuration ');
-    should((failure as Error).message).endWith('was written first and is NOT rolled back with the fleet');
+    should((failure as Error).message).startWith('the kernel went away; the change to the configuration ');
+    should((failure as Error).message).endWith('was made first and is NOT rolled back with the fleet');
   });
 
   it('should refuse a ferret that widens what ferrets may drive, and keep the change to try again', async () => {
@@ -715,7 +715,7 @@ describe('a change to one login', () => {
     // The login change is saved; the republish's own "nothing was changed" is about the republish and sits in its own
     // sentence, never after a "the login changed, but …" that it would contradict.
     should((failure as Error).message).match(
-      /^the login change is saved\. Republishing the runtimes was refused: nothing was changed: no id could be minted$/u,
+      /^the login change is saved\. Republishing the runtimes was refused: nothing was changed: no id could be minted\. Fix that, then apply any change to publish the runtimes again\.$/u,
     );
     should((failure as Error).message).not.match(/changed, but/u);
   });
@@ -749,4 +749,39 @@ describe('a change to one login', () => {
     should(failure).match({ code: 'fleet_change_failed' });
     should((failure as Error).message).match(/^the login change is saved\. Republishing the runtimes failed: /u);
   });
+
+  // A message with nothing but dots and blanks leaves no reason to name, so the sentence names none (never "refused: .");
+  // an empty message is the error's own name, which is a reason.
+  const REPUBLISH_REASONS: readonly (readonly [string, string])[] = [
+    ['', ': Error'],
+    ['.', ''],
+    [' ..  ', ''],
+  ];
+  for (const [said, reason] of REPUBLISH_REASONS) {
+    it(`BG-031 n3 should say the republish was refused without an empty reason when its message is ${JSON.stringify(said)}`, async () => {
+      let afterApply = false;
+      const { service, changes } = world({
+        overrides: {
+          mint: () => {
+            if (afterApply) throw new Error(said);
+            return 'an-id';
+          },
+          modelCatalogs: async () => ({ catalogs: {}, presets: [] }),
+        },
+      });
+      const staged = await service.propose(relabel);
+      const apply = changes.apply;
+      changes.apply = async id => {
+        const result = await apply(id);
+        afterApply = true;
+        return result;
+      };
+
+      const failure = await rejection(service.apply(staged.id, OWNER));
+
+      should((failure as Error).message).equal(
+        `the login change is saved. Republishing the runtimes was refused${reason}. Fix that, then apply any change to publish the runtimes again.`,
+      );
+    });
+  }
 });

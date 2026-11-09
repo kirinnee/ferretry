@@ -37,7 +37,12 @@ const halves = (seen: Seen) => [
       api: 5,
       core: false,
       kinds: [],
-      permissions: { roots: ['fleet', 'harness-home', 'downloads'], harnessFiles: ['.claude.json'], setMode: true },
+      permissions: {
+        roots: ['fleet', 'harness-home', 'downloads', 'project-files'],
+        harnessFiles: ['.claude.json'],
+        projectFiles: ['.mcp.json'],
+        setMode: true,
+      },
     }),
     {
       build: ({ kernel }) => {
@@ -107,6 +112,8 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
   const theirFleet = stranger.roots.root('agent-homes', { subfolder: 'other' });
   await theirFleet.writeText(at(theirFleet, 'f.txt'), 'x');
   const claudeJson = `${places.owner}/.claude.json`;
+  const link = { link: true } as const;
+  const project = runtimes.roots.root('project-files', { subfolder: `${places.owner}/sub` });
   return [
     ['linkTo a harness credential into fleet', await answer(() => fleet.linkTo(place, credential))],
     ['the name is now a link', { ok: await kindAt(place) }],
@@ -263,6 +270,49 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     // the folder the name gives must be the folder reached: a link on the way is refused, as for `rename`
     ['unlink through a link on the way', await answer(() => fleet.unlink(at(fleet, 'homes/alias/extra.txt')))],
     ['unlink the root itself', await answer(() => fleet.unlink(at(fleet, '')))],
+    // BG-014 m1: a link root cannot point at a project file, whatever the options (the real host's `linkTarget`)
+    [
+      'BG-014 linkTo a project file from fleet',
+      await answer(() =>
+        fleet.linkTo(at(fleet, 'homes/claude-a/proj-link'), { root: project, path: at(project, '.mcp.json') }),
+      ),
+    ],
+    [
+      'BG-014 linkTo a project file from fleet, dangling',
+      await answer(() =>
+        fleet.linkTo(at(fleet, 'homes/claude-a/proj-link'), {
+          root: project,
+          path: at(project, '.mcp.json'),
+          dangling: true,
+        }),
+      ),
+    ],
+    ['BG-014 nothing was linked', { ok: await kindAt(at(fleet, 'homes/claude-a/proj-link')) }],
+    // BG-004 (X1): `copyTree {link:true}` follows `linkTo`'s rules: INTO a link root only, never FROM an owner's root
+    ['a folder to copy from downloads', await answer(() => downloads.makeDirectory(at(downloads, 'pack')))],
+    ['its file', await answer(() => downloads.writeText(at(downloads, 'pack/SKILL.md'), '# pack'))],
+    [
+      'BG-004 copyTree link into downloads',
+      await answer(() => downloads.copyTree(downloads, at(downloads, 'pack'), at(downloads, 'l'), link)),
+    ],
+    [
+      'BG-004 copyTree link into a read-only root',
+      await answer(() => harness.copyTree(downloads, at(downloads, 'pack'), at(harness, 'l'), link)),
+    ],
+    [
+      'BG-004 copyTree link from an owner root into fleet',
+      await answer(() => fleet.copyTree(harness, at(harness, ''), at(fleet, 'l-harness'), link)),
+    ],
+    ['BG-004 nothing was planted', { ok: await kindAt(at(fleet, 'l-harness')) }],
+    [
+      'BG-004 copyTree link from downloads into fleet',
+      await answer(() => fleet.copyTree(downloads, at(downloads, 'pack'), at(fleet, 'l-pack'), link)),
+    ],
+    [
+      'BG-004 copyTree copy from downloads into fleet',
+      await answer(() => fleet.copyTree(downloads, at(downloads, 'pack'), at(fleet, 'c-pack'))),
+    ],
+    ['BG-004 the name is a folder', { ok: await kindAt(at(fleet, 'c-pack')) }],
     ['harnessFile read', await answer(() => runtimes.roots.harnessFile(claudeJson).readText())],
     ['harnessFile stat kind', await answer(async () => (await runtimes.roots.harnessFile(claudeJson).stat())?.kind)],
     [
@@ -331,7 +381,9 @@ async function onRealHost() {
 test('roots part 2 parity: linkTo, setMode and harnessFile answer every case alike on both hosts', async () => {
   const testing = await onTestingHost();
   const real = await onRealHost();
-  expect(testing).toEqual(real);
+  // titles first, then answers by title, so a difference names its case
+  expect(testing.map(([title]) => title)).toEqual(real.map(([title]) => title));
+  expect(Object.fromEntries(testing)).toEqual(Object.fromEntries(real));
   // and what both answer is the rule (so parity is not two hosts agreeing on a wrong answer)
   const byCase = Object.fromEntries(real);
   expect(byCase['linkTo a harness credential into fleet']).toEqual({ ok: null });
@@ -370,6 +422,16 @@ test('roots part 2 parity: linkTo, setMode and harnessFile answer every case ali
   expect(byCase['rename a folder holding only a link']).toEqual({ ok: null });
   expect(byCase['the only link is at the new place']).toEqual({ ok: 'symlink' });
   expect(byCase['the only link is gone from the old place']).toEqual({ ok: null });
+  expect(byCase['BG-014 linkTo a project file from fleet']).toEqual({ refused: 'not_declared' });
+  expect(byCase['BG-014 linkTo a project file from fleet, dangling']).toEqual({ refused: 'not_declared' });
+  expect(byCase['BG-014 nothing was linked']).toEqual({ ok: null });
+  expect(byCase['BG-004 copyTree link into downloads']).toEqual({ refused: 'read_only' });
+  expect(byCase['BG-004 copyTree link into a read-only root']).toEqual({ refused: 'read_only' });
+  expect(byCase['BG-004 copyTree link from an owner root into fleet']).toEqual({ refused: 'not_declared' });
+  expect(byCase['BG-004 nothing was planted']).toEqual({ ok: null });
+  expect(byCase['BG-004 copyTree link from downloads into fleet']).toEqual({ ok: null });
+  expect(byCase['BG-004 copyTree copy from downloads into fleet']).toEqual({ ok: null });
+  expect(byCase['BG-004 the name is a folder']).toEqual({ ok: 'directory' });
   expect(byCase['harnessFile read']).toEqual({ ok: CLAUDE_JSON });
   expect(byCase['harnessFile stat kind']).toEqual({ ok: 'file' });
   expect(byCase['harnessFile a missing declared file']).toEqual({ ok: null });

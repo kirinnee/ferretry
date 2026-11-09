@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Instant } from '@ferretry/std';
 import { CodexTranscriptParser } from '../../daemon/lib/transcript/codex.ts';
-import { tailRecordOf } from '../../daemon/lib/transcript/tail-record.ts';
+import { markCutWindow, tailRecordOf } from '../../daemon/lib/transcript/tail-record.ts';
 
 const AT = '2026-11-08T10:00:00.000Z';
 const parser = new CodexTranscriptParser();
@@ -13,6 +13,44 @@ const records = (...lines: unknown[]) =>
       return record === undefined ? [] : [record];
     }),
   );
+
+describe('markCutWindow', () => {
+  const work = { kind: 'work' } as const;
+  const usage = { kind: 'usage', inputTokens: 1 } as const;
+
+  test('BG-041 a cut window with no user or agent message, work or turn boundary read whole is marked as at work', () => {
+    expect(markCutWindow([], true)).toEqual([work]);
+    expect(markCutWindow([usage], true)).toEqual([usage, work]);
+    expect(markCutWindow([{ kind: 'compaction' }, { kind: 'error' }], true)).toEqual([
+      { kind: 'compaction' },
+      { kind: 'error' },
+      work,
+    ]);
+    expect(markCutWindow([], false)).toEqual([]);
+    expect(markCutWindow([usage], false)).toEqual([usage]);
+  });
+
+  test('BG-041 a developer or system note after the cut record is marked too: the fold skips it, so it decides nothing', () => {
+    for (const role of ['developer', 'system'] as const) {
+      const note = { kind: 'message', role } as const;
+      expect(markCutWindow([note], true)).toEqual([note, work]);
+      expect(markCutWindow([usage, note], true)).toEqual([usage, note, work]);
+    }
+  });
+
+  test('BG-041 a user or agent message, work or a turn boundary read whole decides the turn itself, so a finished turn finishes', () => {
+    const assistant = { kind: 'message', role: 'assistant' } as const;
+    const user = { kind: 'message', role: 'user' } as const;
+    const completed = { kind: 'turn', state: 'completed' } as const;
+    expect(markCutWindow([assistant], true)).toEqual([assistant]);
+    expect(markCutWindow([user], true)).toEqual([user]);
+    expect(markCutWindow([work], true)).toEqual([work]);
+    expect(markCutWindow([completed, usage], true)).toEqual([completed, usage]);
+    // A final message after a developer note still ends it: nothing is added.
+    const note = { kind: 'message', role: 'developer' } as const;
+    expect(markCutWindow([note, assistant, completed], true)).toEqual([note, assistant, completed]);
+  });
+});
 
 describe('tailRecordOf', () => {
   test('G161 a vault value that crosses the 200-character cut is masked whole BEFORE the notice is cut, so no prefix survives', () => {

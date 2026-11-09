@@ -25,8 +25,9 @@
  * - any `YAML.parse`-family member (`parse`, `parseDocument`, `load`, …) of a name that holds a YAML module;
  * - any import, re-export, dynamic import or `require` of a module whose bare name contains `yaml` (`yaml`,
  *   `js-yaml`, `@std/yaml`, `yamljs`, …), type-only imports included: they are the first step;
- * - the same through every plain loader: `require`, `import.meta.require` (Bun), `module.require` (the object in
- *   brackets or not), `createRequire(import.meta.url)` (under any name it is imported, destructured out of a dynamic
+ * - the same through every plain loader: `require`, `import.meta.require` (Bun), `module.require` and
+ *   `process.mainModule.require` (the object in brackets or not, the name spelled `'req' + 'uire'` or as a member the
+ *   walk cannot read), `createRequire(import.meta.url)` (under any name it is imported, destructured out of a dynamic
  *   import or given) and a name bound to any of them — or assigned one later (`let require; require = createRequire(…)`);
  * - a loader handed on as a VALUE (`require.call(null, p)`, `.apply`, `.bind`, `paths.map(require)`, an argument): the
  *   call that loads is made where this walk does not follow. A loader is only ever called, named, or asked for a
@@ -58,7 +59,8 @@
  * followed), a YAML library whose name has no `yaml` in it, and a ledgered parser reached through a function of an
  * allowed caller that itself is exported (the caller's ledger line is the review; its own importers are not followed),
  * `createRequire` itself handed on as a value (`[u].map(cr)`), and a loader made through a sequence callee
- * (`(0, createRequire)(import.meta.url)`).
+ * (`(0, createRequire)(import.meta.url)`), and the loader reached through another object (`module.constructor._load`,
+ * `require('node:module')._load`, `process.binding`).
  *
  * Usage: `bun scripts/validate/no-raw-yaml.ts <repo root>`; exits 0 clean, 1 a violation, 2 a broken gate.
  */
@@ -163,9 +165,17 @@ const TRANSPARENT: ReadonlySet<string> = new Set([
   'AwaitExpression',
 ]);
 
-/** The name a key or member spells STATICALLY — an identifier, a string, a template with no holes — else none. */
+/**
+ * The name a key or member spells STATICALLY — an identifier, a string, a template with no holes, or such strings
+ * joined with `+` (`'req' + 'uire'`) — else none.
+ */
 function staticName(node: unknown): string | undefined {
   if (!isNode(node)) return undefined;
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
+    const left = isNode(node.left) && node.left.type === 'Identifier' ? undefined : staticName(node.left);
+    const right = isNode(node.right) && node.right.type === 'Identifier' ? undefined : staticName(node.right);
+    return left === undefined || right === undefined ? undefined : left + right;
+  }
   if (node.type === 'Identifier' && typeof node.name === 'string') return node.name;
   if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
   if (node.type === 'TemplateLiteral' && Array.isArray(node.expressions) && node.expressions.length === 0) {
@@ -354,6 +364,16 @@ export function scanFile(path: string, text: string): FileFacts {
     while (isNode(at) && TRANSPARENT.has(at.type) && at.type !== 'AwaitExpression') at = at.expression;
     return at;
   };
+  /** `process.mainModule`, the entry module's `module` object: it has a `require` too. */
+  const isMainModule = (node: unknown): boolean => {
+    const at = unwrap(node);
+    return (
+      isNode(at) &&
+      at.type === 'MemberExpression' &&
+      memberName(at) === 'mainModule' &&
+      staticName(unwrap(at.object)) === 'process'
+    );
+  };
   const isCreateRequire = (callee: unknown): boolean => {
     const at = unwrap(callee);
     if (!isNode(at)) return false;
@@ -365,11 +385,14 @@ export function scanFile(path: string, text: string): FileFacts {
     const at = unwrap(callee);
     if (!isNode(at)) return false;
     if (at.type === 'Identifier') return requireNames.has(at.name as string);
-    if (at.type === 'MemberExpression')
-      // `import.meta.require(…)` (Bun) and `module.require(…)`.
-      return (
-        memberName(at) === 'require' && (isImportMeta(unwrap(at.object)) || staticName(unwrap(at.object)) === 'module')
-      );
+    if (at.type === 'MemberExpression') {
+      // `import.meta.require(…)` (Bun), `module.require(…)` and `process.mainModule.require(…)`. A member of one of
+      // them whose name cannot be read (`module[k]`) is taken for `require`: the walk cannot say it is not.
+      const name = memberName(at);
+      if (name !== undefined && name !== 'require') return false;
+      const owner = unwrap(at.object);
+      return isImportMeta(owner) || staticName(owner) === 'module' || isMainModule(owner);
+    }
     // `createRequire(import.meta.url)(…)`.
     return at.type === 'CallExpression' && isCreateRequire(at.callee);
   };

@@ -1,11 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { DescriptorRow } from '../../packages/core/kernel/testing/parity.ts';
 import { movedFindings, movedPairs, readChanges } from './descriptor-parity.ts';
 import { junitCases } from './guarantees.ts';
-import { FROZEN_IDS, type LedgerRow, type TickContext, readKnown, routeWorld, tickFindings } from './parity-ticks.ts';
+import {
+  FROZEN_IDS,
+  type LedgerRow,
+  type TickContext,
+  liveTitles,
+  readKnown,
+  routeWorld,
+  statusProofFindings,
+  tickFindings,
+} from './parity-ticks.ts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -58,9 +67,21 @@ describe('parity-ticks: the test that names a row', () => {
     expect(run([row({})], ctx(root))).toEqual([]);
   });
 
-  test('an id in an enclosing describe title passes', () => {
-    const root = fixture({ [TEST]: "describe('F-0019 group', () => { test('does it', () => {}) })" });
-    expect(run([row({})], ctx(root))).toEqual([]);
+  test('an id only in a describe title fails: a describe runs nothing, so no case can turn red for the row', () => {
+    for (const source of [
+      "describe('F-0019 group', () => { test('does it', () => {}) })",
+      "describe.each([1])('F-0019 group', () => { test('does it', () => {}) })",
+    ]) {
+      const root = fixture({ [TEST]: source });
+      expect(run([row({})], ctx(root))[0], source).toContain('no live test() or it() title');
+    }
+  });
+
+  test('an id in a case title passes inside a describe, and moving it up to the describe makes the row fail', () => {
+    const inCase = fixture({ [TEST]: "describe('group', () => { test('F-0019 does it', () => {}) })" });
+    expect(run([row({})], ctx(inCase))).toEqual([]);
+    const moved = fixture({ [TEST]: "describe('F-0019 group', () => { test('does it', () => {}) })" });
+    expect(run([row({})], ctx(moved))[0]).toContain('names F-0019');
   });
 
   test('an id only in a comment fails', () => {
@@ -240,6 +261,58 @@ describe('parity-ticks: a route also needs descriptor-parity', () => {
         ctx(named2, () => routeWorld(noStoreLost, next, recorded)),
       )[0],
     ).toContain('not a tightening');
+  });
+});
+
+describe('parity-ticks: a status that says "proved by test X" names a live test', () => {
+  const STATUS = 'removed by design (§9.1: the converter renders it, proved by its tests J-0052)';
+  const rows = [row({ id: 'J-0052', kind: 'J', status: STATUS })];
+  const findings = (source: string | undefined): string[] => {
+    const root = fixture(source === undefined ? {} : { 'migration/tests/unit/p.test.ts': source });
+    const files = source === undefined ? [] : ['migration/tests/unit/p.test.ts'];
+    return statusProofFindings(
+      rows,
+      files,
+      file => readFileSync(join(root, file), 'utf8'),
+      file => liveTitles(join(root, file)),
+    ).map(f => `${f.where}: ${f.message}`);
+  };
+
+  test('a live test or it title naming the id passes', () => {
+    expect(findings("test('J-0052 renders it', () => {})")).toEqual([]);
+    expect(findings("describe('g', () => { it('J-0052 renders it', () => {}) })")).toEqual([]);
+  });
+
+  test('a skipped, todo, untitled, describe-only or missing test fails', () => {
+    for (const source of [
+      "test.skip('J-0052 renders it', () => {})",
+      "it.todo('J-0052 renders it')",
+      "test('renders it', () => {})",
+      "describe('J-0052 renders it', () => { test('x', () => {}) })",
+      undefined,
+    ])
+      expect(findings(source)[0], String(source)).toContain('proved by test J-0052');
+  });
+
+  test('a status that names no test is left alone, and every id of a list is checked', () => {
+    const plain = [row({ id: 'J-0009', kind: 'J', status: 'removed by design (§9.1: the daemon runs no sweep)' })];
+    expect(
+      statusProofFindings(
+        plain,
+        [],
+        () => '',
+        () => [],
+      ),
+    ).toEqual([]);
+    const two = [row({ id: 'J-0052', kind: 'J', status: 'proved by tests J-0052, J-0053' })];
+    const out = statusProofFindings(
+      two,
+      ['t.test.ts'],
+      () => 'J-0052 J-0053',
+      () => ['J-0052 renders it'],
+    );
+    expect(out.map(f => f.message).join('\n')).toContain('J-0053');
+    expect(out.map(f => f.message).join('\n')).not.toContain('test J-0052,');
   });
 });
 

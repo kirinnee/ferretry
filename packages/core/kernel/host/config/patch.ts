@@ -12,6 +12,10 @@
  * - What a merge extends is the mapping the file ITSELF holds (`base`, the file's own value when the caller has one
  *   apart from `current`): a section the file lacks is not given the schema's defaults by a merge, so an unchanged
  *   default stays unwritten, exactly as a plain patch of that section would leave it.
+ * - NOTE (pinned in `owner-write-within.test.ts`): a section the file lacks is merged from nothing, so a sub-key the
+ *   patch does not name reads as ITS OWN default afterwards. Where a section's default differs from its sub-keys'
+ *   defaults the unnamed sub-key changes meaning. No declared schema has that shape; a schema that does must name every
+ *   sub-key it cares about in the patch.
  *
  * The result is built from entries, never by assignment, so a key spelled `__proto__` is an ordinary key (a value
  * inherited from the prototype has no entries of its own, so nothing is merged from one).

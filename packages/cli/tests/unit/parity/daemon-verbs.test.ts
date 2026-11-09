@@ -42,7 +42,7 @@ const run = async (argv: string[], probe: 'up' | 'down' = 'up', exitCode = 0) =>
   return { ...built, code, out: built.io.stdout(), err: built.io.stderr() };
 };
 
-describe('V-0233 V-0249 V-0244 fy daemon', () => {
+describe('fy daemon', () => {
   it('V-0223 bare fy daemon names the daemon verbs it manages and exits as a usage error', async () => {
     const result = await run(['daemon']);
     expect(result.code).toBe(2);
@@ -50,17 +50,18 @@ describe('V-0233 V-0249 V-0244 fy daemon', () => {
       expect(result.err).toContain(`fy daemon ${verb}`);
   });
 
-  it.each([
-    ['V-0233', 'install'],
-    ['V-0249', 'uninstall'],
-    ['V-0244', 'stop'],
-  ] as const)('%s fy daemon %s runs the controller verb and exits with its code', async (_id, verb) => {
+  async function runsTheControllerVerb(verb: 'install' | 'uninstall' | 'stop') {
     const result = await run(['daemon', verb]);
     expect(result.code).toBe(0);
     expect(result.calls.map(call => call[0])).toEqual([verb]);
     // The verb's own failure is the command's exit code, not a flat zero.
     expect((await run(['daemon', verb], 'up', 7)).code).toBe(7);
-  });
+  }
+  it('V-0233 fy daemon install runs the controller verb and exits with its code', () =>
+    runsTheControllerVerb('install'));
+  it('V-0249 fy daemon uninstall runs the controller verb and exits with its code', () =>
+    runsTheControllerVerb('uninstall'));
+  it('V-0244 fy daemon stop runs the controller verb and exits with its code', () => runsTheControllerVerb('stop'));
 
   it('V-0242 fy daemon start launches a daemon that is down and exits 0, and says so when it is already up', async () => {
     const down = await run(['daemon', 'start'], 'down');

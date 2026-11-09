@@ -5,7 +5,7 @@
  * would not change a test's answer.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmod, link, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import { nodeFs } from '../../../../../core/kernel/host/adapters/node-fs.ts';
@@ -737,10 +737,15 @@ describe('R1 m5 every escape is typed', () => {
     expect(await home.skillFile('plain', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
   });
 
-  it('refuses a manifest over the byte bound, naming the path and no content', async () => {
+  it('BG-033 n1 refuses a VALID manifest over the byte bound, naming the path and no content (red without the bound)', async () => {
     const { world, api } = await seed();
-    await writeFile(join(world.fleet, 'manifest.json'), `{"pad":"${'x'.repeat(4 * 1024 * 1024)}"}`);
+    const valid = await readFile(join(world.fleet, 'manifest.json'), 'utf8');
+    // The padding sits INSIDE the object: cut short at the bound it no longer parses, uncut it is a valid manifest.
+    await writeFile(join(world.fleet, 'manifest.json'), `{${' '.repeat(4 * 1024 * 1024)}${valid.slice(1)}`);
     await expect(api.homes()).rejects.toThrow(`The fleet manifest at ${world.fleet}/manifest.json could not be read.`);
+    // The same manifest under the bound is read, so the refusal above is the bound's and nothing else's.
+    await writeFile(join(world.fleet, 'manifest.json'), `{${' '.repeat(1024)}${valid.slice(1)}`);
+    expect((await api.homes()).length).toBeGreaterThan(0);
   });
 
   it('maps a kernel refusal while skillTree lists skills/ to RuntimeHomeUnreadable', async () => {
@@ -788,20 +793,29 @@ describe('R1 m4 a home the manifest places outside fleet/homes is served read-on
     expect(await home.skillFile('plain', 'a.md', 100)).toEqual({ ok: true, bytes: new TextEncoder().encode('aa') });
   });
 
-  it('refuses a link out of it (a document, a skill folder, and a file inside a skill) and skips every link in skills/', async () => {
+  it('BG-033 skips a link that leaves the home (a skill folder, a file inside a skill, the fleet assets), follows a document that leaves, and follows a link that stays inside', async () => {
     const { world, folder, home } = await away();
-    await writeFile(join(world.parent, 'elsewhere.json'), SECRET);
+    await writeFile(join(world.parent, 'elsewhere.json'), '{"out":true}');
     await symlink(join(world.parent, 'elsewhere.json'), join(folder, '.claude.json'));
-    await expect(home.document('.claude.json', 100)).rejects.toThrow('.claude.json is a link, which is never read.');
+    // A document is the one thing that follows out of the home (document-link.ts); a skill never does.
+    expect(await home.document('.claude.json', 100)).toBe('{"out":true}');
     await mkdir(join(world.parent, 'outside-skill'), { recursive: true });
-    await writeFile(join(world.parent, 'outside-skill', 'SKILL.md'), SECRET);
+    await writeFile(join(world.parent, 'outside-skill', 'SKILL.md'), '# out\n');
     await symlink(join(world.parent, 'outside-skill'), join(folder, 'skills', 'leaves'));
-    // Even a link into the fleet's assets is not followed out of an operator's folder.
-    await symlink(join(world.fleet, 'assets', 'skills', 'managed-skill'), join(folder, 'skills', 'managed-skill'));
     await symlink(join(world.parent, 'elsewhere.json'), join(folder, 'skills', 'plain', 'leak.md'));
-    expect((await home.skills(10)).map(entry => entry.name)).toEqual(['plain']);
-    expect(await home.skillFile('leaves', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
-    expect(await home.skillFile('managed-skill', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+    // A link into the fleet's assets is outside the operator's folder: skipped like any other.
+    await symlink(join(world.fleet, 'assets', 'skills', 'managed-skill'), join(folder, 'skills', 'managed-skill'));
+    // A link that stays inside the home is followed.
+    await mkdir(join(folder, 'shared', 'inner'), { recursive: true });
+    await writeFile(join(folder, 'shared', 'inner', 'SKILL.md'), '# inner\n');
+    await symlink(join(folder, 'shared', 'inner'), join(folder, 'skills', 'inner'));
+    expect((await home.skills(10)).map(entry => [entry.name, entry.managed])).toEqual([
+      ['inner', false],
+      ['plain', false],
+    ]);
+    expect(await home.skillManifest('inner', 100)).toBe('# inner\n');
+    expect(await home.skillManifest('leaves', 100)).toBeUndefined();
     expect(await home.skillFile('plain', 'leak.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+    expect(await home.skillFile('managed-skill', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
   });
 });
