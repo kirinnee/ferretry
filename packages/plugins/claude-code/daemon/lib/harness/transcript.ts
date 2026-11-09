@@ -106,14 +106,20 @@ const TAIL_USER_ROLES = new Set(['user', 'assistant']);
  * the turn stands. A cut window drops its first line (the end of a record whose start is outside it), and what that cut
  * record was is unknown: a pasted image, a big tool result, a final message. So unless a message, a piece of work or a
  * turn boundary is read whole in the window, the turn is at work (never "no records": one idle-looking frame then
- * cannot end it). Records that say nothing of the turn (usage, a compaction, an error) or an unfinished last line
- * after the cut one change nothing: only a record that says where the turn stands decides. Pure.
+ * cannot end it). Records that say nothing of the turn (usage, a compaction, an error, a developer or system note) or
+ * an unfinished last line after the cut one change nothing: only a record that says where the turn stands decides, and
+ * that is the set the turn fold itself reads (it skips developer and system notes). Pure.
  */
 export function markCutWindow(records: readonly HarnessTailRecord[], partial: boolean): readonly HarnessTailRecord[] {
   if (!partial) return records;
-  if (records.some(record => record.kind === 'message' || record.kind === 'work' || record.kind === 'turn'))
-    return records;
+  if (records.some(decidesTurn)) return records;
   return [...records, { kind: 'work' }];
+}
+
+/** A record the turn fold reads for where the turn stands: not a developer or system note, which it skips. */
+function decidesTurn(record: HarnessTailRecord): boolean {
+  if (record.kind === 'message') return record.role === 'user' || record.role === 'assistant';
+  return record.kind === 'work' || record.kind === 'turn';
 }
 
 /**

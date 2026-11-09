@@ -296,6 +296,33 @@ describe('the registered Codex harness', () => {
     expect(decided.records.map(record => record.kind)).toEqual(['usage', 'message']);
   });
 
+  test('BG-041 a developer note after the cut record is not a record that says where the turn stands, so the turn still reads as at work', async () => {
+    const box = fixture();
+    const harness = box.build();
+    const spec = box.spec();
+    await harness.start(spec, box.runner, ENV);
+    const file = `${spec.home}/sessions/2026/10/20/rollout-native.jsonl`;
+    const big = line('response_item', { type: 'function_call_output', call_id: 'c1', output: 'x'.repeat(600 * 1024) });
+    const note = line('response_item', {
+      type: 'message',
+      role: 'developer',
+      content: [{ type: 'input_text', text: 'a note' }],
+    });
+
+    // The note is kept (it is a record), and the window is marked: the fold skips the note, so alone it reads no phase.
+    box.files.set(file, header('native-id', spec.home) + message('done') + big + note);
+    const afterNote = await harness.transcriptTail?.(spec.ferret, 50);
+    if (afterNote?.kind !== 'read') throw new Error('the tail reads');
+    expect(afterNote.records).toMatchObject([{ kind: 'message', role: 'developer' }, { kind: 'work' }]);
+    expect(afterNote.records).toHaveLength(2);
+
+    // A final message after the note still ends the turn: it decides, and no mark is added.
+    box.files.set(file, header('native-id', spec.home) + message('done') + big + note + message('next'));
+    const decided = await harness.transcriptTail?.(spec.ferret, 50);
+    if (decided?.kind !== 'read') throw new Error('the tail reads');
+    expect(decided.records.map(record => record.kind)).toEqual(['message', 'message']);
+  });
+
   test('BG-042 a stop forgets what was proved about the ferret’s rollout, so the next read proves it afresh', async () => {
     const box = fixture();
     const harness = box.build();

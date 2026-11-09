@@ -132,6 +132,19 @@ describe('parseTail', () => {
     expect(markCutWindow([usage], false)).toEqual([usage]);
   });
 
+  test('BG-041 a developer or system note after the cut record decides nothing (the turn fold skips it), so the window is marked; a message after it still decides', () => {
+    const work = { kind: 'work' } as const;
+    const assistant = { kind: 'message', role: 'assistant' } as const;
+    const completed = { kind: 'turn', state: 'completed' } as const;
+    for (const role of ['developer', 'system'] as const) {
+      const note = { kind: 'message', role } as const;
+      expect(markCutWindow([note], true)).toEqual([note, work]);
+      // A finished turn still finishes: a final message (or its boundary) after the note adds no mark.
+      expect(markCutWindow([note, assistant], true)).toEqual([note, assistant]);
+      expect(markCutWindow([note, completed], true)).toEqual([note, completed]);
+    }
+  });
+
   test('text the harness wrote into the user channel is marked, and a window cut mid-record skips its first line', () => {
     const cut = parseTail(
       `{"type":"user","uuid":"x","timest\n${user(2, 'CONTINUED', { isCompactSummary: true })}\nnot json`,
