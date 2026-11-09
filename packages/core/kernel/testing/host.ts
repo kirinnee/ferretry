@@ -2,7 +2,7 @@ import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
 import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
-import { harnessFileRefusal, permittedMode, takesLinks } from '../host/root-rules.ts';
+import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from '../host/root-rules.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
@@ -1040,7 +1040,9 @@ async function start(world: World): Promise<TestHost> {
   const testLinks = new Map<string, string>();
   /** `setMode`'s modes in the test world, by path; a path never set keeps the default (`0o600` for a file). */
   const testModes = new Map<string, number>();
-  const testFolderExists = (path: string): boolean => [...world.roots.keys()].some(key => key.startsWith(`${path}/`));
+  /** A folder exists in the flat test world when a file OR a link lies under it. */
+  const testFolderExists = (path: string): boolean =>
+    [...world.roots.keys(), ...testLinks.keys()].some(key => key.startsWith(`${path}/`));
   const testHarnessFile = (manifest: Manifest, absolutePath: string): RootFileHandle => {
     const refusal = harnessFileRefusal({
       plugin: manifest.id,
@@ -1242,22 +1244,34 @@ async function start(world: World): Promise<TestHost> {
           lstat: async path => {
             if (testLinks.has(path)) return { kind: 'symlink', size: 0, modified: clock.now(), mode: 0o777, links: 1 };
             if (world.roots.has(path)) return fileStat(path);
-            return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
+            return testFolderExists(path)
               ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
               : undefined;
           },
           makeDirectory: async () => {},
           realPath: async path => {
-            if (!world.roots.has(path) && ![...world.roots.keys()].some(p => p.startsWith(`${path}/`)))
-              throw new Error(`no such file ${path}`);
+            if (!world.roots.has(path) && !testFolderExists(path)) throw new Error(`no such file ${path}`);
             return path;
           },
           list: async path =>
-            [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
-          entries: async path =>
-            [...world.roots.keys()]
+            [...world.roots.keys(), ...testLinks.keys()]
+              .filter(p => p.startsWith(`${path}/`))
+              .map(p => p.slice(path.length + 1)),
+          entries: async path => [
+            ...[...world.roots.keys()]
               .filter(p => p.startsWith(`${path}/`))
               .map(p => ({ name: p.slice(path.length + 1), ...fileStat(p) })),
+            ...[...testLinks.keys()]
+              .filter(p => p.startsWith(`${path}/`))
+              .map(p => ({
+                name: p.slice(path.length + 1),
+                kind: 'symlink' as const,
+                size: 0,
+                modified: clock.now(),
+                mode: 0o777,
+                links: 1,
+              })),
+          ],
           stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
           remove: async path => {
             world.roots.delete(path);
@@ -1278,6 +1292,48 @@ async function start(world: World): Promise<TestHost> {
             if (world.roots.has(place) || testFolderExists(place) || testLinks.has(place))
               throw new RootError('outside');
             testLinks.set(place, to);
+          },
+          rename: async (from, to) => {
+            if (isReadOnlyRoot(name) || !takesRenames(name)) throw new RootError('read_only');
+            const names = renameNamesRefusal(from, to);
+            if (names !== undefined) throw new RootError(names);
+            const source = ownPath(from);
+            const target = ownPath(to);
+            // As production, each parent is opened first (the source's, then the target's): a link anywhere on the way
+            // is `link_escape`, and a parent that is missing or is a file is `changed`. The leaf is never followed.
+            for (const end of [source, target]) {
+              const parent = end.slice(0, end.lastIndexOf('/'));
+              const steps = parent.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
+              if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+              if (parent !== prefix && (world.roots.has(parent) || !testFolderExists(parent)))
+                throw new RootError('changed');
+            }
+            const isFile = world.roots.has(source);
+            const isLink = testLinks.has(source);
+            const isFolder = testFolderExists(source);
+            if (!isFile && !isLink && !isFolder) throw new RootError('outside');
+            if (world.roots.has(target) || testLinks.has(target) || testFolderExists(target))
+              throw new RootError('outside');
+            if (target.startsWith(`${source}/`)) throw new RootError('changed');
+            // The flat world keeps files, links and modes in three maps keyed by full path: everything at `source`
+            // or under it moves to the same place under `target`, a link as the text it holds.
+            const under = (key: string): boolean => key === source || key.startsWith(`${source}/`);
+            const placed = (key: string): string => `${target}${key.slice(source.length)}`;
+            for (const [key, text] of [...world.roots])
+              if (under(key)) {
+                world.roots.set(placed(key), text);
+                world.roots.delete(key);
+              }
+            for (const [key, pointsAt] of [...testLinks])
+              if (under(key)) {
+                testLinks.set(placed(key), pointsAt);
+                testLinks.delete(key);
+              }
+            for (const [key, mode] of [...testModes])
+              if (under(key)) {
+                testModes.set(placed(key), mode);
+                testModes.delete(key);
+              }
           },
           setMode: async (path, mode) => {
             if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');
