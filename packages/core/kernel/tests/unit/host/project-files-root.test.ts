@@ -486,14 +486,16 @@ describe('S179 copyTree is not a second door for a link (H1)', () => {
     expect(await readdir(`${f.home}/state/mcp/downloads/pack`)).toEqual(['SKILL.md']);
   });
 
-  test('S179 copyTree {link:true} FROM a project folder into an internal root is refused not_declared: no link outlives the declared set', async () => {
+  test('S179 copyTree {link:true} FROM a project folder into an internal root is refused: no link outlives the declared set', async () => {
     const { f, downloads, project } = await withDownloads();
     await project.writeText(at(project, '.claude/skills/x/SKILL.md'), '# x');
+    // `downloads` takes no link (BG-004): the destination refuses first; the not_declared of a link FROM a project
+    // folder into a root that DOES take links (fleet, agent-homes) is in root-copytree-link.test.ts
     expect(
       await refusalOf(() =>
         downloads.copyTree(project, at(project, '.claude/skills/x'), at(downloads, 'linked'), { link: true }),
       ),
-    ).toBe('not_declared');
+    ).toBe('read_only');
     expect(await exists(`${f.home}/state/mcp/downloads/linked`)).toBe(false);
     // a COPY out of the set still works
     await downloads.copyTree(project, at(project, '.claude/skills/x'), at(downloads, 'copied'));
@@ -726,5 +728,37 @@ describe('S179 review minors: links to a same-named place, remove of a link, fol
     await f.root.ensurePrivateDirectory(at(f.root, '.claude/skills/fresh'));
     expect((await stat(`${f.proj}/.claude/skills/fresh`)).mode & 0o777).toBe(0o700);
     expect((await stat(`${f.proj}/.claude`)).mode & 0o777).toBe(0o775);
+  });
+
+  test('BG-014 m2 ensurePrivateDirectory outside the declared set is refused not_declared and makes nothing (O7)', async () => {
+    const f = await fresh();
+    for (const outside of ['.git/hooks-x', 'other', '.claude/other', '.claude/settings.d', 'sub/.claude/skills/x/y']) {
+      expect(await refusalOf(() => f.root.ensurePrivateDirectory(at(f.root, outside)))).toBe('not_declared');
+    }
+    expect(await readdir(f.proj)).toEqual([]);
+  });
+});
+
+describe('BG-014 m1 linkTo a project file from a link root is refused not_declared on the real host (O1)', () => {
+  test('BG-014 m1 a link root cannot point at a project file, dangling or not, and nothing is made', async () => {
+    const f = await fresh();
+    const roots = f.port(DECLARED, ['project-files', 'agent-homes']);
+    const agent = roots.root('agent-homes');
+    const project = roots.root('project-files', { subfolder: f.proj });
+    await project.writeText(at(project, '.mcp.json'), '{"mcpServers":{}}\n');
+    expect(await refusalOf(() => agent.linkTo(at(agent, 'l'), { root: project, path: at(project, '.mcp.json') }))).toBe(
+      'not_declared',
+    );
+    expect(
+      await refusalOf(() =>
+        agent.linkTo(at(agent, 'l2'), { root: project, path: at(project, '.mcp.json'), dangling: true }),
+      ),
+    ).toBe('not_declared');
+    expect(
+      await refusalOf(() =>
+        agent.linkTo(at(agent, 'l3'), { root: project, path: at(project, '.claude/skills/x/a.md') }),
+      ),
+    ).toBe('not_declared');
+    expect(await readFile(`${f.proj}/.mcp.json`, 'utf8')).toBe('{"mcpServers":{}}\n');
   });
 });

@@ -2547,12 +2547,12 @@ scoped handle:
   refused `link_escape` (even one that points elsewhere inside it), a file with a second hard link is refused
   `hard_link`, and the fence is refused by name and identity. **Where the "no-follow descriptor write" is true:** only
   on a host WITH descriptor reach (`/proc/self/fd`, Linux), and there only up to one residual (below). On a host
-  without it (macOS today) the temp create and the `rename` are by path, so a swap of a folder for a link between the
-  check and the syscall can overwrite ONE same-named file outside the folder (inside the state home too); that is
-  the registered BEFORE-GREEN `writeChecked`/`publishChecked` gap in `ports-pending.json`, now reached by MCP and Skills
-  writes too (any process that can write in a project folder, a ferret included, can drive it), and the macOS rename unit
-  closes it for every root at once. Writes are NOT refused without reach (that would stop MCP and Skills on the owner's
-  Mac). **Residual with reach:** the parent is found by `realpath` and re-proved by (real path, device, inode), which is
+  without it (macOS) the temp create, the look at the leaf, the `rename`, the `link` of an exclusive publish and the
+  removal of a failed temp are the held folder's own descriptor calls (`bun:ffi` `openat`, `renameat`, `linkat`,
+  `unlinkat`, each folder proven by device and inode first, the leaf opened `O_NOFOLLOW`), so a swap of a folder for a
+  link between the check and the syscall moves and writes inside the folder that was checked and overwrites nothing
+  outside, for every root at once, MCP and Skills writes included. A macOS host whose library cannot be loaded keeps
+  the by-path steps, as before (one re-proof of the folder), and says nothing more than that. **Residual with reach:** the parent is found by `realpath` and re-proved by (real path, device, inode), which is
   check then use; an ABA swap (a link in for the instant of the open and out again before the re-proof) is not seen, and
   full closure is a per-segment `openat(O_NOFOLLOW)` walk (the descriptor-bracket unit). A link swapped in earlier is
   refused. A remove resolves the PARENT and never follows the leaf: a link at the name is unlinked as a link and what it
@@ -2591,10 +2591,10 @@ scoped handle:
     whole; the provisioner's move-aside-as-evidence and undo, which a copy cannot do). Both ends are fenced with every
     parent opened without following a link, an existing target is refused and never overwritten (a look then the move,
     a declared GAP: no `renameat2`), and a move the disk refuses (another device) is `changed`, never a copy. A move
-    needs descriptor reach to both parents (Linux `/proc/self/fd`) and is refused `no_descriptor_reach` without it
-    (macOS today): on plain paths the move would resolve the parents again and follow a link swapped in after the
-    check, so nothing is claimed there. **[own] BEFORE-GREEN(runtimes):** the owner runs macOS, so the provisioner's
-    move-aside and undo fail there until a descriptor-reach move exists; this is not a plain GAP. Each end's parent
+    needs descriptor reach to both parents: Linux `/proc/self/fd`, or on macOS `renameat` between the two held, proven
+    folder descriptors (the provisioner's move-aside and undo work there). A host with neither refuses
+    `no_descriptor_reach`: on plain paths the move would resolve the parents again and follow a link swapped in after
+    the check, so nothing is claimed there. Each end's parent
     folder must already exist (a move makes none): a missing parent, or one that is a file, is `changed`, and a link on
     the way to either end is `link_escape`; the testing host answers the same. A link moves as the text it holds:
     kernel-made links are absolute, so they still point where they did; a RELATIVE link made by a harness and moved to

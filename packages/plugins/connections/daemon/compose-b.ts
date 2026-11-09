@@ -34,6 +34,7 @@ import type { OtherConnections } from './index.ts';
 import type { CloudflaredLocatorPort } from './lib/tunnel/connector.ts';
 import { tunnelPeer } from './lib/tunnel/listener.ts';
 import { tunnelServiceOrigin } from './lib/tunnel/service.ts';
+import { writeTunnelSetting } from './tunnel-setting.ts';
 import type { WebRtcAvailability } from './lib/webrtc/carrier.ts';
 import type { SessionLayer } from '@ferretry/kernel/contract';
 
@@ -133,14 +134,7 @@ export function composeOtherConnections(input: ComposeInput): OtherConnections {
       },
     },
     tunnelStore: {
-      write: async entry => {
-        const outcome = await kernel.config.write(manifest.data.config[0]!, undefined, {
-          patch: { tunnel: { enabled: entry.enabled } },
-        });
-        if (outcome.kind === 'held')
-          throw new Error('turning the tunnel on widens how this daemon is reached: it waits for the owner to confirm');
-        if (outcome.kind !== 'written') throw new Error('the tunnel setting could not be written to its document');
-      },
+      write: async entry => await writeTunnelSetting(kernel.config, manifest.data.config[0]!, entry.enabled),
     },
     webrtc: {
       availability,

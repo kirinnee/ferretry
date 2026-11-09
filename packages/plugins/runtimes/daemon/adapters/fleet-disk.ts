@@ -23,10 +23,8 @@
  */
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { FencedPath, RootEntry, RootHandle, RootLstat, RootStat, RootsPort } from '@ferretry/kernel/contract';
+import { isSignInName } from '../lib/account/credentials.ts';
 import { harnessMounts, type HostMounts } from './root-host-files.ts';
-
-/** The names a sign-in lives in; never read, never copied, never listed as a source. */
-const SIGN_IN_FILES: ReadonlySet<string> = new Set(['.credentials.json', 'auth.json']);
 
 /** The most entries one source folder may hold when it is walked for a sign-in file. */
 const MAX_SOURCE_ENTRIES = 10_000;
@@ -77,10 +75,7 @@ function below(base: string, path: string): string | undefined {
   return inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside) ? undefined : inside;
 }
 
-/** Whether one name is a sign-in's, in any letter case (a case-insensitive disk opens `AUTH.JSON` as `auth.json`). */
-const isSignInName = (name: string): boolean => SIGN_IN_FILES.has(name.toLowerCase());
-
-/** The components of a path below its base that name a sign-in file. */
+/** The components of a path below its base that name a sign-in file (judged in any letter case: a case-insensitive disk opens `AUTH.JSON` as `auth.json`). */
 const namesSignIn = (inside: string): boolean => inside.split(sep).some(isSignInName);
 
 export interface FleetDiskOptions {

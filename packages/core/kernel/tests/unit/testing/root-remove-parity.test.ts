@@ -170,6 +170,38 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     ['remove under a folder that is not there', await answer(() => fleet.remove(dir('nope/x.txt')))],
     ['remove with ..', await answer(() => fleet.remove(`${dir('nested')}/../x` as FencedPath))],
     ['remove a path of another root', await answer(() => fleet.remove(at(downloads, 'a.txt')))],
+
+    // BG-006: a forged spelling names the same leaf as its plain form; a NUL is outside, on both hosts
+    [
+      'BG-006 link to a folder, for the forged-spelling rows',
+      await answer(() => fleet.linkTo(dir('alias2'), { root: fleet, path: dir('nested') })),
+    ],
+    ['BG-006 remove with a trailing slash', await answer(() => fleet.remove(`${dir('alias2')}/` as FencedPath))],
+    ['BG-006 the link went, not the folder', { ok: await kindAt(dir('alias2')) }],
+    ['BG-006 the folder it pointed at kept its file', await answer(() => fleet.readText(dir('nested/deep.txt')))],
+    [
+      'BG-006 link again, for the trailing-dot row',
+      await answer(() => fleet.linkTo(dir('alias3'), { root: fleet, path: dir('nested') })),
+    ],
+    ['BG-006 remove with a trailing dot', await answer(() => fleet.remove(`${dir('alias3')}/.` as FencedPath))],
+    ['BG-006 the second link went', { ok: await kindAt(dir('alias3')) }],
+    ['BG-006 the folder still has its file', await answer(() => fleet.readText(dir('nested/deep.txt')))],
+    [
+      'BG-006 link at the root, for the relative-name row',
+      await answer(() => fleet.linkTo(at(fleet, 'top-alias'), { root: fleet, path: dir('nested') })),
+    ],
+    ['BG-006 remove a single relative name', await answer(() => fleet.remove('top-alias' as FencedPath))],
+    ['BG-006 the top link went', { ok: await kindAt(at(fleet, 'top-alias')) }],
+    ['BG-006 the folder still has its file again', await answer(() => fleet.readText(dir('nested/deep.txt')))],
+    [
+      'BG-006 remove with a NUL in the leaf',
+      await answer(() => fleet.remove(`${dir('nested')}/de\0ep.txt` as FencedPath)),
+    ],
+    [
+      'BG-006 remove with a NUL in the parent',
+      await answer(() => fleet.remove(`${at(fleet, 'homes/claude-a')}/nes\0ted/deep.txt` as FencedPath)),
+    ],
+    ['BG-006 the file survived the NUL asks', await answer(() => fleet.readText(dir('nested/deep.txt')))],
   ];
 }
 
@@ -257,5 +289,18 @@ test.skipIf(process.platform !== 'linux')(
     expect(byCase['remove under a folder that is not there']).toEqual({ refused: 'changed' });
     expect(byCase['remove with ..']).toEqual({ refused: 'outside' });
     expect(byCase['remove a path of another root']).toEqual({ refused: 'outside' });
+    // BG-006: a forged spelling removes the LINK and never the folder behind it; a NUL is outside on both hosts
+    expect(byCase['BG-006 remove with a trailing slash']).toEqual({ ok: null });
+    expect(byCase['BG-006 the link went, not the folder']).toEqual({ ok: null });
+    expect(byCase['BG-006 the folder it pointed at kept its file']).toEqual({ ok: 'deep' });
+    expect(byCase['BG-006 remove with a trailing dot']).toEqual({ ok: null });
+    expect(byCase['BG-006 the second link went']).toEqual({ ok: null });
+    expect(byCase['BG-006 the folder still has its file']).toEqual({ ok: 'deep' });
+    expect(byCase['BG-006 remove a single relative name']).toEqual({ ok: null });
+    expect(byCase['BG-006 the top link went']).toEqual({ ok: null });
+    expect(byCase['BG-006 the folder still has its file again']).toEqual({ ok: 'deep' });
+    expect(byCase['BG-006 remove with a NUL in the leaf']).toEqual({ refused: 'outside' });
+    expect(byCase['BG-006 remove with a NUL in the parent']).toEqual({ refused: 'outside' });
+    expect(byCase['BG-006 the file survived the NUL asks']).toEqual({ ok: 'deep' });
   },
 );

@@ -333,6 +333,16 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     ],
     ['unlink in a project folder', await answer(() => project.unlink(at(project, '.claude/skills/x/l')))],
     ['pin a project folder', await answer(() => project.pin(at(project, '.claude/skills/x')))],
+    // BG-014 m2: the declared set gates `ensurePrivateDirectory` on both hosts (a name above a grant is only made)
+    [
+      'ensurePrivateDirectory outside the set',
+      await answer(() => project.ensurePrivateDirectory(at(project, '.git/hooks-x'))),
+    ],
+    ['ensurePrivateDirectory a name outside', await answer(() => project.ensurePrivateDirectory(at(project, 'other')))],
+    [
+      'ensurePrivateDirectory above a grant',
+      await answer(() => project.ensurePrivateDirectory(at(project, '.claude/skills/pe'))),
+    ],
     ['remove outside the set', await answer(() => project.remove(at(project, 'package.json')))],
     ['remove above a grant', await answer(() => project.remove(at(project, '.claude/skills')))],
     [
@@ -481,6 +491,9 @@ test('S179 project-files parity: every case is answered alike on the testing hos
   expect(byCase['rename in a project folder']).toEqual({ refused: 'read_only' });
   expect(byCase['unlink in a project folder']).toEqual({ refused: 'read_only' });
   expect(byCase['pin a project folder']).toEqual({ refused: 'not_declared' });
+  expect(byCase['ensurePrivateDirectory outside the set']).toEqual({ refused: 'not_declared' });
+  expect(byCase['ensurePrivateDirectory a name outside']).toEqual({ refused: 'not_declared' });
+  expect(byCase['ensurePrivateDirectory above a grant']).toEqual({ ok: null });
   expect(byCase['a plugin without the root']).toEqual({ refused: 'not_declared' });
   expect(byCase['kind of the handle']).toEqual({ ok: ['project-files', false] });
   expect(byCase['remove a non-empty grant folder onlyIfEmpty']).toEqual({ refused: 'not_empty' });
@@ -502,7 +515,8 @@ test('S179 project-files parity: every case is answered alike on the testing hos
   expect(byCase['copy FROM a folder above a grant']).toEqual({ refused: 'not_declared' });
   expect(byCase['copy FROM the skills folder above a grant']).toEqual({ refused: 'not_declared' });
   expect(byCase['copy FROM a name outside the set']).toEqual({ refused: 'not_declared' });
-  expect(byCase['copyTree link FROM a project folder into downloads']).toEqual({ refused: 'not_declared' });
+  // downloads takes no link (BG-004): the destination is judged before the project source is held against a link
+  expect(byCase['copyTree link FROM a project folder into downloads']).toEqual({ refused: 'read_only' });
   expect(byCase['copyTree link FROM a folder above a grant']).toEqual({ refused: 'not_declared' });
   expect(byCase['a stranger handle as the source']).toEqual({ refused: 'not_declared' });
   // remove never follows the leaf: a link at a grant is unlinked, a link above the name is refused (M1)

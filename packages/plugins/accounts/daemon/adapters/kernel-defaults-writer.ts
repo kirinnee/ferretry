@@ -62,8 +62,13 @@ export class KernelAccountDefaultsWriter implements AccountDefaultsWriter {
         );
       case 'conflict':
         throw new AccountDefaultsNotWritten('conflict', `${DEFAULTS_PATH} changed while this was written; try again`);
-      case 'refused':
-        throw new AccountDefaultsFileBroken(issuesOf(outcome));
+      case 'refused': {
+        // The kernel's own words are kept: "does not check" is the wrong diagnosis for a link or a file that is not UTF-8.
+        const said = outcome.issues.map(issue =>
+          issue.fix === undefined || issue.fix === '' ? issue.message : `${issue.message}: ${issue.fix}`,
+        );
+        throw new AccountDefaultsFileBroken(issuesOf(outcome), said.length === 0 ? undefined : said.join('; '));
+      }
     }
   }
 }

@@ -68,6 +68,7 @@ import {
   serializeCloneBase,
 } from '../account/clone-base.ts';
 import { parseAccountModel, type AccountModel, isRuntimeName, type LayerReferenceText } from '../account/schema.ts';
+import { standInsNamedBy } from '../account/runtimes-model.ts';
 import { classifyCloneKeys, recordCloneKeys } from '../account/clone-keys.ts';
 import { assignOriginKeys, EXPORT_KEYS_FILE, parseExportKeys, serializeExportKeys } from '../account/export-keys.ts';
 import {
@@ -474,6 +475,21 @@ export class FleetSetupService {
       throw new FleetSetupRefusal(
         'fleet_setup_refused',
         `${catalog.machineName()} isn't set up yet, so there is nothing to copy from it.`,
+      );
+    }
+    // What stands in for a part that could not be read is never copied to another machine as if it were real.
+    if (reading.unreadable.length > 0) {
+      const them = reading.unreadable.length === 1 ? 'it' : 'them';
+      throw new FleetSetupRefusal(
+        'fleet_setup_refused',
+        `${catalog.machineName()} can't be copied yet: ${reading.unreadable.length === 1 ? 'a part of this machine' : `${String(reading.unreadable.length)} parts of this machine`} could not be read, and a bundle made without ${them} would carry a stand-in instead (${reading.unreadable.join('; ')}). Fix that first, then copy again.`,
+      );
+    }
+    const standingIn = standInsNamedBy(reading.model, reading.stoodInLogins);
+    if (standingIn.length > 0) {
+      throw new FleetSetupRefusal(
+        'fleet_setup_refused',
+        `${catalog.machineName()} can't be copied yet: ${standingIn.map(login => `the login "${login.id}" keeps its variables as ${login.because}`).join('; ')}, so the bundle would carry a stand-in in place of ${standingIn.length === 1 ? 'its' : 'their'} variables. Fix the login in Logins first, then copy again.`,
       );
     }
     const sources = cloneSources(reading.model);

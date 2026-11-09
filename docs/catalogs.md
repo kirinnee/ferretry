@@ -1386,6 +1386,70 @@ session** and **Refresh** at the top; the install review stays a sheet over it. 
 session actually uses it_ needs a paid model run, which this slice did not make. Until it is checked the page claims
 only what is known; changing the sentence is one constant (`CODEX_NEXT`).
 
+### An account home outside the fleet: what each reader does with a link (BG-033)
+
+A home the fleet places outside its own folder (an operator's own folder, a home-manager home whose `skills/`,
+`settings.json` and `config.toml` link into a store) is read **read-only**, and each reader treats a link by its own rule.
+"Inside" means the link's real path is inside that account home.
+
+| Reader                       | A link inside the home                                  | A link out of the home (a store, `~/.ssh`)                                                                                   | A link to nothing, a loop, a sign-in file                   |
+| ---------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Skills list (`skills()`)     | followed, listed (when its `SKILL.md` is a plain file)  | skipped silently                                                                                                             | skipped silently                                            |
+| A skill's `SKILL.md`         | read                                                    | not read                                                                                                                     | not read                                                    |
+| A file inside a skill folder | never followed (a link is listed as a link, unreadable) | never followed                                                                                                               | never followed                                              |
+| The three documents          | followed, read                                          | **followed**, read (a regular file, a second name only in a proven-immutable store, at most 16 MiB, parsing as the document) | refused in one sentence naming the link; to nothing: absent |
+
+Against the readers of the same homes before, reader by reader:
+
+- **Skills list.** What `skills()` lists is a **superset** of the machine skill inventory of such a home in what it lists
+  (a plain folder and an inside link are extra: that inventory listed neither), **except** where that inventory followed a
+  link into `fleet/`: a link into the fleet's `assets/` it listed as Ferretry's, and here it is skipped (waived, because
+  no root can name both the home and `assets/`). Skills unit S1 closes it: once Skills binds the homes and lists
+  `fleet/assets/skills/<name>` itself as Ferretry's, such a link is a duplicate path to the same skill and is never
+  followed; until then it is a before-green line in `ports-pending.json`. The list is also **narrower** than the session
+  skill picker (which listed store links too). A plain folder in such a home is listed only when it holds a plain,
+  single-name, non-sign-in `SKILL.md`.
+- **A skill's `SKILL.md`, and the files inside a skill folder.** The machine inventory followed links into `fleet/`, the
+  session picker followed every link, and the skill-folder reader (tree and file) followed none; here `SKILL.md` follows a
+  link inside the home only, and a walk or a file read follows none.
+- **The three documents.** They follow a link out of the home, as the MCP document reader did, but under bounds that
+  reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file outside a proven-immutable store, the daemon's
+  home, a target whose real name is a sign-in file's, or something that does not parse as the document is refused, and the
+  refusal names only the link. A sign-in file's second name under another basename is refused outside the store (it is a
+  hard link) and read inside it (see below).
+
+A hard-linked `SKILL.md` is not listed. A file read is checked after it was read: if the name no longer reaches the file
+that was judged, the bytes are dropped, and a followed document that grew after it was judged is refused rather than
+returned cut short. A second name on a followed document is the kernel's own hard-link rule (S49): allowed only inside a
+proven-immutable store such as `/nix/store`, so a home-manager link into an optimised store keeps working, and refused
+everywhere else. What is refused: a target whose real basename is a sign-in file's (any letter case, after every link),
+and any hard link that is not store-shaped. What is allowed: a store-shaped hard link (a file owned by root, in a closed
+folder chain under the store), whatever its basename, unless that basename is a sign-in file's. So a second name of a
+sign-in file under another basename inside the store is read; that exposes nothing, because the store is root-owned and
+world-readable and only root can add a name there.
+The refusal of a hard link costs about 200 ms (the kernel retries the check about twenty times, five milliseconds apart,
+before it gives up, which is meant for a publish leftover); that retry is the kernel's and is left as it is, so up to
+three refused documents cost about 0.6 s.
+
+Four things the document follow still leaves, declared:
+
+- **A swap of a folder above the target.** A folder above the target swapped for a link to another folder after the
+  judge can make the read return that folder's same-named file: a regular file that parses (with a second name only
+  inside a proven-immutable store), outside the daemon's private places, and never one whose own name is a sign-in file's.
+- **A link to nothing in the daemon's home.** It answers absent, like any link to nothing, so whoever owns the link can
+  tell whether a name exists there, never a byte of it; the MCP document reader answered the same.
+- **A target under `/proc`, `/sys` or `/etc`.** What happens differs per case. A `/proc` file is never returned: the
+  kernel syncs every file it reads durably, `/proc` refuses that sync, so a `/proc` target is refused whatever it holds,
+  an empty one included. A `/sys` file is read up to the size it reports (often 4096 bytes), and an `/etc` file up to its
+  real size; either one is returned whole when it parses as the document (a config file of comments only is valid TOML)
+  or reads blank, as a blank file inside the home is (declared, not refused; the test of an empty linked document pins
+  that answer), and dropped otherwise. That a readable file which parses is returned is the rule of
+  every followed document (the table above). None of this is new exposure: the account owner who authors the link
+  already reads these files as themselves, and the MCP document reader read all of these too.
+- **A kernel test gap, kernel-owned.** The kernel's unit tests do not pin its store-root check against a looser match (a
+  substring of the real path); the check that the file is owned by root still refuses, so nothing opens. It is left to
+  the kernel's owner and is not changed here.
+
 ## Links (catalogs 3f)
 
 > **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4 and 3f-5,

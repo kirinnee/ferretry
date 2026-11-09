@@ -137,6 +137,14 @@ describe('every way past the old line matcher is found', () => {
     'import.meta.require of bun': "const v = import.meta.require('bun').YAML.parse(text);",
     'import.meta.require of yaml': "const y = import.meta.require('yaml');",
     'module.require of yaml': "const y = module.require('yaml');",
+    // pm2 #2 / BG-069: the loader's name spelled in pieces, and the entry module's own `require`.
+    "module['req' + 'uire'] of a built path": "const r = module['req' + 'uire'];\nr(path);",
+    "import.meta['req' + 'uire'] of a built path": "const r = import.meta['req' + 'uire'];\nr(path);",
+    "module['req' + 'uire'] called at once": "module['req' + 'uire'](path);",
+    'a member of module whose name cannot be read': 'const r = module[key];\nr(path);',
+    'process.mainModule.require of a built path': 'process.mainModule.require(path);',
+    'process.mainModule?.require of yaml': "process.mainModule?.require('yaml');",
+    "Bun['YA' + 'ML']": "const v = Bun['YA' + 'ML'].parse(text);",
     'createRequire, called at once':
       "import { createRequire } from 'node:module';\nconst y = createRequire(import.meta.url)('yaml');",
     'createRequire, renamed and bound':
@@ -383,6 +391,8 @@ describe('laundering through a ledgered parser', () => {
     'a js specifier for a ts file': "import { readIt } from './reader.js';\nreadIt('x');",
     'import.meta.require': "const r = import.meta.require('./reader.ts');",
     'module.require': "const r = module.require('./reader.ts');",
+    "module['req' + 'uire']": "const r = module['req' + 'uire']('./reader.ts');",
+    'process.mainModule.require': "const r = process.mainModule.require('./reader.ts');",
     createRequire:
       "import { createRequire } from 'node:module';\nconst r = createRequire(import.meta.url)('./reader.ts');",
     'a name for require': "const load = require;\nconst r = load('./reader.ts');",

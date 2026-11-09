@@ -273,6 +273,10 @@ describe('readConfigText — aliases it cannot read are syntax errors, never a t
 describe('readConfigText — a file at the size limit is read in ONE pass, whatever its aliases do', () => {
   /** A hard bound, far above what one linear pass takes; the quadratic paths this guards took seconds to minutes. */
   const BOUND_MS = 1500;
+  /** How many times a read is timed before a slow one counts. */
+  const ATTEMPTS = 3;
+  /** Each read is cheap alone; up to four of them under a loaded run must still fit one test's own timeout. */
+  const TEST_TIMEOUT_MS = 60_000;
   const fill = (head: string, line: (index: number) => string, tail = ''): string => {
     const lines = [head];
     let size = head.length + tail.length;
@@ -337,18 +341,27 @@ describe('readConfigText — a file at the size limit is read in ONE pass, whate
       'not a plain string',
     ],
   ] as const) {
-    it(`should read ${label} in under ${BOUND_MS} ms`, () => {
-      // Act
-      const started = performance.now();
-      const actual = readConfigText(text);
-      const took = performance.now() - started;
+    it(
+      `should read ${label} in under ${BOUND_MS} ms`,
+      () => {
+        // Act: the BEST of a few reads. A bound on the clock measures the box as much as the code (2.2 s under a loaded
+        // run, a few hundred ms alone): a quadratic path takes seconds in EVERY attempt, a busy moment spoils one.
+        const actual = readConfigText(text);
+        let took = Number.POSITIVE_INFINITY;
+        for (let attempt = 0; attempt < ATTEMPTS && took >= BOUND_MS / 2; attempt += 1) {
+          const started = performance.now();
+          readConfigText(text);
+          took = Math.min(took, performance.now() - started);
+        }
 
-      // Assert
-      should(took).be.below(BOUND_MS);
-      if (refused === undefined) should(actual.ok).be.true();
-      else if (refused instanceof RegExp) should(actual.ok ? '' : actual.errors[0]?.message).match(refused);
-      else should(actual.ok ? '' : actual.errors[0]?.message).containEql(refused);
-    });
+        // Assert
+        should(took).be.below(BOUND_MS);
+        if (refused === undefined) should(actual.ok).be.true();
+        else if (refused instanceof RegExp) should(actual.ok ? '' : actual.errors[0]?.message).match(refused);
+        else should(actual.ok ? '' : actual.errors[0]?.message).containEql(refused);
+      },
+      TEST_TIMEOUT_MS,
+    );
   }
 });
 
@@ -867,6 +880,38 @@ describe('editConfigText — the file itself', () => {
     // Assert
     should(actual).containEql('$schema=./mine.json');
     should(actual).not.containEql('machine.json');
+  });
+
+  it('BG-007 should refresh a kernel modeline that points at another schema name, keeping the rest of the file', () => {
+    // Arrange — an item written before collections published `<name>--item.json` points at the collection's old name.
+    const old = '# yaml-language-server: $schema=../.schema/machine-old.json';
+    const existing = `${old}\n# my notes\na: 1\n`;
+
+    // Act
+    const actual = editConfigText(existing, { a: 2 }, { a: 1 }, MODELINE);
+
+    // Assert
+    should(occurrences(actual, 'yaml-language-server:')).equal(1);
+    should(actual).containEql(MODELINE);
+    should(actual).not.containEql('machine-old.json');
+    should(actual).containEql('# my notes');
+    should(actual).containEql('a: 2');
+  });
+
+  it('BG-007 should refresh a nested kernel modeline written with more ../ steps, and leave a URL or a relative path alone', () => {
+    // Arrange
+    const nested = '# yaml-language-server: $schema=../../.schema/runtimes.json\na: 1\n';
+    const remote = '# yaml-language-server: $schema=https://example.com/.schema/mine.json\na: 1\n';
+
+    // Act
+    const refreshed = editConfigText(nested, { a: 2 }, { a: 1 }, MODELINE);
+    const kept = editConfigText(remote, { a: 2 }, { a: 1 }, MODELINE);
+
+    // Assert
+    should(refreshed).containEql(MODELINE);
+    should(refreshed).not.containEql('runtimes.json');
+    should(kept).containEql('https://example.com/.schema/mine.json');
+    should(kept).not.containEql('machine.json');
   });
 
   it('should end the text with one newline', () => {
