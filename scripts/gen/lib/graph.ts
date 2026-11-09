@@ -5,7 +5,7 @@
  */
 import { CORE_IDS, KERNEL_BOUND_PORTS, KERNEL_ONLY_PORTS } from '../../../packages/core/kernel/contract/index.ts';
 import type { HookDef, PortToken } from '../../../packages/core/kernel/contract/index.ts';
-import type { Manifest } from '../../../packages/core/kernel/manifest/index.ts';
+import { type Manifest, reachFaults } from '../../../packages/core/kernel/manifest/index.ts';
 import type { LoadedSubsystem } from './workspace.ts';
 
 const CORE = new Set<string>(CORE_IDS);
@@ -169,6 +169,9 @@ export function pluginGraphFindings(graph: StartGraph): Finding[] {
           message: `provides kernel-bound port "${token.name}"; only ${token.boundBy} may`,
         });
   }
+  // Reach the kernel does not honour (K1, K2): the boot refusal reads the same rule (`reachFaults`).
+  for (const fault of reachFaults(graph.ids.map(id => graph.manifests.get(id) as Manifest)))
+    findings.push({ check, where: fault.plugin, message: fault.sentence });
   const keyTakers = new Map<string, string[]>();
   for (const id of graph.ids)
     for (const take of graph.manifests.get(id)?.hooks?.takes ?? [])

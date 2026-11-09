@@ -47,8 +47,10 @@ export type PreflightIdsOf<M> = M extends { readonly preflight: readonly (infer 
 export type SelftestIdsOf<M> = M extends { readonly selftest: readonly (infer D extends string)[] } ? D : never;
 export type WorkerIdsOf<M> = M extends { readonly workers: readonly (infer D extends string)[] } ? D : never;
 type NetworkEntryOf<M> = M extends { readonly permissions: { readonly network: readonly (infer E)[] } } ? E : never;
+type SpawnEntryOf<M> = M extends { readonly permissions: { readonly spawn: readonly (infer E)[] } } ? E : never;
 export type ResolverIdsOf<M> =
-  NetworkEntryOf<M> extends infer E ? (E extends { readonly resolver: infer R extends string } ? R : never) : never;
+  | (NetworkEntryOf<M> extends infer E ? (E extends { readonly resolver: infer R extends string } ? R : never) : never)
+  | (SpawnEntryOf<M> extends infer E ? (E extends { readonly resolver: infer R extends string } ? R : never) : never);
 
 type TokensOf<M, K extends 'needs' | 'uses' | 'provides'> = M extends { readonly [P in K]: infer T } ? T : {};
 
@@ -156,7 +158,7 @@ export interface ToolResult {
 
 export type ToolHandler = (call: CallContext, input: unknown) => Promise<ToolResult>;
 
-/** A declared network resolver: the hosts it allows right now, from the plugin's own config/state only. */
+/** A declared resolver: the hosts (`network`) or programs (`spawn`) it allows right now, from the plugin's own config/state only. */
 export type NetworkResolver = () => readonly string[];
 
 /** One declared `fy doctor` check: reads only the plugin's own ports; never a secret in `detail` or `fix`. */

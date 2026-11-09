@@ -103,8 +103,10 @@ import {
   type ItemReachOf,
   NO_ITEMS,
   PermissionError,
+  type ResolverOf,
   spawnPermitted,
 } from '../host/permissions.ts';
+import { configOwnedKinds, itemReach } from '../host/items.ts';
 import { scratchPort } from '../host/scratch.ts';
 import { type DetachedCall, detachedAsked, detachedHandle, detachedRefusal } from '../host/detached.ts';
 import { PinRegistry } from '../host/pins.ts';
@@ -126,6 +128,7 @@ import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
 import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
+import { reachFaults } from '../manifest/reach.ts';
 import type { HookTake, Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
 import { type TestCaller, owner, standInAdmission, testArrival, testPrincipal } from './admission.ts';
@@ -142,11 +145,13 @@ function refuseDetached(
   call: DetachedCall,
   program: string,
   spawnOptions: SpawnOptions,
+  resolve: ResolverOf,
 ): void {
   const spawnDeclared = spawnPermitted(
     effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
     items,
     program,
+    resolve,
   );
   const why = detachedRefusal(manifest.id, manifest.permissions?.detached, spawnDeclared, call, program, spawnOptions);
   if (why !== undefined) throw new PermissionError(why);
@@ -407,6 +412,9 @@ export async function testHost(options: TestHostOptions): Promise<TestHost> {
 async function start(world: World): Promise<TestHost> {
   const { options, clock, identity, identitySigner } = world;
   const manifests: readonly Manifest[] = options.plugins.map(plugin => plugin.manifest);
+  // The real host refuses a plugin whose reach declarations it does not honour; a suite learns it the same way.
+  const fault = reachFaults(manifests)[0];
+  if (fault !== undefined) throw new Error(`testHost: ${fault.plugin} ${fault.sentence}`);
   const hookOffers = new Map(
     manifests.flatMap(manifest => (manifest.hooks?.offers ?? []).map(offer => [offer.hook.name, offer.hook] as const)),
   );
@@ -1408,6 +1416,30 @@ async function start(world: World): Promise<TestHost> {
     };
   };
 
+  // What an item names, by the real host's rule (`host/items.ts`): the installed items `options.items` names, united with
+  // the owner's config collection of each kind, read from the world at every check. Built on first use, when every
+  // plugin's config is declared.
+  let liveItems: ItemReachOf | undefined;
+  const itemsOf: ItemReachOf = kind => {
+    liveItems ??= itemReach({
+      installed: options.items ?? NO_ITEMS,
+      configOwned: configOwnedKinds(
+        options.plugins.map(plugin => plugin.manifest as Manifest),
+        id => configPort(options.plugins.find(plugin => plugin.manifest.id === id)?.manifest as Manifest),
+      ),
+    });
+    return liveItems(kind);
+  };
+  /** A plugin's own declared resolvers, asked at each call, as the real host asks them. */
+  const resolversOf =
+    (id: string): ResolverOf =>
+    name =>
+      (
+        built.find(b => b.manifest.id === id)?.half?.resolvers as
+          | Readonly<Record<string, (() => readonly string[]) | undefined>>
+          | undefined
+      )?.[name];
+
   const kernelFor = (manifest: Manifest): KernelPorts => {
     let state = world.states.get(manifest.id);
     if (state === undefined) {
@@ -1417,18 +1449,7 @@ async function start(world: World): Promise<TestHost> {
     const publishes = new Set((manifest.data?.publishes ?? []).map(event => event.name));
     const declaredNetwork = effectivePermissions(manifest.id, manifest.permissions?.network ?? []);
     const mayReach = (hostname: string, host: string): boolean =>
-      hostPermitted(
-        declaredNetwork,
-        options.items ?? NO_ITEMS,
-        hostname,
-        name =>
-          (
-            built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-              | Readonly<Record<string, (() => readonly string[]) | undefined>>
-              | undefined
-          )?.[name],
-        host,
-      );
+      hostPermitted(declaredNetwork, itemsOf, hostname, resolversOf(manifest.id), host);
     const fetchPort: FetchPort = {
       async request(url, init) {
         const parsed = new URL(url);
@@ -1469,12 +1490,13 @@ async function start(world: World): Promise<TestHost> {
       spawn: {
         async run(program, args, spawnOptions) {
           if (detachedAsked(spawnOptions))
-            refuseDetached(manifest, options.items ?? NO_ITEMS, 'run', program, spawnOptions);
+            refuseDetached(manifest, itemsOf, 'run', program, spawnOptions, resolversOf(manifest.id));
           if (
             !spawnPermitted(
               effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
-              options.items ?? NO_ITEMS,
+              itemsOf,
               program,
+              resolversOf(manifest.id),
             )
           )
             throw new Error(`${manifest.id}: spawn ${program} is not declared`);
@@ -1483,7 +1505,7 @@ async function start(world: World): Promise<TestHost> {
         },
         async runBytes(program, args, spawnOptions) {
           if (detachedAsked(spawnOptions))
-            refuseDetached(manifest, options.items ?? NO_ITEMS, 'runBytes', program, spawnOptions);
+            refuseDetached(manifest, itemsOf, 'runBytes', program, spawnOptions, resolversOf(manifest.id));
           const result = await this.run(program, args, spawnOptions);
           const all = new TextEncoder().encode(result.stdout);
           const cap = spawnOptions?.maxStdoutBytes ?? 1024 * 1024;
@@ -1498,7 +1520,7 @@ async function start(world: World): Promise<TestHost> {
         },
         start(program, args, spawnOptions): ChildHandle {
           if (detachedAsked(spawnOptions)) {
-            refuseDetached(manifest, options.items ?? NO_ITEMS, 'start', program, spawnOptions);
+            refuseDetached(manifest, itemsOf, 'start', program, spawnOptions, resolversOf(manifest.id));
             if (options.detachedStart === undefined)
               throw new Error(`${manifest.id}: detached ${program} with no detachedStart fake`);
             return detachedHandle(options.detachedStart(program, args, spawnOptions));
@@ -1518,14 +1540,9 @@ async function start(world: World): Promise<TestHost> {
           if (
             !hostPermitted(
               effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
-              options.items ?? NO_ITEMS,
+              itemsOf,
               parsed.hostname,
-              name =>
-                (
-                  built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
-                )?.[name],
+              resolversOf(manifest.id),
               parsed.host,
             )
           )
