@@ -8,6 +8,7 @@ import {
   type CopyMeta,
   type PasteRuleCreate,
   PASTE_RULE_ERROR_CODES,
+  PASTE_RULE_STAGES_MAX,
   type PasteRuleStageId,
 } from '../../../../contract/routes/index.ts';
 import {
@@ -394,6 +395,39 @@ describe('the settings', () => {
     const forged = await w.call('POST', commit, { params: { stage: 'nope' }, standing: proving() });
     should(moved).match({ status: 404, code: PASTE_RULE_ERROR_CODES.profileTargetsChanged });
     should(forged).match({ status: 400, code: 'bad_request' });
+  });
+});
+
+describe('a full set of waiting stages', () => {
+  const homes: RuleProgramHomes = { profileCouldStandFor: async program => program === 'vercel' };
+
+  async function fill(w: World): Promise<void> {
+    for (let held = 0; held < PASTE_RULE_STAGES_MAX; held += 1) await staged(w);
+    should(await w.call('GET', '/v1/copy-rules/stages', { standing: phone() })).match({
+      body: { stages: { length: PASTE_RULE_STAGES_MAX } },
+    });
+  }
+
+  it('should answer 409 paste_rule_stages_full to a new rule stage, and change nothing', async () => {
+    const w = await world();
+    await fill(w);
+    const refused = await w.call('POST', '/v1/copy-rules/stages', { body: TO_TERMINAL, standing: phone() });
+    should(refused).match({ status: 409, code: PASTE_RULE_ERROR_CODES.stagesFull });
+    should(
+      ((await w.call('GET', '/v1/copy-rules/stages', { standing: phone() })).body as { stages: unknown[] }).stages,
+    ).have.length(PASTE_RULE_STAGES_MAX);
+    should(await w.rules.list(HOST)).eql([]);
+  });
+
+  it('should answer 409 paste_rule_stages_full to a new settings stage, and change nothing', async () => {
+    const w = await world({ homes });
+    await fill(w);
+    const refused = await w.call('POST', '/v1/copy-rules/settings/stages', { standing: phone() });
+    should(refused).match({ status: 409, code: PASTE_RULE_ERROR_CODES.stagesFull });
+    should(
+      ((await w.call('GET', '/v1/copy-rules/stages', { standing: phone() })).body as { stages: unknown[] }).stages,
+    ).have.length(PASTE_RULE_STAGES_MAX);
+    should((await w.call('GET', '/v1/copy-rules/settings')).body).match({ settings: { allowProfileTargets: false } });
   });
 });
 

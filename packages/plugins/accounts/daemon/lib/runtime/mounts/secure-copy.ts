@@ -214,8 +214,12 @@ export function secureCopyRoutes(
         const caller = ruleOwner(context);
         if (rules.currentSettings(caller).allowProfileTargets)
           throw new ApiError(409, 'programs in your own profile are already allowed: nothing to approve', 'conflict');
-        const staged = await stages.stageProfileTargets(caller, await widenedBy(homes, rules.list(caller)));
-        return jsonResponse(PasteRuleStagedSchema.parse(staged), 201);
+        const widens = await widenedBy(homes, rules.list(caller));
+        try {
+          return jsonResponse(PasteRuleStagedSchema.parse(await stages.stageProfileTargets(caller, widens)), 201);
+        } catch (error) {
+          return stageAnswered(error);
+        }
       },
     },
     {
@@ -267,7 +271,11 @@ export function secureCopyRoutes(
         const request = await parseBody(context.request, PasteRuleCreateSchema);
         const refused = refusedDestination(context, request);
         if (refused !== undefined) return refused;
-        return jsonResponse(PasteRuleStagedSchema.parse(await stages.stage(caller, request)), 201);
+        try {
+          return jsonResponse(PasteRuleStagedSchema.parse(await stages.stage(caller, request)), 201);
+        } catch (error) {
+          return stageAnswered(error);
+        }
       },
     },
     {

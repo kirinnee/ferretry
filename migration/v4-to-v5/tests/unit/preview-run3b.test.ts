@@ -144,6 +144,9 @@ describe('m3: a login that drives both CLIs is decided by the runtime profile, a
     await put('config/profiles/mixed.yaml', 'contents:\n  - instructions/c-only\n  - instructions/x-only\n');
     await put('config/profiles/ms.yaml', 'contents:\n  - instructions/c-only\n  - modelSets/ms\n');
     await put('config/profiles/via.yaml', 'contents:\n  - profile/cl\n');
+    await put('config/profiles/ms-only.yaml', 'contents:\n  - modelSets/ms\n');
+    await put('config/profiles/ms-cx.yaml', 'contents:\n  - instructions/x-only\n  - modelSets/ms\n');
+    await put('config/profiles/ms-via.yaml', 'contents:\n  - profile/ms\n');
     const ctx = { v4: v4Paths(f.from), previewLoginHarnesses: await readLoginHarnesses(f.from) };
     return { ctx, scopes: await previewProfileScopes(ctx) };
   };
@@ -164,22 +167,41 @@ describe('m3: a login that drives both CLIs is decided by the runtime profile, a
     // A scoped profile still beats the login's harness.
     expect(on('dual-cx', 'cl')).toBe('claude-code');
     expect(on('dual', 'cx')).toBe('codex');
-    // The one case left held: a model set without a harness (v4 scopes it by model ids this tool does not copy).
-    expect(on('dual', 'ms')).toBe('both');
-    expect(on('dual-cx', 'ms')).toBe('both');
+    // Held: a model set without a harness and nothing else saying which CLI (v4 scopes it by model ids this tool does
+    // not copy).
+    expect(on('dual', 'ms-only')).toBe('both');
+    expect(on('dual-cx', 'ms-only')).toBe('both');
     expect([...scopes.entries()].sort()).toEqual([
       ['cl', 'claude'],
       ['cx', 'codex'],
       ['gen', 'generic'],
       ['mixed', 'generic'],
-      ['ms', 'unsure'],
+      ['ms', 'unsure-claude'],
+      ['ms-cx', 'unsure-codex'],
+      ['ms-only', 'unsure'],
+      ['ms-via', 'unsure-claude'],
       ['via', 'claude'],
     ]);
   });
 
+  test('c: a profile scoped to the login’s own CLI that also has a harness-less model set picks that CLI, as v4 does', async () => {
+    const { ctx, scopes } = await setup();
+    const on = (login: string, profile: string) => runtimeHarnessOf(ctx, undefined, login, scopes.get(profile));
+    // claude layers + model set, on a login whose own harness is claude: the model set agrees or makes it mixed → claude.
+    expect(on('dual', 'ms')).toBe('claude-code');
+    expect(on('dual', 'ms-via')).toBe('claude-code');
+    // codex layers + model set, on a login whose own harness is codex.
+    expect(on('dual-cx', 'ms-cx')).toBe('codex');
+    // The other CLI's login cannot tell: the model set may say the profile is codex-scoped, which then wins. Held.
+    expect(on('dual-cx', 'ms')).toBe('both');
+    expect(on('dual', 'ms-cx')).toBe('both');
+  });
+
   test('a login with one half, or none, keeps its own harness whatever the profile says; a runtime harness wins', async () => {
     const { ctx, scopes } = await setup();
-    // v4 returns the runtime's own harness first, even when its login is missing; so does this (n5).
+    // v4 checks the login first (scope.ts:205-217) and returns nothing for a login that does not exist; but v4's schema
+    // refuses such a runtime, so no booted home has one, and an unreadable login (missing from the stage map) does
+    // exist in v4, where the runtime's own harness is returned. This returns the runtime's own harness first (n5).
     expect(runtimeHarnessOf(ctx, 'claude', 'no-such-login', undefined)).toBe('claude-code');
     expect(runtimeHarnessOf(ctx, 'codex', undefined, undefined)).toBe('codex');
     expect(runtimeHarnessOf(ctx, undefined, 'one-half', scopes.get('cl'))).toBe('codex');
