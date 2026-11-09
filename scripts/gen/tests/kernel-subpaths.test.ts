@@ -48,6 +48,12 @@ describe('context-imports: the kernel wire and session subpaths', () => {
     expect(refusal(edge('access', 'app/lib/push-clear.ts', '@ferretry/kernel/contract/push-envelope'))).toBeUndefined();
   });
 
+  test('the hosted app origin is contract surface by its own subpath, for the app build config Node loads', () => {
+    const specifier = '@ferretry/kernel/contract/hosted-app';
+    expect(edge('connections', 'contract/hosted-directory.ts', specifier).toArea).toBe('kernel-contract');
+    expect(refusal(edge('connections', 'contract/hosted-directory.ts', specifier))).toBeUndefined();
+  });
+
   test('a plugin contract may import them too (they are pure)', () => {
     expect(refusal(edge('connections', 'contract/index.ts', '@ferretry/kernel/wire'))).toBeUndefined();
   });
