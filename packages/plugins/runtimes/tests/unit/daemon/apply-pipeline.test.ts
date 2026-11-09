@@ -496,6 +496,82 @@ describe('the apply pipeline over a fake config writer', () => {
     should(w.written).have.length(1);
   });
 
+  describe('BG-027 a proposal refused before any write is kept; one that began to write is spent', () => {
+    const settle = async (w: World, id: string): Promise<{ ok: true } | { ok: false; error: FleetCatalogRefusal }> =>
+      await w.service.apply(id, OWNER).then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error: error as FleetCatalogRefusal }),
+      );
+    const spent = (result: { ok: true } | { ok: false; error: FleetCatalogRefusal }): void => {
+      should(result.ok).equal(false);
+      should(result.ok ? '' : result.error.message).containEql('already been applied');
+    };
+    const LATE = ['the mcp component "github" could not be read from the part of Ferretry that owns it'];
+
+    it('BG-027 PR1b should keep a proposal refused for a stand-in seen only on the last look, and apply it once when that clears', async () => {
+      // Arrange: the staleness check is clean; the last look before the write is not.
+      const w = world();
+      const staged = await w.service.propose(CHANGE);
+      w.readings = [{}, { unreadable: LATE }];
+
+      // Act + Assert: refused, nothing written, and the retry is refused the same true way (not "already applied").
+      const first = await settle(w, staged.id);
+      should(first.ok ? '' : first.error.code).equal('fleet_change_refused');
+      w.readings = [{}, { unreadable: LATE }];
+      const retry = await settle(w, staged.id);
+      should(retry.ok ? '' : retry.error.code).equal('fleet_change_refused');
+      should(w.written).have.length(0);
+
+      // The stand-in clears: the same proposal applies once, and is then spent.
+      w.readings = [{}, {}];
+      should((await settle(w, staged.id)).ok).equal(true);
+      spent(await settle(w, staged.id));
+      should(w.written).have.length(1);
+    });
+
+    it('BG-027 PR3 should keep a proposal spent when a refusal-coded error is thrown AFTER the documents were written', async () => {
+      // Arrange: the plan, after the documents landed, throws an error that carries a refusal code.
+      const w = world('fake', undefined, {
+        provisioner: {
+          preview: async plan => ({ ...plan, sharedHistory: [] }),
+          apply: async () => {
+            throw new FleetCatalogRefusal('fleet_change_refused', 'refused in the middle of the plan');
+          },
+        },
+      });
+      const staged = await w.service.propose(CHANGE);
+
+      // Act
+      const first = await settle(w, staged.id);
+
+      // Assert: answered as a failed change that names the file that landed, never restored for a replay.
+      should(first.ok ? '' : first.error.code).equal('fleet_change_failed');
+      should(first.ok ? '' : first.error.message).containEql('/fy/config/runtimes/claude-default.yaml');
+      spent(await settle(w, staged.id));
+      should(w.written).have.length(1);
+    });
+
+    it('BG-027 PR3b should keep a proposal spent when the config writer throws a stale-coded refusal, wrapped as a failed change', async () => {
+      // Arrange: the writer itself refuses as stale, after the apply began to write.
+      let writes = 0;
+      const w = world({
+        write: async () => {
+          writes += 1;
+          throw new FleetCatalogRefusal('fleet_change_stale', 'stale inside the writer');
+        },
+      });
+      const staged = await w.service.propose(CHANGE);
+
+      // Act
+      const first = await settle(w, staged.id);
+
+      // Assert
+      should(first.ok ? '' : first.error.code).equal('fleet_change_failed');
+      spent(await settle(w, staged.id));
+      should(writes).equal(1);
+    });
+  });
+
   it('should refuse when this daemon cannot say who is asking, before anything is written', async () => {
     // Arrange
     const w = world();
