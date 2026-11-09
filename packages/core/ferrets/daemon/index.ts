@@ -378,6 +378,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // The ferret's last screen, kept as it stops (F-0326): one `Runner.look` (an act on the pane, masked by the runner),
   // masked again here, written 0600 to its own folder on the sessions root, bounded by the kernel clock.
   const lastSnapshots = new LastSnapshotCapture({
+    // read-scoped: none — a factory typed LastSnapshotWriter (write only); the frame it is handed was masked inside Redaction.read in LastSnapshotCapture.captureOnce
     store: id => new FileLastSnapshotStore(sessionFiles.root(id), id),
     redaction: kernel.redaction,
     sleep: async (delay, signal) => await kernel.clock.sleep(delay, signal),

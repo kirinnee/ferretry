@@ -55,6 +55,10 @@ export const ONE_TIME_PENDING_ALLOWANCE: readonly { readonly id: string; readonl
   { id: 'projects', reason: 'ruling #28 (britnee): ported but unwired, back in pending' },
   { id: 'updates', reason: 'ruling #28 (britnee): ported but unwired, back in pending' },
   {
+    id: 'vault',
+    reason: 'ruling (britnee): left pending with its app and cli halves still skeletons, back in pending',
+  },
+  {
     id: 'lessons',
     reason: 'kac2 R5 ruling (britnee): GAP(lessons) is Lessons own launch flag, owner nelly, back in pending',
   },
