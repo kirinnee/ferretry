@@ -1027,7 +1027,10 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
   - `warden:orphans` — one item naming the cards that have nobody working on them, titled "A card has nobody working on it"
     (or "N cards have nobody working on them"), one plain line per card: "&B1 Fix simcha Loge 502 is waiting in
     Review/CI, but no ferret is assigned, so nothing will happen to it." A card leaves it when someone takes it. The
-    nudge to a live owner ferret is unchanged. It is information, so **Got it** dismisses the whole item, and it
+    nudge to a live owner ferret is unchanged. (On 5.0 the Warden keeps it as the `daemon` + `warden.orphans` standing
+    notice, `AsksApi.standing`: the same item while the list changes, nothing written when it is unchanged, a new one if
+    it was closed and cards are orphaned again; it names the first 12 cards oldest wait first, then "…and N more.", as
+    plain lines in the context: Asks carries no `cards` rows.) It is information, so **Got it** dismisses the whole item, and it
     carries `cards` (below): each card gets its own **Open**, **Start a ferret** and **Close**, on one line (a phone's width
     holds the three; a screen reader hears "Open card &B1", "Start a ferret on &B1", "Close card &B1").
     - **`cards`** is a structured field on an `info` item (1 to 12 rows, each `{ task: { id }, line }`, strict; refused

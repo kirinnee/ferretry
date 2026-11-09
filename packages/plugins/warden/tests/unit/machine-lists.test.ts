@@ -4,8 +4,6 @@ import type { MachineAgendaPort, MachineMembersStore, MachineRaise } from '../..
 import { AUTO_MOVE_FAILED_REF, AutoMoveFailures } from '../../daemon/lib/auto-move-failures.ts';
 import { INBOX_STUCK_REF, StuckInboxList } from '../../daemon/lib/inbox-stuck-list.ts';
 import { INPUT_STUCK_REF, StuckInputList } from '../../daemon/lib/input-stuck-list.ts';
-import { ORPHANS_REF, OrphanList } from '../../daemon/lib/orphan-list.ts';
-import type { WardenCardNotice } from '../../daemon/lib/orphans.ts';
 
 class Members implements MachineMembersStore {
   value: Record<string, readonly string[]> = {};
@@ -171,87 +169,6 @@ describe('the auto-move failures item', () => {
     );
     for (const id of many.keys()) await failures.note(id, 'x');
     should(raised.at(-1)?.request.context).containEql('…and 3 more.');
-  });
-});
-
-const notice = (id: string, title: string): WardenCardNotice => ({
-  sourceRef: `warden-orphan:${id}`,
-  task: { id } as never,
-  title,
-  subject: `${title} subject`,
-  why: 'w',
-  premise: 'p',
-  context: 'c',
-  howToResolve: 'h',
-  waitingSince: id === 'F1' ? '2026-07-01T00:00:00Z' : '2026-07-02T00:00:00Z',
-});
-
-describe('the orphaned cards item', () => {
-  it('should list the cards in one item, oldest wait first, and name a single card', async () => {
-    const { port, raised } = machine();
-    const list = new OrphanList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
-    await list.add(notice('F1', 'A card has nobody working on it'));
-    should(raised[0]).containDeep({
-      ref: ORPHANS_REF,
-      members: ['F1'],
-      request: {
-        title: 'A card has nobody working on it',
-        cards: [{ task: { id: 'F1' }, line: 'A card has nobody working on it subject' }],
-      },
-    });
-    should(raised[0]?.request.premise).containEql('this card');
-    should(raised[0]?.request.why).containEql('This one was handed');
-    await list.add(notice('F2', 'A card has nobody working on it'));
-    should(raised[1]?.request.premise).containEql('these cards');
-    should(raised[1]?.request.title).equal('2 cards have nobody working on them');
-    should(raised[1]?.request.cards?.map(row => row.task.id)).eql(['F1', 'F2']);
-    should(raised[1]?.request.why).not.containEql('nothing under it is alive');
-    should(raised[1]?.request.howToResolve).containEql('Got it');
-    should(raised[1]?.request.waitingSince).equal('2026-07-01T00:00:00Z');
-  });
-
-  it('should keep every card when adds and removes run at the same time, and raise quietly when told to', async () => {
-    // Arrange
-    const { port, raised } = machine();
-    const store = new Members();
-    const slow = {
-      read: async () => {
-        const held = await store.read();
-        await new Promise(resolve => setTimeout(resolve, 5));
-        return held;
-      },
-      write: async (members: Readonly<Record<string, readonly string[]>>) => {
-        await new Promise(resolve => setTimeout(resolve, 5));
-        await store.write(members);
-      },
-    };
-    const list = new OrphanList(slow, port, () => '2026-11-06T09:00:00.000Z');
-
-    // Act
-    await Promise.all([list.add(notice('F1', 'a'), true), list.add(notice('F2', 'b')), list.remove('F9')]);
-
-    // Assert
-    should(Object.keys(store.value).sort()).eql(['F1', 'F2']);
-    should(raised[0]?.request.ping).be.undefined();
-    should(raised[1]?.request.ping).be.true();
-  });
-
-  it('should close the item when the last card leaves, and ignore a card it never held', async () => {
-    const { port, resolved, raised } = machine();
-    const list = new OrphanList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
-    await list.remove('F9');
-    should(raised).be.empty();
-    await list.add(notice('F1', 'a'));
-    await list.remove('F1');
-    should(resolved).eql([ORPHANS_REF]);
-  });
-
-  it('should say how many more than a dozen', async () => {
-    const { port, raised } = machine();
-    const list = new OrphanList(new Members(), port, () => '2026-11-06T09:00:00.000Z');
-    for (let index = 0; index < 14; index += 1)
-      await list.add(notice(`F${String(index + 10)}`, `card ${String(index)}`));
-    should(raised.at(-1)?.request.context).containEql('…and 2 more.');
   });
 });
 
