@@ -472,6 +472,11 @@ export interface CliContext<M extends Manifest> {
    */
   readText?(path: string): Promise<string>;
   /**
+   * The raw bytes of a path (an image, a PDF, a document), by the same rules as `readText`: relative to the CLI working
+   * directory, '-' reads stdin, no reader size cap (the receiving route bounds what it takes). Nothing is decoded.
+   */
+  readBytes?(path: string): Promise<Uint8Array>;
+  /**
    * Whether a path exists, resolved against the CLI working directory (never stdin: `-` is a file named `-`).
    * As today's `existsSync`: a directory counts, and so does a file that exists but cannot be read. It reads no
    * content, so a poll (`fy wait --until-marker`) costs one probe, not a whole-file read.
