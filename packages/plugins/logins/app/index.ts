@@ -1,4 +1,5 @@
 import { implementApp } from '@ferretry/kernel/manifest';
+import { forSubject } from '@ferretry/app';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
 import { AddLoginPanel, LocalModelsSurface, LoginSignInPanel, QuotaReadout, SignInsTab } from './views.tsx';
@@ -25,6 +26,8 @@ export default implementApp(manifest, {
         createElement(LoginSignInPanel, { client, harness: 'codex', ...(subject === undefined ? {} : { subject }) }),
       'local-models': () => createElement(LocalModelsSurface, { client }),
       'quota-readout': () => createElement(QuotaReadout, { client }),
+      // The first-run step's body: the sign-ins view, only for its own step.
+      'onboarding-step': forSubject('logins.login', () => createElement(SignInsTab, { client })),
     },
   }),
 });

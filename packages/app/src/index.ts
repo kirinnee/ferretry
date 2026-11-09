@@ -9,6 +9,7 @@
 export * from './fy-render/index.ts';
 
 // ─── reaching a daemon: what Access and Connections provide (§4.8, §4.13) ─────────────────────────────────────────
+export { localQr, MAX_QR_VERSION, QrEncodeError, type QrMatrix } from './ui/local-qr.ts';
 export {
   CARRIER_TAKERS,
   CLAIM_TAKERS,
@@ -17,6 +18,7 @@ export {
   type ConnectPorts,
   type DaemonlessPorts,
   type PairedList,
+  type ChosenDaemon,
   type DaemonlessScreenProps,
   type DaemonlessViews,
   type DeviceClaims,
@@ -148,6 +150,7 @@ export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from '
 export { type DeviceLayout, useDeviceLayout } from './shell/use-device-layout.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
 export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
+export { forSubject } from './shell/for-subject.ts';
 /** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */
 export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 /** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */

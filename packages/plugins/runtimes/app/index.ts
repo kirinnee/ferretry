@@ -1,6 +1,6 @@
 import type { AppComponent, PanelProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
-import { provideToShell } from '@ferretry/app';
+import { forSubject, provideToShell } from '@ferretry/app';
 import manifest from '../manifest.ts';
 import type { LiveRuntimesClient, RuntimesClient } from './lib/client.ts';
 import { lazyComponent } from './lazy.ts';
@@ -59,6 +59,11 @@ export default provideToShell(
         'runtime-picker': pickerView(client),
         'new-ferret-account': accountPanel(client, 'createNewFerretAccountPanel'),
         'move-account': accountPanel(client, 'createMoveAccountPanel'),
+        // The first-run step's body: the runtimes view, only for its own step.
+        'onboarding-step': forSubject(
+          'runtimes.runtimes',
+          settingsView('runtimes-settings', 'createRuntimesSettings', client) as AppComponent<PanelProps>,
+        ),
       },
     }),
   }),

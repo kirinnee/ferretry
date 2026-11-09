@@ -220,6 +220,22 @@ export interface DaemonlessScreenProps {
    * keeps nothing: a pairing link's fragment carries a single-use code.
    */
   readonly location: () => string;
+  /**
+   * Asks the person which machine to use (S10). The shell draws its own picker (the paired machines where this plugin
+   * is on, `purpose` as its heading) and answers only the machine the PERSON chose, with THIS plugin's own client on
+   * it. `undefined` when the person cancels; it never resolves without a click. A share code is never spent by the
+   * choice itself. The chosen machine counts as the machine on screen until this screen unmounts, so its reads are not
+   * left waiting for a passkey.
+   */
+  readonly chooseDaemon: (purpose: string) => Promise<ChosenDaemon | undefined>;
+}
+
+/** The machine a person chose on a daemon-less screen, and the calling plugin's own client there. */
+export interface ChosenDaemon {
+  readonly daemon: string;
+  /** The name the person picked it by (the same one the picker showed). */
+  readonly machine: string;
+  readonly client: PluginClient;
 }
 
 /** The daemon-less screens of one plugin, by screen id. */

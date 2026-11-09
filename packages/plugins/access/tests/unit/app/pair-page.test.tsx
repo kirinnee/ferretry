@@ -10,7 +10,7 @@ import {
 } from '@ferretry/app';
 import { deviceViewHarness } from '@ferretry/app/testing';
 import half from '../../../app/index.ts';
-import { OPENING_LINK, pairPage } from '../../../app/pair-page.tsx';
+import { OPENING_LINK, pairPage, returnPathOf } from '../../../app/pair-page.tsx';
 import { MemoryDeviceKeyStore, testDeviceKeyCrypto } from '../../support/app/device-keys.ts';
 import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
 
@@ -99,6 +99,8 @@ function props(href: string, moves: Navigation[]): DaemonlessScreenProps {
     navigate: (to, options) => {
       moves.push({ to, replace: options?.replace });
     },
+    // The pairing page never asks for a machine: a pairing is the way one gets chosen.
+    chooseDaemon: async () => undefined,
   };
 }
 
@@ -220,6 +222,61 @@ describe('the /pair page', () => {
       expect(region.textContent).not.toContain(FAKE_CODE);
     }
     expect(must(view, 'the page').container.innerHTML).not.toContain(FAKE_CODE);
+  });
+
+  it('M2 pairs from the first run and lands back on the path it named, never on a machine’s home', async () => {
+    const { Page, store } = setup(async input => {
+      await input.key.save(answer as never);
+      return {
+        kind: 'paired',
+        response: answer,
+        via: { kind: 'direct', address: 'https://daemon.example.test' },
+      } as PairedOver;
+    });
+    const moves: Navigation[] = [];
+    const shell = shellAt(`/pair?return=%2Fonboarding${FRAGMENT}`);
+    view = await mount(
+      <shell.Harness place="daemonless" screen="pair">
+        <Page {...props(`${PAGE}?return=%2Fonboarding`, moves)} />
+      </shell.Harness>,
+    );
+    await interact(() => button('Pair this device').click());
+    await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
+    expect(store.keys.has(DAEMON)).toBe(true);
+    expect(moves.at(-1)).toEqual({ to: '/onboarding', replace: undefined });
+    expect(moves.some(move => move.to.includes(FAKE_CODE))).toBe(false);
+  });
+
+  it('M2 only a plain same-origin path can be a return: no host, scheme, query or fragment', () => {
+    expect(returnPathOf(`${PAGE}?return=%2Fonboarding`)).toBe('/onboarding');
+    expect(returnPathOf(`${PAGE}?return=%2F`)).toBe('/');
+    for (const bad of [
+      '//evil.example',
+      'https://evil.example/',
+      '/a?b=1',
+      '/a#b',
+      '/a\\b',
+      '/a//b',
+      'onboarding',
+      '',
+      '/a b',
+    ]) {
+      expect(returnPathOf(`${PAGE}?return=${encodeURIComponent(bad)}`)).toBeUndefined();
+    }
+    expect(returnPathOf(PAGE)).toBeUndefined();
+  });
+
+  it('n3 a dot segment is not a plain path, though a name that merely contains dots is', () => {
+    for (const bad of ['/..', '/.', '/a/..', '/a/../b', '/./a', '/a/.', '/../a', '/%2e%2e']) {
+      expect(returnPathOf(`${PAGE}?return=${encodeURIComponent(bad)}`)).toBeUndefined();
+    }
+    // Raw, not re-encoded: the address reader decodes `%2e` to a real dot, so these ARE dot segments by then.
+    for (const raw of ['/%2e%2e', '/%2E%2e/x', '/a/%2e', '/a/%2E%2e/b', '/.%2e']) {
+      expect(returnPathOf(`${PAGE}?return=${raw}`)).toBeUndefined();
+    }
+    for (const good of ['/..a', '/a..', '/.well-known/x', '/a.b/c', '/...']) {
+      expect(returnPathOf(`${PAGE}?return=${encodeURIComponent(good)}`)).toBe(good);
+    }
   });
 
   it('after a sealed refusal says one sentence without the code, keeps no key, and never retries on its own', async () => {

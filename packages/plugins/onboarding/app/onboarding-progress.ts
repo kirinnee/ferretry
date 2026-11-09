@@ -484,6 +484,19 @@ export class OnboardingProgressStore {
     });
   }
 
+  /**
+   * Writes the place on the glass to storage, so a visit that comes back without this address's fragment resumes here.
+   *
+   * A hand-off or an arrival is applied on read and never written (merely opening a link must not rewrite progress).
+   * Leaving for another page on purpose is a deliberate act, so it is the one moment that place is kept: the person
+   * returns to the bare first-run address and finds the place they left, not the first question.
+   */
+  remember(): OnboardingProgress {
+    const at = this.snapshot();
+    this.#save(at);
+    return at;
+  }
+
   #commit(next: OnboardingProgress): OnboardingProgress {
     this.#snapshot = next;
     this.#save(next);
