@@ -214,6 +214,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
             throw new Error('Runtimes cannot read its profile files on this daemon right now');
           return await assembly.profileEtag(name);
         },
+        state: name => config.fileState(profileItems, name),
         writeAll: async documents => await config.writeAll(documents),
         // The same one-at-a-time section as an apply (S67). A daemon whose catalogue cannot be opened has no apply to
         // run beside, so the act stands alone there (and its etag read refuses in a sentence).

@@ -67,7 +67,7 @@ async function realWorld(world: FleetWorld) {
   };
   const assembly = fileAssembly({ kernel, needs, hooks: { provider: () => 'unavailable' } }, new FleetPublication());
   /** Runs right after an etag is answered and before its caller reads the value: the window an edit can land in. */
-  const hooks: { afterEtag?: (name: string) => Promise<void> } = {};
+  const hooks: { afterEtag?: (name: string) => Promise<void>; beforeWrite?: () => Promise<void> } = {};
   const api: Pick<RuntimesApi, 'profiles' | 'changeProfileLayers'> = createProfileLayers({
     runtimes: () => port.collection(RUNTIME_ITEMS as never),
     profiles: () => port.collection(PROFILE_ITEMS as never),
@@ -76,13 +76,21 @@ async function realWorld(world: FleetWorld) {
       await hooks.afterEtag?.(name);
       return answered;
     },
-    writeAll: async documents => await port.writeAll(documents),
+    state: name => port.fileState(PROFILE_ITEMS as never, name),
+    writeAll: async documents => {
+      await hooks.beforeWrite?.();
+      return await port.writeAll(documents);
+    },
     serialise: async act => await assembly.catalog.serialise(act),
   });
   return {
     api,
     assembly,
     hooks,
+    /** The kernel's config service reloads from disk (what the watcher does after its debounce). */
+    reload: async (): Promise<void> => {
+      await config.reload();
+    },
     /** Someone edits the file behind the service: written to disk, no reload (the watcher's debounce, or no watcher). */
     editBehind: async (name: string, text: string): Promise<void> => {
       await writeFile(join(profiles, `${name}.yaml`), text);
@@ -244,5 +252,102 @@ describe('R2 the profile layers over the kernel’s real config service, nothing
 
     // Act + Assert
     expect(await world.assembly.profileEtag('nothing')).toBe('absent');
+  });
+
+  describe('R2 M-1 a profile file that is BROKEN on disk is never written over', () => {
+    const BAD_YAML = '# my careful notes\ncontents:\n  - mcp/one\n  - mcp/theirs\nbroken: [unclosed\n';
+    const BAD_LAYER = '# notes\ncontents:\n  - mcp/one\n  - mcp/theirs\n  - Not A Layer\n';
+    const NOT_A_STRING = 'contents:\n  - mcp/one\n  - { a: 1 }\n';
+    const FIXED = 'contents:\n  - mcp/one\n  - mcp/theirs\n';
+    const BROKEN: readonly (readonly [string, string])[] = [
+      ['bad YAML', BAD_YAML],
+      ['a layer that names nothing', BAD_LAYER],
+      ['a layer that is not a string', NOT_A_STRING],
+    ];
+
+    for (const [kind, text] of BROKEN) {
+      it(`R2 M-1 should refuse an add, naming the file and the problem, for a profile with ${kind}, and leave its bytes`, async () => {
+        // Arrange — `plain` was good when loaded; the owner then breaks it by hand (the last good value stays in effect).
+        const world = await realWorld(await fleetWorld());
+        await world.editBehind('plain', text);
+
+        // Act
+        const outcome = await world.api.changeProfileLayers({ kind: 'add', profile: 'plain', layer: 'mcp/two' }, owner);
+
+        // Assert
+        expect(outcome.kind).toBe('refused');
+        const sentence = outcome.kind === 'refused' ? outcome.sentence : '';
+        expect(sentence).toContain('profiles/plain.yaml');
+        expect(sentence).toContain('nothing was changed');
+        expect(await world.onDisk('plain')).toBe(text);
+      });
+
+      it(`R2 M-1 should refuse the WHOLE remove-everywhere set when one of three profiles has ${kind}, writing nothing`, async () => {
+        // Arrange — all three name `mcp/one`; only `crlf` is broken.
+        const world = await realWorld(await fleetWorld());
+        await world.editBehind('crlf', text);
+        const before = { plain: await world.onDisk('plain'), crlf: text, bom: await world.onDisk('bom') };
+
+        // Act
+        const outcome = await world.api.changeProfileLayers({ kind: 'remove-everywhere', layer: 'mcp/one' }, owner);
+
+        // Assert — refused, and the two good files are byte for byte what they were (atomic).
+        expect(outcome.kind).toBe('refused');
+        expect(outcome.kind === 'refused' ? outcome.sentence : '').toContain('profiles/crlf.yaml');
+        expect(await world.onDisk('plain')).toBe(before.plain);
+        expect(await world.onDisk('crlf')).toBe(before.crlf);
+        expect(await world.onDisk('bom')).toBe(before.bom);
+      });
+    }
+
+    it('R2 M-1 should write the same add once the owner has fixed the file', async () => {
+      // Arrange
+      const world = await realWorld(await fleetWorld());
+      await world.editBehind('plain', BAD_YAML);
+      const call = () => world.api.changeProfileLayers({ kind: 'add', profile: 'plain', layer: 'mcp/two' }, owner);
+      expect((await call()).kind).toBe('refused');
+
+      // Act — the owner fixes the file; the very same call.
+      await world.editBehind('plain', FIXED);
+      const outcome = await call();
+
+      // Assert
+      expect(outcome).toEqual({ kind: 'written', profiles: ['plain'] });
+      expect((await world.onDisk('plain')).split('contents:\n')[1]).toBe('  - mcp/one\n  - mcp/theirs\n  - mcp/two\n');
+    });
+
+    it('R2 M-1 should write the same remove-everywhere once the owner has fixed the file', async () => {
+      // Arrange
+      const world = await realWorld(await fleetWorld());
+      await world.editBehind('crlf', BAD_LAYER);
+      const call = () => world.api.changeProfileLayers({ kind: 'remove-everywhere', layer: 'mcp/one' }, owner);
+      expect((await call()).kind).toBe('refused');
+
+      // Act
+      await world.editBehind('crlf', FIXED);
+      const outcome = await call();
+
+      // Assert
+      expect(outcome).toEqual({ kind: 'written', profiles: ['bom', 'crlf', 'plain'] });
+      expect((await world.onDisk('crlf')).split('contents:\n')[1]).toBe('  - mcp/theirs\n');
+    });
+  });
+
+  it('R2 M-1 should answer a conflict, and write nothing, when an edit AND a reload land between the value read and the write', async () => {
+    // Arrange — the `ifMatch` pin is the only thing that can see this: after the reload the kernel's own view agrees with
+    // the disk, so a write without the pin would land on the value read before the edit and lose it.
+    const world = await realWorld(await fleetWorld());
+    world.hooks.beforeWrite = async () => {
+      world.hooks.beforeWrite = undefined;
+      await world.editBehind('plain', THEIRS);
+      await world.reload();
+    };
+
+    // Act
+    const outcome = await world.api.changeProfileLayers({ kind: 'add', profile: 'plain', layer: 'mcp/two' }, owner);
+
+    // Assert
+    expect(outcome).toEqual({ kind: 'conflict', profile: 'plain' });
+    expect(await world.onDisk('plain')).toBe(THEIRS);
   });
 });

@@ -66,6 +66,7 @@ async function realWorld(files: Readonly<Record<string, string | Uint8Array>>) {
       runtimes: () => port.collection(RUNTIME_ITEMS as never),
       profiles: () => port.collection(PROFILE_ITEMS as never),
       etag: etagOf,
+      state: name => port.fileState(PROFILE_ITEMS as never, name),
       writeAll: async documents => await port.writeAll(documents),
       serialise: async act => await act(),
     }),

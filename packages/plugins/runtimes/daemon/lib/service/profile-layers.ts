@@ -12,7 +12,7 @@
  * overwrite the layer it just added.
  */
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
-import type { ConfigWriteAllDocument, ConfigWriteAllOutcome } from '@ferretry/kernel/contract';
+import type { ConfigFileStatus, ConfigWriteAllDocument, ConfigWriteAllOutcome } from '@ferretry/kernel/contract';
 import {
   layerNameRefusal,
   PROFILE_ITEMS,
@@ -46,6 +46,11 @@ export interface ProfileLayerDeps {
   profiles(): ReadonlyMap<string, ProfileFile>;
   /** The etag of one profile file as it is on disk right now (`'absent'` when there is none). Rejects when unreadable. */
   etag(profile: string): Promise<string>;
+  /**
+   * What the kernel says of one profile file right now (`ConfigPort.fileState`). Read right AFTER `etag(profile)`: once
+   * the etag is answered the kernel's settled view describes that disk text, so the state and the etag agree.
+   */
+  state(profile: string): Pick<ConfigFileStatus, 'state' | 'sentences'>;
   /** `ConfigPort.writeAll`: the kernel's all-or-none writer of Runtimes' own files. */
   writeAll(documents: readonly ConfigWriteAllDocument[]): Promise<ConfigWriteAllOutcome>;
   /** Runs `act` in the one-at-a-time section every apply runs in, so no apply is between its read and its write. */
@@ -176,14 +181,37 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
     }
   };
 
+  /**
+   * The refusal of a profile file that does not check on disk. Such a file keeps its LAST GOOD value in effect while its
+   * etag is the digest of the broken text, so a patch built from that value and pinned to that etag would replace the
+   * owner's broken edit whole and answer `written`. Fix the file first: nothing is ever written over it. A file that is
+   * absent, valid or held is not judged here (a held one is refused by the writer itself).
+   */
+  const brokenRefusal = (profile: string): ProfileLayerOutcome | undefined => {
+    let status: Pick<ConfigFileStatus, 'state' | 'sentences'>;
+    try {
+      status = deps.state(profile);
+    } catch (error) {
+      return refuse(`profile ${profile} could not be read, so nothing was changed: ${errorText(error)}`);
+    }
+    if (status.state !== 'invalid') return undefined;
+    const problem = status.sentences.length === 0 ? 'it does not check' : status.sentences.join('; ');
+    return refuse(
+      `profile ${profile} does not check on disk (profiles/${profile}.yaml: ${problem}), so nothing was changed: fix the file first`,
+    );
+  };
+
   const add = async (change: Extract<ProfileLayerChange, { kind: 'add' }>): Promise<ProfileLayerOutcome> => {
     const layer: ProfileLayerName = change.layer;
     // The etag FIRST, then the value it describes: answering the etag refreshes what `profiles()` holds (an on-disk edit
-    // the watcher has not reloaded yet is read now), so the value below is at least as new as this etag. A value that is
-    // NEWER than the etag (the file moved after) only makes the writer's `ifMatch` fail, a refusal; the other order
-    // pinned a fresh etag to an old value and silently overwrote the edit.
+    // the watcher has not reloaded yet is read now), so the value below is at least as new as this etag, PROVIDED the
+    // file checks (a broken one keeps an older last good value: refused below). A value that is NEWER than the etag (the
+    // file moved after) only makes the writer's `ifMatch` fail, a refusal; the other order pinned a fresh etag to an old
+    // value and silently overwrote the edit.
     const etag = await etagOf(change.profile);
     if (typeof etag !== 'string') return etag;
+    const broken = brokenRefusal(change.profile);
+    if (broken !== undefined) return broken;
     const file = deps.profiles().get(change.profile);
     if (file === undefined) return refuse(`profile ${change.profile} does not exist`, 'fleet_change_unknown');
     if (file.contents.includes(layer)) {
@@ -208,6 +236,9 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
     for (const name of names) {
       const etag = await etagOf(name);
       if (typeof etag !== 'string') return etag;
+      // One broken file refuses the WHOLE set: nothing has been written yet, and nothing is.
+      const broken = brokenRefusal(name);
+      if (broken !== undefined) return broken;
       const file = deps.profiles().get(name);
       if (file === undefined || !file.contents.includes(layer)) continue;
       documents.push(

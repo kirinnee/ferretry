@@ -89,6 +89,7 @@ import {
   type StampedConfigFile,
 } from '../host/config/state-change.ts';
 import {
+  ALREADY_HELD_ISSUE,
   type DocumentVerdict,
   DUPLICATE_ISSUE,
   firstStop,
@@ -947,8 +948,9 @@ async function start(world: World): Promise<TestHost> {
         return { kind: 'written', etag: 'absent', loosened: sentences };
       },
       // The real writer's set over the in-memory values: each document checked as `write` checks one, every one before
-      // any lands, and the set's answer decided by the SAME rule (`host/config/write-all.ts`). The world holds nothing
-      // held and nothing unreadable, so `already_held` and `unreadable` never arise here.
+      // any lands, and the set's answer decided by the SAME rule (`host/config/write-all.ts`). A file with an edit
+      // already held for the owner refuses the set (`already_held`), as the real writer does: a set never discards a
+      // held edit. The world holds nothing unreadable, so `unreadable` never arises here.
       async writeAll(documents) {
         const refs: ConfigDocumentRef[] = [];
         for (const document of documents) {
@@ -969,6 +971,8 @@ async function start(world: World): Promise<TestHost> {
         const verdicts: DocumentVerdict[] = documents.map((document, index): DocumentVerdict => {
           const { def, name, edit } = document;
           const ref = refs[index] as ConfigDocumentRef;
+          if (configStamps.get(keyOf(def))?.get(ref.path)?.stamp.state === 'held')
+            return refusedDocument('already_held', ref, [ALREADY_HELD_ISSUE(ref.path)]);
           const all = world.config.get(keyOf(def)) as Record<string, unknown> | undefined;
           const before = def.shape === 'file' ? all : all?.[name as string];
           if (document.ifMatch !== undefined && document.ifMatch !== diskEtagOf(def, name, before))
