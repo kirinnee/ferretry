@@ -227,9 +227,47 @@ export class GateAdmission implements Admission {
     return judgeConfigAccess(input);
   }
 
-  /** A plugin's own loosening config write (`kernel.config.write`/`remove`): today's held-loosening rule. */
+  /**
+   * A plugin's own loosening config write (`kernel.config.write`/`remove`): today's held-loosening rule. A secret add
+   * (`ConfigPort.writeAsCaller`) is judged from the standing as it is NOW, not as it was at admission: the work a call
+   * spawns can write long after the call ended, so a device revoked, locked, or stripped of a grant since holds.
+   */
   judgeConfigWrite(input: ConfigWriteJudgement): 'apply' | 'hold' {
-    return judgeLooseningWrite(input);
+    if (input.secretAdd !== true) return judgeLooseningWrite(input);
+    return judgeLooseningWrite({ ...input, standing: this.#liveStanding(input.standing) });
+  }
+
+  /**
+   * The call's standing re-read from the providers now (devices, step-ups, the policy), keeping the claim functions the
+   * admission minted so one proof is still one act. `undefined` (the judge then holds) for a device its provider no
+   * longer holds or cannot place, one that must unlock again, or a standing this admission did not mint.
+   */
+  #liveStanding(standing: CallStanding | undefined): CallStanding | undefined {
+    const presentation = standing?.presentation;
+    if (standing === undefined || presentation === undefined) return undefined;
+    // A route that asked for no grant standing (no capability, no `consultsGrants`) has none to read: undetermined.
+    if (standing.governance === undefined) return standing;
+    const credential = standing.credential;
+    if (credential?.kind !== 'authenticated' || credential.tokenClass !== 'device')
+      return { ...standing, governance: this.#guard.governance(presentation) };
+    const principal = credential.principal;
+    const answer = this.#device(principal);
+    if (answer.kind !== 'device') return undefined;
+    const subject: StepUpSubject = { deviceId: principal.holder, appSession: principal.session };
+    const policy = this.deps.policy();
+    const unlocked = answer.standing.unlockedUntil !== undefined && answer.standing.unlockedUntil > this.deps.now();
+    if (
+      ((policy === undefined || policy.security.unlockOnOpen) && !unlocked) ||
+      this.deps.stepUps.unlockRequired(subject)
+    )
+      return undefined;
+    const live: CapabilityPresentation = {
+      ...presentation,
+      stepUp: this.deps.stepUps.held(subject),
+      freshStepUp: this.deps.stepUps.freshlyHeld(subject),
+      deviceGrants: answer.standing.grants,
+    };
+    return { ...standing, presentation: live, governance: this.#guard.governance(live) };
   }
 
   admitMember(input: AdmissionInput & { readonly table: 'member' }): AdmissionDecision<MemberStanding> {

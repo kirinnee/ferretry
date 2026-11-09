@@ -126,9 +126,10 @@ export interface ConfigWriteJudgement {
   readonly sentences: readonly string[];
   /**
    * Set by the kernel ONLY for a `ConfigPort.writeAsCaller`, never by a plugin: `sentences` are then the
-   * `${secret:NAME}` references the edit adds, and the question is whether the call in progress IS the owner (the host
-   * admin where it arrived on the host, or an unlocked device whose grants hold the file's configure capability). It
-   * is never a loosening to confirm with a step-up proof, so a judge claims no proof for it.
+   * `${secret:NAME}` references the caller's edit adds (names, never a value), and the question is whether the call in
+   * progress IS the owner as the route would have it: the host admin where it arrived on the host, or a governed device
+   * whose grants hold the file's configure capability and which proves a passkey for this act (`loosen-config`), claimed
+   * once. The kernel sets it alone: a plugin's input that carries it is never read. The judge is synchronous.
    */
   readonly secretAdd?: true;
   /** Who the call in progress runs as. */

@@ -18,10 +18,21 @@ import {
 import { definePlugin, implementDaemon, route } from '@ferretry/kernel/manifest';
 import { testHost } from '@ferretry/kernel/testing';
 import { DEFAULT_GATE_CONFIG, FULL_DEVICE_GRANTS } from '../../../../contract/index.ts';
-import { StandInAdmission } from '../../../../contract/testing/index.ts';
+import { holder, StandInAdmission } from '../../../../contract/testing/index.ts';
 import { CLIENT_HEADER, SESSION_ID_HEADER } from '../../../../daemon/lib/api/admission.ts';
 import { judgeLooseningWrite, judgeOwnerSecretAdd } from '../../../../daemon/lib/policy/config-judge.ts';
-import { ADMIN, admit, carried, descriptor, FERRET_TOKEN, local, type World, world } from '../support.ts';
+import {
+  ADMIN,
+  admit,
+  carried,
+  descriptor,
+  FERRET_TOKEN,
+  fleetConfigure,
+  later,
+  local,
+  type World,
+  world,
+} from '../support.ts';
 
 /**
  * `ConfigPort.writeAsCaller` through the REAL config writer, Gate's REAL judge and Gate's real admission standings: one
@@ -45,6 +56,7 @@ const mcpDef = defineConfig({
 
 /** A route that asks no capability of its own but reads the grants, which is where a plugin's config write can run. */
 const route0 = descriptor({ consultsGrants: true });
+const subjectOf = (id: string) => ({ deviceId: id, appSession: `s-${id}` });
 const atMachine = { bearer: ADMIN, arrival: local(), headers: { [CLIENT_HEADER]: 'cli' } };
 const relayed = { bearer: ADMIN, arrival: carried(), headers: { [CLIENT_HEADER]: 'cli' } };
 
@@ -53,16 +65,23 @@ interface Call {
   readonly standing?: CallStanding;
 }
 
-function callOf(w: World, options: Parameters<typeof admit>[2] = {}): Call {
-  const { decision, outcome } = admit(w, route0, options);
+/** The admission that minted each standing: the judge below asks it, as the built daemon asks its own. */
+const mintedBy = new WeakMap<object, World>();
+const nobody = world();
+
+function callOf(w: World, options: Parameters<typeof admit>[2] = {}, route = route0): Call {
+  const { decision, outcome } = admit(w, route, options);
   if (decision.outcome !== 'admitted') throw new Error(`expected admitted, got ${outcome}`);
+  mintedBy.set(decision.standing, w);
   return { actor: decision.actor, standing: decision.standing };
 }
 
 /** The host's wiring, as `host.ts` makes it: the ambient call at the moment the writer asks, and nothing else. */
 const hostJudge = (input: Omit<ConfigWriteJudgement, 'actor' | 'standing'>): boolean => {
   try {
-    return judgeLooseningWrite({ ...input, actor: currentActor(), standing: currentStanding() }) === 'apply';
+    const standing = currentStanding();
+    const gate = (standing === undefined ? undefined : mintedBy.get(standing)) ?? nobody;
+    return gate.gate.judgeConfigWrite({ ...input, actor: currentActor(), standing }) === 'apply';
   } catch {
     return false;
   }
@@ -116,12 +135,35 @@ describe('writeAsCaller: one edit, every kind of caller', () => {
     expect(result.inEffect).toBeUndefined();
   });
 
-  test('writeAsCaller a governed device that holds the configure capability and is unlocked: in effect, no proof spent', async () => {
+  test('writeAsCaller G129 G131 a governed device with the configure capability and only the unlock: held, as the route holds it', async () => {
     const w = world();
     w.enrol('phone');
     const result = await writeAs(callOf(w, { device: 'phone' }));
-    expect(result.kind).toBe('written');
-    expect(result.inEffect).toMatchObject({ env: { TOKEN: '${secret:ACME_TOKEN}' } });
+    expect(result.kind).toBe('held');
+    expect(result.inEffect).toBeUndefined();
+  });
+
+  test('writeAsCaller G129 G131 a governed device with the configure capability and a passkey proved for the act: in effect, the proof spent', async () => {
+    const w = world();
+    w.enrol('phone');
+    w.stepUps.grant(subjectOf('phone'));
+    const call = callOf(w, { device: 'phone' });
+    const first = await writeAs(call);
+    expect(first.kind).toBe('written');
+    expect(first.inEffect).toMatchObject({ env: { TOKEN: '${secret:ACME_TOKEN}' } });
+    // one proof, one act: the same call cannot add a second reference
+    expect((await writeAs(call)).kind).toBe('held');
+  });
+
+  test('writeAsCaller G129 G131 a device with a proof but without the configure capability: held', async () => {
+    const w = world();
+    w.enrol('phone', { ...FULL_DEVICE_GRANTS, fleet: { use: true, configure: false } });
+    w.stepUps.grant(subjectOf('phone'));
+    expect((await writeAs(callOf(w, { device: 'phone' }))).kind).toBe('held');
+  });
+
+  test('writeAsCaller G129 G131 the host admin over loopback needs no proof: unchanged', async () => {
+    expect((await writeAs(callOf(world(), atMachine))).kind).toBe('written');
   });
 
   test('writeAsCaller a governed device with the capability that is NOT unlocked (unlock off, no proof): held', async () => {
@@ -209,44 +251,46 @@ describe('writeAsCaller: one edit, every kind of caller', () => {
   });
 });
 
-describe('writeAsCaller: the owner question claims no step-up proof', () => {
-  test('writeAsCaller judgeOwnerSecretAdd never spends the device’s fresh proof: a loosening can still take it', () => {
-    const w = world();
-    w.enrol('phone');
-    w.stepUps.grant({ deviceId: 'phone', appSession: 's-phone' });
-    const standing = callOf(w, { device: 'phone' });
-    const ask: ConfigWriteJudgement = {
-      plugin: 'mcp',
-      path: 'mcp/acme.yaml',
-      removal: false,
-      sentences: ['names the secret ACME_TOKEN, which only the owner may add to a configuration'],
-      actor: standing.actor,
-      standing: standing.standing,
-      secretAdd: true,
-    };
-    expect(judgeOwnerSecretAdd(ask)).toBe('apply');
-    expect(judgeOwnerSecretAdd(ask)).toBe('apply');
-    expect(judgeLooseningWrite(ask)).toBe('apply');
-    // the loosening that is not a secret add still takes the one proof
-    const plain = { ...ask, secretAdd: undefined, sentences: ['raises the limit'] } as ConfigWriteJudgement;
-    expect(judgeLooseningWrite(plain)).toBe('apply');
-    expect(judgeLooseningWrite(plain)).toBe('hold');
+describe('writeAsCaller: the owner question takes the one proof a loosening takes (G129, G131)', () => {
+  const askOf = (call: Call, extra: Partial<ConfigWriteJudgement> = {}): ConfigWriteJudgement => ({
+    plugin: 'mcp',
+    path: 'mcp/acme.yaml',
+    removal: false,
+    sentences: ['names the secret ACME_TOKEN, which only the owner may add to a configuration'],
+    actor: call.actor,
+    standing: call.standing,
+    secretAdd: true,
+    ...extra,
   });
 
-  test('writeAsCaller a plain judgement without secretAdd for a device with only the unlock still holds', () => {
+  test('writeAsCaller G131 judgeOwnerSecretAdd and a loosening share one proof: whichever goes first applies, the other holds', () => {
     const w = world();
     w.enrol('phone');
-    const standing = callOf(w, { device: 'phone' });
-    const ask: ConfigWriteJudgement = {
-      plugin: 'mcp',
-      path: 'mcp/acme.yaml',
-      removal: false,
-      sentences: ['raises the limit'],
-      actor: standing.actor,
-      standing: standing.standing,
-    };
-    expect(judgeLooseningWrite(ask)).toBe('hold');
-    expect(judgeLooseningWrite({ ...ask, secretAdd: true })).toBe('apply');
+    w.stepUps.grant(subjectOf('phone'));
+    const call = callOf(w, { device: 'phone' });
+    expect(judgeOwnerSecretAdd(askOf(call))).toBe('apply');
+    expect(judgeOwnerSecretAdd(askOf(call))).toBe('hold');
+    expect(judgeLooseningWrite(askOf(call, { secretAdd: undefined, sentences: ['raises the limit'] }))).toBe('hold');
+    w.stepUps.grant(subjectOf('phone'));
+    const next = callOf(w, { device: 'phone' });
+    expect(judgeLooseningWrite(askOf(next, { secretAdd: undefined, sentences: ['raises the limit'] }))).toBe('apply');
+    expect(judgeOwnerSecretAdd(askOf(next))).toBe('hold');
+  });
+
+  test('writeAsCaller G131 a device with only the unlock holds a secret add and a loosening alike', () => {
+    const w = world();
+    w.enrol('phone');
+    const call = callOf(w, { device: 'phone' });
+    expect(judgeLooseningWrite(askOf(call, { secretAdd: undefined, sentences: ['raises the limit'] }))).toBe('hold');
+    expect(judgeLooseningWrite(askOf(call))).toBe('hold');
+    expect(judgeOwnerSecretAdd(askOf(call))).toBe('hold');
+  });
+
+  test('writeAsCaller G129 G131 warden.yaml asks the warden capability, not the fleet’s, for a secret add too', () => {
+    const w = world();
+    w.enrol('phone', { ...FULL_DEVICE_GRANTS, warden: { use: true, configure: false } });
+    w.stepUps.grant(subjectOf('phone'));
+    expect(judgeOwnerSecretAdd(askOf(callOf(w, { device: 'phone' }), { path: 'warden.yaml' }))).toBe('hold');
   });
 });
 
@@ -307,15 +351,223 @@ describe('writeAsCaller: the testing host judges the same, from the same Gate ju
     }
   });
 
-  test('writeAsCaller twin: an unlocked device with the capability is in effect, one without it is held', async () => {
+  test('writeAsCaller G131 twin: a device with the capability and a proof for the act is in effect, one with the unlock only or without the capability is held', async () => {
     const w = world();
     w.enrol('phone');
+    expect((await twinAs(callOf(w, { device: 'phone' }).standing)).kind).toBe('held');
+    w.stepUps.grant(subjectOf('phone'));
     expect((await twinAs(callOf(w, { device: 'phone' }).standing)).kind).toBe('written');
     const v = world();
     v.enrol('phone', { ...FULL_DEVICE_GRANTS, fleet: { use: true, configure: false } });
+    v.stepUps.grant(subjectOf('phone'));
     const held = await twinAs(callOf(v, { device: 'phone' }).standing);
     expect(held.kind).toBe('held');
     expect(held.inEffect).toBeUndefined();
+  });
+});
+
+describe('writeAsCaller: the owner question is judged from the standing as it is when the write happens', () => {
+  const perAct = {
+    policy: {
+      ...DEFAULT_GATE_CONFIG,
+      security: { ...DEFAULT_GATE_CONFIG.security, stepUpOnActions: true, stepUpWindowMinutes: 0 },
+    },
+  };
+  /** A device that holds the proof for the act and the capability: the add is in effect for it, as admitted. */
+  const provedDevice = (w: World): Call => {
+    w.enrol('phone');
+    w.stepUps.grant(subjectOf('phone'));
+    return callOf(w, { device: 'phone' });
+  };
+
+  test('writeAsCaller M1 a device revoked after the call was admitted holds the add', async () => {
+    const w = world();
+    const call = provedDevice(w);
+    w.devices.revoke(holder('phone'));
+    expect((await writeAs(call)).kind).toBe('held');
+  });
+
+  test('writeAsCaller M1 a device whose unlock ran out after the call was admitted holds the add', async () => {
+    const w = world();
+    const call = provedDevice(w);
+    w.now = later(w.now, 3 * 60 * 60 * 1000);
+    w.stepUps.grant(subjectOf('phone'));
+    expect((await writeAs(call)).kind).toBe('held');
+  });
+
+  test('writeAsCaller M1 a device whose configure grant was narrowed after the call was admitted holds the add', async () => {
+    const w = world();
+    const call = provedDevice(w);
+    w.devices.narrow(holder('phone'), { ...FULL_DEVICE_GRANTS, fleet: { use: true, configure: false } });
+    expect((await writeAs(call)).kind).toBe('held');
+  });
+
+  test('writeAsCaller M1 the same call, with nothing changed since admission, still writes', async () => {
+    const w = world();
+    expect((await writeAs(provedDevice(w))).kind).toBe('written');
+  });
+
+  test('writeAsCaller M1 work the call started writes after the device was revoked: held', async () => {
+    const w = world();
+    const call = provedDevice(w);
+    const { port } = await realPort();
+    let late: Promise<{ kind: string }> | undefined;
+    await runInCall(call, async () => {
+      late = new Promise(resolve => setTimeout(() => void port.writeAsCaller(mcpDef, 'late', ADD).then(resolve), 20));
+    });
+    w.devices.revoke(holder('phone'));
+    expect((await (late as Promise<{ kind: string }>)).kind).toBe('held');
+    expect(port.collection(mcpDef).get('late')).toBeUndefined();
+  });
+
+  test('writeAsCaller M1 work the call started writes while the device still stands: written, on its one proof', async () => {
+    const w = world();
+    const call = provedDevice(w);
+    const { port } = await realPort();
+    let late: Promise<{ kind: string }> | undefined;
+    await runInCall(call, async () => {
+      late = new Promise(resolve => setTimeout(() => void port.writeAsCaller(mcpDef, 'late', ADD).then(resolve), 20));
+    });
+    expect((await (late as Promise<{ kind: string }>)).kind).toBe('written');
+  });
+
+  test('writeAsCaller G79 the machine asks a step-up per act: held without one', async () => {
+    const w = world(perAct);
+    w.enrol('phone');
+    expect((await writeAs(callOf(w, { device: 'phone' }))).kind).toBe('held');
+  });
+
+  test('writeAsCaller G79 window 0: one step-up buys exactly one act — the add spends it, the second add and a fleet.configure route are refused', async () => {
+    const w = world(perAct);
+    w.enrol('phone');
+    w.stepUps.grant(subjectOf('phone'));
+    const call = callOf(w, { device: 'phone' });
+    expect((await writeAs(call)).kind).toBe('written');
+    // the same standing cannot add again, and a later configure route is not admitted on the spent step-up
+    expect((await writeAs(call)).kind).toBe('held');
+    expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).not.toBe('admitted');
+  });
+
+  test('writeAsCaller G79 a step-up already spent by a configure route does not carry a later add', async () => {
+    const w = world(perAct);
+    w.enrol('phone');
+    w.stepUps.grant(subjectOf('phone'));
+    const call = callOf(w, { device: 'phone' });
+    expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).toBe('admitted');
+    expect((await writeAs(call)).kind).toBe('held');
+  });
+
+  test('writeAsCaller M1 the judge input names the secret and never a value of the edit', async () => {
+    const seen: ConfigWriteJudgement[] = [];
+    const spy = (input: Omit<ConfigWriteJudgement, 'actor' | 'standing'>): boolean => {
+      seen.push(input as ConfigWriteJudgement);
+      return hostJudge(input);
+    };
+    const lines: string[] = [];
+    const log = { debug() {}, info: (m: string) => void lines.push(m), warn() {}, error() {}, child: () => log };
+    const cancel = () => undefined;
+    const files = kernelConfig.createConfigFiles({
+      home: HOME,
+      fs: kernelState.createMemoryHostFs(),
+      clock: { nowMs: () => 0, after: () => cancel, every: () => cancel },
+      log: log as never,
+      binary: 'fy',
+      defs: [{ plugin: 'mcp', def: mcpDef }],
+      judge: spy,
+    });
+    await files.reload();
+    await runInCall(callOf(world(), atMachine), async () =>
+      files.port('mcp').writeAsCaller(mcpDef, 'acme', `note: ${FAKE_VALUE}\nenv:\n  T: \${secret:ACME_TOKEN}\n`),
+    );
+    const text = JSON.stringify(seen);
+    expect(seen.some(input => input.secretAdd === true)).toBe(true);
+    expect(text).toContain('ACME_TOKEN');
+    expect(text).not.toContain(FAKE_VALUE);
+  });
+});
+
+describe('writeAsCaller: nothing a plugin passes can reach the judge’s secretAdd question', () => {
+  test('writeAsCaller (1a) a plain write carrying secretAdd or judge fields in its options stays held for the owner', async () => {
+    const { port } = await realPort();
+    const owner = callOf(world(), atMachine);
+    const injected = { judgeSecretAdds: () => true, secretAdd: true, confirmedLoosening: true } as never;
+    expect((await runInCall(owner, async () => port.write(mcpDef, 'acme', ADD, injected))).kind).toBe('held');
+  });
+
+  test('writeAsCaller (1a) writeAsCaller with owner-looking options is judged as the call is', async () => {
+    const { port } = await realPort();
+    const injected = { asOwner: true, secretAdd: true, judgeSecretAdds: () => true } as never;
+    const ferret = callOf(world(), {
+      bearer: ADMIN,
+      arrival: local(),
+      headers: { [SESSION_ID_HEADER]: 'F12', [CLIENT_HEADER]: 'cli' },
+    });
+    expect((await runInCall(ferret, async () => port.writeAsCaller(mcpDef, 'acme', ADD, injected))).kind).toBe('held');
+  });
+
+  test('writeAsCaller a route with no capability and no consultsGrants holds the add of every caller, the host admin’s too', async () => {
+    const bare = descriptor({});
+    for (const options of [atMachine, relayed, { device: 'phone' }]) {
+      const { port } = await realPort();
+      const w = world();
+      w.enrol('phone');
+      w.stepUps.grant(subjectOf('phone'));
+      const call = callOf(w, options, bare);
+      expect((await runInCall(call, async () => port.writeAsCaller(mcpDef, 'acme', ADD))).kind).toBe('held');
+      expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+    }
+  });
+
+  test('writeAsCaller a warden.yaml add asks the warden capability and the fleet use, not the fleet configure', async () => {
+    const wardenDef = defineConfig({
+      file: 'warden.yaml',
+      schema: z.strictObject({ env: z.record(z.string(), z.string()).default({}) }),
+      axis: 'configure',
+      loosens: () => [],
+    });
+    /** One device with these grants and a proof, writing the add to a warden.yaml of its own (a fresh disk each time). */
+    const addAs = async (grants: typeof FULL_DEVICE_GRANTS): Promise<string> => {
+      const w = world();
+      w.enrol('phone', grants);
+      w.stepUps.grant(subjectOf('phone'));
+      const files = kernelConfig.createConfigFiles({
+        home: HOME,
+        fs: kernelState.createMemoryHostFs(),
+        clock: { nowMs: () => 0, after: () => () => undefined, every: () => () => undefined },
+        log: {
+          debug() {},
+          info() {},
+          warn() {},
+          error() {},
+          child() {
+            return this;
+          },
+        } as never,
+        binary: 'fy',
+        defs: [{ plugin: 'mcp', def: wardenDef }],
+        judge: hostJudge,
+      });
+      await files.reload();
+      const call = callOf(w, { device: 'phone' });
+      return (await runInCall(call, async () => files.port('mcp').writeAsCaller(wardenDef, undefined, ADD))).kind;
+    };
+    // the fleet's configure is not what a warden.yaml add asks: the warden capability's is
+    expect(await addAs({ ...FULL_DEVICE_GRANTS, warden: { use: true, configure: false } })).toBe('held');
+    expect(
+      await addAs({
+        ...FULL_DEVICE_GRANTS,
+        warden: { use: true, configure: true },
+        fleet: { use: true, configure: false },
+      }),
+    ).toBe('written');
+    // and the fleet's use is asked too
+    expect(
+      await addAs({
+        ...FULL_DEVICE_GRANTS,
+        warden: { use: true, configure: true },
+        fleet: { use: false, configure: true },
+      }),
+    ).toBe('held');
   });
 });
 

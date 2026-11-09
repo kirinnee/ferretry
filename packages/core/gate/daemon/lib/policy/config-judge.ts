@@ -41,28 +41,26 @@ export function claimLooseningProof(standing: CallStanding): boolean {
 }
 
 /**
- * Whether the call in progress IS the owner, for a `${secret:NAME}` reference an edit adds (`ConfigPort.writeAsCaller`,
- * NN2): the host admin where the request ARRIVED on the host (`governance.governed === false`, decided from the carrier,
- * so a relayed loopback is governed), or a governed device whose grants hold the file's `configure` capability and the
- * fleet's `use` right now. The grant layer's `configure` decision already needs the device UNLOCKED (the passkey
- * unlock stands for the step-up), so a locked device is refused there. It claims NO step-up proof: this is not a
- * loosening to confirm, it is who is asking. A ferret, a warden, a job (no standing) and anything undetermined hold.
+ * Whether the call in progress may put a `${secret:NAME}` reference its edit adds into effect
+ * (`ConfigPort.writeAsCaller`, NN2): the SAME rule `PUT /v1/config/file` applies to an add (Appendix D G129, G131) and
+ * to any other loosening — the host admin where the request ARRIVED on the host (`governance.governed === false`,
+ * decided from the carrier, so a relayed loopback is governed), or a governed device that holds the file's
+ * `configure` capability and the fleet's `use` AND a passkey proved for THIS act (`loosen-config`), which the add
+ * CLAIMS (one proof, one act). The unlock alone is not enough. When the owner asks a step-up per act
+ * (`stepUpOnActions`, G79) the step-up that admitted the configure decision is spent by the add, so one step-up buys
+ * one act. A ferret, a warden, a job (no standing) and anything undetermined hold. The question is SYNCHRONOUS (a
+ * kernel judge that cannot answer in time is not a thing: there is nothing to time out), and it is asked of the LIVE
+ * standing (`GateAdmission.judgeConfigWrite`), so a device revoked or locked since admission holds.
  */
 export function judgeOwnerSecretAdd(input: ConfigWriteJudgement): 'apply' | 'hold' {
-  if (input.actor === 'ferret' || input.actor === 'warden') return 'hold';
-  const standing = input.standing;
-  if (standing === undefined) return 'hold';
-  if (isFerretCall(standing) || standing.wardenRemedy !== undefined) return 'hold';
-  const governance = standing.governance;
-  if (governance === undefined) return 'hold';
-  const capability = input.path === WARDEN_FILE ? CAPABILITIES.warden : CAPABILITIES.fleet;
-  if (!governance.decide({ capability, axis: 'configure' }).allowed) return 'hold';
-  if (!governance.decide({ capability: CAPABILITIES.fleet, axis: 'use' }).allowed) return 'hold';
-  return 'apply';
+  return judgeConfirmingCaller(input, true);
 }
 
 export function judgeLooseningWrite(input: ConfigWriteJudgement): 'apply' | 'hold' {
-  if (input.secretAdd === true) return judgeOwnerSecretAdd(input);
+  return judgeConfirmingCaller(input, input.secretAdd === true);
+}
+
+function judgeConfirmingCaller(input: ConfigWriteJudgement, secretAdd: boolean): 'apply' | 'hold' {
   if (input.actor === 'ferret' || input.actor === 'warden') return 'hold';
   const standing = input.standing;
   if (standing === undefined) return 'hold';
@@ -70,8 +68,12 @@ export function judgeLooseningWrite(input: ConfigWriteJudgement): 'apply' | 'hol
   const governance = standing.governance;
   if (governance === undefined) return 'hold';
   const capability = input.path === WARDEN_FILE ? CAPABILITIES.warden : CAPABILITIES.fleet;
-  if (!governance.decide({ capability, axis: 'configure' }).allowed) return 'hold';
+  const configure = governance.decide({ capability, axis: 'configure' });
+  if (!configure.allowed) return 'hold';
   if (!governance.decide({ capability: CAPABILITIES.fleet, axis: 'use' }).allowed) return 'hold';
   if (!governance.governed) return 'apply';
-  return claimLooseningProof(standing) ? 'apply' : 'hold';
+  if (!claimLooseningProof(standing)) return 'hold';
+  // A secret add rides no route that spent the step-up at admission, so it spends it here (`G79`): one act, one step-up.
+  if (secretAdd && configure.steppedUp === true) standing.spendStepUp?.();
+  return 'apply';
 }
