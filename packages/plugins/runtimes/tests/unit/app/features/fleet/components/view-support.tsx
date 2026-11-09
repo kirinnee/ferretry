@@ -19,6 +19,8 @@ export interface Machine {
   stage?: unknown;
   /** Runs after a change is applied, before the next read. */
   onApply?: (machine: Machine) => void;
+  /** What an apply answers with (default: the executed setup outcome). */
+  applied?: unknown;
   readonly calls: Call[];
 }
 
@@ -44,7 +46,7 @@ export const machineClient = (machine: Machine): RuntimesClient => {
       [PROPOSE]: (call: Call) => machine.stage ?? stagedFrom(call),
       [`POST /v1/runtimes/proposals/${CHANGE_ID}/apply`]: () => {
         machine.onApply?.(machine);
-        return APPLIED;
+        return machine.applied ?? APPLIED;
       },
     },
     machine.calls,

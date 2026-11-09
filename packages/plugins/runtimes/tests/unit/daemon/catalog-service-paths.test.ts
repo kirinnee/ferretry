@@ -123,6 +123,8 @@ function world(options: Options = {}) {
       format: options.format ?? 'present',
       model: MODEL,
       revision: 'rev-1',
+      unreadable: [],
+      stoodInLogins: [],
       documents: () => [
         { path: '/fy/config/runtimes/claude-default.yaml', content: '# moved\n', mode: 0o600, expect: 'absent' },
       ],
@@ -354,9 +356,10 @@ describe('staging a change', () => {
     const again = await service.read(staged.id);
     should(again.id).equal(staged.id);
     should(again.change).not.have.property('content');
-    should((again.preview as unknown as { documents: { path: string }[] }).documents.map(file => file.path)).containEql(
-      '/fy/fleet/assets/components/instructions/fresh.md',
-    );
+    // The text lives in Runtimes' own config item, written by the config writer: no document lands in the asset tree.
+    should(
+      (again.preview as unknown as { documents: { path: string }[] }).documents.map(file => file.path),
+    ).not.containEql('/fy/fleet/assets/components/instructions/fresh.md');
   });
 
   it('should name the runtimes an edit to a used component lands on, even though no row reads differently', async () => {
@@ -769,6 +772,8 @@ describe('a change to one login', () => {
             format: 'present',
             model: MODEL,
             revision: 'rev-1',
+            unreadable: [],
+            stoodInLogins: [],
             documents: () => [],
           };
         },

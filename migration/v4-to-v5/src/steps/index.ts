@@ -48,6 +48,8 @@ export interface EnforcedConversion {
   readonly configs: ReadonlyMap<string, string>;
   /** The config-writing steps that failed in it (their files are missing from `configs`). */
   readonly failed: readonly string[];
+  /** One line per failed step: its id and its own note (names a file and a key, never a value). */
+  readonly failedWhy: readonly string[];
   /** What it took out of one login's file (see `LoginKeyHold.fingerprint`): digests, never a value. */
   readonly fingerprint: (login: string) => string;
 }

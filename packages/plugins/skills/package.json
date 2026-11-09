@@ -23,6 +23,7 @@
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/plugin-conversation": "workspace:*",
+    "@ferretry/plugin-runtimes": "workspace:*",
     "react": "^19.0.0",
     "lucide-react": "^0.468.0",
     "@ferretry/app": "workspace:*"

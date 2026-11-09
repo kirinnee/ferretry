@@ -1276,6 +1276,37 @@ export const LoginFileSchema = z.strictObject({
 });
 export type LoginFile = z.infer<typeof LoginFileSchema>;
 
+/**
+ * An environment login's own variables as Runtimes reads them to build a runtime's home (`LoginsApi.environmentTemplates`):
+ * the login file's variable TEMPLATES, exactly as written. A value is plain text or contains `${secret:NAME}` references;
+ * the file schema refuses a raw secret, so no value of a secret is here to be read, and nothing else of the file travels
+ * (not its budget, not its text).
+ */
+export const EnvironmentLoginTemplateSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('templates'),
+    id: z.string().min(1),
+    harness: HarnessKindSchema,
+    env: LoginEnvSchema.optional(),
+    preset: z.string().min(1).max(64).optional(),
+    cloudCredential: CloudCredentialReferenceSchema.optional(),
+    codexProvider: CodexProviderSchema.optional(),
+    claude: LoginHalfSchema.optional(),
+    codex: LoginHalfSchema.optional(),
+  }),
+  /**
+   * A login whose file is not a clean, checked version in effect (it is invalid, a loosening edit of it is held, or a
+   * variable holds something that looks like a raw secret): its NAME and its variable NAMES only, never a value.
+   */
+  z.strictObject({
+    kind: z.literal('withheld'),
+    id: z.string().min(1),
+    harness: HarnessKindSchema,
+    variables: z.array(z.string().min(1)).readonly(),
+  }),
+]);
+export type EnvironmentLoginTemplate = z.infer<typeof EnvironmentLoginTemplateSchema>;
+
 const PresetVariableFileSchema = z
   .strictObject({
     value: z.string().max(1024).optional(),

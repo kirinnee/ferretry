@@ -11,7 +11,12 @@ describe('codex contract', () => {
 
   test('the manifest declares its two routes, the harness take and the start.decide take', () => {
     expect(manifest.actions.routes.map(route => route.key)).toEqual(['GET /v1/codex/update', 'POST /v1/codex/update']);
-    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['harnesses', 'start.decide']);
+    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
+      'harnesses',
+      'start.decide',
+      'runtimes.components.settings.codex',
+      'runtimes.components.hooks.codex',
+    ]);
     expect(manifest.hooks.takes[0]?.key).toBe('codex');
   });
 

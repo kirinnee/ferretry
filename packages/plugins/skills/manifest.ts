@@ -2,6 +2,7 @@ import { definePlugin, panel, renderer, route, settingsTab, verb } from '@ferret
 import { cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
+import { PROFILE_COMPONENTS_KEY, ProfileSkillsSource } from '@ferretry/plugin-runtimes/contract';
 import {
   SKILLS_CONFIG,
   SKILLS_INSTALLED_STATE,
@@ -96,7 +97,13 @@ export default definePlugin({
   hooks: {
     // `/` and `$` are one skill: Claude invokes `/name`, Codex `$name`. Conversation's composer asks for the menu entries
     // of each prefix; Skills answers with the skill names the ferret can invoke.
-    takes: [{ hook: LaunchParts }, { hook: ReferenceCatalog, key: '/' }, { hook: ReferenceCatalog, key: '$' }],
+    // Runtimes reads the `skills` components a profile names through this plugin, which alone owns them.
+    takes: [
+      { hook: LaunchParts },
+      { hook: ReferenceCatalog, key: '/' },
+      { hook: ReferenceCatalog, key: '$' },
+      { hook: ProfileSkillsSource, key: PROFILE_COMPONENTS_KEY },
+    ],
   },
 
   permissions: {

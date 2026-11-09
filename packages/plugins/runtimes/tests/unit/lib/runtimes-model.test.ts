@@ -7,7 +7,13 @@ import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { ownedFileBodies, ownedFileEdits, unownedChanges } from '../../../daemon/lib/account/runtimes-edits.ts';
-import { assembleRuntimesModel, type RuntimesFiles } from '../../../daemon/lib/account/runtimes-model.ts';
+import {
+  assembleRuntimesModel,
+  NO_COMPONENTS,
+  type RuntimesFiles,
+  standInsNamedBy,
+  stoodInLoginSentence,
+} from '../../../daemon/lib/account/runtimes-model.ts';
 
 const runtime = (overrides: Partial<RuntimeFile> = {}): RuntimeFile =>
   ({ login: 'claude-you', profile: 'default', agent: false, ...overrides }) as RuntimeFile;
@@ -20,6 +26,8 @@ const files = (overrides: Partial<RuntimesFiles> = {}): RuntimesFiles => ({
   modelSets: new Map([['heavy', { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' }]]),
   settings: undefined,
   logins: [sampleLogin('claude-you', { store: 'ferretry' })],
+  templates: new Map(),
+  components: NO_COMPONENTS,
   ...overrides,
 });
 
@@ -56,8 +64,8 @@ describe('the model Runtimes assembles from its own files', () => {
 
     expect(assembled.model.profiles.default?.layers).toEqual(['modelSets/heavy', 'mcp/github', 'settings/codex-guard']);
     expect(assembled.unreadable).toEqual([
-      'the mcp component "github" belongs to another part of Ferretry, which Runtimes cannot read',
-      'the settings component "codex-guard" belongs to another part of Ferretry, which Runtimes cannot read',
+      'the mcp component "github" could not be read from the part of Ferretry that owns it: no part of Ferretry provides these components yet',
+      'the settings component "codex-guard" could not be read from the part of Ferretry that owns it: no part of Ferretry provides these components yet',
     ]);
   });
 
@@ -78,9 +86,10 @@ describe('the model Runtimes assembles from its own files', () => {
       files({ logins: [view], runtimes: new Map([['glm', runtime({ login: 'glm' })]]) }),
     );
 
-    expect(assembled.unreadable).toHaveLength(1);
-    expect(assembled.unreadable[0]).toContain('login "glm"');
-    expect(JSON.stringify(assembled.unreadable)).not.toContain('GLM_KEY');
+    expect(assembled.unreadable).toEqual([]);
+    expect(assembled.stoodInLogins.map(login => login.id)).toEqual(['glm']);
+    expect(JSON.stringify(assembled.stoodInLogins)).not.toContain('GLM_KEY');
+    expect(stoodInLoginSentence(standInsNamedBy(assembled.model, assembled.stoodInLogins))).toContain('login "glm"');
     // The secret stays a reference, never a value.
     expect(assembled.model.credentials.glm?.env).toEqual({
       ANTHROPIC_BASE_URL: 'https://api.example.test',

@@ -144,6 +144,41 @@ export const ModelSetFileSchema = z
   });
 export type ModelSetFile = z.infer<typeof ModelSetFileSchema>;
 
+/**
+ * `config/instructions/<name>.yaml`: an instructions component, the text a harness reads as its system guidance
+ * (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex). No other plugin owns these files, so Runtimes does. The text is in
+ * the file (`text`), not in a document beside it, so a read is one live read of one file. `harness` narrows it to one
+ * harness (K3); absent, every harness gets it.
+ */
+export const INSTRUCTIONS_TEXT_LIMIT = 200_000;
+
+/**
+ * Whether a text holds a NUL or another control character other than tab, newline and carriage return: bytes no person
+ * types into guidance, which a harness would read as part of the instructions or choke on.
+ */
+export const holdsControlCharacter = (text: string): boolean =>
+  [...text].some(character => {
+    const code = character.codePointAt(0) ?? 0;
+    return (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f;
+  });
+
+export const InstructionsFileSchema = z.strictObject({
+  description: z.string().optional(),
+  text: z
+    .string()
+    .min(1)
+    .max(INSTRUCTIONS_TEXT_LIMIT)
+    .refine(
+      text => !holdsControlCharacter(text),
+      'the text holds a control character (NUL or another, besides tab and line breaks)',
+    ),
+  harness: HarnessKeySchema.optional(),
+  clonedFrom: NonEmptyStringSchema.optional(),
+  clonedFromDaemon: NonEmptyStringSchema.optional(),
+  clonedFromKey: NonEmptyStringSchema.optional(),
+});
+export type InstructionsFile = z.infer<typeof InstructionsFileSchema>;
+
 // ─── loosening (§7.2) ──────────────────────────────────────────────────────────────────────────────────────────────
 
 /**

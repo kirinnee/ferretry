@@ -501,7 +501,7 @@ function mergeSettings(
 
   for (const layer of layers) {
     const component = componentOf(catalogue, 'settings', layer.name);
-    if (component.file !== undefined) {
+    if (component.file !== undefined || component.document !== undefined) {
       const body = bodies[layer.name];
       if (body === undefined) unread.push(layer.name);
       else {

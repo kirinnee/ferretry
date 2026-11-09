@@ -17,7 +17,10 @@
  * - `harness-claude-code.yaml`, `harness-codex.yaml` (today machine.yaml's agent permissions): each also holds the
  *   harness `binary` and `searchPaths`, which today lived in `daemon.json` where no agent reached, and its `loosens`
  *   judges only the permission mode. Mapping it would let an agent choose the program every new ferret launches.
- * - `components/instructions/<n>`: now `config/instructions/<n>.md`, which no plugin declares as a config file.
+ * - `components/instructions/<n>` and `components/hooks/<n>` of Codex: now `config/instructions/<n>.yaml` (Runtimes) and
+ *   `config/codex/hooks/<n>.yaml` (Codex), which plugins DO declare, but are left out on purpose. Their `neverLoosens` holds
+ *   nothing (as in v4), so mapping them would let an agent add agent instructions and shell hook commands with no owner
+ *   hold. Today's `claude-code/hooks` is mapped (above); mapping these two is the owner's decision, not a side effect.
  * - `presets/<n>.yaml`: no declared successor (Logins to rule whether `endpoints/` is one).
  *
  * Pure and total over every string.

@@ -296,7 +296,7 @@ describe('MCP launch renewal through the daemon half', () => {
       } as unknown as DaemonContext<typeof manifest>['kernel'],
     } as DaemonContext<typeof manifest>);
     if (half?.hooks === undefined) throw new Error('the MCP daemon half offers no hooks');
-    const hooks = half.hooks as Record<string, () => readonly { id: string; item: LaunchPartSource }[]>;
+    const hooks = half.hooks as unknown as Record<string, () => readonly { id: string; item: LaunchPartSource }[]>;
     const contributions = hooks['launch.parts']?.() ?? [];
     const launch = contributions[0]?.item;
     if (launch === undefined) throw new Error('MCP contributes no launch.parts source');

@@ -87,7 +87,8 @@ export function useAccountChanges({ client }: UseAccountChangesOptions): Account
       setRefusal(null);
       try {
         const result = await work(client);
-        if (result.kind === 'refused') setRefusal(result.sentence);
+        // A rolled-back or half-restored apply is not a save: it shows where a refusal shows, in the same alert.
+        if (result.kind !== 'applied' && result.kind !== 'staged') setRefusal(result.sentence);
         return result;
       } catch (error) {
         // A change's own failure is already a result, so this is only an unexpected throw, and that says why rather

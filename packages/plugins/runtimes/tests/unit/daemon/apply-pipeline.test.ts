@@ -47,11 +47,23 @@ const LAYOUT = {
   defaultHomeDirectories: { claude: '/home/person/.claude', codex: '/home/person/.codex' },
 } as const;
 
+/** One read of the configuration: what stands in in it and the revision it was read at (the world's, when not given). */
+interface Reading {
+  readonly unreadable?: string[];
+  /** The logins whose variables stand in, in this read (the model's one runtime uses `claude-you`). */
+  readonly stoodInLogins?: { readonly id: string; readonly because: string }[];
+  readonly revision?: string;
+}
+
 interface World {
   readonly order: string[];
   readonly written: { path: string; content: string }[][];
   readonly plans: { documents: number }[];
   revision: string;
+  /** What the NEXT reads of the configuration answer, one entry per read (then the last repeats). */
+  readings: Reading[];
+  /** How many times the configuration was read. */
+  reads: number;
   service: FleetCatalogService;
 }
 
@@ -63,7 +75,7 @@ function world(
   const order: string[] = [];
   const written: World['written'] = [];
   const plans: World['plans'] = [];
-  const state = { revision: 'rev-1' };
+  const state = { revision: 'rev-1', readings: [{}] as Reading[], reads: 0 };
   const fake: RuntimeConfigWriter = {
     write: async documents => {
       order.push('documents');
@@ -73,19 +85,31 @@ function world(
   const base = unavailableCatalogDeps(() => 1_794_052_800_000, fakeLogins(), fakeLoginChanges());
   const deps: FleetCatalogServiceDeps = {
     ...base,
-    document: async () => ({
-      format: 'present',
-      model: MODEL,
-      revision: state.revision,
-      documents: next => [
-        {
-          path: '/fy/config/runtimes/claude-default.yaml',
-          content: `# ${JSON.stringify(next.machine.agentPermissions)}\n`,
-          mode: 0o600,
-          expect: 'absent',
-        },
-      ],
-    }),
+    document: async () => {
+      // Each read answers its OWN stand-ins (the list for read N, the last list once they run out) and the revision
+      // that goes with them: a reading that stands in is never the reading that does not.
+      const reading = state.readings[Math.min(state.reads, state.readings.length - 1)] ?? {};
+      state.reads += 1;
+      const unreadable = reading.unreadable ?? [];
+      const stoodInLogins = reading.stoodInLogins ?? [];
+      const standing = [...unreadable, ...stoodInLogins.map(login => login.id)];
+      return {
+        format: 'present',
+        model: MODEL,
+        revision:
+          reading.revision ?? (standing.length === 0 ? state.revision : `${state.revision}+${standing.join('|')}`),
+        unreadable,
+        stoodInLogins,
+        documents: next => [
+          {
+            path: '/fy/config/runtimes/claude-default.yaml',
+            content: `# ${JSON.stringify(next.machine.agentPermissions)}\n`,
+            mode: 0o600,
+            expect: 'absent',
+          },
+        ],
+      };
+    },
     readAsset: async () => undefined,
     documentRevision: async () => 'absent',
     ids: async () => undefined,
@@ -124,6 +148,16 @@ function world(
     },
     set revision(value: string) {
       state.revision = value;
+    },
+    get readings() {
+      return state.readings;
+    },
+    set readings(value: Reading[]) {
+      state.readings = value;
+      state.reads = 0;
+    },
+    get reads() {
+      return state.reads;
     },
     service: catalog,
   };
@@ -203,6 +237,77 @@ describe('the apply pipeline over a fake config writer', () => {
     should(w.written).deepEqual([]);
   });
 
+  const STANDING_IN = ['the mcp component "github" could not be read from the part of Ferretry that owns it'];
+  const refusedApply = async (w: World, id: string): Promise<FleetCatalogRefusal> => {
+    const failure = await w.service.apply(id, OWNER).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    should(failure).be.instanceOf(FleetCatalogRefusal);
+    return failure as FleetCatalogRefusal;
+  };
+
+  it('C1 should refuse an apply whose plan was made from a reading that stood in, even when the live reading is clean', async () => {
+    // Arrange: the plan is made while a part stands in; by the time it is applied every read is clean again (and, as a
+    // stand-in is part of the revision in real life, the revision is held equal here so only the plan's own list can refuse).
+    const w = world();
+    w.readings = [{ unreadable: STANDING_IN, revision: 'rev-1' }];
+    const staged = await w.service.propose(CHANGE);
+    w.readings = [{}];
+
+    // Act
+    const failure = await refusedApply(w, staged.id);
+
+    // Assert: the plan answers for itself: refused in a sentence, with nothing written anywhere.
+    should(failure.code).equal('fleet_change_refused');
+    should(failure.message).containEql('nothing was changed');
+    should(failure.message).containEql('github');
+    should(w.order).deepEqual([]);
+    should(w.written).deepEqual([]);
+  });
+
+  it('C1 should refuse an apply when a part stands in on the read made just before the write, and write nothing', async () => {
+    // Arrange: a clean plan; the first read of the apply (the staleness check) is clean, the last look before the write is not.
+    const w = world();
+    const staged = await w.service.propose(CHANGE);
+    w.readings = [{}, { unreadable: STANDING_IN }];
+
+    // Act
+    const failure = await refusedApply(w, staged.id);
+
+    // Assert
+    should(failure.code).equal('fleet_change_refused');
+    should(failure.message).containEql('github');
+    should(w.order).deepEqual([]);
+    should(w.written).deepEqual([]);
+  });
+
+  it('C1 should refuse an apply as stale when the read made just before the write is not the reading the plan was made from', async () => {
+    // Arrange: both reads are clean, but the last look sees a configuration that moved since the first.
+    const w = world();
+    const staged = await w.service.propose(CHANGE);
+    w.readings = [{}, { revision: 'rev-2' }];
+
+    // Act
+    const failure = await refusedApply(w, staged.id);
+
+    // Assert
+    should(failure.code).equal('fleet_change_stale');
+    should(w.order).deepEqual([]);
+    should(w.written).deepEqual([]);
+  });
+
+  it('C1 should apply when the reading the plan was made from is the reading just before the write', async () => {
+    const w = world();
+    const staged = await w.service.propose(CHANGE);
+    w.readings = [{}, {}];
+
+    const outcome = await w.service.apply(staged.id, OWNER);
+
+    should(outcome).match({ outcome: 'applied', apply: { outcome: 'committed' } });
+    should(w.order).deepEqual(['documents', 'plan']);
+  });
+
   it('C2 should ask the preflight before a setup or a clone runs its own writes too, and run nothing when it refuses', async () => {
     // Arrange: an executor that would write settings files and a preflight that refuses.
     const ran: string[] = [];
@@ -256,6 +361,73 @@ describe('the apply pipeline over a fake config writer', () => {
     should((failure as FleetCatalogRefusal).message).containEql('/fy/config/runtimes/claude-default.yaml');
     should((failure as FleetCatalogRefusal).message).containEql('NOT rolled back with the fleet');
     should(w.written).have.length(1);
+  });
+
+  describe('m1-R2 a republish is never made from a reading that stands in', () => {
+    /** A world whose catalogs are wired (so a republish plans) and whose provisioner counts what it is asked to apply. */
+    const republishWorld = () => {
+      const applied: number[] = [];
+      const w = world('fake', undefined, {
+        modelCatalogs: async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() }),
+        publishedManifest: async () => undefined,
+        provisioner: {
+          preview: async plan => ({ ...plan, sharedHistory: [] }),
+          apply: async plan => {
+            applied.push(plan.operations.length);
+            return {
+              accountCount: plan.manifest.accounts.length,
+              operationCount: plan.operations.length,
+              manifestPath: '/fy/fleet/manifest.json',
+              prunedWrappers: [],
+              sharedHistory: [],
+            };
+          },
+        },
+      });
+      return { w, applied };
+    };
+    const refusal = async (w: World): Promise<FleetCatalogRefusal> => {
+      const failure = await w.service.republish().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      should(failure).be.instanceOf(FleetCatalogRefusal);
+      return failure as FleetCatalogRefusal;
+    };
+
+    it('m1-R2 should refuse a republish while a component stands in, and never call the provisioner', async () => {
+      const { w, applied } = republishWorld();
+      w.readings = [{ unreadable: STANDING_IN }];
+
+      const failure = await refusal(w);
+
+      should(failure.code).equal('fleet_change_refused');
+      should(failure.message).containEql('github');
+      should(applied).deepEqual([]);
+    });
+
+    it('m1-R2 should refuse a republish while a login a runtime uses stands in, and never call the provisioner', async () => {
+      const { w, applied } = republishWorld();
+      w.readings = [
+        { stoodInLogins: [{ id: 'claude-you', because: '${secret:NAME} templates, which Logins withheld' }] },
+      ];
+
+      const failure = await refusal(w);
+
+      should(failure.code).equal('fleet_change_refused');
+      should(failure.message).containEql('login "claude-you"');
+      should(applied).deepEqual([]);
+    });
+
+    it('m1-R2 should still republish a clean reading, and one whose stood-in login no runtime uses', async () => {
+      const { w, applied } = republishWorld();
+      w.readings = [{ stoodInLogins: [{ id: 'unused', because: '${secret:NAME} templates, which Logins withheld' }] }];
+
+      const outcome = await w.service.republish();
+
+      should(outcome).equal('applied');
+      should(applied).have.length(1);
+    });
   });
 
   it('M5 should run a republish one at a time with applies, and a login change republishes from inside its apply without waiting on itself', async () => {

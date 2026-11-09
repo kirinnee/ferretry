@@ -6,12 +6,16 @@ import { chooseRuntimeAction, menuButton, openRuntimeMenu } from './runtime-menu
 import {
   type Call,
   CHANGE_ID,
+  LANDED_FILE,
   machine,
   machineWith,
   READS,
+  ROLLBACK_INCOMPLETE,
+  ROLLED_BACK,
   type Route,
   scripted,
   stagedFrom,
+  UNRESTORED_PATH,
 } from '../account-support.ts';
 
 const PROPOSE = 'POST /v1/runtimes/proposals';
@@ -301,6 +305,85 @@ describe('Runtime actions: Rename', () => {
     // Assert
     expect(view.container.querySelector('[data-runtime-dialog="rename"]')).not.toBeNull();
     expect(view.container.querySelector('[data-runtime-dialog] [data-change-refusal]')).not.toBeNull();
+  });
+
+  it('R3-M1: a rolled-back rename keeps the dialog open and names the file that stayed', async () => {
+    // Arrange
+    const view = await page('codex-default', { routes: { [PROPOSE]: stagedFrom, [APPLY]: ROLLED_BACK } });
+    await click(view.container, '[data-runtime-page] [data-runtime-rename]');
+    await type(renameInput(view.container), 'codex-work');
+
+    // Act
+    await interact(() => submit(view.container).click());
+    await settle();
+
+    // Assert
+    const alert = must(view.container.querySelector('[data-runtime-dialog] [data-change-refusal]'), 'alert');
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toStartWith('This change was not applied: the fleet apply failed and was rolled back.');
+    expect(alert.textContent).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-runtime-dialog="rename"]')).not.toBeNull();
+    expect(window.location.hash).toBe('#machines/studio-mac/runtimes/codex-default');
+  });
+
+  it('R3-M1: a rollback-incomplete rename keeps the dialog open and names the paths left partly changed', async () => {
+    // Arrange
+    const view = await page('codex-default', { routes: { [PROPOSE]: stagedFrom, [APPLY]: ROLLBACK_INCOMPLETE } });
+    await click(view.container, '[data-runtime-page] [data-runtime-rename]');
+    await type(renameInput(view.container), 'codex-work');
+
+    // Act
+    await interact(() => submit(view.container).click());
+    await settle();
+
+    // Assert
+    const said = text(view.container, '[data-runtime-dialog] [data-change-refusal]');
+    expect(said).toContain('needs a look');
+    expect(said).toContain(UNRESTORED_PATH);
+    expect(said).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-runtime-dialog="rename"]')).not.toBeNull();
+    expect(window.location.hash).toBe('#machines/studio-mac/runtimes/codex-default');
+  });
+
+  it('R3-M1: a rolled-back removal keeps the dialog open, names the file that stayed, and removes nothing from the list', async () => {
+    // Arrange
+    const refreshes: string[] = [];
+    const view = await page('codex-default', {
+      refreshes,
+      routes: { [PROPOSE]: removalStaged([]), [APPLY]: ROLLED_BACK },
+    });
+    await click(view.container, '[data-runtime-page] [data-runtime-remove]');
+
+    // Act
+    await interact(() => submit(view.container).click());
+    await settle();
+
+    // Assert
+    const alert = must(view.container.querySelector('[data-runtime-dialog] [data-change-refusal]'), 'alert');
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-runtime-dialog]')).not.toBeNull();
+    expect(window.location.hash).toBe('#machines/studio-mac/runtimes/codex-default');
+    expect(refreshes).not.toContain('refresh');
+  });
+
+  it('R3-M1: a rollback-incomplete removal keeps the dialog open and names the paths left partly changed', async () => {
+    // Arrange
+    const view = await page('codex-default', {
+      routes: { [PROPOSE]: removalStaged([]), [APPLY]: ROLLBACK_INCOMPLETE },
+    });
+    await click(view.container, '[data-runtime-page] [data-runtime-remove]');
+
+    // Act
+    await interact(() => submit(view.container).click());
+    await settle();
+
+    // Assert
+    const said = text(view.container, '[data-runtime-dialog] [data-change-refusal]');
+    expect(said).toContain(UNRESTORED_PATH);
+    expect(said).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-runtime-dialog]')).not.toBeNull();
+    expect(window.location.hash).toBe('#machines/studio-mac/runtimes/codex-default');
   });
 
   it('closes on Cancel and on Escape, changing nothing', async () => {
@@ -612,6 +695,43 @@ describe('Runtime actions: Remove', () => {
     expect(text(view.container, '[data-runtime-remove-impact]')).toBe(
       'Nothing is running on it. Its past sessions stay in history.',
     );
+  });
+
+  it('R3-M1: a rolled-back default change stays on the pick step and names the file that stayed', async () => {
+    // Arrange
+    const refreshes: string[] = [];
+    const view = await open({
+      refreshes,
+      routes: {
+        [PROPOSE]: (call: Call) =>
+          (call.body as { change: { kind: string } }).change.kind === 'runtime.remove'
+            ? removalStaged([])(call)
+            : stagedFrom(call),
+        [APPLY]: ROLLED_BACK,
+        'GET /v1/runtimes': {
+          format: 'present',
+          runtimes: [...(READS()['GET /v1/runtimes'] as { runtimes: unknown[] }).runtimes].map(entry => ({
+            ...(entry as object),
+            agent: true,
+          })),
+        },
+      },
+    });
+    await chooseRuntimeAction(view.container, 'claude-default', 'remove');
+    await choose(
+      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-default-picker]'), 'picker'),
+      'claude-agent',
+    );
+
+    // Act
+    await interact(() => submit(view.container).click());
+    await settle();
+
+    // Assert
+    expect(text(view.container, '[data-runtime-dialog] [data-change-refusal]')).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-runtime-default-picker]')).not.toBeNull();
+    expect(view.container.querySelector('[data-runtime-remove-impact]')).toBeNull();
+    expect(refreshes).not.toContain('refresh');
   });
 
   it('says why when the dry run itself is refused', async () => {
