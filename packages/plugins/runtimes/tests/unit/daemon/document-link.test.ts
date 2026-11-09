@@ -9,33 +9,56 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { link, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RootsPort } from '@ferretry/kernel/contract';
 import type { RuntimeHomeReader } from '../../../contract/index.ts';
 import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
-import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 
 const LINKED = '00000000-0000-4000-8000-0000000000a1';
 const SECRET = 'SECRET-VALUE-THAT-MUST-NEVER-SURFACE';
 
-/** Roots whose `harness-home` handles call `hook` after each `lstat` answers (the reader has then judged the file). */
-function hooked(roots: RootsPort, hook: { current?: (path: string) => Promise<void> }): Pick<RootsPort, 'root'> {
+type Hook = (method: 'realPath' | 'lstat', path: string) => Promise<void>;
+
+/** What a `harness-home` handle was asked to read: the path and the byte bound of each `readDurable`. */
+interface ReadLog {
+  readonly reads: { readonly path: string; readonly limit: number | undefined }[];
+  /** The `subfolder` each `harness-home` root was opened with. */
+  readonly scopes: (string | undefined)[];
+}
+
+/**
+ * Roots whose `harness-home` handles call `hook` after each `realPath` and `lstat` answers (the reader has then judged
+ * the name), and record every `readDurable` and every scope a root was opened with in `log`.
+ */
+function hooked(
+  roots: RootsPort,
+  hook: { current?: Hook },
+  log: ReadLog = { reads: [], scopes: [] },
+): Pick<RootsPort, 'root'> {
   return {
-    root: ((name: never, options?: never) => {
-      const real = roots.root(name, options);
+    root: ((name: never, options?: { subfolder?: string }) => {
+      const real = roots.root(name, options as never);
       if ((name as string) !== 'harness-home') return real;
+      log.scopes.push(options?.subfolder);
       return new Proxy(real, {
         get(target, key) {
           const value = Reflect.get(target, key) as unknown;
-          if (key !== 'lstat' || typeof value !== 'function') return value;
+          if (typeof value !== 'function') return value;
+          if (key === 'readDurable')
+            return async (path: string, limit: number | undefined, use: never) => {
+              log.reads.push({ path, limit });
+              return await (value as (...args: unknown[]) => Promise<unknown>).call(target, path, limit, use);
+            };
+          if (key !== 'lstat' && key !== 'realPath') return value;
           return async (path: string) => {
             const answer = await (value as (path: string) => Promise<unknown>).call(target, path);
-            await hook.current?.(path);
+            await hook.current?.(key, path);
             return answer;
           };
         },
@@ -44,7 +67,7 @@ function hooked(roots: RootsPort, hook: { current?: (path: string) => Promise<vo
   };
 }
 
-async function seed(hook: { current?: (path: string) => Promise<void> } = {}) {
+async function seed(hook: { current?: Hook } = {}, log?: ReadLog, build?: (world: FleetWorld) => RootsPort) {
   const world = await fleetWorld();
   const store = join(world.parent, 'store');
   const linked = join(world.person, 'linked');
@@ -69,7 +92,7 @@ async function seed(hook: { current?: (path: string) => Promise<void> } = {}) {
     runtimes: [],
   });
   await writeFile(join(world.fleet, 'manifest.json'), JSON.stringify(manifest));
-  const api = fleetHomes(hooked(world.roots, hook), new FleetPublication());
+  const api = fleetHomes(hooked(build?.(world) ?? world.roots, hook, log), new FleetPublication());
   await api.homes();
   const reader = (): RuntimeHomeReader => {
     const found = api.home(LINKED);
@@ -210,14 +233,14 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
   });
 
   it('BG-033 a target swapped for a link to another file after it was judged is discarded, never returned', async () => {
-    const hook: { current?: (path: string) => Promise<void> } = {};
+    const hook: { current?: Hook } = {};
     const { store, linked, reader } = await seed(hook);
     await writeFile(join(store, 'real.json'), '{"a":1}');
     await writeFile(join(store, 'other.json'), `{"k":"${SECRET}"}`);
     await symlink(join(store, 'real.json'), join(linked, 'settings.json'));
     let swapped = false;
-    hook.current = async path => {
-      if (swapped || path !== join(store, 'real.json')) return;
+    hook.current = async (method, path) => {
+      if (swapped || method !== 'lstat' || path !== join(store, 'real.json')) return;
       swapped = true;
       await rm(join(store, 'real.json'));
       await symlink(join(store, 'other.json'), join(store, 'real.json'));
@@ -228,6 +251,52 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
     expect(swapped).toBe(true);
     expect(error).toBeInstanceOf(Error);
     expect(everythingOf(error)).not.toContain('SECRET');
+  });
+
+  it('BG-033 R6 RESIDUAL a FOLDER above the target swapped for a link to another folder after the judge returns that folder’s same-named file (stated in document-link.ts)', async () => {
+    const hook: { current?: Hook } = {};
+    const { store, linked, reader } = await seed(hook);
+    await mkdir(join(store, 'a'), { recursive: true });
+    await mkdir(join(store, 'b'), { recursive: true });
+    await writeFile(join(store, 'a', 'doc.json'), '{"from":"a"}');
+    await writeFile(join(store, 'b', 'doc.json'), '{"from":"b"}');
+    await symlink(join(store, 'a', 'doc.json'), join(linked, 'settings.json'));
+    let swapped = false;
+    hook.current = async (method, path) => {
+      if (swapped || method !== 'realPath' || path !== join(linked, 'settings.json')) return;
+      swapped = true;
+      await rename(join(store, 'a'), join(store, 'a-old'));
+      await symlink(join(store, 'b'), join(store, 'a'));
+    };
+    expect(await reader().document('settings.json', 1000)).toBe('{"from":"b"}');
+    expect(swapped).toBe(true);
+  });
+
+  it('BG-033 R6 the same folder swap into the daemon’s home, or to a folder whose same-named file is a link to a sign-in file, is refused content-free', async () => {
+    for (const into of ['fence', 'sign-in'] as const) {
+      const hook: { current?: Hook } = {};
+      const { world, store, linked, reader } = await seed(hook);
+      await mkdir(join(store, 'a'), { recursive: true });
+      await writeFile(join(store, 'a', 'doc.json'), '{"from":"a"}');
+      const elsewhere = into === 'fence' ? join(world.home, 'state') : join(store, 'b');
+      await mkdir(elsewhere, { recursive: true });
+      await writeFile(join(elsewhere, into === 'fence' ? 'doc.json' : '.credentials.json'), `{"k":"${SECRET}"}`);
+      if (into === 'sign-in') await symlink('.credentials.json', join(elsewhere, 'doc.json'));
+      await symlink(join(store, 'a', 'doc.json'), join(linked, 'settings.json'));
+      let swapped = false;
+      hook.current = async (method, path) => {
+        if (swapped || method !== 'realPath' || path !== join(linked, 'settings.json')) return;
+        swapped = true;
+        await rename(join(store, 'a'), join(store, 'a-old'));
+        await symlink(elsewhere, join(store, 'a'));
+      };
+      const error = await reader()
+        .document('settings.json', 1000)
+        .catch((failure: unknown) => failure);
+      expect(swapped).toBe(true);
+      expect(error).toBeInstanceOf(Error);
+      expect(everythingOf(error)).not.toContain('SECRET');
+    }
   });
 
   it('BG-033 the other readers of the same home still do not follow a link out: skills stay skipped, a file in a skill is unreadable', async () => {

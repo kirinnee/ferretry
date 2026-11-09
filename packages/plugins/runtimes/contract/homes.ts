@@ -71,7 +71,7 @@ export interface RuntimeHomeReader {
    * 16 MiB, parsing as the document; never the daemon's home, never a sign-in file) and a link to nothing is absent.
    */
   document(file: RuntimeHomeDocument, limitBytes: number): Promise<string | null>;
-  /** Folders directly in `<home>/skills`, at most `limit + 1`, dot-entries skipped. A fleet home lists a link only when it resolves into `fleet/assets/`; a home outside the fleet lists a link only when it resolves to a folder INSIDE that home (with a `SKILL.md` inside it too), and skips every other link silently. */
+  /** Folders directly in `<home>/skills`, at most `limit + 1`, dot-entries skipped. A fleet home lists a link only when it resolves into `fleet/assets/`; a home outside the fleet lists a plain folder only when it holds a plain, single-name, non-sign-in `SKILL.md`, and a link only when it resolves to a folder INSIDE that home with such a `SKILL.md`; it skips every other link silently. */
   skills(limit: number): Promise<readonly RuntimeHomeSkillEntry[]>;
   /** The text of `<home>/skills/<name>/SKILL.md`, or `undefined` (not listed, absent, too large, not a regular file). */
   skillManifest(name: string, maxBytes: number): Promise<string | undefined>;

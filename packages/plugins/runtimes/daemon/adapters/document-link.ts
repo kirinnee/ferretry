@@ -11,7 +11,8 @@
  *  - the target must be a REGULAR FILE (never a folder, a pipe, a socket or a device) with a single name, and no larger than
  *    the caller's bound or the 16 MiB cap below, whichever is smaller;
  *  - the bytes are read through the kernel's held descriptor on a root scoped to the target's own folder, and kept only when
- *    the real path's name still reaches the very file that was opened (a swap after the judge is discarded);
+ *    the real path's name still reaches the very file that was opened (a swap of the TARGET itself after the judge is
+ *    discarded; a swap of a FOLDER ABOVE it is the residual below);
  *  - the text must PARSE as what the file is (a JSON object, or TOML), so a link named `settings.json` to some other kind of
  *    file (a private key, a log) is refused and its text is never handed on;
  *  - a refusal names the LINK NAME only: never the target's path, never a byte of the target, never the parser's complaint;
@@ -19,6 +20,11 @@
  *
  * Declared residual: a link to a valid JSON or TOML file anywhere the owner's own user can read (outside the daemon's
  * private places) is read and returned as that document, as the reader of today did; the caller reads it as settings.
+ * Inside that window a folder ABOVE the target swapped for a link to another folder after the judge can make the read
+ * return a same-named file there: a regular file of one name that parses, outside the daemon's private places, never a
+ * sign-in file's name. A link to a name that does not exist inside the daemon's home answers absent like any link to
+ * nothing, so whoever owns the link can tell whether that name exists there (never a byte of it; the reader of today
+ * answered the same).
  */
 import { basename, dirname } from 'node:path';
 import type { RootsPort } from '@ferretry/kernel/contract';

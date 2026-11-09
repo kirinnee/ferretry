@@ -16,19 +16,21 @@
  * WHAT THIS FILE ADDS, each a sentence:
  *
  *  - a sign-in file (`.credentials.json`, `auth.json`) is never listed, and a read refuses one, whatever name a link gives
- *    it and wherever inside the home the link leads (its real path's name is judged, case-insensitively), the same list
- *    `host-harness-scan.ts` keeps;
+ *    it and wherever inside the home the link leads (its real path's name is judged, case-insensitively, by the one
+ *    `isSignInName` in `account/credentials.ts`);
  *  - a link whose real path is the folder it is found in, or a folder above it (`skills/self -> skills`, `dir/up -> ..`),
  *    is a loop and is left as a link;
  *  - a chain of links that never ends in a file or folder (longer than the operating system's own bound), a link to
  *    nothing, and a link the kernel refuses all stay a LINK in the listing.
  *
- * HOW FAR A LINK IS FOLLOWED is bounded by construction, not by a count: `follow` is on only for the listing of the home and
- * of its `skills/` folder (a WIDENING from today's machine inventory, which followed none of them in a home outside the
- * fleet), and the folder a link leads to is then read with `follow` off, where every link is reported as a link and none
- * is opened (today's skill-folder reader). So a chain of followed links is
- * at most three: the `skills` link, the entry link, and the `SKILL.md` link (`skillManifest` only), plus the link a document
- * is; whatever chain of links each is made of, the chain itself is resolved by the kernel.
+ * HOW FAR A LINK IS FOLLOWED is bounded by construction, not by a count: `follow` is on only for the listing of the home,
+ * of its `skills/` folder, and of the skill folder `skillManifest` reads (for its one `SKILL.md` link); every other walk and
+ * file read of a skill folder has `follow` off, where every link is reported as a link and none is opened. Against what
+ * today's readers did with a home outside the fleet: the machine skill inventory followed links into `fleet/` (one into
+ * `fleet/assets` it listed as Ferretry's) and none inside the home; the session skill picker followed every link; the skill-folder reader (tree and
+ * file) followed none. So a chain of followed links is at most three: the `skills` link, the entry link, and the `SKILL.md`
+ * link (`skillManifest` only), plus the link a document is; whatever chain of links each is made of, the chain itself is
+ * resolved by the kernel.
  *
  * WHAT A READ RETURNS. A read judges the REAL path of the name (inside the home, and its own name is not a sign-in file's,
  * any case), reads the real path through the kernel's held descriptor, and hands the bytes back only when the NAME of that

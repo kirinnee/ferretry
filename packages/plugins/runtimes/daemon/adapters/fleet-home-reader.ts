@@ -17,8 +17,9 @@
  *
  * Declared residuals: a name of a FLEET home swapped for a link between its listing and its read can reach another file of
  * the SAME folder it is scoped to. For a home outside the fleet every read is checked after it (the bytes are kept only
- * when the name still reaches the file that was judged), so a swap is refused; what that leaves is stated in
- * `following-handle.ts` and `document-link.ts`.
+ * when the name still reaches the file that was judged), so a swap of the file itself is refused; a swap of a FOLDER above
+ * it for a link to another folder is not, and can return a same-named file there (`following-handle.ts` states it for the
+ * skills, `document-link.ts` for the three documents).
  *
  * A home the manifest places outside `fleet/homes` (an operator's own folder, a home-manager home) is served read-only
  * through `following-handle.ts` (the skills, scoped to the account home itself) and `document-link.ts` (the three
