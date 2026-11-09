@@ -2691,8 +2691,11 @@ scoped handle:
   is built once; a session folder (a member of a `*` collection) whose last change is older than a minute is
   **resting**, and a look does not touch it — resting folders are looked at in rotating slices of 512, so one look
   costs the folders that changed lately plus one slice, never every folder (measured at 2,000, 5,000 and 20,000
-  sessions with one writer: the mean read is 1.0–1.5x of 5.0's at each, and the slowest read does not grow). The price
-  is declared as GAP (7). The host looks at most every
+  sessions with one writer, paired with 5.0: the median mean read is 1.5x, 1.7x and 1.55x of 5.0's — the guard's walk
+  of each path, not the sessions — with 21 filesystem calls a read at every size and a slowest read of about 6, 6 and 8
+  ms; a hostile writer that adds a session folder every 5 ms costs one 40–70 ms look at 20,000 sessions, once per
+  look; the very first fenced read after boot builds the index and waits for it: 0.14 s at 2,000, 0.4 s at 5,000, 1.8 s
+  at 20,000). The price is declared as GAP (7). The host looks at most every
   250 ms (a private file created or replaced is pinned within that, which is also the longest it can be reached under
   a second name; an interval that is not a finite number from 0 to 5 s — `Infinity`, `NaN`, a negative — is the 250 ms
   default, never "never"). A change is told by the folder's modification AND status-change times **to the
