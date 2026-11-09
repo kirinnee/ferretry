@@ -19,14 +19,15 @@
 
 import { formatCardRef } from '../../contract/index.ts';
 import { Columns3, List, Maximize2, Minimize2 } from 'lucide-react';
-import { type ReactElement, useCallback, useState } from 'react';
+import { type ReactElement, useState } from 'react';
 import { Spinner } from '@ferretry/app/ui';
 import type { BoardChat } from '../lib/board-chat.ts';
 import { NO_BOARD_FILTERS } from '../lib/board-model.ts';
 import { ferretNamer } from '../lib/board-present.ts';
 import type { BoardSideView } from '../lib/board-side-view.ts';
 import type { BoardCardOf } from '../lib/board-view.ts';
-import { addReferenceToComposer, type FerretScope } from '../lib/machine.ts';
+import { useAddToChat } from '../lib/add-to-chat.ts';
+import type { FerretScope } from '../lib/machine.ts';
 import { boardCardPath } from '../lib/paths.ts';
 import { BoardCard, type BoardDensity } from './board-card.tsx';
 import { InternalToggle } from './board-filters.tsx';
@@ -134,12 +135,10 @@ export function BoardSideTab({
   const { cards, status } = chat;
   const names = ferretNamer(callsigns);
   const [message, setMessage] = useState('');
-  const addToChat = useCallback(
-    (card: BoardCardOf): void => {
-      setMessage(addReferenceToComposer(scope, formatCardRef(card.task)));
-    },
-    [scope],
-  );
+  const addReference = useAddToChat();
+  const addToChat = (card: BoardCardOf): void => {
+    setMessage(addReference(scope.ferret, formatCardRef(card.task)));
+  };
   const draw = (card: BoardCardOf, extra: { readonly depth?: number; readonly lane?: string } = {}): ReactElement => {
     const place = cards.places.get(card.key);
     return (

@@ -64,7 +64,16 @@ const deepLinkView = lazyComponent<DeviceViewProps>(
     (await import('./views/agenda-deep-link-view.tsx')).agendaDeepLinkView(fleet) as AppComponent<DeviceViewProps>,
 ) as NonNullable<ShellProvides['device']>[string];
 
+/**
+ * Agenda writes the worker's notification filter document (shell contract S6) at app boot, from a second device view
+ * that draws nothing; every change of its settings writes it again (`lib/device-filter-store.ts`).
+ */
+const filterBootView = lazyComponent<DeviceViewProps>(
+  async () =>
+    (await import('./views/agenda-filter-boot-view.tsx')).AgendaFilterBootView as AppComponent<DeviceViewProps>,
+) as NonNullable<ShellProvides['device']>[string];
+
 export default provideToShell(half, {
   fragments: [{ form: 'keyed', key: 'agenda' }],
-  device: { 'deep-link': deepLinkView },
+  device: { 'deep-link': deepLinkView, 'notification-filter': filterBootView },
 });

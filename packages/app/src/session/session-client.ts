@@ -710,11 +710,18 @@ const streamFrame = (message: { readonly text: string } | { readonly bytes: stri
   return bytes === null ? null : { kind: 'bytes', bytes };
 };
 
-/** Thrown for every refusal this side makes or is told about, carrying the close code. */
+/**
+ * Thrown for every refusal this side makes or is told about, carrying the close code.
+ *
+ * `endedWhileServing` is true only when the session had already accepted this device and was serving requests when it
+ * ended. It is what lets the client layer tell a `4440` that raced another request's `endsSession` (no outcome for THIS
+ * request: a carrier-style loss) from a `4440` before acceptance, which §14 calls a protocol violation.
+ */
 export class RelaySessionError extends Error {
   constructor(
     message: string,
     readonly code: number,
+    readonly endedWhileServing: boolean = false,
   ) {
     super(message);
     this.name = 'RelaySessionError';
@@ -1777,8 +1784,9 @@ export class RelayClientSession {
     if (this.#done()) return;
     if (close) this.deps.socket.close(code, reason);
     const streaming = this.#phase === 'streaming';
+    const serving = this.#phase === 'serving';
     this.#phase = 'ended';
-    const failure = new RelaySessionError(reason, code);
+    const failure = new RelaySessionError(reason, code, serving);
     this.#failure = failure;
     this.#waiting.length = 0;
     this.#waitingRequests = 0;

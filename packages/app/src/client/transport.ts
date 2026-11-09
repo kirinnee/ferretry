@@ -76,8 +76,77 @@ export class DaemonCallError extends Error {
     /** The refusal's whole JSON body, for a route whose refusal carries a fact beside its sentence (a 409 naming
      *  the draft that holds the agent's box, the send that was typed but never shown, an in-flight inventory, a size). */
     readonly body?: unknown,
+    /**
+     * `true` when the call died on the CARRIER (the session closed, the rendezvous ended, a deadline passed) rather
+     * than with an answer from the daemon (S12). A screen keeps its last good content through one, because the
+     * connection model is already retrying; an answer, whatever its status, is news.
+     */
+    readonly carrier?: true,
+    /** The failure this one stands for, kept so the original reason is never lost (S12). */
+    cause?: unknown,
   ) {
-    super(message);
+    super(message, cause === undefined ? undefined : { cause });
     this.name = 'DaemonCallError';
   }
+}
+
+/** The machine code a carrier outage carries; no daemon says it. */
+export const CARRIER_OUTAGE_CODE = 'carrier_outage';
+/** The machine code a call carries when a session ended with the device-refused close (`4403`). */
+export const DEVICE_REFUSED_CODE = 'device_refused';
+
+/** Whether a failure is a carrier outage (S12): the call never got an answer. Total; reads one `cause` level too. */
+export function isCarrierOutage(error: unknown): boolean {
+  if (error instanceof DaemonCallError) return error.carrier === true;
+  return error instanceof Error && error.cause instanceof DaemonCallError && error.cause.carrier === true;
+}
+
+/**
+ * The close code the daemon ends a session with when it does not accept this device (the session wire's
+ * `RELAY_CLOSE_CODES.authRejected`; a parity test pins the two together). The client layer reads it off a transport
+ * failure without importing the wire.
+ */
+export const DEVICE_REFUSED_CLOSE_CODE = 4403;
+
+/** Whether a transport failure is the daemon saying it no longer accepts this device (revoked, or unused for too long). */
+export function isDeviceRefusal(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === 'RelaySessionError' &&
+    (error as { readonly code?: unknown }).code === DEVICE_REFUSED_CLOSE_CODE
+  );
+}
+
+/**
+ * The session close codes that mean the CARRIER went away rather than the daemon answering (S12): the rendezvous had
+ * no daemon on the route (`4404`), the claim timed out or was lost (`4402`, `4410`), the socket stopped answering
+ * heartbeats (`4408`), it is full or the hosted relay is off, over capacity or over its bandwidth (`4429`, `4431`-`4433`),
+ * its access lease ended (`4441`), or the rendezvous itself failed (`4500`). A parity test pins each to the session
+ * wire. Anything else — `4426` (the daemon's own "update this app"), the `4400`-class protocol and integrity codes,
+ * `4403` — is an ANSWER or a defect, not an outage. `4440` is in neither list: it is carrier-gone only for a session
+ * that was serving ({@link isCarrierGone}).
+ */
+const CARRIER_GONE_CLOSE_CODES: ReadonlySet<number> = new Set([
+  4402, 4404, 4408, 4410, 4429, 4431, 4432, 4433, 4441, 4500,
+]);
+
+/** The close code a daemon ends a session with once it has concluded (`RELAY_SESSION_CONCLUDED_CLOSE_CODE`; a parity test pins them). */
+export const SESSION_CONCLUDED_CLOSE_CODE = 4440;
+
+/**
+ * Whether a transport failure says the call died on the carrier before any answer (S12): a close with no outcome (a
+ * browser close code, `1006` included, is below 4000), one of the carrier-gone close codes above, a request that was never
+ * sent, or a machine read that gave up waiting. A `4440` counts only when the session was `serving` (the request raced
+ * another request's `endsSession`, so it has no outcome); before acceptance it is the protocol violation §14 names and
+ * passes through unmarked. Total. Everything else (a refusal, a protocol error, a missing key, a plain `Error`) is not
+ * an outage and keeps its own words.
+ */
+export function isCarrierGone(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'RelayRequestNotSentError' || error.name === 'MachineDeadlineError') return true;
+  if (error.name !== 'RelaySessionError') return false;
+  const { code, endedWhileServing } = error as { readonly code?: unknown; readonly endedWhileServing?: unknown };
+  if (typeof code !== 'number') return false;
+  if (code === SESSION_CONCLUDED_CLOSE_CODE) return endedWhileServing === true;
+  return code < 4000 || CARRIER_GONE_CLOSE_CODES.has(code);
 }
