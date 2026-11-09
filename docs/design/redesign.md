@@ -2760,7 +2760,8 @@ scoped handle:
   that a `*` collection looks at), so an alias of an UNINDEXED member that sits on a device no indexed place of that tree
   answers with is allowed: an overlay's lower layer against its upper one (members written at run time sit on the
   upper, a baked one on the lower), a member folder past the budget that is a mountpoint or a btrfs subvolume, or a
-  folder met at the depth limit that is a mountpoint. It needs a privileged bind or a mount of such a member, and it is
+  mount below a folder met at the depth limit (never looked at), or a split-device filesystem mounted at that folder
+  (its files answer a device its root folder does not). It needs a privileged bind or a mount of such a member, and it is
   strictly narrower than the head's device only, which was all a closed tree held before.
   Residuals the secret-name rule cannot see, none named like a secret and none changed here: MCP's `inventory.json`
   keeps a server's address with its path (a key embedded in a path segment would be stored), Shells' `cache/*` keeps a

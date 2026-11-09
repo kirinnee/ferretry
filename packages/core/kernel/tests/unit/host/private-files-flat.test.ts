@@ -233,7 +233,9 @@ describe('PF-budget a `*` collection spends its budget only on a member that hol
     await fill(l.sessions, 3, n => `s${n}/${ENV}`);
     const real = await realpath(l.home);
     const folder = (await REAL.identity(l.sessions))?.device as bigint;
-    const mounted = folder + 9n;
+    const file = (await REAL.identity(`${l.sessions}/s0/${ENV}`))?.device as bigint;
+    // A device that is neither the folder's nor the file's, whatever disk the test runs on.
+    const mounted = (folder > file ? folder : file) + 9n;
     // The third holder (s2) is the first one past the budget; a mount appears on its file after the first look.
     let moved = false;
     const disk: HostFs = {
@@ -247,13 +249,13 @@ describe('PF-budget a `*` collection spends its budget only on a member that hol
     };
     const index = privateIndexOf(disk, real, INPUT, { bounds: small });
     const first = await index.snapshot();
-    expect(first.closed[0]?.devices).toEqual(new Set([folder]));
+    expect(first.closed[0]?.devices).toEqual(new Set([folder, file]));
     moved = true;
-    // The mount changes its folder's times, and the look sees the change; no indexed place, key or count differs.
+    // Writing into the folder stands in for the folder being looked at again; no indexed place, key or count differs.
     await writeFile(`${l.sessions}/s2/touched.md`, 'x');
     const after = await index.snapshot();
     expect(after.places.map(place => place.key)).toEqual(first.places.map(place => place.key));
-    expect(after.closed[0]?.devices).toEqual(new Set([folder, mounted]));
+    expect(after.closed[0]?.devices).toEqual(new Set([folder, file, mounted]));
     expect(after).not.toBe(first);
   });
 });
