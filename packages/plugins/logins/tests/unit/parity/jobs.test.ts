@@ -1,4 +1,4 @@
-/** Parity rows J-0042, J-0087, J-0157, J-0223, J-0224, J-0226: the reads and timers Logins keeps. */
+/** Parity rows J-0042, J-0087, J-0096, J-0157, J-0223, J-0224, J-0226: the reads and timers Logins keeps. */
 import { describe, expect, test } from 'bun:test';
 import { milliseconds } from '@ferretry/std';
 import { testHost } from '@ferretry/kernel/testing';
@@ -23,6 +23,32 @@ describe('the jobs and timers Logins keeps', () => {
     try {
       expect(host.jobIds()).toContain('logins.models-refresh');
       await host.runJob('logins.models-refresh');
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('J-0096 a watched document that changes is seen on the next read: the watch lets go of what was read before', async () => {
+    const work = { harness: 'claude-code', store: 'host' };
+    const home = { harness: 'codex', store: 'host' };
+    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: { logins: { work } } });
+    try {
+      await host.settle();
+      const listed = async (): Promise<string[]> => {
+        const response = await host.request('GET', '/v1/logins');
+        expect(response.status).toBe(200);
+        const body = JSON.parse(String(response.body)) as { logins?: { id: string }[] } | { id: string }[];
+        return (Array.isArray(body) ? body : (body.logins ?? [])).map(entry => entry.id).sort();
+      };
+      expect(await listed()).toEqual(['work']);
+      // A hand edit adds a login: the next read, with nothing else asked, names it.
+      host.setConfig('logins', { work, home });
+      await host.settle();
+      expect(await listed()).toEqual(['home', 'work']);
+      // And one taken out is gone from the next read too, not served from what was read before.
+      host.setConfig('logins', { home });
+      await host.settle();
+      expect(await listed()).toEqual(['home']);
     } finally {
       await host.stop();
     }

@@ -304,7 +304,8 @@ const REOWNED: Readonly<Record<string, string>> = {
   'J-0177': 'connections',
   // The housekeeping pass trigger: analytics ingestion's nudge plus its slow backstop is Usage's.
   'J-0227': 'usage',
-  // The credentials' usage reading, kept current by file events: Logins'. (J-0096 has no real 5.0 owner.)
+  // The credentials' usage reading, kept current by file events: Logins'. J-0096 (a watched document is read again
+  // only when it changed) is Logins' own: its login files are read through the kernel's watched configuration.
   'J-0096': 'logins',
   'J-0232': 'logins',
   'J-0233': 'logins',
