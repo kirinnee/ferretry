@@ -178,10 +178,14 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
 
   const add = async (change: Extract<ProfileLayerChange, { kind: 'add' }>): Promise<ProfileLayerOutcome> => {
     const layer: ProfileLayerName = change.layer;
-    const file = deps.profiles().get(change.profile);
-    if (file === undefined) return refuse(`profile ${change.profile} does not exist`, 'fleet_change_unknown');
+    // The etag FIRST, then the value it describes: answering the etag refreshes what `profiles()` holds (an on-disk edit
+    // the watcher has not reloaded yet is read now), so the value below is at least as new as this etag. A value that is
+    // NEWER than the etag (the file moved after) only makes the writer's `ifMatch` fail, a refusal; the other order
+    // pinned a fresh etag to an old value and silently overwrote the edit.
     const etag = await etagOf(change.profile);
     if (typeof etag !== 'string') return etag;
+    const file = deps.profiles().get(change.profile);
+    if (file === undefined) return refuse(`profile ${change.profile} does not exist`, 'fleet_change_unknown');
     if (file.contents.includes(layer)) {
       // Already there: nothing to write. A caller that read the profile before it moved is still told.
       return change.ifMatch !== undefined && change.ifMatch !== etag
@@ -196,16 +200,16 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
 
   /** Every profile naming the layer loses it in ONE set: all of them, or (a conflict, a refusal) none. */
   const removeEverywhere = async (layer: ProfileLayerName): Promise<ProfileLayerOutcome> => {
-    const naming = [...deps.profiles()]
-      .filter(([, file]) => file.contents.includes(layer))
-      .map(([name]) => name)
-      .toSorted((left, right) => left.localeCompare(right));
+    // For EVERY profile the etag comes first and the value after it (the same rule as `add`): which profiles name the
+    // layer, and what each is rewritten to, is decided from a value at least as new as the etag it is pinned to, so an
+    // edit not yet reloaded is read now or refused by the writer, never overwritten.
+    const names = [...deps.profiles().keys()].toSorted((left, right) => left.localeCompare(right));
     const documents: ConfigWriteAllDocument[] = [];
-    for (const name of naming) {
-      const file = deps.profiles().get(name);
-      if (file === undefined) continue;
+    for (const name of names) {
       const etag = await etagOf(name);
       if (typeof etag !== 'string') return etag;
+      const file = deps.profiles().get(name);
+      if (file === undefined || !file.contents.includes(layer)) continue;
       documents.push(
         patchOf(
           name,
@@ -226,9 +230,11 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
       const names = [...deps.profiles().keys()].toSorted((left, right) => left.localeCompare(right));
       const summaries: ProfileSummary[] = [];
       for (const name of names) {
+        // The etag first, then the layers it describes (never a fresh etag over layers read before it).
+        const etag = await deps.etag(name);
         const file = deps.profiles().get(name);
         if (file === undefined) continue;
-        summaries.push({ name, layers: [...file.contents], etag: await deps.etag(name) });
+        summaries.push({ name, layers: [...file.contents], etag });
       }
       return summaries;
     },

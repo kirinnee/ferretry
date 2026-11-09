@@ -66,16 +66,27 @@ async function realWorld(world: FleetWorld) {
     config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file' | 'etag'>;
   };
   const assembly = fileAssembly({ kernel, needs, hooks: { provider: () => 'unavailable' } }, new FleetPublication());
+  /** Runs right after an etag is answered and before its caller reads the value: the window an edit can land in. */
+  const hooks: { afterEtag?: (name: string) => Promise<void> } = {};
   const api: Pick<RuntimesApi, 'profiles' | 'changeProfileLayers'> = createProfileLayers({
     runtimes: () => port.collection(RUNTIME_ITEMS as never),
     profiles: () => port.collection(PROFILE_ITEMS as never),
-    etag: assembly.profileEtag,
+    etag: async name => {
+      const answered = await assembly.profileEtag(name);
+      await hooks.afterEtag?.(name);
+      return answered;
+    },
     writeAll: async documents => await port.writeAll(documents),
     serialise: async act => await assembly.catalog.serialise(act),
   });
   return {
     api,
     assembly,
+    hooks,
+    /** Someone edits the file behind the service: written to disk, no reload (the watcher's debounce, or no watcher). */
+    editBehind: async (name: string, text: string): Promise<void> => {
+      await writeFile(join(profiles, `${name}.yaml`), text);
+    },
     /** The etag the kernel's config service reckons for the file, read from the service itself. */
     kernelEtag: async (name: string): Promise<string | undefined> =>
       (await config.read('runtimes', PROFILE_ITEMS as never, name))?.etag,
@@ -146,6 +157,85 @@ describe('R2 the profile layers over the kernel’s real config service, nothing
 
     // Act + Assert
     expect(await world.assembly.profileEtag('bom')).not.toBe(raw);
+  });
+
+  const THEIRS = 'contents:\n  - mcp/one\n  - mcp/theirs\n';
+
+  it('R2 M-1 should keep an on-disk edit the service has not reloaded when a layer is added without an ifMatch', async () => {
+    // Arrange — the service loaded `plain`, then someone edited the file; nothing has reloaded it.
+    const world = await realWorld(await fleetWorld());
+    await world.editBehind('plain', THEIRS);
+
+    // Act
+    const outcome = await world.api.changeProfileLayers({ kind: 'add', profile: 'plain', layer: 'mcp/two' }, owner);
+
+    // Assert — the edit was read before the write was built: it is still there, and the new layer is on top of it.
+    expect(outcome).toEqual({ kind: 'written', profiles: ['plain'] });
+    expect((await world.onDisk('plain')).split('contents:\n')[1]).toBe('  - mcp/one\n  - mcp/theirs\n  - mcp/two\n');
+  });
+
+  it('R2 M-1 should keep an on-disk edit the service has not reloaded when a layer is removed everywhere', async () => {
+    // Arrange
+    const world = await realWorld(await fleetWorld());
+    await world.editBehind('plain', THEIRS);
+
+    // Act
+    const outcome = await world.api.changeProfileLayers({ kind: 'remove-everywhere', layer: 'mcp/one' }, owner);
+
+    // Assert — only the named layer went from the edited file; their addition survives.
+    expect(outcome).toEqual({ kind: 'written', profiles: ['bom', 'crlf', 'plain'] });
+    expect((await world.onDisk('plain')).split('contents:\n')[1]).toBe('  - mcp/theirs\n');
+  });
+
+  it('R2 M-1 should refuse an add, and leave an edit that lands between the etag and the read byte for byte', async () => {
+    // Arrange — the file moves AFTER its etag was answered and BEFORE the value is read.
+    const world = await realWorld(await fleetWorld());
+    world.hooks.afterEtag = async name => {
+      world.hooks.afterEtag = undefined;
+      await world.editBehind(name, THEIRS);
+    };
+
+    // Act
+    const outcome = await world.api.changeProfileLayers({ kind: 'add', profile: 'plain', layer: 'mcp/two' }, owner);
+
+    // Assert — the value read is older than the disk, so the writer's ifMatch fails: a conflict, nothing written.
+    expect(outcome).toEqual({ kind: 'conflict', profile: 'plain' });
+    expect(await world.onDisk('plain')).toBe(THEIRS);
+  });
+
+  it('R2 M-1 should refuse a remove-everywhere, and leave an edit that lands between an etag and its read byte for byte', async () => {
+    // Arrange — every profile's etag is taken first; `plain` moves right after its own etag.
+    const world = await realWorld(await fleetWorld());
+    world.hooks.afterEtag = async name => {
+      if (name !== 'plain') return;
+      world.hooks.afterEtag = undefined;
+      await world.editBehind(name, THEIRS);
+    };
+
+    // Act
+    const outcome = await world.api.changeProfileLayers({ kind: 'remove-everywhere', layer: 'mcp/one' }, owner);
+
+    // Assert — one set: the stale pin refuses the WHOLE set, so no other profile changed either.
+    expect(outcome).toEqual({ kind: 'conflict', profile: 'plain' });
+    expect(await world.onDisk('plain')).toBe(THEIRS);
+    expect(await world.onDisk('crlf')).toBe(FILES.crlf as string);
+  });
+
+  it('R2 M-1 should list the layers an unreloaded edit made, under the etag that describes them', async () => {
+    // Arrange
+    const world = await realWorld(await fleetWorld());
+    await world.editBehind('plain', THEIRS);
+
+    // Act
+    const listed = (await world.api.profiles()).find(profile => profile.name === 'plain');
+    const outcome = await world.api.changeProfileLayers(
+      { kind: 'add', profile: 'plain', layer: 'mcp/two', ifMatch: listed?.etag },
+      owner,
+    );
+
+    // Assert — the listing is not stale layers under a fresh etag: a write pinned to it lands on the edited file.
+    expect(listed?.layers).toEqual(['mcp/one', 'mcp/theirs']);
+    expect(outcome).toEqual({ kind: 'written', profiles: ['plain'] });
   });
 
   it('R2 should answer the absent sentinel for a profile that has no file', async () => {
