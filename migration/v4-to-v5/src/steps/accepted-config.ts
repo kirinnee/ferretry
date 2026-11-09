@@ -193,7 +193,7 @@ async function enforcedConfigs(ctx: StepContext, state: V4State): Promise<Enforc
     if (result.failed.length > 0)
       return {
         kind: 'failed',
-        why: `the conversion of what v4 enforced failed in: ${result.failed.join(', ')}`,
+        why: `the conversion of what v4 enforced failed in: ${result.failedWhy.join('; ')}`,
       };
     return { kind: 'ok', configs: result.configs, fingerprint: result.fingerprint };
   } catch {
@@ -263,7 +263,7 @@ export const acceptedConfigStep: Step = {
           return {
             ...base,
             status: 'failed',
-            note: `${enforced.why}; v4 was not enforcing as written (${held.paths.join(', ')}), so no accepted record was written for any file and the conversion is incomplete (it never falls back to the current text). Fix or confirm the v4 file named, then run again`,
+            note: `${enforced.why}; v4 was not enforcing as written (${held.paths.join(', ')}), so no accepted record was written for any file and the conversion is incomplete (it never falls back to the current text). Fix what the failure above names (when it is one of those v4 files, confirm it in v4 instead), then run again`,
             kept: [],
             notCarried: [],
           };
@@ -338,7 +338,7 @@ export const acceptedConfigStep: Step = {
               : [
                   {
                     what: `no accepted record for ${loginHeld.join(', ')}`,
-                    why: 'v4 enforced another key for this login than the one now sealed in the vault (the enforced file would name a different secret or a different value), and a record never holds a plain key: the file stays held until the owner confirms it',
+                    why: 'the file v4 enforced would name a different secret than the live one (a different value, a different name, or none), and a record never holds a plain key: the file stays held until the owner confirms it',
                   },
                 ]),
             {

@@ -24,8 +24,9 @@ describe('vite.config.ts under Node', () => {
     const result = spawnSync('node', ['--input-type=module', '-e', program], {
       cwd: appDir,
       encoding: 'utf8',
-      timeout: 60_000,
+      timeout: 4_000,
     });
+    expect(result.error).toBeUndefined();
     expect(result.stderr).not.toContain('ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX');
     expect(result.stdout).toBe('config-loaded');
     expect(result.status).toBe(0);

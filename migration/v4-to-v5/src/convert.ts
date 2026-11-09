@@ -83,17 +83,28 @@ async function plainConfigs(
     ...(host === undefined ? {} : { host }),
   };
   const failed: string[] = [];
+  const failedWhy: string[] = [];
   for (const step of steps) {
     if (!CONFIG_STEPS.has(step.id)) continue;
     try {
       // A step that fails here leaves its files out: they then count as preview-authored (fail closed), and the
       // enforced pass names it so the accepted-config step records nothing from it.
-      if ((await step.run(plain)).status === 'failed') failed.push(step.id);
-    } catch {
+      const report = await step.run(plain);
+      if (report.status === 'failed') {
+        failed.push(step.id);
+        failedWhy.push(report.note === undefined ? step.id : `${step.id}: ${report.note}`);
+      }
+    } catch (error) {
       failed.push(step.id);
+      failedWhy.push(`${step.id}: ${error instanceof Error ? error.message : 'it threw'}`);
     }
   }
-  return { configs: plain.v5.writtenConfigs(), failed, fingerprint: login => loginKeys.fingerprint(login) };
+  return {
+    configs: plain.v5.writtenConfigs(),
+    failed,
+    failedWhy,
+    fingerprint: login => loginKeys.fingerprint(login),
+  };
 }
 
 /** The plain dry conversion of the v4 home with the given config overrides (the accepted-config step's enforced view). */
