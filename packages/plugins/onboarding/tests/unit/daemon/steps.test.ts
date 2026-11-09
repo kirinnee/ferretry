@@ -123,6 +123,16 @@ describe('recording an answer', () => {
     expect(second.steps['logins:login']?.state).toBe('done');
   });
 
+  test('n1 a found step can be recorded as the terminal’s own sign-in, and answering again drops the mark', () => {
+    const found = withAnswer(undefined, 'logins', 'login', { state: 'found', linked: true }, AT);
+    expect(found.steps['logins:login']).toEqual({ state: 'found', at: AT, linked: true });
+    const view = joinProgress([entry('logins', 'login', 30, 'Sign in')], found);
+    expect(view[0]?.linked).toBe(true);
+    const again = withAnswer(found, 'logins', 'login', { state: 'done' }, AT);
+    expect(again.steps['logins:login']).toEqual({ state: 'done', at: AT });
+    expect('linked' in (joinProgress([entry('logins', 'login', 30)], again)[0] ?? {})).toBe(false);
+  });
+
   test('the empty progress is format 1 with no steps', () => {
     expect(EMPTY_PROGRESS).toEqual({ format: 1, steps: {} });
   });

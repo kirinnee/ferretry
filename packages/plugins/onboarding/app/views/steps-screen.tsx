@@ -20,12 +20,12 @@ const STATE_LABEL: Readonly<Record<StepState, string>> = {
   skipped: 'Skipped',
 };
 
-/** The plugins whose steps are a harness or a sign-in: a `found` one is the terminal's own sign-in being reused. */
-const SIGN_IN_PLUGINS: ReadonlySet<string> = new Set(['claude-code', 'codex', 'logins']);
-
-/** Whether to say what linking the terminal's own sign-in costs under this step. */
-const sayLinkCosts = (step: { readonly plugin: string; readonly state: StepState }): boolean =>
-  step.state === 'found' && SIGN_IN_PLUGINS.has(step.plugin);
+/**
+ * Whether to say what linking the terminal's own sign-in costs under this step: when the check that found it said it is
+ * the terminal's own (`linked`). The fact is the step's, recorded with its answer, so no plugin id is named here.
+ */
+const sayLinkCosts = (step: { readonly state: StepState; readonly linked?: true | undefined }): boolean =>
+  step.state === 'found' && step.linked === true;
 
 type Reading =
   | { readonly kind: 'loading' }

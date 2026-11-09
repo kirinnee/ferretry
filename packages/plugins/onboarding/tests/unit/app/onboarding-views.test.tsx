@@ -157,11 +157,21 @@ describe('S14 the steps screen', () => {
     await view.unmount();
   });
 
-  it('M3 says what linking the terminal’s sign-in costs under a found harness or login step, and nowhere else', async () => {
+  it('M3 n1 says what linking the terminal’s sign-in costs under a found step the check marked linked, and nowhere else', async () => {
     const steps = [
+      // Installed, not a sign-in: no mark, no sentence.
       { plugin: 'claude-code', id: 'harness', title: 'Claude Code', order: 20, state: 'found' as const },
       { plugin: 'codex', id: 'harness', title: 'Codex', order: 21, state: 'pending' as const },
-      { plugin: 'logins', id: 'login', title: 'Sign in', order: 30, state: 'found' as const },
+      // The terminal's own sign-in, linked: the sentence, whatever plugin owns the step (no plugin id is named here).
+      { plugin: 'logins', id: 'login', title: 'Sign in', order: 30, state: 'found' as const, linked: true as const },
+      {
+        plugin: 'elsewhere',
+        id: 'sign-in',
+        title: 'Elsewhere',
+        order: 31,
+        state: 'found' as const,
+        linked: true as const,
+      },
       { plugin: 'shells', id: 'nix', title: 'Shells', order: 80, state: 'found' as const },
       { plugin: 'runtimes', id: 'runtimes', title: 'Name your runtimes', order: 40, state: 'done' as const },
     ];
@@ -172,8 +182,9 @@ describe('S14 the steps screen', () => {
     await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
     const costs = (subject: string): string | null =>
       view.container.querySelector(`[data-step="${subject}"] [data-link-costs]`)?.textContent ?? null;
-    expect(costs('claude-code.harness')).toBe(LINK_COSTS);
+    expect(costs('claude-code.harness')).toBeNull();
     expect(costs('logins.login')).toBe(LINK_COSTS);
+    expect(costs('elsewhere.sign-in')).toBe(LINK_COSTS);
     expect(costs('codex.harness')).toBeNull();
     expect(costs('shells.nix')).toBeNull();
     expect(costs('runtimes.runtimes')).toBeNull();

@@ -28,6 +28,7 @@ export function joinProgress(entries: readonly OnboardingEntry[], progress: Prog
       order: entry.order,
       state: known?.state ?? 'pending',
       ...(known === undefined ? {} : { at: known.at }),
+      ...(known?.state === 'found' && known.linked === true ? { linked: true as const } : {}),
     };
   });
 }
@@ -56,7 +57,11 @@ export function withAnswer(
   answer: StepAnswerRequest,
   at: Instant,
 ): Progress {
-  return { format: 1, steps: { ...(progress?.steps ?? {}), [stepKey(plugin, id)]: { state: answer.state, at } } };
+  const linked = answer.state === 'found' && answer.linked === true ? { linked: true as const } : {};
+  return {
+    format: 1,
+    steps: { ...(progress?.steps ?? {}), [stepKey(plugin, id)]: { state: answer.state, at, ...linked } },
+  };
 }
 
 /** The keys of the steps that stand anywhere but `pending`: the ones a reset changes. */

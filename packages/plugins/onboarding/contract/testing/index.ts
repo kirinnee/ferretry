@@ -24,7 +24,12 @@ export function fakeOnboarding(): FakeOnboarding {
     answer: async (plugin, step, answer: StepAnswerRequest) => {
       const found = find(plugin, step);
       if (found === undefined) return undefined;
-      const next: StepView = { ...found, state: answer.state };
+      const { linked: _before, ...rest } = found;
+      const next: StepView = {
+        ...rest,
+        state: answer.state,
+        ...(answer.state === 'found' && answer.linked === true ? { linked: true as const } : {}),
+      };
       steps.splice(steps.indexOf(found), 1, next);
       return next;
     },
