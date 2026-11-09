@@ -3,6 +3,7 @@ import should from 'should';
 import { AgentConfigCallSchema } from '@ferretry/kernel/contract';
 import { fixedClock } from '@ferretry/kernel/testing';
 import { agentConfig } from '../../../../../core/kernel/host/config/agent.ts';
+import { checkConfigText } from '../../../../../core/kernel/host/config/check.ts';
 import { createConfigFiles } from '../../../../../core/kernel/host/config/service.ts';
 import { createMemoryHostFs } from '../../../../../core/kernel/host/state/memory-fs.ts';
 import {
@@ -293,5 +294,137 @@ describe('R6 m4: config_read of a login file refused by the stored rule shows no
     const issue = result.error?.issues[0] as { code: string; params?: { rawSecret?: boolean } } | undefined;
     should(issue?.code).equal('custom');
     should(issue?.params?.rawSecret).be.true();
+  });
+});
+
+describe('R8: an env that is not a map of strings is withheld, never skipped or thrown on', () => {
+  const H = 'Xq9vT2mLp8RzW4kNc7HbJ3fGd6YsA1eU';
+  const GOOD = 'harness: claude-code\nstore: environment\nenv:\n  GATEWAY_NOTE: fine\n';
+  const world = async () => {
+    const fs = createMemoryHostFs();
+    const files = createConfigFiles({
+      home: HOME,
+      fs,
+      clock: fixedClock(),
+      log: SILENT,
+      binary: 'fy',
+      defs: [{ plugin: 'logins', def: LOGINS_CONFIG }],
+    });
+    const agent = agentConfig({
+      writer: () => files.writer(),
+      control: () => ({ allows: async () => true }),
+      status: () => files.status(),
+      home: HOME,
+      binary: 'fy',
+      now: () => '2026-01-01T00:00:00.000Z',
+    });
+    return { fs, files, agent };
+  };
+  const standing = { credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'wren' } };
+  const read = async (path: string) => {
+    const { fs, files, agent } = await world();
+    fs.seed(`${HOME}/config/logins/${path}.yaml`, GOOD);
+    await files.reload();
+    return { fs, files, agent };
+  };
+
+  it('C1: should refuse env: null and claude.env: null as a schema failure, not throw', () => {
+    for (const body of [
+      { harness: 'claude-code', store: 'environment', env: null },
+      { harness: 'claude-code', store: 'environment', claude: { env: null } },
+      { harness: 'claude-code', store: 'environment', codex: { env: null } },
+    ]) {
+      should(LoginFileSchema.safeParse(body).success).be.false();
+    }
+  });
+
+  for (const [what, text] of [
+    ['a blank env:', 'harness: claude-code\nstore: environment\nenv:\n'],
+    ['env: ~', 'harness: claude-code\nstore: environment\nenv: ~\n'],
+    ['a blank claude.env', 'harness: claude-code\nstore: environment\nclaude:\n  env:\n'],
+  ] as const) {
+    it(`C1: should check ${what} without throwing, as a refusal`, () => {
+      const checked = checkConfigText(LOGINS_CONFIG, 'logins/gw.yaml', text, 'fy');
+
+      should(checked.ok).be.false();
+      should(['schema', 'raw_secret']).containEql((checked as { reason: string }).reason);
+    });
+
+    it(`C1: should reload with ${what} beside a good file, and the good one still reads`, async () => {
+      const { fs, files, agent } = await read('good');
+      fs.seed(`${HOME}/config/logins/gw.yaml`, text);
+      await files.reload();
+      const states = Object.fromEntries(files.status().files.map(file => [file.path, file.state]));
+
+      should(states['logins/gw.yaml']).equal('invalid');
+      should(states['logins/good.yaml']).equal('ok');
+      const answer = await agent.run(
+        AgentConfigCallSchema.parse({ tool: 'config.read', path: 'logins/good.yaml' }),
+        standing,
+      );
+      should(answer.text).equal(GOOD);
+    });
+  }
+
+  for (const [what, env] of [
+    ['a Kubernetes-style list', `  - name: ANTHROPIC_AUTH_TOKEN\n    value: "Bearer ${H}"`],
+    ['a list with a short key', '  - name: OPENAI_API_KEY\n    value: hunter22x'],
+    ['a value written as a map', `  GATEWAY_TOKEN:\n    value: "Bearer ${H}"`],
+    ['a value written as a list', `  GATEWAY_TOKEN: ["Bearer ${H}"]`],
+    ['env as one string', `ANTHROPIC_AUTH_TOKEN=${H}`],
+    ['a Compose-style list', `  - ANTHROPIC_AUTH_TOKEN=Bearer ${H}`],
+  ] as const) {
+    it(`M2: should return no text for ${what}`, async () => {
+      const { fs, files, agent } = await read('good');
+      const body = what === 'env as one string' ? ` "${env}"` : `\n${env}`;
+      fs.seed(`${HOME}/config/logins/gw.yaml`, `harness: claude-code\nstore: environment\nenv:${body}\n`);
+      await files.reload();
+      const answer = await agent.run(
+        AgentConfigCallSchema.parse({ tool: 'config.read', path: 'logins/gw.yaml' }),
+        standing,
+      );
+
+      should(answer.text).equal('');
+      should(JSON.stringify(answer)).not.containEql(H);
+      should(JSON.stringify(answer)).not.containEql('hunter22x');
+    });
+  }
+
+  it('M1: should return no text for a login file that does not parse, key or not', async () => {
+    for (const bad of [
+      `GATEWAY_TOKEN: "Bearer ${H}"\n   BAD: : x\n`,
+      `GATEWAY_TOKEN: "Bearer ${H}\n`,
+      'OPENAI_API_KEY: hunter22x\n[\n',
+      'env:\n\tOPENAI_API_KEY: hunter22x\n',
+      `ANTHROPIC_CUSTOM_HEADERS: "x-api-key: ${H}"\n[\n`,
+    ]) {
+      const { fs, files, agent } = await read('gw');
+      fs.seed(`${HOME}/config/logins/gw.yaml`, bad);
+      await files.reload();
+      const answer = await agent.run(
+        AgentConfigCallSchema.parse({ tool: 'config.read', path: 'logins/gw.yaml' }),
+        standing,
+      );
+
+      should(answer.text).equal('');
+      should(JSON.stringify(answer)).not.containEql(H);
+      should(JSON.stringify(answer)).not.containEql('hunter22x');
+    }
+  });
+
+  it('m1: should refuse a variable NAME over 128 characters as a marked issue, whatever its value', () => {
+    const result = LoginFileSchema.safeParse({
+      harness: 'claude-code',
+      store: 'environment',
+      env: { [`GATEWAY_TOKEN_${'A'.repeat(130)}_X`]: `Bearer ${H}` },
+    });
+
+    should(result.success).be.false();
+    should(
+      (result.error?.issues ?? []).some(
+        issue => issue.code === 'custom' && (issue.params as { rawSecret?: boolean } | undefined)?.rawSecret === true,
+      ),
+    ).be.true();
+    should(JSON.stringify(result.error?.issues)).not.containEql(H);
   });
 });

@@ -807,6 +807,14 @@ describe('R7: schemes, hosts, queries, paths and key-named variables; the owner 
     // n1: a header name (shape d) that is long enough to hold a key
     ['GATEWAY_TOKEN', `${H.slice(0, 16)}-${H.slice(16)}-aaaa-bbbb: \${secret:K}`],
     ['GATEWAY_TOKEN', `${GUID}: \${secret:K}`],
+    // R8 m2: a standard base64 key starting with `/` is one run in shape (h), `+` and `=` included
+    ['AWS_SECRET_ACCESS_KEY', '/q8Kd9xZ2vB7nM4w+R1tY6uI3oP5aS0dF+gH8jK2lQ'],
+    // R8 n1: a header-list piece whose name part holds `$`, `/` or `@` is judged, not skipped
+    ['ANTHROPIC_CUSTOM_HEADERS', `x-api-key/: ${H}`],
+    ['ANTHROPIC_CUSTOM_HEADERS', `\${secret:A}x-api-key: ${H}`],
+    // R8 m3: a scheme word still cannot carry a key
+    ['OTEL_EXPORTER_OTLP_HEADERS', `Authorization=Api-Token ${H}`],
+    ['OTEL_EXPORTER_OTLP_HEADERS', `Authorization=ApiKey \${secret:A} ${H}`],
   ];
   it.each(refusedRows)(
     'should refuse %s holding a hidden key (row %#), naming the variable and never the value',
@@ -824,6 +832,11 @@ describe('R7: schemes, hosts, queries, paths and key-named variables; the owner 
     // OpenTelemetry
     ['OTEL_EXPORTER_OTLP_HEADERS', 'Authorization=Bearer ${secret:OTEL_TOKEN}'],
     ['OTEL_EXPORTER_OTLP_HEADERS', 'x-honeycomb-dataset=claude,x-org=acme'],
+    // R8 m3: Dynatrace and Elastic document a scheme word other than Bearer
+    ['OTEL_EXPORTER_OTLP_HEADERS', 'Authorization=Api-Token ${secret:DT}'],
+    ['OTEL_EXPORTER_OTLP_HEADERS', 'Authorization=Api-Token%20${secret:DT}'],
+    ['OTEL_EXPORTER_OTLP_HEADERS', 'Authorization=ApiKey ${secret:ELASTIC}'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'Authorization: ApiKey ${secret:E}'],
     ['OTEL_EXPORTER_OTLP_ENDPOINT', 'https://otel.example.com:4318'],
     ['OTEL_EXPORTER_OTLP_PROTOCOL', 'http/protobuf'],
     ['OTEL_RESOURCE_ATTRIBUTES', 'service.name=claude-code,deployment.environment=prod'],

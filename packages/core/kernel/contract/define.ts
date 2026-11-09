@@ -290,6 +290,8 @@ interface ConfigBase<Shape> {
    * The files of this def are CREDENTIAL RECORDS: each one names the secrets a credential it describes is made from
    * (Logins' login records). Only the `${secret:NAME}` references in effect in a def marked so count as the owning plugin's
    * own secrets for a provider that acts for it (the Vault's spend rule); a reference in any other file counts for nothing.
+   * It also means the file's TEXT is never shown by `config_read` when it does not parse (`reason: 'yaml'`): the located
+   * issues stay, but the owner's rule for such a file is a schema check that text which does not parse never reaches.
    */
   readonly credentialRecords?: true;
 }

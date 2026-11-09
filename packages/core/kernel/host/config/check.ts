@@ -247,7 +247,26 @@ export function checkConfigText(
   // The walk above sees parsed VALUES only, so a key left in a comment or a tag is found on the raw text: refused the same.
   const held = rawTextIssue(path, text, binary);
   if (held !== undefined) return held;
-  const parsed = def.schema.safeParse(read.read.value);
+  // A schema that THROWS (a plugin's rule hit a value it did not expect) must not stop a reload, which the host awaits
+  // unguarded: the file is invalid, and the error's words (which could quote the value) are never kept.
+  let parsed: ReturnType<typeof def.schema.safeParse>;
+  try {
+    parsed = def.schema.safeParse(read.read.value);
+  } catch {
+    return {
+      ok: false,
+      // A def of credential records could not judge the file, so its text is withheld as for a raw secret.
+      reason: def.credentialRecords === true ? 'raw_secret' : 'schema',
+      issues: [
+        {
+          path,
+          severity: 'error',
+          message: 'this file could not be checked',
+          fix: 'correct the file, or tell whoever maintains this setting',
+        },
+      ],
+    };
+  }
   if (!parsed.success) return schemaIssues(path, parsed.error, read.read.locate);
   return { ok: true, value: parsed.data, written: read.read.value, text };
 }

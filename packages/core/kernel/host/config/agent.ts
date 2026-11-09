@@ -176,7 +176,10 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
     const holdsSecret =
       checked !== undefined &&
       !checked.ok &&
-      (checked.reason === 'raw_secret' || (checked.reason === 'yaml' && rawTextHoldsSecret(file.text ?? '')));
+      (checked.reason === 'raw_secret' ||
+        // A def of credential records never shows text it could not parse: its rule is a schema check, which a file that
+        // does not parse never reached, so no scan of the raw text can vouch for it.
+        (checked.reason === 'yaml' && (found.def.credentialRecords === true || rawTextHoldsSecret(file.text ?? ''))));
     const withheld = holdsSecret
       ? '; its text is not shown because it holds a raw secret, which the owner must move into the secret store'
       : tooLarge

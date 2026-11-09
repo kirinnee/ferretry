@@ -466,12 +466,24 @@ export const RESERVED_LOGIN_ENV_NAMES = [
  * `login.env`): no reserved variable, and no malformed `${secret:…}` reference (which would be exported as literal
  * text and fail as a credential with no visible cause). A refusal names the KEY only, never the value.
  */
+const MAX_ENVIRONMENT_NAME = 128;
+
 const refuseUnsafeEnvironment = (ctx: {
   readonly value: Readonly<Record<string, unknown>>;
   readonly issues: z.core.$ZodRawIssue[];
 }): void => {
   for (const [name, value] of Object.entries(ctx.value)) {
-    if (!POSIX_ENV_NAME.test(name)) {
+    if (name.length > MAX_ENVIRONMENT_NAME) {
+      // The record leaves no key out any more, so the rule sees every name. Nothing can vouch that the value under a name this long holds no key.
+      ctx.issues.push({
+        code: 'custom',
+        message: `A variable name is longer than ${MAX_ENVIRONMENT_NAME} characters: a variable name is short, and the value under it is not read`,
+        input: name.slice(0, 16),
+        path: [name],
+        params: { rawSecret: true },
+        continue: true,
+      });
+    } else if (!POSIX_ENV_NAME.test(name)) {
       ctx.issues.push({
         code: 'custom',
         message: `"${name}" must be a POSIX environment variable name`,
@@ -506,11 +518,14 @@ const MAX_ENVIRONMENT_VALUE = 4096;
 
 /**
  * The ONE builder of a login's environment record, for the login file, the harness half, `login.add` and `login.env`:
- * the key is any string up to 128 characters at the record, and `refuseUnsafeEnvironment` refuses every unsafe key (not
- * POSIX, reserved) and value (malformed reference) together, so a file with two faults reports both.
+ * the key is any string at the record (a key the record dropped would never reach the stored-secret rule), and
+ * `refuseUnsafeEnvironment` refuses every unsafe key (over 128 characters, not POSIX, reserved) and value (malformed
+ * reference) together, so a file with two faults reports both.
  */
-const loginEnvironment = <V extends z.ZodType>(value: V) =>
-  z.record(z.string().max(128), value).check(refuseUnsafeEnvironment);
+const loginEnvironment = <V extends z.ZodType>(value: V) => z.record(z.string(), value).check(refuseUnsafeEnvironment);
+
+const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * What a login FILE's environment may not hold: a secret value, or an address carrying one. The same rule the staging route
@@ -522,12 +537,31 @@ const loginEnvironment = <V extends z.ZodType>(value: V) =>
  * version in effect, but a file saved before this rule is not in effect until it is fixed (the kernel re-checks the accepted
  * text at start).
  */
-const refuseStoredSecrets = (ctx: {
-  readonly value: Readonly<Record<string, unknown>>;
-  readonly issues: z.core.$ZodRawIssue[];
-}): void => {
+const refuseStoredSecrets = (ctx: { readonly value: unknown; readonly issues: z.core.$ZodRawIssue[] }): void => {
+  // The check runs even when the record's own type check failed, so the value can be anything (null for a blank `env:`).
+  // An environment that is not a map, or a value under it that is not a string, cannot be judged, so it is withheld.
+  if (!isPlainObject(ctx.value)) {
+    ctx.issues.push({
+      code: 'custom',
+      message: 'env must be a map of NAME: value',
+      input: undefined,
+      path: [],
+      params: { rawSecret: true },
+    });
+    return;
+  }
   for (const [name, value] of Object.entries(ctx.value)) {
-    if (typeof value === 'string' && value.length > MAX_ENVIRONMENT_VALUE) {
+    if (typeof value !== 'string') {
+      ctx.issues.push({
+        code: 'custom',
+        message: `"${name}": env must be a map of NAME: value`,
+        input: name,
+        path: [name],
+        params: { rawSecret: true },
+      });
+      continue;
+    }
+    if (value.length > MAX_ENVIRONMENT_VALUE) {
       ctx.issues.push({
         code: 'custom',
         message: `"${name}" is longer than ${MAX_ENVIRONMENT_VALUE} characters: keep a long value in the secret store and write \${secret:NAME} here`,
@@ -537,7 +571,7 @@ const refuseStoredSecrets = (ctx: {
       });
       continue;
     }
-    const issue = typeof value === 'string' ? storedEnvironmentIssue(name, value) : undefined;
+    const issue = storedEnvironmentIssue(name, value);
     if (issue === undefined) continue;
     ctx.issues.push({
       code: 'custom',

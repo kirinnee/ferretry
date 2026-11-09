@@ -256,8 +256,11 @@ const REFERENCE_PATTERN = secretReferencePattern();
 /** One or more `${secret:NAME}` references and nothing between them. */
 const REFERENCES_ONLY = /^(?:\$\{secret:[A-Z][A-Z0-9_]{0,63}\})+$/u;
 
-/** A scheme word that may open a value, then the whitespace after it. */
-const SCHEME_WORD = /^(?:bearer|basic|token)\s+/iu;
+/**
+ * A scheme word that may open a value, then the whitespace after it: one word of letters and `-`, at most 16 characters and
+ * no digit (`Bearer`, `Basic`, `Token`, `Api-Token`, `ApiKey`, `Splunk`), so a key does not fit in it.
+ */
+const SCHEME_WORD = /^[A-Za-z][A-Za-z-]{0,15}\s+/u;
 
 /** A header's name: letters, digits, `-` and `_`, at most 64 characters. */
 const HEADER_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
@@ -275,16 +278,18 @@ const ALLOWED_ADDRESS_SCHEMES: ReadonlySet<string> = new Set(['http', 'https', '
 const MIN_KEY_RUN = 24;
 const MIN_KEY_RUN_ENTROPY = 3.5;
 const WORD_RUN = /[A-Za-z0-9_]+/gu;
+/** Shape (h) only: a standard base64 key (`+`, `=`) is not cut by them, so a path is no way to hide one. */
+const PATH_RUN = /[A-Za-z0-9_+=]+/gu;
 
 /**
  * Whether a text holds a run of 24 or more letters, digits and `_` with entropy of at least 3.5 and a digit in it: the shape
  * of a random key, as opposed to a long word (`application_default_credentials`) or a dashed id (a GUID is runs of 12 or
- * fewer). `-`, `.`, `/`, `~` and every other character end a run. A whole `${secret:NAME}` is taken out first. Linear: each
- * run is read once.
+ * fewer). Every character outside the run pattern ends a run (`-`, `.`, `/`, `~`, `+`, `=`; shape (h) alone keeps `+` and
+ * `=` in a run). A whole `${secret:NAME}` is taken out first. Linear: each run is read once.
  */
-function holdsKeyRun(text: string): boolean {
+function holdsKeyRun(text: string, pattern: RegExp = WORD_RUN): boolean {
   const bare = text.replace(REFERENCE_PATTERN, ' ');
-  for (const [run] of bare.matchAll(WORD_RUN)) {
+  for (const [run] of bare.matchAll(pattern)) {
     if (run.length >= MIN_KEY_RUN && /[0-9]/u.test(run) && shannonEntropy(run) >= MIN_KEY_RUN_ENTROPY) return true;
   }
   return false;
@@ -388,7 +393,12 @@ function queryIsClean(text: string): boolean {
 
 /** Allowed shape (h): an absolute or `~/` path with no whitespace, no token shape and no key-like run (`GOOGLE_APPLICATION_CREDENTIALS`). */
 function isPlainPath(text: string): boolean {
-  return /^(?:\/|~\/)\S*$/u.test(text) && !hasTokenShape(text) && !holdsKeyRun(text) && !holdsKeyRun(decoded(text));
+  return (
+    /^(?:\/|~\/)\S*$/u.test(text) &&
+    !hasTokenShape(text) &&
+    !holdsKeyRun(text, PATH_RUN) &&
+    !holdsKeyRun(decoded(text), PATH_RUN)
+  );
 }
 
 /**
@@ -396,7 +406,7 @@ function isPlainPath(text: string): boolean {
  *
  * - (a) under 8 characters with no `$`: a placeholder (`ollama`, `dummy`, `hunter2`), shorter than the secret store accepts;
  * - (b) one `${secret:NAME}`, or several with nothing between them;
- * - (c) a scheme word (`Bearer`, `Basic`, `Token`) then whitespace then (b);
+ * - (c) a scheme word (`Bearer`, `Api-Token`, `ApiKey`: letters and `-`, at most 16, no digit) then whitespace then (b);
  * - (d) a header name, `:` or `=`, optional whitespace, then (b) or (c);
  * - (e) `$NAME` or `${NAME}`, NAME being an upper-case environment variable name;
  * - (f) a number of up to 12 digits, or a flag word (`true`, `oauth`, `none`…);
@@ -451,7 +461,9 @@ function headerListHoldsKey(value: string, named: boolean): boolean {
       const piece = masked.replaceAll(REFERENCE_MARK, ':');
       const split = masked.search(/[:=]/u);
       // An address, a path or a reference where a name should be (`${secret:U}:…`, `https:`) is no header.
-      if (split < 1 || /[$/@]/u.test(piece.slice(0, split))) return false;
+      if (split < 1) return false;
+      // In a variable that IS a header list such a piece is judged whole; elsewhere it is no header (a URL under another name).
+      if (/[$/@]/u.test(piece.slice(0, split))) return named && headerValueHoldsKey(piece);
       const body = decoded(piece.slice(split + 1)).trim();
       if (headerNamesACredential(decoded(piece.slice(0, split)).trim()) && !isPlaceholderOrReference(body)) return true;
       // In a variable that IS a header list, a header whose name says nothing (`x-honeycomb-team`) still carries a key.
