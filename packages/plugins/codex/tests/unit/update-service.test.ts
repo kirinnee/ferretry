@@ -547,3 +547,98 @@ describe('when an update goes wrong', () => {
     await service.settled();
   });
 });
+
+describe('finding the program an update runs', () => {
+  /** Codex at `launched`, which resolves to `resolved`, reading `0.140.0` until the update installs `0.145.0`. */
+  const codexAt = (launched: string, resolved?: string): World => {
+    const world = new World();
+    if (resolved !== undefined) RESOLVED[launched] = resolved;
+    world.location = located(launched);
+    world.versions.set(launched, { state: 'ok', version: '0.140.0' });
+    world.script = [world.installs(launched, '0.145.0')];
+    return world;
+  };
+
+  it('has no release to remember when the very first check fails', async () => {
+    const world = new World();
+    world.latest = { kind: 'failed', reason: 'could not reach npm' };
+
+    const view = await world.service().view();
+
+    should(view.check).eql({
+      state: 'failed',
+      checkedAt: new Date(T0).toISOString(),
+      reason: 'could not reach npm',
+    });
+    should(view.available).be.false();
+  });
+
+  it('runs pnpm, bun and volta from the PATH when they are there, and from where each keeps itself when they are not', async () => {
+    const cases = [
+      {
+        tool: 'pnpm',
+        launched: '/home/kirin/.pnpm-home/bin/codex',
+        resolved: `${HOME}/.local/share/pnpm/global/5/node_modules/${NPM_PACKAGE}/bin/codex.js`,
+        fallback: `${HOME}/.local/share/pnpm/pnpm`,
+        args: ['add', '-g', `${NPM_PACKAGE}@0.145.0`],
+      },
+      {
+        tool: 'bun',
+        launched: '/home/kirin/.bun/bin/codex',
+        resolved: `${HOME}/.bun/install/global/node_modules/${NPM_PACKAGE}/bin/codex.js`,
+        fallback: `${HOME}/.bun/bin/bun`,
+        args: ['add', '-g', `${NPM_PACKAGE}@0.145.0`],
+      },
+      {
+        tool: 'volta',
+        launched: '/home/kirin/.volta/bin/codex',
+        resolved: undefined,
+        fallback: `${HOME}/.volta/bin/volta`,
+        args: ['install', `${NPM_PACKAGE}@0.145.0`],
+      },
+    ] as const;
+    for (const each of cases) {
+      const onPath = codexAt(each.launched, each.resolved);
+      onPath.resolvable.set(each.tool, `/usr/local/bin/${each.tool}`);
+      const first = onPath.service();
+      await first.start({ target: '0.145.0' });
+      should(await report(first)).containDeep({ outcome: 'succeeded' });
+      should(onPath.runs.map(run => [run.executable, ...run.args])).eql([
+        [`/usr/local/bin/${each.tool}`, ...each.args],
+      ]);
+
+      const kept = codexAt(each.launched, each.resolved);
+      kept.runnable.add(each.fallback);
+      const second = kept.service();
+      await second.start({ target: '0.145.0' });
+      should(kept.runs.map(run => run.executable)).eql([each.fallback]);
+    }
+  });
+
+  it('says it cannot find a program that is nowhere it looks', async () => {
+    const world = codexAt('/home/kirin/.volta/bin/codex');
+    const service = world.service();
+
+    await service.start({ target: '0.145.0' });
+
+    const finished = await report(service);
+    should(finished.outcome).equal('failed');
+    should(finished.message).containEql('volta');
+  });
+
+  it('falls back to the npm on the PATH when the prefix keeps none, and to a later nix when the first is not there', async () => {
+    const world = codexAt(NPM_CODEX);
+    world.runnable.delete(`${NPM_PREFIX}/bin/npm`);
+    const service = world.service();
+    await service.start({ target: '0.145.0' });
+    await service.settled();
+    should(world.runs.map(run => run.executable)).eql(['/usr/bin/npm']);
+
+    const nix = codexAt('/home/kirin/.nix-profile/bin/codex');
+    nix.runnable.add('/nix/var/nix/profiles/default/bin/nix');
+    const profile = nix.service();
+    await profile.start({});
+    await profile.settled();
+    should(nix.runs.map(run => run.executable)).eql(['/nix/var/nix/profiles/default/bin/nix']);
+  });
+});
