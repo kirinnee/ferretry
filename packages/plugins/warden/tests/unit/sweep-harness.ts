@@ -16,7 +16,7 @@ import {
   type WardenAutoMoveService,
   type WardenAnomalyKind,
   type WardenBoardPort,
-  type WardenCardNotice,
+  type OrphanItem,
   type WardenConfig,
   type WardenEscalationBoardItem,
   type WardenEscalationRaise,
@@ -135,10 +135,12 @@ export interface Harness {
   /** Every escalation write the sweep attempted, in order. */
   readonly raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[];
   readonly resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[];
-  /** Every card notice the sweep attempted, in order. */
-  readonly notices: { readonly sessionId: string; readonly notice: WardenCardNotice }[];
-  /** How many card notices the sweep tried to place, landed or refused. */
-  readonly noticeAttempts: { count: number };
+  /**
+   * The ONE machine item of orphaned cards, as a board holds it: what it says now, how often the sweep asked
+   * (`syncs`, landed or refused), how often the board was written (`writes`: a changed wording, an item opened or
+   * closed) and how many times an item was OPENED (`opened`: a recreated item is a new id).
+   */
+  readonly orphanItem: { current: OrphanItem | undefined; syncs: number; writes: number; opened: number };
   /** Every snapshot the Jev guard was shown, after redaction. */
   readonly guarded: readonly TriageSnapshot[];
   /** Every question set the Jev guard was asked, in order. */
@@ -198,11 +200,9 @@ export function harness(
     readonly stuckInput?: WardenStuckInputPort;
     /** A ferret whose messages wait in Ferretry's queue far past due, when a test is about one. */
     readonly stuckInbox?: WardenStuckInboxPort;
-    /** Force every card notice to one outcome. */
-    readonly noticeWrite?: WardenAgendaWrite;
-    /** Why a refused card notice was refused, as the Agenda says it; read at each refusal. */
-    readonly noticeReason?: () => string;
-    /** Make the machine agenda refuse to take a card off its orphan list. */
+    /** Why the machine board refuses the orphan item, as the Agenda says it, read at each sync; `undefined`: it takes it. */
+    readonly itemRefusal?: () => string | undefined;
+    /** Make the Agenda refuse to close a per-card ask an earlier Warden left on a ferret's board. */
     readonly removeFails?: boolean;
     /** Force every raise to one outcome, for the paths a real store reaches rarely. */
     readonly raiseWrite?: WardenAgendaWrite;
@@ -237,8 +237,12 @@ export function harness(
   /** The newest card text raised per `[sessionId, sourceRef]`. */
   const cards = new Map<string, WardenEscalationRaise>();
   const resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[] = [];
-  const notices: { readonly sessionId: string; readonly notice: WardenCardNotice }[] = [];
-  const noticeAttempts = { count: 0 };
+  const orphanItem: { current: OrphanItem | undefined; syncs: number; writes: number; opened: number } = {
+    current: undefined,
+    syncs: 0,
+    writes: 0,
+    opened: 0,
+  };
   let spawnCall = 0;
   let capability = 0;
   const guarded: TriageSnapshot[] = [];
@@ -363,10 +367,16 @@ export function harness(
     usage: { accounts: async () => await (options.usage?.() ?? Promise.resolve([])) },
     verdicts: { recent: async () => await (options.verdicts?.() ?? Promise.resolve([])) },
     orphans: {
-      add: async (sessionId, notice) => {
-        noticeAttempts.count += 1;
-        if (options.noticeWrite === 'rejected') throw new Error(options.noticeReason?.() ?? 'the Agenda refused');
-        if (!notices.some(each => each.notice.task.id === notice.task.id)) notices.push({ sessionId, notice });
+      sync: async (item, announce) => {
+        orphanItem.syncs += 1;
+        const refusal = options.itemRefusal?.();
+        if (refusal !== undefined) throw new Error(refusal);
+        // As the port does: an item that is not open stays closed unless a card joined the list.
+        if (item !== undefined && !announce && orphanItem.current === undefined) return;
+        if (JSON.stringify(item) === JSON.stringify(orphanItem.current)) return;
+        orphanItem.writes += 1;
+        if (orphanItem.current === undefined) orphanItem.opened += 1;
+        orphanItem.current = item;
       },
       remove: async resolution => {
         if (options.removeFails === true) throw new Error('the Agenda refused');
@@ -430,8 +440,7 @@ export function harness(
     provenance,
     raises,
     resolved,
-    notices,
-    noticeAttempts,
+    orphanItem,
     guarded,
     judged,
     guardSettings,

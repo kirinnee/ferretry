@@ -92,6 +92,43 @@ const FAILED: readonly FerretEndCause[] = [
   { kind: 'start_failed' },
 ];
 
+/**
+ * BG-043: Ferrets (`FAILED_ENDS` in `service.ts`) and the Warden (`FAILED_ENDS` in `warden/daemon/fleet.ts`) each keep
+ * their own copy of which end causes are a death nobody chose, and a drift is the R1 major again (a ferret the Warden
+ * calls failed that a stop does not write over, or the reverse). Each side pins the SAME partition below, and the
+ * Warden's twin is `warden/tests/unit/fleet-ferrets.test.ts` ("BG-043"): the record typed per kind means a new end
+ * cause fails to compile until it is placed on one side.
+ */
+const END_CAUSE_SAMPLES = {
+  tmux_crashed: { kind: 'tmux_crashed' },
+  terminal_gone: { kind: 'terminal_gone' },
+  signal: { kind: 'signal', signal: 9 },
+  agent_crashed: { kind: 'agent_crashed', exitCode: 2 },
+  start_failed: { kind: 'start_failed' },
+  stopped: { kind: 'stopped' },
+  completed: { kind: 'completed' },
+  clean_exit: { kind: 'clean_exit' },
+} as const satisfies Record<FerretEndCause['kind'], FerretEndCause>;
+const FAILED_KINDS: readonly FerretEndCause['kind'][] = [
+  'tmux_crashed',
+  'terminal_gone',
+  'signal',
+  'agent_crashed',
+  'start_failed',
+];
+
+test('BG-043 every end cause is classified, and the failed five are the ones a later stop is written over', async () => {
+  expect(Object.keys(END_CAUSE_SAMPLES).toSorted()).toEqual(
+    FerretEndCauseSchema.options.map(o => o.shape.kind.value).toSorted(),
+  );
+  for (const cause of Object.values(END_CAUSE_SAMPLES) as FerretEndCause[]) {
+    const f = stoppedFor(cause);
+    await f.service.stop(f.id, 'now', 'again');
+    const writtenOver = f.changes.length === 1;
+    expect([cause.kind, writtenOver]).toEqual([cause.kind, FAILED_KINDS.includes(cause.kind)]);
+  }
+});
+
 for (const failed of FAILED)
   for (const how of ['polite', 'now'] as const)
     test(`W2-a death cause: a ${how} stop of a ferret that ended ${failed.kind} is the caller's decision and is written over it`, async () => {

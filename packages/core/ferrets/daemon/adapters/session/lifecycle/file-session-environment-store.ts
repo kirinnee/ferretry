@@ -7,8 +7,16 @@ import { assertOwnSession, assertSessionsRoot, OwnFolder } from '../sessions-roo
 /** What this store asks of the kernel's root: a durable publish, and a read that can tell "absent" from a failure. */
 export type EnvironmentRoot = Pick<
   RootHandle,
-  'name' | 'internal' | 'ensurePrivateDirectory' | 'resolve' | 'publish' | 'readBytes'
+  'name' | 'internal' | 'ensurePrivateDirectory' | 'resolve' | 'publish' | 'readBytes' | 'remove'
 >;
+
+/** A name (or its folder) that is simply not there: the kernel's own refusal, or the system's. */
+function isAbsent(error: unknown): boolean {
+  if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+  const refusal = (error as { readonly refusal?: unknown }).refusal;
+  // `outside`: the kernel refuses a path below a scoped folder that is not there, and this one was proved inside already.
+  return refusal === 'outside';
+}
 
 /**
  * The environment is a flat string map, parsed rather than asserted: this file holds the only copy
@@ -64,6 +72,23 @@ export class FileSessionEnvironmentStore implements SessionEnvironmentStore {
     // The kernel's durable publish: a new `0600` temp file (exclusive create, synced), moved onto the name,
     // then the folder synced. A name it did not create is never removed, and the temp is never left behind.
     await this.root.publish(this.file(id), new TextEncoder().encode(document), { mode: 0o600 });
+  }
+
+  /**
+   * Deletes the session's environment (its credential is dead once the session has ended). The kernel removes the
+   * entry by its own name and NEVER follows it: a link at `environment.json` goes as a link and what it points at is
+   * untouched. A file or folder that is not there is the normal case (never launched, already removed), not a fault,
+   * and the ferret's folder is NOT made for it (a sweep over many ended sessions must create nothing). Any other
+   * failure is thrown for the caller to log: it never says what the file held.
+   */
+  async remove(id: SessionId): Promise<void> {
+    const file = this.file(id);
+    try {
+      await this.root.remove(file);
+    } catch (error) {
+      if (isAbsent(error)) return;
+      throw error;
+    }
   }
 
   async read(id: SessionId): Promise<Readonly<Record<string, string>>> {

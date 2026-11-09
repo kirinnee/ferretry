@@ -35,16 +35,14 @@ export const usableSkillName = (name: string): boolean =>
  * Why a set of paths cannot be written as one folder, or `undefined` (today's `CatalogSkillSchema` rules): two paths that
  * differ only in case land on ONE file on a Mac or on Windows, so what the review listed is not what is written; and a
  * path that is both a file and a folder (`a` and `a/b`) would fail part-way, after the installed skill was removed.
+ * The paths are already distinct: `installRefusal` refuses a path given twice before it asks.
  */
 function pathCollision(paths: readonly string[]): string | undefined {
   const seen = new Map<string, string>();
   for (const path of paths) {
     const key = path.toLowerCase();
     const earlier = seen.get(key);
-    if (earlier !== undefined)
-      return earlier === path
-        ? `"${path}" is given twice`
-        : `"${earlier}" and "${path}" would be one file on a Mac or on Windows`;
+    if (earlier !== undefined) return `"${earlier}" and "${path}" would be one file on a Mac or on Windows`;
     seen.set(key, path);
   }
   for (const [key, path] of seen) {
