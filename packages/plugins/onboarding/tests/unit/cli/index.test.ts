@@ -45,6 +45,7 @@ const view = (state: 'pending' | 'found') => ({
     },
   ],
   complete: state === 'found',
+  setUp: false,
 });
 
 const half = (answers: Record<string, unknown>, terminal: TerminalIo, calls: Call[] = []) => {

@@ -26,7 +26,7 @@
  */
 
 import { type CommandToken, type CommandTokenKind, tokenizeCommand } from './command-syntax.ts';
-import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
+import { type ClipboardWriter, CopyButton } from '@ferretry/app/ui';
 
 /**
  * Kind → tone.

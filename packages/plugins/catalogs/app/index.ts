@@ -1,4 +1,4 @@
-import { type DaemonlessScreenProps, type DaemonlessViews, provideToShell } from '@ferretry/app';
+import { type DaemonlessPorts, type DaemonlessScreenProps, type DaemonlessViews, provideToShell } from '@ferretry/app';
 import type { AppComponent, PanelProps, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
@@ -39,6 +39,9 @@ const daemonlessScreen = (
 /** The views module's screen factories, as this module calls them. */
 type DaemonlessFactory = () => AppComponent<DaemonlessScreenProps>;
 
+/** `/shared` reads the paired list (and nothing else of the ports) to know whether there is a machine to install on. */
+type SharedFactory = (ports: DaemonlessPorts) => AppComponent<DaemonlessScreenProps>;
+
 /** The per-machine slot of a daemon-less screen: never drawn (its route is under no `/d/<machine>/`), so it draws nothing. */
 const daemonlessPlaceholder = (): null => null;
 
@@ -70,9 +73,9 @@ export default provideToShell(
     // and the history entry before the first render and before the views chunk is asked for, and is held in memory
     // until the join screen takes it. Beneath `/join` it is stripped and dropped.
     fragments: [{ form: 'path', screen: 'join' }],
-    daemonless: () => ({
+    daemonless: ports => ({
       join: daemonlessScreen(views => (views.createJoinScreen as DaemonlessFactory)()),
-      shared: daemonlessScreen(views => (views.createSharedScreen as DaemonlessFactory)()),
+      shared: daemonlessScreen(views => (views.createSharedScreen as SharedFactory)(ports)),
     }),
   },
 );
