@@ -553,3 +553,28 @@ describe('RuleSignInGrants: terminal rules only while sign-in-rules-terminal.1 i
     should(w.store.document?.rules.map(rule => rule.body.surface).sort()).eql(['page', 'terminal']);
   });
 });
+
+describe('RuleSignInGrants: what it shares and what it reads from the session', () => {
+  it('should be on whenever the rule service is, and share the one ledger it was given', async () => {
+    const w = await world();
+    const { source, ledger } = grants(w);
+
+    should(source.enabled()).be.true();
+    should(source.ledger).equal(ledger);
+  });
+
+  it('should read the project a session was stamped with, and none when the stamp cannot be read', async () => {
+    const w = await world();
+    const stamped = grants(w, { project: PROJECT }).source;
+    const unreadable = new RuleSignInGrants({
+      rules: w.service,
+      ledger: new SignInGrantLedger(),
+      keys: async () => KEY as AccountKey,
+      stampedProject: async () => Promise.reject(new Error('the session store is down')),
+      clock: { now: () => w.clock.now },
+    });
+
+    should(await stamped.projectOf(SESSION)).equal(PROJECT);
+    should(await unreadable.projectOf(SESSION)).be.undefined();
+  });
+});

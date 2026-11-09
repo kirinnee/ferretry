@@ -179,6 +179,22 @@ describe('changing a login from its page', () => {
     await view.unmount();
   });
 
+  it('says a held change is held for the owner, and names what it loosens', async () => {
+    const view = await openPage({
+      [LIST]: loginList(login()),
+      [GRANTS]: OPEN,
+      [STAGE]: staged({ kind: 'login.signout', id: 'claude-you' }),
+      [APPLY]: { outcome: 'held', sentences: ['raises the budget', 'widens a model'] },
+    });
+    await click(view.container.querySelector('[data-login-sign-out-ask]'), 'Sign out…');
+    await click(view.container.querySelector('[data-login-sign-out] [data-change-submit]'), 'Sign out');
+    await until(() => view.container.querySelector('[data-change-refusal]') !== null, 'the hold');
+    expect(view.container.querySelector('[data-login-sign-out] [data-change-refusal]')?.textContent).toBe(
+      'Saved, but this loosens something, so the owner has to confirm it before it takes effect. The tighter version stays in effect until then: raises the budget; widens a model.',
+    );
+    await view.unmount();
+  });
+
   it('stages a removal first and shows the daemon’s consequences before it is confirmed', async () => {
     const calls: Call[] = [];
     const view = await openPage(
