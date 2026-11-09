@@ -30,7 +30,7 @@ async function home() {
   const dir = await mkdtemp(join(tmpdir(), 'busy-daemon-reads-'));
   homes.push(dir);
   const real = asksStateAt(dir);
-  const counts = { ledgerReads: 0, otherReads: 0, lists: 0 };
+  const counts = { ledgerReads: 0, otherReads: 0, lists: 0, versions: 0 };
   const ledgerDef = (AGENDA_STATE_FILES as Readonly<Record<string, unknown>>)[AGENDA_FILES.ledger];
   const state = new Proxy(real, {
     get: (target, key, receiver) => {
@@ -39,6 +39,11 @@ async function home() {
           if (args[0] === ledgerDef) counts.ledgerReads += 1;
           else counts.otherReads += 1;
           return await target.read(...args);
+        };
+      if (key === 'version')
+        return async (...args: Parameters<StatePort['version']>) => {
+          counts.versions += 1;
+          return await target.version(...args);
         };
       if (key === 'list')
         return async (...args: Parameters<StatePort['list']>) => {
@@ -111,10 +116,12 @@ describe('the idle daemon reads the ledgers it needs, once', () => {
     expect(firstReads()).toBeLessThanOrEqual(LEDGERS + 2);
 
     const nextReads = w.since();
+    const nextStats = w.counts.versions;
     for (let i = 2; i <= 6; i += 1) await w.api.raise(draft(`e${i}`));
 
-    // five raises, each at most its own board
+    // five raises, each at most its own board: its reads, and the stats that tell a cached ledger is still current
     expect(nextReads()).toBeLessThanOrEqual(10);
+    expect(w.counts.versions - nextStats).toBeLessThanOrEqual(60);
   });
 
   it('should list no ledger on an idle change drain, and only the ferret that holds an event after one', async () => {
