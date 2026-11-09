@@ -124,6 +124,32 @@ describe('R248 the session transport carrying a rotation', () => {
     expect(test.seen).toHaveLength(1);
   });
 
+  test('R252 a request the old key is refused on is answered over the pending key, which is promoted', async () => {
+    const pending = await testDevice('fy_dev_rotation');
+    const test = await rig({ accepts: () => [pending.publicKey] });
+    test.recorded.pendingKey = pending.claim.key;
+
+    const answer = await test.transport.request({ method: 'GET', path: '/v1/plugins' });
+
+    expect(answer.status).toBe(200);
+    expect(test.recorded.calls).toEqual(['pending', 'promote', 'amend GET /v1/plugins fy_dev_rotation']);
+    expect(test.route.credentials.map(credential => credential.accepted)).toEqual([false, true]);
+  });
+
+  test('R252 a request refused on the pending key too discards it and reports the first refusal', async () => {
+    const pending = await testDevice('fy_dev_rotation');
+    const test = await rig({ accepts: () => [] });
+    test.recorded.pendingKey = pending.claim.key;
+
+    const failure = await test.transport.request({ method: 'GET', path: '/v1/plugins' }).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    expect(failure).toMatchObject({ name: 'RelaySessionError', code: 4403 });
+    expect(test.recorded.calls).toEqual(['pending', 'discard']);
+  });
+
   test('C1 a pending-key attempt that dies on the carrier surfaces as the carrier failure, never the first 4403', async () => {
     const pending = await testDevice('fy_dev_rotation');
     // The old key is refused (the daemon already swapped), then the pending key's session dies on the carrier.

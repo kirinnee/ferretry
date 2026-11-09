@@ -135,6 +135,20 @@ describe('S6 the app root mounts the notification taps', () => {
     await view.unmount();
   });
 
+  test('a tap naming a machine this browser never paired lands on the app’s home and tells no plugin', async () => {
+    go('/d/d1/board');
+    heard.length = 0;
+    const inbox = new NotificationOpenInbox(window.location.origin);
+    const { runtime, storage } = setup(inbox);
+    const view = await render(runtime, storage);
+    await settle();
+    await interact(async () => tap(inbox, '/d/stranger/board', 'agenda-A3'));
+    await settle();
+    expect(window.location.pathname).toBe('/app/');
+    expect(heard).toEqual([]);
+    await view.unmount();
+  });
+
   test('with no inbox nothing is mounted and the app stays where it was', async () => {
     go('/app/');
     heard.length = 0;

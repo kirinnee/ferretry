@@ -466,6 +466,11 @@ describe('notificationUrl (a push’s url is NOT trusted: only an accepted route
     }
   });
 
+  it('a machine id that is not valid percent-encoding is another machine’s, for a machine worker and for the app-wide one', () => {
+    expect(notificationUrl('/d/%E0%A4%A/ferrets/x/chat', ORIGIN, WORK)).toBe(HOME);
+    expect(notificationClickUrl(`${ORIGIN}/d/%E0%A4%A/ferrets/x/chat`, ORIGIN, null)).toBe(APP);
+  });
+
   it('has no /session/ alias, and a machine home carries no ask', () => {
     expect(notificationUrl('/session/f1?ask=A3', ORIGIN, WORK)).toBe(HOME);
     expect(notificationUrl(`${HOME.slice(ORIGIN.length)}?ask=A3`, ORIGIN, WORK)).toBe(HOME);
