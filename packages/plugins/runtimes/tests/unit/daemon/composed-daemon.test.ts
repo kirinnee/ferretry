@@ -436,17 +436,26 @@ describe('a real apply through the composed daemon', () => {
 
     pauses = [{ login: 'claude-you', pause, phrase: '' }];
     const first = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
-    expect(first.status).toBeGreaterThanOrEqual(400);
+    const written = host.configChanges.length;
+    expect(first.status).toBe(409);
     expect(JSON.stringify(first.json())).toContain('spend budget changed');
+    expect(host.configChanges.length).toBe(written);
 
     const retry = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    expect(retry.status).toBe(409);
     expect(JSON.stringify(retry.json())).toContain('spend budget changed');
     expect(JSON.stringify(retry.json())).not.toContain('already been applied');
+    expect(host.configChanges.length).toBe(written);
 
     // The pause lifts: the same proposal is back to what it was previewed against, so it applies.
     pauses = [];
     const lifted = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
     expect(lifted.status).toBe(200);
+    expect(host.configChanges.length).toBeGreaterThan(written);
+
+    // A proposal is single use: the apply that landed spent it.
+    const again = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    expect(JSON.stringify(again.json())).toContain('already been applied');
   });
 
   it('M3 a budget hold that starts or stops publishes the fleet again, so its wrappers follow Usage’s pause', async () => {

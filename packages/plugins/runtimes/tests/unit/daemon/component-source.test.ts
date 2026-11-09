@@ -866,6 +866,27 @@ describe('BG-029 a login that starts standing in after a change was previewed ch
     expect(composed.host.configChanges.length).toBe(written);
     expect(await readdir(join(composed.world.fleet, 'bin'))).not.toContain('glm-renamed');
   });
+
+  it('BG-029 m3 the export route refuses a machine whose used login stands in, naming only the login: no value, no path', async () => {
+    const composed = await composeWithWithheldLogin(
+      [{ kind: 'plain', name: 'BASE_URL', value: 'https://fake.invalid' }],
+      {
+        used: true,
+      },
+    );
+
+    const exported = await composed.host.request('GET', '/v1/runtimes/export');
+
+    expect(exported.status).toBe(409);
+    const answer = exported.json<{ code?: string; error: string }>();
+    expect(answer.code).toBe('fleet_setup_refused');
+    expect(answer.error).toContain('login "glm"');
+    expect(answer.error).toContain('Fix the login in Logins first, then copy again.');
+    const whole = JSON.stringify(answer);
+    expect(whole).not.toContain('https://fake.invalid');
+    expect(whole).not.toContain(composed.world.person);
+    expect(whole).not.toContain(composed.world.fleet);
+  });
 });
 
 describe('M1 an instructions change is refused before anything of it is written', () => {
