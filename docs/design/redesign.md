@@ -2756,7 +2756,12 @@ scoped handle:
   and any folder that changed within the minute, is looked at by the next look; an alias of the replaced file needs the
   same user or privilege, as (6); (8) a filesystem whose clock steps by more than two seconds can still miss a member
   that lands after the look in the same step (the window is 20 ms, two seconds where the times carry no fraction of a
-  second).
+  second); (9) a tree is closed on the devices its INDEXED places answer with (plus the first member past its budget
+  that a `*` collection looks at), so an alias of an UNINDEXED member that sits on a device no indexed place of that tree
+  answers with is allowed: an overlay's lower layer against its upper one (members written at run time sit on the
+  upper, a baked one on the lower), a member folder past the budget that is a mountpoint or a btrfs subvolume, or a
+  folder met at the depth limit that is a mountpoint. It needs a privileged bind or a mount of such a member, and it is
+  strictly narrower than the head's device only, which was all a closed tree held before.
   Residuals the secret-name rule cannot see, none named like a secret and none changed here: MCP's `inventory.json`
   keeps a server's address with its path (a key embedded in a path segment would be stored), Shells' `cache/*` keeps a
   devShell's exported variables verbatim, Warden's `state.json` is a loose object, and the kernel's `accepted-config/*`

@@ -222,8 +222,39 @@ describe('PF-budget a `*` collection spends its budget only on a member that hol
     const snapshot = await privateIndexOf(REAL, real, INPUT, { wall: LATER, bounds: small }).snapshot();
     expect(snapshot.truncated).toEqual([`${real}/state/ferrets/sessions`]);
     expect(snapshot.closed.map(tree => tree.path)).toEqual([`${real}/state/ferrets/sessions`]);
-    expect(snapshot.closed[0]?.device).toBe((await REAL.identity(l.sessions))?.device as bigint);
+    const folder = (await REAL.identity(l.sessions))?.device as bigint;
+    const file = (await REAL.identity(`${l.sessions}/s0/${ENV}`))?.device as bigint;
+    expect(snapshot.closed[0]?.devices).toEqual(new Set([folder, file]));
     expect(snapshot.budgets).toEqual([{ path: `${real}/state/ferrets/sessions`, limit: 3, indexed: 3 }]);
+  });
+
+  test('PF-budget the first holder past the budget moves to a device of its own while every indexed place stays: the tree is closed on the new device at the next look, never answered from the snapshot before', async () => {
+    const l = await home();
+    await fill(l.sessions, 3, n => `s${n}/${ENV}`);
+    const real = await realpath(l.home);
+    const folder = (await REAL.identity(l.sessions))?.device as bigint;
+    const mounted = folder + 9n;
+    // The third holder (s2) is the first one past the budget; a mount appears on its file after the first look.
+    let moved = false;
+    const disk: HostFs = {
+      ...REAL,
+      identity: async path => {
+        const found = await REAL.identity(path);
+        return moved && found !== undefined && path === `${l.sessions}/s2/${ENV}`
+          ? { ...found, device: mounted }
+          : found;
+      },
+    };
+    const index = privateIndexOf(disk, real, INPUT, { bounds: small });
+    const first = await index.snapshot();
+    expect(first.closed[0]?.devices).toEqual(new Set([folder]));
+    moved = true;
+    // The mount changes its folder's times, and the look sees the change; no indexed place, key or count differs.
+    await writeFile(`${l.sessions}/s2/touched.md`, 'x');
+    const after = await index.snapshot();
+    expect(after.places.map(place => place.key)).toEqual(first.places.map(place => place.key));
+    expect(after.closed[0]?.devices).toEqual(new Set([folder, mounted]));
+    expect(after).not.toBe(first);
   });
 });
 
