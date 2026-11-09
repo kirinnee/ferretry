@@ -42,8 +42,10 @@ export const vaultStep: Step = {
     const document = join(ctx.v4.state, 'secrets.json');
     const base = { id: this.id, title: this.title, notCarried: this.notCarried };
     const [hasKey, hasDocument] = [await present(key), await present(document)];
-    if (!hasKey && !hasDocument)
+    if (!hasKey && !hasDocument) {
+      ctx.loginKeys?.markVaultMoved();
       return { ...base, status: 'converted', note: 'this home has no vault', kept: [], sealed: [] };
+    }
     if (!hasKey)
       return {
         ...base,
@@ -57,6 +59,7 @@ export const vaultStep: Step = {
     if (ctx.dryRun) {
       sealed.push({ file: V5_VAULT_KEY_FILE, bytes: await sizeOf(key) });
       if (hasDocument) sealed.push({ file: V5_VAULT_FILE, bytes: await sizeOf(document) });
+      ctx.loginKeys?.markVaultMoved();
       return { ...base, status: 'converted', note: 'dry run: nothing written', kept: [], sealed };
     }
     const movedKey = await moveSealed(key, ctx.v5.resolve(V5_VAULT_KEY_FILE));
@@ -70,6 +73,7 @@ export const vaultStep: Step = {
       entries = rewrapped.entries;
       sealed.push({ file: V5_VAULT_FILE, bytes: await sizeOf(rewrapped.to) });
     }
+    ctx.loginKeys?.markVaultMoved();
     return { ...base, status: 'converted', kept: [{ what: 'sealed secrets', count: entries }], sealed };
   },
 };

@@ -8,8 +8,11 @@ set -euo pipefail
 #   dry-run   print what would be copied, left out, converted and started. Touches nothing.
 #   prepare   copy a snapshot of v4 (credentials left out by path), convert it into the preview home, prove v4 unchanged,
 #             write the `fy5` wrapper. Never stops or writes to v4.
-#             --owner (OWNER ONLY, never an agent): records the two files the preview writes itself (terminals.yaml and
-#             claude-code/settings/fy-preview.yaml) as accepted. Without it they are held and `start` stops the daemon.
+#             --owner (OWNER ONLY, never an agent): records as accepted every config file the preview wrote or
+#             changed (found by comparing with the plain conversion: terminals.yaml, claude-code/settings/fy-preview.yaml,
+#             the forced limits.yaml), EXCEPT one that comes from a v4 file with an unconfirmed edit: that one stays held
+#             and the preview runs with the kernel's last good or default for it (tighter limits). Confirm the edit in v4,
+#             then `clean` and `prepare --owner`. Without --owner they are all held and `start` stops the daemon.
 #   build     compile fy, fyd and the browser worker from a CLEAN rebuild/5.0 checkout with the preview app origin, prove
 #             the compiled binaries name that origin, and only then install them into <target>/libexec (bin holds shims
 #             that pin the preview). Refuses unless the preview signing key is committed on that checkout

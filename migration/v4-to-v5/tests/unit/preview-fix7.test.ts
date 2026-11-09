@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { ownerNote, prepare, writeReport } from '../../preview/driver.ts';
 import { PREVIEW } from '../../preview/plan.ts';
 import { CHECK_TERMINAL, terminalCheck, terminalsFileState, type Run } from '../../preview/start-checks.ts';
-import { acceptedConfigStep } from '../../src/steps/accepted-config.ts';
+import { acceptedConfigStep, previewAuthoredFiles } from '../../src/steps/accepted-config.ts';
 import { ferretsStep } from '../../src/steps/ferrets.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
 import { previewShellEnv } from '../../src/v5/preview-env.ts';
@@ -168,7 +168,12 @@ describe('MAJOR-2 the preview records its own files as accepted', () => {
       expect((await settingsStep.run(ctx)).status).toBe('converted');
       const report = await acceptedConfigStep.run(ctx);
       expect(report.notCarried.map(item => item.what).join('\n')).toContain('limits.yaml');
-      // terminals.yaml, the settings item, and the forced limits.yaml and runtimes.yaml: all the preview's own.
+      // terminals.yaml, the settings item, and the forced limits.yaml and runtimes.yaml: all the preview's own (4 named),
+      // but limits.yaml comes from a held v4 file, so only 3 are recorded.
+      expect(report.kept).toContainEqual({
+        what: "the preview's own config files recorded as accepted",
+        count: 3,
+      });
       expect(JSON.stringify(report.kept)).toContain('"count":4');
 
       const dir = join(f.to, 'state/kernel/accepted-config');
@@ -176,10 +181,8 @@ describe('MAJOR-2 the preview records its own files as accepted', () => {
       const record = JSON.parse(await readFile(recordPath, 'utf8')) as { text: string; plugin: string };
       expect(record.plugin).toBe('terminals');
       expect(record.text).toBe(await readFile(join(f.to, 'config/terminals.yaml'), 'utf8'));
-      // limits.yaml (v4 had not accepted it) is the preview's own text now (forced off), so the owner's flag records it.
-      expect(JSON.parse(await readFile(join(dir, `${acceptedName('limits.yaml')}.json`), 'utf8')).text).toBe(
-        await readFile(join(f.to, 'config/limits.yaml'), 'utf8'),
-      );
+      // limits.yaml (v4 had not accepted it) carries v4's held text: even the owner's flag does not record it.
+      await expect(readFile(join(dir, `${acceptedName('limits.yaml')}.json`), 'utf8')).rejects.toThrow();
       const settings = acceptedName('claude-code/settings/fy-preview.yaml');
       expect(JSON.parse(await readFile(join(dir, `${settings}.json`), 'utf8')).plugin).toBe('claude-code');
 
@@ -220,10 +223,11 @@ console.log(JSON.stringify({ state: port.fileState(def).state, environment: port
       await write(f.from, 'config/limits.yaml', 'enabled: true\n');
       const ctx = await previewCtx(f, false);
       expect((await settingsStep.run(ctx)).status).toBe('converted');
-      await acceptedConfigStep.run(ctx);
+      const ran = await acceptedConfigStep.run(ctx);
       await expect(stat(join(f.to, 'state/kernel/accepted-config'))).rejects.toThrow();
 
-      const note = ownerNote(false);
+      const files = previewAuthoredFiles([ran]);
+      const note = ownerNote(false, files);
       expect(note).toContain('config/terminals.yaml');
       expect(note).toContain('config/claude-code/settings/fy-preview.yaml');
       expect(note).toContain('config/limits.yaml');
@@ -231,7 +235,7 @@ console.log(JSON.stringify({ state: port.fileState(def).state, environment: port
       expect(note).not.toContain('Confirm');
       expect(note).not.toContain('config confirm');
       expect(note).toContain('--owner');
-      expect(ownerNote(true)).toContain('recorded as accepted');
+      expect(ownerNote(true, files)).toContain('recorded as accepted');
     } finally {
       await f.clean();
     }

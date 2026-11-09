@@ -475,7 +475,8 @@ export const daemonSettingsStep: Step = {
         throw new V4InputError(
           `v5 would allow more than v4 enforced at ${wider.join(', ')}; nothing was written (a converter defect: report it)`,
         );
-      for (const { planned, text } of texts.values()) await ctx.v5.config(planned.target, undefined, text);
+      for (const { planned, text } of texts.values())
+        await ctx.v5.config(planned.target, undefined, text, [planned.label]);
     } catch (error) {
       return {
         ...base,

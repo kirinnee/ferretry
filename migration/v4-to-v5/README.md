@@ -38,6 +38,18 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 - Sealed and secret files (vault, its key, the identity key, push keys, harness sign-ins, the message-token key) are
   moved with `copyFile` + mode + times (`src/sealed.ts`): their bytes never become a value in this program, and the
   report names a file and its size, never content.
+- One exception, and only to ADD: a key v4 saved in plain text in a login file's `env`, `claude.env` or `codex.env` is sealed into the v5 vault
+  (`src/steps/login-keys.ts`) and the login file names it `${secret:LOGIN_<ID>_<VAR>}`. For that the tool holds the
+  vault key in memory only long enough to import it (one Buffer, zeroed at once and again on any exit), seals each new
+  value exactly as the vault does, and writes the vault with a temp file + rename. Existing vault entries are still
+  copied byte for byte and never decrypted. The report names login, variable and secret name, never a value; if a key
+  cannot be sealed the step fails and the run has no `home.json`, so a key is never left plain. The v4 login file in
+  the backup still holds the key in plain text. Two more cases, both said out loud and never with the value:
+  the rule is exactly what v5's login schema refuses as a raw secret (a key, or an address with a password or a key in
+  its query), a refused value of 8 or more characters is moved, and a refused value under 8 characters (which the
+  vault cannot hold) fails the step naming the login and variable; edit or remove it in the v4 file, then run again.
+  Login keys are sealed only when the vault step converted; if it failed or did not run, the login-keys step fails
+  naming each login and variable it could not move, and mints no key and writes no `vault.json`.
 - The live tmux socket is given a second name in the new home with `link(2)`, so v5 reaches the same running server.
 
 ## State (Phase B)
@@ -254,11 +266,17 @@ Confirmed settings (`src/steps/accepted-config.ts`, last): v4's `state/config-ac
 effect per config file. When every v4 config file was in effect as written (its entry's etag is the SHA-256 of its text),
 each v5 config file this run wrote is recorded as accepted (`state/kernel/accepted-config/`, the kernel's
 `acceptedConfigFile`, each record naming the plugin whose def owns the path, from `src/v5/targets.ts`; a path no def
-owns is not recorded and stays held), so a loosening the owner confirmed in v4 is not asked about again. The preview's
-own two files (`terminals.yaml`, the `fy-preview` settings item) are recorded only with `prepare --owner`, never
-otherwise. When any was not (a held
-edit, an invalid file, one never accepted, a held deletion), nothing is recorded, the report names those files, and v5
-holds any loosening until the owner confirms it again. Texts are hashed and written, never reported.
+owns is not recorded and stays held), so a loosening the owner confirmed in v4 is not asked about again. In the preview,
+a file the PREVIEW wrote or changed (its text differs from a plain, non-preview conversion of the same v4 home, or the
+plain conversion writes no such file: `terminals.yaml`, the `fy-preview` settings item, the forced `limits.yaml`) is
+"preview-authored" and is recorded only with `prepare --owner`, never otherwise. When any v4 file was not in effect (a
+held edit, an invalid file, one never accepted, a held deletion), nothing else is recorded, the report names those
+files, and v5 holds any loosening until the owner confirms it again. Even then `--owner` records a preview-authored
+file whose v4 source files (the ones the writing step names for it) were all in effect, and a pure preview file (no v4
+source). A preview-authored file with a held v4 source gets NO record even with the flag: the owner's "not yet" stands.
+For `limits.yaml` (source `machine.yaml` `agentControl` and `limits.yaml`) that means the preview runs with the kernel's
+last good or default limits (tighter), and the report and the `prepare` note say so; the remedy is to confirm the edit in
+v4, then `preview.sh clean` and `preview.sh prepare --owner`. Texts are hashed and written, never reported.
 
 ## Tests
 

@@ -16,8 +16,11 @@
  * the report names those files: v5 judges every file against its defaults and holds any loosening until the owner
  * confirms it again — the safe direction to be wrong in, never wider than v4. The one exception is the files the
  * PREVIEW itself wrote or changed (its text differs from the plain conversion's, e.g. `terminals.yaml`, the `fy-preview`
- * settings item, the forced `limits.yaml`): they are recorded either way, but ONLY when the owner ran `prepare --owner`
- * (the flag is the owner's act of accepting them; without it nothing of theirs is recorded).
+ * settings item, the forced `limits.yaml`), and only the ones with NO held v4 source: they are recorded either way, but
+ * ONLY when the owner ran `prepare --owner` (the flag is the owner's act of accepting them; without it nothing of theirs
+ * is recorded). A preview-changed file whose v4 source files (the ones the writing step named for it) include a held
+ * one gets no record even with the flag: the owner's "not yet" on that edit stands, and the preview runs with the
+ * kernel's last good or default for it.
  *
  * Runs LAST, after every step that writes config. Texts are hashed and written, never reported.
  */
@@ -26,9 +29,10 @@ import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { z } from 'zod';
-import type { StepReport } from '../report.ts';
+import type { KeptItem, StepReport } from '../report.ts';
 import { readV4Json } from '../v4/documents.ts';
 import { configOwner } from '../v5/targets.ts';
+import { UNKNOWN_SOURCE } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
 
 export const V4_CONFIG_ACCEPTED = 'state/config-accepted.json';
@@ -48,6 +52,28 @@ const V4AcceptedRecord = z.record(z.string(), z.strictObject({ etag: z.string().
  */
 const isPreviewAuthored = (ctx: StepContext, path: string, text: string): boolean =>
   ctx.preview === true && ctx.plainConfigs?.get(path) !== text;
+
+/** The report item that names every preview-authored config file of this run (`previewAuthoredFiles` reads it back). */
+const AUTHORED_PREFIX = 'preview-authored config files: ';
+
+/** The preview-authored config files a conversion report names (computed by the accepted-config step, never listed by hand). */
+export function previewAuthoredFiles(steps: readonly StepReport[]): readonly string[] {
+  const item = steps
+    .find(step => step.id === 'accepted-config')
+    ?.kept.find(kept => kept.what.startsWith(AUTHORED_PREFIX));
+  return item === undefined ? [] : item.what.slice(AUTHORED_PREFIX.length).split(', ');
+}
+
+/**
+ * Whether a v4 file the target came from was held (not in effect as written). The sources are the v4 files the writing
+ * step named for the target (`V5Writer.writtenSources`), not a map kept here. A target with no v4 source (the preview
+ * wrote it whole) has none held. Unknown sources count as held whenever anything was held (fail closed).
+ */
+const sourceHeld = (ctx: StepContext, path: string, held: readonly string[]): boolean => {
+  const sources = ctx.v5.writtenSources().get(path);
+  if (sources === undefined || sources.has(UNKNOWN_SOURCE)) return held.length > 0;
+  return held.some(file => sources.has(`config/${file}`) || sources.has(file));
+};
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -126,18 +152,32 @@ export const acceptedConfigStep: Step = {
         return { recorded, unowned };
       };
       const held = await notInEffect(ctx);
+      const authored = configs.filter(([path, text]) => isPreviewAuthored(ctx, path, text)).map(([path]) => path);
+      const named: KeptItem[] =
+        authored.length === 0 ? [] : [{ what: `${AUTHORED_PREFIX}${authored.join(', ')}`, count: authored.length }];
       if (held.paths.length > 0) {
-        // The preview's own authored files are the owner's act (the owner runs `prepare`), so they are recorded as accepted
-        // whatever v4's record says: a held terminals.yaml would open every terminal with only {PATH, HOME} and reach v4's `fy`.
-        const own = await record(configs.filter(([path, text]) => isPreviewAuthored(ctx, path, text)));
+        // A preview-authored file with NO v4 source (the preview wrote it whole) is the owner's act (the owner runs
+        // `prepare --owner`), recorded whatever v4's record says: a held terminals.yaml would open every terminal with only
+        // {PATH, HOME} and reach v4's `fy`. One that carries a held v4 file's text stays held even with the flag: the
+        // owner's "not yet" on that edit stands.
+        const heldSource = authored.filter(path => sourceHeld(ctx, path, held.paths));
+        const own = await record(configs.filter(([path]) => authored.includes(path) && !heldSource.includes(path)));
         return {
           ...base,
           status: 'converted',
-          kept:
-            own.recorded === 0
+          kept: [
+            ...named,
+            ...(own.recorded === 0
               ? []
-              : [{ what: "the preview's own config files recorded as accepted", count: own.recorded }],
+              : [{ what: "the preview's own config files recorded as accepted", count: own.recorded }]),
+          ],
           notCarried: [
+            ...(ownerRan
+              ? heldSource.map(path => ({
+                  what: `${path} (the preview's forced setting, NOT accepted even with --owner)`,
+                  why: `v4 had an unconfirmed edit in a v4 file it comes from (${held.paths.join(', ')}), so the preview's text stays held and the preview runs with the kernel's last good or default for it (for limits.yaml: tighter limits). To fix: confirm it in v4 first, then \`preview.sh clean\` and \`preview.sh prepare --owner\``,
+                }))
+              : []),
             {
               what: `${V4_CONFIG_ACCEPTED} (v4 was not enforcing as written: ${held.paths.join(', ')})`,
               why: "v4 was holding an unconfirmed edit, refusing a file, or had never accepted it, so what it enforced is not the text on disk. Nothing is recorded as accepted (the preview's own files excepted): v5 judges every file against its defaults and holds any loosening until the owner confirms it again (never wider than v4)",
@@ -153,6 +193,7 @@ export const acceptedConfigStep: Step = {
         kept: [
           { what: 'v4 config files in effect as written', count: held.files },
           { what: 'v5 config files recorded as accepted', count: all.recorded },
+          ...named,
         ],
         notCarried:
           all.unowned.length === 0

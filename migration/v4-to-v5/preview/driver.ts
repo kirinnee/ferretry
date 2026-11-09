@@ -7,6 +7,7 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'n
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { convert } from '../src/convert.ts';
+import { previewAuthoredFiles } from '../src/steps/accepted-config.ts';
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
@@ -148,11 +149,16 @@ export interface PrepareInputs {
   readonly owner?: boolean;
 }
 
-/** What `prepare` prints about the preview's own two files: accepted by the owner's flag, or what to do without it. */
-export function ownerNote(owner: boolean): string {
+/**
+ * What `prepare` prints about the config files the preview wrote or changed (`files`: the computed set the accepted-config
+ * step names, `previewAuthoredFiles`): accepted by the owner's flag (except one whose v4 source was held), or what to do
+ * without it.
+ */
+export function ownerNote(owner: boolean, files: readonly string[] = []): string {
+  const names = files.length === 0 ? 'none' : files.join(', ');
   return owner
-    ? 'every config file the preview wrote or changed (config/terminals.yaml, config/claude-code/settings/fy-preview.yaml, the forced config/limits.yaml) was recorded as accepted (--owner).'
-    : `NOT ACCEPTED (no --owner): the config files the preview wrote or changed (config/terminals.yaml, config/claude-code/settings/fy-preview.yaml, the forced config/limits.yaml) are held like any other unconfirmed file, so terminals cannot carry the preview environment and \`preview.sh start\` will stop the daemon. The owner's remedy is preview.sh clean, then preview.sh prepare --owner (--owner accepts them).`;
+    ? `the config files the preview wrote or changed (${names}) were recorded as accepted (--owner), EXCEPT one that comes from a v4 file with an unconfirmed edit: that one stays held (the preview then runs with the kernel's last good or default for it, e.g. tighter limits.yaml limits) and the report names it. The remedy: confirm the edit in v4 first, then preview.sh clean and preview.sh prepare --owner.`
+    : `NOT ACCEPTED (no --owner): the config files the preview wrote or changed (${names}) are held like any other unconfirmed file, so terminals cannot carry the preview environment and \`preview.sh start\` will stop the daemon. The owner's remedy is preview.sh clean, then preview.sh prepare --owner (--owner accepts them, except one that comes from a v4 file with an unconfirmed edit).`;
 }
 
 export interface Prepared {
@@ -247,7 +253,7 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   await writeReport(reportPath, `${JSON.stringify(result.report, null, 2)}\n`);
   return {
     report: result.report,
-    summary: `${summarise(result.report)}\n${heldSection(result.report)}\n${ownerNote(inputs.owner === true)}\nreport: ${reportPath}`,
+    summary: `${summarise(result.report)}\n${heldSection(result.report)}\n${ownerNote(inputs.owner === true, previewAuthoredFiles(result.report.steps))}\nreport: ${reportPath}`,
     proof,
     changedWhileCopying: staged.changed,
     gate,
