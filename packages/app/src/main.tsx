@@ -17,6 +17,7 @@ import { registeredConnect, registeredDaemonless, registeredPasskey } from './co
 import { DaemonList } from './daemons/daemon-list.ts';
 import { generated } from './generated/surfaces.ts';
 import { DeviceLayoutStore } from './layout/device-layout.ts';
+import { browserNotificationOpens } from './worker/notification-open.ts';
 import { ScrollMemory } from './scroll/scroll-memory.ts';
 import { trustedWorkerUrl } from './security/trusted-types.ts';
 import { directDial, type SocketLike } from './session/direct-dial.ts';
@@ -78,7 +79,7 @@ const daemons = new DaemonList({
   storage,
   now,
   // The device key goes with its pairing (Access keeps it).
-  forget: daemon => void registered.claims?.forget(daemon).catch(() => {}),
+  forget: daemon => registered.claims?.forget(daemon).catch(() => {}),
 });
 
 // The session layer's parts and the pairing walk (R582: direct first, then the one discovered rendezvous).
@@ -123,6 +124,7 @@ const runtime = new ShellRuntime({
   daemonless: { views: daemonless.views, location: () => window.location.href },
   onVisible: whenBackOnScreen(document),
   address: window, // the declared fragments leave the address bar here, before the first render (S3)
+  notificationOpens: browserNotificationOpens(window, navigator), // held before React mounts: a tap is never lost (S6)
 });
 
 const themes = new ThemePreferenceStore(storage);
@@ -134,11 +136,9 @@ window.addEventListener('storage', () => {
   layouts.adopt();
 });
 preloadThemeFonts(themes.snapshot().family);
-// A phone held sideways gets today's portrait gate (the app is drawn for an upright phone).
-installPortraitLock(window, document);
+installPortraitLock(window, document); // a phone held sideways gets today's portrait gate
 themes.subscribe(() => preloadThemeFonts(themes.snapshot().family));
-// The signed-release service worker (docs/pwa-release-signing.md, built by scripts/build-release.ts; absent in `vite
-// dev`). Its URL goes through the `fy-worker` Trusted Types policy, which `_headers` requires at every script sink.
+// The signed-release service worker (docs/pwa-release-signing.md; absent in `vite dev`), URL via the `fy-worker` policy.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   void navigator.serviceWorker.register(trustedWorkerUrl('/sw.verified.js'), { scope: '/' }).catch(() => {});
 }
