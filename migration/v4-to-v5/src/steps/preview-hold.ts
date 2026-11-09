@@ -38,9 +38,11 @@ export const heldReason = (harness: RuntimeHarness): string =>
 /**
  * A profile's scope as v4 derives it (`profileScope`): the one CLI its layers are for (`claude`, `codex`), `generic`
  * (generic or mixed: v4 treats both as not scoped), or `unsure` (a model set with no `harness`, which v4 scopes by model
- * ids this tool does not copy).
+ * ids this tool does not copy). `unsure-claude` / `unsure-codex`: layers for that one CLI AND a model set without a
+ * `harness`; the model set either agrees (still scoped to that CLI) or names the other CLI (the profile is then mixed,
+ * and v4 falls back to the login's own harness), so a login whose own harness is that CLI gets it either way.
  */
-export type ProfileScope = 'claude' | 'codex' | 'generic' | 'unsure';
+export type ProfileScope = 'claude' | 'codex' | 'generic' | 'unsure' | 'unsure-claude' | 'unsure-codex';
 export type ProfileScopes = ReadonlyMap<string, ProfileScope>;
 
 /**
@@ -77,7 +79,7 @@ export async function previewProfileScopes(ctx: Pick<StepContext, 'v4'>): Promis
       );
     }
   }
-  type Folded = 'claude' | 'codex' | 'generic' | 'mixed' | 'unsure';
+  type Folded = ProfileScope | 'mixed';
   const fold = (layers: readonly string[], visiting: ReadonlySet<string>): Folded => {
     let claude = false;
     let codex = false;
@@ -90,12 +92,12 @@ export async function previewProfileScopes(ctx: Pick<StepContext, 'v4'>): Promis
         const base = profiles.get(name);
         if (base !== undefined && !visiting.has(name)) scope = fold(base, new Set([...visiting, name]));
       } else if (slash >= 0) scope = components.get(layer) ?? 'generic';
-      if (scope === 'claude' || scope === 'mixed') claude = true;
-      if (scope === 'codex' || scope === 'mixed') codex = true;
-      if (scope === 'unsure') unsure = true;
+      if (scope === 'claude' || scope === 'mixed' || scope === 'unsure-claude') claude = true;
+      if (scope === 'codex' || scope === 'mixed' || scope === 'unsure-codex') codex = true;
+      if (scope === 'unsure' || scope === 'unsure-claude' || scope === 'unsure-codex') unsure = true;
     }
     if (claude && codex) return 'mixed';
-    if (unsure) return 'unsure';
+    if (unsure) return claude ? 'unsure-claude' : codex ? 'unsure-codex' : 'unsure';
     return claude ? 'claude' : codex ? 'codex' : 'generic';
   };
   const scopes = new Map<string, ProfileScope>();
@@ -113,8 +115,12 @@ export const holdsCodex = (ctx: Pick<StepContext, 'preview'>): boolean =>
 /**
  * The harness of one runtime: its own `harness` (v4 `claude`, or v5 `claude-code`, or `codex`), else the one its login
  * names in the stage's map (v4 `runtimeHarness`: on a two-CLI login the CLI its profile is scoped to, else the login's
- * own). A login that is not in the map (unreadable) leaves it unknown. A runtime's own `harness` wins even when its login
- * is missing, which is v4's first step too (it returns the runtime's own before it looks at the login).
+ * own). A login that is not in the map (unreadable) leaves it unknown.
+ *
+ * v4 checks the LOGIN first (`scope.ts:205-217`): a runtime whose login does not exist gets `undefined` before its own
+ * `harness` is looked at. This function still returns the runtime's own `harness` first, which is right: v4's schema
+ * refuses a runtime with no login, so no home v4 booted has one, and a login missing from the stage map is one that
+ * exists but is unreadable here, for which v4 does return the runtime's own harness.
  */
 export function runtimeHarnessOf(
   ctx: Pick<StepContext, 'previewLoginHarnesses'>,
@@ -130,6 +136,11 @@ export function runtimeHarnessOf(
   let harness = fromLogin.harness;
   if (fromLogin.both) {
     if (profile === 'claude' || profile === 'codex') harness = profile;
+    // Layers for one CLI plus a model set without `harness`: the model set agrees (scoped to that CLI) or disagrees
+    // (mixed, so v4 uses the login's own harness). A login whose own harness IS that CLI gets it either way, as in v4.
+    else if (profile === 'unsure-claude' || profile === 'unsure-codex') {
+      if (profile !== `unsure-${harness}`) return 'both';
+    }
     // A model set without `harness` is scoped in v4 by model ids this tool does not copy: undecidable here, held.
     else if (profile === 'unsure') return 'both';
     // generic, or a profile that does not exist: v4 falls back to the login's own harness.
