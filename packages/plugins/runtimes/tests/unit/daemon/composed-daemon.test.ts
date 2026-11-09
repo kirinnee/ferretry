@@ -734,4 +734,16 @@ describe('the homes the composed daemon provides', () => {
     expect(port.home(HOME_ID)).toBeDefined();
     expect(port.home('00000000-0000-4000-8000-0000000000ff')).toBeUndefined();
   });
+
+  it('S1 the provided port lists and reads the fleet’s installed skills through assetSkills()', async () => {
+    const { host, world } = await compose();
+    await mkdir(join(world.fleet, 'assets', 'skills', 'review'), { recursive: true });
+    await writeFile(join(world.fleet, 'assets', 'skills', 'review', 'SKILL.md'), '# review\n');
+
+    const assets = host.provided(RuntimesPort).assetSkills?.();
+
+    expect((await assets?.skills(5))?.map(entry => entry.name)).toEqual(['review']);
+    expect(await assets?.skillManifest('review', 100)).toBe('# review\n');
+    expect(await assets?.skillManifest('absent', 100)).toBeUndefined();
+  });
 });
