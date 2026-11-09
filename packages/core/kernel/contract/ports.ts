@@ -777,9 +777,16 @@ export interface RootHandle {
    */
   pin(path: FencedPath, options?: PinOptions): Promise<HeldRoot>;
   /**
-   * Removes the name, a folder one entry at a time through descriptors. Remove of a folder needs descriptor reach; refused `no_descriptor_reach` without it (macOS until the descriptor bracket lands), and an owner root refuses every remove then. On a host without descriptor reach a file or link of an internal root is unlinked by path after one re-proof of its folder: a parent swapped in between can delete ONE same-named file outside the root, never a tree (declared GAP). [own] BEFORE-GREEN(runtimes) closed by the bracket unit.
+   * Removes the name, a folder one entry at a time through descriptors. The LEAF IS NEVER FOLLOWED: the folder it sits in is
+   * resolved and judged inside the root, then the entry is removed by its own name, so a link at the name goes as a link
+   * and what it points at (inside the root or outside it) is untouched. Remove of a folder needs descriptor reach; refused `no_descriptor_reach` without it (macOS until the descriptor bracket lands), and an owner root refuses every remove then. On a host without descriptor reach a file or link of an internal root is unlinked by path after one re-proof of its folder: a parent swapped in between can delete ONE same-named file outside the root, never a tree (declared GAP). [own] BEFORE-GREEN(runtimes) closed by the bracket unit.
+   *
+   * With `onlyIfEmpty` a folder is removed with `rmdir` semantics: ONE kernel call, empty-check and removal in the same
+   * syscall, so a folder that holds any entry (a link included) is refused `not_empty` and nothing is removed, never
+   * recursing. A file or link at the name behaves as without the option. A folder without descriptor reach is refused
+   * `no_descriptor_reach` exactly as above (the option never widens what a host without reach may remove).
    */
-  remove(path: FencedPath): Promise<void>;
+  remove(path: FencedPath, options?: { readonly onlyIfEmpty?: boolean }): Promise<void>;
   /**
    * A symlink at `at` (today's "stored once, never copied" link from a runtime home to the host's credential or
    * history) whose text is the REAL path of `target` in one of THIS plugin's own root handles — the rule `copyTree`'s
