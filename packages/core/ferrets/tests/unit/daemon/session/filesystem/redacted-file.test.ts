@@ -44,6 +44,15 @@ describe('the outbound file projection, base64 (R-0151)', () => {
     should((await mask(bytes, ONE_LINE)).equals(bytes)).be.true();
   });
 
+  it('R-0151 a UTF-8 text file with no vault value is served as the very base64 it came in, and reported as not covered', async () => {
+    const base64 = Buffer.from('plain notes, nothing secret here\n', 'utf8').toString('base64');
+    const out = await new FakeRedaction(new Map([['V' as never, ONE_LINE]])).read(scope =>
+      redactedFileBase64(base64, scope),
+    );
+    should(out.covered).be.false();
+    should(out.base64 === base64).be.true();
+  });
+
   it('R-0151 a multi-line value in a CRLF file is masked, and the CRs and the length are kept', async () => {
     const text = `head\r\n${FIRST}\r\n${SECOND}\r\ntail\r\n`;
     const out = await new FakeRedaction(new Map([['V' as never, `${FIRST}\n${SECOND}`]])).read(scope =>

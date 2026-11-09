@@ -24,14 +24,22 @@ const line = (over: Partial<ApprovedSignInLine> = {}): ApprovedSignInLine => ({
   ...over,
 });
 
-function source(lines: ApprovedSignInLine[]) {
+function source(
+  lines: ApprovedSignInLine[],
+  keys: (account: string) => Promise<AccountKey | undefined> = async () => undefined,
+  stopFails = false,
+) {
+  const calls: string[] = [];
   const plans: PlanGrantLines = {
     signInLines: session => lines.filter(each => each.sessionId === session),
     signInLineHeld: (planId, at) => lines.some(each => each.planId === planId && each.line === at),
-    lineUsed: () => undefined,
-    lineStopped: async () => undefined,
+    lineUsed: (planId, at, when) => void calls.push(`used ${planId}:${String(at)} at ${String(when)}`),
+    lineStopped: async (planId, at, because) => {
+      calls.push(`stopped ${planId}:${String(at)} ${because}`);
+      if (stopFails) throw new Error('the plan service is gone');
+    },
   };
-  return new PlanSignInGrants(plans, async () => undefined, new SignInGrantLedger());
+  return Object.assign(new PlanSignInGrants(plans, keys, new SignInGrantLedger()), { calls });
 }
 
 describe('PlanSignInGrants', () => {
@@ -68,6 +76,44 @@ describe('PlanSignInGrants', () => {
     should(grants.ledger.pinned(`plan:${PLAN}:5`).size).equal(0);
     // A standing rule's pin is not this source's to drop: dropping it would let its first-fill pin run again forever.
     should(grants.ledger.pinned('rule:standing-1').get('password')).equal('identity-of-rule:standing-1');
+  });
+});
+
+describe('PlanSignInGrants: a plan line’s writes go back to its plan', () => {
+  const KEY = `L${'a'.repeat(31)}` as AccountKey;
+
+  it('should be on whenever a plan is held', () => {
+    should(source([]).enabled()).be.true();
+  });
+
+  it('should find an account’s key through the plans, and none when the lookup fails', async () => {
+    should(await source([], async () => KEY).keyOf('GITHUB_WORK')).equal(KEY);
+    should(await source([], () => Promise.reject(new Error('locked'))).keyOf('GITHUB_WORK')).be.undefined();
+  });
+
+  it('should tell the plan a line was used, when, and ignore a grant that is not from a plan', () => {
+    const grants = source([line({ line: 2 })]);
+    const [grant] = grants.of(SESSION);
+    if (grant === undefined) throw new Error('no grant');
+
+    grants.used(grant, NOW, SESSION);
+    grants.used({ ...grant, plan: undefined }, NOW, SESSION);
+
+    should(grants.calls).deepEqual([`used ${PLAN}:2 at ${String(NOW)}`]);
+  });
+
+  it('should tell the plan why a line stopped, never throw if the plan cannot be told, and ignore a non-plan grant', async () => {
+    const [grant] = source([line()]).of(SESSION);
+    if (grant === undefined) throw new Error('no grant');
+    const told = source([line()]);
+    const failing = source([line()], undefined, true);
+
+    await told.stopped(grant, 'form-changed');
+    await told.stopped({ ...grant, plan: undefined }, 'form-changed');
+    await failing.stopped(grant, 'form-changed');
+
+    should(told.calls).deepEqual([`stopped ${PLAN}:0 form-changed`]);
+    should(failing.calls).deepEqual([`stopped ${PLAN}:0 form-changed`]);
   });
 });
 

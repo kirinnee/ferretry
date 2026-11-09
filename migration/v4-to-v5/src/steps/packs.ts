@@ -70,6 +70,7 @@ import {
   V4SessionPack,
 } from '../v4/packs.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
+import { keyPath } from '../key-path.ts';
 import { v5ConfigProblem } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
 import { heldReason, heldRuntimes, type RuntimeHarness } from './preview-hold.ts';
@@ -413,7 +414,7 @@ async function planRun(ctx: StepContext, plan: Plan, id: string, resolve: Resolv
   if (!run.success) {
     plan.dropped.push({
       what: label,
-      why: `v5 refuses its run.json at ${run.error.issues.map(issue => issue.path.join('.') || '(top)').join(', ')}`,
+      why: `v5 refuses its run.json at ${run.error.issues.map(issue => keyPath(issue.path)).join(', ')}`,
     });
     return;
   }

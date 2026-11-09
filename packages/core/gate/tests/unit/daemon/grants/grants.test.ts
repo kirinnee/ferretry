@@ -98,6 +98,23 @@ describe('the grants surface', () => {
     expect(await failure(svc.patch({ terminal: { use: false } }, phone(true)))).toBe('applied');
   });
 
+  test('G140 a device whose record is gone cannot change the grants, and nothing is written', async () => {
+    const { svc, grants } = service();
+    const unpaired: CapabilityPresentation = { ...phone(true), deviceGrants: null };
+    expect(await failure(svc.patch({ terminal: { use: false } }, unpaired))).toBe(
+      'forbidden: this device is no longer paired, so it cannot change the grants',
+    );
+    expect(grants().terminal.use).toBe(true);
+  });
+
+  test('G133 a device that was not itself given a capability cannot change that capability’s grant for the machine', async () => {
+    const { svc, grants } = service();
+    expect(await failure(svc.patch({ terminal: { use: false } }, phone(true, LIMITED_DEVICE_GRANTS)))).toBe(
+      'device-not-granted: this device has not been given terminal, so it cannot change the terminal grant for the machine',
+    );
+    expect(grants().terminal.use).toBe(true);
+  });
+
   test('G159 a change moves the answer in the same call and is recorded after the write', async () => {
     const { svc, grants, history } = service();
     await svc.patch({ browser: { configure: false } }, owner);

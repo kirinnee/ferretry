@@ -26,6 +26,7 @@ import {
 import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { KeptItem, StepReport } from '../report.ts';
+import { pathSegment } from '../key-path.ts';
 import { failureNote, readV4Json, V4InputError } from '../v4/documents.ts';
 import { V4_CREDENTIALS, V4_PASSIVE_USAGE } from '../v4/logins.ts';
 import {
@@ -153,7 +154,7 @@ export const usageStep: Step = {
           );
         const document = PricingFileSchema.safeParse({ catalog, sources: keys.data.analyticsPricingSources });
         if (!document.success) {
-          const where = document.error.issues[0]?.path.slice(0, 2).join(' entry ') ?? '';
+          const where = document.error.issues[0]?.path.slice(0, 2).map(pathSegment).join(' entry ') ?? '';
           throw new V4InputError(`${V4_DAEMON_CONFIG}: pricing ${where} does not fit the v5 rate catalog`);
         }
         if (keys.data.analyticsPricing.length > 0 || keys.data.analyticsPricingSources.length > 0) {
