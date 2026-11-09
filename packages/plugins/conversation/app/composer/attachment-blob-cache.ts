@@ -34,6 +34,17 @@ interface CacheEntry {
   touched: number;
 }
 
+/** Every cache a screen has open right now (a screen's provider, or an attachment's private one); gone on `dispose`. */
+const liveCaches = new Set<DaemonAttachmentBlobCache>();
+
+/**
+ * Drops, and revokes the object URLs of, every attachment this browser cached for one machine, in every open cache
+ * (S12: Conversation's `forget`, once the machine is no longer paired).
+ */
+export const clearAttachmentCaches = (daemonId: DaemonId): void => {
+  for (const cache of liveCaches) cache.clearDaemon(daemonId);
+};
+
 /**
  * Bounded LRU cache for attachment object URLs. Every cache slot includes the
  * daemon fingerprint, so equal ferret and attachment IDs from two pairings
@@ -50,6 +61,7 @@ export class DaemonAttachmentBlobCache {
       throw new Error('attachment cache capacity must be a positive integer');
     this.#urls = urls;
     this.#capacity = capacity;
+    liveCaches.add(this);
   }
 
   acquire(scope: DaemonAttachmentScope, load: () => Promise<Blob>): Promise<string> {
@@ -107,6 +119,7 @@ export class DaemonAttachmentBlobCache {
   }
 
   dispose(): void {
+    liveCaches.delete(this);
     for (const entry of this.#entries.values()) if (entry.url) this.#urls.revoke(entry.url);
     this.#entries.clear();
   }
