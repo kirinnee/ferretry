@@ -7,6 +7,7 @@ import { chmod, mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
+import { keyPath } from '../key-path.ts';
 
 /**
  * The part of a v5 `defineConfig` declaration the writer needs: one file under `config/`, or a folder of
@@ -44,21 +45,7 @@ export function v5ConfigProblem(target: V5ConfigTarget, name: string | undefined
   if (document.errors.length > 0) return 'the written YAML does not read back';
   const parsed = target.schema.safeParse(document.toJS() ?? {});
   if (parsed.success) return undefined;
-  return parsed.error.issues
-    .map(issue => `${issue.path.length === 0 ? '(top)' : issue.path.map(pathSegment).join('.')} (${issue.code})`)
-    .join(', ');
-}
-
-/**
- * One key of an issue path, only when it reads as a name. A key that is a list or a mapping (`? [..] : x`) reaches the
- * path as the text of its own content, which may be a credential, so anything else is said as `<key>`.
- */
-function pathSegment(segment: PropertyKey): string {
-  return typeof segment === 'string' && /^[A-Za-z0-9_.-]{1,64}$/u.test(segment)
-    ? segment
-    : typeof segment === 'number'
-      ? String(segment)
-      : '<key>';
+  return parsed.error.issues.map(issue => `${keyPath(issue.path)} (${issue.code})`).join(', ');
 }
 
 /** The part of a v5 `defineState` / `defineConfig` declaration the writer needs. */

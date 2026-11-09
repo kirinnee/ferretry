@@ -45,6 +45,7 @@ import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { isMap, isScalar, type Document } from 'yaml';
 import { LoginFileSchema, storedEnvironmentIssue } from '@ferretry/plugin-logins/contract';
+import { pathSegment } from '../key-path.ts';
 import type { KeptItem, StepReport } from '../report.ts';
 import { V4InputError } from '../v4/documents.ts';
 import { V5_VAULT_FILE, V5_VAULT_KEY_FILE } from './secrets.ts';
@@ -90,10 +91,16 @@ export class LoginKeyHold {
     for (const name of names) this.#taken.add(name);
   }
 
-  /** A free `LOGIN_<ID>_<VAR>`, de-duplicated with `_2`, `_3`; the name is reserved. */
+  /**
+   * A free `LOGIN_<ID>_<VAR>`, de-duplicated with `_2`, `_3`; the name is reserved. The vault name is printed in the
+   * report, so the variable is said through `pathSegment`: an owner-typed variable that reads as a key becomes `KEY`.
+   */
   claim(login: string, variable: string): string {
     const clean = (text: string) => text.toUpperCase().replace(/[^A-Z0-9]+/gu, '_');
-    const base = `LOGIN_${clean(login)}_${clean(variable)}`.replace(/_+$/u, '').slice(0, MAX_SECRET_NAME_LENGTH);
+    const said = pathSegment(variable);
+    const base = `LOGIN_${clean(login)}_${said === '<key>' ? 'KEY' : clean(said)}`
+      .replace(/_+$/u, '')
+      .slice(0, MAX_SECRET_NAME_LENGTH);
     let name = base;
     for (let n = 2; this.#taken.has(name); n++) {
       const suffix = `_${String(n)}`;
@@ -225,16 +232,19 @@ export function takeLoginKeys(document: Document, login: string, hold: LoginKeyH
       if (typeof variable !== 'string' || !isScalar(node) || typeof node.value !== 'string') continue;
       if (!isPlainLoginKey(variable, node.value)) continue;
       const value = node.value;
+      // The variable is typed by the owner and can itself be a key (`AKIA…` is a valid environment name): it is said
+      // only through `pathSegment`, in every sentence, in the held record and in the vault name.
+      const said = pathSegment(variable);
       if (value.length < MIN_SECRET_VALUE_LENGTH)
         throw new V4InputError(
-          `config/logins/${login}.yaml: ${where}.${variable} is refused by v5 as a secret but is under ${String(MIN_SECRET_VALUE_LENGTH)} characters, which the vault cannot hold; edit or remove it in the v4 file, then run again`,
+          `config/logins/${login}.yaml: ${where}.${said} is refused by v5 as a secret but is under ${String(MIN_SECRET_VALUE_LENGTH)} characters, which the vault cannot hold; edit or remove it in the v4 file, then run again`,
         );
       if (!SecretValueSchema.safeParse(value).success)
         throw new V4InputError(
-          `config/logins/${login}.yaml: ${where}.${variable} is a key the vault cannot hold (over ${String(MAX_SECRET_VALUE_LENGTH)} characters)`,
+          `config/logins/${login}.yaml: ${where}.${said} is a key the vault cannot hold (over ${String(MAX_SECRET_VALUE_LENGTH)} characters)`,
         );
       const name = hold.claim(login, variable);
-      hold.add({ login, variable: path.length === 1 ? variable : `${where}.${variable}`, name }, value);
+      hold.add({ login, variable: path.length === 1 ? said : `${where}.${said}`, name }, value);
       node.value = secretReference(SecretNameSchema.parse(name));
       taken++;
     }

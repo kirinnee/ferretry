@@ -81,6 +81,25 @@ describe('MAJOR-1 the terminal check against a fresh preview', () => {
     expect(calls.map(call => verb(call))).toEqual(['ps']);
   });
 
+  test('n2 an invalid terminals.yaml is said by key path and code, never by zod text that can quote a key-shaped name', async () => {
+    const miss = async (yaml: string) =>
+      (
+        await terminalCheck({
+          target,
+          v4Home: '/v4',
+          callerEnv,
+          run: fake({ ps: '[]' }).run,
+          readText: files({ yaml }),
+        })
+      ).problems.join(' ');
+    const unknownKey = await miss('AKIAFAKEFAKEFAKE0123: 1\nenvironment: {}\n');
+    expect(unknownKey).toContain('is invalid (');
+    expect(unknownKey).not.toContain('AKIAFAKE');
+    const badName = await miss('environment:\n  AKIAFAKEFAKEFAKE0123=x: "1"\n');
+    expect(badName).toContain('is invalid (environment.<key>');
+    expect(badName).not.toContain('AKIAFAKE');
+  });
+
   test('with no ferret record, a held, invalid, wrong or missing terminals.yaml is a miss that names its state', async () => {
     const miss = async (readText: (path: string) => Promise<string | undefined>) =>
       (await terminalCheck({ target, v4Home: '/v4', callerEnv, run: fake({ ps: '[]' }).run, readText })).problems.join(

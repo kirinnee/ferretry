@@ -118,7 +118,7 @@ interface EnvironmentStoreResolution {
 }
 
 /** A `host` or `ferretry` login with no store to read: a Codex home that cannot be named, or a build that cannot reach the stores. */
-export interface UnavailableStoreResolution {
+interface UnavailableStoreResolution {
   readonly harness: HarnessKind;
   readonly store: 'host' | 'ferretry';
   readonly unavailable: string;
@@ -126,6 +126,14 @@ export interface UnavailableStoreResolution {
 
 /** A resolution that has a login on disk (or in a keychain) to read. */
 export type StoredCredentialResolution = ClaudeStoreResolution | CodexStoreResolution;
+
+/** Why a login kept in a store reads as unreachable until the host names the directories the stores live in. */
+const NO_STORE_PATHS =
+  'this build cannot reach the directories logins are signed in to, so it cannot read or sign this one in';
+
+/** Why an environment login whose Google credentials file is under `~/` cannot launch before the home is named. */
+const NO_HOME_FOR_CLOUD_CREDENTIAL =
+  'its Google credentials file is under your home directory, which this build cannot locate';
 
 /** Where one credential's login lives and how a runtime reaches it. */
 export type CredentialStoreResolution =
@@ -169,10 +177,11 @@ export function claudeStorageDirectory(secureStorage: string, userHome: string):
 export function resolveCredentialStore(
   id: string,
   credential: Credential,
-  paths: CredentialStorePaths,
+  paths: CredentialStorePaths | undefined,
   harness: HarnessKind = credential.harness,
 ): CredentialStoreResolution {
-  if (credential.store === 'environment') return environmentResolution(credential, harness, paths.userHome);
+  if (credential.store === 'environment') return environmentResolution(credential, harness, paths?.userHome);
+  if (paths === undefined) return { harness: credential.harness, store: credential.store, unavailable: NO_STORE_PATHS };
   const owned = credential.store === 'ferretry' ? ferretryCredentialDirectory(paths.fleetRoot, id) : undefined;
   if (credential.harness === 'claude') {
     const secureStorage = owned ?? HOST_CLAUDE_SECURE_STORAGE;
@@ -240,21 +249,28 @@ export function codexCredentialLink(
 function environmentResolution(
   credential: Credential,
   harness: HarnessKind,
-  userHome: string,
+  userHome: string | undefined,
 ): EnvironmentStoreResolution {
   const half = credentialHalf(credential, harness);
   const own = half?.env ?? {};
   const codexProvider = half?.codexProvider;
   const reference =
     credential.cloudCredential === undefined ? undefined : parseCloudCredential(credential.cloudCredential);
-  const env = { ...own, ...(reference === undefined ? {} : cloudCredentialEnvironment(reference, userHome)) };
+  // Only a `~/` Google credentials path reads the person's home: without one named, that one reference cannot launch.
+  const homeless =
+    userHome === undefined && reference?.kind === 'gcloud-adc' && reference.path?.startsWith('~/') === true;
+  const env = {
+    ...own,
+    ...(reference === undefined || homeless ? {} : cloudCredentialEnvironment(reference, userHome ?? '')),
+  };
   const provider = codexProvider === undefined ? undefined : codexProviderArgs(codexProvider, own);
+  const problem = provider !== undefined && 'problem' in provider ? provider.problem : undefined;
   return {
     harness,
     store: 'environment',
     env,
     ...(provider !== undefined && 'args' in provider ? { args: provider.args } : {}),
-    ...(provider !== undefined && 'problem' in provider ? { problem: provider.problem } : {}),
+    ...(homeless ? { problem: NO_HOME_FOR_CLOUD_CREDENTIAL } : problem === undefined ? {} : { problem }),
     ...(codexProvider?.model === undefined ? {} : { modelArgs: codexProviderModelArgs(codexProvider.model) }),
   };
 }

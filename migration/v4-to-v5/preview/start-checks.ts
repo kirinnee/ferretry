@@ -19,6 +19,7 @@ import { acceptedConfigFile, acceptedName } from '@ferretry/kernel/contract';
 import { TerminalsConfigSchema } from '@ferretry/plugin-terminals/contract';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { keyPath } from '../src/key-path.ts';
 import { quietYaml as parseYaml } from '../src/v4/config.ts';
 import { previewShellEnv } from '../src/v5/preview-env.ts';
 import { PREVIEW } from './plan.ts';
@@ -169,6 +170,13 @@ type TerminalsFileState =
   | { readonly state: 'missing' | 'invalid' | 'held' | 'wrong'; readonly sentence: string };
 
 /**
+ * Why the terminals file does not parse, said as a key path and a code: zod's own message can quote a name (a strict
+ * schema says `Unrecognized key: "<key>"`), and a name can be a key, so the message is never printed.
+ */
+const invalidWhere = (issue: { readonly path: readonly PropertyKey[]; readonly code: string } | undefined): string =>
+  issue === undefined ? 'it does not parse' : `${keyPath(issue.path)}: ${issue.code}`;
+
+/**
  * The state of the preview's terminal environment as the runtime reads it: the file parses, the kernel has it ACCEPTED
  * for Terminals (a file with no matching record is held, and nothing of it is in effect), and its `environment` is the
  * preview's. A sentence for each miss that names the state and the remedy.
@@ -193,7 +201,7 @@ export async function terminalsFileState(
   if (!parsed.success)
     return {
       state: 'invalid',
-      sentence: `${file} is invalid (${parsed.error.issues[0]?.message ?? 'it does not parse'}), so the daemon keeps the last good one or none. Fix it, or run preview.sh clean and prepare again.`,
+      sentence: `${file} is invalid (${invalidWhere(parsed.error.issues[0])}), so the daemon keeps the last good one or none. Fix it, or run preview.sh clean and prepare again.`,
     };
   let accepted: { format?: unknown; etag?: unknown; text?: unknown; plugin?: unknown } | undefined;
   try {
