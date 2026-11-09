@@ -27,9 +27,10 @@ function BindOpeners({ openFile }: { readonly openFile: (path: string) => void }
 export function FilesSearchPanel(props: PanelProps): ReactNode {
   const daemon = useConversationDaemon();
   const slot = isFilesSearchSlotProps(props) ? props : null;
+  const ferret = slot === null ? undefined : slot.ferret;
   const scope = useMemo(
-    () => (slot === null || daemon === undefined ? null : { daemon, ferret: slot.ferret }),
-    [daemon, slot?.ferret],
+    () => (ferret === undefined || daemon === undefined ? null : { daemon, ferret }),
+    [daemon, ferret],
   );
   if (slot === null || scope === null) return null;
   return (
