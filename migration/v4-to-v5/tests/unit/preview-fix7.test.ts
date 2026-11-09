@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { acceptedName } from '@ferretry/kernel/contract';
+import { createHash } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -13,6 +14,7 @@ import { previewShellEnv } from '../../src/v5/preview-env.ts';
 import { fixture } from './ferret-fixture.ts';
 
 const REPO = resolve(import.meta.dir, '../../../..');
+const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
 let root: string;
 beforeEach(async () => {
@@ -60,7 +62,7 @@ describe('MAJOR-1 the terminal check against a fresh preview', () => {
         .join('\n')}\n`;
     const accepted =
       over.accepted === undefined
-        ? JSON.stringify({ format: 1, etag: 'x', text: yaml, plugin: 'terminals' })
+        ? JSON.stringify({ format: 1, etag: sha256(yaml), text: yaml, plugin: 'terminals' })
         : over.accepted;
     return async (path: string): Promise<string | undefined> =>
       path === join(target, 'config/terminals.yaml')
@@ -84,16 +86,31 @@ describe('MAJOR-1 the terminal check against a fresh preview', () => {
         ' ',
       );
     expect(await miss(files({ accepted: null }))).toContain('is held');
-    expect(await miss(files({ accepted: null }))).toContain('config confirm terminals.yaml');
+    // 5.0 has no `fy config` verb: the sentence names the app's Confirm, never a command that does not exist.
+    expect(await miss(files({ accepted: null }))).toContain('Settings, configuration file, Confirm');
+    expect(await miss(files({ accepted: null }))).not.toContain('config confirm');
     expect(await miss(files({ yaml: 'environment:\n  PATH: /evil\n' }))).toContain('is invalid');
     expect(await miss(files({ yaml: 'environment:\n  A: "1"\n' }))).toContain('not the preview');
     expect(await miss(files({ accepted: null }))).toContain('prepare --owner');
     expect(await miss(async () => undefined)).toContain('is missing');
+    const wrongText = 'environment:\n  A: "1"\n';
     const wrong = files({
-      yaml: 'environment:\n  A: "1"\n',
-      accepted: JSON.stringify({ text: 'environment:\n  A: "1"\n', plugin: 'terminals' }),
+      yaml: wrongText,
+      accepted: JSON.stringify({ format: 1, etag: sha256(wrongText), text: wrongText, plugin: 'terminals' }),
     });
     expect((await terminalsFileState(target, wrong)).state).toBe('wrong');
+  });
+
+  test('a record the kernel would not read is held: a format other than 1, or an etag that is not the text', async () => {
+    const env = previewShellEnv(target, PREVIEW.port);
+    const yaml = `environment:\n${Object.entries(env)
+      .map(([k, v]) => `  ${k}: "${v}"`)
+      .join('\n')}\n`;
+    for (const record of [
+      { format: 2, etag: sha256(yaml), text: yaml, plugin: 'terminals' },
+      { format: 1, etag: 'x', text: yaml, plugin: 'terminals' },
+    ])
+      expect((await terminalsFileState(target, files({ accepted: JSON.stringify(record) }))).state).toBe('held');
   });
 
   test('no sentence tells the owner to start a ferret first', async () => {
@@ -195,12 +212,13 @@ console.log(JSON.stringify({ state: port.fileState(def).state, environment: port
       await acceptedConfigStep.run(ctx);
       await expect(stat(join(f.to, 'state/kernel/accepted-config'))).rejects.toThrow();
 
-      const note = ownerNote(false, f.to);
+      const note = ownerNote(false);
       expect(note).toContain('config/terminals.yaml');
       expect(note).toContain('config/claude-code/settings/fy-preview.yaml');
-      expect(note).toContain('config confirm');
+      expect(note).toContain('Settings, configuration file, Confirm');
+      expect(note).not.toContain('config confirm');
       expect(note).toContain('--owner');
-      expect(ownerNote(true, f.to)).toContain('recorded as accepted');
+      expect(ownerNote(true)).toContain('recorded as accepted');
     } finally {
       await f.clean();
     }
@@ -220,20 +238,21 @@ console.log(JSON.stringify({ state: port.fileState(def).state, environment: port
           ...(owner ? { owner: true } : {}),
         });
         expect(done.summary).toContain(owner ? 'recorded as accepted (--owner)' : 'NOT ACCEPTED (no --owner)');
-        // A record naming Terminals (the plugin the kernel reads it for) exists only with the owner's flag.
-        const text = await readFile(
-          join(f.to, 'state/kernel/accepted-config', `${acceptedName('terminals.yaml')}.json`),
-          'utf8',
-        ).catch(() => undefined);
-        const plugin = text === undefined ? undefined : (JSON.parse(text) as { plugin?: string }).plugin;
-        expect(plugin).toBe(owner ? 'terminals' : undefined);
+        // A record for either preview file exists only with the owner's flag: without it the record is ABSENT.
+        const dir = join(f.to, 'state/kernel/accepted-config');
+        for (const name of ['terminals.yaml', 'claude-code/settings/fy-preview.yaml']) {
+          const text = await readFile(join(dir, `${acceptedName(name)}.json`), 'utf8').catch(() => undefined);
+          if (owner)
+            expect(JSON.parse(text ?? 'null').plugin).toBe(name === 'terminals.yaml' ? 'terminals' : 'claude-code');
+          else expect(text).toBeUndefined();
+        }
       } finally {
         await f.clean();
       }
     }
   });
 
-  test('a home whose v4 files were all in effect is unchanged by the exception (outside the preview nothing carries a plugin)', async () => {
+  test('a home whose v4 files were held and not a preview run records nothing', async () => {
     const f = await fixture();
     try {
       await write(f.from, 'config/limits.yaml', 'enabled: true\n');
@@ -244,6 +263,121 @@ console.log(JSON.stringify({ state: port.fileState(def).state, environment: port
     } finally {
       await f.clean();
     }
+  });
+
+  const previewRecords = async (f: Awaited<ReturnType<typeof fixture>>) => {
+    const dir = join(f.to, 'state/kernel/accepted-config');
+    return {
+      terminals: await stat(join(dir, `${acceptedName('terminals.yaml')}.json`)).then(
+        () => true,
+        () => false,
+      ),
+      settings: await stat(join(dir, `${acceptedName('claude-code/settings/fy-preview.yaml')}.json`)).then(
+        () => true,
+        () => false,
+      ),
+    };
+  };
+
+  test('MAJOR-1 no flag, every v4 file in effect: neither preview file has a record', async () => {
+    const f = await fixture();
+    try {
+      const text = 'enabled: true\n';
+      await write(f.from, 'config/limits.yaml', text);
+      await write(
+        f.from,
+        'state/config-accepted.json',
+        JSON.stringify({ 'limits.yaml': { etag: sha256(text), text } }),
+      );
+      const ctx = previewCtx(f, false);
+      expect((await settingsStep.run(ctx)).status).toBe('converted');
+      const report = await acceptedConfigStep.run(ctx);
+      expect(JSON.stringify(report.kept)).toContain('v4 config files in effect as written');
+      expect(await previewRecords(f)).toEqual({ terminals: false, settings: false });
+    } finally {
+      await f.clean();
+    }
+  });
+
+  test('MAJOR-1 no flag, no v4 config files: neither preview file has a record; with the flag both do', async () => {
+    for (const owner of [false, true]) {
+      const f = await fixture();
+      try {
+        const ctx = previewCtx(f, owner);
+        expect((await settingsStep.run(ctx)).status).toBe('converted');
+        const report = await acceptedConfigStep.run(ctx);
+        expect(await previewRecords(f)).toEqual({ terminals: owner, settings: owner });
+        // The report counts only the files actually recorded.
+        const recorded = report.kept.find(item => item.what === 'v5 config files recorded as accepted')?.count;
+        // The two files the preview forces tight (limits.yaml, runtimes.yaml) are recorded either way; the preview's two
+        // are the flag's.
+        expect(recorded).toBe(owner ? 4 : 2);
+      } finally {
+        await f.clean();
+      }
+    }
+  });
+});
+
+describe('Minor-3 a miss in preview.sh start stops the daemon it just started, and says so', () => {
+  const script = join(import.meta.dir, '../../preview/preview.sh');
+
+  /** A fake `bun` that records its arguments and fails `terminal-check`, and a fake `fy5` that succeeds. */
+  const start = async (stopCode: number) => {
+    const bin = join(root, 'fakebin');
+    const target = join(root, 'v5');
+    const log = join(root, 'bun.log');
+    await mkdir(bin, { recursive: true });
+    await mkdir(join(target, 'bin'), { recursive: true });
+    await writeFile(
+      join(bin, 'bun'),
+      [
+        '#!/bin/sh',
+        'echo "$@" >> "$FAKE_LOG"',
+        'case "$2" in',
+        '  guard) printf "%s\\n%s\\n" "$FAKE_V4" "$FAKE_TARGET" ;;',
+        '  terminal-check) exit 1 ;;',
+        '  stop) exit "$FAKE_STOP_CODE" ;;',
+        '  *) exit 0 ;;',
+        'esac',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    await writeFile(join(target, 'bin', 'fy5'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const result = Bun.spawnSync([script, 'start', '--v4', join(root, 'v4'), '--target', target], {
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        HOME: root,
+        FAKE_LOG: log,
+        FAKE_V4: join(root, 'v4'),
+        FAKE_TARGET: target,
+        FAKE_STOP_CODE: String(stopCode),
+      },
+    });
+    const calls = (await readFile(log, 'utf8'))
+      .split('\n')
+      .filter(line => line !== '')
+      .map(line => line.split(' ')[1]);
+    return { result, calls };
+  };
+
+  test('the daemon is stopped, the sentence says it was, and the exit is 1', async () => {
+    const { result, calls } = await start(0);
+    expect(calls).toContain('terminal-check');
+    expect(calls.at(-2)).toBe('terminal-check');
+    expect(calls.at(-1)).toBe('stop');
+    expect(calls).toContain('stop');
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain('the preview daemon was stopped because the terminal proof failed');
+  });
+
+  test('when stop itself fails the sentence says the daemon could not be stopped and names the command', async () => {
+    const { result, calls } = await start(1);
+    expect(calls).toContain('stop');
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain('could not be stopped');
+    expect(result.stderr.toString()).toContain("preview.sh stop' now");
   });
 });
 

@@ -253,7 +253,10 @@ rules twice.
 Confirmed settings (`src/steps/accepted-config.ts`, last): v4's `state/config-accepted.json` holds what v4 put into
 effect per config file. When every v4 config file was in effect as written (its entry's etag is the SHA-256 of its text),
 each v5 config file this run wrote is recorded as accepted (`state/kernel/accepted-config/`, the kernel's
-`acceptedConfigFile`), so a loosening the owner confirmed in v4 is not asked about again. When any was not (a held
+`acceptedConfigFile`, each record naming the plugin whose def owns the path, from `src/v5/targets.ts`; a path no def
+owns is not recorded and stays held), so a loosening the owner confirmed in v4 is not asked about again. The preview's
+own two files (`terminals.yaml`, the `fy-preview` settings item) are recorded only with `prepare --owner`, never
+otherwise. When any was not (a held
 edit, an invalid file, one never accepted, a held deletion), nothing is recorded, the report names those files, and v5
 holds any loosening until the owner confirms it again. Texts are hashed and written, never reported.
 

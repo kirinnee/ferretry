@@ -13,7 +13,7 @@ import type { z } from 'zod';
  * `<name>.yaml` items. A contract's own `ConfigDef` fits; a def declared only in a manifest is restated with the same
  * file name and the schema its contract exports.
  */
-export type V5ConfigTarget =
+export type V5ConfigDef =
   | { readonly shape: 'file'; readonly file: string; readonly schema: z.ZodType<unknown> }
   | {
       readonly shape: 'collection';
@@ -21,6 +21,9 @@ export type V5ConfigTarget =
       readonly name: RegExp;
       readonly schema: z.ZodType<unknown>;
     };
+
+/** A {@link V5ConfigDef} with the id of the plugin that declares it (`data.config` of its manifest). */
+export type V5ConfigTarget = V5ConfigDef & { readonly plugin: string };
 
 /** Where a config file lands, relative to the v5 home: `config/<file>` or `config/<collection>/<name>.yaml`. */
 export function configPath(target: V5ConfigTarget, name?: string): string {

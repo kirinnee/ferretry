@@ -34,7 +34,6 @@ import {
   GLOBAL_FILE,
   GLOBAL_LESSONS_DOCUMENT,
   GlobalDocumentSchema,
-  LESSONS_CONFIG,
   LessonsStateFileSchema,
   OBSERVATIONS_FILE,
   ObservationSchema,
@@ -81,7 +80,10 @@ import {
   type V4RunManifest as V4RunManifestValue,
   type V4StoredProposal as V4StoredProposalValue,
 } from '../v4/lessons.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem } from '../v5/write.ts';
+
+const LESSONS_CONFIG = CONFIG_TARGETS.LESSONS;
 import { dropModeline } from '../v4/config.ts';
 import { instructionsSource } from './settings.ts';
 import type { Step, StepContext } from './index.ts';

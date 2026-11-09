@@ -8,7 +8,8 @@
  * had not confirmed), refusing the file, or had never read it, and enforced an older text or the defaults.
  *
  * v5 keeps one document per config path under `state/kernel/accepted-config/` (`acceptedConfigFile`,
- * `acceptedName(path)`), `{etag: sha256(text), text}`. The converter's v5 files are not v4's texts, so the record cannot
+ * `acceptedName(path)`), `{etag: sha256(text), text, plugin}`, where `plugin` is the plugin whose def owns the path
+ * (the kernel reads a record only for the plugin it names; a path no def owns is not recorded and stays held). The converter's v5 files are not v4's texts, so the record cannot
  * be copied; instead, when EVERY v4 config file was in effect as written, every config file this run wrote is recorded
  * as accepted with its own text: v5 then starts with exactly what v4 enforced, confirmations included. When ANY v4
  * file was not (a held edit, an invalid file, a file v4 never accepted, a deletion still held), nothing is recorded and
@@ -27,27 +28,26 @@ import { z } from 'zod';
 import type { StepReport } from '../report.ts';
 import { readV4Json } from '../v4/documents.ts';
 import { PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
+import { configOwner } from '../v5/targets.ts';
 import type { Step, StepContext } from './index.ts';
 
 export const V4_CONFIG_ACCEPTED = 'state/config-accepted.json';
 const V5_ACCEPTED_DIR = 'state/kernel/accepted-config';
 
-/** The kernel's declared body for one accepted document (`{etag, text}`, strict). */
+/** The kernel's declared body for one accepted document (`{etag, text, plugin?}`, strict). */
 const ACCEPTED_BODY = acceptedConfigFile.schema;
 if (ACCEPTED_BODY === undefined) throw new Error('the kernel declares accepted-config with no schema');
 
 const V4AcceptedRecord = z.record(z.string(), z.strictObject({ etag: z.string().min(1), text: z.string() }));
 
 /**
- * The plugin that owns a file only the preview itself writes (Terminals' `terminals.yaml`, Claude Code's `fy-preview`
- * settings item), else `undefined`. The kernel reads an accepted record only for the plugin it names, so these carry it.
+ * A file only the preview itself writes (Terminals' `terminals.yaml`, Claude Code's `fy-preview` settings item). The
+ * kernel reads an accepted record only for the plugin that owns the path ({@link configOwner}, built from the v5 defs),
+ * and these are recorded only when the owner ran `prepare --owner`, in every case.
  */
-const previewOwner = (path: string): string | undefined =>
-  path === join('config', 'terminals.yaml')
-    ? 'terminals'
-    : path === join('config', 'claude-code', 'settings', `${PREVIEW_SETTINGS_ITEM}.yaml`)
-      ? 'claude-code'
-      : undefined;
+const isPreviewAuthored = (path: string): boolean =>
+  path === join('config', 'terminals.yaml') ||
+  path === join('config', 'claude-code', 'settings', `${PREVIEW_SETTINGS_ITEM}.yaml`);
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -99,29 +99,44 @@ export const acceptedConfigStep: Step = {
       const configs = [...ctx.v5.writtenConfigs()].sort(([a], [b]) => a.localeCompare(b));
       // Only when the OWNER ran `prepare --owner`: accepting the preview's own files is the owner's act, never an agent's.
       const ownerRan = ctx.preview === true && ctx.previewOwner === true;
-      const record = async (entries: readonly (readonly [string, string])[]): Promise<void> => {
+      /**
+       * Records each entry for the plugin whose def owns its path. A preview-authored path is never recorded without
+       * the owner's flag, and a path no def owns is dropped (that file stays held). Returns what was recorded and
+       * what no def owned.
+       */
+      const record = async (
+        entries: readonly (readonly [string, string])[],
+      ): Promise<{ readonly recorded: number; readonly unowned: readonly string[] }> => {
+        let recorded = 0;
+        const unowned: string[] = [];
         for (const [path, text] of entries) {
+          if (isPreviewAuthored(path) && !ownerRan) continue;
+          const plugin = configOwner(path);
+          if (plugin === undefined) {
+            unowned.push(path);
+            continue;
+          }
           const name = acceptedName(relative('config', path));
-          const plugin = ownerRan ? previewOwner(path) : undefined;
           await ctx.v5.stamped(
             { path: join(V5_ACCEPTED_DIR, `${name}.json`), format: acceptedConfigFile.format, schema: ACCEPTED_BODY },
-            { etag: sha256(text), text, ...(plugin === undefined ? {} : { plugin }) },
+            { etag: sha256(text), text, plugin },
           );
+          recorded += 1;
         }
+        return { recorded, unowned };
       };
       const held = await notInEffect(ctx);
       if (held.paths.length > 0) {
         // The preview's own authored files are the owner's act (the owner runs `prepare`), so they are recorded as accepted
         // whatever v4's record says: a held terminals.yaml would open every terminal with only {PATH, HOME} and reach v4's `fy`.
-        const own = ownerRan ? configs.filter(([path]) => previewOwner(path) !== undefined) : [];
-        await record(own);
+        const own = await record(configs.filter(([path]) => isPreviewAuthored(path)));
         return {
           ...base,
           status: 'converted',
           kept:
-            own.length === 0
+            own.recorded === 0
               ? []
-              : [{ what: "the preview's own config files recorded as accepted", count: own.length }],
+              : [{ what: "the preview's own config files recorded as accepted", count: own.recorded }],
           notCarried: [
             {
               what: `${V4_CONFIG_ACCEPTED} (v4 was not enforcing as written: ${held.paths.join(', ')})`,
@@ -130,16 +145,24 @@ export const acceptedConfigStep: Step = {
           ],
         };
       }
-      await record(configs);
+      const all = await record(configs);
       return {
         ...base,
         status: 'converted',
         ...(ctx.dryRun ? { note: 'dry run: nothing written' } : {}),
         kept: [
           { what: 'v4 config files in effect as written', count: held.files },
-          { what: 'v5 config files recorded as accepted', count: configs.length },
+          { what: 'v5 config files recorded as accepted', count: all.recorded },
         ],
-        notCarried: [],
+        notCarried:
+          all.unowned.length === 0
+            ? []
+            : [
+                {
+                  what: `no accepted record for ${all.unowned.join(', ')}`,
+                  why: 'no v5 plugin declares a config def for the path, so the kernel could not read a record for it: the file stays held until the owner confirms it',
+                },
+              ],
       };
     } catch {
       return {

@@ -27,7 +27,6 @@
 import {
   PACK_REPLACED,
   PACK_SWITCHES,
-  PACKS_CONFIG,
   PackInventorySchema,
   packConfigFromFile,
   PackRunFileSchema,
@@ -67,11 +66,12 @@ import {
   V4RoutingCatalog,
   V4SessionPack,
 } from '../v4/packs.ts';
-import { v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
+import { v5ConfigProblem } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
 import { CODEX_HELD_SENTENCE, heldRuntimeNames } from './preview-hold.ts';
 
-const PACKS_TARGET = PACKS_CONFIG as V5ConfigTarget;
+const PACKS_TARGET = CONFIG_TARGETS.PACKS;
 const STATE = 'state/packs';
 /** `packages/core/kernel/host/state/state-port.ts` `COLLECTION_NAME`: the names v5's `runs/*` store lists. */
 const V5_COLLECTION_NAME = /^[A-Za-z0-9_][A-Za-z0-9._%~-]{0,200}$/u;

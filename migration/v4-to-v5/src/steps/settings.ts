@@ -30,20 +30,7 @@
  * file is read back as the v5 kernel reads it and parsed with the declared schema BEFORE anything is written. A value
  * that looks like a raw secret fails the step naming the file and key; `${secret:NAME}` references are kept verbatim.
  */
-import { CODEX_CONFIG, CODEX_SETTINGS } from '@ferretry/plugin-codex/contract';
-import { CLAUDE_CODE_CONFIG, CLAUDE_CODE_SETTINGS } from '@ferretry/plugin-claude-code/contract';
-import { INSTRUCTION_ITEMS_FOLDER, LimitsConfigFile } from '@ferretry/core-ferrets/contract';
-import { AccountsConfigSchema } from '@ferretry/plugin-accounts/contract';
-import { AGENDA_CONFIG } from '@ferretry/plugin-agenda/contract';
-import { BrowsersConfigSchema } from '@ferretry/plugin-browsers/contract';
-import { CONVERSATION_CONFIG } from '@ferretry/plugin-conversation/contract';
-import { ENDPOINTS_CONFIG, LOGINS_CONFIG, MODELS_CONFIG } from '@ferretry/plugin-logins/contract';
-import { MCP_CONFIG } from '@ferretry/plugin-mcp/contract';
-import { MODEL_SET_ITEMS, PROFILE_ITEMS, RUNTIME_ITEMS, RUNTIMES_CONFIG } from '@ferretry/plugin-runtimes/contract';
-import { SKILLS_CONFIG } from '@ferretry/plugin-skills/contract';
-import { TerminalsConfigSchema } from '@ferretry/plugin-terminals/contract';
-import { USAGE_CONFIG } from '@ferretry/plugin-usage/contract';
-import { WardenFileSchema } from '@ferretry/plugin-warden/contract';
+import { INSTRUCTION_ITEMS_FOLDER } from '@ferretry/core-ferrets/contract';
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { Document, isMap, isScalar, isSeq, Pair, type YAMLMap } from 'yaml';
@@ -60,14 +47,34 @@ import {
 import { failureNote, V4InputError } from '../v4/documents.ts';
 import { CODEX_HELD_SENTENCE, PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
 
-/** v5 files declared in a plugin MANIFEST (not its contract): restated with the file name and the contract's schema. */
-const WARDEN_CONFIG: V5ConfigTarget = { shape: 'file', file: 'warden.yaml', schema: WardenFileSchema };
-const ACCOUNTS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'accounts.yaml', schema: AccountsConfigSchema };
-const BROWSERS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'browsers.yaml', schema: BrowsersConfigSchema };
-const TERMINALS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'terminals.yaml', schema: TerminalsConfigSchema };
+/** Every v5 file this step writes, with its owning plugin, from the one registry of targets. */
+const {
+  WARDEN: WARDEN_CONFIG,
+  ACCOUNTS: ACCOUNTS_CONFIG,
+  BROWSERS: BROWSERS_CONFIG,
+  TERMINALS: TERMINALS_CONFIG,
+  CODEX: CODEX_CONFIG,
+  CODEX_SETTINGS,
+  CLAUDE_CODE: CLAUDE_CODE_CONFIG,
+  CLAUDE_CODE_SETTINGS,
+  LIMITS: LimitsConfigFile,
+  AGENDA: AGENDA_CONFIG,
+  CONVERSATION: CONVERSATION_CONFIG,
+  ENDPOINTS: ENDPOINTS_CONFIG,
+  LOGINS: LOGINS_CONFIG,
+  MODELS: MODELS_CONFIG,
+  MCP: MCP_CONFIG,
+  MODEL_SET_ITEMS,
+  PROFILE_ITEMS,
+  RUNTIME_ITEMS,
+  RUNTIMES: RUNTIMES_CONFIG,
+  SKILLS: SKILLS_CONFIG,
+  USAGE: USAGE_CONFIG,
+} = CONFIG_TARGETS;
 
 /** v4's `LEGACY_TRIAGE_LAYERS` and `DEFAULT_WARDEN_JEV_ACTS` (`packages/protocol/src/lib/warden.ts`). */
 const LEGACY_TRIAGE_LAYERS: Readonly<Record<string, { jev: boolean; llm: boolean }>> = {

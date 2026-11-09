@@ -14,6 +14,7 @@ import { CODEX_HELD_SENTENCE, previewShellEnv } from '../src/v5/preview-env.ts';
 import { gateFiles, gateForecast, type Spellings } from './gate.ts';
 import { ALLOWED, GAPS, LEFT_BEHIND, PREVIEW, SESSION_FILES, stepPlan } from './plan.ts';
 import { guardTarget, hasMarker, PREVIEW_MARKER, PREVIEW_MARKER_TEXT } from './paths.ts';
+import { CONFIRM_IN_APP } from './start-checks.ts';
 import {
   compare,
   parseSnapshot,
@@ -149,10 +150,10 @@ export interface PrepareInputs {
 }
 
 /** What `prepare` prints about the preview's own two files: accepted by the owner's flag, or what to do without it. */
-export function ownerNote(owner: boolean, target: string): string {
+export function ownerNote(owner: boolean): string {
   return owner
     ? "the preview's own config/terminals.yaml and config/claude-code/settings/fy-preview.yaml were recorded as accepted (--owner)."
-    : `NOT ACCEPTED (no --owner): config/terminals.yaml and config/claude-code/settings/fy-preview.yaml are held like any other unconfirmed file, so terminals cannot carry the preview environment and \`preview.sh start\` will stop the daemon. Confirm each with \`${join(target, 'bin', PREVIEW.wrapper)} config confirm <file>\` (needs the running daemon, which start stops), or the owner re-runs prepare with --owner.`;
+    : `NOT ACCEPTED (no --owner): config/terminals.yaml and config/claude-code/settings/fy-preview.yaml are held like any other unconfirmed file, so terminals cannot carry the preview environment and \`preview.sh start\` will stop the daemon. ${CONFIRM_IN_APP} \`preview.sh start\` stops the daemon on this miss, so the owner's remedy is preview.sh clean, then preview.sh prepare --owner.`;
 }
 
 export interface Prepared {
@@ -247,7 +248,7 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   await writeReport(reportPath, `${JSON.stringify(result.report, null, 2)}\n`);
   return {
     report: result.report,
-    summary: `${summarise(result.report)}\n${heldSection(result.report)}\n${ownerNote(inputs.owner === true, target)}\nreport: ${reportPath}`,
+    summary: `${summarise(result.report)}\n${heldSection(result.report)}\n${ownerNote(inputs.owner === true)}\nreport: ${reportPath}`,
     proof,
     changedWhileCopying: staged.changed,
     gate,
