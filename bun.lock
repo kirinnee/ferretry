@@ -250,7 +250,6 @@
         "playwright-core": "1.62.1",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
-        "yaml": "2.9.0",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -427,7 +426,6 @@
         "@ferretry/std": "workspace:*",
         "lucide-react": "^0.468.0",
         "react": "^19.0.0",
-        "yaml": "2.9.0",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -667,7 +665,6 @@
         "@ferretry/std": "workspace:*",
         "lucide-react": "^0.468.0",
         "react": "^19.0.0",
-        "yaml": "2.9.0",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -700,7 +697,6 @@
         "remark-gfm": "^4.0.1",
         "remark-parse": "^11.0.0",
         "unified": "^11.0.0",
-        "yaml": "2.9.0",
         "zod": "4.4.3",
       },
       "devDependencies": {
