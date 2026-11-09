@@ -302,7 +302,6 @@
       "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
-        "app/hooks/use-spend-today.ts",
         "app/lib/move-triggers.ts",
         "daemon/adapters/usage/index.ts",
         "daemon/adapters/usage/provider-quota/index.ts",

@@ -58,14 +58,14 @@ export function fakeConversation(options: { readonly now?: () => Instant } = {})
         path: 'direct',
         message: request.message,
         attachmentIds: request.attachmentIds ?? [],
-        senderKind: caller.kind === 'owner' ? 'human' : 'agent',
+        senderKind: caller.kind === 'owner' ? 'human' : caller.kind === 'warden' ? 'daemon' : 'agent',
         fate: busy ? 'queued' : 'delivered',
       });
       if (busy)
         queueOf(ferret).push({
           v: 1,
           id: sendId,
-          sender: caller.kind === 'owner' ? 'human' : 'agent',
+          sender: caller.kind === 'owner' ? 'human' : caller.kind === 'warden' ? 'daemon' : 'agent',
           text: request.message,
           attachmentIds: request.attachmentIds ?? [],
           enqueuedAt: now(),

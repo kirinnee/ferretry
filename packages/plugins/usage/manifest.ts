@@ -152,6 +152,9 @@ export default definePlugin({
       // The quota readout in the top bar, and a ferret's own insights next to it.
       panel('top', { id: 'quota', order: 70 }),
       panel('ferret.side', { id: 'insights', order: 70 }),
+      // Info › Usage (context, turns, tokens, cost and the login's quota), and the machine home's "Spend today" tile.
+      panel('ferret.side', { id: 'usage', order: 65 }),
+      panel('daemon.status', { id: 'spend-today', order: 70 }),
       // The account's quota on the composer's context row.
       panel('composer.tools', { id: 'composer-quota', order: 90 }),
     ],
