@@ -19,8 +19,8 @@ export { CODEX_HELD_SENTENCE };
 /** Why a runtime of unknown harness is held: said truthfully, it is not a Codex runtime. */
 export const UNKNOWN_HELD_SENTENCE = `held: its harness is unknown (its runtime file does not say, and the login that decides it is not in the preview), so it is held like a Codex runtime. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
 
-/** Why a runtime on a login that drives both CLIs is held when its profile does not say which one it runs. */
-export const BOTH_HELD_SENTENCE = `held: its login drives both CLIs and its profile does not say which one it runs, so its harness is unknown and it is held like a Codex runtime. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
+/** Why a runtime on a login that drives both CLIs is held when its profile includes a model set without a harness. */
+export const BOTH_HELD_SENTENCE = `held: its login drives both CLIs and its profile includes a model set without a harness, which v4 scopes by model ids the preview does not read, so its harness is unknown and it is held like a Codex runtime. ${CODEX_HELD_SENTENCE.replace(/^held: /u, 'Why Codex is held: ')}`;
 
 /** What the stage knows of one v4 login: its harness, and whether it drives both CLIs (halves for both). */
 export interface LoginHarness {
@@ -35,14 +35,19 @@ export type RuntimeHarness = 'claude-code' | 'codex' | 'unknown' | 'both';
 export const heldReason = (harness: RuntimeHarness): string =>
   harness === 'unknown' ? UNKNOWN_HELD_SENTENCE : harness === 'both' ? BOTH_HELD_SENTENCE : CODEX_HELD_SENTENCE;
 
-/** A profile's scope as v4 derives it (`profileScope`): the one CLI its layers are for, or `undefined` when they do not decide. */
-export type ProfileScopes = ReadonlyMap<string, 'claude' | 'codex' | undefined>;
+/**
+ * A profile's scope as v4 derives it (`profileScope`): the one CLI its layers are for (`claude`, `codex`), `generic`
+ * (generic or mixed: v4 treats both as not scoped), or `unsure` (a model set with no `harness`, which v4 scopes by model
+ * ids this tool does not copy).
+ */
+export type ProfileScope = 'claude' | 'codex' | 'generic' | 'unsure';
+export type ProfileScopes = ReadonlyMap<string, ProfileScope>;
 
 /**
  * v4's `profileScope` for every profile file: a layer is a component (its own `harness`, else generic) or a base
- * profile (folded in); a profile is scoped to one CLI only when its layers name that CLI and not the other. Anything
- * v4 would call generic or mixed does not decide. A model set without a `harness` is scoped by its model ids in v4, a
- * table this tool does not copy, so a profile with one does not decide either (it can only hold more, never less).
+ * profile (folded in); a profile is scoped to one CLI only when its layers name that CLI and not the other. Generic and
+ * mixed are `generic` (v4 falls back to the login). A model set without a `harness` is scoped by its model ids in v4, a
+ * table this tool does not copy, so a profile with one is `unsure` (the only case the preview cannot decide).
  */
 export async function previewProfileScopes(ctx: Pick<StepContext, 'v4'>): Promise<ProfileScopes> {
   const profiles = new Map<string, readonly string[]>();
@@ -93,10 +98,10 @@ export async function previewProfileScopes(ctx: Pick<StepContext, 'v4'>): Promis
     if (unsure) return 'unsure';
     return claude ? 'claude' : codex ? 'codex' : 'generic';
   };
-  const scopes = new Map<string, 'claude' | 'codex' | undefined>();
+  const scopes = new Map<string, ProfileScope>();
   for (const [name, layers] of profiles) {
     const scope = fold(layers, new Set([name]));
-    scopes.set(name, scope === 'claude' || scope === 'codex' ? scope : undefined);
+    scopes.set(name, scope === 'mixed' ? 'generic' : scope);
   }
   return scopes;
 }
@@ -107,23 +112,29 @@ export const holdsCodex = (ctx: Pick<StepContext, 'preview'>): boolean =>
 
 /**
  * The harness of one runtime: its own `harness` (v4 `claude`, or v5 `claude-code`, or `codex`), else the one its login
- * names in the stage's map. A login that is not in the map (unreadable, or a login with halves) leaves it unknown.
+ * names in the stage's map (v4 `runtimeHarness`: on a two-CLI login the CLI its profile is scoped to, else the login's
+ * own). A login that is not in the map (unreadable) leaves it unknown. A runtime's own `harness` wins even when its login
+ * is missing, which is v4's first step too (it returns the runtime's own before it looks at the login).
  */
 export function runtimeHarnessOf(
   ctx: Pick<StepContext, 'previewLoginHarnesses'>,
   own: string | undefined,
   login: string | undefined,
-  profile: 'claude' | 'codex' | undefined,
+  profile: ProfileScope | undefined,
 ): RuntimeHarness {
   if (own === 'claude' || own === 'claude-code') return 'claude-code';
   if (own === 'codex') return 'codex';
   if (own !== undefined) return 'unknown';
   const fromLogin = login === undefined ? undefined : ctx.previewLoginHarnesses?.get(login);
   if (fromLogin === undefined) return 'unknown';
-  // v4 `runtimeHarness`: a login that drives both CLIs is decided by the runtime's PROFILE; if the profile does not
-  // decide, nothing here does, and the runtime is held (v4 would fall back to the login's `harness`, which is stricter).
-  const harness = fromLogin.both ? profile : fromLogin.harness;
-  return harness === 'claude' ? 'claude-code' : harness === 'codex' ? 'codex' : 'both';
+  let harness = fromLogin.harness;
+  if (fromLogin.both) {
+    if (profile === 'claude' || profile === 'codex') harness = profile;
+    // A model set without `harness` is scoped in v4 by model ids this tool does not copy: undecidable here, held.
+    else if (profile === 'unsure') return 'both';
+    // generic, or a profile that does not exist: v4 falls back to the login's own harness.
+  }
+  return harness === 'claude' ? 'claude-code' : 'codex';
 }
 
 /** The v4 runtimes the preview holds, by name, with why (`codex`, or `unknown` when nothing proves a harness). */

@@ -105,8 +105,10 @@ if [ "${command}" = "dry-run" ] || [ "${command}" = "prepare" ]; then
 fi
 
 # One fact, one owner: the port and the app origin are read from plan.ts, never restated here.
-fact() { (cd "${tool_dir}" && bun -e "import { PREVIEW } from './preview/plan.ts'; console.log(PREVIEW.$1)"); }
-run_tool() { (cd "${tool_dir}" && bun preview/main.ts "$@" --v4 "${v4_home}" --target "${target}"); }
+# The yaml library prints every token it parses when LOG_TOKENS or LOG_STREAM is set, and a config can hold a key: bun
+# never starts with either (the entry files clear them too).
+fact() { (cd "${tool_dir}" && env -u LOG_TOKENS -u LOG_STREAM bun -e "import { PREVIEW } from './preview/plan.ts'; console.log(PREVIEW.$1)"); }
+run_tool() { (cd "${tool_dir}" && env -u LOG_TOKENS -u LOG_STREAM bun preview/main.ts "$@" --v4 "${v4_home}" --target "${target}"); }
 fy5() { "${target}/bin/fy5" "$@"; }
 
 # One owner for where the preview may write and remove (preview/paths.ts): it resolves links, refuses `..`, v4's home

@@ -334,7 +334,9 @@ reported.
 `preview.sh prepare` reads each `config/logins/*.yaml` once, for its `harness` field and whether it has both `claude:`
 and `codex:` halves, and nothing else (the file is opened without following links, YAML warnings are silenced, and no
 other key is read into a variable); an agent's `dry-run` reads no login file. A runtime on a login that drives both
-CLIs is decided by its profile as in v4, and held with a reason saying so when the profile does not decide.
+CLIs runs as v4 decides it: the CLI its profile is scoped to, else the login's own harness. It is held, with a reason
+saying so, only when its profile includes a model set without a `harness` (v4 scopes that by model ids the preview does
+not read).
 
 ## Tests
 

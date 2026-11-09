@@ -2,14 +2,17 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { link, mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { parseDocument } from 'yaml';
 import { readLoginHarnesses } from '../../preview/harness-map.ts';
 import { PREVIEW } from '../../preview/plan.ts';
 import { convert } from '../../src/convert.ts';
 import { acceptedConfigStep } from '../../src/steps/accepted-config.ts';
 import { previewProfileScopes, runtimeHarnessOf } from '../../src/steps/preview-hold.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
+import { parseV4Yaml, quietYaml, YAML_OPTIONS } from '../../src/v4/config.ts';
 import { v4Paths } from '../../src/v4/layout.ts';
 import { previewShellEnv } from '../../src/v5/preview-env.ts';
+import { captured } from './capture.ts';
 import { fixture } from './ferret-fixture.ts';
 
 let f: Awaited<ReturnType<typeof fixture>>;
@@ -27,35 +30,9 @@ const put = async (path: string, text: string) => {
 };
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
-/** Everything written to stdout, stderr, the console or `process.emitWarning` while `work` runs. */
-async function captured(work: () => Promise<unknown>): Promise<string> {
-  const seen: string[] = [];
-  const out = process.stdout.write.bind(process.stdout);
-  const err = process.stderr.write.bind(process.stderr);
-  const warn = process.emitWarning.bind(process);
-  const consoleKeys = ['log', 'warn', 'error', 'info', 'debug'] as const;
-  const saved = consoleKeys.map(key => console[key]);
-  const record = (...parts: unknown[]) => {
-    seen.push(parts.map(part => (part instanceof Error ? `${part.name}: ${part.message}` : String(part))).join(' '));
-    return true;
-  };
-  process.stdout.write = record as never;
-  process.stderr.write = record as never;
-  process.emitWarning = record as never;
-  for (const key of consoleKeys) console[key] = record as never;
-  try {
-    await work();
-  } finally {
-    process.stdout.write = out;
-    process.stderr.write = err;
-    process.emitWarning = warn;
-    consoleKeys.forEach((key, index) => (console[key] = saved[index] as never));
-  }
-  return seen.join('\n');
-}
-
 const nested = (inner: string, times: number): string => `[${Array.from({ length: times }, () => inner).join(', ')}]`;
 const HOSTILE: Record<string, string> = {
+  'an unresolved alias': `harness: claude\nK: *${FAKE_KEY}\n`,
   'an unknown tag': `harness: claude\nANTHROPIC_API_KEY: !weird ${FAKE_KEY}\n`,
   'a list used as a key': `harness: claude\nenv:\n  ? [${FAKE_KEY}]\n  : x\n`,
   'a duplicate key': `harness: claude\nK: ${FAKE_KEY}\nK: other\n`,
@@ -84,7 +61,8 @@ describe('M1: a login file read says nothing, whatever it holds', () => {
       expect(JSON.stringify([...(found ?? [])])).not.toContain('FAKE');
       // A list key and an alias bomb are valid YAML (the library only warns or refuses when turned into data, which
       // is never done here): they may be read for their harness. The rest have an error or a warning.
-      if (!['an alias bomb', 'a list used as a key'].includes(name)) expect(found?.has('hostile')).toBe(false);
+      if (!['an alias bomb', 'a list used as a key', 'an unresolved alias'].includes(name))
+        expect(found?.has('hostile')).toBe(false);
     });
 
     test(`${name}: the accepted-config step prints nothing (a login in the record and on disk)`, async () => {
@@ -96,6 +74,7 @@ describe('M1: a login file read says nothing, whatever it holds', () => {
           'logins/hostile.yaml': { etag: sha256('older'), text: `${text}budget:\n  daily:\n    hard: 1\n` },
         }),
       );
+      const thrown: string[] = [];
       const output = await captured(() =>
         convert({
           from: f.from,
@@ -108,9 +87,14 @@ describe('M1: a login file read says nothing, whatever it holds', () => {
           preview: true,
           previewV4Home: f.from,
           previewShellEnv: previewShellEnv(f.to, PREVIEW.port),
-        }).catch(() => undefined),
+        }).then(
+          result => thrown.push(JSON.stringify(result)),
+          (error: unknown) => thrown.push(error instanceof Error ? error.message : String(error)),
+        ),
       );
       expect(output).not.toContain(FAKE_KEY);
+      // Nothing thrown or reported names the text either.
+      expect(thrown.join('\n')).not.toContain('FAKE');
     });
   }
 });
@@ -148,6 +132,7 @@ describe('m3: a login that drives both CLIs is decided by the runtime profile, a
   const setup = async () => {
     await put('layout-version', '2\n');
     await put('config/logins/dual.yaml', BOTH);
+    await put('config/logins/dual-cx.yaml', BOTH.replace('harness: claude', 'harness: codex'));
     await put('config/logins/one-half.yaml', 'harness: codex\nstore: environment\ncodex:\n  env: {}\n');
     await put('config/components/instructions/c-only.yaml', 'file: a.md\nharness: claude\n');
     await put('config/components/instructions/x-only.yaml', 'file: b.md\nharness: codex\n');
@@ -169,17 +154,102 @@ describe('m3: a login that drives both CLIs is decided by the runtime profile, a
     expect(on('dual', 'cl')).toBe('claude-code');
     expect(on('dual', 'via')).toBe('claude-code');
     expect(on('dual', 'cx')).toBe('codex');
-    // The profile does not decide: held, with its own reason.
-    expect(on('dual', 'gen')).toBe('both');
-    expect(on('dual', 'mixed')).toBe('both');
+    // Generic, mixed, or no profile: v4 falls back to the login's own harness (claude here, codex on `dual-cx`).
+    expect(on('dual', 'gen')).toBe('claude-code');
+    expect(on('dual', 'mixed')).toBe('claude-code');
+    expect(runtimeHarnessOf(ctx, undefined, 'dual', undefined)).toBe('claude-code');
+    expect(on('dual-cx', 'gen')).toBe('codex');
+    expect(on('dual-cx', 'mixed')).toBe('codex');
+    expect(runtimeHarnessOf(ctx, undefined, 'dual-cx', undefined)).toBe('codex');
+    // A scoped profile still beats the login's harness.
+    expect(on('dual-cx', 'cl')).toBe('claude-code');
+    expect(on('dual', 'cx')).toBe('codex');
+    // The one case left held: a model set without a harness (v4 scopes it by model ids this tool does not copy).
     expect(on('dual', 'ms')).toBe('both');
-    expect(runtimeHarnessOf(ctx, undefined, 'dual', undefined)).toBe('both');
+    expect(on('dual-cx', 'ms')).toBe('both');
+    expect([...scopes.entries()].sort()).toEqual([
+      ['cl', 'claude'],
+      ['cx', 'codex'],
+      ['gen', 'generic'],
+      ['mixed', 'generic'],
+      ['ms', 'unsure'],
+      ['via', 'claude'],
+    ]);
   });
 
   test('a login with one half, or none, keeps its own harness whatever the profile says; a runtime harness wins', async () => {
     const { ctx, scopes } = await setup();
+    // v4 returns the runtime's own harness first, even when its login is missing; so does this (n5).
+    expect(runtimeHarnessOf(ctx, 'claude', 'no-such-login', undefined)).toBe('claude-code');
+    expect(runtimeHarnessOf(ctx, 'codex', undefined, undefined)).toBe('codex');
     expect(runtimeHarnessOf(ctx, undefined, 'one-half', scopes.get('cl'))).toBe('codex');
     expect(runtimeHarnessOf(ctx, 'claude', 'dual', scopes.get('cx'))).toBe('claude-code');
     expect(runtimeHarnessOf(ctx, undefined, 'no-such-login', scopes.get('cl'))).toBe('unknown');
   });
+});
+
+describe('n1/n2: the silent reader turns a document into data without printing or naming the text', () => {
+  for (const [name, text] of Object.entries(HOSTILE)) {
+    test(`${name}: quietYaml, parseV4Yaml().toJS() and a raw toJS print nothing, and quietYaml throws one fixed message`, async () => {
+      let thrown = '';
+      const output = await captured(async () => {
+        try {
+          quietYaml(text);
+        } catch (error) {
+          thrown = error instanceof Error ? error.message : String(error);
+        }
+        // `toJS` is where the library emits its warnings (an unresolved tag, a collection used as a key).
+        for (const read of [() => parseV4Yaml('x.yaml', text).toJS(), () => parseDocument(text, YAML_OPTIONS).toJS()]) {
+          try {
+            read();
+          } catch {
+            // The thrown text of the raw library call is not what is under test; only what is printed is.
+          }
+        }
+      });
+      expect(output).toBe('');
+      expect(thrown).not.toContain('FAKE');
+      if (thrown !== '') expect(thrown).toBe('not valid YAML');
+    });
+  }
+
+  test('an unresolved alias (K: *<FAKE>) makes quietYaml throw the fixed message, not the library one naming the alias', () => {
+    expect(() => quietYaml(`K: *${FAKE_KEY}\n`)).toThrow(new Error('not valid YAML'));
+  });
+});
+
+describe('m: the yaml library token dumps (LOG_TOKENS, LOG_STREAM) never reach a login file with a key in it', () => {
+  const LOGIN = `harness: claude\nstore: environment\nenv:\n  ANTHROPIC_API_KEY: ${FAKE_KEY}\n`;
+  const toolDir = join(import.meta.dir, '../..');
+  /** Runs a real entry file as its own process, with the variable set, and returns everything it printed. */
+  const spawned = (entry: string, args: string[], variable: string): string => {
+    const run = Bun.spawnSync(['bun', entry, ...args], {
+      cwd: toolDir,
+      env: { PATH: process.env.PATH ?? '', HOME: f.root, [variable]: '1' },
+    });
+    return `${run.stdout.toString()}\n${run.stderr.toString()}`;
+  };
+  for (const variable of ['LOG_TOKENS', 'LOG_STREAM']) {
+    test(`${variable}=1: the converter entry reads a login file and prints no key`, async () => {
+      await put('layout-version', '2\n');
+      await put('config/logins/with-key.yaml', LOGIN);
+      const printed = spawned('src/main.ts', ['--from', f.from, '--to', f.to, '--dry-run'], variable);
+      expect(printed).not.toContain('FAKE');
+      expect(printed).toContain('dry run');
+    });
+
+    test(`${variable}=1: the preview entry reads a login file and prints no key`, async () => {
+      await put('layout-version', '2\n');
+      await put('config/logins/with-key.yaml', LOGIN);
+      await put('config/runtimes/r.yaml', 'credential: with-key\nprofile: main\n');
+      await put('config/profiles/main.yaml', 'contents: []\n');
+      const printed = spawned(
+        'preview/main.ts',
+        ['prepare', '--v4', f.from, '--target', join(f.root, 'preview-home')],
+        variable,
+      );
+      expect(printed).not.toContain('FAKE');
+      expect(printed.length).toBeGreaterThan(1);
+    });
+  }
 });

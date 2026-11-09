@@ -69,6 +69,12 @@ async function realShapes() {
   await put('config/runtimes/ghost.yaml', 'credential: no-such-login\nprofile: main\n');
   await f.session('s1', { agent: 'claude-x', harness: 'claude' });
   await f.session('s2', { agent: 'both', harness: 'claude' });
+  // A two-CLI login on a profile with a model set that names no harness: v4 scopes that by model ids the preview does
+  // not read, so this is the one case that stays held.
+  await put('config/components/modelSets/ms.yaml', 'models: [m-a]\ndefault: m-a\n');
+  await put('config/profiles/msprof.yaml', 'contents:\n  - modelSets/ms\n');
+  await put('config/runtimes/both-ms.yaml', 'credential: h-login\nprofile: msprof\n');
+  await f.session('s3', { agent: 'both-ms', harness: 'claude' });
 }
 const prepared = () =>
   prepare({
@@ -87,20 +93,24 @@ describe('problem 1: the harness comes from the login, through a stage map that 
     // Claude on a Claude login: converted, and its ferret is carried.
     expect(existsSync(join(f.to, 'config/runtimes/claude-x.yaml'))).toBe(true);
     expect(existsSync(join(f.to, 'state/ferrets/s1/ferret.json'))).toBe(true);
-    for (const held of ['claude-liar', 'codex-y', 'both', 'ghost'])
+    // A two-CLI login on a generic profile runs as the login's harness (v4 parity), and so does its ferret.
+    expect(existsSync(join(f.to, 'config/runtimes/both.yaml'))).toBe(true);
+    expect(existsSync(join(f.to, 'state/ferrets/s2/ferret.json'))).toBe(true);
+    for (const held of ['claude-liar', 'codex-y', 'both-ms', 'ghost'])
       expect(existsSync(join(f.to, `config/runtimes/${held}.yaml`))).toBe(false);
     const dropped = done.report?.steps.flatMap(step => step.notCarried) ?? [];
     const why = (what: string) => dropped.find(item => item.what === what)?.why;
     expect(why('runtime claude-liar (Codex)')).toBe(CODEX_HELD_SENTENCE);
     expect(why('runtime codex-y (Codex)')).toBe(CODEX_HELD_SENTENCE);
-    expect(why('runtime both (its login drives both CLIs)')).toBe(BOTH_HELD_SENTENCE);
+    expect(why('runtime both-ms (its login drives both CLIs)')).toBe(BOTH_HELD_SENTENCE);
+    expect(BOTH_HELD_SENTENCE).toContain('a model set without a harness');
     expect(why('runtime ghost (its harness is unknown)')).toBe(UNKNOWN_HELD_SENTENCE);
     expect(UNKNOWN_HELD_SENTENCE).toContain('its harness is unknown');
     expect(UNKNOWN_HELD_SENTENCE).toContain('so it is held like a Codex runtime');
     expect(UNKNOWN_HELD_SENTENCE.startsWith("held: a Codex ferret's")).toBe(false);
     // A ferret on an unknown runtime is held with the unknown reason, not the Codex one.
-    expect(why('ferret s2 (on the held runtime both)')).toBe(BOTH_HELD_SENTENCE);
-    expect(existsSync(join(f.to, 'state/ferrets/s2/ferret.json'))).toBe(false);
+    expect(why('ferret s3 (on the held runtime both-ms)')).toBe(BOTH_HELD_SENTENCE);
+    expect(existsSync(join(f.to, 'state/ferrets/s3/ferret.json'))).toBe(false);
   });
 
   test('the stage map is login name to harness, and a fake key in a login file appears nowhere', async () => {
