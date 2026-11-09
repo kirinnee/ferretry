@@ -9,7 +9,14 @@
  * nothing that repeats it, and the caller drops it before the promise settles. The contract has no field that could carry
  * a token either way.
  */
+import {
+  FerretSummarySchema,
+  type RestartResult,
+  RestartRequestSchema,
+  RestartResultSchema,
+} from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { z } from 'zod';
 import {
   McpCheckRequestSchema,
   type McpCheckResult,
@@ -29,6 +36,17 @@ import {
   McpOAuthSignedOutSchema,
   type McpOAuthStartRequest,
   McpOAuthStartRequestSchema,
+  type SessionMcpAdded,
+  SessionMcpAddedSchema,
+  type SessionMcpAddRequest,
+  SessionMcpAddRequestSchema,
+  type SessionMcpListing,
+  SessionMcpListingSchema,
+  type SessionMcpPreview,
+  SessionMcpPreviewSchema,
+  type SessionMcpPreviewRequest,
+  SessionMcpPreviewRequestSchema,
+  type SessionMcpScope,
 } from '../../contract/index.ts';
 
 /** The slice of the per-daemon client this half uses; a test hands a scripted one. */
@@ -100,3 +118,81 @@ export const cancelMcpSignIn = async (client: McpClient, flowId: string): Promis
 /** Deletes one server's stored tokens, asking the provider to revoke them when it can. */
 export const signOutMcp = async (client: McpClient, component: string): Promise<McpOAuthSignedOut> =>
   McpOAuthSignedOutSchema.parse(await client.call(SIGN_OUT_ROUTE, { params: { component } }));
+
+const LISTING_ROUTE = 'GET /v1/ferrets/:ferretId/mcp' as const;
+const PREVIEW_ROUTES = {
+  project: 'POST /v1/ferrets/:ferretId/mcp/project/preview',
+  login: 'POST /v1/ferrets/:ferretId/mcp/login/preview',
+} as const;
+const ADD_ROUTES = {
+  project: 'POST /v1/ferrets/:ferretId/mcp/project',
+  login: 'POST /v1/ferrets/:ferretId/mcp/login',
+} as const;
+const RESTART_ROUTE = 'POST /v1/restarts' as const;
+
+/** Whether a project file can be written for this ferret at all, and what it holds now. */
+export const readFerretMcpListing = async (
+  client: McpClient,
+  ferretId: string,
+  signal?: AbortSignal,
+): Promise<SessionMcpListing> =>
+  SessionMcpListingSchema.parse(
+    await client.call(LISTING_ROUTE, { params: { ferretId }, ...(signal === undefined ? {} : { signal }) }),
+  );
+
+/** What adding this server would change, in the given scope. Writes nothing. */
+export const previewFerretMcp = async (
+  client: McpClient,
+  ferretId: string,
+  scope: SessionMcpScope,
+  request: SessionMcpPreviewRequest,
+): Promise<SessionMcpPreview> =>
+  SessionMcpPreviewSchema.parse(
+    await client.call(PREVIEW_ROUTES[scope], {
+      params: { ferretId },
+      body: SessionMcpPreviewRequestSchema.parse(request),
+    }),
+  );
+
+/** Adds the server. A project add carries the previewed etag, so a file that changed meanwhile is refused. */
+export const addFerretMcp = async (
+  client: McpClient,
+  ferretId: string,
+  scope: SessionMcpScope,
+  request: SessionMcpAddRequest,
+): Promise<SessionMcpAdded> =>
+  SessionMcpAddedSchema.parse(
+    await client.call(ADD_ROUTES[scope], { params: { ferretId }, body: SessionMcpAddRequestSchema.parse(request) }),
+  );
+
+/**
+ * Restarts these ferrets' CLIs with their conversations (a busy one waits for its next idle moment). The answer is Ferrets'
+ * own `RestartResult`: a 200 can mean restarted, queued, skipped or failed, so the caller reads which, per ferret.
+ */
+export const restartFerrets = async (client: McpClient, ids: readonly string[]): Promise<RestartResult> =>
+  RestartResultSchema.parse(
+    await client.call(RESTART_ROUTE, {
+      body: RestartRequestSchema.parse({ scope: 'ids', ids }),
+      headers: { 'x-fy-request-id': crypto.randomUUID() },
+    }),
+  );
+
+const FERRET_ROUTE = 'GET /v1/ferrets/:ferretId' as const;
+const FERRETS_ROUTE = 'GET /v1/ferrets' as const;
+
+/**
+ * What MCP reads of a ferret: who it is, the runtime it runs as (the login a login-scope add writes to) and whether it
+ * is alive. The fields are Ferrets' own (`FerretSummarySchema`); the rest of the summary is not MCP's to depend on.
+ */
+const FerretRowSchema = z.looseObject(
+  FerretSummarySchema.pick({ id: true, name: true, runtime: true, state: true }).shape,
+);
+export type FerretRow = z.infer<typeof FerretRowSchema>;
+
+/** One ferret, from Ferrets' own route. */
+export const readFerret = async (client: McpClient, ferretId: string): Promise<FerretRow> =>
+  FerretRowSchema.parse(await client.call(FERRET_ROUTE, { params: { ferretId } }));
+
+/** Every ferret on this machine, from Ferrets' own route. */
+export const readFerrets = async (client: McpClient): Promise<readonly FerretRow[]> =>
+  z.array(FerretRowSchema).parse(await client.call(FERRETS_ROUTE));

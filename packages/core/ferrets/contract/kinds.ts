@@ -279,6 +279,42 @@ export interface Runner {
    */
   look?(handle: RunnerHandle): Promise<RunnerLook | undefined>;
   /**
+   * Additive (send path, today's `TmuxSendTerminal.observe`): ONE read of what the ferret's pane shows for a send to
+   * decide where a message may go (type it, queue it, revive first). Reads only: no key is typed. The runner reads
+   * inside the pane's own binding and masks `blockingPrompt` before it leaves; `draft` is the person's OWN unsent text
+   * (as `composer_occupied` carries it) and goes only to the send that must refuse around it. A handle with nothing
+   * live behind it answers `undefined`. Absent: the runner cannot be read, so a send cannot prove a pane safe to type
+   * into and Conversation refuses (`plugin_unavailable`).
+   */
+  observe?(handle: RunnerHandle): Promise<RunnerPaneObservation | undefined>;
+  /**
+   * Additive (send path, today's `TmuxSendTerminal.heldAt`): where the pane still shows `text` held, in the composer or
+   * in the harness's visible queue and nowhere else on screen; `undefined` when it shows it in neither. REJECTS when the
+   * pane cannot be read, or its queue runs past what the pane shows: an unread pane proves nothing, and "not held" is
+   * what licenses typing a message again. Reads only.
+   */
+  heldAt?(handle: RunnerHandle, text: string): Promise<RunnerHeldAt | undefined>;
+  /**
+   * Additive (send path, today's `TmuxSendTerminal.clearComposer`): erases `text` from the composer ONLY when the
+   * composer holds exactly that and nothing else, one `C-u` at a time, reading the composer before each key; a person's
+   * own draft is never erased (`foreign`). Like `deliver`, the runner guards every write with `kernel.act` on that pane
+   * itself, so a caller must not wrap it in a second act. Its rejections carry a {@link RunnerDeliveryFailure}.
+   */
+  clearComposer?(handle: RunnerHandle, text: string): Promise<RunnerComposerCleared>;
+  /**
+   * Additive (send path, today's `TmuxSendTerminal.submitComposer`): presses Enter ONCE, only when the composer holds
+   * exactly `text` at a pane that is not mid-turn or behind a prompt (`strict` also refuses a clipped drawing of it),
+   * then watches it leave or not. Guarded and rejecting as {@link Runner.clearComposer} is.
+   */
+  submitComposer?(handle: RunnerHandle, text: string, strict?: boolean): Promise<RunnerComposerSubmitted>;
+  /**
+   * Additive (send path, today's `TmuxSendTerminal.stopActiveTurn`, the send-now's stop): presses the harness's stop
+   * key under {@link shouldPressStopKey} exactly as {@link Runner.stopTurn} does, waits boundedly for the pane to come
+   * back to a prompt (a wait that gives up is not a failure: the answer is what a READ afterwards shows) and answers that
+   * read, or `undefined` when the pane could not be read. Guarded and rejecting as `stopTurn` is.
+   */
+  stopActiveTurn?(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerPaneObservation | undefined>;
+  /**
    * Additive (W2-a, today's `TmuxSessionExitObserver.exitOf` `gone` proof): whether the runner PROVES that `ferret`'s own
    * terminal is not there at all (tmux: the ferret's session cannot be found, or the private server is not running,
    * which takes every pane with it). `false` for a live terminal, one tmux kept dead with an exit status (an agent that
@@ -323,6 +359,35 @@ export interface RunnerLook {
    */
   readonly status?: string;
 }
+
+/**
+ * What one {@link Runner.observe} read of a ferret's pane (today's `SendPaneObservation`), as plain data. Every text in it
+ * was read from a masked screen: `blockingPrompt` is masked again by the runner. `draft` is NOT masked: it is the
+ * person's own unsent words exactly as the pane shows them (as today's 409 `composer_occupied` carries them), so a
+ * secret the person pasted there is in it. It must never be logged, stored or journalled by a caller.
+ */
+export interface RunnerPaneObservation {
+  readonly alive: boolean;
+  /** The pane exists but its process is gone: a shell that outlived its agent. */
+  readonly dead: boolean;
+  /** The harness is at a prompt and will accept typed input. */
+  readonly promptReady: boolean;
+  /** The harness is visibly mid-turn (a half-typed draft is neither this nor prompt-ready). */
+  readonly activeWork: boolean;
+  /** Codex accepted a submission and PARKED it until its startup ends: the composer text is not a draft. */
+  readonly startupParked?: boolean;
+  /** A harness dialog, permission prompt or picker the pane is parked on, in the words a person is shown for it. */
+  readonly blockingPrompt?: string;
+  /** Input typed in the composer and not submitted: anything typed now would be submitted joined to it. */
+  readonly draft?: string;
+}
+
+/** Where a pane shows a message held: typed in the composer, or in the harness's own queue (today's `SendHeldAt`). */
+export type RunnerHeldAt = 'composer' | 'queue';
+/** What erasing a message from the composer did (today's `ComposerClearOutcome`). */
+export type RunnerComposerCleared = 'cleared' | 'absent' | 'foreign' | 'stuck';
+/** What pressing Enter on a message in the composer did (today's `ComposerSubmitOutcome`). */
+export type RunnerComposerSubmitted = 'submitted' | 'holding' | 'absent';
 
 /** How many of a frame's last lines {@link RunnerLook.status} carries (the live readout's status window). */
 export const RUNNER_LOOK_STATUS_LINES = 25;
