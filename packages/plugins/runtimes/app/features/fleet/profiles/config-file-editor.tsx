@@ -18,6 +18,7 @@
 import { CircleAlert, FileCode2, TriangleAlert } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { PanelPath } from '@ferretry/app/ui';
+import { useConfigFileChanges } from '../../../hooks/use-config-file-changes.ts';
 import { useMachineChanges } from '../../../hooks/use-machine-changes.ts';
 import type { LiveRuntimesClient } from '../../../lib/client.ts';
 import {
@@ -166,10 +167,10 @@ export function ConfigFileEditor({
   }, [client, path, reads]);
 
   // Changed on the machine — a hand edit, `fy`, another device — and read again in place, unless the person has
-  // started editing: their draft stays, and saving it says the file moved under them. It hears `runtimes.changed`, which
-  // names a profile only when its PARSED value moved, so an edit held for the owner or a newly broken file is read on
-  // the next open (GAP(kernel), ports-pending.json).
-  useMachineChanges(client, ['catalogue'], () => {
+  // started editing: their draft stays, and saving it says the file moved under them. It hears `runtimes.changed` (a
+  // parsed value in effect moved) AND the kernel's `kernel.config-changed` for this file, which also names an edit held
+  // for the owner, a discard and a newly broken file.
+  const readAgain = (): void => {
     if (load.status !== 'ready' || draft !== load.file.text) return;
     readConfigFile(client, path).then(
       file => {
@@ -179,7 +180,9 @@ export function ConfigFileEditor({
       },
       () => undefined,
     );
-  });
+  };
+  useMachineChanges(client, ['catalogue'], readAgain);
+  useConfigFileChanges(client, path, readAgain);
 
   const submit = (): void => {
     setSave({ status: 'saving' });
