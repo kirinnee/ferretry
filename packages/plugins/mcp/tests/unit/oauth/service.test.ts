@@ -1229,4 +1229,85 @@ describe('McpOAuthService — a client registered by hand', () => {
     // Assert
     should(message).containEql('client id');
   });
+
+  describe('the hosts a sign-in discovers', () => {
+    /** A recorder that remembers, per flow id, what it was told and whether it was released. */
+    const recorder = () => {
+      const told: { flowId: string; host: string; expiresAt: number }[] = [];
+      const released: string[] = [];
+      return {
+        told,
+        released,
+        discovered: (flowId: string, url: string, expiresAt: number) =>
+          void told.push({ flowId, host: new URL(url).host, expiresAt }),
+        release: (flowId: string) => void released.push(flowId),
+      };
+    };
+
+    it('should record them under the flow’s own id, expiring with the flow, the challenge’s metadata host included', async () => {
+      // Arrange
+      const seen = recorder();
+      const w = world({}, seen);
+
+      // Act
+      const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+      // Assert
+      should(seen.told.length).be.above(0);
+      for (const entry of seen.told) {
+        should(entry.flowId).equal(flow.flowId);
+        should(entry.expiresAt).equal(Date.parse(flow.expiresAt));
+      }
+      should(seen.released).deepEqual([]);
+    });
+
+    it('should release only its own hosts when a start fails after discovery', async () => {
+      // Arrange
+      const seen = recorder();
+      const w = world({ noRegistration: true }, seen);
+
+      // Act
+      await refusedWith(w.service.start('linear', {}), 'mcp_auth_registration');
+
+      // Assert
+      should(seen.released).have.length(1);
+      should(seen.released[0]).equal(seen.told[0]?.flowId);
+    });
+
+    it('should release the hosts of a replaced flow, a completed flow and a cancelled one', async () => {
+      // Arrange
+      const seen = recorder();
+      const w = world({}, seen);
+      const first = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+      // Act
+      const second = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+      // Assert — the replaced flow went, the new one did not
+      should(seen.released).deepEqual([first.flowId]);
+
+      // Act
+      const callback = await w.provider.approve(second.authorizeUrl);
+      await w.service.complete(second.flowId, { callback });
+
+      // Assert
+      should(seen.released).deepEqual([first.flowId, second.flowId]);
+    });
+
+    it('should release the hosts of a cancelled flow and of one that expired', async () => {
+      // Arrange
+      const seen = recorder();
+      const w = world({}, seen);
+      const cancelled = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+      w.service.cancel(cancelled.flowId);
+      const expiring = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+      // Act — a later look at the flows drops the expired one
+      w.clock.at += MCP_OAUTH_FLOW_TTL_MS + 1;
+      await refusedWith(w.service.complete(expiring.flowId, { callback: 'x' }), 'mcp_auth_unknown_flow');
+
+      // Assert
+      should(seen.released).deepEqual([cancelled.flowId, expiring.flowId]);
+    });
+  });
 });

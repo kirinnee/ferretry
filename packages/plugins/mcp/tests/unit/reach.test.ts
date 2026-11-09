@@ -12,7 +12,7 @@ function reach() {
       return this.at;
     },
   };
-  return { clock, reach: new SignInReach(clock, TTL) };
+  return { clock, reach: new SignInReach(clock), expiry: () => clock.at + TTL };
 }
 
 const record = (over: Partial<McpOAuthRecord> = {}): McpOAuthRecord => ({
@@ -75,9 +75,9 @@ describe('the sign-in reach', () => {
     expect(r.hosts()).toEqual(['auth.example.test']);
   });
 
-  test('a discovered host lasts for the time to live, and not a millisecond longer', () => {
-    const { clock, reach: r } = reach();
-    r.discovered('linear', 'https://token.example.test/token');
+  test('a discovered host lasts until its flow’s expiry, and not a millisecond longer', () => {
+    const { clock, reach: r, expiry } = reach();
+    r.discovered('linear', 'https://token.example.test/token', expiry());
     expect(r.hosts()).toEqual(['token.example.test']);
     clock.at += TTL - 1;
     expect(r.hosts()).toEqual(['token.example.test']);
@@ -85,10 +85,21 @@ describe('the sign-in reach', () => {
     expect(r.hosts()).toEqual([]);
   });
 
-  test('a flow ending takes its hosts and nobody else’s', () => {
-    const { reach: r } = reach();
-    r.discovered('one', 'https://one.example.test/x');
-    r.discovered('two', 'https://two.example.test/x');
+  test('R-0291 two flows keep their hosts apart, each with its own expiry', () => {
+    const { clock, reach: r } = reach();
+    const first = clock.at + TTL;
+    r.discovered('flow-a', 'https://a.example.test/x', first);
+    clock.at += TTL - 100;
+    r.discovered('flow-b', 'https://b.example.test/x', clock.at + TTL);
+    clock.at += 100;
+    // The first flow is over: its hosts went with it, the second flow's did not.
+    expect(r.hosts()).toEqual(['b.example.test']);
+  });
+
+  test('R-0292 a flow ending takes its hosts and nobody else’s', () => {
+    const { reach: r, expiry } = reach();
+    r.discovered('one', 'https://one.example.test/x', expiry());
+    r.discovered('two', 'https://two.example.test/x', expiry());
     r.release('one');
     expect(r.hosts()).toEqual(['two.example.test']);
     r.release('absent');
@@ -96,21 +107,21 @@ describe('the sign-in reach', () => {
   });
 
   test('an address that is not one is never recorded, and an expired flow makes room', () => {
-    const { clock, reach: r } = reach();
-    r.discovered('one', 'not a url');
+    const { clock, reach: r, expiry } = reach();
+    r.discovered('one', 'not a url', expiry());
     expect(r.hosts()).toEqual([]);
-    r.discovered('one', 'https://one.example.test');
+    r.discovered('one', 'https://one.example.test', expiry());
     clock.at += TTL;
-    r.discovered('two', 'https://two.example.test');
+    r.discovered('two', 'https://two.example.test', expiry());
     expect(r.hosts()).toEqual(['two.example.test']);
   });
 
   test('a flow names a bounded number of hosts and only a bounded number of flows discover at once', () => {
-    const { reach: r } = reach();
-    for (let index = 0; index < 20; index += 1) r.discovered('one', `https://h${String(index)}.example.test`);
+    const { reach: r, expiry } = reach();
+    for (let index = 0; index < 20; index += 1) r.discovered('one', `https://h${String(index)}.example.test`, expiry());
     expect(r.hosts().length).toBe(8);
     for (let index = 0; index < 20; index += 1)
-      r.discovered(`flow${String(index)}`, `https://f${String(index)}.example.test`);
+      r.discovered(`flow${String(index)}`, `https://f${String(index)}.example.test`, expiry());
     expect(r.hosts().length).toBeLessThanOrEqual(16 * 8);
     expect(r.hosts()).not.toContain('h0.example.test');
     expect(r.hosts()).toContain('f19.example.test');

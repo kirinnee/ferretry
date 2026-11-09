@@ -305,7 +305,29 @@ export class McpOAuthService {
         );
       pwaOrigin = new URL(checked).origin;
     }
-    const discovered = await this.discover(component, serverUrl);
+    // The hosts discovery names are kept under THIS flow's id and expire with THIS flow, whatever other flows of the
+    // component are doing; a start that fails anywhere below gives up its own and nobody else's.
+    const flowId = flowIdentifier(this.deps.crypto);
+    const expiresAt = this.deps.clock.now() + MCP_OAUTH_FLOW_TTL_MS;
+    try {
+      const flow = await this.begin(flowId, expiresAt, component, server, serverUrl, pwaOrigin);
+      this.admit(flow);
+      return this.flowView(flow);
+    } catch (error) {
+      this.deps.reach?.release(flowId);
+      throw error;
+    }
+  }
+
+  private async begin(
+    flowId: string,
+    expiresAt: number,
+    component: string,
+    server: McpOAuthServer,
+    serverUrl: string,
+    pwaOrigin: string | undefined,
+  ): Promise<McpOAuthPendingFlow> {
+    const discovered = await this.discover(flowId, expiresAt, serverUrl);
     const path = mcpOAuthRedirectPath(discovered.server.issuer);
     const registered =
       server.client === undefined
@@ -325,8 +347,8 @@ export class McpOAuthService {
       ...(discovered.scope === undefined ? {} : { scope: discovered.scope }),
     };
     for (const [key, value] of Object.entries(parameters)) authorize.searchParams.set(key, value);
-    const flow: McpOAuthPendingFlow = {
-      flowId: flowIdentifier(this.deps.crypto),
+    return {
+      flowId,
       component,
       mode: registered.registration.paste === true ? 'paste' : 'pwa',
       redirectUri: registered.registration.redirectUri,
@@ -345,17 +367,15 @@ export class McpOAuthService {
       resource: discovered.resource,
       ...(discovered.scope === undefined ? {} : { scope: discovered.scope }),
       authorizeUrl: authorize.toString(),
-      expiresAt: this.deps.clock.now() + MCP_OAUTH_FLOW_TTL_MS,
+      expiresAt,
       ...(registered.note === undefined ? {} : { note: registered.note }),
     };
-    this.admit(flow);
-    return this.flowView(flow);
   }
 
   /** One sign-in per component: a new start replaces the old one, whose code can then finish nothing. */
   private admit(flow: McpOAuthPendingFlow): void {
-    // The old flow of this component goes first and silently: its hosts and the new flow's are one entry.
-    for (const [id, pending] of this.flows) if (pending.component === flow.component) this.flows.delete(id);
+    // The old flow of this component goes first, and gives up its own hosts (the new flow keeps its own).
+    for (const [id, pending] of this.flows) if (pending.component === flow.component) this.end(id);
     this.prune();
     while (this.flows.size >= MAX_PENDING_FLOWS) this.end(this.flows.keys().next().value as string);
     this.flows.set(flow.flowId, flow);
@@ -369,7 +389,7 @@ export class McpOAuthService {
   /** A flow is over: forget it, and the hosts its discovery named. */
   private end(flowId: string): boolean {
     const flow = this.flows.get(flowId);
-    if (flow !== undefined) this.deps.reach?.release(flow.component);
+    if (flow !== undefined) this.deps.reach?.release(flowId);
     return this.flows.delete(flowId);
   }
 
@@ -413,17 +433,17 @@ export class McpOAuthService {
 
   // ── Discovery ──────────────────────────────────────────────────────────────────────────────────
 
-  private async discover(component: string, serverUrl: string): Promise<Discovered> {
+  private async discover(flowId: string, expiresAt: number, serverUrl: string): Promise<Discovered> {
     try {
       const challenge = await this.challengeOf(serverUrl);
-      const resource = await this.protectedResource(serverUrl, challenge.resourceMetadata);
+      const resource = await this.protectedResource(flowId, expiresAt, serverUrl, challenge.resourceMetadata);
       // A server with no resource metadata is its own authorization server (MCP 2025-03-26). A named one is reachable
       // for this flow only, and only because it passed `endpointAllowed` in `protectedResourceFrom`.
       const issuer = resource?.issuer ?? new URL(serverUrl).origin;
-      if (resource !== undefined) this.deps.reach?.discovered(component, issuer);
+      if (resource !== undefined) this.deps.reach?.discovered(flowId, issuer, expiresAt);
       const server = await this.authorizationServer(issuer, serverUrl);
       for (const endpoint of [server.tokenEndpoint, server.registrationEndpoint, server.revocationEndpoint])
-        if (endpoint !== undefined) this.deps.reach?.discovered(component, endpoint);
+        if (endpoint !== undefined) this.deps.reach?.discovered(flowId, endpoint, expiresAt);
       const scope = requestedScope(challenge, resource);
       return {
         resource: resource?.resource ?? canonicalResource(serverUrl),
@@ -431,7 +451,6 @@ export class McpOAuthService {
         ...(scope === undefined ? {} : { scope }),
       };
     } catch (error) {
-      this.deps.reach?.release(component);
       if (error instanceof DiscoveryRefusal) throw new McpOAuthRefusal('mcp_auth_discovery', error.message);
       if (error instanceof Unanswered)
         throw new McpOAuthRefusal(
@@ -466,11 +485,15 @@ export class McpOAuthService {
   }
 
   private async protectedResource(
+    flowId: string,
+    expiresAt: number,
     serverUrl: string,
     named: string | undefined,
   ): Promise<ProtectedResource | undefined> {
-    const candidates =
-      named !== undefined && endpointAllowed(named, serverUrl) ? [named] : protectedResourceMetadataUrls(serverUrl);
+    const allowed = named !== undefined && endpointAllowed(named, serverUrl) ? named : undefined;
+    // The server named this address itself (RFC 9728 lets it be anywhere), and it passed the endpoint rule.
+    if (allowed !== undefined) this.deps.reach?.discovered(flowId, allowed, expiresAt);
+    const candidates = allowed === undefined ? protectedResourceMetadataUrls(serverUrl) : [allowed];
     for (const url of candidates) {
       const response = await this.get(url);
       if (response.status === 200) return protectedResourceFrom(response.text, serverUrl);
@@ -706,7 +729,7 @@ export class McpOAuthService {
     try {
       return await this.redeem(flow, checked.code);
     } finally {
-      this.deps.reach?.release(flow.component);
+      this.deps.reach?.release(flowId);
     }
   }
 

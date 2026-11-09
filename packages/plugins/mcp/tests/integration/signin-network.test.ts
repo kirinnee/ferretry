@@ -15,6 +15,7 @@ const MCP = 'https://mcp.example.test';
 const AUTH = 'https://auth.example.test';
 const TOKEN = 'https://token.example.test';
 const OTHER = 'https://mcp2.example.test';
+const META = 'https://meta.example.test';
 
 const ACCESS = 'access-secret-7f3a9c';
 const REFRESH = 'refresh-secret-51be02';
@@ -41,10 +42,16 @@ interface Scenario {
 function network(scenario: Scenario = {}) {
   const seen: string[] = [];
   const revoked: string[] = [];
+  /** What a scenario flips while it runs: the authorization server's metadata answers 500, registration answers 500. */
+  const broken = { authMetadata: false, registration: false };
   const handle = async (url: URL, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? 'GET';
     seen.push(`${method} ${url.href}`);
     const at = `${method} ${url.origin}${url.pathname}`;
+    if (at === `GET ${META}/prm`) return json(200, { resource: `${MCP}/mcp`, authorization_servers: [AUTH] });
+    if (broken.authMetadata && at === `GET ${AUTH}/.well-known/oauth-authorization-server`)
+      return new Response('broken', { status: 500 });
+    if (broken.registration && at === `POST ${AUTH}/register`) return new Response('broken', { status: 500 });
     if (at === `POST ${MCP}/mcp`)
       return new Response(null, {
         status: 401,
@@ -80,7 +87,7 @@ function network(scenario: Scenario = {}) {
   const hosts = (): readonly string[] => [
     ...new Set(seen.map(line => new URL(line.slice(line.indexOf(' ') + 1)).host)),
   ];
-  return { handle, seen, revoked, hosts };
+  return { handle, seen, revoked, hosts, broken };
 }
 
 async function host(fake: ReturnType<typeof network>) {
@@ -196,6 +203,8 @@ describe('the MCP sign-in network', () => {
     // The refresh token went to the host the metadata named, which the record (not the ended flow) kept reachable.
     expect(fake.revoked).toEqual([REFRESH]);
     const after = await h.request('GET', '/v1/mcp/auth', { as: USE });
+    expect(after.status).toBe(200);
+    clean(after);
     expect(after.json<{ connections: { component: string; state: string }[] }>().connections[0]).toMatchObject({
       component: 'linear',
       state: 'needs-sign-in',
@@ -205,44 +214,139 @@ describe('the MCP sign-in network', () => {
   test('R-0019 cancelling a sign-in, and letting one expire, takes the hosts its discovery named away', async () => {
     const fake = network();
     const h = await host(fake);
-    const reachesToken = (): number => fake.seen.filter(line => line === `GET ${TOKEN}/prm`).length;
-    // `probe`'s challenge names the token host: reachable only while a flow has discovered it.
-    expect((await start(h, 'probe')).status).toBe(409);
-    expect(reachesToken()).toBe(0);
-
+    // (The hosts' release itself is proved per flow in tests/unit/reach.test.ts and tests/unit/oauth/service.test.ts;
+    // here, what a person sees: a cancelled or expired flow finishes nothing and never reaches the token host.)
+    const tokenRequests = (): number => fake.seen.filter(line => line === `POST ${TOKEN}/token`).length;
     const flow = (await start(h)).json<Flow>();
-    expect((await start(h, 'probe')).status).toBe(409);
-    expect(reachesToken()).toBe(1);
     const cancelled = await h.request('DELETE', `/v1/mcp/auth/flows/${flow.flowId}`, { as: CONFIGURE });
     expect(cancelled.status).toBe(200);
     expect(cancelled.json()).toEqual({ flowId: flow.flowId, cancelled: true });
     clean(cancelled);
-    const before = reachesToken();
-    const refused = await start(h, 'probe');
-    expect(refused.status).toBe(409);
-    expect(refused.json()).toMatchObject({ code: 'mcp_auth_discovery' });
-    expect(reachesToken()).toBe(before);
+    const finished = await h.request('POST', `/v1/mcp/auth/flows/${flow.flowId}`, {
+      body: { callback: callbackFor(flow) },
+      as: CONFIGURE,
+    });
+    expect(finished.status).toBe(404);
+    expect(finished.json()).toMatchObject({ code: 'mcp_auth_unknown_flow' });
+    clean(finished);
 
     // And an unfinished flow lets go of them at its time to live.
-    await start(h);
+    const second = (await start(h)).json<Flow>();
     await h.clock.advance(MCP_OAUTH_FLOW_TTL_MS + 1);
-    expect((await start(h, 'probe')).status).toBe(409);
-    expect(reachesToken()).toBe(before);
+    const late = await h.request('POST', `/v1/mcp/auth/flows/${second.flowId}`, {
+      body: { callback: callbackFor(second) },
+      as: CONFIGURE,
+    });
+    expect(late.status).toBe(404);
+    expect(late.json()).toMatchObject({ code: 'mcp_auth_unknown_flow' });
+    clean(late);
+    expect(tokenRequests()).toBe(0);
     // Cancelling a flow that is gone says so.
     const gone = await h.request('DELETE', `/v1/mcp/auth/flows/${flow.flowId}`, { as: CONFIGURE });
     expect(gone.json()).toEqual({ flowId: flow.flowId, cancelled: false });
+    clean(gone);
   });
 
-  test('R-0291 a host that no configured server and no metadata names is refused, and never reaches the network', async () => {
-    const fake = network({ resourceMetadata: 'https://elsewhere.example.test/prm' });
+  test('R-0291 a loopback address a challenge names for its metadata is never fetched, and the server’s own is used', async () => {
+    const fake = network({ resourceMetadata: 'https://127.0.0.1/prm' });
     const h = await host(fake);
     const response = await start(h);
-    expect(response.status).toBe(409);
-    expect(response.json()).toMatchObject({ code: 'mcp_auth_discovery' });
-    // Said in words that name the host and the kind of failure, never an address or a body.
-    expect(response.json<{ error: string }>().error).toContain('couldn’t reach elsewhere.example.test');
+    expect(response.status).toBe(200);
     clean(response);
-    expect(fake.hosts()).not.toContain('elsewhere.example.test');
+    expect(fake.hosts()).not.toContain('127.0.0.1');
+  });
+
+  test('R-0291 a trailing dot does not turn a loopback name into a public one', async () => {
+    for (const named of ['https://localhost./prm', 'https://127.0.0.1./prm']) {
+      const fake = network({ resourceMetadata: named });
+      const h = await host(fake);
+      const response = await start(h);
+      expect(response.status).toBe(200);
+      clean(response);
+      expect(fake.hosts().filter(name => name.startsWith('localhost') || name.startsWith('127.'))).toEqual([]);
+    }
+  });
+
+  test('R-0291 a challenge that names its resource metadata on another public host is followed, as it was', async () => {
+    const fake = network({ resourceMetadata: `${META}/prm` });
+    const h = await host(fake);
+    const response = await start(h);
+    expect(response.status).toBe(200);
+    clean(response);
+    expect(fake.hosts()).toEqual(['mcp.example.test', 'meta.example.test', 'auth.example.test']);
+  });
+
+  test('R-0292 a second start inside the first’s life gets its own expiry, and finishes after the first would have ended', async () => {
+    const fake = network();
+    const h = await host(fake);
+    await start(h);
+    await h.clock.advance(MCP_OAUTH_FLOW_TTL_MS - 60_000);
+    const second = (await start(h)).json<Flow>();
+    await h.clock.advance(120_000);
+    const done = await h.request('POST', `/v1/mcp/auth/flows/${second.flowId}`, {
+      body: { callback: callbackFor(second) },
+      as: CONFIGURE,
+    });
+    expect(done.status).toBe(200);
+    clean(done);
+    expect(fake.seen).toContain(`POST ${TOKEN}/token`);
+  });
+
+  test('R-0292 a retry that fails does not take the hosts a pending flow still needs', async () => {
+    const fake = network();
+    const h = await host(fake);
+    const first = (await start(h)).json<Flow>();
+    fake.broken.authMetadata = true;
+    const retry = await start(h);
+    expect(retry.status).toBe(409);
+    expect(retry.json()).toMatchObject({ code: 'mcp_auth_discovery' });
+    clean(retry);
+    fake.broken.authMetadata = false;
+    const done = await h.request('POST', `/v1/mcp/auth/flows/${first.flowId}`, {
+      body: { callback: callbackFor(first) },
+      as: CONFIGURE,
+    });
+    expect(done.status).toBe(200);
+    clean(done);
+  });
+
+  test('R-0291 a start that fails after discovery answers its refusal, and the next start is clean (release: service unit test)', async () => {
+    const fake = network();
+    const h = await host(fake);
+    fake.broken.registration = true;
+    const failed = await start(h);
+    expect(failed.status).toBe(409);
+    expect(failed.json()).toMatchObject({ code: 'mcp_auth_registration' });
+    clean(failed);
+    fake.broken.registration = false;
+    const ok = (await start(h)).json<Flow>();
+    expect(ok.flowId.length).toBeGreaterThan(0);
+  });
+
+  test('R-0018 a restart with oauth.json on file lists the sign-in and signs it out, with no flow and no token in a body', async () => {
+    const fake = network();
+    const h = await host(fake);
+    const flow = (await start(h)).json<Flow>();
+    await h.request('POST', `/v1/mcp/auth/flows/${flow.flowId}`, {
+      body: { callback: callbackFor(flow) },
+      as: CONFIGURE,
+    });
+    // A new daemon: no flow, no discovered host, only oauth.json on file. (The revocation request itself is not
+    // observable here: the fake sealed store is keyed by the state port, which a restart replaces, so the refresh
+    // token is gone. That the recorded revocation host is answered once the document is READ is pinned in
+    // tests/unit/reach.test.ts, and the revocation after a flow ended is R-0018 above.)
+    const again = await h.restart();
+    const listed = await again.request('GET', '/v1/mcp/auth', { as: USE });
+    expect(listed.status).toBe(200);
+    clean(listed);
+    expect(listed.json<{ connections: { component: string; state: string }[] }>().connections[0]).toMatchObject({
+      component: 'linear',
+      state: 'signed-in',
+    });
+    const out = await again.request('DELETE', '/v1/mcp/auth/linear', { as: CONFIGURE });
+    expect(out.status).toBe(200);
+    clean(out);
+    expect(out.json()).toMatchObject({ component: 'linear', removed: true });
   });
 
   test('R-0291 a public server that names a loopback authorization server is refused before anything is sent there', async () => {

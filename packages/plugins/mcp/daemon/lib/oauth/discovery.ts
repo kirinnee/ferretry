@@ -115,13 +115,18 @@ export function endpointAllowed(endpoint: string, serverUrl: string): boolean {
   if (!URL.canParse(endpoint)) return false;
   const url = new URL(endpoint);
   const server = new URL(serverUrl);
-  const serverLocal = isLoopbackHost(server.hostname);
+  // `localhost.` and `127.0.0.1.` are the same hosts as without the dot: judged without it.
+  const serverHost = withoutTrailingDot(server.hostname);
+  const urlHost = withoutTrailingDot(url.hostname);
+  const serverLocal = isLoopbackHost(serverHost);
   if (url.username !== '' || url.password !== '' || url.hash !== '') return false;
-  if (url.protocol === 'http:') return serverLocal && isLoopbackHost(url.hostname);
+  if (url.protocol === 'http:') return serverLocal && isLoopbackHost(urlHost);
   if (url.protocol !== 'https:') return false;
-  if (serverLocal || isPrivateLiteral(server.hostname)) return true;
-  return !isLoopbackHost(url.hostname) && !isPrivateLiteral(url.hostname);
+  if (serverLocal || isPrivateLiteral(serverHost)) return true;
+  return !isLoopbackHost(urlHost) && !isPrivateLiteral(urlHost);
 }
+
+const withoutTrailingDot = (hostname: string): string => (hostname.endsWith('.') ? hostname.slice(0, -1) : hostname);
 
 // ── The documents ────────────────────────────────────────────────────────────────────────────────
 

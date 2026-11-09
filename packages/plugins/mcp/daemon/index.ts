@@ -24,7 +24,7 @@ import { McpDocumentUnreadable, McpInventoryService } from './lib/inventory/serv
 import { SignInReach } from './lib/reach.ts';
 import { combinedMcpOAuthServers, ProjectMcpLaunch, ProjectMcpOAuthServers } from './lib/inventory/project-sign-in.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
-import { MCP_OAUTH_FLOW_TTL_MS, McpOAuthService } from './lib/oauth/service.ts';
+import { McpOAuthService } from './lib/oauth/service.ts';
 import { SessionMcpService } from './lib/session/service.ts';
 import { inventoryRoutes, oauthRoutes, sessionRoutes } from './routes.ts';
 
@@ -138,7 +138,7 @@ export default implementDaemon(manifest, {
     // ── sign-in: the servers (components and projects') and the hosts it may reach ─────────────────────────────────
     // The `mcp-sign-in` network resolver answers only the hosts of the servers listed now, those of the sign-ins on
     // file, and the ones a flow's metadata named (`lib/reach.ts`).
-    const reach = new SignInReach({ now: () => kernel.clock.nowMs() }, MCP_OAUTH_FLOW_TTL_MS);
+    const reach = new SignInReach({ now: () => kernel.clock.nowMs() });
     const oauth = new McpOAuthService({
       servers: reach.observeServers(
         combinedMcpOAuthServers(new ConfigMcpServers(items), new ProjectMcpOAuthServers(folders, documents)),
