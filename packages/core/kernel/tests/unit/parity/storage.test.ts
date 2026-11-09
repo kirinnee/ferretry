@@ -7,8 +7,9 @@
  *
  * Not proved here, and why (see the report): the `fy daemon` lifecycle claim files, the restart marker and the
  * syscall trace folder live in the `fy` shell, which a kernel test may not import (context-imports); `health.jsonl` /
- * `self-restart.json` are Ferrets' own files and not ported yet; `auth.json` belongs to Runtimes; `migration-inflight.md`
- * is a one-time conversion artefact that a clean slate does not keep.
+ * `self-restart.json` are Ferrets' own files and not ported yet; `auth.json` belongs to Runtimes; the one-time conversion report
+ * (F-0384) is an artefact that a clean slate does not keep. F-0033 (the identity key's pin) is not proved here: the fence
+ * pins no 5.0 key path yet, and the unit that fixes it ticks the row.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
@@ -18,7 +19,6 @@ import { instantFromEpochMs } from '@ferretry/std';
 import { FerretIndexFile } from '../../../../ferrets/contract/state.ts';
 import { acceptedName } from '../../../contract/accepted.ts';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
-import { PINNED_KEY_PATHS } from '../../../host/fence-guard.ts';
 import { openHome } from '../../../host/home.ts';
 import { IDENTITY_FILE, loadIdentity } from '../../../host/identity.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
@@ -27,6 +27,8 @@ import { acquireHomeLock, homeLockPath, StateHomeLockedError } from '../../../ho
 import { configHarness, HOME, loginsDef, manualClock, captureLog, updatesDef } from '../host-config/support.ts';
 import { declaredKinds } from '../host-config/real-schemas.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
+import { createNodeHostFs } from '../../../host/state/host-fs.ts';
+import { createStatePort } from '../../../host/state/state-port.ts';
 
 const homes: string[] = [];
 afterEach(async () => {
@@ -57,10 +59,14 @@ describe('the home tree (§9.2): one home, FY_HOME, with the folders today keeps
     expect(await modeOf(join(home, folder))).toBe(0o700);
   });
 
-  test('F-0212 F-0252 the session index is state/ferrets/index.sqlite, a cache in the state folder', () => {
-    expect(FerretIndexFile.path).toBe('index.sqlite');
+  test('F-0212 F-0252 the session index is state/ferrets/index.sqlite, a cache the state port opens in the state folder', async () => {
     expect(FerretIndexFile.store).toBe('sqlite-cache');
-    expect(`state/ferrets/${FerretIndexFile.path}`).toBe('state/ferrets/index.sqlite');
+    const home = await freshHome();
+    const port = createStatePort({ home, pluginId: 'ferrets', files: [FerretIndexFile], fs: createNodeHostFs() });
+    expect(port.sqliteGrant(FerretIndexFile).path).toBe(join(home, 'state', 'ferrets', 'index.sqlite'));
+    // Opened for real: the file is made where the grant says, so moving the state root moves the file and fails this.
+    port.sqlite(FerretIndexFile).close();
+    expect(await kindOf(join(home, 'state', 'ferrets', 'index.sqlite'))).toBe('file');
   });
 });
 
@@ -97,10 +103,6 @@ describe('the daemon identity key', () => {
     expect(again.kind === 'ready' && made.kind === 'ready' && again.identity.daemonId === made.identity.daemonId).toBe(
       true,
     );
-  });
-
-  test("F-0033 the home fence still pins today's state/daemon-identity.json by identity", () => {
-    expect(PINNED_KEY_PATHS).toContain('state/daemon-identity.json');
   });
 });
 
@@ -216,6 +218,19 @@ describe('the generated schemas: FY_HOME/config/.schema', () => {
     ).toBe('claude-code--hooks.json');
   });
 
+  test('F-0151 the one name two declared files share is .schema/runtimes.json (runtimes.yaml and the runtimes/ folder)', () => {
+    const owners = new Map<string, string[]>();
+    for (const kind of declaredKinds()) {
+      const name = schemaFileName(kind.def);
+      owners.set(name, [...(owners.get(name) ?? []), `${kind.plugin}:${kind.path}`]);
+    }
+    const shared = [...owners].filter(([, paths]) => paths.length > 1);
+    // Pinned as it stands (ports-pending `[kernel: schema file name collision]`): it goes red the day the collision is
+    // fixed, or when a second one appears, and whoever does either updates this and the row.
+    expect(shared.map(([name]) => name)).toEqual(['runtimes.json']);
+    expect(shared[0]?.[1].length).toBe(2);
+  });
+
   test.each(SCHEMA_ROWS)(
     '%s today .schema/%s is now .schema/%s, written from the schema the daemon checks with',
     async (_id, _v4, now, witness) => {
@@ -224,9 +239,10 @@ describe('the generated schemas: FY_HOME/config/.schema', () => {
       expect(text).toBeDefined();
       const schema = JSON.parse(text ?? '{}') as { properties?: Record<string, unknown> };
       expect(Object.keys(schema.properties ?? {})).toContain(witness);
-      // It is generated text, byte for byte what the schema yields, so an editor and the daemon never disagree.
+      // It is generated text, byte for byte what the schema yields, so an editor and the daemon never disagree. Where
+      // two declared files share a name the one published last (the later declaration) is what is on disk.
       const own = declaredKinds().filter(kind => schemaFileName(kind.def) === now);
-      expect(own.map(kind => configJsonSchemaText(kind.def))).toContain(text as string);
+      expect(configJsonSchemaText(own.at(-1)?.def as never)).toBe(text as string);
     },
   );
 

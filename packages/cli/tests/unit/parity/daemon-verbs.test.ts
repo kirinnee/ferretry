@@ -9,7 +9,7 @@ import { fakeWorld } from '../fakes.ts';
 
 type Call = readonly [method: string, options: unknown];
 
-function daemonWorld(probe: 'up' | 'down' = 'up') {
+function daemonWorld(probe: 'up' | 'down' = 'up', exitCode = 0) {
   const made = fakeWorld({
     probe:
       probe === 'up'
@@ -31,13 +31,13 @@ function daemonWorld(probe: 'up' | 'down' = 'up') {
   } as unknown as DaemonController;
   const world = {
     ...made.world,
-    daemon: (_reads: DaemonControlReads) => ({ controller, exitCode: () => 0 }),
+    daemon: (_reads: DaemonControlReads) => ({ controller, exitCode: () => exitCode }),
   };
   return { ...made, world, calls };
 }
 
-const run = async (argv: string[], probe: 'up' | 'down' = 'up') => {
-  const built = daemonWorld(probe);
+const run = async (argv: string[], probe: 'up' | 'down' = 'up', exitCode = 0) => {
+  const built = daemonWorld(probe, exitCode);
   const code = await runFy(argv, built.world);
   return { ...built, code, out: built.io.stdout(), err: built.io.stderr() };
 };
@@ -58,6 +58,8 @@ describe('fy daemon', () => {
     const result = await run(['daemon', verb]);
     expect(result.code).toBe(0);
     expect(result.calls.map(call => call[0])).toEqual([verb]);
+    // The verb's own failure is the command's exit code, not a flat zero.
+    expect((await run(['daemon', verb], 'up', 7)).code).toBe(7);
   });
 
   it('V-0242 fy daemon start launches a daemon that is down and exits 0, and says so when it is already up', async () => {

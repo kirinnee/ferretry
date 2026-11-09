@@ -6,7 +6,7 @@
  * Time is driven by hand; the one real child is killed within tens of milliseconds.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { milliseconds } from '@ferretry/std';
 import { AdmissionPort } from '../../../contract/bound.ts';
@@ -33,10 +33,11 @@ const flush = async (): Promise<void> => {
 
 describe('the housekeeping lane', () => {
   test.each([
-    { name: 'by default two minutes', raw: undefined, delay: DEFAULT_BACKGROUND_DELAY_MS },
+    { name: 'by default two minutes', raw: undefined, delay: 120_000 },
     { name: 'FYD_BACKGROUND_DELAY_SECONDS=7 seven seconds', raw: '7', delay: 7_000 },
   ])('J-0186 the lane opens $name after the daemon serves, and housekeeping waits for it', async ({ raw, delay }) => {
     expect(parseBackgroundDelay(raw)).toBe(delay);
+    if (raw === undefined) expect(DEFAULT_BACKGROUND_DELAY_MS).toBe(120_000);
     const clock = fixedClock();
     const ran: string[] = [];
     const runner = new JobRunner(clock, silentLog, () => true, { backgroundDelayMs: parseBackgroundDelay(raw) });
@@ -235,17 +236,131 @@ describe('the host arms the configuration', () => {
     await result.host.stop();
     expect(trace.at(-1)).toBe('watch:stop');
   });
+
+  test('J-0066 F-0151 boot publishes the editors’ schemas, config/.schema/<claim>.json, once the configuration is loaded', async () => {
+    const root = await mkdtemp(`${tmpdir()}/parity-schemas-`);
+    roots.push(root);
+    const home = `${root}/home`;
+    const trace: string[] = [];
+    const real = realAdapters(home, () => {}, { binary: 'fy' });
+    const adapters: HostOptions['adapters'] = {
+      ...real,
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => undefined }),
+      config: (declarations, judge) => {
+        const service = real.config(declarations, judge);
+        return {
+          ...service,
+          reload: async () => {
+            trace.push('load');
+            await service.reload();
+          },
+          publishSchemas: async () => {
+            trace.push('publish');
+            await service.publishSchemas?.();
+          },
+        };
+      },
+    };
+    const gate = definePlugin({
+      version: '5.0.0',
+      api: 5,
+      kinds: [],
+      id: 'gate',
+      title: 'Gate',
+      core: true,
+      provides: { admission: AdmissionPort },
+    });
+    const result = await bootHost({
+      home,
+      version: '5.0.0',
+      implementations: [implementDaemon(gate, { build: () => ({ provides: { admission: recordingAdmission() } }) })],
+      adapters,
+    });
+    if (result.kind !== 'running') throw new Error(result.sentence);
+    hosts.push(result.host);
+    expect(trace.slice(0, 2)).toEqual(['load', 'publish']);
+    const written = await readdir(`${home}/config/.schema`);
+    expect(written.length).toBeGreaterThan(0);
+    for (const name of written) expect(name).toMatch(/\.json$/u);
+  });
+
+  test('J-0066 a schema that cannot be written does not stop the daemon from serving', async () => {
+    const root = await mkdtemp(`${tmpdir()}/parity-schemas-`);
+    roots.push(root);
+    const home = `${root}/home`;
+    const trace: string[] = [];
+    const real = realAdapters(home, () => {}, { binary: 'fy' });
+    const adapters: HostOptions['adapters'] = {
+      ...real,
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => undefined }),
+      config: (declarations, judge) => {
+        const service = real.config(declarations, judge);
+        return {
+          ...service,
+          reload: async () => {
+            trace.push('load');
+            await service.reload();
+          },
+          publishSchemas: async () => {
+            trace.push('publish');
+            throw new Error('read-only');
+          },
+        };
+      },
+    };
+    const gate = definePlugin({
+      version: '5.0.0',
+      api: 5,
+      kinds: [],
+      id: 'gate',
+      title: 'Gate',
+      core: true,
+      provides: { admission: AdmissionPort },
+    });
+    const result = await bootHost({
+      home,
+      version: '5.0.0',
+      implementations: [implementDaemon(gate, { build: () => ({ provides: { admission: recordingAdmission() } }) })],
+      adapters,
+    });
+    if (result.kind !== 'running') throw new Error(result.sentence);
+    hosts.push(result.host);
+    expect(trace.slice(0, 2)).toEqual(['load', 'publish']);
+    expect(result.host).toBeDefined();
+  });
 });
 
 describe('the spawn deadline', () => {
   test('J-0172 a child still running at its deadline is killed with SIGKILL and the answer says it timed out', async () => {
     const spawn = bunSpawn({ PATH: process.env.PATH ?? '' });
     const started = Date.now();
-    const answer = await spawn.runBytes(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], {
-      timeout: milliseconds(50),
-    });
+    // The child ignores SIGTERM and says who it is, so only SIGKILL can have ended it.
+    const answer = await spawn.runBytes(
+      process.execPath,
+      [
+        '-e',
+        "process.on('SIGTERM', () => {}); process.stdout.write(String(process.pid)); setInterval(() => {}, 1_000);",
+      ],
+      { timeout: milliseconds(500) },
+    );
     expect(answer.timedOut).toBe(true);
     expect(answer.exitCode).toBe(-1);
+    const pid = Number(new TextDecoder().decode(answer.stdout));
+    expect(Number.isInteger(pid) && pid > 0).toBe(true);
+    const alive = (): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (let wait = 0; wait < 40 && alive(); wait += 1) await new Promise(resolve => setTimeout(resolve, 50));
+    const survived = alive();
+    if (survived) process.kill(pid, 'SIGKILL');
+    expect(survived).toBe(false);
     // Killed at the deadline, nowhere near the child's own thirty seconds.
     expect(Date.now() - started).toBeLessThan(5_000);
   });
