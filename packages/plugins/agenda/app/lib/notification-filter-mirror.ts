@@ -1,42 +1,27 @@
 /**
- * THE SERVICE WORKER'S WINDOW INTO THIS DEVICE'S NOTIFICATION FILTER.
+ * THE SERVICE WORKER'S WINDOW INTO THIS DEVICE'S NOTIFICATION FILTER (S6).
  *
- * `DeviceNotificationFilterStore` (`notification-filter.ts`) is synchronous and backed by
- * `localStorage`, which a service worker cannot read — `ServiceWorkerGlobalScope` has no
- * `localStorage` at all. IndexedDB is the one storage both a page and its worker can reach, so every
- * write the store makes is mirrored here, and the worker's `push` handler reads it back to apply the
- * same `shouldShowNotification` decision a backgrounded or closed app never got the chance to run.
+ * `DeviceNotificationFilterStore` (`notification-filter.ts`) is synchronous and backed by `localStorage`, which a
+ * service worker cannot read. IndexedDB is the one storage both a page and its worker can reach, so Agenda writes the
+ * v2 FILTER DOCUMENT (`@ferretry/kernel/contract/notification-filter`) there at app boot and on every change of its
+ * settings, and the shell's signed worker reads it back and calls the kernel's `shouldShowPush` over it.
  *
- * MIRROR, NOT SOURCE OF TRUTH. The page always reads and writes `localStorage` directly through the
- * store; this is a one-way shadow copy kept current on every `set()`. A worker that finds a stale or
- * absent mirror — the very first push before anything was ever written, a denied database, a write
- * that lost a race with a push that arrived first — falls back to
- * `DEFAULT_NOTIFICATION_FILTER_PREFERENCES`, the same safe default the page itself starts from:
- * everything on, no quiet hours, no machine muted. A worker can therefore never show LESS than an
- * unconfigured device would.
+ * MIRROR, NOT SOURCE OF TRUTH. The page always reads and writes `localStorage` directly through the store; this is a
+ * one-way shadow copy. A worker that finds an absent, stale, unreadable or over-bound document shows everything, the same
+ * safe default an unconfigured device starts from: a worker can never show LESS than an unconfigured device would. The
+ * worker reads; this file only writes, and the document's names, shape and encoding (the JSON TEXT) are the kernel's.
  *
- * BEST EFFORT, BOTH DIRECTIONS. A write that fails leaves the worker on whatever it last saw, or on
- * defaults — never breaks the setting the reader just changed, which stays correct in `localStorage`
- * regardless. A read that fails answers the same way. Nothing here may ever throw past its own
- * boundary.
+ * BEST EFFORT. A write that fails leaves the worker on whatever it last saw, or on the default, and never breaks the
+ * setting the person just changed, which stays correct in `localStorage`. Nothing here throws past its own boundary.
  */
 
 import {
-  DEFAULT_NOTIFICATION_FILTER_PREFERENCES,
-  type DeviceNotificationFilterPreferences,
-  parseNotificationFilterPreferences,
-} from './notification-filter.ts';
-
-/** Separate from `ferretry-release` (the signed-release keeper's own database) and from any other. */
-const MIRROR_DATABASE = 'ferretry-notification-filter';
-const MIRROR_OBJECT_STORE = 'mirror';
-const MIRROR_KEY = 'preferences';
-
-const requestResult = <T>(request: IDBRequest<T>): Promise<T> =>
-  new Promise<T>((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
-  });
+  NOTIFICATION_FILTER_DB,
+  NOTIFICATION_FILTER_DB_VERSION,
+  NOTIFICATION_FILTER_KEY,
+  NOTIFICATION_FILTER_STORE,
+  type NotificationFilterDocument,
+} from '@ferretry/kernel/contract/notification-filter';
 
 const transactionComplete = (transaction: IDBTransaction): Promise<void> =>
   new Promise<void>((resolve, reject) => {
@@ -47,10 +32,10 @@ const transactionComplete = (transaction: IDBTransaction): Promise<void> =>
 
 const openMirrorDatabase = (factory: IDBFactory): Promise<IDBDatabase> =>
   new Promise<IDBDatabase>((resolve, reject) => {
-    const request = factory.open(MIRROR_DATABASE, 1);
+    const request = factory.open(NOTIFICATION_FILTER_DB, NOTIFICATION_FILTER_DB_VERSION);
     request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(MIRROR_OBJECT_STORE)) {
-        request.result.createObjectStore(MIRROR_OBJECT_STORE);
+      if (!request.result.objectStoreNames.contains(NOTIFICATION_FILTER_STORE)) {
+        request.result.createObjectStore(NOTIFICATION_FILTER_STORE);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -58,63 +43,27 @@ const openMirrorDatabase = (factory: IDBFactory): Promise<IDBDatabase> =>
     request.onblocked = () => reject(new Error('the notification filter mirror upgrade is blocked'));
   });
 
-/** What `DeviceNotificationFilterStore` writes through on every `set()`. */
+/** What `DeviceNotificationFilterStore` writes through at boot and on every `set()`. */
 export interface NotificationFilterMirrorWriter {
-  write(value: DeviceNotificationFilterPreferences): Promise<void>;
+  write(document: NotificationFilterDocument): Promise<void>;
 }
 
-/** What the worker's `push` handler reads. Never throws — see the module doc. */
-interface NotificationFilterMirrorReader {
-  read(): Promise<DeviceNotificationFilterPreferences>;
-}
-
-/**
- * The real IndexedDB-backed mirror, shared by the page (writer) and the worker (reader) because both
- * open the SAME database, object store and key — the only thing that makes this a mirror rather than
- * two unrelated records.
- */
-export class IndexedDbNotificationFilterMirror
-  implements NotificationFilterMirrorWriter, NotificationFilterMirrorReader
-{
+/** The real IndexedDB-backed writer: the document's JSON text, at the kernel's database, store and key. */
+export class IndexedDbNotificationFilterMirror implements NotificationFilterMirrorWriter {
   constructor(private readonly factory: IDBFactory) {}
 
-  /**
-   * Overwrites the mirrored record in one transaction. Throws on failure; callers decide how to
-   * treat that.
-   *
-   * Wrapped in the SAME `{ version: 1, ... }` envelope `DeviceNotificationFilterStore` writes to
-   * `localStorage`, because `parseNotificationFilterPreferences` — the one parser both storage
-   * layers share — demands it; omitting it would make every mirrored write unreadable.
-   */
-  async write(value: DeviceNotificationFilterPreferences): Promise<void> {
+  /** Overwrites the document in one transaction. Throws on failure; callers decide how to treat that. */
+  async write(document: NotificationFilterDocument): Promise<void> {
     const database = await openMirrorDatabase(this.factory);
-    const transaction = database.transaction(MIRROR_OBJECT_STORE, 'readwrite');
-    transaction.objectStore(MIRROR_OBJECT_STORE).put(JSON.stringify({ version: 1, ...value }), MIRROR_KEY);
-    await transactionComplete(transaction);
-  }
-
-  /** Reads the mirrored record raw. Throws on failure, including "nothing has ever been written". */
-  async read(): Promise<DeviceNotificationFilterPreferences> {
-    const database = await openMirrorDatabase(this.factory);
-    const transaction = database.transaction(MIRROR_OBJECT_STORE, 'readonly');
-    const raw = await requestResult<unknown>(transaction.objectStore(MIRROR_OBJECT_STORE).get(MIRROR_KEY));
-    if (typeof raw !== 'string') throw new Error('no notification filter has been mirrored yet');
-    return parseNotificationFilterPreferences(raw);
-  }
-}
-
-/**
- * The worker's whole contract with this file: read the mirror, or fall back to the exact defaults a
- * page with no stored preference would use. Called from inside `event.waitUntil`, so it is safe for
- * this to take as long as IndexedDB needs — it is never safe for it to reject.
- */
-export async function readMirroredNotificationFilter(
-  factory: IDBFactory,
-): Promise<DeviceNotificationFilterPreferences> {
-  try {
-    return await new IndexedDbNotificationFilterMirror(factory).read();
-  } catch {
-    return DEFAULT_NOTIFICATION_FILTER_PREFERENCES;
+    try {
+      const transaction = database.transaction(NOTIFICATION_FILTER_STORE, 'readwrite');
+      transaction.objectStore(NOTIFICATION_FILTER_STORE).put(JSON.stringify(document), NOTIFICATION_FILTER_KEY);
+      await transactionComplete(transaction);
+    } finally {
+      // Every write opens its own connection; one left open would block a later version bump of the database, and
+      // the worker's open would then wait on it and fall back to showing everything.
+      database.close();
+    }
   }
 }
 
@@ -124,8 +73,7 @@ export interface NotificationFilterMirrorSource {
 }
 
 /**
- * Resolves the page's writer onto the mirror, treating absence or denial as an ordinary condition —
- * the same shape `browserControlsStorage` (`controls.ts`) uses for `localStorage`. `indexedDB` can be
+ * Resolves the page's writer onto the mirror, treating absence or denial as an ordinary condition. `indexedDB` can be
  * missing in a locked-down browser mode, and merely reading the property throws in some of them.
  */
 export const browserNotificationFilterMirror = (

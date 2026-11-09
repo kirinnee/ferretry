@@ -288,7 +288,8 @@ export class SessionTransport implements DaemonTransport {
    * already swapped after a rotation whose answer was lost, so a refusal is followed by exactly one more attempt with
    * the replacement this browser kept before it sent it — accepted, and that key is promoted; refused as well, and
    * the daemon never took it, so it is discarded. Any OTHER failure of the second attempt is a fact about the
-   * carrier, not about the key, so the pending key is kept for the next session and the first failure is reported.
+   * carrier, not about the key, so the pending key is kept for the next session and THAT failure is reported (never
+   * the first `4403`, which would read as a refusal the daemon may not stand by).
    */
   async #openKeyed(): Promise<OpenedSession> {
     const device = await this.#claim();
@@ -304,7 +305,11 @@ export class SessionTransport implements DaemonTransport {
         await rotation.promote(daemonId);
         return { ...opened, device: rotated };
       } catch (again) {
-        if (deviceRefusal(again)) await rotation.discard(daemonId);
+        // A second attempt that died on the CARRIER says nothing about the key: the pending key is kept for the next
+        // session and the carrier's failure is what surfaces, never the first `4403` (a refusal the daemon may not
+        // even stand by any more).
+        if (!deviceRefusal(again)) throw again;
+        await rotation.discard(daemonId);
         throw refused;
       }
     }
@@ -474,10 +479,12 @@ export class SessionTransport implements DaemonTransport {
         (error: unknown) => {
           if (closed) return;
           if (retry !== undefined) {
+            // Refused with the pending key too: the daemon never took it, and the first refusal is the answer. Any
+            // other failure is the carrier's, so the pending key stays and that failure is what surfaces.
             const discarded = deviceRefusal(error) ? rotation?.discard(daemonId) : undefined;
             void Promise.resolve(discarded)
               .catch(() => undefined)
-              .then(() => failed(retry.refused));
+              .then(() => failed(deviceRefusal(error) ? retry.refused : error));
             return;
           }
           if (deviceRefusal(error) && rotation !== undefined) {

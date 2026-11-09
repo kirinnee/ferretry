@@ -13,17 +13,17 @@
  *
  * NO PLUGIN CODE RUNS IN THIS WORKER. Every byte here is the shell's own and part of the signed release. A plugin that
  * needs worker behaviour (Agenda's notification kinds, a `clear` push, this device's notification filter) asks for it as
- * declarative data the worker interprets — later, in that plugin's contract. The one such datum today is the push envelope
- * (`push-envelope.ts`: `title`, `body`, `url`, strict). A payload that has none is shown the way today's worker shows
- * one it cannot read: plainly, so a subscription that received a push is never left showing nothing (the browser
- * penalises that and eventually revokes it).
+ * declarative data the worker interprets, declared in the KERNEL's contract: the push message (`readPushMessage`: a show
+ * with `tag`, `kind`, `count`, `urgency`, or a `clear` naming tags) and this device's filter document. A payload that
+ * has none is shown the way today's worker shows one it cannot read: plainly, so a subscription that received a push is
+ * never left showing nothing (the browser penalises that and eventually revokes it).
  */
 
+import { PUSH_TAG_PATTERN, PUSH_URL_MAX } from '@ferretry/kernel/contract/push-envelope';
 import { daemonHomeHref, HOME_HREF, routeTable } from '../router/routes.ts';
 import { PUSH_TAP_SCREENS } from '../router/tap-target.ts';
-import { NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_MESSAGE, PUSH_LABEL_PARAMETER, PUSH_SCOPE_ROOT } from './facts.ts';
-import { PUSH_URL_MAX } from '@ferretry/kernel/contract/push-envelope';
-import { readPushEnvelope } from './push-envelope.ts';
+import { NOTIFICATION_OPEN_ACK, PUSH_LABEL_PARAMETER, PUSH_SCOPE_ROOT } from './facts.ts';
+import { notificationOpenMessage } from './notification-open.ts';
 
 export { NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_MESSAGE, PUSH_SCOPE_ROOT } from './facts.ts';
 
@@ -67,11 +67,11 @@ export const pushMachineOf = (scope: string, scriptUrl: string): PushMachine | n
 };
 
 /** What a push that reached the app-wide registration says it is: from no machine this browser can name. */
-const UNVERIFIED = 'Unverified';
+export const UNVERIFIED_LABEL = 'Unverified';
 
 /** What a push nobody composed is shown as, so a subscription is never punished for a silent push. */
 export const unreadablePushTitle = (machine: PushMachine | null): string =>
-  machine === null ? `${UNVERIFIED} · Ferretry` : `${machine.label} · Ferretry`;
+  machine === null ? `${UNVERIFIED_LABEL} · Ferretry` : `${machine.label} · Ferretry`;
 
 /** The body of that notification. */
 const UNREADABLE_PUSH_BODY = 'Something is waiting in your Agenda.';
@@ -111,7 +111,12 @@ const askIn = (query: string): string | null => {
   return null;
 };
 
-const appHome = (origin: string): string => new URL(HOME_HREF, origin).href;
+/**
+ * Where a quiet line's tap goes, and where ANY tap that names no acceptable page goes: the machine's home, or — for the
+ * app-wide registration, which knows no machine — the app.
+ */
+export const machineHomeUrl = (machine: PushMachine | null, origin: string): string =>
+  new URL(machine === null ? HOME_HREF : daemonHomeHref(machine.daemonId), origin).href;
 
 const decodeSegment = (segment: string): string | null => {
   try {
@@ -187,15 +192,16 @@ const machineTarget = (raw: string, machine: PushMachine | null): { path: string
  * only a page the shell's route parse accepts and that belongs to the machine whose worker received the push:
  * that machine's home or a screen in {@link PUSH_TAP_SCREENS} under it. Anything else — another origin, `javascript:`,
  * `//host`, a backslash, encoded or literal traversal, an encoded slash, another machine's page, an unknown route, `/`
- * — opens the app (`/app/`).
+ * — opens THAT MACHINE'S HOME (S6: "an unknown URL goes to the machine home"; a tap on machine B's alert never shows
+ * machine A's page). The app-wide registration has no machine, so for it the fallback is the app (`/app/`).
  *
  * The app-wide registration knows no machine and its pushes are named "Unverified", so a PUSH it receives always carries
  * the app, whatever it says (see {@link notificationClickUrl} for a line a page showed).
  */
 export const notificationUrl = (raw: unknown, origin: string, machine: PushMachine | null): string => {
-  if (machine === null || typeof raw !== 'string') return appHome(origin);
+  if (machine === null || typeof raw !== 'string') return machineHomeUrl(machine, origin);
   const target = machineTarget(raw, machine);
-  if (target === null) return appHome(origin);
+  if (target === null) return machineHomeUrl(machine, origin);
   return new URL(target.ask === null ? target.path : `${target.path}?ask=${target.ask}`, origin).href;
 };
 
@@ -211,44 +217,40 @@ export const notificationUrl = (raw: unknown, origin: string, machine: PushMachi
 export const notificationClickUrl = (stored: unknown, origin: string, machine: PushMachine | null): string => {
   // A relative address (a page's own `data.url`) is read against this site, like the browser would.
   const url = typeof stored === 'string' ? URL.parse(stored, origin) : null;
-  if (url === null || url.origin !== origin) return appHome(origin);
+  if (url === null || url.origin !== origin) return machineHomeUrl(machine, origin);
   const target = machineTarget(`${url.pathname}${url.search}`, machine);
-  if (target === null) return appHome(origin);
+  if (target === null) return machineHomeUrl(machine, origin);
   return new URL(target.ask === null ? target.path : `${target.path}?ask=${target.ask}`, origin).href;
 };
 
-/** What the worker shows for a push, and the page its tap carries. `url` is absent when the push named none it could read. */
-export interface PushPresentation {
-  readonly title: string;
-  readonly body: string;
-  readonly data?: { readonly url: string };
-}
+/**
+ * What the worker shows for a push it cannot read (no `readPushMessage`): plainly, with no page, so a subscription that
+ * received a push is never left showing nothing.
+ */
+export const unreadablePush = (machine: PushMachine | null): { readonly title: string; readonly body: string } => ({
+  title: unreadablePushTitle(machine),
+  body: UNREADABLE_PUSH_BODY,
+});
 
 /**
- * How one push is shown. A machine's worker titles the daemon's own words with the reader's label for the machine and
- * carries the page they named (checked); the app-wide registration says "Unverified" and carries `/app/` whatever the
- * push named; a payload with no readable envelope is shown plainly with no page, so a subscription that received a push
- * is never left showing nothing.
+ * The tap a notification carries back to its click: the page it may open (read through the same closed list as ever) and
+ * the daemon's own tag of the line, kept only if it fits the kernel's tag grammar. `data` is NOT TRUSTED — a notification a
+ * page showed carries whatever that page put there.
  */
-export const presentPush = (json: unknown, origin: string, machine: PushMachine | null): PushPresentation => {
-  const envelope = readPushEnvelope(json);
-  if (envelope === null) return { title: unreadablePushTitle(machine), body: UNREADABLE_PUSH_BODY };
-  return {
-    title: `${machine === null ? UNVERIFIED : machine.label} · ${envelope.title}`,
-    body: envelope.body,
-    data: { url: notificationUrl(envelope.url, origin, machine) },
-  };
+export const notificationClick = (
+  stored: unknown,
+  origin: string,
+  machine: PushMachine | null,
+): { readonly url: string; readonly tag?: string } => {
+  const data = typeof stored === 'object' && stored !== null ? (stored as { url?: unknown; tag?: unknown }) : undefined;
+  const tag = typeof data?.tag === 'string' && PUSH_TAG_PATTERN.test(data.tag) ? data.tag : undefined;
+  return { url: notificationClickUrl(data?.url, origin, machine), ...(tag === undefined ? {} : { tag }) };
 };
 
 // ─── a tap opens its page inside the running app, not by reloading it ─────────────────────────────────────────────
 
 /** How long the worker waits for the page to say it took the open before it navigates the window instead. */
 export const NOTIFICATION_OPEN_ACK_MS = 1_000;
-
-interface NotificationOpenMessage {
-  readonly type: typeof NOTIFICATION_OPEN_MESSAGE;
-  readonly url: string;
-}
 
 /** The open window, as the worker sees it. */
 export interface NotificationWindow {
@@ -280,6 +282,7 @@ export const openInWindow = async (
   url: string,
   openWindow: (url: string) => Promise<unknown>,
   environment: NotificationOpenEnvironment = browserOpenEnvironment,
+  tag?: string,
 ): Promise<'routed' | 'navigated' | 'opened'> => {
   await window.focus().catch(() => undefined);
   const routed = await new Promise<boolean>(resolve => {
@@ -295,8 +298,7 @@ export const openInWindow = async (
       if (event.data === NOTIFICATION_OPEN_ACK) settle(true);
     };
     try {
-      const message: NotificationOpenMessage = { type: NOTIFICATION_OPEN_MESSAGE, url };
-      window.postMessage(message, [channel.port2]);
+      window.postMessage(notificationOpenMessage(url, tag), [channel.port2]);
     } catch {
       settle(false);
     }
