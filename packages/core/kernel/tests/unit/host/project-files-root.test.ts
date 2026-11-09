@@ -486,14 +486,16 @@ describe('S179 copyTree is not a second door for a link (H1)', () => {
     expect(await readdir(`${f.home}/state/mcp/downloads/pack`)).toEqual(['SKILL.md']);
   });
 
-  test('S179 copyTree {link:true} FROM a project folder into an internal root is refused not_declared: no link outlives the declared set', async () => {
+  test('S179 copyTree {link:true} FROM a project folder into an internal root is refused: no link outlives the declared set', async () => {
     const { f, downloads, project } = await withDownloads();
     await project.writeText(at(project, '.claude/skills/x/SKILL.md'), '# x');
+    // `downloads` takes no link (BG-004): the destination refuses first; the not_declared of a link FROM a project
+    // folder into a root that DOES take links (fleet, agent-homes) is in root-copytree-link.test.ts
     expect(
       await refusalOf(() =>
         downloads.copyTree(project, at(project, '.claude/skills/x'), at(downloads, 'linked'), { link: true }),
       ),
-    ).toBe('not_declared');
+    ).toBe('read_only');
     expect(await exists(`${f.home}/state/mcp/downloads/linked`)).toBe(false);
     // a COPY out of the set still works
     await downloads.copyTree(project, at(project, '.claude/skills/x'), at(downloads, 'copied'));

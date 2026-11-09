@@ -502,7 +502,8 @@ test('S179 project-files parity: every case is answered alike on the testing hos
   expect(byCase['copy FROM a folder above a grant']).toEqual({ refused: 'not_declared' });
   expect(byCase['copy FROM the skills folder above a grant']).toEqual({ refused: 'not_declared' });
   expect(byCase['copy FROM a name outside the set']).toEqual({ refused: 'not_declared' });
-  expect(byCase['copyTree link FROM a project folder into downloads']).toEqual({ refused: 'not_declared' });
+  // downloads takes no link (BG-004): the destination is judged before the project source is held against a link
+  expect(byCase['copyTree link FROM a project folder into downloads']).toEqual({ refused: 'read_only' });
   expect(byCase['copyTree link FROM a folder above a grant']).toEqual({ refused: 'not_declared' });
   expect(byCase['a stranger handle as the source']).toEqual({ refused: 'not_declared' });
   // remove never follows the leaf: a link at a grant is unlinked, a link above the name is refused (M1)

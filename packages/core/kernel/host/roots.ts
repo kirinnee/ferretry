@@ -94,6 +94,11 @@ export function mayHoldRoot(plugin: string, name: RootName): boolean {
   return owner === undefined || owner === plugin;
 }
 
+/** Whether a root is an owner's own (`work`, `imports`, `harness-*`, `project-files`). One fact for both hosts. */
+export function isOwnerRoot(name: RootName): boolean {
+  return OWNER_ROOTS.has(name);
+}
+
 /** Whether a root is read-only through every handle (an owner's harness or import folder). One fact for both hosts. */
 export function isReadOnlyRoot(name: RootName): boolean {
   return READ_ONLY_ROOTS.has(name);
@@ -1734,11 +1739,14 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const known = HANDLES.get(source);
       if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
       const sourceFolder = await known.real(from);
-      // A link is never made INTO a project folder (`linkTo` refuses it: it would carry a write to a name the declared
-      // set never reached) nor FROM one into another root (`linkTarget`: the link would outlive the declared set). A copy
-      // is the only door; this is the same two refusals the link door gives, so `copyTree` is not a second way round them.
-      if (options?.link === true && projectRoot) return refuse('read_only');
-      if (options?.link === true && known.root === 'project-files') return refuse('not_declared');
+      // A link is written only INTO a root that takes links (`linkTo`'s rule: `fleet` and `agent-homes`; never a project
+      // folder, `work` or any other, where it would carry a write to a name the declared set never reached) and never
+      // FROM an owner's root (a project folder, `work`, ...: the link would outlive what the owner declared). A copy is
+      // the only door there; these are the refusals the link door gives, so `copyTree` is not a second way round them.
+      if (options?.link === true && !takesLinks(name)) return refuse('read_only');
+      // (A source whose root is unknown is refused too: the table only holds handles made for a root, so none is.)
+      if (options?.link === true && (known.root === undefined || isOwnerRoot(known.root)))
+        return refuse('not_declared');
       const checkedSource = await openCheckedFolder(sourceFolder.scope, sourceFolder.full).catch((error: unknown) => {
         if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
         throw error;

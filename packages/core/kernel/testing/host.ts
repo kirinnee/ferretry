@@ -1,7 +1,14 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
-import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
+import {
+  DEFAULT_COPY_ENTRIES,
+  isOwnerRoot,
+  isReadOnlyRoot,
+  mayHoldRoot,
+  RootError,
+  scopedSubfolder,
+} from '../host/roots.ts';
 import {
   harnessFileRefusal,
   permittedMode,
@@ -1338,7 +1345,14 @@ async function start(world: World): Promise<TestHost> {
             // link is ever made from one into another root: the same two refusals as production (`HANDLES.real`, `linkTarget`).
             const projectSource = PROJECT_SOURCES.get(source);
             projectSource?.(from);
-            if (projectSource !== undefined && copyOptions?.link === true) throw new RootError('not_declared');
+            // The same two refusals, in the same order (`copyTree` in `host/roots.ts`): a link is written only into a root
+            // that takes links, and never from an owner's root.
+            if (copyOptions?.link === true) {
+              if (isReadOnlyRoot(name) || !takesLinks(name)) throw new RootError('read_only');
+              const sourceRoot = testHandles.get(source)?.root;
+              if (projectSource !== undefined || (sourceRoot !== undefined && isOwnerRoot(sourceRoot)))
+                throw new RootError('not_declared');
+            }
             // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
             const fromKey = projectSource === undefined ? from : projectFileKey(from);
             for (const [key, text] of [...world.roots])
