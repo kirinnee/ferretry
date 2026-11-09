@@ -14,7 +14,8 @@ import { check as contextImports } from '../../validate/context-imports.ts';
 import { check as contractConsumes } from '../../validate/contract-consumes.ts';
 import { check as contractGraph } from '../../validate/contract-graph.ts';
 import { check as coreClosed } from '../../validate/core-closed.ts';
-import { parity, readChanges } from '../../validate/descriptor-parity.ts';
+import { parity } from '../../../packages/core/kernel/testing/parity.ts';
+import { readChanges } from '../../validate/descriptor-parity.ts';
 import { check as glossary, glossaryFindings } from '../../validate/glossary.ts';
 import {
   check as guarantees,

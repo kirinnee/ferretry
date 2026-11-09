@@ -178,7 +178,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Ferretry 5.0 checks";
       entry = bun-script "scripts/validate/rebuild-checks.sh";
-      files = "^(packages/.*|scripts/(gen|validate)/.*|ports-pending\\.json|release\\.json|docs/rebuild/guarantees\\.tsv|package\\.json)$";
+      files = "^(packages/.*|scripts/(gen|validate)/.*|ports-pending\\.json|release\\.json|docs/rebuild/guarantees\\.tsv|docs/design/rebuild-parity\\.tsv|package\\.json)$";
       pass_filenames = false;
       language = "system";
     };

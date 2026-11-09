@@ -142,8 +142,11 @@ export default definePlugin({
         ...PERSON,
         capability: cap('terminal', 'use'),
         audit: { record: COMPOSER_ACTED_AUDIT },
-        // The composer's draft text goes to a pane; the answer is the outcome word only.
-        guard: { none: 'answers an outcome word; no pane, page or vault text' },
+        // The composer's draft text goes to a pane; the answer is the outcome word only. A refusal can quote the pane's
+        // blocking prompt (masked), as today's refusal did; the draft itself is never in an answer.
+        guard: {
+          none: "answers an outcome word; a refusal may quote the pane's masked blocking prompt; no page or vault text",
+        },
       }),
 
       // ── reading (session-reads) ───────────────────────────────────────────────────────────────

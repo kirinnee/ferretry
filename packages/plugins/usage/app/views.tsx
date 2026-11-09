@@ -19,6 +19,10 @@ import { type InsightsView, type UsageClient, useDaemonConnection } from './shel
 import { InsightsFrame } from './shell/insights-frame.tsx';
 import { ComposerQuota } from './shell/composer-quota.tsx';
 import { QuotaReadout } from './shell/quota-readout.tsx';
+import { FerretUsageInfoPanel } from './shell/info-usage.tsx';
+import { SpendTodayPanel } from './shell/spend-today.tsx';
+
+export { FerretUsageInfoPanel, SpendTodayPanel };
 
 const noNavigate = (): void => undefined;
 

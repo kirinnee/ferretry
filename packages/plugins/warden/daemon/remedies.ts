@@ -24,8 +24,8 @@ export interface WardenRemedyHost {
   /** Browsers, while it is on (an optional use): it closes the browsers left under a ferret's pane. */
   readonly browsers?: () => BrowsersApi | undefined;
   /**
-   * Told when a resume that DID start the ferret could not type its notice (Conversation refuses until its terminal
-   * seam lands). The resume stands; the notice's failure is journalled apart from it.
+   * Told when a resume that DID start the ferret could not type its notice (Conversation refused it, or the ferret's terminal
+   * could not be reached). The resume stands; the notice's failure is journalled apart from it.
    */
   readonly noticeUndelivered?: (ferret: string, reason: string) => void;
 }
@@ -56,12 +56,11 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     }
   };
 
-  // GAP(conversation): nudges must carry actor warden (D2 #19); needs Conversation's additive warden caller. Today the
-  // daemon was the sender (`origin: 'daemon', by: { kind: 'ferretry', feature: 'Warden' }`), so a Warden notice was
-  // never kept, retried or counted as the owner's own message. Conversation's `ConversationCaller` names only the
-  // owner and a ferret on 5.0, so until it gains `{ kind: 'warden' }` the Warden's words go as the owner's.
+  // D2 #19: every word the Warden types is Conversation's `warden` caller (today's `origin: 'daemon'`, authored by Ferretry's
+  // Warden), so a notice is never recorded as the owner's own message, never retried on a person's behalf, and the
+  // sweep's input_stuck / inbox_stuck looks can tell it apart. It is never sent as the owner or as a ferret.
   const say = async (ferret: string, message: string): Promise<void> => {
-    const sent = await conversation.send(ferret as FerretId, { kind: 'owner' }, { message, label: 'action' });
+    const sent = await conversation.send(ferret as FerretId, { kind: 'warden' }, { message, label: 'action' });
     if (!sent.ok) throw new Error(`the message was refused: ${JSON.stringify(sent.error)}`);
   };
 

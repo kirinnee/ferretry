@@ -220,7 +220,8 @@ async function listedGroups(database: string, user: string): Promise<readonly nu
 
 /**
  * `descriptorFolder`: where an open descriptor is reached by number (Linux `/proc/self/fd`); a host without it reaches
- * entries by their real path, re-proved before each step, and a remove or move outside daemon folders is refused.
+ * entries by their real path, re-proved before each step; a folder remove is refused there, and so is any remove of an
+ * owner root.
  */
 export function nodeFs(
   randomSuffix: () => string,
