@@ -12,11 +12,11 @@
 #
 # A new importer of a listed parser is a use too (laundering): add it to the line only with why it is safe there.
 
-packages/core/kernel/host/config/yaml-text.ts  # the kernel's bounded reader itself: size cap, alias budget by length, no YAML 1.1 tags, duplicate keys in one pass
-packages/core/kernel/host/config/yaml-text.ts::readConfigText  <- *  # the sanctioned door: every daemon-side read of a config text goes through it
-packages/core/kernel/host/config/yaml-text.ts::readConfigTextToEdit  <- *  # the same bounded read, handing back the document an edit starts from
-packages/core/kernel/host/config/yaml-text.ts::editConfigText  <- *  # bounded read, then a comment-preserving edit
-packages/core/kernel/host/config/yaml-text.ts::setConfigKey  <- *  # bounded read, then one key set
+packages/std/src/yaml-text.ts  # the shared bounded reader itself: size cap, alias budget by length, no YAML 1.1 tags, duplicate keys in one pass
+packages/std/src/yaml-text.ts::readConfigText  <- *  # the sanctioned door: every daemon-side read of a config text goes through it
+packages/std/src/yaml-text.ts::readConfigTextToEdit  <- *  # the same bounded read, handing back the document an edit starts from
+packages/std/src/yaml-text.ts::editConfigText  <- *  # bounded read, then a comment-preserving edit
+packages/std/src/yaml-text.ts::setConfigKey  <- *  # bounded read, then one key set
 
 packages/plugins/logins/daemon/lib/shared/yaml-text.ts  # parses only the built-in catalog and preset texts shipped in the repo (catalog.ts, presets/catalog.ts call it with origin 'built-in'), never a file on disk
 packages/plugins/logins/daemon/lib/shared/yaml-text.ts::readConfigText  <- packages/plugins/logins/daemon/lib/catalog/catalog.ts, packages/plugins/logins/daemon/lib/presets/catalog.ts  # both callers pass the origin 'built-in': a text shipped in the repo, never one a person or an agent wrote

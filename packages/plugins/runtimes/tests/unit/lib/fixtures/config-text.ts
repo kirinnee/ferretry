@@ -4,6 +4,7 @@
  * that knows the three things the settings tests rely on (a spending layer switched on, a raised cap, a faster sweep).
  */
 import { config } from '@ferretry/kernel/host';
+import { editConfigText, readConfigText } from '@ferretry/std/yaml';
 import type { ConfigText, SettingsFile } from '../../../../daemon/lib/ports.ts';
 
 /** The warden settings in effect when nobody wrote a file (the fields the tests judge). */
@@ -53,11 +54,11 @@ function wardenLoosening(effective: typeof DEFAULT_WARDEN_CONFIG, written: Recor
 }
 
 export const configText: ConfigText = {
-  read: text => config.readConfigText(text),
-  edit: (existing, target, current, modeline) => config.editConfigText(existing, target, current, modeline),
+  read: text => readConfigText(text),
+  edit: (existing, target, current, modeline) => editConfigText(existing, target, current, modeline),
   hasRawSecret: document => config.findRawSecrets(document).length > 0,
   loosening: (path: SettingsFile, effective, text) => {
-    const read = config.readConfigText(text);
+    const read = readConfigText(text);
     if (!read.ok) return undefined;
     if (path !== 'warden.yaml') return [];
     return wardenLoosening(effective as typeof DEFAULT_WARDEN_CONFIG, record(read.read.value));

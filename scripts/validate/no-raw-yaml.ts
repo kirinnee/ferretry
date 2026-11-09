@@ -4,7 +4,7 @@
  *
  * WHY. A hand-written YAML file is the most hostile input the daemon reads: one long string aliased many times made
  * `Bun.YAML.parse` of a 256 KiB `gate.yaml` take 2.3 s and 5.4 GB at every boot (kac2 review round 8), while the
- * kernel's own reader (`packages/core/kernel/host/config/yaml-text.ts`: the size cap, the alias budget by length, no
+ * shared bounded reader (`packages/std/src/yaml-text.ts`, imported as `@ferretry/std/yaml`: the size cap, the alias budget by length, no
  * YAML 1.1 tags, duplicate keys in one pass) refused the same file in one linear pass. Every daemon-side reader of
  * text a person or an agent can write must go through that one reader — or through the value the kernel already
  * checked — so a new parse of its own is refused here until somebody says, in the ledger, why it is safe.
@@ -71,8 +71,11 @@ import { parseSync } from 'oxc-parser';
 
 export const LEDGER = 'scripts/validate/raw-yaml-allowlist.txt';
 
-/** The kernel's bounded reader: the one file whose parsing exports are open to every caller. */
-export const KERNEL_READER = 'packages/core/kernel/host/config/yaml-text.ts';
+/** The shared bounded reader (it lives in `@ferretry/std`, the kernel and the plugins both import it): the one file whose parsing exports are open to every caller. */
+export const KERNEL_READER = 'packages/std/src/yaml-text.ts';
+
+/** The package subpath that file is imported by: the sanctioned door, so importing it is not a use of a YAML library. */
+export const KERNEL_READER_SPECIFIER = '@ferretry/std/yaml';
 
 /** What a YAML module (or Bun's `YAML`) offers that reads text. `stringify` and the `is…` helpers read nothing. */
 const PARSE_NAMES: ReadonlySet<string> = new Set([
@@ -201,8 +204,12 @@ const keyName = (property: Node): string | undefined =>
     ? undefined
     : staticName(property.key);
 
-/** A module specifier of a YAML library: bare (not a path) and with `yaml` in its name. */
-const isYamlLibrary = (specifier: string): boolean => !/^[./]/u.test(specifier) && /yaml/iu.test(specifier);
+/**
+ * A module specifier of a YAML library: bare (not a path) and with `yaml` in its name. The bounded reader's own
+ * subpath is the one bare name with `yaml` in it that is NOT a library: it is the door the ledger sanctions.
+ */
+const isYamlLibrary = (specifier: string): boolean =>
+  specifier !== KERNEL_READER_SPECIFIER && !/^[./]/u.test(specifier) && /yaml/iu.test(specifier);
 
 /** Whether an identifier found under `parent.key` only NAMES something a declaration introduces. */
 function declaresOnly(parent: Node | undefined, key: string): boolean {

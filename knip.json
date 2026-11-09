@@ -6,6 +6,7 @@
       "project": ["scripts/test/*.ts"]
     },
     "packages/std": {
+      "entry": ["tests/**/*.test.ts"],
       "project": ["**/*.ts"]
     },
     "packages/core/kernel": {

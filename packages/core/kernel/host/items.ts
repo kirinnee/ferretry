@@ -2,7 +2,7 @@ import type { ConfigPort } from '../contract/ports.ts';
 import type { ItemKind, Manifest } from '../manifest/types.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import type { ItemReach, ItemReachOf } from './permissions.ts';
-import { readConfigText } from './config/yaml-text.ts';
+import { readConfigText } from '@ferretry/std/yaml';
 
 /** One installed data plugin's items, as `loadDataPlugins` accepted them. */
 export interface InstalledItems {

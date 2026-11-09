@@ -11,7 +11,7 @@ import { AGENT_CONFIG_TEXT_MAX_BYTES } from '../../../contract/agent-config.ts';
 import { AdmissionPort } from '../../../contract/bound.ts';
 import { defineConfig } from '../../../contract/index.ts';
 import type { ConfigPort } from '../../../contract/ports.ts';
-import { CONFIG_FILE_MAX_BYTES } from '../../../host/config/yaml-text.ts';
+import { CONFIG_FILE_MAX_BYTES } from '@ferretry/std/yaml';
 import { bootHost, type HostConfig, type RunningHost } from '../../../host/host.ts';
 import type { LogRecord } from '../../../host/log.ts';
 import { realAdapters } from '../../../host/wiring.ts';

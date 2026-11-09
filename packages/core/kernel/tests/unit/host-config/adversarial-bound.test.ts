@@ -12,7 +12,7 @@ import { agentConfig } from '../../../host/config/agent.ts';
 import { checkConfigText } from '../../../host/config/check.ts';
 import { evaluateConfig } from '../../../host/config/evaluate.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
-import { CONFIG_FILE_MAX_BYTES, CONFIG_TOO_LARGE, configTextTooLarge } from '../../../host/config/yaml-text.ts';
+import { CONFIG_FILE_MAX_BYTES, CONFIG_TOO_LARGE, configTextTooLarge } from '@ferretry/std/yaml';
 import type { HostFs } from '../../../host/state/host-fs.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { adversarialTexts, PRIVATE_WORD } from './adversarial-texts.ts';

@@ -75,7 +75,7 @@ import {
 import { assertDistinctSchemaNames, configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
 import { readConfigDisk } from './disk.ts';
-import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
+import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigTextToEdit } from '@ferretry/std/yaml';
 import { isWithinList, patchedValue } from './patch.ts';
 import {
   ALREADY_HELD_ISSUE,

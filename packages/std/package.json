@@ -2,13 +2,15 @@
   "name": "@ferretry/std",
   "version": "5.0.0",
   "private": true,
-  "description": "Generic helpers with no Ferretry noun: results, brands, instants, durations, JSON",
+  "description": "Generic helpers with no Ferretry noun: results, brands, instants, durations, JSON, and the bounded YAML text reader",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./yaml": "./src/yaml-text.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {
+    "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "sideEffects": false

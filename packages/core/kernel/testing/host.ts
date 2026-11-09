@@ -95,7 +95,7 @@ import type {
   WebSocketClient,
   CarrierListenerPort,
 } from '../contract/ports.ts';
-import { readConfigText } from '../host/config/yaml-text.ts';
+import { readConfigText } from '@ferretry/std/yaml';
 import { isWithinList, patchedValue } from '../host/config/patch.ts';
 import {
   ABSENT_STAMP,

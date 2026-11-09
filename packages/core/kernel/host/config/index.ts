@@ -23,6 +23,5 @@ export type {
 export { ACKNOWLEDGEMENT_TTL_MS, CONFIG_FILE_MAX_BYTES, createConfigFiles } from './service.ts';
 export type { ConfigTreeEvents, ConfigWatchOptions, ConfigWatchTimers } from './watcher.ts';
 export { watchConfigFiles } from './watcher.ts';
-export { editConfigText, readConfigText, sameConfigValue, setConfigKey } from './yaml-text.ts';
 export type { ConfigRouteSources } from './routes.ts';
 export { configRoutes } from './routes.ts';

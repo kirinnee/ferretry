@@ -1,7 +1,12 @@
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
-import { AGENT_CONFIG_TEXT_MAX_BYTES } from '../../../contract/agent-config.ts';
-import { editConfigText, readConfigText, sameConfigValue, setConfigKey } from '../../../host/config/yaml-text.ts';
+import {
+  CONFIG_FILE_MAX_BYTES,
+  editConfigText,
+  readConfigText,
+  sameConfigValue,
+  setConfigKey,
+} from '../../src/yaml-text.ts';
 
 const MODELINE = '# yaml-language-server: $schema=../.schema/machine.json';
 
@@ -280,7 +285,7 @@ describe('readConfigText — a file at the size limit is read in ONE pass, whate
   const fill = (head: string, line: (index: number) => string, tail = ''): string => {
     const lines = [head];
     let size = head.length + tail.length;
-    for (let index = 0; size + 32 < AGENT_CONFIG_TEXT_MAX_BYTES; index += 1) {
+    for (let index = 0; size + 32 < CONFIG_FILE_MAX_BYTES; index += 1) {
       const next = line(index);
       lines.push(next);
       size += next.length;

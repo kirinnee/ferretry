@@ -10,15 +10,13 @@ const PATH = 'packages/plugins/x/daemon/a.ts';
 /** The findings for one planted product file with no ledger at all. */
 const planted = (text: string, path = PATH): readonly string[] => findings([{ path, text }], '');
 
-/** The nine files that were on the ledger when the guard was an eight-pattern grep: all of them still stand. */
+/**
+ * The files on the ledger that are still there after the five plugin readers (logins, browsers, usage x2, voice) were
+ * routed through the shared reader: the reader itself, board's write-only `stringify`, and the two chart fences.
+ */
 const ORIGINAL_LEDGER = [
-  'packages/core/kernel/host/config/yaml-text.ts',
-  'packages/plugins/logins/daemon/lib/shared/yaml-text.ts',
+  'packages/std/src/yaml-text.ts',
   'packages/plugins/board/cli/lib/patch-document.ts',
-  'packages/plugins/usage/cli/lib/config-text.ts',
-  'packages/plugins/usage/app/lib/config-text.ts',
-  'packages/plugins/voice/app/lib/config-text.ts',
-  'packages/plugins/browsers/app/lib/browsers-config.ts',
   'packages/plugins/conversation/app/render/fy-render-chart-model.ts',
   'packages/plugins/conversation/app/render/fy-render-map-model.ts',
 ];
@@ -45,17 +43,24 @@ describe('the raw-YAML gate on this repository', () => {
     WHOLE_TREE_SCAN_MS,
   );
 
-  test('still lists the nine entries it started with, and no reason claims a text was "already checked"', () => {
+  test('still lists the entries that remain, and no reason claims a text was "already checked"', () => {
     const { files, problems } = parseLedger(readFileSync(join(root, LEDGER), 'utf8'));
     expect(problems).toEqual([]);
     for (const path of ORIGINAL_LEDGER) expect(files.has(path), path).toBe(true);
-    // The app copies parse text the daemon SERVES, and it serves a refused text too: "checked" was never true.
+    // A text the daemon SERVES is a refused text too: "checked" was never true.
     for (const [path, reason] of files) expect(reason, path).not.toMatch(/already checked/iu);
-    // And they say what is true of them (kac2 R9 m3): browser side, bounded by the cap, able to stall the tab.
-    for (const app of ['usage', 'voice', 'browsers']) {
-      const [path, reason] = [...files].find(([key]) => key.startsWith(`packages/plugins/${app}/app/`)) ?? [];
-      expect(reason, path).toMatch(/person's own browser.*256 KiB cap.*stall that tab, never the daemon/u);
-    }
+  });
+
+  test('the five plugin readers are gone from the ledger: they read through @ferretry/std/yaml', () => {
+    const { files } = parseLedger(readFileSync(join(root, LEDGER), 'utf8'));
+    for (const gone of [
+      'packages/plugins/logins/daemon/lib/shared/yaml-text.ts',
+      'packages/plugins/browsers/app/lib/browsers-config.ts',
+      'packages/plugins/usage/app/lib/config-text.ts',
+      'packages/plugins/usage/cli/lib/config-text.ts',
+      'packages/plugins/voice/app/lib/config-text.ts',
+    ])
+      expect(files.has(gone), gone).toBe(false);
   });
 });
 
@@ -217,6 +222,8 @@ describe('every way past the old line matcher is found', () => {
     'the word as a string': "const name = 'yaml';",
     'a relative path to a yaml-named file': "import { readConfigText } from './yaml-text.ts';",
     'a relative path, dynamic': "const t = await import('../yaml-text.ts');",
+    'the shared bounded reader, by its package subpath':
+      "import { readConfigText, setConfigKey } from '@ferretry/std/yaml';\nreadConfigText('');",
     'other Bun members': "const f = Bun.file('x'); const { spawn } = Bun;",
     'a property that is only named YAML': 'const o = { YAML: 1 }; o.YAML;',
     'a type that mentions it': "type T = typeof import('yaml');\nconst x: typeof Bun.YAML = 1 as never;",
@@ -348,7 +355,7 @@ describe('the ledger', () => {
   test('"<- *" is the kernel reader alone', () => {
     expect(parseLedger(`${KERNEL_READER}::readConfigText  <- *  # the door\n`).problems).toEqual([]);
     expect(parseLedger('packages/plugins/x/daemon/r.ts::read  <- *  # open\n').problems).toEqual([
-      expect.stringContaining('only packages/core/kernel/host/config/yaml-text.ts is open to every caller'),
+      expect.stringContaining('only packages/std/src/yaml-text.ts is open to every caller'),
     ]);
   });
 });
@@ -453,7 +460,7 @@ describe('laundering through a ledgered parser', () => {
     const door = `${KERNEL_READER}  # the reader\n${KERNEL_READER}::readConfigText  <- *  # the door`;
     const call = {
       path: 'packages/core/gate/daemon/index.ts',
-      text: "import { readConfigText } from '../../kernel/host/config/yaml-text.ts';\nreadConfigText('');",
+      text: "import { readConfigText } from '../../../std/src/yaml-text.ts';\nreadConfigText('');",
     };
     expect(findings([{ path: KERNEL_READER, text: kernel }, call], door)).toEqual([]);
     // Without the line, the export is unlisted: the door is a ledger entry like any other.
