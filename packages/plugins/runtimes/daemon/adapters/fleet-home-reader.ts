@@ -190,7 +190,11 @@ class FleetHomeReader implements RuntimeHomeReader {
         if (entry.links > 1) throw unreadable(`${file} has another name on this machine, so it is not read.`);
         if (entry.size > limitBytes)
           throw unreadable(`${file} is larger than the ${limitBytes} bytes that may be read.`);
-        return await root.readText(fenced(root, file), limitBytes);
+        // One byte more than the bound: a file that grew after the listing comes back longer and is refused, not cut short.
+        const bytes = await root.readBytes(fenced(root, file), limitBytes + 1);
+        if (bytes.length > limitBytes)
+          throw unreadable(`${file} is larger than the ${limitBytes} bytes that may be read.`);
+        return new TextDecoder().decode(bytes);
       });
     } catch (error) {
       if (error instanceof RuntimeHomeUnreadable) throw error;
@@ -351,7 +355,8 @@ class FleetHomeReader implements RuntimeHomeReader {
         if (folder === undefined || found === undefined || found.entry.kind !== 'file' || found.entry.links > 1)
           return { ok: false, reason: 'unreadable' };
         if (found.entry.size > maxBytes) return { ok: false, reason: 'too_big' };
-        const bytes = await folder.readBytes(fenced(folder, found.path), maxBytes);
+        // One byte more than the bound, so a file that grew after the listing is told from one that fits.
+        const bytes = await folder.readBytes(fenced(folder, found.path), maxBytes + 1);
         return bytes.length > maxBytes ? { ok: false, reason: 'too_big' } : { ok: true, bytes };
       });
     } catch {

@@ -344,6 +344,27 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
     }
   });
 
+  it('BG-033 a plain document or skill file that grew after it was listed is refused as too big, never returned cut short', async () => {
+    const hook: { current?: Hook } = {};
+    const { linked, reader } = await seed(hook);
+    await mkdir(join(linked, 'skills', 'alpha'), { recursive: true });
+    await writeFile(join(linked, 'settings.json'), '{"a":1}');
+    await writeFile(join(linked, 'skills', 'alpha', 'SKILL.md'), '# alpha\n');
+    await writeFile(join(linked, 'skills', 'alpha', 'a.md'), 'abcdefgh');
+    const grow = (target: string) => {
+      let done = false;
+      hook.current = async (method, path) => {
+        if (done || method !== 'realPath' || path !== target) return;
+        done = true;
+        await appendFile(target, 'MORE-BYTES-THAN-JUDGED');
+      };
+    };
+    grow(join(linked, 'settings.json'));
+    await expect(reader().document('settings.json', 7)).rejects.toThrow('larger than the 7 bytes');
+    grow(join(linked, 'skills', 'alpha', 'a.md'));
+    expect(await reader().skillFile('alpha', 'a.md', 8)).toEqual({ ok: false, reason: 'too_big' });
+  });
+
   it('BG-033 R6 RESIDUAL a FOLDER above the target swapped for a link to another folder after the judge returns that folder’s same-named file (stated in document-link.ts)', async () => {
     const hook: { current?: Hook } = {};
     const { store, linked, reader } = await seed(hook);
