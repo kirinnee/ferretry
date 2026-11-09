@@ -18,6 +18,7 @@ import type { FleetPublication } from '../lib/service/publication.ts';
 import type { RuntimeConfigWriter } from '../lib/service/ports.ts';
 import {
   ABSENT_DOCUMENT_REVISION,
+  FleetApplyAfterConfigError,
   type FleetDocumentWrite,
   type FleetLayout,
   type FleetModelApplyPlan,
@@ -196,7 +197,17 @@ export function configThenFleet(
       }
       try {
         await writer.write(inConfig);
-        return await inner.apply(plan, inFleet);
+        try {
+          return await inner.apply(plan, inFleet);
+        } catch (error) {
+          // The files above are on disk and are not rolled back with the fleet: whoever words the failure must know.
+          throw inConfig.length === 0
+            ? error
+            : new FleetApplyAfterConfigError(
+                inConfig.map(document => document.path),
+                error,
+              );
+        }
       } finally {
         if (inConfig.length > 0) await config.load().catch(() => undefined);
       }

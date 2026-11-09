@@ -12,7 +12,7 @@ import { fileAssembly, fleetHost } from '../../../daemon/host-assembly.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
-import type { FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
+import { FleetApplyAfterConfigError, type FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
@@ -153,6 +153,52 @@ describe('one change lands its configuration documents, then its fleet', () => {
       /neither a file of the fleet folder nor of the configuration folder; nothing was changed/u,
     );
     expect(order).toHaveLength(2);
+  });
+
+  it('R2-M1 tells the caller which configuration files landed when the fleet then fails, and only then', async () => {
+    const world = await fleetWorld();
+    const configDirectory = join(world.home, 'config');
+    const setting = { path: join(configDirectory, 'runtimes.yaml'), content: 'b', mode: 0o600 };
+    const asset = { path: join(world.fleet, 'assets', 'a.md'), content: 'a', mode: 0o600 };
+    const refusing = {
+      preview: async () => ({}) as never,
+      apply: async () => {
+        throw new Error('a source leads out of the folder');
+      },
+    };
+    const landed: string[] = [];
+    const writer = {
+      write: async (documents: readonly { path: string }[]) => void landed.push(...documents.map(d => d.path)),
+    };
+    const load = { load: async () => ({}) as never };
+    const subject = configThenFleet(refusing, writer, load, configDirectory, world.disk);
+
+    // The files landed, then the fleet refused: the error says which files, and keeps the fleet's own error.
+    const failure = await subject.apply(plan(world), [asset, setting]).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(FleetApplyAfterConfigError);
+    expect((failure as FleetApplyAfterConfigError).written).toEqual([setting.path]);
+    expect((failure as FleetApplyAfterConfigError).failure).toEqual(new Error('a source leads out of the folder'));
+    expect(landed).toEqual([setting.path]);
+
+    // No configuration file in the change: nothing landed first, so the fleet's own error is not wrapped.
+    const plain = await subject.apply(plan(world), [asset]).catch((error: unknown) => error);
+    expect(plain).not.toBeInstanceOf(FleetApplyAfterConfigError);
+    expect((plain as Error).message).toBe('a source leads out of the folder');
+
+    // The configuration set itself refused: nothing landed, so nothing is claimed.
+    const held = configThenFleet(
+      refusing,
+      {
+        write: async () => {
+          throw new ConfigWriteInvalid('held for the owner; nothing was written');
+        },
+      },
+      load,
+      configDirectory,
+      world.disk,
+    );
+    const refused = await held.apply(plan(world), [setting]).catch((error: unknown) => error);
+    expect(refused).not.toBeInstanceOf(FleetApplyAfterConfigError);
   });
 
   it('writes no fleet file when the configuration set is held or refused: the whole change waits', async () => {

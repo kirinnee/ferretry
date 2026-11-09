@@ -80,7 +80,12 @@ import {
 } from '../account/clone.ts';
 import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
-import { FleetApplyFailureError, type FleetDocumentWrite, type FleetModelApplyPlan } from '../provisioning.ts';
+import {
+  FleetApplyAfterConfigError,
+  FleetApplyFailureError,
+  type FleetDocumentWrite,
+  type FleetModelApplyPlan,
+} from '../provisioning.ts';
 import {
   freeName,
   type HostHarnessScan,
@@ -178,21 +183,30 @@ export interface CloneConfigFiles {
 }
 
 /**
- * What a failed apply says it left behind. A document of the fleet folder rides the provisioner's own boundary and rolls
- * back with the plan. A configuration file is written BEFORE the plan (the files are the source of truth, and the next
- * republish retries the plan from them) and is NOT rolled back with it, so the sentence names what was written: the
- * words "nothing was left half-changed" are said only when no configuration file landed first.
+ * What a failed apply says it left behind, for EVERY way it can fail. A document of the fleet folder rides the
+ * provisioner's own boundary and rolls back with the plan. A configuration file is written BEFORE the plan (the files
+ * are the source of truth, and the next republish retries the plan from them) and is NOT rolled back with it, so when
+ * the adapter says files landed (`FleetApplyAfterConfigError`) the sentence names them, whatever the apply then threw:
+ * a rollback, a refused source, a claim it could not take. "Nothing was left half-changed" is said only when the fleet
+ * was rolled back cleanly AND no configuration file landed first; a rollback that could not be verified, and a fleet
+ * that committed before its history failed, already say in their own words what they left and add no such claim.
  */
-export function failedApplySentence(
-  failure: string,
-  documents: readonly FleetDocumentWrite[],
-  fleetDirectory: string,
-): string {
-  const written = documents.filter(document => !document.path.startsWith(`${fleetDirectory}/`)).map(({ path }) => path);
-  if (written.length === 0) return `${failure}; nothing was left half-changed`;
+export function failedApplySentence(error: unknown, landed: readonly string[] = []): string {
+  const cause = error instanceof FleetApplyAfterConfigError ? error.failure : error;
+  const failure = errorMessage(cause);
+  const written = [...new Set([...landed, ...(error instanceof FleetApplyAfterConfigError ? error.written : [])])];
+  if (written.length > 0) return `${failure}; ${configurationLanded(written)}`;
+  const cleanRollback = cause instanceof FleetApplyFailureError && cause.failure.kind === 'rolled-back';
+  return cleanRollback ? `${failure}; nothing was left half-changed` : failure;
+}
+
+/** What a person is told when configuration files were written before the change then failed. */
+function configurationLanded(written: readonly string[]): string {
   const named =
-    written.length === 1 ? `the configuration ${written[0]} was` : `the configuration files ${written.join(', ')} were`;
-  return `${failure}; ${named} written first and is NOT rolled back with the fleet`;
+    written.length === 1
+      ? `the configuration ${written[0]} was written first and is`
+      : `the configuration files ${written.join(', ')} were written first and are`;
+  return `${named} NOT rolled back with the fleet`;
 }
 
 /** Every refusal the setup routes answer with, so a client branches on cause rather than on prose. */
@@ -630,8 +644,21 @@ export class FleetSetupService {
     // other held edit.
     const mayLoosen = caller?.governance?.governed === false;
     let held = 0;
-    for (const write of composed.configWrites ?? []) held += await this.#writeConfigFile(write, mayLoosen);
-    await this.#applyModel(composed.model, composed.documents);
+    // The settings files that really landed (a held one did not): a later failure must say they are on disk.
+    const landed: string[] = [];
+    for (const write of composed.configWrites ?? []) {
+      try {
+        const waiting = await this.#writeConfigFile(write, mayLoosen);
+        held += waiting;
+        if (waiting === 0) landed.push(write.path);
+      } catch (error) {
+        if (landed.length > 0 && error instanceof FleetCatalogRefusal) {
+          throw new FleetCatalogRefusal(error.code, `${error.message}; ${configurationLanded(landed)}`);
+        }
+        throw error;
+      }
+    }
+    await this.#applyModel(composed.model, composed.documents, landed);
     return held === 0
       ? composed.summary
       : `${composed.summary} ${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`;
@@ -1410,7 +1437,11 @@ export class FleetSetupService {
   }
 
   /** Materialise the model and apply it with these documents, inside the provisioner's one boundary. */
-  async #applyModel(model: AccountModel, documents: readonly FleetDocumentWrite[]): Promise<void> {
+  async #applyModel(
+    model: AccountModel,
+    documents: readonly FleetDocumentWrite[],
+    landed: readonly string[],
+  ): Promise<void> {
     const { catalog } = this.deps;
     let plan: FleetModelApplyPlan;
     try {
@@ -1431,16 +1462,15 @@ export class FleetSetupService {
         ...(await this.#modelCatalogs()),
       });
     } catch (error) {
-      throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
+      throw new FleetCatalogRefusal(
+        'fleet_change_refused',
+        landed.length === 0 ? errorMessage(error) : `${errorMessage(error)}; ${configurationLanded(landed)}`,
+      );
     }
     try {
       await catalog.provisioner.apply(plan, documents);
     } catch (error) {
-      const reason =
-        error instanceof FleetApplyFailureError
-          ? failedApplySentence(errorMessage(error), documents, catalog.layout.fleetDirectory)
-          : errorMessage(error);
-      throw new FleetCatalogRefusal('fleet_change_failed', reason);
+      throw new FleetCatalogRefusal('fleet_change_failed', failedApplySentence(error, landed));
     }
   }
 

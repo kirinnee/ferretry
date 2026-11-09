@@ -34,6 +34,18 @@ const MAX_SOURCE_ENTRIES = 10_000;
 /** The largest single file a copy reads whole. */
 const MAX_COPIED_FILE_BYTES = 8 * 1024 * 1024;
 
+/** An entry of a copied folder that the copy leaves out, relative to that folder, and why (a plain sentence). */
+export interface LeftOut {
+  readonly path: string;
+  readonly reason: string;
+}
+
+/** What a copy made: whether the source was a file or a folder, and what the folder copy left out of it. */
+export interface CopiedSource {
+  readonly kind: 'file' | 'directory';
+  readonly left: readonly LeftOut[];
+}
+
 /** An entry that is already there where a new one was to be made (the root's `exclusive` publish says so). */
 export class AlreadyExistsError extends Error {
   readonly code = 'EEXIST';
@@ -230,7 +242,9 @@ export class FleetDisk {
     } catch (error) {
       if (error instanceof Error && error.message === 'root refused: link_escape') throw refusedLink(shown);
       if (error instanceof Error && error.message === 'root refused: fenced') throw refusedLink(shown);
-      return undefined;
+      // Only a source that is not there is "absent"; anything else that stopped the judge is a refusal, never a read.
+      if (isAbsent(error)) return undefined;
+      throw new Error(`${shown} could not be checked for a sign-in, so it was not opened`);
     }
     const inside = relative(base, real);
     if (inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) throw refusedLink(shown);
@@ -245,12 +259,15 @@ export class FleetDisk {
    */
   async readSource(path: string, maxBytes: number): Promise<string | undefined> {
     const { root, at } = this.#source(path);
-    if ((await this.#judgeReal(root, at, path)) === undefined) return undefined;
+    const real = await this.#judgeReal(root, at, path);
+    if (real === undefined) return undefined;
     try {
       const found = await root.stat(at);
       if (found?.kind !== 'file' || found.size > maxBytes) return undefined;
-      return await root.readText(at, maxBytes);
-    } catch {
+      return decoder.decode(await this.#readJudged(root, at, path, real, maxBytes));
+    } catch (error) {
+      // A source that changed after it was judged is a refusal, not "not there".
+      if (error instanceof SourceChangedError) throw error;
       return undefined;
     }
   }
@@ -258,8 +275,33 @@ export class FleetDisk {
   /** The text of a settings layer: the same reach as {@link readSource}, but absent or unreadable is an error. */
   async readSourceText(path: string): Promise<string> {
     const { root, at } = this.#source(path);
-    await this.#judgeReal(root, at, path);
-    return await root.readText(at, MAX_COPIED_FILE_BYTES);
+    const real = await this.#judgeReal(root, at, path);
+    if (real === undefined) throw new Error(`the source ${path} does not exist`);
+    return decoder.decode(await this.#readJudged(root, at, path, real, MAX_COPIED_FILE_BYTES));
+  }
+
+  /**
+   * The bytes of the file at `at`, read only if it is the very file the judge cleared (`real` is what it resolved to,
+   * every link followed). The sign-in rule lives in the judge, but a read follows links, so a name swapped for a link to a
+   * sign-in after the judge would be read as the sign-in: the identity of the file the judge cleared is taken, the read
+   * is held (`readDurable`) and must be of that identity, and the name must still reach it afterwards. A mismatch is a
+   * refusal in a sentence; the bytes are not returned. No kernel member beyond `fileIdentity` and `readDurable`.
+   */
+  async #readJudged(root: RootHandle, at: FencedPath, shown: string, real: string, limit: number): Promise<Uint8Array> {
+    const cleared = root.resolve(real === '' ? '.' : real);
+    if (!cleared.ok) throw new SourceChangedError(shown);
+    const judged = await root.fileIdentity(cleared.value);
+    const read = await root.readDurable(at, limit, async held => ({
+      bytes: held.bytes,
+      identity: held.identity,
+      named: await held.stillNames(),
+    }));
+    if (read === undefined) throw new SourceChangedError(shown);
+    if (judged === undefined || judged.device !== read.identity.device || judged.inode !== read.identity.inode) {
+      throw new SourceChangedError(shown);
+    }
+    if (!read.named) throw new SourceChangedError(shown);
+    return read.bytes;
   }
 
   /**
@@ -268,19 +310,25 @@ export class FleetDisk {
    * depth inside it (bounded), because the copy takes every file in it.
    */
   async assertSource(path: string): Promise<'file' | 'directory'> {
+    return (await this.#vetSource(path)).kind;
+  }
+
+  /** {@link assertSource}, and for a folder the entries a copy of it would leave out (see {@link CopiedSource}). */
+  async #vetSource(path: string): Promise<{ readonly kind: 'file' | 'directory'; readonly left: readonly LeftOut[] }> {
     const { root, at, inside } = this.#source(path);
     const found = await lookAtSource(async () => await root.stat(at));
     if (found === undefined) throw new Error(`the source ${path} does not exist`);
     const real = await this.#judgeReal(root, at, path);
-    if (found.kind === 'directory') await this.#assertNoSignIn(root, real ?? inside, path);
-    return found.kind;
+    const left: LeftOut[] = [];
+    if (found.kind === 'directory') await this.#assertNoSignIn(root, real ?? inside, path, left);
+    return { kind: found.kind, left };
   }
 
   /**
    * Walks the folder (bounded) and refuses at the first entry, at ANY depth, named like a sign-in, whatever its kind;
    * `inside` is relative to the root.
    */
-  async #assertNoSignIn(root: RootHandle, inside: string, shown: string): Promise<void> {
+  async #assertNoSignIn(root: RootHandle, inside: string, shown: string, left?: LeftOut[]): Promise<void> {
     let seen = 0;
     const walk = async (folder: string): Promise<void> => {
       const at = root.resolve(folder === '' ? '.' : folder);
@@ -289,6 +337,18 @@ export class FleetDisk {
         seen += 1;
         if (seen > MAX_SOURCE_ENTRIES) throw new Error(`refusing to copy ${shown}: it holds too many entries`);
         if (isSignInName(entry.name)) throw refusedSignIn(join(shown, entry.name));
+        // What a folder copy cannot carry: a link is never followed, and a file with a second name may be a file from
+        // anywhere. Named, so the person is told what is missing from the copy (names only, never content).
+        const leftOut = entry.kind === 'symlink' || (entry.kind === 'file' && entry.links > 1);
+        if (leftOut) {
+          left?.push({
+            path: relative(inside, join(folder, entry.name)),
+            reason:
+              entry.kind === 'symlink'
+                ? 'it is a link, and a link in a copied folder is not followed'
+                : 'it is a file with a second name (a hard link), which is not copied',
+          });
+        }
         if (entry.kind === 'directory') await walk(join(folder, entry.name));
       }
     };
@@ -300,17 +360,27 @@ export class FleetDisk {
    * the root (a link inside is skipped, a file with a second hard link is skipped, modes kept); a file is read whole
    * through a checked descriptor and created exclusively. The source is judged again right before it is read.
    */
-  async copyInto(source: string, destination: string, mode: number): Promise<'file' | 'directory'> {
-    const kind = await this.assertSource(source);
+  async copyInto(source: string, destination: string, mode: number): Promise<CopiedSource> {
+    const { kind, left } = await this.#vetSource(source);
     const { root, at } = this.#source(source);
     if (kind === 'directory') {
-      await this.fleet.copyTree(root, at, this.fenced(destination));
-      return kind;
+      const target = this.fenced(destination);
+      await this.fleet.copyTree(root, at, target);
+      // A name changed to a sign-in's between the walk above and the copy would be carried: what landed is walked again,
+      // and a copy that holds one is removed whole and refused (names are looked at; nothing is read).
+      try {
+        await this.#assertNoSignIn(this.fleet, below(this.directory, destination) ?? '', source);
+      } catch (error) {
+        await this.fleet.remove(target);
+        throw error;
+      }
+      return { kind, left };
     }
-    await this.#judgeReal(root, at, source);
-    const bytes = await root.readBytes(at, MAX_COPIED_FILE_BYTES);
+    const real = await this.#judgeReal(root, at, source);
+    if (real === undefined) throw new Error(`the source ${source} does not exist`);
+    const bytes = await this.#readJudged(root, at, source, real, MAX_COPIED_FILE_BYTES);
     await this.create(destination, bytes, mode);
-    return kind;
+    return { kind, left: [] };
   }
 
   /**
@@ -375,6 +445,26 @@ async function absentWhenFolderMissing<T>(
  */
 const lookAtSource = async <T>(look: () => Promise<T | undefined>): Promise<T | undefined> =>
   await absentWhenFolderMissing(look, ['outside', 'changed']);
+
+const decoder = new TextDecoder();
+
+/** A source that is not there: a missing name or folder (the kernel's `outside`/`changed`, or the platform's own). */
+const isAbsent = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  if (error.message === 'root refused: outside' || error.message === 'root refused: changed') return true;
+  const code = (error as { readonly code?: unknown }).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+};
+
+/** A source that was not the file the sign-in check cleared by the time it was read (a name swapped after the judge). */
+class SourceChangedError extends Error {
+  constructor(path: string) {
+    super(
+      `${path} changed while it was being read, so it was not copied (a source may not change after it is checked)`,
+    );
+    this.name = 'SourceChangedError';
+  }
+}
 
 const asLstat = (stat: RootStat | undefined): RootLstat | undefined => stat;
 

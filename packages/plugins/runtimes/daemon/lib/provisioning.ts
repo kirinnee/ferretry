@@ -325,6 +325,23 @@ export class FleetApplyFailureError extends Error {
 }
 
 /**
+ * An apply that failed AFTER the configuration files of its change had landed: the files are written first and are NOT
+ * rolled back with the fleet, so a caller that tells a person what a failure left behind must know they are on disk.
+ * It wraps whatever the apply threw (a rollback outcome, a refused source, a claim that could not be taken) and names
+ * only paths, never content. A failure BEFORE any file landed is never wrapped.
+ */
+export class FleetApplyAfterConfigError extends Error {
+  constructor(
+    /** The configuration files written first, as the paths the change named. */
+    readonly written: readonly string[],
+    readonly failure: unknown,
+  ) {
+    super(failure instanceof Error ? failure.message : String(failure));
+    this.name = 'FleetApplyAfterConfigError';
+  }
+}
+
+/**
  * An operation an apply left as the disk has it, and why: on a platform where the destination side cannot reach a
  * folder through its descriptor (macOS), nothing below a runtime's top folder is moved aside or removed.
  */

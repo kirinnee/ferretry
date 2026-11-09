@@ -224,7 +224,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
           // with a link after the all-or-nothing preflight approved this destination.
           await this.assertOperationWritable(operation);
           const mark = journal.beginOperation();
-          const pruned = await this.applyOperation(operation, journal);
+          const pruned = await this.applyOperation(operation, journal, skipped);
           await journal.sealOperation(mark);
           operationCount += 1;
           prunedWrappers.push(...pruned);
@@ -488,7 +488,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   /** Returns pruned names. */
-  private async applyOperation(operation: FleetWriteOperation, journal: MutationJournal): Promise<readonly string[]> {
+  private async applyOperation(
+    operation: FleetWriteOperation,
+    journal: MutationJournal,
+    skipped: SkippedDestination[],
+  ): Promise<readonly string[]> {
     if (operation.kind === 'directory') {
       await journal.captureDirectory(operation.path, operation.mode);
       await this.disk.makeFolder(operation.path, operation.mode ?? DEFAULT_FOLDER_MODE);
@@ -534,7 +538,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
     await journal.captureDirectory(path.dirname(operation.path));
     await this.disk.makeFolder(path.dirname(operation.path), DEFAULT_FOLDER_MODE);
-    await this.writeEntry(operation, journal);
+    await this.writeEntry(operation, journal, skipped);
     return [];
   }
 
@@ -547,6 +551,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   private async writeEntry(
     operation: Extract<FleetWriteOperation, { readonly kind: 'symlink' | 'copy' | 'file' }>,
     journal: MutationJournal,
+    skipped: SkippedDestination[],
   ): Promise<void> {
     if (operation.kind === 'symlink') {
       // Clear the path only when this batch already owned it. After a fresh capture the path is empty, and anything
@@ -566,12 +571,14 @@ export class FileFleetProvisioner implements FleetProvisioner {
       try {
         // The root reads each file through a checked descriptor (a source swapped for a link copies nothing), refuses a
         // folder holding a sign-in file (S144), and serves only the folders a plugin may declare (S43).
-        const kind = await this.disk.copyInto(operation.source, staged, 0o600);
+        const { kind, left } = await this.disk.copyInto(operation.source, staged, 0o600);
         // A template linked out of a read-only store copies as 0444; force the copied root writable so a harness can
         // rewrite a file it owns. Directories remain private to the account.
         await this.disk.setMode(staged, operation.mode ?? (kind === 'directory' ? 0o700 : 0o644));
         if (!(await journal.capture(operation.path))) await this.removeEntry(operation.path);
         await this.publish(staged, operation.path);
+        // Named in the outcome of a committed apply: what the copy could not carry is missing from the destination.
+        skipped.push(...left.map(entry => ({ path: path.join(operation.path, entry.path), reason: entry.reason })));
       } finally {
         await discardQuietly(this.disk, staged);
       }

@@ -558,3 +558,38 @@ describe('FileFleetProvisioner over the fleet root', () => {
     ).toEqual([]);
   });
 });
+
+describe('what a folder copy leaves out is named in the outcome (S49, S144)', () => {
+  it('S49 names a link inside a copied skill folder in the committed result, and carries the rest', async () => {
+    const world = await fleetWorld();
+    const source = join(world.fleet, 'assets', 'skills', 'review');
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, 'SKILL.md'), 'placeholder skill\n');
+    await symlink('SKILL.md', join(source, 'alias.md'));
+    const destination = join(world.fleet, 'homes', 'one', 'skills', 'review');
+    const plan = planFor(world, [{ kind: 'copy', source, path: destination, mode: 0o700 }]);
+
+    const result = await world.provisioner().apply(plan);
+
+    expect(result.skipped).toEqual([
+      {
+        path: join(destination, 'alias.md'),
+        reason: 'it is a link, and a link in a copied folder is not followed',
+      },
+    ]);
+    expect(await readFile(join(destination, 'SKILL.md'), 'utf8')).toBe('placeholder skill\n');
+    expect(await exists(join(destination, 'alias.md'))).toBe(false);
+  });
+
+  it('S49 names nothing for a copy that left nothing out', async () => {
+    const world = await fleetWorld();
+    const source = join(world.fleet, 'assets', 'skills', 'plain');
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, 'SKILL.md'), 'placeholder skill\n');
+    const plan = planFor(world, [
+      { kind: 'copy', source, path: join(world.fleet, 'homes', 'one', 'skills', 'plain'), mode: 0o700 },
+    ]);
+
+    expect((await world.provisioner().apply(plan)).skipped).toBeUndefined();
+  });
+});

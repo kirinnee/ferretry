@@ -4,10 +4,16 @@
  * name is never a source), S144.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { link, mkdir, readdir, readFile, readlink, symlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, readdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { FleetDisk, NoDescriptorReachError } from '../../../daemon/adapters/fleet-disk.ts';
-import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
+import {
+  credentialMounts,
+  FleetDisk,
+  NoDescriptorReachError,
+  sourceMounts,
+} from '../../../daemon/adapters/fleet-disk.ts';
+import type { HostMounts } from '../../../daemon/adapters/root-host-files.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 
@@ -322,5 +328,255 @@ describe('FleetDisk: a link TO the stored credential works, a copy of it never d
       );
     }
     expect(await world.disk.lstat(join(world.fleet, 'homes', 'one', 'a'))).toBeUndefined();
+  });
+});
+
+/** A disk whose `harness-home` sources run a hook at the moments a race would strike (the root, wrapped). */
+function racingDisk(
+  world: FleetWorld,
+  hooks: {
+    readonly afterRealPath?: (count: number) => Promise<void>;
+    readonly beforeRead?: () => Promise<void>;
+    /** After the bytes were read, while the file is still held. */
+    readonly afterRead?: () => Promise<void>;
+  },
+): FleetDisk {
+  const inner = sourceMounts(world.roots, world.fleet, [join(world.person, '.claude'), join(world.person, '.codex')]);
+  let realPaths = 0;
+  const sources: HostMounts = path => {
+    const mounted = inner(path);
+    if (mounted === undefined || mounted.kind !== 'root') return mounted;
+    const root = new Proxy(mounted.root, {
+      get(target, key) {
+        if (key === 'realPath') {
+          return async (at: Parameters<typeof target.realPath>[0]) => {
+            const answer = await target.realPath(at);
+            realPaths += 1;
+            await hooks.afterRealPath?.(realPaths);
+            return answer;
+          };
+        }
+        if (key === 'readDurable') {
+          return async (...args: Parameters<typeof target.readDurable>) => {
+            await hooks.beforeRead?.();
+            const [at, limit, hold] = args;
+            return await target.readDurable(at, limit, async held => {
+              await hooks.afterRead?.();
+              return await (hold as (read: typeof held) => Promise<unknown>)(held);
+            });
+          };
+        }
+        return Reflect.get(target, key);
+      },
+    });
+    return { ...mounted, root };
+  };
+  return new FleetDisk({
+    fleet: world.roots.root('fleet'),
+    directory: world.fleet,
+    sources,
+    credentials: credentialMounts(world.roots, world.fleet),
+  });
+}
+
+/** A disk whose fleet root runs a hook right before a folder copy starts (after the source was walked). */
+function copyRacingDisk(world: FleetWorld, beforeCopy: () => Promise<void>): FleetDisk {
+  const fleet = world.roots.root('fleet');
+  const racing = new Proxy(fleet, {
+    get(target, key) {
+      if (key === 'copyTree') {
+        return async (...args: Parameters<typeof target.copyTree>) => {
+          await beforeCopy();
+          return await target.copyTree(...args);
+        };
+      }
+      return Reflect.get(target, key);
+    },
+  });
+  return new FleetDisk({
+    fleet: racing,
+    directory: world.fleet,
+    sources: sourceMounts(world.roots, world.fleet, [join(world.person, '.claude'), join(world.person, '.codex')]),
+    credentials: credentialMounts(world.roots, world.fleet),
+  });
+}
+
+/** Swaps `notes.md` of the Claude home for a link to the sign-in beside it, once, as a racing writer would. */
+async function swapForSignIn(world: FleetWorld): Promise<void> {
+  const notes = join(world.person, '.claude', 'notes.md');
+  await rm(notes);
+  await symlink('.credentials.json', notes);
+}
+
+describe('FleetDisk: the sign-in check is held at the read (S144, R2-m1, R2-m3)', () => {
+  async function homeWithSignIn(world: FleetWorld): Promise<void> {
+    await writeFile(join(world.person, '.claude', 'notes.md'), 'fine');
+    await writeFile(join(world.person, '.claude', '.credentials.json'), INERT);
+  }
+
+  it('S144 R2-m1 refuses a copy whose name became a link to a sign-in after the last check, copying nothing', async () => {
+    const world = await fleetWorld();
+    await homeWithSignIn(world);
+    let swapped = false;
+    const disk = racingDisk(world, {
+      beforeRead: async () => {
+        if (!swapped) await swapForSignIn(world);
+        swapped = true;
+      },
+    });
+
+    await expect(
+      disk.copyInto(join(world.person, '.claude', 'notes.md'), join(world.fleet, 'homes', 'out'), 0o600),
+    ).rejects.toThrow(/changed while it was being read/u);
+    expect(swapped).toBe(true);
+    expect(await world.disk.lstat(join(world.fleet, 'homes', 'out'))).toBeUndefined();
+  });
+
+  it('S144 R2-m1 refuses a read and a settings read whose name became a link to a sign-in after the check', async () => {
+    const world = await fleetWorld();
+    await homeWithSignIn(world);
+    const notes = join(world.person, '.claude', 'notes.md');
+    const swapOnce = async () => {
+      if (!(await lstat(notes)).isSymbolicLink()) await swapForSignIn(world);
+    };
+
+    await expect(racingDisk(world, { beforeRead: swapOnce }).readSource(notes, 1000)).rejects.toThrow(
+      /changed while it was being read/u,
+    );
+
+    // Put the plain file back: the settings read is held the same way.
+    await rm(notes);
+    await writeFile(notes, 'fine');
+    await expect(racingDisk(world, { beforeRead: swapOnce }).readSourceText(notes)).rejects.toThrow(
+      /changed while it was being read/u,
+    );
+  });
+
+  it('S144 R2-m1 refuses a read whose name stopped reaching the file that was read, once it was read', async () => {
+    const world = await fleetWorld();
+    await homeWithSignIn(world);
+    const notes = join(world.person, '.claude', 'notes.md');
+    const disk = racingDisk(world, {
+      afterRead: async () => {
+        await rm(notes);
+        await writeFile(notes, 'a different file');
+      },
+    });
+
+    await expect(disk.copyInto(notes, join(world.fleet, 'homes', 'out'), 0o600)).rejects.toThrow(
+      /changed while it was being read/u,
+    );
+    expect(await world.disk.lstat(join(world.fleet, 'homes', 'out'))).toBeUndefined();
+  });
+
+  it('S144 R2-m3 O2 judges the real path again right before the file is read (a swap between the two checks)', async () => {
+    const world = await fleetWorld();
+    await homeWithSignIn(world);
+    // `assertSource` judges (two real-path calls); the swap lands right after, before the copy's own judge.
+    const disk = racingDisk(world, {
+      afterRealPath: async count => {
+        if (count === 2) await swapForSignIn(world);
+      },
+    });
+
+    await expect(
+      disk.copyInto(join(world.person, '.claude', 'notes.md'), join(world.fleet, 'homes', 'out'), 0o600),
+    ).rejects.toThrow(/a sign-in file/u);
+    expect(await world.disk.lstat(join(world.fleet, 'homes', 'out'))).toBeUndefined();
+  });
+
+  it('S144 R2-m3 O4 refuses a sign-in name inside a copied folder whatever its kind (a folder, a link)', async () => {
+    const world = await fleetWorld();
+    for (const [name, make] of [
+      ['asfolder', async (dir: string) => await mkdir(join(dir, 'auth.json'), { recursive: true })],
+      ['aslink', async (dir: string) => await symlink('note.md', join(dir, '.credentials.json'))],
+    ] as const) {
+      const dir = join(world.person, '.claude', name);
+      await mkdir(join(dir, 'deeper'), { recursive: true });
+      await writeFile(join(dir, 'note.md'), 'fine');
+      await make(join(dir, 'deeper'));
+
+      await expect(world.disk.copyInto(dir, join(world.fleet, 'homes', `out-${name}`), 0o700)).rejects.toThrow(
+        /a sign-in file/u,
+      );
+      expect(await world.disk.lstat(join(world.fleet, 'homes', `out-${name}`))).toBeUndefined();
+    }
+  });
+
+  it('S144 R2-m1 removes a folder copy that came to hold a sign-in name between the walk and the copy', async () => {
+    const world = await fleetWorld();
+    const dir = join(world.person, '.claude', 'bundle');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'note.md'), 'fine');
+    // The walk of the source found nothing; the name changes right before the copy starts.
+    const disk = copyRacingDisk(world, async () => await rename(join(dir, 'note.md'), join(dir, 'auth.json')));
+
+    await expect(disk.copyInto(dir, join(world.fleet, 'homes', 'out'), 0o700)).rejects.toThrow(/a sign-in file/u);
+    expect(await world.disk.lstat(join(world.fleet, 'homes', 'out'))).toBeUndefined();
+  });
+
+  it('S144 R2-m1 refuses a sign-in renamed onto the name after the check (a different file, not a link)', async () => {
+    const world = await fleetWorld();
+    await homeWithSignIn(world);
+    const notes = join(world.person, '.claude', 'notes.md');
+    let moved = false;
+    const disk = racingDisk(world, {
+      beforeRead: async () => {
+        if (moved) return;
+        moved = true;
+        await rm(notes);
+        await rename(join(world.person, '.claude', '.credentials.json'), notes);
+      },
+    });
+
+    await expect(disk.copyInto(notes, join(world.fleet, 'homes', 'out'), 0o600)).rejects.toThrow(
+      /changed while it was being read/u,
+    );
+    expect(await world.disk.lstat(join(world.fleet, 'homes', 'out'))).toBeUndefined();
+  });
+
+  it('S144 R2-m1 refuses a source that could not be judged, and still reads a missing one as absent', async () => {
+    const world = await fleetWorld();
+    await homeWithSignIn(world);
+    const notes = join(world.person, '.claude', 'notes.md');
+    const failing = racingDisk(world, {
+      afterRealPath: async () => {
+        throw new Error('the disk stopped answering');
+      },
+    });
+
+    await expect(failing.readSource(notes, 1000)).rejects.toThrow(/could not be checked for a sign-in/u);
+    await expect(failing.copyInto(notes, join(world.fleet, 'homes', 'out'), 0o600)).rejects.toThrow(
+      /could not be checked for a sign-in/u,
+    );
+    expect(await world.disk.readSource(join(world.person, '.claude', 'missing.md'), 1000)).toBeUndefined();
+  });
+});
+
+describe('FleetDisk: a folder copy names what it leaves out (S49, S144)', () => {
+  it('S49 names a link and a hard-linked file the copy skipped, and carries the rest', async () => {
+    const world = await fleetWorld();
+    const dir = join(world.person, '.claude', 'skill');
+    await mkdir(join(dir, 'sub'), { recursive: true });
+    await writeFile(join(dir, 'keep.md'), 'keep');
+    await writeFile(join(dir, 'sub', 'two.md'), 'two');
+    await symlink('keep.md', join(dir, 'alias.md'));
+    await link(join(dir, 'sub', 'two.md'), join(world.parent, 'elsewhere.md'));
+
+    const copied = await world.disk.copyInto(dir, join(world.fleet, 'copied'), 0o700);
+
+    expect(copied.kind).toBe('directory');
+    expect([...copied.left].toSorted((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { path: 'alias.md', reason: 'it is a link, and a link in a copied folder is not followed' },
+      { path: join('sub', 'two.md'), reason: 'it is a file with a second name (a hard link), which is not copied' },
+    ]);
+    expect(await readFile(join(world.fleet, 'copied', 'keep.md'), 'utf8')).toBe('keep');
+    expect(await world.disk.lstat(join(world.fleet, 'copied', 'alias.md'))).toBeUndefined();
+    // A folder with nothing to leave out names nothing, and a file never does.
+    const plain = join(world.person, '.claude', 'plain');
+    await mkdir(plain, { recursive: true });
+    await writeFile(join(plain, 'a.md'), 'a');
+    expect((await world.disk.copyInto(plain, join(world.fleet, 'plain'), 0o700)).left).toEqual([]);
+    expect((await world.disk.copyInto(join(plain, 'a.md'), join(world.fleet, 'a.md'), 0o600)).left).toEqual([]);
   });
 });
