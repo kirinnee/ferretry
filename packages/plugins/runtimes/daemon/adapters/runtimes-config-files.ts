@@ -32,7 +32,7 @@ import {
   unreadableSentence,
 } from '../lib/service/catalog-service.ts';
 import { ownInstructionsSource } from './own-instructions-source.ts';
-import { type ComponentSourceLookup, readProfileComponents } from './profile-components.ts';
+import { type ComponentSourceLookup, readProfileComponents, type Within } from './profile-components.ts';
 import type { ConfigFilesPort } from './ports.ts';
 
 // The contract widens its config defs so `manifest.data.config` accepts them (`contract/config-def.ts`); these put the shapes back.
@@ -50,6 +50,8 @@ export interface RuntimesConfigSources {
   readonly logins: Pick<LoginsApi, 'list' | 'environmentTemplates'>;
   /** Who provides each profile component source; read live on every load, never kept. */
   readonly components: ComponentSourceLookup;
+  /** Bounds each owner's answer, so one that never answers cannot hold an evaluation (and every apply behind it). */
+  readonly within: Within;
   /** Looks up, ahead of a read, the commands the read will ask about (`./command-cache.ts`). */
   readonly prime?: (model: AccountModel | undefined) => Promise<void>;
 }
@@ -92,7 +94,7 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
   ): Promise<Awaited<ReturnType<ConfigFilesPort<AccountModel>['load']>>> => {
     let assembled: RuntimesModel;
     const [components, templates] = await Promise.all([
-      readProfileComponents(sources.components, ownInstructionsSource(sources.config)),
+      readProfileComponents(sources.components, ownInstructionsSource(sources.config), sources.within),
       loginTemplates(sources.logins),
     ]);
     try {

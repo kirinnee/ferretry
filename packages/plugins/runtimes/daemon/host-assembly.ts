@@ -27,6 +27,7 @@ import { PROFILE_COMPONENTS_KEY } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
+import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
@@ -220,6 +221,7 @@ export function fileAssembly(
     config: ctx.kernel.config,
     logins: ctx.needs.logins,
     components: hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY),
+    within: withinMs((delay, fn) => ctx.kernel.clock.after(milliseconds(delay), fn), PROVIDER_ANSWER_MS),
     prime: async model => {
       const wanted = new Set<string>(HARNESS_COMMANDS);
       for (const component of Object.values(model?.components.mcp ?? {}))

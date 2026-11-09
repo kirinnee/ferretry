@@ -42,7 +42,15 @@ import {
 /** What reading one kind of component from its owners came to. */
 export type KindReading =
   /** Every source of the kind answered: its components, in the model's shape, by name. */
-  | { readonly state: 'read'; readonly components: ReadonlyMap<string, unknown> }
+  | {
+      readonly state: 'read';
+      readonly components: ReadonlyMap<string, unknown>;
+      /**
+       * Set when a part of the kind that is per harness is not running (the owner turned Codex off): what the running parts
+       * gave is real, and a layer that names a component none of them has is unread, for this reason, not a gap in the files.
+       */
+      readonly partial?: string;
+    }
   /** No source answered (none exists, it is off, it threw, or it gave something invalid): why, in a sentence of names and rules. */
   | { readonly state: 'unread'; readonly reason: string };
 
@@ -200,11 +208,14 @@ function foreignLayers(
 export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
   const unreadable: string[] = [];
   const credentials: Record<string, Credential> = {};
+  // A login whose variables stand in blocks only what uses them: a runtime that names it. One that none names is shown
+  // (stood in) and holds nothing else back.
+  const usedLogins = new Set([...files.runtimes.values()].map(file => file.login as string));
   for (const view of files.logins) {
     const template = files.templates?.get(view.id as string);
     const { credential, stoodIn } = credentialOf(view, template);
     credentials[view.id as string] = credential;
-    if (stoodIn)
+    if (stoodIn && usedLogins.has(view.id as string))
       unreadable.push(
         `login "${view.id as string}" keeps its variables as ` +
           (template?.kind === 'withheld'
@@ -221,6 +232,15 @@ export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
       // The owner's components, as it projected them. A name a layer uses that the owner does not have is a real gap in
       // the machine's files, which the cross-reference rules below refuse by name.
       components[kind] = Object.fromEntries(reading.components);
+      if (reading.partial === undefined) continue;
+      // ...unless a part of the kind is not running: then the name may be one of ITS components, which stands in.
+      for (const name of [...names].toSorted((left, right) => left.localeCompare(right))) {
+        if (reading.components.has(name)) continue;
+        components[kind][name] = standIn(kind);
+        unreadable.push(
+          `the ${kind} component "${name}" could not be read from the part of Ferretry that owns it: ${reading.partial}`,
+        );
+      }
       continue;
     }
     components[kind] = Object.fromEntries([...names].map(name => [name, standIn(kind)]));

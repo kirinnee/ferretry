@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
+import type { EnvironmentLoginTemplate } from '@ferretry/plugin-logins/contract';
 import { refuseBeforeWriting, runtimesConfigFiles } from '../../../daemon/adapters/runtimes-config-files.ts';
 import type { ComponentSourceLookup } from '../../../daemon/adapters/profile-components.ts';
 import type { AccountModel } from '../../../daemon/lib/account/schema.ts';
@@ -41,6 +42,7 @@ function adapter(
       environmentTemplates: async () => [],
     },
     components,
+    within: work => work,
   });
 }
 
@@ -49,6 +51,48 @@ const NO_MOVES = new Map<string, string>();
 const modelOf = (loaded: { evaluation: { effective: { model: AccountModel } } }) => loaded.evaluation.effective.model;
 
 describe('the model-in-effect adapter', () => {
+  it('keeps no copy of the login templates: a template Logins changed shows on the NEXT read (O2)', async () => {
+    const glm = sampleLogin('glm', {
+      store: 'environment',
+      environment: {
+        variables: [],
+        quotaSource: 'none',
+        missingSecrets: [],
+        test: { available: false, reason: 'x' },
+      } as never,
+    });
+    const templates: { current: EnvironmentLoginTemplate[] } = {
+      current: [{ kind: 'templates', id: 'glm', harness: 'claude-code', env: { REGION: 'eu' } } as never],
+    };
+    const files = runtimesConfigFiles({
+      config: {
+        collection: (def: ConfigCollectionDef<unknown>) =>
+          new Map(
+            Object.entries(
+              {
+                ...BASE,
+                runtimes: { 'glm-work': { login: 'glm', profile: 'default', agent: false } },
+              }[(def as unknown as { collection: string }).collection] ?? {},
+            ),
+          ),
+        file: () => undefined,
+      } as never,
+      logins: {
+        list: async () => ({ format: 1 as const, machine: 'm', logins: [glm] }),
+        environmentTemplates: async () => templates.current,
+      },
+      components: () => 'unavailable',
+      within: work => work,
+    });
+
+    const first = await files.inEffect();
+    templates.current = [{ kind: 'templates', id: 'glm', harness: 'claude-code', env: { REGION: 'us' } } as never];
+    const second = await files.inEffect();
+
+    expect(modelOf(first).credentials.glm?.env).toEqual({ REGION: 'eu' });
+    expect(modelOf(second).credentials.glm?.env).toEqual({ REGION: 'us' });
+  });
+
   it('reads nothing as standing in when every part was read', async () => {
     const files = adapter();
 

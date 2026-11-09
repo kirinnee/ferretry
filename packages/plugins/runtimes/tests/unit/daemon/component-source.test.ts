@@ -574,6 +574,45 @@ describe('a plan carries its own reading: what stands in is never written, which
   });
 });
 
+describe('m1 Claude settings and hooks apply whenever Claude Code runs, whether or not Codex does', () => {
+  it('m1 with Codex off, a Claude settings layer and a Claude hooks layer are applied to the home', async () => {
+    const owners = newOwners();
+    owners.claudeSettings.with('strict', { harness: 'claude-code', document: { cleanupPeriodDays: 7 } });
+    owners.claudeHooks.with('guard', {
+      harness: 'claude-code',
+      document: { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'guard-bash' }] }] } },
+    });
+    const { host, world } = await compose({
+      owners,
+      absent: ['codex'],
+      config: withLayers('settings/strict', 'hooks/guard'),
+    });
+
+    const applied = await stageAndApply(host, put('claude-work'));
+
+    expect([applied.status, JSON.stringify(applied.json())]).toEqual([200, expect.any(String)]);
+    const homes = await readdir(join(world.fleet, 'homes'));
+    const settings = (await filesUnder(join(world.fleet, 'homes', homes[0] as string)))['settings.json'] as string;
+    expect(settings).toContain('"cleanupPeriodDays": 7');
+    expect(settings).toContain('guard-bash');
+  });
+
+  it('m1 with Codex off, a layer naming a component only Codex could have is refused in a sentence, naming it', async () => {
+    const owners = newOwners();
+    owners.claudeSettings.with('strict', { harness: 'claude-code', document: { cleanupPeriodDays: 7 } });
+    const { host, world } = await compose({
+      owners,
+      absent: ['codex'],
+      config: withLayers('settings/strict', 'settings/codex-guard'),
+    });
+
+    const sentence = await refused({ host, world, owners } as never);
+
+    expect(sentence).toContain('"codex-guard"');
+    expect(sentence).toContain('could not be read');
+  });
+});
+
 describe('M1 an instructions change is refused before anything of it is written', () => {
   const putHouse = (content: string) => ({
     change: { kind: 'component.put', name: 'house', component: { kind: 'instructions' }, content, create: true },

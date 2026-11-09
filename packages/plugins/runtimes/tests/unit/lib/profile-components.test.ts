@@ -7,7 +7,7 @@ import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { InstructionsFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { ownInstructionsSource } from '../../../daemon/adapters/own-instructions-source.ts';
-import { readProfileComponents } from '../../../daemon/adapters/profile-components.ts';
+import { readProfileComponents, type Within, withinMs } from '../../../daemon/adapters/profile-components.ts';
 import {
   assembleRuntimesModel,
   type ComponentReading,
@@ -132,6 +132,30 @@ describe('an environment login', () => {
     expect(JSON.stringify(assembled.model.credentials.glm)).not.toContain('GLM_KEY');
   });
 
+  it('m3 a withheld login that no runtime names holds nothing back, and one a runtime names still does', () => {
+    const withheld = new Map([
+      ['glm', { kind: 'withheld' as const, id: 'glm', harness: 'claude-code' as const, variables: ['TOKEN'] }],
+    ]);
+
+    const unused = assembleRuntimesModel(
+      files({ logins: [sampleLogin('claude-you', { store: 'ferretry' }), glm], templates: withheld }),
+    );
+    const used = assembleRuntimesModel(
+      files({
+        logins: [sampleLogin('claude-you', { store: 'ferretry' }), glm],
+        runtimes: new Map([
+          ['claude-default', runtime('claude-you')],
+          ['glm-work', runtime('glm')],
+        ]),
+        templates: withheld,
+      }),
+    );
+
+    expect(unused.unreadable).toEqual([]);
+    expect(used.unreadable).toHaveLength(1);
+    expect(used.unreadable[0]).toContain('login "glm"');
+  });
+
   it('is stood in for when Logins gave no templates at all (it could not answer)', () => {
     const assembled = assembleRuntimesModel(
       files({ logins: [glm], runtimes: new Map([['glm-work', runtime('glm')]]), templates: undefined }),
@@ -142,16 +166,79 @@ describe('an environment login', () => {
   });
 });
 
+/** No deadline: the work is waited for. */
+const noDeadline: Within = work => work;
+
+/** A clock the test drives: `after` keeps the callback, `fire` runs every timer still waiting. */
+function manualClock() {
+  const timers = new Map<number, () => void>();
+  let next = 0;
+  return {
+    after: (_delayMs: number, fn: () => void) => {
+      next += 1;
+      const id = next;
+      timers.set(id, fn);
+      return () => {
+        timers.delete(id);
+      };
+    },
+    fire: () => {
+      for (const [id, fn] of [...timers]) {
+        timers.delete(id);
+        fn();
+      }
+    },
+    waiting: () => timers.size,
+  };
+}
+
+describe('m4 an owner that does not answer', () => {
+  const ownEmpty = ownInstructionsSource({ collection: () => new Map() as never });
+  const hang = new Promise<never>(() => undefined);
+
+  it('leaves its kind unread, in a sentence, once the deadline passes: never a stuck read and never an empty answer', async () => {
+    const clock = manualClock();
+    const lookup = (hook: { name: string }) =>
+      hook.name === 'runtimes.components.mcp'
+        ? { list: async () => await hang, read: async () => undefined }
+        : ('unavailable' as const);
+
+    const reading = readProfileComponents(lookup as never, ownEmpty, withinMs(clock.after, 5_000));
+    // The read is still waiting on the owner: only the clock lets it end.
+    clock.fire();
+
+    expect((await reading).mcp).toEqual({
+      state: 'unread',
+      reason: 'the part of Ferretry that owns them did not answer in time',
+    });
+  });
+
+  it('an owner that answers in time is read, and its timer is cancelled', async () => {
+    const clock = manualClock();
+    const lookup = (hook: { name: string }) =>
+      hook.name === 'runtimes.components.mcp'
+        ? { list: async () => ['github'], read: async () => ({ command: 'github-mcp' }) }
+        : ('unavailable' as const);
+
+    const reading = await readProfileComponents(lookup as never, ownEmpty, withinMs(clock.after, 5_000));
+
+    expect(reading.mcp).toMatchObject({ state: 'read', components: new Map([['github', { command: 'github-mcp' }]]) });
+    // Every other source is not running (it never started a timer), and the answered one cancelled its own.
+    expect(clock.waiting()).toBe(0);
+  });
+});
+
 describe('reading every kind', () => {
   const none = () => 'unavailable' as const;
   const ownEmpty = ownInstructionsSource({ collection: () => new Map() as never });
 
   it('a kind with no provider is unread, and instructions are Runtimes’ own and read without a hook', async () => {
-    const reading = await readProfileComponents(none, ownEmpty);
+    const reading = await readProfileComponents(none, ownEmpty, noDeadline);
 
     expect(reading.mcp).toMatchObject({ state: 'unread' });
-    expect(reading.settings).toMatchObject({ state: 'unread' });
-    expect(reading.hooks).toMatchObject({ state: 'unread' });
+    // Settings and hooks come per harness: with neither running they give nothing, and every layer naming one is unread.
+    expect(reading.settings).toMatchObject({ state: 'read', partial: expect.any(String) });
+    expect(reading.hooks).toMatchObject({ state: 'read', partial: expect.any(String) });
     expect(reading.instructions).toEqual({ state: 'read', components: new Map() });
   });
 
@@ -161,9 +248,9 @@ describe('reading every kind', () => {
     ]);
     const own = ownInstructionsSource({ collection: () => held as never });
 
-    const reading = await readProfileComponents(none, own);
+    const reading = await readProfileComponents(none, own, noDeadline);
     held.clear();
-    const after = await readProfileComponents(none, own);
+    const after = await readProfileComponents(none, own, noDeadline);
 
     expect(reading.instructions).toEqual({
       state: 'read',
@@ -181,7 +268,7 @@ describe('reading every kind', () => {
           }
         : ('unavailable' as const);
 
-    const reading = await readProfileComponents(lookup as never, ownEmpty);
+    const reading = await readProfileComponents(lookup as never, ownEmpty, noDeadline);
 
     expect(reading.settings).toEqual({
       state: 'read',
@@ -189,15 +276,46 @@ describe('reading every kind', () => {
     });
   });
 
-  it('a kind is unread when only one of its two sources answers (settings need both harnesses)', async () => {
+  it('m1 a per-harness kind is read from the harness that runs when the other one is off, and says what it lacks', async () => {
     const claudeOnly = (hook: { name: string }) =>
       hook.name === 'runtimes.components.settings.claude'
-        ? { list: async () => [], read: async () => undefined }
+        ? { list: async () => ['one'], read: async () => ({ harness: 'claude-code', document: { a: 1 } }) }
         : ('unavailable' as const);
 
-    const reading = await readProfileComponents(claudeOnly as never, ownEmpty);
+    const reading = await readProfileComponents(claudeOnly as never, ownEmpty, noDeadline);
 
-    expect(reading.settings).toMatchObject({ state: 'unread' });
+    expect(reading.settings).toMatchObject({
+      state: 'read',
+      components: new Map([['one', { harness: 'claude', document: { a: 1 } }]]),
+      partial: expect.stringContaining('not running'),
+    });
+  });
+
+  it('m1 a component the running harness lacks is unread BY NAME, and one it has is not', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        profiles: new Map([['default', profile(['modelSets/heavy', 'settings/one', 'settings/codex-guard'])]]),
+        components: {
+          ...NO_COMPONENTS,
+          settings: {
+            state: 'read',
+            components: new Map([['one', { harness: 'claude', document: { a: 1 } }]]),
+            partial: 'the part of Ferretry that owns them is not running',
+          },
+        },
+      }),
+    );
+
+    expect(assembled.unreadable).toHaveLength(1);
+    expect(assembled.unreadable[0]).toContain('"codex-guard"');
+    expect(assembled.model.components.settings.one).toMatchObject({ document: { a: 1 } });
+  });
+
+  it('m1 a single-owner kind is still unread when its owner is not running', async () => {
+    const reading = await readProfileComponents((() => 'unavailable') as never, ownEmpty, noDeadline);
+
+    expect(reading.mcp).toMatchObject({ state: 'unread' });
+    expect(reading.skills).toMatchObject({ state: 'unread' });
   });
 });
 
