@@ -218,6 +218,33 @@ describe('send path: stopActiveTurn presses the harness stop under shouldPressSt
     expect(seen).toMatchObject({ promptReady: true });
   });
 
+  it('m1 a frame with an active-work line AND a permission prompt is not pressed by stopActiveTurn: Escape would answer it', async () => {
+    const world = subject();
+    world.server.working = true;
+    world.server.modal = TRUST;
+    const seen = await world.runner.stopActiveTurn(world.handle, { key: 'Escape', whenIdle: false });
+    expect(keys(world)).toEqual([]);
+    expect(seen?.blockingPrompt).toBeDefined();
+  });
+
+  it('m1 a frame with an active-work line under Codex’s startup wait is not pressed by stopActiveTurn either', async () => {
+    const world = subject();
+    world.server.working = true;
+    world.server.startupWaitUntilMs = Number.MAX_SAFE_INTEGER;
+    await world.runner.stopActiveTurn(world.handle, { key: 'Escape', whenIdle: false });
+    expect(keys(world)).toEqual([]);
+  });
+
+  it('m1 the person’s own interrupt (stopTurn) keeps today’s rule: the same frame is pressed', async () => {
+    const world = subject();
+    world.server.working = true;
+    world.server.modal = TRUST;
+    expect(await world.runner.stopTurn(world.handle, { key: 'Escape', whenIdle: false })).toMatchObject({
+      pressed: true,
+    });
+    expect(keys(world)).toEqual(['Escape']);
+  });
+
   it('a hold refuses the stop and presses nothing', async () => {
     const world = subject();
     world.server.working = true;

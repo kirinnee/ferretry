@@ -48,6 +48,7 @@ import {
   type CapturedFrame,
   capturedFrameIsCurrent,
   paneShowsActiveWork,
+  paneShowsStartupWait,
   paneStateFrom,
   parsePaneActivity,
 } from '../../lib/tmux/pane.ts';
@@ -56,6 +57,7 @@ import {
   PaneDeliveryError,
   type PaneNotReadyCause,
   PaneNotReadyError,
+  blockedByDialog,
   PaneStrandedError,
   TmuxPaneDelivery,
 } from './pane-delivery.ts';
@@ -349,6 +351,16 @@ export class TmuxRunner implements Runner {
    * longer the one bound is a stop at a gone ferret pane). A hold that refused the press is its closed code.
    */
   async stopTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome> {
+    return await this.#stop(handle, stop, false);
+  }
+
+  /**
+   * `stopTurn`'s press. `overPrompt: false` is the person's own interrupt (today's rule: pressed whenever
+   * `shouldPressStopKey` says so). `true` is a send-now's stop: the frame read INSIDE the act must also show no
+   * blocking prompt and no startup wait, since a permission that came up after the caller's own read can sit beneath a
+   * still-drawn active-work line, and Escape would then answer it "no" for the person. Nothing is pressed then.
+   */
+  async #stop(handle: RunnerHandle, stop: RunnerStop, overPrompt: boolean): Promise<RunnerStopOutcome> {
     // Closed by the contract's type; refused here as well, so no caller can make this press another key.
     if (!STOP_KEYS.has(stop.key)) throw new PaneDeliveryError('that is not a harness stop key');
     const pane = await this.guardedPane(handle);
@@ -358,6 +370,8 @@ export class TmuxRunner implements Runner {
       if (before === undefined || !before.alive || before.dead)
         throw new PaneNotReadyError('the ferret pane is no longer live', 'exited');
       const working = paneShowsActiveWork(before.visible);
+      if (overPrompt && (blockedByDialog(before.visible) || paneShowsStartupWait(before.visible)))
+        return { pressed: false, working };
       if (!shouldPressStopKey(working, stop)) return { pressed: false, working };
       await tmux.sendKey(pane.session, stop.key);
       const after = await captureFrame(tmux, pane.session).catch(() => undefined);
@@ -476,7 +490,7 @@ export class TmuxRunner implements Runner {
    * then a bounded wait for a prompt that is NOT a failure when it gives up, then one read of the pane.
    */
   async stopActiveTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerPaneObservation | undefined> {
-    const stopped = await this.stopTurn(handle, stop);
+    const stopped = await this.#stop(handle, stop, true);
     if (!stopped.pressed) return await this.observe(handle);
     const pane = await this.guardedPane(handle).catch(() => undefined);
     if (pane !== undefined)

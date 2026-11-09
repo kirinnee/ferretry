@@ -25,6 +25,7 @@ import {
   peerMessageKind,
   peerPreamble,
   type SendTarget,
+  authorizeSend,
   SendDraftRefused,
   SendPending,
   SendRefused,
@@ -296,13 +297,6 @@ export function buildConversationA(deps: {
     answer: async (_ferret: string, _request: AnswerToTerminal): Promise<SessionView> => pending(),
   };
   /**
-   * TODAY'S INTERRUPT (`SessionInterrupt`, the session layer's `interruptLocked`) over Ferrets' harness stop. The
-   * session's own refusals come first — an unconfirmed shutdown, a pending structured question (`question.json`), a
-   * ferret with no running turn — so the harness is never asked to press at a question; the harness then presses its
-   * own stop key under its own rule, and says whether the pane still shows work, which decides `awaiting_user` (an
-   * interactive pane handed back) from `interrupted`.
-   */
-  /**
    * THE ONE LANE PER FERRET (as today's `serial.run(id, …)`): a typed send, a send-now's stop, cancel, Enter, the person's
    * draft, the tracker's re-submit and an interrupt all run one at a time on a ferret, so a Cancel can never clear a
    * message while its typing is still between paste and Enter, and a stop never lands between two keys of a send.
@@ -323,6 +317,13 @@ export function buildConversationA(deps: {
       ...(question === undefined ? {} : { pendingQuestion: { toolUseId: question.toolUseId } }),
     };
   };
+  /**
+   * TODAY'S INTERRUPT (`SessionInterrupt`, the session layer's `interruptLocked`) over Ferrets' harness stop. The
+   * session's own refusals come first — an unconfirmed shutdown, a pending structured question (`question.json`), a
+   * ferret with no running turn — so the harness is never asked to press at a question; the harness then presses its
+   * own stop key under its own rule, and says whether the pane still shows work, which decides `awaiting_user` (an
+   * interactive pane handed back) from `interrupted`.
+   */
   const interrupts = new SessionInterrupt({
     serial: lane,
     repository: {
@@ -465,15 +466,31 @@ export function buildConversationA(deps: {
    *  - a pane Codex holds a submission on until startup ends is PENDING (nothing pressed, nothing typed);
    *  - an idle pane is not pressed: nothing is running, and the pane may be parked on a prompt the stop would answer;
    *  - a pane behind a blocking prompt (a permission, a picker) is not pressed: Escape would answer it for the person;
-   *  - a ferret with a pending structured question is not pressed: Escape would dismiss the form.
    * Where it does not press, the send goes on as any send does, and the delivery decides (type, queue, or refuse).
+   * A ferret holding a pending structured question never reaches here: {@link refuseWhileAsking} refuses every send to it
+   * first. That check reads `question.json`, which NOTHING writes on 5.0 yet (the observer's question part is not
+   * mounted), so until it does, only this pane read stands between a send-now and a question form — and it is unproven on
+   * an AskUserQuestion screen (see the conversation line in `ports-pending.json`).
    */
   const stopForNow = async (ferret: SessionId, bound: Awaited<ReturnType<typeof terminal.bind>>): Promise<void> => {
-    const [pane, target] = await Promise.all([lookAtPane.observe(ferret), readTarget(ferret)]);
+    const pane = await lookAtPane.observe(ferret);
     // Pending, as the route and the port answer a launch still in flight (503 `session_launching`).
     if (pane.startupParked === true) throw new SessionSendError('pending', startupParkedPending(ferret).message);
-    if (!pane.activeWork || pane.blockingPrompt !== undefined || target.pendingQuestion !== undefined) return;
+    if (!pane.activeWork || pane.blockingPrompt !== undefined) return;
     await bound.stopActive();
+  };
+  /**
+   * TODAY'S `authorizeSend` REFUSAL, for every send (plain or now): a ferret holding an unanswered structured question
+   * is showing a form, not a composer, and typing prose into it selects whichever option the keys land on. Nothing is
+   * typed, nothing is kept, and the sentence is today's (`SendUnavailable`, answered as the route answers every
+   * session-side refusal: 409 `send_refused`). Inert until something writes `question.json` (see {@link stopForNow}).
+   */
+  const refuseWhileAsking = async (ferret: SessionId): Promise<void> => {
+    try {
+      authorizeSend(await readTarget(ferret), []);
+    } catch (error) {
+      sendRefusal(error);
+    }
   };
   /**
    * Types one message. The send is ledgered as accepted BEFORE a key goes (the same id twice is one message), and a
@@ -497,6 +514,7 @@ export function buildConversationA(deps: {
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
     const bound = await terminal.bind(ferret);
+    await refuseWhileAsking(ferret);
     const { text, fromName } = await typedText(ferret, request);
     // SEND-NOW: the turn is stopped FIRST and BEFORE the record exists: a stop that is refused (a hold, a gone pane, a
     // runner that cannot stop) types nothing and keeps nothing, so the id starts over. The pane is READ before any key.

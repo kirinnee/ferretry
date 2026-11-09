@@ -1134,8 +1134,12 @@ export class FerretsService implements FerretsApi {
         if (!found.ok) return found;
         // Ruling #45: one look first. A ferret visibly at work is answered busy NOW, nothing typed, rather than after
         // the delivery's readiness wait gives up on a prompt that will not come until the turn ends.
-        if (midTurn(await found.value.runner.look?.(found.value.handle).catch(() => undefined)))
-          return err({ refused: 'not_ready', why: 'busy' });
+        const look = await found.value.runner.look?.(found.value.handle).catch(() => undefined);
+        if (midTurn(look)) return err({ refused: 'not_ready', why: 'busy' });
+        // A pane parked on a tool permission waits for a person, so the readiness wait would only run out its ~27 s while
+        // holding the ferret's one send lane (an interrupt and every later send queue behind it): answered at once.
+        // Startup dialogs (`prompt`, `dialog`) are NOT answered here: the delivery's own wait answers them.
+        if (look?.permission === true) return err({ refused: 'not_ready', why: 'dialog' });
         // The runner guards each write with kernel.act on this pane itself; a hold it meets types nothing.
         const delivered = await written(async () => await found.value.runner.deliver(found.value.handle, delivery));
         if (delivered.ok) this.ports.delivered?.(ferret);

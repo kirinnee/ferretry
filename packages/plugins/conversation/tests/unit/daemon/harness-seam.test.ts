@@ -1481,15 +1481,34 @@ describe('send path: the send-now and reply flags are carried', () => {
     await host.stop();
   });
 
-  test('C1 now with a structured question pending presses no stop key: Escape would dismiss the form', async () => {
+  test('C1 now with a structured question pending is refused: no stop key, nothing typed, nothing kept (Escape would dismiss the form)', async () => {
     const ferrets = new HarnessFerrets();
     ferrets.script.observe = async () => BUSY_PANE;
     const { host, api, asking } = await conversation(ferrets);
     await asking();
 
-    await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
 
+    expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
     expect(ferrets.stopsActive).toBe(0);
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('M1 a PLAIN send with a structured question pending is refused with today’s sentence: nothing typed, nothing kept', async () => {
+    const { host, ferrets, api, asking } = await conversation();
+    await asking();
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'prose', sendId: 's-plain' });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    expect(!sent.ok && sent.error.message).toContain(
+      `holding an unanswered structured question (${QUESTION_TOOL_USE}); answer or abandon it before sending prose`,
+    );
+    expect(ferrets.delivered).toEqual([]);
+    expect(ferrets.stopsActive).toBe(0);
+    expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
   });
 
@@ -1624,6 +1643,22 @@ describe('m2 one lane per ferret: typing, the acts and an interrupt press keys o
     release();
     await typing;
     await stopping;
+    expect(ferrets.interrupts).toBe(1);
+    await host.stop();
+  });
+
+  test('m2 an interrupt behind a send to a pane on a permission prompt runs at once: Ferrets answers dialog, so the lane is not held for the readiness wait', async () => {
+    const ferrets = new HarnessFerrets();
+    // Ferrets' deliver answers `not_ready` `dialog` the moment its look shows a permission prompt (its own test), so the
+    // send's turn on the lane is short; the readiness budget (~27 s) is never entered and no clock is waited out.
+    ferrets.script.deliver = async () => err({ refused: 'not_ready' as const, why: 'dialog' as const });
+    const { host, api } = await conversation(ferrets);
+
+    const sending = api().send(F1, { kind: 'owner' }, { message: 'to a parked ferret', sendId: 's-1' });
+    const stopping = api().interrupt(F1, {});
+    const [sent] = await Promise.all([sending, stopping]);
+
+    expect(sent.ok).toBe(false);
     expect(ferrets.interrupts).toBe(1);
     await host.stop();
   });
