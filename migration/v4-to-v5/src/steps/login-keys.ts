@@ -355,14 +355,6 @@ export const loginKeysStep: Step = {
     );
     if (hold === undefined || held.length === 0)
       return { ...base, status: 'converted', note: 'no login holds a plain key', kept: [], sealed: [] };
-    if (ctx.dryRun) {
-      hold.clear();
-      return { ...base, status: 'converted', note: 'dry run: nothing sealed', kept: named, sealed: [] };
-    }
-
-    const vaultPath = ctx.v5.resolve(V5_VAULT_FILE);
-    const keyPath = ctx.v5.resolve(V5_VAULT_KEY_FILE);
-    const first = held[0];
     const listed = held.map(key => `login ${key.login} variable ${key.variable}`).join(', ');
     if (!hold.vaultMoved) {
       // The vault step failed or did not run: sealing now would mint a key beside a vault v4 never handed over.
@@ -375,6 +367,14 @@ export const loginKeysStep: Step = {
         sealed: [],
       };
     }
+    if (ctx.dryRun) {
+      hold.clear();
+      return { ...base, status: 'converted', note: 'dry run: nothing sealed', kept: named, sealed: [] };
+    }
+
+    const vaultPath = ctx.v5.resolve(V5_VAULT_FILE);
+    const keyPath = ctx.v5.resolve(V5_VAULT_KEY_FILE);
+    const first = held[0];
     try {
       const existing = (await readVault(vaultPath)) ?? {
         format: 1 as const,

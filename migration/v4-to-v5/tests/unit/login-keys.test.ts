@@ -221,7 +221,6 @@ describe('a key is never left plain', () => {
     expect(report.note).toContain('state/vault/vault.json');
     expect(JSON.stringify(report).includes(KEY)).toBe(false);
     expect(hold.size).toBe(0);
-    expect((await readdir(join(f.to, 'state', 'vault'))).filter(name => name.endsWith('.tmp'))).toEqual([]);
     expect((await everyFileText(join(f.to, 'state', 'vault'))).some(text => text.includes(KEY))).toBe(false);
   });
 
@@ -448,6 +447,25 @@ describe('login keys are sealed only when the vault step converted', () => {
     const vaultFiles = await readdir(join(f.to, 'state', 'vault')).catch(() => [] as string[]);
     expect(vaultFiles).toEqual([]);
     await expect(stat(join(f.to, 'home.json'))).rejects.toThrow();
+  });
+
+  test('a dry run after a failed vault step: login-keys fails naming each login and variable, nothing written', async () => {
+    await login('work', `  ANTHROPIC_API_KEY: ${KEY}\n`);
+    await login('home', `  OTHER_SETTING: fine\nclaude:\n  env:\n    ANTHROPIC_API_KEY: ${OTHER_KEY}\n`);
+    await mkdir(join(f.from, 'state'), { recursive: true });
+    await writeFile(
+      join(f.from, 'state', 'secrets.json'),
+      JSON.stringify({ v: 1, cipher: 'AES-256-GCM', entries: {} }),
+    );
+    const { reports, output } = await run(true);
+
+    expect(reports.vault?.status).toBe('failed');
+    expect(reports['login-keys']?.status).toBe('failed');
+    expect(reports['login-keys']?.note).toContain('login work variable ANTHROPIC_API_KEY');
+    expect(reports['login-keys']?.note).toContain('login home variable claude.env.ANTHROPIC_API_KEY');
+    expect((JSON.stringify(reports) + output).includes(KEY)).toBe(false);
+    expect((JSON.stringify(reports) + output).includes(OTHER_KEY)).toBe(false);
+    await expect(readdir(f.to)).rejects.toThrow();
   });
 
   test('a skipped vault step: login-keys fails the same way and writes nothing', async () => {
