@@ -164,20 +164,28 @@ function renderApply(apply: ApplyOutcome): RenderedOutcome {
           ...landedLines(apply.configurationLanded),
         ].join('\n'),
       };
-    case 'rollback-incomplete':
+    case 'rollback-incomplete': {
+      const displaced = (apply.displaced ?? []).map(state => `${state.path} (moved to ${state.movedTo})`);
+      const header =
+        apply.unrestored.length > 0
+          ? `${apply.failedOperation} failed (${apply.reason}) and these could not be put back:`
+          : displaced.length > 0
+            ? `${apply.failedOperation} failed (${apply.reason}), and the fleet could not be fully put back:`
+            : `${apply.failedOperation} failed (${apply.reason}).`;
       return {
         ok: false,
         text: [
-          apply.unrestored.length === 0
-            ? `${apply.failedOperation} failed (${apply.reason}).`
-            : `${apply.failedOperation} failed (${apply.reason}) and these could not be put back:`,
+          header,
           ...indent(
             apply.unrestored.map(
               path => `${path.path}: ${path.reason}${path.backup ? ` (the original is at ${path.backup})` : ''}`,
             ),
           ),
+          ...(apply.unrestored.length > 0 && displaced.length > 0 ? ['Moved aside:'] : []),
+          ...indent(displaced),
           ...landedLines(apply.configurationLanded),
         ].join('\n'),
       };
+    }
   }
 }

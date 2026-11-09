@@ -249,6 +249,39 @@ describe('renderChangeOutcome', () => {
     should(rendered.text).startWith('link failed (denied).');
   });
 
+  it('BG-031 MD2 should say the fleet could not be fully put back and list what was moved aside, when nothing is unrestored', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [],
+        displaced: [{ path: '/h/a', movedTo: '/h/a.moved' }],
+      },
+    } as never);
+    should(rendered.ok).equal(false);
+    should(rendered.text).equal(
+      'link failed (denied), and the fleet could not be fully put back:\n  /h/a (moved to /h/a.moved)',
+    );
+  });
+
+  it('BG-031 MD2 should list what was moved aside after the unrestored paths, under its own line', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [{ path: '/p', reason: 'gone' }],
+        displaced: [{ path: '/h/a', movedTo: '/h/a.moved' }],
+      },
+    } as never);
+    should(rendered.text).equal(
+      'link failed (denied) and these could not be put back:\n  /p: gone\nMoved aside:\n  /h/a (moved to /h/a.moved)',
+    );
+  });
+
   it('BG-031 OM7 should name the landed configuration file after an incomplete rollback, and say what to do', () => {
     const rendered = renderChangeOutcome({
       outcome: 'applied',

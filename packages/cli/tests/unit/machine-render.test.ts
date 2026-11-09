@@ -269,6 +269,54 @@ describe('the machine renderer says how an applied change ended', () => {
     });
   });
 
+  it('BG-031 should not open a list of paths that is empty after an incomplete rollback that moved nothing aside', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [],
+        configurationLanded: ['runtimes/work.yaml'],
+      },
+    } as never);
+    should(rendered.text).not.containEql('could not be put back');
+    should(rendered.text).startWith('link failed (denied).');
+  });
+
+  it('BG-031 MD2 should say the fleet could not be fully put back and list what was moved aside, when nothing is unrestored', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [],
+        displaced: [{ path: '/h/a', movedTo: '/h/a.moved' }],
+      },
+    } as never);
+    should(rendered.ok).equal(false);
+    should(rendered.text).equal(
+      'link failed (denied), and the fleet could not be fully put back:\n  /h/a (moved to /h/a.moved)',
+    );
+  });
+
+  it('BG-031 MD2 should list what was moved aside after the unrestored paths, under its own line', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [{ path: '/p', reason: 'gone' }],
+        displaced: [{ path: '/h/a', movedTo: '/h/a.moved' }],
+      },
+    } as never);
+    should(rendered.text).equal(
+      'link failed (denied) and these could not be put back:\n  /p: gone\nMoved aside:\n  /h/a (moved to /h/a.moved)',
+    );
+  });
+
   it('should say a sign-out, and a sign-out that failed', () => {
     should(renderChangeOutcome({ outcome: 'signed-out', credential: { id: 'work' } } as never)).eql({
       ok: true,
