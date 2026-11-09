@@ -3,16 +3,17 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeF
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createConfigFiles } from '../../../host/config/service.ts';
-import { createNodeHostFs } from '../../../host/state/host-fs.ts';
-import { captureLog, manualClock, updatesDef } from '../../unit/host-config/support.ts';
+import { createNodeHostFs, type HostFs } from '../../../host/state/host-fs.ts';
+import { captureLog, loginsDef, manualClock, updatesDef } from '../../unit/host-config/support.ts';
 
 /**
  * A config file the kernel cannot read (over the 256 KiB cap, a link, a directory, a FIFO)
  * reads as `absent` to the etag and to the load. A write, an owner's write, a removal or a set pinned `ifMatch: 'absent'`
  * (or pinned to nothing) must therefore REFUSE it, in the sentence a set's refusal says, and leave it exactly as it was —
  * on a real disk, through the real service. A non-UTF-8 file is still READ (decoded with U+FFFD, its etag unchanged), but
- * every WRITE over it is refused in its own sentence (BG-005), because saving would replace bytes nobody edited; a
- * removal replaces nothing, so it is not refused.
+ * every WRITE over it is refused in its own sentence (BG-005), because saving would replace bytes nobody edited. A set
+ * refuses it even when the set only removes it (its journal holds the prior as decoded text, so a roll-back would write
+ * U+FFFD over the owner's bytes); the single removal journals nothing, so it is not refused.
  */
 const homes: string[] = [];
 afterEach(async () => {
@@ -120,6 +121,53 @@ async function latin1World() {
   return { files, port: files.port('updates'), path, bytes, before: LATIN1.toString('hex') };
 }
 
+/**
+ * `updates.yaml` (holding `bytes`) and a `logins` collection in one home. With `failLoginsWrite`, the first write under
+ * `logins/` throws ENOSPC, the way a full disk would part-way through a set.
+ */
+async function setWorld(bytes: Buffer, failLoginsWrite: boolean) {
+  const home = await mkdtemp(join(tmpdir(), 'fy-kernel-not-utf8-set-'));
+  homes.push(home);
+  await mkdir(join(home, 'config'), { recursive: true });
+  const path = join(home, 'config', 'updates.yaml');
+  await writeFile(path, bytes);
+  const base = createNodeHostFs();
+  let failed = 0;
+  const fs: HostFs = new Proxy(base, {
+    get(target, key) {
+      if (key === 'writeAtomic')
+        return async (p: string, data: string | Uint8Array, mode: number) => {
+          if (failLoginsWrite && p.includes('/logins/')) {
+            failed += 1;
+            throw new Error('ENOSPC: no space left on device');
+          }
+          return await target.writeAtomic(p, data, mode);
+        };
+      const value = Reflect.get(target, key) as unknown;
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  const files = createConfigFiles({
+    home,
+    fs,
+    clock: manualClock(),
+    log: captureLog(),
+    binary: 'fy',
+    defs: [
+      { plugin: 'updates', def: updatesDef },
+      { plugin: 'updates', def: loginsDef },
+    ],
+  });
+  await files.reload();
+  return {
+    files,
+    port: files.port('updates'),
+    path,
+    loginsPath: join(home, 'config', 'logins', 'work.yaml'),
+    failedWrites: () => failed,
+  };
+}
+
 const refusedAs = (outcome: { readonly kind: string }, sentence = NOT_UTF8): void => {
   expect(outcome.kind).toBe('refused');
   const said = outcome as { reason?: string; issues?: readonly { message: string }[] };
@@ -182,10 +230,41 @@ describe('BG-005 a config write refuses a file that is not UTF-8, and leaves its
     expect((await readFile(path)).toString('hex')).toBe(LATIN1.toString('hex'));
   });
 
-  test('a set that only removes it is not refused as unreadable: it replaces no byte', async () => {
-    const { port } = await latin1World();
+  test('a set that only removes it is refused as unreadable: its journal would put it back as U+FFFD', async () => {
+    const { port, bytes, before } = await latin1World();
     const outcome = await port.writeAll([{ def: updatesDef, edit: { remove: true } }]);
-    expect(outcome.kind === 'refused' && outcome.reason).not.toBe('unreadable');
+    expect(outcome.kind === 'refused' && outcome.reason).toBe('unreadable');
+    refusedAs(outcome);
+    expect(await bytes()).toBe(before);
+  });
+
+  test('a set that removes it and then fails part-way never rewrites it with U+FFFD (the roll-back case)', async () => {
+    // `limit: 15` is accepted (UTF-8), then the owner re-saves the same value as Latin-1: in effect, not held.
+    const tight = Buffer.concat([Buffer.from('# caf'), Buffer.from([0xe9]), Buffer.from('\nlimit: 15\n')]);
+    const world = await setWorld(Buffer.from('limit: 15\n'), true);
+    await world.files.confirm(world.files.held()[0]?.id ?? '');
+    await writeFile(world.path, tight);
+    await world.files.reload();
+    const outcome = await world.port.writeAll([
+      { def: updatesDef, edit: { remove: true } },
+      { def: loginsDef, name: 'work', edit: 'model: fast\n' },
+    ]);
+    // The set is refused before any write, so the disk full error is never reached and nothing is rolled back.
+    refusedAs(outcome);
+    expect(world.failedWrites()).toBe(0);
+    expect((await readFile(world.path)).toString('hex')).toBe(tight.toString('hex'));
+    expect(await Bun.file(world.loginsPath).exists()).toBe(false);
+  });
+
+  test('a set with a UTF-8 sibling is refused as a whole: the sibling is not written either', async () => {
+    const world = await setWorld(LATIN1, false);
+    const outcome = await world.port.writeAll([
+      { def: loginsDef, name: 'work', edit: 'model: fast\n' },
+      { def: updatesDef, edit: 'limit: 7\n' },
+    ]);
+    refusedAs(outcome);
+    expect((await readFile(world.path)).toString('hex')).toBe(LATIN1.toString('hex'));
+    expect(await Bun.file(world.loginsPath).exists()).toBe(false);
   });
 
   test('a removal is not refused: it replaces no byte', async () => {

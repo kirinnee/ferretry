@@ -897,12 +897,14 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
 
   /**
    * Why a WRITE over this disk is refused, or `undefined` when it may go ahead: the target cannot be read, or it is not
-   * UTF-8 and the write would replace bytes it did not edit (a removal replaces nothing, so `removing` lets it by). Both
-   * say the `unreadable` reason; the sentence says which.
+   * UTF-8 and the write would replace bytes it did not edit. Both say the `unreadable` reason; the sentence says which.
+   * The single `remove` does not ask: it journals nothing, so it has nothing to put back. A set asks for every file it
+   * touches, a removal included, because its journal holds the prior as decoded text and a roll-back would write U+FFFD
+   * over the owner's bytes.
    */
-  const unwritableIssues = (slot: Slot, disk: DiskState, removing = false): readonly ConfigIssue[] | undefined => {
+  const unwritableIssues = (slot: Slot, disk: DiskState): readonly ConfigIssue[] | undefined => {
     if (disk.kind === 'unreadable') return unreadableIssues(slot);
-    if (disk.kind !== 'text' || disk.lossy !== true || removing) return undefined;
+    if (disk.kind !== 'text' || disk.lossy !== true) return undefined;
     const { message, fix } = NOT_UTF8_ISSUE(slot.path);
     return [{ path: slot.path, severity: 'error', message, fix: fix ?? '' }];
   };
@@ -1169,9 +1171,9 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (entry?.evaluated.held !== undefined)
       return { verdict: refusedDocument('already_held', ref, [ALREADY_HELD_ISSUE(slot.path)]) };
     const disk = await readDisk(slot.path);
-    // What cannot be read could not be put back by a roll-back, so the set does not touch it.
-    const removing = typeof document.edit === 'object' && 'remove' in document.edit;
-    const unwritable = unwritableIssues(slot, disk, removing);
+    // What cannot be read, or read only lossily, could not be put back byte for byte by a roll-back, so the set does not
+    // touch it, whatever it does to it (a removal included).
+    const unwritable = unwritableIssues(slot, disk);
     if (unwritable !== undefined) return { verdict: refusedDocument('unreadable', ref, writeIssues(unwritable)) };
     const prior = disk.kind === 'text' ? disk.text : undefined;
     const found = prior === undefined ? ABSENT_CONFIG_ETAG : digest(prior);
