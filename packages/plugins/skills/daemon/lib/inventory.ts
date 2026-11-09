@@ -186,8 +186,9 @@ export class SkillsInventoryService {
   /**
    * One account's skills: the folders of its home (when it has a published one), then Ferretry's own, each listed once.
    * Ferretry's own are the v4-installed skills read straight from the fleet's asset tree (a link from a home into it is
-   * a duplicate, never followed) and the skill items the runtime's profile selects. A name a home already lists as
-   * Ferretry's is not listed a second time.
+   * a duplicate, never followed) and the skill items the runtime's profile selects. A name the home already lists, its
+   * own plain folder or a managed link alike, is not listed a second time: the harness loads the one the home holds.
+   * The asset tree reaches a launch only through a runtime home, so an account with no published home lists none of it.
    */
   private async homeSkills(
     harness: Harness,
@@ -196,13 +197,13 @@ export class SkillsInventoryService {
     runtime: string | undefined,
   ): Promise<Listed> {
     const own = home === undefined ? [] : await this.ports.files.list(join(home, 'skills'), MAX_SKILLS_PER_ROOT);
-    const asset = (await this.ports.ferretry?.()) ?? [];
+    const asset = home === undefined ? [] : ((await this.ports.ferretry?.()) ?? []);
     const chosen = runtime === undefined || runtime === '' ? [] : ((await this.ports.selected?.(runtime)) ?? []);
     const entries: SkillDirectoryEntry[] = [...own];
-    const managed = new Set(own.filter(entry => entry.managed === true).map(folderOf));
+    const taken = new Set(own.map(folderOf));
     for (const entry of [...asset, ...chosen]) {
-      if (managed.has(folderOf(entry))) continue;
-      managed.add(folderOf(entry));
+      if (taken.has(folderOf(entry))) continue;
+      taken.add(folderOf(entry));
       entries.push({ ...entry, managed: true });
     }
     return await this.read(harness, entries, runtimes, entry => (entry.managed === true ? 'ferretry' : 'user'));

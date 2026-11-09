@@ -199,6 +199,11 @@ describe('the skills routes with homes and projects bound', () => {
     ferrets.add({ id: ferretId('f2'), folder: '/work/app', runtime: 'not-published' });
     const runtimes = fakeRuntimes();
     runtimes.setHomes([HOME], { a: reader() });
+    // The fleet has an asset skill, but it reaches a ferret only through a runtime home, which this ferret has none of.
+    runtimes.setAssetSkills({
+      skills: async () => [{ name: 'tool', manifest: ASSET, managed: true }],
+      skillManifest: async name => doc(name),
+    });
     const h = await testHost({ plugins: [skills], fakes: { ferrets }, uses: { runtimes } });
     const res = await h.request('GET', '/v1/ferrets/f2/skills/inventory');
     expect(res.json<{ skills: unknown[]; runtime?: string }>()).toMatchObject({ skills: [] });

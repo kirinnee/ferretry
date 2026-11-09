@@ -180,6 +180,33 @@ describe('the skills inventory service', () => {
     should(skills.find(skill => skill.name === 'extra')!.toggle?.supported).equal(false);
   });
 
+  it('U11 a plain folder of the home keeps its name: an asset or a selected item of the same name is not a second row', async () => {
+    const files = new FakeFiles().skill(`${HOME_A}/skills`, 'review').skill(ASSETS, 'review').skill('/store', 'review');
+    const asset = async () => [{ manifest: `${ASSETS}/review/SKILL.md`, managed: true }];
+    const selected = async () => [{ manifest: '/store/review/SKILL.md', managed: true }];
+
+    const listing = await service(files, [], { ferretry: asset, selected }).machine();
+
+    const skills = listing.homes.find(home => home.home === HOME_A)!.skills;
+    should(skills.map(skill => [skill.name, skill.scope, skill.path])).deepEqual([
+      ['review', 'user', `${HOME_A}/skills/review/SKILL.md`],
+    ]);
+  });
+
+  it('U11 a ferret with no published home lists none of the asset tree', async () => {
+    const files = new FakeFiles().skill(ASSETS, 'tool');
+    const asset = async () => [{ manifest: `${ASSETS}/tool/SKILL.md`, managed: true }];
+
+    const inventory = await service(files, [], { ferretry: asset }).ferret({
+      id: 's1',
+      harness: 'claude-code',
+      runtime: 'not-a-wrapper',
+      folder: '/work/none',
+    });
+
+    should(inventory.skills).deepEqual([]);
+  });
+
   it('a skill item the runtime’s profile selects is listed as Ferretry’s, and an unnamed runtime selects none', async () => {
     const files = new FakeFiles().skill('/store', 'chosen');
     const asked: string[] = [];
