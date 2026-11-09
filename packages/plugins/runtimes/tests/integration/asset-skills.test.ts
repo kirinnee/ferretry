@@ -22,8 +22,12 @@ async function skill(world: FleetWorld, name: string, text = doc(name)): Promise
   await writeFile(join(skills(world), name, 'SKILL.md'), text);
 }
 
-const reader = (world: FleetWorld, publication: Pick<FleetPublication, 'reading'> = new FleetPublication()) => {
-  const assets = fleetHomes(world.roots, publication).assetSkills?.();
+const reader = (
+  world: FleetWorld,
+  publication: Pick<FleetPublication, 'reading'> = new FleetPublication(),
+  said: string[] = [],
+) => {
+  const assets = fleetHomes(world.roots, publication, sentence => said.push(sentence)).assetSkills?.();
   if (assets === undefined) throw new Error('the fleet answers no asset skills');
   return assets;
 };
@@ -103,6 +107,25 @@ describe('assetSkills lists the fleet’s installed skills as plain folders only
     for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 1001])
       expect(await reader(world).skills(bad)).toEqual([]);
   });
+
+  it('limit is a hard bound: 0 and 1000 are served and say nothing, anything outside refuses with a sentence', async () => {
+    const world = await fleetWorld();
+    await skill(world, 'a');
+    const said: string[] = [];
+    const assets = reader(world, new FleetPublication(), said);
+    expect((await assets.skills(0)).map(entry => entry.name)).toEqual(['a']);
+    expect((await assets.skills(1000)).map(entry => entry.name)).toEqual(['a']);
+    expect(said).toEqual([]);
+    for (const bad of [-1, 1001, 1.5, Number.NaN, Number.POSITIVE_INFINITY])
+      expect(await assets.skills(bad)).toEqual([]);
+    expect(said).toHaveLength(5);
+    expect(new Set(said)).toEqual(
+      new Set([
+        "The fleet's installed skills were asked for with a limit that is not a whole number from 0 to 1000, so none were listed.",
+      ]),
+    );
+    expect(said.join('\n')).not.toContain(world.fleet);
+  });
 });
 
 describe('assetSkills reads a listed skill’s SKILL.md within a bound, and says nothing else', () => {
@@ -115,6 +138,27 @@ describe('assetSkills reads a listed skill’s SKILL.md within a bound, and says
     for (const bad of [0, -1, 1.5, Number.NaN]) expect(await assets.skillManifest('review', bad)).toBeUndefined();
     expect(await assets.skillManifest('absent', 1000)).toBeUndefined();
     expect(await assets.skillManifest('../review', 1000)).toBeUndefined();
+  });
+
+  it('maxBytes is a hard bound: 1 byte up to 256 KiB are served, anything outside refuses with a sentence and no content', async () => {
+    const world = await fleetWorld();
+    await skill(world, 'review', `${doc('review')}${SECRET}`);
+    const said: string[] = [];
+    const assets = reader(world, new FleetPublication(), said);
+    expect(await assets.skillManifest('review', 256 * 1024)).toBe(`${doc('review')}${SECRET}`);
+    // a bound that is allowed but smaller than the file is a file too large, not a refused bound: nothing is said
+    expect(await assets.skillManifest('review', 1)).toBeUndefined();
+    expect(said).toEqual([]);
+    for (const bad of [0, -1, 256 * 1024 + 1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])
+      expect(await assets.skillManifest('review', bad)).toBeUndefined();
+    expect(said).toHaveLength(6);
+    expect(new Set(said)).toEqual(
+      new Set([
+        'An installed skill was asked for with a byte bound that is not a whole number from 1 to 262144, so it was not read.',
+      ]),
+    );
+    expect(said.join('\n')).not.toContain(SECRET);
+    expect(said.join('\n')).not.toContain('review');
   });
 
   it('a skill swapped for a link after it was listed is not read, and the answer names no content', async () => {

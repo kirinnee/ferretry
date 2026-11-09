@@ -787,6 +787,22 @@ describe('the homes the composed daemon provides', () => {
     expect(await assets?.skillManifest('absent', 100)).toBeUndefined();
   });
 
+  it('S1 an over-bound ask of the provided assetSkills() is refused empty and said in the daemon log, never thrown', async () => {
+    const { host } = await compose();
+    const assets = host.provided(RuntimesPort).assetSkills?.();
+
+    expect(await assets?.skills(1001)).toEqual([]);
+    expect(await assets?.skillManifest('review', 256 * 1024 + 1)).toBeUndefined();
+
+    const said = host.logs.filter(line => line.level === 'warn').map(line => line.message);
+    expect(said).toContain(
+      "The fleet's installed skills were asked for with a limit that is not a whole number from 0 to 1000, so none were listed.",
+    );
+    expect(said).toContain(
+      'An installed skill was asked for with a byte bound that is not a whole number from 1 to 262144, so it was not read.',
+    );
+  });
+
   it('BG-033 n2 a fleet root that cannot be opened: homes() rejects with the typed refusal and home(id) answers undefined', async () => {
     const world = await fleetWorld();
     const host = await testHost({

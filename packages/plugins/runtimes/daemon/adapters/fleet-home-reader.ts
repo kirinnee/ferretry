@@ -378,15 +378,25 @@ const assetSkillName = (name: string): boolean => ASSET_SKILL_NAME.test(name) &&
 
 /** The most a listing of the asset tree asks for: past it nothing is listed (a bound the caller cannot widen). */
 const ASSET_SKILLS_LIMIT = 1000;
+/** The most one `SKILL.md` read asks for (what Skills asks, 256 KiB): past it nothing is read (a bound the caller cannot widen). */
+const ASSET_SKILL_MAX_BYTES = 256 * 1024;
+
+/** Said once per refused call, to the daemon's log: the answer itself has no field for a sentence. Never names a path or a file's text. */
+const LIMIT_REFUSED = `The fleet's installed skills were asked for with a limit that is not a whole number from 0 to ${ASSET_SKILLS_LIMIT}, so none were listed.`;
+const MAX_BYTES_REFUSED = `An installed skill was asked for with a byte bound that is not a whole number from 1 to ${ASSET_SKILL_MAX_BYTES}, so it was not read.`;
+
+/** Where a refused bound is said; the default says nothing (a caller that has no log). */
+type SaySentence = (sentence: string) => void;
 
 /**
  * The fleet's own installed skills (`<fleet>/assets/skills/<name>`), listed and read only as plain folders: `assets/skills`
  * itself, each skill folder and its `SKILL.md` are judged by `lstat` on handles scoped to them, so a link at any of
  * those names, a hard-linked `SKILL.md` or any other kind is skipped and nothing is followed. Each call runs inside ONE
- * `publication.reading(...)`. A fault, a bound passed or an unreadable name gives an empty answer; nothing it says
- * names a file's content or a path.
+ * `publication.reading(...)`. A fault or an unreadable name gives an empty answer. `limit` (0 to 1000) and `maxBytes`
+ * (1 to 256 KiB) are hard bounds: a call outside them is refused (an empty answer, never a throw) and `say` is told a
+ * sentence, because the answer's types have no field for one. Nothing it says names a file's content or a path.
  */
-function fleetAssetSkills(deps: Deps): RuntimeAssetSkills {
+function fleetAssetSkills(deps: Deps, say: SaySentence): RuntimeAssetSkills {
   const skills = (): RootHandle => deps.roots.root('fleet', { subfolder: 'assets/skills' });
   const plain = async (root: RootHandle, relative: string): Promise<boolean> =>
     (await root.lstat(fenced(root, relative)))?.kind === 'directory';
@@ -405,7 +415,10 @@ function fleetAssetSkills(deps: Deps): RuntimeAssetSkills {
   };
   return {
     skills: async limit => {
-      if (!Number.isSafeInteger(limit) || limit < 0 || limit > ASSET_SKILLS_LIMIT) return [];
+      if (!Number.isSafeInteger(limit) || limit < 0 || limit > ASSET_SKILLS_LIMIT) {
+        say(LIMIT_REFUSED);
+        return [];
+      }
       try {
         return await deps.publication.reading(async () => {
           const fleet = deps.roots.root('fleet');
@@ -428,7 +441,10 @@ function fleetAssetSkills(deps: Deps): RuntimeAssetSkills {
       }
     },
     skillManifest: async (name, maxBytes) => {
-      if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) return undefined;
+      if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > ASSET_SKILL_MAX_BYTES) {
+        say(MAX_BYTES_REFUSED);
+        return undefined;
+      }
       try {
         return await deps.publication.reading(async () => {
           if (!(await listed(name))) return undefined;
@@ -460,6 +476,7 @@ function fleetDirectory(fleet: RootHandle): string {
 export function fleetHomes(
   roots: Pick<RootsPort, 'root'>,
   publication: Pick<FleetPublication, 'reading'>,
+  say: SaySentence = () => {},
 ): RuntimeHomesApi {
   const fleet = roots.root('fleet');
   const directory = fleetDirectory(fleet);
@@ -488,6 +505,6 @@ export function fleetHomes(
   return {
     homes: async () => await publication.reading(published),
     home: id => (known.has(id) ? new FleetHomeReader(id, deps) : undefined),
-    assetSkills: () => fleetAssetSkills(deps),
+    assetSkills: () => fleetAssetSkills(deps, say),
   };
 }

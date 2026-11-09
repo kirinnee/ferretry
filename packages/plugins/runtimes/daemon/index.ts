@@ -220,7 +220,11 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     catalog: deferred(() => assembled().catalog),
     setup: deferred(() => assembled().setup),
     ended: deferred(() => assembled().ended),
-    homes: onceHomes(() => fleetHomes(ctx.kernel.roots, publication)),
+    homes: onceHomes(() =>
+      fleetHomes(ctx.kernel.roots, publication, sentence => {
+        ctx.kernel.log.warn(sentence);
+      }),
+    ),
     profileEtag: async profile => await assembled().profileEtag(profile),
     probe: () => {
       assembled();
