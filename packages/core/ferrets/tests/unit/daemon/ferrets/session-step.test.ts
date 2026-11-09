@@ -18,7 +18,12 @@ import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
  * private first, a start records who caused it, a resume brings that forward. Fixture values only.
  */
 
-function fixture(session: FerretSessionPort, records: readonly FerretRecord[] = [], log: string[] = []) {
+function fixture(
+  session: FerretSessionPort,
+  records: readonly FerretRecord[] = [],
+  log: string[] = [],
+  extra: Partial<FerretsPorts> = {},
+) {
   const registry = new FerretRegistry(records);
   const tokens = new FerretTokenDirectory();
   const harness = new (class extends FakeHarness {
@@ -57,6 +62,7 @@ function fixture(session: FerretSessionPort, records: readonly FerretRecord[] = 
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
     asks: { open: async () => [] },
     session,
+    ...extra,
   };
   return { log, registry, service: new FerretsService(registry, tokens, ports) };
 }
@@ -127,6 +133,66 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
     expect(started.ok).toBe(false);
     if (!started.ok) expect(started.error.reason).not.toContain('FIXTURE_SECRET');
     expect(log).toEqual(['prepare f1', 'stamp f1']);
+  });
+
+  describe('a start with opening attachments (V-0443)', () => {
+    const NOTES = Buffer.from('Ship the login fix.').toString('base64');
+    const attachments: FerretsPorts['openingAttachments'] = () => ({
+      plan: ({ directory }) =>
+        ok({
+          section: `\n## Attachments\n\n- ${directory}/notes.txt\n`,
+          files: [{ file: `${directory}/notes.txt`, contents: new Uint8Array([1]) }],
+        }),
+    });
+    const withFiles = {
+      folder: '/work',
+      by: 'owner' as const,
+      prompt: 'Fix the login.',
+      options: { initialAttachments: [{ filename: 'notes.txt', base64: NOTES }] },
+    };
+
+    test('a start whose attachments folder cannot be named launches nothing and quotes nothing of the failure', async () => {
+      const log: string[] = [];
+      const session: FerretSessionPort = {
+        ...recorder(log),
+        attachmentsFolder: async () => {
+          throw new Error('FIXTURE_SECRET no folder');
+        },
+        attach: async () => {
+          log.push('attach');
+        },
+      };
+      const f = fixture(session, [], log, { openingAttachments: attachments });
+      const started = await f.service.start(withFiles);
+      expect(started.ok).toBe(false);
+      if (!started.ok) {
+        expect(started.error.reason).toBe("this ferret's attachments folder could not be named, so it was not started");
+        expect(started.error.reason).not.toContain('FIXTURE_SECRET');
+      }
+      expect(log).not.toContain('attach');
+      expect(log).not.toContain('runner.start');
+    });
+
+    test('a start whose attachments cannot be written launches nothing and quotes nothing of the failure', async () => {
+      const log: string[] = [];
+      const session: FerretSessionPort = {
+        ...recorder(log),
+        attachmentsFolder: async ferret => `/sessions/${ferret}/attachments`,
+        attach: async () => {
+          log.push('attach');
+          throw new Error('FIXTURE_SECRET disk full');
+        },
+      };
+      const f = fixture(session, [], log, { openingAttachments: attachments });
+      const started = await f.service.start(withFiles);
+      expect(started.ok).toBe(false);
+      if (!started.ok) {
+        expect(started.error.reason).toBe("this ferret's attachments could not be written, so it was not started");
+        expect(started.error.reason).not.toContain('FIXTURE_SECRET');
+      }
+      expect(log).toContain('attach');
+      expect(log).not.toContain('runner.start');
+    });
   });
 
   test('a resume whose stamp cannot be carried still resumes: the stamp on disk is left exactly as it was', async () => {
