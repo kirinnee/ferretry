@@ -13,6 +13,21 @@ export const PluginIdSchema = z
 export const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets'] as const;
 export type CoreId = (typeof CORE_IDS)[number];
 
+/**
+ * The kinds of item a plugin's items can be (`permissions.spawn: [{ items: 'mcp' }]`, a config collection's
+ * `itemKind`). Here because a contract names it (`defineConfig`); the manifest re-exports it.
+ */
+export type ItemKind =
+  | 'mcp'
+  | 'skill'
+  | 'shell'
+  | 'recipe'
+  | 'instruction'
+  | 'layout'
+  | 'theme'
+  | 'runtime'
+  | 'endpoint';
+
 /** The plugin API major this kernel accepts; exactly one (§3.2, §9). */
 export const PLUGIN_API = 5 as const;
 export type PluginApi = typeof PLUGIN_API;
