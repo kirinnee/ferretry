@@ -48,6 +48,7 @@ function handler(ctx: CliContext<typeof manifest>, body: VerbBody): VerbHandler 
 export default implementCli(manifest, {
   build: ctx => ({
     verbs: {
+      runtimes: handler(ctx, VERB_BODIES.runtimes),
       'runtime ls': handler(ctx, VERB_BODIES['runtime ls']),
       'runtime add': handler(ctx, VERB_BODIES['runtime add']),
       'runtime show': handler(ctx, VERB_BODIES['runtime show']),
@@ -58,6 +59,7 @@ export default implementCli(manifest, {
       'runtime rm': handler(ctx, VERB_BODIES['runtime rm']),
       'runtime link': handler(ctx, VERB_BODIES['runtime link']),
       'runtime scan': handler(ctx, VERB_BODIES['runtime scan']),
+      profiles: handler(ctx, VERB_BODIES.profiles),
       'profile ls': handler(ctx, VERB_BODIES['profile ls']),
       'profile show': handler(ctx, VERB_BODIES['profile show']),
       'profile build': handler(ctx, VERB_BODIES['profile build']),
