@@ -14,6 +14,7 @@ import { chmod, lstat, mkdir, readdir, readFile, readlink, rm, writeFile } from 
 import path from 'node:path';
 import should from 'should';
 
+import { unavailableSharedHistory } from '../../daemon/adapters/shared-history-unavailable.ts';
 import { CLAUDE_QUESTION_HOOKS, codexTrustOverride } from '../../daemon/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../daemon/lib/account/ids.ts';
 import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
@@ -48,7 +49,9 @@ const worldOf = (root: string): FleetWorld => {
   return world;
 };
 const fleetOf = (root: string): string => worldOf(root).fleet;
-const newProvisioner = (root: string) => worldOf(root).provisioner();
+// The pooling the daemon's own host assembly supplies (`daemon/host-assembly.ts`): history pooling is Conversation's and
+// not wired, so an apply skips and names it. A provisioner given NO pooling refuses a plan that carries history requests.
+const newProvisioner = (root: string) => worldOf(root).provisioner({ sharedHistory: unavailableSharedHistory });
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
@@ -94,6 +97,8 @@ interface Machine {
   readonly layout: FleetLayout;
   readonly claudeHome: string;
   readonly codexHome: string;
+  /** What the last apply left undone and said so (the history pooling this host does not have). */
+  readonly skippedByLastApply: () => readonly { readonly path: string; readonly reason: string }[];
   /** Plan and apply `layers`, carrying `ids.json` forward from the previous apply. */
   readonly apply: (layers: readonly string[]) => Promise<FleetModelApplyPlan>;
 }
@@ -107,14 +112,16 @@ async function machine(): Promise<Machine> {
   await writeFile(path.join(assets, 'components', 'instructions', 'extra.md'), 'Extra guidance.\n');
   await mkdir(path.join(assets, 'skills', 'review'), { recursive: true });
   await writeFile(path.join(assets, 'skills', 'review', 'SKILL.md'), '---\nname: review\n---\n');
-  // GAP(conversation): the shared-history pooling and its file system are the lease store's; no pooling is wired here,
-  // so a plan carrying history requests is refused by the provisioner rather than pooled.
+  // GAP(conversation): the shared-history pooling and its file system are the lease store's; the unavailable pooling is
+  // wired here as in production, so a plan carrying history requests has them skipped and named, not pooled.
   const provisioner = newProvisioner(root);
   let ids: RuntimeIds = EMPTY_RUNTIME_IDS;
   const minted = [ID_CLAUDE, ID_CODEX];
+  let skipped: readonly { readonly path: string; readonly reason: string }[] = [];
   return {
     root,
     layout,
+    skippedByLastApply: () => skipped,
     claudeHome: path.join(layout.homesDirectory, ID_CLAUDE),
     codexHome: path.join(layout.homesDirectory, ID_CODEX),
     apply: async layers => {
@@ -129,7 +136,8 @@ async function machine(): Promise<Machine> {
         fyCommand: path.join(root, 'no-such-fy'),
         acceptsAutoPermissionMode: true,
       });
-      await provisioner.apply(plan);
+      const applied = await provisioner.apply(plan);
+      skipped = applied.skipped ?? [];
       ids = plan.ids;
       return plan;
     },
@@ -162,6 +170,9 @@ describe('materialising the account model onto disk', () => {
     should(await readlink(path.join(host.claudeHome, 'skills', 'review'))).equal(
       path.join(host.layout.assetsDirectory, 'skills', 'review'),
     );
+    // History pooling is not available on this host: the apply stood, and said what it skipped rather than planning it silently.
+    should(host.skippedByLastApply().length).be.above(0);
+    for (const skip of host.skippedByLastApply()) should(skip.reason).match(/pooling conversation history/);
     // The slot has no login yet; the link waits for the sign-in that writes through it.
     should(await readlink(path.join(host.codexHome, 'auth.json'))).equal(
       path.join(host.layout.fleetDirectory, 'credentials', 'codex-slot', 'auth.json'),

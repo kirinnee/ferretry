@@ -25,7 +25,14 @@ import {
   rowsOf,
 } from '../../packages/core/kernel/testing/parity.ts';
 import { type AstNode, type Check, type Finding, parseFile, runMain, walk } from '../gen/lib/check.ts';
-import { PARITY_CHANGES, TODAY_ROUTES, isTightening, movedPairs, readChanges } from './descriptor-parity.ts';
+import {
+  type ChangeRecord,
+  PARITY_CHANGES,
+  TODAY_ROUTES,
+  isTightening,
+  movedPairs,
+  readChanges,
+} from './descriptor-parity.ts';
 import { type JunitCase, inTier, junitCases, resultFiles } from './guarantees.ts';
 
 export const LEDGER = 'docs/design/rebuild-parity.tsv';
@@ -118,14 +125,14 @@ export function readKnown(text: string): Map<string, string> {
 export interface RouteWorld {
   readonly today: readonly DescriptorRow[];
   readonly next: readonly DescriptorRow[];
-  readonly changes: ReadonlyMap<string, { readonly change: string; readonly reason: string }>;
+  readonly changes: ReadonlyMap<string, ChangeRecord>;
   readonly findings: readonly Finding[];
 }
 
 export function routeWorld(
   today: readonly DescriptorRow[],
   next: readonly DescriptorRow[],
-  changes: ReadonlyMap<string, { readonly change: string; readonly reason: string }>,
+  changes: ReadonlyMap<string, ChangeRecord>,
 ): RouteWorld {
   return { today, next, changes, findings: parity(today, next, changes).findings };
 }
@@ -167,12 +174,12 @@ export function routeStatus(row: Pick<LedgerRow, 'what'>, world: RouteWorld): Ro
   const recorded = world.changes.get(wasKey);
   if (recorded?.change !== 'removed')
     return { kind: 'missing', text: `route missing: 5.0 declares no ${table} ${key}` };
-  const { pairs, claimed } = movedPairs(world.today, world.next, world.changes);
+  const { pairs, claimed, broken } = movedPairs(world.today, world.next, world.changes);
   const pair = pairs.find(p => p.was === was);
   if (pair === undefined)
     return {
       kind: 'unpaired',
-      text: `route removed in 5.0 (recorded), no single counterpart derivable: ${recorded.reason}`,
+      text: `route removed in 5.0 (recorded), ${broken.get(wasKey) ?? 'no single counterpart derivable'}: ${recorded.reason}`,
     };
   const now = pair.now;
   if (claimed.has(`${now.table}\t${now.key}`))
