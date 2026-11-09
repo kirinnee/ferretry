@@ -38,11 +38,10 @@
  */
 import { basename, join, relative, sep } from 'node:path';
 import type { FencedPath, RootEntry, RootHandle, RootsPort } from '@ferretry/kernel/contract';
+import { isSignInName } from '../lib/account/credentials.ts';
 
-/** Names of a harness's own sign-in files (the list `host-harness-scan.ts` keeps): never listed, never read. */
-const SIGN_IN_FILES = new Set(['.credentials.json', 'auth.json']);
-
-const isSignIn = (name: string): boolean => SIGN_IN_FILES.has(name.toLowerCase());
+/** A harness's own sign-in file (the one list in `account/credentials.ts`): never listed, never read. */
+const isSignIn = isSignInName;
 
 /** The members of a root the reader uses: none of them writes, and the type names no other. */
 export interface ReadHandle {

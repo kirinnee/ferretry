@@ -10,6 +10,7 @@ import type { RootsPort } from '@ferretry/kernel/contract';
 import type { RuntimeHomeReader } from '../../../contract/index.ts';
 import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
 import { followingHandle } from '../../../daemon/adapters/following-handle.ts';
+import { isSignInName } from '../../../daemon/lib/account/credentials.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
@@ -178,6 +179,13 @@ describe('BG-033 the handle judges every read and refuses to leave its folder by
       await expect(handle.readText(placed.value, 1000)).rejects.toThrow('the file is not read');
       await expect(handle.readBytes(placed.value, 1000)).rejects.toThrow('the file is not read');
     }
+  });
+
+  it('BG-033 the sign-in names have ONE owner (account/credentials.ts), judged in any letter case', () => {
+    for (const name of ['.credentials.json', 'auth.json', '.Credentials.JSON', 'AUTH.json'])
+      expect(isSignInName(name)).toBe(true);
+    for (const name of ['credentials.json', 'auth.json.bak', 'settings.json', ''])
+      expect(isSignInName(name)).toBe(false);
   });
 
   it('BG-033 a name that climbs (a `..` segment anywhere) or holds a NUL is outside, even when it lands back inside the folder', async () => {
