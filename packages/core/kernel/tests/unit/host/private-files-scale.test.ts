@@ -11,6 +11,7 @@ import { privateIndexOf, recheckIntervalOf } from '../../../host/fence-index.ts'
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
 import { SharedTreeError } from '../../../host/shared-trees.ts';
 import { composePrivateFiles } from '../../../manifest/privacy.ts';
+import { overlayDisk } from './private-files-overlay.ts';
 
 /**
  * The private-files index at the size of a long-lived machine and under the clock (§7.7): a few thousand ferret
@@ -155,6 +156,27 @@ describe('PF-budget the real bound fails closed: a place past its budget is trun
     await mkdir(`${l.parent}/work`, { recursive: true });
     await writeFile(`${l.parent}/work/notes.md`, 'hello');
     expect(await fencedReal(REAL, fence, `${l.parent}/work/notes.md`)).toBe(true);
+  });
+
+  test('PF-budget on a disk that gives a file a device of its own (an overlay) the truncated tree is closed on the file device too, owner roots included', async () => {
+    const l = await home();
+    await fill(`${l.home}/state/browsers/data/P1`, 4100, n => `f${n}`);
+    await mkdir(`${l.parent}/work`, { recursive: true });
+    await writeFile(`${l.parent}/work/notes.md`, 'hello');
+    const disk = overlayDisk(REAL);
+    const real = await realpath(l.home);
+    const snapshot = await privateIndexOf(disk, real, { pins: () => [], private: LIST }, { wall: LATER }).snapshot();
+    expect(snapshot.truncated).toEqual([`${real}/state/browsers/data`]);
+    const folder = (await disk.identity(`${real}/state/browsers/data`))?.device as bigint;
+    const file = (await disk.identity(`${l.agentHome}/own.txt`))?.device as bigint;
+    // The folder and the file answer with two devices, and an alias of an unindexed member keeps the file's.
+    expect(file).not.toBe(folder);
+    expect(snapshot.closed[0]?.devices).toEqual(new Set([folder, file]));
+    const root = agentHomeRoot(disk, l.home, LIST, 0);
+    expect(await refusal(() => root.readText(named(root, 'own.txt')))).toBe('refused:fenced');
+    const fence = await fenceOf(disk, l.home, LIST);
+    expect(fence.closed).toEqual(new Set([folder, file]));
+    expect(await fencedReal(disk, fence, `${l.parent}/work/notes.md`)).toBe(true);
   });
 
   test('PF-budget under the real budget nothing is truncated: the last of 3000 members is pinned and an ordinary file is read', async () => {

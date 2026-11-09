@@ -146,7 +146,7 @@ function keysOf(snapshot: PrivateSnapshot): SnapshotKeys {
   if (kept !== undefined) return kept;
   const made = {
     keys: new Set(snapshot.places.map(place => place.key)),
-    closed: new Set(snapshot.closed.map(tree => tree.device)),
+    closed: new Set(snapshot.closed.flatMap(tree => [...tree.devices])),
   };
   SNAPSHOT_KEYS.set(snapshot, made);
   return made;
@@ -309,7 +309,7 @@ export async function privateGuardOf(
     : indexed.keys;
   const made = {
     keys,
-    closed: new Set(snapshot.closed.filter(tree => !nested(tree.path, base)).map(tree => tree.device)),
+    closed: new Set(snapshot.closed.filter(tree => !nested(tree.path, base)).flatMap(tree => [...tree.devices])),
   };
   bases.set(base, made);
   return made;
