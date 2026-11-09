@@ -128,8 +128,8 @@ export interface RootLayout {
 /**
  * Why a root refused, host-side: the contract's {@link FolderRefusal}, plus today's guard rules a handle's caller
  * meets only as this error — `hard_link` (a file with another name that could be anywhere), `changed` (what was
- * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a remove on a host
- * that cannot reach an entry through its checked folder, S44).
+ * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a folder remove, or any remove of an owner
+ * root, on a host that cannot reach an entry through its checked folder, S44).
  */
 export type RootRefusal =
   | FolderRefusal
@@ -687,10 +687,21 @@ async function removeChecked(scope: Scope, full: string): Promise<void> {
       : await openCheckedFolder(scope, parent);
   try {
     const through = folder.entryPath(leaf);
-    // Without descriptor reach nothing is removed, owner root or internal (S44): a by-path remove after one re-proof of
-    // the parent deletes an outside tree when the parent is swapped for a link in between. Refused (macOS) until the
-    // descriptor bracket lands.
-    if (through === undefined) return refuse('no_descriptor_reach');
+    if (through === undefined) {
+      // Without descriptor reach (S44): an owner root removes nothing, and no root removes a FOLDER, because a by-path
+      // `rm -r` after one re-proof of the parent deletes an outside tree when the parent is swapped for a link in
+      // between. A file or link leaf of an internal root is unlinked by path (sessions markers, tidy): the leaf is
+      // looked at without following it, and `unlink` never removes a tree, so the worst a swapped parent costs is ONE
+      // same-named file outside the root. Declared GAP, closed by the descriptor bracket unit.
+      if (scope.ownerRoot) return refuse('no_descriptor_reach');
+      const problem = await folderProblem(scope, parent, folder.identity);
+      if (problem !== undefined) return refuse(problem);
+      const found = await scope.fs.identity(join(parent, leaf));
+      if (found === undefined) return;
+      if (found.kind === 'directory') return refuse('no_descriptor_reach');
+      await scope.fs.unlink(join(parent, leaf));
+      return;
+    }
     const identity = await scope.fs.identity(through);
     if (identity === undefined) return;
     await removeWithin(scope, through, identity);

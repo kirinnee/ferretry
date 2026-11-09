@@ -777,7 +777,7 @@ export interface RootHandle {
    */
   pin(path: FencedPath, options?: PinOptions): Promise<HeldRoot>;
   /**
-   * Removes the name, a folder one entry at a time through descriptors. Remove of a folder needs descriptor reach; refused without it (macOS until the descriptor bracket lands), [own] BEFORE-GREEN(runtimes).
+   * Removes the name, a folder one entry at a time through descriptors. Remove of a folder needs descriptor reach; refused `no_descriptor_reach` without it (macOS until the descriptor bracket lands), and an owner root refuses every remove then. On a host without descriptor reach a file or link of an internal root is unlinked by path after one re-proof of its folder: a parent swapped in between can delete ONE same-named file outside the root, never a tree (declared GAP). [own] BEFORE-GREEN(runtimes) closed by the bracket unit.
    */
   remove(path: FencedPath): Promise<void>;
   /**
