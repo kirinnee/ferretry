@@ -1,4 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { AgentConfigCallSchema } from '@ferretry/kernel/contract';
+import { fixedClock } from '@ferretry/kernel/testing';
+import { agentConfig } from '../../../../core/kernel/host/config/agent.ts';
+import { createConfigFiles } from '../../../../core/kernel/host/config/service.ts';
+import { createMemoryHostFs } from '../../../../core/kernel/host/state/memory-fs.ts';
 import { MCP_CONFIG, McpItemSchema, SessionMcpPreviewRequestSchema } from '../../contract/index.ts';
 import { fakeMcp, mcpConformance } from '../../contract/testing/index.ts';
 import manifest from '../../manifest.ts';
@@ -54,6 +59,45 @@ describe('mcp contract', () => {
     expect(McpItemSchema.safeParse({ command: 'x', env: { A: '${secret:UPPER_1}' } }).success).toBe(true);
     expect(McpItemSchema.safeParse({ url: 'http://a.example', auth: 'oauth' }).success).toBe(false);
     expect(MCP_CONFIG.axis).toBe('configure');
+  });
+
+  test('R9 M1 a failing mcp/<name>.yaml is withheld whole by config_read, its issues kept', async () => {
+    const SILENT = {
+      debug: () => undefined,
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      child: () => SILENT,
+    };
+    const home = '/mcp-test-only';
+    const fs = createMemoryHostFs();
+    const files = createConfigFiles({
+      home,
+      fs,
+      clock: fixedClock(),
+      log: SILENT,
+      binary: 'fy',
+      defs: [{ plugin: 'mcp', def: MCP_CONFIG }],
+    });
+    const agent = agentConfig({
+      writer: () => files.writer(),
+      control: () => ({ allows: async () => true }),
+      status: () => files.status(),
+      home,
+      binary: 'fy',
+      now: () => '2026-01-01T00:00:00.000Z',
+    });
+    fs.seed(`${home}/config/mcp/gw.yaml`, 'command: npx\n');
+    await files.reload();
+    const fake = 'made-up-value-9f2k';
+    fs.seed(`${home}/config/mcp/gw.yaml`, `commnd: npx\nenv:\n  A: ${fake}\n`);
+    await files.reload();
+    const answer = await agent.run(AgentConfigCallSchema.parse({ tool: 'config.read', path: 'mcp/gw.yaml' }), {
+      credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'wren' },
+    });
+    expect(answer.text).toBe('');
+    expect((answer.issues ?? []).length).toBeGreaterThan(0);
+    expect(JSON.stringify(answer)).not.toContain(fake);
   });
 
   test('an add request refuses a field it does not know', () => {

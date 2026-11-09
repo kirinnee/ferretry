@@ -11,17 +11,26 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { LOGIN_NAME } from '../../contract/wire.ts';
 
 /** The first word of a Machines hash, and the tab's own word in it. */
 const MACHINES = 'machines';
 const TAB = 'sign-ins';
 
-/** The login a Machines link names (`#machines/<machine>/sign-ins/<loginId>`), or `null` for the list. */
+/** The longest login id the daemon takes. */
+const LOGIN_ID_MAX = 64;
+
+/**
+ * The login a Machines link names (`#machines/<machine>/sign-ins/<loginId>`), or `null` for the list. Only a login id
+ * (the daemon's grammar) is a login: any other text a link carries is never read, so a crafted link cannot put its own
+ * words in a notice.
+ */
 export const loginFromHash = (hash: string): string | null => {
   const [section, , tab, item] = hash.replace(/^#/u, '').split('/');
   if (section !== MACHINES || tab !== TAB || item === undefined || item === '') return null;
   try {
-    return decodeURIComponent(item);
+    const id = decodeURIComponent(item);
+    return id.length <= LOGIN_ID_MAX && LOGIN_NAME.test(id) ? id : null;
   } catch {
     return null;
   }
