@@ -472,6 +472,11 @@ export default definePlugin({
     ],
   },
 
+  /** Never reached by a ferret, through any root: the digests of every ferret token (`PrivacyDecl`). */
+  privacy: {
+    // `sessions/*/environment.json` is each ferret's plaintext `fys_` credential (the kernel's own `sessions` root).
+    private: ['tokens.json', 'sessions/*/environment.json'],
+  },
   data: {
     state: [
       FerretFiles,

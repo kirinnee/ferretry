@@ -208,6 +208,10 @@ export default definePlugin({
     settings: [settingsTab('logins', { label: 'Logins', order: 25 })],
   },
 
+  /** Never reached by a ferret, through any root: the sign-in material of every login (`PrivacyDecl`). */
+  privacy: {
+    private: ['credentials'],
+  },
   data: {
     state: [LOGINS_CREDENTIALS, LOGINS_MODELS],
     config: [LOGINS_CONFIG, ENDPOINTS_CONFIG, MODELS_CONFIG],

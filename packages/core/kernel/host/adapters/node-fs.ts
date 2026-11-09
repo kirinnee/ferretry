@@ -32,6 +32,10 @@ export interface FileIdentity {
   readonly links: number;
   readonly size: number;
   readonly mtimeMs: number;
+  /** The modification time to the nanosecond: a whole-millisecond compare misses a change made in the same millisecond. */
+  readonly mtimeNs: bigint;
+  /** The status-change time to the nanosecond: it moves on every create, rename and remove in a folder, and cannot be set back. */
+  readonly ctimeNs: bigint;
   /** The permission bits. */
   readonly mode: number;
   readonly owner: number;
@@ -152,6 +156,8 @@ function fileIdentityOf(entry: BigIntStats): FileIdentity {
     links: Number(entry.nlink),
     size: Number(entry.size),
     mtimeMs: Number(entry.mtimeMs),
+    mtimeNs: entry.mtimeNs,
+    ctimeNs: entry.ctimeNs,
     mode: Number(entry.mode & 0o7777n),
     owner: Number(entry.uid),
     group: Number(entry.gid),

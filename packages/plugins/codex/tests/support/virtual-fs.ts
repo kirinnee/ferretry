@@ -78,6 +78,8 @@ export class VirtualFs {
       links: 1,
       size: node.kind === 'file' ? node.text.length : 0,
       mtimeMs: 0,
+      mtimeNs: 0n,
+      ctimeNs: 0n,
       mode: node.kind === 'directory' ? 0o700 : 0o600,
       owner: 1000,
       group: 1000,

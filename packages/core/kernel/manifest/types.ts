@@ -324,6 +324,26 @@ export interface Needer {
   readonly ownedSecretReferences: () => ReadonlySet<string>;
 }
 
+/** A state file that names itself like a secret but is not one, with the reason a reviewer can check. */
+export interface PublicFileDecl {
+  /** Relative to `state/<id>/`, as a `defineState` path is (one `*` at most). */
+  readonly path: string;
+  readonly reason: string;
+}
+
+/**
+ * Which of a plugin's state files a ferret must never reach (§7.7, §9.3). The kernel composes every plugin's list into
+ * the one list its fence reads (no kernel → plugin import): each `private` entry is pinned by IDENTITY, so a bind mount
+ * or alias of it is refused under any name, through any root. A state file named like a secret (key, secret, token,
+ * passkey, credential, oauth) must be declared one way or the other, or the manifest is refused.
+ */
+export interface PrivacyDecl {
+  /** Paths relative to `state/<id>/`: a file, a folder, or a collection (`credentials/*` pins the folder). */
+  readonly private?: readonly string[];
+  /** Secret-named files that are not secret, each with a written reason. */
+  readonly public?: readonly PublicFileDecl[];
+}
+
 // the manifest ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The one declaration (§3.3). Plain data; every field of the "Every field" table. */
@@ -388,4 +408,7 @@ export interface Manifest {
   readonly workers?: readonly string[];
 
   readonly permissions?: Permissions;
+
+  /** The state files a ferret must never reach, and the secret-named ones that are safe (`PrivacyDecl`). */
+  readonly privacy?: PrivacyDecl;
 }

@@ -256,7 +256,11 @@ describe.skipIf(!onLinux)('RootHandle.remove with onlyIfEmpty is rmdir', () => {
     const refusal = await refusalOf(() => f.fleet.remove(at(f.fleet, 'homes/claude-a/empty'), { onlyIfEmpty: true }));
     expect(refusal).toBe('not_empty');
     expect(await readFile(`${f.dir}/empty/late.txt`, 'utf8')).toBe('LATE');
-    expect(calls.filter(call => call.startsWith('list') || call.startsWith('remove'))).toEqual([]);
+    // What the claim is about is the FOLDER being removed: it is never listed and never emptied entry by entry. The
+    // private-places index (§7.7) legitimately lists the home's own `state` folder (a fresh test home's is racy, so it
+    // is read again), which is not this folder, so only calls that name the removed folder count.
+    const named = (call: string): boolean => call.endsWith(`${f.dir}/empty`) || call.includes(`${f.dir}/empty/`);
+    expect(calls.filter(call => (call.startsWith('list') || call.startsWith('remove')) && named(call))).toEqual([]);
     expect(calls.filter(call => call === 'rmdir')).toEqual(['rmdir']);
   });
 });

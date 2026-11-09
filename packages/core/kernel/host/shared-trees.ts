@@ -58,6 +58,24 @@ export function ownStateTree(declared: readonly StateFileDef[], def: StateFileDe
   return known.path.slice(0, -1) + name;
 }
 
+/**
+ * Whether the state tree at `folder` (relative to the minter's state folder) is private, or holds a private place: it
+ * is declared in the composed list (`state/<plugin>/<path>`, home-relative, a `*` segment standing for each member),
+ * above it, below it, or at it. A tree the minter declared private is its own to keep, never one to hand to another
+ * plugin's agent home.
+ */
+export function holdsPrivate(plugin: string, folder: string, privateFiles: readonly string[]): boolean {
+  const tree = `state/${plugin}/${folder}`.split('/').filter(segment => segment !== '');
+  return privateFiles.some(declared => {
+    const segments = declared.split('/');
+    const star = segments.findIndex(segment => segment.includes('*'));
+    const head = star === -1 ? segments : segments.slice(0, star);
+    const shared = Math.min(head.length, tree.length);
+    // Nested by whole segments either way: one is a prefix of the other.
+    return head.slice(0, shared).every((segment, at) => segment === tree[at]);
+  });
+}
+
 /** One minted tree: what the host needs to reach it again, and whether its minter is still running. */
 interface Minted<Entry> {
   readonly entry: Entry;

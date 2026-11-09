@@ -301,6 +301,10 @@ export default definePlugin({
     renderers: [renderer('reference', { prefix: '%browser' })],
   },
 
+  /** Never reached by a ferret, through any root: browser profiles (cookies, sign-ins) and the X11 session folder (`PrivacyDecl`). */
+  privacy: {
+    private: ['data', 'x11'],
+  },
   data: {
     state: [
       /** Chrome's own profile folders: never parsed by Ferretry. */

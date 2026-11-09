@@ -33,6 +33,7 @@ import { check as noCompat } from '../validate/no-compat.ts';
 import { check as oneFormat } from '../validate/one-format.ts';
 import { check as parityTicks } from '../validate/parity-ticks.ts';
 import { check as pins } from '../validate/pins.ts';
+import { check as privateFiles } from '../validate/private-files.ts';
 import { check as pluginGraph } from '../validate/plugin-graph.ts';
 import { check as portsPending } from '../validate/ports-pending.ts';
 import { check as readScoped } from '../validate/read-scoped.ts';
@@ -69,6 +70,7 @@ export const CHECKS: readonly Check[] = [
   words,
   glossary,
   pins,
+  privateFiles,
 ];
 
 /** Checks that read one package when `--package` is given; the rest are whole-graph and run unscoped. */
@@ -87,6 +89,7 @@ const SCOPED = new Set([
   'one-format',
   'no-compat',
   'glossary',
+  'private-files',
 ]);
 const GRAPH = new Set(['plugin-graph', 'core-closed', 'contract-graph']);
 

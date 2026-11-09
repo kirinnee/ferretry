@@ -1400,26 +1400,27 @@ export default definePlugin({
 
 **Every field:**
 
-| Section      | Field                                        | Declares                                                                                          | Code |                               Data                               |
-| ------------ | -------------------------------------------- | ------------------------------------------------------------------------------------------------- | :--: | :--------------------------------------------------------------: |
-| identity     | `id`, `title`, `version`, `api`, `core`      | §3.2                                                                                              |  ✓   |                     ✓ (`core` always false)                      |
-| identity     | `kinds`                                      | which kinds (§4) it implements; each kind brings its contract and conformance suite               |  ✓   |                            data kinds                            |
-| identity     | `words`                                      | its glossary entries (§1.3)                                                                       |  ✓   |                                ✓                                 |
-| dependencies | `needs`, `uses`, `provides`                  | required ports, optional ports, offered ports (by token)                                          |  ✓   |                                —                                 |
-| actions      | `routes`, `sockets`                          | every route and socket, each with the full security descriptor (§7.1)                             |  ✓   |                                —                                 |
-| actions      | `memberRoutes`                               | routes for catalog members, with the member descriptor (§7.1); a separate table                   |  ✓   |                                —                                 |
-| actions      | `cli`                                        | `fy` verbs (code) or aliases to existing verbs (data: `alias: { 'ship': 'card move --to done' }`) |  ✓   |                             aliases                              |
-| actions      | `agentTools`                                 | MCP tools for ferrets, same descriptor                                                            |  ✓   |                                —                                 |
-| actions      | `app`                                        | buttons and menu items on a thing (card, ferret, ask, page), each naming the route it calls       |  ✓   |                                —                                 |
-| UI           | `screens`, `panels`, `settings`, `renderers` | §5                                                                                                |  ✓   |                                —                                 |
-| UI           | `layouts`, `themes`                          | §5.3                                                                                              |  ✓   |                                ✓                                 |
-| data         | `state`, `config`                            | its folder's files with formats; its config files and collections (§7.2)                          |  ✓   |                           config only                            |
-| data         | `readModels`, `publishes`, `subscribes`      | queries others may read; wake-ups                                                                 |  ✓   |                                —                                 |
-| data         | `items`                                      | items it brings (MCP servers, skills, shells, recipes, instructions)                              |  ✓   |                                ✓                                 |
-| hooks        | `takes`, `offers`                            | §3.5                                                                                              |  ✓   | data hooks only (`launch.parts`, `sitrep.lines` from a template) |
-| order        | `order.after`, `order.before`, `priority`    | §3.5                                                                                              |  ✓   |                            `priority`                            |
-| metadata     | `instructions`, `onboarding`, `doctor`       | launch-prompt text (with `when`), first-run steps (§6.1), `fy doctor` checks                      |  ✓   |                instructions, onboarding defaults                 |
-| permissions  | `roots`, `network`, `spawn`, `secrets`       | §3.7                                                                                              |  ✓   |            what its items would run, shown at install            |
+| Section      | Field                                        | Declares                                                                                           | Code |                               Data                               |
+| ------------ | -------------------------------------------- | -------------------------------------------------------------------------------------------------- | :--: | :--------------------------------------------------------------: |
+| identity     | `id`, `title`, `version`, `api`, `core`      | §3.2                                                                                               |  ✓   |                     ✓ (`core` always false)                      |
+| identity     | `kinds`                                      | which kinds (§4) it implements; each kind brings its contract and conformance suite                |  ✓   |                            data kinds                            |
+| identity     | `words`                                      | its glossary entries (§1.3)                                                                        |  ✓   |                                ✓                                 |
+| dependencies | `needs`, `uses`, `provides`                  | required ports, optional ports, offered ports (by token)                                           |  ✓   |                                —                                 |
+| actions      | `routes`, `sockets`                          | every route and socket, each with the full security descriptor (§7.1)                              |  ✓   |                                —                                 |
+| actions      | `memberRoutes`                               | routes for catalog members, with the member descriptor (§7.1); a separate table                    |  ✓   |                                —                                 |
+| actions      | `cli`                                        | `fy` verbs (code) or aliases to existing verbs (data: `alias: { 'ship': 'card move --to done' }`)  |  ✓   |                             aliases                              |
+| actions      | `agentTools`                                 | MCP tools for ferrets, same descriptor                                                             |  ✓   |                                —                                 |
+| actions      | `app`                                        | buttons and menu items on a thing (card, ferret, ask, page), each naming the route it calls        |  ✓   |                                —                                 |
+| UI           | `screens`, `panels`, `settings`, `renderers` | §5                                                                                                 |  ✓   |                                —                                 |
+| UI           | `layouts`, `themes`                          | §5.3                                                                                               |  ✓   |                                ✓                                 |
+| data         | `state`, `config`                            | its folder's files with formats; its config files and collections (§7.2)                           |  ✓   |                           config only                            |
+| data         | `readModels`, `publishes`, `subscribes`      | queries others may read; wake-ups                                                                  |  ✓   |                                —                                 |
+| data         | `items`                                      | items it brings (MCP servers, skills, shells, recipes, instructions)                               |  ✓   |                                ✓                                 |
+| hooks        | `takes`, `offers`                            | §3.5                                                                                               |  ✓   | data hooks only (`launch.parts`, `sitrep.lines` from a template) |
+| order        | `order.after`, `order.before`, `priority`    | §3.5                                                                                               |  ✓   |                            `priority`                            |
+| metadata     | `instructions`, `onboarding`, `doctor`       | launch-prompt text (with `when`), first-run steps (§6.1), `fy doctor` checks                       |  ✓   |                instructions, onboarding defaults                 |
+| permissions  | `roots`, `network`, `spawn`, `secrets`       | §3.7                                                                                               |  ✓   |            what its items would run, shown at install            |
+| privacy      | `privacy.private`, `privacy.public`          | which of its state files a ferret must never reach (§7.7), and the secret-named ones that are safe |  ✓   |                                —                                 |
 
 ### 3.4 Lifecycle
 
@@ -2668,6 +2669,95 @@ scoped handle:
   folder, so "read-only" holds for a copy only (a declared GAP). A link made also outlives the tree: revoking a tree (its
   minter stopping, or `shareTrees` leaving the manifest) stops new materializations only, and a link already in
   `agent-homes` stays until the harness removes it (a declared GAP).
+- **Private files (`privacy`).** A plugin declares the files of its own `state/<id>/` a ferret must never reach —
+  `privacy.private`, paths relative to that folder (a folder pins the folder and what it holds, to three levels — a
+  login's `credentials/<id>/auth.json`, a browser profile's `data/<profile>/Default/Cookies`; a `credentials/*`
+  collection pins `credentials`; `sessions/*/environment.json` pins that one file in each member of `sessions`, Ferrets'
+  per-ferret plaintext `fys_` credential). The kernel COMPOSES every manifest's list into the one list its fence
+  reads (no kernel → plugin import) and pins each place by **identity** (device and inode), beside the home's key
+  paths and every other plugin's internal root folders, for EVERY root: an owner's, an internal one (`agent-homes`,
+  `fleet`, `sessions`, `credentials`, `downloads`), a harness file, a pinned read, a shared tree and a copy's source.
+  A place the root itself holds (its base, a folder above it, anything below) is its own and is left out. A name that IS
+  a private place is refused `fenced` for read, stat, write, rename-over (as target), `publish`, link (as target and
+  as the link's place), delete, mode change and copy, whatever its spelling: the verdict is the inode's, so a case
+  variant, a double slash or a `.` segment changes nothing, and a bind mount (one link, the same device and inode —
+  which the hard-link rule cannot see) is refused as a hard link is; `entries()` leaves such a name out. **The index.**
+  The places are indexed ONCE (`host/fence-index.ts`, one per home and list, shared by every root) and kept
+  INCREMENTALLY: the index remembers every folder it looked at with what was in it, each check looks at those folders
+  again (one identity per folder, never a file, all in one parallel batch) and re-reads only the folders that changed,
+  so a write into one ferret's session folder costs that folder, not the whole tree. **The cost is flat in how many
+  sessions a machine has ever made** (they are kept for ever): a look that finds nothing changed re-reads nothing, and a
+  snapshot that came out the same is the same snapshot, so what is built from it (every root's guard, an owner's fence)
+  is built once; a session folder (a member of a `*` collection) whose last change is older than a minute is
+  **resting**, and a look does not touch it — resting folders are looked at in rotating slices of 512, so one look
+  costs the folders that changed lately plus one slice, never every folder (measured at 2,000, 5,000 and 20,000
+  sessions with one writer, paired with 5.0: the median mean read is 1.5x, 1.7x and 1.55x of 5.0's — the guard's walk
+  of each path, not the sessions — with 21 filesystem calls a read at every size and a slowest read of about 6, 6 and 8
+  ms; a hostile writer that adds a session folder every 5 ms costs one 40–70 ms look at 20,000 sessions, once per
+  look; the very first fenced read after boot builds the index and waits for it: 0.14 s at 2,000, 0.4 s at 5,000, 1.8 s
+  at 20,000). The price is declared as GAP (7). The host looks at most every
+  250 ms (a private file created or replaced is pinned within that, which is also the longest it can be reached under
+  a second name; an interval that is not a finite number from 0 to 5 s — `Infinity`, `NaN`, a negative — is the 250 ms
+  default, never "never"). A change is told by the folder's modification AND status-change times **to the
+  nanosecond** (plus device, inode, size and links), and a folder whose last change is within 20 ms of the look that
+  recorded it (the filesystem's clock has a step, so the next change could land in the same tick) is **racy**: it is read
+  again at the next look until it is old enough to trust. A filesystem whose times carry no fraction of a second
+  (HFS+, FAT, some network mounts) has a step that coarse, so its window is two seconds; one that gives no
+  status-change time at all (zero) is never trusted — every look re-reads. A recursive remove asks only each member's
+  own identity, its folders already judged. **The bounds:** at most three levels below a private folder; and every
+  declared place has its OWN place budget — 4096 for a tree, 65,536 for a `*` collection such as
+  `sessions/*/environment.json` (the folder itself and 65,535 members) — so a place with thousands of folders (a few
+  thousand ferret sessions, kept for ever) can never starve a login's `auth.json` of its pin. A `*` collection spends
+  its budget only on a member that HOLDS the declared file: a session folder with no `environment.json` costs nothing
+  against it. Breadth first, so the shallow files that matter come first; a folder met at the depth limit is itself
+  pinned (a bind mount of it is held, and so is everything walked through it). **A budget that is reached fails
+  closed:** the tree is `truncated`, and the guard of every root that does not own the tree (and the fence of an
+  owner's root) refuses every entry on that tree's device, because an alias of an unindexed member (a bind mount keeps
+  its source's device) cannot be told from any other file there; an entry on another device is proven not to be one.
+  **The blast radius is the whole device, not the tree:** home, state and the owner's repositories are one device on a
+  normal Linux box or a macOS Data volume, so a place past its budget makes agent homes, fleet files, work folders,
+  imports, harness homes and every login's credentials root read nothing (the root that owns the tree still reads it),
+  and ferrets stop launching. It is reached by ordinary use only through sessions: a ferret session's
+  `environment.json` is never removed when the session ends (Ferrets has no delete, and its folder is kept for ever),
+  so the count only grows, and 65,535 sessions at a few hundred a day is months away, not years — **the remedy is open
+  and belongs to Ferrets** (delete the `environment.json` when a session ends: its credential is dead then, and the
+  budget then counts live sessions, not history); until then, deleting an ended session's `environment.json` by hand
+  lifts it. **It is never silent:** every change of what is past its budget is announced once — one `warn` log line
+  naming the place (home-relative) with how many places were indexed against the limit, and one failing line in
+  `GET /v1/doctor` / `fyd --check` naming the place, the blast radius and the remedy until it fits again (one more log
+  line when it does).
+  A check that cannot look at a place, or cannot LIST a private folder, **refuses**, never reads it as empty or
+  allows. **Fail closed:**
+  a state file whose name says key, secret, token, passkey, password, credential, oauth, auth or cookie
+  (case-insensitive substrings), or that the plugin seals itself (`store: 'secret'`), must be declared `private` or
+  `public` with a written reason (`privacy.public: [{ path, reason }]`), or `definePlugin`, both hosts at load and
+  the `private-files` check refuse the manifest; an entry that names no declared file is a finding. Declared GAPs:
+  (1) a single FILE deeper than the depth bound — a browser profile's web storage (`Local Storage`, `Session Storage`,
+  IndexedDB: where web apps keep bearer tokens; at depth 4–5 under `data/<profile>/Default/`) and its caches — is not
+  indexed, so a bind mount of exactly that file under another name is not recognised (folders are held only down to the
+  depth bound too: a deeper FOLDER, such as `Default/Local Storage/leveldb`, is not recognised under a second name any
+  more than a deeper file, so a bind mount of that folder exposes everything in it; a place past its BUDGET is not this
+  gap, it fails closed as above); (2) the
+  names INSIDE a `*` collection (`cache/*`) are not judged by the secret-name rule, only the folder's; (3) a FUSE or
+  overlay re-export of a private file shows a different device, and often a different inode, so identity cannot see
+  it — same-user ferrets can read such a file directly anyway ([secrets](../secrets.md)); (4) a ferret's own agent
+  home is that root's own place, so another ferret's harness sign-in files inside `agent-homes/<ferret>/` are held by
+  their folder only; (5) a name that no manifest declares is not private to the fence; (6) an alias of a private
+  file made BEFORE the owner replaced that file (a hard link, or a bind mount, of the old inode) is not recognised
+  after the replace — the index holds the new inode, and the old one is no longer in it — so it reads the old
+  credential until it is removed (a hard link needs the same user, who can read the file directly anyway; a bind
+  mount needs privilege); the same-millisecond and 4096-place misses of earlier rounds are closed, this one is not;
+  (7) a RESTING session folder (unchanged for a minute) is looked at only when its slice comes round, so a file
+  replaced in one is not recognised under a second name until then — at 512 folders a look and 250 ms a look, 5,000
+  sessions are all looked at in 2.5 s and 20,000 in 10 s, and it grows with the count (65,000: 32 s); a NEW session,
+  and any folder that changed within the minute, is looked at by the next look; an alias of the replaced file needs the
+  same user or privilege, as (6); (8) a filesystem whose clock steps by more than two seconds can still miss a member
+  that lands after the look in the same step (the window is 20 ms, two seconds where the times carry no fraction of a
+  second).
+  Residuals the secret-name rule cannot see, none named like a secret and none changed here: MCP's `inventory.json`
+  keeps a server's address with its path (a key embedded in a path segment would be stored), Shells' `cache/*` keeps a
+  devShell's exported variables verbatim, Warden's `state.json` is a loose object, and the kernel's `accepted-config/*`
+  and `config-write-set.json` rely on the raw-secret heuristic (a low-entropy password under an odd key name passes).
 - An owner's root refuses everything inside **the fence**: the live `FY_HOME`, every `<FY_HOME>-before-*` folder and
   every `state/<id>-before-*` folder (§9.3), for every caller including the owner's own `fy` imports. An internal
   root reaches its own subtree only.

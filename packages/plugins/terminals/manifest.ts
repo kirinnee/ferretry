@@ -291,6 +291,10 @@ export default definePlugin({
     renderers: [renderer('reference', { prefix: '%terminal' })],
   },
 
+  /** Never reached by a ferret, through any root: the tmux socket: whoever opens it drives every terminal (`PrivacyDecl`). */
+  privacy: {
+    private: ['tmux.sock'],
+  },
   data: {
     state: [
       /** tmux's own server socket: not a document, never parsed by Ferretry. */
