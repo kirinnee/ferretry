@@ -2,6 +2,7 @@ import { createContext, type ReactNode, useCallback, useContext, useRef, useSync
 import { type DaemonList, type DaemonListSnapshot, daemonTitle } from '../daemons/daemon-list.ts';
 import type { AddressTaker } from '../router/address.ts';
 import type { HandOffs } from './hand-off.ts';
+import type { InstallPromptHolder } from './install-prompt.ts';
 import { usePluginIdentity } from './plugin-identity.tsx';
 import {
   type ResolvedMode,
@@ -26,17 +27,7 @@ import {
  * this module is a module-wide singleton.
  */
 
-/**
- * The install-as-app prompt the browser offered, captured at boot (S13 fills it; until then it holds nothing). A typed
- * holder so the device context's shape is final now.
- */
-export interface InstallPromptHolder {
-  /** The captured prompt, or `undefined` when the browser offered none (or none was captured yet). */
-  readonly current: () => unknown;
-}
-
-/** The holder S13 replaces: no prompt was ever captured. */
-export const NO_INSTALL_PROMPT: InstallPromptHolder = Object.freeze({ current: () => undefined });
+export { type InstallPromptHolder, NO_INSTALL_PROMPT } from './install-prompt.ts';
 
 /** The paired list and the selected id, read-only, and no client (MA4: clients come only via `reach`). */
 type DaemonListView = Pick<DaemonList, 'snapshot' | 'subscribe'>;
