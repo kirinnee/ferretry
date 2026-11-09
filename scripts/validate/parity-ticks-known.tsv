@@ -1,0 +1,18 @@
+# Ticked parity rows that parity-ticks.ts cannot prove yet: id<TAB>reason. TEMPORARY - this list must shrink to empty
+# before 5.0 is green; an entry whose row passes (or is unticked) fails the validator so it can only shrink.
+F-0422	check file never mentions F-0422: packages/core/ferrets/tests/unit/parity/storage.test.ts
+V-0452	check file never mentions V-0452: packages/core/ferrets/tests/unit/parity/commands.test.ts
+R-0017	route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+R-0083	route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+R-0085	route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+R-0088	route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+R-0286	route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+R-0287	route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+R-0288	route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+R-0289	route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+R-0245	route removed in 5.0 (recorded), no single counterpart derivable: learning is lessons and /v1/agent/… is replaced (agent word, design §1.4): the ferret files a lesson at /v1/lessons/suggest; Gate admits the ferret credential, so minimum none becomes authenticated and the handler still refuses any caller without a ferret credential (403 forbidden)
+S-0010	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
+S-0255	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
+S-0262	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
+S-0304	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
+S-0388	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
