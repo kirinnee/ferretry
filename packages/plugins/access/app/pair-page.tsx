@@ -77,8 +77,11 @@ export const PAIR_SCREEN_ID = 'pair';
 
 const NO_LINK: PairingArrival = Object.freeze({ kind: 'none' });
 
-/** A plain absolute path: letters, digits and `. _ ~ -` in segments. No scheme, host, query, fragment or `//`. */
-const PLAIN_PATH = /^\/(?:[\w.~-]+(?:\/[\w.~-]+)*)?$/u;
+/**
+ * A plain absolute path: letters, digits and `. _ ~ -` in segments. No scheme, host, query, fragment or `//`, and no dot
+ * segment (`.` or `..` as a whole segment), which a browser would resolve away from the path it was given.
+ */
+const PLAIN_PATH = /^(?!(?:.*\/)?\.{1,2}(?:\/|$))\/(?:[\w.~-]+(?:\/[\w.~-]+)*)?$/u;
 
 /**
  * Where `/pair?return=<path>` asks to land after a pairing (the first run opens this page and comes back to its

@@ -266,6 +266,15 @@ describe('the /pair page', () => {
     expect(returnPathOf(PAGE)).toBeUndefined();
   });
 
+  it('n3 a dot segment is not a plain path, though a name that merely contains dots is', () => {
+    for (const bad of ['/..', '/.', '/a/..', '/a/../b', '/./a', '/a/.', '/../a', '/%2e%2e']) {
+      expect(returnPathOf(`${PAGE}?return=${encodeURIComponent(bad)}`)).toBeUndefined();
+    }
+    for (const good of ['/..a', '/a..', '/.well-known/x', '/a.b/c', '/...']) {
+      expect(returnPathOf(`${PAGE}?return=${encodeURIComponent(good)}`)).toBe(good);
+    }
+  });
+
   it('after a sealed refusal says one sentence without the code, keeps no key, and never retries on its own', async () => {
     let attempts = 0;
     const { Page, store } = setup(async () => {
