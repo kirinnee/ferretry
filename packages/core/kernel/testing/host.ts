@@ -1104,7 +1104,8 @@ async function start(world: World): Promise<TestHost> {
       (path !== known.prefix && !path.startsWith(`${known.prefix}/`))
     )
       throw new Error(`${path} is outside the root`);
-    if (!processFolderAllowed(known.root, path.slice(known.prefix.length + 1)))
+    // judged against the UNSCOPED root, as production does (BG-008): `prefix` is `/<root>` or `/<root>/<scope>`
+    if (!processFolderAllowed(known.root, path.slice(`/${known.root}/`.length)))
       throw new Error('kernel.processes accepts only a folder at or under fleet/homes/<id>');
     if (![...world.roots.keys()].some(key => key.startsWith(`${path}/`))) throw new Error(`no such folder ${path}`);
     return [path];

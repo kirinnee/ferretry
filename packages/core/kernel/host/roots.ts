@@ -1999,8 +1999,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
     },
     folder: async path => {
       const { full, scope } = await real(path);
-      const relative = full.startsWith(`${scope.base.real}/`) ? full.slice(scope.base.real.length + 1) : '';
-      if (!processFolderAllowed(name, relative))
+      // Judged against the UNSCOPED root (BG-008): a handle scoped to `homes/<id>` (or to anything below) names the very
+      // folders an unscoped one does and gets the very same answer, so the folder rule never reads a scope's own base as
+      // the root. A root that cannot be placed, or a folder that is not inside it, is refused (fail closed).
+      const unscoped =
+        scopedParent === undefined ? scope.base.real : await fs.realpath(scopedParent).catch(() => undefined);
+      const below = unscoped !== undefined && full.startsWith(`${unscoped}/`) ? full.slice(unscoped.length + 1) : '';
+      if (!processFolderAllowed(name, below))
         throw new Error('kernel.processes accepts only a folder at or under fleet/homes/<id>');
       // Held open and checked as `copyTree`'s source is: a folder, the one at that real path, inside the root.
       const held = await openCheckedFolder(scope, full);
