@@ -224,14 +224,16 @@ test('a shell operator glued to the token does not make a false refusal', async 
 
 describe('a path that climbs or is not a file is never carried (the rel stays inside fleet/assets)', () => {
   const cases: readonly (readonly [string, string])[] = [
-    ['a .. out of fleet/assets', `${REAL}/fleet/assets/../state/notes.txt`],
-    ['a .. out of a deeper folder', `${REAL}/fleet/assets/components/hooks/../../../state/notes.txt`],
+    ['a .. out of fleet/assets', `${REAL}/fleet/assets/../../state/notes.txt`],
+    ['a .. out of a deeper folder', `${REAL}/fleet/assets/components/hooks/../../../../state/notes.txt`],
+    ['a .. into fleet but outside assets', `${REAL}/fleet/assets/../config-x.txt`],
     ['a folder', `${REAL}/fleet/assets/components/hooks`],
     ['a folder with a trailing slash', `${REAL}/fleet/assets/components/hooks/`],
   ];
   for (const [name, path] of cases)
     test(name, async () => {
       await put('state/notes.txt', 'FAKE\n');
+      await put('fleet/config-x.txt', 'FAKE\n');
       await put(`fleet/assets/${BEFORE}`, 'FAKE notes\n');
       await put(`fleet/assets/${AFTER}`, SCRIPT, 0o700);
       const { step } = await run(`cat ${path}`, sh());
