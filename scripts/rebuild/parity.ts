@@ -334,6 +334,10 @@ const REOWNED: Readonly<Record<string, string>> = {
   'S-0232': 'ferrets',
   // One machine's outage sheet: the outage and its attempt count are Connections'.
   'S-0145': 'connections',
+  // The fleet event socket is declared by Ferrets (packages/core/ferrets/manifest.ts), not the kernel.
+  'R-0424': 'ferrets',
+  // The open-url route is served by Browsers (daemon/open-url/routes.ts).
+  'R-0401': 'browsers',
 };
 
 const SHELL_DAEMON_VERBS: ReadonlySet<string> = new Set([
@@ -1729,8 +1733,10 @@ for (const row of rows.sort((a, b) => rowKey(a).localeCompare(rowKey(b)))) {
   if (old && !row.status.startsWith('removed by design') && !old.status.startsWith('removed by design'))
     row.status = old.status;
   // A route ticked `[x]` names the route test that proves it (parity-ticks); the generator's default is only the check
-  // a port must add, so a test path someone wrote survives regeneration.
-  if (old && row.kind === 'R' && old.check !== 'descriptor-parity') row.check = old.check;
+  // a port must add, so a test path someone wrote survives regeneration. Only a TICKED row keeps it: a row reverted to
+  // `[ ]` goes back to the default, so an open row never points at a test that no longer proves it.
+  if (old && row.kind === 'R' && old.status.startsWith('[x]') && old.check !== 'descriptor-parity')
+    row.check = old.check;
   unique.set(key, row);
 }
 /**
