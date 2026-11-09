@@ -296,6 +296,40 @@ describe('the registered Codex harness', () => {
     expect(decided.records.map(record => record.kind)).toEqual(['usage', 'message']);
   });
 
+  test('BG-042 a stop forgets what was proved about the ferret’s rollout, so the next read proves it afresh', async () => {
+    const box = fixture();
+    const harness = box.build();
+    const spec = box.spec();
+    await harness.start(spec, box.runner, ENV);
+    const file = `${spec.home}/sessions/2026/10/20/rollout-native.jsonl`;
+    box.files.set(file, header('native-id', spec.home) + message('done'));
+    const stopped: string[] = [];
+    const stopper = {
+      stop: async (_handle: unknown, how: string) => void stopped.push(how),
+    } as unknown as Parameters<NonNullable<typeof harness.stop>>[2];
+
+    // Proved once, then remembered: the second tail walks no rollout head.
+    await harness.transcriptTail?.(spec.ferret, 50);
+    const proving = box.windows.length;
+    await harness.transcriptTail?.(spec.ferret, 50);
+    expect(box.windows.length).toBe(proving);
+
+    // A stop (even one whose runner throws) drops the proof: the next tail proves it afresh.
+    await harness.stop(spec.ferret, '%1' as never, stopper, 'now');
+    expect(stopped).toEqual(['now']);
+    await harness.transcriptTail?.(spec.ferret, 50);
+    expect(box.windows.length).toBeGreaterThan(proving);
+    const proved = box.windows.length;
+    const failing = {
+      stop: async () => {
+        throw new Error('the pane would not stop');
+      },
+    } as unknown as Parameters<NonNullable<typeof harness.stop>>[2];
+    await expect(harness.stop(spec.ferret, '%1' as never, failing, 'now')).rejects.toThrow('would not stop');
+    await harness.transcriptTail?.(spec.ferret, 50);
+    expect(box.windows.length).toBeGreaterThan(proved);
+  });
+
   test('refuses the baseline, same-folder strangers and ambiguous ownership; resumes only the native id after restart', async () => {
     const box = fixture();
     const harness = box.build();

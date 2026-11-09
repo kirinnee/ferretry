@@ -11,6 +11,7 @@ import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/ke
 import { seconds, type Instant, type JsonValue } from '@ferretry/std';
 import { CODEX_ROLLOUTS, type CodexRolloutBinding as Binding } from '../../contract/index.ts';
 import { CodexTranscriptParser } from '../lib/transcript/codex.ts';
+import { ProofCache } from '../lib/transcript/proof-cache.ts';
 import { selectCodexRollout } from '../lib/transcript/rollout.ts';
 import { markCutWindow, tailRecordOf } from '../lib/transcript/tail-record.ts';
 
@@ -136,7 +137,7 @@ export class CodexRollouts {
     if (!home.ok || !ownHome.ok || home.value !== ownHome.value)
       throw new Error('Codex rollout ownership could not be placed in the ferret home');
     // A new launch (a resume names its own conversation) may prove another rollout: forget the one remembered.
-    this.#proved.delete(spec.ferret);
+    this.forget(spec.ferret);
     const root = this.kernel.roots.root('agent-homes', { subfolder: `${spec.ferret}/sessions` });
     const existing = await rollouts(root, '');
     await this.kernel.state.write(
@@ -152,7 +153,12 @@ export class CodexRollouts {
   }
 
   /** The rollout proved to be the ferret's, found once and remembered: a stamp asked every half second must not walk the home. */
-  readonly #proved = new Map<FerretId, { readonly rollout: Rollout; readonly provedAtMs: number }>();
+  readonly #proved = new ProofCache<FerretId, Rollout>(PROOF_REUSE_MS);
+
+  /** Drops what was proved about this ferret (a relaunch, a stop): the next read proves it afresh. */
+  forget(ferret: FerretId): void {
+    this.#proved.forget(ferret);
+  }
 
   /**
    * The rollout proved to be this ferret's (never guessed by folder or recency), or `undefined` while none is. A read
@@ -164,13 +170,12 @@ export class CodexRollouts {
     remembered = false,
   ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout } | undefined> {
     const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
-    const known = this.#proved.get(ferret);
-    if (remembered && known !== undefined && Date.parse(this.kernel.clock.now()) - known.provedAtMs < PROOF_REUSE_MS) {
-      const stat = await root.stat(known.rollout.file).catch(() => undefined);
-      if (stat?.kind === 'file')
-        return { root, rollout: { ...known.rollout, size: stat.size, modified: stat.modified } };
+    const known = remembered ? this.#proved.fresh(ferret, Date.parse(this.kernel.clock.now())) : undefined;
+    if (known !== undefined) {
+      const stat = await root.stat(known.file).catch(() => undefined);
+      if (stat?.kind === 'file') return { root, rollout: { ...known, size: stat.size, modified: stat.modified } };
     }
-    this.#proved.delete(ferret);
+    this.#proved.forget(ferret);
     const binding = await this.binding(ferret);
     if (binding === undefined) return undefined;
     const ownHome = this.owner(ferret).resolve('');
@@ -189,11 +194,8 @@ export class CodexRollouts {
       chosen = selected === undefined ? undefined : candidates.find(candidate => candidate.file === selected.file);
     }
     if (chosen === undefined) return undefined;
-    const nowMs = Date.parse(this.kernel.clock.now());
     // A proof older than PROOF_REUSE_MS is proved again before it is used, so it is dead weight: dropped here.
-    for (const [other, entry] of this.#proved)
-      if (nowMs - entry.provedAtMs >= PROOF_REUSE_MS) this.#proved.delete(other);
-    this.#proved.set(ferret, { rollout: chosen, provedAtMs: nowMs });
+    this.#proved.remember(ferret, chosen, Date.parse(this.kernel.clock.now()));
     return { root, rollout: chosen };
   }
 
