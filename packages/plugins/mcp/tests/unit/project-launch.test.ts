@@ -222,7 +222,7 @@ async function setup(
   const half = daemon.build?.({
     manifest,
     needs: { ferrets, vault, sealed },
-    uses: { claudeCode: handle(uses.claudeCode), projects: handle(uses.projects) },
+    uses: { claudeCode: handle(uses.claudeCode), projects: handle(uses.projects), runtimes: handle(undefined) },
     hooks: {} as never,
     kernel: {
       config: { collection: () => new Map() },
