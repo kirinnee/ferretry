@@ -1,10 +1,10 @@
 /**
- * Parity rows J-0042, J-0087, J-0157, J-0223, J-0224, J-0226: the reads and timers Logins keeps.
+ * Parity rows J-0042, J-0087, J-0096, J-0157, J-0223, J-0224, J-0226: the reads and timers Logins keeps.
  *
- * J-0096 (v4's watched fleet-manifest read, cached until the file-event hub said it changed) is NOT proved here: Logins
- * keeps no read cache (its files are read fresh through the kernel's configuration on every call), so there is nothing a
- * watch lets go of. What its watch does is announce a file that moved in effect (`logins.changed`), proved in
- * tests/unit/daemon/config-watch.test.ts. The row stays open for britnee's ruling.
+ * J-0096 (v4's watched fleet-manifest read, cached until the file-event hub said it changed) is removed by design
+ * (britnee): no read cache, nothing to clear. The test below is the condition of that ruling: a login file changed on
+ * disk is seen by the very next read, with no restart and no watch callback. What Logins' watch does do is announce a
+ * file that moved in effect (`logins.changed`), proved in tests/unit/daemon/config-watch.test.ts.
  */
 import { describe, expect, test } from 'bun:test';
 import { milliseconds } from '@ferretry/std';
@@ -15,6 +15,7 @@ import {
   HARNESS_LOGIN_SHUTDOWN_GRACE_MS,
   HARNESS_LOGIN_WINDOW_MINUTES,
 } from '../../../daemon/lib/harness-login/service.ts';
+import { LoginChanged, LoginListSchema } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
 import { emptyVault } from '../../support/fake-vault.ts';
 
@@ -30,6 +31,33 @@ describe('the jobs and timers Logins keeps', () => {
     try {
       expect(host.jobIds()).toContain('logins.models-refresh');
       await host.runJob('logins.models-refresh');
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('J-0096 a login file changed on disk is seen by the very next read: no read cache, no restart, no watch callback', async () => {
+    // The files are edited IN PLACE under the host (the way an editor writes the disk), so the host fires no config
+    // listener: whatever the next read shows, it read from the files and was not told to let go of anything.
+    const logins: Record<string, unknown> = { work: { harness: 'claude-code', store: 'host' } };
+    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: { logins } });
+    try {
+      await host.settle();
+      const idsOf = async () =>
+        (LoginListSchema.parse((await host.request('GET', '/v1/logins')).json()).logins as readonly { id: string }[])
+          .map(login => login.id)
+          .sort();
+      const announced = () => host.published.filter(entry => entry.event === LoginChanged.name).length;
+
+      expect(await idsOf()).toEqual(['work']);
+
+      logins.home = { harness: 'codex', store: 'host' };
+      expect(await idsOf()).toEqual(['home', 'work']);
+
+      delete logins.work;
+      expect(await idsOf()).toEqual(['home']);
+
+      expect(announced()).toBe(0);
     } finally {
       await host.stop();
     }
