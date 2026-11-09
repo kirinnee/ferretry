@@ -11,19 +11,17 @@ import {
   APP_ORIGIN,
   type Browser,
   browser,
-  CREDENTIAL,
   catalogsFixture,
-  DAY,
   joinWith,
   makeCatalog,
   memberSession,
   mintShare,
   unlock,
 } from '../../support/daemon-host.ts';
+import { everyUnusableKeyEndsTheSame, joinChallengeIsSpentByTheJoin } from '../../support/member-mode-cases.ts';
 
 const { MEMBER_JOIN_OUTCOME_BYTES, SESSION_CLOSE_CODES } = session;
 const CONCLUDED = 4440;
-const b64 = (value: Uint8Array | string): string => Buffer.from(value).toString('base64url');
 
 async function publisher() {
   const fx = await catalogsFixture();
@@ -76,30 +74,9 @@ describe('joining as a member', () => {
     }
   });
 
+  // The case unit row R609 pins, run here too (one case in tests/support, not a second copy of it).
   it('issues a challenge to a person who has a passkey, that a join spends, so a replay is refused', async () => {
-    const { fx, joined } = await unlockedMember();
-    const second = await browser();
-    const share = await mintShare(fx, {
-      catalogIds: [await makeCatalog(fx, 'Third')],
-      member: { kind: 'existing', memberId: joined.memberId },
-    });
-
-    const options = await fx.open().handshake();
-    await options.joinOptions(second, share.code);
-    const passkey = {
-      credentialId: b64(CREDENTIAL),
-      clientDataJSON: b64('client'),
-      authenticatorData: b64('authenticator'),
-      signature: b64('signature'),
-    };
-    const join = await fx.open().handshake();
-    await join.join(second, share.code, { passkey });
-    const replay = await fx.open().handshake();
-    await replay.join(second, share.code, { passkey });
-
-    expect(options.records[0]?.message.t).toBe('join-challenge');
-    expect(join.records[0]?.message.t).toBe('joined');
-    expect(replay.records[0]?.message.t).toBe('join-refused');
+    await joinChallengeIsSpentByTheJoin();
   });
 });
 
@@ -127,29 +104,9 @@ describe('a live member session', () => {
     expect(other.end?.code).toBe(SESSION_CLOSE_CODES.authRejected);
   });
 
+  // The case unit row R612 pins, run here too (one case in tests/support, not a second copy of it).
   it('ends an unknown key, a removed key, an idle key and a forged proof with the same 4403', async () => {
-    const { fx, catalog } = await publisher();
-    const share = await mintShare(fx, { catalogIds: [catalog], uses: { kind: 'multi', cap: 100 } });
-    const who = await browser();
-    const gone = await browser();
-    const idle = await browser();
-    const joined = await joinWith(fx, who, share.code);
-    const removed = await joinWith(fx, gone, share.code);
-    const idleKey = await joinWith(fx, idle, share.code);
-    await unlock(await memberSession(fx, idle, idleKey.keyId));
-    await fx.host.request('DELETE', `/v1/catalog-members/${removed.memberId}`);
-
-    const unknown = await memberSession(fx, who, `mk_${'Z'.repeat(22)}`);
-    const forged = await fx.open().handshake();
-    await forged.member(who, joined.keyId, await browser());
-    const revoked = await memberSession(fx, gone, removed.keyId);
-    await fx.clock.advance(91 * DAY);
-    const expired = await memberSession(fx, idle, idleKey.keyId);
-
-    for (const end of [unknown, forged, revoked, expired]) {
-      expect(end.end?.code).toBe(SESSION_CLOSE_CODES.authRejected);
-      expect(end.records).toEqual([]);
-    }
+    await everyUnusableKeyEndsTheSame();
   });
 });
 

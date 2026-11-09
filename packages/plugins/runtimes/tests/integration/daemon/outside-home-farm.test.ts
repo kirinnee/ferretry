@@ -11,7 +11,7 @@ import type { RootsPort } from '@ferretry/kernel/contract';
 import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
-import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 

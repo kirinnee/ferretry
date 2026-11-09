@@ -13,7 +13,7 @@ import { followingHandle } from '../../../daemon/adapters/following-handle.ts';
 import { isSignInName } from '../../../daemon/lib/account/credentials.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 

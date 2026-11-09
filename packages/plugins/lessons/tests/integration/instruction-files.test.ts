@@ -54,11 +54,14 @@ describe('the project root', () => {
     expect(await files().projectRoot(nowhere)).toBe(nowhere);
   });
 
-  it('walks all the way up to the top of the disk and gives up there when nothing holds a .git', async () => {
+  it('walks up to the top of the folder a ferret holds and gives up there when nothing in it holds a .git, looking at no folder above it', async () => {
+    // The ferret holds the whole test world, so every folder the walk looks at is one this test made: nothing above
+    // `world.parent` (the real temp folder, whatever checkout it sits in) is ever asked about.
     const deep = await world.folder('walk', 'down');
-    world.ferret('everything', '/');
+    world.ferret('everything', world.parent);
 
     expect(await files().projectRoot(deep)).toBe(deep);
+    expect(await files().projectRoot(world.parent)).toBe(world.parent);
   });
 
   it('refuses with a sentence when the walk meets a link that leads outside the ferret’s folder', async () => {
