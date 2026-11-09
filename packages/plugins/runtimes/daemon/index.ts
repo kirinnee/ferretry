@@ -14,7 +14,7 @@
  *
  * LoginsPort is required and supplies safe sign-in facts: they are also what the model's logins are read from.
  */
-import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
+import type { ConfigCollectionDef, ConfigFileDef, DoctorFinding } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
@@ -85,6 +85,12 @@ export interface RuntimesAssembly {
    * answering `undefined`, until the host assembly reaches the account model: auto-resume then resumes nothing (W2-a).
    */
   readonly autoResume?: () => boolean | undefined;
+  /**
+   * Builds what the services stand on NOW and throws a sentence when it cannot be (the fleet folder cannot be opened).
+   * `fy doctor` calls it: the build itself touches nothing, so a broken fleet root would otherwise show only as routes
+   * that fail. Absent: nothing to probe, which `fy doctor` says.
+   */
+  readonly probe?: () => void;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
@@ -121,8 +127,53 @@ export const hostAssembly: RuntimesAssembler = ctx => {
   // ONE publication gate: every apply (the catalogue's and the setup's share one provisioner) runs exclusively under
   // it, and every read of the published fleet (the ended-runtime seams, the manifest the republish compares) waits (S67).
   const publication = new FleetPublication();
-  return { ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) };
+  // `build` touches nothing (it is also run against an inert kernel to compare it with the manifest): the fleet folder
+  // is opened and its paths spelled on the first use of a service, never while the half is built.
+  let said = false;
+  const assembled = once(() => {
+    try {
+      return { ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) };
+    } catch (error) {
+      // The build no longer fails when the fleet folder cannot be opened, so say so here, once, and in `fy doctor`.
+      if (!said) {
+        said = true;
+        ctx.kernel.log.warn(
+          `Runtimes could not open the fleet folder, so its catalogue, setup and ended-runtime follow-up are unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      throw error;
+    }
+  });
+  return {
+    catalog: deferred(() => assembled().catalog),
+    setup: deferred(() => assembled().setup),
+    ended: deferred(() => assembled().ended),
+    probe: () => {
+      assembled();
+    },
+  };
 };
+
+/** `make` run at most once, on the first call. */
+function once<Value>(make: () => Value): () => Value {
+  let made: { readonly value: Value } | undefined;
+  return () => {
+    made ??= { value: make() };
+    return made.value;
+  };
+}
+
+/** An object that stands for `make()` and builds it on the first property read; methods run on the real object. */
+function deferred<Target extends object>(make: () => Target): Target {
+  return new Proxy({} as Target, {
+    get(_stand, property) {
+      const target = make();
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    has: (_stand, property) => property in make(),
+  });
+}
 
 export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
   return implementDaemon(manifest, {
@@ -251,6 +302,9 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
       const ending = new RuntimeEndSupervision({
         ferrets: ctx.needs.ferrets,
         seams: assembly.ended,
+        warn: message => {
+          ctx.kernel.log.warn(message);
+        },
         launchFailed: failure => events.publish(RuntimesLaunchFailed, failure),
       });
 
@@ -261,6 +315,28 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ...ferretRuntimeRoutes(assembly.runtime),
         },
         provides: { runtimes: api },
+        doctor: {
+          // The half builds without opening the fleet folder, so a broken fleet root shows here, not as a failed boot.
+          'runtimes-config': async (): Promise<DoctorFinding> => {
+            if (assembly.probe === undefined)
+              return {
+                state: 'warn',
+                detail:
+                  'Runtimes is running without its host seams, so every catalogue read and change answers that it is unavailable',
+                fix: 'restart the daemon; if this stays, report it',
+              };
+            try {
+              assembly.probe();
+            } catch (error) {
+              return {
+                state: 'fail',
+                detail: `the fleet folder could not be opened, so Runtimes cannot read or change anything: ${error instanceof Error ? error.message : String(error)}`,
+                fix: 'check that the Ferretry home is a folder this user can write, then restart the daemon',
+              };
+            }
+            return { state: 'ok', detail: 'the fleet folder is open' };
+          },
+        },
         // Logins asks which runtimes use a login before it removes one (`logins.used-by`).
         hooks: {
           'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),

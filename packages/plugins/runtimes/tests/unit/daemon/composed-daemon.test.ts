@@ -10,6 +10,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { DaemonImplementation } from '@ferretry/kernel/manifest';
@@ -456,6 +457,99 @@ describe('a real apply through the composed daemon', () => {
     const body = applied.json<{ outcome?: string; apply?: { outcome?: string } }>();
     expect(applied.status >= 400 || (body.outcome === 'applied' && body.apply?.outcome !== 'committed')).toBe(true);
     expect(await readdir(world.fleet)).not.toContain('manifest.json');
+  });
+});
+
+/** A kernel whose fleet root cannot be opened: everything else is the fleet world's. */
+const brokenFleet =
+  (roots: FleetWorld['roots']): RuntimesAssembler =>
+  ctx =>
+    hostAssembly({
+      ...ctx,
+      kernel: {
+        ...ctx.kernel,
+        roots: {
+          ...roots,
+          root: (name: string, ...rest: unknown[]) => {
+            if (name === 'fleet') throw new Error('the fleet root is not there');
+            return (roots.root as (...args: unknown[]) => unknown)(name, ...rest);
+          },
+        },
+      },
+    } as never);
+
+describe('the default composition stands in for the services and keeps a broken fleet root visible', () => {
+  const codexEnded = (ferrets: FakeFerrets): void => {
+    ferrets.add({ id: 'f1' as never, harness: 'codex', runtime: 'codex-default', state: 'stopped' });
+  };
+
+  it('a route reaches the real file assembly through the stand-in, and the doctor row says the fleet folder is open', async () => {
+    const { host } = await compose();
+
+    const machine = await host.request('GET', '/v1/runtimes/machine');
+    const finding = await host.doctor('runtimes', 'runtimes-config');
+
+    expect(machine.status).toBe(200);
+    expect(finding).toMatchObject({ state: 'ok' });
+  });
+
+  it('a ferret that stopped reaches wrapperOf through the stand-in and the follow-up runs without a warning', async () => {
+    const ferrets = new FakeFerrets();
+    codexEnded(ferrets);
+    const world = await fleetWorld();
+    const host = await testHost({
+      plugins: [
+        runtimesDaemon(ctx =>
+          hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
+        ) as DaemonImplementation<any>,
+      ],
+      fakes: {
+        ferrets,
+        logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
+        loginChanges: fakeLoginChanges(),
+      },
+      gate: new StandInAdmission(() => ownerStanding()),
+      config: CONFIG,
+      ownerHome: world.person,
+    });
+
+    host.emit(FerretsChanged, { ferret: 'f1', generation: 1, state: 'stopped' });
+    await host.settle();
+
+    expect(host.logs.filter(line => line.message.includes('follow-up could not run'))).toEqual([]);
+  });
+
+  it('a broken fleet root no longer fails the build, and is seen: the routes answer, the doctor row fails, the log says so once and the ended follow-up says why it did not run', async () => {
+    const ferrets = new FakeFerrets();
+    codexEnded(ferrets);
+    const world = await fleetWorld();
+    const host = await testHost({
+      plugins: [runtimesDaemon(brokenFleet(world.roots)) as DaemonImplementation<any>],
+      fakes: {
+        ferrets,
+        logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
+        loginChanges: fakeLoginChanges(),
+      },
+      gate: new StandInAdmission(() => ownerStanding()),
+      config: CONFIG,
+      ownerHome: world.person,
+    });
+
+    const finding = await host.doctor('runtimes', 'runtimes-config');
+    host.emit(FerretsChanged, { ferret: 'f1', generation: 1, state: 'stopped' });
+    await host.settle();
+
+    expect(finding).toMatchObject({ state: 'fail' });
+    expect(finding?.detail).toContain('the fleet root is not there');
+    const lines = host.logs.map(line => line.message);
+    expect(lines.filter(line => line.includes('could not open the fleet folder'))).toHaveLength(1);
+    expect(lines.some(line => line.includes('follow-up could not run'))).toBe(true);
+  });
+
+  it('the unavailable assembly is reported by the doctor row as a warning, not as a healthy half', async () => {
+    const { host } = await compose({ assemble: unavailableAssembly });
+
+    expect(await host.doctor('runtimes', 'runtimes-config')).toMatchObject({ state: 'warn' });
   });
 });
 

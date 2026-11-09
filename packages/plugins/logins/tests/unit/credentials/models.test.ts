@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { findRawSecrets } from '../../../daemon/lib/shared/secret-shape.ts';
+import { findRawSecrets } from '../../../contract/secret-shape.ts';
 import { readConfigText } from '../../../daemon/lib/shared/yaml-text.ts';
 import {
   BUILT_IN_MODEL_CATALOG_TEXTS,
