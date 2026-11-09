@@ -4,19 +4,24 @@ import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
 import type { FerretId } from '../../../contract/ids.ts';
-import type { RootHandle } from '../../../contract/ports.ts';
+import type { RootHandle, RootName } from '../../../contract/ports.ts';
 import { type FileIdentity, type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { DEFAULT_RECHECK_MS } from '../../../host/fence-index.ts';
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
 import { composePrivateFiles } from '../../../manifest/privacy.ts';
 
 /**
- * A rotated `fys_` credential in a RESTING session folder (§7.7, GAP 7 closed): every ferret relaunch writes a new
- * `environment.json` into its session folder, and a session folder unchanged for a minute is only looked at when its
- * slice comes round. The fence pins each `*` member FOLDER by identity beside its file, so an alias of the folder —
- * a bind mount made at any time — is recognised at once, whatever the folder holds and however stale the slice is.
- * A bind mount cannot be made without privilege in a unit test, so it is simulated at the disk seam: every path below
- * the alias answers as the same path below the source, and the alias itself has the source's device and inode.
+ * A live credential in a RESTING session folder (§7.7): every ferret relaunch writes a new `environment.json` into its
+ * session folder, and a session folder unchanged for a minute is only looked at when its slice comes round. The fence
+ * pins EVERY `*` member FOLDER by identity — one that holds the file, one that rests empty, one whose session ended —
+ * so an alias of the folder (a bind mount made at any time) is recognised at once, whatever the folder holds and
+ * however stale the slice is. The test runs through all SIX root kinds and four ways the folder came to rest:
+ * `holder` (the file is rotated), `rebuild` (a new session is made between the build and the rotation, so the folder is
+ * answered from its record), `empty` (it rested with no file and one is published), and `ended` (its file was removed
+ * and a resume publishes a new one). A bind mount cannot be made without privilege in a unit test, so it is simulated
+ * at the disk seam: every path below the alias answers as the same path below the source, and the alias itself has
+ * the source's device and inode. What the pin cannot name — a folder REPLACED by another while it rests — is the
+ * declared GAP (8) of §7.7, not tested here.
  */
 
 const parents: string[] = [];
@@ -48,12 +53,15 @@ async function layout() {
   parents.push(parent);
   const home = `${parent}/home`;
   const work = `${parent}/work`;
+  const harnessHome = `${parent}/harness`;
+  const project = `${parent}/project`;
   const sessions = `${home}/state/ferrets/sessions`;
   const agentHome = `${home}/state/codex/agent-homes/F1`;
-  await mkdir(agentHome, { recursive: true });
-  await writeFile(`${agentHome}/own.txt`, 'mine');
-  await mkdir(work, { recursive: true });
-  await writeFile(`${work}/own.txt`, 'mine');
+  const fleetHome = `${home}/fleet/F1`;
+  for (const folder of [agentHome, fleetHome, work, harnessHome, project]) {
+    await mkdir(folder, { recursive: true });
+    await writeFile(`${folder}/own.txt`, 'mine');
+  }
   for (let from = 0; from < SESSIONS; from += 100)
     await Promise.all(
       Array.from({ length: Math.min(100, SESSIONS - from) }, async (_, offset) => {
@@ -62,7 +70,7 @@ async function layout() {
         await writeFile(`${folder}/${ENV}`, 'FAKE-old-credential');
       }),
     );
-  return { parent, home, work, sessions, agentHome, target: `${sessions}/${TARGET}` };
+  return { parent, home, work, harnessHome, project, sessions, agentHome, fleetHome, target: `${sessions}/${TARGET}` };
 }
 
 type Layout = Awaited<ReturnType<typeof layout>>;
@@ -111,37 +119,58 @@ const workFolders = (folder: string): WorkFolders => ({
   check: (_ferret, path) => (path.startsWith(folder) ? ok(path as FencedPath) : err('outside')),
 });
 
+/** A root of kind `name` of the plugin `plugin`, scoped as that kind is. */
+const rootOf = (
+  l: Layout,
+  fs: HostFs,
+  plugin: string,
+  name: RootName,
+  scope: { readonly ferret?: FerretId; readonly subfolder?: string },
+): RootHandle =>
+  rootsPortFor(fs, { home: l.home, plugin, worktrees: `${l.home}-worktrees` }, [name], () => workFolders(l.work), {
+    random: () => 'r',
+    privateFiles: LIST,
+    privateRecheckMs: DEFAULT_RECHECK_MS,
+    projectFiles: ['own.txt', 'alias/environment.json'],
+  }).root(name, scope);
+
+/** One of the six kinds of root: the folder it reaches (where the alias is made) and how it is built. */
 interface Door {
-  readonly label: string;
+  readonly label: RootName;
   readonly folder: (l: Layout) => string;
   readonly make: (l: Layout, fs: HostFs) => RootHandle;
 }
 
-const rootOf = (
-  l: Layout,
-  fs: HostFs,
-  name: 'work' | 'imports' | 'agent-homes',
-  scope: { readonly ferret?: FerretId; readonly subfolder?: string },
-): RootHandle =>
-  rootsPortFor(
-    fs,
-    { home: l.home, plugin: 'codex', worktrees: `${l.home}-worktrees` },
-    [name],
-    () => workFolders(l.work),
-    {
-      random: () => 'r',
-      privateFiles: LIST,
-      privateRecheckMs: DEFAULT_RECHECK_MS,
-    },
-  ).root(name, scope);
-
 const DOORS: readonly Door[] = [
-  { label: 'work', folder: l => l.work, make: (l, fs) => rootOf(l, fs, 'work', { ferret: 'F1' as FerretId }) },
-  { label: 'imports', folder: l => l.work, make: (l, fs) => rootOf(l, fs, 'imports', { subfolder: l.work }) },
+  {
+    label: 'work',
+    folder: l => l.work,
+    make: (l, fs) => rootOf(l, fs, 'codex', 'work', { ferret: 'F1' as FerretId }),
+  },
+  {
+    label: 'imports',
+    folder: l => l.work,
+    make: (l, fs) => rootOf(l, fs, 'codex', 'imports', { subfolder: l.work }),
+  },
   {
     label: 'agent-homes',
     folder: l => l.agentHome,
-    make: (l, fs) => rootOf(l, fs, 'agent-homes', { subfolder: 'F1' }),
+    make: (l, fs) => rootOf(l, fs, 'codex', 'agent-homes', { subfolder: 'F1' }),
+  },
+  {
+    label: 'project-files',
+    folder: l => l.project,
+    make: (l, fs) => rootOf(l, fs, 'mcp', 'project-files', { subfolder: l.project }),
+  },
+  {
+    label: 'harness-home',
+    folder: l => l.harnessHome,
+    make: (l, fs) => rootOf(l, fs, 'runtimes', 'harness-home', { subfolder: l.harnessHome }),
+  },
+  {
+    label: 'fleet',
+    folder: l => l.fleetHome,
+    make: (l, fs) => rootOf(l, fs, 'runtimes', 'fleet', { subfolder: 'F1' }),
   },
 ];
 
@@ -174,39 +203,59 @@ const wait = async (ms: number): Promise<void> => {
   await new Promise(done => setTimeout(done, ms));
 };
 
-describe('PF-flat a rotated credential in a RESTING session folder is never served through an alias of that folder', () => {
+/**
+ * What `rebuild` does between the second look and the credential that is published: a new session is made, so the next
+ * look rebuilds the index and answers the resting folder from its record (the fast path every resting member takes).
+ * The other ways are set up around the build: `holder` rotates the file that is there; `empty` rests with no file at
+ * all; `ended` has its file removed right after the build, so the second look (the first slice, folder 400 in it) finds
+ * a folder with no file.
+ */
+async function rebuilt(l: Layout, root: RootHandle): Promise<void> {
+  await mkdir(`${l.sessions}/s9000`, { recursive: true });
+  await writeFile(`${l.sessions}/s9000/${ENV}`, 'FAKE-new-session');
+  await wait(LOOK_MS);
+  expect(await readOf(root, 'own.txt')).toBe('served:mine');
+}
+
+describe('PF-flat a credential published into a RESTING session folder is never served through an alias of that folder', () => {
   for (const door of DOORS)
-    test(`PF-flat a bind mount of a resting session folder, read through the ${door.label} root, serves the rotated credential 0 times`, async () => {
-      const l = await layout();
-      const rested = restedFolders(l);
-      const alias = `${door.folder(l)}/alias`;
-      await mkdir(alias, { recursive: true });
-      const root = door.make(l, bind(resting(REAL, l.sessions, rested), alias, l.target));
-      // The first look builds the index; every session folder rests.
-      expect(await readOf(root, 'own.txt')).toBe('served:mine');
-      // The second look visits the first slice (folders 0–511). The alias holds the pinned old file: refused.
-      await wait(LOOK_MS);
-      expect(await readOf(root, 'own.txt')).toBe('served:mine');
-      expect(await readOf(root, `alias/${ENV}`)).toBe('refused:fenced');
-      // A relaunch rotates the credential of the resting session.
-      await rotate(l.target);
-      rested.delete(l.target);
-      const answers = [await readOf(root, `alias/${ENV}`)];
-      // The next look visits 512–699 and 0–323: not folder 400. Then the one after reaches it.
-      for (let look = 0; look < 2; look += 1) {
+    for (const way of ['holder', 'rebuild', 'empty', 'ended'] as const)
+      test(`PF-flat a bind mount of a resting session folder (${way}), read through the ${door.label} root, serves the credential 0 times`, async () => {
+        const l = await layout();
+        const rested = restedFolders(l);
+        const alias = `${door.folder(l)}/alias`;
+        await mkdir(alias, { recursive: true });
+        // A folder that rests with no file at all: the session never had an environment, or it ended before this boot.
+        if (way === 'empty') await rm(`${l.target}/${ENV}`);
+        const root = door.make(l, bind(resting(REAL, l.sessions, rested), alias, l.target));
+        // The first look builds the index; every session folder rests.
+        expect(await readOf(root, 'own.txt')).toBe('served:mine');
+        // The session ended: its file is gone (the index has not seen that yet).
+        if (way === 'ended') await rm(`${l.target}/${ENV}`);
+        // The second look visits the first slice (folders 0–511).
         await wait(LOOK_MS);
-        answers.push(await readOf(root, `alias/${ENV}`));
-      }
-      expect(answers.filter(answer => answer.startsWith('served:'))).toEqual([]);
-      expect(answers).toEqual(['refused:fenced', 'refused:fenced', 'refused:fenced']);
-      // The control: nothing else on the disk is refused by it.
-      expect(await readOf(root, 'own.txt')).toBe('served:mine');
-    }, 60_000);
+        expect(await readOf(root, 'own.txt')).toBe('served:mine');
+        if (way === 'holder') expect(await readOf(root, `alias/${ENV}`)).toBe('refused:fenced');
+        if (way === 'rebuild') await rebuilt(l, root);
+        // A relaunch (or a resume) publishes a new credential into the resting session.
+        await rotate(l.target);
+        rested.delete(l.target);
+        const answers = [await readOf(root, `alias/${ENV}`)];
+        // The next look visits 512–699 and 0–323: not folder 400. Then the one after reaches it.
+        for (let look = 0; look < 2; look += 1) {
+          await wait(LOOK_MS);
+          answers.push(await readOf(root, `alias/${ENV}`));
+        }
+        expect(answers.filter(answer => answer.startsWith('served:'))).toEqual([]);
+        expect(answers).toEqual(['refused:fenced', 'refused:fenced', 'refused:fenced']);
+        // The control: nothing else on the disk is refused by it.
+        expect(await readOf(root, 'own.txt')).toBe('served:mine');
+      }, 60_000);
 
   test('PF-flat a hard link of the rotated credential made into a work folder is refused too, whatever the slice says', async () => {
     const l = await layout();
     const rested = restedFolders(l);
-    const root = rootOf(l, resting(REAL, l.sessions, rested), 'work', { ferret: 'F1' as FerretId });
+    const root = rootOf(l, resting(REAL, l.sessions, rested), 'codex', 'work', { ferret: 'F1' as FerretId });
     expect(await readOf(root, 'own.txt')).toBe('served:mine');
     await wait(LOOK_MS);
     await rotate(l.target);
@@ -221,7 +270,7 @@ describe('PF-flat a rotated credential in a RESTING session folder is never serv
   test('PF-flat a session folder that is NOT aliased is unaffected: the folder pin costs no ordinary read', async () => {
     const l = await layout();
     const rested = restedFolders(l);
-    const root = rootOf(l, resting(REAL, l.sessions, rested), 'work', { ferret: 'F1' as FerretId });
+    const root = rootOf(l, resting(REAL, l.sessions, rested), 'codex', 'work', { ferret: 'F1' as FerretId });
     expect(await readOf(root, 'own.txt')).toBe('served:mine');
     await rotate(l.target);
     rested.delete(l.target);

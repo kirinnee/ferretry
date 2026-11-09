@@ -7,7 +7,7 @@ import type { FerretId } from '../../../contract/ids.ts';
 import type { RootHandle } from '../../../contract/ports.ts';
 import { type FileIdentity, type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { fencedReal, fenceOf } from '../../../host/fence-guard.ts';
-import { type PlaceBudget, privateIndexOf } from '../../../host/fence-index.ts';
+import { identityKey, type PlaceBudget, privateIndexOf } from '../../../host/fence-index.ts';
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
 import { composePrivateFiles } from '../../../manifest/privacy.ts';
 
@@ -626,4 +626,127 @@ describe('PF-flat a session folder that changed within the minute is looked at b
     await replace('second rotation');
     expect(keyOf((await index.snapshot()).places, `s300/${ENV}`)).not.toBe(key);
   }, 60_000);
+});
+
+/**
+ * The folder pin (§7.7): every member folder of `sessions/*` is pinned by its own identity, whether it holds the file or
+ * not, on every path of a look (the first build, a rebuild that answers it from its record, a renewal, a replacement,
+ * a departure), and a pin spends no budget. These read the snapshot itself; the alias tests read through the roots.
+ */
+describe('PF-flat every session folder is pinned by its own identity, holder or not, however the look went', () => {
+  /** The key the disk gives the folder now. */
+  const keyNow = async (path: string): Promise<string> => identityKey((await REAL.identity(path)) as FileIdentity);
+  /** The key of the place that pins exactly `path` (the folder, not a file in it), or `undefined`. */
+  const pinOf = (places: readonly { readonly path: string; readonly key: string }[], path: string) =>
+    places.find(place => place.path === path)?.key;
+  const slice5 = { depth: 3, limit: 4096, slice: 5 } as const;
+
+  async function mixed() {
+    const l = await home();
+    await fill(l.sessions, 40, n => `s${String(n).padStart(2, '0')}/${ENV}`);
+    await mkdir(`${l.sessions}/empty1`, { recursive: true });
+    await mkdir(`${l.sessions}/ended1`, { recursive: true });
+    await writeFile(`${l.sessions}/ended1/notes.md`, 'x');
+    return { ...l, real: await realpath(l.home) };
+  }
+
+  test('PF-flat the first build pins a folder that holds the file, one that holds nothing and one that holds only other files', async () => {
+    const l = await mixed();
+    const places = (await privateIndexOf(REAL, l.real, INPUT, { wall: LATER, bounds: slice5 }).snapshot()).places;
+    for (const name of ['s07', 'empty1', 'ended1'])
+      expect(pinOf(places, `${l.sessions}/${name}`)).toBe(await keyNow(`${l.sessions}/${name}`));
+  });
+
+  test('PF-flat a rebuild that answers resting folders from their records still pins every one of them', async () => {
+    const l = await mixed();
+    const index = privateIndexOf(REAL, l.real, INPUT, { wall: LATER, bounds: slice5 });
+    const first = await index.snapshot();
+    // A new session changes `sessions`: the next look is a full build, and the resting folders are answered from their records.
+    await fill(l.sessions, 1, () => `s9999/${ENV}`);
+    const rebuilt = await index.snapshot();
+    expect(rebuilt).not.toBe(first);
+    for (const name of ['s07', 's33', 'empty1', 'ended1', 's9999'])
+      expect(pinOf(rebuilt.places, `${l.sessions}/${name}`)).toBe(await keyNow(`${l.sessions}/${name}`));
+  });
+
+  test('PF-flat a pin of a folder that holds nothing spends no budget: 10 empty folders and 2 holders fit a budget of 3', async () => {
+    const l = await home();
+    await fill(l.sessions, 10, n => `empty${n}/notes.md`);
+    await fill(l.sessions, 2, n => `s${n}/${ENV}`);
+    const snapshot = await privateIndexOf(REAL, await realpath(l.home), INPUT, {
+      wall: LATER,
+      bounds: { depth: 3, limit: 4096, patternLimit: 3 },
+    }).snapshot();
+    expect(snapshot.truncated).toEqual([]);
+    expect(snapshot.budgets).toEqual([]);
+    for (const name of ['empty0', 'empty9', 's0', 's1'])
+      expect(pinOf(snapshot.places, `${l.sessions}/${name}`)).toBe(await keyNow(`${l.sessions}/${name}`));
+  });
+
+  test('PF-flat a folder that is no longer the folder it was (another inode, its parent unchanged) is pinned afresh at the very next look', async () => {
+    const l = await mixed();
+    const swapped = new Map<string, bigint>();
+    const disk: HostFs = {
+      ...REAL,
+      identity: async path => {
+        const found = await REAL.identity(path);
+        const inode = swapped.get(path);
+        return found !== undefined && inode !== undefined ? { ...found, inode } : found;
+      },
+    };
+    // Every folder is within each look's slice, so a folder that changed is seen at the next look.
+    const index = privateIndexOf(disk, l.real, INPUT, { wall: LATER, bounds: { depth: 3, limit: 4096, slice: 1000 } });
+    const first = await index.snapshot();
+    for (const name of ['s07', 'empty1']) {
+      const path = `${l.sessions}/${name}`;
+      const was = pinOf(first.places, path);
+      swapped.set(path, 4_000_000_000_000n);
+      // The alias of the folder (a bind mount over it) leaves its parent alone and its file as it was.
+      const now = await index.snapshot();
+      expect(now).not.toBe(first);
+      expect(pinOf(now.places, path)).toBe(
+        identityKey({ device: (await REAL.identity(path))?.device ?? 0n, inode: 4_000_000_000_000n }),
+      );
+      expect(pinOf(now.places, path)).not.toBe(was);
+      swapped.delete(path);
+      await index.snapshot();
+    }
+  });
+
+  test('PF-flat a session folder replaced by another (renamed aside, made again) is pinned by the NEW identity when its slice comes round, the old one dropped', async () => {
+    const l = await mixed();
+    const index = privateIndexOf(REAL, l.real, INPUT, { wall: LATER, bounds: slice5 });
+    const first = await index.snapshot();
+    const path = `${l.sessions}/s20`;
+    const old = pinOf(first.places, path);
+    await rename(path, `${l.parent}/aside`);
+    await fill(l.sessions, 1, () => `s20/${ENV}`);
+    const fresh = await keyNow(path);
+    expect(fresh).not.toBe(old);
+    let looks = 0;
+    let now = pinOf((await index.snapshot()).places, path);
+    // The declared GAP (8): a resting folder is replaced for as long as its slice takes to come round, and no longer.
+    while (now !== fresh && looks < 40) {
+      looks += 1;
+      now = pinOf((await index.snapshot()).places, path);
+    }
+    expect(now).toBe(fresh);
+    const places = (await index.snapshot()).places;
+    expect(places.some(place => place.key === old)).toBe(false);
+  });
+
+  test('PF-flat a session folder that left is no longer pinned: the pin goes with the folder, holder or not', async () => {
+    const l = await mixed();
+    const index = privateIndexOf(REAL, l.real, INPUT, { wall: LATER, bounds: slice5 });
+    const first = await index.snapshot();
+    const gone = ['s11', 'empty1', 'ended1'];
+    const keys = gone.map(name => pinOf(first.places, `${l.sessions}/${name}`) as string);
+    for (const name of gone) await rm(`${l.sessions}/${name}`, { recursive: true, force: true });
+    const after = await index.snapshot();
+    expect(after).not.toBe(first);
+    for (const key of keys) expect(after.places.some(place => place.key === key)).toBe(false);
+    for (const name of gone) expect(pinOf(after.places, `${l.sessions}/${name}`)).toBeUndefined();
+    // Two places a holder (its file and its folder), one an empty folder: nothing else changed.
+    expect(first.places.length - after.places.length).toBe(2 + 1 + 1);
+  });
 });

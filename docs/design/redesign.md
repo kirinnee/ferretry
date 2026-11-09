@@ -2695,14 +2695,16 @@ scoped handle:
   1.58x of 5.0's on a loaded host, and the independent reviewer measured 1.23x, 1.34x and 1.71x — the guard's walk of
   each path, not the sessions — with about 35 filesystem calls a read at every size. **A hostile writer that adds a
   session folder every 5 ms is not flat:** at 20,000 sessions the mean read is about 4.5x of 5.0's (4.49x measured by
-  the reviewer, 4.9x re-measured on a loaded host) and one look in each 250 ms takes 115–165 ms, because a changed
+  the reviewer on a quiet host, 4.9x re-measured and 7.5x by the next reviewer on a loaded one: more under load) and one look in each 250 ms takes 115–165 ms, because a changed
   `sessions` folder is walked whole in memory (about 2 µs a member); p95 stays at a few ms. The actor is a same-user
   shell, which can already stop the daemon, and nothing ordinary does it. The very first fenced read after boot builds
   the index and waits for it: 0.2 s at 2,000, 0.5 s at 5,000, 2 s at 20,000). A resting folder's replaced FILE is
   recognised when its slice comes round, but a rotated credential reached through an alias of its session FOLDER is
-  fenced at once: every holder's member folder is pinned by identity beside its file (one more place per holder, and no
-  budget spent). What stays stale until the slice is only a privileged bind mount of the single file made AFTER the
-  rotation, which is the class of (6). The host looks at most every
+  fenced at once: EVERY member folder of the collection is pinned by its own identity, whether it holds the file now
+  or not (a session that ended, its file removed, and was resumed is such a folder), one more place per member folder
+  and no budget spent (a member folder with no file costs nothing against the budget, and its pin leaves with it).
+  What stays stale until the slice is what that pin cannot name: a member folder REPLACED by another while it rests
+  (GAP (8)), and a privileged bind mount of the single file made AFTER the rotation (the class of (6)). The host looks at most every
   250 ms (a private file created or replaced is pinned within that, which is also the longest it can be reached under
   a second name; an interval that is not a finite number from 0 to 5 s — `Infinity`, `NaN`, a negative — is the 250 ms
   default, never "never"). A change is told by the folder's modification AND status-change times **to the
@@ -2755,11 +2757,15 @@ scoped handle:
   credential until it is removed (a hard link needs the same user, who can read the file directly anyway; a bind
   mount needs privilege); the same-millisecond and 4096-place misses of earlier rounds are closed, this one is not;
   (7) a filesystem whose clock steps by more than two seconds can still miss a member that lands after the look in the
-  same step (the window is 20 ms, two seconds where the times carry no fraction of a second). A bind mount of a RESTING
-  session folder is not a gap: each member folder is pinned by identity, so the rotated credential that every relaunch
-  writes is fenced through such an alias at once (a RESTING folder is looked at only when its slice comes round — at 512
-  folders a look and 250 ms a look, 5,000 sessions are all looked at in 2.5 s and 20,000 in 10 s, 65,000 in 32 s, and
-  under steady churn up to about twice that — but the folder's own pin does not wait for it).
+  same step (the window is 20 ms, two seconds where the times carry no fraction of a second); (8) a RESTING member
+  folder that is REPLACED by another (renamed aside and made again under its name, or any new inode) is pinned, and its
+  file indexed, only when its slice comes round — at 512 folders a look and 250 ms a look, 5,000 sessions are all looked
+  at in 2.5 s and 20,000 in 10 s, 65,000 in 32 s, and under steady churn up to about twice that — so an alias of the NEW
+  folder made after the replace (a privileged bind mount, or a path-following alias) reads what it holds for that long;
+  an alias made BEFORE the replace follows the old inode, which is the class of (6). What is closed: an alias of any
+  member folder the index holds (one that holds the file, one that rests empty, one whose session ended and was
+  resumed), made at any time before or after the rotation or the resume, is fenced at once, because the folder's own pin
+  does not wait for its slice.
   Residuals the secret-name rule cannot see, none named like a secret and none changed here: MCP's `inventory.json`
   keeps a server's address with its path (a key embedded in a path segment would be stored), Shells' `cache/*` keeps a
   devShell's exported variables verbatim, Warden's `state.json` is a loose object, and the kernel's `accepted-config/*`
