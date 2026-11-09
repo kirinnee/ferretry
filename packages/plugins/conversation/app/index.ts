@@ -6,7 +6,7 @@ import type {
   ScreenProps,
   SettingsProps,
 } from '@ferretry/kernel/manifest';
-import { provideToShell } from '@ferretry/app';
+import { provideToShell, type ShellProvides } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { CONVERSATION_ADD_TO_CHAT_HOOK } from '../contract/app-hooks.ts';
@@ -28,6 +28,19 @@ type Surfaces = {
  * free of React so anything that only inspects the half (the registry generator, `manifest-match`) can load it.
  */
 const loadSurfaces = (): Promise<Record<string, unknown>> => import(`./${'surfaces'}.tsx`);
+
+/** A `device.settings` panel (no daemon, no client), loaded on first use with the rest of the surfaces. */
+const deviceSetting = (id: 'chat-width' | 'message-marks') =>
+  lazyComponent<Record<string, never>>(async () => {
+    const panels = (await loadSurfaces()).deviceSettingsPanels as Record<string, AppComponent<Record<string, never>>>;
+    return panels[id] as AppComponent<Record<string, never>>;
+  }) as NonNullable<ShellProvides['deviceSettings']>[string];
+
+/**
+ * The half's typed `panels` still name every panel the manifest declares, a `device.settings` one included; those two
+ * are drawn from `shell.deviceSettings` (no daemon), never from a machine's half, so their per-daemon entry draws nothing.
+ */
+const notDrawnPerDaemon: AppComponent<PanelProps> = () => null;
 
 /**
  * Conversation's app half: the chat and the links list as screens, the attachment entry, the queue and the compaction
@@ -54,7 +67,6 @@ export default provideToShell(
           | 'queue'
           | 'compact-at'
           | 'hypermedia'
-          | 'chat-width'
           | 'files-search'
           | 'interrupt-row'
           | 'agenda-conversation',
@@ -66,7 +78,8 @@ export default provideToShell(
           queue: panel('queue'),
           'compact-at': panel('compact-at'),
           hypermedia: panel('hypermedia'),
-          'chat-width': panel('chat-width'),
+          'chat-width': notDrawnPerDaemon,
+          'message-marks': notDrawnPerDaemon,
           'files-search': panel('files-search'),
           'interrupt-row': panel('interrupt-row'),
           'agenda-conversation': panel('agenda-conversation'),
@@ -95,6 +108,11 @@ export default provideToShell(
       documentRestoreStore.clearDaemon(daemon);
       // ...and neither may it read the cached attachment images (object URLs) of that machine.
       clearAttachmentCaches(daemon);
+    },
+    // Settings › Appearance (S4): this device's conversation width and the key to a message's marks. No machine, no client.
+    deviceSettings: {
+      'chat-width': deviceSetting('chat-width'),
+      'message-marks': deviceSetting('message-marks'),
     },
   },
 );

@@ -1,3 +1,5 @@
+import { BackgroundViews } from './background.tsx';
+import { DevicePanels, NavCount, type NavForm } from './device-panels.tsx';
 import { DeviceViews } from './device-views.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
@@ -21,7 +23,7 @@ import {
 } from './pages.tsx';
 import { PageScrollRegion } from '../scroll/page-scroll-region.tsx';
 import { PasskeyMount } from './passkey-mount.tsx';
-import { ScreenView, ShellLine } from './views.tsx';
+import { PanelSlot, ScreenView, ShellLine } from './views.tsx';
 
 /**
  * THE FRAME (§5.2): the shell's slots, placed by the layout. `nav` (or `bottom` when the layout puts nav there on a
@@ -55,6 +57,10 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
     return daemon === undefined ? undefined : routes.href(screen, {}, daemon);
   };
   const side = plan.nav.side;
+  // A nav panel is drawn in a left or right nav of EVERY style (the default built-in is a list, compact is a rail), told which form it is
+  // in; never on the top or bottom bar.
+  const panelForm: NavForm | undefined =
+    side === 'left' || side === 'right' ? (plan.nav.style === 'rail' ? 'rail' : 'column') : undefined;
   return (
     <nav
       className={`fy-nav fy-nav--${side} fy-nav--${plan.nav.style}`}
@@ -64,16 +70,26 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
         const to = navHref(entry, daemon, href);
         const label = entry.kind === 'screen' ? entry.screen.label : entry.item === 'settings' ? 'Settings' : 'Daemons';
         const key = entry.kind === 'screen' ? `${entry.screen.plugin}.${entry.screen.id}` : entry.item;
+        // A plugin's count for its own entry, summed over every machine (S4), on every nav form.
+        const badge =
+          entry.kind === 'screen' ? (
+            <NavCount key="count" plugin={entry.screen.plugin} screen={entry.screen.id} label={label} />
+          ) : null;
         return to === undefined ? (
           <span key={key} className="fy-nav__item fy-nav__item--off">
             {label}
+            {badge}
           </span>
         ) : (
           <Link key={key} to={to} className="fy-nav__item">
             {label}
+            {badge}
           </Link>
         );
       })}
+      {/* Device-level nav panels (S4, MJ3): drawn once, with no daemon, in the column and in the rail (each told its
+      form), never on the phone bar. */}
+      {panelForm === undefined ? null : <DevicePanels slot="nav" form={panelForm} />}
     </nav>
   );
 }
@@ -164,6 +180,8 @@ function Side({ daemon }: { readonly daemon: string | undefined }) {
   return (
     <aside className="fy-side" data-slot="side">
       {holds.kind === 'screen' ? <ScreenView daemon={daemon} screen={holds.screen} params={{}} /> : null}
+      {/* The side column that holds panels (S4): the `side` slot's panels, for the route's daemon. */}
+      {holds.kind === 'panels' ? <PanelSlot daemon={daemon} slot="side" /> : null}
     </aside>
   );
 }
@@ -295,6 +313,8 @@ export function Frame() {
       <PasskeyMount onScreen={daemon ?? runtime.daemons.snapshot().selected} />
       {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
       <DeviceViews />
+      {/* Every plugin's background views, once per paired daemon where it may run (S5): watchers and overlays. */}
+      <BackgroundViews />
     </div>
   );
 }
