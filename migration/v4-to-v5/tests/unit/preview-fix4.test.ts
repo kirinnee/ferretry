@@ -264,10 +264,14 @@ describe('Minor-3 a SQLite file is never opened in v4', () => {
     db.run('BEGIN');
     for (let i = 0; i < 500; i++) db.run('INSERT INTO t VALUES (?, ?)', [i, 'z'.repeat(100)]);
     db.run('COMMIT');
+    db.run('DELETE FROM t WHERE n >= 100');
     db.close();
-    // Tear it: a data page overwritten with garbage (what a copy taken mid-write can look like).
+    // Tear it: the free-list trunk page (named in the header, bytes 32-35) overwritten with garbage, as a copy taken
+    // mid-write can look. Only an integrity_check sees this one; VACUUM never reads the free list.
     const bytes = new Uint8Array(await readFile(original));
-    bytes.fill(0xab, 4096, 8192);
+    const trunk = new DataView(bytes.buffer).getUint32(32);
+    expect(trunk).toBeGreaterThan(0);
+    bytes.fill(0xab, (trunk - 1) * 4096, trunk * 4096);
     await writeFile(original, bytes);
     const before = await sha(original);
 
