@@ -57,8 +57,11 @@ export interface ProfileLayerDeps {
   serialise<T>(act: () => Promise<T>): Promise<T>;
 }
 
-/** Why a stack of bases cannot be expanded, in a sentence naming the profile. */
-function stackRefusal(failure: StackFailure<never>, start: string): string {
+/**
+ * Why a stack of bases cannot be expanded, in a sentence naming the profile. A profile's layers are read as plain text
+ * and none of them can fail to parse, so the expansion has no 'layer' failure here.
+ */
+function stackRefusal(failure: Exclude<StackFailure<never>, { readonly kind: 'layer' }>, start: string): string {
   switch (failure.kind) {
     case 'unknown-profile':
       return failure.chain.length === 1
@@ -70,8 +73,6 @@ function stackRefusal(failure: StackFailure<never>, start: string): string {
       return `profile ${start} sits under more than ${failure.limit} bases in a chain, which is too deep to read`;
     case 'too-large':
       return `profile ${failure.profile} expands to more than ${failure.limit} layers, which is too many to read`;
-    case 'layer':
-      return failure.failure;
   }
 }
 
@@ -97,7 +98,10 @@ function resolveProfileStack(
         : { kind: 'leaf', key: text, item: text },
     start,
   );
-  if (!stack.ok) return { ok: false, sentence: stackRefusal(stack.failure, start) };
+  if (!stack.ok) {
+    // The leaf reader above never answers `fail`, so the expansion cannot end in a 'layer' failure.
+    return { ok: false, sentence: stackRefusal(stack.failure as Parameters<typeof stackRefusal>[0], start) };
+  }
   const named = (kind: 'mcp' | 'skills'): readonly string[] =>
     stack.entries
       .map(entry => entry.key)

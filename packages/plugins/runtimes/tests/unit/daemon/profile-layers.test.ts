@@ -601,40 +601,71 @@ describe('R2 changeProfileLayers — what the writer can answer', () => {
     should(outcome).deepEqual({ kind: 'conflict', profile: 'a' });
   });
 
-  it('R2 should say what was already removed when a later profile stops the removal, in the words of how it stopped', async () => {
-    const stopAfterFirst = (second: unknown) => {
-      let calls = 0;
-      return async () => {
-        calls += 1;
-        return calls === 1 ? { kind: 'written', documents: [] } : second;
-      };
-    };
+  it('R2 should name every profile of a removal that the writer holds, refuses or finds moved, and write none', async () => {
     const remove = { kind: 'remove-everywhere', layer: 'mcp/shared' } as const;
 
     const heldWorld = await world();
-    replace(heldWorld.kernel, stopAfterFirst(held) as Writer);
+    replace(heldWorld.kernel, async () => held);
     should(await heldWorld.port.changeProfileLayers(remove, owner)).deepEqual({
-      kind: 'held',
-      sentence: 'profile c loosens a limit; it is held (already removed from a)',
-    });
-
-    const refusedWorld = await world();
-    replace(refusedWorld.kernel, stopAfterFirst(refused) as Writer);
-    should(await refusedWorld.port.changeProfileLayers(remove, owner)).match({
-      kind: 'refused',
-      sentence: 'profile b was refused (schema): contents must be a list; and so on (already removed from a)',
-    });
-
-    const conflictWorld = await world();
-    replace(conflictWorld.kernel, stopAfterFirst({ kind: 'conflict', plugin: 'runtimes' }) as Writer);
-    should(await conflictWorld.port.changeProfileLayers(remove, owner)).deepEqual({ kind: 'conflict', profile: 'b' });
-
-    const firstWorld = await world();
-    replace(firstWorld.kernel, async () => held);
-    should(await firstWorld.port.changeProfileLayers(remove, owner)).deepEqual({
       kind: 'held',
       sentence: 'profile c loosens a limit; it is held',
     });
+
+    const refusedWorld = await world();
+    replace(refusedWorld.kernel, async () => refused);
+    should(await refusedWorld.port.changeProfileLayers(remove, owner)).deepEqual({
+      kind: 'refused',
+      code: 'fleet_change_refused',
+      sentence: 'profiles a, b was refused (schema): contents must be a list; and so on',
+    });
+
+    const conflictWorld = await world();
+    replace(conflictWorld.kernel, async () => ({ kind: 'conflict', plugin: 'runtimes', name: 'b' }) as never);
+    should(await conflictWorld.port.changeProfileLayers(remove, owner)).deepEqual({ kind: 'conflict', profile: 'b' });
+
+    const anonymous = await world();
+    replace(anonymous.kernel, async () => ({ kind: 'conflict', plugin: 'runtimes' }) as never);
+    should(await anonymous.port.changeProfileLayers(remove, owner)).deepEqual({ kind: 'conflict', profile: 'a' });
+  });
+
+  it('R2 should refuse, writing nothing, when the kernel cannot say whether a profile file checks', async () => {
+    const { kernel, port: runtimes, writes } = await world();
+    (kernel.config as { fileState: unknown }).fileState = () => {
+      throw new Error('the watcher is down');
+    };
+
+    const outcome = await runtimes.changeProfileLayers({ kind: 'add', profile: 'c', layer: 'mcp/x' }, owner);
+
+    should(outcome).deepEqual({
+      kind: 'refused',
+      code: 'fleet_change_refused',
+      sentence: 'profile c could not be read, so nothing was changed: the watcher is down',
+    });
+    should(writes).deepEqual([]);
+  });
+});
+
+describe('R2 layers — a stack that cannot be read', () => {
+  it('R2 should refuse a stack of bases that is too deep, and a profile that expands to too many layers, in a sentence', async () => {
+    const chain: Record<string, { contents: string[] }> = {};
+    for (let index = 0; index < 70; index += 1)
+      chain[`p${String(index)}`] = { contents: index === 69 ? ['mcp/leaf'] : [`profile/p${String(index + 1)}`] };
+    const deep = await world({ runtimes: { work: { login: 'claude-you', profile: 'p0' } }, profiles: chain });
+    const tooDeep = await deep.port.layers(RuntimeIdSchema.parse('work')).then(
+      () => 'answered',
+      (error: unknown) => (error as Error).message,
+    );
+    should(tooDeep).containEql('sits under more than');
+
+    const wide = await world({
+      runtimes: { work: { login: 'claude-you', profile: 'big' } },
+      profiles: { big: { contents: Array.from({ length: 10_001 }, (_, index) => `mcp/m${String(index)}`) } },
+    });
+    const tooLarge = await wide.port.layers(RuntimeIdSchema.parse('work')).then(
+      () => 'answered',
+      (error: unknown) => (error as Error).message,
+    );
+    should(tooLarge).containEql('expands to more than');
   });
 });
 
