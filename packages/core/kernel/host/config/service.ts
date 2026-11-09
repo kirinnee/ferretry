@@ -987,7 +987,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     const slot = slotFor(declaration, name);
     if (slot === undefined) return { kind: 'refused', reason: 'bad_name', issues: [] };
     // Never guessed at: a `within` that is not a list would otherwise replace a section the caller meant to merge.
-    if (!isWithinList(edit.within))
+    const within = edit.within;
+    if (!isWithinList(within))
       return {
         kind: 'refused',
         reason: 'schema',
@@ -1004,7 +1005,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       const entry = settled.get(slot.path);
       const heldNow = entry?.evaluated.held;
       if (heldNow === undefined || entry === undefined)
-        return await writeLocked(slot, def, { patch: edit.patch }, writeOptions, edit.within);
+        return await writeLocked(slot, def, { patch: edit.patch }, writeOptions, within);
       const absolute = `${root}/${slot.path}`;
       const disk = await readDisk(slot.path);
       if (disk.kind === 'unreadable') return { kind: 'refused', reason: 'unreadable', issues: unreadableIssues(slot) };
@@ -1014,12 +1015,12 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       if (moved !== undefined) return moved;
       const inEffect = entry.evaluated.inEffect;
       // The version in effect, patched: what the owner's act means today.
-      const effectiveText = patched(slot, inEffect?.text, edit.patch, edit.within);
+      const effectiveText = patched(slot, inEffect?.text, edit.patch, within);
       if (effectiveText === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
       const effective = check(def, slot.path, effectiveText);
       if (!effective.ok) return { kind: 'refused', reason: effective.reason, issues: effective.issues };
       // The held version (the file on disk), patched. A held REMOVAL has no text to carry the patch.
-      const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch, edit.within);
+      const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch, within);
       if (existing !== undefined && heldText === undefined)
         return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
       const checkedHeld = heldText === undefined ? undefined : check(def, slot.path, heldText);

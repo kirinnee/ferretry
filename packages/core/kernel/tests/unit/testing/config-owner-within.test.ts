@@ -107,6 +107,28 @@ test('the testing host keeps the sub-keys a within save does not name, and refus
   await host.stop();
 });
 
+test('the testing host answers an undeclared def and a bad name before a bad within, as the real writer does', async () => {
+  const { host, config } = await testing();
+  const bad = 'sentinel-2c81d0-not-a-list' as unknown as readonly string[];
+  const stranger = defineConfig({
+    file: 'stranger.yaml',
+    schema: z.strictObject({ size: z.number().default(1) }),
+    axis: 'configure',
+    loosens: () => [],
+  });
+  expect(await config.writeAsOwner(stranger as never, undefined, { patch: { size: 2 }, within: bad })).toEqual({
+    kind: 'refused',
+    reason: 'not_declared',
+    issues: [],
+  });
+  expect(config.file(wardenDef)).toEqual(START);
+  // a within refusal names no value
+  const refused = await config.writeAsOwner(wardenDef, undefined, { patch: { caps: { daily: 3 } }, within: bad });
+  expect(refused).toMatchObject({ kind: 'refused', reason: 'schema' });
+  expect(JSON.stringify(refused)).not.toContain('sentinel');
+  await host.stop();
+});
+
 test('the testing host refuses a within that is not a list, as the real writer does, and writes nothing', async () => {
   const { host, config } = await testing();
   const refused = await config.writeAsOwner(wardenDef, undefined, {
