@@ -48,6 +48,7 @@ import {
 } from '../../contract/index.ts';
 import { homesOf } from '../lib/service/runtime-homes.ts';
 import type { FleetPublication } from '../lib/service/publication.ts';
+import { readLinkedDocument } from './document-link.ts';
 import { followingHandle, isPlainFileInside, type ReadHandle } from './following-handle.ts';
 import { readFleetManifest } from './manifest-file.ts';
 
@@ -156,12 +157,18 @@ class FleetHomeReader implements RuntimeHomeReader {
         const root = scoped(this.#deps, home, undefined, true);
         const entry = (await listing(root, '.')).find(candidate => candidate.name === file);
         if (entry === undefined) return null;
-        if (entry.kind === 'symlink')
+        if (entry.kind === 'symlink') {
+          if (isFleetHome(this.#deps, home)) throw unreadable(`${file} is a link, which is never read.`);
+          // The home-scoped handle did not follow it (outside the home, nowhere, a loop, a sign-in file): see `document-link.ts`.
+          const linked = await readLinkedDocument(this.#deps.roots, home.home, file, limitBytes);
+          if (linked.kind === 'text') return linked.text;
+          if (linked.kind === 'absent') return null;
+          if (linked.kind === 'too_big')
+            throw unreadable(`${file} is larger than the ${linked.bound} bytes that may be read.`);
           throw unreadable(
-            isFleetHome(this.#deps, home)
-              ? `${file} is a link, which is never read.`
-              : `${file} is a link that is not followed (it leads nowhere, loops, or leads outside this home).`,
+            `${file} is a link whose target is not read (it is not a plain settings file this reader may open).`,
           );
+        }
         if (entry.kind !== 'file') throw unreadable(`${file} is not a regular file.`);
         if (entry.links > 1) throw unreadable(`${file} has another name on this machine, so it is not read.`);
         if (entry.size > limitBytes)

@@ -793,13 +793,12 @@ describe('R1 m4 a home the manifest places outside fleet/homes is served read-on
     expect(await home.skillFile('plain', 'a.md', 100)).toEqual({ ok: true, bytes: new TextEncoder().encode('aa') });
   });
 
-  it('BG-033 skips a link that leaves the home (a document, a skill folder, a file inside a skill, the fleet assets) and follows one that stays inside', async () => {
+  it('BG-033 skips a link that leaves the home (a skill folder, a file inside a skill, the fleet assets), follows a document that leaves, and follows a link that stays inside', async () => {
     const { world, folder, home } = await away();
     await writeFile(join(world.parent, 'elsewhere.json'), '{"out":true}');
     await symlink(join(world.parent, 'elsewhere.json'), join(folder, '.claude.json'));
-    await expect(home.document('.claude.json', 100)).rejects.toThrow(
-      '.claude.json is a link that is not followed (it leads nowhere, loops, or leads outside this home).',
-    );
+    // A document is the one thing that follows out of the home (document-link.ts); a skill never does.
+    expect(await home.document('.claude.json', 100)).toBe('{"out":true}');
     await mkdir(join(world.parent, 'outside-skill'), { recursive: true });
     await writeFile(join(world.parent, 'outside-skill', 'SKILL.md'), '# out\n');
     await symlink(join(world.parent, 'outside-skill'), join(folder, 'skills', 'leaves'));

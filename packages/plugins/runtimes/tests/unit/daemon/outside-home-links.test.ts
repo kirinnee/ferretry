@@ -117,15 +117,17 @@ describe('BG-033 an outside account home follows a link only when it resolves in
     expect(await reader(LINKED).skillManifest('out-folder', 100)).toBeUndefined();
   });
 
-  it('BG-033 a document that is a link out of the home is refused in one sentence and its target is not read', async () => {
+  it('BG-033 a document that is a link out of the home (a store) is followed and read: the home-manager home keeps its MCP servers and approvals', async () => {
     const { store, linked, reader } = await seed();
     await content(store);
     for (const file of ['settings.json', '.claude.json', 'config.toml'])
       await symlink(join(store, file), join(linked, file));
-    for (const file of ['settings.json', '.claude.json', 'config.toml'] as const)
-      await expect(reader(LINKED).document(file, 1000)).rejects.toThrow(
-        `${file} is a link that is not followed (it leads nowhere, loops, or leads outside this home).`,
-      );
+    expect(await reader(LINKED).document('settings.json', 1000)).toBe('{"permissions":{}}');
+    expect(await reader(LINKED).document('.claude.json', 1000)).toBe('{"mcpServers":{"a":{}}}');
+    expect(await reader(LINKED).document('config.toml', 1000)).toBe('model = "m"\n');
+    // Only the three documents follow out: the skills of the same home do not.
+    await symlink(join(store, 'skills'), join(linked, 'skills'));
+    expect(await reader(LINKED).skills(50)).toEqual([]);
   });
 
   it('BG-033 a link that resolves INSIDE the home is followed, and the home reads exactly like the same plain home', async () => {
@@ -181,7 +183,7 @@ describe('BG-033 an outside account home follows a link only when it resolves in
     expect((await reader(LINKED).skills(50)).map(skill => skill.name)).toEqual(['ok']);
   });
 
-  it('BG-033 a dangling link is skipped (not an error); a dangling document says so in one sentence', async () => {
+  it('BG-033 a dangling link is skipped (not an error); a dangling document is absent, as a document that is not there', async () => {
     const { linked, reader } = await seed();
     await put(join(linked, 'skills', 'ok', 'SKILL.md'), '# ok\n');
     await symlink(join(linked, 'missing'), join(linked, 'skills', 'gone'));
@@ -190,9 +192,7 @@ describe('BG-033 an outside account home follows a link only when it resolves in
     expect((await reader(LINKED).skills(10)).map(skill => skill.name)).toEqual(['ok']);
     const tree = await reader(LINKED).skillTree('ok', { entries: 10, depth: 3 });
     expect(tree?.entries).toContainEqual({ path: 'gone.md', type: 'symlink', size: 0 });
-    await expect(reader(LINKED).document('settings.json', 100)).rejects.toThrow(
-      'settings.json is a link that is not followed (it leads nowhere, loops, or leads outside this home).',
-    );
+    expect(await reader(LINKED).document('settings.json', 100)).toBeNull();
     expect(await reader(LINKED).skillFile('gone', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
   });
 
@@ -243,7 +243,7 @@ describe('BG-033 an outside account home follows a link only when it resolves in
     await symlink(join(linked, '.credentials.json'), join(linked, 'skills', 'creds'));
     const found = reader(LINKED);
     for (const file of ['settings.json', '.claude.json', 'config.toml'] as const)
-      await expect(found.document(file, 1000)).rejects.toThrow('is a link that is not followed');
+      await expect(found.document(file, 1000)).rejects.toThrow(`${file} is a link whose target is not read`);
     expect((await found.skills(10)).map(skill => skill.name)).toEqual(['nested']);
     // The folder that IS followed never lists or reads its sign-in file.
     const nested = await found.skillTree('nested', { entries: 10, depth: 3 });
