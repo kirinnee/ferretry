@@ -124,7 +124,8 @@ const landed = (files: readonly string[] | undefined): string | undefined => {
     files.length === 1
       ? `The configuration ${files[0]} was written first and is`
       : `The configuration files ${files.join(', ')} were written first and are`;
-  return `${named} NOT rolled back; the next apply publishes ${files.length === 1 ? 'it' : 'them'}.`;
+  const them = files.length === 1 ? 'it' : 'them';
+  return `${named} NOT rolled back; the next apply publishes ${them}. Fix the cause and apply again, or remove ${them} to undo the change.`;
 };
 const landedLines = (files: readonly string[] | undefined): string[] => {
   const line = landed(files);

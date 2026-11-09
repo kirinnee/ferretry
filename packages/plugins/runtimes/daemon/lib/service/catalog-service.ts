@@ -702,6 +702,14 @@ export class FleetCatalogService {
         record.payload.before === undefined
       )
         this.#changes.restore(record);
+      // A fleet plan refused ahead of any write (a stand-in, a changed configuration, a changed spend budget) applied
+      // nothing, so the proposal is not spent: a retry is refused for the same true reason, or applies once it clears.
+      if (
+        error instanceof FleetCatalogRefusal &&
+        (error.code === 'fleet_change_refused' || error.code === 'fleet_change_stale') &&
+        record.payload.kind === 'apply'
+      )
+        this.#changes.restore(record);
       throw error;
     }
     return outcome;

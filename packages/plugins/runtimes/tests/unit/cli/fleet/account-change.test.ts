@@ -206,6 +206,26 @@ describe('runChange', () => {
     should(text).containEql('the next apply publishes them.');
   });
 
+  it('BG-027 should give the owner a remedy after a rolled-back change that left files on disk', async () => {
+    const world = fakeWorld({
+      gateway: {
+        apply: () => ({
+          outcome: 'applied',
+          apply: {
+            outcome: 'rolled-back',
+            failedOperation: 'directory fleet/bin',
+            reason: 'root refused: changed',
+            configurationLanded: ['runtimes/work.yaml'],
+          },
+        }),
+      },
+    });
+
+    await runChange(world.deps, { change: removeRuntime, destructive: false, options: {} });
+
+    should(world.out.text('error')).containEql('Fix the cause and apply again, or remove it to undo the change.');
+  });
+
   it('should describe a sign-out and an executor preview in words', async () => {
     const signOut = fakeWorld({
       gateway: {

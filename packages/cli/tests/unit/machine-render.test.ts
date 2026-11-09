@@ -214,6 +214,7 @@ describe('the machine renderer says how an applied change ended', () => {
     should(rendered.text).not.containEql('Nothing changed');
     should(rendered.text).containEql('runtimes/work.yaml');
     should(rendered.text).containEql('NOT rolled back');
+    should(rendered.text).containEql('Fix the cause and apply again, or remove it to undo the change.');
   });
 
   it('C2 should name a landed configuration file after a rollback that could not put everything back', () => {
