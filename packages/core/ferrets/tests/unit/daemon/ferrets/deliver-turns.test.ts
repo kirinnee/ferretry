@@ -800,11 +800,25 @@ describe('ruling #45 (a): one look before deliver, so a send to a working ferret
     expect(w.runner.deliveries).toEqual([]);
   });
 
-  test('ruling #45 a pane at its prompt, behind a permission prompt or a dialog, or one the look cannot read, goes on to the delivery', async () => {
+  test('m2 a pane parked on a permission prompt is answered not_ready dialog at once: nothing typed, the readiness wait never entered', async () => {
+    const w = await world();
+    const id = await started(w);
+    const handle = w.registry.get(id as never)?.handle as RunnerHandle;
+    w.runner.screens.set(handle, { ...WORKING, permission: true });
+    waitsOutItsReadiness(w);
+    const seam = await w.service.harness(id as never);
+
+    expect(await within(1_000, seam!.deliver({ text: 'FIXTURE words to a parked ferret' }))).toEqual(
+      err({ refused: 'not_ready', why: 'dialog' }),
+    );
+    expect(w.runner.looked).toEqual([handle]);
+    expect(w.runner.deliveries).toEqual([]);
+  });
+
+  test('ruling #45 a pane at its prompt, behind a harness dialog (a startup dialog the delivery answers), or one the look cannot read, goes on to the delivery', async () => {
     const screens: readonly [string, RunnerLook | undefined][] = [
       ['an idle prompt', { frame: 'idle', working: false, atPrompt: true, permission: false }],
       ['a working line under a prompt', { ...WORKING, atPrompt: true }],
-      ['a permission prompt', { ...WORKING, permission: true }],
       ['a harness dialog', { ...WORKING, prompt: 'FIXTURE dialog words' }],
       ['a dialog read as data', { ...WORKING, dialog: { kind: 'FIXTURE' } }],
       ['no work and no prompt (the record alone proves nothing)', { ...WORKING, working: false }],

@@ -89,7 +89,7 @@ describe('the layout item', () => {
   test('phone overrides apply only on a phone', () => {
     expect(resolveLayout(DEFAULT_LAYOUT, 'wide').nav.side).toBe('left');
     const phone = resolveLayout(DEFAULT_LAYOUT, 'phone');
-    expect(phone.nav).toEqual({ side: 'bottom', style: 'rail', items: ['agenda', 'board'] });
+    expect(phone.nav).toEqual({ side: 'bottom', style: 'list', items: ['agenda', 'board'] });
   });
 });
 

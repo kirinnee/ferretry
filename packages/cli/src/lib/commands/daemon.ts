@@ -11,6 +11,17 @@ import type { ShellContext, ShellVerb } from '../shell-context.ts';
 export const daemonStatus: ShellVerb = async ctx => {
   const { io, identity } = ctx.world;
   const probe = await ctx.world.probe();
+  // V-0243: `--json` is the machine-readable answer; it carries the probe's own facts and reads no plugin inventory.
+  if (optionOn(ctx.invocation, 'json')) {
+    io.out(
+      `${JSON.stringify(
+        probe.state === 'down'
+          ? { running: false, baseUrl: probe.baseUrl, why: probe.why }
+          : { running: true, baseUrl: probe.baseUrl, version: probe.health.version, protocol: probe.health.protocol },
+      )}\n`,
+    );
+    return probe.state === 'down' ? EXIT.failure : EXIT.ok;
+  }
   if (probe.state === 'down') {
     io.err(
       `daemon  not running at ${probe.baseUrl} (${probe.why})\nstart it with \`${identity.binary} daemon start\`\n`,

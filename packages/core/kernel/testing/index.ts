@@ -49,7 +49,16 @@ export {
 } from './host.ts';
 export { testPluginClient } from './plugin-client.ts';
 export { testExists, testReadText } from './read-text.ts';
-export { COMPARED, type DescriptorRow, type ParityResult, type Table, parity, rowsOf } from './parity.ts';
+export {
+  COMPARED,
+  type DescriptorRow,
+  type FieldDiff,
+  type ParityResult,
+  type Table,
+  fieldDiffs,
+  parity,
+  rowsOf,
+} from './parity.ts';
 export { RouteTable, compareRouteSpecificity, orderRoutesBySpecificity } from './router.ts';
 export { MemoryStateFolder, SimulatedCrash, parseDocument } from './state.ts';
 export { type ToolCase, toolConformance } from './tool-suite.ts';

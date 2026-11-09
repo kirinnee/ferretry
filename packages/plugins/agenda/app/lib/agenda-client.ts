@@ -275,7 +275,8 @@ interface MachineAgendaRead {
 }
 
 /**
- * Daemon-scoped attention coordinator, over this half's one client. It keeps request coalescing out of the
+ * Daemon-scoped attention coordinator, over each machine's client (one machine's half hands its one client; the
+ * device's fleet hands the client of the machine each call is for). It keeps request coalescing out of the
  * immutable store and fences every continuation by the machine's generation: a cleared machine cannot publish
  * stale daemon data.
  */
@@ -296,10 +297,15 @@ export class DaemonAgendaClient {
 
   constructor(
     readonly store: DaemonAgendaStore = new DaemonAgendaStore(),
-    private readonly client: AgendaCall,
+    private readonly client: AgendaCall | ((daemon: DaemonConnection) => AgendaCall),
     private readonly refreshEnvironment: ListRefreshEnvironment = browserListRefreshEnvironment,
   ) {
     this.rollup = new AgendaRollupStore(client);
+  }
+
+  /** The client of the machine a call is for. */
+  #clientFor(daemon: DaemonConnection): AgendaCall {
+    return typeof this.client === 'function' ? this.client(daemon) : this.client;
   }
 
   hydrate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
@@ -388,7 +394,9 @@ export class DaemonAgendaClient {
     // may reach its turn after the machine was unpaired or re-paired, and then it sends nothing at all.
     const promise = this.#readLimit(daemon.daemonId)
       .run(async () =>
-        this.#currentConnection(daemon, generation) ? await fetchAgendaSnapshot(daemon, scope, this.client) : null,
+        this.#currentConnection(daemon, generation)
+          ? await fetchAgendaSnapshot(daemon, scope, this.#clientFor(daemon))
+          : null,
       )
       .then(snapshot => {
         if (snapshot !== null && this.#current(daemon, generation, key, revision)) {
@@ -422,7 +430,7 @@ export class DaemonAgendaClient {
     if (existing?.generation === generation) return existing.promise;
 
     const revision = this.#boardRevisions.get(key) ?? 0;
-    const promise = fetchAgendaCount(daemon, scope, this.client)
+    const promise = fetchAgendaCount(daemon, scope, this.#clientFor(daemon))
       .then(count => {
         if (this.#current(daemon, generation, key, revision)) this.store.applyCount(scope, count);
       })
@@ -541,7 +549,7 @@ export class DaemonAgendaClient {
 
   /** Delivers the answers the daemon is holding for this ferret now. */
   sendReplies(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
-    return this.#mutate(daemon, scope, () => sendAgendaReplies(daemon, scope, this.client));
+    return this.#mutate(daemon, scope, () => sendAgendaReplies(daemon, scope, this.#clientFor(daemon)));
   }
 
   #mutate(
@@ -553,7 +561,9 @@ export class DaemonAgendaClient {
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     const revision = this.#advanceBoardRevision(key);
-    const promise = (typeof action === 'function' ? action() : applyAgendaAction(daemon, scope, action, this.client))
+    const promise = (
+      typeof action === 'function' ? action() : applyAgendaAction(daemon, scope, action, this.#clientFor(daemon))
+    )
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {
           this.#advanceBoardRevision(key);

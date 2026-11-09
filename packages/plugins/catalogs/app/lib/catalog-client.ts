@@ -5,6 +5,7 @@
  * route the manifest does not list (and never another plugin's).
  */
 
+import type { NoReach } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { z } from 'zod';
 import manifest from '../../manifest.ts';
@@ -97,4 +98,66 @@ export function catalogClientOf(client: Pick<PluginClient, 'call'>): CatalogClie
       return schema.parse(answer);
     },
   };
+}
+
+/** What an install on a machine with no Catalogs row says: not connected yet, or Catalogs is off there. */
+export const NO_MACHINE_SENTENCE = 'This device cannot reach Catalogs on that machine yet.';
+
+/**
+ * Catalogs' own row client (`useEveryDaemon`) on another paired machine. A machine still being reached is waited for;
+ * one that is off or paused says the shell's own sentence, and one with no row at all says it cannot be reached yet.
+ */
+async function rowClientOf(
+  others: ReadonlyMap<string, PluginClient> | RowSource,
+  daemonId: string,
+): Promise<PluginClient> {
+  const source: RowSource = 'clients' in others ? others : { clients: () => others };
+  const deadline = Date.now() + (source.waitMs ?? ROW_WAIT_MS);
+  for (;;) {
+    const row = source.clients().get(daemonId);
+    if (row !== undefined) return row;
+    const why = source.whyNone?.(daemonId);
+    if (why !== undefined && !why.waiting) throw new Error(why.line);
+    // The shell allowing the plugin before the row map has caught up (`why === undefined`) is one more loop, not an end.
+    if (source.whyNone === undefined || Date.now() >= deadline) throw new Error(why?.line ?? NO_MACHINE_SENTENCE);
+    await new Promise(resolve => setTimeout(resolve, ROW_POLL_MS));
+  }
+}
+
+/**
+ * The catalog client of any paired machine: this half's own for the daemon it was built for, Catalogs' own row client
+ * (`useEveryDaemon`) on another, and a refusal saying so where there is none.
+ */
+export const machineCatalogClient =
+  (
+    own: CatalogClient,
+    ownId: string,
+    others: ReadonlyMap<string, PluginClient> | RowSource,
+  ): ((connection: { readonly daemonId: string }) => Promise<CatalogClient>) =>
+  async connection =>
+    connection.daemonId === ownId ? own : catalogClientOf(await rowClientOf(others, connection.daemonId));
+
+/**
+ * The plugin client of any paired machine, for a read through that machine's OWN daemon (its project list): the client
+ * this half was built with for its own daemon, Catalogs' row client on another. Never the screen's client for a
+ * machine it was not built for.
+ */
+export const machinePluginClient =
+  (
+    own: Pick<PluginClient, 'call'>,
+    ownId: string,
+    others: ReadonlyMap<string, PluginClient> | RowSource,
+  ): ((connection: { readonly daemonId: string }) => Promise<Pick<PluginClient, 'call'>>) =>
+  async connection =>
+    connection.daemonId === ownId ? own : rowClientOf(others, connection.daemonId);
+
+/** How long an install on another machine waits for its row (connecting, or its plugin list being read). */
+const ROW_WAIT_MS = 15_000;
+const ROW_POLL_MS = 100;
+
+/** The live row clients (a getter, so a wait sees a row that arrives), and the shell's reason a machine has none. */
+export interface RowSource {
+  readonly clients: () => ReadonlyMap<string, PluginClient>;
+  readonly whyNone?: (daemon: string) => NoReach | undefined;
+  readonly waitMs?: number;
 }
