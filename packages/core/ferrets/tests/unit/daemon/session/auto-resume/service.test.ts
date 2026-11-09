@@ -138,6 +138,43 @@ describe('auto-resume service', () => {
     should(h.summaries).deepEqual([]);
   });
 
+  it('BG-044 should resume nothing, and say so by failing, when the setting is off and the ledger cannot be cleared', async () => {
+    // Arrange: off, and the disk refuses the clear.
+    const h = new Harness();
+    h.enabled = false;
+    h.ledger = [candidate('a')];
+    h.fail('a');
+    h.ledgerWriteFails = true;
+
+    // Act
+    const failure = await h
+      .service()
+      .run()
+      .then(
+        () => undefined,
+        (error: unknown) => error as Error,
+      );
+
+    // Assert: the pass fails loudly (the job reports it) and spends nothing; the entry is still owed.
+    should(failure?.message).equal('disk full');
+    should(h.resumed).deepEqual([]);
+    should(h.ledger.map(entry => entry.id)).deepEqual(['a']);
+  });
+
+  it('BG-044 should not resume an entry an uncleared ledger kept past a day, when the setting is turned on later', async () => {
+    // Arrange: the leftover is 25 h old by the time a later boot finds the switch on (the declared window is 24 h).
+    const h = new Harness();
+    h.ledger = [candidate('old', 'running', '2026-10-20T11:00:00.000Z'), candidate('new', 'running', NOW)];
+    h.fail('old');
+    h.fail('new');
+
+    // Act
+    await h.service().run();
+
+    // Assert
+    should(h.resumed.map(entry => entry.id)).deepEqual(['new']);
+  });
+
   it('should resume a failed session with a notice that fits its mode and turn', async () => {
     // Arrange
     const h = new Harness();

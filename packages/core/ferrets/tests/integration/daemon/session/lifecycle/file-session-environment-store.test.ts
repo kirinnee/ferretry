@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { access, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -130,5 +130,82 @@ describe('FileSessionEnvironmentStore', () => {
 
     // Assert
     should(await store.read(SESSION)).eql({ A: '1', B: '2' });
+  });
+
+  it('BG-036 should delete the environment of an ended session, and read as none afterwards', async () => {
+    // Arrange
+    const { store, directory } = await subject();
+    await store.write(SESSION, CAPABILITY);
+
+    // Act
+    await store.remove(SESSION);
+
+    // Assert
+    should(await readdir(directory)).eql([]);
+    should(await store.read(SESSION)).eql({});
+  });
+
+  it('BG-036 should treat a missing file, or a session folder that was never made, as already removed', async () => {
+    // Arrange: a folder with no file, and a store whose folder does not exist at all.
+    const { store, directory } = await subject();
+    const never = await subject();
+    await rm(never.directory, { recursive: true, force: true });
+
+    // Act + Assert: neither throws, and removing creates nothing.
+    await store.write(SESSION, CAPABILITY);
+    await store.remove(SESSION);
+    await store.remove(SESSION);
+    await never.store.remove(SESSION);
+    should(await readdir(directory)).eql([]);
+    should(
+      await access(never.directory).then(
+        () => true,
+        () => false,
+      ),
+    ).be.false();
+  });
+
+  it('BG-036 should never follow a link at the name: the link goes, what it pointed at stays', async () => {
+    // Arrange: environment.json is a link to a file outside the session's folder.
+    const { store, directory } = await subject();
+    await mkdir(directory, { recursive: true });
+    const outside = join(directory, '..', 'outside-target.txt');
+    await writeFile(outside, 'must stay');
+    await symlink(outside, join(directory, 'environment.json'));
+
+    // Act
+    await store.remove(SESSION);
+
+    // Assert
+    should(await readdir(directory)).eql([]);
+    should(await readFile(outside, 'utf8')).equal('must stay');
+  });
+
+  it('BG-036 should refuse, without saying what it held, when the name cannot be removed', async () => {
+    // Arrange: the kernel's remove fails with a real fault (not absence).
+    const home = await mkdtemp(join(tmpdir(), 'fy-environment-store-'));
+    homes.add(home);
+    const { root } = await diskSessionsRoot(home, SESSION);
+    const failing = new FileSessionEnvironmentStore(
+      {
+        ...root,
+        name: root.name,
+        internal: root.internal,
+        ensurePrivateDirectory: path => root.ensurePrivateDirectory(path),
+        resolve: path => root.resolve(path),
+        publish: (...args) => root.publish(...args),
+        readBytes: path => root.readBytes(path),
+        remove: async () => {
+          throw Object.assign(new Error('the disk failed'), { code: 'EIO' });
+        },
+      },
+      SESSION,
+    );
+
+    // Act
+    const failure = await rejection(failing.remove(SESSION));
+
+    // Assert: a real fault is thrown for the caller to log; only absence is swallowed.
+    should(failure.code).equal('EIO');
   });
 });

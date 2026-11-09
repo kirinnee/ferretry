@@ -467,11 +467,15 @@ export class ClaudeHarness implements Harness {
    * never an older launch's.
    */
   private async recordLaunchSettings(ferret: FerretId, inputs: LaunchSettingsInputs): Promise<void> {
+    const record = launchSettingsRecord(inputs);
     try {
-      await this.deps.state.write(CLAUDE_CODE_LAUNCH_SETTINGS, launchSettingsRecord(inputs), ferret);
+      await this.deps.state.write(CLAUDE_CODE_LAUNCH_SETTINGS, record, ferret);
     } catch {
       try {
         await this.deps.state.remove(CLAUDE_CODE_LAUNCH_SETTINGS, ferret);
+        // A damaged record fails the write above (the kernel guard refuses to write over it) and the remove clears it:
+        // write once more, so this launch is recorded and the answer is current now, not unknown until the next launch.
+        await this.deps.state.write(CLAUDE_CODE_LAUNCH_SETTINGS, record, ferret).catch(() => undefined);
       } catch {
         // Nothing more can be done: the read then finds whatever is left, and a damaged record reads as unknown.
       }

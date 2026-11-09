@@ -342,6 +342,8 @@ export interface TestHost {
   /** Moves the stand-in output guard's generation: a guarded body built before now is withheld. */
   holdBegins(): void;
   putRoot(name: RootName, relative: string, text: string): void;
+  /** The text of the file at `relative` of the test root `name`, or `undefined` when there is none. */
+  rootText(name: RootName, relative: string): string | undefined;
   /**
    * A link planted at `relative` of the test root `name` (for `project-files`, `relative` is the ABSOLUTE path of the name:
    * its scope folder and then the name). The kernel never follows it: a root read or write through it is refused.
@@ -2166,6 +2168,9 @@ async function start(world: World): Promise<TestHost> {
     },
     putRoot(name, relative, text) {
       world.roots.set(rootKey(name, relative), text);
+    },
+    rootText(name, relative) {
+      return world.roots.get(rootKey(name, relative));
     },
     putRootLink(name, relative) {
       testLinks.set(rootKey(name, relative), '(planted)');
