@@ -42,7 +42,6 @@ import {
   HOST_CLAUDE_SECURE_STORAGE,
   resolveCredentialStore,
   type StoredCredentialResolution,
-  type UnavailableStoreResolution,
 } from './credentials.ts';
 import {
   CREDENTIAL_STATUS_LABELS,
@@ -206,14 +205,7 @@ export class FleetCredentialCatalog {
           id,
           credential,
           resolution:
-            this.deps.resolveStore?.(id, credential) ??
-            (this.deps.paths === undefined && credential.store !== 'environment'
-              ? ({
-                  harness: credential.harness,
-                  store: credential.store,
-                  unavailable: NO_STORE_PATHS,
-                } satisfies UnavailableStoreResolution)
-              : resolveCredentialStore(id, credential, this.deps.paths as CredentialStorePaths)),
+            this.deps.resolveStore?.(id, credential) ?? resolveCredentialStore(id, credential, this.deps.paths),
           usedBy: [...(this.deps.usedBy?.(id) ?? [])].sort(),
         };
       });
@@ -224,13 +216,15 @@ export class FleetCredentialCatalog {
     const resolution = stored(entry.resolution);
     if (resolution === undefined) return undefined;
     if (resolution.harness === 'codex') return { harness: 'codex', resolution };
-    return {
-      harness: 'claude',
-      accountFile:
-        resolution.ownedDirectory === undefined
-          ? join((this.deps.paths as CredentialStorePaths).userHome, CLAUDE_ACCOUNT_FILE)
-          : join(resolution.ownedDirectory, CREDENTIAL_SIGN_IN_DIRECTORY, CLAUDE_ACCOUNT_FILE),
-    };
+    if (resolution.ownedDirectory !== undefined) {
+      return {
+        harness: 'claude',
+        accountFile: join(resolution.ownedDirectory, CREDENTIAL_SIGN_IN_DIRECTORY, CLAUDE_ACCOUNT_FILE),
+      };
+    }
+    // The person's own account file is under their home: a build that cannot name it has no file to point at.
+    const userHome = this.deps.paths?.userHome;
+    return userHome === undefined ? undefined : { harness: 'claude', accountFile: join(userHome, CLAUDE_ACCOUNT_FILE) };
   }
 
   /**
@@ -380,10 +374,6 @@ const REASON_SENTENCES: Readonly<Record<CredentialStatusReason, string>> = {
 };
 
 const instant = (milliseconds: number): Instant => instantFromEpochMs(Math.trunc(milliseconds));
-
-/** Why a login kept in a store reads as unreachable until the host names the directories the stores live in. */
-const NO_STORE_PATHS =
-  'this build cannot reach the directories logins are signed in to, so it cannot read or sign this one in';
 
 /** A login's `disabled` block as the wire carries it. */
 function disabledOf(block: Disabled, source: LoginDisabled['source']): LoginDisabled {

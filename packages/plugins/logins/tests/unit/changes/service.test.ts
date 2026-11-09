@@ -210,6 +210,86 @@ describe('LoginChangeService: login.env', () => {
   });
 });
 
+describe('LoginChangeService: what an apply reports and announces', () => {
+  it('should report a finished sign-out with the login as it stands now', async () => {
+    const { service, events } = world({
+      signOut: async () => ({ outcome: 'signed-out', credential: { id: 'work' } as unknown as LoginView }),
+    });
+    const view = await service.stage({ kind: 'login.signout', id: 'work' });
+
+    should(await service.apply(view.id)).deepEqual({ outcome: 'signed-out', login: { id: 'work' } });
+    should(events).deepEqual([{ id: 'work', change: 'signed-out' }]);
+  });
+
+  it('should announce an added login and a disabled login by what happened to them', async () => {
+    const { service, events } = world();
+    const added = await service.stage({ kind: 'login.add', id: 'second', harness: 'claude-code' });
+    await service.apply(added.id);
+    const disabled = await service.stage({ kind: 'login.disable', id: 'work' });
+    await service.apply(disabled.id);
+
+    should(events).deepEqual([
+      { id: 'second', change: 'added' },
+      { id: 'work', change: 'disabled' },
+    ]);
+  });
+
+  it('should say the file moved while the apply ran, and keep the change reviewable', async () => {
+    const { service } = world({ write: async () => ({ kind: 'conflict' }) });
+    const view = await service.stage({ kind: 'login.enable', id: 'work' });
+
+    const error = (await service.apply(view.id).catch(caught => caught)) as LoginChangeError;
+
+    should(error.code).equal('login_change_stale');
+    should(error.message).equal('login work changed while this was being applied; review it again');
+    should(service.view(view.id).state).equal('pending');
+  });
+
+  it('should carry the reasons a file was refused, or say the file was refused when none were given', async () => {
+    const issues = [
+      { path: 'label', message: 'too long' },
+      { path: 'env', message: 'not a map' },
+    ];
+    const named = world({ write: async () => ({ kind: 'refused', reason: 'schema', issues }) });
+    const bare = world({ write: async () => ({ kind: 'refused', reason: 'schema', issues: [] }) });
+
+    for (const [subject, sentence] of [
+      [named, 'too long; not a map'],
+      [bare, 'the file was refused'],
+    ] as const) {
+      const view = await subject.service.stage({ kind: 'login.enable', id: 'work' });
+      const error = (await subject.service.apply(view.id).catch(caught => caught)) as LoginChangeError;
+      should(error.code).equal('login_change_failed');
+      should(error.message).equal(sentence);
+    }
+  });
+
+  it('should let an unexpected failure pass as itself rather than dress it as a hold refusal', async () => {
+    const { service } = world({
+      mintId: () => {
+        throw new Error('the clock of ids broke');
+      },
+    });
+
+    const error = (await service.stage({ kind: 'login.enable', id: 'work' }).catch(caught => caught)) as Error;
+
+    should(error.message).equal('the clock of ids broke');
+    should(error).not.have.property('code');
+  });
+
+  it('should give up minting a handle when every one it tries is already held', async () => {
+    const { service } = world({ mintId: () => 'same' });
+    await service.stage({ kind: 'login.enable', id: 'work' });
+
+    const error = (await service
+      .stage({ kind: 'login.enable', id: 'work' })
+      .catch(caught => caught)) as LoginChangeError;
+
+    should(error.code).equal('login_change_refused');
+    should(error.message).equal('could not mint an unused login change handle');
+  });
+});
+
 describe('changeRoutes', () => {
   it('should stage and apply over the routes, a refusal as a 409 with its code and an unknown change as a 404', async () => {
     const { service } = world();

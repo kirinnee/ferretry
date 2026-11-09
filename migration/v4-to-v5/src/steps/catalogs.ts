@@ -80,6 +80,7 @@ import {
   V4MembersDocument,
   V4SharesDocument,
 } from '../v4/catalogs.ts';
+import { keyPath } from '../key-path.ts';
 import { V4PasskeysSchema } from '../v4/access.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
 import type { Step, StepContext } from './index.ts';
@@ -201,7 +202,7 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
 const where = (error: z.ZodError): string =>
   error.issues
     .slice(0, 3)
-    .map(issue => (issue.path.length === 0 ? '(top)' : issue.path.join('.')))
+    .map(issue => keyPath(issue.path))
     .join(', ');
 
 async function readDocument<Shape>(home: string, file: string, schema: z.ZodType<Shape>): Promise<Shape | undefined> {

@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { SIGN_IN_RULE_MAX, type SignInId, type SignInRuleStageId } from '../../../../contract/routes/index.ts';
+import {
+  SIGN_IN_RULE_MAX,
+  SIGN_IN_RULE_STAGE_TTL_SECONDS,
+  type SignInId,
+  type SignInRuleStageId,
+} from '../../../../contract/routes/index.ts';
 import should from 'should';
 import { FINISHED_STAGES_KEPT, SignInRuleError } from '../../../../daemon/lib/sign-in-rules/index.ts';
 import {
@@ -364,6 +369,21 @@ describe('finished stages are bounded (secrev-1274a N2)', () => {
     );
     should(w.service.viewStage(deviceOwner(), stages.at(-2) as SignInRuleStageId).state).equal('denied');
     should(w.service.viewStage(deviceOwner(), stages.at(-1) as SignInRuleStageId).state).equal('waiting');
+  });
+});
+
+describe('a stage that was never answered', () => {
+  it('should lapse once its time is up, still answer "expired" for a while, and then be forgotten', async () => {
+    const w = await world();
+    const { stage } = await w.service.stage(deviceOwner(), DRAFT);
+    should(w.service.viewStage(deviceOwner(), stage).state).equal('waiting');
+
+    w.clock.now += SIGN_IN_RULE_STAGE_TTL_SECONDS * 1_000;
+    should(w.service.viewStage(deviceOwner(), stage).state).equal('expired');
+
+    w.clock.now += SIGN_IN_RULE_STAGE_TTL_SECONDS * 1_000;
+    should((await refusal(() => w.service.viewStage(deviceOwner(), stage))).code).equal('stage_not_found');
+    should(w.store.document).be.undefined();
   });
 });
 

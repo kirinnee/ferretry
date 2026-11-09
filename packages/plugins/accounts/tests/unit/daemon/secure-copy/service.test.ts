@@ -505,3 +505,44 @@ describe('SecureCopyService under the re-review', () => {
     should(masking.heldCount()).equal(0);
   });
 });
+
+describe('SecureCopyService answering for a live copy', () => {
+  it('should describe a live copy without its value, and hand the value only through open', async () => {
+    const { service } = world();
+    await service.capture('s1', command());
+
+    const described = service.describe('s1', 'token');
+
+    should(described).match({ handle: 'sealed:token', name: 'token', length: TOKEN.length, state: 'live', uses: 0 });
+    should(JSON.stringify(described)).not.containEql(TOKEN);
+    should(service.open('s1', 'token')).equal(TOKEN);
+  });
+
+  it('should count each paste of the copy, and ignore a paste of one it does not hold', async () => {
+    const { service } = world();
+    await service.capture('s1', command());
+
+    service.used('s1', 'token');
+    service.used('s1', 'token');
+    service.used('s1', 'other');
+    service.used('s2', 'token');
+
+    should(service.describe('s1', 'token')?.uses).equal(2);
+    should(service.describe('s1', 'other')).be.undefined();
+  });
+
+  it('should answer nothing for a copy that was discarded or whose life is over', async () => {
+    const { service, clock } = world();
+    await service.capture('s1', command());
+    await service.capture('s1', { ...command(), name: 'short', expiresInSeconds: 60 });
+
+    service.discard('s1', 'token');
+    clock.ms += 60_000;
+
+    should(service.describe('s1', 'token')).be.undefined();
+    should(service.open('s1', 'token')).be.undefined();
+    should(service.describe('s1', 'short')).be.undefined();
+    should(service.open('s1', 'short')).be.undefined();
+    should(service.open('s9', 'token')).be.undefined();
+  });
+});
