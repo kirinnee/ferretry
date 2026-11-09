@@ -485,8 +485,8 @@ export interface FleetCredentialsServiceDeps {
   machineName(): string;
   /** The harness command, located by this daemon's one rule. `undefined` when it is not installed. */
   locate(harness: HarnessKind): string | undefined;
-  /** Runs one harness child to completion; the exit code. */
-  run(spec: CredentialHarnessRun): Promise<number>;
+  /** Runs one harness child to completion; its exit code, or the signal's name when a signal ended it. */
+  run(spec: CredentialHarnessRun): Promise<number | string>;
   /** The environment a harness child starts from, already sanitized of inherited provider state. */
   baseEnvironment(): Readonly<Record<string, string | undefined>>;
   /**
@@ -717,7 +717,9 @@ export class FleetCredentialsService {
       reason:
         code === 0
           ? 'the harness said it signed out, but a login is still there'
-          : `the harness could not sign out (it exited with code ${code})`,
+          : typeof code === 'number'
+            ? `the harness could not sign out (it exited with code ${code})`
+            : `the harness could not sign out (it was ended by ${code})`,
       credential,
     };
   }

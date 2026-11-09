@@ -28,4 +28,10 @@ describe('kernel.spawn run answers how a child ended', () => {
     expect(fine.signal).toBeNull();
     expect(fine.stdout).toBe('ok');
   });
+
+  test('a child that exits by itself with 143 answers that code and no signal', async () => {
+    const result = await spawn.run('sh', ['-c', 'exit 143']);
+    expect(result.exitCode).toBe(143);
+    expect(result.signal).toBeNull();
+  });
 });

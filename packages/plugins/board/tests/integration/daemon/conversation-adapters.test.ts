@@ -77,7 +77,9 @@ describe('the host’s own gh, run as a child', () => {
           run: async (_program, _args, options) =>
             await new Promise<SpawnResult>((resolve, reject) => {
               options?.signal?.addEventListener('abort', () =>
-                rejects ? reject(new Error('aborted')) : resolve(spawned('partial', 143)),
+                rejects
+                  ? reject(new Error('aborted'))
+                  : resolve({ exitCode: null, signal: 'SIGTERM', stdout: 'partial', stderr: '' }),
               );
             }),
         },
