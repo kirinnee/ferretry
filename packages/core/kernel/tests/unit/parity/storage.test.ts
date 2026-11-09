@@ -186,8 +186,9 @@ describe('the configuration folder: FY_HOME/config, one YAML file per building b
 
 /**
  * Today's generated editor schemas, config/.schema/<id>.json, one per file kind. 5.0 generates one per declared file or
- * folder, named by its claim (`logins/` is `logins.json`, `claude-code/hooks/` is `claude-code--hooks.json`), from the
- * same zod schema the daemon checks the file with. `witness` is a property of today's kind that the schema still has.
+ * folder, named by its claim (a file `warden.yaml` is `warden.json`; a folder's schema describes one item, so `logins/`
+ * is `logins--item.json` and `claude-code/hooks/` is `claude-code--hooks--item.json`), from the same zod schema the
+ * daemon checks the file with. `witness` is a property of today's kind that the schema still has.
  * Each row has its own test, titled with its id, so deleting one leaves its row unproven.
  */
 describe('the generated schemas: FY_HOME/config/.schema', () => {
@@ -214,20 +215,25 @@ describe('the generated schemas: FY_HOME/config/.schema', () => {
     }
     expect(
       schemaFileName(declaredKinds().find(kind => kind.path === 'claude-code/hooks/sweep.yaml')?.def as never),
-    ).toBe('claude-code--hooks.json');
+    ).toBe('claude-code--hooks--item.json');
   });
 
-  test('F-0151 (open, GAP schema file name collision) pins the one name two declared files share: .schema/runtimes.json (runtimes.yaml and the runtimes/ folder)', () => {
+  test('F-0142 F-0151 no two declared files share a schema name: runtimes.yaml and the runtimes/ folder each keep theirs', async () => {
     const owners = new Map<string, string[]>();
     for (const kind of declaredKinds()) {
       const name = schemaFileName(kind.def);
       owners.set(name, [...(owners.get(name) ?? []), `${kind.plugin}:${kind.path}`]);
     }
-    const shared = [...owners].filter(([, paths]) => paths.length > 1);
-    // Pinned as it stands (ports-pending `[kernel: schema file name collision]`): it goes red the day the collision is
-    // fixed, or when a second one appears, and whoever does either updates this and the row.
-    expect(shared.map(([name]) => name)).toEqual(['runtimes.json']);
-    expect(shared[0]?.[1].length).toBe(2);
+    expect([...owners].filter(([, paths]) => paths.length > 1)).toEqual([]);
+    const memory = await published();
+    const schemaOf = (name: string) =>
+      JSON.parse(memory.snapshot().get(`${HOME}/config/.schema/${name}`) ?? '{}') as {
+        properties?: Record<string, unknown>;
+      };
+    expect(Object.keys(schemaOf('runtimes.json').properties ?? {})).toEqual(
+      expect.arrayContaining(['defaultRuntime', 'autoResume']),
+    );
+    expect(Object.keys(schemaOf('runtimes--item.json').properties ?? {})).toContain('login');
   });
 
   async function schemaIsWrittenFromItsKind(now: string, witness: string) {
@@ -244,34 +250,34 @@ describe('the generated schemas: FY_HOME/config/.schema', () => {
 
   test('F-0132 today .schema/accountDefaults.json is now .schema/accounts.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('accounts.json', 'sites'));
-  test('F-0133 today .schema/component-hooks.json is now .schema/claude-code--hooks.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('claude-code--hooks.json', 'hooks'));
-  test('F-0135 today .schema/component-mcp.json is now .schema/mcp.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('mcp.json', 'command'));
-  test('F-0136 today .schema/component-modelSets.json is now .schema/model-sets.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('model-sets.json', 'models'));
-  test('F-0137 today .schema/component-settings.json is now .schema/claude-code--settings.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('claude-code--settings.json', 'settings'));
-  test('F-0138 today .schema/component-skills.json is now .schema/skills.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('skills.json', 'items'));
+  test('F-0133 today .schema/component-hooks.json is now .schema/claude-code--hooks--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('claude-code--hooks--item.json', 'hooks'));
+  test('F-0135 today .schema/component-mcp.json is now .schema/mcp--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('mcp--item.json', 'command'));
+  test('F-0136 today .schema/component-modelSets.json is now .schema/model-sets--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('model-sets--item.json', 'models'));
+  test('F-0137 today .schema/component-settings.json is now .schema/claude-code--settings--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('claude-code--settings--item.json', 'settings'));
+  test('F-0138 today .schema/component-skills.json is now .schema/skills--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('skills--item.json', 'items'));
   test('F-0139 today .schema/learning.json is now .schema/lessons.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('lessons.json', 'passiveDefault'));
   test('F-0140 today .schema/limits.json is now .schema/limits.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('limits.json', 'perFerret'));
-  test('F-0141 today .schema/login.json is now .schema/logins.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('logins.json', 'store'));
-  test('F-0143 today .schema/models.json is now .schema/models.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('models.json', 'detect'));
+  test('F-0141 today .schema/login.json is now .schema/logins--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('logins--item.json', 'store'));
+  test('F-0143 today .schema/models.json is now .schema/models--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('models--item.json', 'detect'));
   test('F-0144 today .schema/modelsGuide.json is now .schema/packs.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('packs.json', 'routing'));
   test('F-0145 today .schema/pack.json is now .schema/packs.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('packs.json', 'enabled'));
-  test('F-0146 today .schema/preset.json is now .schema/endpoints.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('endpoints.json', 'verified'));
-  test('F-0147 today .schema/profile.json is now .schema/profiles.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('profiles.json', 'contents'));
-  test('F-0148 today .schema/runtime.json is now .schema/runtimes.json, written from the schema the daemon checks with', () =>
-    schemaIsWrittenFromItsKind('runtimes.json', 'login'));
+  test('F-0146 today .schema/preset.json is now .schema/endpoints--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('endpoints--item.json', 'verified'));
+  test('F-0147 today .schema/profile.json is now .schema/profiles--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('profiles--item.json', 'contents'));
+  test('F-0148 today .schema/runtime.json is now .schema/runtimes--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('runtimes--item.json', 'login'));
   test('F-0149 today .schema/voice.json is now .schema/voice.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('voice.json', 'defaultEngine'));
   test('F-0150 today .schema/warden.json is now .schema/warden.json, written from the schema the daemon checks with', () =>
