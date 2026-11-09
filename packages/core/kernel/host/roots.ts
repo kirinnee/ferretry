@@ -50,7 +50,7 @@ import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
-import { harnessFileRefusal, permittedMode, takesLinks } from './root-rules.ts';
+import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from './root-rules.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports', 'harness-home']);
@@ -128,8 +128,8 @@ export interface RootLayout {
 /**
  * Why a root refused, host-side: the contract's {@link FolderRefusal}, plus today's guard rules a handle's caller
  * meets only as this error — `hard_link` (a file with another name that could be anywhere), `changed` (what was
- * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a remove outside daemon folders on a host
- * that cannot reach an entry through its checked folder, S44).
+ * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a remove outside daemon folders, or any
+ * `rename`, on a host that cannot reach an entry through its checked folder, S44).
  */
 export type RootRefusal =
   | FolderRefusal
@@ -1071,6 +1071,45 @@ async function setModeChecked(scope: Scope, full: string, bits: number): Promise
   }
 }
 
+/**
+ * `rename` through the two checked folders: each parent is opened without following a link and proven, the entry at
+ * `from` is looked at WITHOUT following it (it must exist: a link stays a link, a directory moves whole), nothing may
+ * be at `to` (a link there included), and the move is `rename(2)` between the two folders' descriptors. A host that
+ * cannot reach an entry through a held folder's descriptor (macOS today) is refused `no_descriptor_reach`: there the
+ * move would resolve both parents by name again and follow a link swapped in after the proof, so it is never made
+ * ([own] BEFORE-GREEN(runtimes): the owner runs macOS, so the provisioner's move-aside and undo fail there). No copy
+ * is ever the fallback: any failure of the move itself (another device, a folder into itself, a full disk) is
+ * `changed`, a fact with no path or content in it.
+ *
+ * GAP (declared, tested): the standard library has no `renameat2(RENAME_NOREPLACE)`, so "nothing at `to`" is a look
+ * followed by the move. A writer who creates `to` in that window has a file or an empty folder replaced; a non-empty
+ * folder is never replaced (the move fails). The window is the kernel's own two calls, inside folders only the
+ * harness and the kernel write.
+ */
+async function renameChecked(from: Checked, to: Checked): Promise<void> {
+  const fromParent = dirname(from.full);
+  const toParent = dirname(to.full);
+  const source = await openCheckedFolder(from.scope, fromParent);
+  try {
+    const target = await openCheckedFolder(to.scope, toParent);
+    try {
+      // Without descriptor reach the move would run on plain paths, which resolve the parents afresh (as `removeWithin`
+      // refuses a folder it cannot hold). Refuse before anything is looked at or moved.
+      if (source.entryPath('') === undefined || target.entryPath('') === undefined)
+        return refuse('no_descriptor_reach');
+      const fromAt = await entry(from.scope, source, fromParent, basename(from.full));
+      const toAt = await entry(to.scope, target, toParent, basename(to.full));
+      if ((await from.scope.fs.identity(fromAt)) === undefined) return refuse('outside');
+      if ((await to.scope.fs.identity(toAt)) !== undefined) return refuse('outside');
+      await from.scope.fs.rename(fromAt, toAt).catch(() => refuse('changed'));
+    } finally {
+      await target.close();
+    }
+  } finally {
+    await source.close();
+  }
+}
+
 /** What a harness file handle needs: the disk, the home it must stay out of, and the one file it names. */
 interface HarnessFileSetup {
   readonly fs: HostFs;
@@ -1529,6 +1568,27 @@ function rootHandle(setup: HandleSetup): RootHandle {
       } finally {
         await made.folder.close();
       }
+    },
+    rename: async (from: FencedPath, to: FencedPath) => {
+      writable();
+      if (!takesRenames(name)) return refuse('read_only');
+      const names = renameNamesRefusal(from, to);
+      if (names !== undefined) return refuse(names);
+      const source = await realParent(from);
+      const target = await realParent(to, true);
+      // No link on the way at either end: the folder each name gives, as this root names it, is the very folder
+      // reached.
+      const root = base() as string;
+      for (const [given, placed] of [
+        [from, source],
+        [to, target],
+      ] as const) {
+        const lexical = lexicalInRoot(home, root, ownerRoot, given);
+        if (!lexical.ok) return refuse(lexical.error);
+        if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+          refuse('link_escape');
+      }
+      await renameChecked(source, target);
     },
     setMode: async (path: FencedPath, mode: number) => {
       if (setup.setMode !== true) return refuse('not_declared');

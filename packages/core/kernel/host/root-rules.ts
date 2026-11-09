@@ -1,7 +1,7 @@
 /**
- * The pure rules of `RootHandle.linkTo`, `RootHandle.setMode` and `RootsPort.harnessFile` (§7.7): one fact, read by
- * the real roots port (`./roots.ts`, which adds the descriptor checks) and by the testing host, so a plugin's unit test
- * meets exactly the refusals production makes.
+ * The pure rules of `RootHandle.linkTo`, `RootHandle.setMode`, `RootHandle.rename` and `RootsPort.harnessFile`
+ * (§7.7): one fact, read by the real roots port (`./roots.ts`, which adds the descriptor checks) and by the testing
+ * host, so a plugin's unit test meets exactly the refusals production makes.
  */
 import { posix } from 'node:path';
 import { insideFence } from '../contract/home.ts';
@@ -17,6 +17,33 @@ const LINK_ROOTS: ReadonlySet<RootName> = new Set(['fleet', 'agent-homes']);
 /** Whether `linkTo` may write a link into this root. */
 export function takesLinks(name: RootName): boolean {
   return LINK_ROOTS.has(name);
+}
+
+/**
+ * The roots an entry may be MOVED inside (`RootHandle.rename`): the same internal, writable, kernel-made roots a link
+ * may be written into, and no other. Never an owner's root, never a read-only one.
+ */
+const RENAME_ROOTS: ReadonlySet<RootName> = new Set(['fleet', 'agent-homes']);
+
+/** Whether `rename` may move an entry inside this root. */
+export function takesRenames(name: RootName): boolean {
+  return RENAME_ROOTS.has(name);
+}
+
+/**
+ * The refusal `rename` gives before any disk is asked, from the two names alone: `undefined` when both are sane. A
+ * name is a string without NUL whose segments (after the one leading `/` of an absolute path) are all plain: no
+ * `..`, no `.` and none empty (`a//b`, a trailing `/`), so both hosts read the same name the same way. The same name
+ * at both ends moves nothing and is refused (`outside`) rather than reported as done.
+ */
+export function renameNamesRefusal(from: string, to: string): 'outside' | undefined {
+  for (const name of [from, to]) {
+    if (typeof name !== 'string' || name === '' || name.includes('\0')) return 'outside';
+    const segments = name.split('/');
+    if (name.startsWith('/')) segments.shift();
+    if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) return 'outside';
+  }
+  return from === to ? 'outside' : undefined;
 }
 
 /**
