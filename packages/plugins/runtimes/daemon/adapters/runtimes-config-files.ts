@@ -12,7 +12,7 @@
  * ({@link refuseWhileUnreadable}), so a stand-in is shown but never replaces a real document.
  */
 import type { ConfigCollectionDef, ConfigFileDef, ConfigPort } from '@ferretry/kernel/contract';
-import type { LoginsApi } from '@ferretry/plugin-logins/contract';
+import type { EnvironmentLoginTemplate, LoginsApi } from '@ferretry/plugin-logins/contract';
 import {
   MODEL_SET_ITEMS,
   PROFILE_ITEMS,
@@ -27,6 +27,8 @@ import { foreignComponentChanges, ownedFileEdits } from '../lib/account/runtimes
 import { assembleRuntimesModel, type RuntimesModel } from '../lib/account/runtimes-model.ts';
 import type { AccountModel } from '../lib/account/schema.ts';
 import { FleetCatalogRefusal, type FleetCatalogServiceDeps } from '../lib/service/catalog-service.ts';
+import { ownInstructionsSource } from './own-instructions-source.ts';
+import { type ComponentSourceLookup, readProfileComponents } from './profile-components.ts';
 import type { ConfigFilesPort } from './ports.ts';
 
 // The contract widens its config defs so `manifest.data.config` accepts them (`contract/config-def.ts`); these put the shapes back.
@@ -35,10 +37,15 @@ const profileItems = PROFILE_ITEMS as unknown as ConfigCollectionDef<ProfileFile
 const modelSetItems = MODEL_SET_ITEMS as unknown as ConfigCollectionDef<ModelSetFile>;
 const runtimesFile = RUNTIMES_CONFIG as unknown as ConfigFileDef<RuntimesFile>;
 
-/** What the evaluator reads: Runtimes' own files, and the logins Logins states. */
+/**
+ * What the evaluator reads: Runtimes' own files, the logins Logins states (and their environment templates), and the
+ * components the plugins that own the other kinds provide.
+ */
 export interface RuntimesConfigSources {
   readonly config: Pick<ConfigPort, 'collection' | 'file'>;
-  readonly logins: Pick<LoginsApi, 'list'>;
+  readonly logins: Pick<LoginsApi, 'list' | 'environmentTemplates'>;
+  /** Who provides each profile component source; read live on every load, never kept. */
+  readonly components: ComponentSourceLookup;
   /** Looks up, ahead of a read, the commands the read will ask about (`./command-cache.ts`). */
   readonly prime?: (model: AccountModel | undefined) => Promise<void>;
 }
@@ -60,12 +67,29 @@ function inconsistent(error: unknown): Error {
   return new Error(`the runtimes, profiles and model sets on this machine do not fit together: ${issues.join('; ')}`);
 }
 
+/** The environment logins' templates by login id, or `undefined` when Logins could not give them (fail closed). */
+async function loginTemplates(
+  logins: Pick<LoginsApi, 'environmentTemplates'>,
+): Promise<ReadonlyMap<string, EnvironmentLoginTemplate> | undefined> {
+  try {
+    return new Map((await logins.environmentTemplates()).map(template => [template.id, template]));
+  } catch {
+    return undefined;
+  }
+}
+
 export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesConfigFiles {
   let last: Awaited<ReturnType<ConfigFilesPort<AccountModel>['load']>> | undefined;
   let lastLogins: Awaited<ReturnType<LoginsApi['list']>>['logins'] | undefined;
 
-  const evaluate = (logins: NonNullable<typeof lastLogins>): NonNullable<typeof last> => {
+  // EVERY evaluation reads the owners' components and the login templates again: nothing of them is kept between reads
+  // (a cache refreshed by a watch showed a removed item for the length of the reload window).
+  const evaluate = async (logins: NonNullable<typeof lastLogins>): Promise<NonNullable<typeof last>> => {
     let assembled: RuntimesModel;
+    const [components, templates] = await Promise.all([
+      readProfileComponents(sources.components, ownInstructionsSource(sources.config)),
+      loginTemplates(sources.logins),
+    ]);
     try {
       assembled = assembleRuntimesModel({
         runtimes: sources.config.collection(runtimeItems),
@@ -73,6 +97,8 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
         modelSets: sources.config.collection(modelSetItems),
         settings: sources.config.file(runtimesFile),
         logins,
+        templates,
+        components,
       });
     } catch (error) {
       throw inconsistent(error);
@@ -90,21 +116,21 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
 
   const load = async (): Promise<NonNullable<typeof last>> => {
     lastLogins = (await sources.logins.list()).logins;
-    const loaded = evaluate(lastLogins);
+    const loaded = await evaluate(lastLogins);
     await sources.prime?.(loaded.evaluation.effective.model);
     return loaded;
   };
 
   return {
-    // The last load; the files are live, so only the part that needs Logins is reused.
-    inEffect: async () => (lastLogins === undefined ? await load() : evaluate(lastLogins)),
+    // The last load; the files and the owners' components are live, so only the login list is reused.
+    inEffect: async () => (lastLogins === undefined ? await load() : await evaluate(lastLogins)),
     load,
     editsFor: (loaded, next) => {
       const foreign = foreignComponentChanges(loaded.evaluation.effective.model, next);
       if (foreign.length > 0)
         throw new FleetCatalogRefusal(
           'fleet_change_refused',
-          `this change also edits ${foreign.join(', ')}, which another part of Ferretry owns and Runtimes cannot write yet; nothing was changed`,
+          `this change also edits ${foreign.join(', ')}, which another part of Ferretry owns or that Runtimes does not write through a change (edit its own file under config/); nothing was changed`,
         );
       return ownedFileEdits(loaded.evaluation.effective.model, next).map(edit => ({
         path: edit.path,

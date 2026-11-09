@@ -7,7 +7,11 @@ import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { ownedFileBodies, ownedFileEdits } from '../../../daemon/lib/account/runtimes-edits.ts';
-import { assembleRuntimesModel, type RuntimesFiles } from '../../../daemon/lib/account/runtimes-model.ts';
+import {
+  assembleRuntimesModel,
+  NO_COMPONENTS,
+  type RuntimesFiles,
+} from '../../../daemon/lib/account/runtimes-model.ts';
 
 const runtime = (overrides: Partial<RuntimeFile> = {}): RuntimeFile =>
   ({ login: 'claude-you', profile: 'default', agent: false, ...overrides }) as RuntimeFile;
@@ -20,6 +24,8 @@ const files = (overrides: Partial<RuntimesFiles> = {}): RuntimesFiles => ({
   modelSets: new Map([['heavy', { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' }]]),
   settings: undefined,
   logins: [sampleLogin('claude-you', { store: 'ferretry' })],
+  templates: new Map(),
+  components: NO_COMPONENTS,
   ...overrides,
 });
 
@@ -56,8 +62,8 @@ describe('the model Runtimes assembles from its own files', () => {
 
     expect(assembled.model.profiles.default?.layers).toEqual(['modelSets/heavy', 'mcp/github', 'settings/codex-guard']);
     expect(assembled.unreadable).toEqual([
-      'the mcp component "github" belongs to another part of Ferretry, which Runtimes cannot read',
-      'the settings component "codex-guard" belongs to another part of Ferretry, which Runtimes cannot read',
+      'the mcp component "github" could not be read from the part of Ferretry that owns it: no part of Ferretry provides these components yet',
+      'the settings component "codex-guard" could not be read from the part of Ferretry that owns it: no part of Ferretry provides these components yet',
     ]);
   });
 

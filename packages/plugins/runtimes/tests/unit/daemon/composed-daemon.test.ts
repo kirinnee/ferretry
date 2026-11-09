@@ -254,7 +254,7 @@ describe('a real apply through the composed daemon', () => {
 
     expect(staged.status).toBeGreaterThanOrEqual(400);
     expect(JSON.stringify(staged.json())).toContain('house-rules');
-    expect(JSON.stringify(staged.json())).toContain('another part of Ferretry owns');
+    expect(JSON.stringify(staged.json())).toContain('another part of Ferretry owns or that Runtimes does not write');
     expect(await readdir(world.fleet)).not.toContain('manifest.json');
   });
 

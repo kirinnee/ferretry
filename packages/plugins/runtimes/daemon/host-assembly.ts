@@ -19,7 +19,10 @@
  */
 import type { FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
+import type { HookInvoker } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
+import type { LoginsApi } from '@ferretry/plugin-logins/contract';
+import { PROFILE_COMPONENTS_KEY } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
@@ -193,10 +196,14 @@ export function fileAssembly(
       readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file'>;
     };
     readonly needs: {
-      readonly logins: FleetCatalogServiceDeps['credentials'] & Parameters<typeof fileFleetSetupDeps>[0]['logins'];
+      readonly logins: FleetCatalogServiceDeps['credentials'] &
+        Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
+        Pick<LoginsApi, 'environmentTemplates'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
       readonly ferrets: { list(): Promise<readonly { readonly state: FerretState }[]> };
     };
+    /** The hooks this plugin offers: the profile component sources the owning plugins take (read live, never kept). */
+    readonly hooks: Pick<HookInvoker, 'provider'>;
   },
   publication: FleetPublication,
 ): Pick<ReturnType<typeof assembleServices>, 'catalog' | 'setup'> {
@@ -209,6 +216,7 @@ export function fileAssembly(
   const config = runtimesConfigFiles({
     config: ctx.kernel.config,
     logins: ctx.needs.logins,
+    components: hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY),
     prime: async model => {
       const wanted = new Set<string>(HARNESS_COMMANDS);
       for (const component of Object.values(model?.components.mcp ?? {}))

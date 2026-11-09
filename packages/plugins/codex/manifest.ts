@@ -5,6 +5,7 @@ import {
   CODEX_CONFIG,
   CODEX_DISCOVERY,
   CODEX_FAST_CATALOG,
+  CODEX_HOOKS,
   CODEX_READ_MODELS,
   CODEX_ROLLOUTS,
   CODEX_LAUNCH_SETTINGS,
@@ -14,6 +15,11 @@ import {
 } from './contract/index.ts';
 import { cap } from '@ferretry/core-gate/contract';
 import { Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
+import {
+  PROFILE_COMPONENTS_KEY,
+  ProfileCodexHooksSource,
+  ProfileCodexSettingsSource,
+} from '@ferretry/plugin-runtimes/contract';
 
 /**
  * Codex (§2.3): a harness, the same way as Claude Code. It takes `harnesses:codex` from Ferrets and needs a `runners`
@@ -72,13 +78,19 @@ export default definePlugin({
 
   data: {
     state: [CODEX_AGENT_HOMES, CODEX_DISCOVERY, CODEX_FAST_CATALOG, CODEX_ROLLOUTS, CODEX_LAUNCH_SETTINGS],
-    config: [CODEX_CONFIG, CODEX_SETTINGS],
+    config: [CODEX_CONFIG, CODEX_SETTINGS, CODEX_HOOKS],
     readModels: CODEX_READ_MODELS,
     publishes: [CodexUpdateFinished],
   },
 
   hooks: {
-    takes: [{ hook: Harnesses, key: CODEX }, { hook: StartDecide }],
+    // Runtimes reads the Codex `settings` components a profile names through this plugin, which alone owns them.
+    takes: [
+      { hook: Harnesses, key: CODEX },
+      { hook: StartDecide },
+      { hook: ProfileCodexSettingsSource, key: PROFILE_COMPONENTS_KEY },
+      { hook: ProfileCodexHooksSource, key: PROFILE_COMPONENTS_KEY },
+    ],
   },
 
   onboarding: [{ id: 'harness', title: 'Codex', order: 21 }],

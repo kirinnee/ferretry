@@ -1,25 +1,34 @@
 /**
- * The account model as the Runtimes plugin can read it from the files it is given: its OWN files (`runtimes.yaml`,
- * `runtimes/<name>.yaml`, `profiles/<name>.yaml`, `model-sets/<name>.yaml`) and the facts Logins offers about each login.
+ * The account model as the Runtimes plugin can read it from what it is given: its OWN files (`runtimes.yaml`,
+ * `runtimes/<name>.yaml`, `profiles/<name>.yaml`, `model-sets/<name>.yaml`), the facts Logins offers about each login and
+ * its environment logins' variable templates, and the component documents the plugins that own the other kinds provide
+ * through the profile component source (`../../../contract/component-source.ts`).
  *
- * Today's evaluator (`assembleAccountModel`) read every fleet file from one folder. In 5.0 the folders belong to
- * several plugins and Runtimes may read only its own, so this assembles the same {@link AccountModel} from what it may
- * read and says, in `unreadable`, every part it had to stand in for:
+ * Today's evaluator (`assembleAccountModel`) read every fleet file from one folder. In 5.0 the folders belong to several
+ * plugins and Runtimes may read only its own, so this assembles the same {@link AccountModel} from what it may read and
+ * says, in `unreadable`, every part it had to stand in for:
  *
- *  - a login's `env` is a `${secret:NAME}` TEMPLATE in its file and the Logins view carries the secret's name, not the
- *    template, so an environment login is stood in for with the variables the view can state;
- *  - a layer naming a component of a kind another plugin owns (`instructions`, `mcp`, `skills`, `settings`, `hooks`)
- *    is kept in its profile, so an edit never drops it, and is stood in for by an empty component of that kind.
+ *  - an environment login whose templates Logins did not give is stood in for with the variables the login view can state;
+ *  - a layer naming a component of a kind (`instructions`, `mcp`, `skills`, `settings`, `hooks`) that NO provider answered
+ *    for, or whose provider failed or gave something that is not a component, is kept in its profile (so an edit never
+ *    drops it) and stood in for by an empty component of that kind.
  *
- * What stands in for something is NEVER written into a home: the caller refuses an apply while `unreadable` is not
- * empty (`../../adapters/runtimes-config-files.ts`), so a stand-in can be read and shown but can never replace a real
- * document on disk.
+ * What stands in for something is NEVER written into a home: the caller refuses an apply while `unreadable` is not empty
+ * (`../../adapters/runtimes-config-files.ts`), so a stand-in can be read and shown but can never replace a real document
+ * on disk. A kind whose owner answered is real: its components are in the model exactly as the owner projected them.
  *
  * Pure: no filesystem, no clock, no environment.
  */
 import { createHash } from 'node:crypto';
-import type { LoginView } from '@ferretry/plugin-logins/contract';
-import type { ModelSetFile, ProfileFile, RuntimeFile, RuntimesFile } from '../../../contract/index.ts';
+import type { EnvironmentLoginTemplate, LoginView } from '@ferretry/plugin-logins/contract';
+import {
+  PROFILE_COMPONENT_KINDS,
+  type ProfileComponentKind,
+  type ModelSetFile,
+  type ProfileFile,
+  type RuntimeFile,
+  type RuntimesFile,
+} from '../../../contract/index.ts';
 import { harnessKindOfKey, type HarnessKind } from '../manifest.ts';
 import {
   type AccountModel,
@@ -30,6 +39,16 @@ import {
   type Runtime,
 } from './schema.ts';
 
+/** What reading one kind of component from its owners came to. */
+export type KindReading =
+  /** Every source of the kind answered: its components, in the model's shape, by name. */
+  | { readonly state: 'read'; readonly components: ReadonlyMap<string, unknown> }
+  /** No source answered (none exists, it is off, it threw, or it gave something invalid): why, in a sentence of names and rules. */
+  | { readonly state: 'unread'; readonly reason: string };
+
+/** Every kind another plugin owns, as read at one moment. */
+export type ComponentReading = Readonly<Record<ProfileComponentKind, KindReading>>;
+
 /** Everything the model is assembled from. */
 export interface RuntimesFiles {
   readonly runtimes: ReadonlyMap<string, RuntimeFile>;
@@ -39,6 +58,10 @@ export interface RuntimesFiles {
   readonly settings: RuntimesFile | undefined;
   /** Logins' safe facts: never a token and never a `${secret:NAME}` template. */
   readonly logins: readonly LoginView[];
+  /** The environment logins' variable templates by login id; `undefined` when Logins could not give them. */
+  readonly templates: ReadonlyMap<string, EnvironmentLoginTemplate> | undefined;
+  /** The components the owning plugins provided, per kind. */
+  readonly components: ComponentReading;
 }
 
 /** What the files assemble to, and every part that is a stand-in rather than a document read. */
@@ -52,14 +75,18 @@ export interface RuntimesModel {
   readonly revision: string;
 }
 
-/** The kinds whose components another plugin owns. */
-const FOREIGN_KINDS = ['instructions', 'mcp', 'skills', 'settings', 'hooks'] as const;
-type ForeignKind = (typeof FOREIGN_KINDS)[number];
+/** Nothing read: what a caller that has no providers (a test of the pure part, an unavailable seam) gives. */
+export const NO_COMPONENTS: ComponentReading = Object.fromEntries(
+  PROFILE_COMPONENT_KINDS.map(kind => [
+    kind,
+    { state: 'unread', reason: 'no part of Ferretry provides these components yet' } as const,
+  ]),
+) as ComponentReading;
 
 /** The word a stand-in carries where a document would name a file, so nothing mistakes it for one. */
 const STAND_IN = 'not-read';
 
-const standIn = (kind: ForeignKind): unknown => {
+const standIn = (kind: ProfileComponentKind): unknown => {
   switch (kind) {
     case 'instructions':
       return { file: STAND_IN };
@@ -75,8 +102,11 @@ const standIn = (kind: ForeignKind): unknown => {
   }
 };
 
-/** A login as the model holds it, from the facts Logins states about it. */
-function credentialOf(view: LoginView): { readonly credential: Credential; readonly stoodIn: boolean } {
+/** A login as the model holds it, from the facts Logins states about it and, for an environment login, its templates. */
+function credentialOf(
+  view: LoginView,
+  template: EnvironmentLoginTemplate | undefined,
+): { readonly credential: Credential; readonly stoodIn: boolean } {
   const harness: HarnessKind = harnessKindOfKey(view.harness);
   const disabled =
     view.disabled === undefined || view.disabled.source !== 'login'
@@ -96,8 +126,23 @@ function credentialOf(view: LoginView): { readonly credential: Credential; reado
     ...disabled,
   };
   if (view.store !== 'environment') return { credential: base as Credential, stoodIn: false };
-  // An environment login: the variables the view states. A secret's template is not among them, so the variable is
-  // given as a reference to the one secret it names; a login that cannot be stated at all gets one empty variable.
+  if (template?.kind === 'templates') {
+    // The login's own templates, as Logins gave them: a secret is a `${secret:NAME}` reference, never a value.
+    return {
+      credential: {
+        ...base,
+        ...(template.env === undefined ? {} : { env: template.env }),
+        ...(template.preset === undefined ? {} : { preset: template.preset }),
+        ...(template.cloudCredential === undefined ? {} : { cloudCredential: template.cloudCredential }),
+        ...(template.codexProvider === undefined ? {} : { codexProvider: template.codexProvider }),
+        ...(template.claude === undefined ? {} : { claude: template.claude }),
+        ...(template.codex === undefined ? {} : { codex: template.codex }),
+      } as Credential,
+      stoodIn: false,
+    };
+  }
+  // No templates: the variables the view states. A secret's template is not among them, so the variable is given as a
+  // reference to the one secret it names; a login that cannot be stated at all gets one empty variable.
   const env: Record<string, string> = {};
   for (const variable of view.environment?.variables ?? []) {
     if (variable.kind === 'plain') env[variable.name] = variable.value;
@@ -130,14 +175,18 @@ const modelSetOf = (file: ModelSetFile): ModelSetComponent => ({
 });
 
 /** The layers every profile names whose component another plugin owns, as `kind/name`. */
-function foreignLayers(profiles: ReadonlyMap<string, ProfileFile>): ReadonlyMap<ForeignKind, ReadonlySet<string>> {
-  const named = new Map<ForeignKind, Set<string>>(FOREIGN_KINDS.map(kind => [kind, new Set<string>()]));
+function foreignLayers(
+  profiles: ReadonlyMap<string, ProfileFile>,
+): ReadonlyMap<ProfileComponentKind, ReadonlySet<string>> {
+  const named = new Map<ProfileComponentKind, Set<string>>(
+    PROFILE_COMPONENT_KINDS.map(kind => [kind, new Set<string>()]),
+  );
   for (const profile of profiles.values()) {
     for (const layer of profile.contents) {
       const reference = parseLayerReference(layer);
       if (reference?.kind !== 'component') continue;
-      if ((FOREIGN_KINDS as readonly string[]).includes(reference.componentKind))
-        named.get(reference.componentKind as ForeignKind)?.add(reference.name);
+      if ((PROFILE_COMPONENT_KINDS as readonly string[]).includes(reference.componentKind))
+        named.get(reference.componentKind as ProfileComponentKind)?.add(reference.name);
     }
   }
   return named;
@@ -145,28 +194,39 @@ function foreignLayers(profiles: ReadonlyMap<string, ProfileFile>): ReadonlyMap<
 
 /**
  * Assembles the model. Throws the account model's `ZodError` when a cross-file rule fails (a runtime naming a login or
- * profile that is not there): the caller words it as the files' own problem.
+ * profile that is not there, a layer naming a component its owner does not have): the caller words it as the files' own
+ * problem.
  */
 export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
   const unreadable: string[] = [];
   const credentials: Record<string, Credential> = {};
   for (const view of files.logins) {
-    const { credential, stoodIn } = credentialOf(view);
+    const template = files.templates?.get(view.id as string);
+    const { credential, stoodIn } = credentialOf(view, template);
     credentials[view.id as string] = credential;
     if (stoodIn)
       unreadable.push(
         `login "${view.id as string}" keeps its variables as ` +
-          '${secret:NAME} templates, which Logins does not show to Runtimes',
+          (template?.kind === 'withheld'
+            ? '${secret:NAME} templates, which Logins withheld (its file is not a clean, checked version)'
+            : '${secret:NAME} templates, which Logins did not give to Runtimes'),
       );
   }
   const components: Record<string, Record<string, unknown>> = {
     modelSets: Object.fromEntries([...files.modelSets].map(([name, file]) => [name, modelSetOf(file)])),
   };
   for (const [kind, names] of foreignLayers(files.profiles)) {
+    const reading = files.components[kind];
+    if (reading.state === 'read') {
+      // The owner's components, as it projected them. A name a layer uses that the owner does not have is a real gap in
+      // the machine's files, which the cross-reference rules below refuse by name.
+      components[kind] = Object.fromEntries(reading.components);
+      continue;
+    }
     components[kind] = Object.fromEntries([...names].map(name => [name, standIn(kind)]));
     for (const name of [...names].toSorted((left, right) => left.localeCompare(right)))
       unreadable.push(
-        `the ${kind} component "${name}" belongs to another part of Ferretry, which Runtimes cannot read`,
+        `the ${kind} component "${name}" could not be read from the part of Ferretry that owns it: ${reading.reason}`,
       );
   }
   const document = {

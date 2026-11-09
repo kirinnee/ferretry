@@ -10,8 +10,15 @@ import {
 import { audit, cap } from '@ferretry/core-gate/contract';
 import {
   FerretsPort,
+  INSTRUCTION_ITEMS,
   MODEL_SET_ITEMS,
   PROFILE_ITEMS,
+  ProfileClaudeHooksSource,
+  ProfileClaudeSettingsSource,
+  ProfileCodexHooksSource,
+  ProfileCodexSettingsSource,
+  ProfileMcpSource,
+  ProfileSkillsSource,
   RUNTIME_ITEMS,
   RUNTIMES_AUDIT,
   RUNTIMES_CONFIG,
@@ -241,7 +248,7 @@ export default definePlugin({
   },
 
   data: {
-    config: [RUNTIMES_CONFIG, RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS],
+    config: [RUNTIMES_CONFIG, RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS, INSTRUCTION_ITEMS],
     readModels: RUNTIMES_READ_MODELS,
     publishes: [RuntimesChanged, RuntimesDefaultChanged, RuntimesLaunchFailed],
     // An ended Codex ferret's runtime has its app-server pair stopped, and a Codex that could not start offline says so.
@@ -252,7 +259,20 @@ export default definePlugin({
 
   // Logins asks which runtimes use a login before it removes one; Runtimes is the only plugin that knows.
   // Ferrets asks whether an automatic resume may spend (W2-a); only this plugin's own yes resumes anything.
-  hooks: { takes: [{ hook: LoginsUsedBy, key: 'runtimes' }, { hook: AutoResumeDecide }] },
+  // Runtimes OFFERS the profile component sources (`contract/component-source.ts`): the plugin that owns a kind of
+  // component provides Runtimes' read of it, so Runtimes reads no other plugin's config. Taking a hook is an edge from the
+  // offerer, so Runtimes starts before each owner; Runtimes needs none of them, so there is no cycle.
+  hooks: {
+    takes: [{ hook: LoginsUsedBy, key: 'runtimes' }, { hook: AutoResumeDecide }],
+    offers: [
+      { hook: ProfileMcpSource },
+      { hook: ProfileSkillsSource },
+      { hook: ProfileClaudeSettingsSource },
+      { hook: ProfileCodexSettingsSource },
+      { hook: ProfileClaudeHooksSource },
+      { hook: ProfileCodexHooksSource },
+    ],
+  },
 
   onboarding: [{ id: 'runtimes', title: 'Name your runtimes', order: 40 }],
   doctor: ['runtimes-config'],

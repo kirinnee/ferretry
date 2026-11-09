@@ -4,6 +4,7 @@ import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferre
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { PROFILE_COMPONENTS_KEY, ProfileMcpSource } from '@ferretry/plugin-runtimes/contract';
 import {
   MCP_AUDIT,
   MCP_CONFIG,
@@ -198,7 +199,8 @@ export default definePlugin({
   },
 
   hooks: {
-    takes: [{ hook: LaunchParts }],
+    // Runtimes reads the `mcp` components a profile names through this plugin, which alone owns them (its `takers` list).
+    takes: [{ hook: LaunchParts }, { hook: ProfileMcpSource, key: PROFILE_COMPONENTS_KEY }],
   },
 
   doctor: ['mcp-inventory'],

@@ -1,10 +1,14 @@
-import type { ConfigFileDef } from '@ferretry/kernel/contract';
+import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import {
   CODEX_CONFIG,
   CODEX_DISCOVERY,
   CODEX_FAST_CATALOG,
+  CODEX_HOOKS,
+  CODEX_SETTINGS,
+  type HooksItem,
+  type SettingsItem,
   CodexUpdateFinished,
   type CodexApi,
   type Discovery,
@@ -21,6 +25,7 @@ import { CodexAppServerCatalog } from './adapters/app-server-catalog.ts';
 import { HeldFastCatalog } from './adapters/held-catalog.ts';
 import { codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
 import { fastStartDecision } from './lib/fast-mode.ts';
+import { codexHooksSource, codexSettingsSource } from './lib/profile-components.ts';
 import { codexProjectApprovals } from './lib/project-approvals.ts';
 
 /** The one job that reads the held catalog: once at boot, then each time a fast start finds it missing or stale. */
@@ -143,6 +148,13 @@ export default implementDaemon(manifest, {
       // answers `not-taken` for a Codex launch without asking, so this is the contract's answer, not MCP's gate.
       provides: { codex: { view, discovery, approvedProjectServers: codexProjectApprovals } },
       hooks: {
+        // Runtimes' read of the `settings` components a profile names for Codex: this plugin's own items, live, no cache.
+        'runtimes.components.settings.codex:components': codexSettingsSource(() =>
+          kernel.config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>),
+        ),
+        'runtimes.components.hooks.codex:components': codexHooksSource(() =>
+          kernel.config.collection(CODEX_HOOKS as ConfigCollectionDef<HooksItem>),
+        ),
         'start.decide': async input => {
           // Only a fast Codex start looks at the catalog; any other start is answered without touching it.
           if (input.harness !== 'codex' || input.fast !== true) return fastStartDecision(input, () => undefined);

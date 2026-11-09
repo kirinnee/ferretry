@@ -21,6 +21,7 @@ import {
   type Discovery,
   type HarnessCliView,
   type HarnessConfig,
+  HooksItemSchema,
   SettingsItemSchema,
 } from './wire.ts';
 
@@ -170,6 +171,17 @@ export const CODEX_SETTINGS = configDef(
     collection: 'codex/settings',
     name: ITEM_NAME,
     schema: SettingsItemSchema,
+    axis: 'configure',
+    loosens: neverLoosens,
+  }),
+);
+
+/** `config/codex/hooks/<name>.yaml`. Same shape as Claude Code's hooks items; Runtimes renders them as the runtime's `hooks.json`. */
+export const CODEX_HOOKS = configDef(
+  defineConfig({
+    collection: 'codex/hooks',
+    name: ITEM_NAME,
+    schema: HooksItemSchema,
     axis: 'configure',
     loosens: neverLoosens,
   }),

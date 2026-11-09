@@ -114,12 +114,12 @@ describe('the composed catalogue and setup', () => {
     const world = await fleetWorld();
     const { kernel } = kernelOver(world);
     const needs = {
-      logins: { list: async () => ({ logins: [] }) },
+      logins: { list: async () => ({ logins: [] }), environmentTemplates: async () => [] },
       loginChanges: {},
       ferrets: { list: async () => [] },
     } as never;
 
-    const services = fileAssembly({ kernel, needs }, new FleetPublication());
+    const services = fileAssembly({ kernel, needs, hooks: { provider: () => 'unavailable' } }, new FleetPublication());
 
     const machine = await services.catalog.machine(undefined);
     expect(machine).toMatchObject({ format: 'none' });

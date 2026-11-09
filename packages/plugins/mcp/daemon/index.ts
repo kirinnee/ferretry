@@ -23,6 +23,7 @@ import {
 import { McpDocumentUnreadable, McpInventoryService } from './lib/inventory/service.ts';
 import { ProjectMcpLaunch } from './lib/inventory/project-sign-in.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
+import { mcpComponentSource } from './lib/profile-component-source.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
 import { SessionMcpService } from './lib/session/service.ts';
 import { inventoryRoutes, oauthRoutes, sessionRoutes } from './routes.ts';
@@ -295,6 +296,8 @@ export default implementDaemon(manifest, {
       provides: { mcp: api },
       hooks: {
         'launch.parts': () => [{ id: 'mcp', item: launch }],
+        // Runtimes' read of the `mcp` components a profile names: this plugin's own items, live, no cache.
+        'runtimes.components.mcp:components': mcpComponentSource(items),
       },
     };
   },

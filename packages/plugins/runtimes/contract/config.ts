@@ -144,6 +144,22 @@ export const ModelSetFileSchema = z
   });
 export type ModelSetFile = z.infer<typeof ModelSetFileSchema>;
 
+/**
+ * `config/instructions/<name>.yaml`: an instructions component, the text a harness reads as its system guidance
+ * (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex). No other plugin owns these files, so Runtimes does. The text is in
+ * the file (`text`), not in a document beside it, so a read is one live read of one file. `harness` narrows it to one
+ * harness (K3); absent, every harness gets it.
+ */
+export const InstructionsFileSchema = z.strictObject({
+  description: z.string().optional(),
+  text: z.string().min(1).max(200_000),
+  harness: HarnessKeySchema.optional(),
+  clonedFrom: NonEmptyStringSchema.optional(),
+  clonedFromDaemon: NonEmptyStringSchema.optional(),
+  clonedFromKey: NonEmptyStringSchema.optional(),
+});
+export type InstructionsFile = z.infer<typeof InstructionsFileSchema>;
+
 // ─── loosening (§7.2) ──────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
