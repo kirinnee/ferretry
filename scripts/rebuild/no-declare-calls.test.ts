@@ -49,6 +49,13 @@ function declareIdentifiers(file: string, source: string): readonly string[] {
   return found;
 }
 
+test('the guard flags a declare call, an escaped spelling of the name and a bare statement, and lets a property name through', () => {
+  expect(declareIdentifiers('a.ts', 'declare();')).toHaveLength(1);
+  expect(declareIdentifiers('a.ts', 'd\\u0065clare();')).toHaveLength(1);
+  expect(declareIdentifiers('a.ts', 'declare = 1;')).toHaveLength(1);
+  expect(declareIdentifiers('a.ts', 'const o = { declare: 1 }; o.declare;')).toEqual([]);
+});
+
 test('no script under scripts/ uses an identifier named declare (Bun 1.3.x erases a statement that starts with it)', async () => {
   const offenders: string[] = [];
   for await (const path of new Bun.Glob('scripts/**/*.{ts,tsx}').scan({ cwd: root, absolute: true })) {

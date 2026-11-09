@@ -277,7 +277,7 @@ test('BG-060 a ticked route row that REOWNED moves keeps its test path on regene
   expect(f.run().exitCode).toBe(0);
   expect(f.rows().find(row => row.what === what)).toMatchObject({
     owner: 'ferrets',
-    check: expect.not.stringContaining(testPath),
+    check: 'descriptor-parity',
     status: '[ ]',
   });
 });
