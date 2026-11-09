@@ -291,6 +291,8 @@ describe('a real apply through the composed daemon', () => {
     const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
 
     expect(staged.status).toBeGreaterThanOrEqual(400);
+    // The stand-in's own sentence (a layer that names no component at all would be refused in other words).
+    expect(JSON.stringify(staged.json())).toContain('belongs to another part of Ferretry');
     expect(JSON.stringify(staged.json())).toContain('hooks component');
     expect(JSON.stringify(staged.json())).toContain('guard');
   });
