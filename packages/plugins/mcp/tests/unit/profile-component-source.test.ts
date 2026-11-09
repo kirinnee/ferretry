@@ -41,6 +41,8 @@ describe('the mcp profile component source', () => {
 
     const first = (await source.read('github')) as { args: string[] };
     first.args.push('--tampered');
+    // What a reader does to what it was given never reaches the item the plugin holds.
+    expect(await source.read('github')).toMatchObject({ args: ['--stdio'] });
     held.set('github', { command: 'github-mcp', args: ['--second'] } as McpItem);
     const second = await source.read('github');
     held.delete('github');
