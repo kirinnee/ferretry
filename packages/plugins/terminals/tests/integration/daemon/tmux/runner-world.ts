@@ -2,8 +2,8 @@ import type { RunnerHandle } from '@ferretry/core-ferrets/contract';
 import type { InputHolds, Redaction } from '@ferretry/kernel/contract';
 import { type ActRecord, testActRunner, TestMintedIds } from '@ferretry/kernel/testing';
 import { TmuxRunner } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
-import { FakeTmuxServer } from '../../../integration/daemon/support/fake-tmux-server.ts';
-import { scriptWords } from '../../../integration/daemon/support/script-words.ts';
+import { FakeTmuxServer } from '../support/fake-tmux-server.ts';
+import { scriptWords } from '../support/script-words.ts';
 
 // This fixture is an in-memory composer; no tmux process or real sleep is used.
 export function subject(options: { readonly unguarded?: boolean; readonly redaction?: Redaction } = {}) {

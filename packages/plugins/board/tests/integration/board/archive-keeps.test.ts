@@ -16,7 +16,7 @@ import { BoardPort, type Card, CardCreateRequestSchema } from '../../../contract
 import daemon from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
 import type { LaneSets } from '../../../daemon/lib/board/index.ts';
-import { card, lanes, OTHER_PROJECT, PROJECT } from './support.ts';
+import { card, lanes, OTHER_PROJECT, PROJECT } from '../../support/board.ts';
 
 /**
  * Board's half of `session.archive-keeps` (ruling #46). The archive is OFF by default today and in 5.0 (no `afterHours`

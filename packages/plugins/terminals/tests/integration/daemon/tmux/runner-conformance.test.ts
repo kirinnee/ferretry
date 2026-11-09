@@ -4,8 +4,8 @@ import type { InputHolds } from '@ferretry/kernel/contract';
 import { testActRunner, TestMintedIds } from '@ferretry/kernel/testing';
 import { TmuxRunner } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
 import type { TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
-import { FakeTmuxServer } from '../../../integration/daemon/support/fake-tmux-server.ts';
-import { scriptWords } from '../../../integration/daemon/support/script-words.ts';
+import { FakeTmuxServer } from '../support/fake-tmux-server.ts';
+import { scriptWords } from '../support/script-words.ts';
 
 /** One pane of the in-memory tmux world: its facts, and the composer model that answers its reads and keys. */
 interface WorldPane {

@@ -2,8 +2,9 @@ import { afterEach, describe, it } from 'bun:test';
 import { access, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { err } from '@ferretry/std';
 import should from 'should';
-import { diskSessionsRoot } from '@ferretry/kernel/testing';
+import { diskRoot, diskSessionsRoot } from '@ferretry/kernel/testing';
 import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
@@ -119,6 +120,51 @@ describe('FileSessionEnvironmentStore', () => {
     // Assert: the failure propagates and the plaintext temporary does not linger beside it.
     should(failure).be.instanceOf(Error);
     should(await readdir(directory)).eql(['environment.json']);
+  });
+
+  it('should refuse a damaged document without quoting it, since the file holds a credential', async () => {
+    // Arrange: the folder exists after a first read; then the file is cut off mid-secret, and then it is the wrong shape.
+    const { store, directory } = await subject();
+    await store.read(SESSION);
+    await writeFile(join(directory, 'environment.json'), '{"FY_SESSION_TOKEN":"super-secret-token');
+    const cut = await rejection(store.read(SESSION));
+    await writeFile(join(directory, 'environment.json'), '{"FY_SESSION_TOKEN":42}');
+
+    // Act
+    const wrong = await rejection(store.read(SESSION));
+
+    // Assert
+    for (const failure of [cut, wrong]) {
+      should(failure.message).equal(`the session environment of ${SESSION} is not a valid environment document`);
+      should(failure.message).not.containEql('super-secret-token');
+    }
+  });
+
+  it('should refuse to keep a session’s credential anywhere but the internal sessions root', async () => {
+    // Arrange: a person's own work folder is a real root, but never this store's.
+    const home = await mkdtemp(join(tmpdir(), 'fy-environment-store-'));
+    homes.add(home);
+    const { root } = await diskRoot(home);
+
+    // Act
+    const build = () => new FileSessionEnvironmentStore(root, SESSION);
+
+    // Assert
+    should(build).throw(/internal sessions root only/);
+  });
+
+  it('should refuse to make its folder when the root says the folder is outside it', async () => {
+    // Arrange
+    const home = await mkdtemp(join(tmpdir(), 'fy-environment-store-'));
+    homes.add(home);
+    const { root } = await diskSessionsRoot(home, SESSION);
+    const lost = { ...root, resolve: () => err('outside' as const) } as typeof root;
+
+    // Act
+    const failure = await rejection(new FileSessionEnvironmentStore(lost, SESSION).read(SESSION));
+
+    // Assert
+    should(failure.message).match(/session folder is outside its root/);
   });
 
   it('should write and read back one environment', async () => {
