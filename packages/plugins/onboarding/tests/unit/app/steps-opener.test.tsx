@@ -64,16 +64,22 @@ async function open(already: readonly string[], address = '/') {
   const harness = deviceViewHarness({ plugin: 'onboarding', fragments: [] });
   harness.setPaired(already);
   const went: string[] = [];
+  const replaced: (boolean | undefined)[] = [];
   const View = createStepsOpener();
   view = await mount(
     <RouterProvider screens={[FIRST_RUN]}>
       <harness.Harness>
-        <View navigate={to => void went.push(to)} />
+        <View
+          navigate={(to, options) => {
+            went.push(to);
+            replaced.push(options?.replace);
+          }}
+        />
       </harness.Harness>
     </RouterProvider>,
   );
   await settle();
-  return { harness, went };
+  return { harness, went, replaced };
 }
 
 /** A machine joins the paired list while the tab is open and its row comes. */
@@ -103,6 +109,14 @@ describe('m2 a just-paired machine opens its steps page by itself', () => {
     await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
     expect(went).toHaveLength(1);
     expect(b.calls).toEqual(['GET /v1/onboarding']);
+  });
+
+  it('m2 opens by REPLACING the entry Access navigated to, so Back never lands on a second one', async () => {
+    const b = machineClient(B, 'pending');
+    const { harness, went, replaced } = await open([]);
+    await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
+    expect(went).toHaveLength(1);
+    expect(replaced).toEqual([true]);
   });
 
   it('opens nothing for a machine already paired when the view first drew, and never reads it', async () => {

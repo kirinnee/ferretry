@@ -270,6 +270,10 @@ describe('the /pair page', () => {
     for (const bad of ['/..', '/.', '/a/..', '/a/../b', '/./a', '/a/.', '/../a', '/%2e%2e']) {
       expect(returnPathOf(`${PAGE}?return=${encodeURIComponent(bad)}`)).toBeUndefined();
     }
+    // Raw, not re-encoded: the address reader decodes `%2e` to a real dot, so these ARE dot segments by then.
+    for (const raw of ['/%2e%2e', '/%2E%2e/x', '/a/%2e', '/a/%2E%2e/b', '/.%2e']) {
+      expect(returnPathOf(`${PAGE}?return=${raw}`)).toBeUndefined();
+    }
     for (const good of ['/..a', '/a..', '/.well-known/x', '/a.b/c', '/...']) {
       expect(returnPathOf(`${PAGE}?return=${encodeURIComponent(good)}`)).toBe(good);
     }

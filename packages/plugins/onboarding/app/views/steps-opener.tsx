@@ -8,7 +8,11 @@
  *   opens the page; a machine with nothing pending, a locked one (nothing may prompt) and a failed read open nothing.
  * - The first run owns the screen it draws: while the person is on `/onboarding` the journey's own last stage (Open
  *   your fleet) is the way to the same page, so nothing moves under them.
- * - Each machine is decided once. Opening is a navigation, never a write: nothing is answered or recorded.
+ * - Each machine is decided once. Opening is a navigation, never a write: nothing is answered or recorded. It REPLACES
+ *   the entry Access navigated to (v4 went to setup instead of home), so Back never lands on a second one.
+ * - DIFFERENCE FROM v4 (declared as GAP(onboarding-steps)): v4 asked the machine whether it was set up (`setUp`) and
+ *   skipped one that was. That fact is Runtimes' (`MachineView.setUp`), and Onboarding has no edge to Runtimes, so
+ *   "not set up" here means a step with no recorded answer.
  */
 
 import { type DeviceViewProps, useDevicePaired, useEveryDaemon, useOptionalRouter } from '@ferretry/app';
@@ -45,7 +49,7 @@ export function createStepsOpener() {
           .then(
             view => {
               if (where.current || !view.steps.some(step => step.state === 'pending')) return;
-              go.current(stepsHref(row.daemon));
+              go.current(stepsHref(row.daemon), { replace: true });
             },
             () => {
               // A machine that cannot say what is left opens nothing: the Setup tab is still the way there.

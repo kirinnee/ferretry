@@ -8,7 +8,7 @@
 export { createStepsOpener } from './steps-opener.tsx';
 export { createSetupTab, createStepsScreen } from './steps-screen.tsx';
 
-import { type DaemonlessPorts, type DaemonlessScreenProps } from '@ferretry/app';
+import type { DaemonlessPorts, DaemonlessScreenProps } from '@ferretry/app';
 import { browserClipboardWriter, Button } from '@ferretry/app/ui';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { detectDeviceKind } from '../device-kind.ts';

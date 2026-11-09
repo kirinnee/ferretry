@@ -11,7 +11,8 @@
  * placeholder inside a script cannot pass it and ship blocked.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 
@@ -19,6 +20,7 @@ const here = (relative: string): string => fileURLToPath(new URL(relative, impor
 
 export const GET_STARTED_PAGE = here('../../plugins/onboarding/app/get-started/index.html');
 export const HEADERS_FILE = here('../public/_headers');
+export const PUBLIC_DIR = here('../public');
 
 /** The page's inline scripts, exactly as the browser hashes them (the text between the tags). */
 export const inlineScriptsOf = (page: string): readonly string[] =>
@@ -41,11 +43,39 @@ export const unlistedScriptHashes = (page: string, headers: string): readonly st
     .filter(hash => !allowed.split(/\s+/u).includes(hash));
 };
 
+/** The `'sha256-…'` entries the policy lists in `script-src`. */
+export const listedScriptHashes = (headers: string): readonly string[] =>
+  (scriptSrcOf(headers) ?? '').split(/\s+/u).filter(entry => entry.startsWith("'sha256-"));
+
+/**
+ * The hashes the policy lists that NO page uses. An allowance nobody owns lets one exact old script run on every page,
+ * and the missing-hash check can never see it.
+ */
+export const unusedScriptHashes = (pages: readonly string[], headers: string): readonly string[] => {
+  const used = new Set(pages.flatMap(page => inlineScriptsOf(page).map(cspHashOf)));
+  return listedScriptHashes(headers).filter(hash => !used.has(hash));
+};
+
+/** Every `.html` file under `dir` (the pages copied verbatim from `public/`), as `[path relative to dir, text]`. */
+export const htmlPagesUnder = (dir: string): readonly (readonly [string, string])[] => {
+  const found: [string, string][] = [];
+  const walk = (current: string): void => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.html')) found.push([relative(dir, full), readFileSync(full, 'utf8')]);
+    }
+  };
+  walk(dir);
+  return found;
+};
+
 export interface GetStartedPageOptions {
   readonly version: string;
-  /** The page's source and the headers file; the real ones unless a suite plants others. */
+  /** The page's source, the headers file and the `public/` directory; the real ones unless a suite plants others. */
   readonly pagePath?: string;
   readonly headersPath?: string;
+  readonly publicDir?: string;
 }
 
 /** What the build hands `generateBundle` that this check reads: the emitted files by name. */
@@ -70,6 +100,7 @@ const htmlSourceOf = (name: string, file: EmittedBundle[string] | undefined): st
 export function getStartedPagePlugin(options: GetStartedPageOptions): Plugin {
   const pagePath = options.pagePath ?? GET_STARTED_PAGE;
   const headersPath = options.headersPath ?? HEADERS_FILE;
+  const publicDir = options.publicDir ?? PUBLIC_DIR;
   return {
     name: 'fy-get-started-page',
     apply: 'build',
@@ -82,6 +113,8 @@ export function getStartedPagePlugin(options: GetStartedPageOptions): Plugin {
         const source = htmlSourceOf(name, file);
         if (source !== undefined) pages.push([name, source]);
       }
+      // Pages copied from `public/` never enter the bundle, but the main policy serves them all the same.
+      for (const [name, source] of htmlPagesUnder(publicDir)) pages.push([name, source]);
       for (const [name, source] of pages) {
         const unlisted = unlistedScriptHashes(source, headers);
         if (unlisted.length > 0)
@@ -91,6 +124,15 @@ export function getStartedPagePlugin(options: GetStartedPageOptions): Plugin {
               `blocks the script and the page does nothing.`,
           );
       }
+      const unused = unusedScriptHashes(
+        pages.map(([, source]) => source),
+        headers,
+      );
+      if (unused.length > 0)
+        this.error(
+          `The script-src in packages/app/public/_headers lists ${unused.join(' ')}, which no page the build emits ` +
+            `uses: remove it (an allowance with no owner lets one exact old script run on every page).`,
+        );
       this.emitFile({ type: 'asset', fileName: 'get-started/index.html', source: stamped });
     },
   };

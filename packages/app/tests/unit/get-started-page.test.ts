@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ import {
   inlineScriptsOf,
   scriptSrcOf,
   unlistedScriptHashes,
+  unusedScriptHashes,
 } from '../../scripts/get-started-page.ts';
 import config from '../../vite.config.ts';
 
@@ -26,6 +27,10 @@ const headers = readFileSync(HEADERS_FILE, 'utf8');
 const release = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../../../release.json', import.meta.url)), 'utf8'),
 ) as { version: string };
+
+const landing = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8');
+const asBundle = (pages: Record<string, string>): Bundle =>
+  Object.fromEntries(Object.entries(pages).map(([name, source]) => [name, { type: 'asset', fileName: name, source }]));
 
 const inlineScripts = inlineScriptsOf(page);
 const scriptSrc = scriptSrcOf(headers);
@@ -91,7 +96,7 @@ describe('S14 the get-started page', () => {
           candidate.name === 'fy-get-started-page',
       );
     expect(plugin).toBeDefined();
-    const { emitted, error } = build(plugin as BuildPlugin);
+    const { emitted, error } = build(plugin as BuildPlugin, asBundle({ 'index.html': landing }));
     expect(error).toBeUndefined();
     expect(emitted).toHaveLength(1);
     expect(emitted[0]?.fileName).toBe('get-started/index.html');
@@ -125,12 +130,7 @@ describe('S14 the get-started page', () => {
 });
 
 describe('S14 m3 every HTML page the build emits is checked, not just this one', () => {
-  const landing = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8');
   const real = () => getStartedPagePlugin({ version: release.version }) as unknown as BuildPlugin;
-  const asBundle = (pages: Record<string, string>): Bundle =>
-    Object.fromEntries(
-      Object.entries(pages).map(([name, source]) => [name, { type: 'asset', fileName: name, source }]),
-    );
 
   it('the landing page’s inline scripts (its paired-device redirect among them) are all listed in script-src', () => {
     expect(inlineScriptsOf(landing).length).toBeGreaterThan(0);
@@ -158,10 +158,43 @@ describe('S14 m3 every HTML page the build emits is checked, not just this one',
     expect(error).toContain('The app/index.html page');
     expect(error).toContain(cspHashOf('alert(1)'));
     const notAPage: Bundle = {
+      ...asBundle({ 'index.html': landing }),
       'assets/app.js': { type: 'chunk', source: rogue },
       'a.txt': { type: 'asset', source: rogue },
     };
     expect(build(real(), notAPage).error).toBeUndefined();
+  });
+
+  it('m1 a planted UNUSED hash in script-src fails the build, naming it, and emits nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fy-get-started-'));
+    try {
+      const stale = "'sha256-+wiRIqS9x5FvDCgblRWdz5D6qiFnSdt9s0Fren/SWoo='";
+      const planted = join(dir, '_headers');
+      writeFileSync(planted, headers.replace("script-src 'self'", `script-src 'self' ${stale}`));
+      const plugin = getStartedPagePlugin({ version: release.version, headersPath: planted });
+      const { error, emitted } = build(plugin as unknown as BuildPlugin, asBundle({ 'index.html': landing }));
+      expect(error).toContain(stale);
+      expect(error).toContain('no page');
+      expect(emitted).toEqual([]);
+      expect(unusedScriptHashes([landing, page], headers)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('m1 a planted inline script in a public/ page with no hash fails the build, naming the page', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fy-get-started-'));
+    try {
+      mkdirSync(join(dir, 'oauth'));
+      writeFileSync(join(dir, 'oauth', 'planted.html'), '<script>alert(1)</script>');
+      const plugin = getStartedPagePlugin({ version: release.version, publicDir: dir });
+      const { error, emitted } = build(plugin as unknown as BuildPlugin, asBundle({ 'index.html': landing }));
+      expect(error).toContain('The oauth/planted.html page');
+      expect(error).toContain(cspHashOf('alert(1)'));
+      expect(emitted).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('n2 hashes the STAMPED page: a placeholder inside a script cannot pass on the strength of its unstamped text', () => {
