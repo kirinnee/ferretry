@@ -280,8 +280,8 @@ READS as v4's accepted text for it. That is an in-memory override: no copy of an
 other file is read from v4 itself, read-only. A login file's enforced text carries `${secret:NAME}` with the SAME name
 the live file got, or, when v4 enforced a different key than the one now sealed, no record is written for it (held). If
 the enforced conversion cannot run, or a step fails in it, no record is written for any file, the `accepted-config` step
-fails and the conversion is incomplete (it never falls back to the current text). The kernel then judges the file on disk against the enforced record
-and holds a loosening, enforcing the v4-enforced version. A held DELETION leaves the v5 file absent but records the
+fails and the conversion is incomplete (it never falls back to the current text). The kernel then judges the file on
+disk against the enforced record and holds a loosening, enforcing the v4-enforced version. A held DELETION leaves the v5 file absent but records the
 enforced text, and the kernel treats a missing file with a record as a deletion (held when it loosens). Where v4 enforced
 nothing for a file (never accepted) no record is carried, and if v4's record is damaged, nothing is recorded. A file with
 no held edit is unchanged. The report names the held files.

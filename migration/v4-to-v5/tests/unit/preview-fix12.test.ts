@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CONFIG_STEPS, convert } from '../../src/convert.ts';
 import { acceptedConfigStep } from '../../src/steps/accepted-config.ts';
-import { loginKeysStep } from '../../src/steps/login-keys.ts';
+import { STEPS as ALL_STEPS } from '../../src/steps/index.ts';
+import { LoginKeyHold, loginKeysStep } from '../../src/steps/login-keys.ts';
 import { vaultStep } from '../../src/steps/secrets.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
 import { listV4Config, readV4Yaml } from '../../src/v4/config.ts';
@@ -155,13 +156,32 @@ test('MINOR-1 a held file and the conversion not available at all: the step fail
   expect(await records()).toEqual([]);
 });
 
-test('the dry pass runs exactly the steps that write config', async () => {
-  const names = new Set<string>();
-  const folder = join(import.meta.dir, '../../src/steps');
-  for (const file of await readdir(folder))
-    if (file.endsWith('.ts') && /ctx\.v5\.config\(/u.test(await readFile(join(folder, file), 'utf8')))
-      names.add(file.slice(0, -'.ts'.length));
-  expect([...names].sort()).toEqual([...CONFIG_STEPS].sort());
+test('the dry pass runs exactly the steps that write config (behavioural: any writer, aliased or not)', async () => {
+  // Every step runs once on a fixture that gives each config writer something to write; a spy on the writer's `config`
+  // records which step called it, however the step reached the writer (an alias, a helper module).
+  await put('layout-version', '2\n');
+  await put('config/machine.yaml', 'timeZone: Europe/Berlin\n');
+  await put('config/pack.yaml', 'enabled: true\n');
+  await put('config/learning.yaml', 'enabled: true\n');
+  await put('config/daemon.json', '{"port": 4321}');
+  const plain = f.ctx(true);
+  const called = new Set<string>();
+  for (const step of ALL_STEPS) {
+    const v5 = new Proxy(plain.v5, {
+      get(target, property) {
+        if (property === 'config')
+          return (...args: Parameters<typeof target.config>) => {
+            called.add(step.id);
+            return target.config(...args);
+          };
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    const host = { homeDirectory: f.root, env: { FYD_SESSION_ARCHIVE_AFTER_HOURS: '24' } };
+    await step.run({ ...plain, v5, loginKeys: new LoginKeyHold(), host }).catch(() => undefined);
+  }
+  expect([...called].sort()).toEqual([...CONFIG_STEPS].sort());
 });
 
 test('config overrides read in memory: replace, remove and restore a file; every other file is the disk', async () => {

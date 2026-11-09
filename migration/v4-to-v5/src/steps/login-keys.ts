@@ -39,7 +39,7 @@ import {
   VaultDocumentSchema,
   type VaultDocument,
 } from '@ferretry/core-vault/contract';
-import { createHash } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -51,6 +51,13 @@ import { V5_VAULT_FILE, V5_VAULT_KEY_FILE } from './secrets.ts';
 import type { Step, StepContext } from './index.ts';
 
 const KEY_COUNT_LIMIT = MAX_SECRETS_PER_DAEMON;
+
+/**
+ * The key every fingerprint digest is keyed under: random per run, memory only, never written or logged. Every
+ * {@link LoginKeyHold} of one run shares it, because the live and the enforced pass compare their digests; a digest
+ * from another run means nothing.
+ */
+const RUN_KEY = randomBytes(32);
 
 /** One key waiting to be sealed. The value is held in a closure-free private field and never serialised. */
 export interface HeldLoginKey {
@@ -100,7 +107,7 @@ export class LoginKeyHold {
     this.#items.push({ key, value });
     // A digest only, kept after the value is drained or cleared: it lets a second conversion say whether it would hold
     // the SAME key under the SAME name, without anything holding the key.
-    const digest = createHash('sha256').update(value, 'utf8').digest('hex');
+    const digest = createHmac('sha256', RUN_KEY).update(value, 'utf8').digest('hex');
     this.#ledger.set(key.login, [...(this.#ledger.get(key.login) ?? []), `${key.variable}=${key.name}:${digest}`]);
   }
 
