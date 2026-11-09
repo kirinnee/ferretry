@@ -101,6 +101,12 @@ function world(
   return { service, calls };
 }
 
+/** For `.then(unexpected, asError)`: the refusal an act ends in, or a failure of the test when it did not refuse. */
+const unexpected = (): never => {
+  throw new Error('expected a refusal');
+};
+const asError = (error: unknown): Error => error as Error;
+
 const proposal = (extra: Partial<LoginRecipeProposal> = {}): LoginRecipeProposal => ({
   id: 'rp_0000000000000001',
   recipe: 'new steps',
@@ -117,9 +123,7 @@ describe('a recipe never holds a value', () => {
   });
 
   it('should refuse a recipe the redactor changes, without saying the value', async () => {
-    const refused = await world()
-      .service.assertNoValue(`Type ${SECRET} then click Sign in.`)
-      .catch((error: unknown) => error as Error);
+    const refused = await world().service.assertNoValue(`Type ${SECRET} then click Sign in.`).then(unexpected, asError);
 
     should(refused.message).equal(
       'a recipe never holds a value, and this one contains a saved or secret value; take it out',
@@ -130,7 +134,7 @@ describe('a recipe never holds a value', () => {
   it('should refuse, failing closed, when the redactor cannot run', async () => {
     const refused = await world({ redactFails: true })
       .service.assertNoValue('Click Sign in.')
-      .catch((error: unknown) => error as Error);
+      .then(unexpected, asError);
 
     should(refused.message).equal('Ferretry could not check the recipe for values, so it was not kept');
   });
@@ -147,12 +151,10 @@ describe('naming the sign-in a proposal is for', () => {
   it('should refuse a sign-in that does not exist, and a selector that names more than a sign-in', async () => {
     const w = world();
 
-    const unknown = await w.service
-      .resolve({ signIn: 'si_00000000000000ff' })
-      .catch((error: unknown) => error as Error);
+    const unknown = await w.service.resolve({ signIn: 'si_00000000000000ff' }).then(unexpected, asError);
     const extra = await w.service
       .resolve({ signIn: GITHUB_SIGN_IN, account: 'GITHUB' } as never)
-      .catch((error: unknown) => error as Error);
+      .then(unexpected, asError);
 
     should(unknown.message).equal('unknown_sign_in: Name a sign-in; account_hint lists them.');
     should(extra.message).equal('unknown_sign_in: Name a sign-in; account_hint lists them.');
@@ -302,10 +304,10 @@ describe('a ferret proposing steps', () => {
 
     const inRecipe = await recipe.service
       .propose('session-1', { signIn: GITHUB_SIGN_IN }, `Type ${SECRET}.`, 'why')
-      .catch((error: unknown) => error as Error);
+      .then(unexpected, asError);
     const inReason = await reason.service
       .propose('session-1', { signIn: GITHUB_SIGN_IN }, 'Steps.', `because ${SECRET}`)
-      .catch((error: unknown) => error as Error);
+      .then(unexpected, asError);
 
     should(inRecipe.message).containEql('never holds a value');
     should(inReason.message).containEql('never holds a value');
@@ -428,9 +430,7 @@ describe('the owner answering a proposal', () => {
       signIns: [withRecipe({ proposals: [proposal({ agendaItemId: 'ask-1', recipe: `type ${SECRET}` })] })],
     });
 
-    const refused = await w.service
-      .decideSignIn(GITHUB_SIGN_IN, waiting.id, 'approve')
-      .catch((error: unknown) => error as Error);
+    const refused = await w.service.decideSignIn(GITHUB_SIGN_IN, waiting.id, 'approve').then(unexpected, asError);
 
     should(refused.message).containEql('never holds a value');
     should(w.calls.closed).eql([]);

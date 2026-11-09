@@ -352,7 +352,10 @@ describe('what the use boundary answers when a field is not there', () => {
     if (sealName === undefined || stored?.entries[sealName] === undefined) throw new Error('no seed was sealed');
     await w.sealed.write({
       ...stored,
-      entries: { ...stored.entries, [sealName]: { iv: sealName, ciphertext: [...'not base32 !!'].reverse().join('') } },
+      entries: {
+        ...stored.entries,
+        [sealName]: { ...stored.entries[sealName], iv: sealName, ciphertext: [...'not base32 !!'].reverse().join('') },
+      },
     });
 
     const refused = await failure(w.vault.fill('GITHUB', 'totp', NOW_MS));

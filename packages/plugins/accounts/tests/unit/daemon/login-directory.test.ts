@@ -85,7 +85,15 @@ describe('the boot sweep, through the login directory', () => {
     if (sealed === undefined) throw new Error('nothing was sealed');
     await w.sealed.write({
       ...sealed,
-      entries: { ...sealed.entries, ORPHAN: { iv: 'ORPHAN', ciphertext: 'nothing-points-here' } },
+      entries: {
+        ...sealed.entries,
+        ORPHAN: {
+          iv: 'ORPHAN',
+          ciphertext: 'nothing-points-here',
+          createdAt: '2026-10-31T09:00:00.000Z',
+          updatedAt: '2026-10-31T09:00:00.000Z',
+        },
+      },
     });
 
     should(await w.logins.sweepUnreferenced()).eql({ swept: 1 });

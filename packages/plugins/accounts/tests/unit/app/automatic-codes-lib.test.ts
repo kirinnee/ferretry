@@ -153,9 +153,9 @@ describe('what a refusal comes to, in the owner’s words', () => {
 
 describe('what a saved key says', () => {
   it('says whether Ferretry typed the first code into the card', () => {
-    expect(savedSeedWords({ typed: true }, 'GitHub')).toBe(
+    expect(savedSeedWords({ typed: true, mismatch: false }, 'GitHub')).toBe(
       'Saved. Ferretry typed the first code for GitHub into the card.',
     );
-    expect(savedSeedWords({}, 'GitHub')).toBe('Saved. Ferretry will make GitHub’s codes from now on.');
+    expect(savedSeedWords({ mismatch: false }, 'GitHub')).toBe('Saved. Ferretry will make GitHub’s codes from now on.');
   });
 });
