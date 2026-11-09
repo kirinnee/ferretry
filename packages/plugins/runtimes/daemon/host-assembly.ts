@@ -21,9 +21,10 @@ import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-mode
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
-import type { AdapterHost, ConfigFilesPort, SharedHistoryPooling } from './adapters/ports.ts';
+import type { AdapterHost, ConfigFilesPort } from './adapters/ports.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
+import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
 import type { FleetManifest } from './lib/manifest.ts';
 import { assembleServices, UNAVAILABLE, unavailableSetupDeps } from './lib/service/assembly.ts';
 import { CodexAppServerSupervisor } from './lib/service/codex-runtime.ts';
@@ -105,15 +106,6 @@ function fleetTexts(disk: FleetDisk): AdapterHost['texts'] {
     },
   };
 }
-
-/** The shared-history migration is Conversation's; until it is wired it is unavailable, which an apply skips and names. */
-const unavailableSharedHistory: SharedHistoryPooling = {
-  preview: async () => await Promise.reject(new Error(SHARED_HISTORY_UNAVAILABLE)),
-  materialize: async () => await Promise.reject(new Error(SHARED_HISTORY_UNAVAILABLE)),
-  isUnavailable: error => error instanceof Error && error.message === SHARED_HISTORY_UNAVAILABLE,
-};
-const SHARED_HISTORY_UNAVAILABLE =
-  'pooling conversation history across runtimes is not available from the Runtimes plugin yet, so it was skipped';
 
 /** The account model's evaluator is not ported: every read of the model in effect answers the plain sentence. */
 const unevaluatedModel: ConfigFilesPort<never> = {
