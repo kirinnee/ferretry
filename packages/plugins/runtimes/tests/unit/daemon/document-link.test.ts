@@ -23,7 +23,7 @@ afterEach(cleanupWorlds);
 const LINKED = '00000000-0000-4000-8000-0000000000a1';
 const SECRET = 'SECRET-VALUE-THAT-MUST-NEVER-SURFACE';
 
-/** Roots whose `harness-home` handles call `hook` after each `realPath` answers. */
+/** Roots whose `harness-home` handles call `hook` after each `lstat` answers (the reader has then judged the file). */
 function hooked(roots: RootsPort, hook: { current?: (path: string) => Promise<void> }): Pick<RootsPort, 'root'> {
   return {
     root: ((name: never, options?: never) => {
@@ -32,7 +32,7 @@ function hooked(roots: RootsPort, hook: { current?: (path: string) => Promise<vo
       return new Proxy(real, {
         get(target, key) {
           const value = Reflect.get(target, key) as unknown;
-          if (key !== 'realPath' || typeof value !== 'function') return value;
+          if (key !== 'lstat' || typeof value !== 'function') return value;
           return async (path: string) => {
             const answer = await (value as (path: string) => Promise<unknown>).call(target, path);
             await hook.current?.(path);
@@ -217,7 +217,7 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
     await symlink(join(store, 'real.json'), join(linked, 'settings.json'));
     let swapped = false;
     hook.current = async path => {
-      if (swapped || path !== join(linked, 'settings.json')) return;
+      if (swapped || path !== join(store, 'real.json')) return;
       swapped = true;
       await rm(join(store, 'real.json'));
       await symlink(join(store, 'other.json'), join(store, 'real.json'));
