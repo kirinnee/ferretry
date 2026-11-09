@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import type { Op } from '../contract/act.ts';
 import type { ConfigDef, EventDef, HookDef, PortToken, StateFileDef } from '../contract/define.ts';
-import type { PluginApi } from '../contract/ids.ts';
+import type { ItemKind, PluginApi } from '../contract/ids.ts';
 import type { RootName } from '../contract/ports.ts';
 import type { MemberRouteDescriptor, RouteDescriptor, ScopedRoute } from '../contract/route.ts';
 import type { SocketDescriptor } from '../contract/socket.ts';
@@ -135,16 +135,7 @@ export interface LayoutDecl {
 
 // data ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export type ItemKind =
-  | 'mcp'
-  | 'skill'
-  | 'shell'
-  | 'recipe'
-  | 'instruction'
-  | 'layout'
-  | 'theme'
-  | 'runtime'
-  | 'endpoint';
+export type { ItemKind };
 
 export interface ItemDecl {
   readonly kind: ItemKind;
@@ -197,24 +188,29 @@ export interface OnboardingDecl {
 
 /**
  * One `permissions.spawn` / `permissions.network` entry: a program (its name, or the basename of an absolute path) or
- * a host (`*.example.com` for subdomains), or `{ items: kind }` — the programs or hosts NAMED BY the owner-installed,
- * pinned items of that kind (an MCP server's `command` / `url`), resolved by the kernel when the call is made from
- * the installed items it holds; refused when no installed item names it.
+ * a host (`*.example.com` for subdomains), or `{ items: kind }` — the programs or hosts NAMED BY the items of that kind
+ * (an MCP server's `command` / `url`): the installed, pinned data-plugin items, and the items of the owner's config
+ * collection (`itemKind`), read by the kernel when the call is made; refused when no item names it. Only the kind's
+ * owner may declare it.
  */
 export type PermissionEntry = string | { readonly items: ItemKind } | ResolverEntry;
 
 /**
- * A `permissions.network` entry whose hosts the plugin's OWN daemon half answers at each call (Connections' relay
- * endpoint, from its configured or advertised value): the half implements `resolvers: { [name]: () => readonly
- * string[] }`, called with no request data; the host is allowed only when it equals one answer exactly (`host` or
- * `host:port`, no wildcard). A throwing resolver refuses.
+ * A `permissions.network` or `permissions.spawn` entry whose answers the plugin's OWN daemon half gives at each call
+ * (Connections' relay endpoint, from its configured or advertised value): the half implements `resolvers: { [name]:
+ * () => readonly string[] }`, called with no request data. In `network` the host is allowed only when it equals one
+ * answer exactly (`host` or `host:port`, no wildcard). In `spawn` the program is allowed only when an answer names it
+ * exactly: an absolute answer allows only that path, a bare name allows that basename, and an answer with `*` in it
+ * allows nothing. A throwing or missing resolver refuses. A resolver name serves ONE of the two fields (its answers are
+ * programs in `spawn` and hosts in `network`); a name in both is refused. The resolver is the plugin's own code: the
+ * kernel does not prove what it answers from.
  */
 export interface ResolverEntry {
   readonly resolver: string;
 }
 
-/** A `permissions.spawn` entry: a program, or what installed items name. A resolver reaches hosts, never programs. */
-export type SpawnEntry = string | { readonly items: ItemKind };
+/** A `permissions.spawn` entry: a program, what installed items name, or what the plugin's own resolver answers. */
+export type SpawnEntry = string | { readonly items: ItemKind } | ResolverEntry;
 
 /**
  * `permissions.processes`: the environment variables, by exact name, `kernel.processes.usersOf` may match. A name is

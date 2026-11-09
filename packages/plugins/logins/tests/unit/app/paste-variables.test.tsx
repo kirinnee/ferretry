@@ -160,7 +160,9 @@ describe('the paste screen', () => {
     await interact(() => button.click());
     expect(given.value?.[0]).toBe('zai-glm');
     expect(given.value?.[1].values).toEqual({ ANTHROPIC_BASE_URL: 'https://api.z.ai/api/paas/v4' });
-    expect(Object.keys(given.value?.[1].secrets ?? {})).toEqual(['ZAI_API_KEY']);
+    expect(given.value?.[1].secrets).toEqual(['ZAI_API_KEY']);
+    // The key's value is dropped where it is read: nothing the panel is handed holds it.
+    expect(JSON.stringify(given.value?.[1])).not.toContain('sk-zai-very-secret');
     await view.unmount();
   });
 

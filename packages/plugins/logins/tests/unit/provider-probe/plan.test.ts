@@ -128,7 +128,10 @@ describe('planProviderProbe', () => {
       /must be an https/u,
     ],
   ])('should refuse %s', (_label, env, reason) => {
-    const actual = planProviderProbe(preset('custom-gateway'), login({ harness: 'claude', env }));
+    const actual = planProviderProbe(
+      preset('custom-gateway'),
+      CredentialSchema.parseOnDisk({ store: 'environment', harness: 'claude', env }),
+    );
     should(actual).have.property('code', 'refused');
     should((actual as { reason: string }).reason).match(reason);
   });

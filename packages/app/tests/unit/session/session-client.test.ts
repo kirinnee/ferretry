@@ -25,6 +25,7 @@ import {
   utf8Bytes,
 } from '../../../src/session/wire/index.ts';
 import should from 'should';
+import { isCarrierGone } from '../../../src/client/transport.ts';
 import {
   decodeTunnelDaemonMessage,
   encodeTunnelClientMessage,
@@ -425,6 +426,9 @@ describe('a serving relay session', () => {
       const error = await pending;
       should(error.code).equal(4440);
       should(error.message).equal(`the rendezvous ended this session: 4440 ${reason}`);
+      // The request raced another request's `endsSession`: no outcome for THIS one, so the client reads a lost carrier.
+      should(error.endedWhileServing).be.true();
+      should(isCarrierGone(error)).be.true();
     }
   });
 
@@ -437,6 +441,9 @@ describe('a serving relay session', () => {
       const error = await pending;
       should(error.code).equal(4440);
       should(error.message).containEql('without stating an outcome inside the channel');
+      // §14: a 4440 before the daemon accepted this device is a protocol violation, not an outage.
+      should(error.endedWhileServing).be.false();
+      should(isCarrierGone(error)).be.false();
     }
   });
 

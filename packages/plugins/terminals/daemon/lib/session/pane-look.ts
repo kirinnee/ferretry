@@ -51,7 +51,14 @@ export type PaneProcessObservation =
 /** A process as one look saw it, with the start that, with its pid, is its identity. */
 type ObservedPaneProcess = PaneProcess & { readonly start: number };
 
-const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const message = (error: unknown): string => {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    // A value whose own text cannot be read (a null-prototype object) still has to be a reason, never a throw.
+    return 'an unreadable failure';
+  }
+};
 
 export class PaneLook {
   constructor(private readonly ports: PaneLookPorts) {}
@@ -70,7 +77,9 @@ export class PaneLook {
       const absent =
         error instanceof SessionAttachError &&
         (error.failure === 'missing_registration' || error.failure === 'pane_unavailable') &&
-        (await this.ports.paneAbsent(ferret).catch(() => false));
+        (await Promise.resolve()
+          .then(() => this.ports.paneAbsent(ferret))
+          .catch(() => false));
       return absent ? { kind: 'observed', processes: [] } : { kind: 'unobservable', reason: message(error) };
     }
     try {

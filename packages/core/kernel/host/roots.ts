@@ -132,8 +132,9 @@ export interface RootLayout {
 /**
  * Why a root refused, host-side: the contract's {@link FolderRefusal}, plus today's guard rules a handle's caller
  * meets only as this error — `hard_link` (a file with another name that could be anywhere), `changed` (what was
- * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a folder remove, any remove of an owner
- * root, or any `rename`, on a host that cannot reach an entry through its checked folder, S44).
+ * opened is not what was checked), `not_a_file`, `no_descriptor_reach` (a folder remove, any remove of an owner
+ * root, or any `rename`, on a host that cannot reach an entry through its checked folder, S44), and `not_empty` (a
+ * `remove` with `onlyIfEmpty` of a folder that holds an entry).
  */
 export type RootRefusal =
   | FolderRefusal
@@ -142,7 +143,8 @@ export type RootRefusal =
   | 'hard_link'
   | 'changed'
   | 'not_a_file'
-  | 'no_descriptor_reach';
+  | 'no_descriptor_reach'
+  | 'not_empty';
 
 export class RootError extends Error {
   constructor(readonly refusal: RootRefusal) {
@@ -764,7 +766,24 @@ async function removeWithin(scope: Scope, through: string, expected: FileIdentit
   await scope.fs.rmdir(through);
 }
 
-async function removeChecked(scope: Scope, full: string): Promise<void> {
+/**
+ * `rmdir(2)` through the checked folder: ONE syscall both looks for an entry and removes the folder, so no entry can
+ * arrive between a look and the removal (a list-then-remove would have that window). Never recurses.
+ */
+async function removeEmptyFolder(scope: Scope, through: string): Promise<void> {
+  try {
+    await scope.fs.rmdir(through);
+  } catch (error) {
+    const code = errnoOf(error);
+    if (code === 'ENOTEMPTY' || code === 'EEXIST') return refuse('not_empty');
+    if (code === 'ENOENT') return;
+    // the name is no longer a folder (a link or a file took its place after the look)
+    if (code === 'ENOTDIR') return refuse('changed');
+    throw error;
+  }
+}
+
+async function removeChecked(scope: Scope, full: string, onlyIfEmpty: boolean): Promise<void> {
   const leaf = basename(full);
   const parent = dirname(full);
   const folder =
@@ -791,6 +810,10 @@ async function removeChecked(scope: Scope, full: string): Promise<void> {
     }
     const identity = await scope.fs.identity(through);
     if (identity === undefined) return;
+    if (onlyIfEmpty && identity.kind === 'directory') {
+      await removeEmptyFolder(scope, through);
+      return;
+    }
     await removeWithin(scope, through, identity);
   } finally {
     await folder.close();
@@ -1673,17 +1696,20 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const { full, scope } = await real(path);
       return await statChecked(scope, full);
     },
-    remove: async path => {
+    remove: async (path, removeOptions) => {
       writable();
-      // A link at the name is the thing removed: it is unlinked, never resolved to the tree it points at and removed
-      // there (a swept skill link would otherwise delete the folder it pointed to). Any other leaf is judged where it
-      // really is (the fence, hard links and the containment of a base that is itself a link are all decided by `real`).
-      const named = await realParent(path).then(
-        async at => ((await leafIdentity(at.scope, at.full))?.kind === 'link' ? at : undefined),
-        () => undefined,
-      );
-      const { full, scope } = named ?? (await real(path));
-      await removeChecked(scope, full);
+      // The leaf is NOT followed: the parent is resolved and judged inside the root, then the entry goes by its own
+      // name (a link leaf is removed as a link). The root's own folder has no parent inside the root, so it is judged
+      // as itself.
+      const { full, scope } = path === base() ? await real(path) : await realParent(path);
+      // What sits at the name is judged by its own identity, still without following it: a second name of a fenced
+      // file (the key, planted as a hard link) is refused, while a link leaf (never the thing it points at) goes.
+      const fence = scope.base.fence;
+      if (fence !== undefined) {
+        const found = await scope.fs.identity(full);
+        if (found !== undefined && found.kind !== 'link' && heldByFence(fence, [toComponent(found)])) refuse('fenced');
+      }
+      await removeChecked(scope, full, removeOptions?.onlyIfEmpty === true);
     },
     linkTo: async (at: FencedPath, target: RootLinkTarget) => {
       writable();

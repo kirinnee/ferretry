@@ -70,7 +70,7 @@ import { checkDirectory, gatedOverrides, gatedPaths, gatedWhich } from './paths.
 import { type ExecutableProbe, handleReaders, locateCommand, whichCommand, whichForCommand } from './which.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
-import { type InstalledItems, installedItemReach } from './items.ts';
+import { configOwnedKinds, type InstalledItems, installedItemReach, itemReach } from './items.ts';
 import {
   admitCall,
   Dispatcher,
@@ -580,7 +580,12 @@ async function bootLocked(
   const { engine: hooks } = HookEngine.plan(order, log, deadline, manifests);
 
   const data = await loadDataPlugins(adapters.fs, home, new Set(manifests.map(manifest => manifest.id)));
-  const items = await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]);
+  // What an item names: the installed data plugins' (read once, an install is pinned) united with the owner's config
+  // collection of each kind (`config/mcp/<name>.yaml`), read live at every check (no cache: nothing to go stale).
+  const items = itemReach({
+    installed: await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]),
+    configOwned: configOwnedKinds(order, id => config.port(id)),
+  });
 
   const records = new Map<string, PluginRecord>();
   for (const manifest of manifests) {
@@ -795,11 +800,13 @@ async function bootLocked(
           openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
           items,
           pins,
+          resolversOf(manifest.id),
         ),
         adapters.spawn,
         items,
         // The program's name and pid, never its arguments: a link opener's URL may carry a query.
         (program, pid) => log.info('a detached child was started', { plugin: manifest.id, program, pid }),
+        resolversOf(manifest.id),
       ),
       scratch: adapters.scratch ?? NO_SCRATCH,
       fetch: fetchPort,

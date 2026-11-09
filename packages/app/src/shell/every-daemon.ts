@@ -142,9 +142,11 @@ export class DaemonReachCache {
     const line = runtime.blockedLine(daemon, plugin);
     if (line === undefined) return undefined;
     const standing = runtime.standing(daemon, plugin);
+    // A refused machine is not waited for: this page stopped dialling it, and the line says why.
     const waiting =
-      runtime.connection(daemon).kind === 'unreachable' ||
-      (standing.state !== 'allowed' && standing.reason === 'unread');
+      !runtime.isRefused(daemon) &&
+      (runtime.connection(daemon).kind === 'unreachable' ||
+        (standing.state !== 'allowed' && standing.reason === 'unread'));
     return { waiting, line };
   }
 

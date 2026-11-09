@@ -17,11 +17,73 @@ export interface CommandBarEntry {
   readonly keywords?: readonly string[];
   /** Shown with no query typed. */
   readonly resting?: boolean;
+  /** A line under the description (a card's project, an ask's owner), drawn quieter than it (S11). */
+  readonly detail?: string;
+  /** Drawn faded, not hidden: closed work is still the answer to "did we already do this?" (S11). */
+  readonly muted?: boolean;
   readonly run: () => void;
 }
 
-/** One contributor: answers its entries for a query (it may ignore the query and let the bar rank). */
-export type CommandBarSource = (query: string) => readonly CommandBarEntry[];
+/** One chip row a source offers: pick one option (the first is the resting one). The bar remembers the choice. */
+export interface CommandBarFilter {
+  readonly id: string;
+  readonly label: string;
+  readonly options: readonly { readonly id: string; readonly label: string }[];
+}
+
+/** What a source answers when it has more to say than entries: a line while it is still searching (S11). */
+export interface CommandBarAnswer {
+  readonly entries: readonly CommandBarEntry[];
+  readonly pending?: string;
+}
+
+/**
+ * One contributor. The plain function form (query → entries; it may ignore the query and let the bar rank) is still
+ * accepted. The object form also offers filter chips and may answer a pending line (S11): `list` is asked with the
+ * query AND the chosen option of every filter the bar holds, `{ [filter.id]: option.id }`.
+ */
+export type CommandBarSource = ((query: string) => readonly CommandBarEntry[]) | CommandBarListSource;
+
+/** The object form of a source (S11): filter chips, and an answer that may carry a pending line. */
+export interface CommandBarListSource {
+  readonly list: (
+    query: string,
+    filters: Readonly<Record<string, string>>,
+  ) => readonly CommandBarEntry[] | CommandBarAnswer;
+  readonly filters?: readonly CommandBarFilter[];
+}
+
+/** The choices the bar holds, filter id → option id. A filter with no choice yet is at its first option. */
+export type CommandBarChoices = Readonly<Record<string, string>>;
+
+/** Every filter the sources offer, in source order; a repeated id is offered once. */
+export const commandBarFilters = (sources: readonly CommandBarSource[]): readonly CommandBarFilter[] => {
+  const seen = new Set<string>();
+  return sources.flatMap(source =>
+    typeof source === 'function'
+      ? []
+      : (source.filters ?? []).filter(filter => {
+          if (seen.has(filter.id) || filter.options.length === 0) return false;
+          seen.add(filter.id);
+          return true;
+        }),
+  );
+};
+
+/** The option each filter is at: the person's choice when it is one of its options, else the first. */
+export const resolveChoices = (
+  filters: readonly CommandBarFilter[],
+  chosen: CommandBarChoices,
+): Readonly<Record<string, string>> => {
+  const resolved: Record<string, string> = {};
+  for (const filter of filters) {
+    const pick = chosen[filter.id];
+    const first = filter.options[0];
+    if (first === undefined) continue;
+    resolved[filter.id] = filter.options.some(option => option.id === pick) ? (pick as string) : first.id;
+  }
+  return resolved;
+};
 
 export interface CommandBarGroup {
   readonly heading: string;
@@ -33,6 +95,8 @@ export interface CommandBarGroup {
 export interface CommandBarResults {
   readonly groups: readonly CommandBarGroup[];
   readonly results: readonly CommandBarEntry[];
+  /** The first source's line while it is still searching, or `undefined`. */
+  readonly pending?: string;
 }
 
 /** Longest list a group shows; the bar is for jumping, not browsing. */
@@ -48,14 +112,26 @@ const fieldsOf = (entry: CommandBarEntry): FuzzyField[] => [
  * Collects, ranks and groups. With no query only `resting` entries show, in source order; with one, every entry that
  * scores, best first within its group. A source that throws costs only its own entries.
  */
-export function commandBarResults(sources: readonly CommandBarSource[], query: string): CommandBarResults {
+export function commandBarResults(
+  sources: readonly CommandBarSource[],
+  query: string,
+  chosen: CommandBarChoices = {},
+): CommandBarResults {
   const searching = query.trim() !== '';
+  const choices = resolveChoices(commandBarFilters(sources), chosen);
+  let pending: string | undefined;
   const byGroup = new Map<string, { entry: CommandBarEntry; score: number; order: number }[]>();
   let order = 0;
   for (const source of sources) {
     let entries: readonly CommandBarEntry[];
     try {
-      entries = source(query);
+      const answer = typeof source === 'function' ? source(query) : source.list(query, choices);
+      if (Array.isArray(answer)) entries = answer;
+      else {
+        const full = answer as CommandBarAnswer;
+        entries = full.entries;
+        pending ??= full.pending;
+      }
     } catch {
       entries = [];
     }
@@ -78,7 +154,7 @@ export function commandBarResults(sources: readonly CommandBarSource[], query: s
     groups.push({ heading, entries: ranked, offset: results.length });
     results.push(...ranked);
   }
-  return { groups, results };
+  return { groups, results, ...(pending === undefined ? {} : { pending }) };
 }
 
 /** The option id for one entry. */
