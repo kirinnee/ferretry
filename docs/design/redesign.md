@@ -2538,6 +2538,18 @@ scoped handle:
   - `setMode(path, mode)` is an `fchmod` through an `O_NOFOLLOW` descriptor proven to be what was looked at. It keeps
     `mode & 0o700` on an internal root and `mode & 0o777` elsewhere, never setuid/setgid/sticky. It is refused on a
     read-only root and for a file with a second hard link.
+  - `rename(from, to)` moves an entry inside `fleet` or `agent-homes` AS IS (a link stays a link, a folder moves
+    whole; the provisioner's move-aside-as-evidence and undo, which a copy cannot do). Both ends are fenced with every
+    parent opened without following a link, an existing target is refused and never overwritten (a look then the move,
+    a declared GAP: no `renameat2`), and a move the disk refuses (another device) is `changed`, never a copy. A move
+    needs descriptor reach to both parents (Linux `/proc/self/fd`) and is refused `no_descriptor_reach` without it
+    (macOS today): on plain paths the move would resolve the parents again and follow a link swapped in after the
+    check, so nothing is claimed there. **[own] BEFORE-GREEN(runtimes):** the owner runs macOS, so the provisioner's
+    move-aside and undo fail there until a descriptor-reach move exists; this is not a plain GAP. Each end's parent
+    folder must already exist (a move makes none): a missing parent, or one that is a file, is `changed`, and a link on
+    the way to either end is `link_escape`; the testing host answers the same. A link moves as the text it holds:
+    kernel-made links are absolute, so they still point where they did; a RELATIVE link made by a harness and moved to
+    a parent at another depth points somewhere else afterwards, and the kernel does not follow it either way.
   - `kernel.roots.harnessFile(absolutePath)` (`permissions.harnessFiles`, by exact basename, Runtimes with
     `harness-home` only) reads ONE file beside a harness home (`~/.claude.json` sits beside `~/.claude`), read-only.
     Its folder is never listable. The leaf is never a link, never a second hard link, never a device, and the name
