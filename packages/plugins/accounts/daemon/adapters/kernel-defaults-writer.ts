@@ -65,7 +65,7 @@ export class KernelAccountDefaultsWriter implements AccountDefaultsWriter {
       case 'refused': {
         // The kernel's own words are kept: "does not check" is the wrong diagnosis for a link or a file that is not UTF-8.
         const said = outcome.issues.map(issue =>
-          issue.fix === undefined ? issue.message : `${issue.message}: ${issue.fix}`,
+          issue.fix === undefined || issue.fix === '' ? issue.message : `${issue.message}: ${issue.fix}`,
         );
         throw new AccountDefaultsFileBroken(issuesOf(outcome), said.length === 0 ? undefined : said.join('; '));
       }

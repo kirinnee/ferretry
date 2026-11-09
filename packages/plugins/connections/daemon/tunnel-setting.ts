@@ -16,7 +16,9 @@ export async function writeTunnelSetting(
   if (outcome.kind === 'written') return;
   const said =
     outcome.kind === 'refused'
-      ? outcome.issues.map(issue => (issue.fix === undefined ? issue.message : `${issue.message}: ${issue.fix}`))
+      ? outcome.issues.map(issue =>
+          issue.fix === undefined || issue.fix === '' ? issue.message : `${issue.message}: ${issue.fix}`,
+        )
       : [];
   throw new Error(
     said.length === 0

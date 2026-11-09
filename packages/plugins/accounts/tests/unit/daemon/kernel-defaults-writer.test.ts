@@ -44,6 +44,18 @@ describe('the accounts defaults writer says why the kernel refused a write', () 
     should(error.issues.map(issue => issue.message)).deepEqual([UNREADABLE]);
   });
 
+  it('BG-012 m-3 should not end the sentence in a bare colon when the kernel’s fix is the empty string', async () => {
+    const writer = writerOver({
+      kind: 'refused',
+      reason: 'yaml',
+      issues: [{ path: 'accounts.yaml', message: UNREADABLE, fix: '' }],
+    });
+
+    const error = await broken(writer.amend(file => file, 'refuse'));
+
+    should(error.message).equal(UNREADABLE);
+  });
+
   it('should keep the fixed sentence when the kernel gave no issue to say', async () => {
     const writer = writerOver({ kind: 'refused', reason: 'schema', issues: [] });
 

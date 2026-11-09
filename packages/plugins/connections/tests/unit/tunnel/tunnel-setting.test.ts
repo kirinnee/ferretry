@@ -25,6 +25,19 @@ it('BG-012 m-3 a refused tunnel setting write names the kernel’s sentence and 
   );
 });
 
+it('BG-012 m-3 a refusal whose fix is the empty string ends in the kernel’s sentence, with no bare colon', async () => {
+  const config = over({
+    kind: 'refused',
+    reason: 'yaml',
+    issues: [{ path: 'connections.yaml', message: UNREADABLE, fix: '' }],
+  });
+  const error = await writeTunnelSetting(config, def, true).then(
+    () => undefined,
+    (thrown: unknown) => thrown as Error,
+  );
+  expect(error?.message).toBe(`the tunnel setting could not be written to its document: ${UNREADABLE}`);
+});
+
 it('BG-012 m-3 a refusal with nothing to say keeps the plain sentence, and a held write says it waits for the owner', async () => {
   await expect(writeTunnelSetting(over({ kind: 'conflict' }), def, true)).rejects.toThrow(
     'the tunnel setting could not be written to its document',
