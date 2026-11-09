@@ -92,8 +92,8 @@ function scoped(deps: Deps, home: RuntimeHome, inside?: string): ReadHandle {
 
 /**
  * The asset folder (below the fleet folder) a link in `<home>/skills` resolves to, or `undefined` when it does not resolve
- * to a folder inside the fleet's `assets/`. Resolved once per call; a home outside the fleet has none (its root cannot
- * follow a link out of the folder).
+ * to a folder inside the fleet's `assets/`. Resolved once per call; a home outside the fleet has none (a link there is
+ * followed as a plain link by `following-handle.ts`, and is never a Ferretry-managed skill).
  */
 type ManagedResolver = (name: string) => Promise<string | undefined>;
 
