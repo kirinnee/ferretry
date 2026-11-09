@@ -293,6 +293,21 @@ describe('a card at a gate has one obligation through Asks, never an ask of its 
     should(w.obligations.openEntries()).have.length(100);
   });
 
+  it('should read Asks twice for a pass over 3000 gate cards, not twice per card', async () => {
+    const cards = Array.from({ length: 3000 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(cards);
+    for (const each of cards) await w.service.trigger(each.id, 'release.running');
+    should(w.obligations.openEntries()).have.length(3000);
+    w.obligations.scans.all = 0;
+    w.obligations.scans.perCard = 0;
+
+    const raised = await w.gates.sweep();
+
+    should(raised).equal(0);
+    should(w.obligations.scans.all).equal(2);
+    should(w.obligations.scans.perCard).equal(0);
+  }, 60_000);
+
   it('should stop a pass at the next card once its signal aborts', async () => {
     const cards = Array.from({ length: 20 }, (_, i) => external({ id: `F${i + 1}` }));
     const w = fixture(cards);
