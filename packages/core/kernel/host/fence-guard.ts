@@ -1,6 +1,7 @@
 import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { BEFORE_SUFFIX, insideFence, internalRootFolder } from '../contract/home.ts';
 import type { FileIdentity, HostFs } from './adapters/node-fs.ts';
+import { IDENTITY_FILE } from './identity.ts';
 import { INTERNAL_ROOT_FOLDERS } from './internal-roots.ts';
 
 /**
@@ -42,7 +43,8 @@ export interface Fence {
 
 /**
  * The home's key files and folders, relative to the home: today's `stateHomeFence(home).pinned`
- * (`packages/fleet/src/lib/state-home-fence.ts`), exactly. Each is recognised by IDENTITY wherever a walk meets it, so
+ * (`packages/fleet/src/lib/state-home-fence.ts`) with the daemon's identity key at the place the kernel keeps it
+ * ({@link IDENTITY_FILE}, the one owner of that path: nothing here spells it). Each is recognised by IDENTITY wherever a walk meets it, so
  * one bind-mounted or hard-linked alone into a work folder is refused under any name. The list is kept whole: its
  * v4 places (`fleet`, `fleet/homes`, `state/sessions`) still pin a home that holds them and cost nothing where absent;
  * where 5.0 keeps those folders is {@link internalRootPins}.
@@ -54,7 +56,7 @@ export const PINNED_KEY_PATHS: readonly string[] = [
   ...['secrets.key', 'secrets.json', 'mcp-oauth-secrets.json', 'login-secrets.json', 'passkeys.json'].map(
     name => `state/${name}`,
   ),
-  'state/daemon-identity.json',
+  IDENTITY_FILE,
   'fleet',
   'fleet/homes',
   'state/sessions',
