@@ -6,10 +6,15 @@ import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin } from '../passkey/passkey.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { untilAborted } from './machine-deadline.ts';
+import { DEVICE_NOT_ACCEPTED_SENTENCE } from './sentences.ts';
 import { eventOwner, type Inventory, parseInventory, type Standing, standings } from './inventory.ts';
 import {
+  CARRIER_OUTAGE_CODE,
   DaemonCallError,
   type DaemonTransport,
+  DEVICE_REFUSED_CODE,
+  isCarrierGone,
+  isDeviceRefusal,
   type SocketListeners,
   type TransportAnswer,
   type TransportSocket,
@@ -42,6 +47,9 @@ export const HEALTH_ROUTE = 'GET /v1/health';
 const GRANTS_PATH = '/v1/grants';
 /** The package that owns the grants read: the shell's own read admits as it, caller and owner alike. */
 const GATE_PACKAGE = 'gate';
+
+/** Said when a call died on the carrier, before any answer. */
+const CARRIER_OUTAGE_SENTENCE = 'The connection to this machine was lost before it answered.';
 
 /**
  * What this client tells the shell's grants cache (shell contract S1) about the answers it sees, so a stale control
@@ -174,6 +182,8 @@ export class DaemonClient {
   /** Bumped by every passkey confirm the shell hears of (S1, R3 m2). */
   #generation = 0;
   readonly #authorityListeners = new Set<(signal: AuthoritySignal) => void>();
+  readonly #refusedListeners = new Set<() => void>();
+  #refused = false;
 
   constructor(options: DaemonClientOptions) {
     this.#transport = options.transport;
@@ -279,6 +289,16 @@ export class DaemonClient {
     return { generation, answer, need: answer === undefined ? undefined : this.#need(answer) };
   }
 
+  /**
+   * Fires ONCE, when a session ended with the device-refused close (`4403`) on this machine (S12). That close is a
+   * cleartext word a relay can forge (`docs/relay-protocol.md`), so it is NOT proof the pairing is gone: the shell
+   * stops dialling this machine for this page and says so, and deletes nothing. Only the person's own removal unpairs.
+   */
+  onRefused(listener: () => void): () => void {
+    this.#refusedListeners.add(listener);
+    return () => this.#refusedListeners.delete(listener);
+  }
+
   /** Fires after every inventory change; the shell re-renders from {@link standing}. */
   onChange(listener: () => void): () => void {
     this.#changeListeners.add(listener);
@@ -324,7 +344,8 @@ export class DaemonClient {
     try {
       const answer = await this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path });
       inventory = answer.status === 200 ? parseInventory(answer.body) : { kind: 'unreadable' };
-    } catch {
+    } catch (error) {
+      if (isDeviceRefusal(error)) this.#refuse();
       inventory = { kind: 'unreadable' };
     }
     try {
@@ -418,11 +439,44 @@ export class DaemonClient {
 
   /** One request, its answer told to the grants cache under the generation it was sent in. */
   async #sent(request: Parameters<DaemonTransport['request']>[0]): Promise<TransportAnswer> {
+    // Once this machine has refused this device (`4403`) nothing more is dialled on this client: a call that captured
+    // the client before the refusal gets the same answer without asking the daemon again.
+    if (this.#refused) throw new DaemonCallError(0, DEVICE_REFUSED_CODE, DEVICE_NOT_ACCEPTED_SENTENCE);
     const generation = this.#generation;
-    const answer = await this.#transport.request(request);
+    let answer: TransportAnswer;
+    try {
+      answer = await this.#transport.request(request);
+    } catch (error) {
+      throw this.#failed(error, request.signal);
+    }
     if (answer.status === 401 && this.#need(answer)?.kind === 'unlock') this.#signal({ kind: 'locked', generation });
     else if (isCapabilityRefusal(answer)) this.#signal({ kind: 'refused', generation });
     return answer;
+  }
+
+  /**
+   * A transport failure, told apart (S12). The caller's own abort is its own. A device-refused close (`4403`) is
+   * `device_refused` (and the shell is told once, to stop dialling). A failure that says the CARRIER went away
+   * ({@link isCarrierGone}) is a CARRIER OUTAGE, marked `carrier`, so a screen keeps its last good content instead of
+   * saying the daemon refused. Every other failure (the daemon's own `4426` "update this app", a protocol error, no
+   * device key, a plain `Error`) passes through unmarked with its own words, so it is shown, never retried silently.
+   * The original is kept as `cause`.
+   */
+  #failed(error: unknown, signal: AbortSignal | undefined): unknown {
+    if (error instanceof DaemonCallError || signal?.aborted === true) return error;
+    if (isDeviceRefusal(error)) {
+      this.#refuse();
+      return new DaemonCallError(0, DEVICE_REFUSED_CODE, DEVICE_NOT_ACCEPTED_SENTENCE, undefined, undefined, error);
+    }
+    if (isCarrierGone(error))
+      return new DaemonCallError(0, CARRIER_OUTAGE_CODE, CARRIER_OUTAGE_SENTENCE, undefined, true, error);
+    return error;
+  }
+
+  #refuse(): void {
+    if (this.#refused || this.#stopped) return;
+    this.#refused = true;
+    for (const listener of [...this.#refusedListeners]) listener();
   }
 
   #signal(signal: AuthoritySignal): void {

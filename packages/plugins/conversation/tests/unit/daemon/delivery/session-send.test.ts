@@ -329,4 +329,15 @@ describe('the send ledger and the queue', () => {
       ['composer', 'f1', { action: 'clear', draft: 'my words' }],
     ]);
   });
+
+  it('refuses a press of Enter that carries a body, and does not submit', async () => {
+    const { subsystem, calls } = build();
+    const routes = sessionSendRoutes(subsystem);
+    const refused = await refusalOf(routes, 'POST', `${SENDS}/:sendId/enter`, {
+      params: { ferretId: 'f1', sendId: 's1' },
+      body: { message: 'x' },
+    });
+    expect(refused.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
 });

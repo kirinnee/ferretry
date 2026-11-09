@@ -13,8 +13,7 @@
  */
 
 import { agendaItemPushTag, type PushSeenResponse } from '../../contract/index.ts';
-import type { DaemonConnection, DaemonId } from '../shell-pairing.ts';
-import { type ClearRegistration, closeShownTags } from './push-clear.ts';
+import { type ClearRegistration, closeShownTags, type DaemonConnection, type DaemonId } from '../shell-pairing.ts';
 import { pushScopePath } from './push-scope.ts';
 
 export interface AgendaItemOpenedPorts {

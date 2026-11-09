@@ -13,4 +13,13 @@ export const CredentialSchema = {
     if (issues.length > 0) throw new Error(issues.join('; '));
     return credential;
   },
+  /**
+   * A credential as a file ALREADY ON DISK once held it, past the stored-secret rule the schema now applies on write: the
+   * defensive layers (the probe, the list view) must still behave on a value such a file might hold.
+   */
+  parseOnDisk(input: Record<string, unknown>): Credential {
+    const harness = input.harness === 'claude' || input.harness === undefined ? 'claude-code' : input.harness;
+    const { env, ...rest } = input;
+    return credentialOf({ ...LoginFileSchema.parse({ ...rest, harness }), env: env as Record<string, string> });
+  },
 };
