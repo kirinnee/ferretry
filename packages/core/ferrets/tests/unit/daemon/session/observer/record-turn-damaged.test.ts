@@ -115,7 +115,7 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
     should(folder.raw(FerretStateFile, id)).equal(invalid);
   });
 
-  it('the inline host logs that throw (file named, no content) and keeps watching other ferrets', async () => {
+  it('BG-037 the inline host logs that throw (ferret, file and why named, no content) and keeps watching other ferrets', async () => {
     // Arrange: two live ferrets, both panes drawing (working, nothing to record) on the first look.
     const { storage, folder } = await opened();
     const broken = await working(storage, 'damaged-3');
@@ -179,14 +179,17 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
     should(warned).have.length(1);
     should(warned[0]?.fields?.ferret).equal(broken);
     should(String(warned[0]?.fields?.file)).endWith('state.json');
-    // Exactly the ferret and the file: no error text, no name, nothing else a parser could have quoted.
-    should(Object.keys(warned[0]?.fields ?? {}).sort()).deepEqual(['ferret', 'file']);
+    // The ferret, the file and the KIND of damage (a fixed word): no error text, nothing a parser could have quoted.
+    should(Object.keys(warned[0]?.fields ?? {}).sort()).deepEqual(['ferret', 'file', 'why']);
+    should(warned[0]?.fields?.why).equal('schema');
+    should(warned[0]?.message).containEql(broken);
+    should(warned[0]?.message).containEql('does not match');
     should(JSON.stringify(log.lines)).not.containEql(CONTENT);
     should(followed).deepEqual([`${healthy}:your-turn`]);
     should(await storage.readState(healthy)).have.property('turnState', 'your-turn');
   });
 
-  it('one damaged state.json among 30 does not stop the watch for the other 29, and is said ONCE until its damage changes', async () => {
+  it('BG-037 one damaged state.json among 30 does not stop the watch for the other 29, and is said ONCE until its bytes change', async () => {
     // Arrange: thirty live ferrets mid-turn, every pane drawing (a turn in progress, nothing to record).
     const { storage, folder } = await opened();
     const ids = [];
@@ -255,7 +258,7 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
     await ticks(28);
     should(followed).have.length(29);
     should(warnings()).have.length(1);
-    should(warnings()[0]?.fields).deepEqual({ ferret: broken, file: warnings()[0]?.fields?.file });
+    should(warnings()[0]?.fields).deepEqual({ ferret: broken, file: warnings()[0]?.fields?.file, why: 'schema' });
     should(String(warnings()[0]?.fields?.file)).endWith('state.json');
 
     // Act + Assert: its damage changes (no longer JSON at all): said once more, and not again.
@@ -263,7 +266,78 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
     await ticks(30);
     should(warnings()).have.length(2);
     should(warnings()[1]?.fields?.ferret).equal(broken);
+    should(warnings()[1]?.fields?.why).equal('unparsable');
     should(JSON.stringify(log.lines)).not.containEql(CONTENT);
     should(folder.raw(FerretStateFile, broken)).equal('{"turnState": "');
+
+    // Act + Assert: DIFFERENT bytes with the SAME kind of damage are a new report (the key is the bytes, not the kind).
+    folder.plant(FerretStateFile, '{"turnState": "x', broken);
+    await ticks(30);
+    should(warnings()).have.length(3);
+    should(warnings()[2]?.fields?.why).equal('unparsable');
+    should(JSON.stringify(log.lines)).not.containEql('turnState');
+  });
+
+  it('BG-037 a mended state.json clears the report, so the same damage later is said again', async () => {
+    // Arrange: one live ferret mid-turn whose document is damaged, and whose pane shows the turn over.
+    const { storage, folder } = await opened();
+    const id = await working(storage, 'mended-1');
+    const runner = new FakeRunner();
+    const record = {
+      format: 1,
+      id: id as unknown as FerretId,
+      name: id,
+      role: 'lead',
+      harness: 'claude-code',
+      runner: 'tmux',
+      folder: `/work/${id}`,
+      state: 'working',
+      handle: runner.adoptable(id as unknown as FerretId),
+      createdAt: RECORD_T0,
+      stateAt: RECORD_T0,
+    } as FerretRecord;
+    const log = new RecordingLog();
+    let nowMs = Date.parse(AT);
+    const { host } = buildTurnWatch({
+      storage,
+      tail: MID_TURN_TAIL,
+      record: ferret => (ferret === (id as unknown as FerretId) ? record : undefined),
+      runner: () => runner,
+      turnObserved: async () => undefined,
+      clock: { now: () => new Date(nowMs).toISOString() },
+      every: () => () => undefined,
+      yieldToLoop: async () => undefined,
+      log,
+    });
+    const warnings = () => log.lines.filter(line => line.level === 'warn');
+    const ticks = async (count: number) => {
+      for (let tick = 0; tick < count; tick += 1) {
+        nowMs += 2_000;
+        await host.turns.run();
+      }
+    };
+    runner.screens.set(record.handle as never, { frame: 'w', working: true, atPrompt: false, permission: false });
+    await host.turns.run();
+    const damaged = '{"turnState": "';
+    folder.plant(FerretStateFile, damaged, id);
+    runner.screens.clear();
+    await ticks(30);
+    should(warnings()).have.length(1);
+
+    // Act: the file is mended (a valid document), the turn ends and is written; then the SAME bytes break it again.
+    folder.plant(
+      FerretStateFile,
+      JSON.stringify({ format: 1, id, status: 'running', turn: 1, turnState: 'working' }),
+      id,
+    );
+    await ticks(30);
+    should(await storage.readState(id)).have.property('turnState', 'your-turn');
+    // A second turn is recorded (a send), its first end-look passes, and then the document breaks with the same bytes.
+    await storage.writeState(id, { id, status: 'running', turn: 2, turnState: 'working', turnStateAt: AT });
+    folder.plant(FerretStateFile, damaged, id);
+    await ticks(30);
+
+    // Assert: said again, once.
+    should(warnings()).have.length(2);
   });
 });

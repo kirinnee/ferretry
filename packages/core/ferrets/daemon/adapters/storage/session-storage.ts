@@ -1,4 +1,4 @@
-import type { Log, StateFileDef, StatePort } from '@ferretry/kernel/contract';
+import type { Log, StateDamage, StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import {
   canonicalJsonValue,
   deepFreezeJson,
@@ -66,6 +66,13 @@ export class InvalidStateDocumentError extends Error {
   constructor(
     readonly file: string,
     readonly reason: string,
+    /** The kind of damage, from a fixed vocabulary (`StateDamage['reason']`): safe to log, never a quote of the file. */
+    readonly damage: StateDamage['reason'] = 'schema',
+    /**
+     * Which bytes were refused: the state port's version etag of the file (equal etags are the same file), so the
+     * same damage is the same damage until the file moves. `undefined` when the port could not say.
+     */
+    readonly etag?: string,
   ) {
     super(`invalid JSON document ${file}: ${reason}`);
     this.name = 'InvalidStateDocumentError';
@@ -711,7 +718,11 @@ export class DaemonStorage {
     const file = kind === 'config' ? FerretConfigFile : FerretStateFile;
     const read =
       kind === 'config' ? await this.state.read(FerretConfigFile, id) : await this.state.read(FerretStateFile, id);
-    if (!read.ok) throw new InvalidStateDocumentError(fileOf(file, id), read.error.sentence);
+    if (!read.ok) {
+      // Which bytes: the port's version of the file as it is now (best effort; a version that cannot be had is no key).
+      const version = await this.state.version(file, id).catch(() => undefined);
+      throw new InvalidStateDocumentError(fileOf(file, id), read.error.sentence, read.error.reason, version?.etag);
+    }
     if (read.value === undefined) return undefined;
     return deepFreezeJson(canonicalJsonValue(read.value));
   }
@@ -749,7 +760,7 @@ export class DaemonStorage {
         const file = kind === 'config' ? FerretConfigFile : FerretStateFile;
         const current = await this.readDocument(id, kind);
         const compute = current === undefined ? create : () => transform(current);
-        if (compute === undefined) throw new InvalidStateDocumentError(fileOf(file, id), 'file is missing');
+        if (compute === undefined) throw new InvalidStateDocumentError(fileOf(file, id), 'file is missing', 'missing');
         // Checked under the same lineage gate and session lane as archive publication: maintenance
         // never revives a session that left the live set while its caller was reading the transcript.
         if (unlessArchived && this.archived.has(id)) return canonicalJsonValue(current);

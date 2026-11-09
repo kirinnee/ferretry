@@ -78,18 +78,43 @@ const QUESTIONS_NOT_MOUNTED = new Proxy({} as QuestionStepPolicy, {
  * parser's account of it, which can quote it), anything else by its kind.
  */
 export function turnWatchFailureFields(error: unknown): Readonly<Record<string, string>> {
-  if (error instanceof InvalidStateDocumentError) return { file: error.file };
+  if (error instanceof InvalidStateDocumentError) return { file: error.file, why: error.damage };
   return { error: error instanceof Error ? error.name : 'unknown' };
 }
 
+/** What each kind of damage says, in words that carry nothing of the file (the kinds are a fixed vocabulary). */
+const DAMAGE_SENTENCE: Readonly<Record<InvalidStateDocumentError['damage'], string>> = {
+  unparsable: 'it is not JSON',
+  no_format: 'it has no format number',
+  lower_format: 'it is in an older format than this daemon reads',
+  higher_format: 'it is in a newer format than this daemon reads',
+  schema: 'it does not match the state document it should be',
+  missing: 'it is missing',
+  io: 'it could not be read',
+};
+
 /**
- * What makes one damaged state document the SAME damage: its file and a digest of what the parser said is wrong with it
- * (the account can quote the document, so only its digest is kept, and it is never logged). Any other failure has no
- * key, so it is told every time.
+ * What a failed look says in the log, for one ferret: WHICH ferret and WHY, and nothing of the document (never its bytes,
+ * nor the parser's account of it, which can quote them).
+ */
+function turnWatchFailureSentence(ferret: string, error: unknown): string {
+  if (error instanceof InvalidStateDocumentError)
+    return `ferret ${ferret}'s turn cannot be watched until its state.json is mended: ${DAMAGE_SENTENCE[error.damage]}`;
+  return `ferret ${ferret}'s turn could not be watched this time`;
+}
+
+/**
+ * What makes one damaged state document the SAME damage: its file, its kind of damage and a digest of the bytes the
+ * port refused (its version etag; the parser's account stands in where the port gave none, and the account can quote the
+ * document, so only its digest is kept and it is never logged). A fixed file clears it by recording a turn again;
+ * changed bytes are a new key. Any other failure has no key, so it is told every time.
  */
 function turnWatchFailureKey(error: unknown): string | undefined {
   if (!(error instanceof InvalidStateDocumentError)) return undefined;
-  return `${error.file}\u0000${createHash('sha256').update(error.reason, 'utf8').digest('hex')}`;
+  const digest = createHash('sha256')
+    .update(error.etag ?? error.reason, 'utf8')
+    .digest('hex');
+  return `${error.file}\u0000${error.damage}\u0000${digest}`;
 }
 
 /** The inline host over the turn part, unarmed: `arm()` starts the 2 s tick, `close()` stops it. */
@@ -182,7 +207,7 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
           // A damaged document is said ONCE, not on every look that meets it again (until its damage changes).
           failureKey: turnWatchFailureKey,
           failed: (id, error) =>
-            deps.log.warn("a ferret's turn could not be watched this time", {
+            deps.log.warn(turnWatchFailureSentence(id, error), {
               ferret: id,
               ...turnWatchFailureFields(error),
             }),
