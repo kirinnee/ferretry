@@ -99,6 +99,8 @@ function props(href: string, moves: Navigation[]): DaemonlessScreenProps {
     navigate: (to, options) => {
       moves.push({ to, replace: options?.replace });
     },
+    // The pairing page never asks for a machine: a pairing is the way one gets chosen.
+    chooseDaemon: async () => undefined,
   };
 }
 

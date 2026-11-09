@@ -1,8 +1,9 @@
 import { skeletonSentence } from '@ferretry/kernel/contract';
-import { Component, type ErrorInfo, type ReactNode, useMemo } from 'react';
+import { Component, type ErrorInfo, type ReactNode, Suspense, useMemo } from 'react';
 import type { PanelRef, ScreenRef } from '../layout/engine.ts';
 import { useRouter } from '../router/router.tsx';
 import { useOptionalShell, useRuntimeVersion, useShell, WithoutShell } from './context.tsx';
+import { useDaemonChooser } from './daemon-chooser.tsx';
 import { identityOf, WithPluginIdentity } from './plugin-identity.tsx';
 import { WithViewPlace } from './view-place.tsx';
 
@@ -28,7 +29,10 @@ export function ShellLine({
   );
 }
 
-/** A view that throws while rendering is contained to its own box. */
+/**
+ * A view that throws while rendering is contained to its own box, and one that SUSPENDS (a lazy half's first draw) is
+ * too: only its own box shows "Loading {title}…" until its chunk arrives, and the frame around it is never blanked (S10).
+ */
 export class ViewBoundary extends Component<
   { readonly title: string; readonly children: ReactNode },
   { failed: boolean }
@@ -45,7 +49,7 @@ export class ViewBoundary extends Component<
 
   override render(): ReactNode {
     if (this.state.failed) return <ShellLine tone="warn">{this.props.title} stopped working on this screen.</ShellLine>;
-    return this.props.children;
+    return <Suspense fallback={<ShellLine>Loading {this.props.title}…</ShellLine>}>{this.props.children}</Suspense>;
   }
 }
 
@@ -109,16 +113,20 @@ function DaemonlessScreen({
     () => identityOf(runtime, screen.plugin, 'daemonless', screen.id),
     [runtime, screen.plugin, screen.id],
   );
+  const { chooseDaemon, picker } = useDaemonChooser(screen.plugin);
   const View = runtime.daemonlessView(screen.plugin, screen.id);
   if (View === undefined) return <ShellLine>{skeletonSentence(screen.label)}</ShellLine>;
   return (
-    <ViewBoundary title={runtime.titleOf(screen.plugin)}>
-      <WithPluginIdentity identity={identity}>
-        <WithoutShell>
-          <View params={params} navigate={router.navigate} location={runtime.location} />
-        </WithoutShell>
-      </WithPluginIdentity>
-    </ViewBoundary>
+    <>
+      <ViewBoundary title={runtime.titleOf(screen.plugin)}>
+        <WithPluginIdentity identity={identity}>
+          <WithoutShell>
+            <View params={params} navigate={router.navigate} location={runtime.location} chooseDaemon={chooseDaemon} />
+          </WithoutShell>
+        </WithPluginIdentity>
+      </ViewBoundary>
+      {picker}
+    </>
   );
 }
 
@@ -135,7 +143,7 @@ export function ScreenView({
   // A daemon-less screen is drawn without a daemon and ONLY without one: never under a `/d/<daemon>/` prefix.
   if (daemon === undefined) {
     return daemonless ? (
-      <DaemonlessScreen screen={screen} params={params} />
+      <DaemonlessScreen key={`${screen.plugin}.${screen.id}`} screen={screen} params={params} />
     ) : (
       <ShellLine>{skeletonSentence(screen.label)}</ShellLine>
     );

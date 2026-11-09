@@ -33,6 +33,7 @@ import { CatalogClientProvider } from '../lib/client-context.tsx';
 import { daemonConnection } from '../lib/machine.ts';
 import { sharedMembers } from '../lib/members.ts';
 import { fetchMachineSkillEntries } from '../lib/machine-skills.ts';
+import { installChooser } from '../lib/choose-install.ts';
 import { readRegisteredProjects, useRegisteredProjects } from '../lib/registered-projects.ts';
 import { isSharingTab, JOIN_SCREEN_ID, SHARED_PATH } from '../lib/routes.ts';
 import type { InstallMachine } from '../features/shared/shared-item-sheet.tsx';
@@ -166,9 +167,21 @@ export function createJoinScreen() {
   };
 }
 
-/** `/shared`, what is shared with this browser across publishers. No client, so no machine to install on is offered here. */
+/**
+ * `/shared`, what is shared with this browser across publishers. It has no client, so no machine is listed: Install
+ * ASKS (`chooseDaemon`), and only the machine the person picks gives this half a client, its own on that machine. The
+ * choice spends no share code: the item was already opened and verified through the member transport.
+ */
 export function createSharedScreen() {
-  return function SharedRoute({ navigate }: DaemonlessScreenProps) {
-    return <SharedWithMe members={sharedMembers()} machines={[]} onHome={() => navigate(HOME_HREF)} />;
+  return function SharedRoute({ navigate, chooseDaemon }: DaemonlessScreenProps) {
+    const chooseInstall = useMemo(() => installChooser(chooseDaemon), [chooseDaemon]);
+    return (
+      <SharedWithMe
+        members={sharedMembers()}
+        machines={[]}
+        chooseInstall={chooseInstall}
+        onHome={() => navigate(HOME_HREF)}
+      />
+    );
   };
 }
