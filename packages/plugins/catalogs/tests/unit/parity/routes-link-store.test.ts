@@ -4,13 +4,15 @@
  *
  * They run over the real daemon half on the kernel's test host with `options.fetch` standing in for the store (no
  * network). The manifest declares ONE outside host, the `link-store` resolver, so every request below is also a proof
- * that the kernel let that host through and no other. The store fake does not verify the request signature (the
+ * that the kernel let that host through. That the resolver grants no other host is proved exactly, by the unit tests
+ * at the end of this file. The store fake does not verify the request signature (the
  * kernel's signer is replaced by the fixture's own over a real key); it answers the five calls of the wire.
  */
 import { describe, expect, test } from 'bun:test';
 import type { SealedDocumentHandle, SealedDocumentsApi } from '@ferretry/core-vault/contract';
 import { catalogsFixture, makeCatalog, mcpServer } from '../../support/daemon-host.ts';
 import { LinkStoreHosts } from '../../../daemon/adapters/link-store-hosts.ts';
+import { storedLink } from '../catalog-links/support.ts';
 
 const ferret = { kind: 'ferret', id: 'F1936' } as const;
 const SOURCE = { kind: 'mcp', mcp: 'pdf-tools' } as const;
@@ -230,6 +232,19 @@ describe('the download link routes that reach the link store', () => {
     expect(off.status).toBe(200);
     expect(remote.bundles.size).toBe(0);
     expect(remote.calls.every(call => new URL(call.url).origin === STORE)).toBe(true);
+  });
+
+  test('R-0007 after a restart, a link already on file is still turned off at its store when downloads are off or moved', async () => {
+    for (const linkStore of [{ enabled: false }, { url: 'https://other.example.test' }]) {
+      const setup = await withStore({ linkStore });
+      const { fx, remote, itemId } = setup;
+      const link = storedLink({ state: 'live', kind: 'public', publisher: fx.daemonId, itemId, storeOrigin: STORE });
+      fx.host.state('catalogs').files.set('links.json', JSON.stringify({ format: 1, schemaVersion: 1, links: [link] }));
+      const off = await fx.host.request('DELETE', `/v1/catalog-links/${link.linkId}`);
+      expect(off.status).toBe(200);
+      expect(remote.calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
+      expect(remote.calls.every(call => new URL(call.url).origin === STORE)).toBe(true);
+    }
   });
 });
 

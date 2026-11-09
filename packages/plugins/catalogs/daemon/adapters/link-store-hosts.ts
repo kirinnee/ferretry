@@ -1,7 +1,9 @@
+import { linkStoreSiteProblem } from '../lib/catalog-links/store-origin.ts';
 import type { LinkStoreSetting } from './link-store-locator.ts';
 
-/** The host (with a non-default port) of an address, or nothing when it is not an address. */
+/** The host (with a non-default port) of an address the link-store locator accepts, or nothing for any other value. */
 function hostOf(address: string): string[] {
+  if (linkStoreSiteProblem(address) !== null) return [];
   try {
     return [new URL(address).host];
   } catch {
@@ -14,7 +16,8 @@ function hostOf(address: string): string[] {
  * store the next link goes to (the configured address, or the relay directory's origin), plus every store an existing
  * link remembers, so a link made before a setting changed can still be turned off. The kernel asks with no request
  * data at each outbound call, so the remembered origins live in memory and are refreshed whenever `links.json` is
- * read or written. A machine with download links turned off grants no new store, only the remembered ones.
+ * read or written. A read that runs outside the link service's write queue can, for a moment, put back an origin a
+ * just-queued write dropped; the set only ever holds origins this daemon chose itself, so that window is harmless. A machine with download links turned off grants no new store, only the remembered ones.
  */
 export class LinkStoreHosts {
   #remembered: readonly string[] = [];

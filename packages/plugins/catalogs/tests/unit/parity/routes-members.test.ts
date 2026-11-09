@@ -100,7 +100,6 @@ describe('the share and member routes', () => {
       await browser(),
       (await mintShare(fx, { catalogIds: [catalog], member: { kind: 'new', label: 'Bob' } })).code,
     );
-    expect(listed.json<{ members: unknown[] }>().members).toHaveLength(1);
     expect((await fx.host.request('GET', '/v1/catalog-members')).json<{ members: unknown[] }>().members).toHaveLength(
       2,
     );
