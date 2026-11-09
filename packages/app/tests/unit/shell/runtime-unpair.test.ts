@@ -68,4 +68,20 @@ describe('unpairing a daemon', () => {
     expect(asked).toBe(0);
     expect(runtime.connection('d1').kind).toBe('unreachable');
   });
+  test("an unpair drops the daemon's clients from the one cache; nothing is handed out for it afterwards", async () => {
+    const transport = new ClosableTransport((request: TransportRequest) =>
+      request.path === '/v1/plugins'
+        ? json(inventoryOf(surfaces, {}))
+        : json({ error: 'none', code: 'not_found' }, 404),
+    );
+    const daemons = new DaemonList({ storage: memoryStore(), now: () => 1 });
+    daemons.add({ daemon: 'd1', machine: 'laptop', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
+    const runtime = new ShellRuntime({ appVersion: '5.0.0', surfaces, daemons, connect: async () => transport });
+    runtime.connection('d1');
+    await settle();
+    expect(runtime.client('d1', 'gate')).toBeDefined();
+    daemons.remove('d1');
+    expect(runtime.client('d1', 'gate')).toBeUndefined();
+    expect(runtime.client('d1', 'gate', 'background')).toBeUndefined();
+  });
 });

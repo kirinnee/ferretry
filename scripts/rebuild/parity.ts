@@ -281,6 +281,101 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
     return 'removed by design (§9.2: fleet/config.yaml)';
   return undefined;
 }
+/**
+ * Rows the word rules above place with Runtimes ("runtime", "fleet", "component" in a name) but whose code is another
+ * owner's in 5.0 (britnee ruling, parity-runtimes round 1: re-owned, none removed). Keyed by ROW ID, so a later row from
+ * the same source file keeps the owner the rules gave it; `applyReowned` refuses an id the inventory does not hold.
+ * J-0052 and J-0096 have no 5.0 plugin that really does the job; they stay `[ ]` under the nearest name, and the
+ * owner decides each (a "removed by design" status needs her per-row yes).
+ */
+const REOWNED: Readonly<Record<string, string>> = {
+  // Pack routing conversion at boot (the v4-to-v5 converter's packs step is the nearest owner).
+  'J-0052': 'packs',
+  // Activity timers, the ordered log writer and the bundled worker host and probe: the kernel's clock, jobs and workers.
+  'J-0093': 'kernel',
+  'J-0153': 'kernel',
+  'J-0161': 'kernel',
+  'J-0165': 'kernel',
+  'J-0169': 'kernel',
+  'J-0175': 'kernel',
+  // The session worker's pacing and backstop timers: Ferrets' own worker (the kernel only supplies `after`).
+  'J-0176': 'ferrets',
+  // The relay carrier's reconnect scheduler is Connections'.
+  'J-0177': 'connections',
+  // The housekeeping pass trigger: analytics ingestion's nudge plus its slow backstop is Usage's.
+  'J-0227': 'usage',
+  // The credentials' usage reading, kept current by file events: Logins'. (J-0096 has no real 5.0 owner.)
+  'J-0096': 'logins',
+  'J-0232': 'logins',
+  'J-0233': 'logins',
+  'J-0234': 'logins',
+  // The transcript follower: each harness implements `TranscriptReader.follow` (Claude's is claude-code's).
+  'J-0237': 'claude-code',
+  'F-0006': 'skills',
+  'F-0018': 'cli',
+  // The shared-history lease lock: the lease store stays Conversation's.
+  'F-0023': 'conversation',
+  'F-0027': 'kernel',
+  'F-0029': 'kernel',
+  'F-0030': 'kernel',
+  'F-0034': 'kernel',
+  'F-0046': 'kernel',
+  'F-0096': 'kernel',
+  // Screens of the conversation, the files tab and the session pages.
+  'S-0064': 'conversation',
+  'S-0111': 'conversation',
+  'S-0115': 'conversation',
+  'S-0134': 'conversation',
+  'S-0102': 'ferrets',
+  'S-0103': 'ferrets',
+  'S-0157': 'ferrets',
+  'S-0160': 'ferrets',
+  'S-0167': 'ferrets',
+  'S-0232': 'ferrets',
+  // One machine's outage sheet: the outage and its attempt count are Connections'.
+  'S-0145': 'connections',
+  // The fleet event socket is declared by Ferrets (packages/core/ferrets/manifest.ts), not the kernel.
+  'R-0424': 'ferrets',
+  // The open-url route is served by Browsers (daemon/open-url/routes.ts).
+  'R-0401': 'browsers',
+};
+
+const SHELL_DAEMON_VERBS: ReadonlySet<string> = new Set([
+  'fy daemon',
+  'fy daemon install',
+  'fy daemon logs',
+  'fy daemon reset',
+  'fy daemon restart',
+  'fy daemon start',
+  'fy daemon status',
+  'fy daemon stop',
+  'fy daemon uninstall',
+  'fy daemon which',
+]);
+const SHELL_STORAGE_FILES: ReadonlySet<string> = new Set([
+  'packages/cli/src/adapters/daemon/lifecycle-lock.ts',
+  'packages/cli/src/lib/daemon/layout.ts',
+]);
+/** The unit test file that proves a row: the owner's parity file for its kind, or the shell's own for what it owns. */
+function checkOf(kind: Kind, what: string, file: string, actualOwner: string): string {
+  return kind === 'V' && what === 'fy daemon update'
+    ? 'packages/cli/tests/unit/update/shell.test.ts'
+    : // The daemon process verbs are the fy shell's, which a kernel test may not import (context-imports).
+      kind === 'V' && SHELL_DAEMON_VERBS.has(what)
+      ? 'packages/cli/tests/unit/parity/daemon-verbs.test.ts'
+      : // The lifecycle claim and the daemon lock's place in the state home are the shell's own files.
+        kind === 'F' && actualOwner === 'kernel' && SHELL_STORAGE_FILES.has(file)
+        ? 'packages/cli/tests/unit/parity/storage.test.ts'
+        : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
+          kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
+          ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
+          : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
+            kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
+            ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
+            : kind === 'R'
+              ? 'descriptor-parity'
+              : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+}
 function add(kind: Kind, what: string, file: string, line: number, descriptor = '', owner?: string) {
   let actualOwner = owner ?? ownerOf(file, what);
   if (kind === 'S' && actualOwner === 'asks') actualOwner = 'agenda';
@@ -292,18 +387,7 @@ function add(kind: Kind, what: string, file: string, line: number, descriptor = 
         'per-kind command: mcp/skill/shell/instruction/profile/runtime/model-set/harness settings/hooks (§1.4)',
       )
     : renamed(what);
-  const check =
-    kind === 'V' && what === 'fy daemon update'
-      ? 'packages/cli/tests/unit/update/shell.test.ts'
-      : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
-        kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
-        ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
-        : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
-          kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
-          ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
-          : kind === 'R'
-            ? 'descriptor-parity'
-            : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+  const check = checkOf(kind, what, file, actualOwner);
   rows.push({
     id: '',
     kind,
@@ -1648,8 +1732,31 @@ for (const row of rows.sort((a, b) => rowKey(a).localeCompare(rowKey(b)))) {
   row.id = old?.id ?? `${row.kind}-${String(next[row.kind]++).padStart(4, '0')}`;
   if (old && !row.status.startsWith('removed by design') && !old.status.startsWith('removed by design'))
     row.status = old.status;
+  // A route ticked `[x]` names the route test that proves it (parity-ticks); the generator's default is only the check
+  // a port must add, so a test path someone wrote survives regeneration. Only a TICKED row keeps it: a row reverted to
+  // `[ ]` goes back to the default, so an open row never points at a test that no longer proves it.
+  if (old && row.kind === 'R' && old.status.startsWith('[x]') && old.check !== 'descriptor-parity')
+    row.check = old.check;
   unique.set(key, row);
 }
+/**
+ * Moves the rows `REOWNED` names to their 5.0 owner (and that owner's check file). The ids belong to the committed
+ * registry in docs/design, so an id it lacks is an error there; a run into another `--out-dir` (the generator's own
+ * fixture) has no such registry and skips ids it does not hold.
+ */
+function applyReowned(all: ReadonlyMap<string, Row>) {
+  const byId = new Map([...all.values()].map(row => [row.id, row]));
+  for (const [id, owner] of Object.entries(REOWNED)) {
+    const row = byId.get(id);
+    if (!row) {
+      if (outputDirectory !== resolve(join(root, 'docs/design'))) continue;
+      throw new Error(`REOWNED names ${id}, which is not in the inventory`);
+    }
+    row.owner = owner;
+    row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
+  }
+}
+applyReowned(unique);
 const inventory = [...unique.values()].sort(
   (a, b) =>
     owners.indexOf(a.owner) - owners.indexOf(b.owner) || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id),

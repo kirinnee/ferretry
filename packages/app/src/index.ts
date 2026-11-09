@@ -20,6 +20,8 @@ export {
   type DaemonlessScreenProps,
   type DaemonlessViews,
   type DeviceClaims,
+  type BackgroundViewProps,
+  type DeviceViewProps,
   type DirectoryFetch,
   type PairedOver,
   type PairingAttempt,
@@ -145,6 +147,24 @@ export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
 export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 /** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */
 export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
+/** @public This device's theme, read on any screen, daemon-less ones included (§5.2: a device setting; shell contract S9). */
+export {
+  type DevicePaired,
+  type DevicePairedMachine,
+  type DeviceTheme,
+  useDevicePaired,
+  useDeviceTheme,
+} from './shell/device-context.tsx';
+/** @public Where a per-daemon view is drawn — its machine, feed and authority — and how a control shows for it (§5.2; shell contract S1). */
+export {
+  type Authority,
+  type Axis,
+  CAPABILITY_NAMES,
+  type CapabilityName,
+  controlState,
+  useViewPlace,
+  type ViewPlace,
+} from './shell/view-place.tsx';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,
@@ -174,7 +194,21 @@ export {
   reconcileMachineOrder,
   replacedPairing,
 } from './daemons/machine-names.ts';
-export { type DaemonClientOf, useDaemonClients, usePairedDaemons } from './shell/daemon-access.ts';
+export { usePairedDaemons } from './shell/daemon-access.ts';
+/** @public The same plugin on every paired machine (§5.1; shell contract S2): each row's place and the plugin's own client. */
+export { type DaemonReach, useEveryDaemon, useNoReach, useNoReaches } from './shell/every-daemon.ts';
+export type { NoReach } from './shell/plugin-identity.tsx';
+// ─── declared fragments, device views and the in-memory hand-off (shell contract S3) ─────────────────────────────
+export { type FragmentDecl, FRAGMENT_KEY } from './router/address.ts';
+export { type FragmentArrival, useFragment } from './shell/use-fragment.ts';
+export {
+  type InstallOutcome,
+  type InstallPlatform,
+  type InstallPrompt,
+  useInstallPrompt,
+} from './shell/install-prompt.ts';
+export { type NavForm, useNavForm } from './shell/device-panels.tsx';
+export { handOff, type OwnScreenRef, useHandOff, useOwnScreen } from './shell/hand-off.ts';
 
 export {
   type AddressPlace,

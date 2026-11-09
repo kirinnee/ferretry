@@ -40,9 +40,11 @@ import {
   type RuntimesFile,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { endedSeams, fileAssembly } from './host-assembly.ts';
+import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
-import { autoResumeAnswer } from './lib/service/auto-resume-answer.ts';
+import { autoResumeAnswer, autoResumeSwitch } from './lib/service/auto-resume-answer.ts';
 import { DisableExpiryWatch, earliestExpiry, keepUnpublished, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
@@ -71,7 +73,8 @@ export interface RuntimesAssembly {
     | 'read'
     | 'apply'
     | 'installCatalogItem'
-  >;
+  > &
+    Partial<Pick<FleetCatalogService, 'republish'>>;
   readonly setup: Pick<
     FleetSetupService,
     'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
@@ -203,6 +206,14 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
         },
         now: () => clock.nowMs(),
         republish: async () => {
+          // The fleet manifest and the wrappers are published again AT this instant (docs/disabling.md), under the
+          // same exclusive section as every apply. A republish that cannot run (the model is not readable yet) is said
+          // once and never stops the views from hearing it.
+          await assembly.catalog.republish?.().catch((error: unknown) => {
+            ctx.kernel.log.warn(
+              `a login or runtime switched off until a time came back on, but the fleet could not be published again: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
           const now = clock.nowMs();
           const after = expiredUpTo;
           expiredUpTo = now;
@@ -237,7 +248,9 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
           'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
-            switchOn: () => assembly.autoResume?.(),
+            switchOn: () =>
+              assembly.autoResume?.() ??
+              autoResumeSwitch(config.fileState(runtimesFile).state, config.file(runtimesFile)),
             resolve: async id => await api.resolve(id),
           }),
         },
@@ -251,4 +264,12 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
   });
 }
 
-export default runtimesDaemon();
+/** The assembly of this build: the services stay unwired where the kernel offers no way yet, the rest is the host's. */
+const hostAssembly: RuntimesAssembler = ctx => {
+  // ONE publication gate: every apply (the catalogue's and the setup's share one provisioner) runs exclusively under
+  // it, and every read of the published fleet (the ended-runtime seams, the manifest the republish compares) waits (S67).
+  const publication = new FleetPublication();
+  return { ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) };
+};
+
+export default runtimesDaemon(hostAssembly);

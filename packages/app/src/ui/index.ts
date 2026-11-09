@@ -24,6 +24,7 @@ export * from './route-link.tsx';
 export * from './setup-ui.tsx';
 export * from './sheet-tabs.tsx';
 export * from './spinner.tsx';
+export * from './theme-toggle.tsx';
 export * from './underline-tabs.tsx';
 export * from './hooks/use-app-viewport.ts';
 export * from './hooks/use-back-dismiss.ts';

@@ -11,7 +11,8 @@ import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
-import { useDaemonClients, usePairedDaemons } from '../../../src/shell/daemon-access.ts';
+import { usePairedDaemons } from '../../../src/shell/daemon-access.ts';
+import { useEveryDaemon } from '../../../src/shell/every-daemon.ts';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { PanelSlot, ScreenView } from '../../../src/shell/views.tsx';
@@ -43,12 +44,12 @@ const manifest = {
   },
 } as unknown as Manifest;
 
-const got: { props?: DaemonlessScreenProps; reach?: (daemon: string) => Promise<unknown> } = {};
+const got: { props?: DaemonlessScreenProps; reach?: readonly unknown[] | undefined } = {};
 const current = (): DaemonlessScreenProps | undefined => got.props;
-const reached = (): ((daemon: string) => Promise<unknown>) | undefined => got.reach;
+const reached = (): readonly unknown[] | undefined => got.reach;
 /** What a daemon-less view could try with the shell's own hooks and components, given a daemon id it learned elsewhere. */
 function Reaching(): ReactNode {
-  got.reach = useDaemonClients('welcome');
+  got.reach = useEveryDaemon();
   return (
     <>
       <span data-testid="paired">{usePairedDaemons().length}</span>
@@ -163,7 +164,7 @@ describe('daemon-less screens', () => {
     await settle();
     // The shell itself keeps its selected daemon's connection; the view adds nothing to it.
     const before = transport.paths();
-    await expect(reached()?.('d1')).rejects.toThrow('no app shell');
+    expect(reached()).toEqual([]);
     await settle();
     expect(transport.paths()).toEqual(before);
     // A panel slot drawn inside it places nothing, and the paired list reads as empty there.

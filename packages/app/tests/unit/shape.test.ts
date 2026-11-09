@@ -22,6 +22,13 @@ describe('the app shell shape', () => {
     expect(lines).toBeLessThanOrEqual(150);
   });
 
+  test('main.tsx captures the browser’s install prompt before anything renders (S13)', () => {
+    const main = readFileSync(join(SRC, 'main.tsx'), 'utf8');
+    const capture = main.indexOf('createBrowserInstallPrompt(');
+    expect(capture).toBeGreaterThan(-1);
+    expect(capture).toBeLessThan(main.indexOf('createRoot('));
+  });
+
   test('no source binds a global network function', () => {
     const offenders = sources(SRC).filter(path => /(=|\?\?|:)\s*fetch\b/u.test(readFileSync(path, 'utf8')));
     expect(offenders.map(path => relative(SRC, path))).toEqual([]);

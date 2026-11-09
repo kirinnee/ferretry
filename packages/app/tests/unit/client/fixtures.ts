@@ -66,6 +66,8 @@ export class FakeTransport implements DaemonTransport {
   readonly sockets: { path: string; closed: boolean; listeners: SocketListeners }[] = [];
   eventStreams = 0;
   #eventListener: ((event: RawEvent) => void) | undefined;
+  #feedClosed: ((reason: string) => void) | undefined;
+  #feedOpened: (() => void) | undefined;
   #reconnect = new Set<() => void>();
 
   constructor(public answer: (request: TransportRequest) => Promise<TransportAnswer> | TransportAnswer) {}
@@ -75,9 +77,11 @@ export class FakeTransport implements DaemonTransport {
     return this.answer(request);
   }
 
-  events(listener: (event: RawEvent) => void): () => void {
+  events(listener: (event: RawEvent) => void, onClose?: (reason: string) => void, onOpen?: () => void): () => void {
     this.eventStreams += 1;
     this.#eventListener = listener;
+    this.#feedClosed = onClose;
+    this.#feedOpened = onOpen;
     return () => {
       this.#eventListener = undefined;
     };
@@ -97,6 +101,16 @@ export class FakeTransport implements DaemonTransport {
   onReconnect(listener: () => void): () => void {
     this.#reconnect.add(listener);
     return () => this.#reconnect.delete(listener);
+  }
+
+  /** The event feed answered: the client's feed is live. */
+  openFeed(): void {
+    this.#feedOpened?.();
+  }
+
+  /** The event feed dropped. */
+  dropFeed(): void {
+    this.#feedClosed?.('dropped');
   }
 
   emit(event: RawEvent): void {

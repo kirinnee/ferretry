@@ -262,9 +262,19 @@ describe('harness-refusals: interrupt presses the HARNESS’s stop key, only und
   });
 });
 
-test('decision 18: the seam offers deliver, queue (U3), interrupt and transcript only; no raw pane write exists', async () => {
+test('decision 18: the seam offers deliver, queue (U3), interrupt, transcript and the send path’s pane look and composer acts only; no raw pane write exists', async () => {
   const f = await running();
-  expect(Object.keys(f.seam).sort()).toEqual(['deliver', 'interrupt', 'queue', 'transcript']);
+  expect(Object.keys(f.seam).sort()).toEqual([
+    'clearComposer',
+    'deliver',
+    'heldAt',
+    'interrupt',
+    'observe',
+    'queue',
+    'stopActive',
+    'submitComposer',
+    'transcript',
+  ]);
   expect(Object.keys(f.seam.transcript).sort()).toEqual(['find', 'follow', 'read']);
 });
 
@@ -371,5 +381,93 @@ describe('U4: Ferrets’ own delivery wakes the turn watch', () => {
     expect((await f.seam.queue('refused words')).ok).toBe(false);
 
     expect(told).toEqual([f.id]);
+  });
+});
+
+describe('send path: the seam reaches the pane look and the composer acts through the runner', () => {
+  test('send path observe reads the pane once through the runner and writes nothing', async () => {
+    const f = await running();
+    f.runner.pane = { alive: true, dead: false, promptReady: false, activeWork: false, draft: 'half' };
+    expect(await f.seam.observe!()).toEqual({ ok: true, value: f.runner.pane });
+    expect(f.runner.pressed).toEqual([]);
+    expect(f.runner.deliveries).toEqual([]);
+  });
+
+  test('send path observe says no_pane for a pane the runner cannot read, and plugin_unavailable for a runner that cannot observe', async () => {
+    const gone = await running();
+    gone.runner.reboot();
+    expect(await gone.seam.observe!()).toEqual({ ok: false, error: { refused: 'no_pane' } });
+    const bare = await running();
+    (bare.runner as { observe?: unknown }).observe = undefined;
+    expect(await bare.seam.observe!()).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
+  });
+
+  test('send path heldAt answers where the pane holds a message, and REJECTS (never "not held") when it cannot read', async () => {
+    const f = await running();
+    f.runner.held = 'queue';
+    expect(await f.seam.heldAt!('x')).toEqual({ ok: true, value: 'queue' });
+    f.runner.held = 'throw';
+    await expect(f.seam.heldAt!('x')).rejects.toThrow();
+    (f.runner as { heldAt?: unknown }).heldAt = undefined;
+    expect(await f.seam.heldAt!('x')).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
+  });
+
+  test('send path clearComposer and submitComposer answer the runner’s outcome, and its closed failures as refusals typed nothing', async () => {
+    const f = await running();
+    f.runner.clearOutcome = 'foreign';
+    expect(await f.seam.clearComposer!('x')).toEqual({ ok: true, value: 'foreign' });
+    expect(await f.seam.submitComposer!('x', true)).toEqual({ ok: true, value: 'submitted' });
+    expect(f.runner.submitted).toEqual([{ handle: f.handle, text: 'x', strict: true }]);
+    f.runner.fail = { kind: 'held', code: 'input_pending' };
+    expect(await f.seam.submitComposer!('x')).toEqual({ ok: false, error: { refused: 'input_pending' } });
+    f.runner.fail = { kind: 'not_ready', why: 'exited' };
+    expect(await f.seam.clearComposer!('x')).toEqual({ ok: false, error: { refused: 'not_ready', why: 'exited' } });
+    (f.runner as { clearComposer?: unknown }).clearComposer = undefined;
+    (f.runner as { submitComposer?: unknown }).submitComposer = undefined;
+    expect(await f.seam.clearComposer!('x')).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
+    expect(await f.seam.submitComposer!('x')).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
+  });
+
+  test('send path stopActive presses only the harness’s stop under shouldPressStopKey and answers the pane read', async () => {
+    const working = await running();
+    working.runner.working = true;
+    expect((await working.seam.stopActive!()).ok).toBe(true);
+    expect(working.runner.stoppedActive).toEqual([
+      { handle: working.handle, stop: { key: 'Escape', whenIdle: false } },
+    ]);
+    expect(working.runner.pressed).toEqual([{ handle: working.handle, key: 'Escape' }]);
+    expect(working.runner.signals).toEqual([]);
+  });
+
+  test('send path stopActive NEVER presses an idle pane, interactive Claude (whose key is harmless idle) included', async () => {
+    // The interrupt may press an idle interactive Claude pane (the person's own Stop); a send-now's stop may not: an
+    // idle pane may be parked on a permission prompt or a question, and Escape would answer it.
+    const claude = await running({}, 'interactive');
+    claude.harness.turnStop = { key: 'Escape', safeWhenIdle: true };
+    claude.runner.working = false;
+    expect((await claude.seam.stopActive!()).ok).toBe(true);
+    expect(claude.runner.stoppedActive[0]?.stop).toEqual({ key: 'Escape', whenIdle: false });
+    expect(claude.runner.pressed).toEqual([]);
+    const codex = await running({}, 'interactive');
+    codex.harness.turnStop = { key: 'Escape', safeWhenIdle: false };
+    codex.runner.working = false;
+    await codex.seam.stopActive!();
+    expect(codex.runner.stoppedActive[0]?.stop).toEqual({ key: 'Escape', whenIdle: false });
+    expect(codex.runner.pressed).toEqual([]);
+  });
+
+  test('send path stopActive refuses without a harness stop or a runner stop, and answers a hold or a gone pane as refusals', async () => {
+    const none = await running();
+    none.harness.turnStop = undefined;
+    expect(await none.seam.stopActive!()).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
+    const held = await running();
+    held.runner.fail = { kind: 'held', code: 'quarantined' };
+    expect(await held.seam.stopActive!()).toEqual({ ok: false, error: { refused: 'quarantined' } });
+    const gone = await running();
+    gone.runner.fail = { kind: 'not_ready', why: 'exited' };
+    expect(await gone.seam.stopActive!()).toEqual({ ok: false, error: { refused: 'no_pane' } });
+    const odd = await running();
+    odd.runner.fail = { kind: 'not_ready', why: 'busy' };
+    await expect(odd.seam.stopActive!()).rejects.toThrow();
   });
 });

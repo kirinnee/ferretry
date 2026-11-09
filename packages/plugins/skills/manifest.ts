@@ -41,6 +41,7 @@ export default definePlugin({
         minimum: 'operator',
         caller: 'any',
         noStore: true,
+        precedence: 1,
         audit: { skip: 'a read of names and descriptions' },
         guard: { none: 'skill names and descriptions; no pane text, no secret' },
       }),
