@@ -376,25 +376,57 @@ const isVariableReference = (value: string): boolean => {
 const mixedRandom = (piece: string): boolean =>
   piece.length >= 8 && /[A-Z]/u.test(piece) && /[a-z]/u.test(piece) && /\d/u.test(piece);
 
+/** Steps where the text changes kind: lower to UPPER, letter to digit, digit to letter. Random base64 has one about every 2.4 characters; a name has few. */
+const humps = (text: string): number => {
+  let count = 0;
+  for (let i = 1; i < text.length; i++) {
+    const before = text[i - 1] as string;
+    const after = text[i] as string;
+    if (
+      (/[a-z]/u.test(before) && /[A-Z]/u.test(after)) ||
+      (/[A-Za-z]/u.test(before) && /\d/u.test(after)) ||
+      (/\d/u.test(before) && /[A-Za-z]/u.test(after))
+    )
+      count++;
+  }
+  return count;
+};
+
+const alnumCount = (text: string): number => (text.match(/[A-Za-z0-9]/gu) ?? []).length;
+
+/** A piece that is random on its own: mixed case and a digit, and a hump at least every third character. */
+const randomPiece = (piece: string): boolean => mixedRandom(piece) && humps(piece) * 100 >= 35 * piece.length;
+
 /**
- * A value that is a PATH: every `/`-separated segment is neither key-shaped nor a random mixed-case run. `/` is in the
- * base64 alphabet, so a key can start with it (an AWS secret access key can): its long segment, or its mixed-case
- * pieces, are what tell it from `/home/x/notes/2026-11-09/summary.md`.
+ * A value that is a PATH. It is judged by its NAME PIECES (the value split on `/`, `-`, `_` and `.`), not by whole
+ * `/`-segments: ordinary file names such as `migration-v4-to-v5.yaml` or `id_ed25519_github_2026` are long enough with a
+ * letter and a digit to look like a key as a whole, but base64 never holds `-`, `_` or `.`, so splitting on them never
+ * shortens a key's pieces (only `/` does). A key that `/` cuts into short pieces is caught by hump density over the
+ * whole value: at most max(2, 15% of the letters and digits).
  */
 const isPathShaped = (value: string): boolean =>
-  /^[/~.]/u.test(value) && value.split('/').every(segment => !looksLikeKey(segment) && !mixedRandom(segment));
+  /^[/~.]/u.test(value) &&
+  value
+    .split(/[/_.-]/u)
+    .filter(piece => piece !== '')
+    .every(piece => !looksLikeKey(piece) && !randomPiece(piece)) &&
+  humps(value) <= Math.max(2, Math.floor(0.15 * alnumCount(value)));
 
 /**
  * A version number (`1.2.3`, `v4.291.5-rc.1+build.20261109`). The suffix after the numbers is bounded: no `.`, `+` or
  * `-` separated piece of it may look like a key, nor the suffix with its separators taken out (a key written with
- * `-` or `+` in it would otherwise split into short pieces).
+ * `-` or `+` in it would otherwise split into short pieces). Pieces that are only digits (a build number, the
+ * timestamp of a Go pseudo-version) are left out of the joined check: they are not what makes a key.
  */
 const isVersionNumber = (value: string): boolean => {
   const match = /^v?\d+(?:\.\d+){2,}(?:[-+]([A-Za-z0-9.+-]*))?$/u.exec(value);
   if (match === null) return false;
   const suffix = match[1] ?? '';
   const pieces = suffix.split(/[.+-]/u);
-  return !pieces.some(piece => looksLikeKey(piece) || mixedRandom(piece)) && !looksLikeKey(pieces.join(''));
+  return (
+    !pieces.some(piece => looksLikeKey(piece) || mixedRandom(piece)) &&
+    !looksLikeKey(pieces.filter(piece => !/^\d+$/u.test(piece)).join(''))
+  );
 };
 
 /**

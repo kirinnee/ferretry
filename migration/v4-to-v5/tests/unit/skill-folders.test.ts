@@ -138,6 +138,23 @@ test('n5 an unreadable file named like a key fails by <key>, never by the name',
   expect(report.note).not.toContain('AKIAFAKE');
 });
 
+test('n2 a name with a space is said as it is so the owner can find it; a key-shaped word in it is still <key>', async () => {
+  const KEYNAME = 'AKIAFAKEFAKEFAKE0123';
+  await v4('My Skill/SKILL.md', 'FAKE\n');
+  await v4('My Skill/my notes.md', 'FAKE\n');
+  await v4(`My Skill/${KEYNAME} copy.md`, 'FAKE\n');
+  await chmod(join(f.from, 'fleet/assets/skills/My Skill/my notes.md'), 0o000);
+  const named = await skillFoldersStep.run(f.ctx());
+  expect(named.status).toBe('failed');
+  expect(named.note).toContain('fleet/assets/skills/My Skill/my notes.md');
+  await chmod(join(f.from, 'fleet/assets/skills/My Skill/my notes.md'), 0o600);
+  await chmod(join(f.from, `fleet/assets/skills/My Skill/${KEYNAME} copy.md`), 0o000);
+  const keyed = await skillFoldersStep.run(f.ctx());
+  expect(keyed.status).toBe('failed');
+  expect(keyed.note).toContain('fleet/assets/skills/My Skill/<key> copy.md');
+  expect(keyed.note).not.toContain('AKIAFAKE');
+});
+
 test('no asset tree converts to nothing; a dry run writes nothing', async () => {
   expect((await skillFoldersStep.run(f.ctx())).status).toBe('converted');
   await v4('review/SKILL.md', 'FAKE\n');

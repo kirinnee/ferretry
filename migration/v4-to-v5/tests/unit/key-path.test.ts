@@ -68,6 +68,32 @@ test('M1 a base64 secret that starts with a slash under a credential key is stil
   expect(rawSecretPaths({ env: { API_KEY: '~/notes/2026-11-09/summary-final.md' } })).toEqual([]);
 });
 
+test('M1 round 2: a real key-file path under a credential-named config key is a path, never a raw secret', () => {
+  const paths: Record<string, string> = {
+    sshKey: '/home/kirin/.ssh/id_ed25519_github_2026',
+    privateKey: '~/.ssh/deploy-key-2026-11-09-production.pem',
+    githubToken: '~/.config/gh/hosts-backup-20261109.yml',
+    apiKey: '/run/secrets/openai-api-key-2026-production',
+    serviceAccountKey: './secrets/gcp-sa-ferretry-prod-12345.json',
+    credentials: '/Users/erng/Library/Keychains/login2026.keychain-db',
+  };
+  for (const [key, value] of Object.entries(paths))
+    expect(rawSecretPaths({ [key]: value }), `${key}: ${value}`).toEqual([]);
+  expect(rawSecretPaths({ sshKey: '~/.ssh/id_ed25519' })).toEqual([]);
+});
+
+test('M1 round 2: a base64 key that starts with a slash is still refused however the slashes cut it, and a prefixed name is too', () => {
+  expect(rawSecretPaths({ apiKey: '/Zx9qLm2P/w8Rt5Vb7/Nc4Kabcd' })).toEqual(['apiKey']);
+  expect(rawSecretPaths({ apiKey: '/Zx9qLm2Pw8Rt5Vb7Nc4KabcdEfGh3Jk6' })).toEqual(['apiKey']);
+  expect(rawSecretPaths({ apiKey: '/home/x/Zx9qLm2Pw8Rt5Vb7Nc4Kabcd' })).toEqual(['apiKey']);
+  expect(rawSecretPaths({ apiKey: '~Zx9qLm2Pw8Rt5Vb7Nc4Kabcd' })).toEqual(['apiKey']);
+  expect(rawSecretPaths({ apiKey: '.Zx9qLm2Pw8Rt5Vb7Nc4Kabcd' })).toEqual(['apiKey']);
+  expect(rawSecretPaths({ apiKey: '/a1B2c3D4/e5F6g7H8/i9J0k1L2' })).toEqual(['apiKey']);
+  // Pieces under 8 characters judge as nothing alone; only the hump density over the whole value refuses these.
+  expect(rawSecretPaths({ apiKey: '/Zx9q/Lm2P/w8Rt/5Vb7/Nc4K/Qa3Z' })).toEqual(['apiKey']);
+  expect(rawSecretPaths({ apiKey: '~/Zx9q/Lm2P/w8Rt/5Vb7/Nc4K/Qa3Z' })).toEqual(['apiKey']);
+});
+
 test('n3 the vendored agenda engine reaches the converter only through its reader, never its mutation path', async () => {
   // `unreadableWrite` (state-machine.ts) prints zod text unrouted and is on the mutation path (`applyToLedger`). The
   // file is vendored verbatim ("do not edit"), so it stays as it is; this proves nothing converts through it.
@@ -79,16 +105,56 @@ test('n3 the vendored agenda engine reaches the converter only through its reade
     for (const entry of await readdir(join(root, folder), { recursive: true })) {
       if (!entry.endsWith('.ts') || entry === 'v4/agenda/engine/state-machine.ts') continue;
       const text = await readFile(join(root, folder, entry), 'utf8');
-      for (const match of text.matchAll(/^import\s+(type\s+)?\{([^}]*)\}\s+from\s+'[^']*engine\/state-machine\.ts'/gmu))
-        if (match[1] === undefined)
-          imports.push(
-            ...(match[2] as string)
-              .split(',')
-              .map(name => name.trim())
-              .filter(name => name !== '' && !name.startsWith('type ')),
-          );
+      imports.push(...valueImportsOfStateMachine(text));
     }
   expect([...new Set(imports)]).toEqual(['parseAgendaLedger']);
+});
+
+/**
+ * Every way a file can reach `state-machine.ts` as a VALUE: `import { a }`, `import * as X`, a default import, a side-effect
+ * import, `export { a } from`, `export * from` and a dynamic `import()`. A type-only import or re-export reads nothing
+ * at run time and is not one. A braced name is said as itself; every other form is said as its own text, so it cannot
+ * equal `parseAgendaLedger`.
+ */
+function valueImportsOfStateMachine(text: string): string[] {
+  const target = String.raw`['"][^'"]*state-machine\.ts['"]`;
+  const found: string[] = [];
+  for (const match of text.matchAll(
+    new RegExp(String.raw`\b(?:import|export)\s+(type\s+)?([^;'"]*?)\s*from\s*${target}`, 'gu'),
+  )) {
+    if (match[1] !== undefined) continue;
+    const clause = (match[2] as string).trim();
+    const braced = /^\{([^}]*)\}$/u.exec(clause);
+    if (braced === null) found.push(`unbraced: ${clause}`);
+    else
+      found.push(
+        ...(braced[1] as string)
+          .split(',')
+          .map(name => name.trim())
+          .filter(name => name !== '' && !name.startsWith('type ')),
+      );
+  }
+  for (const match of text.matchAll(new RegExp(String.raw`\bimport\s*\(\s*${target}`, 'gu')))
+    found.push(`dynamic: ${match[0]}`);
+  for (const match of text.matchAll(new RegExp(String.raw`^\s*import\s+${target}`, 'gmu')))
+    found.push(`side-effect: ${match[0].trim()}`);
+  return found;
+}
+
+test('n3 the state-machine import guard sees every form of reaching it, and passes only the reader', () => {
+  const from = (clause: string): string => `${clause} from './engine/state-machine.ts';`;
+  expect(valueImportsOfStateMachine(from('import { parseAgendaLedger }'))).toEqual(['parseAgendaLedger']);
+  expect(valueImportsOfStateMachine(from('import { type AgendaLedger, parseAgendaLedger }'))).toEqual([
+    'parseAgendaLedger',
+  ]);
+  expect(valueImportsOfStateMachine(from('import type { AgendaLedger }'))).toEqual([]);
+  expect(valueImportsOfStateMachine(from('export type { AgendaLedger }'))).toEqual([]);
+  expect(valueImportsOfStateMachine(from('import * as machine'))).toEqual(['unbraced: * as machine']);
+  expect(valueImportsOfStateMachine(from('import machine'))).toEqual(['unbraced: machine']);
+  expect(valueImportsOfStateMachine(from('export { applyToLedger }'))).toEqual(['applyToLedger']);
+  expect(valueImportsOfStateMachine(from('export *'))).toEqual(['unbraced: *']);
+  expect(valueImportsOfStateMachine(`const m = await import('./engine/state-machine.ts');`)).toHaveLength(1);
+  expect(valueImportsOfStateMachine(`import './engine/state-machine.ts';`)).toHaveLength(1);
 });
 
 test('n1a daemon.json: an unrecognized key written as a credential is named <key>, never printed', async () => {

@@ -32,8 +32,20 @@ export const V4_SKILL_FOLDERS = 'fleet/assets/skills';
 /** v5 Runtimes' `join(paths.fleet, 'assets', 'skills')`, relative to the home. */
 export const V5_SKILL_FOLDERS = 'fleet/assets/skills';
 
-/** A path as a report says it: each `/`-separated name through {@link pathSegment}, so a key-shaped file name is `<key>`. */
-const said = (path: string): string => path.split('/').map(pathSegment).join('/');
+/**
+ * A path as a report says it: each `/`-separated name through {@link pathSegment}, so a key-shaped file name is `<key>`.
+ * A name with spaces ("My Skill") is judged word by word, so the owner can still find it; a key has no space in it.
+ */
+const said = (path: string): string =>
+  path
+    .split('/')
+    .map(name =>
+      name
+        .split(' ')
+        .map(word => (word === '' ? word : pathSegment(word)))
+        .join(' '),
+    )
+    .join('/');
 
 export const skillFoldersStep: Step = {
   id: 'skill-folders',

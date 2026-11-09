@@ -407,6 +407,17 @@ describe('prose in a carried file is not a credential (m1)', () => {
     // M1 keeps these: a path is a path, whatever digits it holds.
     ['token before a path with a log name', 'see the token /var/log/app/2026-11-09/worker-3.log for details\n'],
     ['token before a mixed-case but short path', 'the token /home/User/Docs/notes.md\n'],
+    // M1 (round 2): a long file name is a name. Judged by its pieces, not as one 20+ character run.
+    ['token before a long hyphenated image name', 'the token ./docs/brand/fleet-grid/png/logomark-16-at-12x.png\n'],
+    ['token before a camera file name', 'see the token ~/Downloads/IMG_20261109_101530.jpg\n'],
+    [
+      'token before a long workflow file name',
+      'Rotate the token /home/user/.github/workflows/migration-v4-to-v5.yaml reads.\n',
+    ],
+    ['Basic before a long findings file name', 'Basic /tmp/work/converter-nits-findings2.md\n'],
+    ['token before a camel-case file name with a digit', 'the token /src/main/java/MyServiceImplV2Test.java\n'],
+    // n1 (round 2): a Go pseudo-version is a version.
+    ['token before a Go pseudo-version', 'the token v0.0.0-20261109153000-a3f9c2e1d4b5 is pinned\n'],
     // m2: a version with a short build suffix is still a version.
     ['token before a release-candidate version', 'the token 1.2.3-rc.1+build.20261109 is current\n'],
     // m1: a reference in quotes is still a reference.
