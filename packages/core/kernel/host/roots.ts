@@ -1582,7 +1582,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
    */
   const anchoredFolders = async (): Promise<void> => {
     for (const folder of setup.linkFreeFolders() ?? []) {
-      const found = await fs.lstat(folder);
+      // A folder the walk cannot look at (no permission, a file where a folder should be) is one it cannot prove to be
+      // no link: it fails closed as a link does, with the refusal alone — the system's error names an absolute path.
+      const found = await fs.lstat(folder).catch(() => refuse('link_escape'));
       if (found === undefined) return;
       if (found.kind === 'link') refuse('link_escape');
     }

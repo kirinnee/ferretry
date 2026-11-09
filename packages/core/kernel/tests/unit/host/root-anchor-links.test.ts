@@ -10,7 +10,7 @@
  * list and read it. Each test names the door it proves.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { FencedPath } from '../../../contract/bound.ts';
 import type { RootHandle, RootName } from '../../../contract/ports.ts';
@@ -295,6 +295,92 @@ describe('an anchored scope refuses a link from the anchor down to the scoped fo
   });
 });
 
+describe('a folder the walk cannot look at, a hostile spelling of the anchor, and the lexical half', () => {
+  const kind = (error: unknown): { refusal?: string; message: string } => ({
+    ...(error instanceof RootError ? { refusal: error.refusal } : {}),
+    message: error instanceof Error ? error.message : String(error),
+  });
+  const listError = async (root: RootHandle): Promise<{ refusal?: string; message: string } | undefined> => {
+    const folder = root.resolve('');
+    if (!folder.ok) return { refusal: folder.error, message: '' };
+    try {
+      await root.list(folder.value);
+      return undefined;
+    } catch (error) {
+      return kind(error);
+    }
+  };
+
+  test('a component with no permission (EACCES) is refused with a content-free RootError, never allowed', async () => {
+    if (process.getuid?.() === 0) return;
+    const w = await world();
+    await chmod(`${w.project}/.claude`, 0o000);
+    try {
+      const refused = await listError(w.handle({ subfolder: `${w.project}/.claude/skills`, within: w.project }));
+      expect(refused?.refusal).toBe('link_escape');
+      expect(refused?.message).toBe('root refused: link_escape');
+      expect(refused?.message).not.toContain(w.parent);
+    } finally {
+      await chmod(`${w.project}/.claude`, 0o700);
+    }
+  });
+
+  test('a component that is a FILE where a folder should be (ENOTDIR) is refused with a content-free RootError', async () => {
+    const w = await world();
+    await rm(`${w.project}/.claude`, { recursive: true });
+    await writeFile(`${w.project}/.claude`, 'not a folder');
+    const refused = await listError(w.handle({ subfolder: `${w.project}/.claude/skills`, within: w.project }));
+    expect(refused?.refusal).toBe('link_escape');
+    expect(refused?.message).toBe('root refused: link_escape');
+    expect(refused?.message).not.toContain(w.parent);
+  });
+
+  test('a dangling link and a link loop at the anchor’s first child are link_escape', async () => {
+    const w = await world();
+    await rm(`${w.project}/.claude`, { recursive: true });
+    await symlink(`${w.parent}/nowhere`, `${w.project}/.claude`);
+    const scope = { subfolder: `${w.project}/.claude/skills`, within: w.project };
+    expect(await doors(w.handle(scope))).toEqual(ALL_REFUSED);
+    await rm(`${w.project}/.claude`);
+    await symlink(`${w.project}/.claude`, `${w.project}/.claude`);
+    expect(await doors(w.handle(scope))).toEqual(ALL_REFUSED);
+  });
+
+  test('an anchor spelled with a trailing slash, relative, or in another case names no folder: outside at every door', async () => {
+    const w = await world();
+    const folder = `${w.project}/.claude/skills`;
+    const refused = {
+      list: 'outside',
+      entries: 'outside',
+      readText: 'outside',
+      readBytes: 'outside',
+      stat: 'outside',
+      lstat: 'outside',
+      realPath: 'outside',
+    };
+    for (const within of [
+      `${w.project}/`,
+      'workspace/proj',
+      `${w.parent}/Workspace/proj`,
+      `${w.parent}/WORKSPACE/proj`,
+    ])
+      expect({ within, doors: await doors(w.handle({ subfolder: folder, within }), folder) }).toEqual({
+        within,
+        doors: refused,
+      });
+  });
+
+  test('resolve is lexical: under a hostile link it answers ok, and every call that reaches the disk refuses', async () => {
+    const w = await world();
+    await rm(`${w.project}/.claude`, { recursive: true });
+    await symlink(`${w.parent}/outside/claude`, `${w.project}/.claude`);
+    const root = w.handle({ subfolder: `${w.project}/.claude/skills`, within: w.project });
+    expect(root.resolve('')).toMatchObject({ ok: true });
+    expect(root.resolve(`${NAME}/SKILL.md`)).toMatchObject({ ok: true });
+    expect(await doors(root)).toEqual(ALL_REFUSED);
+  });
+});
+
 describe('an anchor that is not the folder or an ancestor of it names no folder', () => {
   const FOLDER = (project: string) => `${project}/.claude/skills`;
   const refused = {
@@ -328,6 +414,14 @@ describe('an anchor that is not the folder or an ancestor of it names no folder'
   test('a root that takes no absolute folder refuses any anchor', async () => {
     const w = await world();
     const downloads = w.rootsFor(['downloads']).root('downloads', { within: w.project });
+    expect(downloads.resolve('')).toEqual({ ok: false, error: 'outside' });
+    expect(await doors(downloads, `${w.home}/state/downloads`)).toEqual(refused);
+  });
+
+  test('a root that takes no absolute folder refuses an anchor even when it IS an ancestor of that root’s own folder', async () => {
+    const w = await world();
+    // `downloads` lives under the home, so the home is a true ancestor of it: only the root’s kind refuses the anchor
+    const downloads = w.rootsFor(['downloads']).root('downloads', { within: w.home });
     expect(downloads.resolve('')).toEqual({ ok: false, error: 'outside' });
     expect(await doors(downloads, `${w.home}/state/downloads`)).toEqual(refused);
   });
