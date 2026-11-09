@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { defineConfig } from '../../../contract/index.ts';
 import { type AnyConfigDef, ConfigPathClaimError } from '../../../host/config/claims.ts';
+import { schemaFileName } from '../../../host/config/schemas.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { configHarness, HOME, loginsDef, manualClock, captureLog, updatesDef } from './support.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
@@ -270,7 +271,7 @@ describe('config files: comment-keeping writes', () => {
     const h = configHarness();
     await h.files.write('logins', loginsDef, 'work', { patch: { model: 'fast' } });
     const text = h.fs.snapshot().get(h.path('logins/work.yaml')) ?? '';
-    expect(text.split('\n')[0]).toBe('# yaml-language-server: $schema=../.schema/logins.json');
+    expect(text.split('\n')[0]).toBe('# yaml-language-server: $schema=../.schema/logins--item.json');
     expect(text).toContain('model: fast');
   });
 
@@ -384,6 +385,38 @@ describe('config files: collections, claims and refusals', () => {
     expect(() => build(claim('a', file('x.yaml')), claim('b', file('y.yaml')), claim('c', folder('z')))).not.toThrow();
   });
 
+  test('a file and a folder of one stem publish distinct schema names (F-0142)', async () => {
+    const file = defineConfig({ file: 'runtimes.yaml', schema, axis: 'use', loosens: () => [] });
+    const folder = defineConfig({
+      collection: 'runtimes',
+      name: /^[a-z]+$/,
+      schema,
+      axis: 'use',
+      loosens: () => [],
+    });
+    expect(schemaFileName(file)).not.toBe(schemaFileName(folder));
+    const memory = createMemoryHostFs();
+    const files = createConfigFiles({
+      home: HOME,
+      fs: memory,
+      clock: manualClock(),
+      log: captureLog(),
+      binary: 'fy',
+      defs: [claim('runtimes', file), claim('runtimes', folder)],
+    });
+    await files.publishSchemas();
+    const published = [...memory.snapshot().keys()].filter(p => p.includes('/.schema/')).toSorted();
+    expect(published).toEqual([`${HOME}/config/.schema/runtimes--item.json`, `${HOME}/config/.schema/runtimes.json`]);
+  });
+
+  test('two defs that would publish one schema name are refused at declaration, in a sentence (F-0142)', () => {
+    const file = (name: string) => defineConfig({ file: name, schema, axis: 'use', loosens: () => [] });
+    // `a/b.yaml` and `a--b.yaml` are different paths, but both flatten to a--b.json
+    expect(() => build(claim('a', file('a/b.yaml')), claim('b', file('a--b.yaml')))).toThrow(
+      /would both publish the editor schema \.schema\/a--b\.json/u,
+    );
+  });
+
   test('a path that leaves config/ or hides is refused', () => {
     const file = (name: string) => defineConfig({ file: name, schema, axis: 'use', loosens: () => [] });
     for (const bad of ['../x.yaml', '/x.yaml', '.schema/x.yaml', 'a//b.yaml', 'x.json'])
@@ -461,7 +494,7 @@ describe('config files: live reading and watching', () => {
     const h = configHarness();
     await h.files.publishSchemas();
     expect([...h.fs.snapshot().keys()].filter(p => p.includes('/.schema/')).toSorted()).toEqual([
-      h.path('.schema/logins.json'),
+      h.path('.schema/logins--item.json'),
       h.path('.schema/updates.json'),
     ]);
     const before = h.fs.snapshot().get(h.path('.schema/updates.json'));

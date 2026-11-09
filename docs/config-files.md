@@ -27,7 +27,9 @@ wire).
 
 Every file Ferretry writes starts with `# yaml-language-server: $schema=…`, pointing at
 `config/.schema/<kind>.json`, which the daemon writes from the same zod schemas it checks with
-(`fy config schema <kind>` prints one). `config/daemon.json` and `config/routing.json` live in the same
+(`fy config schema <kind>` prints one). A file keeps its stem (`runtimes.yaml` is `runtimes.json`); a folder's schema
+describes one item, so it ends `--item` (`runtimes/` is `runtimes--item.json`). Two declarations that would publish one
+name are refused at start, in a sentence. `config/daemon.json` and `config/routing.json` live in the same
 directory and are not configuration files in this sense: they are the daemon's own documents. The shell
 terminals open is one of them (`terminals.shell`, [terminals.md](terminals.md)).
 

@@ -72,7 +72,7 @@ import {
   defaultsOf,
   evaluateConfig,
 } from './evaluate.ts';
-import { configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
+import { assertDistinctSchemaNames, configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
 import { readConfigDisk } from './disk.ts';
 import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
@@ -366,6 +366,7 @@ const duration = (ms: number): Duration => milliseconds(ms);
 export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   const { home, fs, log, binary } = options;
   assertNoSharedPaths(options.defs);
+  assertDistinctSchemaNames(options.defs);
   const root = `${home}/config`;
   const state: StatePort =
     options.state ?? createStatePort({ home, pluginId: 'kernel', files: [acceptedConfigFile], fs });
