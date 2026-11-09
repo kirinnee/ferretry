@@ -74,8 +74,8 @@ const QUESTIONS_NOT_MOUNTED = new Proxy({} as QuestionStepPolicy, {
 });
 
 /**
- * What a turn watch failure may say in the log: a damaged state document by its FILE only (never its text, nor the
- * parser's account of it, which can quote it), anything else by its kind.
+ * What a turn watch failure may say in the log: a refused state document by its FILE and its KIND (a fixed word; never
+ * its text, nor the parser's account of it, which can quote it), anything else by its kind.
  */
 export function turnWatchFailureFields(error: unknown): Readonly<Record<string, string>> {
   if (error instanceof InvalidStateDocumentError) return { file: error.file, why: error.damage };
@@ -83,7 +83,7 @@ export function turnWatchFailureFields(error: unknown): Readonly<Record<string, 
 }
 
 /** What each kind of damage says, in words that carry nothing of the file (the kinds are a fixed vocabulary). */
-const DAMAGE_SENTENCE: Readonly<Record<InvalidStateDocumentError['damage'], string>> = {
+const DAMAGE_SENTENCE: Readonly<Record<Exclude<InvalidStateDocumentError['damage'], 'refused_write'>, string>> = {
   unparsable: 'it is not JSON',
   no_format: 'it has no format number',
   lower_format: 'it is in an older format than this daemon reads',
@@ -98,16 +98,23 @@ const DAMAGE_SENTENCE: Readonly<Record<InvalidStateDocumentError['damage'], stri
  * nor the parser's account of it, which can quote them).
  */
 export function turnWatchFailureSentence(ferret: string, error: unknown): string {
-  if (error instanceof InvalidStateDocumentError)
-    return `ferret ${ferret}'s turn cannot be watched until its state.json is mended: ${DAMAGE_SENTENCE[error.damage]}`;
+  // The daemon's own value was refused before it reached the disk: the file on disk is not what is wrong, so it is not
+  // told as damage there.
+  if (error instanceof InvalidStateDocumentError) {
+    const kind = error.damage;
+    if (kind === 'refused_write')
+      return `ferret ${ferret}'s turn could not be recorded: the state document the daemon built for it does not match the state document it should be (nothing was written, and the state.json on disk is as it was)`;
+    return `ferret ${ferret}'s turn cannot be watched until its state.json is mended: ${DAMAGE_SENTENCE[kind]}`;
+  }
   return `ferret ${ferret}'s turn could not be watched this time`;
 }
 
 /**
- * What makes one damaged state document the SAME damage: its file, its kind of damage and a digest of the bytes the
- * port refused (its version etag; the parser's account stands in where the port gave none, and the account can quote the
- * document, so only its digest is kept and it is never logged). A fixed file clears it by recording a turn again;
- * changed bytes are a new key. Any other failure has no key, so it is told every time.
+ * What makes one refused state document the SAME report: its file, its kind and a digest of the file as last written
+ * (the port's version etag: inode, size and modification time, so a rewrite is a new report even of identical bytes; the
+ * port's account stands in where it gave no etag, and that account can quote the document, so only its digest is kept
+ * and it is never logged). A fixed file clears it by recording a turn again. Any other failure has no key, so it is told
+ * every time.
  */
 export function turnWatchFailureKey(error: unknown): string | undefined {
   if (!(error instanceof InvalidStateDocumentError)) return undefined;

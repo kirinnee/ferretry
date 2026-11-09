@@ -408,7 +408,8 @@ describe('PacedTurnWatcher', () => {
     });
 
     it('BG-040 its wake count is forgotten, so a wake for a ferret that never came back is not kept forever', async () => {
-      // Arrange
+      // Arrange: the wake count is only ever COMPARED within one look, so a stale entry changes no behaviour a caller
+      // can see; what a leak costs is memory, and the only thing that can show it is the map itself (hence the cast).
       const subject = fleet(['leaves-4']);
       const id = subject.id('leaves-4');
       const wakes = (subject.watcher as unknown as { readonly wakes: ReadonlyMap<SessionId, number> }).wakes;

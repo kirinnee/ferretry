@@ -326,6 +326,31 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
     should(keys[0]).not.equal(keys[1]);
   });
 
+  it("BG-037 the daemon's own refused write is told as that, not as damage on disk, and leaves the file as it was", async () => {
+    // Arrange: a healthy state.json on the real port, and a value the daemon computed that the declared schema refuses.
+    const { storage, raw } = await openedReal();
+    const id = await working(storage, 'refused-1');
+    const before = await raw(id);
+
+    // Act
+    const thrown = await storage
+      .writeState(id, { id, status: 'not-a-status', turn: 1, turnState: CONTENT } as never)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // Assert: its own kind, a sentence that does not send the owner to mend a file that is fine, and nothing written.
+    should(thrown).be.instanceOf(InvalidStateDocumentError);
+    should((thrown as InvalidStateDocumentError).damage).equal('refused_write');
+    const sentence = turnWatchFailureSentence('refused-1', thrown);
+    should(sentence).containEql('could not be recorded');
+    should(sentence).containEql('as it was');
+    should(sentence).not.containEql('mended');
+    should(sentence).not.containEql(CONTENT);
+    should(await raw(id)).equal(before);
+  });
+
   it('BG-037 a mended state.json clears the report, so the same damage later is said again', async () => {
     // Arrange: one live ferret mid-turn whose document is damaged, and whose pane shows the turn over.
     const { storage, folder } = await opened();
