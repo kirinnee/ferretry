@@ -45,8 +45,12 @@ describe('what reading a paste comes to', () => {
 
   it('is invalid, with the parser’s own sentence, for text that is not a key', () => {
     const draft = readSeedDraft('not a key!', github);
-    expect(draft.kind).toBe('invalid');
-    if (draft.kind === 'invalid') expect(draft.problem).not.toContain('not a key!');
+    expect(draft).toEqual({
+      kind: 'invalid',
+      problem:
+        'That is not a 2FA key: paste the key itself (letters A to Z and digits 2 to 7, spaces are fine) or an otpauth://totp link.',
+    });
+    expect(JSON.stringify(draft)).not.toContain('not a key!');
   });
 
   it('reads a bare key as its default codes, saying nothing of who it is for', () => {
