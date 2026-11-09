@@ -176,7 +176,7 @@ describe('the device context', () => {
     // Device state only: the theme, the OS answer, the install holder, the paired list, the address taker and the
     // in-memory hand-offs (S3) — no client, no runtime.
     expect(got.keys).toEqual(['address', 'daemons', 'handOffs', 'install', 'systemDark', 'theme']);
-    expect(NO_INSTALL_PROMPT.current()).toBeUndefined();
+    expect(NO_INSTALL_PROMPT.snapshot()).toEqual({ platform: 'browser', canPrompt: false });
   });
 
   test('outside an app shell there is no device theme', async () => {

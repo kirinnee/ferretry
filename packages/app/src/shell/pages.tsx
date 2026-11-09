@@ -10,6 +10,7 @@ import {
   type ThemeMode,
 } from '../theme/preferences.ts';
 import { useRuntimeVersion, useShell } from './context.tsx';
+import { DevicePanels } from './device-panels.tsx';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
 import { useSyncExternalStore, type MouseEvent } from 'react';
 
@@ -173,6 +174,8 @@ export function DeviceSettingsPage() {
           ))}
         </select>
       </label>
+      {/* Panels plugins declare in device.settings (S4, M3): no machine needed, by order. */}
+      <DevicePanels slot="device.settings" />
       <p>
         Layout: <code>{layout.layout.id}</code>
         {layout.kind === 'refused'
