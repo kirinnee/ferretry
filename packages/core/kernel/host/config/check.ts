@@ -152,6 +152,16 @@ function messageOf(issue: z.core.$ZodIssue): string {
   return issue.message;
 }
 
+/**
+ * Whether a schema found a secret in a file: ANY issue is a custom issue its schema marked `params: { rawSecret: true }`,
+ * whatever else is wrong with the file (a typo key, a bad reference). Any plugin may mark an issue, so a rule that lives in a
+ * schema (a login's environment) is handled as a raw key the kernel's own scan found, which also wins over every schema fault:
+ * the file's text is never shown to an agent. The unmarked issues stay in the list; they quote no value.
+ */
+function markedRawSecret(error: z.ZodError): boolean {
+  return error.issues.some(issue => issue.code === 'custom' && issue.params?.rawSecret === true);
+}
+
 /** The issues a failed schema parse means, the first {@link MAX_CONFIG_ISSUES} each located in the file. */
 function schemaIssues(
   path: string,
@@ -160,7 +170,7 @@ function schemaIssues(
 ): RefusedConfigText {
   return {
     ok: false,
-    reason: 'schema',
+    reason: markedRawSecret(error) ? 'raw_secret' : 'schema',
     ...cappedIssues(path, error.issues, issue => {
       const site = issue.code === 'unrecognized_keys' ? [...issue.path, ...issue.keys.slice(0, 1)] : issue.path;
       const where = describePath(issue.path);
@@ -237,7 +247,26 @@ export function checkConfigText(
   // The walk above sees parsed VALUES only, so a key left in a comment or a tag is found on the raw text: refused the same.
   const held = rawTextIssue(path, text, binary);
   if (held !== undefined) return held;
-  const parsed = def.schema.safeParse(read.read.value);
+  // A schema that THROWS (a plugin's rule hit a value it did not expect) must not stop a reload, which the host awaits
+  // unguarded: the file is invalid, and the error's words (which could quote the value) are never kept.
+  let parsed: ReturnType<typeof def.schema.safeParse>;
+  try {
+    parsed = def.schema.safeParse(read.read.value);
+  } catch {
+    return {
+      ok: false,
+      // A def of credential records could not judge the file, so its text is withheld as for a raw secret.
+      reason: def.credentialRecords === true ? 'raw_secret' : 'schema',
+      issues: [
+        {
+          path,
+          severity: 'error',
+          message: 'this file could not be checked',
+          fix: 'correct the file, or tell whoever maintains this setting',
+        },
+      ],
+    };
+  }
   if (!parsed.success) return schemaIssues(path, parsed.error, read.read.locate);
   return { ok: true, value: parsed.data, written: read.read.value, text };
 }

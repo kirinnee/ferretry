@@ -19,6 +19,15 @@ describe('loginFromHash', () => {
   it('an item that does not decode names no login', () => {
     expect(loginFromHash('#machines/box/sign-ins/%')).toBeNull();
   });
+
+  it('an item that is not a login id names no login, so a crafted link cannot put its own words in a notice', () => {
+    expect(
+      loginFromHash('#machines/x/sign-ins/Your%20session%20expired%2C%20sign%20in%20at%20evil.example'),
+    ).toBeNull();
+    expect(loginFromHash('#machines/x/sign-ins/Claude-You')).toBeNull();
+    expect(loginFromHash(`#machines/x/sign-ins/${'a'.repeat(65)}`)).toBeNull();
+    expect(loginFromHash(`#machines/x/sign-ins/${'a'.repeat(64)}`)).toBe('a'.repeat(64));
+  });
 });
 
 describe('signInsHash', () => {
