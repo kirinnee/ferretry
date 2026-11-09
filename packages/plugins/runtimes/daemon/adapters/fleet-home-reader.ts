@@ -15,21 +15,32 @@
  * can name both `homes/<id>/skills/<name>` and `assets/`. A swap there can only change which asset folder is read, and that
  * folder is then read through its own scoped handle.
  *
- * Declared residuals: a document swapped for a link between its listing and its read can reach another file of the
- * SAME home (the three-name menu and the home's own folder bound it, and no link out of the home is ever followed);
- * a file inside a skill folder swapped for a link can reach another file of the same skill folder.
+ * Declared residuals: a name of a FLEET home swapped for a link between its listing and its read can reach another file of
+ * the SAME folder it is scoped to. For a home outside the fleet every read is checked after it (the bytes are kept only
+ * when the name still reaches the file that was judged), so a swap is refused; what that leaves is stated in
+ * `following-handle.ts` and `document-link.ts`.
  *
  * A home the manifest places outside `fleet/homes` (an operator's own folder, a home-manager home) is served read-only
- * through `following-handle.ts` with the same menu and bounds, scoped to the account home itself. A link is followed ONLY
- * when it resolves INSIDE that home, and only where today's readers followed one: in the listing of the home (a document
- * that is a link, the `skills` folder that is a link) and of `skills/` (a skill folder that is a link). A link that leads
- * outside the home (into a store, into `~/.ssh`, anywhere else), nowhere, or round to a folder above it is skipped: in
- * `skills()` with no line and no error, as the inventory of today skipped it; in `document()` as one sentence. A skill
- * folder of a home outside the fleet is listed only when its `SKILL.md` resolves to a file inside the home. Inside a skill
- * folder (`skillTree`, `skillFile`) no link is followed: it is reported as a link and never opened, as today's skill-folder
- * reader does; only `skillManifest` reads `SKILL.md` through a link inside the home. The follow reaches neither the daemon's
- * own home nor a sign-in file, and nothing here writes. A fleet home is unchanged: a link there is read only when it
- * resolves into the fleet's own `assets/`.
+ * through `following-handle.ts` (the skills, scoped to the account home itself) and `document-link.ts` (the three
+ * documents). WHAT EACH READER DOES WITH A LINK there, against what today's readers of the same home did (today's machine
+ * skill inventory confined an outside home to `fleet/`; the session skill picker and the MCP document reader followed
+ * every link):
+ *
+ *  - `skills()` lists a plain folder and a link that resolves INSIDE the home to a folder with a plain `SKILL.md`; it skips,
+ *    with no line and no error, a link that leaves the home (a store, `~/.ssh`), leads nowhere, loops, or leads to a
+ *    sign-in file. It is a SUPERSET of today's machine inventory (that listed neither a plain folder nor an inside link of
+ *    such a home) and NARROWER than today's session picker (that listed store links). A skill folder whose `SKILL.md` is
+ *    a hard link is not listed: nothing could read it.
+ *  - `skillManifest()` reads `SKILL.md` plain or through a link inside the home; a link out of the home is not read.
+ *  - `document()` follows a link for the three documents ONLY, wherever it leads (a home-manager link into a store), as
+ *    today's MCP document reader did, under the bounds of `document-link.ts` (a regular file of one name, at most 16 MiB,
+ *    that parses as the document, never the daemon's home, never a sign-in file) and with a refusal that names only the
+ *    link. That is NARROWER than today's reader, which opened any file. A link to nothing answers absent, as there.
+ *  - `skillTree()` and `skillFile()` never follow a link inside a skill folder: a link is a link (tree) or unreadable
+ *    (file), as today's skill-folder reader does.
+ *
+ * The follow of the home and of its `skills/` folder is bounded by construction (`following-handle.ts`); nothing here
+ * writes. A fleet home is unchanged: a link there is read only when it resolves into the fleet's own `assets/`.
  *
  * Each method runs whole inside ONE `publication.reading(...)` (the manifest is read inside it, ungated, never nested),
  * so an apply that moves a home's documents aside is never observed half-done (S67).

@@ -1386,6 +1386,27 @@ session** and **Refresh** at the top; the install review stays a sheet over it. 
 session actually uses it_ needs a paid model run, which this slice did not make. Until it is checked the page claims
 only what is known; changing the sentence is one constant (`CODEX_NEXT`).
 
+### An account home outside the fleet: what each reader does with a link (BG-033)
+
+A home the fleet places outside its own folder (an operator's own folder, a home-manager home whose `skills/`,
+`settings.json` and `config.toml` link into a store) is read **read-only**, and each reader treats a link by its own rule.
+"Inside" means the link's real path is inside that account home.
+
+| Reader                       | A link inside the home                                  | A link out of the home (a store, `~/.ssh`)                                                 | A link to nothing, a loop, a sign-in file                   |
+| ---------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Skills list (`skills()`)     | followed, listed (when its `SKILL.md` is a plain file)  | skipped silently                                                                           | skipped silently                                            |
+| A skill's `SKILL.md`         | read                                                    | not read                                                                                   | not read                                                    |
+| A file inside a skill folder | never followed (a link is listed as a link, unreadable) | never followed                                                                             | never followed                                              |
+| The three documents          | followed, read                                          | **followed**, read (one regular file of one name, at most 16 MiB, parsing as the document) | refused in one sentence naming the link; to nothing: absent |
+
+Against the readers of the same homes before: this Skills list is a **superset** of the machine skill inventory (which
+listed neither a plain folder nor an inside link of such a home) and **narrower** than the session skill picker (which
+listed store links too). The documents follow a link out of the home, as the MCP document reader did, but under bounds that
+reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file, the daemon's home,
+a sign-in file, or something that does not parse as the document is refused, and the refusal names only the link. A
+hard-linked `SKILL.md` is not listed. A file read is checked after it was read: if the name no longer reaches the file that
+was judged, the bytes are dropped.
+
 ## Links (catalogs 3f)
 
 > **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4 and 3f-5,

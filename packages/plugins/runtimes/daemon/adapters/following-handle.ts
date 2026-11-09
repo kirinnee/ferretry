@@ -1,12 +1,14 @@
 /**
  * The READ-ONLY handle Runtimes uses on an account home outside the fleet (an operator's own folder, a home-manager
- * home): it follows a link ONLY when the link resolves INSIDE that account home.
+ * home): it follows a link ONLY when the link resolves INSIDE that account home. It serves the SKILLS of such a home; the
+ * three documents follow a link out of the home through `document-link.ts`, under their own bounds.
  *
  * THE ROOT IS THE ACCOUNT HOME, never `/`. The kernel's `harness-home` root is scoped to the home (`anchor`): it resolves a
  * link before it checks it and refuses one that leaves the home (`link_escape`). A link whose real path is outside the home
- * is therefore SKIPPED, exactly as the inventory of today skipped it (`node-skill-files.ts`: a folder whose `realpath` is
- * not inside the home is passed over with no line and no error). A link into a store, into `~/.ssh`, or into any other
- * place outside the home is skipped the same way: it stays a LINK in the listing, which every reader treats as "not read".
+ * is therefore SKIPPED (today's session skill picker followed it; today's machine inventory skipped it, as did the
+ * fallback home's reader: a folder whose `realpath` was not inside the confinement was passed over with no line and no
+ * error). A link into a store, into `~/.ssh`, or into any other place outside the home stays a LINK in the listing, which
+ * every skill reader treats as "not read".
  * The kernel's judgement still holds at every step: nothing inside the daemon's own home is reached (`fenced`), a device
  * file is refused, a file with a second hard link is refused, and the root is READ-ONLY (the handle exposes no member that
  * writes, removes, renames or links, and the root under it would refuse one).
@@ -22,8 +24,9 @@
  *    nothing, and a link the kernel refuses all stay a LINK in the listing.
  *
  * HOW FAR A LINK IS FOLLOWED is bounded by construction, not by a count: `follow` is on only for the listing of the home and
- * of its `skills/` folder (what the inventory of today did), and the folder a link leads to is then read with `follow` off,
- * where every link is reported as a link and none is opened (today's skill-folder reader). So a chain of followed links is
+ * of its `skills/` folder (a WIDENING from today's machine inventory, which followed none of them in a home outside the
+ * fleet), and the folder a link leads to is then read with `follow` off, where every link is reported as a link and none
+ * is opened (today's skill-folder reader). So a chain of followed links is
  * at most three: the `skills` link, the entry link, and the `SKILL.md` link (`skillManifest` only), plus the link a document
  * is; whatever chain of links each is made of, the chain itself is resolved by the kernel.
  *

@@ -65,7 +65,11 @@ export class RuntimeHomeUnreadable extends Error {
  * the home is still published, so a home that disappears is refused.
  */
 export interface RuntimeHomeReader {
-  /** `null`: absent. Bounded; a link or a hard-linked file is refused ({@link RuntimeHomeUnreadable}). */
+  /**
+   * `null`: absent. Bounded; a hard-linked file is refused ({@link RuntimeHomeUnreadable}), and so is a link in a fleet
+   * home. In a home outside the fleet a link is followed for these three names only (a regular file, one name, at most
+   * 16 MiB, parsing as the document; never the daemon's home, never a sign-in file) and a link to nothing is absent.
+   */
   document(file: RuntimeHomeDocument, limitBytes: number): Promise<string | null>;
   /** Folders directly in `<home>/skills`, at most `limit + 1`, dot-entries skipped. A fleet home lists a link only when it resolves into `fleet/assets/`; a home outside the fleet lists a link only when it resolves to a folder INSIDE that home (with a `SKILL.md` inside it too), and skips every other link silently. */
   skills(limit: number): Promise<readonly RuntimeHomeSkillEntry[]>;

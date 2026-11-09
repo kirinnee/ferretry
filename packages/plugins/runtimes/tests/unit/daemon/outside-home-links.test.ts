@@ -1,7 +1,8 @@
 /**
- * BG-033: an account home outside the fleet follows a link ONLY when it resolves INSIDE that home, read-only (v4 parity:
- * `node-skill-files.ts` skipped, silently, a folder whose real path was outside the home). Real kernel roots over a temp
- * world; `store` is a folder OUTSIDE every home, standing in for a place the links of a home-manager home lead to.
+ * BG-033: the SKILLS of an account home outside the fleet follow a link ONLY when it resolves INSIDE that home, read-only
+ * (a link out of the home is skipped silently); its three documents follow a link out (see `document-link.test.ts`). Real
+ * kernel roots over a temp world; `store` is a folder OUTSIDE every home, standing in for a place the links of a
+ * home-manager home lead to.
  *
  *   <parent>/store           a place outside every account home
  *   <parent>/person/<home>   the account homes outside the fleet
