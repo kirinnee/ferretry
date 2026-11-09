@@ -13,8 +13,11 @@
  *  - the bytes are read through the kernel's held descriptor on a root scoped to the target's own folder, and kept only when
  *    the real path's name still reaches the very file that was opened (a swap of the TARGET itself after the judge is
  *    discarded; a swap of a FOLDER ABOVE it is the residual below);
+ *  - a target that GREW after it was judged (the read comes back longer than the size judged) is refused, never handed on as
+ *    a prefix of what it has become;
  *  - the text must PARSE as what the file is (a JSON object, or TOML), so a link named `settings.json` to some other kind of
- *    file (a private key, a log) is refused and its text is never handed on;
+ *    file (a private key, a log) is refused and its text is never handed on; an empty or blank file is the one exception,
+ *    answered as the same file inside the home is (its own text, which holds nothing);
  *  - a refusal names the LINK NAME only: never the target's path, never a byte of the target, never the parser's complaint;
  *  - a link to nothing answers ABSENT, as a document that is not there does.
  *
@@ -84,12 +87,15 @@ export async function readLinkedDocument(
     if (found?.kind !== 'file' || found.links > 1) return refused;
     const bound = Math.min(limitBytes, DOCUMENT_CAP);
     if (found.size > bound) return { kind: 'too_big', bound };
-    const bytes = await reach.readDurable(placed.value, bound, async held =>
+    // One byte more than was judged: a target that GREW after the judge comes back longer than `found.size` and is refused,
+    // never handed on as a prefix of what it has become.
+    const bytes = await reach.readDurable(placed.value, found.size + 1, async held =>
       (await held.stillNames()) ? held.bytes : undefined,
     );
-    if (bytes === undefined) return refused;
+    if (bytes === undefined || bytes.length > found.size) return refused;
     const text = new TextDecoder().decode(bytes);
-    return parses(file, text) ? { kind: 'text', text } : refused;
+    // An empty (or blank) document is answered as the same file in the home itself is: its own text, nothing to parse.
+    return text.trim() === '' || parses(file, text) ? { kind: 'text', text } : refused;
   } catch {
     return refused;
   }

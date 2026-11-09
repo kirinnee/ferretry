@@ -9,7 +9,7 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { link, mkdir, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { appendFile, link, mkdir, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RootsPort } from '@ferretry/kernel/contract';
 import type { RuntimeHomeReader } from '../../../contract/index.ts';
@@ -288,6 +288,58 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
     expect(swapped).toBe(true);
     expect(error).toBeInstanceOf(Error);
     expect(everythingOf(error)).not.toContain('SECRET');
+  });
+
+  it('BG-033 an empty or blank linked document is answered as the same file inside the home is (its own text), not refused', async () => {
+    const { store, linked, reader } = await seed();
+    for (const [file, text] of [
+      ['settings.json', ''],
+      ['.claude.json', ''],
+      ['config.toml', ''],
+      ['settings.json', ' \n'],
+    ] as const) {
+      await rm(join(linked, file), { force: true });
+      await writeFile(join(linked, file), text);
+      const inHome = await reader().document(file, 1000);
+      await rm(join(linked, file));
+      await writeFile(join(store, 'blank'), text);
+      await symlink(join(store, 'blank'), join(linked, file));
+      expect(inHome).toBe(text);
+      expect(await reader().document(file, 1000)).toBe(inHome);
+    }
+  });
+
+  it('BG-033 a target that GREW after it was judged, in place or by a bigger file moved over it, is refused content-free, never a prefix', async () => {
+    for (const how of ['in place', 'replaced'] as const) {
+      const hook: { current?: Hook } = {};
+      const { store, linked, reader } = await seed(hook);
+      const target = join(store, 'grow.toml');
+      const longer = Array.from(
+        { length: 100 },
+        (_, index) => `k${String(index).padStart(3, '0')} = "${SECRET}"\n`,
+      ).join('');
+      await writeFile(target, 'a000 = 11\n');
+      await writeFile(join(store, 'bigger.toml'), longer);
+      await symlink(target, join(linked, 'config.toml'));
+      let grown = false;
+      hook.current = async (method, path) => {
+        if (grown || method !== 'lstat' || path !== target) return;
+        grown = true;
+        if (how === 'in place') await appendFile(target, longer);
+        else await rename(join(store, 'bigger.toml'), target);
+      };
+      const error = await reader()
+        .document('config.toml', 100_000)
+        .then(
+          text => `RETURNED ${text}`,
+          (failure: unknown) => failure,
+        );
+      expect(grown).toBe(true);
+      expect(error).toBeInstanceOf(Error);
+      expect(everythingOf(error)).not.toContain('SECRET');
+      expect(everythingOf(error)).not.toContain(store);
+      expect((error as Error).message).toContain('config.toml is a link whose target is not read');
+    }
   });
 
   it('BG-033 R6 RESIDUAL a FOLDER above the target swapped for a link to another folder after the judge returns that folder’s same-named file (stated in document-link.ts)', async () => {
