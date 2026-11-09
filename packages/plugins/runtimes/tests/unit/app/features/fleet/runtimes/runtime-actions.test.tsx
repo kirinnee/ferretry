@@ -386,6 +386,23 @@ describe('Runtime actions: Rename', () => {
     expect(window.location.hash).toBe('#machines/studio-mac/runtimes/codex-default');
   });
 
+  it('closes on Cancel and on Escape, changing nothing', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const view = await open({ calls });
+
+    // Act + Assert
+    await chooseRuntimeAction(view.container, 'codex-default', 'rename');
+    await click(view.container, '[data-runtime-dialog-cancel]');
+    expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
+    await chooseRuntimeAction(view.container, 'codex-default', 'rename');
+    await interact(() => pressKey(must(view.container.querySelector('[data-runtime-dialog]'), 'dialog'), 'Escape'));
+    expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
+    expect(proposed(calls)).toEqual([]);
+  });
+});
+
+describe('Runtime actions: Remove after a rolled-back apply', () => {
   it('BG-028 a retry after a rolled-back removal stages the removal afresh instead of re-sending the spent proposal', async () => {
     // Arrange
     const calls: Call[] = [];
@@ -432,21 +449,6 @@ describe('Runtime actions: Rename', () => {
     expect(alert.getAttribute('role')).toBe('alert');
     expect(alert.textContent).toContain(LANDED_FILE);
     expect(view.container.querySelector('[data-runtime-dialog="remove"]')).not.toBeNull();
-  });
-
-  it('closes on Cancel and on Escape, changing nothing', async () => {
-    // Arrange
-    const calls: Call[] = [];
-    const view = await open({ calls });
-
-    // Act + Assert
-    await chooseRuntimeAction(view.container, 'codex-default', 'rename');
-    await click(view.container, '[data-runtime-dialog-cancel]');
-    expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
-    await chooseRuntimeAction(view.container, 'codex-default', 'rename');
-    await interact(() => pressKey(must(view.container.querySelector('[data-runtime-dialog]'), 'dialog'), 'Escape'));
-    expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
-    expect(proposed(calls)).toEqual([]);
   });
 });
 
