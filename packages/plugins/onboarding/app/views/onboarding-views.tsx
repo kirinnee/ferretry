@@ -58,7 +58,9 @@ function PairingHandoff({
   navigate,
   onPaired,
   trip,
+  progress,
 }: {
+  readonly progress: OnboardingProgressStore;
   readonly ports: DaemonlessPorts;
   readonly navigate: DaemonlessScreenProps['navigate'];
   readonly onPaired: () => void;
@@ -86,6 +88,8 @@ function PairingHandoff({
         variant="primary"
         onClick={() => {
           trip.baseline = ports.daemons.snapshot().daemons.length;
+          // The place is kept before leaving (a hand-off arrival is otherwise never written), so the return finds it.
+          progress.remember();
           navigate(PAIR_AND_RETURN);
         }}
         data-onboarding-open-pair=""
@@ -131,7 +135,7 @@ export function createOnboardingRoute(ports: DaemonlessPorts) {
         share={share}
         onOpenFleet={openFleet}
         renderPairing={({ onPaired }) => (
-          <PairingHandoff ports={ports} navigate={navigate} onPaired={onPaired} trip={trip} />
+          <PairingHandoff ports={ports} navigate={navigate} onPaired={onPaired} trip={trip} progress={progress} />
         )}
       />
     );

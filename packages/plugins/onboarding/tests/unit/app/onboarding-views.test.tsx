@@ -2,7 +2,7 @@
  * S14 — Onboarding's own views, driven in isolation: the share sheet port, the steps screen outside a shell (which has
  * no machine to draw), a read that fails, and the first-run page's pairing hand-off with a fake paired list.
  */
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { DaemonlessPorts } from '@ferretry/app';
 import { noteClientDaemon } from '@ferretry/app/testing';
 import type { EventDef } from '@ferretry/kernel/contract';
@@ -17,7 +17,9 @@ import {
 } from '../../../app/views/onboarding-views.tsx';
 import { RouterProvider } from '@ferretry/app/testing/router';
 import { DEVICE_SENTENCES } from '../../../app/device-kind.ts';
+import { detectDeviceKind } from '../../../app/device-kind.ts';
 import { LINK_COSTS } from '../../../app/link-costs.ts';
+import { startOnboardingPairing } from '../../../app/onboarding-progress.ts';
 import { interact, mount } from '../support/dom.ts';
 
 interface Listing {
@@ -286,6 +288,9 @@ describe('S14 answering a step', () => {
 
 describe('S14 the first-run route’s pairing hand-off', () => {
   const Route = (ports: DaemonlessPorts) => createOnboardingRoute(ports);
+  // The place is stored in the browser; every case starts from an empty one.
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
 
   it('opens Access’s pairing page, and holds no subscription once it is gone', async () => {
     const moves: string[] = [];
@@ -329,8 +334,16 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     await view.unmount();
   });
 
+  /** The return Access navigates to: the bare first-run address, with no fragment. */
+  const BARE = 'https://f.invalid/onboarding';
+  const HANDOFF = 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan';
+  const screenOf = (view: { container: HTMLElement }) =>
+    view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
+
   it('M2 coming back from the pairing page with a new machine finishes the step and shows the next stage', async () => {
-    const here = 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan';
+    // A walk this browser already stored (Pair again, or an earlier visit) is on the pairing step.
+    startOnboardingPairing(detectDeviceKind(navigator));
+    let here = BARE;
     const moves: string[] = [];
     const paired = pairedList({ daemons: [], selected: null });
     const OnboardingRoute = Route(paired.ports);
@@ -351,25 +364,50 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     expect(PAIR_AND_RETURN.startsWith(`${PAIR_PATH}?return=`)).toBe(true);
     expect(decodeURIComponent(PAIR_AND_RETURN)).toBe('/pair?return=/onboarding');
     await first.unmount();
-    // Access paired a machine and navigated back: the journey is remounted, and the pairing step is not asked again.
+    // Access paired a machine and navigated back to the BARE address: the pairing step is not asked again.
     paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
+    here = BARE;
     const back = await mount(draw());
-    const screen = () =>
-      back.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
-    expect(screen()).toBe('done');
+    expect(screenOf(back)).toBe('done');
     expect(back.container.querySelector('[data-onboarding-open-pair]')).toBeNull();
     await back.unmount();
   });
 
-  it('M2 coming back with no new machine stays on the pairing step, and a later visit starts from the list as it is', async () => {
-    const here = 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan';
-    const paired = pairedList({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
+  it('M2 a hand-off arrival that went to the pairing page lands on the "it worked" stage when it comes back', async () => {
+    let here = HANDOFF;
+    const paired = pairedList({ daemons: [], selected: null });
     const OnboardingRoute = Route(paired.ports);
     const draw = () => (
       <OnboardingRoute
         params={{}}
         navigate={() => undefined}
         location={() => here}
+        chooseDaemon={async () => undefined}
+      />
+    );
+    const first = await mount(draw());
+    expect(screenOf(first)).not.toBe('done');
+    await interact(() => {
+      first.container.querySelector<HTMLElement>('[data-onboarding-open-pair]')?.click();
+    });
+    await first.unmount();
+    // Access paired a machine and navigated to the bare address: the fragment is gone, the place was kept.
+    paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
+    here = BARE;
+    const back = await mount(draw());
+    expect(screenOf(back)).toBe('done');
+    await back.unmount();
+  });
+
+  it('M2 coming back with no new machine stays on the pairing step, and a later visit starts from the list as it is', async () => {
+    startOnboardingPairing(detectDeviceKind(navigator));
+    const paired = pairedList({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
+    const OnboardingRoute = Route(paired.ports);
+    const draw = () => (
+      <OnboardingRoute
+        params={{}}
+        navigate={() => undefined}
+        location={() => BARE}
         chooseDaemon={async () => undefined}
       />
     );
