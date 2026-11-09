@@ -144,7 +144,9 @@ export class OnboardController {
   async #record(report: StepReport, state: StepAnswerRequest['state']): Promise<StepReport> {
     const { step } = report;
     try {
-      const recorded = await this.deps.client.record(step.plugin, step.id, { state });
+      // The check that saw the sign-in says it is the terminal's own, so a screen reading the step need not know which plugin.
+      const linked = state === 'found' && report.linked === true ? { linked: true as const } : {};
+      const recorded = await this.deps.client.record(step.plugin, step.id, { state, ...linked });
       return { ...report, step: recorded ?? { ...step, state } };
     } catch (error: unknown) {
       this.deps.out.warn(sentenceOf(error));

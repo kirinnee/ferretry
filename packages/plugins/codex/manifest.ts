@@ -1,4 +1,4 @@
-import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import {
   CODEX,
   CODEX_AGENT_HOMES,
@@ -74,6 +74,8 @@ export default definePlugin({
 
   ui: {
     settings: [settingsTab('codex', { label: 'Codex', order: 21 })],
+    // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
+    panels: [panel('onboarding.step', { id: 'onboarding-step', order: 21 })],
   },
 
   data: {

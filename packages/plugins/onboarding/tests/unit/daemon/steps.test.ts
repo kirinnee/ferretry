@@ -74,7 +74,7 @@ describe('joining steps with progress', () => {
   });
 
   test('a snapshot with no steps is an empty, complete view', () => {
-    expect(viewOf([], undefined)).toEqual({ steps: [], complete: true });
+    expect(viewOf([], undefined, false)).toEqual({ steps: [], complete: true, setUp: false });
   });
 });
 
@@ -89,7 +89,7 @@ describe('completeness', () => {
         'shells:nix': { state: 'skipped', at: AT },
       },
     };
-    expect(viewOf(ENTRIES, progress).complete).toBe(true);
+    expect(viewOf(ENTRIES, progress, false).complete).toBe(true);
   });
 
   test('one pending step keeps the run incomplete', () => {
@@ -101,7 +101,7 @@ describe('completeness', () => {
         'logins:login': { state: 'found', at: AT },
       },
     };
-    const view = viewOf(ENTRIES, progress);
+    const view = viewOf(ENTRIES, progress, false);
     expect(view.complete).toBe(false);
     expect(isComplete(view.steps)).toBe(false);
   });
@@ -121,6 +121,16 @@ describe('recording an answer', () => {
     const first = withAnswer(undefined, 'logins', 'login', { state: 'later' }, AT);
     const second = withAnswer(first, 'logins', 'login', { state: 'done' }, AT);
     expect(second.steps['logins:login']?.state).toBe('done');
+  });
+
+  test('n1 a found step can be recorded as the terminal’s own sign-in, and answering again drops the mark', () => {
+    const found = withAnswer(undefined, 'logins', 'login', { state: 'found', linked: true }, AT);
+    expect(found.steps['logins:login']).toEqual({ state: 'found', at: AT, linked: true });
+    const view = joinProgress([entry('logins', 'login', 30, 'Sign in')], found);
+    expect(view[0]?.linked).toBe(true);
+    const again = withAnswer(found, 'logins', 'login', { state: 'done' }, AT);
+    expect(again.steps['logins:login']).toEqual({ state: 'done', at: AT });
+    expect('linked' in (joinProgress([entry('logins', 'login', 30)], again)[0] ?? {})).toBe(false);
   });
 
   test('the empty progress is format 1 with no steps', () => {

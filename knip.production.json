@@ -299,31 +299,7 @@
     "packages/plugins/onboarding": {
       "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "app/command-block.tsx",
-        "app/command-syntax.ts",
-        "app/connection-disclosure.ts",
-        "app/copy-button.tsx",
-        "app/device-kind.ts",
-        "app/first-run-entry.ts",
-        "app/landing-geometry.ts",
-        "app/link-costs.ts",
-        "app/onboarding-brand.tsx",
-        "app/onboarding-chooser.tsx",
-        "app/onboarding-connection-note.tsx",
-        "app/onboarding-doer-chooser.tsx",
-        "app/onboarding-model.ts",
-        "app/onboarding-page.tsx",
-        "app/onboarding-progress.ts",
-        "app/onboarding-stages.tsx",
-        "app/onboarding-target-chooser.tsx",
-        "app/onboarding-track.tsx",
-        "app/pending-connections.ts",
-        "app/setup-diagram.tsx",
-        "app/setup-handoff-panel.tsx",
-        "app/setup-handoff.ts",
-        "app/setup-qr.ts"
-      ]
+      "ignore": ["app/landing-geometry.ts"]
     },
     "packages/plugins/codex": {
       "entry": [],

@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { firstRunEntry } from '../../../app/first-run-entry.ts';
+import { firstRunEntry } from '../../../src/shell/first-run.ts';
 
 describe('firstRunEntry', () => {
   it('goes straight to the fleet for a browser that holds a selected pairing', () => {

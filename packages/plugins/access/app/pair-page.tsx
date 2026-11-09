@@ -77,6 +77,22 @@ export const PAIR_SCREEN_ID = 'pair';
 
 const NO_LINK: PairingArrival = Object.freeze({ kind: 'none' });
 
+/**
+ * A plain absolute path: letters, digits and `. _ ~ -` in segments. No scheme, host, query, fragment or `//`, and no dot
+ * segment (`.` or `..` as a whole segment), which a browser would resolve away from the path it was given.
+ */
+const PLAIN_PATH = /^(?!(?:.*\/)?\.{1,2}(?:\/|$))\/(?:[\w.~-]+(?:\/[\w.~-]+)*)?$/u;
+
+/**
+ * Where `/pair?return=<path>` asks to land after a pairing (the first run opens this page and comes back to its
+ * journey). Only a plain same-origin path is honoured, so the query can never send a person to another site; it never
+ * holds a code (those ride the fragment) and is read from the page's address, not from anything the exchange returns.
+ */
+export const returnPathOf = (href: string): string | undefined => {
+  const asked = new URL(href).searchParams.get('return');
+  return asked !== null && PLAIN_PATH.test(asked) ? asked : undefined;
+};
+
 /** The arrival a taken fragment reads as, on this page's own (already stripped) address. */
 const arrivalOf = (location: string, fragment: string): PairingArrival => {
   const url = new URL(location);
@@ -134,7 +150,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           {...(environment.defaultName === undefined ? {} : { defaultName: environment.defaultName })}
           onPair={async (seed, deviceName) => {
             const paired = await exchangePairing({ ports, claims, store }, seed, deviceName);
-            navigate(daemonHomeHref(paired.daemon));
+            navigate(returnPathOf(location()) ?? daemonHomeHref(paired.daemon));
           }}
           onSelect={id => {
             ports.daemons.select(String(id));

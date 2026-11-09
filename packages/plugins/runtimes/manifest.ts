@@ -244,6 +244,8 @@ export default definePlugin({
       panel('composer.tools', { id: 'runtime-picker', order: 10 }),
       panel(NEW_FERRET_ACCOUNT_SLOT, { id: 'new-ferret-account', order: 10 }),
       panel(MOVE_ACCOUNT_SLOT, { id: 'move-account', order: 10 }),
+      // The first-run step's body (Onboarding's steps screen offers this slot): the runtimes view.
+      panel('onboarding.step', { id: 'onboarding-step', order: 40 }),
     ],
   },
 

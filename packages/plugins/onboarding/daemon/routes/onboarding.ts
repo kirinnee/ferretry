@@ -48,7 +48,7 @@ export function onboardingRoutes(api: OnboardingApi) {
       if (!parsed.success)
         throw new ApiError(
           400,
-          'The answer must be { "state": "found" | "done" | "later" | "skipped" }.',
+          'The answer must be { "state": "found" | "done" | "later" | "skipped" }, and only a found step may add "linked": true.',
           undefined,
           parsed.error.issues.map(issue => ({ path: issue.path, message: issue.message })),
         );

@@ -23,7 +23,8 @@
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/plugin-runtimes": "workspace:*",
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "@ferretry/app": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {
