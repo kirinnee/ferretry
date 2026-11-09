@@ -35,6 +35,8 @@ const skillsManifest = definePlugin({
   core: false,
   kinds: [],
   permissions: { roots: [...SKILLS_ROOTS], shareTrees: true },
+  // A state folder named like a secret is declared one way or the other (§7.7): this one holds sign-in files.
+  privacy: { private: ['credentials'] },
   data: { state: [INSTALLED, CREDENTIALS] },
 });
 const claudeManifest = definePlugin({
