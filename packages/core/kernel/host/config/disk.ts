@@ -2,6 +2,15 @@ import type { HostFs } from '../state/host-fs.ts';
 import type { DiskState } from './evaluate.ts';
 import { CONFIG_FILE_MAX_BYTES, configTextTooLarge } from './yaml-text.ts';
 
+const isUtf8 = (bytes: Uint8Array): boolean => {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * One configuration file as the kernel reads it, at boot, on every reload and under `fyd --check`: a link, a
  * non-regular file or one past the 256 KiB cap is `unreadable` (its last good version stays), never read whole.
@@ -22,7 +31,10 @@ export async function readConfigDisk(fs: HostFs, absolute: string): Promise<Disk
     if (read === undefined) return { kind: 'absent' };
     if (read.from > 0 || read.bytes.byteLength > CONFIG_FILE_MAX_BYTES) return { kind: 'unreadable' };
     const text = new TextDecoder().decode(read.bytes);
-    return configTextTooLarge(text) ? { kind: 'unreadable' } : { kind: 'text', text };
+    if (configTextTooLarge(text)) return { kind: 'unreadable' };
+    // The text above is what every read uses (invalid bytes are U+FFFD), so a non-UTF-8 file still reads and its etag is
+    // unchanged; it is only marked, so a WRITE can refuse to replace bytes it did not edit.
+    return isUtf8(read.bytes) ? { kind: 'text', text } : { kind: 'text', text, lossy: true };
   } catch {
     return { kind: 'unreadable' };
   }

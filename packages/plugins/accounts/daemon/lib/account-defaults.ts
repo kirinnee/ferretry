@@ -39,8 +39,12 @@ export interface ConfigIssue {
 
 /** The file is there but does not check: an owner act will not write over a file somebody is still fixing. */
 export class AccountDefaultsFileBroken extends Error {
-  constructor(readonly issues: readonly ConfigIssue[]) {
-    super(`${DEFAULTS_PATH} does not check, so it was not changed; fix it first`);
+  /** `said` is the kernel's own sentence when it refused the write (a link, a file that is not UTF-8): it names the real cause. */
+  constructor(
+    readonly issues: readonly ConfigIssue[],
+    said?: string,
+  ) {
+    super(said ?? `${DEFAULTS_PATH} does not check, so it was not changed; fix it first`);
     this.name = 'AccountDefaultsFileBroken';
   }
 }
