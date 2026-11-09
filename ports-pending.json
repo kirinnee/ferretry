@@ -23,9 +23,14 @@
     "access",
     "voice",
     "projects",
-    "updates"
+    "updates",
+    "vault"
   ],
   "pendingReasons": {
+    "vault": [
+      "[own] GAP(vault): the app half is still a skeleton, so three guarantee rows have no test yet: I6 (the input card's controlled field is held until Send and cleared on send, unmount and hide), I51 (the input card's default-submit rule: a terminal secret submits on, a browser one stays off) and S4 (the Secrets page); each test lands with the app port",
+      "[own] GAP(vault): the cli half is still a skeleton, so two guarantee rows have no test yet: S1 (`fy secret set` reads the value from stdin only) and S33 (no verb takes a secret value as an argument); each test lands with the cli port"
+    ],
     "runtimes": [
       "[cross: terminals] GAP(terminals): a Codex ferret whose start failed is told why from what its dead pane last showed (codexLaunchFailure), but that pane text is Terminals' and no Terminals service offers Runtimes a dead pane's read, so RuntimeEndSupervisionSeams.paneText stays unset and the owner hears no offline-failure sentence: daemon/lib/service/runtime-end-supervision.ts",
       "[cross: ferrets] GAP(ferrets): the start path that defaults a first account, strips a launch environment and resolves secret-backed variables, and the session records a runtime rename re-points, are Ferrets', which calls none of these yet: daemon/lib/harness.ts, daemon/lib/harness-env.ts, daemon/lib/env-profiles.ts, daemon/adapters/runtime-session-records.ts",
@@ -242,6 +247,7 @@
       "[own] the Layout tab edits the wide layout only: the `phone.*` keys (`fy layout set phone.nav.side bottom`) have no row in either scope"
     ],
     "terminals": [
+      "[cross: vault] GAP(terminals): row I73 (every stream frame kind, a predicate match and the last frame are withheld when a quarantine began after the read was stamped) is proven in Vault's tests only at the kernel Dispatcher's publication gate; the same check at Terminals' own publication points (stream frames, the recorded last frame, a screen read before quarantine) has no test named `I73` in Terminals yet",
       "[compose] GAP(terminals): an armed launch guard still refuses every launch whose environment handle sets PATH (every ferret with a Shells launch part) 409 real_harness: the kernel now offers kernel.paths.whichFor (claude/codex resolved on the PATH a Vault handle will set, without spending it, for a handle minted for this plugin or for one offering a hook it takes, unprovable for a secret-derived or unreadable PATH), but Terminals declares no permissions.which and RealHarnessLaunchGuard (daemon/adapters/tmux/harness-launch-guard.ts) is not handed the handle, so it cannot ask yet",
       "[cross: ferrets] GAP(ferrets): limits.yaml is not read for launches: Ferrets offers no effectiveLimits, so Terminals launches with the defaults whatever limits.yaml says (v4 honoured it): daemon/index.ts takes ferrets.effectiveLimits?.bind(ferrets) and daemon/processes.ts falls back to no limits config",
       "[own] GAP(terminals): resource limits are never enforced on Linux: Terminals' cgroup probe runs systemctl with the kernel's {PATH, HOME} child env, so it never reaches the user manager and always falls to direct (v4 enforced them): daemon/lib/cgroups/enforcement.ts through adapters/cgroups/spawn-cgroup-commands.ts, whose spawn takes no env option"

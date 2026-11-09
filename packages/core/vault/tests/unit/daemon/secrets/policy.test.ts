@@ -244,6 +244,22 @@ describe('a ferret child’s environment', () => {
     should(refused).deepEqual({ ok: false, unknown: ['MISSING', 'ALSO_MISSING'] });
   });
 
+  it('S66 a store-environment binding gets the same grammar, store and refusal as a use request', () => {
+    // Arrange — one binding read as a launch environment, the same entries as a use request's `env`
+    const binding = { AUTH: 'Bearer ${secret:TOKEN}', GONE: '${secret:MISSING}' };
+
+    // Act
+    const launch = launchEnvironment({ AUTH: binding.AUTH }, values());
+    const used = resolveChildEnvironment([], { AUTH: binding.AUTH }, values());
+    const refusedLaunch = launchEnvironment(binding, values());
+
+    // Assert — same expansion; a missing name refuses (naming it), never an empty string
+    should(launch).deepEqual({ ok: true, value: { AUTH: `Bearer ${TOKEN}` } });
+    should(used).deepEqual({ AUTH: `Bearer ${TOKEN}` });
+    should(refusedLaunch).deepEqual({ ok: false, unknown: ['MISSING'] });
+    should(() => resolveChildEnvironment([], binding, values())).throw(/MISSING/u);
+  });
+
   it('should set a whole-value optional reference when held and leave the variable out when not, never empty', () => {
     // Arrange — a sign-out landed between MCP naming SIGNED_OUT and the launch opening it.
     const env = { HELD: '${secret?:TOKEN}', GONE: '${secret?:SIGNED_OUT}' };
