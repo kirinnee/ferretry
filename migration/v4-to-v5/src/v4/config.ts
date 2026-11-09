@@ -7,7 +7,8 @@
  * Every failure is a {@link V4InputError} naming the file (relative to the v4 home) and, for a value, its key path —
  * never the text: a YAML parser's own message quotes the line it choked on, so it is never passed through.
  */
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { type Document, isMap, isScalar, LineCounter, parseDocument, type YAMLMap } from 'yaml';
 import { V4InputError } from './documents.ts';
@@ -172,8 +173,80 @@ export async function listV4Config(home: string, overrides?: V4ConfigOverrides):
   return { files: added ? merged.sort(bySegments) : merged, ignored };
 }
 
-/** YAML 1.2's core schema with unique keys: how v4 and v5 both read a config file. */
-export const YAML_OPTIONS = { version: '1.2', uniqueKeys: true, prettyErrors: false } as const;
+/**
+ * YAML 1.2's core schema with unique keys: how v4 and v5 both read a config file. `logLevel: 'silent'` is load-bearing:
+ * the library sends every warning (an unresolved tag, a collection used as a key) to `process.emitWarning`, which writes
+ * the offending text to stderr, and a config text may carry a credential. Nothing here ever prints a YAML message.
+ */
+export const YAML_OPTIONS = { version: '1.2', uniqueKeys: true, prettyErrors: false, logLevel: 'silent' } as const;
+
+/**
+ * The yaml library has two environment switches that print what it parses: `LOG_TOKENS` prints every token of a
+ * parsed text and `LOG_STREAM` dumps every token the composer sees, and a config text may carry a credential. They
+ * are read at parse time, so every entry point calls this before anything is parsed.
+ */
+export function clearYamlLogSwitches(): void {
+  delete process.env.LOG_TOKENS;
+  delete process.env.LOG_STREAM;
+}
+
+/**
+ * A YAML text as a Document that is a mapping (an empty text is an empty mapping), or `undefined` when it has ANY error
+ * or warning, is not a mapping, or breaks the alias limit. Nothing is printed and no message is kept. A caller reads the
+ * few nodes it needs from the Document directly; it never turns a credential-bearing document into plain data.
+ */
+export function strictYamlMap(text: string): Document | undefined {
+  try {
+    const document = parseDocument(text, YAML_OPTIONS);
+    if (document.errors.length > 0 || document.warnings.length > 0) return undefined;
+    if (document.contents === null) document.contents = document.createNode({}) as never;
+    return isMap(document.contents) ? document : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A YAML text as plain data, silently. Whatever goes wrong (a syntax error, or `toJS` meeting an unresolved alias, whose
+ * message would carry the alias name from the text) throws the one fixed message, which says nothing of the text.
+ */
+export function quietYaml(text: string): unknown {
+  try {
+    const document = parseDocument(text, YAML_OPTIONS);
+    if (document.errors.length > 0) throw new Error('not valid YAML');
+    return document.toJS();
+  } catch {
+    throw new Error('not valid YAML');
+  }
+}
+
+/**
+ * The text of one plain file, or `undefined` when it is not safe to read: a link (opened `O_NOFOLLOW`, so one swapped in
+ * after a check still fails), a folder, a FIFO or device (opened `O_NONBLOCK`, so it never waits), a hard link, a file
+ * over `maxBytes`, or any error. Read through the handle that was checked, at most `maxBytes + 1` bytes.
+ */
+export async function readPlainText(path: string, maxBytes: number): Promise<string | undefined> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(
+    () => undefined,
+  );
+  if (handle === undefined) return undefined;
+  try {
+    const facts = await handle.stat();
+    if (!facts.isFile() || facts.nlink !== 1 || facts.size > maxBytes) return undefined;
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let filled = 0;
+    while (filled < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
+    }
+    return filled > maxBytes ? undefined : buffer.subarray(0, filled).toString('utf8');
+  } catch {
+    return undefined;
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
 
 /**
  * One v4 config file as a Document whose contents are a mapping (an empty file is an empty mapping, as v4 read it).

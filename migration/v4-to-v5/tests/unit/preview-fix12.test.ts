@@ -40,6 +40,8 @@ const accept = async (files: Record<string, string>) =>
   );
 const login = (key: string, extra = '') =>
   `harness: claude\nstore: environment\nenv:\n  ANTHROPIC_API_KEY: ${key}\n${extra}`;
+const LOWER = 'budget:\n  daily:\n    hard: 5\n';
+const RAISED = 'budget:\n  daily:\n    hard: 10\n';
 const acceptedDir = () => join(f.to, 'state/kernel/accepted-config');
 const records = async () => (await readdir(acceptedDir()).catch(() => [] as string[])).sort();
 const recordText = async (name: string) =>
@@ -91,10 +93,11 @@ async function withUnwritableTemp<T>(body: () => Promise<T>): Promise<{ result: 
 const STEPS = [settingsStep, vaultStep, loginKeysStep, acceptedConfigStep];
 
 test('MAJOR-1 the enforced pass writes no copy of a v4 file: a plain key in a held and an unheld login is found nowhere on disk', async () => {
-  await put('config/logins/work.yaml', login(KEY, "  EXTRA_FLAG: 'on'\n")); // held: v4 enforced the older text
+  // held: v4 enforced the older text (a budget RAISED waits for the owner; a key or flag edit alone is applied at once)
+  await put('config/logins/work.yaml', login(KEY, `  EXTRA_FLAG: 'on'\n${RAISED}`));
   await put('config/logins/home.yaml', login(HOME_KEY)); // unheld
   await put('config/pack.yaml', 'x: 2\n'); // held, never accepted
-  await accept({ 'logins/work.yaml': login(KEY), 'logins/home.yaml': login(HOME_KEY) });
+  await accept({ 'logins/work.yaml': login(KEY, LOWER), 'logins/home.yaml': login(HOME_KEY) });
   const before = new Set(await readdir(tmpdir()));
   const { result: report, root } = await withUnwritableTemp(() => run(STEPS));
   // The pass ran (an unwritable temp root would have failed a copy and, failing closed, left no record).
@@ -120,8 +123,8 @@ test('MAJOR-1 the enforced pass writes no copy of a v4 file: a plain key in a he
 });
 
 test('MAJOR-1 a held login whose enforced key differs from the live one gets no record: held, said in the report', async () => {
-  await put('config/logins/work.yaml', login(KEY));
-  await accept({ 'logins/work.yaml': login(OLD_KEY) });
+  await put('config/logins/work.yaml', login(KEY, RAISED));
+  await accept({ 'logins/work.yaml': login(OLD_KEY, LOWER) });
   const report = await run(STEPS);
   expect(await records()).toEqual([]);
   const step = report.steps.find(item => item.id === 'accepted-config');

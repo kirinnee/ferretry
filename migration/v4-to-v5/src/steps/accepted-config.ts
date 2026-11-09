@@ -42,8 +42,10 @@ import { acceptedConfigFile, acceptedName } from '@ferretry/kernel/contract';
 import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { type Document, isScalar } from 'yaml';
 import { z } from 'zod';
 import type { KeptItem, StepReport } from '../report.ts';
+import { classifyV4ConfigPath, strictYamlMap, V4_SINGLETONS } from '../v4/config.ts';
 import { readV4Json } from '../v4/documents.ts';
 import { configOwner } from '../v5/targets.ts';
 import { UNKNOWN_SOURCE } from '../v5/write.ts';
@@ -88,6 +90,17 @@ export function previewHeldFiles(steps: readonly StepReport[]): readonly string[
   return item === undefined ? [] : item.what.slice(HELD_PREFIX.length).split(', ');
 }
 
+/** The report item that names each v4 file not in effect as written, with its kind (paths only). */
+const V4_HELD_PREFIX = 'v4 config files not in effect as written: ';
+
+/** Those v4 files, each `config/<path> (<kind>)`, as the report names them. */
+export function v4HeldFiles(steps: readonly StepReport[]): readonly string[] {
+  const item = steps
+    .find(step => step.id === 'accepted-config')
+    ?.kept.find(kept => kept.what.startsWith(V4_HELD_PREFIX));
+  return item === undefined ? [] : item.what.slice(V4_HELD_PREFIX.length).split(', ');
+}
+
 /**
  * Whether a v4 file the target came from was held (not in effect as written). The sources are the v4 files the writing
  * step named for the target (`V5Writer.writtenSources`), not a map kept here. A target with no v4 source (the preview
@@ -103,6 +116,88 @@ const sourceHeld = (ctx: StepContext, path: string, state: V4State): boolean => 
 };
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
+
+/**
+ * v4's `fy config confirm` list, ported from `evaluateConfigFiles` (`packages/fleet/src/lib/config-files/evaluate.ts`):
+ * a file whose etag moved from its accepted entry waits ONLY when it LOOSENS, and a file that is gone waits ONLY when
+ * deleting it loosens. v4 applies every other edit at once and rewrites its record on that load, so an edit that is not
+ * pending is in effect as written. What loosens (`configLoosening`, `loginLoosening`, `runtimeLoosening`):
+ * - a login: a budget limit dropped, removed, raised, or the login file gone while it had a budget;
+ * - a runtime: moved off, or removed from, a login whose budget was in effect;
+ * - a singleton: any value that moves toward more spend or control. GAP(migration): the singleton schemas and their
+ *   defaults are v4 code this tool does not copy, so ANY change in a singleton's values counts (comments and key order
+ *   do not), a superset of v4's list that only ever holds more, never less;
+ * - every other file (profile, component, preset, model catalog): never.
+ */
+const BUDGET_PERIODS = ['daily', 'weekly'] as const;
+const BUDGET_LEVELS = ['trigger', 'hard'] as const;
+
+const asMap = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+
+/**
+ * A YAML text as a mapping Document (an empty file is an empty mapping, as v4 read it), or `undefined` when it has any
+ * error or warning. Silent: no YAML message is ever printed, because a login's text can hold a credential. A caller reads
+ * the nodes it needs; a login or a runtime is never turned into plain data.
+ */
+const plain = (text: string): Document | undefined => strictYamlMap(text);
+
+/** A singleton as sorted-key JSON, or `undefined` when it cannot be read as plain data (it then counts as changed). */
+function canonical(document: Document | undefined): string | undefined {
+  if (document === undefined) return '{}';
+  try {
+    return JSON.stringify(document.toJS(), (_key, item: unknown) => {
+      const map = asMap(item);
+      return map === undefined ? item : Object.fromEntries(Object.entries(map).sort(([a], [b]) => (a < b ? -1 : 1)));
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+/** One scalar of a document by path: its value, a placeholder object for a collection, `undefined` when absent. */
+function nodeValue(document: Document | undefined, path: readonly string[]): unknown {
+  const node: unknown = document?.getIn(path, true);
+  if (node === undefined) return undefined;
+  return isScalar(node) ? node.value : {};
+}
+
+/** `loginLoosening`: a budget limit that goes away or goes up (`after` absent: the login file is gone). */
+function loginLoosens(before: Document, after: Document | undefined): boolean {
+  return BUDGET_PERIODS.some(period =>
+    BUDGET_LEVELS.some(level => {
+      const was = nodeValue(before, ['budget', period, level]);
+      if (was === undefined) return false;
+      const now = nodeValue(after, ['budget', period, level]);
+      return now === undefined || (typeof was === 'number' && typeof now === 'number' && now > was);
+    }),
+  );
+}
+
+type V4Address = NonNullable<ReturnType<typeof classifyV4ConfigPath>>;
+
+/** Whether the edit from `previous` (its accepted text) to `current` (absent: the file is gone) waits for the owner. */
+function loosens(
+  address: V4Address,
+  previous: string | undefined,
+  current: string | undefined,
+  budgeted: ReadonlySet<string>,
+): boolean {
+  const before = previous === undefined ? undefined : plain(previous);
+  const after = current === undefined ? undefined : plain(current);
+  if (address.kind === 'login') return before !== undefined && loginLoosens(before, after);
+  if (address.kind === 'runtime') {
+    const was = nodeValue(before, ['credential']);
+    return (
+      typeof was === 'string' && budgeted.has(was) && (after === undefined || nodeValue(after, ['credential']) !== was)
+    );
+  }
+  if (address.kind in V4_SINGLETONS) {
+    const [was, now] = [canonical(before), canonical(after)];
+    return was === undefined || now === undefined || was !== now;
+  }
+  return false;
+}
 
 /** Every YAML file under v4's `config/` (not `.schema/`), by config-relative path; a link is listed as `null`. */
 async function v4ConfigFiles(root: string): Promise<Map<string, string | null>> {
@@ -134,7 +229,16 @@ interface V4State {
   readonly onDisk: ReadonlyMap<string, string | null>;
   /** The held paths whose file is gone (a held deletion). */
   readonly deleted: string[];
+  /** Each held v4 file by path and kind, for the report (never a text). */
+  readonly named: string[];
 }
+
+type HeldKind = 'edit' | 'deletion' | 'unread';
+const KIND_WORDS: Record<HeldKind, string> = {
+  edit: 'an unconfirmed edit',
+  deletion: 'a held deletion',
+  unread: 'not read: a link or a file that does not parse',
+};
 
 async function notInEffect(ctx: StepContext): Promise<V4State> {
   const decoded = await readV4Json(ctx.v4.home, join(ctx.v4.home, V4_CONFIG_ACCEPTED)).catch(() => null);
@@ -143,19 +247,47 @@ async function notInEffect(ctx: StepContext): Promise<V4State> {
   const files = await v4ConfigFiles(ctx.v4.config);
   const paths: string[] = [];
   const deleted: string[] = [];
-  if (!parsed.success) paths.push(V4_CONFIG_ACCEPTED);
-  for (const [path, text] of files) {
-    const entry = accepted[path];
-    if (text === null || entry === undefined || entry.etag !== sha256(text) || entry.text !== text) paths.push(path);
+  const named: string[] = [];
+  const hold = (path: string, kind: HeldKind): void => {
+    paths.push(path);
+    named.push(`config/${path} (${KIND_WORDS[kind]})`);
+    if (kind === 'deletion') deleted.push(path);
+  };
+  if (!parsed.success) {
+    paths.push(V4_CONFIG_ACCEPTED);
+    named.push(`${V4_CONFIG_ACCEPTED} (damaged)`);
   }
-  // An entry whose file is gone: v4 was holding the deletion and still enforced the old text.
-  for (const path of Object.keys(accepted))
-    if (!files.has(path)) {
-      paths.push(path);
-      deleted.push(path);
+  // A login whose budget was in effect: the runtimes on it may not leave it unconfirmed (`runtimeLoosening`).
+  const budgeted = new Set(
+    Object.entries(accepted).flatMap(([path, entry]) => {
+      const login = /^logins\/([^/]+)\.yaml$/u.exec(path)?.[1];
+      return login !== undefined && plain(entry.text)?.has('budget') === true ? [login] : [];
+    }),
+  );
+  for (const [path, text] of files) {
+    const address = classifyV4ConfigPath(path);
+    // v4 never reads a path it cannot classify: it is in no list.
+    if (address === undefined) continue;
+    const entry = accepted[path];
+    if (text !== null && entry?.etag === sha256(text)) continue;
+    // A link, or a file that does not parse: v4 keeps the last good version in effect (an issue, not a held edit).
+    if (text === null || plain(text) === undefined) {
+      if (entry !== undefined) hold(path, 'unread');
+      continue;
     }
+    if (loosens(address, entry?.text, text, budgeted)) hold(path, 'edit');
+  }
+  // An entry whose file is gone waits only when deleting it loosens; any other deletion v4 applied at once. The
+  // preview leaves `config/logins` out on purpose (the owner adds logins fresh), so a login entry is not a deletion there.
+  for (const [path, entry] of Object.entries(accepted)) {
+    if (files.has(path)) continue;
+    const address = classifyV4ConfigPath(path);
+    if (address === undefined || (ctx.preview === true && address.kind === 'login')) continue;
+    if (loosens(address, entry.text, undefined, budgeted)) hold(path, 'deletion');
+  }
   return {
     paths: [...new Set(paths)].sort(),
+    named: [...new Set(named)].sort(),
     files: files.size,
     accepted,
     readable: parsed.success,
@@ -263,7 +395,7 @@ export const acceptedConfigStep: Step = {
           return {
             ...base,
             status: 'failed',
-            note: `${enforced.why}; v4 was not enforcing as written (${held.paths.join(', ')}), so no accepted record was written for any file and the conversion is incomplete (it never falls back to the current text). Fix what the failure above names (when it is one of those v4 files, confirm it in v4 instead), then run again`,
+            note: `${enforced.why}; v4 was not enforcing as written (${held.named.join(', ')}), so no accepted record was written for any file and the conversion is incomplete (it never falls back to the current text). Fix what the failure above names (when it is one of those v4 files, confirm it in v4 instead), then run again`,
             kept: [],
             notCarried: [],
           };
@@ -303,6 +435,7 @@ export const acceptedConfigStep: Step = {
           status: 'converted',
           kept: [
             ...named,
+            { what: `${V4_HELD_PREFIX}${held.named.join(', ')}`, count: held.named.length },
             ...(ownerRan && heldSource.length > 0
               ? [{ what: `${HELD_PREFIX}${heldSource.join(', ')}`, count: heldSource.length }]
               : []),
@@ -322,7 +455,7 @@ export const acceptedConfigStep: Step = {
             ...(ownerRan
               ? heldSource.map(path => ({
                   what: `${path} (the preview's forced setting, NOT accepted even with --owner)`,
-                  why: `a v4 file it comes from has an unconfirmed edit or a held deletion (${held.paths.join(', ')}), so the preview's text is not recorded as accepted. The record carries what v4 enforced for it instead (none when v4 enforced nothing, then the kernel judges it against its defaults), so the kernel holds the preview's text wherever it loosens that; a file that can loosen nothing (runtimes.yaml) is in effect anyway. To fix: confirm the edit in v4 first, then \`preview.sh clean\` and \`preview.sh prepare --owner\``,
+                  why: `a v4 file it comes from has an unconfirmed edit or a held deletion (${held.named.join(', ')}), so the preview's text is not recorded as accepted. The record carries what v4 enforced for it instead (none when v4 enforced nothing, then the kernel judges it against its defaults), so the kernel holds the preview's text wherever it loosens that; a file that can loosen nothing (runtimes.yaml) is in effect anyway. To fix: confirm the edit in v4 first, then \`preview.sh clean\` and \`preview.sh prepare --owner\``,
                 }))
               : []),
             ...(carried.unowned.length === 0
@@ -342,7 +475,7 @@ export const acceptedConfigStep: Step = {
                   },
                 ]),
             {
-              what: `${V4_CONFIG_ACCEPTED} (v4 was not enforcing as written: ${held.paths.join(', ')})`,
+              what: `${V4_CONFIG_ACCEPTED} (v4 was not enforcing as written: ${held.named.join(', ')})`,
               why:
                 enforced.kind === 'unknown'
                   ? "v4 was holding an unconfirmed edit, refusing a file, or had never accepted it, and what it enforced could not be converted (its record is damaged or the conversion was not available). Nothing is recorded as accepted (the preview's own files excepted): v5 judges every file against its defaults and holds any loosening until the owner confirms it again"

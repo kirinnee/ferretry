@@ -19,7 +19,7 @@ import { acceptedConfigFile, acceptedName } from '@ferretry/kernel/contract';
 import { TerminalsConfigSchema } from '@ferretry/plugin-terminals/contract';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { parse as parseYaml } from 'yaml';
+import { quietYaml as parseYaml } from '../src/v4/config.ts';
 import { previewShellEnv } from '../src/v5/preview-env.ts';
 import { PREVIEW } from './plan.ts';
 
