@@ -32,6 +32,7 @@
  * then act — restoring it only while it is certain nothing was attempted.
  */
 import type { AccountModel } from '../account/schema.ts';
+import { standInsNamedBy, type StoodInLogin, stoodInLoginSentence } from '../account/runtimes-model.ts';
 import { type ClaudeStatuslineCommand, skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds, renameRuntimeId } from '../account/ids.ts';
 import {
@@ -181,6 +182,11 @@ export interface AccountDocumentReading {
    * the list of the reading it was made from; nothing else answers for it.
    */
   readonly unreadable: readonly string[];
+  /**
+   * The environment logins whose variables stand in, in THIS reading. A model that names one (a runtime using it) is
+   * never written ({@link standInsNamedBy}); a change that stops using it is.
+   */
+  readonly stoodInLogins: readonly StoodInLogin[];
   /**
    * The writes that move the configuration files from this model to `next` (docs/config-files.md):
    * each changed file rewritten key by key with its comments kept, each file `next` drops removed —
@@ -537,6 +543,12 @@ export class FleetCatalogService {
     const reading = await this.#read();
     const sources = await this.#modelCatalogs();
     if (reading.format === 'none' || sources.modelCatalogs === undefined) return 'skipped';
+    // A reading that holds a stand-in is never published: it would replace what the homes hold with what stands in. This is
+    // the guard every caller of a republish (a timer, a budget pause, a login change) passes through.
+    if (reading.unreadable.length > 0)
+      throw new FleetCatalogRefusal('fleet_change_refused', unreadableSentence(reading.unreadable));
+    const standingIn = standInsNamedBy(reading.model, reading.stoodInLogins);
+    if (standingIn.length > 0) throw new FleetCatalogRefusal('fleet_change_refused', stoodInLoginSentence(standingIn));
     let plan: FleetModelApplyPlan;
     try {
       plan = materialiseFleet({

@@ -6,6 +6,7 @@
  * and `harness-home` roots, `daemon/host-assembly.ts`) or a test supply the implementation. Nothing here falls back to
  * `node:fs`.
  */
+import type { StoodInLogin } from '../lib/account/runtimes-model.ts';
 import type { RuntimeRename } from '../lib/service/foreign.ts';
 import type { DisplacedState, FleetApplyPlan, FleetApplyPreview, UnrestoredPath } from '../lib/provisioning.ts';
 import type { FleetDisk } from './fleet-disk.ts';
@@ -91,6 +92,11 @@ interface ConfigLoad<Model, Files = unknown> {
    * load and is never a field shared between loads, so a decision about a plan asks the load the plan was made from.
    */
   readonly unreadable: readonly string[];
+  /**
+   * The environment logins whose variables stand in, in THIS load. They block only a model that names one (a runtime
+   * using it), so a change that stops using a login stays possible while a runtime on it is in effect.
+   */
+  readonly stoodInLogins: readonly StoodInLogin[];
 }
 
 export interface ConfigFilesPort<Model> {

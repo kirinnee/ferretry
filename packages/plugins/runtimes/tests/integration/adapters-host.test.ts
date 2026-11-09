@@ -291,6 +291,7 @@ describe('the account model files', () => {
       evaluation: { fleetFiles, fleetRevision: 'rev-1', effective: { model: { marker: 'now' } } },
       files: {},
       unreadable: [],
+      stoodInLogins: [],
     };
     return {
       inEffect: async () => load,

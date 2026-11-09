@@ -50,6 +50,8 @@ const LAYOUT = {
 /** One read of the configuration: what stands in in it and the revision it was read at (the world's, when not given). */
 interface Reading {
   readonly unreadable?: string[];
+  /** The logins whose variables stand in, in this read (the model's one runtime uses `claude-you`). */
+  readonly stoodInLogins?: { readonly id: string; readonly because: string }[];
   readonly revision?: string;
 }
 
@@ -89,12 +91,15 @@ function world(
       const reading = state.readings[Math.min(state.reads, state.readings.length - 1)] ?? {};
       state.reads += 1;
       const unreadable = reading.unreadable ?? [];
+      const stoodInLogins = reading.stoodInLogins ?? [];
+      const standing = [...unreadable, ...stoodInLogins.map(login => login.id)];
       return {
         format: 'present',
         model: MODEL,
         revision:
-          reading.revision ?? (unreadable.length === 0 ? state.revision : `${state.revision}+${unreadable.join('|')}`),
+          reading.revision ?? (standing.length === 0 ? state.revision : `${state.revision}+${standing.join('|')}`),
         unreadable,
+        stoodInLogins,
         documents: next => [
           {
             path: '/fy/config/runtimes/claude-default.yaml',
@@ -356,6 +361,73 @@ describe('the apply pipeline over a fake config writer', () => {
     should((failure as FleetCatalogRefusal).message).containEql('/fy/config/runtimes/claude-default.yaml');
     should((failure as FleetCatalogRefusal).message).containEql('NOT rolled back with the fleet');
     should(w.written).have.length(1);
+  });
+
+  describe('m1-R2 a republish is never made from a reading that stands in', () => {
+    /** A world whose catalogs are wired (so a republish plans) and whose provisioner counts what it is asked to apply. */
+    const republishWorld = () => {
+      const applied: number[] = [];
+      const w = world('fake', undefined, {
+        modelCatalogs: async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() }),
+        publishedManifest: async () => undefined,
+        provisioner: {
+          preview: async plan => ({ ...plan, sharedHistory: [] }),
+          apply: async plan => {
+            applied.push(plan.operations.length);
+            return {
+              accountCount: plan.manifest.accounts.length,
+              operationCount: plan.operations.length,
+              manifestPath: '/fy/fleet/manifest.json',
+              prunedWrappers: [],
+              sharedHistory: [],
+            };
+          },
+        },
+      });
+      return { w, applied };
+    };
+    const refusal = async (w: World): Promise<FleetCatalogRefusal> => {
+      const failure = await w.service.republish().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      should(failure).be.instanceOf(FleetCatalogRefusal);
+      return failure as FleetCatalogRefusal;
+    };
+
+    it('m1-R2 should refuse a republish while a component stands in, and never call the provisioner', async () => {
+      const { w, applied } = republishWorld();
+      w.readings = [{ unreadable: STANDING_IN }];
+
+      const failure = await refusal(w);
+
+      should(failure.code).equal('fleet_change_refused');
+      should(failure.message).containEql('github');
+      should(applied).deepEqual([]);
+    });
+
+    it('m1-R2 should refuse a republish while a login a runtime uses stands in, and never call the provisioner', async () => {
+      const { w, applied } = republishWorld();
+      w.readings = [
+        { stoodInLogins: [{ id: 'claude-you', because: '${secret:NAME} templates, which Logins withheld' }] },
+      ];
+
+      const failure = await refusal(w);
+
+      should(failure.code).equal('fleet_change_refused');
+      should(failure.message).containEql('login "claude-you"');
+      should(applied).deepEqual([]);
+    });
+
+    it('m1-R2 should still republish a clean reading, and one whose stood-in login no runtime uses', async () => {
+      const { w, applied } = republishWorld();
+      w.readings = [{ stoodInLogins: [{ id: 'unused', because: '${secret:NAME} templates, which Logins withheld' }] }];
+
+      const outcome = await w.service.republish();
+
+      should(outcome).equal('applied');
+      should(applied).have.length(1);
+    });
   });
 
   it('M5 should run a republish one at a time with applies, and a login change republishes from inside its apply without waiting on itself', async () => {

@@ -24,7 +24,12 @@ import {
   type RuntimesFile,
 } from '../../contract/index.ts';
 import { foreignComponentChanges, ownedFileEdits, unownedChanges } from '../lib/account/runtimes-edits.ts';
-import { assembleRuntimesModel, type RuntimesModel } from '../lib/account/runtimes-model.ts';
+import {
+  assembleRuntimesModel,
+  type RuntimesModel,
+  standInsNamedBy,
+  stoodInLoginSentence,
+} from '../lib/account/runtimes-model.ts';
 import type { AccountModel } from '../lib/account/schema.ts';
 import {
   FleetCatalogRefusal,
@@ -118,6 +123,7 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
       },
       files: assembled,
       unreadable: assembled.unreadable,
+      stoodInLogins: assembled.stoodInLogins,
     };
   };
 
@@ -137,6 +143,11 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     editsFor: (loaded, next) => {
       if (loaded.unreadable.length > 0)
         throw new FleetCatalogRefusal('fleet_change_refused', unreadableSentence(loaded.unreadable));
+      // The model the change would WRITE is judged, not the one in effect: a new runtime (or one moved) onto a login that
+      // stands in would carry the stand-in in its wrapper, while removing the runtime that uses it carries none.
+      const standingIn = standInsNamedBy(next, loaded.stoodInLogins);
+      if (standingIn.length > 0)
+        throw new FleetCatalogRefusal('fleet_change_refused', stoodInLoginSentence(standingIn));
       const unowned = unownedChanges(loaded.evaluation.effective.model, next);
       if (unowned.length > 0)
         throw new FleetCatalogRefusal(

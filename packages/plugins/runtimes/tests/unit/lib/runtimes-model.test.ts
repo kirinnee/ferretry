@@ -11,6 +11,8 @@ import {
   assembleRuntimesModel,
   NO_COMPONENTS,
   type RuntimesFiles,
+  standInsNamedBy,
+  stoodInLoginSentence,
 } from '../../../daemon/lib/account/runtimes-model.ts';
 
 const runtime = (overrides: Partial<RuntimeFile> = {}): RuntimeFile =>
@@ -84,9 +86,10 @@ describe('the model Runtimes assembles from its own files', () => {
       files({ logins: [view], runtimes: new Map([['glm', runtime({ login: 'glm' })]]) }),
     );
 
-    expect(assembled.unreadable).toHaveLength(1);
-    expect(assembled.unreadable[0]).toContain('login "glm"');
-    expect(JSON.stringify(assembled.unreadable)).not.toContain('GLM_KEY');
+    expect(assembled.unreadable).toEqual([]);
+    expect(assembled.stoodInLogins.map(login => login.id)).toEqual(['glm']);
+    expect(JSON.stringify(assembled.stoodInLogins)).not.toContain('GLM_KEY');
+    expect(stoodInLoginSentence(standInsNamedBy(assembled.model, assembled.stoodInLogins))).toContain('login "glm"');
     // The secret stays a reference, never a value.
     expect(assembled.model.credentials.glm?.env).toEqual({
       ANTHROPIC_BASE_URL: 'https://api.example.test',

@@ -13,6 +13,7 @@ import {
   type ComponentReading,
   NO_COMPONENTS,
   type RuntimesFiles,
+  standInsNamedBy,
 } from '../../../daemon/lib/account/runtimes-model.ts';
 import { adaptProfile } from '../../../daemon/lib/account/adapt.ts';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
@@ -127,8 +128,9 @@ describe('an environment login', () => {
       }),
     );
 
-    expect(assembled.unreadable).toHaveLength(1);
-    expect(assembled.unreadable[0]).toContain('withheld');
+    expect(assembled.unreadable).toEqual([]);
+    expect(assembled.stoodInLogins).toHaveLength(1);
+    expect(assembled.stoodInLogins[0]?.because).toContain('withheld');
     expect(JSON.stringify(assembled.model.credentials.glm)).not.toContain('GLM_KEY');
   });
 
@@ -152,8 +154,9 @@ describe('an environment login', () => {
     );
 
     expect(unused.unreadable).toEqual([]);
-    expect(used.unreadable).toHaveLength(1);
-    expect(used.unreadable[0]).toContain('login "glm"');
+    expect(used.unreadable).toEqual([]);
+    expect(standInsNamedBy(unused.model, unused.stoodInLogins)).toEqual([]);
+    expect(standInsNamedBy(used.model, used.stoodInLogins).map(login => login.id)).toEqual(['glm']);
   });
 
   it('is stood in for when Logins gave no templates at all (it could not answer)', () => {
@@ -161,8 +164,9 @@ describe('an environment login', () => {
       files({ logins: [glm], runtimes: new Map([['glm-work', runtime('glm')]]), templates: undefined }),
     );
 
-    expect(assembled.unreadable).toHaveLength(1);
-    expect(assembled.unreadable[0]).toContain('did not give');
+    expect(assembled.unreadable).toEqual([]);
+    expect(assembled.stoodInLogins).toHaveLength(1);
+    expect(assembled.stoodInLogins[0]?.because).toContain('did not give');
   });
 });
 

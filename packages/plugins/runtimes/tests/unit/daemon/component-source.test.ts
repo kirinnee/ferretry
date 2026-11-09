@@ -42,6 +42,8 @@ const noop = (): void => undefined;
 class Owner {
   readonly documents = new Map<string, ProfileComponentDocument>();
   throws = false;
+  /** While true every call of its source waits and never answers (an owner that hangs). */
+  hangs = false;
   /** Runs, once, when the next `list` fails: that call fails and the owner has recovered by the next one. */
   #onNextFailure: (() => void) | undefined;
   failNextList(then: () => void): void {
@@ -49,6 +51,7 @@ class Owner {
   }
   readonly source: ProfileComponentSource = {
     list: async () => {
+      if (this.hangs) return await new Promise<never>(noop);
       if (this.#onNextFailure !== undefined) {
         const then = this.#onNextFailure;
         this.#onNextFailure = undefined;
@@ -635,6 +638,134 @@ describe('m1 Claude settings and hooks apply whenever Claude Code runs, whether 
 
     expect(sentence).toContain('"codex-guard"');
     expect(sentence).toContain('could not be read');
+  });
+});
+
+describe('m2-R2 the 5 s deadline on an owner is wired at the composition root', () => {
+  it('m2-R2 an owner that never answers is refused as "did not answer in time" at 5 s of the kernel clock, and recovers', async () => {
+    const owners = newOwners();
+    owners.mcp.with('github', { command: 'github-mcp' });
+    const { host, world } = await compose({ owners, config: withLayers('mcp/github') });
+    owners.mcp.hangs = true;
+
+    const timersBefore = host.clock.pending();
+    let settled = false;
+    const pending = host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') }).then(answer => {
+      settled = true;
+      return answer;
+    });
+    // The deadline's timer is set once the request reaches the hanging owner: wait for it, then drive the kernel clock.
+    for (let turns = 0; host.clock.pending() <= timersBefore && turns < 200; turns += 1)
+      await new Promise(resolve => setTimeout(resolve, 5));
+    await host.clock.advance(4_990);
+    const stillWaiting = !settled;
+    await host.clock.advance(20);
+    const answer = await pending;
+
+    expect(stillWaiting).toBe(true);
+    expect(answer.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(answer.json())).toContain('did not answer in time');
+    expect(await readdir(world.fleet)).not.toContain('manifest.json');
+    // Once the owner answers again, the next change is proposed and applied.
+    owners.mcp.hangs = false;
+    expect((await stageAndApply(host, put('claude-work'))).status).toBe(200);
+  });
+});
+
+/** An environment login Logins withholds (its file is not a clean, checked version), with the view variables it can state. */
+async function composeWithWithheldLogin(
+  variables: readonly unknown[],
+  options: { readonly used?: boolean } = {},
+): Promise<Composed> {
+  const glm = sampleLogin('glm', {
+    store: 'environment',
+    environment: {
+      variables,
+      quotaSource: 'none',
+      missingSecrets: [],
+      test: { available: false, reason: 'x' },
+    } as never,
+  });
+  const composed = await compose({
+    logins: [sampleLogin('claude-you', { store: 'ferretry' }), glm],
+    config:
+      options.used === true
+        ? { ...BASE, runtimes: { ...BASE.runtimes, 'glm-work': { login: 'glm', profile: 'default', agent: false } } }
+        : BASE,
+  });
+  composed.logins.setTemplates([
+    {
+      kind: 'withheld',
+      id: 'glm',
+      harness: 'claude-code',
+      variables: ['TOKEN', 'BASE_URL'],
+    } as EnvironmentLoginTemplate,
+  ]);
+  return composed;
+}
+
+const putOnGlm = (create: boolean, name = 'glm-work') => ({
+  change: { kind: 'runtime.put', name, credential: 'glm', profile: 'default', agent: true, create, addAnother: true },
+});
+
+const noGlmWork = (composed: Composed): void =>
+  expect(composed.host.configChanges.some(change => change.path.includes('runtimes/glm-work'))).toBe(false);
+
+describe('M1-R2 a change that would write a login that stands in is refused, and removing what uses it is not', () => {
+  const VARIABLE_SETS = [[], [{ kind: 'plain', name: 'BASE_URL', value: 'https://fake.invalid' }]] as const;
+
+  for (const variables of VARIABLE_SETS) {
+    it(`M1-R2 a NEW runtime on a withheld login (${String(variables.length)} view variables) is refused at propose naming the login: no file, no wrapper, no wedge`, async () => {
+      const composed = await composeWithWithheldLogin(variables);
+
+      const sentence = await refused(composed, putOnGlm(true));
+
+      expect(sentence).toContain('login "glm"');
+      expect(sentence).toContain('nothing was changed');
+      noGlmWork(composed);
+      expect(await readdir(join(composed.world.fleet, 'bin')).catch(() => [])).not.toContain('glm-work');
+      expect(JSON.stringify(await homesSnapshot(composed.world))).not.toContain('not-read');
+      // The wedge cannot be reached: the machine still changes, and the unrelated change lands.
+      const unrelated = await stageAndApply(composed.host, put('claude-work'));
+      expect(unrelated.status).toBe(200);
+    });
+  }
+
+  it('M1-R2 moving an existing runtime onto a withheld login is refused at propose too', async () => {
+    const composed = await composeWithWithheldLogin([]);
+
+    const sentence = await refused(composed, putOnGlm(false, 'claude-default'));
+
+    expect(sentence).toContain('login "glm"');
+    expect(JSON.stringify(await homesSnapshot(composed.world))).not.toContain('not-read');
+  });
+
+  it('M1-R2 a runtime that already uses a withheld login can still be removed, and the machine is not wedged after it', async () => {
+    const composed = await composeWithWithheldLogin([], { used: true });
+
+    const removed = await stageAndApply(composed.host, { change: { kind: 'runtime.remove', name: 'glm-work' } });
+    const after = await stageAndApply(composed.host, put('claude-work'));
+
+    expect([removed.status, after.status]).toEqual([200, 200]);
+    expect(JSON.stringify(await homesSnapshot(composed.world))).not.toContain('not-read');
+  });
+
+  it('M1-R2 while a runtime uses a withheld login, a change that would still write that runtime is refused, naming the login', async () => {
+    const composed = await composeWithWithheldLogin([], { used: true });
+
+    const sentence = await refused(composed, put('claude-work'));
+
+    expect(sentence).toContain('login "glm"');
+  });
+
+  it('M1-R2 a withheld login nobody uses, and a runtime on a healthy login, are unaffected', async () => {
+    const composed = await composeWithWithheldLogin([]);
+
+    const applied = await stageAndApply(composed.host, put('claude-work'));
+    const wrapper = await readFile(join(composed.world.fleet, 'bin', 'claude-work'), 'utf8');
+
+    expect(applied.status).toBe(200);
+    expect(wrapper).not.toContain('not-read');
   });
 });
 

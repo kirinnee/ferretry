@@ -16,10 +16,12 @@ import {
   RuntimesFileSchema,
   runtimeFileLoosens,
 } from './config.ts';
+import { RUNTIME_HOME_READ_MODELS, type RuntimeHomesApi } from './homes.ts';
 import type { ApplyOutcomeSchema, CatalogInstallChangeSchema } from './wire/index.ts';
 
 export * from './codex-launch.ts';
 export * from './component-source.ts';
+export * from './homes.ts';
 export * from './config.ts';
 export * from './wire/index.ts';
 
@@ -76,7 +78,7 @@ export type ResolveResult =
   | { readonly ok: true; readonly runtime: RuntimeSummary }
   | { readonly ok: false; readonly refusal: ResolveRefusal; readonly sentence: string };
 
-export interface RuntimesApi {
+export interface RuntimesApi extends RuntimeHomesApi {
   /** Every runtime on this machine, in name order. */
   list(): Promise<readonly RuntimeSummary[]>;
   get(id: RuntimeId): Promise<RuntimeSummary | undefined>;
@@ -94,7 +96,7 @@ export const RuntimesPort = definePort<RuntimesApi>('runtimes');
 export { FerretsPort };
 
 /** Read models others and the app may call through `RuntimesPort` (`manifest.data.readModels`). */
-export const RUNTIMES_READ_MODELS = ['list', 'get', 'default', 'resolve'] as const;
+export const RUNTIMES_READ_MODELS = ['list', 'get', 'default', 'resolve', ...RUNTIME_HOME_READ_MODELS] as const;
 
 // ─── events ──────────────────────────────────────────────────────────────────────────────────────────────────────
 

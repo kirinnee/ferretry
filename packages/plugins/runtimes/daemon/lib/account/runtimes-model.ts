@@ -14,8 +14,8 @@
  *    drops it) and stood in for by an empty component of that kind.
  *
  * What stands in for something is NEVER written into a home: the caller refuses an apply while `unreadable` is not empty
- * (`../../adapters/runtimes-config-files.ts`), so a stand-in can be read and shown but can never replace a real document
- * on disk. A kind whose owner answered is real: its components are in the model exactly as the owner projected them.
+ * and refuses a model that names a stood-in login (`stoodInLogins`, `standInsNamedBy`; `../../adapters/runtimes-config-files.ts`),
+ * so a stand-in can be read and shown but can never replace a real document on disk. A kind whose owner answered is real: its components are in the model exactly as the owner projected them.
  *
  * Pure: no filesystem, no clock, no environment.
  */
@@ -72,11 +72,46 @@ export interface RuntimesFiles {
   readonly components: ComponentReading;
 }
 
+/** An environment login whose variables the model holds as a stand-in, and why (names and rules only, never a value). */
+export interface StoodInLogin {
+  readonly id: string;
+  readonly because: string;
+}
+
+/**
+ * The stood-in logins a model names: those a runtime of `model` uses. A login no runtime names is shown stood in and
+ * holds nothing back; one a runtime names would have its stand-in written into that runtime's wrapper.
+ */
+export function standInsNamedBy(model: AccountModel, stoodIn: readonly StoodInLogin[]): readonly StoodInLogin[] {
+  const used = new Set(Object.values(model.runtimes).map(runtime => runtime.credential as string));
+  return stoodIn.filter(login => used.has(login.id));
+}
+
+/**
+ * The sentence a change is refused with when the home it would write names a login that stands in. It names each login
+ * and why, and says nothing was changed; removing the runtimes that use the login stays possible.
+ */
+export const stoodInLoginSentence = (named: readonly StoodInLogin[]): string =>
+  `nothing was changed: ${named
+    .map(login => `the login "${login.id}" keeps its variables as ${login.because}`)
+    .join(
+      '; ',
+    )}, so a runtime that uses ${named.length === 1 ? 'it' : 'them'} would be written with a stand-in in place of ${named.length === 1 ? 'its' : 'their'} variables (fix the login in Logins first, or remove the runtime that uses it)`;
+
 /** What the files assemble to, and every part that is a stand-in rather than a document read. */
 export interface RuntimesModel {
   readonly model: AccountModel;
-  /** Plain sentences naming what stands in (names only, never a value); empty when every part was read. */
+  /**
+   * Plain sentences naming what stands in (names only, never a value) for a component that could not be read; empty when
+   * every one was read. While it is not empty NOTHING is written: a home built from it would replace what is there.
+   */
   readonly unreadable: readonly string[];
+  /**
+   * The environment logins whose variables stand in (Logins withheld their templates or gave none), used or not. Judged
+   * against the model a change would WRITE ({@link standInsNamedBy}), never against the model in effect: a change that
+   * removes the last runtime on such a login must stay possible.
+   */
+  readonly stoodInLogins: readonly StoodInLogin[];
   /** The number of files and logins the model came from; zero is a machine nobody has set up. */
   readonly sources: number;
   /** A digest of the model, so a staged change can tell the machine moved under it. */
@@ -208,20 +243,21 @@ function foreignLayers(
 export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
   const unreadable: string[] = [];
   const credentials: Record<string, Credential> = {};
-  // A login whose variables stand in blocks only what uses them: a runtime that names it. One that none names is shown
-  // (stood in) and holds nothing else back.
-  const usedLogins = new Set([...files.runtimes.values()].map(file => file.login as string));
+  // A login whose variables stand in blocks only a model that names it (see `standInsNamedBy`), so it is kept apart from
+  // the components: the model in effect may use it and still be changed by a change that stops using it.
+  const stoodInLogins: StoodInLogin[] = [];
   for (const view of files.logins) {
     const template = files.templates?.get(view.id as string);
     const { credential, stoodIn } = credentialOf(view, template);
     credentials[view.id as string] = credential;
-    if (stoodIn && usedLogins.has(view.id as string))
-      unreadable.push(
-        `login "${view.id as string}" keeps its variables as ` +
-          (template?.kind === 'withheld'
+    if (stoodIn)
+      stoodInLogins.push({
+        id: view.id as string,
+        because:
+          template?.kind === 'withheld'
             ? '${secret:NAME} templates, which Logins withheld (its file is not a clean, checked version)'
-            : '${secret:NAME} templates, which Logins did not give to Runtimes'),
-      );
+            : '${secret:NAME} templates, which Logins did not give to Runtimes',
+      });
   }
   const components: Record<string, Record<string, unknown>> = {
     modelSets: Object.fromEntries([...files.modelSets].map(([name, file]) => [name, modelSetOf(file)])),
@@ -273,6 +309,7 @@ export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
   return {
     model,
     unreadable,
+    stoodInLogins,
     sources:
       files.runtimes.size +
       files.profiles.size +
