@@ -40,7 +40,7 @@ export function configPath(target: V5ConfigTarget, name?: string): string {
 export function v5ConfigProblem(target: V5ConfigTarget, name: string | undefined, text: string): string | undefined {
   if (target.shape === 'collection' && (name === undefined || !target.name.test(name)))
     return `the name is not a valid v5 ${target.collection} item name`;
-  const document = parseDocument(text, { version: '1.2', uniqueKeys: true, prettyErrors: false });
+  const document = parseDocument(text, { version: '1.2', uniqueKeys: true, prettyErrors: false, logLevel: 'silent' });
   if (document.errors.length > 0) return 'the written YAML does not read back';
   const parsed = target.schema.safeParse(document.toJS() ?? {});
   if (parsed.success) return undefined;

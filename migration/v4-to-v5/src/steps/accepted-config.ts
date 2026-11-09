@@ -42,10 +42,10 @@ import { acceptedConfigFile, acceptedName } from '@ferretry/kernel/contract';
 import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { parse } from 'yaml';
+import { type Document, isScalar } from 'yaml';
 import { z } from 'zod';
 import type { KeptItem, StepReport } from '../report.ts';
-import { classifyV4ConfigPath, V4_SINGLETONS, YAML_OPTIONS } from '../v4/config.ts';
+import { classifyV4ConfigPath, strictYamlMap, V4_SINGLETONS } from '../v4/config.ts';
 import { readV4Json } from '../v4/documents.ts';
 import { configOwner } from '../v5/targets.ts';
 import { UNKNOWN_SOURCE } from '../v5/write.ts';
@@ -135,31 +135,40 @@ const BUDGET_LEVELS = ['trigger', 'hard'] as const;
 const asMap = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 
-/** A YAML text as plain data (an empty file is an empty mapping, as v4 read it), or `undefined` when it does not parse. */
-function plain(text: string): Record<string, unknown> | undefined {
+/**
+ * A YAML text as a mapping Document (an empty file is an empty mapping, as v4 read it), or `undefined` when it has any
+ * error or warning. Silent: no YAML message is ever printed, because a login's text can hold a credential. A caller reads
+ * the nodes it needs; a login or a runtime is never turned into plain data.
+ */
+const plain = (text: string): Document | undefined => strictYamlMap(text);
+
+/** A singleton as sorted-key JSON, or `undefined` when it cannot be read as plain data (it then counts as changed). */
+function canonical(document: Document | undefined): string | undefined {
+  if (document === undefined) return '{}';
   try {
-    const value: unknown = parse(text, YAML_OPTIONS);
-    return value === null || value === undefined ? {} : asMap(value);
+    return JSON.stringify(document.toJS(), (_key, item: unknown) => {
+      const map = asMap(item);
+      return map === undefined ? item : Object.fromEntries(Object.entries(map).sort(([a], [b]) => (a < b ? -1 : 1)));
+    });
   } catch {
     return undefined;
   }
 }
 
-const canonical = (value: unknown): string =>
-  JSON.stringify(value, (_key, item: unknown) => {
-    const map = asMap(item);
-    return map === undefined ? item : Object.fromEntries(Object.entries(map).sort(([a], [b]) => (a < b ? -1 : 1)));
-  });
+/** One scalar of a document by path: its value, a placeholder object for a collection, `undefined` when absent. */
+function nodeValue(document: Document | undefined, path: readonly string[]): unknown {
+  const node: unknown = document?.getIn(path, true);
+  if (node === undefined) return undefined;
+  return isScalar(node) ? node.value : {};
+}
 
 /** `loginLoosening`: a budget limit that goes away or goes up (`after` absent: the login file is gone). */
-function loginLoosens(before: Record<string, unknown>, after: Record<string, unknown> | undefined): boolean {
-  const budget = (login: Record<string, unknown> | undefined, period: string, level: string): unknown =>
-    asMap(asMap(login?.budget)?.[period])?.[level];
+function loginLoosens(before: Document, after: Document | undefined): boolean {
   return BUDGET_PERIODS.some(period =>
     BUDGET_LEVELS.some(level => {
-      const was = budget(before, period, level);
+      const was = nodeValue(before, ['budget', period, level]);
       if (was === undefined) return false;
-      const now = budget(after, period, level);
+      const now = nodeValue(after, ['budget', period, level]);
       return now === undefined || (typeof was === 'number' && typeof now === 'number' && now > was);
     }),
   );
@@ -178,10 +187,15 @@ function loosens(
   const after = current === undefined ? undefined : plain(current);
   if (address.kind === 'login') return before !== undefined && loginLoosens(before, after);
   if (address.kind === 'runtime') {
-    const was = before?.credential;
-    return typeof was === 'string' && budgeted.has(was) && (after === undefined || after.credential !== was);
+    const was = nodeValue(before, ['credential']);
+    return (
+      typeof was === 'string' && budgeted.has(was) && (after === undefined || nodeValue(after, ['credential']) !== was)
+    );
   }
-  if (address.kind in V4_SINGLETONS) return canonical(before ?? {}) !== canonical(after ?? {});
+  if (address.kind in V4_SINGLETONS) {
+    const [was, now] = [canonical(before), canonical(after)];
+    return was === undefined || now === undefined || was !== now;
+  }
   return false;
 }
 
@@ -247,7 +261,7 @@ async function notInEffect(ctx: StepContext): Promise<V4State> {
   const budgeted = new Set(
     Object.entries(accepted).flatMap(([path, entry]) => {
       const login = /^logins\/([^/]+)\.yaml$/u.exec(path)?.[1];
-      return login !== undefined && plain(entry.text)?.budget !== undefined ? [login] : [];
+      return login !== undefined && plain(entry.text)?.has('budget') === true ? [login] : [];
     }),
   );
   for (const [path, text] of files) {

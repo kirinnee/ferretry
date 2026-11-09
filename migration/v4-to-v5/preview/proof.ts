@@ -1,7 +1,8 @@
 /**
  * The proof that a preview run left v4 alone. Before and after, every CONFIG file the preview may read is hashed, and
- * every credential, harness-home and identity path is only `lstat`ed (size, mtime, inode, mode): its content is never
- * read. The v4 files that change on their own while v4 runs are named as volatile and are not hashed.
+ * every credential, harness-home and identity path is only `lstat`ed (size, mtime, inode, mode): the proof never reads
+ * its content. (The one login read, `prepare` taking each login's `harness` field, is in harness-map.ts; it is not part
+ * of the proof.) The v4 files that change on their own while v4 runs are named as volatile and are not hashed.
  */
 import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, readdir, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
@@ -36,7 +37,7 @@ export const HASHED_FOLDERS: readonly string[] = [
  * compared, never its mtime or size, so v4's own writes are not reported as damage. Never listed.
  */
 export const IDENTITY_ONLY_FOLDERS: readonly string[] = [
-  // Sign-ins: stat only, never listed or hashed (the preview treats the folder as credentials).
+  // Sign-ins: stat only, never listed or hashed by the proof (the preview treats the folder as credentials; prepare reads only each file's harness field, see harness-map.ts).
   'config/logins',
   'fleet/credentials',
   'fleet/homes',

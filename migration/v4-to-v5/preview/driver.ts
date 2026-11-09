@@ -109,7 +109,7 @@ export async function dryRun(
     '',
     'IN THE PREVIEW HOME EVERY FERRET IS STOPPED: no launch command, no terminal handle, no transcript pointer, no',
     'credential hash, no token ledger, no worktree ownership. The runtimes config says autoResume: false.',
-    'LOGINS ARE LEFT OUT ENTIRELY (config/logins is not copied): you add logins fresh in the preview. Do not add a Codex login or runtime to the preview yet.',
+    'LOGINS ARE LEFT OUT OF THE COPY (config/logins is not copied): you add logins fresh in the preview. `prepare` (an agent never runs it) reads each config/logins/*.yaml ONCE, for its harness field (and whether it has both claude and codex halves) and nothing else, to know which runtimes are Claude Code ones; this dry run reads no login file. Do not add a Codex login or runtime to the preview yet.',
     'LAST GATE: only fields that are EXECUTED or RESOLVED AS PATHS are checked (a ferret command, agent, folder, env and flags; every',
     'command, argument, env value, home and path of a runtime, profile, component, preset or MCP server). Free text (messages, events,',
     'prompts, notes) is neither gated nor redacted. A hit refuses the whole home, naming file and field, never the value. Spellings',
@@ -129,7 +129,7 @@ export async function dryRun(
     'THEN: fresh daemon identity and empty vault come from the 5.0 daemon at first start; nothing from v4 is reused.',
     `START (owner): ${join(target, 'bin', PREVIEW.wrapper)} daemon start   (FY_HOME, FY_PORT=${PREVIEW.port}, FY_URL pinned to it; no service unit)`,
     '',
-    `PROOF v4 was untouched: config files hashed and credential paths stat'ed (never read) before and after. Volatile, not hashed:`,
+    `PROOF v4 was untouched: config files hashed and credential paths stat'ed (never read) before and after; the one login read is the harness field above (never written). Volatile, not hashed:`,
     ...VOLATILE.map(row => `  ${row}`),
   ];
   return lines.join('\n');

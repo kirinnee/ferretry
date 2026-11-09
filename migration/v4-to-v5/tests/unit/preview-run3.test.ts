@@ -13,7 +13,7 @@ import {
   previewHeldFiles,
   v4HeldFiles,
 } from '../../src/steps/accepted-config.ts';
-import { CODEX_HELD_SENTENCE, UNKNOWN_HELD_SENTENCE } from '../../src/steps/preview-hold.ts';
+import { BOTH_HELD_SENTENCE, CODEX_HELD_SENTENCE, UNKNOWN_HELD_SENTENCE } from '../../src/steps/preview-hold.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
 import { previewShellEnv } from '../../src/v5/preview-env.ts';
 import { fixture } from './ferret-fixture.ts';
@@ -93,13 +93,13 @@ describe('problem 1: the harness comes from the login, through a stage map that 
     const why = (what: string) => dropped.find(item => item.what === what)?.why;
     expect(why('runtime claude-liar (Codex)')).toBe(CODEX_HELD_SENTENCE);
     expect(why('runtime codex-y (Codex)')).toBe(CODEX_HELD_SENTENCE);
-    expect(why('runtime both (its harness is unknown)')).toBe(UNKNOWN_HELD_SENTENCE);
+    expect(why('runtime both (its login drives both CLIs)')).toBe(BOTH_HELD_SENTENCE);
     expect(why('runtime ghost (its harness is unknown)')).toBe(UNKNOWN_HELD_SENTENCE);
     expect(UNKNOWN_HELD_SENTENCE).toContain('its harness is unknown');
     expect(UNKNOWN_HELD_SENTENCE).toContain('so it is held like a Codex runtime');
     expect(UNKNOWN_HELD_SENTENCE.startsWith("held: a Codex ferret's")).toBe(false);
     // A ferret on an unknown runtime is held with the unknown reason, not the Codex one.
-    expect(why('ferret s2 (on the held runtime both)')).toBe(UNKNOWN_HELD_SENTENCE);
+    expect(why('ferret s2 (on the held runtime both)')).toBe(BOTH_HELD_SENTENCE);
     expect(existsSync(join(f.to, 'state/ferrets/s2/ferret.json'))).toBe(false);
   });
 
@@ -107,8 +107,9 @@ describe('problem 1: the harness comes from the login, through a stage map that 
     await realShapes();
     const map = await readLoginHarnesses(f.from);
     expect([...map.entries()].sort()).toEqual([
-      ['a-login', 'claude'],
-      ['b-login', 'codex'],
+      ['a-login', { harness: 'claude', both: false }],
+      ['b-login', { harness: 'codex', both: false }],
+      ['h-login', { harness: 'claude', both: true }],
     ]);
     expect(JSON.stringify([...map])).not.toContain('FAKE');
     const done = await prepared();

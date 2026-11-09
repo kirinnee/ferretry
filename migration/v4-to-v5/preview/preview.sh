@@ -7,7 +7,9 @@ set -euo pipefail
 #
 #   dry-run   print what would be copied, left out, converted and started. Touches nothing.
 #   prepare   copy a snapshot of v4 (credentials left out by path), convert it into the preview home, prove v4 unchanged,
-#             write the `fy5` wrapper. Never stops or writes to v4.
+#             write the `fy5` wrapper. Never stops or writes to v4. It reads each config/logins/*.yaml once, for its
+#             `harness` field (and whether it has both claude and codex halves) only, to know which runtimes are Claude
+#             Code ones; no other key of a login is kept, and an agent's dry-run reads no login file.
 #             --owner (OWNER ONLY, never an agent): records as accepted every config file the preview wrote or
 #             changed (found by comparing with the plain conversion: terminals.yaml, claude-code/settings/fy-preview.yaml,
 #             the forced limits.yaml), EXCEPT any that comes from a v4 file with an unconfirmed edit: each stays held

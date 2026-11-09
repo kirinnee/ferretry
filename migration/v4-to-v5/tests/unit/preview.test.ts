@@ -386,7 +386,10 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
     await put('config/logins/work.yaml', 'store: host\n');
     const target = fixtureOf.to;
     expect((await walk(v4)).files.some(file => file.path.startsWith('config/logins'))).toBe(false);
-    expect(await dryRun(v4, target)).toContain('LOGINS ARE LEFT OUT ENTIRELY');
+    const said = await dryRun(v4, target);
+    expect(said).toContain('LOGINS ARE LEFT OUT OF THE COPY');
+    expect(said).toContain('this dry run reads no login file');
+    expect(said).not.toContain('LEFT OUT ENTIRELY');
     const done = await prepare({ v4Home: v4, target, lock, now, home: join(root, 'home') });
     expect(done.report?.complete).toBe(true);
     expect((await everyFile(target)).some(file => file.includes('/logins/'))).toBe(false);

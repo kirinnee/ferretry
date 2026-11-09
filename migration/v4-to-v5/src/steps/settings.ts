@@ -50,7 +50,13 @@ import {
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
 import { PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
-import { heldReason, type RuntimeHarness, runtimeHarnessOf } from './preview-hold.ts';
+import {
+  heldReason,
+  type ProfileScopes,
+  previewProfileScopes,
+  type RuntimeHarness,
+  runtimeHarnessOf,
+} from './preview-hold.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
@@ -772,7 +778,7 @@ export async function buildPlan(
         count(plan, 'preview shell environment (settings item)');
       }
     }
-    if (!codexRuntimes) holdCodexRuntimes(plan, ctx);
+    if (!codexRuntimes) holdCodexRuntimes(plan, ctx, await previewProfileScopes(ctx));
   }
   settleUncarried(plan, ctx.dropUncarried === true);
   return { ...plan, ignored: listing.ignored };
@@ -796,7 +802,7 @@ const scalarOf = (map: YAMLMap, key: string): string | undefined => {
  * file out, so a login the map does not know leaves the harness unknown, and an unknown one is held, said truthfully.
  * Each held runtime is listed by NAME.
  */
-function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarnesses'>): void {
+function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarnesses'>, scopes: ProfileScopes): void {
   const planned = [...plan.files.entries()];
   const held = new Map<string, RuntimeHarness>();
   const profilesOf = new Map<string, { held: number; kept: number; codex: number }>();
@@ -804,8 +810,13 @@ function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarne
     if (file.target !== RUNTIME_ITEMS || file.name === undefined || !isMap(file.document.contents)) continue;
     const map = file.document.contents;
     const own = scalarOf(map, 'harness');
-    const harness = runtimeHarnessOf(ctx, own, scalarOf(map, 'login'));
     const profile = scalarOf(map, 'profile');
+    const harness = runtimeHarnessOf(
+      ctx,
+      own,
+      scalarOf(map, 'login'),
+      profile === undefined ? undefined : scopes.get(profile),
+    );
     const isHeld = harness !== 'claude-code';
     if (profile !== undefined) {
       const tally = profilesOf.get(profile) ?? { held: 0, kept: 0, codex: 0 };
@@ -819,7 +830,7 @@ function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarne
     plan.files.delete(path);
     uncount(plan, 'runtimes');
     plan.dropped.push({
-      what: `runtime ${file.name}${harness === 'unknown' ? ' (its harness is unknown)' : ' (Codex)'}`,
+      what: `runtime ${file.name}${harness === 'unknown' ? ' (its harness is unknown)' : harness === 'both' ? ' (its login drives both CLIs)' : ' (Codex)'}`,
       why: heldReason(harness),
     });
   }
