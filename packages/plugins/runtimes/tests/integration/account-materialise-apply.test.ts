@@ -10,8 +10,7 @@
  * directory is a temporary one, and the harnesses on `PATH` are scripts that print what they were given.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, lstat, mkdir, readdir, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
 
@@ -20,7 +19,7 @@ import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../daemon/lib/account/ids
 import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../daemon/lib/account/schema.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../daemon/lib/provisioning.ts';
-import { newProvisioner, suite } from './support/provisioner-host.ts';
+import { fleetWorld, type FleetWorld } from '../unit/support/fleet-world.ts';
 import {
   HISTORY_CLAIM_HELD_EXIT_CODE,
   type RuntimeWrapperInput,
@@ -33,25 +32,36 @@ const GENERATED_AT = '2026-10-13T08:00:00.000Z';
 
 const temporaryDirectories: string[] = [];
 
+/** The fleet world each temporary directory is the parent of: the kernel's real roots over it (`../unit/support/fleet-world.ts`). */
+const worlds = new Map<string, FleetWorld>();
+
 async function temporaryDirectory(): Promise<string> {
-  // realpath: macOS hands out /var/… for /private/var/…, and a home compared by path must be canonical.
-  const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'fy-account-apply-')));
-  temporaryDirectories.push(directory);
-  return directory;
+  const world = await fleetWorld();
+  worlds.set(world.parent, world);
+  temporaryDirectories.push(world.parent);
+  return world.parent;
 }
+
+const worldOf = (root: string): FleetWorld => {
+  const world = worlds.get(root);
+  if (world === undefined) throw new Error('not a fleet world');
+  return world;
+};
+const fleetOf = (root: string): string => worldOf(root).fleet;
+const newProvisioner = (root: string) => worldOf(root).provisioner();
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
 });
 
 const layoutIn = (root: string): FleetLayout => ({
-  stateHome: root,
+  stateHome: worldOf(root).home,
   userHome: path.join(root, 'person'),
-  fleetDirectory: path.join(root, 'fleet'),
-  binDirectory: path.join(root, 'fleet', 'bin'),
-  homesDirectory: path.join(root, 'fleet', 'homes'),
-  assetsDirectory: path.join(root, 'fleet', 'assets'),
-  manifestPath: path.join(root, 'fleet', 'manifest.json'),
+  fleetDirectory: fleetOf(root),
+  binDirectory: path.join(fleetOf(root), 'bin'),
+  homesDirectory: path.join(fleetOf(root), 'homes'),
+  assetsDirectory: path.join(fleetOf(root), 'assets'),
+  manifestPath: path.join(fleetOf(root), 'manifest.json'),
   defaultHomeDirectories: { claude: path.join(root, 'person', '.claude'), codex: path.join(root, 'person', '.codex') },
 });
 
@@ -99,7 +109,7 @@ async function machine(): Promise<Machine> {
   await writeFile(path.join(assets, 'skills', 'review', 'SKILL.md'), '---\nname: review\n---\n');
   // GAP(conversation): the shared-history pooling and its file system are the lease store's; no pooling is wired here,
   // so a plan carrying history requests is refused by the provisioner rather than pooled.
-  const provisioner = newProvisioner([root]);
+  const provisioner = newProvisioner(root);
   let ids: RuntimeIds = EMPTY_RUNTIME_IDS;
   const minted = [ID_CLAUDE, ID_CODEX];
   return {
@@ -137,7 +147,7 @@ const exists = async (target: string): Promise<boolean> => {
 
 const isLink = async (target: string): Promise<boolean> => (await lstat(target)).isSymbolicLink();
 
-suite('materialising the account model onto disk', () => {
+describe('materialising the account model onto disk', () => {
   it('should write each config directory, its credential link, the wrappers, ids.json and the manifest', async () => {
     // Arrange
     const host = await machine();
@@ -260,10 +270,10 @@ suite('materialising the account model onto disk', () => {
   });
 });
 
-suite('the narrowed sweep on its own', () => {
+describe('the narrowed sweep on its own', () => {
   const sweep = async (root: string, operation: FleetWriteOperation): Promise<void> => {
-    const fleet = path.join(root, 'fleet');
-    await newProvisioner([root]).apply({
+    const fleet = fleetOf(root);
+    await newProvisioner(root).apply({
       manifest: { version: 1, generatedAt: GENERATED_AT, accounts: [], runtimes: [] },
       manifestPath: path.join(fleet, 'manifest.json'),
       operations: [operation],
@@ -273,7 +283,7 @@ suite('the narrowed sweep on its own', () => {
   it('should read an unreadable or malformed record as no record, so only links are removed', async () => {
     // Arrange
     const root = await temporaryDirectory();
-    const home = path.join(root, 'fleet', 'homes', 'one');
+    const home = path.join(fleetOf(root), 'homes', 'one');
     await mkdir(path.join(home, '.fy', 'materialised.json'), { recursive: true });
     await writeFile(path.join(home, 'recorded.md'), 'mine\n');
     await writeFile(path.join(root, 'target.md'), 'target\n');
@@ -307,7 +317,7 @@ suite('the narrowed sweep on its own', () => {
   it('should keep a kept name even when the record lists it', async () => {
     // Arrange
     const root = await temporaryDirectory();
-    const home = path.join(root, 'fleet', 'homes', 'one');
+    const home = path.join(fleetOf(root), 'homes', 'one');
     await mkdir(path.join(home, '.fy'), { recursive: true });
     await writeFile(path.join(home, 'kept.md'), 'kept\n');
     await writeFile(path.join(home, 'gone.md'), 'gone\n');

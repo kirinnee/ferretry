@@ -148,17 +148,13 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
         "daemon/adapters/account-model-files.ts",
-        "daemon/adapters/file-provisioner.ts",
-        "daemon/adapters/host-harness-scan.ts",
-        "daemon/adapters/manifest-file.ts",
         "daemon/adapters/ports.ts",
         "daemon/adapters/runtime-ids-file.ts",
         "daemon/adapters/runtime-session-records.ts",
         "daemon/adapters/setup-files.ts",
         "daemon/lib/env-profiles.ts",
         "daemon/lib/harness-env.ts",
-        "daemon/lib/harness.ts",
-        "daemon/lib/service/publication.ts"
+        "daemon/lib/harness.ts"
       ]
     },
     "packages/plugins/updates": {
@@ -206,7 +202,6 @@
         "daemon/reader/lib/session/reader.ts",
         "daemon/reader/lib/session/tail-cache.ts",
         "daemon/reader/lib/session/log-page.ts",
-        "app/chat/message-marks-legend.tsx",
         "daemon/attachments/adapters/raw-deflate.ts"
       ]
     },
