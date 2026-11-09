@@ -586,6 +586,9 @@ export const conversationStep: Step = {
           }
           const parsed = v5Schema.safeParse(mapped);
           if (!parsed.success || !check(parsed.data)) {
+            // For answers (`evidence`) this branch cannot fire: the v4 receipt schema is non-strict (unknown keys are
+            // stripped) and the v5 line is the same fields plus `format`, so a line that parsed always maps. The throw
+            // stays as the fail-closed guard for a future schema change; the other logs reach this branch for real.
             if (evidence) throw stopForEvidence(`v4 log line ${line} has no v5 form`, label(from));
             damage(`v4 log line ${line} has no v5 form`, label(from));
             continue;

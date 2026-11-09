@@ -158,9 +158,11 @@ A runtime alias in `fleet/ids.json` `formerNames` is rewritten to the current na
 any singleton (a cloud provider v4 never confirmed stays held). `pack.yaml` and `models-guide.yaml` still wait for v5
 schemas (the step reports `pending`).
 
-Settings and hooks components are inlined. A `file:` resolves the way v4 resolved it: relative to `fleet/assets/`, then
-beside the component YAML under `config/components/<kind>/`; `~/`, `$HOME/` and absolute paths count only when they point
-inside the home being converted. Every folder from the home root down is `lstat`ed (no links), the file must be a regular
+Settings and hooks components are inlined. A `file:` follows v4's rule exactly: it resolves the way v4's
+`expandAssetPath` did (relative to `fleet/assets/`; `~/`, `$HOME/` and absolute paths as real paths) and is carried only
+when the resolved path lies under the home's `fleet/assets/`. There is no "beside the YAML" fallback and nothing else
+in the home is read (v4 fenced it; a stray `.toml` beside the YAMLs is ignored); such a component is NOT CARRIED and the
+report says v4 would not have read it either. Every folder from the home root down is `lstat`ed (no links), the file must be a regular
 file, and at most 1 MiB is read. Flags: Claude `--disallowedTools` becomes `settings.permissions.deny` (merged,
 deduplicated) and Codex `-c key=value` becomes a key of the item's `settings` (secret values refused); an env value that
 is a string, number or boolean is carried as a string. Anything else a v5 settings item has no form for (any other flag,

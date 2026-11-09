@@ -13,8 +13,9 @@ set -euo pipefail
 #             the forced limits.yaml), EXCEPT any that comes from a v4 file with an unconfirmed edit: each stays held
 #             (the printed note and the report name every one, with the reason). Confirm the edit in v4,
 #             then `clean` and `prepare --owner`. Without --owner they are all held and `start` stops the daemon.
-#             --drop-uncarried (OWNER'S CHOICE, never the default; an agent never passes it without the owner's yes): a
-#             settings or hooks component the converter cannot carry (an unsupported flag, a file outside the v4 home, a
+#             --drop-uncarried (prepare ONLY; dry-run ignores it. OWNER'S CHOICE, never the default; an agent never passes
+#             it without the owner's yes): a settings or hooks component the converter cannot carry (an unsupported flag,
+#             a `file:` that v4's rule would not have read: it is carried only when it resolves under fleet/assets/, a
 #             hooks folder, a secret-shaped value...) leaves the Settings step PENDING by default, because a profile still
 #             layers it. With this flag its layer is removed from every profile that names it (each profile is named in the
 #             report) so the preview can start, and the ferrets on those profiles may be LESS restricted than in v4.
@@ -107,7 +108,7 @@ v4_home="$(printf '%s\n' "${resolved}" | sed -n 1p)"
 target="$(printf '%s\n' "${resolved}" | sed -n 2p)"
 
 case "${command}" in
-dry-run) run_tool dry-run ${drop_flag[@]+"${drop_flag[@]}"} ;;
+dry-run) run_tool dry-run ;; # converts nothing, so --drop-uncarried means nothing here
 prepare)
   # Never opens a v4 file before the preview home is known to be new.
   if [ -e "${target}" ] && [ -n "$(ls -A "${target}" 2>/dev/null)" ]; then

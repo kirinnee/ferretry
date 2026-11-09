@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { acceptedName } from '@ferretry/kernel/contract';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
@@ -7,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { sampleLogin } from '../../../../packages/plugins/logins/contract/testing/index.ts';
 import { convert } from '../../src/convert.ts';
+import { acceptedConfigStep } from '../../src/steps/accepted-config.ts';
 import { conversationStep } from '../../src/steps/conversation.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
 import { CONFIG_TARGETS } from '../../src/v5/targets.ts';
@@ -198,20 +200,33 @@ test('the real-run shapes convert completely: home.json written, every case name
   expect(JSON.stringify(report)).not.toContain(FAKE_SECRET);
 });
 
-test('the owner shape: three components whose file is a relative .json/.toml beside them, layered by one profile, carry inline', async () => {
+const STRAY_MARKER = 'STRAY-TOML-BESIDE-THE-YAML';
+
+test('the owner shape: file: components/<kind>/<name>.<ext> under fleet/assets carries; a stray .toml beside the YAMLs is ignored', async () => {
   await text('layout-version', '2\n');
-  await text('config/components/hooks/claude-hooks.yaml', 'harness: claude\nfile: claude-hooks.json\n');
   await text(
-    'config/components/hooks/claude-hooks.json',
+    'config/components/hooks/claude-hooks.yaml',
+    'harness: claude\nfile: components/hooks/claude-hooks.json\n',
+  );
+  await text(
+    'fleet/assets/components/hooks/claude-hooks.json',
     JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'true' }] }] } }),
   );
-  await text('config/components/settings/claude-settings.yaml', 'harness: claude\nfile: claude-settings.json\n');
   await text(
-    'config/components/settings/claude-settings.json',
+    'config/components/settings/claude-settings.yaml',
+    'harness: claude\nfile: components/settings/claude-settings.json\n',
+  );
+  await text(
+    'fleet/assets/components/settings/claude-settings.json',
     JSON.stringify({ permissions: { deny: ['Bash(rm:*)'] }, model: 'fake' }),
   );
-  await text('config/components/settings/codex-settings.yaml', 'harness: codex\nfile: codex-settings.toml\n');
-  await text('config/components/settings/codex-settings.toml', 'model = "fake-codex"\n');
+  await text(
+    'config/components/settings/codex-settings.yaml',
+    'harness: codex\nfile: components/settings/codex-settings.toml\n',
+  );
+  await text('fleet/assets/components/settings/codex-settings.toml', 'model = "fake-codex"\n');
+  // v4 ignored this one: it sits beside the YAMLs, is no component, and is never carried.
+  await text('config/components/settings/codex-settings.toml', `model = "${STRAY_MARKER}"\n`);
   await text(
     'config/profiles/default.yaml',
     'contents:\n  - settings/claude-settings\n  - settings/codex-settings\n  - hooks/claude-hooks\n',
@@ -224,6 +239,146 @@ test('the owner shape: three components whose file is a relative .json/.toml bes
   expect(await readV5('config/codex/settings/codex-settings.yaml')).toContain('fake-codex');
   expect(await readV5('config/claude-code/hooks/claude-hooks.yaml')).toContain('PreToolUse');
   expect(await modelAccepts()).toEqual(['default']);
+  for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(STRAY_MARKER)).toBe(false);
+  expect(JSON.stringify(report)).not.toContain(STRAY_MARKER);
+});
+
+test('a bare name under fleet/assets and components/<kind>/<name> both carry', async () => {
+  await text('layout-version', '2\n');
+  await text('fleet/assets/bare.json', JSON.stringify({ model: 'bare-model' }));
+  await text('config/components/settings/bare.yaml', 'harness: claude\nfile: bare.json\n');
+  const report = await done();
+  expect(settingsOf(report).status).toBe('converted');
+  expect(await readV5('config/claude-code/settings/bare.yaml')).toContain('bare-model');
+});
+
+describe('v4 fence: a component file carries only when it resolves under fleet/assets/', () => {
+  const KEY = 'FAKE-PRIVATE-KEY-MATERIAL-NOT-REAL';
+  const notCarried = async (yaml: string, extra: () => Promise<void> = async () => {}) => {
+    await text('layout-version', '2\n');
+    await text('state/daemon-identity.json', JSON.stringify({ schemaVersion: 1, privateKeyPem: KEY }));
+    await extra();
+    await text('config/components/settings/probe.yaml', yaml);
+    const report = await done({ dropUncarried: true });
+    const named = namedIn(settingsOf(report));
+    expect(named).toContain('config/components/settings/probe.yaml');
+    expect(named).toContain('v4 would not have read it either');
+    await expect(stat(join(f.to, 'config/claude-code/settings/probe.yaml'))).rejects.toThrow();
+    for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(KEY)).toBe(false);
+    expect(JSON.stringify(report)).not.toContain(KEY);
+    return named;
+  };
+
+  test('P1 a `..` climb out of fleet/assets to a key file is not carried', async () => {
+    const named = await notCarried('harness: claude\nfile: ../../state/daemon-identity.json\n');
+    expect(named).toContain('outside fleet/assets');
+  });
+  test('P2 an absolute path into the home, outside fleet/assets, is not carried', async () => {
+    await notCarried(`harness: claude\nfile: ${f.from}/state/daemon-identity.json\n`);
+  });
+  test('P3 a ~/ path into the home, outside fleet/assets, is not carried', async () => {
+    // The user home is the fixture root, so `~/<v4 dir>/state/...` lands in the v4 home.
+    const rel = f.from.slice(f.root.length + 1);
+    await notCarried(`harness: claude\nfile: ~/${rel}/state/daemon-identity.json\n`);
+  });
+  test('P3b a $HOME/ path into the home, outside fleet/assets, is not carried', async () => {
+    const rel = f.from.slice(f.root.length + 1);
+    await notCarried(`harness: claude\nfile: $HOME/${rel}/config/components/settings/x.json\n`, () =>
+      text('config/components/settings/x.json', JSON.stringify({ model: 'x' })),
+    );
+  });
+  test('a bare name present only beside the YAML is not carried', async () => {
+    await notCarried('harness: claude\nfile: beside.json\n', () =>
+      text('config/components/settings/beside.json', JSON.stringify({ model: 'beside' })),
+    );
+  });
+  test('a components/<kind>/<name> value with the document only beside the YAML is not carried', async () => {
+    await notCarried('harness: claude\nfile: components/settings/beside.json\n', () =>
+      text('config/components/settings/beside.json', JSON.stringify({ model: 'beside' })),
+    );
+  });
+  test('an absolute or ~/ path that lands UNDER fleet/assets of the home is carried', async () => {
+    await text('layout-version', '2\n');
+    const rel = f.from.slice(f.root.length + 1);
+    await text('fleet/assets/in.json', JSON.stringify({ model: 'in-abs' }));
+    await text('config/components/settings/abs.yaml', `harness: claude\nfile: ${f.from}/fleet/assets/in.json\n`);
+    await text('config/components/settings/tilde.yaml', `harness: claude\nfile: ~/${rel}/fleet/assets/in.json\n`);
+    const report = await done();
+    expect(settingsOf(report).status).toBe('converted');
+    expect(await readV5('config/claude-code/settings/abs.yaml')).toContain('in-abs');
+    expect(await readV5('config/claude-code/settings/tilde.yaml')).toContain('in-abs');
+  });
+});
+
+describe('m1 flag values never reach the report', () => {
+  const SENTINEL = 'SENTINEL-FLAG-VALUE-DO-NOT-ECHO';
+  const shapes: [string, string, string][] = [
+    ['codex -cKEY=VALUE', 'codex', `  - -cfoo.${'bar'}=${SENTINEL}\n  - --verbose\n`],
+    ['claude -k=VALUE', 'claude', `  - -k=${SENTINEL}\n`],
+    ['claude --flag=VALUE', 'claude', `  - --flag=${SENTINEL}\n`],
+    ['a value starting with -', 'claude', `  - --header\n  - -${SENTINEL}\n`],
+  ];
+  for (const [label, harness, flags] of shapes)
+    test(label, async () => {
+      await text('layout-version', '2\n');
+      await text('config/components/settings/odd.yaml', `harness: ${harness}\nflags:\n${flags}`);
+      await text('config/profiles/default.yaml', 'contents:\n  - settings/odd\n');
+      const report = await done();
+      const step = settingsOf(report);
+      expect(JSON.stringify(report)).not.toContain(SENTINEL);
+      expect(namedIn(step)).toContain('config/components/settings/odd.yaml');
+      if (label !== 'codex -cKEY=VALUE') expect(step.status).toBe('pending');
+    });
+});
+
+describe('m2 a cloud voice provider v4 never confirmed stays held', () => {
+  const runAccepted = async () => {
+    const result = await convert({
+      from: f.from,
+      to: f.to,
+      dryRun: false,
+      lock: { held: async () => false },
+      now: () => new Date('2026-11-09T00:00:00Z'),
+      host: { homeDirectory: f.root, env: {} },
+      steps: [settingsStep, acceptedConfigStep],
+    });
+    if (result.kind !== 'done') throw new Error('expected a run');
+    return result.report;
+  };
+  const records = async () =>
+    (await readdir(join(f.to, 'state/kernel/accepted-config')).catch(() => [] as string[])).sort();
+  const recordText = async () =>
+    (
+      JSON.parse(
+        await readFile(join(f.to, 'state/kernel/accepted-config', `${acceptedName('voice.yaml')}.json`), 'utf8'),
+      ) as { text: string }
+    ).text;
+
+  test('P9 the file says groq, v4 enforced off: the v5 file carries groq, the accepted record says off', async () => {
+    await text('layout-version', '2\n');
+    const live = 'postProcessing:\n  provider: groq\n';
+    const enforced = 'postProcessing:\n  provider: "off"\n';
+    await text('config/voice.yaml', live);
+    await text(
+      'state/config-accepted.json',
+      JSON.stringify({
+        'voice.yaml': { etag: createHash('sha256').update(enforced, 'utf8').digest('hex'), text: enforced },
+      }),
+    );
+    await runAccepted();
+    expect(await readV5('config/voice.yaml')).toContain('groq');
+    const recorded = await recordText();
+    expect(recorded).toContain('off');
+    expect(recorded).not.toContain('groq');
+  });
+
+  test('P10 a voice.yaml v4 never accepted gets no record, so its groq is judged against the default', async () => {
+    await text('layout-version', '2\n');
+    await text('config/voice.yaml', 'postProcessing:\n  provider: groq\n');
+    await runAccepted();
+    expect(await readV5('config/voice.yaml')).toContain('groq');
+    expect(await records()).toEqual([]);
+  });
 });
 
 test('a flags-only component carries Codex -c and Claude --disallowedTools; v4-superseded flags are named, never carried', async () => {
@@ -379,11 +534,12 @@ test('links are never followed: a file link in fleet/assets, fleet/assets itself
   for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(OUTSIDE_MARKER)).toBe(false);
   await rm(f.to, { recursive: true, force: true });
 
-  // 3. a link in config/components/<kind> on the way to a beside file
+  // 3. a folder link inside fleet/assets on the way to the file
   await rm(join(f.from, 'fleet/assets'), { force: true });
-  await mkdir(join(f.from, 'config/components/hooks'), { recursive: true });
-  await symlink(real, join(f.from, 'config/components/hooks/h.json'));
-  await text('config/components/hooks/h.yaml', 'harness: claude\nfile: h.json\n');
+  await mkdir(join(f.from, 'fleet/assets/components'), { recursive: true });
+  await writeFile(join(outside, 'h.json'), JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o600 });
+  await symlink(outside, join(f.from, 'fleet/assets/components/hooks'));
+  await text('config/components/hooks/h.yaml', 'harness: claude\nfile: components/hooks/h.json\n');
   report = await done();
   expect(namedIn(settingsOf(report))).toContain('config/components/hooks/h.yaml');
   for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(OUTSIDE_MARKER)).toBe(false);
@@ -392,11 +548,8 @@ test('links are never followed: a file link in fleet/assets, fleet/assets itself
 test('an absolute path inside the real v4 home is read from the snapshot copy; one outside it is not', async () => {
   await text('layout-version', '2\n');
   const real = '/fake-real-home/.ferretry';
-  await text(
-    'config/components/settings/abs.yaml',
-    `harness: claude\nfile: ${real}/config/components/settings/abs.json\n`,
-  );
-  await text('config/components/settings/abs.json', JSON.stringify({ model: 'from-copy' }));
+  await text('config/components/settings/abs.yaml', `harness: claude\nfile: ${real}/fleet/assets/abs.json\n`);
+  await text('fleet/assets/abs.json', JSON.stringify({ model: 'from-copy' }));
   const report = await done();
   // The plain (non-preview) run's real home is the home itself, so a path under a DIFFERENT real home is outside.
   expect(namedIn(settingsOf(report))).toContain('config/components/settings/abs.yaml');
@@ -415,6 +568,50 @@ test('an absolute path inside the real v4 home is read from the snapshot copy; o
   });
   if (mapped.kind !== 'done') throw new Error('expected a run');
   expect(await readV5('config/claude-code/settings/abs.yaml')).toContain('from-copy');
+});
+
+test('preview.sh passes --drop-uncarried to prepare only, never to dry-run', async () => {
+  const script = resolve(import.meta.dir, '../../preview/preview.sh');
+  const root = await mkdtemp(join(tmpdir(), 'fy-sh-drop-'));
+  try {
+    const tool = join(root, 'tool');
+    await mkdir(join(tool, 'preview'), { recursive: true });
+    await mkdir(join(tool, 'node_modules/yaml'), { recursive: true });
+    await writeFile(join(tool, 'preview/preview.sh'), await readFile(script, 'utf8'), { mode: 0o755 });
+    const bin = join(root, 'bin');
+    await mkdir(bin);
+    const log = join(root, 'args.log');
+    // A stub bun: `guard` answers two folders, everything else is logged.
+    await writeFile(
+      join(bin, 'bun'),
+      `#!/usr/bin/env bash\nif [ "$2" = guard ]; then printf '%s\\n%s\\n' "${join(root, 'v4')}" "${join(root, 'v5')}"; exit 0; fi\necho "$*" >> "$INSTALL_LOG"\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}`, INSTALL_LOG: log };
+    const go = (verb: string) =>
+      spawnSync(
+        'bash',
+        [
+          join(tool, 'preview/preview.sh'),
+          verb,
+          '--drop-uncarried',
+          '--v4',
+          join(root, 'v4'),
+          '--target',
+          join(root, 'v5'),
+        ],
+        { env, encoding: 'utf8' },
+      );
+    go('dry-run');
+    const dry = await readFile(log, 'utf8');
+    expect(dry).toContain('dry-run');
+    expect(dry).not.toContain('--drop-uncarried');
+    await rm(log);
+    go('prepare');
+    expect(await readFile(log, 'utf8')).toContain('prepare --drop-uncarried');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('preview.sh installs the converter dependencies when node_modules is missing or has no yaml, and names the command when that fails', async () => {

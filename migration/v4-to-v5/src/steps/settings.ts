@@ -460,9 +460,9 @@ const isRecordValue = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * A v4 settings or hooks component. v5 holds these INLINE in the item (`settings:` / `hooks:`), where v4 pointed at a
- * file, flags or env. `env` is data in the YAML itself and is written inline; a `file` that is a plain file inside the
- * v4 home (`component-files.ts`: the asset tree, beside the component, or its real path inside the home) is read from the
- * snapshot and inlined; a file outside the home is NEVER opened. Codex `-c` and Claude `--disallowedTools` flags are
+ * file, flags or env. `env` is data in the YAML itself and is written inline; a `file` that is a plain file under
+ * `fleet/assets/` (v4's rule exactly, `component-files.ts`) is read from the snapshot and inlined; any other file is
+ * NEVER opened. Codex `-c` and Claude `--disallowedTools` flags are
  * carried as settings keys; any other thing the converter cannot carry in full (another flag, an outside file, a hooks
  * directory, a secret-shaped or `${secret:...}` value, an oversize file, a v5 refusal) makes the component NOT CARRIED:
  * it is named with its flags (names only) and every profile that layers it, and `settleUncarried` decides what happens
@@ -497,14 +497,16 @@ async function planHarnessComponent(
   // The file form: only a plain file inside the v4 home snapshot is read (component-files.ts), up to the size cap.
   let fromFile: Record<string, unknown> | undefined;
   if (typeof v4.file === 'string') {
-    const source = await componentFileSource(ctx, kind, v4.file);
-    if (source === undefined)
-      entry.reasons.push('its file points outside the v4 home (or at no plain file in it), so it was never read');
-    else if (((await lstat(source).catch(() => undefined))?.size ?? 0) > MAX_COMPONENT_BYTES)
+    const found = await componentFileSource(ctx, v4.file);
+    if (!('source' in found))
+      entry.reasons.push(
+        `its file is ${found.refused}, and v4 would not have read it either (v4 reads a component file only from fleet/assets/), so it was never read; copy it into fleet/assets/ and point file: at it`,
+      );
+    else if (((await lstat(found.source).catch(() => undefined))?.size ?? 0) > MAX_COMPONENT_BYTES)
       entry.reasons.push(`its file is over ${MAX_COMPONENT_BYTES / 1024 / 1024} MiB, so it was not read`);
     else {
       try {
-        const text = await readFile(source, 'utf8');
+        const text = await readFile(found.source, 'utf8');
         const parsed: unknown =
           harnessName === 'codex' && kind === 'settings' ? Bun.TOML.parse(text) : JSON.parse(text);
         if (isRecordValue(parsed)) fromFile = parsed;
@@ -679,7 +681,7 @@ function settleUncarried(plan: Plan, drop: boolean): void {
     } else {
       plan.dropped.push({ what: item.label, why: `${base}.` });
       plan.waiting.push(
-        `${item.label} (not carried, ${used}; fix it in v4 by moving its file inside the v4 home or removing the flag or the component, or re-run with --drop-uncarried, which removes the layer and may leave the ferrets less restricted than in v4)`,
+        `${item.label} (not carried, ${used}; fix it in v4 by copying its file into fleet/assets/ (and pointing file: at it) or removing the flag or the component, or re-run with --drop-uncarried, which removes the layer and may leave the ferrets less restricted than in v4)`,
       );
     }
   }

@@ -81,9 +81,13 @@ export function carryFlags(harness: 'claude-code' | 'codex', flags: readonly unk
   const isFlag = (token: string | undefined): boolean => token?.startsWith('-') === true;
   for (let index = 0; index < text.length; index++) {
     const token = text[index] as string;
+    // A flag NAME is all a report may carry: `--flag=VALUE` splits at `=`; a short flag with a value attached
+    // (`-cKEY=VALUE`, `-k=VALUE`) is its first two characters and the rest is the value.
     const equals = token.startsWith('--') ? token.indexOf('=') : -1;
-    const name = equals > 0 ? token.slice(0, equals) : token;
-    const inline = equals > 0 ? token.slice(equals + 1) : undefined;
+    const shortWithValue = !token.startsWith('--') && token.startsWith('-') && token.length > 2;
+    const name = equals > 0 ? token.slice(0, equals) : shortWithValue ? token.slice(0, 2) : token;
+    const inline =
+      equals > 0 ? token.slice(equals + 1) : shortWithValue ? token.slice(2).replace(/^=/u, '') : undefined;
     if (harness === 'claude-code' && (name === '--disallowedTools' || name === '--disallowed-tools')) {
       const values: string[] = inline === undefined ? [] : [inline];
       if (inline === undefined)
@@ -116,8 +120,17 @@ export function carryFlags(harness: 'claude-code' | 'codex', flags: readonly unk
     }
     if (!token.startsWith('-')) continue; // the stray value of a flag already named
     uncarried.push(name);
-    // An unknown flag's value is never named (it may be a secret): skip it with the flag.
-    if (inline === undefined && index + 1 < text.length && !isFlag(text[index + 1])) index++;
+    // An unknown flag's value is never named (it may be a secret, and may start with `-`). A next token is a real
+    // flag only when it is `--name` or a bare `-x`; a longer single-dash token (`-VALUE`, `-cKEY=VALUE`) is taken as
+    // the value (a placeholder says so, the token is never echoed); a plain next token is the value.
+    const following = inline === undefined ? text[index + 1] : undefined;
+    if (following !== undefined) {
+      const clearFlag = following.startsWith('--') || (following.startsWith('-') && following.length === 2);
+      if (!clearFlag) {
+        if (following.startsWith('-')) uncarried.push('(a flag value that starts with -)');
+        index++;
+      }
+    }
   }
   return { deny, config, superseded, uncarried };
 }
