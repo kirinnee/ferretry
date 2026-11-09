@@ -12,7 +12,7 @@ import { seconds, type Instant, type JsonValue } from '@ferretry/std';
 import { CODEX_ROLLOUTS, type CodexRolloutBinding as Binding } from '../../contract/index.ts';
 import { CodexTranscriptParser } from '../lib/transcript/codex.ts';
 import { selectCodexRollout } from '../lib/transcript/rollout.ts';
-import { tailRecordOf } from '../lib/transcript/tail-record.ts';
+import { markCutWindow, tailRecordOf } from '../lib/transcript/tail-record.ts';
 
 const MAX_ROLLOUTS = 4_000;
 const MAX_DIRECTORIES = 8_000;
@@ -219,10 +219,6 @@ export class CodexRollouts {
     if (read === undefined) return { kind: 'unreadable' };
     const lines = decoder.decode(read.bytes).split('\n');
     const partial = read.size > read.bytes.length;
-    // The newest record is larger than the window and none of it is whole: something big is being written, which is a
-    // turn at work (never "no records", so one idle-looking frame cannot end it). The window is never widened.
-    if (partial && lines.slice(1).every(line => line.trim() === ''))
-      return { kind: 'read', records: [{ kind: 'work' }] };
     // The window may start mid-record, and the last line may be one the harness has not finished: neither is read.
     if (partial) lines.shift();
     lines.pop();
@@ -245,7 +241,10 @@ export class CodexRollouts {
       }
       return parsed;
     });
-    return { kind: 'read', records: records.slice(-limit) };
+    // A window that reads no message, work or turn boundary whole cannot say where the turn stands (the newest record is
+    // larger than it, or only bookkeeping follows the cut one): a turn at work, never "no records", so one idle-looking
+    // frame cannot end it. The window is never widened.
+    return { kind: 'read', records: markCutWindow(records, partial).slice(-limit) };
   };
 
   private events(rollout: OwnedRollout) {

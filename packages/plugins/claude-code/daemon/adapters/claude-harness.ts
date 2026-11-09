@@ -54,7 +54,7 @@ import {
   type LaunchSettingsInputs,
   launchSettingsRecord,
 } from '../lib/harness/launch-settings.ts';
-import { parseEntries, parseTail, parseUsage, windowHoldsOneCutRecord } from '../lib/harness/transcript.ts';
+import { markCutWindow, parseEntries, parseTail, parseUsage } from '../lib/harness/transcript.ts';
 import { parseHarnessDialog } from '../lib/pane/harness-dialog.ts';
 import { parsePermissionPrompt } from '../lib/pane/permission-prompt.ts';
 import type { PermissionAnswerService } from '../lib/permission/service.ts';
@@ -426,12 +426,11 @@ export class ClaudeHarness implements Harness {
     if (tail === undefined) return { kind: 'unreadable' };
     const text = new TextDecoder().decode(tail.bytes);
     const partial = tail.size > tail.bytes.length;
-    const records = parseTail(text, partial);
-    // The newest record is larger than the window and none of it is whole: something big is being written, which is a
-    // turn at work (never "no transcript", so the pane alone cannot end it). The window is never widened: one wider
-    // parse is a synchronous slice on the daemon's main thread (ruling #44).
-    if (records.length === 0 && partial && windowHoldsOneCutRecord(text))
-      return { kind: 'read', records: [{ kind: 'work' }] };
+    // A window that reads no message, work or turn boundary whole cannot say where the turn stands: the newest record is
+    // larger than it (or only bookkeeping and an unfinished line follow the cut one), which is a turn at work (never "no
+    // transcript", so the pane alone cannot end it). The window is never widened: one wider parse is a synchronous slice
+    // on the daemon's main thread (ruling #44).
+    const records = markCutWindow(parseTail(text, partial), partial);
     return { kind: 'read', records: records.slice(-limit) };
   }
 

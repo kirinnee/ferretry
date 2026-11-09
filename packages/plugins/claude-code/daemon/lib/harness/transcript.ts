@@ -102,15 +102,18 @@ export function parseUsage(text: string): readonly TurnUsage[] {
 const TAIL_USER_ROLES = new Set(['user', 'assistant']);
 
 /**
- * Whether a window cut from the end of a file holds NOTHING BUT the end of one record: no complete line follows the cut
- * one. The newest record is then larger than the window (a pasted image, a big tool result), so no record was read, which
- * is not the same as a transcript with nothing to say.
+ * The records of a window cut from the end of a file, with the turn marked as at work when the window cannot say where
+ * the turn stands. A cut window drops its first line (the end of a record whose start is outside it), and what that cut
+ * record was is unknown: a pasted image, a big tool result, a final message. So unless a message, a piece of work or a
+ * turn boundary is read whole in the window, the turn is at work (never "no records": one idle-looking frame then
+ * cannot end it). Records that say nothing of the turn (usage, a compaction, an error) or an unfinished last line
+ * after the cut one change nothing: only a record that says where the turn stands decides. Pure.
  */
-export function windowHoldsOneCutRecord(text: string): boolean {
-  return text
-    .split('\n')
-    .slice(1)
-    .every(line => line.trim() === '');
+export function markCutWindow(records: readonly HarnessTailRecord[], partial: boolean): readonly HarnessTailRecord[] {
+  if (!partial) return records;
+  if (records.some(record => record.kind === 'message' || record.kind === 'work' || record.kind === 'turn'))
+    return records;
+  return [...records, { kind: 'work' }];
 }
 
 /**

@@ -265,6 +265,37 @@ describe('the registered Codex harness', () => {
     expect(after.records).not.toEqual([{ kind: 'work' }]);
   });
 
+  test('BG-041 a cut record followed by a token_count line or an unfinished one still reads as a turn at work', async () => {
+    const box = fixture();
+    const harness = box.build();
+    const spec = box.spec();
+    await harness.start(spec, box.runner, ENV);
+    const file = `${spec.home}/sessions/2026/10/20/rollout-native.jsonl`;
+    const big = line('response_item', { type: 'function_call_output', call_id: 'c1', output: 'x'.repeat(600 * 1024) });
+    const tokens = line('event_msg', {
+      type: 'token_count',
+      info: { last_token_usage: { input_tokens: 20, output_tokens: 5 }, total_token_usage: { total_tokens: 25 } },
+    });
+
+    // The bookkeeping line after the cut record says nothing of the turn: the usage is kept and the turn is at work.
+    box.files.set(file, header('native-id', spec.home) + message('done') + big + tokens);
+    const afterTokens = await harness.transcriptTail?.(spec.ferret, 50);
+    if (afterTokens?.kind !== 'read') throw new Error('the tail reads');
+    expect(afterTokens.records.map(record => record.kind)).toEqual(['usage', 'work']);
+
+    // An unfinished line (being written right now) after it: the same.
+    box.files.set(file, `${box.files.get(file)}{"timestamp":"2026-10-20T09:00:00.000Z","type":"resp`);
+    const afterUnfinished = await harness.transcriptTail?.(spec.ferret, 50);
+    if (afterUnfinished?.kind !== 'read') throw new Error('the tail reads');
+    expect(afterUnfinished.records.at(-1)).toEqual({ kind: 'work' });
+
+    // A whole message after the cut record decides the turn itself: no mark is added.
+    box.files.set(file, header('native-id', spec.home) + message('done') + big + tokens + message('next'));
+    const decided = await harness.transcriptTail?.(spec.ferret, 50);
+    if (decided?.kind !== 'read') throw new Error('the tail reads');
+    expect(decided.records.map(record => record.kind)).toEqual(['usage', 'message']);
+  });
+
   test('refuses the baseline, same-folder strangers and ambiguous ownership; resumes only the native id after restart', async () => {
     const box = fixture();
     const harness = box.build();
