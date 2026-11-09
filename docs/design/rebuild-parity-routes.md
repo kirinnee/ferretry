@@ -8,7 +8,7 @@ which open routes are stubs (`stub`: a pending or GAP refusal in the handler; `m
 `ports-pending.json` names the route; a row a review traced by hand is a `stub` too) before spending a batch on them.
 `no-marker` means only that the scan found no marker: it does NOT mean the handler works.
 
-Open route rows: 377. Descriptor proven: 358. Not proven: 19 (loosened 2, unpaired 17). Handler a stub: 32. Maybe a stub: 140.
+Open route rows: 373. Descriptor proven: 354. Not proven: 19 (loosened 2, unpaired 17). Handler a stub: 31. Maybe a stub: 140.
 
 <!-- prettier-ignore -->
 | Row | Route | Descriptor | Handler |
@@ -62,7 +62,6 @@ Open route rows: 377. Descriptor proven: 358. Not proven: 19 (loosened 2, unpair
 | R-0369 | `POST /v1/sessions/:sessionId/sends/:sendId/retry` | descriptor proven | stub: traced by review: conversation host: send retry is pending() |
 | R-0410 | `POST /v1/worktrees` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/worktrees.ts:134 |
 | R-0411 | `POST /v1/worktrees/remove` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/worktrees.ts:132 |
-| R-0424 | `WS GET /v1/events` | descriptor proven | stub: traced by review: kernel events socket: ports-pending GAP(kernel), ported but not mounted |
 | R-0044 | `GET /v1/agenda/open` | descriptor proven | no-marker: packages/plugins/agenda/daemon/routes.ts:120 |
 | R-0110 | `GET /v1/machine/agenda` | descriptor proven | no-marker: packages/plugins/agenda/daemon/routes.ts:166 |
 | R-0111 | `GET /v1/machine/agenda/:id` | descriptor proven | no-marker: packages/plugins/agenda/daemon/routes.ts:171 |
@@ -108,8 +107,8 @@ Open route rows: 377. Descriptor proven: 358. Not proven: 19 (loosened 2, unpair
 | R-0418 | `PUT /v1/catalog-shares/:shareId/new-passkey` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
 | R-0059 | `GET /v1/carriers` | descriptor proven | maybe: packages/plugins/connections/daemon/index.ts:253; the file carries pending/GAP markers at 79, 80, 168, 207, 218, 257 |
 | R-0203 | `GET /v1/tunnel` | descriptor proven | no-marker: packages/plugins/connections/daemon/connection-b.ts:88 |
-| R-0409 | `POST /v1/webrtc/offer` | descriptor proven | maybe: packages/plugins/connections/daemon/compose-b.ts:181; the file carries pending/GAP markers at 64 |
-| R-0423 | `PUT /v1/tunnel` | descriptor proven | maybe: packages/plugins/connections/daemon/compose-b.ts:180; the file carries pending/GAP markers at 64 |
+| R-0409 | `POST /v1/webrtc/offer` | descriptor proven | maybe: packages/plugins/connections/daemon/compose-b.ts:175; the file carries pending/GAP markers at 65 |
+| R-0423 | `PUT /v1/tunnel` | descriptor proven | maybe: packages/plugins/connections/daemon/compose-b.ts:174; the file carries pending/GAP markers at 65 |
 | R-0425 | `WS GET /v1/rendezvous/:daemonId/client` | descriptor proven | stub: stub at packages/plugins/connections/daemon/index.ts:261: sockets: { 'GET /v1/rendezvous/:daemonId/client': direct?.route.accept ?? (async |
 | R-0079 | `GET /v1/daemon/update` | descriptor proven | no-marker: packages/plugins/updates/daemon/lib/routes.ts:54 |
 | R-0096 | `GET /v1/harnesses/update` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
@@ -142,8 +141,7 @@ Open route rows: 377. Descriptor proven: 358. Not proven: 19 (loosened 2, unpair
 | R-0338 | `POST /v1/sessions/:sessionId/browser` | descriptor proven | no-marker: packages/plugins/browsers/daemon/pages/routes.ts:145 |
 | R-0373 | `POST /v1/sessions/:sessionId/surfaces/browser/control` | descriptor proven | maybe: packages/plugins/browsers/daemon/tools/index.ts:137; the file carries pending/GAP markers at 42 |
 | R-0374 | `POST /v1/sessions/:sessionId/surfaces/browser/tools` | descriptor proven | maybe: packages/plugins/browsers/daemon/tools/index.ts:143; the file carries pending/GAP markers at 42 |
-| R-0401 | `POST /v1/system/open-url` | descriptor proven | no-marker: packages/plugins/browsers/daemon/open-url/routes.ts:26 |
-| R-0426 | `WS GET /v1/sessions/:sessionId/browser/stream` | descriptor proven | no-marker: packages/plugins/browsers/daemon/index.ts:275 |
+| R-0426 | `WS GET /v1/sessions/:sessionId/browser/stream` | descriptor proven | no-marker: packages/plugins/browsers/daemon/index.ts:276 |
 | R-0017 | `DELETE /v1/fleet/login/:flowId` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/sign-in.ts:78 |
 | R-0083 | `GET /v1/fleet/credentials` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/logins.ts:46 |
 | R-0085 | `GET /v1/fleet/login/:flowId` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/sign-in.ts:68 |
@@ -379,8 +377,6 @@ Open route rows: 377. Descriptor proven: 358. Not proven: 19 (loosened 2, unpair
 | R-0387 | `POST /v1/shared/unlock/options` | descriptor proven | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0416 | `PUT /v1/catalog-items/:itemId/current` | descriptor proven | maybe: packages/plugins/catalogs/daemon/lib/catalog-links/service.ts:889; "current" sits beside a pending/GAP marker (key not a literal) |
 | R-0417 | `PUT /v1/catalog-links/:linkId/version` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0112 | `GET /v1/mcp` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:94 |
-| R-0162 | `GET /v1/sessions/:sessionId/mcp/servers` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:96 |
 | R-0306 | `POST /v1/mcp/check` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:95 |
 | R-0175 | `GET /v1/sessions/:sessionId/skills` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:21 |
 | R-0176 | `GET /v1/sessions/:sessionId/skills/inventory` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:22 |

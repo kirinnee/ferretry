@@ -74,6 +74,11 @@ export interface McpInventoryComponent {
 /** A document a harness reads, already parsed. `null`: the file is not there. */
 export interface McpHarnessDocuments {
   read(path: string, format: 'json' | 'toml'): Promise<unknown>;
+  /**
+   * The same documents for ONE request: a reader that keeps what it had to look up (which homes are published) for
+   * the request's reads instead of asking again for every path. Absent: nothing to keep.
+   */
+  scoped?(): McpHarnessDocuments;
 }
 
 /** A document that exists and cannot be read the way the harness reads it; the message names no value. */
@@ -196,6 +201,7 @@ interface Reading {
 
 /** Reads each document once per request, and turns an unreadable one into a problem rather than a failure. */
 function reading(documents: McpHarnessDocuments): Reading {
+  const request = documents.scoped?.() ?? documents;
   const cache = new Map<string, Promise<unknown>>();
   const problems: McpInventoryProblem[] = [];
   return {
@@ -203,7 +209,7 @@ function reading(documents: McpHarnessDocuments): Reading {
     read(path, format) {
       const known = cache.get(path);
       if (known !== undefined) return known;
-      const read = documents.read(path, format).catch((error: unknown) => {
+      const read = request.read(path, format).catch((error: unknown) => {
         if (!(error instanceof McpDocumentUnreadable)) throw error;
         problems.push({ source: path, message: error.message });
         return null;

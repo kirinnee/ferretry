@@ -20,9 +20,12 @@ import {
   managedWorktreeRows,
   mcpInventoryFolders,
 } from './lib/inventory/folders.ts';
-import { McpDocumentUnreadable, McpInventoryService } from './lib/inventory/service.ts';
+import { McpDocumentUnreadable, type McpInventoryAccount, McpInventoryService } from './lib/inventory/service.ts';
 import { SignInReach } from './lib/reach.ts';
 import { combinedMcpOAuthServers, ProjectMcpLaunch, ProjectMcpOAuthServers } from './lib/inventory/project-sign-in.ts';
+import { PublishedHomeDocuments, type PublishedHomes } from './lib/inventory/home-documents.ts';
+import { parseHarnessDocument } from './lib/inventory/parse-document.ts';
+import { accountsOf, componentsOf, layeredMcp } from './lib/inventory/runtime-wiring.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
 import { mcpComponentSource } from './lib/profile-component-source.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
@@ -39,12 +42,15 @@ const NOT_YET = (what: string): never => {
  * MCP (§2.3): MCP servers as items, their sign-ins, and the per-ferret wiring.
  *
  * SEAMS NOT BOUND HERE (declared GAPS; each refuses in words rather than guess):
- * - Catalogs belongs to a neighbour whose contract MCP may not import yet. Runtimes (optional `uses`) answers a login
- *   add: the ferret's runtime and profile are read from it, the item is written to this plugin's own
- *   `config/mcp/<name>.yaml`, and Runtimes adds the one `mcp/<name>` layer under the caller's own standing. Runtimes
- *   off: a login add answers `mcp_runtime_unknown`. A project add lands only at a known root (below), through the
- *   ferret's own `work` root, so a ferret in a SUBFOLDER of a registered project is told in words that the root's file
- *   is outside its folder (declared GAP: it needs the kernel's `project-files` root, the M5 unit).
+ * - Runtimes (an optional `uses`) answers the accounts (one per runtime a published home lists), which MCP items each
+ *   runtime's profile stack carries, and the bounded read of a home's `.claude.json`, `settings.json` and
+ *   `config.toml` (`lib/inventory/home-documents.ts`: exactly those three names, nothing else of a home). A launch
+ *   carries only the items its runtime's profile names. Runtimes off: no accounts and no item on any launch, and a
+ *   login add answers `mcp_runtime_unknown`. A login add reads the ferret's runtime and profile from it, writes the
+ *   item to this plugin's own `config/mcp/<name>.yaml`, and Runtimes adds the one `mcp/<name>` layer under the
+ *   caller's own standing; Catalogs belongs to a later unit. A project add lands only at a known root (below),
+ *   through the ferret's own `work` root, so a ferret in a SUBFOLDER of a registered project is told in words that the
+ *   root's file is outside its folder (declared GAP: it needs the kernel's `project-files` root, the M5 unit).
  * - Projects (an optional `uses`) gives the registered roots and Ferrets' `managedWorktrees()` the managed worktrees
  *   (`<home>-worktrees`), so a subfolder of a registered project, a worktree kept inside it, and a managed worktree
  *   of it are that project, under its root's subject digest, as today. Projects off: a managed worktree belongs to
@@ -74,6 +80,7 @@ export default implementDaemon(manifest, {
     const { kernel } = ctx;
     const { ferrets, vault, sealed } = ctx.needs;
     const { claudeCode, projects, runtimes } = ctx.uses;
+    const published = (): PublishedHomes | undefined => runtimes.current();
 
     // ── what a ferret's folder is: these folders are inventory read roots, never project registrations ────────────
     const owners = new Map<string, FerretId>();
@@ -121,22 +128,18 @@ export default implementDaemon(manifest, {
     // folder (lead ruling (B)), so a ferret in a subfolder reads it with no ferret in the project root. Every other
     // document is read through the ferret folder that holds it, as before.
     const projectFile = projectRootMcpFile(root => kernel.roots.root('imports', { subfolder: root }));
-    const documents = new RootMcpHarnessDocuments(
-      async path => {
-        if (path.endsWith(`/${PROJECT_MCP_FILE}`)) {
-          const held = projectFile(
-            path,
-            (await known()).map(folder => folder.root),
-          );
-          if (held !== undefined) return held;
-        }
-        return workRootFor(path);
-      },
-      (text, format) => {
-        if (format === 'json') return JSON.parse(text) as unknown;
-        return NOT_YET('Reading a Codex config.toml');
-      },
-    );
+    // A runtime home Runtimes published is read through its bounded reader, by exact document name; the rest as before.
+    const rootDocuments = new RootMcpHarnessDocuments(async path => {
+      if (path.endsWith(`/${PROJECT_MCP_FILE}`)) {
+        const held = projectFile(
+          path,
+          (await known()).map(folder => folder.root),
+        );
+        if (held !== undefined) return held;
+      }
+      return workRootFor(path);
+    }, parseHarnessDocument);
+    const documents = new PublishedHomeDocuments(published, parseHarnessDocument, rootDocuments);
     const held = async (): Promise<ReadonlySet<SecretName>> =>
       new Set((await vault.names()).map(summary => summary.name));
 
@@ -160,18 +163,23 @@ export default implementDaemon(manifest, {
     });
 
     // ── every launch: renew the sign-ins it uses, then name them (today's launch environment, `modules/mcp.ts`) ──
+    const accounts = async (): Promise<readonly McpInventoryAccount[]> =>
+      accountsOf((await runtimes.current()?.homes()) ?? []);
     const launch = new McpLaunchParts({
       items,
       held,
       renewal: oauth,
+      layered: async runtime => await layeredMcp(runtimes.current(), runtime),
       project: async spec => {
         // The ferret folders are the read roots, so they are read fresh before the launch's own folder is.
         await refreshOwners();
-        // The launch is its own account: the spec carries the runtime, harness and home it launches with.
-        // Whether the runtime declined a server is its harness's answer, never a read of its home here (GAP above).
+        // The launch is its runtime's account when Runtimes published one (its home, as a v4 launch read it); else its
+        // own, from the runtime, harness and home the spec carries. Whether the runtime declined a server is its
+        // harness's answer, never a read of its home here (GAP above).
         const agent = spec.runtime ?? spec.ferret;
+        const own = (await accounts()).find(account => account.runtime === spec.runtime);
         return await new ProjectMcpLaunch({
-          accounts: async () => [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }],
+          accounts: async () => [own ?? { runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }],
           folders,
           documents,
           approvals: harnessProjectApprovals({ 'claude-code': () => claudeCode.current() }, spec.harness, spec.ferret),
@@ -183,13 +191,8 @@ export default implementDaemon(manifest, {
 
     // ── inventory and check ────────────────────────────────────────────────────────────────────────────────────────
     const inventory = new McpInventoryService({
-      accounts: async () => [],
-      components: async () =>
-        [...items()].map(([name, item]) => ({
-          name,
-          runtimes: [],
-          ...(item.auth === undefined ? {} : { auth: item.auth }),
-        })),
+      accounts,
+      components: async () => await componentsOf(items(), runtimes.current()),
       folders,
       connections: async () => await oauth.connections(),
       documents,

@@ -46,7 +46,10 @@ export default definePlugin({
   // home (MCP has no root there); Projects answers the registered roots a launch folder belongs to. Off = fail closed
   // (no project server bound) and each folder its own project. Codex is not asked: its answer is always `not-taken`
   // (today handed a Codex launch nothing), so MCP answers that itself, whether or not Codex's daemon half is built.
-  // Neither uses MCP, so the graph stays acyclic.
+  // Runtimes answers the published accounts (a runtime's home, read through its bounded reader), the profile layers
+  // that say which items a runtime carries, a launch's runtime, and a login add's runtime and profile (it also takes
+  // the one `mcp/<name>` layer). Off = no accounts and no item on any launch. None of the three uses MCP, so the graph
+  // stays acyclic.
   uses: { claudeCode: ClaudeCodePort, projects: ProjectsPort, runtimes: RuntimesPort },
 
   provides: { mcp: McpPort },
