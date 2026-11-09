@@ -4,7 +4,8 @@
  *
  * 1. The etag a caller reads from `profiles()` is the one the KERNEL's writer compares. Here the real config service
  *    runs over a memory filesystem, with a plain file, a CRLF file, a file with a byte-order mark and one that is not
- *    UTF-8, and the etag the host reads is paired with the writer's own and then used as `ifMatch` for a real write.
+ *    UTF-8, and the etag the host reads is paired with the writer's own and then used as `ifMatch` for a real write
+ *    (a file that is not UTF-8 still READS, but a write over it is refused, so no byte is changed behind the owner).
  * 2. The contract FAKE (`fakeRuntimes`) and the real service give the SAME outcome, and leave the same profiles, on one
  *    shared table of cases, so a wave-2 test driven by the fake cannot pass against an answer the daemon never gives.
  */
@@ -86,7 +87,7 @@ describe('R2 the etag profiles() gives is the kernel writer’s own', () => {
     ]),
   };
 
-  for (const name of Object.keys(FILES)) {
+  for (const name of ['plain', 'crlf', 'bom']) {
     it(`R2 should read, from a ${name} file, the etag the real writer compares, and have it accepted as ifMatch`, async () => {
       // Arrange
       const { api, config, diskOf } = await realWorld(FILES);
@@ -105,6 +106,31 @@ describe('R2 the etag profiles() gives is the kernel writer’s own', () => {
       should(diskOf(name)).containEql('mcp/two');
     });
   }
+
+  it('BG-005 should still READ a latin1 profile with the writer’s etag, but refuse a write pinned to it, the file untouched byte for byte', async () => {
+    // Arrange
+    const { api, config, fs } = await realWorld(FILES);
+    const written = await config.read('runtimes', PROFILE_ITEMS as never, 'latin1');
+    const before = await documentRevision(fs, `${PROFILES}/latin1.yaml`);
+
+    // Act
+    const summary = (await api.profiles()).find(profile => profile.name === 'latin1');
+    const outcome = await api.changeProfileLayers(
+      { kind: 'add', profile: 'latin1', layer: 'mcp/two', ifMatch: summary?.etag },
+      owner,
+    );
+
+    // Assert — it reads, with the writer's etag; the write is refused in the kernel's sentence; nothing changed.
+    should(summary).not.be.undefined();
+    should(summary?.etag).equal(written?.etag);
+    should(outcome).deepEqual({
+      kind: 'refused',
+      code: 'fleet_change_refused',
+      sentence:
+        'profile latin1 was refused (unreadable): profiles/latin1.yaml is not UTF-8: saving would change bytes you did not edit; nothing was written',
+    });
+    should(await documentRevision(fs, `${PROFILES}/latin1.yaml`)).equal(before);
+  });
 
   it('R2 should have hashed the raw bytes differently for a BOM and a non-UTF-8 file (why the kernel’s reckoning is used)', async () => {
     // Arrange

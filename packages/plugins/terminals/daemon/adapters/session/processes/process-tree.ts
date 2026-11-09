@@ -171,7 +171,7 @@ export class PsProcessTree implements ProcessTreePort {
       const read = await this.spawn.run(this.psExecutable, PS_DETAIL_ARGUMENTS, { env: { LC_ALL: 'C', TZ: 'UTC0' } });
       const { stdout } = read;
       const code = read.exitCode;
-      if (code !== 0) return { kind: 'unavailable', reason: `ps exited ${code}.` };
+      if (code !== 0) return { kind: 'unavailable', reason: `ps exited ${String(code ?? read.signal)}.` };
       return { kind: 'read', rows: subtreeOf(rootPid, parsePsDetailTable(stdout)) };
     } catch {
       return { kind: 'unavailable', reason: 'The process table could not be read.' };

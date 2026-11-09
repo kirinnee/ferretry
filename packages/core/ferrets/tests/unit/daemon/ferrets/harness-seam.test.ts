@@ -371,7 +371,7 @@ describe('U4: Ferrets’ own delivery wakes the turn watch', () => {
     expect(told).toEqual([f.id]);
   });
 
-  test('a queue that landed, and only that one, tells the watch the pane was typed into', async () => {
+  test('BG-040 a queue that landed, and only that one, tells the watch the pane was typed into', async () => {
     const f = await running();
     const told: string[] = [];
     f.ports.delivered = ferret => void told.push(ferret);

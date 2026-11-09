@@ -236,7 +236,11 @@ export function configRoutes(sources: ConfigRouteSources): Readonly<{
           if (outcome.reason === 'not_declared' || outcome.reason === 'bad_name')
             return unresolved(path.data, 'bad_request');
           return jsonResponse(
-            { error: `${path.data} was not removed (${outcome.reason})`, code: CONFIG_INVALID_CODE, issues: [] },
+            {
+              error: `${path.data} was not removed (${outcome.reason})`,
+              code: CONFIG_INVALID_CODE,
+              issues: issuesOf(outcome.issues),
+            },
             422,
           );
       }

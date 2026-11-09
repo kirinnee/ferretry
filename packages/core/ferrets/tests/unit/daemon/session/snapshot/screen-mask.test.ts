@@ -160,8 +160,64 @@ describe('F-0326 #U4 one screen masker for the last screen and the live look', (
   });
 });
 
+describe('BG-046 a screen past the size the masker takes is refused, never cut and never passed on', () => {
+  /** The most characters of one screen the masker takes (`MAX_SCREEN_CHARS`). */
+  const MOST = 262_144;
+  const FILLER = 'a';
+
+  test('BG-046 a screen over the cap is refused before the scope is asked anything, saying only the sizes', async () => {
+    // Arrange: a vault value stands in the screen, and the scope counts every question.
+    const screen = `${SHORT}\n${FILLER.repeat(MOST)}`;
+    let asked = 0;
+
+    // Act
+    const refused = await vault({ TOKEN: SHORT })
+      .read(scope =>
+        maskedScreen(
+          {
+            ...scope,
+            text: text => {
+              asked += 1;
+              return scope.text(text);
+            },
+            lines: lines => {
+              asked += 1;
+              return scope.lines(lines);
+            },
+          },
+          screen,
+        ),
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // Assert: refused whole (nothing masked, nothing cut), with a sentence that carries no character of the screen.
+    expect(refused).toBeInstanceOf(RangeError);
+    expect(asked).toBe(0);
+    const sentence = (refused as RangeError).message;
+    expect(sentence).toContain(String(screen.length));
+    expect(sentence).not.toContain(SHORT);
+    expect(sentence).not.toContain(FILLER.repeat(8));
+  });
+
+  test('BG-046 a screen of exactly the cap is still masked', async () => {
+    // Arrange
+    const screen = `${SHORT}${FILLER.repeat(MOST - SHORT.length)}`;
+    expect(screen.length).toBe(MOST);
+
+    // Act
+    const out = await vault({ TOKEN: SHORT }).read(scope => maskedScreen(scope, screen));
+
+    // Assert
+    expect(out).not.toContain(SHORT);
+    expect(out.length).toBeGreaterThan(0);
+  });
+});
+
 describe('F-0326 #U4 the masker stays inside the stop bound on a big, busy screen', () => {
-  /** A 4-character value printed densely across a 200×2000 pane: 80,000 matches. Fake. */
+  /** A 4-character value printed densely across a 200×1300 pane (just under the masker's cap): 52,000 matches. Fake. */
   const PIN = '1234';
   const busy = (row: (index: number) => string) => Array.from({ length: 200 }, (_, index) => row(index)).join('\n');
 
@@ -190,9 +246,9 @@ describe('F-0326 #U4 the masker stays inside the stop bound on a big, busy scree
     return { out, asked, took: performance.now() - started };
   }
 
-  test('F-0326 #U4 a 200×2000 screen dense with a short value behind a gutter asks a bounded number of whole-screen readings', async () => {
+  test('F-0326 #U4 a 200×1300 screen dense with a short value behind a gutter asks a bounded number of whole-screen readings', async () => {
     // Arrange — every other row behind Claude Code's ⎿ indent, so whole rows and content spans differ.
-    const screen = busy(index => (index % 2 === 0 ? `  ⎿  ${`${PIN} `.repeat(399)}` : `${PIN} `.repeat(400)));
+    const screen = busy(index => (index % 2 === 0 ? `  ⎿  ${`${PIN} `.repeat(259)}` : `${PIN} `.repeat(260)));
 
     // Act
     const { out, asked, took } = await measured(screen);
@@ -205,7 +261,7 @@ describe('F-0326 #U4 the masker stays inside the stop bound on a big, busy scree
 
   test('F-0326 #U4 a screen that draws no gutter reads each join once, not twice', async () => {
     // Arrange — rows that start and end with content: whole rows and content spans are the same pieces.
-    const screen = busy(() => `${PIN} `.repeat(400).trimEnd());
+    const screen = busy(() => `${PIN} `.repeat(260).trimEnd());
 
     // Act
     const { out, asked, took } = await measured(screen);

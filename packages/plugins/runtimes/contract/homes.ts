@@ -65,9 +65,17 @@ export class RuntimeHomeUnreadable extends Error {
  * the home is still published, so a home that disappears is refused.
  */
 export interface RuntimeHomeReader {
-  /** `null`: absent. Bounded; a link or a hard-linked file is refused ({@link RuntimeHomeUnreadable}). */
+  /**
+   * `null`: absent. Bounded; a hard-linked file is refused ({@link RuntimeHomeUnreadable}), and so is a link in a fleet
+   * home. In a home outside the fleet a link is followed for these three names only (a regular file, a second name only in
+   * a proven-immutable store, at most 16 MiB, parsing as the document; never the daemon's home, never a target
+   * whose real name is a sign-in file's, and never a second name outside a proven-immutable store) and a link to nothing
+   * is absent. Inside such a store a second name of a store file is read by the kernel's hard-link rule (S49), a sign-in
+   * file's second name under another basename included: the store is root-owned and world-readable, so that exposes
+   * nothing a local user cannot already read.
+   */
   document(file: RuntimeHomeDocument, limitBytes: number): Promise<string | null>;
-  /** Folders directly in `<home>/skills`, at most `limit + 1`, dot-entries skipped, a link whose target leaves `fleet/` skipped. */
+  /** Folders directly in `<home>/skills`, at most `limit + 1`, dot-entries skipped. A fleet home lists a link only when it resolves into `fleet/assets/`; a home outside the fleet lists a plain folder only when it holds a plain, single-name, non-sign-in `SKILL.md`, and a link only when it resolves to a folder INSIDE that home with such a `SKILL.md`; it skips every other link silently. */
   skills(limit: number): Promise<readonly RuntimeHomeSkillEntry[]>;
   /** The text of `<home>/skills/<name>/SKILL.md`, or `undefined` (not listed, absent, too large, not a regular file). */
   skillManifest(name: string, maxBytes: number): Promise<string | undefined>;

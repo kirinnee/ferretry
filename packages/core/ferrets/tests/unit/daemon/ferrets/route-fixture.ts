@@ -126,7 +126,8 @@ export async function host(
     readonly harness?: FakeHarness;
     readonly runner?: FakeRunner;
     readonly config?: Readonly<Record<string, unknown>>;
-    readonly standing?: (request: ApiRequest) => CallStanding;
+    /** Who calls; `undefined` is a call with no credential. */
+    readonly standing?: (request: ApiRequest) => CallStanding | undefined;
     /** What `RootHandle.pin` answers: the kernel's descriptor walk, or a stand-in for it. */
     readonly pinner?: Parameters<typeof testHost>[0]['pinner'];
     /** Answers the Git the file browser runs. */

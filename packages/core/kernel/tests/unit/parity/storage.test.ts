@@ -8,17 +8,19 @@
  * Not proved here, and why (see the report): the `fy daemon` lifecycle claim files, the restart marker and the
  * syscall trace folder live in the `fy` shell, which a kernel test may not import (context-imports); `health.jsonl` /
  * `self-restart.json` are Ferrets' own files and not ported yet; `auth.json` belongs to Runtimes; the one-time conversion report
- * (F-0384) is an artefact that a clean slate does not keep. F-0033 (the identity key's pin) is not proved here: the fence
- * pins no 5.0 key path yet, and the unit that fixes it ticks the row.
+ * (F-0384) is an artefact that a clean slate does not keep. F-0033 (the identity key's pin) is proved in the identity
+ * key's describe below on the real fence; every door that reaches the pinned name is in host/fence-rows.test.ts, and the
+ * one owner of the path is host/identity-pin-single-source.test.ts.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { instantFromEpochMs } from '@ferretry/std';
 import { FerretIndexFile } from '../../../../ferrets/contract/state.ts';
 import { acceptedName } from '../../../contract/accepted.ts';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
+import { fencedReal, fenceOf, PINNED_KEY_PATHS } from '../../../host/fence-guard.ts';
 import { openHome } from '../../../host/home.ts';
 import { IDENTITY_FILE, loadIdentity } from '../../../host/identity.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
@@ -46,18 +48,18 @@ const modeOf = async (path: string): Promise<number> => (await stat(path)).mode 
 const kindOf = async (path: string): Promise<'directory' | 'file'> =>
   (await stat(path)).isDirectory() ? 'directory' : 'file';
 
-describe('F-0047 F-0212 F-0131 F-0424 F-0204 the home tree (§9.2): one home, FY_HOME, with the folders today keeps', () => {
-  test.each([
-    ['F-0047 F-0212', 'state'],
-    ['F-0131 F-0424', 'config'],
-    ['F-0204', 'logs'],
-  ])('%s FY_HOME/%s is made on a first start, a private folder', async (_ids, folder) => {
+describe('the home tree (§9.2): one home, FY_HOME, with the folders today keeps', () => {
+  async function firstStartMakes(folder: string) {
     const home = await freshHome();
     const outcome = await openHome(fs, home, 'fyd 5.0.0', instantFromEpochMs(Date.UTC(2026, 10, 8)));
     expect(outcome).toEqual({ kind: 'ready', created: true });
     expect(await kindOf(join(home, folder))).toBe('directory');
     expect(await modeOf(join(home, folder))).toBe(0o700);
-  });
+  }
+
+  test('F-0047 F-0212 FY_HOME/state is made on a first start, a private folder', () => firstStartMakes('state'));
+  test('F-0131 F-0424 FY_HOME/config is made on a first start, a private folder', () => firstStartMakes('config'));
+  test('F-0204 FY_HOME/logs is made on a first start, a private folder', () => firstStartMakes('logs'));
 
   test('F-0212 F-0252 the session index is state/ferrets/index.sqlite, a cache the state port opens in the state folder', async () => {
     expect(FerretIndexFile.store).toBe('sqlite-cache');
@@ -103,6 +105,22 @@ describe('the daemon identity key', () => {
     expect(again.kind === 'ready' && made.kind === 'ready' && again.identity.daemonId === made.identity.daemonId).toBe(
       true,
     );
+  });
+
+  test('F-0033 the key the kernel really writes is pinned by identity: a hard link to it under an innocent name is fenced', async () => {
+    const home = await freshHome();
+    await openHome(fs, home, 'fyd 5.0.0', instantFromEpochMs(Date.UTC(2026, 10, 8)));
+    await loadIdentity(fs, home);
+    const work = join(dirname(home), 'work');
+    await mkdir(work, { recursive: true });
+    await link(join(home, IDENTITY_FILE), join(work, 'innocent.txt'));
+    await writeFile(join(work, 'plain.txt'), 'not the key');
+
+    expect(PINNED_KEY_PATHS).toContain(IDENTITY_FILE);
+    const fence = await fenceOf(fs, home);
+    // The name outside the home means nothing; the identity (device and inode) is what is held.
+    expect(await fencedReal(fs, fence, join(work, 'innocent.txt'))).toBe(true);
+    expect(await fencedReal(fs, fence, join(work, 'plain.txt'))).toBe(false);
   });
 });
 
@@ -168,30 +186,12 @@ describe('the configuration folder: FY_HOME/config, one YAML file per building b
 
 /**
  * Today's generated editor schemas, config/.schema/<id>.json, one per file kind. 5.0 generates one per declared file or
- * folder, named by its claim (`logins/` is `logins.json`, `claude-code/hooks/` is `claude-code--hooks.json`), from the
- * same zod schema the daemon checks the file with. `witness` is a property of today's kind that the schema still has.
+ * folder, named by its claim (a file `warden.yaml` is `warden.json`; a folder's schema describes one item, so `logins/`
+ * is `logins--item.json` and `claude-code/hooks/` is `claude-code--hooks--item.json`), from the same zod schema the
+ * daemon checks the file with. `witness` is a property of today's kind that the schema still has.
+ * Each row has its own test, titled with its id, so deleting one leaves its row unproven.
  */
-const SCHEMA_ROWS: readonly (readonly [ids: string, v4: string, now: string, witness: string])[] = [
-  ['F-0132', 'accountDefaults.json', 'accounts.json', 'sites'],
-  ['F-0133', 'component-hooks.json', 'claude-code--hooks.json', 'hooks'],
-  ['F-0135', 'component-mcp.json', 'mcp.json', 'command'],
-  ['F-0136', 'component-modelSets.json', 'model-sets.json', 'models'],
-  ['F-0137', 'component-settings.json', 'claude-code--settings.json', 'settings'],
-  ['F-0138', 'component-skills.json', 'skills.json', 'items'],
-  ['F-0139', 'learning.json', 'lessons.json', 'passiveDefault'],
-  ['F-0140', 'limits.json', 'limits.json', 'perFerret'],
-  ['F-0141', 'login.json', 'logins.json', 'store'],
-  ['F-0143', 'models.json', 'models.json', 'detect'],
-  ['F-0144', 'modelsGuide.json', 'packs.json', 'routing'],
-  ['F-0145', 'pack.json', 'packs.json', 'enabled'],
-  ['F-0146', 'preset.json', 'endpoints.json', 'verified'],
-  ['F-0147', 'profile.json', 'profiles.json', 'contents'],
-  ['F-0148', 'runtime.json', 'runtimes.json', 'login'],
-  ['F-0149', 'voice.json', 'voice.json', 'defaultEngine'],
-  ['F-0150', 'warden.json', 'warden.json', 'mayActAlone'],
-];
-
-describe('F-0132 F-0133 F-0135 F-0136 F-0137 F-0138 F-0139 F-0140 F-0141 F-0143 F-0144 F-0145 F-0146 F-0147 F-0148 F-0149 F-0150 the generated schemas: FY_HOME/config/.schema', () => {
+describe('the generated schemas: FY_HOME/config/.schema', () => {
   async function published() {
     const memory = createMemoryHostFs();
     const files = createConfigFiles({
@@ -206,7 +206,7 @@ describe('F-0132 F-0133 F-0135 F-0136 F-0137 F-0138 F-0139 F-0140 F-0141 F-0143 
     return memory;
   }
 
-  test('F-0151 a schema is written under config/.schema/<claim>.json for every declared file, once, 0600', async () => {
+  test('a schema is written under config/.schema/<claim>.json for every declared file, once, 0600', async () => {
     const memory = await published();
     for (const kind of declaredKinds()) {
       const path = `${HOME}/config/.schema/${schemaFileName(kind.def)}`;
@@ -215,36 +215,73 @@ describe('F-0132 F-0133 F-0135 F-0136 F-0137 F-0138 F-0139 F-0140 F-0141 F-0143 
     }
     expect(
       schemaFileName(declaredKinds().find(kind => kind.path === 'claude-code/hooks/sweep.yaml')?.def as never),
-    ).toBe('claude-code--hooks.json');
+    ).toBe('claude-code--hooks--item.json');
   });
 
-  test('F-0151 the one name two declared files share is .schema/runtimes.json (runtimes.yaml and the runtimes/ folder)', () => {
+  test('F-0142 F-0151 no two declared files share a schema name: runtimes.yaml and the runtimes/ folder each keep theirs', async () => {
     const owners = new Map<string, string[]>();
     for (const kind of declaredKinds()) {
       const name = schemaFileName(kind.def);
       owners.set(name, [...(owners.get(name) ?? []), `${kind.plugin}:${kind.path}`]);
     }
-    const shared = [...owners].filter(([, paths]) => paths.length > 1);
-    // Pinned as it stands (ports-pending `[kernel: schema file name collision]`): it goes red the day the collision is
-    // fixed, or when a second one appears, and whoever does either updates this and the row.
-    expect(shared.map(([name]) => name)).toEqual(['runtimes.json']);
-    expect(shared[0]?.[1].length).toBe(2);
+    expect([...owners].filter(([, paths]) => paths.length > 1)).toEqual([]);
+    const memory = await published();
+    const schemaOf = (name: string) =>
+      JSON.parse(memory.snapshot().get(`${HOME}/config/.schema/${name}`) ?? '{}') as {
+        properties?: Record<string, unknown>;
+      };
+    expect(Object.keys(schemaOf('runtimes.json').properties ?? {})).toEqual(
+      expect.arrayContaining(['defaultRuntime', 'autoResume']),
+    );
+    expect(Object.keys(schemaOf('runtimes--item.json').properties ?? {})).toContain('login');
   });
 
-  test.each(SCHEMA_ROWS)(
-    '%s today .schema/%s is now .schema/%s, written from the schema the daemon checks with',
-    async (_id, _v4, now, witness) => {
-      const memory = await published();
-      const text = memory.snapshot().get(`${HOME}/config/.schema/${now}`);
-      expect(text).toBeDefined();
-      const schema = JSON.parse(text ?? '{}') as { properties?: Record<string, unknown> };
-      expect(Object.keys(schema.properties ?? {})).toContain(witness);
-      // It is generated text, byte for byte what the schema yields, so an editor and the daemon never disagree. Where
-      // two declared files share a name the one published last (the later declaration) is what is on disk.
-      const own = declaredKinds().filter(kind => schemaFileName(kind.def) === now);
-      expect(configJsonSchemaText(own.at(-1)?.def as never)).toBe(text as string);
-    },
-  );
+  async function schemaIsWrittenFromItsKind(now: string, witness: string) {
+    const memory = await published();
+    const text = memory.snapshot().get(`${HOME}/config/.schema/${now}`);
+    expect(text).toBeDefined();
+    const schema = JSON.parse(text ?? '{}') as { properties?: Record<string, unknown> };
+    expect(Object.keys(schema.properties ?? {})).toContain(witness);
+    // It is generated text, byte for byte what the schema yields, so an editor and the daemon never disagree. Where
+    // two declared files share a name the one published last (the later declaration) is what is on disk.
+    const own = declaredKinds().filter(kind => schemaFileName(kind.def) === now);
+    expect(configJsonSchemaText(own.at(-1)?.def as never)).toBe(text as string);
+  }
+
+  test('F-0132 today .schema/accountDefaults.json is now .schema/accounts.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('accounts.json', 'sites'));
+  test('F-0133 today .schema/component-hooks.json is now .schema/claude-code--hooks--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('claude-code--hooks--item.json', 'hooks'));
+  test('F-0135 today .schema/component-mcp.json is now .schema/mcp--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('mcp--item.json', 'command'));
+  test('F-0136 today .schema/component-modelSets.json is now .schema/model-sets--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('model-sets--item.json', 'models'));
+  test('F-0137 today .schema/component-settings.json is now .schema/claude-code--settings--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('claude-code--settings--item.json', 'settings'));
+  test('F-0138 today .schema/component-skills.json is now .schema/skills--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('skills--item.json', 'items'));
+  test('F-0139 today .schema/learning.json is now .schema/lessons.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('lessons.json', 'passiveDefault'));
+  test('F-0140 today .schema/limits.json is now .schema/limits.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('limits.json', 'perFerret'));
+  test('F-0141 today .schema/login.json is now .schema/logins--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('logins--item.json', 'store'));
+  test('F-0143 today .schema/models.json is now .schema/models--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('models--item.json', 'detect'));
+  test('F-0144 today .schema/modelsGuide.json is now .schema/packs.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('packs.json', 'routing'));
+  test('F-0145 today .schema/pack.json is now .schema/packs.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('packs.json', 'enabled'));
+  test('F-0146 today .schema/preset.json is now .schema/endpoints--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('endpoints--item.json', 'verified'));
+  test('F-0147 today .schema/profile.json is now .schema/profiles--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('profiles--item.json', 'contents'));
+  test('F-0148 today .schema/runtime.json is now .schema/runtimes--item.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('runtimes--item.json', 'login'));
+  test('F-0149 today .schema/voice.json is now .schema/voice.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('voice.json', 'defaultEngine'));
+  test('F-0150 today .schema/warden.json is now .schema/warden.json, written from the schema the daemon checks with', () =>
+    schemaIsWrittenFromItsKind('warden.json', 'mayActAlone'));
 
   test('F-0377 machine.yaml is not a file in 5.0: its settings live in their owners’ files, each with its own schema', () => {
     const schemaOf = (path: string) => {

@@ -2,19 +2,22 @@
  * `parity-ticks`: a `[x]` in `docs/design/rebuild-parity.tsv` means a TEST proves the row, never a declaration. For every
  * ticked row, of any kind, it fails when
  *   - the check cell is not a regular `*.test.ts` / `*.test.tsx` file under a `tests/` folder;
- *   - the row id is in no LIVE `test(` / `it(` / `describe(` title of that file (parsed; a comment, a string elsewhere,
- *     or a title under `.skip` / `.todo` / `.only` / `.failing`, or inside such a describe, does not count);
+ *   - the row id is in no LIVE `test(` / `it(` title of that file (parsed; a describe's title, a comment, a string
+ *     elsewhere, or a title under `.skip` / `.todo` / `.only` / `.failing`, or inside such a describe, does not count);
  *   - results are given (`--results <junit.xml|folder>`, as `guarantees` takes them, with `--tier unit|int`) and the
  *     id-titled test did not PASS in them. Without results it says so and passes that part;
  *   - (a route) descriptor-parity does not ALSO prove it: today's route is at the same path or moved (both halves
  *     recorded) and every field that differs is a recorded tightening (minimum up, caller any → person, a capability,
  *     `noStore`, `privilegedOnly` or a `catalog` resolver added). A record never blesses a loosening.
+ * A status that says a row is "proved by test(s) <id>" (any row, ticked or not) fails when no live `test(` / `it(` title
+ * in a tracked test file names that id.
  * `parity-ticks-known.tsv` (`id<TAB>reason`) lists rows that fail today. The ids it may hold are PINNED in
  * `FROZEN_IDS` below: an id not in that set fails, so the list can only shrink; an entry whose row passes (or is no
  * longer ticked) fails too, and so does a frozen id that is no longer listed (the two sets must be equal).
  *
  *   bun scripts/validate/parity-ticks.ts [--results <junit.xml|folder>] [--tier unit|int]
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -240,13 +243,21 @@ const titleOf = (node: unknown): string | undefined => {
   return undefined;
 };
 
-/** Every title of a LIVE `test(` / `it(` / `describe(` call in a file: none of its own or its describes' modifiers is dead. */
-export function liveTitles(file: string): string[] {
+/** The calls whose title is a CASE: the thing that runs, so the thing that can go red. A describe only groups. */
+const CASE = new Set(['test', 'it']);
+
+/**
+ * Every title of a LIVE `test(` / `it(` (and, with `cases: false`, `describe(`) call in a file: none of its own or its
+ * describes' modifiers is dead. A row is proved by a CASE title (the default): an id only in a describe's title is
+ * proved by nothing that runs, and moving it there leaves a ticked row nothing can turn red.
+ */
+export function liveTitles(file: string, cases = true): string[] {
   const out: string[] = [];
+  const suites = cases ? CASE : SUITE;
   walk(parseFile(file).program, (node, parents) => {
     if (node.type !== 'CallExpression') return;
     const own = callee(node.callee);
-    if (own === undefined || !SUITE.has(own.base) || own.mods.some(m => DEAD.has(m)) || isOff(node.callee)) return;
+    if (own === undefined || !suites.has(own.base) || own.mods.some(m => DEAD.has(m)) || isOff(node.callee)) return;
     const title = titleOf((node.arguments as unknown[])[0]);
     if (title === undefined) return;
     const dead = parents.some(p => {
@@ -281,7 +292,7 @@ export function testProblem(row: LedgerRow, tc: TickContext): string | undefined
   if (!existsSync(path)) return `check path does not exist: ${check}`;
   if (!statSync(path).isFile()) return `check path is not a regular file: ${check}`;
   if (!liveTitles(path).some(title => namesRow(title, row.id)))
-    return `no live test(), it() or describe() title in ${check} names ${row.id} (a comment, a string elsewhere, or a skipped, todo or only title does not count)`;
+    return `no live test() or it() title in ${check} names ${row.id} (a describe() title, a comment, a string elsewhere, or a skipped, todo or only title does not count)`;
   if (tc.results === undefined || (tc.tier !== undefined && inTier(check, tc.tier) === false)) return undefined;
   const mine = tc.results.filter(
     c => (c.file === check || c.file.endsWith(`/${check}`)) && namesRow(c.fullName, row.id),
@@ -342,6 +353,55 @@ export function tickFindings(
   return out;
 }
 
+/** A status that says a row is proved by a test: `proved by its tests J-0052`, `proved by test V-0001, V-0002`. */
+const PROVED_BY = /proved by (?:its |the )?tests? ((?:[A-Z]-\d{4}(?:,? |\b))+)/;
+
+/**
+ * A row's status that names the test proving it (the `removed by design … proved by its tests J-0052` text) must name
+ * one that exists: some tracked `*.test.ts(x)` file holds a LIVE `test(` / `it(` title naming each id. A status is
+ * prose nothing else reads, so without this a skipped or deleted test leaves the claim standing.
+ */
+export function statusProofFindings(
+  rows: readonly LedgerRow[],
+  files: readonly string[],
+  read: (file: string) => string,
+  titlesOf: (file: string) => string[],
+): Finding[] {
+  const out: Finding[] = [];
+  const cache = new Map<string, readonly string[]>();
+  const named = (id: string): boolean =>
+    files.some(file => {
+      // A tracked file deleted in the working tree is not a naming file: skip it, never crash the gate.
+      const text = (() => {
+        try {
+          return read(file);
+        } catch {
+          return undefined;
+        }
+      })();
+      if (text === undefined || !text.includes(id)) return false;
+      const titles = cache.get(file) ?? titlesOf(file);
+      cache.set(file, titles);
+      return titles.some(title => namesRow(title, id));
+    });
+  for (const row of rows) {
+    const claimed = PROVED_BY.exec(row.status)?.[1]?.match(/[A-Z]-\d{4}/g) ?? [];
+    for (const id of claimed)
+      if (!named(id))
+        out.push({
+          check: 'parity-ticks',
+          where: row.id,
+          message: `its status says it is proved by test ${id}, but no live test() or it() title in a tracked test file names ${id} (skipped, todo, only, untitled or deleted)`,
+        });
+  }
+  return out;
+}
+
+const trackedTests = (root: string): string[] =>
+  execFileSync('git', ['-C', root, 'ls-files', '--', '*.test.ts', '*.test.tsx'], { encoding: 'utf8' })
+    .split('\n')
+    .filter(file => file !== '');
+
 export async function loadWorld(
   root: string,
   model: () => ReturnType<typeof import('../gen/registries.ts').buildModel>,
@@ -378,16 +438,24 @@ export const check: Check = {
         'parity-ticks: not verified against results (no --results given); titles are checked, passes are not',
       );
     const results = files?.flatMap(file => junitCases(readFileSync(file, 'utf8')));
-    return tickFindings(
-      rows,
-      {
-        root: ctx.root,
-        world: () => world,
-        ...(results === undefined ? {} : { results }),
-        ...(ctx.tier === undefined ? {} : { tier: ctx.tier }),
-      },
-      known,
-    );
+    return [
+      ...tickFindings(
+        rows,
+        {
+          root: ctx.root,
+          world: () => world,
+          ...(results === undefined ? {} : { results }),
+          ...(ctx.tier === undefined ? {} : { tier: ctx.tier }),
+        },
+        known,
+      ),
+      ...statusProofFindings(
+        rows,
+        trackedTests(ctx.root),
+        file => readFileSync(join(ctx.root, file), 'utf8'),
+        file => liveTitles(join(ctx.root, file)),
+      ),
+    ];
   },
 };
 

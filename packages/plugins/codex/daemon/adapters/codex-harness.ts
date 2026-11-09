@@ -271,8 +271,14 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     start: async (spec, runner, env) => await launch(spec, runner, env),
     resume: async (spec, runner, env, harnessConversation) => await launch(spec, runner, env, harnessConversation),
 
-    async stop(_ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
-      await runner.stop(handle, how);
+    async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
+      try {
+        await runner.stop(handle, how);
+      } finally {
+        // What was proved about this ferret's rollout is only a cache: a stopped ferret keeps none, and a read that
+        // comes later proves it afresh.
+        rollouts.forget(ferret);
+      }
     },
 
     async deliver(_ferret, _handle, message): Promise<Delivery> {

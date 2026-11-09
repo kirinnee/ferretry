@@ -41,7 +41,7 @@ export interface PacedTurnPorts extends SessionTurnPorts {
    */
   failed?(id: SessionId, error: unknown): void;
   /**
-   * What makes a failure the SAME failure (a damaged document: its file and a digest of what is wrong with it), or
+   * What makes a failure the SAME failure (a refused document: its file, its kind and the file's version etag), or
    * `undefined` for one that is told every time it happens. No key, no dedupe.
    */
   failureKey?(error: unknown): string | undefined;
