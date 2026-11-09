@@ -128,8 +128,8 @@ export interface RootLayout {
 /**
  * Why a root refused, host-side: the contract's {@link FolderRefusal}, plus today's guard rules a handle's caller
  * meets only as this error — `hard_link` (a file with another name that could be anywhere), `changed` (what was
- * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a remove outside daemon folders, or any `rename`, on a host
- * that cannot reach an entry through its checked folder, S44).
+ * opened is not what was checked), `not_a_file`, and `no_descriptor_reach` (a remove outside daemon folders, or any
+ * `rename`, on a host that cannot reach an entry through its checked folder, S44).
  */
 export type RootRefusal =
   | FolderRefusal
@@ -1078,8 +1078,8 @@ async function setModeChecked(scope: Scope, full: string, bits: number): Promise
  * cannot reach an entry through a held folder's descriptor (macOS today) is refused `no_descriptor_reach`: there the
  * move would resolve both parents by name again and follow a link swapped in after the proof, so it is never made
  * ([own] BEFORE-GREEN(runtimes): the owner runs macOS, so the provisioner's move-aside and undo fail there). No copy
- * is ever the fallback: any failure of the move itself (another device, a folder into itself, a full disk) is `changed`,
- * a fact with no path or content in it.
+ * is ever the fallback: any failure of the move itself (another device, a folder into itself, a full disk) is
+ * `changed`, a fact with no path or content in it.
  *
  * GAP (declared, tested): the standard library has no `renameat2(RENAME_NOREPLACE)`, so "nothing at `to`" is a look
  * followed by the move. A writer who creates `to` in that window has a file or an empty folder replaced; a non-empty
@@ -1576,7 +1576,8 @@ function rootHandle(setup: HandleSetup): RootHandle {
       if (names !== undefined) return refuse(names);
       const source = await realParent(from);
       const target = await realParent(to, true);
-      // No link on the way at either end: the folder each name gives, as this root names it, is the very folder reached.
+      // No link on the way at either end: the folder each name gives, as this root names it, is the very folder
+      // reached.
       const root = base() as string;
       for (const [given, placed] of [
         [from, source],

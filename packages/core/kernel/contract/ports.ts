@@ -804,9 +804,11 @@ export interface RootHandle {
    * another depth points elsewhere afterwards, while kernel-made links are absolute). The move runs between the two
    * parents' descriptors, so a host that cannot reach an entry through a held folder (macOS today) refuses
    * `no_descriptor_reach` and moves nothing ([own] BEFORE-GREEN(runtimes): the owner runs macOS, so the provisioner's
-   * move-aside and undo fail there until a descriptor-reach move exists). `from` must exist and nothing may be at `to` (`outside`, never
-   * overwritten; a look then the move, a declared GAP). There is no copy fallback: a refused move (another device, a
-   * folder into itself) is `changed`, with no path or content in it.
+   * move-aside and undo fail there until a descriptor-reach move exists). `from` must exist and nothing may be at `to`
+   * (`outside`, never overwritten; a look then the move, a declared GAP). Each end's parent folder must already exist
+   * (`rename` makes none, as `writeText` does): a missing parent, or one that is a file, is `changed`, and a link on
+   * the way to either end is `link_escape`, on the testing host as on the real one. There is no copy fallback: a
+   * refused move (another device, a folder into itself) is `changed`, with no path or content in it.
    */
   rename(from: FencedPath, to: FencedPath): Promise<void>;
 }
