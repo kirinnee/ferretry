@@ -26,7 +26,7 @@ export function readPatchText(
   const read = readConfigText(text);
   if (!read.ok) {
     const said = read.errors.map(error => `  ${placed(error.position)}${error.message}`).join('\n');
-    return { ok: false, problem: `${source} is not YAML or JSON:\n${said}` };
+    return { ok: false, problem: `${source} cannot be read:\n${said}` };
   }
   const value = read.read.value;
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {

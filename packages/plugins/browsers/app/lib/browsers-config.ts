@@ -42,7 +42,8 @@ export interface BrowsersDocument {
 export async function readBrowsersConfig(client: CallClient): Promise<BrowsersDocument> {
   const file = ConfigFileViewSchema.parse(await client.call('GET /v1/config/file', { query: { path: BROWSERS_FILE } }));
   const read = readConfigText(file.text);
-  if (!read.ok) throw new Error(`browsers.yaml does not parse: ${read.errors[0]?.message ?? 'it is not YAML'}`);
+  if (!read.ok)
+    throw new Error(`browsers.yaml cannot be read: ${read.errors[0]?.message ?? 'the text cannot be read as YAML'}`);
   return { config: BrowsersConfigSchema.parse(read.read.value ?? {}), text: file.text, etag: file.etag };
 }
 

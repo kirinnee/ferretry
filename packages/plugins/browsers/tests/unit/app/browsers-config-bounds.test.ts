@@ -72,7 +72,7 @@ describe('browsers: the settings tab refuses a hostile browsers.yaml in one fixe
       const { client } = serving(text());
       const started = performance.now();
       const read = readBrowsersConfig(client);
-      await expect(read).rejects.toThrow(`browsers.yaml does not parse: ${sentence}`);
+      await expect(read).rejects.toThrow(`browsers.yaml cannot be read: ${sentence}`);
       expect(performance.now() - started).toBeLessThan(FAST_MS);
     });
 

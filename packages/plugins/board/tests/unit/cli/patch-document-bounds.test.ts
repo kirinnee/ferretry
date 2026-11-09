@@ -57,7 +57,7 @@ describe('board cli: a hostile patch document is refused in a fixed sentence, pr
       const read = readPatchText(hostile, 'p.yaml');
       expect(performance.now() - started).toBeLessThan(FAST_MS);
       expect(read.ok).toBe(false);
-      expect(!read.ok && read.problem).toContain(`p.yaml is not YAML or JSON:\n  `);
+      expect(!read.ok && read.problem).toContain(`p.yaml cannot be read:\n  `);
       expect(!read.ok && read.problem).toContain(sentence);
     });
 
@@ -84,7 +84,7 @@ describe('board cli: a refused patch still says where the bad line is', () => {
   test('a syntax error is named by line and column', () => {
     const read = readPatchText('title: fine\nsummary: [unclosed\nnext: 1\n', 'p.yaml');
     expect(read.ok).toBe(false);
-    expect(!read.ok && read.problem).toMatch(/p\.yaml is not YAML or JSON:\n {2}line \d+, column \d+: \S/u);
+    expect(!read.ok && read.problem).toMatch(/p\.yaml cannot be read:\n {2}line \d+, column \d+: \S/u);
   });
 
   test('a directive flood names the line it overflows at', () => {
