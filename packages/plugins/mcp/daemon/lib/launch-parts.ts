@@ -36,6 +36,11 @@ export interface McpLaunchPartsDeps {
   /** Which secret NAMES the Vault holds — never a value (use, never read). */
   held(): Promise<ReadonlySet<SecretName>>;
   readonly renewal: McpLaunchRenewal;
+  /**
+   * The item names the launch's runtime profile stack carries (D10). A launch with no runtime, or a runtime whose
+   * stack cannot be resolved, carries none.
+   */
+  layered(runtime: string | undefined): Promise<ReadonlySet<string>>;
   /** The launch's project servers (`ProjectMcpLaunch.share`), after their own renewal. */
   project(spec: Omit<LaunchSpec, 'parts'>): Promise<ProjectMcpLaunchShare>;
 }
@@ -47,7 +52,7 @@ export interface McpLaunchPartsDeps {
  *    and every `${secret:NAME}` an item's `env` names — is made current just before the launch, by the sign-in
  *    service, which never throws. A refresh that fails leaves the old token where it was (the server then says it
  *    needs a new sign-in) and the launch goes ahead.
- * 2. One `mcp` part per item ({@link mcpParts}); a signed-in one names its `bearer` VARIABLE (today's
+ * 2. One `mcp` part per item the runtime's profile stack names ({@link mcpParts}); a signed-in one names its `bearer` VARIABLE (today's
  *    `adapt.ts`: Claude renders it as an `Authorization` header, Codex as `bearer_token_env_var`).
  * 3. One `mcp` part per signed-in project server, as the local-scope entry for its project root.
  * 4. One `env` part binding each sign-in variable to its OPTIONAL `${secret?:NAME}` reference. The Vault opens the
@@ -63,7 +68,9 @@ export class McpLaunchParts implements LaunchPartSource {
   constructor(private readonly deps: McpLaunchPartsDeps) {}
 
   async parts(spec: Omit<LaunchSpec, 'parts'>): Promise<readonly LaunchPart[]> {
-    const items = this.deps.items();
+    // Only the items this runtime's profile stack names, as a v4 runtime home held only its profile's components.
+    const layered = await this.deps.layered(spec.runtime);
+    const items = new Map([...this.deps.items()].filter(([name]) => layered.has(name)));
     const servers = mcpParts(items, spec.harness);
     const signedIn = new Map<string, McpOAuthSecretNames>();
     const named = new Set<SecretName>();
