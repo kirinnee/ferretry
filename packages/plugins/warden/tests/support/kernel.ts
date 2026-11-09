@@ -80,7 +80,7 @@ export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(v
       for (const listener of listeners) listener();
     },
   };
-  // Reads only: a test that needs the kernel config write adds `write`, `writeAsOwner`, `remove` and `writeAll` itself.
+  // Reads only: a test that needs the kernel config write adds `write`, `writeAsCaller`, `writeAsOwner`, `remove` and `writeAll` itself.
   return port as ConfigPort & { set(value: unknown): void };
 }
 

@@ -155,6 +155,34 @@ test('the testing host takes the same base as the real writer over a file holdin
       }
 });
 
+test('the testing host never asks the owner question for a plain write, for writeAsOwner, or for an edit that adds no reference', async () => {
+  let config: ConfigPort | undefined;
+  const asked: { secretAdd?: true }[] = [];
+  const half = implementDaemon(manifest, {
+    build: ctx => {
+      config = ctx.kernel.config;
+      return {};
+    },
+  });
+  const host = await testHost({
+    plugins: [half],
+    gate: {
+      judgeConfigWrite: (input: { secretAdd?: true }) => (asked.push(input), 'apply'),
+    } as never,
+  });
+  if (config === undefined) throw new Error('the half was not built');
+  // a plain write that adds a reference stays held even though the admission would say yes to the owner question
+  expect((await config.write(mcpDef, 'acme', ADD)).kind).toBe('held');
+  expect((await config.writeAsOwner(mcpDef, 'acme', { patch: { env: { TOKEN: '${secret:ACME_TOKEN}' } } })).kind).toBe(
+    'held',
+  );
+  // an edit that adds none asks no owner question either
+  await config.writeAsCaller(mcpDef, 'other', 'note: hello\n');
+  expect(asked.filter(input => input.secretAdd === true)).toEqual([]);
+  expect(config.collection(mcpDef).get('acme')).toBeUndefined();
+  await host.stop();
+});
+
 test('the testing host answers a stale ifMatch on writeAsCaller as a conflict, as write does', async () => {
   const { host, config } = await testing(true, true);
   expect((await config.writeAsCaller(mcpDef, 'acme', 'note: a\n', { ifMatch: 'absent' })).kind).toBe('written');
