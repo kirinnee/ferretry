@@ -44,10 +44,12 @@ async function removeName(home: RootHandle, path: FencedPath): Promise<void> {
  *
  * `home` is the ferret's own `agent-homes` handle: `copyShared` refuses any other destination.
  *
- * GAP (declared): the kernel offers no held folder handle, so this looks and then acts. Today's `pruneDirectory` sweeps
- * through one handle it opened; here a folder swapped for an in-home link between the `lstat` and the `remove`/`list`
- * (the harness child writes its own home) is followed by that one call. The scope fence still holds (a link out of the
- * ferret's home is refused `link_escape`), and the next launch looks again.
+ * GAP (declared): the kernel offers no held folder handle that lists and removes (`RootHandle.pin` holds a folder but
+ * is read-only), so this looks and then acts. Today's `pruneDirectory` sweeps through one handle it opened; here a
+ * `skills/` folder swapped for an in-home link at any point after the `lstat` sends the rest of that sweep through the
+ * link: the list, every removal and the links made. Entries of the folder it names that no selected skill names are
+ * removed, and a leaf swapped between its `lstat` and its `remove` makes that `remove` delete the folder it names. The
+ * scope fence still holds (a link out of the ferret's home is refused `link_escape`), and the next launch looks again.
  */
 export async function materializeSkills(
   home: RootHandle,
