@@ -28,6 +28,9 @@ import type { AdapterHost, ConfigFilesPort, HostFiles, SharedHistoryPooling } fr
 import { FileFleetProvisioner } from './file-provisioner.ts';
 import { readFleetManifest } from './manifest-file.ts';
 
+/** The fleet's folder of its own records (`setup/import.json`, `setup/clone-base.json`). */
+const SETUP_FOLDER = 'setup';
+
 /** The largest component document the catalogue reads; a larger one is reported as unreadable. */
 const MAX_COMPONENT_BYTES = 1024 * 1024;
 
@@ -75,10 +78,12 @@ export async function readConfigAccountDocument(
         ...(rename === undefined ? [] : config.mentionsRenamed(loaded, rename)),
       ].map(edit => ({
         path: join(locations.configDirectory, edit.path),
-        content: edit.content ?? '',
+        // A patch has no text of its own: its JSON is what the preview counts.
+        content: edit.content ?? (edit.patch === undefined ? '' : JSON.stringify(edit.patch)),
         mode: DOCUMENT_MODE,
-        expect: edit.expect,
-        ...(edit.content === undefined ? { remove: true as const } : {}),
+        ...(edit.expect === undefined ? {} : { expect: edit.expect }),
+        ...(edit.patch === undefined ? {} : { patch: edit.patch }),
+        ...(edit.content === undefined && edit.patch === undefined ? { remove: true as const } : {}),
       })),
   };
 }
@@ -261,7 +266,12 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
       await readConfigAccountDocument(options.config, { configDirectory: options.configDirectory }, fresh),
     // Through the fleet's assets and the harness homes only (S43): any other path reads as "not there", and the
     // configuration check has already said why.
-    readAsset: async path => await host.disk.readSource(path, MAX_COMPONENT_BYTES),
+    // The setup folder holds the fleet's own records (the import record, the clone record), which are not components:
+    // they are read as the fleet's own text files. Everything else is a component source.
+    readAsset: async path =>
+      path.startsWith(`${paths.fleet}/${SETUP_FOLDER}/`) && !path.split('/').includes('..')
+        ? ((await host.texts.read(path)) ?? undefined)
+        : await host.disk.readSource(path, MAX_COMPONENT_BYTES),
     documentRevision: async path => await documentRevision(host.files, path),
     ids,
     locate: options.locate,

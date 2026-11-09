@@ -26,6 +26,7 @@ import {
 } from '../../../daemon/lib/service/ports.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetCatalogServiceDeps } from '../../../daemon/lib/service/catalog-service.ts';
+import { builtInModelCatalogs, builtInPresets } from '../lib/fixtures/built-ins.ts';
 
 const MODEL = parseAccountModel({
   version: 1,
@@ -57,6 +58,7 @@ interface World {
 function world(
   configWriter: RuntimeConfigWriter | 'fake' = 'fake',
   executors?: FleetCatalogServiceDeps['executors'],
+  extra: Partial<FleetCatalogServiceDeps> = {},
 ): World {
   const order: string[] = [];
   const written: World['written'] = [];
@@ -107,6 +109,7 @@ function world(
         };
       },
     },
+    ...extra,
   };
   const { catalog } =
     executors === undefined
@@ -175,6 +178,116 @@ describe('the apply pipeline over a fake config writer', () => {
     should((failure as FleetCatalogRefusal).code).equal('fleet_change_failed');
     should((failure as FleetCatalogRefusal).message).equal(CONFIG_WRITE_UNAVAILABLE);
     should(w.order).deepEqual([]);
+  });
+
+  it('C2 should ask the preflight before ANY document is written, and write nothing when it refuses', async () => {
+    // Arrange: a preflight that refuses (a part of the model stands in), so a sentence saying "nothing was changed" must be true.
+    const w = world('fake', undefined, {
+      preflight: async () => {
+        throw new Error('nothing was changed: a part of this machine could not be read');
+      },
+    });
+    const staged = await w.service.propose(CHANGE);
+
+    // Act
+    const failure = await w.service.apply(staged.id, OWNER).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert: refused in that sentence, with no document written and no plan published.
+    should(failure).be.instanceOf(FleetCatalogRefusal);
+    should((failure as FleetCatalogRefusal).code).equal('fleet_change_refused');
+    should((failure as FleetCatalogRefusal).message).containEql('nothing was changed');
+    should(w.order).deepEqual([]);
+    should(w.written).deepEqual([]);
+  });
+
+  it('C2 should ask the preflight before a setup or a clone runs its own writes too, and run nothing when it refuses', async () => {
+    // Arrange: an executor that would write settings files and a preflight that refuses.
+    const ran: string[] = [];
+    const executor = {
+      describe: async () => 'import it',
+      execute: async () => {
+        ran.push('execute');
+        return 'imported';
+      },
+    };
+    const w = world('fake', { setup: executor, clone: executor } as never, {
+      preflight: async () => {
+        throw new Error('nothing was changed: a part of this machine could not be read');
+      },
+    });
+    const staged = await w.service.propose({ kind: 'setup.import' } as never);
+
+    // Act
+    const failure = await w.service.apply(staged.id, OWNER).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.instanceOf(FleetCatalogRefusal);
+    should((failure as FleetCatalogRefusal).message).containEql('nothing was changed');
+    should(ran).deepEqual([]);
+  });
+
+  it('C2 should name the configuration files that stay written when the plan fails after them', async () => {
+    // Arrange: the documents land, then the provisioner fails with a sentence that knows nothing of them.
+    const w = world('fake', undefined, {
+      provisioner: {
+        preview: async plan => ({ ...plan, sharedHistory: [] }),
+        apply: async () => {
+          throw new Error('the manifest could not be written');
+        },
+      },
+    });
+    const staged = await w.service.propose(CHANGE);
+
+    // Act
+    const failure = await w.service.apply(staged.id, OWNER).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert: the sentence says the file is on disk, not that nothing changed.
+    should((failure as FleetCatalogRefusal).code).equal('fleet_change_failed');
+    should((failure as FleetCatalogRefusal).message).containEql('the manifest could not be written');
+    should((failure as FleetCatalogRefusal).message).containEql('/fy/config/runtimes/claude-default.yaml');
+    should((failure as FleetCatalogRefusal).message).containEql('NOT rolled back with the fleet');
+    should(w.written).have.length(1);
+  });
+
+  it('M5 should run a republish one at a time with applies, and a login change republishes from inside its apply without waiting on itself', async () => {
+    // Arrange: a provisioner that records how many calls overlap.
+    let running = 0;
+    let overlapped = false;
+    const w = world('fake', undefined, {
+      modelCatalogs: async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() }),
+      provisioner: {
+        preview: async plan => ({ ...plan, sharedHistory: [] }),
+        apply: async plan => {
+          running += 1;
+          overlapped ||= running > 1;
+          await new Promise(resolve => setTimeout(resolve, 5));
+          running -= 1;
+          return {
+            accountCount: plan.manifest.accounts.length,
+            operationCount: plan.operations.length,
+            manifestPath: '/fy/fleet/manifest.json',
+            prunedWrappers: [],
+            sharedHistory: [],
+          };
+        },
+      },
+    });
+    const staged = await w.service.propose(CHANGE);
+
+    // Act: an apply and two republishes arrive together.
+    await Promise.all([w.service.apply(staged.id, OWNER), w.service.republish(), w.service.republish()]);
+
+    // Assert: none of the three overlapped another inside the provisioner.
+    should(overlapped).equal(false);
   });
 
   it('should refuse a change whose configuration moved after the preview, and write nothing', async () => {

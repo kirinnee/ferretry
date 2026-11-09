@@ -1,6 +1,6 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { LoginChanged, LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
-import { UsagePort } from '@ferretry/plugin-usage/contract';
+import { LoginPaused, LoginResumed, UsagePort } from '@ferretry/plugin-usage/contract';
 import {
   AutoResumeDecide,
   FerretsChanged,
@@ -248,7 +248,8 @@ export default definePlugin({
     publishes: [RuntimesChanged, RuntimesDefaultChanged, RuntimesLaunchFailed],
     // An ended Codex ferret's runtime has its app-server pair stopped, and a Codex that could not start offline says so.
     // A login switched off or on moves the disable-until timer (docs/disabling.md).
-    subscribes: [FerretsChanged, LoginChanged],
+    // A login its spend budget starts or stops holding is published unavailable or runnable again (docs/budgets.md).
+    subscribes: [FerretsChanged, LoginChanged, LoginPaused, LoginResumed],
     // `items` stays empty: it lists items this package SHIPS. Runtimes are items the owner (or a catalog) installs.
   },
 
