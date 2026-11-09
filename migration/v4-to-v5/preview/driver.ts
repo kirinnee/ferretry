@@ -10,7 +10,7 @@ import { convert } from '../src/convert.ts';
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
-import { previewShellEnv } from '../src/v5/preview-env.ts';
+import { CODEX_HELD_SENTENCE, previewShellEnv } from '../src/v5/preview-env.ts';
 import { gateFiles, gateForecast, type Spellings } from './gate.ts';
 import { ALLOWED, GAPS, LEFT_BEHIND, PREVIEW, SESSION_FILES, stepPlan } from './plan.ts';
 import { guardTarget, hasMarker, PREVIEW_MARKER, PREVIEW_MARKER_TEXT } from './paths.ts';
@@ -85,7 +85,7 @@ export async function dryRun(
     ...forecast.map(line => `  ${line}`),
     `FOLDERS: a ferret whose folder is inside v4's home or its worktree folder, inside a worktree v4's ledger lists, or under a .worktrees folder gets ${join(target, PREVIEW_WORKSPACE)} instead (it lost its folder). A ferret in a primary checkout keeps it, and shares that checkout with v4's agents.`,
     `RESOURCE LIMITS: limits.yaml is NOT read for launches in 5.0. The preview daemon starts with XDG_RUNTIME_DIR set to ${join(target, PREVIEW.xdgRunFolder)} (private) and no DBUS_SESSION_BUS_ADDRESS. The kernel runs 5.0's systemd probe with only {PATH, HOME} (no bus at all), and the private folder is the second layer, so the daemon reaches no user systemd manager: launches run directly, with no slice, scope or set-property. \`preview.sh start\` asks the probe both ways and refuses to start if either reaches your manager.`,
-    "LOGIN SHELLS: preview ferrets get __ETC_PROFILE_NIX_SOURCED=1, FY_HOME, FY_PORT and FY_URL: Claude Code ferrets through settings.env, Codex ferrets through shell_environment_policy.set (a Codex settings item; 5.0 does not apply Codex settings items yet, so for Codex this is declared, not proven). `preview.sh start` refuses to start unless bash -l and zsh -li with that environment find the preview's fy. In a preview terminal you open yourself, `fy` may be v4's: type `~/.ferretry-v5/bin/fy` or use `fy5`.",
+    `LOGIN SHELLS: preview ferrets get __ETC_PROFILE_NIX_SOURCED=1, FY_HOME, FY_PORT and FY_URL: for Claude Code ferrets, through settings.env. CODEX RUNTIMES ARE LEFT OUT of the preview (each is listed by name in the conversion report): ${CODEX_HELD_SENTENCE}. \`preview.sh start\` refuses to start unless bash -l and zsh -li with that environment find the preview's fy. In a preview terminal you open yourself, \`fy\` may be v4's: type \`~/.ferretry-v5/bin/fy\` or use \`fy5\`.`,
     '',
     '',
     'KNOWN GAPS:',

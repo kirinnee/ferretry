@@ -196,7 +196,7 @@ export function gatedFields(
           path === '' ? label : `${path}.${label}`,
           gated || GATED_LAST_WORDS.has(lastWord(key)),
           harnessOnly ? 'harness' : 'both',
-          key.toLowerCase() === 'env',
+          key.toLowerCase() === 'env' || (key === 'set' && path.split('.').at(-1) === 'shell_environment_policy'),
         );
       }
   };

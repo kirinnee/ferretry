@@ -25,7 +25,7 @@ const V4 = '/nonexistent-v4/.ferretry';
 const PATH = process.env.PATH ?? '/usr/bin:/bin';
 
 describe('MAJOR-1 both harnesses get the guard environment in the converted home', () => {
-  test('a converted home carries the guard, FY_HOME, FY_PORT and FY_URL for Claude Code and for Codex', async () => {
+  test('a converted home carries the guard, FY_HOME, FY_PORT and FY_URL for Claude Code', async () => {
     const f = await fixture();
     try {
       await mkdir(join(f.from, 'config'), { recursive: true });
@@ -46,10 +46,8 @@ describe('MAJOR-1 both harnesses get the guard environment in the converted home
         await readFile(join(f.to, `config/claude-code/settings/${PREVIEW_SETTINGS_ITEM}.yaml`), 'utf8'),
       );
       expect(claude.settings.env).toEqual(wanted);
-      const codex = parseYaml(
-        await readFile(join(f.to, `config/codex/settings/${PREVIEW_SETTINGS_ITEM}.yaml`), 'utf8'),
-      );
-      expect(codex.settings.shell_environment_policy.set).toEqual(wanted);
+      // Codex runtimes are held out of the preview (PREVIEW_CODEX_RUNTIMES is off), so no Codex item is written.
+      expect(existsSync(join(f.to, `config/codex/settings/${PREVIEW_SETTINGS_ITEM}.yaml`))).toBe(false);
     } finally {
       await rm(f.root, { recursive: true, force: true });
     }

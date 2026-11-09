@@ -60,6 +60,9 @@ const isSqliteSidecar = (path: string) => /\.sqlite-(journal|wal|shm)$/u.test(pa
 export const SQLITE_COPY_TRIES = 3;
 const SQLITE_SIDECARS = ['-journal', '-wal'] as const;
 
+/** `VACUUM INTO` itself failed, as opposed to a copy that was torn. */
+class VacuumFailed extends Error {}
+
 /** A plain single-name file at `path`, or false (absent, a link, a device, hard-linked elsewhere). */
 const plainFile = async (path: string): Promise<boolean> => {
   const info = await lstat(path).catch(() => undefined);
@@ -81,8 +84,11 @@ export async function copySqlite(
   try {
     await chmod(scratch, 0o700);
     const copy = join(scratch, 'copy.sqlite');
-    // v4 is live: the file and its sidecars are read in one pass, which a writer can tear. A torn copy fails
-    // `integrity_check` HERE (it only ever breaks the preview, never v4), so it is copied again, three tries in all.
+    // v4 is live: the file and its sidecars are read in one pass, which a writer can tear. A copy SQLite cannot open,
+    // or that fails `integrity_check`, is copied again, three tries in all. A copy that holds half a committed
+    // transaction (main copied, then the writer commits and deletes its journal before the journal is copied) can still
+    // pass the check: the second pass in `stage` (size or mtime moved) catches that case and copies the file again.
+    // Either way a torn copy only ever breaks the preview, never v4.
     for (let attempt = 1; attempt <= SQLITE_COPY_TRIES; attempt++) {
       options.onAttempt?.(attempt);
       await rm(copy, { force: true });
@@ -98,9 +104,15 @@ export async function copySqlite(
         if (rows.length !== 1 || rows[0]?.integrity_check !== 'ok') continue;
         // The target must not exist. The quote doubling is the SQL literal rule; the path is the tool's own.
         await rm(to, { force: true });
-        source.run(`VACUUM INTO '${to.replaceAll("'", "''")}'`);
+        try {
+          source.run(`VACUUM INTO '${to.replaceAll("'", "''")}'`);
+        } catch (error) {
+          // Not a torn copy (a full disk, an unwritable target): another try would fail the same way, so say why.
+          throw new VacuumFailed((error as Error).message);
+        }
         return;
-      } catch {
+      } catch (error) {
+        if (error instanceof VacuumFailed) throw new Error(`VACUUM INTO failed: ${error.message}`);
         // A copy SQLite cannot even open is as torn as one that fails the check.
       } finally {
         source?.close();
@@ -122,7 +134,12 @@ async function copyOne(home: string, staging: string, path: string): Promise<voi
   if (isSqlite(path)) {
     await rm(target, { force: true });
     await copySqlite(join(home, path), target).catch(error => {
-      throw new Error(`${path} was refused: ${(error as Error).message}; nothing was copied for it`);
+      // Keep `code`: a file v4 deleted mid-copy (ENOENT) is "vanished" in `stage`, not an abort.
+      const code = (error as NodeJS.ErrnoException).code;
+      throw Object.assign(
+        new Error(`${path} was refused: ${(error as Error).message}; nothing was copied for it`),
+        code === undefined ? {} : { code },
+      );
     });
   } else await copyFile(join(home, path), target);
   await chmod(target, 0o600);

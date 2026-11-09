@@ -57,7 +57,7 @@ import {
   YAML_OPTIONS,
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
-import { PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
+import { CODEX_HELD_SENTENCE, PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
@@ -475,21 +475,84 @@ async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: r
         'the preview',
         new Document({ description: describe, settings: { env: { ...ctx.previewShellEnv } } }, YAML_OPTIONS),
       );
-      place(
-        plan,
-        CODEX_SETTINGS,
-        PREVIEW_SETTINGS_ITEM,
-        'the preview',
-        new Document(
-          { description: describe, settings: { shell_environment_policy: { set: { ...ctx.previewShellEnv } } } },
-          YAML_OPTIONS,
-        ),
-      );
       count(plan, 'preview shell environment (settings item)');
-      count(plan, 'preview shell environment (settings item)');
+      // What Codex ferrets will need once 5.0 applies Codex settings items; written only with the switch on.
+      if (PREVIEW_CODEX_RUNTIMES) {
+        place(
+          plan,
+          CODEX_SETTINGS,
+          PREVIEW_SETTINGS_ITEM,
+          'the preview',
+          new Document(
+            { description: describe, settings: { shell_environment_policy: { set: { ...ctx.previewShellEnv } } } },
+            YAML_OPTIONS,
+          ),
+        );
+        count(plan, 'preview shell environment (settings item)');
+      }
     }
+    if (!PREVIEW_CODEX_RUNTIMES) holdCodexRuntimes(plan);
   }
   return { ...plan, ignored: listing.ignored };
+}
+
+const uncount = (plan: Plan, what: string): void => {
+  const left = (plan.kept.get(what) ?? 0) - 1;
+  if (left > 0) plan.kept.set(what, left);
+  else plan.kept.delete(what);
+};
+
+const scalarOf = (map: YAMLMap, key: string): string | undefined => {
+  const value = pairOf(map, key)?.value;
+  return isScalar(value) && typeof value.value === 'string' ? value.value : undefined;
+};
+
+/**
+ * Preview only: leaves out every runtime that is not provably a Claude Code one, and every profile that only such
+ * runtimes use. Only a runtime whose own file says `harness: claude` is kept: the preview leaves every v4 login out and
+ * the owner adds logins fresh, so a runtime that does not say can become a Codex one the day its login is added.
+ * Each held runtime is listed by NAME.
+ */
+function holdCodexRuntimes(plan: Plan): void {
+  const planned = [...plan.files.entries()];
+  const held = new Set<string>();
+  const profilesOf = new Map<string, { held: number; kept: number }>();
+  for (const [path, file] of planned) {
+    if (file.target !== RUNTIME_ITEMS || file.name === undefined || !isMap(file.document.contents)) continue;
+    const map = file.document.contents;
+    const harness = scalarOf(map, 'harness');
+    const profile = scalarOf(map, 'profile');
+    const isHeld = harness !== 'claude-code';
+    if (profile !== undefined) {
+      const tally = profilesOf.get(profile) ?? { held: 0, kept: 0 };
+      if (isHeld) tally.held++;
+      else tally.kept++;
+      profilesOf.set(profile, tally);
+    }
+    if (!isHeld) continue;
+    held.add(file.name);
+    plan.files.delete(path);
+    uncount(plan, 'runtimes');
+    plan.dropped.push({
+      what: `runtime ${file.name}${harness === undefined ? ' (its file does not say which harness; the preview has no logins to tell)' : ' (Codex)'}`,
+      why: CODEX_HELD_SENTENCE,
+    });
+  }
+  for (const [path, file] of planned) {
+    if (file.target !== PROFILE_ITEMS || file.name === undefined) continue;
+    const tally = profilesOf.get(file.name);
+    if (tally === undefined || tally.kept > 0 || tally.held === 0) continue;
+    plan.files.delete(path);
+    uncount(plan, 'profiles');
+    plan.dropped.push({ what: `profile ${file.name} (used only by held runtimes)`, why: CODEX_HELD_SENTENCE });
+  }
+  for (const [, file] of planned) {
+    if (file.target !== RUNTIMES_CONFIG || !isMap(file.document.contents)) continue;
+    const chosen = scalarOf(file.document.contents, 'defaultRuntime');
+    if (chosen === undefined || !held.has(chosen)) continue;
+    take(file.document.contents, 'defaultRuntime');
+    plan.dropped.push({ what: `defaultRuntime ${chosen}`, why: CODEX_HELD_SENTENCE });
+  }
 }
 
 export const settingsStep: Step = {

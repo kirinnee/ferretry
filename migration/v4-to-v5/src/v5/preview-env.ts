@@ -19,9 +19,22 @@ export const SHELL_GUARD_ENV: Readonly<Record<string, string>> = Object.freeze({
 export const PREVIEW_SETTINGS_ITEM = 'fy-preview';
 
 /**
+ * THE SWITCH: whether the preview converts Codex runtimes. OFF, because 5.0 does not apply Codex settings items yet,
+ * so a Codex preview ferret's login shell would carry FY_HOME but no FY_PORT/FY_URL and reach v4's `fy` (owner hard
+ * rule 4: never write a v4 path). Turn it on only when the Runtimes compose unit applies Codex settings items. While it
+ * is off the converter writes no Codex runtime, no profile only Codex runtimes use, and no Codex settings item.
+ */
+export const PREVIEW_CODEX_RUNTIMES: boolean = false;
+
+/** The one sentence that says why a Codex runtime is held; plan.ts GAPS and the driver's dry run use these words. */
+export const CODEX_HELD_SENTENCE =
+  "held: a Codex ferret's login shell would find v4's fy (FY_HOME is the preview home, no FY_PORT/FY_URL) and v4's `fy daemon stop|restart|update` writes v4 lifecycle files before any ownership check; it is added once 5.0 applies Codex settings items";
+
+/**
  * The shell environment for every preview ferret: the guard, and the preview's home and address (the shim pins them
- * too). It has no PATH: a settings environment is literal, so a PATH here would replace the ferret's own; `fy5` and the
- * shim put the preview's `bin` first themselves, and the guard is what keeps a login shell from putting it behind v4's.
+ * too). It has no PATH: a settings environment is literal, so a PATH here would replace the ferret's own. Only `fy5`
+ * puts the preview's `bin` first (the shim leaves PATH alone), and a ferret inherits that PATH from the daemon; the
+ * guard is what keeps a login shell from putting it behind v4's.
  */
 export function previewShellEnv(home: string, port: number): Readonly<Record<string, string>> {
   return Object.freeze({
