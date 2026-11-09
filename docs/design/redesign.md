@@ -2357,6 +2357,8 @@ config: [
 - `axis` is the grant axis a remote editor needs; Gate applies it to `fy config write` and the app's editor exactly
   as to a route.
 - The generator refuses two entries that could claim one path. §9.2 lists every file and its owner.
+- A plugin reads the disk etag of its OWN files (never their text) with `ConfigPort.etag(def, name?)`: the etag a write's
+  `ifMatch` is compared with, `absent` for no file; another plugin's file is refused.
 - A plugin hears its OWN files two ways: `ConfigPort.watch` when the version in effect moves, and
   `ConfigPort.watchState` when a file moves on disk or in state (written, held, confirmed, discarded, broken, fixed,
   removed), with its state and disk etag and never a value. An app hears every file it may read through the kernel's

@@ -122,19 +122,6 @@ export async function documentRevision(files: Pick<HostFiles, 'readBytes'>, path
 }
 
 /**
- * A config file's etag EXACTLY as the kernel's config writer reckons it (the one `ConfigPort.writeAll`'s `ifMatch` is
- * compared with): the sha256 of the file's TEXT, decoded as UTF-8 the way the kernel reads it (a BOM dropped, a byte
- * that is not UTF-8 replaced), or `'absent'`. {@link documentRevision} hashes the raw bytes, which differs for such a
- * file, so an etag read that way would never be accepted by the writer.
- */
-export async function configEtag(files: Pick<HostFiles, 'readBytes'>, path: string): Promise<string> {
-  const bytes = await files.readBytes(path);
-  return bytes === undefined
-    ? ABSENT_DOCUMENT_REVISION
-    : new Bun.CryptoHasher('sha256').update(new TextDecoder().decode(bytes)).digest('hex');
-}
-
-/**
  * The status a raw state document says, or `undefined` when it says none a reader can count. Only the status is
  * read: the catalogue counts running sessions, and parsing the whole state of every session to count them was
  * the cost the session status tally exists to remove.

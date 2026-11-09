@@ -835,6 +835,33 @@ describe('R2 layers — a lattice of shared bases', () => {
     should(took).be.below(1000);
   });
 
+  it('R2 should list the profiles and change one of a 20-deep lattice (about a million paths) at once', async () => {
+    // Arrange
+    const { port: runtimes } = await world({
+      runtimes: { work: { login: 'claude-you', profile: 'a0', agent: true } },
+      profiles: lattice(20),
+    });
+
+    // Act
+    const listedAt = performance.now();
+    const listed = await runtimes.profiles();
+    const listedTook = performance.now() - listedAt;
+    const addedAt = performance.now();
+    const added = await runtimes.changeProfileLayers({ kind: 'add', profile: 'a0', layer: 'mcp/extra' }, owner);
+    const addedTook = performance.now() - addedAt;
+    const removedAt = performance.now();
+    const removed = await runtimes.changeProfileLayers({ kind: 'remove-everywhere', layer: 'mcp/extra' }, owner);
+    const removedTook = performance.now() - removedAt;
+
+    // Assert
+    should(listed.length).equal(42);
+    should(added).deepEqual({ kind: 'written', profiles: ['a0'] });
+    should(removed).deepEqual({ kind: 'written', profiles: ['a0'] });
+    should(listedTook).be.below(1000);
+    should(addedTook).be.below(1000);
+    should(removedTook).be.below(1000);
+  });
+
   it('R2 should refuse a loop with the exact path, however deep the way into it', async () => {
     // Arrange
     const { port: runtimes } = await world({

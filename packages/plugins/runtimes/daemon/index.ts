@@ -77,7 +77,7 @@ export interface RuntimesAssembly {
   readonly homes?: RuntimeHomesApi;
   /**
    * The etag of one profile file as it is on disk right now, reckoned as the kernel's config writer reckons it (what a
-   * change's `ifMatch` is compared with; `configEtag` for a host). Absent: the
+   * change's `ifMatch` is compared with; `ConfigPort.etag` for a host). Absent: the
    * profile layers answer in a sentence that they cannot read the files, and change nothing.
    */
   readonly profileEtag?: (profile: string) => Promise<string>;

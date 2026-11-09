@@ -19,7 +19,7 @@ import {
   type RuntimesApi,
 } from '../../../contract/index.ts';
 import { fakeRuntimes } from '../../../contract/testing/index.ts';
-import { configEtag, documentRevision } from '../../../daemon/adapters/account-model-files.ts';
+import { documentRevision } from '../../../daemon/adapters/account-model-files.ts';
 import { createProfileLayers } from '../../../daemon/lib/service/profile-layers.ts';
 
 const HOME = '/home/fy';
@@ -58,17 +58,19 @@ async function realWorld(files: Readonly<Record<string, string | Uint8Array>>) {
   for (const [name, content] of Object.entries(files)) fs.seed(`${PROFILES}/${name}.yaml`, content);
   await config.reload();
   const port = config.port('runtimes');
+  // The kernel's own answer for Runtimes' own file: the etag the writer below compares an `ifMatch` with.
+  const etagOf = async (name: string): Promise<string> => await port.etag(PROFILE_ITEMS as never, name);
   const api: RuntimesApi = {
     ...fakeRuntimes(),
     ...createProfileLayers({
       runtimes: () => port.collection(RUNTIME_ITEMS as never),
       profiles: () => port.collection(PROFILE_ITEMS as never),
-      etag: async name => await configEtag(fs, `${PROFILES}/${name}.yaml`),
+      etag: etagOf,
       writeAll: async documents => await port.writeAll(documents),
       serialise: async act => await act(),
     }),
   };
-  return { api, fs, config, diskOf: (name: string) => fs.snapshot().get(`${PROFILES}/${name}.yaml`) };
+  return { api, fs, config, etagOf, diskOf: (name: string) => fs.snapshot().get(`${PROFILES}/${name}.yaml`) };
 }
 
 describe('R2 the etag profiles() gives is the kernel writer’s own', () => {
@@ -105,17 +107,13 @@ describe('R2 the etag profiles() gives is the kernel writer’s own', () => {
 
   it('R2 should have hashed the raw bytes differently for a BOM and a non-UTF-8 file (why the kernel’s reckoning is used)', async () => {
     // Arrange
-    const { fs } = await realWorld(FILES);
+    const { fs, etagOf } = await realWorld(FILES);
 
     // Act + Assert — the raw-bytes revision (the apply's pin) differs from the writer's etag for exactly these two.
     for (const name of ['bom', 'latin1'])
-      should(await documentRevision(fs, `${PROFILES}/${name}.yaml`)).not.equal(
-        await configEtag(fs, `${PROFILES}/${name}.yaml`),
-      );
+      should(await documentRevision(fs, `${PROFILES}/${name}.yaml`)).not.equal(await etagOf(name));
     for (const name of ['plain', 'crlf'])
-      should(await documentRevision(fs, `${PROFILES}/${name}.yaml`)).equal(
-        await configEtag(fs, `${PROFILES}/${name}.yaml`),
-      );
+      should(await documentRevision(fs, `${PROFILES}/${name}.yaml`)).equal(await etagOf(name));
   });
 
   it('R2 should answer a stale etag of a BOM file as a conflict, and write nothing', async () => {
@@ -136,10 +134,10 @@ describe('R2 the etag profiles() gives is the kernel writer’s own', () => {
 
   it('R2 should say the etag of a profile that is not there is the absent sentinel the writer uses', async () => {
     // Arrange
-    const { fs } = await realWorld({});
+    const { etagOf } = await realWorld({});
 
     // Act + Assert
-    should(await configEtag(fs, `${PROFILES}/nothing.yaml`)).equal('absent');
+    should(await etagOf('nothing')).equal('absent');
   });
 });
 

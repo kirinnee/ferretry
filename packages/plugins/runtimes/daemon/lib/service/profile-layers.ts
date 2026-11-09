@@ -28,6 +28,7 @@ import {
   type RuntimeLayers,
   type RuntimeLayersApi,
 } from '../../../contract/index.ts';
+import { expandStack, type StackFailure } from '../account/layering.ts';
 import { configFileWriteRefusal } from './ports.ts';
 
 /** A profile stack that cannot be resolved: the sentence says which profile and why. */
@@ -51,23 +52,31 @@ export interface ProfileLayerDeps {
   serialise<T>(act: () => Promise<T>): Promise<T>;
 }
 
-/** The layers of a list with each one kept once, at its newest position (a newer layer overrides an older one). */
-function newestOnly(layers: readonly string[]): readonly string[] {
-  const newest = new Map<string, number>();
-  for (const [index, layer] of layers.entries()) newest.set(layer, index);
-  return layers.filter((layer, index) => newest.get(layer) === index);
+/** Why a stack of bases cannot be expanded, in a sentence naming the profile. */
+function stackRefusal(failure: StackFailure<never>, start: string): string {
+  switch (failure.kind) {
+    case 'unknown-profile':
+      return failure.chain.length === 1
+        ? `profile ${failure.profile} does not exist`
+        : `profile ${failure.chain[failure.chain.length - 2]} names the base profile ${failure.profile}, which does not exist`;
+    case 'loop':
+      return `profile ${failure.profile} names the base profile ${failure.cycle[failure.cycle.length - 1]}, which leads back to itself (${failure.cycle.join(' → ')})`;
+    case 'too-deep':
+      return `profile ${start} sits under more than ${failure.limit} bases in a chain, which is too deep to read`;
+    case 'too-large':
+      return `profile ${failure.profile} expands to more than ${failure.limit} layers, which is too many to read`;
+    case 'layer':
+      return failure.failure;
+  }
 }
-
-type Expansion = { readonly layers: readonly string[] } | { readonly refusal: string };
 
 /**
  * The MCP servers and skills a profile names, oldest first, with every `profile/<base>` layer expanded where it stands
  * and each item kept once at its newest position (a newer layer overrides an older one). A base that does not exist,
- * or a loop of bases, is refused in a sentence.
+ * a loop of bases, or a stack beyond the bounds is refused in a sentence.
  *
- * Each profile is expanded ONCE: its expansion does not depend on who reached it, so a base shared by many profiles
- * (a lattice of diamonds) costs one expansion, not one per path. Keeping only the newest copy of each item per
- * profile before the parent concatenates gives the same list as keeping it once at the end.
+ * The expansion is the account model's own (`expandStack`, ONE owner of how bases layer): each profile is expanded
+ * once however many profiles reach it, so a lattice of diamonds costs one expansion per profile, not one per path.
  */
 function resolveProfileStack(
   profiles: ReadonlyMap<string, ProfileFile>,
@@ -75,42 +84,20 @@ function resolveProfileStack(
 ):
   | { readonly ok: true; readonly mcp: readonly string[]; readonly skills: readonly string[] }
   | { readonly ok: false; readonly sentence: string } {
-  // Only a profile whose whole subtree resolved is remembered, so a profile in a loop is never in here.
-  const expanded = new Map<string, readonly string[]>();
-  const expand = (name: string, chain: readonly string[]): Expansion => {
-    const done = expanded.get(name);
-    if (done !== undefined) return { layers: done };
-    const profile = profiles.get(name);
-    if (profile === undefined)
-      return {
-        refusal:
-          chain.length === 1
-            ? `profile ${name} does not exist`
-            : `profile ${chain[chain.length - 2]} names the base profile ${name}, which does not exist`,
-      };
-    const layers: string[] = [];
-    for (const layer of profile.contents) {
-      if (!layer.startsWith(`${PROFILE_LAYER_PREFIX}/`)) {
-        layers.push(layer);
-        continue;
-      }
-      const base = layer.slice(PROFILE_LAYER_PREFIX.length + 1);
-      if (chain.includes(base))
-        return {
-          refusal: `profile ${name} names the base profile ${base}, which leads back to itself (${[...chain.slice(chain.indexOf(base)), base].join(' → ')})`,
-        };
-      const inner = expand(base, [...chain, base]);
-      if ('refusal' in inner) return inner;
-      for (const kept of inner.layers) layers.push(kept);
-    }
-    const kept = newestOnly(layers);
-    expanded.set(name, kept);
-    return { layers: kept };
-  };
-  const stack = expand(start, [start]);
-  if ('refusal' in stack) return { ok: false, sentence: stack.refusal };
+  const stack = expandStack<string, never>(
+    name => profiles.get(name)?.contents,
+    text =>
+      text.startsWith(`${PROFILE_LAYER_PREFIX}/`)
+        ? { kind: 'base', name: text.slice(PROFILE_LAYER_PREFIX.length + 1) }
+        : { kind: 'leaf', key: text, item: text },
+    start,
+  );
+  if (!stack.ok) return { ok: false, sentence: stackRefusal(stack.failure, start) };
   const named = (kind: 'mcp' | 'skills'): readonly string[] =>
-    stack.layers.filter(layer => layer.startsWith(`${kind}/`)).map(layer => layer.slice(kind.length + 1));
+    stack.entries
+      .map(entry => entry.key)
+      .filter(layer => layer.startsWith(`${kind}/`))
+      .map(layer => layer.slice(kind.length + 1));
   return { ok: true, mcp: named('mcp'), skills: named('skills') };
 }
 

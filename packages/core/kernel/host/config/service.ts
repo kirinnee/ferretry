@@ -749,6 +749,14 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         const slot = slotFor(declaration, name);
         return statusOf(slot === undefined ? undefined : settled.get(slot.path)?.evaluated);
       },
+      // The etag only (`read` below carries the text and the issues, which a plugin is never handed). Its own def, an
+      // existing slot: the same two refusals every other member makes.
+      etag: async (def, name): Promise<string> => {
+        own(def);
+        const declaration = declared(pluginId, def as ConfigDef) as ConfigDeclaration;
+        if (slotFor(declaration, name) === undefined) throw new Error(`${pluginId} has no config file of that name`);
+        return (await read(pluginId, def as ConfigDef, name))?.etag ?? ABSENT_CONFIG_ETAG;
+      },
       // A plugin's own write takes the one writer; a loosening goes into effect only on Gate's judge, else it is held.
       write: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
         writeOutcome(

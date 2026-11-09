@@ -1,0 +1,131 @@
+/**
+ * R2 (M-1): a profile's derived scope (`profileScope`) folds its bases; a base reached by many paths is folded once. The
+ * reference here is the per-path fold as it was before (`naiveScope`, test-local), so the memo changes cost and nothing
+ * else — including on a loop (which the schema refuses, but the function is total over a draft).
+ */
+import { describe, it } from 'bun:test';
+import should from 'should';
+import { type ProfileScope, profileScope } from '../../../daemon/lib/account/scope.ts';
+import { type AccountModel, type LayerReferenceText, parseLayerReference } from '../../../daemon/lib/account/schema.ts';
+
+type Graph = Readonly<Record<string, readonly string[]>>;
+type Catalogue = Pick<AccountModel, 'profiles' | 'components'>;
+
+const catalogueOf = (graph: Graph): Catalogue =>
+  ({
+    components: {
+      instructions: {},
+      mcp: {
+        any: { command: 'srv' },
+        cl: { command: 'srv', harness: 'claude' },
+        cl2: { command: 'srv', harness: 'claude' },
+        cx: { command: 'srv', harness: 'codex' },
+      },
+      skills: {},
+      settings: {},
+      hooks: {},
+      modelSets: {},
+    },
+    profiles: Object.fromEntries(Object.entries(graph).map(([name, layers]) => [name, { layers }])),
+  }) as unknown as Catalogue;
+
+/** The fold as it was: every path walked, a loop cut by the profiles on the way. */
+function naiveScope(catalogue: Catalogue, name: string): ProfileScope {
+  const layerScope = (reference: LayerReferenceText, visiting: ReadonlySet<string>): string => {
+    const parsed = parseLayerReference(reference);
+    if (parsed === undefined) return 'generic';
+    if (parsed.kind === 'component') {
+      const component = (catalogue.components[parsed.componentKind] as Record<string, { harness?: string }>)[
+        parsed.name
+      ];
+      return component?.harness ?? 'generic';
+    }
+    const base = catalogue.profiles[parsed.name];
+    if (base === undefined || visiting.has(parsed.name)) return 'generic';
+    const scope = fold(base.layers, new Set([...visiting, parsed.name]));
+    return scope.kind === 'mixed' ? 'mixed' : scope.scope;
+  };
+  const fold = (layers: readonly string[], visiting: ReadonlySet<string>): ProfileScope => {
+    let claude: LayerReferenceText | undefined;
+    let codex: LayerReferenceText | undefined;
+    for (const text of layers) {
+      const reference = text as LayerReferenceText;
+      const scope = layerScope(reference, visiting);
+      if ((scope === 'claude' || scope === 'mixed') && claude === undefined) claude = reference;
+      if ((scope === 'codex' || scope === 'mixed') && codex === undefined) codex = reference;
+    }
+    if (claude !== undefined && codex !== undefined) return { kind: 'mixed', claude, codex };
+    if (claude !== undefined) return { kind: 'scoped', scope: 'claude' };
+    if (codex !== undefined) return { kind: 'scoped', scope: 'codex' };
+    return { kind: 'scoped', scope: 'generic' };
+  };
+  return fold(catalogue.profiles[name]?.layers ?? [], new Set([name]));
+}
+
+const GRAPHS: Readonly<Record<string, Graph>> = {
+  'generic bases': { top: ['profile/a', 'mcp/any'], a: ['mcp/any'] },
+  'a Claude base shared by two parents': {
+    top: ['profile/left', 'profile/right'],
+    left: ['profile/base'],
+    right: ['profile/base', 'mcp/any'],
+    base: ['mcp/cl'],
+  },
+  'a Claude and a Codex base under one profile': {
+    top: ['profile/c', 'profile/x'],
+    c: ['mcp/cl'],
+    x: ['mcp/cx'],
+  },
+  'a mixed base shared by two parents': {
+    top: ['profile/left', 'profile/right'],
+    left: ['profile/base'],
+    right: ['mcp/cl2', 'profile/base'],
+    base: ['mcp/cl', 'mcp/cx'],
+  },
+  'a missing base': { top: ['profile/ghost', 'mcp/cl'] },
+  'a profile that names itself': { top: ['mcp/cl', 'profile/top'] },
+  'a loop behind a shared base': {
+    top: ['profile/left', 'profile/right'],
+    left: ['profile/base'],
+    right: ['profile/base', 'mcp/cx'],
+    base: ['profile/loop-a'],
+    'loop-a': ['mcp/cl', 'profile/loop-b'],
+    'loop-b': ['profile/loop-a', 'mcp/any'],
+  },
+  'a loop through a base a sibling already folded': {
+    top: ['profile/shared', 'profile/other'],
+    shared: ['mcp/cl'],
+    other: ['profile/shared', 'profile/top', 'mcp/cx'],
+  },
+};
+
+describe('R2 profileScope — the memoised fold says what the per-path fold said', () => {
+  for (const [label, graph] of Object.entries(GRAPHS)) {
+    it(`R2 should give, for ${label}, the scope of every profile as the per-path fold does`, () => {
+      // Arrange
+      const catalogue = catalogueOf(graph);
+
+      // Act + Assert
+      for (const name of Object.keys(graph))
+        should(profileScope(catalogue, name)).deepEqual(naiveScope(catalogue, name));
+    });
+  }
+
+  it('R2 should fold a 20-deep diamond (2^20 paths) inside the deadline, keeping a Claude leaf at the bottom', () => {
+    // Arrange
+    const depth = 20;
+    const graph: Record<string, readonly string[]> = {};
+    for (let level = 0; level <= depth; level++)
+      for (const side of ['a', 'b'])
+        graph[`${side}${String(level)}`] =
+          level === depth ? ['mcp/cl'] : [`profile/a${String(level + 1)}`, `profile/b${String(level + 1)}`, 'mcp/any'];
+
+    // Act
+    const started = performance.now();
+    const actual = profileScope(catalogueOf(graph), 'a0');
+    const took = performance.now() - started;
+
+    // Assert
+    should(actual).deepEqual({ kind: 'scoped', scope: 'claude' });
+    should(took).be.below(1000);
+  });
+});

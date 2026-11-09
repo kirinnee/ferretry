@@ -484,6 +484,8 @@ async function start(world: World): Promise<TestHost> {
   for (const plugin of options.plugins)
     for (const def of plugin.manifest.data?.config ?? [])
       configOwners.set(def.shape === 'file' ? def.file : def.collection, { plugin: plugin.manifest.id, def });
+  /** A file's etag in this world: its value's JSON (what its writes answer), or the absent sentinel when it is not there. */
+  const etagOfValue = (value: unknown): string => (value === undefined ? ABSENT_STAMP.etag : JSON.stringify(value));
   const configStamps = new Map<string, Map<string, StampedConfigFile>>();
   /** Where every file of one key stands in the world now: valid or invalid by its schema, absent when not there. */
   const worldStamps = (key: string): Map<string, StampedConfigFile> => {
@@ -809,7 +811,7 @@ async function start(world: World): Promise<TestHost> {
           issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })),
         };
       const etag = JSON.stringify(next);
-      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
+      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== etagOfValue(before))
         return { kind: 'conflict' };
       const prior = before === undefined ? undefined : def.schema.safeParse(before);
       const priorValue = prior?.success === true ? prior.data : undefined;
@@ -873,6 +875,16 @@ async function start(world: World): Promise<TestHost> {
           ? { state: 'valid', inEffect: true, sentences: [] }
           : { state: 'invalid', inEffect: false, sentences: parsed.error.issues.map(issue => issue.message) };
       },
+      // The etag only, of an own file that exists as a slot: the world's value as JSON (what its writes answer), or the
+      // absent sentinel — the same refusals as the real port (another plugin's def, a name that is no file of the def).
+      async etag(def, name) {
+        assertDeclared(def);
+        if (def.shape === 'file' ? name !== undefined : name === undefined || !def.name.test(name))
+          throw new Error(`${manifest.id} has no config file of that name`);
+        const all = world.config.get(keyOf(def));
+        const value = def.shape === 'file' ? all : (all as Record<string, unknown> | undefined)?.[name as string];
+        return etagOfValue(value);
+      },
       async write(def, name, edit, writeOptions = {}) {
         return await write(def, name, edit, writeOptions);
       },
@@ -895,7 +907,7 @@ async function start(world: World): Promise<TestHost> {
           return { kind: 'refused', reason: 'bad_name', issues: [] };
         const all = world.config.get(key) as Record<string, unknown> | undefined;
         const before = def.shape === 'file' ? all : all?.[name as string];
-        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
+        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== etagOfValue(before))
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
         const defaults = def.schema.safeParse({});
@@ -944,7 +956,7 @@ async function start(world: World): Promise<TestHost> {
           const ref = refs[index] as ConfigDocumentRef;
           const all = world.config.get(keyOf(def)) as Record<string, unknown> | undefined;
           const before = def.shape === 'file' ? all : all?.[name as string];
-          if (document.ifMatch !== undefined && document.ifMatch !== JSON.stringify(before ?? null))
+          if (document.ifMatch !== undefined && document.ifMatch !== etagOfValue(before))
             return { kind: 'conflict', ...ref };
           const prior = before === undefined ? undefined : def.schema.safeParse(before);
           const priorValue = prior?.success === true ? prior.data : undefined;

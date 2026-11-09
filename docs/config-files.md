@@ -814,7 +814,11 @@ on a timer. The revision is per boot (`epoch`), and it is how the app learns wha
 whenever the app returns to the foreground or the network comes back, and if the first frame's revision moved —
 or names another boot — every screen reads again.
 
-**In the 5.0 kernel** a file's own moves are their own signal. `ConfigPort.watch` still fires only when the version
+**In the 5.0 kernel** a plugin that must pin an edit to what a caller read asks `ConfigPort.etag(def, name?)` for the
+disk etag of one of its OWN files (the one `write` and `writeAll` compare an `ifMatch` with, or `absent`): the etag only,
+never the text, and another plugin's file or a name that is no file of the def is refused.
+
+A file's own moves are their own signal. `ConfigPort.watch` still fires only when the version
 in effect moves; `ConfigPort.watchState` fires when one of the plugin's OWN files moves on disk or in state — an edit
 written or held for the owner, a held edit confirmed or discarded, a file broken or fixed, one removed — with the
 file's state (`absent`, `valid`, `invalid`, `held`) and its disk etag, never its text, a value or a sentence. The same

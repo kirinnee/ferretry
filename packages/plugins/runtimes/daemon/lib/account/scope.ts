@@ -83,11 +83,23 @@ export function componentScope(kind: ComponentKind, component: unknown): Harness
 export const scopeFits = (scope: HarnessScope, harness: HarnessKind): boolean =>
   scope === 'generic' || scope === harness;
 
+/**
+ * What one walk has learned. A base profile's derived scope does not depend on which way it was reached UNLESS a loop
+ * was cut somewhere below it (`visiting` is what cuts it), so a base is remembered only when its whole subtree met no
+ * cut: a lattice of shared bases then costs one fold per profile, not one per path, and a loop is read exactly as before.
+ */
+interface Walk {
+  readonly remembered: Map<string, HarnessScope | 'mixed'>;
+  /** How many times a loop was cut so far. */
+  cuts: number;
+}
+
 /** A layer's scope: a component's own, or a base profile's derived one (`mixed` when it is). */
 function layerScope(
   catalogue: Catalogue,
   reference: LayerReferenceText,
   visiting: ReadonlySet<string>,
+  walk: Walk,
 ): HarnessScope | 'mixed' {
   const parsed = parseLayerReference(reference);
   if (parsed === undefined) return 'generic';
@@ -96,17 +108,31 @@ function layerScope(
     return component === undefined ? 'generic' : componentScope(parsed.componentKind, component);
   }
   const base = catalogue.profiles[parsed.name];
-  if (base === undefined || visiting.has(parsed.name)) return 'generic';
-  const scope = foldLayers(catalogue, base.layers, new Set([...visiting, parsed.name]));
-  return scope.kind === 'mixed' ? 'mixed' : scope.scope;
+  if (base === undefined) return 'generic';
+  if (visiting.has(parsed.name)) {
+    walk.cuts++;
+    return 'generic';
+  }
+  const known = walk.remembered.get(parsed.name);
+  if (known !== undefined) return known;
+  const cutsBefore = walk.cuts;
+  const scope = foldLayers(catalogue, base.layers, new Set([...visiting, parsed.name]), walk);
+  const derived = scope.kind === 'mixed' ? 'mixed' : scope.scope;
+  if (walk.cuts === cutsBefore) walk.remembered.set(parsed.name, derived);
+  return derived;
 }
 
-function foldLayers(catalogue: Catalogue, layers: readonly string[], visiting: ReadonlySet<string>): ProfileScope {
+function foldLayers(
+  catalogue: Catalogue,
+  layers: readonly string[],
+  visiting: ReadonlySet<string>,
+  walk: Walk = { remembered: new Map(), cuts: 0 },
+): ProfileScope {
   let claude: LayerReferenceText | undefined;
   let codex: LayerReferenceText | undefined;
   for (const text of layers) {
     const reference = text as LayerReferenceText;
-    const scope = layerScope(catalogue, reference, visiting);
+    const scope = layerScope(catalogue, reference, visiting, walk);
     if ((scope === 'claude' || scope === 'mixed') && claude === undefined) claude = reference;
     if ((scope === 'codex' || scope === 'mixed') && codex === undefined) codex = reference;
   }
