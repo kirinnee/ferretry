@@ -340,8 +340,11 @@ describe.skipIf(!onLinux)('BG-006 a forged spelling of a name never follows the 
     expect(await readFile(`${f.dir}/inside-file.txt`, 'utf8')).toBe('INSIDE-FILE');
   });
 
-  test('BG-006 a forged spelling that leaves the root is still refused, and the root itself is still judged as itself', async () => {
+  test('BG-006 a forged spelling that leaves the root is refused outside, and so is a spelling of the root itself (it has no leaf)', async () => {
     const f = await fresh(withReach());
+    expect(await refusalOf(() => f.fleet.remove(`${f.home}/fleet/` as FencedPath))).toBe('outside');
+    expect(await refusalOf(() => f.fleet.remove(`${f.home}/fleet/.` as FencedPath))).toBe('outside');
+    expect((await lstat(`${f.home}/fleet`)).isDirectory()).toBe(true);
     expect(await refusalOf(() => f.fleet.remove(`${f.home}/fleet/homes/claude-a/../../../x/` as FencedPath))).toBe(
       'outside',
     );

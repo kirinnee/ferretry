@@ -1588,8 +1588,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
     const lexical = lexicalInRoot(home, root as string, ownerRoot, path);
     if (!lexical.ok) return refuse(lexical.error);
     const named: string = lexical.value;
-    // The root itself has no parent inside the root: it is judged as itself.
-    if (named === absolute(root as string, 'a root')) return await real(path, create);
+    // The root itself (any spelling of it) has no leaf and no parent inside the root: it is `outside` for every call
+    // that names a leaf (`remove` of the root's own folder is judged as itself before it gets here).
+    if (named === absolute(root as string, 'a root')) return refuse('outside');
     const leaf = basename(named);
     const parent = await real(dirname(named) as FencedPath, create);
     const full = join(parent.full, leaf);
