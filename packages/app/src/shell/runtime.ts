@@ -16,13 +16,23 @@ import type { PasskeyProvision } from '../passkey/passkey.ts';
 import { AppHookCache, appHookProviders } from '../surfaces/app-hooks.ts';
 import {
   type DaemonlessScreenProps,
+  type DevicePanelSlot,
+  type NavBadge,
+  type RegisteredBackgroundView,
   type RegisteredDeviceView,
+  type RegisteredDevicePanel,
+  type RegisteredNavBadge,
+  registeredBackgroundViews,
+  registeredLinkProvider,
+  registeredDevicePanels,
+  registeredNavBadges,
   registeredDeviceViews,
   registeredFragments,
 } from '../connect/provides.ts';
 import { type AddressBrowser, AddressTaker, type HoldClock, REAL_CLOCK } from '../router/address.ts';
 import { viewsOf } from '../layout/engine.ts';
 import { HandOffs } from './hand-off.ts';
+import type { LinkProvision } from '../ui/external-link.tsx';
 import type { View } from '../surfaces/halves.ts';
 
 /**
@@ -105,6 +115,12 @@ export class ShellRuntime {
   readonly handOffs: HandOffs;
   /** Every plugin's device views, mounted once each at the frame root (S3). */
   readonly deviceViews: readonly RegisteredDeviceView[];
+  /** Every plugin's background views, mounted once per paired daemon where the plugin may run (S5). */
+  readonly backgroundViews: readonly RegisteredBackgroundView[];
+  /** The device-level panels (`device.settings`, `nav`) the halves gave views for (S4). */
+  readonly #devicePanels: Readonly<Record<DevicePanelSlot, ReadonlyMap<string, RegisteredDevicePanel>>>;
+  readonly #navBadges: readonly RegisteredNavBadge[];
+  readonly #links: ReturnType<typeof registeredLinkProvider>;
   readonly #addressBrowser: AddressBrowser | undefined;
   readonly #listeners = new Set<() => void>();
   #version = 0;
@@ -129,6 +145,13 @@ export class ShellRuntime {
     this.address = new AddressTaker(registeredFragments(options.surfaces, screenOf), options.address, options.clock);
     this.handOffs = new HandOffs(screenOf, options.clock ?? REAL_CLOCK);
     this.deviceViews = registeredDeviceViews(options.surfaces);
+    this.backgroundViews = registeredBackgroundViews(options.surfaces);
+    this.#devicePanels = {
+      'device.settings': registeredDevicePanels(options.surfaces, 'device.settings'),
+      nav: registeredDevicePanels(options.surfaces, 'nav'),
+    };
+    this.#navBadges = registeredNavBadges(options.surfaces);
+    this.#links = registeredLinkProvider(options.surfaces);
     this.#routes = new Map(
       options.surfaces.flatMap(entry => entry.manifest.actions?.routes ?? []).map(route => [route.key, route]),
     );
@@ -247,6 +270,59 @@ export class ShellRuntime {
    */
   reach(plugin: string, origin: ClientOrigin): PluginReach {
     return this.#reach.reach(plugin, origin);
+  }
+
+  /** A plugin's device-level panel for `slot` (no daemon, no client), or `undefined` when it gave none (S4). */
+  devicePanel(slot: DevicePanelSlot, plugin: string, id: string): RegisteredDevicePanel | undefined {
+    return this.#devicePanels[slot].get(`${plugin}.${id}`);
+  }
+
+  /**
+   * The nav-badge providers of one plugin's screen, one per paired daemon where the plugin is ALLOWED (S4, MA5): built
+   * EAGERLY over that daemon's cache client — the half need not be built (R3 m8) — so a machine never opened still counts.
+   * A blocked, paused or unread machine has no client and a skeleton half has no provider; a locked machine adds 0.
+   *
+   * The client is the BACKGROUND-origin entry (R1 m5): a badge is built at app open for every machine while none is on
+   * screen and nobody pressed anything, so a provider that sends more than a read must never raise a passkey prompt for
+   * a machine the person is not looking at. It waits for the unlock instead, as a background view does.
+   */
+  navBadges(plugin: string, screen: string): readonly NavBadge[] {
+    const registered = this.#navBadges.find(each => each.plugin === plugin && each.screen === screen);
+    if (registered === undefined) return [];
+    const badges: NavBadge[] = [];
+    for (const paired of this.daemons.snapshot().daemons) {
+      if (this.#grants.isLocked(paired.daemon)) continue;
+      const client = this.#halves.client(paired.daemon, plugin, 'background');
+      if (client === undefined) continue;
+      const built = this.#hooks.get(paired.daemon, plugin, `nav-badge:${screen}`, client, registered.provide);
+      if (typeof (built as Partial<NavBadge> | undefined)?.count === 'function') badges.push(built as NavBadge);
+    }
+    return badges;
+  }
+
+  /**
+   * What Browsers provides for one machine (`shell.links`, S7), built over Browsers' own client there once it is allowed
+   * on that machine: where a link opens, and the sheet. `undefined` when no one provides it, Browsers is not allowed
+   * there, or the provider threw — a link then opens as the native default.
+   */
+  linkProvision(daemon: string): LinkProvision | undefined {
+    const provider = this.#links;
+    if (provider === undefined) return undefined;
+    const client = this.#halves.client(daemon, provider.plugin);
+    if (client === undefined) return undefined;
+    const built = this.#hooks.get(daemon, provider.plugin, 'links', client, provider.provide) as
+      | Partial<LinkProvision>
+      | undefined;
+    return typeof built?.activate === 'function' &&
+      typeof built.open === 'function' &&
+      typeof built.destination === 'function'
+      ? (built as LinkProvision)
+      : undefined;
+  }
+
+  /** The plugin that provides link behaviour (S7), or `undefined` when none does. */
+  linkProvider(): string | undefined {
+    return this.#links?.plugin;
   }
 
   /** Whether this machine's grants read answered "unlock first" (S1's `locked`). */

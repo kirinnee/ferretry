@@ -21,10 +21,11 @@ export const NOTIFICATION_IOS_NOTE =
 export interface NotificationSettingsViewProps {
   /** The browser capability at this instant; a host asks only from a reader's tap on a machine switch. */
   readonly permission: NotificationPermission;
-  /** The selected machine's own registered devices; every machine's switch lives in the list beside this. */
+  /** One machine's registered devices; every machine's switch lives in the list beside this. */
   readonly devices?: readonly PushDeviceView[];
   readonly currentDeviceId?: string | null;
-  readonly onRevokeDevice: (deviceId: string) => void;
+  /** Absent where the devices are listed machine by machine (the device-level panel), not here. */
+  readonly onRevokeDevice?: (deviceId: string) => void;
 }
 
 /**
@@ -32,6 +33,41 @@ export interface NotificationSettingsViewProps {
  * The host binds its callbacks to one runtime DaemonConnection, preventing a device id from daemon A being
  * revoked on B. Turning a machine on is `notification-machines.tsx`.
  */
+export interface PushDeviceListProps {
+  readonly devices: readonly PushDeviceView[];
+  readonly currentDeviceId: string | null;
+  readonly onRevokeDevice: (deviceId: string) => void;
+}
+
+/** One machine's registered push devices, each with its own Revoke. Nothing when there are none. */
+export function PushDeviceList({ devices, currentDeviceId, onRevokeDevice }: PushDeviceListProps) {
+  if (devices.length === 0) return null;
+  return (
+    <section className="flex flex-col gap-1" aria-label="Push devices">
+      <span className="text-meta font-semibold text-muted">Registered devices</span>
+      {devices.map(device => (
+        <div
+          key={device.id}
+          className="flex min-h-[44px] items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-control-x py-1"
+        >
+          <span className="min-w-0 text-ui text-fg">
+            {device.deviceName}
+            {device.id === currentDeviceId ? <span className="text-faint"> · this device</span> : null}
+          </span>
+          <button
+            type="button"
+            className="min-h-[44px] shrink-0 rounded-control px-2 text-ui font-semibold text-warn hover:bg-warn-bg"
+            onClick={() => onRevokeDevice(device.id)}
+            aria-label={`Revoke push notifications for ${device.deviceName}`}
+          >
+            Revoke
+          </button>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function NotificationSettingsView({
   permission,
   devices = [],
@@ -66,29 +102,8 @@ export function NotificationSettingsView({
       )}
       <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_SCOPE_NOTE}</p>
       <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_IOS_NOTE}</p>
-      {devices.length > 0 && (
-        <section className="flex flex-col gap-1" aria-label="Push devices">
-          <span className="text-meta font-semibold text-muted">Registered devices</span>
-          {devices.map(device => (
-            <div
-              key={device.id}
-              className="flex min-h-[44px] items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-control-x py-1"
-            >
-              <span className="min-w-0 text-ui text-fg">
-                {device.deviceName}
-                {device.id === currentDeviceId ? <span className="text-faint"> · this device</span> : null}
-              </span>
-              <button
-                type="button"
-                className="min-h-[44px] shrink-0 rounded-control px-2 text-ui font-semibold text-warn hover:bg-warn-bg"
-                onClick={() => onRevokeDevice(device.id)}
-                aria-label={`Revoke push notifications for ${device.deviceName}`}
-              >
-                Revoke
-              </button>
-            </div>
-          ))}
-        </section>
+      {onRevokeDevice === undefined ? null : (
+        <PushDeviceList devices={devices} currentDeviceId={currentDeviceId} onRevokeDevice={onRevokeDevice} />
       )}
     </section>
   );
