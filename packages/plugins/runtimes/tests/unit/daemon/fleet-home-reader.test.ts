@@ -5,7 +5,7 @@
  * would not change a test's answer.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmod, link, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import { nodeFs } from '../../../../../core/kernel/host/adapters/node-fs.ts';
@@ -737,10 +737,15 @@ describe('R1 m5 every escape is typed', () => {
     expect(await home.skillFile('plain', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
   });
 
-  it('refuses a manifest over the byte bound, naming the path and no content', async () => {
+  it('BG-033 n1 refuses a VALID manifest over the byte bound, naming the path and no content (red without the bound)', async () => {
     const { world, api } = await seed();
-    await writeFile(join(world.fleet, 'manifest.json'), `{"pad":"${'x'.repeat(4 * 1024 * 1024)}"}`);
+    const valid = await readFile(join(world.fleet, 'manifest.json'), 'utf8');
+    // The padding sits INSIDE the object: cut short at the bound it no longer parses, uncut it is a valid manifest.
+    await writeFile(join(world.fleet, 'manifest.json'), `{${' '.repeat(4 * 1024 * 1024)}${valid.slice(1)}`);
     await expect(api.homes()).rejects.toThrow(`The fleet manifest at ${world.fleet}/manifest.json could not be read.`);
+    // The same manifest under the bound is read, so the refusal above is the bound's and nothing else's.
+    await writeFile(join(world.fleet, 'manifest.json'), `{${' '.repeat(1024)}${valid.slice(1)}`);
+    expect((await api.homes()).length).toBeGreaterThan(0);
   });
 
   it('maps a kernel refusal while skillTree lists skills/ to RuntimeHomeUnreadable', async () => {
