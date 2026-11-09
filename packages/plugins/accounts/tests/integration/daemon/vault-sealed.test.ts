@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { AccountIndexDocument } from '../../../contract/routes/index.ts';
 import { MemoryCipher, vaultSealedStore } from '../../../daemon/adapters/vault-sealed.ts';
-import { AccountDirectory, AccountVault } from './lib.ts';
+import { AccountDirectory, AccountVault } from '../../../daemon/lib/accounts.ts';
 import { CLOCK, MemoryLoginIndex, NamedSealedDocuments } from './support.ts';
 import manifest from '../../../manifest.ts';
 

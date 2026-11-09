@@ -1,7 +1,8 @@
 /**
  * The deadlines and races of the logins adapters, against a real listener that never answers and a real child whose
- * stdin goes away: a Codex callback nobody answers is `unreachable`, a hosted catalog that hangs costs a check and
- * not a boot, and a write into a child that has just gone is reported as not delivered, never thrown.
+ * spawn handle refuses the write with EPIPE (the refusal is injected; the pipe is not really broken, because Bun reports
+ * no error for a write into a closed pipe): a Codex callback nobody answers is `unreachable`, a hosted catalog that
+ * hangs costs a check and not a boot, and a write the port refuses is reported as not delivered, never thrown.
  */
 import { afterEach, describe, it } from 'bun:test';
 import { bunSpawn } from '@ferretry/kernel/host';
@@ -64,8 +65,10 @@ describe('the deadlines', () => {
 });
 
 describe('a write into a child that goes away', () => {
-  it('should report the value as not delivered when the pipe breaks during the write', async () => {
-    // Arrange — a real child; the handle's write is the point where the pipe is gone.
+  it('should report the value as not delivered when the spawn port refuses the write with EPIPE', async () => {
+    // Arrange — a real, running child, and a handle whose write the spawn port refuses with EPIPE. The pipe itself is
+    // NOT really broken: Bun buffers a write into a pipe whose reader has closed and reports no error (measured: a child
+    // that closed its stdin and kept running still answered `delivered`), so a refusal can only be injected.
     const real = bunSpawn({ PATH: '/usr/bin:/bin' });
     const breaking = {
       ...real,

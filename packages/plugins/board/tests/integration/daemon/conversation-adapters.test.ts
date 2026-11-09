@@ -10,7 +10,7 @@ import { ConversationMessages, sendIdOf } from '../../../daemon/adapters/message
 import { ConversationOwnerWords } from '../../../daemon/adapters/owner-words.ts';
 import { BoardReferenceCatalog } from '../../../daemon/adapters/reference-catalog.ts';
 import { BoardWorkSource, cardWork } from '../../../daemon/adapters/work-source.ts';
-import { card, lanes, PROJECT } from '../../unit/board/support.ts';
+import { card, lanes, PROJECT } from '../../support/board.ts';
 
 const spawned = (stdout = '', exitCode: number | null = 0, stderr = ''): SpawnResult => ({
   exitCode,

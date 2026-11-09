@@ -174,4 +174,19 @@ describe('Codex rollout walk never follows a link to a sign-in document', () => 
     expect(await new CodexRollouts(ports(kernelRoots(rebased)), history).conversations.list(undefined)).toEqual([]);
     expect(rebased.opened).toEqual([]);
   });
+
+  test('kernel roots: a launch whose home is not the ferret’s own home is refused before any rollout is proved', async () => {
+    const fs = new VirtualFs().directory(`${HOME}/state`).directory(AGENT);
+    const rollouts = new CodexRollouts(ports(kernelRoots(fs)), async () => undefined);
+    const launch = (home: string) =>
+      ({ ferret: 'f1' as FerretId, home }) as unknown as Parameters<typeof rollouts.launched>[0];
+
+    await expect(rollouts.launched(launch('/fixture-owner/.codex'))).rejects.toThrow(
+      'Codex rollout ownership could not be placed in the ferret home',
+    );
+    await expect(rollouts.launched(launch(`${HOME}/state/codex/agent-homes/f2`))).rejects.toThrow(
+      'Codex rollout ownership could not be placed in the ferret home',
+    );
+    expect(fs.opened).toEqual([]);
+  });
 });
