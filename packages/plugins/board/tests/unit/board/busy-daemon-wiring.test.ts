@@ -15,8 +15,13 @@ import { card, PROJECT } from './support.ts';
 const CARDS = 3000;
 const FERRETS = 20;
 
-/** An Asks that counts every call made through it, by method (the real fake does the work). */
-const counting = (): { readonly asks: FakeAsks; readonly calls: Map<string, number> } => {
+/**
+ * An Asks that counts every call made through it, by method (the real fake does the work). `onCall` runs on each call
+ * with its method and its running count, before the call is made.
+ */
+const counting = (
+  onCall: (method: string, count: number) => void = () => undefined,
+): { readonly asks: FakeAsks; readonly calls: Map<string, number> } => {
   const target = new FakeAsks();
   const calls = new Map<string, number>();
   const asks = new Proxy(target, {
@@ -24,7 +29,9 @@ const counting = (): { readonly asks: FakeAsks; readonly calls: Map<string, numb
       const value = Reflect.get(self, key, self) as unknown;
       if (typeof value !== 'function') return value;
       return (...args: unknown[]) => {
-        calls.set(String(key), (calls.get(String(key)) ?? 0) + 1);
+        const count = (calls.get(String(key)) ?? 0) + 1;
+        calls.set(String(key), count);
+        onCall(String(key), count);
         return (value as (...all: unknown[]) => unknown).apply(self, args);
       };
     },
@@ -32,8 +39,8 @@ const counting = (): { readonly asks: FakeAsks; readonly calls: Map<string, numb
   return { asks, calls };
 };
 
-/** 3000 generated cards in Todo over 20 ferrets, written into Board's own state before the daemon first reads it. */
-const seed = async (host: Awaited<ReturnType<typeof boot>>['host']): Promise<readonly Card[]> => {
+/** Generated cards in Todo over `ferrets` ferrets, written into Board's own state before the daemon first reads it. */
+const seed = async (host: Awaited<ReturnType<typeof boot>>['host'], ferrets: number): Promise<readonly Card[]> => {
   const state = host.state('board').port(manifest.data.state);
   const def = manifest.data.state.find(file => file.name === 'cards');
   if (def === undefined) throw new Error('Board declares no cards file');
@@ -42,8 +49,8 @@ const seed = async (host: Awaited<ReturnType<typeof boot>>['host']): Promise<rea
       id: `F${i + 1}`,
       machineId: TEST_IDENTITY.daemonId,
       projectId: PROJECT as Card['projectId'],
-      owner: `ferret-${i % FERRETS}`,
-      assignee: `ferret-${(i + 1) % FERRETS}`,
+      owner: `ferret-${i % ferrets}`,
+      assignee: `ferret-${(i + 1) % ferrets}`,
     }),
   );
   for (const each of cards) await state.write(def as never, each as never, each.id);
@@ -55,7 +62,7 @@ describe('the board gate list through the real wiring (G1)', () => {
     // Arrange: the daemon's own Board half over a counting Asks, with 3000 cards on disk
     const { asks, calls } = counting();
     const world = await boot({ asks });
-    const cards = await seed(world.host);
+    const cards = await seed(world.host, FERRETS);
     const job = world.jobs.get('board-gates');
     if (job === undefined) throw new Error('Board registers no board-gates job');
     should(cards).have.length(CARDS);
@@ -67,5 +74,60 @@ describe('the board gate list through the real wiring (G1)', () => {
     // card ask (`openAll`) and one of the answered ones. A per-card derivation reads 3000 times that.
     should(calls.get('open')).equal(FERRETS + 1);
     should(calls.get('answers')).equal(1);
+  }, 120_000);
+});
+
+/** How many ledgers one batch of the card-ask read takes at once (`ASK_READ_CONCURRENCY`). */
+const BATCH = 16;
+
+/** Asks that stops the sweep the moment its first ledger is read, the way the daemon's stop does mid-pass. */
+const stoppedAtFirstRead = () => {
+  const stop = new AbortController();
+  const { asks, calls } = counting(method => {
+    if (method === 'open') stop.abort();
+  });
+  return { stop, asks, calls };
+};
+
+describe('the board sweep stops with the daemon (G2)', () => {
+  it('should read one batch of ledgers, not the whole board, once stopped at the first read', async () => {
+    // Arrange: 3000 cards over 100 ferrets, so the board's ledgers are read in 7 batches of 16; the stop comes with
+    // the first read
+    const { stop, asks, calls } = stoppedAtFirstRead();
+    const world = await boot({ asks });
+    await seed(world.host, 100);
+    const job = world.jobs.get('board-sweep');
+    if (job === undefined) throw new Error('Board registers no board-sweep job');
+
+    // Act: the job as the kernel runs it, with the stop signal
+    const outcome = await job.run(stop.signal).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert: the sweep ended with the stop's own reason, one batch in; the other six batches were never read
+    should(outcome).equal(stop.signal.reason);
+    should(calls.get('open')).equal(BATCH);
+  }, 120_000);
+
+  it('should plan, nudge and remember nothing once the stop came before the plan', async () => {
+    // Arrange: 10 ferrets are ONE batch, so the stop lands in the only read and the derivation itself finishes; only
+    // the sweep's own check after it can end the tick before it writes its memory
+    const { stop, asks } = stoppedAtFirstRead();
+    const world = await boot({ asks });
+    await seed(world.host, 10);
+    const job = world.jobs.get('board-sweep');
+    const memory = manifest.data.state.find(file => file.name === 'sweep');
+    if (job === undefined || memory === undefined) throw new Error('Board registers no board-sweep job or sweep file');
+
+    // Act
+    const outcome = await job.run(stop.signal).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(outcome).equal(stop.signal.reason);
+    should(world.host.state('board').raw(memory)).be.undefined();
   }, 120_000);
 });
