@@ -7,17 +7,17 @@ import { createNodeHostFs } from '../../../host/state/host-fs.ts';
 import { captureLog, manualClock, updatesDef } from '../../unit/host-config/support.ts';
 
 /**
- * A config file the kernel cannot read (over the 256 KiB cap, a link, a directory, a FIFO, bytes that are not UTF-8)
+ * A config file the kernel cannot read (over the 256 KiB cap, a link, a directory, a FIFO)
  * reads as `absent` to the etag and to the load. A write, an owner's write, a removal or a set pinned `ifMatch: 'absent'`
  * (or pinned to nothing) must therefore REFUSE it, in the sentence a set's refusal says, and leave it exactly as it was —
- * on a real disk, through the real service. Never `--no-verify`: these are the cases the refusal exists for.
+ * on a real disk, through the real service. A non-UTF-8 file is deliberately NOT here: it is still read (decoded with
+ * U+FFFD) and a write over it lands; refusing it changes a valid read, so it is reported, not done.
  */
 const homes: string[] = [];
 afterEach(async () => {
   for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
 });
 
-const LATIN_1 = Uint8Array.from([0x6c, 0x69, 0x6d, 0x69, 0x74, 0x3a, 0x20, 0x35, 0x20, 0x23, 0xe9, 0x0a]);
 const OVER_THE_CAP = `${'# a comment line to pad the file past the cap\n'.repeat(7000)}limit: 5\n`;
 
 interface Case {
@@ -65,13 +65,6 @@ const CASES: readonly Case[] = [
     plant: async path => {
       const made = Bun.spawnSync(['mkfifo', path]);
       if (made.exitCode !== 0) throw new Error('mkfifo is not available');
-      return async () => await fingerprint(path);
-    },
-  },
-  {
-    name: 'a file that is not UTF-8 (Latin-1)',
-    plant: async path => {
-      await writeFile(path, LATIN_1);
       return async () => await fingerprint(path);
     },
   },

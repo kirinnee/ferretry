@@ -4,8 +4,7 @@ import { CONFIG_FILE_MAX_BYTES, configTextTooLarge } from './yaml-text.ts';
 
 /**
  * One configuration file as the kernel reads it, at boot, on every reload and under `fyd --check`: a link, a
- * non-regular file, one past the 256 KiB cap or one that is not UTF-8 is `unreadable` (its last good version stays),
- * never read whole.
+ * non-regular file or one past the 256 KiB cap is `unreadable` (its last good version stays), never read whole.
  */
 export async function readConfigDisk(fs: HostFs, absolute: string): Promise<DiskState> {
   let info: Awaited<ReturnType<HostFs['info']>>;
@@ -22,9 +21,7 @@ export async function readConfigDisk(fs: HostFs, absolute: string): Promise<Disk
     const read = await fs.readTail(absolute, CONFIG_FILE_MAX_BYTES + 1);
     if (read === undefined) return { kind: 'absent' };
     if (read.from > 0 || read.bytes.byteLength > CONFIG_FILE_MAX_BYTES) return { kind: 'unreadable' };
-    // Fatal: bytes that are not UTF-8 are `unreadable`, never decoded to U+FFFD — a write over such a file would put the
-    // replacement characters back on disk in place of the owner's bytes.
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(read.bytes);
+    const text = new TextDecoder().decode(read.bytes);
     return configTextTooLarge(text) ? { kind: 'unreadable' } : { kind: 'text', text };
   } catch {
     return { kind: 'unreadable' };
