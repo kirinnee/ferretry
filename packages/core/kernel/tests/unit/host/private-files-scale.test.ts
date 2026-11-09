@@ -269,6 +269,21 @@ function stamped(base: HostFs, at: { mtime: bigint; ctime: bigint }, only?: stri
   };
 }
 
+/** A disk that counts how many times the folder whose path ends with `suffix` is LISTED: a folder is read again only then. */
+function listings(base: HostFs, suffix: string): { readonly fs: HostFs; readonly reads: () => number } {
+  let reads = 0;
+  return {
+    fs: {
+      ...base,
+      list: async path => {
+        if (path.endsWith(suffix)) reads += 1;
+        return await base.list(path);
+      },
+    },
+    reads: () => reads,
+  };
+}
+
 describe('PF-time a change is told to the nanosecond, and one too recent to trust is read again', () => {
   const input = { pins: () => [], private: LIST };
 
@@ -277,11 +292,15 @@ describe('PF-time a change is told to the nanosecond, and one too recent to trus
     await fill(`${l.home}/state/logins/credentials`, 1, () => 'L1/auth.json');
     const real = await realpath(l.home);
     const step = { mtime: 0n, ctime: 0n };
-    const index = privateIndexOf(stamped(REAL, step, 'credentials/L1'), real, input, { wall: LATER });
+    const meter = listings(stamped(REAL, step, 'credentials/L1'), 'credentials/L1');
+    const index = privateIndexOf(meter.fs, real, input, { wall: LATER });
     const first = await index.snapshot();
+    expect(meter.reads()).toBe(1);
     expect(await index.snapshot()).toBe(first);
+    expect(meter.reads()).toBe(1);
     step.mtime = 1n;
-    expect(await index.snapshot()).not.toBe(first);
+    await index.snapshot();
+    expect(meter.reads()).toBe(2);
   });
 
   test('PF-time a folder that differs only in its status-change time below the millisecond is a change', async () => {
@@ -289,10 +308,13 @@ describe('PF-time a change is told to the nanosecond, and one too recent to trus
     await fill(`${l.home}/state/logins/credentials`, 1, () => 'L1/auth.json');
     const real = await realpath(l.home);
     const step = { mtime: 0n, ctime: 0n };
-    const index = privateIndexOf(stamped(REAL, step, 'credentials/L1'), real, input, { wall: LATER });
-    const first = await index.snapshot();
+    const meter = listings(stamped(REAL, step, 'credentials/L1'), 'credentials/L1');
+    const index = privateIndexOf(meter.fs, real, input, { wall: LATER });
+    await index.snapshot();
+    expect(meter.reads()).toBe(1);
     step.ctime = 1n;
-    expect(await index.snapshot()).not.toBe(first);
+    await index.snapshot();
+    expect(meter.reads()).toBe(2);
   });
 
   test('PF-time a folder changed within the racy window of the look is read again at the next look, until it is old enough to trust', async () => {
@@ -300,7 +322,8 @@ describe('PF-time a change is told to the nanosecond, and one too recent to trus
     await fill(`${l.home}/state/logins/credentials`, 1, () => 'L1/auth.json');
     const real = await realpath(l.home);
     // Every directory is stamped at one fixed instant; the clock then stands 1 ms after it (too recent), then 1 s.
-    const stamp = 5_000_000_000n;
+    // (with a fraction of a millisecond, so this disk is not read as one that stamps whole seconds)
+    const stamp = 5_000_000_123n;
     const fixed = (base: HostFs): HostFs => ({
       ...base,
       identity: async path => {
@@ -309,14 +332,24 @@ describe('PF-time a change is told to the nanosecond, and one too recent to trus
       },
     });
     let clock = stamp + 1_000_000n;
-    const index = privateIndexOf(fixed(REAL), real, input, { wall: () => clock });
-    const first = await index.snapshot();
-    const second = await index.snapshot();
-    expect(second).not.toBe(first);
-    clock = stamp + 1_000_000_000n;
-    const trusted = await index.snapshot();
-    expect(trusted).not.toBe(second);
-    expect(await index.snapshot()).toBe(trusted);
+    const meter = listings(fixed(REAL), 'credentials/L1');
+    const index = privateIndexOf(meter.fs, real, input, { wall: () => clock });
+    await index.snapshot();
+    expect(meter.reads()).toBe(1);
+    // Too recent to trust (1 ms after the stamp): read again at the next look.
+    await index.snapshot();
+    expect(meter.reads()).toBe(2);
+    // The window is 20 ms: a look 19 ms after the stamp is still inside it, one 21 ms after is not.
+    clock = stamp + 19_000_000n;
+    await index.snapshot();
+    expect(meter.reads()).toBe(3);
+    clock = stamp + 21_000_000n;
+    await index.snapshot();
+    expect(meter.reads()).toBe(4);
+    // The look that read it at 21 ms trusted it: nothing is read again.
+    await index.snapshot();
+    await index.snapshot();
+    expect(meter.reads()).toBe(4);
   });
 
   test('PF-time a member that lands after the look in the same filesystem tick is indexed (the racy rule, on the real disk)', async () => {
@@ -417,6 +450,8 @@ describe('PF-shared a tree the minter declared private is never minted', () => {
     expect(await mint(['state/browsers/data'])).toContain('refused');
     expect(await mint(['state/browsers/data/agent'])).toContain('refused');
     expect(await mint(['state/browsers/data/*/Cookies'])).toContain('refused');
+    // A declared place that sits INSIDE the tree (a profile's cookies): the tree holds a private file, so it is not minted.
+    expect(await mint(['state/browsers/data/agent/Default/Cookies'])).toContain('refused');
     expect(await mint([])).toBe('minted');
     expect(await mint(['state/browsers/other'])).toBe('minted');
   });

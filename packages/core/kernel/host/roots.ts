@@ -49,7 +49,7 @@ import {
   same,
   within,
 } from './fence-guard.ts';
-import { identityKey } from './fence-index.ts';
+import { identityKey, type TruncationWatcher } from './fence-index.ts';
 import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import { holdsPrivate, ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
@@ -179,6 +179,8 @@ export function lexicalInRoot(
 interface PrivatePlaces {
   readonly files: readonly string[];
   readonly recheckMs: number;
+  /** Told when a private place reaches its budget, or fits again: the one watcher the host gives every root. */
+  readonly watch?: TruncationWatcher;
 }
 
 const NO_PRIVATE: PrivatePlaces = { files: [], recheckMs: 0 };
@@ -206,7 +208,7 @@ function privateCheckOf(fs: HostFs, home: string, real: string, privateFiles: Pr
   // One place for the doubt: a guard that cannot be built, or a place that cannot be looked at, answers "held".
   const answer = async (ask: (kept: PrivateGuard) => Promise<boolean> | boolean): Promise<boolean> => {
     try {
-      guard ??= privateGuardOf(fs, home, real, privateFiles.files, privateFiles.recheckMs);
+      guard ??= privateGuardOf(fs, home, real, privateFiles.files, privateFiles.recheckMs, privateFiles.watch);
       return await ask(await guard);
     } catch {
       return true;
@@ -240,7 +242,9 @@ async function checkBase(
   }
   if (ownerRoot) {
     // A home that cannot be identified fails closed: nothing in an owner's root is reached until it can.
-    const fence = await fenceOf(fs, home, privateFiles.files, privateFiles.recheckMs).catch(() => undefined);
+    const fence = await fenceOf(fs, home, privateFiles.files, privateFiles.recheckMs, privateFiles.watch).catch(
+      () => undefined,
+    );
     if (fence === undefined || (await fencedReal(fs, fence, real))) return err('fenced');
     return ok({ real, fence, guard: undefined });
   }
@@ -384,7 +388,9 @@ async function heldPlace(scope: Scope, path: string): Promise<boolean> {
  * has already opened and judged (a recursive remove): their folders were checked, so only the entry itself is asked.
  */
 async function heldMember(scope: Scope, identity: FileIdentity): Promise<boolean> {
-  if (scope.base.fence !== undefined) return scope.base.fence.keys.has(identityKey(identity));
+  // A tree that was not indexed whole holds its whole device unproven: an owner's root refuses a member there too.
+  if (scope.base.fence !== undefined)
+    return scope.base.fence.keys.has(identityKey(identity)) || scope.base.fence.closed.has(identity.device);
   return scope.base.guard !== undefined && (await scope.base.guard.heldIdentity(identity));
 }
 
@@ -957,7 +963,13 @@ const NOT_THERE: ReadonlySet<FsErrorCode> = new Set([
 
 /** The fence now: recomputed on every ask, so a home that cannot be identified refuses (`undefined` answers fenced). */
 const fenceNow = async (setup: PinFenceSetup): Promise<Fence | undefined> =>
-  await fenceOf(setup.fs, setup.home, setup.privateFiles.files, setup.privateFiles.recheckMs).catch(() => undefined);
+  await fenceOf(
+    setup.fs,
+    setup.home,
+    setup.privateFiles.files,
+    setup.privateFiles.recheckMs,
+    setup.privateFiles.watch,
+  ).catch(() => undefined);
 
 const heldByFence = (fence: Fence, identities: readonly ComponentIdentity[]): boolean =>
   identities.some(entry => fence.keys.has(identityKey({ device: entry.dev, inode: entry.ino })));
@@ -1942,6 +1954,11 @@ export interface RootsOptions {
    * stays unrecognised under a second name.
    */
   readonly privateRecheckMs?: number;
+  /**
+   * Told when a private place reaches its budget (its device is then refused to every root that does not own it) and
+   * when it fits again. The host gives every plugin's roots the same function, so it is told once per change.
+   */
+  readonly privateWatch?: TruncationWatcher;
   /** Told the plugin's stop: every tree it minted is revoked then. Absent, its trees live as long as the port. */
   readonly onStop?: (fn: () => void) => void;
 }
@@ -1960,7 +1977,11 @@ export function rootsPortFor(
   const immutable = (): Promise<readonly string[]> =>
     (proven ??= resolveImmutableRoots(fs, options.hardLinkRoots ?? HARD_LINK_ROOTS).catch(() => []));
   const home = absolute(layout.home, 'the home');
-  const privateFiles: PrivatePlaces = { files: options.privateFiles ?? [], recheckMs: options.privateRecheckMs ?? 0 };
+  const privateFiles: PrivatePlaces = {
+    files: options.privateFiles ?? [],
+    recheckMs: options.privateRecheckMs ?? 0,
+    ...(options.privateWatch === undefined ? {} : { watch: options.privateWatch }),
+  };
   // Every tree this plugin mints lives until it stops.
   const life = { live: true };
   options.onStop?.(() => {

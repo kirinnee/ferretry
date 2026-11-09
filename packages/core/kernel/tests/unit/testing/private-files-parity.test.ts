@@ -7,6 +7,7 @@
  */
 import { afterEach, expect, test } from 'bun:test';
 import { link, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import type { LogRecord } from '../../../host/log.ts';
 import { tmpdir } from 'node:os';
 import { defineState } from '../../../contract/define.ts';
 import type { FencedPath } from '../../../contract/bound.ts';
@@ -180,3 +181,78 @@ test('PF-parity the real host looks at the private places again: a file made aft
     await outcome.host.stop();
   }
 });
+
+test('PF-loud the real host says so when a private place passes its budget: one log line, a failing doctor line, and a line when it fits again', async () => {
+  const VAULT = defineState({ name: 'vault', path: 'vault/*', store: 'opaque', format: 1 });
+  const parent = await realpath(await mkdtemp(`${tmpdir()}/private-parity-`));
+  parents.push(parent);
+  const home = `${parent}/home`;
+  const seen: { stranger?: KernelPorts } = {};
+  const records: LogRecord[] = [];
+  const outcome = await bootHost({
+    home,
+    version: '5.0.0',
+    adapters: {
+      ...realAdapters(home, record => records.push(record), { binary: 'fy' }),
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => {} }),
+    },
+    implementations: [
+      implementDaemon(
+        definePlugin({ ...base, id: 'holder', data: { state: [VAULT] }, privacy: { private: ['vault'] } }),
+        { build: () => ({}) },
+      ),
+      implementDaemon(definePlugin({ ...base, id: 'stranger', permissions: { roots: ['agent-homes'] } }), {
+        build: ({ kernel }) => {
+          seen.stranger = kernel;
+          return {};
+        },
+      }),
+    ],
+  });
+  if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+  try {
+    const agentHome = (seen.stranger as KernelPorts).roots.root('agent-homes', { subfolder: 'F1' });
+    const own = agentHome.resolve('own.txt');
+    if (!own.ok) throw new Error(own.error);
+    await agentHome.writeText(own.value, 'own');
+    const readOwn = async (): Promise<string> => {
+      try {
+        return await agentHome.readText(own.value);
+      } catch (error) {
+        return error instanceof RootError ? error.refusal : String(error);
+      }
+    };
+    const ours = (): readonly LogRecord[] => records.filter(record => record.message.includes('private place'));
+    const doctored = async (): Promise<readonly string[]> =>
+      (await outcome.host.doctor()).filter(line => line.detail.includes('private place')).map(line => line.state);
+    expect(await readOwn()).toBe('own');
+    expect(ours()).toEqual([]);
+    expect(await doctored()).toEqual([]);
+    // A private folder with more places than its budget (4096).
+    const vault = `${home}/state/holder/vault`;
+    await mkdir(vault, { recursive: true });
+    for (let from = 0; from < 4100; from += 200)
+      await Promise.all(Array.from({ length: 200 }, (_, at) => writeFile(`${vault}/f${from + at}`, 'x')));
+    await new Promise(done => setTimeout(done, 400));
+    expect(await readOwn()).toBe('fenced');
+    // Said once, with the place and the counts, and kept as a failing line until it fits again.
+    expect(await readOwn()).toBe('fenced');
+    expect(ours().length).toBe(1);
+    expect(ours()[0]?.level).toBe('warn');
+    expect(ours()[0]?.fields).toEqual({ place: 'state/holder/vault', indexed: 4096, limit: 4096 });
+    expect(await doctored()).toEqual(['fail']);
+    const line = (await outcome.host.doctor()).find(found => found.detail.includes('private place'));
+    expect(line?.detail).toContain('state/holder/vault');
+    expect(line?.fix).toContain('state/holder/vault');
+    // It fits again: the refusal is lifted at the next look, said once, and the failing line is gone.
+    await Promise.all(Array.from({ length: 200 }, (_, at) => rm(`${vault}/f${at}`)));
+    await new Promise(done => setTimeout(done, 400));
+    expect(await readOwn()).toBe('own');
+    expect(ours().length).toBe(2);
+    expect(ours()[1]?.message).toContain('fits its budget again');
+    expect(await doctored()).toEqual([]);
+  } finally {
+    await outcome.host.stop();
+  }
+}, 30_000);

@@ -1,3 +1,4 @@
+import { relative } from 'node:path';
 import type { BinaryNames, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { decideHome } from '../contract/home.ts';
@@ -82,7 +83,7 @@ import {
   type Serving,
 } from './dispatch.ts';
 import { EventBus } from './events.ts';
-import { DEFAULT_RECHECK_MS } from './fence-index.ts';
+import { DEFAULT_RECHECK_MS, type PlaceBudget, type TruncationWatcher } from './fence-index.ts';
 import { dependentsOf, type GraphRefusal, planGraph } from './graph.ts';
 import { type Deadline, HookEngine } from './hooks.ts';
 import {
@@ -538,6 +539,29 @@ async function bootLocked(
   let enabled = yamlEnabled;
   let plan = planWith(enabled);
   const bootNotes: DoctorLine[] = [];
+  /**
+   * The private places that are past their budget now (§7.7). Each one makes every other root on that device refuse
+   * everything, so it is never silent: one log line per change, and a standing doctor line until it fits again.
+   */
+  const pastBudget: { current: readonly PlaceBudget[] } = { current: [] };
+  const watchPrivate: TruncationWatcher = budgets => {
+    const before = pastBudget.current;
+    pastBudget.current = budgets;
+    const where = (place: PlaceBudget): string => relative(home, place.path);
+    for (const place of budgets)
+      if (!before.some(was => was.path === place.path))
+        log.warn('a private place holds more than its budget, so every read on its device is refused', {
+          place: where(place),
+          indexed: place.indexed,
+          limit: place.limit,
+        });
+    for (const place of before)
+      if (!budgets.some(now => now.path === place.path))
+        log.warn('a private place fits its budget again, so its device is no longer refused', {
+          place: where(place),
+          limit: place.limit,
+        });
+  };
   // §2.4: a hand-edited plugins.yaml that strands a plugin is refused; boot keeps the last accepted set. A caller
   // that names the enabled set itself (a suite) is not second-guessed.
   if (options.enabled === undefined) {
@@ -747,6 +771,7 @@ async function bootLocked(
         random: adapters.random,
         privateFiles,
         privateRecheckMs: PRIVATE_RECHECK_MS,
+        privateWatch: watchPrivate,
         ...(pins === undefined ? {} : { pins }),
         ...(manifest.permissions?.harnessFiles === undefined
           ? {}
@@ -1155,7 +1180,12 @@ async function bootLocked(
         // The record is Gate's; the answer stands.
       }
     },
-    doctor: async () => doctorReport([...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))]),
+    doctor: async () =>
+      doctorReport([
+        ...bootNotes,
+        ...pastBudgetLines(home, pastBudget.current),
+        ...(await doctorLines(records, hooks, jobs, data.refused)),
+      ]),
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',
       uptimeSeconds: Math.max(0, Math.round((clock.nowMs() - startedAtMs) / 1000)),
@@ -1366,7 +1396,11 @@ async function bootLocked(
     ids,
     dispatch: request => dispatcher.dispatch(request),
     callTool,
-    doctor: async () => [...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))],
+    doctor: async () => [
+      ...bootNotes,
+      ...pastBudgetLines(home, pastBudget.current),
+      ...(await doctorLines(records, hooks, jobs, data.refused)),
+    ],
     stop: () => stopHost(),
   };
 
@@ -1464,6 +1498,24 @@ function refusalText(response: ApiResponse): string {
   } catch {
     return `Refused (${response.status}).`;
   }
+}
+
+/**
+ * One failing line per private place that is past its budget (§7.7): what it stops, and how to lift it. The place is
+ * named relative to the home (never a value), with how many places were indexed against how many are allowed.
+ */
+function pastBudgetLines(home: string, budgets: readonly PlaceBudget[]): readonly DoctorLine[] {
+  return budgets.map(place => ({
+    plugin: 'kernel',
+    state: 'fail',
+    detail:
+      `The private place ${relative(home, place.path)} holds more than its ${place.limit} places, so it is not indexed whole ` +
+      `and every file on its disk is refused (by every root but the one that owns it, and by every owner's root there): ` +
+      `agent homes, fleet files, work folders, imports and harness homes read nothing from that disk.`,
+    fix:
+      `Remove what you no longer need under ${relative(home, place.path)} — for ended ferret sessions delete the ` +
+      `environment.json in their session folder (the credential is dead then) — it is lifted at the next look.`,
+  }));
 }
 
 async function doctorLines(
