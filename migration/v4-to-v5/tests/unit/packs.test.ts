@@ -214,7 +214,6 @@ test('J-0052 a home with preferences and no guide file, or a guide of prose alon
   expect(PacksFileSchema.parse(parse(await config('packs.yaml')))).toEqual({
     routing: { prompt: 'Preferences: Opus for reviews.' },
   });
-  expect(report.note).toContain('v4’s default prompt in front of that text is not added');
   await raw('config/pack.yaml', 'enabled: true\n');
   await raw('config/models-guide.yaml', 'routing:\n  prompt: Keep Opus for reviews.\nmodels:\n  - FAKE-MODEL\n');
   report = await packsStep.run(f.ctx());
@@ -222,6 +221,30 @@ test('J-0052 a home with preferences and no guide file, or a guide of prose alon
     enabled: true,
     routing: { prompt: 'Keep Opus for reviews.' },
   });
+});
+
+test('J-0052 prose-only home: the report names that the default prompt prefix was not added', async () => {
+  const LINE =
+    'routing prose carried alone: v4 would have prefixed the default prompt, this converter reads no catalogs';
+  await raw('config/pack.yaml', 'routingPreferences: Opus for reviews.\n');
+  const report = await packsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  // The prompt is the prose alone: no default prompt in front of it.
+  expect(PacksFileSchema.parse(parse(await config('packs.yaml'))).routing?.prompt).toBe(
+    'Preferences: Opus for reviews.',
+  );
+  // The exact line, as its own entry of the report's note.
+  expect((report.note ?? '').split('; ')).toContain(LINE);
+});
+
+test('J-0052 a home with use cases renders them with the head, so the report carries no prose-alone line', async () => {
+  await raw('config/pack.yaml', 'routingPreferences: Opus for reviews.\n');
+  await raw(
+    'config/models-guide.yaml',
+    'useCases:\n  - title: Hard planning\n    candidates:\n      - model: FAKE-MODEL\n',
+  );
+  const report = await packsStep.run(f.ctx());
+  expect(report.note ?? '').not.toContain('routing prose carried alone');
 });
 
 test('J-0052 a prompt the guide already has is never overwritten, a guide that only described models and a home with no old keys get no prompt, and a too-long rendering is cut with the use cases whole', async () => {

@@ -158,6 +158,14 @@ const foldedWhy = (folded: boolean): string =>
     ? "the old guide's key, which v4 renders into the ONE routing prompt once at boot and this home had not yet: its words are rendered into routing.prompt exactly as v4 would have (see the notes); v5 reads the key itself nowhere"
     : "the old guide's key, which v4 renders into the routing prompt once at boot and this home had not yet; this home's prompt is its own (v4 never overwrote one) or the key said nothing a prompt could carry, so v5 reads it nowhere and its prompt is the file's own, else the one rendered from the model catalogs";
 
+/**
+ * The report line for a home with routing prose and no use cases (J-0052, britnee's acceptance): v4 would have put the
+ * default prompt, which it renders from the model catalogs, in front of the prose; this converter reads no catalogs, so
+ * the prose is carried ALONE and the line says so.
+ */
+const PROSE_CARRIED_ALONE =
+  'routing prose carried alone: v4 would have prefixed the default prompt, this converter reads no catalogs';
+
 const KEY_FILE = { useCases: V4_MODELS_GUIDE_YAML, routing: V4_MODELS_GUIDE_YAML, routingPreferences: V4_PACK_YAML };
 
 /**
@@ -187,8 +195,9 @@ function renderOldGuide(
       why: 'it described the old guide, which is rendered into the prompt now (v4 removed it the same way)',
     });
   plan.notes.push(
-    `routing prompt: rendered from ${rendered.used.map(key => `${KEY_FILE[key]} ${key}`).join(', ')} into one prompt exactly as v4 does once at boot${rendered.cut ? ' (cut to fit the prompt limit, use cases kept whole)' : ''}${rendered.defaultHead ? '; the model catalogs are not read here, so v4’s default prompt in front of that text is not added and v5 reads this text alone' : ''}`,
+    `routing prompt: rendered from ${rendered.used.map(key => `${KEY_FILE[key]} ${key}`).join(', ')} into one prompt exactly as v4 does once at boot${rendered.cut ? ' (cut to fit the prompt limit, use cases kept whole)' : ''}`,
   );
+  if (rendered.defaultHead) plan.notes.push(PROSE_CARRIED_ALONE);
   count(plan, 'routing prompt rendered from the old guide');
   return rendered;
 }
