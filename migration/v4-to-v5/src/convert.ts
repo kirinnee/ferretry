@@ -27,6 +27,11 @@ export interface ConvertOptions {
    * conversion: nothing here changes it.
    */
   readonly preview?: boolean;
+  /**
+   * With `preview`: the REAL v4 home the staged copy in `from` was taken from. A ferret whose folder is inside it, or
+   * inside its `-worktrees` sibling, is written with the preview's own empty `workspace` folder instead.
+   */
+  readonly previewV4Home?: string;
 }
 
 export type ConvertResult =
@@ -45,7 +50,9 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     v4: v4Paths(options.from),
     v5: v5Writer(options.to, { dryRun: options.dryRun }),
     dryRun: options.dryRun,
-    ...(options.preview === true ? { preview: true } : {}),
+    ...(options.preview === true
+      ? { preview: true, ...(options.previewV4Home === undefined ? {} : { previewV4Home: options.previewV4Home }) }
+      : {}),
     ...(options.host === undefined ? {} : { host: options.host }),
   };
 

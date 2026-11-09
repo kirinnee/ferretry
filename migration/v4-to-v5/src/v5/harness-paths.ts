@@ -18,6 +18,22 @@ export function inside(parent: string, child: string) {
   return path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path) ? undefined : path;
 }
 
+/** The preview home's own folder for ferrets that lost theirs (`prepare` makes it). */
+export const PREVIEW_WORKSPACE = 'workspace';
+
+/**
+ * The preview's folder for a ferret: `folder` unchanged, unless it lies inside v4's home or v4's managed worktree root
+ * (its `-worktrees` sibling), where a resumed ferret would run a new agent in a live v4 checkout. Those ferrets get the
+ * preview's own empty `workspace` folder, and the dry run and the gaps say they lost their folder.
+ */
+export function previewFolder(ctx: StepContext, folder: string): string {
+  const home = ctx.previewV4Home;
+  if (ctx.preview !== true || home === undefined) return folder;
+  return inside(home, folder) !== undefined || inside(`${home}-worktrees`, folder) !== undefined
+    ? ctx.v5.resolve(PREVIEW_WORKSPACE)
+    : folder;
+}
+
 /** Rewrite metadata only. Never read a transcript or follow its former home links. */
 export function rewriteTranscript(
   ctx: StepContext,

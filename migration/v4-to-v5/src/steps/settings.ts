@@ -182,6 +182,15 @@ const contents = (document: Document): YAMLMap => document.contents as YAMLMap;
 
 // ── the plan ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Writes `key: value` into a planned file (made if absent), replacing whatever v4 said for that key. */
+function forceFlag(plan: Plan, target: V5ConfigTarget, key: string, value: boolean): void {
+  const planned = place(plan, target, undefined, 'the preview');
+  if (!isMap(planned.document.contents)) planned.document.contents = planned.document.createNode({}) as YAMLMap;
+  const map = contents(planned.document);
+  take(map, key);
+  map.items.push(new Pair(key, value));
+}
+
 function place(plan: Plan, target: V5ConfigTarget, name: string | undefined, from: string, document?: Document) {
   const path = configPath(target, name);
   const existing = plan.files.get(path);
@@ -444,10 +453,10 @@ async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: r
   const ordered = [...listing.files].sort((a, b) => Number(a.label === machine) - Number(b.label === machine));
   for (const file of ordered) await planFile(ctx, plan, file, resolve);
   if (ctx.preview === true) {
-    // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say).
-    const runtimes = contents(place(plan, RUNTIMES_CONFIG, undefined, 'the preview').document);
-    take(runtimes, 'autoResume');
-    runtimes.items.push(new Pair('autoResume', false));
+    // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say), and it never
+    // touches v4's systemd fleet slice: with limits off every launch is direct execution (no `systemctl set-property`).
+    forceFlag(plan, RUNTIMES_CONFIG, 'autoResume', false);
+    forceFlag(plan, LimitsConfigFile, 'enabled', false);
   }
   return { ...plan, ignored: listing.ignored };
 }

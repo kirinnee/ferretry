@@ -1,8 +1,8 @@
 /**
- * bun migration/v4-to-v5/preview/main.ts <guard|dry-run|prepare|wrapper|clean|stop> [--v4 <home>] [--target <home>]
+ * bun migration/v4-to-v5/preview/main.ts <guard|dry-run|prepare|wrapper|proof|clean|stop> [--v4 <home>] [--target <home>]
  *
  * `guard` prints the resolved preview home after refusing one that could reach v4. `dry-run` touches nothing.
- * `prepare` makes the preview home (OWNER-run, after review). `wrapper` writes `<target>/bin/fy5`. `clean` removes a
+ * `prepare` makes the preview home (OWNER-run, after review). `wrapper` writes `<target>/bin/fy5` and the `fy`, `fyd` and `fyd-browser-worker` shims. `proof` compares v4 with the snapshot `prepare` took. `clean` removes a
  * marked preview home. `stop` SIGTERMs the process that holds the preview home's daemon lock. Nothing here starts a
  * daemon, a service or a terminal.
  */
@@ -11,13 +11,13 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { hostLockProbe } from '../src/preflight.ts';
-import { cleanPreview, dryRun, prepare, wrapperText } from './driver.ts';
+import { cleanPreview, dryRun, PREVIEW_PROGRAMS, prepare, proofNow, shimText, wrapperText } from './driver.ts';
 import { guardTarget } from './paths.ts';
 import { PREVIEW } from './plan.ts';
 import { pidsHolding, stopPreview } from './stop.ts';
 
 const USAGE =
-  'usage: bun preview/main.ts <guard|dry-run|prepare|wrapper|clean|stop> [--v4 <v4 home>] [--target <preview home>]';
+  'usage: bun preview/main.ts <guard|dry-run|prepare|wrapper|proof|clean|stop> [--v4 <v4 home>] [--target <preview home>]';
 
 async function main(argv: readonly string[]): Promise<number> {
   let parsed: ReturnType<
@@ -50,10 +50,18 @@ async function main(argv: readonly string[]): Promise<number> {
       console.log(`${v4Home}\n${target}`);
       return 0;
     case 'dry-run':
-      console.log(await dryRun(v4Home, target));
+      console.log(
+        await dryRun(v4Home, target, homedir(), { v4Given: parsed.values.v4, homeGiven: [process.env.HOME ?? ''] }),
+      );
       return 0;
     case 'prepare': {
-      const done = await prepare({ v4Home, target, lock: hostLockProbe(), now: () => new Date() });
+      const done = await prepare({
+        v4Home,
+        target,
+        lock: hostLockProbe(),
+        now: () => new Date(),
+        ...(parsed.values.v4 === undefined ? {} : { v4Given: parsed.values.v4 }),
+      });
       console.log(done.summary);
       console.log(
         `copied while v4 was running: ${done.changedWhileCopying.length} file(s) changed between the two passes`,
@@ -73,11 +81,34 @@ async function main(argv: readonly string[]): Promise<number> {
     case 'wrapper': {
       await mkdir(join(target, 'bin'), { recursive: true, mode: 0o700 });
       const path = join(target, 'bin', PREVIEW.wrapper);
-      await writeFile(path, wrapperText(target), { mode: 0o755 });
+      await writeFile(path, wrapperText(target, v4Home), { mode: 0o755 });
       await chmod(path, 0o755);
       console.log(`wrote ${path}`);
+      for (const name of PREVIEW_PROGRAMS) {
+        const shim = join(target, 'bin', name);
+        await writeFile(shim, shimText(target, name), { mode: 0o755 });
+        await chmod(shim, 0o755);
+        console.log(`wrote ${shim}`);
+      }
       return 0;
     }
+    case 'proof':
+      try {
+        const verdict = await proofNow(v4Home, target);
+        console.log(
+          verdict.unchanged
+            ? 'v4 proof: unchanged since prepare'
+            : `v4 proof: DIFFERENT since prepare (a config file you edited in v4 yourself also shows here)\n${verdict.changed.map(p => `  ${p}`).join('\n')}`,
+        );
+        if (verdict.v4Wrote.length > 0)
+          console.log(
+            `v4 rewrote these credential files by itself (stat only):\n${verdict.v4Wrote.map(p => `  ${p}`).join('\n')}`,
+          );
+        return verdict.unchanged ? 0 : 3;
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        return 1;
+      }
     case 'clean':
       try {
         console.log(await cleanPreview(v4Home, target));

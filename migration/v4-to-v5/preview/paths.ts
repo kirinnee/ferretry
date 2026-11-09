@@ -32,6 +32,35 @@ export function resolveReal(path: string): string {
   }
 }
 
+/**
+ * Like {@link resolveReal}, but a link that does not resolve (dangling, or a loop) is REFUSED, component by component:
+ * a write through such a link would land wherever the link later points, and `realpath` cannot say where that is now.
+ */
+export function resolveStrict(path: string): string {
+  const absolute = resolve(path);
+  const parts = absolute.split(sep).filter(Boolean);
+  let current: string = sep;
+  for (let index = 0; index < parts.length; index++) {
+    const next = join(current, parts[index] as string);
+    let info: ReturnType<typeof lstatSync>;
+    try {
+      info = lstatSync(next);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return join(current, ...parts.slice(index));
+      throw new Error(`${next} cannot be inspected (${code ?? 'error'}); refused`);
+    }
+    if (info.isSymbolicLink()) {
+      try {
+        current = realpathSync(next);
+      } catch {
+        throw new Error(`${next} is a link that does not resolve (dangling or a loop); refused`);
+      }
+    } else current = next;
+  }
+  return current;
+}
+
 const inside = (parent: string, child: string): boolean => {
   const rel = relative(parent, child);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
@@ -47,21 +76,37 @@ export interface Guarded {
 /** Throws a sentence when `target` could reach v4's home, the user's home or `/`. Returns the resolved paths. */
 export function guardTarget(v4Input: string, targetInput: string, home: string = homedir()): Guarded {
   if (targetInput.trim() === '') throw new Error('the preview home must be named');
+  if (!isAbsolute(targetInput))
+    throw new Error(
+      `the preview home must be an absolute path (a "~" or a relative name is not expanded here): ${targetInput}`,
+    );
+  if (!isAbsolute(v4Input)) throw new Error(`v4's home must be an absolute path: ${v4Input}`);
   if (targetInput.split(/[\\/]+/u).includes('..') || v4Input.split(/[\\/]+/u).includes('..'))
     throw new Error('a path with ".." is refused: name the folder in full');
-  const v4Home = resolveReal(v4Input);
-  const target = resolveReal(targetInput);
+  const v4Home = resolveStrict(v4Input);
+  const target = resolveStrict(targetInput);
   const staging = `${target}.staging`;
+  const stagingResolved = resolveStrict(staging);
   const userHome = resolveReal(home);
+  // v4's home as the caller named it, AND the places v4 lives by default (the real user's, and the `home` given), each
+  // with its managed-worktree sibling: whatever `--v4` says, none of them may be written to or removed.
+  const protectedHomes = new Set<string>();
+  for (const base of [v4Home, resolveReal(join(homedir(), '.ferretry')), resolveReal(join(home, '.ferretry'))]) {
+    protectedHomes.add(base);
+    protectedHomes.add(`${base}-worktrees`);
+  }
   for (const [label, folder] of [
     ['the preview home', target],
-    ['its staging copy', resolveReal(staging)],
+    ['its staging copy', stagingResolved],
   ] as const) {
     if (folder === sep || folder === resolve('/')) throw new Error(`${label} must not be the root of the disk`);
     if (folder === userHome) throw new Error(`${label} must not be your home directory`);
     if (inside(folder, userHome)) throw new Error(`${label} must not hold your home directory`);
-    if (inside(v4Home, folder)) throw new Error(`${label} must not be v4's home or inside it`);
-    if (inside(folder, v4Home)) throw new Error(`${label} must not hold v4's home`);
+    for (const guarded of protectedHomes) {
+      if (inside(guarded, folder))
+        throw new Error(`${label} must not be v4's home (or its worktree folder) or inside it`);
+      if (inside(folder, guarded)) throw new Error(`${label} must not hold v4's home (or its worktree folder)`);
+    }
   }
   return { v4Home, target, staging };
 }

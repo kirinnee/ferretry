@@ -19,6 +19,7 @@ set -euo pipefail
 #   2. Generates an Ed25519 key in a 0600 file inside a 0700 temp directory and sets it as the environment secret
 #      PWA_RELEASE_SIGNING_KEY, through STDIN. The private key is never printed, logged, put in an argument or an
 #      environment variable, and the temp directory is removed on every exit.
+#   0. FIRST (before anything is created) asks for the Cloudflare values and checks for a terminal.
 #   3. REQUIRES a Cloudflare API token and account id for the `ferretry-v5` Pages project, and sets them in
 #      `pwa-deploy-v5` through hidden prompts and stdin, never argv and never echoed. A blank answer, or no terminal,
 #      stops the script: there is no fallback. They have names of their own (CLOUDFLARE_PAGES_V5_API_TOKEN and
@@ -61,6 +62,30 @@ else
   repo="${repo:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}"
 fi
 echo "📝 repository: ${repo}"
+
+# ─── 0. everything that can fail on the person comes BEFORE anything is created, set or generated ──
+# The terminal check and both Cloudflare prompts first, so a blank answer, Ctrl-C or no terminal leaves GitHub as it was
+# (no signing key set whose public half was never printed). The values live only in two variables, never in argv.
+cf_secrets=(CLOUDFLARE_PAGES_V5_API_TOKEN CLOUDFLARE_PAGES_V5_ACCOUNT_ID)
+cf_token=""
+cf_account=""
+if [[ ${dry_run} -eq 1 ]]; then
+  for secret in "${cf_secrets[@]}"; do
+    echo "⚙️  [dry-run] would REQUIRE, with a hidden prompt and BEFORE any key is made, ${secret} (a blank answer or no terminal stops here)"
+  done
+else
+  set +x # a traced run would print the values below
+  if [[ ! -t 0 ]]; then
+    echo "❌ no terminal for the Cloudflare prompts, and there is no fallback to a repository secret; run this script in a terminal" >&2
+    exit 1
+  fi
+  read -r -s -p "Paste CLOUDFLARE_PAGES_V5_API_TOKEN for ${deploy_env} (hidden; required; a Pages-only token for ferretry-v5): " cf_token
+  echo
+  [[ -n ${cf_token} ]] || { echo "❌ CLOUDFLARE_PAGES_V5_API_TOKEN is required: the deploy never falls back to a repository-level Cloudflare token" >&2 && exit 1; }
+  read -r -s -p "Paste CLOUDFLARE_PAGES_V5_ACCOUNT_ID for ${deploy_env} (hidden; required): " cf_account
+  echo
+  [[ -n ${cf_account} ]] || { echo "❌ CLOUDFLARE_PAGES_V5_ACCOUNT_ID is required" >&2 && exit 1; }
+fi
 
 # ─── 1. the environments, restricted to the branch before anything can run ──────────────────────
 for environment in "${signing_env}" "${deploy_env}"; do
@@ -113,29 +138,24 @@ else
   public_key="$(openssl pkey -in "${key_file}" -pubout)"
   rm -rf "${key_dir}"
   echo "✅ the signing key is set; the private half is gone from this machine"
+  # Printed NOW, so a later failure never leaves a key set whose public half was never shown.
+  echo "📝 the preview's PUBLIC release key (also printed at the end):"
+  echo "${public_key}"
 fi
 
-# ─── 3. the Cloudflare credentials, required ───────────────────────────────────────────────────
-for secret in CLOUDFLARE_PAGES_V5_API_TOKEN CLOUDFLARE_PAGES_V5_ACCOUNT_ID; do
-  if [[ ${dry_run} -eq 1 ]]; then
-    echo "⚙️  [dry-run] would REQUIRE, with a hidden prompt, ${secret} (a blank answer or no terminal stops here); then: printf '%s' <value> | gh secret set ${secret} --env ${deploy_env}"
-    continue
-  fi
-  if [[ ! -t 0 ]]; then
-    echo "❌ no terminal for the ${secret} prompt, and there is no fallback to a repository secret; run this script in a terminal" >&2
-    exit 1
-  fi
-  read -r -s -p "Paste ${secret} for ${deploy_env} (hidden; required; a Pages-only token for ferretry-v5): " value
-  echo
-  if [[ -z ${value} ]]; then
-    echo "❌ ${secret} is required: the deploy never falls back to a repository-level Cloudflare token" >&2
-    exit 1
-  fi
-  # `printf` is a shell builtin, so no process's arguments carry the value.
-  printf '%s' "${value}" | gh secret set "${secret}" --env "${deploy_env}" --repo "${repo}"
-  unset value
-  echo "✅ ${secret} set in ${deploy_env}"
-done
+# ─── 3. the Cloudflare credentials, set from the variables read in step 0 ───────────────────────
+if [[ ${dry_run} -eq 1 ]]; then
+  for secret in "${cf_secrets[@]}"; do
+    echo "⚙️  [dry-run] would set ${secret} in ${deploy_env} through stdin: printf '%s' <value> | gh secret set ${secret} --env ${deploy_env}"
+  done
+else
+  # `printf` is a shell builtin, so no process's arguments carry a value.
+  printf '%s' "${cf_token}" | gh secret set CLOUDFLARE_PAGES_V5_API_TOKEN --env "${deploy_env}" --repo "${repo}"
+  echo "✅ CLOUDFLARE_PAGES_V5_API_TOKEN set in ${deploy_env}"
+  printf '%s' "${cf_account}" | gh secret set CLOUDFLARE_PAGES_V5_ACCOUNT_ID --env "${deploy_env}" --repo "${repo}"
+  echo "✅ CLOUDFLARE_PAGES_V5_ACCOUNT_ID set in ${deploy_env}"
+  unset cf_token cf_account
+fi
 
 # ─── 4. the public key and the next step ───────────────────────────────────────────────────────
 echo "📝 the preview's PUBLIC release key:"

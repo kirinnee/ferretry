@@ -33,7 +33,7 @@ import {
 import { isAbsolute, join, sep } from 'node:path';
 import { z } from 'zod';
 import type { KeptItem } from '../report.ts';
-import { agentHomesRoot, inside } from '../v5/harness-paths.ts';
+import { agentHomesRoot, inside, previewFolder } from '../v5/harness-paths.ts';
 import { info, json, type V4Config } from '../v4/ferrets.ts';
 import { MAX_AGENT_PINS, V4AgentPinFile, V4PinSnapshot } from '../v4/pins.ts';
 import type { StepContext } from './index.ts';
@@ -127,6 +127,7 @@ export function sessionConfigDocument(
   const body: Json = {
     ...kept,
     agent: isName ? source.runtime : wrapper(ctx, source.runtime, agent),
+    ...(preview ? { cwd: previewFolder(ctx, source.config.cwd) } : {}),
     ...(command === undefined || preview
       ? {}
       : {

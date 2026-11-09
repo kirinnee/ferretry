@@ -47,6 +47,8 @@ export interface StepContext {
   readonly dryRun: boolean;
   /** The try-it preview (see `ConvertOptions.preview`): carry nothing that points into, or authenticates against, v4. */
   readonly preview?: boolean;
+  /** With `preview`: the real v4 home the staged copy came from (see `ConvertOptions.previewV4Home`). */
+  readonly previewV4Home?: string;
   /** Absent in tests that do not read the host: a step needing it then reads nothing and says so. */
   readonly host?: HostFacts;
 }

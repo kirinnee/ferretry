@@ -17,9 +17,13 @@ set -euo pipefail
 #                                             an older 5.0 commit (or a branch cut from one) runs the old, unguarded file.
 #   everything else                          no tag trigger; every job that can write, use an environment or read a
 #                                             secret is gated on main (the preview's own workflow on rebuild/5.0).
-#   THE REST needs the owner's repository tag ruleset (scripts/local/setup-release-tag-ruleset.sh): only the release
-#   actor may create a v* tag, so no workflow ever has to be trusted to refuse one. Until it is applied, any agent with
-#   push access can tag an old commit and publish.
+#   THE TAG RULESET (scripts/local/setup-release-tag-ruleset.sh) refuses Write-role collaborators only. On this
+#   repository every agent pushes as the owner (Admin), so it does NOT stop an agent's tag. What stops a 5.0 tag from
+#   publishing is cd.yaml's main-only job: the tagged commit must be on main, and EVERY other job of cd.yaml (compile,
+#   the macOS smoke, GoReleaser publish, the Casks commit inside it, the signature) depends on it, directly or through
+#   another job. This script proves that dependency below. Declared gap: an agent with the owner's credential can still
+#   push a v* tag; it cannot publish from a 5.0 commit made after main-only existed (a tag runs the workflow file AT THE
+#   TAGGED COMMIT, so an older commit runs the file it carries).
 #
 # WHAT IS CHECKED (per workflow, with yq and jq; `--root <dir>` checks another checkout).
 #   1. Release (semantic-release): its only trigger is a `workflow_run` of CI on `main`, and its job repeats the
@@ -81,6 +85,13 @@ if [[ -f ${cd_workflow} ]]; then
     fail "${cd_workflow}: goreleaser's if must require a successful compile, which main-only gates"
   json "${cd_workflow}" | jq -e '.jobs.goreleaser.needs | index("compile") != null' >/dev/null ||
     fail "${cd_workflow}: goreleaser must need compile"
+  # EVERY job other than main-only must depend on it, directly or through other jobs (a new publishing job cannot skip it).
+  unguarded="$(json "${cd_workflow}" | jq -r '
+    .jobs as $jobs
+    | def needs($j): ($jobs[$j].needs // []) | if type == "array" then . else [.] end;
+      def reach($j): needs($j) as $direct | $direct + ($direct | map(reach(.)) | add // []);
+    $jobs | keys[] | select(. != "main-only") | select([reach(.)[] | select(. == "main-only")] | length == 0)')"
+  [[ -z ${unguarded} ]] || fail "${cd_workflow}: job(s) not behind main-only, so a tag off main could run them: ${unguarded//$'\n'/, }"
 fi
 
 # 3. Everything else that can write, use an environment or read a secret
@@ -126,4 +137,4 @@ for workflow in "${workflows[@]}"; do
 done
 
 ((status == 0)) || exit 1
-echo "✅ these workflows hold every release link to main for commits from here on; the repository tag ruleset (scripts/local/setup-release-tag-ruleset.sh) covers the rest; the preview deploys from rebuild/5.0 alone"
+echo "✅ every job of cd.yaml sits behind main-only, so a tag off main publishes nothing (for commits that carry this file); the tag ruleset refuses Write-role collaborators only and does not stop an agent pushing as the owner (Admin); the preview deploys from rebuild/5.0 alone"

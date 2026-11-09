@@ -9,14 +9,16 @@ set -euo pipefail
 #   prepare   copy a snapshot of v4 (credentials left out by path), convert it into the preview home, prove v4 unchanged,
 #             write the `fy5` wrapper. Never stops or writes to v4.
 #   build     compile fy, fyd and the browser worker from a CLEAN rebuild/5.0 checkout with the preview app origin, prove
-#             the compiled binaries name that origin, and only then install them into <target>/bin. Needs the preview
-#             signing key committed on that checkout (setup-pwa-release-v5.sh).
+#             the compiled binaries name that origin, and only then install them into <target>/libexec (bin holds shims
+#             that pin the preview). Refuses unless the preview signing key is committed on that checkout
+#             (packages/app/release-signing-key.preview.pub, from setup-pwa-release-v5.sh).
 #   start     fy5 daemon start         (port 7458, own home, own terminal socket, no service unit)
 #   stop      SIGTERM the process proven to hold the preview home's own daemon lock (never v4's, never a unit)
 #   status    fy5 daemon status
+#   proof     compare v4 now with the snapshot `prepare` took (run it after a start and a stop); names only
 #   clean     remove the preview home, only if `prepare` marked it. Refuses while the preview daemon answers.
 #
-# fy5 itself refuses `daemon stop|restart|update|install|uninstall|reset`: on a box with v4's service unit they answer
+# fy5 itself refuses `update` and `daemon stop|restart|update|install|uninstall|reset|which|logs`: on a box with v4's service unit they answer
 # for v4's unit and write claim files beside it. Use this script's `stop` instead.
 #
 # v4 stays on 7457 under ~/.ferretry. Nothing here touches it, installs a systemd or launchd unit, or mints a pairing
@@ -69,7 +71,8 @@ dry-run) run_tool dry-run ;;
 prepare)
   # Never opens a v4 file before the preview home is known to be new.
   if [ -e "${target}" ] && [ -n "$(ls -A "${target}" 2>/dev/null)" ]; then
-    echo "${target} already exists; run '$0 clean' first" >&2
+    echo "${target} already exists; run '$0 clean' first. If clean refuses it (a prepare that died before its marker), remove it yourself:" >&2
+    echo "  rm -rf '${target}' '${target}.staging'" >&2
     exit 1
   fi
   run_tool prepare
@@ -94,6 +97,12 @@ build)
     echo "refusing to build: ${source_dir} has uncommitted changes; commit or stash them first" >&2
     exit 1
   fi
+  # The daemon is signed against the PREVIEW key: without the committed public half it would trust nothing the v5 app signs.
+  if [ ! -f "${source_dir}/packages/app/release-signing-key.preview.pub" ]; then
+    echo "refusing to build: ${source_dir}/packages/app/release-signing-key.preview.pub is missing." >&2
+    echo "Owner step: run scripts/local/setup-pwa-release-v5.sh, commit the public key it prints to rebuild/5.0 at that path, then build again." >&2
+    exit 1
+  fi
   app_origin="$(fact appOrigin)"
   out="$(mktemp -d)"
   trap 'rm -rf "${out}"' EXIT
@@ -105,15 +114,17 @@ build)
       exit 1
     fi
   done
-  mkdir -p "${target}/bin"
+  # The raw programs go to libexec; `prepare` writes pinning shims of the same names into bin (never v4's `fy` from PATH).
+  mkdir -p "${target}/libexec"
   for name in fy fyd fyd-browser-worker; do
-    install -m 0755 "${out}/${name}-linux-x64-baseline" "${target}/bin/${name}"
+    install -m 0755 "${out}/${name}-linux-x64-baseline" "${target}/libexec/${name}"
   done
-  echo "installed fy, fyd and fyd-browser-worker into ${target}/bin"
+  echo "installed fy, fyd and fyd-browser-worker into ${target}/libexec"
   ;;
 start) fy5 daemon start ;;
 stop) run_tool stop ;;
 status) fy5 daemon status ;;
+proof) run_tool proof ;;
 clean)
   port="$(fact port)"
   if (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null || { [ -x "${target}/bin/fy5" ] && fy5 daemon status >/dev/null 2>&1; }; then
@@ -124,7 +135,7 @@ clean)
   run_tool clean
   ;;
 *)
-  echo "usage: $0 <dry-run|prepare|build|start|stop|status|clean> [--v4 <home>] [--target <home>] [--source <5.0 checkout>]" >&2
+  echo "usage: $0 <dry-run|prepare|build|start|stop|status|proof|clean> [--v4 <home>] [--target <home>] [--source <5.0 checkout>]" >&2
   exit 64
   ;;
 esac

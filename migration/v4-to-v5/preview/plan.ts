@@ -260,3 +260,24 @@ export function stepPlan(steps: readonly Step[] = STEPS): StepPlan {
     unknown: SKIPPED_STEPS.filter(entry => !known.has(entry.id)).map(entry => entry.id),
   };
 }
+
+// ─── the known gaps ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the preview does NOT protect, in plain words. The dry run prints this list, and the owner reads it before
+ * `prepare`. A gap is a thing the owner must know, not a promise that it is handled.
+ */
+export const GAPS: readonly string[] = [
+  "The preview's ferrets can read the preview's own private files until the fence unit lands.",
+  'Onboarding\'s "import from this machine", and adding a login with `store: host`, would use YOUR real sign-in (the one under your home folder). Do neither in the preview; add logins fresh.',
+  "No resource limits in the preview: limits.yaml says `enabled: false`, so no preview ferret is placed in a systemd slice. If it were on, the preview would reconfigure v4's live `ferretry_fleet.slice`, which has the same name.",
+  "Ferrets whose folder was inside v4's home or v4's worktree folder lost their folder: they point at an empty `workspace` folder in the preview home, so a resumed one never runs in a live v4 checkout. Ferrets in any other folder keep that folder and CAN change real files there when you resume them.",
+  'Every ferret is stopped and nothing resumes by itself. Starting one in the preview starts a new agent; it does not continue the v4 conversation.',
+  "An agent with your GitHub credential can still push a `v*` tag; it cannot publish from a 5.0 commit. What stops a 5.0 tag from publishing is cd.yaml's main-only job (the tagged commit must be on main). The tag ruleset refuses Write-role collaborators only; every agent here pushes as you (Admin), so it does not stop an agent's tag.",
+  'The preview signing key is only as safe as push access to rebuild/5.0: whoever can push that branch can change what the v5 app signs.',
+  "`fy5` pins the preview address, so the preview CLI never talks to v4. A tool started OUTSIDE `fy5` (a bare `fy` from your normal shell) is v4's, and is not stopped by anything here.",
+  'Harness updates started from the preview (Claude Code or Codex "update") run npm or the native updater on YOUR installed tools. They only run when you ask for them.',
+  "The preview daemon asks the user systemd manager one read-only question when it starts (`systemctl --user show-environment`) and runs an `ionice` probe. It changes nothing of v4's.",
+  "tmux: the preview uses its own socket under its home (<home>/state/terminals/tmux.sock), so it is a different tmux server from v4's.",
+  "The lifecycle claim files beside v4's service unit are only written by a lifecycle verb (stop, restart, install, uninstall, reset, update). `fy5` refuses those; `preview.sh proof` checks that none appeared.",
+];

@@ -7,7 +7,7 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { join } from 'node:path';
 import type { StepReport } from '../report.ts';
-import { rewriteTranscript } from '../v5/harness-paths.ts';
+import { previewFolder, rewriteTranscript } from '../v5/harness-paths.ts';
 import { configs, json, paneFor, runtimeIds, runtimeName, State } from '../v4/ferrets.ts';
 import type { Step } from './index.ts';
 import { type DetailsSource, prepareDetails } from './ferret-details.ts';
@@ -116,7 +116,7 @@ export const ferretsStep: Step = {
           harness: config.harness === 'claude' ? 'claude-code' : 'codex',
           runner: 'tmux',
           runtime,
-          folder: config.cwd,
+          folder: previewFolder(ctx, config.cwd),
           state:
             stopped || preview
               ? 'stopped'

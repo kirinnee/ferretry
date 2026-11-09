@@ -5,13 +5,15 @@
  */
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { convert } from '../src/convert.ts';
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
-import { ALLOWED, LEFT_BEHIND, PREVIEW, SESSION_FILES, stepPlan } from './plan.ts';
+import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
+import { gateFiles, gateForecast, type Spellings } from './gate.ts';
+import { ALLOWED, GAPS, LEFT_BEHIND, PREVIEW, SESSION_FILES, stepPlan } from './plan.ts';
 import { guardTarget, hasMarker, PREVIEW_MARKER, PREVIEW_MARKER_TEXT } from './paths.ts';
-import { compare, snapshot, VOLATILE, type Verdict } from './proof.ts';
+import { compare, parseSnapshot, PROOF_FILE, snapshot, VOLATILE, type HostFacts, type Verdict } from './proof.ts';
 import { stage, walk } from './stage.ts';
 
 const mib = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
@@ -19,8 +21,14 @@ const mib = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 /** The staging folder is a private copy; it sits beside the preview home, never inside v4's. */
 export const stagingFor = (target: string) => `${target}.staging`;
 
-export async function dryRun(v4Home: string, target: string): Promise<string> {
+export async function dryRun(
+  v4Home: string,
+  target: string,
+  home: string = homedir(),
+  given: Spellings = {},
+): Promise<string> {
   const walked = await walk(v4Home);
+  const forecast = await gateForecast(v4Home, home, walked.files, given);
   const plan = stepPlan();
   const groups = new Map<string, { files: number; bytes: number }>();
   for (const file of walked.files) {
@@ -56,7 +64,20 @@ export async function dryRun(v4Home: string, target: string): Promise<string> {
     'IN THE PREVIEW HOME EVERY FERRET IS STOPPED: no launch command, no terminal handle, no transcript pointer, no',
     'credential hash, no token ledger, no worktree ownership. The runtimes config says autoResume: false.',
     'LOGINS ARE LEFT OUT ENTIRELY (config/logins is not copied): you add logins fresh in the preview.',
-    `LAST GATE: the home is refused (files named, never their content) if any file holds "${v4Home}/", "<your home>/.claude" or "<your home>/.codex".`,
+    'LAST GATE: only fields that are EXECUTED or RESOLVED AS PATHS are checked (a ferret command, agent, folder, env and flags; every',
+    'command, argument, env value, home and path of a runtime, profile, component, preset or MCP server). Free text (messages, events,',
+    'prompts, notes) is neither gated nor redacted. A hit refuses the whole home, naming file and field, never the value. Spellings',
+    'checked: v4 home and its -worktrees folder (resolved, as given, ~/, $HOME, ${HOME}, URL-encoded) and <home>/.claude*, .codex*.',
+    forecast.length === 0
+      ? 'GATE FORECAST: no file of the copy would be hit (a lower bound: the converter rewrites some ferret fields).'
+      : `GATE FORECAST: ${forecast.length} field(s) the gate would hit (the home would be refused):`,
+    ...forecast.map(line => `  ${line}`),
+    `FOLDERS: a ferret whose folder is inside v4's home or its worktree folder gets ${join(target, PREVIEW_WORKSPACE)} instead (it lost its folder).`,
+    "RESOURCE LIMITS: none in the preview (limits.yaml: enabled: false), so v4's systemd fleet slice is never touched.",
+    '',
+    '',
+    'KNOWN GAPS:',
+    ...GAPS.map(gap => `  - ${gap}`),
     '',
     'THEN: fresh daemon identity and empty vault come from the 5.0 daemon at first start; nothing from v4 is reused.',
     `START (owner): ${join(target, 'bin', PREVIEW.wrapper)} daemon start   (FY_HOME, FY_PORT=${PREVIEW.port}, FY_URL pinned to it; no service unit)`,
@@ -74,6 +95,11 @@ export interface PrepareInputs {
   readonly now: () => Date;
   /** The user's home directory, for the path guard and the last gate; defaults to the real one. */
   readonly home?: string;
+  /** v4's home as the caller named it (before links were resolved), so the gate knows that spelling too. */
+  readonly v4Given?: string;
+  /** Where the host keeps `$XDG_RUNTIME_DIR` and the user id, for the lifecycle claim files the proof stats. */
+  readonly runtimeDir?: string | undefined;
+  readonly uid?: number | undefined;
 }
 
 export interface Prepared {
@@ -81,40 +107,8 @@ export interface Prepared {
   readonly summary: string;
   readonly proof: Verdict;
   readonly changedWhileCopying: readonly string[];
-  /** Files (relative, names only) the last gate found naming v4's home or a harness home; the home was removed. */
+  /** `<file>: <field>` lines (names only) the last gate found naming v4 or a harness home; the home was removed. */
   readonly gate: readonly string[];
-}
-
-/**
- * The last gate: every file of the finished home is searched for a path into v4's home or into the user's harness
- * homes. Returns the files' names, never their content. A hit means a path the converter did not scrub could make the
- * preview touch v4.
- */
-export async function gateFiles(target: string, v4Home: string, home: string): Promise<string[]> {
-  const claude = `${home}/.claude`;
-  const codex = `${home}/.codex`;
-  const hits: string[] = [];
-  const scan = async (folder: string): Promise<void> => {
-    for (const entry of await readdir(folder, { withFileTypes: true })) {
-      const path = join(folder, entry.name);
-      if (entry.isDirectory()) await scan(path);
-      else if (entry.isFile()) {
-        const text = (await readFile(path)).toString('latin1');
-        if (namesV4(text, v4Home) || text.includes(claude) || text.includes(codex)) hits.push(relative(target, path));
-      }
-    }
-  };
-  await scan(target);
-  return hits.sort();
-}
-
-/** `v4Home` followed by anything that ends a path component: `<v4 home>-v5` and `<v4 home>.staging` are other folders. */
-function namesV4(text: string, v4Home: string): boolean {
-  for (let at = text.indexOf(v4Home); at >= 0; at = text.indexOf(v4Home, at + 1)) {
-    const next = text[at + v4Home.length];
-    if (next === undefined || !/[\w.-]/u.test(next)) return true;
-  }
-  return false;
 }
 
 /** Stage, convert, delete the staging copy, prove v4 unchanged. Refuses a target that exists and is not empty. */
@@ -126,7 +120,12 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   if (existing !== undefined && existing.length > 0)
     throw new Error(`${target} is not empty; the preview is made once. Run clean first.`);
 
-  const before = await snapshot(v4Home, home);
+  const facts: HostFacts = {
+    userHome: home,
+    runtimeDir: inputs.runtimeDir ?? process.env.XDG_RUNTIME_DIR,
+    uid: inputs.uid ?? process.getuid?.(),
+  };
+  const before = await snapshot(v4Home, facts);
   const staging = guarded.staging;
   await rm(staging, { recursive: true, force: true });
   const staged = await stage(v4Home, staging);
@@ -144,13 +143,14 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
       host: { homeDirectory: emptyHost, env: {} },
       steps: stepPlan().run,
       preview: true,
+      previewV4Home: v4Home,
     });
   } finally {
     await rm(emptyHost, { recursive: true, force: true });
     await rm(staging, { recursive: true, force: true });
   }
 
-  const after = await snapshot(v4Home, home);
+  const after = await snapshot(v4Home, facts);
   const proof = compare(before, after);
   if (result.kind === 'refused')
     return {
@@ -170,17 +170,20 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
       gate: [],
     };
   }
-  const gate = await gateFiles(target, v4Home, home);
+  // The empty folder a ferret that lost its v4 folder points at.
+  await mkdir(join(target, PREVIEW_WORKSPACE), { recursive: true, mode: 0o700 });
+  const gate = await gateFiles(target, v4Home, home, { v4Given: inputs.v4Given, homeGiven: [process.env.HOME ?? ''] });
   if (gate.length > 0) {
     await rm(target, { recursive: true, force: true });
     return {
       report: result.report,
-      summary: `refused: the converted home names v4's home or a harness home in ${gate.length} file(s); it was removed:\n${gate.map(name => `  - ${name}`).join('\n')}`,
+      summary: `refused: ${gate.length} executed or path field(s) of the converted home name v4's home, its worktree folder or a harness home; it was removed:\n${gate.map(name => `  - ${name}`).join('\n')}`,
       proof,
       changedWhileCopying: staged.changed,
       gate,
     };
   }
+  await writeFile(join(target, PROOF_FILE), `${JSON.stringify(before)}\n`, { mode: 0o600 });
   await writeFile(join(target, PREVIEW_MARKER), PREVIEW_MARKER_TEXT, { mode: 0o600 });
   return {
     report: result.report,
@@ -191,12 +194,28 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   };
 }
 
+/**
+ * `preview.sh proof`: compares v4 now with the snapshot `prepare` took before it started. Run it after a start and a
+ * stop. A config file you edited yourself in v4 since then shows up too; names only, never a value.
+ */
+export async function proofNow(v4Home: string, target: string, home: string = homedir()): Promise<Verdict> {
+  const guarded = guardTarget(v4Home, target, home);
+  if (!hasMarker(guarded.target)) throw new Error(`${guarded.target} is not a preview home made by prepare`);
+  const saved = await readFile(join(guarded.target, PROOF_FILE), 'utf8').catch(() => {
+    throw new Error(
+      `${join(guarded.target, PROOF_FILE)} is missing: prepare did not finish, or the folder was changed`,
+    );
+  });
+  const facts: HostFacts = { userHome: home, runtimeDir: process.env.XDG_RUNTIME_DIR, uid: process.getuid?.() };
+  return compare(parseSnapshot(saved), await snapshot(guarded.v4Home, facts));
+}
+
 /** Removes the preview home and its staging copy, and only a folder `prepare` marked. Returns what it removed. */
 export async function cleanPreview(v4Home: string, target: string, home: string = homedir()): Promise<string> {
   const guarded = guardTarget(v4Home, target, home);
   if (!hasMarker(guarded.target))
     throw new Error(
-      `${guarded.target} has no ${PREVIEW_MARKER} marker, so it is not a preview home; nothing was removed`,
+      `${guarded.target} has no ${PREVIEW_MARKER} marker, so it is not a preview home; nothing was removed. If a prepare died before its marker, remove it yourself: rm -rf '${guarded.target}' '${guarded.staging}'`,
     );
   await rm(guarded.target, { recursive: true, force: true });
   await rm(guarded.staging, { recursive: true, force: true });
@@ -204,38 +223,109 @@ export async function cleanPreview(v4Home: string, target: string, home: string 
 }
 
 /** Names the wrapper passes through from the caller's environment (and `LC_*`): nothing else reaches the binary. */
-export const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'SHELL', 'TERM', 'LANG', 'XDG_RUNTIME_DIR'] as const;
+export const ENV_ALLOWLIST = [
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'PATH',
+  'SHELL',
+  'TERM',
+  'LANG',
+  'XDG_RUNTIME_DIR',
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'DBUS_SESSION_BUS_ADDRESS',
+  'SSH_AUTH_SOCK',
+] as const;
 
-/** Daemon verbs the preview never runs through the product's lifecycle: they write claim files beside v4's unit. */
-export const REFUSED_DAEMON_VERBS = ['stop', 'restart', 'update', 'install', 'uninstall', 'reset'] as const;
+/** Daemon verbs the preview never runs through the product's lifecycle: they write claim files beside v4's unit or answer for it. */
+export const REFUSED_DAEMON_VERBS = [
+  'stop',
+  'restart',
+  'update',
+  'install',
+  'uninstall',
+  'reset',
+  'which',
+  'logs',
+] as const;
 
-/** The one place a wrapper's text is made, so a test and the shell entry agree. */
-export function wrapperText(home: string): string {
-  if (/["$`\\\n]/u.test(home))
-    throw new Error('the preview home must not contain a quote, $, backtick, backslash or newline');
+/** The programs the preview ships: raw in `<home>/libexec`, with a pinning shim of the same name in `<home>/bin`. */
+export const PREVIEW_PROGRAMS = ['fy', 'fyd', 'fyd-browser-worker'] as const;
+
+const assertPlain = (path: string, what: string): void => {
+  if (/["$`\\\n:]/u.test(path))
+    throw new Error(`${what} must not contain a quote, $, backtick, backslash, colon or newline`);
+};
+
+/** `<home>/bin/<name>`: pins the preview home, port and address, then runs the preview's own raw program. */
+export function shimText(home: string, name: (typeof PREVIEW_PROGRAMS)[number]): string {
+  assertPlain(home, 'the preview home');
+  const url = `http://127.0.0.1:${PREVIEW.port}`;
+  return [
+    '#!/bin/sh',
+    `# ${name}: the 5.0 preview's own program. Generated; it pins the preview home and address so it never falls back to v4's.`,
+    `exec env FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" "${home}/libexec/${name}" "$@"`,
+    '',
+  ].join('\n');
+}
+
+/** The one place the `fy5` wrapper's text is made, so a test and the shell entry agree. */
+export function wrapperText(home: string, v4Home: string): string {
+  assertPlain(home, 'the preview home');
+  assertPlain(v4Home, "v4's home");
   const url = `http://127.0.0.1:${PREVIEW.port}`;
   const refused = REFUSED_DAEMON_VERBS.map(verb => `daemon:${verb}`).join('|');
   return [
     '#!/bin/sh',
     "# fy5: the 5.0 preview CLI. Generated; it sets the preview home, port and address, never v4's.",
     'set -eu',
-    `case "\${1:-}:\${2:-}" in`,
+    '# The verb is the first word that is not a flag, the subcommand the next.',
+    'verb=""; sub=""',
+    'for word in "$@"; do',
+    '  case "$word" in',
+    '  -*) ;;',
+    '  *)',
+    '    if [ -z "$verb" ]; then verb="$word"; else sub="$word"; break; fi',
+    '    ;;',
+    '  esac',
+    'done',
+    'case "$verb" in',
+    '  update)',
+    '    echo "fy5 does not run update: it would swap programs and restart under v4\'s service unit." >&2',
+    '    exit 64',
+    '    ;;',
+    'esac',
+    'case "$verb:$sub" in',
     `${refused})`,
-    '  echo "fy5 does not run daemon lifecycle verbs: they write claim files beside v4\'s service unit." >&2',
+    '  echo "fy5 does not run this daemon verb: it answers for v4\'s service unit or writes claim files beside it." >&2',
     '  echo "Use the preview script instead: preview.sh start | stop | status | clean." >&2',
     '  exit 64',
     '  ;;',
     'esac',
+    "# PATH: the preview's own bin first (every bare fy, fyd and fyd-browser-worker is then the preview's), and nothing",
+    "# under v4's home or its worktree folder.",
+    `path="${home}/bin"`,
+    'set -f',
+    'old_ifs="$IFS"; IFS=:',
+    'for entry in ${PATH:-}; do',
+    '  case "$entry" in',
+    `  ""|"${home}/bin"|"${v4Home}"|"${v4Home}"/*|"${v4Home}-worktrees"|"${v4Home}-worktrees"/*) ;;`,
+    '  *) path="$path:$entry" ;;',
+    '  esac',
+    'done',
+    'IFS="$old_ifs"; set +f',
+    'PATH="$path"',
     '# Nothing from a v4 ferret or the surrounding shell may reach the preview: the binary runs in an EMPTY environment',
     '# that holds only the allowlist below, and the preview home, port and address. FY_*, CLAUDE_*, CODEX_* never pass.',
-    `set -- "${home}/bin/fy" "$@"`,
+    `set -- "${home}/libexec/fy" "$@"`,
     `for name in ${ENV_ALLOWLIST.join(' ')} $(env | sed -n 's/^\\(LC_[A-Za-z0-9_]*\\)=.*/\\1/p'); do`,
     '  if eval "[ \\"\\${$name+set}\\" = set ]"; then',
     '    eval "value=\\${$name}"',
     '    set -- "$name=$value" "$@"',
     '  fi',
     'done',
-    `exec env -i FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" "$@"`,
+    `exec env -i FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" FY_UPDATE_CHECK=off "$@"`,
     '',
   ].join('\n');
 }

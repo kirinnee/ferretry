@@ -71,6 +71,37 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(run('--role', 'write').exitCode).toBe(64);
   });
 
+  test('MAJOR-4 a CD job that is not behind main-only (even a new publishing job) is refused, and the text says what the ruleset is', () => {
+    const result = gate(
+      checkout(p =>
+        writeFileSync(
+          p('.github/workflows/cd.yaml'),
+          readFileSync(p('.github/workflows/cd.yaml'), 'utf8') +
+            '  extra-publish:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo publish\n',
+        ),
+      ),
+    );
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('not behind main-only');
+    expect(result.err).toContain('extra-publish');
+    const ok = gate(checkout());
+    expect(ok.out).toContain('does not stop an agent pushing as the owner (Admin)');
+    const script = readFileSync(join(repository, 'scripts/local/setup-release-tag-ruleset.sh'), 'utf8');
+    expect(script).toContain("an agent with the owner's credential can still push one");
+    expect(script).toContain('READS IT\n# BACK and prints the bypass actors by name');
+  });
+
+  test('n2 the ruleset script dies with a message when --repo has no value', () => {
+    const result = Bun.spawnSync(
+      [join(repository, 'scripts/local/setup-release-tag-ruleset.sh'), '--dry-run', '--repo'],
+      {
+        env: { PATH: '/usr/bin:/bin' },
+      },
+    );
+    expect(result.exitCode).toBe(64);
+    expect(result.stderr.toString()).toContain('--repo needs a value');
+  });
+
   test('a CD compile that no longer waits for the main-only proof is refused', () => {
     const result = gate(checkout(p => edit(p('.github/workflows/cd.yaml'), '    needs: main-only\n', '')));
     expect(result.status).toBe(1);
