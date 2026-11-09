@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { AskDraft } from '../../../../contract/index.ts';
 import { asksPort } from '../../../../daemon/adapters/asks-port.ts';
 import { FileAgendaLedgerRepository } from '../../../../daemon/adapters/agenda/file-agenda-ledger-repository.ts';
+import { SqliteAgendaVersionStore } from '../../../../daemon/adapters/agenda/file-agenda-versions.ts';
 import { StateAgendaFiles } from '../../../../daemon/adapters/agenda/state-agenda-files.ts';
 import { AGENDA_FILES, AgendaService, emptyAgendaLedger } from '../../../../daemon/lib/agenda/index.ts';
 import { agendaLedgerDocument } from '../../../../daemon/lib/agenda/state-machine.ts';
@@ -56,7 +57,10 @@ async function home() {
   const files = new StateAgendaFiles(state);
   for (const name of names)
     await files.writeAtomic(name, AGENDA_FILES.ledger, agendaLedgerDocument(emptyAgendaLedger(name, AT)));
-  const repository = new FileAgendaLedgerRepository(files, () => crypto.randomUUID(), undefined, {
+  // The daemon's own version store: without one the repository has no change outbox, and a drain case would pass
+  // whatever the drain does.
+  const versions = new SqliteAgendaVersionStore(state);
+  const repository = new FileAgendaLedgerRepository(files, () => crypto.randomUUID(), versions, {
     now: () => 0,
     warn: () => undefined,
   });
@@ -72,7 +76,7 @@ async function home() {
     const mark = counts.ledgerReads;
     return () => counts.ledgerReads - mark;
   };
-  return { agenda, api, counts, since };
+  return { agenda, api, counts, since, repository };
 }
 
 const draft = (entry: string, ferret = 'b7'): AskDraft => ({
@@ -126,6 +130,9 @@ describe('the idle daemon reads the ledgers it needs, once', () => {
 
   it('should list no ledger on an idle change drain, and only the ferret that holds an event after one', async () => {
     const w = await home();
+    // A change outbox must exist (it needs the version store) and name nobody yet; with none, every drain assertion
+    // below would hold for the wrong reason.
+    expect(w.repository.changeOutbox?.pendingFerrets()).toEqual([]);
     const idle = w.since();
     await w.agenda.flushPending(() => undefined);
     expect(idle()).toBe(0);
