@@ -539,7 +539,8 @@ describe('Add runtime: Name and Create', () => {
     expect(alert.getAttribute('role')).toBe('alert');
     expect(alert.textContent).toStartWith('This change was not applied: the fleet apply failed and was rolled back.');
     expect(alert.textContent).toContain(LANDED_FILE);
-    expect(alert.textContent).toContain('remove that file');
+    expect(alert.textContent).toContain('put that file back as it was');
+    expect(alert.textContent).not.toContain('remove that file');
     expect(view.container.querySelector('[data-add-runtime-done]')).toBeNull();
     expect(nameInput(view.container).value).toBe('claude-claude-hooks');
     expect(reloads).toEqual([]);

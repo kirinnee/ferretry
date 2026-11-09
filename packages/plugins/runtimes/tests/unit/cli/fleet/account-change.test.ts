@@ -223,7 +223,9 @@ describe('runChange', () => {
 
     await runChange(world.deps, { change: removeRuntime, destructive: false, options: {} });
 
-    should(world.out.text('error')).containEql('Fix the cause and apply again, or remove it to undo the change.');
+    should(world.out.text('error')).containEql(
+      'Fix the cause and apply again; to undo the change instead, put that file back as it was.',
+    );
   });
 
   it('should describe a sign-out and an executor preview in words', async () => {

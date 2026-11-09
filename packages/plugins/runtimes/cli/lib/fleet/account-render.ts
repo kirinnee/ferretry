@@ -140,7 +140,8 @@ const landed = (files: readonly string[] | undefined): string | undefined => {
       ? `The configuration ${files[0]} was written first and is`
       : `The configuration files ${files.join(', ')} were written first and are`;
   const them = files.length === 1 ? 'it' : 'them';
-  return `${named} NOT rolled back; the next apply publishes ${them}. Fix the cause and apply again, or remove ${them} to undo the change.`;
+  const back = files.length === 1 ? 'put that file back as it was' : 'put those files back as they were';
+  return `${named} NOT rolled back; the next apply publishes ${them}. Fix the cause and apply again; to undo the change instead, ${back}.`;
 };
 const landedLines = (files: readonly string[] | undefined): string[] => {
   const line = landed(files);

@@ -142,8 +142,9 @@ describe('R3-M1: an apply that did not finish is not applied', () => {
     expect(result).toMatchObject({ kind: 'rolled-back', landed: [LANDED_FILE], unrestored: [] });
     if (result.kind !== 'rolled-back') throw new Error('expected rolled-back');
     expect(result.sentence).toBe(
-      `This change was not applied: the fleet apply failed and was rolled back. Publishing the fleet failed: fleet/bin is a file, not a directory. This configuration file stayed on disk and goes live at the next apply: ${LANDED_FILE}. To undo it, remove that file. Or fix the cause and apply again.`,
+      `This change was not applied: the fleet apply failed and was rolled back. Publishing the fleet failed: fleet/bin is a file, not a directory. This configuration file stayed on disk and goes live at the next apply: ${LANDED_FILE}. Fix the cause and apply again. To undo the change instead, put that file back as it was.`,
     );
+    expect(result.sentence).not.toMatch(/remove (it|that file)/u);
   });
 
   it('R3-M1: a rolled-back apply with no landed file says none was left', async () => {
@@ -191,7 +192,8 @@ describe('R3-M1: an apply that did not finish is not applied', () => {
     expect(result.sentence).toContain(
       `These configuration files stayed on disk and go live at the next apply: ${LANDED_FILE}, /home/kirin/.ferretry/config/model.yaml.`,
     );
-    expect(result.sentence).toContain('remove those files');
+    expect(result.sentence).toContain('put those files back as they were');
+    expect(result.sentence).not.toContain('remove those files');
   });
 
   it('R3-M1: a rollback-incomplete apply names the unrestored paths, their backups, what was moved aside, and the landed files', async () => {

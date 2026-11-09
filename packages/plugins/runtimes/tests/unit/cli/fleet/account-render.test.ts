@@ -261,7 +261,25 @@ describe('renderChangeOutcome', () => {
       },
     });
     should(rendered.text).containEql('The configuration runtimes/work.yaml was written first and is NOT rolled back');
-    should(rendered.text).containEql('Fix the cause and apply again, or remove it to undo the change.');
+    should(rendered.text).containEql(
+      'Fix the cause and apply again; to undo the change instead, put that file back as it was.',
+    );
+  });
+
+  it('BG-027 a rolled-back edit or removal never tells the owner to remove the file', () => {
+    for (const landed of [['runtimes/work.yaml'], ['runtimes/work.yaml', 'profiles/main.yaml']]) {
+      const rendered = renderChangeOutcome({
+        outcome: 'applied',
+        apply: {
+          outcome: 'rolled-back',
+          failedOperation: 'directory fleet/bin',
+          reason: 'refused',
+          configurationLanded: landed,
+        },
+      } as never);
+      should(rendered.text).not.match(/remove (it|them)/u);
+      should(rendered.text).match(/put (that file|those files) back as (it was|they were)\./u);
+    }
   });
 
   it('should report a sign-out', () => {

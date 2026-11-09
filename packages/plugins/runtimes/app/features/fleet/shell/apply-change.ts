@@ -226,7 +226,7 @@ const unfinished = (
           landed,
           landed.length === 0
             ? 'Fix the cause and apply again.'
-            : `To undo it, remove ${fileWord(landed.length, 'that file', 'those files')}. Or fix the cause and apply again.`,
+            : `Fix the cause and apply again. To undo the change instead, put ${fileWord(landed.length, 'that file back as it was', 'those files back as they were')}.`,
         ),
       ].join(' '),
     };
