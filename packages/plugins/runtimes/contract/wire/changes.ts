@@ -290,8 +290,9 @@ export type ApplyCommittedState = z.infer<typeof ApplyCommittedStateSchema>;
  */
 const configurationLandedShape = {
   /**
-   * Configuration files the change wrote BEFORE the fleet plan ran. A rollback undoes the plan, not these: they are
-   * on disk and the next apply publishes them, so a failure that says "nothing changed" must not hide them.
+   * Configuration files the change created, edited or removed BEFORE the fleet plan ran. A rollback undoes the plan,
+   * not these: each change stays and the next apply publishes it, so a failure that says "nothing changed" must not
+   * hide them.
    */
   configurationLanded: z.array(z.string().min(1)).readonly().optional(),
 };

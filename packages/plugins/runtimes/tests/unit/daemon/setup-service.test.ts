@@ -596,6 +596,35 @@ describe('exportBundle', () => {
     ]);
   });
 
+  it('BG-029 should refuse to export while a part of the machine stands in for a file that could not be read', async () => {
+    const { service, state } = world();
+    state.reading = { ...configReading(SET_UP_MODEL(), 'r'), unreadable: ['the MCP server "docs" (not read)'] };
+    const refusal = await setupRefusal(service.exportBundle(), 'fleet_setup_refused');
+    should(refusal.message).containEql("studio can't be copied yet");
+    should(refusal.message).containEql('the MCP server "docs" (not read)');
+    should(refusal.message).endWith('Fix that first, then copy again.');
+  });
+
+  it('BG-029 should refuse to export while a login a runtime uses keeps its variables as a stand-in, and name the login', async () => {
+    const { service, state } = world();
+    state.reading = {
+      ...configReading(SET_UP_MODEL(), 'r'),
+      stoodInLogins: [{ id: 'claude-you', because: 'not read' }],
+    };
+    const refusal = await setupRefusal(service.exportBundle(), 'fleet_setup_refused');
+    should(refusal.message).containEql('the login "claude-you" keeps its variables as not read');
+    should(refusal.message).endWith('Fix the login in Logins first, then copy again.');
+  });
+
+  it('BG-029 should still export while a login no runtime uses stands in', async () => {
+    const { service, state } = world();
+    state.reading = {
+      ...configReading(SET_UP_MODEL(), 'r'),
+      stoodInLogins: [{ id: 'nobody-uses-this', because: 'not read' }],
+    };
+    should((await service.exportBundle()).machine).equal('studio');
+  });
+
   it('should leave out documents past the size a bundle may carry, and the emails when the list fails', async () => {
     const { service, state } = world();
     state.reading = configReading(SET_UP_MODEL(), 'r');
@@ -1104,7 +1133,7 @@ describe('the setup.import executor', () => {
     )();
     should(preflight).startWith('a source leads out of the folder');
     should(preflight).containEql('/state/config/model.yaml');
-    should(preflight).containEql('was written first and is NOT rolled back');
+    should(preflight).containEql('was made first and is NOT rolled back');
     should(preflight).not.containEql('nothing was left half-changed');
     // A rollback that landed after the configuration did: the rollback is the fleet's, the configuration stays.
     const rolled = await throwing(
@@ -1155,12 +1184,12 @@ describe('the setup.import executor', () => {
       const sentence = failedApplySentence(new FleetApplyAfterConfigError(config, failure));
       should(sentence).startWith(failure.message);
       should(sentence).containEql(
-        'the configuration files /state/config/model.yaml, /state/config/runtimes.yaml were written first and are NOT rolled back with the fleet',
+        'the changes to the configuration files /state/config/model.yaml, /state/config/runtimes.yaml were made first and are NOT rolled back with the fleet',
       );
       should(sentence).not.containEql('half-changed');
     }
     should(failedApplySentence(new FleetApplyAfterConfigError(config.slice(0, 1), new Error('x')))).equal(
-      'x; the configuration /state/config/model.yaml was written first and is NOT rolled back with the fleet',
+      'x; the change to the configuration /state/config/model.yaml was made first and is NOT rolled back with the fleet',
     );
   });
 
@@ -2404,7 +2433,7 @@ intervalMinutes: 5
       'fleet_change_failed',
     );
     should(refusal.message).startWith('another fleet apply holds the claim');
-    should(refusal.message).containEql('warden.yaml was written first and is NOT rolled back with the fleet');
+    should(refusal.message).containEql('warden.yaml was made first and is NOT rolled back with the fleet');
     should(refusal.message).not.containEql('half-changed');
 
     // A write the owner's judge HELD did not land: the sentence claims nothing about it.
@@ -2455,7 +2484,7 @@ intervalMinutes: 5
     );
 
     should(refusal.message).containEql('changed on this machine after it was reviewed');
-    should(refusal.message).containEql('was written first and is NOT rolled back with the fleet');
+    should(refusal.message).containEql('was made first and is NOT rolled back with the fleet');
     should(w.applied).deepEqual([]);
   });
 

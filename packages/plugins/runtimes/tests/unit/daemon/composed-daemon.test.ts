@@ -418,6 +418,46 @@ describe('a real apply through the composed daemon', () => {
     expect(await readdir(world.fleet)).not.toContain('manifest.json');
   });
 
+  it('BG-027 a refusal for a changed budget does not spend the proposal: a retry is refused the same way, and applies once the pause lifts', async () => {
+    const pause = {
+      period: 'daily',
+      level: 'over_trigger',
+      limitUsd: 40,
+      resetsAtMs: 1_800_000_000_000,
+      timeZone: 'UTC',
+    };
+    let pauses: { login: string; pause: typeof pause; phrase: string }[] = [];
+    const { host } = await compose({
+      assemble: ctx =>
+        hostAssembly({ ...ctx, uses: { usage: { current: () => ({ pauses: () => pauses }) } } } as never),
+    });
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+    const id = staged.json<{ id: string }>().id;
+
+    pauses = [{ login: 'claude-you', pause, phrase: '' }];
+    const first = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    const written = host.configChanges.length;
+    expect(first.status).toBe(409);
+    expect(JSON.stringify(first.json())).toContain('spend budget changed');
+    expect(host.configChanges.length).toBe(written);
+
+    const retry = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    expect(retry.status).toBe(409);
+    expect(JSON.stringify(retry.json())).toContain('spend budget changed');
+    expect(JSON.stringify(retry.json())).not.toContain('already been applied');
+    expect(host.configChanges.length).toBe(written);
+
+    // The pause lifts: the same proposal is back to what it was previewed against, so it applies.
+    pauses = [];
+    const lifted = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    expect(lifted.status).toBe(200);
+    expect(host.configChanges.length).toBeGreaterThan(written);
+
+    // A proposal is single use: the apply that landed spent it.
+    const again = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    expect(JSON.stringify(again.json())).toContain('already been applied');
+  });
+
   it('M3 a budget hold that starts or stops publishes the fleet again, so its wrappers follow Usage’s pause', async () => {
     let republished = 0;
     const { host } = await compose({
