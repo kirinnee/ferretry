@@ -39,6 +39,7 @@ import {
   VaultDocumentSchema,
   type VaultDocument,
 } from '@ferretry/core-vault/contract';
+import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -65,6 +66,7 @@ export interface HeldLoginKey {
 export class LoginKeyHold {
   readonly #items: { key: HeldLoginKey; value: string }[] = [];
   readonly #taken = new Set<string>();
+  readonly #ledger = new Map<string, string[]>();
   #vaultMoved = false;
 
   /** The vault step calls this once it has moved (or found no) v4 vault: only then may login keys be sealed beside it. */
@@ -96,6 +98,18 @@ export class LoginKeyHold {
 
   add(key: HeldLoginKey, value: string): void {
     this.#items.push({ key, value });
+    // A digest only, kept after the value is drained or cleared: it lets a second conversion say whether it would hold
+    // the SAME key under the SAME name, without anything holding the key.
+    const digest = createHash('sha256').update(value, 'utf8').digest('hex');
+    this.#ledger.set(key.login, [...(this.#ledger.get(key.login) ?? []), `${key.variable}=${key.name}:${digest}`]);
+  }
+
+  /**
+   * What this run took out of one login's file, as a comparable string of `variable=NAME:digest` (no value): empty when
+   * it took nothing. Two holds that give the same string put the same keys in the vault under the same names.
+   */
+  fingerprint(login: string): string {
+    return [...(this.#ledger.get(login) ?? [])].sort().join(';');
   }
 
   get size(): number {

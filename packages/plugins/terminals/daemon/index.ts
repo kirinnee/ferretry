@@ -172,6 +172,19 @@ function terminalsConfig(kernel: KernelPorts): TerminalsConfig {
   return file ?? { perFerret: TERMINAL_MAX_PER_SESSION, global: TERMINAL_MAX_GLOBAL };
 }
 
+/**
+ * The configured terminal environment as it is NOW (no cached copy). The kernel keeps the LAST GOOD file in effect when a
+ * later one is invalid, so that environment stays; only a file never accepted (or one that cannot be read) gives none,
+ * and terminals still open, with no extra environment.
+ */
+function liveTerminalEnvironment(kernel: KernelPorts): Readonly<Record<string, string>> {
+  try {
+    return terminalsConfig(kernel).environment ?? {};
+  } catch {
+    return {};
+  }
+}
+
 /** Who took a terminal over, from Gate's standing: a paired device by its holder, else somebody at this machine. */
 function controllerOf(call: CallContext): SurfaceController {
   const credential = call.credential;
@@ -316,7 +329,8 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   );
   const config = terminalsConfig(kernel);
   const runtime: TerminalRuntimePort =
-    overrides.runtime ?? new TmuxTerminalRuntime(tmux, nowMs, loginShell, processes.limits);
+    overrides.runtime ??
+    new TmuxTerminalRuntime(tmux, nowMs, loginShell, processes.limits, () => liveTerminalEnvironment(kernel));
   const service = new ManagedTerminalService(
     runtime,
     {

@@ -1,4 +1,4 @@
-import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { HoldsChanged, InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import { AgentControlPort, FerretsPort, Runners } from '@ferretry/core-ferrets/contract';
@@ -18,6 +18,7 @@ import {
   TerminalReadInputSchema,
   TerminalSendInputSchema,
   TerminalsConfigSchema,
+  terminalsLoosens,
   TerminalsPort,
   TerminalsStateSchema,
   TerminalWaitInputSchema,
@@ -318,7 +319,7 @@ export default definePlugin({
         file: 'terminals.yaml',
         schema: TerminalsConfigSchema,
         axis: 'configure',
-        loosens: neverLoosens,
+        loosens: terminalsLoosens,
       }) as ConfigDef,
     ],
     readModels: ['terminals', 'holders'],

@@ -32,16 +32,10 @@
  * nudge and mode); this step runs after it and adds its keys to the text Settings wrote ({@link V5Writer.written}). A
  * key both would write fails the step.
  */
-import { CODEX_CONFIG } from '@ferretry/plugin-codex/contract';
-import { CLAUDE_CODE_CONFIG } from '@ferretry/plugin-claude-code/contract';
-import { AGENDA_CONFIG } from '@ferretry/plugin-agenda/contract';
 import { ConnectionsConfigSchema } from '@ferretry/plugin-connections/contract';
-import { VaultConfigFile } from '@ferretry/core-vault/contract';
-import { AsksConfigFile } from '@ferretry/core-asks/contract';
-import { CatalogsConfigFile, CatalogsConfigSchema, catalogConfigLoosens } from '@ferretry/plugin-catalogs/contract';
+import { CatalogsConfigSchema, catalogConfigLoosens } from '@ferretry/plugin-catalogs/contract';
 import {
   CAPABILITY_NAMES,
-  GateConfigFile,
   GateConfigSchema,
   SECURITY_SETTING_FIELDS,
   widensSecurity,
@@ -69,19 +63,21 @@ import {
   V4SecurityDocument,
   type V4SecuritySettings,
 } from '../v4/daemon.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
 
-/** Declared in Connections' MANIFEST: restated with its file name and the contract's schema. */
-export const CONNECTIONS_CONFIG: V5ConfigTarget = {
-  shape: 'file',
-  file: 'connections.yaml',
-  schema: ConnectionsConfigSchema,
-};
-const GATE_CONFIG = GateConfigFile as V5ConfigTarget;
-const CATALOGS_CONFIG = CatalogsConfigFile as V5ConfigTarget;
-const VAULT_CONFIG = VaultConfigFile as V5ConfigTarget;
-const ASKS_CONFIG = AsksConfigFile as V5ConfigTarget;
+/** Every v5 file this step writes, with its owning plugin, from the one registry of targets. */
+export const CONNECTIONS_CONFIG: V5ConfigTarget = CONFIG_TARGETS.CONNECTIONS;
+const {
+  CODEX: CODEX_CONFIG,
+  CLAUDE_CODE: CLAUDE_CODE_CONFIG,
+  AGENDA: AGENDA_CONFIG,
+  GATE: GATE_CONFIG,
+  CATALOGS: CATALOGS_CONFIG,
+  VAULT: VAULT_CONFIG,
+  ASKS: ASKS_CONFIG,
+} = CONFIG_TARGETS;
 
 /** `daemon.json` keys v5 declares no field for, and why (listed only when the document wrote them). */
 const KEY_NOT_CARRIED: Readonly<Record<string, string>> = {
@@ -112,6 +108,8 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
 interface Planned {
   readonly target: V5ConfigTarget;
   readonly label: string;
+  /** Every v4 source that fed this file (the first is `label`), handed to the writer as the file's sources. */
+  readonly sources: Set<string>;
   readonly entries: Map<string, unknown>;
   readonly fresh: string;
 }
@@ -139,9 +137,11 @@ function add(plan: Plan, target: V5ConfigTarget, key: string, value: unknown, fr
   const planned = plan.files.get(path) ?? {
     target,
     label: from,
+    sources: new Set<string>(),
     entries: new Map<string, unknown>(),
     fresh: ` Carried from v4 ${from} by the v4 → v5 converter.`,
   };
+  planned.sources.add(from);
   if (planned.entries.has(key)) throw new V4InputError(`${from}: two v4 keys map to ${path} ${key}`);
   planned.entries.set(key, value);
   plan.files.set(path, planned);
@@ -479,7 +479,8 @@ export const daemonSettingsStep: Step = {
         throw new V4InputError(
           `v5 would allow more than v4 enforced at ${wider.join(', ')}; nothing was written (a converter defect: report it)`,
         );
-      for (const { planned, text } of texts.values()) await ctx.v5.config(planned.target, undefined, text);
+      for (const { planned, text } of texts.values())
+        await ctx.v5.config(planned.target, undefined, text, [...planned.sources]);
     } catch (error) {
       return {
         ...base,
