@@ -925,14 +925,19 @@ async function start(world: World): Promise<TestHost> {
       // The in-memory world holds no edit held for the owner, so the owner's patch is a write of that patch (merged
       // one level deep into the keys `within` names, as the real writer merges it).
       async writeAsOwner(def, name, edit, writeOptions = {}) {
-        // As the real writer: a `within` that is not a list is refused, never read as something else.
-        if (!isWithinList(edit.within))
+        // As the real writer, in its order: an undeclared def and a bad name are answered first, then a `within` that is
+        // not a list is refused, never read as something else.
+        if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
+        if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
+          return { kind: 'refused', reason: 'bad_name', issues: [] };
+        const within = edit.within;
+        if (!isWithinList(within))
           return {
             kind: 'refused',
             reason: 'schema',
             issues: [{ path: keyOf(def), message: '`within` must be a list of top-level key names' }],
           };
-        return await write(def, name, { patch: edit.patch }, writeOptions, edit.within);
+        return await write(def, name, { patch: edit.patch }, writeOptions, within);
       },
       async remove(def, name, writeOptions = {}) {
         if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };

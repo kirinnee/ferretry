@@ -22,6 +22,14 @@ const wardenDef = defineConfig({
   loosens: (before, after) => (after.caps.daily > (before?.caps.daily ?? 10) ? ['raises the daily cap'] : []),
 });
 
+const itemsDef = defineConfig({
+  collection: 'items',
+  name: /^[a-z]+$/,
+  schema: z.strictObject({ size: z.number().default(1) }),
+  axis: 'configure',
+  loosens: () => [],
+});
+
 const manifest = definePlugin({
   id: 'warden',
   title: 'Warden',
@@ -29,7 +37,7 @@ const manifest = definePlugin({
   api: 5,
   core: false,
   kinds: [],
-  data: { config: [wardenDef] },
+  data: { config: [wardenDef, itemsDef] },
 });
 
 const START = { enabled: true, caps: { daily: 5, price: 0.042, weekly: 40 } };
@@ -104,6 +112,36 @@ test('the testing host keeps the sub-keys a within save does not name, and refus
   const edit = { patch: { caps: { daily: 4 } }, within: ['caps'] };
   expect((await config.write(wardenDef, undefined, edit)).kind).toBe('written');
   expect(config.file(wardenDef)).toEqual({ enabled: true, caps: { daily: 4, price: 2 } });
+  await host.stop();
+});
+
+test('BG-011 the testing host answers an undeclared def and a bad name before a bad within, as the real writer does', async () => {
+  const { host, config } = await testing();
+  const bad = 'sentinel-2c81d0-not-a-list' as unknown as readonly string[];
+  const stranger = defineConfig({
+    file: 'stranger.yaml',
+    schema: z.strictObject({ size: z.number().default(1) }),
+    axis: 'configure',
+    loosens: () => [],
+  });
+  expect(await config.writeAsOwner(stranger as never, undefined, { patch: { size: 2 }, within: bad })).toEqual({
+    kind: 'refused',
+    reason: 'not_declared',
+    issues: [],
+  });
+  expect(config.file(wardenDef)).toEqual(START);
+  // a bad item name, or none, is answered bad_name before the bad within is looked at
+  for (const name of ['Bad_Name', undefined]) {
+    expect(await config.writeAsOwner(itemsDef as never, name, { patch: { size: 2 }, within: bad })).toEqual({
+      kind: 'refused',
+      reason: 'bad_name',
+      issues: [],
+    });
+  }
+  // a within refusal names no value
+  const refused = await config.writeAsOwner(wardenDef, undefined, { patch: { caps: { daily: 3 } }, within: bad });
+  expect(refused).toMatchObject({ kind: 'refused', reason: 'schema' });
+  expect(JSON.stringify(refused)).not.toContain('sentinel');
   await host.stop();
 });
 

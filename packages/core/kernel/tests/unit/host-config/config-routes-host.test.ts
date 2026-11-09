@@ -7,8 +7,9 @@
  * the capability the descriptor names; a route that says `caller: 'person'` refuses a ferret's credential.
  */
 import { afterAll, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { dirname } from 'node:path';
 import { z } from 'zod';
 import {
   type Admission,
@@ -281,6 +282,35 @@ test('R-0419 PUT /v1/config/file through the host: a stale etag is 409, an extra
     expect(broken.status).toBe(422);
     expect(json(broken).code).toBe('config_invalid');
     expect(await readFile(file, 'utf8')).toBe('limit: 5\n');
+  } finally {
+    await host.stop();
+  }
+});
+
+test('BG-012 m-2 DELETE /v1/config/file through the host: a file the kernel cannot read is refused 422 with the issues and its fix, and stays', async () => {
+  const { host, file } = await boot();
+  try {
+    await mkdir(dirname(file), { recursive: true });
+    const elsewhere = `${dirname(file)}/elsewhere.yaml`;
+    await writeFile(elsewhere, 'limit: 5\n');
+    await symlink(elsewhere, file);
+    const refused = await host.dispatch(
+      call('DELETE', '/v1/config/file', { caller: 'owner', query: [['path', 'voice.yaml']] }),
+    );
+    // The etag is required: an unreadable file's is the absent one, which is exactly what the app reads first.
+    expect(refused.status).toBe(428);
+    const response = await host.dispatch({
+      ...call('DELETE', '/v1/config/file', { caller: 'owner', query: [['path', 'voice.yaml']] }),
+      headers: headersFrom({ 'x-test-caller': 'owner', 'if-match': 'absent' }),
+    });
+    expect(response.status).toBe(422);
+    const body = json(response) as { code: string; error: string; issues: { message: string; fix: string }[] };
+    expect(body.code).toBe('config_invalid');
+    expect(body.issues).toHaveLength(1);
+    expect(body.issues[0]?.message).toContain('cannot be read');
+    expect(body.issues[0]?.fix).toContain('replace the file with an ordinary one');
+    expect((await lstat(file)).isSymbolicLink()).toBe(true);
+    expect(await readFile(elsewhere, 'utf8')).toBe('limit: 5\n');
   } finally {
     await host.stop();
   }
