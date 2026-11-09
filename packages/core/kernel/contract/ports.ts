@@ -571,11 +571,12 @@ export type RootName =
    * folder holds. A write is as `work`'s is, with this root's one extra rule that a link at ANY level (inside the folder)
    * and a file with a second hard link are refused, never followed. It refuses everything inside the fence.
    *
-   * GAP, stated exactly (redesign §7.7, `ports-pending.json` writeChecked): the write is a checked, no-follow DESCRIPTOR
-   * write only on a host with descriptor reach (`/proc/self/fd`). On a host without it (macOS today) the temp create and
-   * the rename are by path, so a folder swapped for a link between the check and the syscall can make a write overwrite
-   * one same-named file outside the folder; writes are not refused there. Even with reach the parent is proved, not held
-   * (an ABA swap is not seen). No link is made into or out of this root, `copyTree` included.
+   * GAP, stated exactly (redesign §7.7): the write is a checked, no-follow DESCRIPTOR write where a path reaches the
+   * held folder (`/proc/self/fd`) and where it does not (macOS: the held folder's own `openat`, `renameat`, `unlinkat`,
+   * each folder proven by device and inode first), so a folder swapped for a link between the check and the syscall
+   * overwrites nothing outside it. A host whose descriptor calls cannot be loaded writes by path after one re-proof, as
+   * before. Even with reach the parent is proved, not held (an ABA swap is not seen). No link is made into or out of
+   * this root, `copyTree` included.
    *
    * Whether the folder is one Projects or Ferrets names is the PLUGIN ADAPTER's rule, never the kernel's (declared limit,
    * redesign §7.7, which lists what an adapter must check).
@@ -841,9 +842,8 @@ export interface RootHandle {
    * every parent is opened without following a link (`link_escape`); the entry moves AS IS (a link stays a link and is
    * never followed, a directory moves whole; a link keeps the text it holds, so a RELATIVE link moved to a parent at
    * another depth points elsewhere afterwards, while kernel-made links are absolute). The move runs between the two
-   * parents' descriptors, so a host that cannot reach an entry through a held folder (macOS today) refuses
-   * `no_descriptor_reach` and moves nothing ([own] BEFORE-GREEN(runtimes): the owner runs macOS, so the provisioner's
-   * move-aside and undo fail there until a descriptor-reach move exists). `from` must exist and nothing may be at `to`
+   * parents' descriptors (on macOS, where no path reaches a held folder, `renameat` between the two proven
+   * descriptors), so a host with neither refuses `no_descriptor_reach` and moves nothing. `from` must exist and nothing may be at `to`
    * (`outside`, never overwritten; a look then the move, a declared GAP). Each end's parent folder must already exist
    * (`rename` makes none, as `writeText` does): a missing parent, or one that is a file, is `changed`, and a link on
    * the way to either end is `link_escape`, on the testing host as on the real one. There is no copy fallback: a

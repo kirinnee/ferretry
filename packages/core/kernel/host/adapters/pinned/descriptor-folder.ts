@@ -1,0 +1,233 @@
+import { type BigIntStats, close, constants, fchmod, fstat, fsync, write } from 'node:fs';
+import { type DescriptorCalls, O_CLOEXEC } from './descriptor-calls.ts';
+
+/** What a held folder's entry is, as the host's `FileIdentity` spells it (`node-fs.ts` owns the type; this seam only fills it). */
+export interface HeldIdentity {
+  readonly kind: 'file' | 'directory' | 'link' | 'other';
+  readonly device: bigint;
+  readonly inode: bigint;
+  readonly links: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+  readonly mode: number;
+  readonly owner: number;
+  readonly group: number;
+}
+
+/**
+ * The steps on ONE held folder where no path reaches an open descriptor (macOS): every step goes through the folder's
+ * descriptor and first PROVES the descriptor is still the folder it was opened on, by device and inode (copied from
+ * today's `DescriptorBracket.proveHeld`: a descriptor number closed and reused by another folder would otherwise act
+ * somewhere else). A parent swapped for a link after the check therefore changes nothing: the descriptor still names
+ * the folder that was checked.
+ */
+export interface FolderSteps {
+  /** The entry at `leaf`, never followed: `undefined` when nothing is there, a link as `kind: 'link'`. */
+  identity(leaf: string): Promise<HeldIdentity | undefined>;
+  /** A NEW file (`O_EXCL | O_NOFOLLOW`) with exactly `mode`, written and synced; what it is. Removes only what this call made on a failure. */
+  writeNew(leaf: string, data: string | Uint8Array, mode: number): Promise<HeldIdentity>;
+  /** Renames `leaf` to `toLeaf` in the folder `into`, which is proven the same way; replaces silently (the caller looks first). */
+  renameInto(leaf: string, into: object, toLeaf: string): Promise<void>;
+  /** A hard link to `leaf` named `toLeaf` in `into`; `EEXIST` when taken. */
+  link(leaf: string, into: object, toLeaf: string): Promise<void>;
+  /** Removes the non-folder `leaf`. */
+  unlink(leaf: string): Promise<void>;
+}
+
+/** A folder held open by descriptor and what it was when it was opened (the seam's own view of a handle). */
+export interface HeldFolder {
+  readonly fd: number;
+  readonly device: bigint;
+  readonly inode: bigint;
+}
+
+const codeOf = (error: unknown): string | undefined => (error as { code?: string }).code;
+
+const LOOK = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_CLOEXEC;
+/** The look for a file that only has write permission: the same open, for writing, still without truncating, blocking or following. */
+const LOOK_WRITE = constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_CLOEXEC;
+/** Errnos of an open that name an entry which is there (permission, a socket, a running program, a folder opened for writing). */
+const PRESENT_BUT_NOT_OPENABLE: ReadonlySet<string> = new Set([
+  'EACCES',
+  'EPERM',
+  'ENXIO',
+  'EOPNOTSUPP',
+  'ENOTSUP',
+  'ETXTBSY',
+  'EISDIR',
+]);
+const CREATE =
+  constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_CLOEXEC;
+
+/** The descriptor calls of the runtime, as promises: nothing here blocks the loop on a slow disk (the C calls are one syscall each). */
+const settle = (act: (done: (error: Error | null) => void) => void): Promise<void> =>
+  new Promise((resolve, reject) => {
+    act(error => (error === null ? resolve() : reject(error)));
+  });
+
+/** `fstat` of a descriptor, bigint. */
+export const fstatOf = (fd: number): Promise<BigIntStats> =>
+  new Promise((resolve, reject) => {
+    fstat(fd, { bigint: true }, (error, stats) => (error === null ? resolve(stats) : reject(error)));
+  });
+
+const closeOf = (fd: number): Promise<void> => settle(done => close(fd, done));
+
+/**
+ * Runs the one synchronous create `make` under a process umask of `0o077`, restored in the same synchronous block.
+ *
+ * Why: on an Apple arm64 host the C call's variadic `mode` is read from a stack slot this binding does not fill, so a
+ * created file can get ANY mode (see `descriptor-calls.ts`), and it is named in the folder from the moment `openat`
+ * returns, until the `fchmod` that follows. A umask can only clear bits: under `0o077` whatever mode the kernel read
+ * leaves at most the owner's bits, so no other user can open the file in that window. There is no `await` between the
+ * set and the restore, so nothing else in this single-threaded process can create a file under the tighter umask, and
+ * the restore runs when `make` throws too.
+ */
+function createOwnerOnly(make: () => number): number {
+  const before = process.umask(0o077);
+  try {
+    return make();
+  } finally {
+    process.umask(before);
+  }
+}
+
+/** The folder a step must reach, refused `EBADF` (as the kernel would) when the descriptor no longer names it. */
+async function proveHeld(verb: string, ...folders: readonly HeldFolder[]): Promise<void> {
+  for (const folder of folders) {
+    const now = await fstatOf(folder.fd);
+    if (now.dev !== folder.device || now.ino !== folder.inode) {
+      throw Object.assign(
+        new Error(`EBADF: refusing to ${verb}: a held folder is no longer the one it was opened on`),
+        { code: 'EBADF' },
+      );
+    }
+  }
+}
+
+/** Which held folder each handle the host gave out stands for, for the step that needs two of them. */
+const held = new WeakMap<object, HeldFolder>();
+
+/** Records that `handle` stands for `folder`. */
+export const holdFolder = (handle: object, folder: HeldFolder): void => {
+  held.set(handle, folder);
+};
+
+/** The steps on `folder`, filled with `identityOf` (the host's reading of an `fstat` answer on a descriptor). */
+export function folderSteps(
+  calls: DescriptorCalls,
+  folder: HeldFolder,
+  identityOf: (fd: number) => Promise<HeldIdentity>,
+): FolderSteps {
+  const target = (verb: string, into: object): HeldFolder => {
+    const other = held.get(into);
+    if (other === undefined)
+      throw Object.assign(new Error(`EBADF: refusing to ${verb}: that folder is not held`), { code: 'EBADF' });
+    return other;
+  };
+  /**
+   * One open of `leaf` just to read what it is: its identity, `undefined` when nothing is there, or the errno of an
+   * entry that IS there but this open may not take (the answer today's `lstat` never needed an open to give).
+   */
+  const attempt = async (leaf: string, flags: number): Promise<HeldIdentity | undefined | string> => {
+    let fd: number;
+    try {
+      fd = calls.openat(folder.fd, leaf, flags, 0);
+    } catch (error) {
+      const code = codeOf(error);
+      if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+      // `O_NOFOLLOW` on a link: the leaf IS a link, and it was not opened (Linux and macOS answer ELOOP).
+      if (code === 'ELOOP') return { ...EMPTY, kind: 'link' };
+      if (code !== undefined && PRESENT_BUT_NOT_OPENABLE.has(code)) return code;
+      throw error;
+    }
+    try {
+      return await identityOf(fd);
+    } finally {
+      await closeOf(fd);
+    }
+  };
+  /**
+   * What is at `leaf`, never followed, as today's `lstat` answers it: an entry this process may not open for reading
+   * (a mode-0 file, a folder without read permission, a socket) must still be SEEN. A write-only open reads the full
+   * identity of a file that only has write permission; a folder answers `EISDIR` to it; anything else that is there but
+   * cannot be opened is reported as `other` with no identity: the callers treat it as present, and a write that
+   * needs its kind or mode refuses it (`outside`) rather than guess.
+   */
+  const look = async (leaf: string): Promise<HeldIdentity | undefined> => {
+    await proveHeld('look', folder);
+    const read = await attempt(leaf, LOOK);
+    if (read !== 'EACCES') return typeof read === 'string' ? { ...EMPTY, kind: 'other' } : read;
+    const write = await attempt(leaf, LOOK_WRITE);
+    if (write === 'EISDIR') return { ...EMPTY, kind: 'directory' };
+    return typeof write === 'string' ? { ...EMPTY, kind: 'other' } : write;
+  };
+  return {
+    identity: look,
+    writeNew: async (leaf, data, mode) => {
+      await proveHeld('create', folder);
+      const fd = createOwnerOnly(() => calls.openat(folder.fd, leaf, CREATE, mode));
+      let created: HeldIdentity | undefined;
+      let closed = false;
+      try {
+        created = await identityOf(fd);
+        // exactly the asked bits, before any content: the mode `openat` was given is filtered by the umask (and on an
+        // arm64 Mac is not read reliably at all: the create above ran under an owner-only umask, see `createOwnerOnly`)
+        await settle(done => fchmod(fd, mode, done));
+        const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+        for (let written = 0; written < bytes.byteLength; )
+          written += await new Promise<number>((resolve, reject) => {
+            write(fd, bytes, written, bytes.byteLength - written, null, (error, count) =>
+              error === null ? resolve(count) : reject(error),
+            );
+          });
+        await settle(done => fsync(fd, done));
+        closed = true;
+        await closeOf(fd);
+        return created;
+      } catch (error) {
+        if (!closed) await closeOf(fd).catch(() => undefined);
+        // Only while the name still reaches the file this call created: a concurrent writer may have replaced it.
+        const named = created === undefined ? undefined : await look(leaf).catch(() => undefined);
+        if (created !== undefined && named?.device === created.device && named.inode === created.inode) {
+          try {
+            calls.unlinkat(folder.fd, leaf);
+          } catch {
+            // a cleanup never hides the failure that caused it
+          }
+        }
+        throw error;
+      }
+    },
+    renameInto: async (leaf, into, toLeaf) => {
+      const other = target('rename', into);
+      await proveHeld('rename', folder, other);
+      calls.renameat(folder.fd, leaf, other.fd, toLeaf);
+    },
+    link: async (leaf, into, toLeaf) => {
+      const other = target('link', into);
+      await proveHeld('link', folder, other);
+      calls.linkat(folder.fd, leaf, other.fd, toLeaf);
+    },
+    unlink: async leaf => {
+      await proveHeld('unlink', folder);
+      calls.unlinkat(folder.fd, leaf);
+    },
+  };
+}
+
+const EMPTY: HeldIdentity = {
+  kind: 'other',
+  device: 0n,
+  inode: 0n,
+  links: 0,
+  size: 0,
+  mtimeMs: 0,
+  mtimeNs: 0n,
+  ctimeNs: 0n,
+  mode: 0,
+  owner: 0,
+  group: 0,
+};
