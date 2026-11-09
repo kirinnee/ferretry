@@ -12,12 +12,11 @@
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import {
-  type ApplyOutcome,
-  type CatalogInstallChange,
   type ProfileFile,
   type ResolveResult,
   type RuntimeFile,
   type RuntimeHomesApi,
+  type RuntimeLayersApi,
   type RuntimeId,
   RuntimeIdSchema,
   type RuntimesApi,
@@ -40,8 +39,6 @@ export interface RuntimesApiDeps {
   harnesses(): readonly HarnessKey[];
   readonly logins: Pick<LoginsApi, 'list'>;
   now(): number;
-  /** Puts a catalog item into this machine's setup. The signature, digest, passkey and ferret checks are the installer's. */
-  install(change: CatalogInstallChange): Promise<ApplyOutcome>;
 }
 
 async function loginsById(logins: Pick<LoginsApi, 'list'>): Promise<ReadonlyMap<string, LoginView>> {
@@ -70,7 +67,9 @@ function activeBlock(
 const phrase = (block: { readonly reason?: string; readonly until?: string }): string =>
   `switched off${block.reason === undefined ? '' : ` (${block.reason})`}${block.until === undefined ? '' : ` until ${block.until}`}`;
 
-export function createRuntimesApi(deps: RuntimesApiDeps): Omit<RuntimesApi, keyof RuntimeHomesApi> {
+export function createRuntimesApi(
+  deps: RuntimesApiDeps,
+): Omit<RuntimesApi, keyof RuntimeHomesApi | keyof RuntimeLayersApi> {
   type Read = { readonly summary: RuntimeSummary } | { readonly refusal: Extract<ResolveResult, { ok: false }> };
 
   const read = (name: string, file: RuntimeFile, logins: ReadonlyMap<string, LoginView>, now: number): Read => {
@@ -175,6 +174,5 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<RuntimesApi, keyo
       }
       return { ok: true, runtime: summary };
     },
-    installCatalogItem: async change => await deps.install(change),
   };
 }

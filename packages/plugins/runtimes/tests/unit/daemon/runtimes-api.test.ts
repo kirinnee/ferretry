@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
-import type { ApplyOutcome, CatalogInstallChange, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
+import type { ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { createRuntimesApi, type RuntimesApiDeps } from '../../../daemon/lib/service/runtimes-api.ts';
 
 const NOW = Date.parse('2026-11-08T12:00:00Z');
@@ -29,7 +29,6 @@ interface Rig {
   defaultSetting?: string;
   harnesses?: readonly HarnessKey[];
   logins?: readonly LoginView[] | 'throws';
-  install?: RuntimesApiDeps['install'];
 }
 
 const api = (rig: Rig = {}) =>
@@ -47,7 +46,6 @@ const api = (rig: Rig = {}) =>
       },
     },
     now: () => NOW,
-    install: rig.install ?? (async () => ({ outcome: 'applied' }) as unknown as ApplyOutcome),
   });
 
 describe('createRuntimesApi — list and get', () => {
@@ -256,27 +254,5 @@ describe('createRuntimesApi — resolve', () => {
       refusal: 'not_signed_in',
       sentence: 'claude-code is not on this machine',
     });
-  });
-});
-
-describe('createRuntimesApi — installCatalogItem', () => {
-  it('should hand the change to the installer and return what it answered', async () => {
-    // Arrange
-    const seen: CatalogInstallChange[] = [];
-    const outcome = { outcome: 'applied' } as unknown as ApplyOutcome;
-    const runtimes = api({
-      install: async change => {
-        seen.push(change);
-        return outcome;
-      },
-    });
-    const change = { profile: 'default' } as unknown as CatalogInstallChange;
-
-    // Act
-    const actual = await runtimes.installCatalogItem(change);
-
-    // Assert
-    should(actual).equal(outcome);
-    should(seen).deepEqual([change]);
   });
 });

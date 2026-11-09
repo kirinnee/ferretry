@@ -1,6 +1,6 @@
 /**
  * Runtimes' daemon half (§2.3, §3.3): the sixteen routes the manifest declares, and the `runtimes` port others read
- * through (`list`, `get`, `default`, `resolve`, `installCatalogItem`).
+ * through (`list`, `get`, `default`, `resolve`, the homes, the profile layers).
  *
  * `build` is synchronous and touches nothing but the kernel's ports: the routes are handlers over the services in
  * `lib/service`, the port is read from the declared configuration (`config/runtimes/*.yaml`, `config/profiles/*.yaml`,
@@ -26,8 +26,6 @@ import {
   RuntimesChanged,
   RuntimesDefaultChanged,
   RuntimesLaunchFailed,
-  type ApplyOutcome,
-  type CatalogInstallChange,
   type ModelSetFile,
   type ProfileFile,
   type RuntimeFile,
@@ -43,6 +41,7 @@ import type { FleetCatalogService } from './lib/service/catalog-service.ts';
 import { autoResumeAnswer, autoResumeSwitch } from './lib/service/auto-resume-answer.ts';
 import { DisableExpiryWatch, earliestExpiry, keepUnpublished, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
+import { createProfileLayers } from './lib/service/profile-layers.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
 import type { FleetSetupService } from './lib/service/setup-service.ts';
@@ -60,15 +59,7 @@ const runtimesFile = RUNTIMES_CONFIG as unknown as ConfigFileDef<RuntimesFile>;
 export interface RuntimesAssembly {
   readonly catalog: Pick<
     FleetCatalogService,
-    | 'machine'
-    | 'components'
-    | 'profiles'
-    | 'previewProfile'
-    | 'runtimes'
-    | 'propose'
-    | 'read'
-    | 'apply'
-    | 'installCatalogItem'
+    'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply'
   > &
     Partial<Pick<FleetCatalogService, 'republish'>>;
   readonly setup: Pick<
@@ -84,6 +75,11 @@ export interface RuntimesAssembly {
   readonly ended?: RuntimeEndSeams;
   /** The harness homes the fleet published and a reader of one. Absent: no homes (the fail-closed fallback). */
   readonly homes?: RuntimeHomesApi;
+  /**
+   * The etag of one profile file as it is on disk right now (the same revision a change is pinned to). Absent: the
+   * profile layers answer in a sentence that they cannot read the files, and change nothing.
+   */
+  readonly profileEtag?: (profile: string) => Promise<string>;
   /**
    * The machine's "Auto-resume after restart" switch (`machine.yaml` `autoResume`): `true` on, `false` off. Absent, or
    * answering `undefined`, until the host assembly reaches the account model: auto-resume then resumes nothing (W2-a).
@@ -186,6 +182,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     setup: deferred(() => assembled().setup),
     ended: deferred(() => assembled().ended),
     homes: onceHomes(() => fleetHomes(ctx.kernel.roots, publication)),
+    profileEtag: async profile => await assembled().profileEtag(profile),
     probe: () => {
       assembled();
     },
@@ -205,13 +202,18 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         harnesses: () => ctx.needs.ferrets.harnesses(),
         logins: ctx.needs.logins,
         now: () => clock.nowMs(),
-        install: async (change: CatalogInstallChange): Promise<ApplyOutcome> => {
-          const { outcome } = await assembly.catalog.installCatalogItem(change);
-          // `installCatalogItem` throws for anything that did not land; an `applied` outcome is the only one it returns.
-          if (outcome.outcome !== 'applied') throw new Error('the catalog item was not installed');
-          events.publish(RuntimesChanged, { runtimes: [], profiles: [change.profile], modelSets: [] });
-          return outcome.apply;
+      });
+      // What a runtime's profile stack names, and the one act that edits a profile's layers: read live, written through
+      // the kernel's config writer, never kept. The etag is the profile file's own, read when asked.
+      const layers = createProfileLayers({
+        runtimes: () => config.collection(runtimeItems),
+        profiles: () => config.collection(profileItems),
+        etag: async name => {
+          if (assembly.profileEtag === undefined)
+            throw new Error('Runtimes cannot read its profile files on this daemon right now');
+          return await assembly.profileEtag(name);
         },
+        writeAll: async documents => await config.writeAll(documents),
       });
 
       // A change to the files wakes the views, once per change and naming what moved. The first reading is the baseline.
@@ -331,7 +333,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ...fleetSetupRoutes(assembly.setup),
           ...ferretRuntimeRoutes(assembly.runtime),
         },
-        provides: { runtimes: { ...api, ...(assembly.homes ?? noHomes) } },
+        provides: { runtimes: { ...api, ...layers, ...(assembly.homes ?? noHomes) } },
         doctor: {
           // The half builds without opening the fleet folder, so a broken fleet root shows here, not as a failed boot.
           'runtimes-config': async (): Promise<DoctorFinding> => {

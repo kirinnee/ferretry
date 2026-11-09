@@ -57,7 +57,6 @@ import {
   type AccountChangePreview,
   type AccountChangeView,
   type AgentControl,
-  type CatalogInstallChange,
   type CatalogFormat,
   type CatalogRefusalCode,
   type ComponentCatalog,
@@ -68,7 +67,6 @@ import {
   type ProfileDraftView,
   type RunningSession,
   type RuntimeCatalog,
-  CatalogInstallChangeSchema,
 } from '../../../contract/index.ts';
 import { cap, type CallerGovernance } from '@ferretry/core-gate/contract';
 import { ApiError } from '@ferretry/kernel/contract';
@@ -607,60 +605,6 @@ export class FleetCatalogService {
     return this.#view(record);
   }
 
-  /**
-   * Install one verified catalog item: stage it, check the configuration has not moved, and apply it
-   * in this one call. It never enters the proposal store, so `/v1/fleet/proposals` can neither stage,
-   * read nor apply it — its only caller is the catalog installer, after the installer's own checks
-   * (signature, digest, publisher pin, passkey, no ferret); this port carries no caller, because that
-   * decision was made there.
-   */
-  async installCatalogItem(
-    change: CatalogInstallChange,
-  ): Promise<{ readonly outcome: AccountChangeOutcome; readonly component: unknown }> {
-    // The same rules the installer applied, again, so no caller of this method can hand the executor a
-    // path or a provenance the installer would not have produced.
-    const checked = CatalogInstallChangeSchema.safeParse(change);
-    if (!checked.success)
-      throw new FleetCatalogRefusal(
-        'fleet_change_refused',
-        checked.error.issues[0]?.message ?? 'this is not a change the catalog installer makes',
-      );
-    return await this.#exclusively(async () => await this.#install(change));
-  }
-
-  /** The catalogue's install, read and applied under the one apply section (see {@link FleetCatalogService.apply}). */
-  async #install(
-    change: CatalogInstallChange,
-  ): Promise<{ readonly outcome: AccountChangeOutcome; readonly component: unknown }> {
-    const reading = await this.#read();
-    const staged = await this.#stagePlan(reading, change);
-    await this.#assertCurrent({ revision: reading.revision });
-    const outcome = await this.#execute({
-      payload: staged.payload,
-      mutation: change,
-      revision: reading.revision,
-    });
-    if (outcome.outcome === 'applied' && !COMMITTED.has(outcome.apply.outcome)) {
-      const failed = outcome.apply as { readonly reason?: string };
-      throw new FleetCatalogRefusal('fleet_change_failed', failed.reason ?? 'the change did not land');
-    }
-    // The component as the daemon holds it, taken from the model that was just written, so nothing
-    // after the write has to read the configuration again.
-    return {
-      outcome,
-      component: staged.model.components[change.component.kind === 'skills' ? 'skills' : 'mcp'][change.name],
-    };
-  }
-
-  /**
-   * One stored component exactly as the daemon holds it (every field, hidden environment values as
-   * their real stored text), or `undefined` when there is none. It exists for the installer's
-   * edited-locally hash and is never served by a route.
-   */
-  async storedComponent(kind: 'mcp' | 'skills', name: string): Promise<unknown> {
-    return (await this.#read()).model.components[kind][name];
-  }
-
   /** `GET /v1/fleet/proposals/:id`. */
   async read(id: string): Promise<AccountChangeView> {
     return this.#view(this.#proposals(() => this.#changes.require(id)));
@@ -1178,7 +1122,7 @@ export class FleetCatalogService {
    * runs on.
    */
   async #executeLogin(
-    record: { readonly mutation: AccountChange | CatalogInstallChange; readonly revision: string },
+    record: { readonly mutation: AccountChange; readonly revision: string },
     payload: Extract<ChangePayload, { kind: 'login' }>,
   ): Promise<AccountChangeOutcome> {
     let movedApply: ApplyOutcome | undefined;
@@ -1283,7 +1227,7 @@ export class FleetCatalogService {
   async #execute(
     record: {
       readonly payload: ChangePayload;
-      readonly mutation: AccountChange | CatalogInstallChange;
+      readonly mutation: AccountChange;
       /** The revision of the reading the change was staged from. */
       readonly revision: string;
     },
