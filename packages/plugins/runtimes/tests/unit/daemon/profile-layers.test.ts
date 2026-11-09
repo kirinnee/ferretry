@@ -473,3 +473,102 @@ describe('R2 layers and profiles', () => {
     should(moved?.etag).not.equal(etag);
   });
 });
+
+describe('R2 changeProfileLayers — what the writer can answer', () => {
+  type Writer = KernelPorts['config']['writeAll'];
+  const replace = (kernel: KernelPorts, writeAll: Writer): void => {
+    (kernel.config as { writeAll: Writer }).writeAll = writeAll;
+  };
+  const held = { kind: 'held', held: [], sentence: 'profile c loosens a limit; it is held' } as const;
+  const refused = {
+    kind: 'refused',
+    reason: 'schema',
+    issues: [{ message: 'contents must be a list' }, { message: 'and so on' }],
+  } as never;
+
+  it('R2 should answer a sentence, writing nothing, when the writer itself throws', async () => {
+    const { kernel, port: runtimes } = await world();
+    replace(kernel, async () => {
+      throw new Error('disk full');
+    });
+
+    const outcome = await runtimes.changeProfileLayers({ kind: 'add', profile: 'c', layer: 'mcp/x' }, owner);
+
+    should(outcome).deepEqual({
+      kind: 'refused',
+      code: 'fleet_change_refused',
+      sentence: 'profile c could not be written: disk full; nothing was changed',
+    });
+    replace(kernel, async () => {
+      throw 'not an error';
+    });
+    should(await runtimes.changeProfileLayers({ kind: 'add', profile: 'c', layer: 'mcp/x' }, owner)).match({
+      sentence: 'profile c could not be written: not an error; nothing was changed',
+    });
+  });
+
+  it('R2 should pass a held write on, and say why a refused one was refused', async () => {
+    const { kernel, port: runtimes } = await world();
+    replace(kernel, async () => held);
+    should(await runtimes.changeProfileLayers({ kind: 'add', profile: 'c', layer: 'mcp/x' }, owner)).deepEqual({
+      kind: 'held',
+      sentence: 'profile c loosens a limit; it is held',
+    });
+
+    replace(kernel, async () => refused);
+    should(await runtimes.changeProfileLayers({ kind: 'add', profile: 'c', layer: 'mcp/x' }, owner)).deepEqual({
+      kind: 'refused',
+      code: 'fleet_change_refused',
+      sentence: 'profile c was refused (schema): contents must be a list; and so on',
+    });
+  });
+
+  it('R2 should tell a caller that read the profile before it moved, even when the layer is already there', async () => {
+    const { port: runtimes } = await world();
+    const stale = (await runtimes.profiles()).find(profile => profile.name === 'a')?.etag as string;
+    await runtimes.changeProfileLayers({ kind: 'add', profile: 'a', layer: 'mcp/moved' }, owner);
+
+    const outcome = await runtimes.changeProfileLayers(
+      { kind: 'add', profile: 'a', layer: 'mcp/shared', ifMatch: stale },
+      owner,
+    );
+
+    should(outcome).deepEqual({ kind: 'conflict', profile: 'a' });
+  });
+
+  it('R2 should say what was already removed when a later profile stops the removal, in the words of how it stopped', async () => {
+    const stopAfterFirst = (second: unknown) => {
+      let calls = 0;
+      return async () => {
+        calls += 1;
+        return calls === 1 ? { kind: 'written', documents: [] } : second;
+      };
+    };
+    const remove = { kind: 'remove-everywhere', layer: 'mcp/shared' } as const;
+
+    const heldWorld = await world();
+    replace(heldWorld.kernel, stopAfterFirst(held) as Writer);
+    should(await heldWorld.port.changeProfileLayers(remove, owner)).deepEqual({
+      kind: 'held',
+      sentence: 'profile c loosens a limit; it is held (already removed from a)',
+    });
+
+    const refusedWorld = await world();
+    replace(refusedWorld.kernel, stopAfterFirst(refused) as Writer);
+    should(await refusedWorld.port.changeProfileLayers(remove, owner)).match({
+      kind: 'refused',
+      sentence: 'profile b was refused (schema): contents must be a list; and so on (already removed from a)',
+    });
+
+    const conflictWorld = await world();
+    replace(conflictWorld.kernel, stopAfterFirst({ kind: 'conflict', plugin: 'runtimes' }) as Writer);
+    should(await conflictWorld.port.changeProfileLayers(remove, owner)).deepEqual({ kind: 'conflict', profile: 'b' });
+
+    const firstWorld = await world();
+    replace(firstWorld.kernel, async () => held);
+    should(await firstWorld.port.changeProfileLayers(remove, owner)).deepEqual({
+      kind: 'held',
+      sentence: 'profile c loosens a limit; it is held',
+    });
+  });
+});

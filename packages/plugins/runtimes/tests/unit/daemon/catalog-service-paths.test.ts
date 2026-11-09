@@ -526,6 +526,35 @@ describe('the sessions a runtime change reaches', () => {
   });
 });
 
+describe('a settings component whose text is saved with the change', () => {
+  it('should write the saved file with the model, against the revision it was read at', async () => {
+    const written: { path: string; content: string; expect: string }[] = [];
+    const { service } = world({
+      overrides: {
+        documentRevision: async path => `rev:${path}`,
+        configWriter: {
+          write: async documents => {
+            for (const document of documents) written.push(document as never);
+          },
+        },
+      },
+    });
+
+    const staged = await service.propose({
+      kind: 'component.put',
+      name: 'fresh',
+      component: { kind: 'settings', harness: 'claude-code' },
+      content: '{"permissions":{}}\n',
+      create: true,
+    });
+    await service.apply(staged.id, OWNER);
+
+    const file = written.find(document => document.content === '{"permissions":{}}\n');
+    should(file?.path).containEql('settings');
+    should(file?.expect).equal(`rev:${file?.path}`);
+  });
+});
+
 describe('how an apply ends', () => {
   it('should report a rolled-back apply as an outcome rather than a throw', async () => {
     const { service } = world({
