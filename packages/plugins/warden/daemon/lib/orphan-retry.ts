@@ -20,10 +20,10 @@ import type { CardId } from '@ferretry/plugin-board/contract';
 import { instantMs, isoFromMs } from './time.ts';
 
 /** The first wait after a failed try: a little over two sweeps. */
-export const ORPHAN_RETRY_BASE_MS = 5 * 60_000;
+const ORPHAN_RETRY_BASE_MS = 5 * 60_000;
 
 /** The longest wait between two tries of the same notice. */
-export const ORPHAN_RETRY_CEILING_MS = 6 * 60 * 60_000;
+const ORPHAN_RETRY_CEILING_MS = 6 * 60 * 60_000;
 
 /** What the Warden remembers of one card's failing notice. */
 export interface OrphanRetry {
