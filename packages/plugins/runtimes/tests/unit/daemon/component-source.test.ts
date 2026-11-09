@@ -30,6 +30,7 @@ import {
   type ProfileComponentSource,
 } from '../../../contract/index.ts';
 import { hostAssembly, runtimesDaemon } from '../../../daemon/index.ts';
+import manifest from '../../../manifest.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
@@ -217,6 +218,25 @@ describe('an apply with every kind a profile layer names provided', () => {
     expect(files['CLAUDE.md']).toContain('Be brief.');
     // The skill the skills owner selected: its folder is put in the home (a link, so not among the files read above).
     expect(await readdir(join(home, 'skills'))).toEqual(['review']);
+  });
+
+  it('a settings item named by a profile lands in the runtime’s fleet home exactly once, and Runtimes cannot reach the ferret’s agent home', async () => {
+    const owners = newOwners();
+    owners.claudeSettings.with('strict', { harness: 'claude-code', document: { cleanupPeriodDays: 7 } });
+    const { host, world } = await compose({ owners, config: withLayers('settings/strict') });
+
+    const applied = await stageAndApply(host, put('claude-work'));
+
+    expect(applied.status).toBe(200);
+    // The two applications of a settings item are two different folders: the harness plugin writes the item into each
+    // ferret's own agent home (`state/claude-code/agent-homes/<ferret>`, every item, at every launch) and Runtimes writes the
+    // items a profile layer names into the runtime's fleet home (`fleet/homes/<id>`). Runtimes holds no `agent-homes` root,
+    // so it cannot write the first, and the second is written once per apply.
+    expect(manifest.permissions?.roots).toEqual(['fleet', 'harness-home']);
+    for (const home of await readdir(join(world.fleet, 'homes'))) {
+      const settings = (await filesUnder(join(world.fleet, 'homes', home)))['settings.json'] as string;
+      expect(settings.split('cleanupPeriodDays')).toHaveLength(2);
+    }
   });
 
   it('puts a Claude hooks component in the home’s settings exactly once', async () => {
