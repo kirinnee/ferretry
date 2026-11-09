@@ -541,6 +541,29 @@ describe('config files: live reading and watching', () => {
     stop();
   });
 
+  test('J-0096 a login file edited on disk is not seen by a read until the watcher reloads, and is seen after', async () => {
+    // v4's watched document cached its read until the file watch said it changed. In 5.0 the kernel holds that cache:
+    // readers get the answer of the LAST reload, and the watcher's reload is what lets go of it.
+    const h = configHarness();
+    await h.files.write('logins', loginsDef, 'work', 'model: a\n');
+    const idsOf = () => [...h.files.port('logins').collection(loginsDef).keys()].toSorted();
+    expect(idsOf()).toEqual(['work']);
+    const stop = h.files.startWatching();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(100);
+
+    h.fs.seed(h.path('logins/home.yaml'), 'model: b\n');
+    // Nothing has reloaded yet: the very next read still shows the last reload's snapshot.
+    expect(idsOf()).toEqual(['work']);
+
+    h.clock.advance(1_000);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(400);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(idsOf()).toEqual(['home', 'work']);
+    stop();
+  });
+
   test('publishSchemas writes one JSON Schema per def, only when it changed', async () => {
     const h = configHarness();
     await h.files.publishSchemas();

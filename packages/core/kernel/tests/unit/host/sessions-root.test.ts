@@ -630,7 +630,7 @@ describe('K1 the sessions root stays private: nothing widens past the owner', ()
 });
 
 describe('K1 the testing host refuses an owned root to a plugin that does not own it, as production does', () => {
-  const declare = (id: string, root: RootName) =>
+  const rootPlugin = (id: string, root: RootName) =>
     implementDaemon(
       definePlugin({
         id,
@@ -707,7 +707,7 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
   ] as const) {
     test(`K1 testHost: only ${owner} gets ${owned}; a terminals plugin that declares it is refused`, async () => {
       seen.clear();
-      const host = await testHost({ plugins: [declare(owner, owned), declare('terminals', owned)] });
+      const host = await testHost({ plugins: [rootPlugin(owner, owned), rootPlugin('terminals', owned)] });
       expect(seen.get(owner)?.().internal).toBe(true);
       expect(() => seen.get('terminals')?.()).toThrow(`terminals: root ${owned} is not declared`);
       await host.stop();
