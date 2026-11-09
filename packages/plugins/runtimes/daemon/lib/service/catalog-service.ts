@@ -1183,9 +1183,12 @@ export class FleetCatalogService {
     try {
       await this.#republish();
     } catch (error) {
+      // Two sentences, each saying one true thing: the login change is saved, and the republish (whose own reason may
+      // say "nothing was changed", which is about the republish alone) did not finish.
+      const refused = error instanceof FleetCatalogRefusal && error.code === 'fleet_change_refused';
       throw new FleetCatalogRefusal(
         'fleet_change_failed',
-        `the login changed, but the runtimes could not be republished: ${errorMessage(error)}`,
+        `the login change is saved. Republishing the runtimes ${refused ? 'was refused' : 'failed'}: ${errorMessage(error)}`,
       );
     }
     return { outcome: 'login-changed', result: 'applied', ...summary, ...moved };
