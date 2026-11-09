@@ -92,6 +92,19 @@ describe('verifyPublishedCatalog', () => {
     });
   });
 
+  it('should refuse a signature whose base64url text is one character past a whole group, whatever DOM is loaded', async () => {
+    // Arrange — a signature segment of length 1 and of length 5 (both length % 4 === 1) is never valid base64url
+    const app = await hostedApp(7);
+    const [fingerprint] = app.signature.split('.');
+    const check = (signature: string) =>
+      verifyPublishedCatalog({ publicKeyPem: app.pem, list: app.list, signature, catalog: app.catalog });
+
+    // Act / Assert
+    should(await check(`${fingerprint}.b`)).match({ ok: false, reason: /not signed/ });
+    should(await check(`${fingerprint}.abcde`)).match({ ok: false, reason: /not signed/ });
+    should(await check(`${fingerprint}.ab+c`)).match({ ok: false, reason: /not signed/ });
+  });
+
   it('should refuse a list that does not name the catalog, is not JSON, or vouches for a catalog that is not', async () => {
     // Arrange — sign three odd lists with one key
     const keys = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [

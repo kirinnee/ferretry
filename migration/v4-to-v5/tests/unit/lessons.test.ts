@@ -411,6 +411,36 @@ describe('damage is read the way v4 read it, counted and never quoted', () => {
     expect(report.status).toBe('failed');
     expect(report.note).toContain('a hard link (v4 refused it)');
     expect(JSON.stringify(report)).not.toContain('FAKE-KEY');
+    // No component: the fix-it names the default file and is not prefixed with a component that does not exist.
+    expect(report.note).toContain('make fleet/assets/instructions/lessons.md a plain file');
+    expect(report.note).not.toContain('config/components/instructions/lessons.yaml');
+  });
+
+  test('n2 the hard-link fix-it names the file the component names, not the default', async () => {
+    await putText('state/daemon-identity.json', `FAKE-KEY-${SECRET}`);
+    await mkdir(join(f.from, 'fleet/assets/instructions'), { recursive: true });
+    await link(join(f.from, 'state/daemon-identity.json'), join(f.from, 'fleet/assets/instructions/l.md'));
+    await putText('config/components/instructions/lessons.yaml', 'file: instructions/l.md\n');
+    const report = await lessonsStep.run(f.ctx());
+    expect(report.status).toBe('failed');
+    expect(report.note).toContain('config/components/instructions/lessons.yaml: the Global lessons document it names');
+    expect(report.note).toContain('make fleet/assets/instructions/l.md a plain file');
+    expect(report.note).not.toContain('lessons.md a plain file');
+    expect(JSON.stringify(report)).not.toContain('FAKE-KEY');
+  });
+
+  test('n2 a key-shaped file value in the component is never echoed in the hard-link fix-it', async () => {
+    await putText('state/daemon-identity.json', 'FAKE-KEY');
+    await mkdir(join(f.from, 'fleet/assets'), { recursive: true });
+    await link(join(f.from, 'state/daemon-identity.json'), join(f.from, 'fleet/assets/sk-FAKE0123456789abcdef.md'));
+    await putText('config/components/instructions/lessons.yaml', 'file: sk-FAKE0123456789abcdef.md\n');
+    const report = await lessonsStep.run(f.ctx());
+    expect(report.status).toBe('failed');
+    expect(report.note).toContain('a hard link (v4 refused it)');
+    expect(JSON.stringify(report)).not.toContain('sk-FAKE');
+    // m3: the file that is the hard link is the one the component names, never the default document.
+    expect(report.note).toContain('make the file it names (under fleet/assets) a plain file');
+    expect(report.note).not.toContain('instructions/lessons.md');
   });
 
   test('an unknown learning.yaml key fails by key, never by value', async () => {

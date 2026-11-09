@@ -324,6 +324,19 @@ describe('S1 a member session reads a refused key, replays only a read, and does
     });
   });
 
+  it('says only the status when the publisher refuses with a body that is not JSON', async () => {
+    const { transport } = harness(async (_step, session) => {
+      session.asked = async () => ({ kind: 'response', status: 502, headers: {}, body: '<html>Bad gateway</html>' });
+      return session;
+    });
+    const client = await transport.openClient(SUBSCRIPTION);
+    await expect(client.request('/v1/shared/me', z.unknown())).rejects.toMatchObject({
+      status: 502,
+      code: '',
+      message: 'the publisher answered 502',
+    });
+  });
+
   it('opens a new session after a lease ended, for a read', async () => {
     const { transport, sessions, drives } = harness(async (step, session) => {
       if (step === 0) {
@@ -388,6 +401,60 @@ describe('S1 a member session reads a refused key, replays only a read, and does
     expect(sessions[0]?.closed).toEqual(['the member left this publisher']);
     await expect(client.request('/v1/shared/me', z.unknown())).rejects.toBeInstanceOf(MemberUnreachableError);
     expect(dials).toHaveLength(1);
+  });
+});
+
+describe('leaving a publisher while a session to it is still being opened', () => {
+  it('lets the walk fail on its own: the request is unreachable, nothing is left unhandled, and later requests dial nothing', async () => {
+    // Arrange: every carrier fails, but only once the test lets it.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const { transport, dials } = harness(async () => {
+      await gate;
+      throw new Error('this carrier failed');
+    });
+    const client = await transport.openClient(SUBSCRIPTION);
+    const pending = client.request('/v1/shared/me', z.unknown());
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Act: the member leaves while the first carrier is still being tried.
+    client.close();
+    release();
+
+    // Assert
+    await expect(pending).rejects.toBeInstanceOf(MemberUnreachableError);
+    await expect(client.request('/v1/shared/me', z.unknown())).rejects.toBeInstanceOf(MemberUnreachableError);
+    expect(dials.length).toBeGreaterThan(0);
+    const dialled = dials.length;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(dials).toHaveLength(dialled);
+  });
+});
+
+describe('join-options answers a challenge as the proof options the publisher sent', () => {
+  it('parses the options of a challenge, names the carrier that reached the publisher, and closes the socket', async () => {
+    const options = {
+      challenge: 'Y2hhbGxlbmdl',
+      rpId: 'box.example.test',
+      allowCredentials: [{ type: 'public-key', id: 'AQIDBA' }],
+      timeout: 60_000,
+    };
+    const { transport, sockets } = harness(async () => ({ kind: 'challenge', memberLabel: 'Me', options }));
+    const answered = await transport.joinOptions({ seed: SEED, keys: KEYS });
+    expect(answered).toMatchObject({ kind: 'answer', answer: { kind: 'challenge', memberLabel: 'Me', options } });
+    expect(sockets[0]?.closed).toBeGreaterThan(0);
+  });
+
+  it('refuses options that are not a challenge the schema knows, and walks on to the next carrier', async () => {
+    const { transport, dials } = harness(async () => ({
+      kind: 'challenge',
+      memberLabel: 'Me',
+      options: { challenge: 'Y2hhbGxlbmdl', allowCredentials: [] },
+    }));
+    expect(await transport.joinOptions({ seed: SEED, keys: KEYS })).toMatchObject({ kind: 'unreachable' });
+    expect(dials.length).toBeGreaterThan(1);
   });
 });
 

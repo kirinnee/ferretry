@@ -21,6 +21,8 @@ const AFTER = 'components/hooks/compact-after.sh';
 const FAKE_KEY = 'sk-ant-FAKEFAKEFAKEFAKEFAKE0123';
 // 24 characters from the token alphabet, a letter and a digit, no known prefix: FAKE.
 const FAKE_MIXED = 'Zx9qLm2Pw8Rt5Vb7Nc4Kabcd';
+// A standard base64 body (40 characters, no known prefix) that is put after a `/`: FAKE.
+const FAKE_B64 = 'Zx9qLm2Pw8Rt5Vb7Nc4Kabcd+EfGh3Jk6Mn9Pq2R';
 // The owner's script reaches its home through $FY_HOME, never a literal v4 path: that must carry.
 const SCRIPT = '#!/bin/sh\necho compacted\ncat "$FY_HOME/state/compact-notes.txt"\n';
 
@@ -148,6 +150,78 @@ const refusedCases: readonly (readonly [string, () => Promise<void>])[] = [
   [
     'a file with a token followed by a credential-shaped value',
     async () => put(`fleet/assets/${BEFORE}`, `token ${FAKE_MIXED}\n`),
+  ],
+  // n1/n2 narrowing keeps these: a hex value after the word, a value that merely contains a dollar, a literal header.
+  [
+    'a file with a token followed by a 40-hex value',
+    async () => put(`fleet/assets/${BEFORE}`, 'token 0123456789abcdef0123456789abcdef01234567\n'),
+  ],
+  [
+    'a file with an Authorization header whose value only contains a dollar',
+    async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Bearer ${FAKE_MIXED}$x" x\n`),
+  ],
+  // M1: `/` is in the base64 alphabet, so a real key can start with it; only a PATH-shaped value is exempt.
+  [
+    'a file with a token followed by a base64 key that starts with a slash',
+    async () => put(`fleet/assets/${BEFORE}`, `token /${FAKE_B64}\n`),
+  ],
+  [
+    'a file with a Bearer word followed by a base64 key that starts with a slash',
+    async () => put(`fleet/assets/${BEFORE}`, `Bearer /${FAKE_B64}\n`),
+  ],
+  [
+    'a file with an X-Api line naming a Bearer base64 key that starts with a slash',
+    async () => put(`fleet/assets/${BEFORE}`, `X-Api: Bearer /${FAKE_B64}=\n`),
+  ],
+  [
+    'a file with a token followed by a base64 key with slashes inside it',
+    async () => put(`fleet/assets/${BEFORE}`, 'token /Zx9qLm2P/w8Rt5Vb7/Nc4Kabcd\n'),
+  ],
+  [
+    'a file with a token followed by a key that starts with a tilde',
+    async () => put(`fleet/assets/${BEFORE}`, `token ~${FAKE_MIXED}\n`),
+  ],
+  [
+    'a file with a token followed by a key that starts with a dot',
+    async () => put(`fleet/assets/${BEFORE}`, `token .${FAKE_MIXED}\n`),
+  ],
+  [
+    'a file with a token followed by a key under a path-looking prefix',
+    async () => put(`fleet/assets/${BEFORE}`, `token /home/x/${FAKE_MIXED}\n`),
+  ],
+  // m1: only a real variable reference is exempt in a header, never a value that merely starts with a dollar.
+  [
+    'a file with an Authorization header whose value is a dollar then a key',
+    async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Bearer $${FAKE_MIXED}" x\n`),
+  ],
+  [
+    'a file with an Authorization header whose variable has a literal default',
+    async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Bearer \${API_TOKEN:-${FAKE_MIXED}}" x\n`),
+  ],
+  [
+    'a file with an Authorization header whose reference is followed by more text',
+    async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Bearer \${PREFIX}${FAKE_MIXED}" x\n`),
+  ],
+  [
+    'a file with a reference header and then a literal header',
+    async () =>
+      put(
+        `fleet/assets/${BEFORE}`,
+        `curl -H "Authorization: Bearer $FROM_THE_ENVIRONMENT" -H "Authorization: Bearer ${FAKE_MIXED}" x\n`,
+      ),
+  ],
+  // m2: the version exemption has a bounded suffix; a key behind a version-looking prefix is still a key.
+  [
+    'a file with a token followed by a version then a key',
+    async () => put(`fleet/assets/${BEFORE}`, `token 1.2.3-${FAKE_MIXED}\n`),
+  ],
+  [
+    'a file with a token followed by a v-version then a key after a plus',
+    async () => put(`fleet/assets/${BEFORE}`, `token v1.0.0+${FAKE_MIXED}\n`),
+  ],
+  [
+    'a file with a token followed by a version then a key split by dashes',
+    async () => put(`fleet/assets/${BEFORE}`, 'token 1.2.3-Zx9qLm2P-w8Rt5Vb7-Nc4Kabcd\n'),
   ],
   // M2: the content is held to the same homes the last gate refuses in an inline command.
   [
@@ -323,6 +397,42 @@ describe('prose in a carried file is not a credential (m1)', () => {
       'When compacting, keep the plan and the open questions. Basic troubleshooting steps can go. Mention the token ' +
         'budget used so far, and every file path the user named, for example token /home/user/notes/summary.md. ' +
         'Bearer of bad news: say so plainly. Keep the list of decisions and drop the chatter.\n',
+    ],
+    // n1: a token-like word then a long value that carries digits but is a path or a version, not a credential.
+    ['token before a dated path', 'Resume from the token /home/x/notes/2026-11-09/summary.md next time\n'],
+    ['token before a home-relative dated path', 'see the token ~/notes/2026-11-09/summary-final.md\n'],
+    ['token before a dot-relative dated path', 'the token ./docs/2026-11-09/summary-final.md\n'],
+    ['token before a version', 'token v4.291.5-rc.1+build.20261109 is the one to use\n'],
+    ['Bearer before a dated path', 'Bearer /var/log/2026-11-09/session-0001.log\n'],
+    // M1 keeps these: a path is a path, whatever digits it holds.
+    ['token before a path with a log name', 'see the token /var/log/app/2026-11-09/worker-3.log for details\n'],
+    ['token before a mixed-case but short path', 'the token /home/User/Docs/notes.md\n'],
+    // M1 (round 2): a long file name is a name. Judged by its pieces, not as one 20+ character run.
+    ['token before a long hyphenated image name', 'the token ./docs/brand/fleet-grid/png/logomark-16-at-12x.png\n'],
+    ['token before a camera file name', 'see the token ~/Downloads/IMG_20261109_101530.jpg\n'],
+    [
+      'token before a long workflow file name',
+      'Rotate the token /home/user/.github/workflows/migration-v4-to-v5.yaml reads.\n',
+    ],
+    ['Basic before a long findings file name', 'Basic /tmp/work/converter-nits-findings2.md\n'],
+    ['token before a camel-case file name with a digit', 'the token /src/main/java/MyServiceImplV2Test.java\n'],
+    // n1 (round 2): a Go pseudo-version is a version.
+    ['token before a Go pseudo-version', 'the token v0.0.0-20261109153000-a3f9c2e1d4b5 is pinned\n'],
+    // m2: a version with a short build suffix is still a version.
+    ['token before a release-candidate version', 'the token 1.2.3-rc.1+build.20261109 is current\n'],
+    // m1: a reference in quotes is still a reference.
+    [
+      'an Authorization header with a quoted variable reference',
+      `curl -H 'Authorization: Bearer "\${LONG_VARIABLE_NAME_HERE}"' x\n`,
+    ],
+    // n2: a real header whose value is an environment reference, not a value.
+    [
+      'an Authorization header that reads its token from the environment',
+      'curl -H "Authorization: Bearer ${FERRETRY_HOOK_TOKEN}" x\n',
+    ],
+    [
+      'a Proxy-Authorization header on a long variable',
+      'curl -H "Proxy-Authorization: Basic $PROXY_PASSWORD_FROM_THE_ENV" x\n',
     ],
   ];
   for (const [name, text] of prose)
