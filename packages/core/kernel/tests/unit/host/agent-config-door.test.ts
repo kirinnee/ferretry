@@ -16,6 +16,7 @@ import {
 } from '../../../contract/bound.ts';
 import { defineConfig } from '../../../contract/index.ts';
 import { type ApiRequest, headerValue, headersFrom, queryFrom } from '../../../contract/http.ts';
+import type { CarrierKey } from '../../../contract/ids.ts';
 import type { CallStanding } from '../../../contract/route.ts';
 import { bootHost } from '../../../host/host.ts';
 import { inventorySurfacesOf } from '../../../host/kernel-half.ts';
@@ -162,13 +163,21 @@ const post = (
   path: string,
   body: unknown,
   caller?: string,
-  extra: { readonly headers?: Record<string, string>; readonly privileged?: boolean } = {},
+  extra: {
+    readonly headers?: Record<string, string>;
+    readonly privileged?: boolean;
+    /** Arrive over the relay: a carried arrival, which is remote whatever the owner's host. */
+    readonly relayed?: boolean;
+  } = {},
 ): ApiRequest => ({
   method: 'POST',
   path,
   query: queryFrom([]),
   headers: headersFrom({ ...(caller === undefined ? {} : { 'x-test-caller': caller }), ...extra.headers }),
-  arrival: localArrival(extra.privileged ?? true),
+  arrival:
+    extra.relayed === true
+      ? { kind: 'carried', carrier: 'relay' as CarrierKey }
+      : localArrival(extra.privileged ?? true),
   text: async () => JSON.stringify(body),
 });
 const get = (path: string, caller?: string): ApiRequest => ({
@@ -266,6 +275,27 @@ test('R-0073 GET /v1/config/status answers the directory, files, issues and pend
   }
 });
 
+test('R-0073 GET /v1/config/status through the host names the declared files, never stores, and shows a held edit as pending', async () => {
+  const host = await boot({ switches: { on: ['settings'], asked: [] } });
+  try {
+    const before = await host.dispatch(get('/v1/config/status', 'owner'));
+    expect(before.headers.get('cache-control')).toBe('no-store');
+    // A file nobody has written is absent and not listed; a written one is listed with its kind and state.
+    expect(json(before).files).toEqual([]);
+    expect(json(before).pending).toEqual([]);
+    const tools = (tool: string, input: unknown) => host.dispatch(post('/v1/agent/tools', { tool, input }, 'wren'));
+    await tools('config_write', { path: 'voice.yaml', text: 'limit: 5\n' });
+    const written = json(await host.dispatch(get('/v1/config/status', 'owner')));
+    expect(written.files).toMatchObject([{ path: 'voice.yaml', kind: 'ferrets', state: 'ok' }]);
+    await tools('config_write', { path: 'voice.yaml', text: 'limit: 50\n' });
+    const after = json(await host.dispatch(get('/v1/config/status', 'owner')));
+    expect(after.pending).toHaveLength(1);
+    expect(JSON.stringify(after.pending)).toContain('voice.yaml');
+  } finally {
+    await host.stop();
+  }
+});
+
 test('R-0244 the caller is admitted BEFORE the body: no credential 401, a non-ferret 403, whatever the body says', async () => {
   const host = await boot({ switches: { on: ['settings'], asked: [] } });
   try {
@@ -290,7 +320,7 @@ test('R-0244 the owner’s switch is asked BEFORE the body too: off, a bad body 
   }
 });
 
-test('R-0244 Gate’s refusals survive through the route, no credential in today’s words: 401 missing_capability, 401 session_mismatch, 403 on a carrier that is not privileged', async () => {
+test('R-0244 Gate’s refusals survive through the route, no credential in today’s words: 401 missing_capability, 401 session_mismatch, 403 on an unprivileged local arrival and on a relayed one', async () => {
   const host = await boot({ switches: { on: ['settings'], asked: [] } });
   try {
     const none = await host.dispatch(post('/v1/agent/config', { tool: 'config.read' }));
@@ -306,9 +336,12 @@ test('R-0244 Gate’s refusals survive through the route, no credential in today
     );
     expect(mismatch.status).toBe(401);
     expect(json(mismatch).code).toBe('session_mismatch');
-    const relayed = await host.dispatch(
+    // A local arrival that is not the privileged one, and a relayed (carried) arrival: neither is the host.
+    const unprivileged = await host.dispatch(
       post('/v1/agent/config', { tool: 'config.read' }, 'wren', { privileged: false }),
     );
+    expect(unprivileged.status).toBe(403);
+    const relayed = await host.dispatch(post('/v1/agent/config', { tool: 'config.read' }, 'wren', { relayed: true }));
     expect(relayed.status).toBe(403);
   } finally {
     await host.stop();
