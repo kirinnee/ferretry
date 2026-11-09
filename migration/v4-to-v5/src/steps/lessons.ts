@@ -471,6 +471,10 @@ async function globalSource(ctx: StepContext): Promise<string | undefined> {
     file = isScalar(pair?.value) ? pair.value.value : undefined;
   }
   const source = await instructionsSource(home, file);
+  if (source === 'hard-link')
+    throw new V4InputError(
+      `${V4_LESSONS_COMPONENT}: the Global lessons document it names is a hard link (v4 refused it), so it was never read; make it a plain file at fleet/assets/${V4_GLOBAL_LESSONS_FILE} and run the conversion again`,
+    );
   if (source !== undefined) return source;
   // Not found as a plain file inside the assets: absent is no document (v4 read it as empty); anything else is refused.
   const assets = join(home, 'fleet', 'assets');

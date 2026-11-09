@@ -444,7 +444,10 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
       }
       const file = pairOf(map, 'file')?.value;
       const source = await instructionsSource(ctx.v4.home, isScalar(file) ? file.value : undefined);
-      if (source === undefined) plan.waiting.push(`${label} (its document is not a plain file inside fleet/assets/)`);
+      if (source === 'hard-link')
+        plan.waiting.push(`${label} (its document is a hard link (v4 refused it), so it was never read)`);
+      else if (source === undefined)
+        plan.waiting.push(`${label} (its document is not a plain file inside fleet/assets/)`);
       else plan.instructions.push({ name: address.name, source, from: label });
       return;
     }

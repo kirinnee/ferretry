@@ -44,12 +44,11 @@ const outsideOf = (inside: string): boolean =>
   inside === '' || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside);
 
 /** The asset document an instructions (or lessons) component points at, when it is a plain file inside `fleet/assets/`. */
-export async function instructionsSource(home: string, value: unknown): Promise<string | undefined> {
+export async function instructionsSource(home: string, value: unknown): Promise<string | 'hard-link' | undefined> {
   if (typeof value !== 'string' || isAbsolute(value) || value.startsWith('~')) return undefined;
   const inside = relative('assets', normalize(join('assets', value)));
   if (outsideOf(inside)) return undefined;
-  const found = await plainFileInHome(home, ['fleet', 'assets', ...inside.split(sep)]);
-  return found === 'hard-link' ? undefined : found;
+  return plainFileInHome(home, ['fleet', 'assets', ...inside.split(sep)]);
 }
 
 /** What `componentFileSource` found: the snapshot file, or the KIND of refusal (never the path's contents). */
