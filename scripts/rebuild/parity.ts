@@ -480,18 +480,19 @@ function parse(file: string): Module {
   sources.set(ast, { text: source, lines });
   const mod: Module = { file, ast, source, declarations: new Map(), imports: new Map() };
   modules.set(file, mod);
-  const declare = (name: string, node: N) => {
+  // Bun 1.3.x erases calls to a function named declare (read as the TS modifier), so it is not called that.
+  const recordDeclaration = (name: string, node: N) => {
     const list = mod.declarations.get(name) ?? [];
     list.push(node);
     mod.declarations.set(name, list);
   };
   walk(ast, node => {
-    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') declare(node.id.name, node);
-    else if (isFunctionDeclaration(node) && node.id) declare(node.id.name, node);
+    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') recordDeclaration(node.id.name, node);
+    else if (isFunctionDeclaration(node) && node.id) recordDeclaration(node.id.name, node);
     if (isFunctionLike(node))
       for (const parameter of node.params as N[]) {
         const name = bindingTarget(parameter);
-        if (name.type === 'Identifier') declare(name.name, name);
+        if (name.type === 'Identifier') recordDeclaration(name.name, name);
       }
     if (node.type === 'ImportDeclaration' && isStringLiteral(node.source)) {
       const path = node.source.value as string;
