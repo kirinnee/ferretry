@@ -10,6 +10,7 @@ import { type FunctionComponent, Suspense } from 'react';
 import { AddSkillsPage } from '../../../app/features/add-skills/add-skills-page.tsx';
 import half from '../../../app/index.ts';
 import { placeQuery } from '../../../app/lib/add-skills-address.ts';
+import { CatalogClientProvider } from '../../../app/lib/client-context.tsx';
 import { daemonConnection } from '../../../app/lib/machine.ts';
 import type { MemberSubscription } from '../../../app/lib/member-keys.ts';
 import manifest from '../../../manifest.ts';
@@ -64,7 +65,7 @@ describe('the Add skills page', () => {
       />,
     );
     await settle();
-    // S-0010: the heading, where it installs, one group per catalog with its publisher, skills only, a filter and Refresh
+    // S-0010: the heading, where it installs, one group per catalog with its publisher, skills only, and a filter
     expect(q('h1')?.textContent).toBe('Add skills');
     expect(q('[data-add-skills-scope]')?.textContent).toContain('Installs into this project');
     const groups = all('[data-add-skills-catalog]');
@@ -82,6 +83,43 @@ describe('the Add skills page', () => {
     expect(rows[1]?.querySelector('[data-add-skills-install]')?.textContent).toContain('Install');
     // S-0262: it read the installs through the client the shell built for this machine
     expect(fake.calls.map(call => call.path)).toContain('/v1/catalog-installs');
+    await view.unmount();
+  });
+
+  it('S-0262 with the host naming no install client, the page reads installs through the daemon-bound client of the app’s client context', async () => {
+    const installed = {
+      ...installRecord('skill', 'pdf-tools'),
+      provenance: {
+        ...installPreview().provenance,
+        publisher: shared.identity.daemonId,
+        itemId: shared.skill.itemId,
+        kind: 'skill' as const,
+        name: 'pdf-tools',
+      },
+    };
+    const fake = fakeClient({ 'GET /v1/catalog-installs': () => ({ installs: [installed] }) });
+    const members = fakeMembers({ list: async () => [studio], browse: async () => okAttempt(shared.browse) });
+    const view = await mount(
+      <CatalogClientProvider client={fake.client}>
+        <AddSkillsPage
+          connection={daemonConnection({ daemonId: 'alpha' })}
+          machineName="Studio laptop"
+          ferret="f1"
+          place={place}
+          members={members.members}
+          onBack={() => undefined}
+          onSubscribe={() => undefined}
+        />
+      </CatalogClientProvider>,
+    );
+    await settle();
+    // No `install` prop at all: the installs read went to the context's client, and its answer drew "Installed".
+    expect(fake.calls.map(call => call.path)).toContain('/v1/catalog-installs');
+    expect(all('[data-add-skills-row]')[0]?.querySelector('[data-add-skills-installed]')?.textContent).toBe(
+      'Installed',
+    );
+    // And no project is known to the page, so it does not claim to install into one.
+    expect(q('[data-add-skills-scope]')?.textContent).not.toContain('/work/app');
     await view.unmount();
   });
 });

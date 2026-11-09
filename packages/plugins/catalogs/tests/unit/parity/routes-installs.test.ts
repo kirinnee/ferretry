@@ -3,6 +3,11 @@
  * installed, change its update choices and remove it, into a PROJECT (`.mcp.json` in a known project folder) and into a
  * RUNTIME profile. Driven through the real daemon half on the kernel's test host: the real install service, state files
  * and signature checks, with the MCP plugin's file and runtime ports as in-memory stand-ins. One test per row.
+ *
+ * WHAT THE STAND-IN DOES NOT PROVE: it ignores the `governance` and `fresh` arguments the runtime installer is
+ * handed, so these tests do not show that Catalogs passes governance on to it; and it replaces MCP's own
+ * `.mcp.json` confinement (what MCP lets an install write is MCP's to prove). MCP and Skills also take no
+ * `catalog.items` hook yet, so none of this runs end to end on a real daemon (ports-pending.json, the cross lines).
  */
 import { describe, expect, test } from 'bun:test';
 import { catalogsFixture, type CatalogsFixture, makeCatalog, mcpServer } from '../../support/daemon-host.ts';
@@ -90,7 +95,8 @@ describe('the catalog install routes', () => {
     const unknown = await rig.fx.host.request('POST', '/v1/catalog-installs/project/preview', {
       body: { ...body, target: { ...projectTarget, projectRoot: '/elsewhere' } },
     });
-    expect(unknown.status).toBeGreaterThanOrEqual(400);
+    expect(unknown.status).toBe(404);
+    expect(unknown.json()).toMatchObject({ code: 'catalog_target_unknown' });
     const previewId = preview.json<{ previewId: string }>().previewId;
     expect(
       (
@@ -115,9 +121,10 @@ describe('the catalog install routes', () => {
     expect(preview.status).toBe(200);
     expect(rig.held.components.size).toBe(0);
     const bad = await rig.fx.host.request('POST', '/v1/catalog-installs/runtime', {
-      body: { previewId: 'x', secretBindings: {} },
+      body: { previewId: `cip_${'x'.repeat(22)}`, secretBindings: {} },
     });
-    expect(bad.status).toBeGreaterThanOrEqual(400);
+    expect(bad.status).toBe(404);
+    expect(bad.json()).toMatchObject({ code: 'catalog_preview_unknown' });
     const applied = await rig.fx.host.request('POST', '/v1/catalog-installs/runtime', {
       body: { previewId: preview.json<{ previewId: string }>().previewId, secretBindings: {} },
     });

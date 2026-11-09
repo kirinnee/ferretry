@@ -91,7 +91,8 @@ describe('the catalog routes', () => {
     const stale = await fx.host.request('POST', `/v1/catalogs/${catalog}/items`, {
       body: { source: SOURCE, digest: `sha256:${'0'.repeat(64)}` },
     });
-    expect(stale.status).toBeGreaterThanOrEqual(400);
+    expect(stale.status).toBe(409);
+    expect(stale.json()).toMatchObject({ code: 'changed_since_preview' });
     const added = await fx.host.request('POST', `/v1/catalogs/${catalog}/items`, { body: { source: SOURCE, digest } });
     expect(added.status).toBe(201);
     const { itemId } = added.json<{ itemId: string }>();
@@ -115,7 +116,8 @@ describe('the catalog routes', () => {
     const stale = await fx.host.request('POST', `/v1/catalog-items/${itemId}/versions`, {
       body: { digest: `sha256:${'0'.repeat(64)}` },
     });
-    expect(stale.status).toBeGreaterThanOrEqual(400);
+    expect(stale.status).toBe(409);
+    expect(stale.json()).toMatchObject({ code: 'changed_since_preview' });
     const published = await fx.host.request('POST', `/v1/catalog-items/${itemId}/versions`, {
       body: { digest: preview.json<{ digest: string }>().digest },
     });
@@ -146,7 +148,24 @@ describe('the catalog routes', () => {
       query: { from: '1', to: '2' },
     });
     expect(changes.status).toBe(200);
-    expect(changes.json()).toBeTruthy();
+    expect(changes.json()).toEqual({
+      entries: [
+        {
+          label: 'Starts',
+          change: 'changed',
+          document: false,
+          before: 'npx -y pdf-tools',
+          after: 'npx -y pdf-tools@2',
+          flag: 'command',
+        },
+      ],
+      unchanged: 0,
+      newWarnings: [],
+      goneWarnings: [],
+    });
+    expect(
+      (await fx.host.request('GET', `/v1/catalog-items/${itemId}/changes`, { query: { from: '2', to: '1' } })).json(),
+    ).toMatchObject({ entries: [{ before: 'npx -y pdf-tools@2', after: 'npx -y pdf-tools' }] });
     expect((await fx.host.request('GET', `/v1/catalog-items/${itemId}/versions/9`)).status).toBe(404);
     expect((await fx.host.request('GET', `/v1/catalog-items/${itemId}/versions/1`, { as: ferret })).status).toBe(403);
     expect((await fx.host.request('GET', `/v1/catalog-items/${itemId}/versions/2`, { as: ferret })).status).toBe(200);
@@ -192,14 +211,26 @@ describe('the catalog routes', () => {
   });
 
   test('R-0270 POST /v1/catalogs/:id/export writes the catalog as a signed file', async () => {
-    const { fx, catalog, itemId } = await withItem();
+    const { fx, servers, catalog, itemId } = await withItem();
+    const other = { kind: 'mcp', mcp: 'docs-tool' } as const;
+    servers.push(mcpServer('docs-tool'));
+    const otherPreview = await fx.host.request('POST', `/v1/catalogs/${catalog}/items/preview`, {
+      body: { source: other },
+    });
+    await fx.host.request('POST', `/v1/catalogs/${catalog}/items`, {
+      body: { source: other, digest: otherPreview.json<{ digest: string }>().digest },
+    });
     const exported = await fx.host.request('POST', `/v1/catalogs/${catalog}/export`, { body: {} });
     expect(exported.status).toBe(200);
     const file = exported.json<{ signedManifest?: unknown; items?: unknown[] }>();
     expect(file.signedManifest).toBeDefined();
-    expect(file.items).toHaveLength(1);
+    expect(file.items).toHaveLength(2);
     const chosen = await fx.host.request('POST', `/v1/catalogs/${catalog}/export`, { body: { itemIds: [itemId] } });
     expect(chosen.status).toBe(200);
+    const only = chosen.json<{ items: unknown[] }>().items;
+    expect(only).toHaveLength(1);
+    expect(JSON.stringify(only)).toContain(itemId);
+    expect(JSON.stringify(only)).not.toContain('docs-tool');
     expect((await fx.host.request('POST', `/v1/catalogs/${catalog}/export`, { body: {}, as: ferret })).status).toBe(
       403,
     );
@@ -218,7 +249,8 @@ describe('the catalog routes', () => {
     const undone = await fx.host.request('POST', '/v1/catalog-items/quick-add/undo', {
       body: { token: `cqu_${'u'.repeat(22)}` },
     });
-    expect(undone.status).toBeGreaterThanOrEqual(400);
+    expect(undone.status).toBe(410);
+    expect(undone.json()).toMatchObject({ code: 'undo_expired' });
     expect((await fx.host.request('POST', '/v1/catalog-items/quick-add/undo', { body: { token: 'x' } })).status).toBe(
       400,
     );

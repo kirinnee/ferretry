@@ -2,10 +2,8 @@
  * The Catalogs-owned R rows for download links, over the real daemon half on the kernel's test host.
  *
  * What these prove is what a person can do with links that EXIST: read them, filter them, preview what one would
- * carry and Copy one. Making a link, moving it and changing its end all go to the link store through `kernel.fetch`,
- * and Catalogs' manifest does not yet declare the link-store network resolver, so the host refuses every store
- * address (the manifest's own TODO): those rows stay open and are named in ports-pending.json.
- * One test per row, named by its id.
+ * carry and Copy one. Making a link, moving it, changing its end and turning it off reach the link store; those
+ * rows are proven in routes-link-store.test.ts over `options.fetch`. One test per row, named by its id.
  */
 import { describe, expect, test } from 'bun:test';
 import type { SealedDocumentHandle, SealedDocumentsApi } from '@ferretry/core-vault/contract';
@@ -47,10 +45,15 @@ async function withLink() {
 describe('the download link routes', () => {
   test('R-0267 POST /v1/catalog-links/preview shows what a link would carry, writing nothing; a ferret cannot', async () => {
     const { fx, itemId } = await withLink();
+    const files = fx.host.state('catalogs').files;
+    const before = new Map(files);
     const byItem = await fx.host.request('POST', '/v1/catalog-links/preview', { body: { itemId, version: 1 } });
     expect(byItem.status).toBe(200);
+    expect(byItem.json()).toMatchObject({ itemId, version: 1, name: 'pdf-tools', itemKind: 'mcp', newItem: false });
     const bySource = await fx.host.request('POST', '/v1/catalog-links/preview', { body: { source: SOURCE } });
     expect(bySource.status).toBe(200);
+    // A preview writes nothing: every state file is as it was.
+    expect(new Map(files)).toEqual(before);
     expect(
       (await fx.host.request('POST', '/v1/catalog-links/preview', { body: { source: SOURCE }, as: ferret })).status,
     ).toBe(403);
