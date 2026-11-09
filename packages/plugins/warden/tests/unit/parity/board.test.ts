@@ -33,17 +33,25 @@ const ownedByLead: CardView = cardView({ owner: 'lead', assignee: 'worker' }, { 
 function boardWithOrphan(card: CardView | readonly CardView[] = orphaned): {
   readonly board: BoardApi;
   readonly reads: number[];
+  /** Change which cards the board calls orphaned, between two runs. */
+  readonly set: (next: readonly CardView[]) => void;
 } {
-  const all = Array.isArray(card) ? card : [card as CardView];
+  let all: readonly CardView[] = Array.isArray(card) ? card : [card as CardView];
   const reads: number[] = [];
   const board: BoardApi = {
     ...fakeBoard(),
     orphanedCards: async () => {
       reads.push(reads.length + 1);
-      return { cards: all, laneSets: [lanes(PROJECT)] };
+      return { cards: [...all], laneSets: [lanes(PROJECT)] };
     },
   };
-  return { board, reads };
+  return {
+    board,
+    reads,
+    set: next => {
+      all = next;
+    },
+  };
 }
 
 interface WardenOptions {
@@ -90,6 +98,9 @@ async function wardenWith(board: BoardApi | undefined, options: WardenOptions = 
     const subjects = (await fake.snapshots({ ferret: 'machine-agenda' }))[0]?.items.map(item => item.subject) ?? [];
     return { entries: open.map(ask => String(ask.entry)), subjects };
   };
+  /** The ids of the open items on the machine board: a recreated item is a new id. */
+  const machineIds = async () =>
+    (await fake.open({ ferret: ferretId('machine-agenda'), state: 'open' })).map(ask => String(ask.id));
   /** The owner taps "Got it" on the machine item. */
   const closeItem = async () => {
     for (const ask of await fake.open({ ferret: ferretId('machine-agenda'), state: 'open' }))
@@ -102,6 +113,8 @@ async function wardenWith(board: BoardApi | undefined, options: WardenOptions = 
     typed,
     notices,
     machineItem,
+    machineIds,
+    boardWrites: () => fake.boardWrites,
     closeItem,
     attempts: fake instanceof RefusingAsks ? fake.attempts : [],
   };
@@ -229,6 +242,49 @@ describe('Board, an optional use of the Warden', () => {
       entries: ['warden.orphans'],
       subjects: ['31 cards have nobody working on them'],
     });
+  });
+
+  test('the same orphaned cards on every run are the SAME item, and the board is written once', async () => {
+    // Arrange
+    const { board } = boardWithOrphan(
+      Array.from({ length: 4 }, (_, each) =>
+        cardView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
+      ),
+    );
+    const { run, machineIds, boardWrites } = await wardenWith(board);
+
+    // Act
+    await run();
+    const first = await machineIds();
+    const written = boardWrites();
+    for (let again = 0; again < 4; again += 1) await run();
+
+    // Assert
+    expect(first).toHaveLength(1);
+    expect(await machineIds()).toEqual(first);
+    expect(boardWrites()).toBe(written);
+  });
+
+  test('a changed list restates the SAME item, and all recovered closes it', async () => {
+    // Arrange
+    const card = (id: string, activity: 'orphaned' | 'active') =>
+      cardView({ id, owner: 'gone', assignee: 'worker' }, { activity });
+    const { board, set } = boardWithOrphan([card('F1', 'orphaned'), card('F2', 'orphaned')]);
+    const { run, machineIds, machineItem } = await wardenWith(board);
+    await run();
+    const first = await machineIds();
+
+    // Act
+    set([card('F1', 'orphaned'), card('F2', 'active'), card('F3', 'orphaned'), card('F4', 'orphaned')]);
+    await run();
+    const changed = { ids: await machineIds(), item: await machineItem() };
+    set([card('F1', 'active'), card('F3', 'active'), card('F4', 'active')]);
+    await run();
+
+    // Assert
+    expect(changed.ids).toEqual(first);
+    expect(changed.item).toEqual({ entries: ['warden.orphans'], subjects: ['3 cards have nobody working on them'] });
+    expect(await machineItem()).toEqual({ entries: [], subjects: [] });
   });
 
   test('the owner closing the item ("Got it") is respected: the same orphaned card does not raise it again', async () => {
