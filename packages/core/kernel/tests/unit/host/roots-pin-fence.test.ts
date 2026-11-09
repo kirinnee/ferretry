@@ -263,6 +263,23 @@ describe('S47 the pin is caller-scoped: an agent is fenced, a person is not', ()
   });
 });
 
+describe('F-0033 the daemon identity key is held by identity through a pinned work root', () => {
+  test('F-0033 the key hard-linked into the pinned root is refused as fenced for read and by the name verdict, and a sibling is served', async () => {
+    const { parent, home } = await layout();
+    await mkdir(`${home}/state/kernel`, { recursive: true });
+    await writeFile(`${home}/state/kernel/identity.json`, 'identity-key-fixture');
+    await link(`${home}/state/kernel/identity.json`, `${parent}/innocent.txt`);
+    const pinned = await pinOf(home, parent);
+    try {
+      expect(await outcome(read(pinned, 'innocent.txt'))).toBe('refused:fenced');
+      expect(await outcome(read(pinned, 'sibling.txt'))).toBe('sibling-bytes');
+      expect(await pinned.fenced(['innocent.txt', 'sibling.txt'])).toEqual([true, false]);
+    } finally {
+      await pinned.close();
+    }
+  });
+});
+
 describe('S47 the held root answers a name verdict for output the walk never sees', () => {
   test('S47 a name inside the home is fenced by name, present or not; one beside it is not', async () => {
     const { parent, home } = await layout();
@@ -342,7 +359,7 @@ describe("S47 S40 the fence holds the home's pinned key files and folders by ide
       'state/mcp-oauth-secrets.json',
       'state/login-secrets.json',
       'state/passkeys.json',
-      'state/daemon-identity.json',
+      'state/kernel/identity.json',
       'fleet',
       'fleet/homes',
       'state/sessions',

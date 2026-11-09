@@ -282,55 +282,98 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   return undefined;
 }
 /**
- * Rows whose source file the word rules above place with Runtimes ("runtime", "fleet", "component" in a name) but whose
- * code is another owner's in 5.0 (britnee ruling, parity-runtimes round 1: re-owned, none removed). Each entry is
- * `[kind, source file pattern, what pattern, 5.0 owner]`; the first match wins, so a file's other rows keep the owner
- * the rules gave them.
+ * Rows the word rules above place with Runtimes ("runtime", "fleet", "component" in a name) but whose code is another
+ * owner's in 5.0 (britnee ruling, parity-runtimes round 1: re-owned, none removed). Keyed by ROW ID, so a later row from
+ * the same source file keeps the owner the rules gave it; `applyReowned` refuses an id the inventory does not hold.
+ * J-0052 and J-0096 have no 5.0 plugin that really does the job; they stay `[ ]` under the nearest name, and the
+ * owner decides each (a "removed by design" status needs her per-row yes).
  */
-const REOWNED: readonly (readonly [Kind, RegExp, RegExp, string])[] = [
-  // Pack routing migration arm in the daemon's world builder.
-  ['J', /daemon\/bin\/fyd\.ts$/, /RoutingMigration/, 'packs'],
-  // Timers of the daemon's runtime host: the kernel's.
-  [
-    'J',
-    /adapters\/runtime\/(?:activity-timers|ordered-log-writer|bundled-worker-host|bundled-worker)\.ts$/,
-    /./,
-    'kernel',
-  ],
-  ['J', /daemon\/bin\/session\.worker\.ts$/, /runtime\.schedule\.timer/, 'kernel'],
+const REOWNED: Readonly<Record<string, string>> = {
+  // Pack routing conversion at boot (the v4-to-v5 converter's packs step is the nearest owner).
+  'J-0052': 'packs',
+  // Activity timers, the ordered log writer and the bundled worker host and probe: the kernel's clock, jobs and workers.
+  'J-0093': 'kernel',
+  'J-0153': 'kernel',
+  'J-0161': 'kernel',
+  'J-0165': 'kernel',
+  'J-0169': 'kernel',
+  'J-0175': 'kernel',
+  // The session worker's pacing and backstop timers: Ferrets' own worker (the kernel only supplies `after`).
+  'J-0176': 'ferrets',
   // The relay carrier's reconnect scheduler is Connections'.
-  ['J', /adapters\/relay\/bun-relay-carrier\.ts$/, /runtimeScheduler\.after/, 'connections'],
+  'J-0177': 'connections',
   // The housekeeping pass trigger: analytics ingestion's nudge plus its slow backstop is Usage's.
-  ['J', /lib\/runtime\/pass-trigger\.ts$/, /./, 'usage'],
-  // The credentials' usage reading, kept current by file events: Logins'.
-  ['J', /lib\/fleet-reading\//, /./, 'logins'],
-  // The transcript follower: Conversation's.
-  ['J', /adapters\/transcript\/file-source\.ts$/, /follow\.armWatch/, 'conversation'],
-  ['F', /adapters\/catalog\/node-catalog\.ts$/, /\/skills$/, 'skills'],
-  ['F', /cli\/src\/lib\/daemon\/layout\.ts$/, /lifecycle\.lock/, 'cli'],
-  ['F', /adapters\/file-shared-history\.ts$/, /\.lock$/, 'ferrets'],
-  ['F', /lib\/state-home-fence\.ts$/, /^\{home\}\/(?:config|fleet\/assets|fleet\/homes|state\/sessions)$/, 'kernel'],
-  ['F', /cli\/bin\/program\.ts$/, /fleet\/assets/, 'kernel'],
-  ['F', /adapters\/filesystem\/state-file-system\.ts$/, /^FY_HOME\/\{component\}$/, 'kernel'],
+  'J-0227': 'usage',
+  // The credentials' usage reading, kept current by file events: Logins'. (J-0096 has no real 5.0 owner.)
+  'J-0096': 'logins',
+  'J-0232': 'logins',
+  'J-0233': 'logins',
+  'J-0234': 'logins',
+  // The transcript follower: each harness implements `TranscriptReader.follow` (Claude's is claude-code's).
+  'J-0237': 'claude-code',
+  'F-0006': 'skills',
+  'F-0018': 'cli',
+  // The shared-history lease lock: the lease store stays Conversation's.
+  'F-0023': 'conversation',
+  'F-0027': 'kernel',
+  'F-0029': 'kernel',
+  'F-0030': 'kernel',
+  'F-0034': 'kernel',
+  'F-0046': 'kernel',
+  'F-0096': 'kernel',
   // Screens of the conversation, the files tab and the session pages.
-  [
-    'S',
-    /components\/(?:composer-add-menu|handoff-message|imported-history-page|ledger-message)\.tsx$/,
-    /./,
-    'conversation',
-  ],
-  [
-    'S',
-    /components\/(?:file-instance-surface|files-tab|files-views|migrate-sheet|new-session-page|sessions-page)\.tsx$/,
-    /./,
-    'ferrets',
-  ],
-  ['S', /components\/machine-status\.tsx$/, /./, 'app'],
-];
+  'S-0064': 'conversation',
+  'S-0111': 'conversation',
+  'S-0115': 'conversation',
+  'S-0134': 'conversation',
+  'S-0102': 'ferrets',
+  'S-0103': 'ferrets',
+  'S-0157': 'ferrets',
+  'S-0160': 'ferrets',
+  'S-0167': 'ferrets',
+  'S-0232': 'ferrets',
+  // One machine's outage sheet: the outage and its attempt count are Connections'.
+  'S-0145': 'connections',
+};
 
+const SHELL_DAEMON_VERBS: ReadonlySet<string> = new Set([
+  'fy daemon',
+  'fy daemon install',
+  'fy daemon logs',
+  'fy daemon reset',
+  'fy daemon restart',
+  'fy daemon start',
+  'fy daemon status',
+  'fy daemon stop',
+  'fy daemon uninstall',
+  'fy daemon which',
+]);
+const SHELL_STORAGE_FILES: ReadonlySet<string> = new Set([
+  'packages/cli/src/adapters/daemon/lifecycle-lock.ts',
+  'packages/cli/src/lib/daemon/layout.ts',
+]);
+/** The unit test file that proves a row: the owner's parity file for its kind, or the shell's own for what it owns. */
+function checkOf(kind: Kind, what: string, file: string, actualOwner: string): string {
+  return kind === 'V' && what === 'fy daemon update'
+    ? 'packages/cli/tests/unit/update/shell.test.ts'
+    : // The daemon process verbs are the fy shell's, which a kernel test may not import (context-imports).
+      kind === 'V' && SHELL_DAEMON_VERBS.has(what)
+      ? 'packages/cli/tests/unit/parity/daemon-verbs.test.ts'
+      : // The lifecycle claim and the daemon lock's place in the state home are the shell's own files.
+        kind === 'F' && actualOwner === 'kernel' && SHELL_STORAGE_FILES.has(file)
+        ? 'packages/cli/tests/unit/parity/storage.test.ts'
+        : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
+          kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
+          ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
+          : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
+            kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
+            ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
+            : kind === 'R'
+              ? 'descriptor-parity'
+              : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+}
 function add(kind: Kind, what: string, file: string, line: number, descriptor = '', owner?: string) {
   let actualOwner = owner ?? ownerOf(file, what);
-  actualOwner = REOWNED.find(([k, f, w]) => k === kind && f.test(file) && w.test(what))?.[3] ?? actualOwner;
   if (kind === 'S' && actualOwner === 'asks') actualOwner = 'agenda';
   if (kind === 'F' && /\/channel\/|inbox\.jsonl|outbox\.jsonl|sends\.jsonl|answers\.jsonl/.test(what))
     actualOwner = 'conversation';
@@ -340,18 +383,7 @@ function add(kind: Kind, what: string, file: string, line: number, descriptor = 
         'per-kind command: mcp/skill/shell/instruction/profile/runtime/model-set/harness settings/hooks (§1.4)',
       )
     : renamed(what);
-  const check =
-    kind === 'V' && what === 'fy daemon update'
-      ? 'packages/cli/tests/unit/update/shell.test.ts'
-      : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
-        kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
-        ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
-        : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
-          kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
-          ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
-          : kind === 'R'
-            ? 'descriptor-parity'
-            : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+  const check = checkOf(kind, what, file, actualOwner);
   rows.push({
     id: '',
     kind,
@@ -1698,6 +1730,24 @@ for (const row of rows.sort((a, b) => rowKey(a).localeCompare(rowKey(b)))) {
     row.status = old.status;
   unique.set(key, row);
 }
+/**
+ * Moves the rows `REOWNED` names to their 5.0 owner (and that owner's check file). The ids belong to the committed
+ * registry in docs/design, so an id it lacks is an error there; a run into another `--out-dir` (the generator's own
+ * fixture) has no such registry and skips ids it does not hold.
+ */
+function applyReowned(all: ReadonlyMap<string, Row>) {
+  const byId = new Map([...all.values()].map(row => [row.id, row]));
+  for (const [id, owner] of Object.entries(REOWNED)) {
+    const row = byId.get(id);
+    if (!row) {
+      if (outputDirectory !== resolve(join(root, 'docs/design'))) continue;
+      throw new Error(`REOWNED names ${id}, which is not in the inventory`);
+    }
+    row.owner = owner;
+    row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
+  }
+}
+applyReowned(unique);
 const inventory = [...unique.values()].sort(
   (a, b) =>
     owners.indexOf(a.owner) - owners.indexOf(b.owner) || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id),
