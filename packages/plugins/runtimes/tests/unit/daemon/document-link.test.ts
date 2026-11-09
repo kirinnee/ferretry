@@ -347,6 +347,36 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
     expect(everythingOf(error)).not.toContain('SECRET');
   });
 
+  it('BG-033 T1 a target swapped after the judge for a link to a SMALLER sign-in file in its folder is refused by the identity check alone (the size check cannot fire)', async () => {
+    const hook: { current?: Hook } = {};
+    const { store, linked, reader } = await seed(hook);
+    // The judged target is the BIGGER file (padded), the sign-in file it is swapped for is smaller, so the read never comes
+    // back longer than judged: only `stillNames` (the real path still reaches the file that was opened) can refuse it.
+    await writeFile(join(store, 'real.json'), `{"padding":"${'p'.repeat(200)}"}`);
+    await writeFile(join(store, '.credentials.json'), `{"k":"${SECRET}"}`);
+    await symlink(join(store, 'real.json'), join(linked, 'settings.json'));
+    let swapped = false;
+    hook.current = async (method, path) => {
+      if (swapped || method !== 'lstat' || path !== join(store, 'real.json')) return;
+      swapped = true;
+      await rm(join(store, 'real.json'));
+      await symlink('.credentials.json', join(store, 'real.json'));
+    };
+    const outcome = await reader()
+      .document('settings.json', 1000)
+      .then(
+        text => ({ returned: text }),
+        (failure: unknown) => ({ failure }),
+      );
+    expect(swapped).toBe(true);
+    expect('failure' in outcome).toBe(true);
+    const failure = (outcome as { failure: unknown }).failure;
+    expect(failure).toBeInstanceOf(Error);
+    expect(everythingOf(failure)).not.toContain('SECRET');
+    expect(everythingOf(failure)).not.toContain(store);
+    expect((failure as Error).message).toContain('settings.json is a link whose target is not read');
+  });
+
   it('BG-033 an empty or blank linked document is answered as the same file inside the home is (its own text), not refused', async () => {
     const { store, linked, reader } = await seed();
     for (const [file, text] of [
