@@ -110,6 +110,31 @@ describe('R2 profileScope — the memoised fold says what the per-path fold said
     });
   }
 
+  it('R2 should give the per-path fold’s scope for every profile of 2,000 seeded random graphs, loops included', () => {
+    // Arrange — 4 profiles naming each other, a Claude and a Codex component, and a generic one, at random.
+    let seed = 20_261_109;
+    const next = (below: number): number => {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      return seed % below;
+    };
+    const layerTexts = ['profile/p0', 'profile/p1', 'profile/p2', 'profile/p3', 'mcp/cl', 'mcp/cx', 'mcp/any'];
+
+    for (let round = 0; round < 2000; round++) {
+      const graph: Record<string, string[]> = {};
+      for (const name of ['p0', 'p1', 'p2', 'p3'])
+        graph[name] = Array.from({ length: next(4) }, () => layerTexts[next(layerTexts.length)] as string);
+      const catalogue = catalogueOf(graph);
+
+      // Act + Assert
+      for (const name of Object.keys(graph))
+        should({ round, graph, scope: profileScope(catalogue, name) }).deepEqual({
+          round,
+          graph,
+          scope: naiveScope(catalogue, name),
+        });
+    }
+  });
+
   it('R2 should fold a 20-deep diamond (2^20 paths) inside the deadline, keeping a Claude leaf at the bottom', () => {
     // Arrange
     const depth = 20;
