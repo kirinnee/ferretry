@@ -69,7 +69,7 @@ that is not there). Three rules, in order:
    resolved: its value reads as the plain list, mapping or string it is written as. Every file is read in one pass
    whatever its aliases do. One answer lists at most 50 problems, and one more sentence counts the rest. A key
    set by `setConfigKey` does not expand aliases: an edit hands an alias bomb on as written, and the read refuses
-   it, so the last good version stays in effect.
+   it, so the last good version stays in effect (v4's `setConfigKey` had no bounds at all, so this is no wider than v4).
 2. **Loosening waits for the owner.** An edit that loosens what the machine may spend or what agents may do
    is HELD and the tighter version stays in effect: a Warden layer that spends switched on (Jev, LLM),
    a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; Pack mode switched on, Jev choosing sub-ferret models, a sub-ferret limit or depth raised; an agent control turned on (Ferretry

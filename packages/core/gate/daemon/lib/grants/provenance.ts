@@ -5,7 +5,7 @@ import { CAPABILITY_NAMES, type CapabilityName } from '../../../contract/index.t
  *
  * Read from the document AS WRITTEN (the kernel's `configFiles.read` → `written`: the version in effect, before any
  * default) rather than the parsed one, because parsing has already replaced every omission with a default — and an
- * operator may legitimately write a value identical to one. The kernel reads it with its own bounded reader; Gate never
+ * operator may legitimately write a value identical to one. The kernel reads it with the shared bounded reader (`@ferretry/std/yaml`); Gate never
  * parses `gate.yaml`'s text itself, since a hand-written file can make a parse cost gigabytes. A document with no
  * `grants` key — or nothing in effect — names none: every capability's value is the product default.
  */

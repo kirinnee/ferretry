@@ -51,12 +51,12 @@
  *   parser without a line fails; a line whose export, or whose listed caller, is gone fails; a line without a reason
  *   fails. So the ledger stays the true inventory of who can reach a raw parser.
  *
- * DECLARED GAPS (a tree walk is not an interpreter; the real guard is the kernel's one bounded reader): `Bun` or
+ * DECLARED GAPS (a tree walk is not an interpreter; the real guard is the shared bounded reader (`@ferretry/std/yaml`)): `Bun` or
  * `globalThis` handed on whole (a call argument, a literal, a parameter default, a field: `Reflect.get(Bun, 'YAML')`,
  * `const g = globalThis; g.Bun`), `eval` and `new Function` of a string, `require.resolve` and a loader reached
  * through a destructure of `import.meta`, a ledgered file that parks its parser on `globalThis` or exports it by a later
- * assignment or a `namespace`, an import by absolute path, a package name or a `Worker` URL (only relative paths are
- * followed), a YAML library whose name has no `yaml` in it, and a ledgered parser reached through a function of an
+ * assignment or a `namespace`, an import by absolute path, a package name other than `@ferretry/std/yaml` or a `Worker` URL (only relative paths and
+ * that subpath are followed), a YAML library whose name has no `yaml` in it, and a ledgered parser reached through a function of an
  * allowed caller that itself is exported (the caller's ledger line is the review; its own importers are not followed),
  * `createRequire` itself handed on as a value (`[u].map(cr)`), and a loader made through a sequence callee
  * (`(0, createRequire)(import.meta.url)`), and the loader reached through another object (`module.constructor._load`,
