@@ -76,11 +76,10 @@ export function followingHandle(
     return await reach.realPath(placed.value).catch(() => undefined);
   };
 
-  /** `entry`, a link in `directory`, as what it leads to when that is inside the home; the link itself otherwise. */
-  const followed = async (directory: string, entry: RootEntry): Promise<RootEntry> => {
+  /** `entry`, a link in `directory` (whose real path is `here`), as what it leads to inside the home; the link otherwise. */
+  const followed = async (directory: string, here: string | undefined, entry: RootEntry): Promise<RootEntry> => {
     const target = await real(join(directory, entry.name));
     if (target === undefined || isSignIn(basename(target))) return entry;
-    const here = await real(directory);
     // A link to this folder or to one above it is a loop.
     if (here === undefined || here === target || here.startsWith(`${target}${sep}`)) return entry;
     const placed = at(target);
@@ -126,13 +125,37 @@ export function followingHandle(
     },
     entries: async (path: FencedPath): Promise<readonly RootEntry[]> => {
       const listed = (await reach.entries(path)).filter(entry => !isSignIn(entry.name));
-      if (!follow) return listed;
+      if (!follow || !listed.some(entry => entry.kind === 'symlink')) return listed;
+      // The folder's own real path, once for the whole listing (not once per link).
+      const here = await real(path);
       return await Promise.all(
-        listed.map(async entry => (entry.kind === 'symlink' ? await followed(path, entry) : entry)),
+        listed.map(async entry => (entry.kind === 'symlink' ? await followed(path, here, entry) : entry)),
       );
     },
     readText: async (path: FencedPath, limitBytes?: number) =>
       new TextDecoder().decode(await checked(path, limitBytes)),
     readBytes: async (path: FencedPath, limitBytes?: number) => await checked(path, limitBytes),
   });
+}
+
+/**
+ * Whether the ONE name `path` (a skill folder's `SKILL.md`) is, or leads inside the home `anchor` to, a plain file with a
+ * single name that is not a sign-in file. It resolves that one name (resolve, real path, one `lstat`) and lists nothing, so
+ * a farm of links to a big folder costs the same per link as a plain skill. A `SKILL.md` that is a hard link is NOT
+ * listed (the kernel never reads one; the inventory of today listed it and then read it).
+ */
+export async function isPlainFileInside(
+  roots: Pick<RootsPort, 'root'>,
+  anchor: string,
+  path: string,
+): Promise<boolean> {
+  const reach = roots.root('harness-home', { subfolder: anchor });
+  const placed = reach.resolve(path);
+  if (!placed.ok) return false;
+  const target = await reach.realPath(placed.value).catch(() => undefined);
+  if (target === undefined || isSignIn(basename(target))) return false;
+  const at = reach.resolve(target);
+  if (!at.ok) return false;
+  const found = await reach.lstat(at.value).catch(() => undefined);
+  return found?.kind === 'file' && found.links <= 1;
 }

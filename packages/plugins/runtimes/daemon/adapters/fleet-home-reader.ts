@@ -48,7 +48,7 @@ import {
 } from '../../contract/index.ts';
 import { homesOf } from '../lib/service/runtime-homes.ts';
 import type { FleetPublication } from '../lib/service/publication.ts';
-import { followingHandle, type ReadHandle } from './following-handle.ts';
+import { followingHandle, isPlainFileInside, type ReadHandle } from './following-handle.ts';
 import { readFleetManifest } from './manifest-file.ts';
 
 const MANIFEST_FILE = 'manifest.json';
@@ -205,8 +205,7 @@ class FleetHomeReader implements RuntimeHomeReader {
    * inventory of today passed a folder over whose `SKILL.md` did not).
    */
   async #manifestInside(home: RuntimeHome, name: string): Promise<boolean> {
-    const folder = scoped(this.#deps, home, `skills/${name}`, true);
-    return (await listing(folder, '.')).some(entry => entry.name === SKILL_MANIFEST && entry.kind === 'file');
+    return await isPlainFileInside(this.#deps.roots, home.home, `${home.home}/skills/${name}/${SKILL_MANIFEST}`);
   }
 
   /**
