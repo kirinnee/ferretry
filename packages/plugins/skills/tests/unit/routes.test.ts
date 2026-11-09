@@ -24,13 +24,14 @@ const OURS = `${HOME.home}/skills/ours/SKILL.md`;
 const ASSET = '/fy/fleet/assets/skills/tool/SKILL.md';
 const doc = (name: string): string => `---\nname: ${name}\ndescription: does ${name}\n---\n# ${name}\n`;
 
-const reader = (): RuntimeHomeReader => ({
+/** `anything`: a reader that would answer ANY name, so only the route's own listed-only check can refuse an unlisted one. */
+const reader = (anything = false): RuntimeHomeReader => ({
   document: async () => null,
   skills: async () => [
     { name: 'mine', manifest: MINE, managed: false },
     { name: 'ours', manifest: OURS, managed: true },
   ],
-  skillManifest: async name => (name === 'mine' || name === 'ours' ? doc(name) : undefined),
+  skillManifest: async name => (anything || name === 'mine' || name === 'ours' ? doc(name) : undefined),
   skillTree: async () => undefined,
   skillFile: async () => ({ ok: false, reason: 'unreadable' }),
 });
@@ -38,14 +39,14 @@ const reader = (): RuntimeHomeReader => ({
 const as = (...capabilities: string[]) => ({ kind: 'device', holder: 'dev_a', capabilities }) as const;
 const route = (key: string) => manifest.actions.routes.find(candidate => candidate.key === key);
 
-async function host(options: { runtimes?: boolean; projects?: boolean } = {}) {
+async function host(options: { runtimes?: boolean; projects?: boolean; anything?: boolean } = {}) {
   const ferrets = new FakeFerrets();
   ferrets.add({ id: ferretId('f1'), folder: '/work/app', runtime: 'claude-a' });
   const runtimes = fakeRuntimes();
-  runtimes.setHomes([HOME], { a: reader() });
+  runtimes.setHomes([HOME], { a: reader(options.anything === true) });
   runtimes.setAssetSkills({
     skills: async () => [{ name: 'tool', manifest: ASSET, managed: true }],
-    skillManifest: async name => (name === 'tool' ? doc('tool') : undefined),
+    skillManifest: async name => (options.anything === true || name === 'tool' ? doc(name) : undefined),
   });
   runtimes.setProfiles([], [{ runtime: 'claude-a' as RuntimeId, profile: 'p', mcp: [], skills: ['picked'] }]);
   const projects = fakeProjects();
@@ -124,6 +125,25 @@ describe('the skills routes with homes and projects bound', () => {
       expect(res.headers.get('cache-control')).toBe('no-store');
     }
     expect((await h.request('GET', '/v1/skills/file')).status).toBe(400);
+  });
+
+  test('R-0198 listed-only is the route’s own check: a reader that would answer any name is still never asked for an unlisted one', async () => {
+    const h = await host({ anything: true });
+    for (const path of [
+      `${HOME.home}/skills/unlisted/SKILL.md`,
+      '/fy/fleet/assets/skills/planted/SKILL.md',
+      MINE.replace('/mine/', '/mine/../unlisted/'),
+    ]) {
+      const res = await h.request('GET', '/v1/skills/file', { query: { path } });
+      expect(res.status).toBe(404);
+      expect(res.json()).toMatchObject({ code: 'not-found' });
+    }
+    // and the same for a ferret's own view
+    const ferret = await h.request('GET', '/v1/skills/file', {
+      query: { path: `${HOME.home}/skills/unlisted/SKILL.md`, ferretId: 'f1' },
+    });
+    expect(ferret.status).toBe(404);
+    expect((await h.request('GET', '/v1/skills/file', { query: { path: MINE } })).status).toBe(200);
   });
 
   test('R-0198 filesystem.use is demanded: fleet.use alone is refused, filesystem.use alone reads', async () => {
