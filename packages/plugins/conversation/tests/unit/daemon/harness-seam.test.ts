@@ -1647,17 +1647,28 @@ describe('m2 one lane per ferret: typing, the acts and an interrupt press keys o
     await host.stop();
   });
 
-  test('m2 an interrupt behind a send to a pane on a permission prompt runs at once: Ferrets answers dialog, so the lane is not held for the readiness wait', async () => {
+  test('m2 a send Ferrets refuses as dialog is refused and frees the lane: the interrupt behind it waits for that answer, then runs', async () => {
     const ferrets = new HarnessFerrets();
-    // Ferrets' deliver answers `not_ready` `dialog` the moment its look shows a permission prompt (its own test), so the
-    // send's turn on the lane is short; the readiness budget (~27 s) is never entered and no clock is waited out.
-    ferrets.script.deliver = async () => err({ refused: 'not_ready' as const, why: 'dialog' as const });
+    // Ferrets answers `not_ready` `dialog` the moment its look shows a permission prompt (its own test); here the answer
+    // is held on a deferred so the order is visible: the lane is held until Ferrets answers, and freed by the refusal.
+    let answer: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      answer = resolve;
+    });
+    ferrets.script.deliver = async () => {
+      await gate;
+      return err({ refused: 'not_ready' as const, why: 'dialog' as const });
+    };
     const { host, api } = await conversation(ferrets);
 
     const sending = api().send(F1, { kind: 'owner' }, { message: 'to a parked ferret', sendId: 's-1' });
+    await settle();
     const stopping = api().interrupt(F1, {});
-    const [sent] = await Promise.all([sending, stopping]);
+    await settle();
+    expect(ferrets.interrupts).toBe(0);
 
+    answer();
+    const [sent] = await Promise.all([sending, stopping]);
     expect(sent.ok).toBe(false);
     expect(ferrets.interrupts).toBe(1);
     await host.stop();

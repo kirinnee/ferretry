@@ -14,6 +14,8 @@ const failureOf = async (promise: Promise<unknown>) =>
       (error: unknown) => error,
     ),
   );
+const fixtureText = (dir: string, name: string): string =>
+  readFileSync(join(import.meta.dir, '../../../fixtures', dir, `${name}.txt`), 'utf8');
 const TRUST = 'Do you trust the files in this folder?\n❯ 1. Yes, proceed\n  2. No, exit';
 const TRUST_WITH_SECRET = 'Do you trust the files in this folder hunter2?\n❯ 1. Yes, proceed\n  2. No, exit';
 const keys = (world: ReturnType<typeof subject>) =>
@@ -218,13 +220,32 @@ describe('send path: stopActiveTurn presses the harness stop under shouldPressSt
     expect(seen).toMatchObject({ promptReady: true });
   });
 
-  it('m1 a frame with an active-work line AND a permission prompt is not pressed by stopActiveTurn: Escape would answer it', async () => {
+  it('m1 a frame with an active-work line AND a startup prompt is not pressed by stopActiveTurn: Escape would answer it', async () => {
     const world = subject();
     world.server.working = true;
     world.server.modal = TRUST;
     const seen = await world.runner.stopActiveTurn(world.handle, { key: 'Escape', whenIdle: false });
     expect(keys(world)).toEqual([]);
     expect(seen?.blockingPrompt).toBeDefined();
+  });
+
+  it('m1 a frame with an active-work line AND a tool permission prompt is not pressed by stopActiveTurn: Escape would answer it "no"', async () => {
+    const world = subject();
+    world.server.working = true;
+    world.server.modal = fixtureText('permission-prompts', 'claude-2.1.281-bash');
+    world.server.modalReplacesComposer = true;
+    await world.runner.stopActiveTurn(world.handle, { key: 'Escape', whenIdle: false });
+    expect(keys(world)).toEqual([]);
+  });
+
+  it('m1 a frame with an active-work line drawn above a harness dialog is not pressed by stopActiveTurn', async () => {
+    const world = subject();
+    // The active-work line sits above the dialog, as it stays on screen under a dialog that opened over a working turn.
+    world.server.transcript = `${world.server.transcript}\n✻ Lollygagging… (34s · ⚒ 2.1k tokens)`;
+    world.server.modal = fixtureText('harness-dialogs', 'claude-2.1.281-settings-error');
+    world.server.modalReplacesComposer = true;
+    await world.runner.stopActiveTurn(world.handle, { key: 'Escape', whenIdle: false });
+    expect(keys(world)).toEqual([]);
   });
 
   it('m1 a frame with an active-work line under Codex’s startup wait is not pressed by stopActiveTurn either', async () => {
