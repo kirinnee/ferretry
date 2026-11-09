@@ -1,6 +1,6 @@
 export { acceptedConfigFile, acceptedName, pathOfAcceptedName } from './accepted.ts';
 export type { AnyConfigDef } from './claims.ts';
-export { assertNoSharedPaths, CONFIG_EXTENSION, ConfigPathClaimError, SCHEMA_FOLDER } from './claims.ts';
+export { assertNoSharedPaths, CONFIG_EXTENSION, ConfigPathClaimError } from './claims.ts';
 export type { ConfigDeclaration } from './claims.ts';
 export type { CheckedConfigText, ConfigIssue, ConfigRefusal, RefusedConfigText } from './check.ts';
 export { checkConfigText, describePath } from './check.ts';

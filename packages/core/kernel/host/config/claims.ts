@@ -20,8 +20,6 @@ export class ConfigPathClaimError extends Error {
 
 /** The file extension every config file has; `<name>.yaml` inside a collection. */
 export const CONFIG_EXTENSION = '.yaml';
-/** The folder the generated JSON Schemas go in; never a config path. Owned by the bounded text reader, which recognises the modeline that names it. */
-export { SCHEMA_FOLDER } from '@ferretry/std/yaml';
 
 /** What a def claims under `config/`: a file's path, or a collection's folder. */
 export const claimOf = (def: AnyConfigDef): string => (def.shape === 'file' ? def.file : def.collection);
