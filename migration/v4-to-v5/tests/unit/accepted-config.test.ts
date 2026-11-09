@@ -51,7 +51,9 @@ test('every v4 file in effect as written: each config file the run wrote is reco
     expect(Object.keys(document)[0]).toBe('format');
     const { format, ...body } = document;
     expect(format).toBe(acceptedConfigFile.format);
-    expect(acceptedConfigFile.schema?.parse(body)).toEqual({ etag: sha256(v5Text), text: v5Text });
+    // Each record names the plugin whose def owns the file (the kernel reads a record only for that plugin).
+    const plugin = name === 'limits.yaml' ? 'ferrets' : 'warden';
+    expect(acceptedConfigFile.schema?.parse(body)).toEqual({ etag: sha256(v5Text), text: v5Text, plugin });
   }
   expect(JSON.stringify(report)).not.toContain('memoryMax');
 });
