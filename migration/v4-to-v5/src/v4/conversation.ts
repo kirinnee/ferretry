@@ -81,6 +81,8 @@ export async function readJsonlLines<Shape>(
   reader: V4Reader,
   path: string,
   schema: z.ZodType<Shape>,
+  /** Given, a damaged line (not the torn last one) is added here by number and skipped; absent, it refuses the file. */
+  skipped?: number[],
 ): Promise<readonly { readonly line: number; readonly value: Shape }[]> {
   const source = await entry(path);
   if (source === undefined) return [];
@@ -105,6 +107,10 @@ export async function readJsonlLines<Shape>(
       continue;
     }
     if (last && !complete) continue;
+    if (skipped !== undefined) {
+      skipped.push(index + 1);
+      continue;
+    }
     throw new V4InputError(`v4 log line ${index + 1} does not match its v4 schema`, named(reader, path));
   }
   return result;

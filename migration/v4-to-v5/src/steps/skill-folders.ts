@@ -14,7 +14,7 @@
  */
 import { constants } from 'node:fs';
 import { access, chmod, mkdir, readdir, utimes } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { moveSealed } from '../sealed.ts';
 import { info } from '../v4/ferrets.ts';
 import { V4InputError } from '../v4/documents.ts';
@@ -40,6 +40,7 @@ export const skillFoldersStep: Step = {
     const base = { id: this.id, title: this.title, notCarried: this.notCarried };
     const root = join(ctx.v4.home, V4_SKILL_FOLDERS);
     const sealed: { file: string; bytes: number }[] = [];
+    const hardLinks: string[] = [];
     let links = 0;
     let skills = 0;
     try {
@@ -67,6 +68,12 @@ export const skillFoldersStep: Step = {
           return;
         }
         if (!facts.isFile()) throw new V4InputError(`${to}: is not a file, folder or link`);
+        // v4's skill reader (`node-skill-folder.ts`) listed a file with another name as a hard link and skipped that file
+        // alone ("a hard link can be a file from outside the folder"): the same here. It is never copied; named by path.
+        if (facts.nlink !== 1) {
+          hardLinks.push(relative(join(V5_SKILL_FOLDERS), to));
+          return;
+        }
         const readable = await access(from, constants.R_OK).then(
           () => true,
           () => false,
@@ -99,6 +106,13 @@ export const skillFoldersStep: Step = {
       ...base,
       status: 'converted',
       ...(ctx.dryRun ? { note: 'dry run: nothing written' } : {}),
+      notCarried: [
+        ...this.notCarried,
+        ...hardLinks.map(path => ({
+          what: `skills/${path}`,
+          why: 'a hard link (v4 refused it, as it can be a file from outside the folder); only this file is left behind',
+        })),
+      ],
       kept: [
         { what: 'skill folders', count: skills },
         { what: 'skill files copied without opening', count: sealed.length },

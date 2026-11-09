@@ -6,7 +6,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type LockProbe, preflight } from './preflight.ts';
 import type { ConversionReport, StepReport } from './report.ts';
-import { type EnforcedConversion, type HostFacts, STEPS, type Step } from './steps/index.ts';
+import { type EnforcedConversion, type HostFacts, STEPS, type Step, type StepContext } from './steps/index.ts';
 import { LoginKeyHold } from './steps/login-keys.ts';
 import { type V4ConfigOverrides, v4Paths } from './v4/layout.ts';
 import { writeHomeJson } from './v5/home.ts';
@@ -40,6 +40,10 @@ export interface ConvertOptions {
   readonly previewShellEnv?: Readonly<Record<string, string>>;
   /** With `preview`: the owner ran `prepare --owner` (see `StepContext.previewOwner`). */
   readonly previewOwner?: boolean;
+  /** With `preview`: the user's real home folder (see `StepContext.previewUserHome`). */
+  readonly previewUserHome?: string;
+  /** The person running it chose to drop uncarried settings or hooks layers (see `StepContext.dropUncarried`). */
+  readonly dropUncarried?: boolean;
 }
 
 export type ConvertResult =
@@ -62,6 +66,9 @@ export const CONFIG_STEPS: ReadonlySet<string> = new Set([
   'archive-setting',
 ]);
 
+/** What the plain passes share with the real run beyond the v4 and v5 paths. */
+type PlainExtra = Pick<StepContext, 'previewV4Home' | 'previewUserHome' | 'dropUncarried'>;
+
 /**
  * What the plain (non-preview) conversion of the v4 home at `from` would write under `config/`, from a dry run (the
  * v4 home is only read). Used on the real home, and on the accepted-config step's view of what v4 ENFORCED, where
@@ -72,10 +79,12 @@ async function plainConfigs(
   to: string,
   host: HostFacts | undefined,
   steps: readonly Step[],
+  extra: PlainExtra,
   overrides?: V4ConfigOverrides,
 ): Promise<EnforcedConversion> {
   const loginKeys = new LoginKeyHold();
   const plain = {
+    ...extra,
     v4: { ...v4Paths(from), ...(overrides === undefined ? {} : { configOverrides: overrides }) },
     v5: v5Writer(to, { dryRun: true }),
     dryRun: true,
@@ -109,9 +118,9 @@ async function plainConfigs(
 
 /** The plain dry conversion of the v4 home with the given config overrides (the accepted-config step's enforced view). */
 export const dryConfigsOf =
-  (from: string, to: string, host: HostFacts | undefined, steps: readonly Step[]) =>
+  (from: string, to: string, host: HostFacts | undefined, steps: readonly Step[], extra: PlainExtra = {}) =>
   (overrides: V4ConfigOverrides): Promise<EnforcedConversion> =>
-    plainConfigs(from, to, host, steps, overrides);
+    plainConfigs(from, to, host, steps, extra, overrides);
 
 export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   const checked = await preflight(options.from, options.to, options.lock);
@@ -128,8 +137,10 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
           ...(options.previewV4Home === undefined ? {} : { previewV4Home: options.previewV4Home }),
           ...(options.previewShellEnv === undefined ? {} : { previewShellEnv: options.previewShellEnv }),
           ...(options.previewOwner === true ? { previewOwner: true } : {}),
+          ...(options.previewUserHome === undefined ? {} : { previewUserHome: options.previewUserHome }),
         }
       : {}),
+    ...(options.dropUncarried === true ? { dropUncarried: true } : {}),
     loginKeys: new LoginKeyHold(),
     ...(options.host === undefined ? {} : { host: options.host }),
   };
@@ -138,12 +149,19 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   // A preview's authored files are found by comparison: a config file the preview wrote or changed differs from what the
   // plain conversion of the same v4 home writes. The plain pass is a dry run (nothing written) of every step that
   // writes config; a step that fails there leaves its files out, so they count as authored (fail closed).
-  const withEnforced = { ...ctx, dryConfigs: dryConfigsOf(options.from, options.to, options.host, steps) };
+  // The plain passes resolve a component's real-home paths and drop layers exactly as this run does, so a file the
+  // preview did not change is never mistaken for one it authored.
+  const extra: PlainExtra = {
+    ...(options.previewV4Home === undefined ? {} : { previewV4Home: options.previewV4Home }),
+    ...(options.previewUserHome === undefined ? {} : { previewUserHome: options.previewUserHome }),
+    ...(options.dropUncarried === true ? { dropUncarried: true } : {}),
+  };
+  const withEnforced = { ...ctx, dryConfigs: dryConfigsOf(options.from, options.to, options.host, steps, extra) };
   const withPlain =
     options.preview === true
       ? {
           ...withEnforced,
-          plainConfigs: (await plainConfigs(options.from, options.to, options.host, steps)).configs,
+          plainConfigs: (await plainConfigs(options.from, options.to, options.host, steps, extra)).configs,
         }
       : withEnforced;
 
