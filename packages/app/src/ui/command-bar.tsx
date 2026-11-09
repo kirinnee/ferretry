@@ -18,14 +18,18 @@ import { ArrowDown, ArrowUp, CornerDownLeft, Search } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   COMMAND_BAR_IDS,
+  type CommandBarChoices,
   type CommandBarEntry,
+  type CommandBarFilter,
   type CommandBarSource,
   clampActiveIndex,
   commandBarCountLabel,
+  commandBarFilters,
   commandBarFocusPolicy,
   commandBarOptionId,
   commandBarResults,
   nextActiveIndex,
+  resolveChoices,
 } from './command-bar-model.ts';
 import { useDialogFocus } from './hooks/use-dialog-focus.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
@@ -61,6 +65,8 @@ export function CommandBar({
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const [announcement, setAnnouncement] = useState('');
+  // The chips' choices (S11): remembered while the bar lives, handed to every source that offers a filter.
+  const [chosen, setChosen] = useState<CommandBarChoices>({});
   const layout = useLayoutMode();
 
   // Modality is latched for one opening so a convertible changing pointer mode cannot re-run the dialog focus
@@ -74,9 +80,11 @@ export function CommandBar({
   });
 
   const found = useMemo(
-    () => (open ? commandBarResults(sources, query) : { groups: [], results: [] }),
-    [open, sources, query],
+    () => (open ? commandBarResults(sources, query, chosen) : { groups: [], results: [] }),
+    [open, sources, query, chosen],
   );
+  const filters = useMemo(() => (open ? commandBarFilters(sources) : []), [open, sources]);
+  const choices = resolveChoices(filters, chosen);
   const activeIndex = clampActiveIndex(active, found.results.length);
   const activeEntry = activeIndex >= 0 ? found.results[activeIndex] : undefined;
 
@@ -102,6 +110,7 @@ export function CommandBar({
     setQuery('');
     setActive(0);
     setAnnouncement('');
+    setChosen({});
   }, [open]);
 
   useEffect(() => {
@@ -146,6 +155,8 @@ export function CommandBar({
   if (!open) return null;
 
   const trimmed = query.trim();
+  // v4 drew the chips while searching, and the "Searching…" line only while nothing was listed yet.
+  const pending = trimmed !== '' && found.results.length === 0 ? found.pending : undefined;
 
   return (
     <div className="kt-overlay fixed inset-x-0 z-50 flex justify-center px-3 pt-[12vh]">
@@ -192,6 +203,15 @@ export function CommandBar({
           />
         </div>
 
+        {trimmed !== '' && filters.length > 0 ? (
+          <FilterChips
+            filters={filters}
+            choices={choices}
+            busy={found.pending !== undefined}
+            onChoose={(filter, option) => setChosen(current => ({ ...current, [filter]: option }))}
+          />
+        ) : null}
+
         {/* The bar's OWN scroller; an overlay that never nests inside the page's. */}
         <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-xs py-xs">
           <div id={COMMAND_BAR_IDS.listbox} role="listbox" aria-label="Results">
@@ -211,11 +231,17 @@ export function CommandBar({
                         selected={resultIndex === activeIndex}
                         onActivate={() => run(entry)}
                         onHover={() => setActive(resultIndex)}
+                        muted={entry.muted === true}
                       >
                         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                           <span className="font-semibold text-fg">{entry.label}</span>
                           {entry.description === undefined ? null : (
                             <span className="truncate text-meta text-muted">{entry.description}</span>
+                          )}
+                          {entry.detail === undefined || entry.detail === '' ? null : (
+                            <span className="truncate text-meta text-muted" data-command-bar-detail="">
+                              {entry.detail}
+                            </span>
                           )}
                         </span>
                       </CommandBarOption>
@@ -225,7 +251,12 @@ export function CommandBar({
               );
             })}
           </div>
-          {trimmed !== '' && found.results.length === 0 && (
+          {pending !== undefined && (
+            <p className="m-0 px-cell-x py-row-y text-cell text-muted" data-command-bar-pending="">
+              {pending}
+            </p>
+          )}
+          {trimmed !== '' && found.results.length === 0 && pending === undefined && (
             <p className="m-0 px-cell-x py-row-y text-cell text-muted">
               Nothing matches <span className="mono text-fg-soft">{trimmed}</span>.
             </p>
@@ -254,12 +285,14 @@ function CommandBarOption({
   selected,
   onActivate,
   onHover,
+  muted,
   children,
 }: {
   readonly id: string;
   readonly selected: boolean;
   readonly onActivate: () => void;
   readonly onHover: () => void;
+  readonly muted: boolean;
   readonly children: ReactNode;
 }) {
   const pointer = useRef<number | null>(null);
@@ -270,6 +303,7 @@ function CommandBarOption({
       tabIndex={-1}
       aria-selected={selected}
       data-active={selected ? 'true' : undefined}
+      data-muted={muted ? 'true' : undefined}
       onPointerDown={event => {
         pointer.current = event.pointerId;
         event.preventDefault();
@@ -282,10 +316,56 @@ function CommandBarOption({
         pointer.current = null;
       }}
       onPointerMove={onHover}
-      className="kt-navrow min-h-[44px] cursor-pointer items-start"
+      className={`kt-navrow min-h-[44px] cursor-pointer items-start${muted ? ' opacity-70' : ''}`}
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * A source's filter chips (S11), as v4's palette drew them: toggle buttons that keep the query box focused (pointer-down
+ * does not take focus), so a reader can type, chip, and keep typing. One row per filter, the chosen option pressed.
+ */
+function FilterChips({
+  filters,
+  choices,
+  busy,
+  onChoose,
+}: {
+  readonly filters: readonly CommandBarFilter[];
+  readonly choices: Readonly<Record<string, string>>;
+  readonly busy: boolean;
+  readonly onChoose: (filter: string, option: string) => void;
+}) {
+  return (
+    <fieldset
+      aria-label="Narrow the results"
+      aria-busy={busy}
+      data-command-bar-filters=""
+      className="m-0 flex min-w-0 shrink-0 flex-wrap items-center gap-x-md gap-y-xs border-x-0 border-t-0 border-b border-border-soft px-panel py-xs"
+    >
+      {filters.map(filter => (
+        <fieldset
+          key={filter.id}
+          className="m-0 flex min-w-0 items-center gap-xs border-0 p-0"
+          aria-label={filter.label}
+        >
+          {filter.options.map(option => (
+            <button
+              key={option.id}
+              type="button"
+              className="kt-tab"
+              aria-pressed={choices[filter.id] === option.id}
+              onPointerDown={event => event.preventDefault()}
+              onClick={() => onChoose(filter.id, option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </fieldset>
+      ))}
+    </fieldset>
   );
 }
 

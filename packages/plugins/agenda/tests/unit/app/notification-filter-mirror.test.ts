@@ -2,13 +2,17 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 
 import {
-  DEFAULT_NOTIFICATION_FILTER_PREFERENCES,
-  type DeviceNotificationFilterPreferences,
-} from '../../../app/lib/notification-filter.ts';
+  NOTIFICATION_FILTER_DB,
+  NOTIFICATION_FILTER_DB_VERSION,
+  NOTIFICATION_FILTER_KEY,
+  NOTIFICATION_FILTER_STORE,
+  type NotificationFilterDocument,
+  readNotificationFilterDocument,
+} from '@ferretry/kernel/contract/notification-filter';
+import { filterDocumentOf } from '../../../app/lib/notification-filter.ts';
 import {
   browserNotificationFilterMirror,
   IndexedDbNotificationFilterMirror,
-  readMirroredNotificationFilter,
 } from '../../../app/lib/notification-filter-mirror.ts';
 
 interface FakeRequest<T> {
@@ -30,24 +34,22 @@ const fakeRequest = <T>(result: T, error: DOMException | null = null): FakeReque
 });
 
 type OpenOutcome = 'success' | 'error' | 'error-without-cause' | 'blocked';
-type Failure =
-  | 'none'
-  | 'get-error'
-  | 'get-error-without-cause'
-  | 'abort'
-  | 'abort-without-cause'
-  | 'error'
-  | 'error-without-cause';
+type Failure = 'none' | 'abort' | 'abort-without-cause' | 'error' | 'error-without-cause';
 
 /** The same fake-IndexedDB idiom `release-storage.test.ts` uses: no browser runs this test file. */
 const fakeIndexedDb = (options: { open?: OpenOutcome; failure?: Failure; stores?: string[] } = {}) => {
-  const values = new Map<string, unknown>();
+  const puts: [string, unknown][] = [];
+  const opened: [string, number][] = [];
   const stores = new Set(options.stores ?? []);
   const failure = options.failure ?? 'none';
   const cause = (withCause: boolean) => (withCause ? new DOMException('quota', 'QuotaExceededError') : null);
+  const closes = { count: 0 };
   const database = {
     objectStoreNames: { contains: (name: string) => stores.has(name) },
     createObjectStore: (name: string) => stores.add(name),
+    close: () => {
+      closes.count += 1;
+    },
     transaction: () => {
       const transaction = {
         error: null as DOMException | null,
@@ -55,14 +57,8 @@ const fakeIndexedDb = (options: { open?: OpenOutcome; failure?: Failure; stores?
         onabort: null as (() => void) | null,
         onerror: null as (() => void) | null,
         objectStore: () => ({
-          get: (key: string) => {
-            const failing = failure === 'get-error' || failure === 'get-error-without-cause';
-            const request = fakeRequest(values.get(key), failing ? cause(failure === 'get-error') : null);
-            queueMicrotask(() => (failing ? request.onerror?.() : request.onsuccess?.()));
-            return request;
-          },
           put: (value: unknown, key: string) => {
-            if (failure === 'none') values.set(key, value);
+            if (failure === 'none') puts.push([key, value]);
             transaction.error = cause(!failure.endsWith('without-cause'));
             queueMicrotask(() => {
               if (failure === 'abort' || failure === 'abort-without-cause') transaction.onabort?.();
@@ -76,7 +72,8 @@ const fakeIndexedDb = (options: { open?: OpenOutcome; failure?: Failure; stores?
     },
   };
   const factory = {
-    open: () => {
+    open: (name: string, version: number) => {
+      opened.push([name, version]);
       const outcome = options.open ?? 'success';
       const request = fakeRequest(database, outcome === 'error' ? cause(true) : null);
       queueMicrotask(() => {
@@ -88,35 +85,48 @@ const fakeIndexedDb = (options: { open?: OpenOutcome; failure?: Failure; stores?
       return request;
     },
   } as unknown as IDBFactory;
-  return { factory, stores };
+  return { factory, stores, puts, opened, closes };
 };
 
-const CUSTOM: DeviceNotificationFilterPreferences = {
+const CUSTOM: NotificationFilterDocument = filterDocumentOf({
   categories: { 'needs-you': true, finished: false, failed: true, 'new-device': false },
   quietHours: { enabled: true, startMinute: 60, endMinute: 120 },
   machines: { 'daemon-a': false },
-};
+});
 
 describe('IndexedDbNotificationFilterMirror', () => {
-  it('writes and reads back the mirrored record, creating its store once', async () => {
+  it('writes the document as JSON text at the kernel database, store and key, creating the store once', async () => {
     const idb = fakeIndexedDb();
     const subject = new IndexedDbNotificationFilterMirror(idb.factory);
 
     await subject.write(CUSTOM);
-    const read = await subject.read();
 
-    should(read).eql(CUSTOM);
-    should([...idb.stores]).eql(['mirror']);
+    should([...idb.stores]).eql([NOTIFICATION_FILTER_STORE]);
+    should(idb.opened).eql([[NOTIFICATION_FILTER_DB, NOTIFICATION_FILTER_DB_VERSION]]);
+    should(idb.puts).eql([[NOTIFICATION_FILTER_KEY, JSON.stringify(CUSTOM)]]);
+    // What the worker reads back through the kernel is exactly what Agenda wrote.
+    should(readNotificationFilterDocument(idb.puts[0]?.[1])).eql(CUSTOM);
+  });
+
+  it('n1 closes its connection after every write, so a later version bump is never blocked by this page', async () => {
+    const idb = fakeIndexedDb();
+    const subject = new IndexedDbNotificationFilterMirror(idb.factory);
+    await subject.write(CUSTOM);
+    should(idb.closes.count).equal(1);
+    await subject.write(CUSTOM);
+    should(idb.closes.count).equal(2);
+  });
+
+  it('n1 closes its connection when the write fails too', async () => {
+    const idb = fakeIndexedDb({ failure: 'abort' });
+    await should(new IndexedDbNotificationFilterMirror(idb.factory).write(CUSTOM)).be.rejected();
+    should(idb.closes.count).equal(1);
   });
 
   it('reuses a store that already exists', async () => {
-    const subject = new IndexedDbNotificationFilterMirror(fakeIndexedDb({ stores: ['mirror'] }).factory);
-    await should(subject.read()).be.rejected();
-  });
-
-  it('rejects a read of a mirror nothing has ever written to', async () => {
-    const subject = new IndexedDbNotificationFilterMirror(fakeIndexedDb().factory);
-    await should(subject.read()).be.rejectedWith(/no notification filter has been mirrored/u);
+    const idb = fakeIndexedDb({ stores: [NOTIFICATION_FILTER_STORE] });
+    await new IndexedDbNotificationFilterMirror(idb.factory).write(CUSTOM);
+    should(idb.puts).have.length(1);
   });
 
   it.each([
@@ -125,16 +135,7 @@ describe('IndexedDbNotificationFilterMirror', () => {
     ['blocked', 'the notification filter mirror upgrade is blocked'],
   ] as const)('rejects when opening ends in %s', async (open, message) => {
     const subject = new IndexedDbNotificationFilterMirror(fakeIndexedDb({ open }).factory);
-    await should(subject.read()).be.rejectedWith(new RegExp(message, 'u'));
     await should(subject.write(CUSTOM)).be.rejectedWith(new RegExp(message, 'u'));
-  });
-
-  it.each([
-    ['get-error', 'quota'],
-    ['get-error-without-cause', 'IndexedDB request failed'],
-  ] as const)('rejects a read whose fetch ends in %s', async (failure, message) => {
-    const subject = new IndexedDbNotificationFilterMirror(fakeIndexedDb({ failure }).factory);
-    await should(subject.read()).be.rejectedWith(new RegExp(message, 'u'));
   });
 
   it.each([
@@ -148,22 +149,6 @@ describe('IndexedDbNotificationFilterMirror', () => {
   });
 });
 
-describe('readMirroredNotificationFilter', () => {
-  it('answers the mirrored record when one was written', async () => {
-    const idb = fakeIndexedDb();
-    await new IndexedDbNotificationFilterMirror(idb.factory).write(CUSTOM);
-
-    should(await readMirroredNotificationFilter(idb.factory)).eql(CUSTOM);
-  });
-
-  it('falls back to the exact defaults a page with no stored preference would use, on any failure', async () => {
-    should(await readMirroredNotificationFilter(fakeIndexedDb().factory)).eql(DEFAULT_NOTIFICATION_FILTER_PREFERENCES);
-    should(await readMirroredNotificationFilter(fakeIndexedDb({ open: 'error' }).factory)).eql(
-      DEFAULT_NOTIFICATION_FILTER_PREFERENCES,
-    );
-  });
-});
-
 describe('browserNotificationFilterMirror', () => {
   it('resolves a usable factory into a real mirror', async () => {
     const idb = fakeIndexedDb();
@@ -171,7 +156,7 @@ describe('browserNotificationFilterMirror', () => {
 
     should(mirror).not.be.null();
     await mirror?.write(CUSTOM);
-    should(await mirror?.read()).eql(CUSTOM);
+    should(idb.puts).have.length(1);
   });
 
   it('answers null for an absent indexedDB, a non-object value, or one denied to read', () => {

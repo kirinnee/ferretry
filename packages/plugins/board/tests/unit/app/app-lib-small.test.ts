@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import { displayCallsign } from '../../../app/lib/callsign.ts';
-import { addReferenceToComposer, type DaemonId, THIS_MACHINE, pairingKey } from '../../../app/lib/machine.ts';
+import { type DaemonId, THIS_MACHINE, pairingKey } from '../../../app/lib/machine.ts';
 import { navigateTo } from '../../../app/lib/navigate.ts';
 import { ferretPath } from '../../../app/lib/paths.ts';
 import { plainPreview } from '../../../app/lib/plain-label.ts';
@@ -41,34 +41,6 @@ describe('machine', () => {
   it('keys a set of machines by their sorted ids', () => {
     const b = { daemonId: 'b' as DaemonId };
     expect(pairingKey([b, THIS_MACHINE])).toBe('b\u0000this');
-  });
-
-  it('hands a card reference to the composer as an event and says so', () => {
-    const seen: { type: string; detail: unknown }[] = [];
-    class FakeCustomEvent {
-      constructor(
-        readonly type: string,
-        init: { detail: unknown },
-      ) {
-        this.detail = init.detail;
-      }
-      readonly detail: unknown;
-    }
-    setBrowser('CustomEvent', FakeCustomEvent);
-    setBrowser('dispatchEvent', (event: FakeCustomEvent) => {
-      seen.push({ type: event.type, detail: event.detail });
-      return true;
-    });
-    const scope = { daemonId: THIS_MACHINE.daemonId, ferret: 'ms-98' };
-    expect(addReferenceToComposer(scope, '&F12')).toBe('Added &F12 to the chat.');
-    expect(seen).toEqual([{ type: 'ferretry:compose-reference', detail: { ferret: 'ms-98', reference: '&F12' } }]);
-  });
-
-  it('says it could not add the reference when the browser cannot dispatch', () => {
-    setBrowser('CustomEvent', undefined);
-    setBrowser('dispatchEvent', undefined);
-    const scope = { daemonId: THIS_MACHINE.daemonId, ferret: 'ms-98' };
-    expect(addReferenceToComposer(scope, '&F12')).toBe('Could not add &F12 to the chat.');
   });
 });
 

@@ -9,6 +9,10 @@ import type {
 import { provideToShell, type ShellProvides } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { CONVERSATION_ADD_TO_CHAT_HOOK } from '../contract/app-hooks.ts';
+import { addToChatFor } from './composer/add-to-chat.ts';
+import { clearAttachmentCaches } from './composer/attachment-blob-cache.ts';
+import { documentDraftStore, documentRestoreStore } from './composer/drafts.ts';
 import { lazyComponent } from './lazy.ts';
 import { workSearchCommandSource } from './search/work-search-commands.ts';
 
@@ -96,6 +100,15 @@ export default provideToShell(
   // Lead decision Q10: the shell's command bar lists the cards and asks the daemon's work search finds.
   {
     commands: context => workSearchCommandSource(context),
+    // S15: the shared "Add to chat" any surface calls (Board's cards today), over this plugin's own daemon.
+    hooks: { [CONVERSATION_ADD_TO_CHAT_HOOK]: ({ daemon }) => addToChatFor(daemon) },
+    // S12: a later pairing that mints the same daemon id must not read this machine's unsent words back,
+    forget: (daemon: string) => {
+      documentDraftStore.clearDaemon(daemon);
+      documentRestoreStore.clearDaemon(daemon);
+      // ...and neither may it read the cached attachment images (object URLs) of that machine.
+      clearAttachmentCaches(daemon);
+    },
     // Settings › Appearance (S4): this device's conversation width and the key to a message's marks. No machine, no client.
     deviceSettings: {
       'chat-width': deviceSetting('chat-width'),

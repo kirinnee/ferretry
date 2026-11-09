@@ -1,6 +1,12 @@
 import { type ClientOrigin, DaemonClient, type ShellPluginClient } from '../client/daemon-client.ts';
 import type { Standing } from '../client/inventory.ts';
-import { blockedLine, remedyFor, type Remedy, wholeDaemonSentence } from '../client/sentences.ts';
+import {
+  blockedLine,
+  DEVICE_NOT_ACCEPTED_SENTENCE,
+  remedyFor,
+  type Remedy,
+  wholeDaemonSentence,
+} from '../client/sentences.ts';
 import type { DaemonTransport } from '../client/transport.ts';
 import { type DaemonList, daemonTitle, type PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RouteDecl } from '@ferretry/kernel/manifest';
@@ -27,11 +33,14 @@ import {
   registeredDevicePanels,
   registeredNavBadges,
   registeredDeviceViews,
+  registeredForgets,
   registeredFragments,
+  registeredNotificationOpened,
 } from '../connect/provides.ts';
 import { type AddressBrowser, AddressTaker, type HoldClock, REAL_CLOCK } from '../router/address.ts';
 import { viewsOf } from '../layout/engine.ts';
 import { HandOffs } from './hand-off.ts';
+import type { NotificationOpenInbox } from '../worker/notification-open.ts';
 import type { LinkProvision } from '../ui/external-link.tsx';
 import type { View } from '../surfaces/halves.ts';
 
@@ -77,6 +86,8 @@ export interface ShellRuntimeOptions {
   readonly address?: AddressBrowser;
   /** The clock held fragments and hand-offs expire on; a test hands a fake one. */
   readonly clock?: HoldClock;
+  /** The notification-tap inbox the entry point made before React mounted (S6); absent, no tap is routed. */
+  readonly notificationOpens?: NotificationOpenInbox;
 }
 
 const UNKNOWN: Authority = Object.freeze({ kind: 'unknown' });
@@ -86,6 +97,8 @@ const NOT_GRANTED: Authority = Object.freeze({ kind: 'refused', refusal: 'not-gr
 type Connection =
   | { readonly kind: 'connecting' }
   | { readonly kind: 'unreachable' }
+  /** A session ended with `4403` here: not dialled again by this page; the pairing and its key are untouched (S12). */
+  | { readonly kind: 'refused' }
   | { readonly kind: 'connected'; readonly client: DaemonClient; readonly transport: DaemonTransport };
 
 export class ShellRuntime {
@@ -117,6 +130,8 @@ export class ShellRuntime {
   readonly handOffs: HandOffs;
   /** Every plugin's device views, mounted once each at the frame root (S3). */
   readonly deviceViews: readonly RegisteredDeviceView[];
+  /** Taps the worker asked this page to open, held until the router is up and routed in the app (S6). */
+  readonly notificationOpens: NotificationOpenInbox | undefined;
   /** Every plugin's background views, mounted once per paired daemon where the plugin may run (S5). */
   readonly backgroundViews: readonly RegisteredBackgroundView[];
   /** The device-level panels (`device.settings`, `nav`) the halves gave views for (S4). */
@@ -144,6 +159,7 @@ export class ShellRuntime {
     const screens = viewsOf(options.surfaces).screens;
     const screenOf = (plugin: string, screen: string) => screens.get(`${plugin}.${screen}`);
     this.#addressBrowser = options.address;
+    this.notificationOpens = options.notificationOpens;
     this.address = new AddressTaker(registeredFragments(options.surfaces, screenOf), options.address, options.clock);
     this.handOffs = new HandOffs(screenOf, options.clock ?? REAL_CLOCK);
     this.deviceViews = registeredDeviceViews(options.surfaces);
@@ -158,6 +174,17 @@ export class ShellRuntime {
       options.surfaces.flatMap(entry => entry.manifest.actions?.routes ?? []).map(route => [route.key, route]),
     );
     options.onVisible?.(() => this.#grants.refreshAll());
+    const forgets = registeredForgets(options.surfaces);
+    // S12: once per unpair, after the device key and the paired record are gone; one plugin's failure costs only itself.
+    this.daemons.onUnpaired(daemon => {
+      for (const { forget } of forgets) {
+        try {
+          void Promise.resolve(forget(daemon)).catch(() => undefined);
+        } catch {
+          // a plugin whose forget throws still leaves the others to run
+        }
+      }
+    });
     this.daemons.registerCache({ clearDaemon: daemon => this.#drop(daemon) });
     this.daemons.subscribe(() => this.#changed());
   }
@@ -241,6 +268,7 @@ export class ShellRuntime {
   /** The full-screen sentence when nothing may run on this daemon, else `undefined`. */
   wholeDaemonLine(daemon: string): string | undefined {
     const connection = this.#connections.get(daemon);
+    if (connection?.kind === 'refused') return DEVICE_NOT_ACCEPTED_SENTENCE;
     if (connection?.kind !== 'connected') return undefined;
     const inventory = connection.client.inventory;
     if (inventory === undefined) return undefined;
@@ -253,6 +281,7 @@ export class ShellRuntime {
   blockedLine(daemon: string, packageId: string): string | undefined {
     const connection = this.connection(daemon);
     if (connection.kind === 'unreachable') return 'This device cannot reach this daemon yet.';
+    if (connection.kind === 'refused') return DEVICE_NOT_ACCEPTED_SENTENCE;
     return blockedLine(this.titleOf(packageId), this.standing(daemon, packageId), this.remedy(daemon), this.titleOf);
   }
 
@@ -274,6 +303,26 @@ export class ShellRuntime {
     const client = this.#halves.client(daemon, only.plugin);
     if (client === undefined) return undefined;
     return this.#hooks.get(daemon, only.plugin, name, client, only.provide);
+  }
+
+  /**
+   * A notification of this machine was tapped and routed (S6): tells each plugin that asked (`notificationOpened`), over
+   * its OWN guarded client, only where it is allowed. A plugin's failure costs only itself.
+   *
+   * FIRES ONLY FOR A MACHINE THAT IS ALREADY CONNECTED: a plugin whose client does not exist yet (the machine is still
+   * connecting, is refused, or was unpaired) is skipped, not held, so a tap that cold-starts the app does not reach a
+   * plugin whose machine has not connected by then (declared in `ports-pending.json`).
+   */
+  notificationOpened(daemon: string, tap: { readonly url: string; readonly tag?: string }): void {
+    for (const { plugin, opened } of registeredNotificationOpened(this.surfaces)) {
+      const client = this.client(daemon, plugin);
+      if (client === undefined) continue;
+      try {
+        void Promise.resolve(opened({ client, daemon }, tap)).catch(() => undefined);
+      } catch {
+        // one plugin's failure never stops the next
+      }
+    }
   }
 
   /**
@@ -471,6 +520,13 @@ export class ShellRuntime {
       this.#grants.refresh(paired.daemon);
       this.#changed();
     });
+    // A session ended with `4403` (S12). That close is cleartext a relay can forge, so it is NOT an unpair: nothing is
+    // removed, no key is deleted and no plugin forgets anything. This page just stops dialling the machine and says
+    // so ("Pair again"); a reload asks the daemon again. Another machine is never touched.
+    client.onRefused(() => {
+      const held = this.#connections.get(paired.daemon);
+      if (held?.kind === 'connected' && held.client === client) this.#refuse(paired.daemon, held);
+    });
     // The feed coming back is a re-read trigger; every change of it re-renders the views' `online`.
     client.onFeedLive(live => {
       if (live) this.#grants.refresh(paired.daemon);
@@ -492,6 +548,23 @@ export class ShellRuntime {
     const client = connection.client.forPackage(packageId, { origin });
     noteClientDaemon(client, daemon);
     return client;
+  }
+
+  /** Stops dialling a machine this page was refused on (`4403`), keeping its pairing; see {@link DaemonClient.onRefused}. */
+  #refuse(daemon: string, held: Extract<Connection, { kind: 'connected' }>): void {
+    held.client.stop();
+    held.transport.close?.();
+    this.#connections.set(daemon, { kind: 'refused' });
+    this.#grants.drop(daemon);
+    this.#places.delete(daemon);
+    this.#halves.dropDaemon(daemon);
+    this.#hooks.clearDaemon(daemon);
+    this.#changed();
+  }
+
+  /** Whether this page was refused on this machine (`4403`): the frame says so and offers to pair again. */
+  isRefused(daemon: string): boolean {
+    return this.#connections.get(daemon)?.kind === 'refused';
   }
 
   #drop(daemon: string): void {
