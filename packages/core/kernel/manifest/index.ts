@@ -3,3 +3,4 @@ export * from './builders.ts';
 export * from './implement.ts';
 export * from './types.ts';
 export * from './reach.ts';
+export * from './project-files.ts';

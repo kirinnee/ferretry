@@ -5,7 +5,12 @@
  */
 import { CORE_IDS, KERNEL_BOUND_PORTS, KERNEL_ONLY_PORTS } from '../../../packages/core/kernel/contract/index.ts';
 import type { HookDef, PortToken } from '../../../packages/core/kernel/contract/index.ts';
-import { type Manifest, reachFaults } from '../../../packages/core/kernel/manifest/index.ts';
+import {
+  projectFilesAllowListRefusal,
+  projectFilesPatternRefusal,
+  type Manifest,
+  reachFaults,
+} from '../../../packages/core/kernel/manifest/index.ts';
 import type { LoadedSubsystem } from './workspace.ts';
 
 const CORE = new Set<string>(CORE_IDS);
@@ -161,6 +166,18 @@ export function pluginGraphFindings(graph: StartGraph): Finding[] {
       for (const field of ['spawn', 'network'] as const)
         if ((manifest.permissions?.[field] ?? []).some(entry => entry === '*'))
           findings.push({ check, where: id, message: `declares permissions.${field} '*'; only a core piece may` });
+    // `project-files` (K3): the relative set is legal only with the root, the root needs a set, and every pattern is plain.
+    const projectFiles = manifest.permissions?.projectFiles;
+    const holdsProjectFiles = (manifest.permissions?.roots ?? []).includes('project-files');
+    if (projectFiles !== undefined && !holdsProjectFiles)
+      findings.push({ check, where: id, message: "declares permissions.projectFiles without root 'project-files'" });
+    if (holdsProjectFiles && (projectFiles === undefined || projectFiles.length === 0))
+      findings.push({ check, where: id, message: "declares root 'project-files' without permissions.projectFiles" });
+    for (const pattern of projectFiles ?? []) {
+      const why = projectFilesPatternRefusal(pattern) ?? projectFilesAllowListRefusal(pattern);
+      if (why !== undefined)
+        findings.push({ check, where: id, message: `permissions.projectFiles ${JSON.stringify(pattern)}: ${why}` });
+    }
     for (const token of Object.values(manifest.provides ?? {}))
       if (token.boundBy !== undefined && token.boundBy !== id)
         findings.push({
