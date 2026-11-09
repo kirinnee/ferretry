@@ -14,7 +14,7 @@
  *
  * LoginsPort is required and supplies safe sign-in facts: they are also what the model's logins are read from.
  */
-import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
+import type { ConfigCollectionDef, ConfigFileDef, DoctorFinding } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
@@ -89,6 +89,12 @@ export interface RuntimesAssembly {
    * answering `undefined`, until the host assembly reaches the account model: auto-resume then resumes nothing (W2-a).
    */
   readonly autoResume?: () => boolean | undefined;
+  /**
+   * Builds what the services stand on NOW and throws a sentence when it cannot be (the fleet folder cannot be opened).
+   * `fy doctor` calls it: the build itself touches nothing, so a broken fleet root would otherwise show only as routes
+   * that fail. Absent: nothing to probe, which `fy doctor` says.
+   */
+  readonly probe?: () => void;
 }
 
 export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => RuntimesAssembly;
@@ -140,6 +146,15 @@ function deferred<Target extends object>(make: () => Target): Target {
 }
 
 /**
+ * The homes service built once, on the first call, and handed out as a plain object (a spread copies its own keys; a
+ * proxy has none). One build keeps the homes `homes()` listed for the `home(id)` that follows.
+ */
+function onceHomes(make: () => RuntimeHomesApi): RuntimeHomesApi {
+  const built = once(make);
+  return { homes: async () => await built().homes(), home: id => built().home(id) };
+}
+
+/**
  * The assembly of this build, and the daemon's default: the catalogue and the setup over the files (the model in effect
  * from Runtimes' own files and Logins' facts, the provisioner on the `fleet` root, the all-or-none config writer), the
  * published fleet and an ended Codex ferret's follow-up through the kernel's roots and processes. What the kernel does
@@ -151,12 +166,29 @@ export const hostAssembly: RuntimesAssembler = ctx => {
   const publication = new FleetPublication();
   // `build` touches nothing (it is also run against an inert kernel to compare it with the manifest): the fleet folder
   // is opened and its paths spelled on the first use of a service, never while the half is built.
-  const assembled = once(() => ({ ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) }));
+  let said = false;
+  const assembled = once(() => {
+    try {
+      return { ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) };
+    } catch (error) {
+      // The build no longer fails when the fleet folder cannot be opened, so say so here, once, and in `fy doctor`.
+      if (!said) {
+        said = true;
+        ctx.kernel.log.warn(
+          `Runtimes could not open the fleet folder, so its catalogue, setup and ended-runtime follow-up are unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      throw error;
+    }
+  });
   return {
     catalog: deferred(() => assembled().catalog),
     setup: deferred(() => assembled().setup),
     ended: deferred(() => assembled().ended),
-    homes: deferred(() => fleetHomes(ctx.kernel.roots, publication)),
+    homes: onceHomes(() => fleetHomes(ctx.kernel.roots, publication)),
+    probe: () => {
+      assembled();
+    },
   };
 };
 
@@ -266,6 +298,17 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),
       });
       void expiry.rearm();
+      // A republish that cannot run (the model is not readable yet) is said once and never fails the event.
+      const republishForBudget = async (): Promise<void> => {
+        await assembly.catalog.republish?.().then(
+          () => undefined,
+          (error: unknown) => {
+            ctx.kernel.log.warn(
+              `a login's budget hold moved, but the fleet could not be published again: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        );
+      };
       const unwatchExpiry = config.watch(RUNTIME_ITEMS, () => void expiry.rearm());
       ctx.kernel.lifecycle.onStop(() => {
         unwatchExpiry();
@@ -276,6 +319,9 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
       const ending = new RuntimeEndSupervision({
         ferrets: ctx.needs.ferrets,
         seams: assembly.ended,
+        warn: message => {
+          ctx.kernel.log.warn(message);
+        },
         launchFailed: failure => events.publish(RuntimesLaunchFailed, failure),
       });
 
@@ -286,6 +332,28 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ...ferretRuntimeRoutes(assembly.runtime),
         },
         provides: { runtimes: { ...api, ...(assembly.homes ?? noHomes) } },
+        doctor: {
+          // The half builds without opening the fleet folder, so a broken fleet root shows here, not as a failed boot.
+          'runtimes-config': async (): Promise<DoctorFinding> => {
+            if (assembly.probe === undefined)
+              return {
+                state: 'warn',
+                detail:
+                  'Runtimes is running without its host seams, so every catalogue read and change answers that it is unavailable',
+                fix: 'restart the daemon; if this stays, report it',
+              };
+            try {
+              assembly.probe();
+            } catch (error) {
+              return {
+                state: 'fail',
+                detail: `the fleet folder could not be opened, so Runtimes cannot read or change anything: ${error instanceof Error ? error.message : String(error)}`,
+                fix: 'check that the Ferretry home is a folder this user can write, then restart the daemon',
+              };
+            }
+            return { state: 'ok', detail: 'the fleet folder is open' };
+          },
+        },
         // Logins asks which runtimes use a login before it removes one (`logins.used-by`).
         hooks: {
           'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
@@ -301,6 +369,9 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           'ferrets.changed': async change => await ending.onChanged(change),
           // A login switched off or on, or its `until` moved: the expiry timer reads the logins again.
           'logins.changed': async () => await expiry.rearm(),
+          // A login its budget starts or stops holding: the fleet is published again so its wrappers follow (docs/budgets.md).
+          'usage.login-paused': async () => await republishForBudget(),
+          'usage.login-resumed': async () => await republishForBudget(),
         },
       };
     },

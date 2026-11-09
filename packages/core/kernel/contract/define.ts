@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { CoreId } from './ids.ts';
+import type { CoreId, ItemKind } from './ids.ts';
 import type { CapabilityAxis } from './policy.ts';
 
 // ─── Ports ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -309,6 +309,12 @@ export interface ConfigCollectionDef<Shape = unknown> extends ConfigBase<Shape> 
   readonly shape: 'collection';
   readonly collection: string;
   readonly name: RegExp;
+  /**
+   * The item kind whose items THIS collection holds (an item plugin's `itemKind: 'mcp'` on `config/mcp/`): the one
+   * declaration that makes `{ items: 'mcp' }` count these files' `command` and `url` as reach, live. A collection
+   * that does not say so is never a reach source, whatever it is called.
+   */
+  readonly itemKind?: ItemKind;
 }
 
 export type ConfigDef<Shape = unknown> = ConfigFileDef<Shape> | ConfigCollectionDef<Shape>;
@@ -329,6 +335,7 @@ export function defineConfig<Shape>(spec: {
 export function defineConfig<Shape>(spec: {
   readonly collection: string;
   readonly name: RegExp;
+  readonly itemKind?: ItemKind;
   readonly schema: z.ZodType<Shape>;
   readonly axis: CapabilityAxis;
   loosens(before: Shape | undefined, after: Shape): readonly string[];
