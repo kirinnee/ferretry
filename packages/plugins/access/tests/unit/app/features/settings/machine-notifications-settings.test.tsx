@@ -223,6 +223,44 @@ describe('Access draws several machines in ONE list (R1 M2)', () => {
     run(() => view.unmount());
   });
 
+  it('R2 m1: with no enrolment anywhere the "Notifications are off" banner is drawn FIRST, and its Enable enrols through that row’s own client and press only', async () => {
+    const a = machine([], 'daemon-a');
+    const b = machine([], 'daemon-b');
+    const { host } = browser('granted');
+    const pressed: string[] = [];
+    const view = panel(
+      [
+        sourceOf(a.client, { daemon: 'daemon-a', label: 'laptop', pressed }),
+        sourceOf(b.client, { daemon: 'daemon-b', label: 'desk', pressed }),
+      ],
+      host,
+    );
+    const offOf = (daemon: string) =>
+      view.root.findAll(node => node.props['data-notifications-off-machine'] === daemon);
+    await runUntil(
+      () => undefined,
+      () => marked(view, 'data-notifications-off-enable').length === 2,
+      'the banner for both machines',
+    );
+    const words = text(view);
+    expect(words).toContain('Notifications are off for laptop on every device — turn them on');
+    expect(words).toContain('Notifications are off for desk on every device — turn them on');
+    // Above the permission block, as v4 drew it.
+    expect(words.indexOf('Notifications are off for desk')).toBeLessThan(words.indexOf('Permission: '));
+    expect(offOf('daemon-b')).not.toHaveLength(0);
+    const enable = offOf('daemon-b')[0]?.findByProps({ 'data-notifications-off-enable': '' });
+    await runUntil(
+      () => enable?.props.onClick(),
+      () => b.devices.length === 1,
+      'machine b to enrol from the banner',
+    );
+    expect(b.calls).toContain('POST /v1/push/subscriptions');
+    expect(a.calls).not.toContain('POST /v1/push/subscriptions');
+    expect(a.devices).toEqual([]);
+    expect(pressed).toEqual(['daemon-b']);
+    run(() => view.unmount());
+  });
+
   it('revokes a device on the machine that lists it, never on another', async () => {
     const mine = deviceOf('push-22222222-2222-4222-8222-222222222222', 'Pixel 8');
     const a = machine([], 'daemon-a');

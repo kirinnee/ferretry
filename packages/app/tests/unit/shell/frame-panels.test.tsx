@@ -440,7 +440,10 @@ describe('the Needs-you nav panel (device-level)', () => {
   });
 
   for (const layout of BUILT_IN_LAYOUTS) {
-    test(`shell S4 (R1 M1): under the built-in "${layout.id}" layout the Needs-you panel is drawn, once, in its rail`, async () => {
+    // R2 m2: v4 drew the full group in the sessions column on a desktop, so the DEFAULT layout's nav is a list (column)
+    // and only `compact` is a rail.
+    const form = layout.id === 'default' ? 'column' : 'rail';
+    test(`shell S4 (R1 M1, R2 m2): under the built-in "${layout.id}" layout on a desktop the Needs-you panel is drawn, once, in the ${form} form`, async () => {
       const app = await bootApp({
         surfaces: [inbox],
         machines: ['d1', 'd2'],
@@ -448,9 +451,9 @@ describe('the Needs-you nav panel (device-level)', () => {
         storage: deviceLayout({ side: layout.nav.side, style: layout.nav.style, items: ['inbox'] }),
       });
       view = app.view;
-      expect(layout.nav.style).toBe('rail');
+      expect(layout.nav.style).toBe(form === 'column' ? 'list' : 'rail');
       expect(panels('inbox.needs-you')).toBe(1);
-      expect(app.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe('rail');
+      expect(app.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe(form);
     });
   }
 

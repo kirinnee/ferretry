@@ -68,7 +68,8 @@ export interface MachinesNotificationsProps {
 }
 
 /**
- * `device.settings` › notifications: ONE permission block (the browser's permission, its notes), then ONE list of the
+ * `device.settings` › notifications: the "Notifications are off" banner first (a machine with no device enrolled
+ * anywhere, one Enable each), then ONE permission block (the browser's permission, its notes), then ONE list of the
  * machines this device reaches — each row a switch that enrols this browser with THAT machine through its own client,
  * its status and its registered devices — and "Turn on for all machines". A machine that wants its unlock says so and
  * offers Unlock.
@@ -82,6 +83,12 @@ export function MachinesNotificationsSettings({ sources, host }: MachinesNotific
   );
   return (
     <div className="flex flex-col gap-4" data-machine-notifications="">
+      <NotificationsOffBanner
+        rows={notifications.rows}
+        canEnrol={notifications.canEnrol}
+        busy={notifications.busy}
+        onEnable={notifications.enable}
+      />
       <NotificationSettingsView permission={notifications.permission} />
       <MachineNotificationList
         rows={notifications.rows}

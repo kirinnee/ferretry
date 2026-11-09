@@ -34,6 +34,9 @@ function Links(): ReactNode {
         three
       </ExternalLink>
       <ExternalLink href={undefined}>none</ExternalLink>
+      <ExternalLink href="https://example.com/four" aria-controls="menu-own" aria-haspopup="menu">
+        four
+      </ExternalLink>
     </div>
   );
 }
@@ -159,6 +162,17 @@ describe('per machine', () => {
     expect(anchor('one').getAttribute('aria-haspopup')).toBeNull();
   });
 
+  test('shell S7 (R2 n1): a caller’s own aria-controls and aria-haspopup stay when the provider gives none, and the provider’s win when it does', async () => {
+    const native = await bootApp({ surfaces: [chat, browsers], machines: ['d1'], path: '/d/d1/chat' });
+    view = native.view;
+    expect(anchor('four').getAttribute('aria-controls')).toBe('menu-own');
+    expect(anchor('four').getAttribute('aria-haspopup')).toBe('menu');
+    await view.unmount();
+    const provided2 = await bootApp({ surfaces: [chat, browsers], machines: ['d1', 'd2'], path: '/d/d2/chat' });
+    view = provided2.view;
+    expect(anchor('four').getAttribute('aria-controls')).toBe('pane-d2');
+  });
+
   test('shell S7: a provider that says this device’s browser is announced as such', async () => {
     const app = await bootApp({ surfaces: [chat, browsers], machines: ['d2'], path: '/d/d2/chat' });
     view = app.view;
@@ -228,7 +242,7 @@ describe('a provision that is not one', () => {
 });
 
 describe('a daemon-less screen', () => {
-  test('shell S7: says this device’s browser and is never handed a machine’s behaviour', async () => {
+  test('shell S7: is native (says nothing) and is never handed a machine’s behaviour', async () => {
     const app = await bootApp({ surfaces: [chat, browsers], machines: ['d1', 'd2'], path: '/land' });
     view = app.view;
     expect(anchor('one').title).toBe('');

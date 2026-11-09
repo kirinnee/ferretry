@@ -117,9 +117,9 @@ export function ExternalLink({ href, onClick, download, children, title, ...rest
     <>
       <a
         {...rest}
-        aria-controls={anchor?.controls}
+        aria-controls={anchor?.controls ?? rest['aria-controls']}
         aria-description={where}
-        aria-haspopup={anchor?.popup}
+        aria-haspopup={anchor?.popup ?? rest['aria-haspopup']}
         download={download}
         href={href}
         onClick={click}

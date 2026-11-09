@@ -57,7 +57,7 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
     return daemon === undefined ? undefined : routes.href(screen, {}, daemon);
   };
   const side = plan.nav.side;
-  // A nav panel is drawn in a left or right nav of EVERY style (both built-in layouts are a rail), told which form it is
+  // A nav panel is drawn in a left or right nav of EVERY style (the default built-in is a list, compact is a rail), told which form it is
   // in; never on the top or bottom bar.
   const panelForm: NavForm | undefined =
     side === 'left' || side === 'right' ? (plan.nav.style === 'rail' ? 'rail' : 'column') : undefined;

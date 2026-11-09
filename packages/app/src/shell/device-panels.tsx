@@ -13,8 +13,8 @@ import { WithViewPlace } from './view-place.tsx';
  * needs machines lists them with `useEveryDaemon`, one row per machine, each row writing only through its own client — so
  * a write can never go to "whichever machine is selected", and the nav can never show one machine's blocked or paused line.
  *
- * A `nav` panel is drawn in the left or right nav of every style (both built-in layouts are a rail, so a column-only rule
- * would never draw it) and is told which FORM it is drawn in (`useNavForm`), so it can draw compact dots in a rail and
+ * A `nav` panel is drawn in the left or right nav of every style (the compact built-in layout is a rail, so a
+ * column-only rule would never draw it) and is told which FORM it is drawn in (`useNavForm`), so it can draw compact dots in a rail and
  * its full group in a column. It is never drawn on the phone bar.
  */
 
