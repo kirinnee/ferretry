@@ -301,3 +301,54 @@ describe('RootHandle.remove with onlyIfEmpty without descriptor reach follows th
     expect(await readFile(`${f.parent}/outside/file.txt`, 'utf8')).toBe('OUTSIDE-FILE');
   });
 });
+
+describe.skipIf(!onLinux)('BG-006 a forged spelling of a name never follows the leaf, and a NUL is outside', () => {
+  /** The forged spellings of the link `homes/claude-a/planted`, each one a cast a plugin could make. */
+  const FORGED = ['homes/claude-a/planted/', 'homes/claude-a/planted/.', 'homes/claude-a/./planted/'] as const;
+
+  test('BG-006 m1 a trailing slash or a trailing dot names the LINK, which goes alone: the folder it points at stays whole', async () => {
+    for (const forged of FORGED) {
+      const f = await fresh(withReach());
+      await symlink(`${f.dir}/inside-folder`, `${f.dir}/planted`);
+      await f.fleet.remove(`${f.home}/fleet/${forged}` as FencedPath);
+      expect(await gone(`${f.dir}/planted`)).toBe(true);
+      expect(await readFile(`${f.dir}/inside-folder/keep.txt`, 'utf8')).toBe('INSIDE-KEEP');
+    }
+  });
+
+  test('BG-006 m1 the same with onlyIfEmpty: a link to a folder is never rmdir-ed through a forged spelling', async () => {
+    const f = await fresh(withReach());
+    await mkdir(`${f.dir}/empty-folder`);
+    await symlink(`${f.dir}/empty-folder`, `${f.dir}/planted`);
+    await f.fleet.remove(`${f.home}/fleet/homes/claude-a/planted/.` as FencedPath, { onlyIfEmpty: true });
+    expect(await gone(`${f.dir}/planted`)).toBe(true);
+    expect((await lstat(`${f.dir}/empty-folder`)).isDirectory()).toBe(true);
+  });
+
+  test('BG-006 m1 a single relative name is read from the root and names the LINK there, not the folder it points at', async () => {
+    const f = await fresh(withReach());
+    await symlink(`${f.dir}/inside-folder`, `${f.home}/fleet/top-alias`);
+    await f.fleet.remove('top-alias' as FencedPath);
+    expect(await gone(`${f.home}/fleet/top-alias`)).toBe(true);
+    expect(await readFile(`${f.dir}/inside-folder/keep.txt`, 'utf8')).toBe('INSIDE-KEEP');
+  });
+
+  test('BG-006 m2 a NUL in the leaf is refused outside (a RootError), never a raw TypeError, and nothing is removed', async () => {
+    const f = await fresh(withReach());
+    expect(await refusalOf(() => f.fleet.remove(`${f.dir}/inside-file.tx\0t` as FencedPath))).toBe('outside');
+    expect(await refusalOf(() => f.fleet.remove(`${f.dir}\0/inside-file.txt` as FencedPath))).toBe('outside');
+    expect(await readFile(`${f.dir}/inside-file.txt`, 'utf8')).toBe('INSIDE-FILE');
+  });
+
+  test('BG-006 a forged spelling that leaves the root is refused outside, and so is a spelling of the root itself (it has no leaf)', async () => {
+    const f = await fresh(withReach());
+    expect(await refusalOf(() => f.fleet.remove(`${f.home}/fleet/` as FencedPath))).toBe('outside');
+    expect(await refusalOf(() => f.fleet.remove(`${f.home}/fleet/.` as FencedPath))).toBe('outside');
+    expect((await lstat(`${f.home}/fleet`)).isDirectory()).toBe(true);
+    expect(await refusalOf(() => f.fleet.remove(`${f.home}/fleet/homes/claude-a/../../../x/` as FencedPath))).toBe(
+      'outside',
+    );
+    expect(await refusalOf(() => f.fleet.remove(`${f.parent}/outside/folder/` as FencedPath))).toBe('outside');
+    expect(await readFile(`${f.parent}/outside/folder/keep.txt`, 'utf8')).toBe('OUTSIDE-KEEP');
+  });
+});
