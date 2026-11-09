@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import type { Op } from '../contract/act.ts';
 import type { ConfigDef, EventDef, HookDef, PortToken, StateFileDef } from '../contract/define.ts';
-import type { PluginApi } from '../contract/ids.ts';
+import type { ItemKind, PluginApi } from '../contract/ids.ts';
 import type { RootName } from '../contract/ports.ts';
 import type { MemberRouteDescriptor, RouteDescriptor, ScopedRoute } from '../contract/route.ts';
 import type { SocketDescriptor } from '../contract/socket.ts';
@@ -135,16 +135,7 @@ export interface LayoutDecl {
 
 // data ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export type ItemKind =
-  | 'mcp'
-  | 'skill'
-  | 'shell'
-  | 'recipe'
-  | 'instruction'
-  | 'layout'
-  | 'theme'
-  | 'runtime'
-  | 'endpoint';
+export type { ItemKind };
 
 export interface ItemDecl {
   readonly kind: ItemKind;

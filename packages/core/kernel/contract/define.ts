@@ -1,6 +1,5 @@
 import type { z } from 'zod';
-import type { CoreId } from './ids.ts';
-import type { ItemKind } from '../manifest/types.ts';
+import type { CoreId, ItemKind } from './ids.ts';
 import type { CapabilityAxis } from './policy.ts';
 
 // ─── Ports ────────────────────────────────────────────────────────────────────────────────────────────────────────
