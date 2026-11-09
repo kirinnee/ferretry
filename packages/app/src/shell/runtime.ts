@@ -18,11 +18,14 @@ import {
   type DaemonlessScreenProps,
   type RegisteredDeviceView,
   registeredDeviceViews,
+  registeredForgets,
   registeredFragments,
+  registeredNotificationOpened,
 } from '../connect/provides.ts';
 import { type AddressBrowser, AddressTaker, type HoldClock, REAL_CLOCK } from '../router/address.ts';
 import { viewsOf } from '../layout/engine.ts';
 import { HandOffs } from './hand-off.ts';
+import type { NotificationOpenInbox } from '../worker/notification-open.ts';
 import type { View } from '../surfaces/halves.ts';
 
 /**
@@ -67,6 +70,8 @@ export interface ShellRuntimeOptions {
   readonly address?: AddressBrowser;
   /** The clock held fragments and hand-offs expire on; a test hands a fake one. */
   readonly clock?: HoldClock;
+  /** The notification-tap inbox the entry point made before React mounted (S6); absent, no tap is routed. */
+  readonly notificationOpens?: NotificationOpenInbox;
 }
 
 const UNKNOWN: Authority = Object.freeze({ kind: 'unknown' });
@@ -105,6 +110,8 @@ export class ShellRuntime {
   readonly handOffs: HandOffs;
   /** Every plugin's device views, mounted once each at the frame root (S3). */
   readonly deviceViews: readonly RegisteredDeviceView[];
+  /** Taps the worker asked this page to open, held until the router is up and routed in the app (S6). */
+  readonly notificationOpens: NotificationOpenInbox | undefined;
   readonly #addressBrowser: AddressBrowser | undefined;
   readonly #listeners = new Set<() => void>();
   #version = 0;
@@ -126,6 +133,7 @@ export class ShellRuntime {
     const screens = viewsOf(options.surfaces).screens;
     const screenOf = (plugin: string, screen: string) => screens.get(`${plugin}.${screen}`);
     this.#addressBrowser = options.address;
+    this.notificationOpens = options.notificationOpens;
     this.address = new AddressTaker(registeredFragments(options.surfaces, screenOf), options.address, options.clock);
     this.handOffs = new HandOffs(screenOf, options.clock ?? REAL_CLOCK);
     this.deviceViews = registeredDeviceViews(options.surfaces);
@@ -133,6 +141,17 @@ export class ShellRuntime {
       options.surfaces.flatMap(entry => entry.manifest.actions?.routes ?? []).map(route => [route.key, route]),
     );
     options.onVisible?.(() => this.#grants.refreshAll());
+    const forgets = registeredForgets(options.surfaces);
+    // S12: once per unpair, after the device key and the paired record are gone; one plugin's failure costs only itself.
+    this.daemons.onUnpaired(daemon => {
+      for (const { forget } of forgets) {
+        try {
+          void Promise.resolve(forget(daemon)).catch(() => undefined);
+        } catch {
+          // a plugin whose forget throws still leaves the others to run
+        }
+      }
+    });
     this.daemons.registerCache({ clearDaemon: daemon => this.#drop(daemon) });
     this.daemons.subscribe(() => this.#changed());
   }
@@ -229,6 +248,22 @@ export class ShellRuntime {
     const client = this.#halves.client(daemon, only.plugin);
     if (client === undefined) return undefined;
     return this.#hooks.get(daemon, only.plugin, name, client, only.provide);
+  }
+
+  /**
+   * A notification of this machine was tapped and routed (S6): tells each plugin that asked (`notificationOpened`), over
+   * its OWN guarded client, only where it is allowed. A plugin's failure costs only itself.
+   */
+  notificationOpened(daemon: string, tap: { readonly url: string; readonly tag?: string }): void {
+    for (const { plugin, opened } of registeredNotificationOpened(this.surfaces)) {
+      const client = this.client(daemon, plugin);
+      if (client === undefined) continue;
+      try {
+        void Promise.resolve(opened({ client, daemon }, tap)).catch(() => undefined);
+      } catch {
+        // one plugin's failure never stops the next
+      }
+    }
   }
 
   /**
@@ -372,6 +407,12 @@ export class ShellRuntime {
       this.#hooks.clearDaemon(paired.daemon);
       this.#grants.refresh(paired.daemon);
       this.#changed();
+    });
+    // The daemon says it no longer accepts this device: the pairing is final, so it goes the way an unpair does (S12),
+    // once, and every plugin's `forget` fires from that one path. Another daemon's pairing is never touched.
+    client.onRevoked(() => {
+      const held = this.#connections.get(paired.daemon);
+      if (held?.kind === 'connected' && held.client === client) this.daemons.remove(paired.daemon);
     });
     // The feed coming back is a re-read trigger; every change of it re-renders the views' `online`.
     client.onFeedLive(live => {

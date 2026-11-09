@@ -1309,6 +1309,69 @@ describe('app-hooks', () => {
   });
 });
 
+describe('app-hooks: a shared action is one provider, many callers (S15)', () => {
+  const add = (value: unknown) => typeof value === 'object' && value !== null && 'add' in value;
+  const declared = [{ plugin: 'conversation', hooks: { 'conversation.add-to-chat': add } }];
+  const gives = (plugin: string, name: string, value: unknown = { add: () => undefined }) => ({
+    plugin,
+    hooks: { [name]: () => value },
+  });
+  const found = (...args: Parameters<typeof appHookFindings>) => appHookFindings(...args).map(x => x.message);
+
+  test('S15 a provider-named hook its own plugin gives, with the shape, passes without any offerer', () => {
+    expect(found([], [gives('conversation', 'conversation.add-to-chat')], declared)).toEqual([]);
+  });
+  test('S15 a provider-named hook is not mistaken for an offerer-named one (no "no provider"/"which nobody offers")', () => {
+    const offers = [{ plugin: 'agenda', hooks: { 'agenda.card-answer': add } }];
+    expect(
+      found(
+        offers,
+        [gives('board', 'agenda.card-answer'), gives('conversation', 'conversation.add-to-chat')],
+        declared,
+      ),
+    ).toEqual([]);
+  });
+  test('planted: a wrong prefix is found (the name is not the declaring plugin’s own id)', () => {
+    expect(
+      found(
+        [],
+        [gives('conversation', 'board.add-to-chat')],
+        [{ plugin: 'conversation', hooks: { 'board.add-to-chat': add } }],
+      ),
+    ).toEqual([
+      'provides shared action "board.add-to-chat", whose prefix is not "conversation" (the provider\'s own id)',
+    ]);
+  });
+  test('planted: another plugin giving the shared action is found', () => {
+    expect(
+      found(
+        [],
+        [gives('conversation', 'conversation.add-to-chat'), gives('board', 'conversation.add-to-chat')],
+        declared,
+      ),
+    ).toEqual(['provides "conversation.add-to-chat", the shared action of conversation; only conversation may']);
+  });
+  test('planted: a declared shared action its half does not give is found', () => {
+    expect(found([], [], declared)).toEqual([
+      expect.stringContaining('"conversation.add-to-chat" is declared but its half does not give'),
+    ]);
+  });
+  test('planted: a shared action that fails to build or has the wrong shape is found', () => {
+    const throws = {
+      plugin: 'conversation',
+      hooks: {
+        'conversation.add-to-chat': () => {
+          throw new Error('boom');
+        },
+      },
+    };
+    expect(found([], [throws], declared)).toEqual(['shared action "conversation.add-to-chat" failed to build: boom']);
+    expect(found([], [gives('conversation', 'conversation.add-to-chat', {})], declared)).toEqual([
+      'shared action "conversation.add-to-chat" builds a value without the shape its contract declares',
+    ]);
+  });
+});
+
 // ─── shell-provides (S3: declared fragments and device views) ────────────────────────────────────────────────────
 
 describe('shell-provides', () => {

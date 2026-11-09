@@ -13,13 +13,15 @@ import {
   type NotificationOpenEnvironment,
   type NotificationWindow,
   notificationBrand,
+  machineHomeUrl,
+  notificationClick,
   notificationClickUrl,
   notificationUrl,
   notificationWindow,
   openInWindow,
-  presentPush,
   PUSH_SCOPE_ROOT,
   pushMachineOf,
+  unreadablePush,
   unreadablePushTitle,
 } from '../../../src/worker/notifications.ts';
 
@@ -165,6 +167,15 @@ const harness = ({ postMessage, focusRefused = false, navigateRefused = false }:
 };
 
 describe('openInWindow', () => {
+  it('tells the page which of the daemon’s tags was tapped, when it has one', async () => {
+    const subject = harness();
+    const pending = openInWindow(subject.window, '/x', subject.openWindow, subject.environment, 'agenda-A3');
+    await tick();
+    subject.port1.onmessage?.({ data: NOTIFICATION_OPEN_ACK });
+    expect(await pending).toBe('routed');
+    expect(subject.posted[0]?.message).toEqual({ type: NOTIFICATION_OPEN_MESSAGE, url: '/x', tag: 'agenda-A3' });
+  });
+
   it('focuses first, then reports routed when the page acknowledges', async () => {
     // Arrange
     const subject = harness();
@@ -534,65 +545,47 @@ describe('notificationClickUrl on the app-wide registration (the page-shown line
   });
 });
 
-describe('presentPush (the envelope is the worker’s whole view of a push)', () => {
-  const sent = {
-    version: 1,
-    eventKey: 'e1',
-    title: 'Deploy approval',
-    body: 'Ship the build?',
-    tag: 'agenda-A3',
-    url: '/ferrets/f1/chat?ask=A3',
-    count: 1,
-  };
-
-  it('shows a machine’s push under its label and carries the page it named, checked', () => {
-    expect(presentPush(sent, ORIGIN, WORK)).toEqual({
-      title: 'Work laptop · Deploy approval',
-      body: 'Ship the build?',
-      data: { url: `${HOME}/ferrets/f1/chat?ask=A3` },
+describe('unreadablePush (a push the kernel could not read is shown plainly, with no page)', () => {
+  it('is titled by the machine it came through and says nothing from the push', () => {
+    expect(unreadablePush(WORK)).toEqual({
+      title: 'Work laptop · Ferretry',
+      body: 'Something is waiting in your Agenda.',
     });
+    expect(unreadablePush(null).title).toBe('Unverified · Ferretry');
+  });
+});
+
+describe('machineHomeUrl', () => {
+  it('is the machine’s own home, or the app for the app-wide registration', () => {
+    expect(machineHomeUrl(WORK, ORIGIN)).toBe(HOME);
+    expect(machineHomeUrl(null, ORIGIN)).toBe(APP);
+  });
+});
+
+describe('notificationClick (a tap reads back only what the worker wrote)', () => {
+  const chat = `${HOME}/ferrets/f1/chat?ask=A3`;
+
+  it('opens the stored page and keeps a well-formed daemon tag', () => {
+    expect(notificationClick({ url: chat, tag: 'agenda-A3' }, ORIGIN, WORK)).toEqual({ url: chat, tag: 'agenda-A3' });
   });
 
-  it('carries the app, not the named page, for the app-wide registration — however hostile the page', () => {
-    for (const url of [
-      '/ferrets/f1/chat?ask=A3',
-      '/d/laptop/settings/access',
-      '/ferrets/../../../d/other/ferrets/x/chat',
-    ]) {
-      expect(presentPush({ ...sent, url }, ORIGIN, null)).toEqual({
-        title: 'Unverified · Deploy approval',
-        body: 'Ship the build?',
-        data: { url: APP },
-      });
+  it('drops a tag outside the kernel’s grammar or of another type, and still opens the checked page', () => {
+    for (const tag of ['', 'a b', '../x', '<script>', 'x'.repeat(500), 7, null, {}]) {
+      expect(notificationClick({ url: chat, tag }, ORIGIN, WORK)).toEqual({ url: chat });
     }
   });
 
-  it('carries the app for a machine’s push that names a page it may not open', () => {
-    expect(presentPush({ ...sent, url: '/d/other/ferrets/x/chat' }, ORIGIN, WORK).data).toEqual({ url: APP });
-    expect(presentPush({ ...sent, url: 'https://evil.test/' }, ORIGIN, WORK).data).toEqual({ url: APP });
+  it('opens the app, with no tag, for data that is not a record', () => {
+    for (const stored of [undefined, null, 'text', 7, [], { tag: 'agenda-A3' }]) {
+      expect(notificationClick(stored, ORIGIN, WORK).url).toBe(APP);
+    }
+    expect(notificationClick({ tag: 'agenda-A3' }, ORIGIN, WORK)).toEqual({ url: APP, tag: 'agenda-A3' });
   });
 
-  it('shows a payload with no readable envelope plainly, with no page', () => {
-    for (const junk of [
-      null,
-      undefined,
-      'text',
-      42,
-      [],
-      {},
-      { title: 'only a title' },
-      { ...sent, title: 7 },
-      { ...sent, body: undefined },
-      { ...sent, url: '' },
-      { ...sent, title: 'x'.repeat(201) },
-      { ...sent, body: 'x'.repeat(1_001) },
-      { ...sent, url: `/${'x'.repeat(1_100)}` },
-    ]) {
-      expect(presentPush(junk, ORIGIN, WORK)).toEqual({
-        title: 'Work laptop · Ferretry',
-        body: 'Something is waiting in your Agenda.',
-      });
-    }
-    expect(presentPush({}, ORIGIN, null).title).toBe('Unverified · Ferretry');
+  it('never lets a tag widen the page: another machine’s page still opens the app', () => {
+    expect(notificationClick({ url: `${ORIGIN}/d/other/ferrets/x/chat`, tag: 'agenda-A3' }, ORIGIN, WORK)).toEqual({
+      url: APP,
+      tag: 'agenda-A3',
+    });
   });
 });

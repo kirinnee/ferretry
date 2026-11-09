@@ -19,7 +19,6 @@ import agendaManifest from '../../../manifest.ts';
 import type { NotificationPayload as PushNotificationPayload } from '../../../app/lib/notify.ts';
 import { inboxTargetFromSearch, inboxTargetPath } from '../../../app/lib/agenda-inbox.ts';
 import { NOTIFICATION_BADGE, NOTIFICATION_ICON, showGroupedNotification } from '../../../app/lib/notify.ts';
-import { filteredPushNotification } from '../../../app/lib/notification-tap.ts';
 import { daemonId } from '../../../app/shell.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
@@ -184,12 +183,6 @@ describe('every notification wears the Ferretry mark', () => {
       expect(shown[0]?.options.icon).toBe(NOTIFICATION_ICON);
       expect(shown[0]?.options.badge).toBe(NOTIFICATION_BADGE);
     }
-  });
-
-  it('shows it on the quiet one', () => {
-    const quiet = filteredPushNotification(MACHINE, ORIGIN);
-    expect(quiet.options.icon).toBe(NOTIFICATION_ICON);
-    expect(quiet.options.badge).toBe(NOTIFICATION_BADGE);
   });
 
   it('points at icons the manifest actually ships', () => {

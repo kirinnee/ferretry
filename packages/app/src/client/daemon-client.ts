@@ -8,8 +8,11 @@ import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { untilAborted } from './machine-deadline.ts';
 import { eventOwner, type Inventory, parseInventory, type Standing, standings } from './inventory.ts';
 import {
+  CARRIER_OUTAGE_CODE,
   DaemonCallError,
   type DaemonTransport,
+  DEVICE_REVOKED_CODE,
+  isDeviceRefusal,
   type SocketListeners,
   type TransportAnswer,
   type TransportSocket,
@@ -42,6 +45,12 @@ export const HEALTH_ROUTE = 'GET /v1/health';
 const GRANTS_PATH = '/v1/grants';
 /** The package that owns the grants read: the shell's own read admits as it, caller and owner alike. */
 const GATE_PACKAGE = 'gate';
+
+/** Said when the daemon no longer accepts this browser's device: it was removed, or went unused for too long. */
+export const DEVICE_NOT_ACCEPTED_SENTENCE =
+  'This machine no longer accepts this browser — it was removed, or went unused for too long. Pair it again to keep using it.';
+/** Said when a call died on the carrier, before any answer. */
+const CARRIER_OUTAGE_SENTENCE = 'The connection to this machine was lost before it answered.';
 
 /**
  * What this client tells the shell's grants cache (shell contract S1) about the answers it sees, so a stale control
@@ -174,6 +183,8 @@ export class DaemonClient {
   /** Bumped by every passkey confirm the shell hears of (S1, R3 m2). */
   #generation = 0;
   readonly #authorityListeners = new Set<(signal: AuthoritySignal) => void>();
+  readonly #revokedListeners = new Set<() => void>();
+  #revoked = false;
 
   constructor(options: DaemonClientOptions) {
     this.#transport = options.transport;
@@ -279,6 +290,15 @@ export class DaemonClient {
     return { generation, answer, need: answer === undefined ? undefined : this.#need(answer) };
   }
 
+  /**
+   * Fires ONCE, when the daemon answers that it no longer accepts this device (a `4403` on any session): the pairing is
+   * final for this device and re-pairing is the only repair (S12). The shell unpairs through its one unpair path.
+   */
+  onRevoked(listener: () => void): () => void {
+    this.#revokedListeners.add(listener);
+    return () => this.#revokedListeners.delete(listener);
+  }
+
   /** Fires after every inventory change; the shell re-renders from {@link standing}. */
   onChange(listener: () => void): () => void {
     this.#changeListeners.add(listener);
@@ -324,7 +344,8 @@ export class DaemonClient {
     try {
       const answer = await this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path });
       inventory = answer.status === 200 ? parseInventory(answer.body) : { kind: 'unreadable' };
-    } catch {
+    } catch (error) {
+      if (isDeviceRefusal(error)) this.#revoke();
       inventory = { kind: 'unreadable' };
     }
     try {
@@ -419,10 +440,35 @@ export class DaemonClient {
   /** One request, its answer told to the grants cache under the generation it was sent in. */
   async #sent(request: Parameters<DaemonTransport['request']>[0]): Promise<TransportAnswer> {
     const generation = this.#generation;
-    const answer = await this.#transport.request(request);
+    let answer: TransportAnswer;
+    try {
+      answer = await this.#transport.request(request);
+    } catch (error) {
+      throw this.#failed(error, request.signal);
+    }
     if (answer.status === 401 && this.#need(answer)?.kind === 'unlock') this.#signal({ kind: 'locked', generation });
     else if (isCapabilityRefusal(answer)) this.#signal({ kind: 'refused', generation });
     return answer;
+  }
+
+  /**
+   * A transport failure, told apart (S12). The caller's own abort is its own. The daemon refusing this device is
+   * `device_revoked` (and the shell is told once). Anything else never got an answer: a CARRIER OUTAGE, marked
+   * `carrier`, so a screen keeps its last good content instead of saying the daemon refused.
+   */
+  #failed(error: unknown, signal: AbortSignal | undefined): unknown {
+    if (error instanceof DaemonCallError || signal?.aborted === true) return error;
+    if (isDeviceRefusal(error)) {
+      this.#revoke();
+      return new DaemonCallError(0, DEVICE_REVOKED_CODE, DEVICE_NOT_ACCEPTED_SENTENCE);
+    }
+    return new DaemonCallError(0, CARRIER_OUTAGE_CODE, CARRIER_OUTAGE_SENTENCE, undefined, true);
+  }
+
+  #revoke(): void {
+    if (this.#revoked || this.#stopped) return;
+    this.#revoked = true;
+    for (const listener of [...this.#revokedListeners]) listener();
   }
 
   #signal(signal: AuthoritySignal): void {

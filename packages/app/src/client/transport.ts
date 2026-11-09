@@ -76,8 +76,41 @@ export class DaemonCallError extends Error {
     /** The refusal's whole JSON body, for a route whose refusal carries a fact beside its sentence (a 409 naming
      *  the draft that holds the agent's box, the send that was typed but never shown, an in-flight inventory, a size). */
     readonly body?: unknown,
+    /**
+     * `true` when the call died on the CARRIER (the session closed, the rendezvous ended, a deadline passed) rather
+     * than with an answer from the daemon (S12). A screen keeps its last good content through one, because the
+     * connection model is already retrying; an answer, whatever its status, is news.
+     */
+    readonly carrier?: true,
   ) {
     super(message);
     this.name = 'DaemonCallError';
   }
+}
+
+/** The machine code a carrier outage carries; no daemon says it. */
+export const CARRIER_OUTAGE_CODE = 'carrier_outage';
+/** The machine code a call carries when the daemon no longer accepts this device (revoked, or unused for too long). */
+export const DEVICE_REVOKED_CODE = 'device_revoked';
+
+/** Whether a failure is a carrier outage (S12): the call never got an answer. Total; reads one `cause` level too. */
+export function isCarrierOutage(error: unknown): boolean {
+  if (error instanceof DaemonCallError) return error.carrier === true;
+  return error instanceof Error && error.cause instanceof DaemonCallError && error.cause.carrier === true;
+}
+
+/**
+ * The close code the daemon ends a session with when it does not accept this device (the session wire's
+ * `RELAY_CLOSE_CODES.authRejected`; a parity test pins the two together). The client layer reads it off a transport
+ * failure without importing the wire.
+ */
+export const DEVICE_REFUSED_CLOSE_CODE = 4403;
+
+/** Whether a transport failure is the daemon saying it no longer accepts this device (revoked, or unused for too long). */
+export function isDeviceRefusal(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === 'RelaySessionError' &&
+    (error as { readonly code?: unknown }).code === DEVICE_REFUSED_CLOSE_CODE
+  );
 }

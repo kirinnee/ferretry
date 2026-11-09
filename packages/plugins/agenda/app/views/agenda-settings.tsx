@@ -9,29 +9,11 @@ import { useSyncExternalStore } from 'react';
 import { NotificationFilterSettingsView } from '../features/settings/notification-filter-settings.tsx';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
-import { DeviceNotificationFilterStore, type NotificationFilterStorage } from '../lib/notification-filter.ts';
-import { browserNotificationFilterMirror } from '../lib/notification-filter-mirror.ts';
-
-/** This browser's storage, or none where it is denied (memory state still works). */
-const browserStorage = (): NotificationFilterStorage | null => {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
-};
-
-let deviceFilter: DeviceNotificationFilterStore | undefined;
-
-/** The one device-wide filter store, made on first use. */
-const filterStore = (): DeviceNotificationFilterStore => {
-  deviceFilter ??= new DeviceNotificationFilterStore(browserStorage(), browserNotificationFilterMirror());
-  return deviceFilter;
-};
+import { deviceFilterStore } from '../lib/device-filter-store.ts';
 
 export function createAgendaSettings(runtime: AgendaRuntime) {
   return function AgendaSettings(_props: SettingsProps) {
-    const store = filterStore();
+    const store = deviceFilterStore();
     const preferences = useSyncExternalStore(store.subscribe, store.get, store.get);
     return (
       <AgendaClientContext.Provider value={runtime.client}>

@@ -72,7 +72,9 @@ describe('"Pair a phone" in the command bar', () => {
     hostLocal: false,
     steppedUp: false,
   });
-  const sourceFor = (view: unknown, calls: string[], changed: () => void) =>
+  // Access's source is the plain function form of a command bar source.
+  type PlainSource = (query: string) => readonly { readonly label: string; readonly run: () => void }[];
+  const sourceFor = (view: unknown, calls: string[], changed: () => void): PlainSource =>
     pairPhoneCommands({
       client: {
         call: async (route: string) => {
@@ -85,7 +87,7 @@ describe('"Pair a phone" in the command bar', () => {
       navigate: () => {},
       screenHref: (() => '') as never,
       changed,
-    });
+    }) as PlainSource;
 
   it('offers nothing until the machine’s effective grant says this caller may mint, then asks the sheet to open (P58)', async () => {
     const calls: string[] = [];

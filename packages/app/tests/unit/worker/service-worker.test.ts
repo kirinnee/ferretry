@@ -5,6 +5,7 @@ import { join, relative, resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { pluginWorkerFiles, refusePluginWorkers, workerInputGuard } from '../../../scripts/build-release.ts';
+import { NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_MESSAGE } from '../../../src/worker/facts.ts';
 import { buildRelease, releaseSigner } from '../../support/release.ts';
 
 const root = resolve(import.meta.dir, '../../../../..');
@@ -21,7 +22,20 @@ const PROBES = [
 type Listener = (event: Record<string, unknown>) => void;
 
 /** The real worker, built the way the release build compiles it, run against fake browser ports. */
-async function startWorker(options: { readonly scope?: string; readonly script?: string } = {}) {
+async function startWorker(
+  options: {
+    readonly scope?: string;
+    readonly script?: string;
+    /** The device's filter document, as stored (the JSON text Agenda writes); absent is "nothing written". */
+    readonly filter?: unknown;
+    /** The push service the registration's subscription points at. */
+    readonly endpoint?: string;
+    /** The windows the browser finds, each answering a routed open with the ack. */
+    readonly windows?: readonly { readonly url: string }[];
+    /** Lines already on screen, by tag: another machine's, for instance. */
+    readonly lines?: readonly string[];
+  } = {},
+) {
   const signer = await releaseSigner();
   const signed = await buildRelease(signer);
   const inputs = new Set<string>();
@@ -42,6 +56,13 @@ async function startWorker(options: { readonly scope?: string; readonly script?:
   const order: string[] = [];
   const shown: { title: string; options: Record<string, unknown> }[] = [];
   const opened: string[] = [];
+  const closed: string[] = [];
+  const routedTo: { url: string; tag?: string }[] = [];
+  /** The lines on screen, by tag (a show under a tag replaces the line under it). */
+  let live: { tag?: string; data?: unknown; close: () => void }[] = (options.lines ?? []).map(tag => ({
+    tag,
+    close: () => void closed.push(tag),
+  }));
   const site = new Map([
     ['release-manifest.json', new TextDecoder().decode(signed.manifestBytes)],
     ['release-manifest.sig', signed.signatureText],
@@ -50,7 +71,7 @@ async function startWorker(options: { readonly scope?: string; readonly script?:
   const stored = new Map<string, Map<string, Response>>();
   let state: unknown = null;
   // Only the browser ports are fake. The bundled keeper verifies a real Ed25519 signature and file hashes.
-  const database = {
+  const keeperDatabase = {
     objectStoreNames: { contains: () => true },
     transaction: () => {
       const transaction = {
@@ -70,7 +91,26 @@ async function startWorker(options: { readonly scope?: string; readonly script?:
       return transaction;
     },
   };
+  // The device's filter document: the kernel's database, store and key, holding the document's JSON text.
+  const filterDatabase = {
+    objectStoreNames: { contains: () => true },
+    transaction: () => ({
+      objectStore: () => ({
+        get: (key: string) => {
+          const request = {
+            result: key === 'preferences' ? options.filter : undefined,
+            onsuccess: undefined as (() => void) | undefined,
+          };
+          queueMicrotask(() => request.onsuccess?.());
+          return request;
+        },
+      }),
+    }),
+  };
   runInNewContext(await result.outputs[0]!.text(), {
+    MessageChannel,
+    setTimeout,
+    clearTimeout,
     URL,
     Response,
     TextEncoder,
@@ -88,19 +128,56 @@ async function startWorker(options: { readonly scope?: string; readonly script?:
       scope: options.scope ?? `${APP_ORIGIN}/`,
       showNotification: async (title: string, notification: Record<string, unknown>) => {
         shown.push({ title, options: notification });
+        const tag = notification.tag as string | undefined;
+        if (tag !== undefined) live = live.filter(line => line.tag !== tag);
+        live.push({
+          ...(tag === undefined ? {} : { tag }),
+          data: notification.data,
+          close: () => void closed.push(tag ?? ''),
+        });
+      },
+      getNotifications: async (filter?: { tag: string }) =>
+        live
+          .filter(line => filter === undefined || line.tag === filter.tag)
+          .map(line => ({
+            ...line,
+            close: () => {
+              closed.push(line.tag ?? '');
+              live = live.filter(other => other !== line);
+            },
+          })),
+      pushManager: {
+        getSubscription: async () => (options.endpoint === undefined ? null : { endpoint: options.endpoint }),
       },
     },
     clients: {
       claim: async () => undefined,
-      matchAll: async () => [],
+      matchAll: async () =>
+        (options.windows ?? []).map(window => ({
+          url: window.url,
+          focused: true,
+          visibilityState: 'visible',
+          focus: async () => undefined,
+          navigate: async () => {
+            throw new Error('refused');
+          },
+          postMessage: (message: { type: string; url: string; tag?: string }, ports: MessagePort[]) => {
+            expect(message.type).toBe(NOTIFICATION_OPEN_MESSAGE);
+            routedTo.push({ url: message.url, ...(message.tag === undefined ? {} : { tag: message.tag }) });
+            ports[0]?.postMessage(NOTIFICATION_OPEN_ACK);
+          },
+        })),
       openWindow: async (url: string) => {
         opened.push(url);
         return null;
       },
     },
     indexedDB: {
-      open: () => {
-        const request = { result: database, onsuccess: undefined as (() => void) | undefined };
+      open: (name: string) => {
+        const request = {
+          result: name === 'ferretry-notification-filter' ? filterDatabase : keeperDatabase,
+          onsuccess: undefined as (() => void) | undefined,
+        };
         queueMicrotask(() => request.onsuccess?.());
         return request;
       },
@@ -135,10 +212,22 @@ async function startWorker(options: { readonly scope?: string; readonly script?:
       listener({ stopImmediatePropagation() {}, waitUntil: (p: Promise<unknown>) => pending.push(p), ...event });
     await Promise.all(pending);
   };
-  return { signed, listeners, order, shown, opened, dispatch, inputs, state: () => state };
+  return {
+    signed,
+    listeners,
+    order,
+    shown,
+    opened,
+    closed,
+    routedTo,
+    dispatch,
+    inputs,
+    state: () => state,
+    live: () => live,
+  };
 }
 
-test('the guarded release worker has exactly its shell inputs, the kernel contract’s push envelope and zod, with no plugin import graph', async () => {
+test('the guarded release worker has exactly its shell inputs, the kernel contract’s push envelope and filter document, and zod, with no plugin import graph', async () => {
   const worker = await startWorker();
   const app = realpathSync(join(root, 'packages/app'));
   const zod = realpathSync(resolve(Bun.resolveSync('zod/package.json', app), '..'));
@@ -154,14 +243,19 @@ test('the guarded release worker has exactly its shell inputs, the kernel contra
     'src/router/tap-target.ts',
     'src/storage/names.ts',
     'src/worker/facts.ts',
+    'src/worker/filter-document.ts',
+    'src/worker/notification-open.ts',
     'src/worker/notifications.ts',
-    'src/worker/push-envelope.ts',
+    'src/worker/notify-group.ts',
+    'src/worker/push-clear.ts',
     'src/worker/service-worker.ts',
   ]);
-  const envelope = realpathSync(Bun.resolveSync('@ferretry/kernel/contract/push-envelope', app));
+  const contracts = ['push-envelope', 'notification-filter'].map(name =>
+    realpathSync(Bun.resolveSync(`@ferretry/kernel/contract/${name}`, app)),
+  );
   const libraries = [...worker.inputs].filter(path => !shell.includes(path));
-  expect(libraries).toContain(envelope);
-  expect(libraries.every(path => path === envelope || path.startsWith(`${zod}/`))).toBe(true);
+  for (const contract of contracts) expect(libraries).toContain(contract);
+  expect(libraries.every(path => contracts.includes(path) || path.startsWith(`${zod}/`))).toBe(true);
 });
 
 test('the release worker guard refuses a transitive non-worker import even without a plugin worker file', async () => {
@@ -184,6 +278,33 @@ test('the release worker guard refuses a transitive non-worker import even witho
       expect(failure).toBeInstanceOf(AggregateError);
       expect((failure as AggregateError).errors.map(String).join('\n')).toContain(
         'no plugin code may run in the signed service worker',
+      );
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('the release worker guard allows the kernel’s push envelope and filter document by their subpaths and no other contract file', async () => {
+  // Inside the app package, so the probe resolves the workspace’s packages the way the real worker does.
+  const directory = await mkdtemp(join(root, 'packages/app/.fy-worker-contract-'));
+  try {
+    await mkdir(join(directory, 'src/worker'), { recursive: true });
+    const probe = join(directory, 'src/worker/probe.ts');
+    const build = () => Bun.build({ entrypoints: [probe], target: 'browser', plugins: [workerInputGuard(directory)] });
+    for (const allowed of ['push-envelope', 'notification-filter']) {
+      await writeFile(probe, `import '@ferretry/kernel/contract/${allowed}';`);
+      expect((await build()).success).toBe(true);
+    }
+    // The contract barrel and the manifest module are not allowed inputs.
+    for (const refused of ['@ferretry/kernel/contract', '@ferretry/kernel/manifest']) {
+      await writeFile(probe, `import '${refused}';`);
+      const failure = await build().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect((failure as AggregateError).errors.map(String).join('\n')).toContain(
+        'no plugin code may run in the signed service worker: refused input',
       );
     }
   } finally {
@@ -327,12 +448,19 @@ test('a machine’s push carries the page it named, and its tap opens exactly th
         icon: '/icons/icon-any-192.png',
         badge: '/icons/badge-96.png',
         body: 'Ship the build?',
-        data: { url: `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3` },
+        tag: 'fy-push:abc:agenda-A3',
+        renotify: false,
+        data: {
+          url: `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`,
+          count: 1,
+          latestBody: 'Ship the build?',
+          tag: 'agenda-A3',
+        },
       },
     },
   ]);
   await machine.dispatch('notificationclick', {
-    notification: { data: machine.shown[0]!.options.data, close: () => {} },
+    notification: { data: machine.shown[0]?.options.data, close: () => {} },
   });
   expect(machine.opened).toEqual([`${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`]);
 });
@@ -346,11 +474,9 @@ test('the app-wide registration’s push always opens /app/, whatever page it na
   ]) {
     await appWide.dispatch('push', { data: { json: () => ({ ...SENT, url }) } });
   }
-  expect(appWide.shown.map(notification => notification.options.data)).toEqual([
-    { url: `${APP_ORIGIN}/app/` },
-    { url: `${APP_ORIGIN}/app/` },
-    { url: `${APP_ORIGIN}/app/` },
-  ]);
+  expect(appWide.shown.map(notification => (notification.options.data as { url: string }).url)).toEqual(
+    Array(3).fill(`${APP_ORIGIN}/app/`),
+  );
   expect(appWide.shown.map(notification => notification.title)).toEqual(Array(3).fill('Unverified · Deploy approval'));
 });
 
@@ -387,7 +513,141 @@ test('a push whose payload is not readable JSON, or has no envelope, is shown pl
       },
     },
   });
-  await machine.dispatch('push', { data: { json: () => ({ kind: 'clear', tags: ['x'] }) } });
+  await machine.dispatch('push', { data: { json: () => ({ nothing: 'an envelope would hold' }) } });
   expect(machine.shown.map(notification => notification.title)).toEqual(['abc · Ferretry', 'abc · Ferretry']);
   expect(machine.shown.every(notification => !('data' in notification.options))).toBe(true);
+});
+
+const ABC = { scope: `${APP_ORIGIN}/push/abc/`, script: `${APP_ORIGIN}/sw.verified.js?machine=Beta` };
+const document = (over: Record<string, unknown> = {}): string =>
+  JSON.stringify({
+    version: 2,
+    hiddenKinds: [],
+    mutedDaemons: [],
+    quietHours: { enabled: false, startMinute: 0, endMinute: 0 },
+    ...over,
+  });
+const show = (over: Record<string, unknown> = {}) => ({ data: { json: () => ({ ...SENT, kind: 'failed', ...over }) } });
+const FCM = 'https://fcm.googleapis.com/fcm/send/abc';
+const APPLE = 'https://web.push.apple.com/abc';
+
+test('S6 a repeat under one tag replaces the line and says how many; the number never goes backwards', async () => {
+  const machine = await startWorker(ABC);
+  await machine.dispatch('push', show({ body: 'First', count: 1 }));
+  await machine.dispatch('push', show({ body: 'Second', count: 1 }));
+  await machine.dispatch('push', show({ body: 'Third', count: 1 }));
+  expect(machine.shown.map(line => line.options.body)).toEqual(['First', 'Second\n+1 more', 'Third\n+2 more']);
+  expect(machine.live()).toHaveLength(1);
+  expect(machine.shown.every(line => line.options.tag === 'fy-push:abc:agenda-A3')).toBe(true);
+  expect(machine.shown.every(line => line.options.renotify === false)).toBe(true);
+});
+
+test('S6 an urgent push stays on screen and sounds again', async () => {
+  const machine = await startWorker(ABC);
+  await machine.dispatch('push', show({ urgency: 'high' }));
+  expect(machine.shown[0]?.options).toMatchObject({ requireInteraction: true, renotify: true, silent: false });
+});
+
+test('S6 a clear closes only this machine’s line on a push service that may stay silent, and shows nothing', async () => {
+  const machine = await startWorker({ ...ABC, endpoint: FCM, lines: ['fy-push:other:agenda-A3'] });
+  await machine.dispatch('push', show());
+  const before = machine.shown.length;
+  await machine.dispatch('push', { data: { json: () => ({ kind: 'clear', tags: ['agenda-A3'] }) } });
+  expect(machine.shown).toHaveLength(before);
+  expect(machine.closed).toEqual(['fy-push:abc:agenda-A3']);
+  // The other machine's line, under the same daemon tag, is untouched.
+  expect(machine.live().map(line => line.tag)).toEqual(['fy-push:other:agenda-A3']);
+});
+
+test('S6 a clear on a push service that needs every push to show something swaps the line for the quiet one', async () => {
+  for (const endpoint of [APPLE, 'https://updates.push.services.mozilla.com/x', undefined]) {
+    const machine = await startWorker({ ...ABC, ...(endpoint === undefined ? {} : { endpoint }) });
+    await machine.dispatch('push', show({ body: 'Secret words' }));
+    await machine.dispatch('push', {
+      data: { json: () => ({ kind: 'clear', tags: ['agenda-A3'], title: 'Injected', body: 'Injected words' }) },
+    });
+    const quiet = machine.shown.at(-1)!;
+    expect(quiet.title).toBe('Beta · Handled on another device');
+    expect(quiet.options.body).toBe('Nothing to do here.');
+    expect(quiet.options.tag).toBe('fy-push:abc:agenda-A3');
+    expect(JSON.stringify(quiet)).not.toContain('Injected');
+    expect(JSON.stringify(quiet)).not.toContain('Secret words');
+  }
+});
+
+test('S6 a clear for a line that was never shown shows the quiet line under one fixed tag where the service needs one, else nothing', async () => {
+  const needs = await startWorker({ ...ABC, endpoint: APPLE });
+  await needs.dispatch('push', { data: { json: () => ({ kind: 'clear', tags: ['agenda-A3'] }) } });
+  expect(needs.shown.map(line => [line.title, line.options.tag])).toEqual([
+    ['Beta · Handled on another device', 'fy-handled:abc'],
+  ]);
+  const silent = await startWorker({ ...ABC, endpoint: FCM });
+  await silent.dispatch('push', { data: { json: () => ({ kind: 'clear', tags: ['agenda-A3'] }) } });
+  expect(silent.shown).toEqual([]);
+});
+
+test('S6 a push the device’s own filter hides shows the quiet line, never the hidden words', async () => {
+  const hidden = [
+    document({ hiddenKinds: ['failed'] }),
+    document({ mutedDaemons: ['abc'] }),
+    document({ quietHours: { enabled: true, startMinute: 0, endMinute: 0 } }),
+  ];
+  for (const filter of hidden) {
+    const machine = await startWorker({ ...ABC, filter });
+    await machine.dispatch('push', show({ title: 'Deploy failed', body: 'Secret reason' }));
+    expect(machine.shown).toHaveLength(1);
+    const line = machine.shown[0]!;
+    expect(line.title).toBe('Beta · Notifications muted');
+    expect(line.options.tag).toBe('fy-quiet:abc');
+    expect(line.options.silent).toBe(true);
+    expect(JSON.stringify(line)).not.toContain('Secret reason');
+    expect(JSON.stringify(line)).not.toContain('Deploy failed');
+  }
+  // Another machine’s muting, and another kind, hide nothing here.
+  for (const filter of [document({ mutedDaemons: ['other'] }), document({ hiddenKinds: ['completed'] })]) {
+    const machine = await startWorker({ ...ABC, filter });
+    await machine.dispatch('push', show({ body: 'Shown words' }));
+    expect(machine.shown[0]?.options.body).toBe('Shown words');
+  }
+});
+
+test('S6 nothing the page stored is trusted: a missing, garbled, oversized or old-shaped document shows everything', async () => {
+  const garbage: unknown[] = [
+    undefined,
+    'not json',
+    JSON.stringify({
+      version: 1,
+      categories: { failed: false },
+      quietHours: { enabled: true, startMinute: 0, endMinute: 0 },
+      machines: {},
+    }),
+    document({ hiddenKinds: ['Failed Loudly'] }),
+    document({ quietHours: { enabled: true, startMinute: 0, endMinute: 5000 } }),
+    {
+      version: 2,
+      hiddenKinds: ['failed'],
+      mutedDaemons: [],
+      quietHours: { enabled: false, startMinute: 0, endMinute: 0 },
+    },
+    `${document({ hiddenKinds: ['failed'] })}${' '.repeat(70_000)}`,
+  ];
+  for (const filter of garbage) {
+    const machine = await startWorker({ ...ABC, filter });
+    await machine.dispatch('push', show({ body: 'Shown words' }));
+    expect(machine.shown.map(line => line.options.body)).toEqual(['Shown words']);
+  }
+});
+
+test('S6 a tap tells the page which of the daemon’s tags it was, and only a well-formed one', async () => {
+  const chat = `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`;
+  const machine = await startWorker({ ...ABC, windows: [{ url: `${APP_ORIGIN}/app/` }] });
+  await machine.dispatch('push', show());
+  const data = machine.shown[0]?.options.data;
+  await machine.dispatch('notificationclick', { notification: { data, close: () => {} } });
+  await machine.dispatch('notificationclick', {
+    notification: { data: { url: chat, tag: '../../etc/passwd <script>' }, close: () => {} },
+  });
+  await machine.dispatch('notificationclick', { notification: { data: { url: chat, tag: 7 }, close: () => {} } });
+  expect(machine.routedTo).toEqual([{ url: chat, tag: 'agenda-A3' }, { url: chat }, { url: chat }]);
+  expect(machine.opened).toEqual([]);
 });

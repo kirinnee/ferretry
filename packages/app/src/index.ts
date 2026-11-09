@@ -107,7 +107,12 @@ export {
 export { fillPath, HEALTH_ROUTE, INVENTORY_ROUTE, type ShellPluginClient } from './client/daemon-client.ts';
 export type { BlockReason, InventoryEntry, Standing } from './client/inventory.ts';
 export { UPDATE_DAEMON_COMMAND } from './client/sentences.ts';
-export { DaemonCallError, type SocketListeners, type TransportSocket } from './client/transport.ts';
+export {
+  DaemonCallError,
+  isCarrierOutage,
+  type SocketListeners,
+  type TransportSocket,
+} from './client/transport.ts';
 export type { View } from './surfaces/halves.ts';
 export type { GeneratedSurfaces, SurfaceEntry } from './surfaces/registry.ts';
 
@@ -217,12 +222,19 @@ export { notificationTapTarget, PUSH_TAP_SCREENS } from './router/tap-target.ts'
 export {
   notificationClickUrl,
   notificationUrl,
-  presentPush,
   PUSH_ASK_PATTERN,
   PUSH_FERRET_PATTERN,
   type PushMachine,
   pushMachineOf,
 } from './worker/notifications.ts';
+// The page's half of a notification tap (S6) and of a clear: the inbox the entry point creates before the app mounts.
+export {
+  attachNotificationOpens,
+  type NotificationOpen,
+  NotificationOpenInbox,
+  type NotificationOpenSource,
+} from './worker/notification-open.ts';
+export { type ClearRegistration, closeShownTags, type ShownNotification, shownTag } from './worker/push-clear.ts';
 
 // ─── the reference grammar (docs/reference-standard.md) ───────────────────────────────────────────────────────────
 export * from './references/grammar.ts';
