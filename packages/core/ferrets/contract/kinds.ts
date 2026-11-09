@@ -10,7 +10,7 @@ import { z } from 'zod';
 import type { ChildEnvironment, InputRequestId } from '@ferretry/core-vault/contract';
 import type { Brand, Instant, JsonValue, Result } from '@ferretry/std';
 import type { FerretRole, HarnessKey, LoginKindKey, PackId, RunnerKey } from './ids.ts';
-import type { StartOptions } from './port.ts';
+import type { InitialAttachment, StartOptions } from './port.ts';
 
 /**
  * The kinds Ferrets offers (§4.3 harness, §4.4 login, §4.6 runner): the interfaces a plugin's provide hook value
@@ -85,6 +85,26 @@ export type LaunchPart =
 /** What a `launch.parts` taker contributes: a source asked per launch (a contribute item is static; the parts are not). */
 export interface LaunchPartSource {
   parts(spec: Omit<LaunchSpec, 'parts'>): Promise<readonly LaunchPart[]>;
+}
+
+/**
+ * What a start's opening message does with the files attached to it (`fy start -f`, today's `initialAttachments`).
+ * Decoding, bounding, extracting a document's text and wording the section the agent reads belong to the attachment
+ * owner (Conversation); Ferrets writes the planned files into the ferret's own `attachments/` folder and appends the
+ * section to the task. `directory` is the absolute folder the files will be written into; every planned `file` is in it.
+ * A refusal (too many files, too large, an unsafe name, undecodable bytes) is a sentence for the caller, never a throw.
+ */
+export interface OpeningAttachmentsSource {
+  plan(request: {
+    readonly attachments: readonly InitialAttachment[];
+    readonly directory: string;
+  }): Result<OpeningAttachmentsPlan, string>;
+}
+
+/** The section to append to the opening message, and every file to write before the agent is told about it. */
+export interface OpeningAttachmentsPlan {
+  readonly section: string;
+  readonly files: readonly { readonly file: string; readonly contents: Uint8Array | string }[];
 }
 
 // ─── runner (§4.6, spine D15) ─────────────────────────────────────────────────────────────────────────────────────

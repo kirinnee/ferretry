@@ -4,6 +4,8 @@ import { buildStartRequest, type StartFlags, startWarnings } from './start-reque
 
 /** `start` flags plus how to print the answer. */
 export interface StartCommandFlags extends StartFlags {
+  /** `--request-id`: the idempotency key; a start retried with the same key answers the ferret it already started. */
+  readonly requestId?: string;
   readonly json?: boolean;
 }
 
@@ -20,7 +22,7 @@ export class StartSessionController {
   async execute(flags: StartCommandFlags): Promise<void> {
     const body = buildStartRequest(flags, this.environment);
     for (const warning of startWarnings(flags)) this.presenter.note(warning);
-    const started = await this.api.start(body);
+    const started = await this.api.start(body, flags.requestId);
     const view = await this.api.get(started.id);
     this.presenter.view(view, flags.json === true);
     // A launch that outran the request is not a failure: the ferret is recorded and keeps coming up, so say where to
