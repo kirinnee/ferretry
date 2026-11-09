@@ -72,7 +72,7 @@ export interface V5Writer {
    * An `opaque` file whose owner reads its own exact bytes (Asks' per-ferret agenda files): written as given, 0600.
    * The caller has already checked the bytes against what the v5 reader accepts.
    */
-  opaque(relativePath: string, bytes: string | Uint8Array): Promise<void>;
+  opaque(relativePath: string, bytes: string | Uint8Array, mode?: number): Promise<void>;
   /**
    * An owner-edited YAML config file under `config/`, 0600, written as given (comments kept). Refused unless v5
    * would accept it at that place ({@link v5ConfigProblem}); the error names the path and key paths only.
@@ -144,8 +144,8 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
       if ('format' in parsed) throw new TypeError(`${def.path}: a stamped body names no format of its own`);
       await place(def.path, `${JSON.stringify({ format: def.format, ...parsed }, null, 2)}\n`, def.mode ?? 0o600);
     },
-    async opaque(relativePath, bytes) {
-      await place(relativePath, bytes, 0o600);
+    async opaque(relativePath, bytes, mode = 0o600) {
+      await place(relativePath, bytes, mode);
     },
     async config(target, name, text, from) {
       const path = configPath(target, name);

@@ -167,7 +167,23 @@ home, that the preview carries only files under `fleet/assets/`, and that you ca
 `/` is never carried. Every folder from the home root down is `lstat`ed (no links), the file must be a regular file with
 ONE name (a hard link is refused as v4 refused it; the Nix-store exception is not carried), and at most 1 MiB is read. Flags: Claude `--disallowedTools` becomes `settings.permissions.deny` (merged,
 deduplicated) and Codex `-c key=value` becomes a key of the item's `settings` (secret values refused); an env value that
-is a string, number or boolean is carried as a string. Anything else a v5 settings item has no form for (any other flag,
+is a string, number or boolean is carried as a string. **A string value in a carried settings or hooks document that
+names a file under `<v4 home>/fleet/assets/`** (a hook command such as `cat <v4 home>/fleet/assets/components/hooks/x.txt`
+or `sh ~/.ferretry/fleet/assets/…`; the absolute v4 home, or a `~/`, `$HOME/` or `${HOME}/` spelling that resolves to it;
+matched as a whole path token bounded by the value's ends, whitespace or quotes, never a piece of a longer path such as
+`<v4 home>-old/…`) is carried: the FILE is written into the v5 home at the same path under `fleet/assets/` (a place v5
+Runtimes already reads, that nothing in v5 sweeps or refuses; the skill-folders step writes there too), under the same
+rules as a component file (every folder and the file `lstat`ed, no link, one name, a regular file, 1 MiB cap, refused if
+its content looks like a credential), and only that token is rewritten to the v5 copy. A file whose own content names
+the v4 home is NOT carried (a script that reaches back into v4 is never carried silently), and neither is a file under
+`fleet/assets/skills/` (the skill-folders step owns it). The file is held to the same homes the last gate refuses in an
+inline command (v4's home and worktree folder, `~/.claude*`, `~/.codex*`; `$FY_HOME` carries) and to the one credential
+scan settings documents use over the whole content (every assignment, every word, `Authorization` headers). The file is
+written with mode 0600, or 0700 when the source has its owner-execute bit (the preview stage keeps that bit and no group
+or other bit); the bytes written are the bytes checked. The accepted record carries the rewritten text. The report names each carried
+file by its `fleet/assets/` path only. Any other string that names the v4 home (outside `fleet/assets/`, a folder, a
+missing file, a file that fails a rule) makes the component NOT CARRIED; the report names the component and the reason,
+never the command; remedy: copy the file under `fleet/assets` in v4, or remove the hook. Anything else a v5 settings item has no form for (any other flag,
 a file outside the home, a hooks `directory`, a secret-shaped or `${secret:...}` value, an oversize file, an unknown
 harness) makes the component NOT CARRIED. The report names the component, each flag by name only, and every profile that
 layers it, and says it may have restricted what the agent could do. **By default the step is then `pending` and no
