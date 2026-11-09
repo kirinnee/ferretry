@@ -500,7 +500,12 @@ async function bootLocked(
   );
   await config.reload();
   // The modeline of every file points an editor at its schema, so the schemas are there once a daemon serves.
-  await config.publishSchemas?.().catch(() => log.warn('the configuration schemas could not be written'));
+  await config.publishSchemas?.().catch((cause: unknown) =>
+    // The cause (a path and a system reason, never a secret) is what tells an operator why: a full disk or a read-only folder.
+    log.warn('the configuration schemas could not be written', {
+      reason: cause instanceof Error ? cause.message : String(cause),
+    }),
+  );
   const stopWatching = config.startWatching?.();
   if (stopWatching !== undefined) own(stopWatching);
   const pluginsYaml = readPluginsYaml(config.port('kernel'));

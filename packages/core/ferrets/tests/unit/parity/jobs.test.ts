@@ -229,7 +229,7 @@ describe('the turn watch (U4, ruling #27 Q3: mounted in Ferrets)', () => {
     await h.stop();
   });
 
-  test("a document left starting by a crash is brought to its ferret's state when the watch arms, and its turns are watched", async () => {
+  test("BG-040 a document left starting by a crash is brought to its ferret's state when the watch arms, and its turns are watched", async () => {
     const { h, runner } = await host();
     const id = await start(h, 'gale');
     const handle = (await h.provided(FerretsPort).handle(id)) as RunnerHandle;

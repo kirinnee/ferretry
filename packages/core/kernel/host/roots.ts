@@ -33,6 +33,7 @@ import type {
   SharedTreeSource,
 } from '../contract/ports.ts';
 import type { FileIdentity, HostFs, OpenedDirectory, OpenedFile } from './adapters/node-fs.ts';
+import type { FolderRemoval, FolderSteps } from './adapters/pinned/descriptor-folder.ts';
 import {
   absolute,
   type Fence,
@@ -477,6 +478,43 @@ async function entry(scope: Scope, folder: OpenedDirectory, real: string, leaf: 
 }
 
 /**
+ * The steps of a write or a publish in a checked folder, one spelling for both hosts: through the folder's descriptor
+ * where a path reaches it (`entry`), and through its held descriptor's own calls where none does (macOS, `folder.at`),
+ * so a parent swapped for a link after the check cannot carry the temp, the look or the rename out of the folder.
+ */
+interface FolderWork {
+  look(leaf: string): Promise<FileIdentity | undefined>;
+  create(leaf: string, data: string | Uint8Array, mode: number): Promise<FileIdentity>;
+  /** Moves `leaf` onto `toLeaf` in the same folder, replacing what is there. */
+  replace(leaf: string, toLeaf: string): Promise<void>;
+  /** A second name `toLeaf` for `leaf`; `EEXIST` when taken. */
+  link(leaf: string, toLeaf: string): Promise<void>;
+  drop(leaf: string): Promise<void>;
+}
+
+function folderWork(scope: Scope, folder: OpenedDirectory, real: string): FolderWork {
+  const held = folder.at;
+  if (held !== undefined && folder.entryPath('') === undefined) {
+    return {
+      look: async leaf => await held.identity(leaf),
+      create: async (leaf, data, mode) => await held.writeNew(leaf, data, mode),
+      replace: async (leaf, toLeaf) => await held.renameInto(leaf, folder, toLeaf),
+      link: async (leaf, toLeaf) => await held.link(leaf, folder, toLeaf),
+      drop: async leaf => await held.unlink(leaf),
+    };
+  }
+  return {
+    look: async leaf => await scope.fs.identity(await entry(scope, folder, real, leaf)),
+    create: async (leaf, data, mode) => await scope.fs.writeNew(await entry(scope, folder, real, leaf), data, mode),
+    replace: async (leaf, toLeaf) =>
+      await scope.fs.rename(await entry(scope, folder, real, leaf), await entry(scope, folder, real, toLeaf)),
+    link: async (leaf, toLeaf) =>
+      await scope.fs.link(await entry(scope, folder, real, leaf), await entry(scope, folder, real, toLeaf)),
+    drop: async leaf => await scope.fs.unlink(await entry(scope, folder, real, leaf)),
+  };
+}
+
+/**
  * A fresh scoped agent home is made below its declared, already-existing parent. Use the same checked-folder,
  * descriptor-reached mkdir and no-follow open as writeChecked: a sibling link is never a creation shortcut.
  */
@@ -606,28 +644,26 @@ async function writeChecked(
   );
   try {
     await refuseHeldName(scope, join(parent, leaf));
+    const work = folderWork(scope, folder, parent);
     if (options.exclusive === true) {
       // An existing name (a link included) fails the create itself: its own error says so.
-      const created = await scope.fs.writeNew(await entry(scope, folder, parent, leaf), data, options.mode ?? 0o600);
+      const created = await work.create(leaf, data, options.mode ?? 0o600);
       if (created.kind !== 'file' || created.links !== 1) refuse('changed');
       return;
     }
     let mode = options.mode ?? 0o600;
     if (options.replaceExisting === true) {
-      const current = await scope.fs.identity(await entry(scope, folder, parent, leaf));
+      const current = await work.look(leaf);
       if (current?.kind !== 'file') return refuse(current?.kind === 'link' ? 'link_escape' : 'outside');
       mode = options.mode ?? current.mode;
     }
     const temp = `.${leaf}.${random()}.tmp`;
-    const created = await scope.fs
-      .writeNew(await entry(scope, folder, parent, temp), data, mode)
-      .catch(() => refuse('changed'));
+    const created = await work.create(temp, data, mode).catch(() => refuse('changed'));
     if (created.kind !== 'file' || created.links !== 1) refuse('changed');
-    const madeTemp = await entry(scope, folder, parent, temp);
     try {
-      await scope.fs.rename(madeTemp, await entry(scope, folder, parent, leaf));
+      await work.replace(temp, leaf);
     } catch (error) {
-      await scope.fs.unlink(madeTemp).catch(() => undefined);
+      await work.drop(temp).catch(() => undefined);
       throw error;
     }
   } finally {
@@ -687,34 +723,33 @@ async function publishChecked(
     await refuseHeldName(scope, join(parent, leaf));
     for (const directory of ancestorsToPersist(scope, created, parent)) await syncChecked(scope, directory);
     const temp = `.${leaf}.${random()}.tmp`;
-    const tempPath = await entry(scope, folder, parent, temp);
+    const work = folderWork(scope, folder, parent);
     // OUTSIDE the cleanup below: a name this call did not create is another publisher's, and losing the exclusive
     // create (which `writeNew` reports by throwing before it owns anything) leaves nothing to remove.
-    const made = await scope.fs.writeNew(tempPath, data, options.mode ?? 0o600);
+    const made = await work.create(temp, data, options.mode ?? 0o600);
     if (made.kind !== 'file' || made.links !== 1) {
-      await scope.fs.unlink(tempPath).catch(() => undefined);
+      await work.drop(temp).catch(() => undefined);
       refuse('changed');
     }
-    const leafPath = await entry(scope, folder, parent, leaf);
     if (options.exclusive === true) {
       try {
-        await scope.fs.link(tempPath, leafPath);
+        await work.link(temp, leaf);
       } catch (error) {
-        await scope.fs.unlink(tempPath).catch(() => undefined);
+        await work.drop(temp).catch(() => undefined);
         if (errnoOf(error) !== 'EEXIST') throw error;
         return { outcome: 'exists' };
       }
       // The second name goes BEFORE the folder sync, so one directory fsync persists the new name and the removed
       // temp together: a crash or a power cut can never leave the leaf with two names, and a loser reading while
       // the winner syncs sees one name. A failed unlink leaves a leftover that `readDurable` knows how to adopt.
-      await scope.fs.unlink(tempPath).catch(() => undefined);
+      await work.drop(temp).catch(() => undefined);
       await folder.sync();
       return { outcome: 'published', identity: identityOfEntry(made) };
     }
     try {
-      await scope.fs.rename(tempPath, leafPath);
+      await work.replace(temp, leaf);
     } catch (error) {
-      await scope.fs.unlink(tempPath).catch(() => undefined);
+      await work.drop(temp).catch(() => undefined);
       throw error;
     }
     await folder.sync();
@@ -805,12 +840,70 @@ async function removeWithin(scope: Scope, through: string, expected: FileIdentit
 }
 
 /**
+ * `removeWithin` where no path reaches a held folder (macOS): the same walk, one name at a time, but every step goes
+ * through the folder's DESCRIPTOR (`FolderSteps`: `unlinkat`, and the working-directory bracket for a listing, an
+ * `lstat` and an `rmdir`) and every folder below is opened from its parent's descriptor without following a link, so a
+ * folder swapped for a link in the middle of the tree is refused (`changed`), never walked, and nothing outside the
+ * proven folder is touched. A name that is not one plain segment is refused `outside`, as the lexical rule would.
+ */
+async function removeWithinHeld(
+  scope: Scope,
+  steps: FolderSteps,
+  removal: FolderRemoval,
+  name: string,
+  expected: FileIdentity,
+): Promise<void> {
+  if (await heldMember(scope, expected)) refuse('fenced');
+  if (expected.kind !== 'directory') {
+    await steps.unlink(name).catch(error => heldFailure(error));
+    return;
+  }
+  const child = await removal.openFolder(name).catch(() => refuse('changed'));
+  try {
+    if (!same(expected, child.identity)) refuse('changed');
+    const inside = child.steps.removal as FolderRemoval;
+    for (const member of await inside.list().catch(error => heldFailure(error))) {
+      const identity = await inside.lstat(member).catch(error => heldFailure(error));
+      if (identity !== undefined) await removeWithinHeld(scope, child.steps, inside, member, identity);
+    }
+  } finally {
+    await child.close();
+  }
+  await removal.rmdir(name).catch(error => heldFailure(error));
+}
+
+/** What a step through a held folder that failed means to the caller: a folder that is no longer the proven one is `changed`; anything else is the host's own error. */
+function heldFailure(error: unknown): never {
+  const code = errnoOf(error);
+  if (code === 'EBADF' || code === 'EBUSY') return refuse('changed');
+  if (code === 'EINVAL') return refuse('outside');
+  throw error;
+}
+
+/** `remove` of `leaf` in a checked folder through its descriptor and the bracket (the Linux walk, without a path). */
+async function removeHeld(
+  scope: Scope,
+  steps: FolderSteps,
+  removal: FolderRemoval,
+  leaf: string,
+  onlyIfEmpty: boolean,
+): Promise<void> {
+  const identity = await removal.lstat(leaf).catch(error => heldFailure(error));
+  if (identity === undefined) return;
+  if (onlyIfEmpty && identity.kind === 'directory') {
+    await removeEmptyFolder(() => removal.rmdir(leaf).catch(error => heldFailure(error)));
+    return;
+  }
+  await removeWithinHeld(scope, steps, removal, leaf, identity);
+}
+
+/**
  * `rmdir(2)` through the checked folder: ONE syscall both looks for an entry and removes the folder, so no entry can
  * arrive between a look and the removal (a list-then-remove would have that window). Never recurses.
  */
-async function removeEmptyFolder(scope: Scope, through: string): Promise<void> {
+async function removeEmptyFolder(rmdirIt: () => Promise<void>): Promise<void> {
   try {
-    await scope.fs.rmdir(through);
+    await rmdirIt();
   } catch (error) {
     const code = errnoOf(error);
     if (code === 'ENOTEMPTY' || code === 'EEXIST') return refuse('not_empty');
@@ -831,11 +924,16 @@ async function removeChecked(scope: Scope, full: string, onlyIfEmpty: boolean): 
   try {
     const through = folder.entryPath(leaf);
     if (through === undefined) {
-      // Without descriptor reach (S44): an owner root removes nothing, and no root removes a FOLDER, because a by-path
+      // No path reaches the folder (macOS) but the host loaded the C calls AND the working-directory bracket: the
+      // whole remove, a tree included, goes through the proven folder's descriptor (`FolderSteps.removal`), as on
+      // Linux, for an owner's root as for an internal one.
+      const steps = folder.at;
+      if (steps?.removal !== undefined) return await removeHeld(scope, steps, steps.removal, leaf, onlyIfEmpty);
+      // Without that reach (S44): an owner root removes nothing, and no root removes a FOLDER, because a by-path
       // `rm -r` after one re-proof of the parent deletes an outside tree when the parent is swapped for a link in
       // between. A file or link leaf of an internal root is unlinked by path (sessions markers, tidy): the leaf is
       // looked at without following it, and `unlink` never removes a tree, so the worst a swapped parent costs is ONE
-      // same-named file outside the root. Declared GAP, closed by the descriptor bracket unit.
+      // same-named file outside the root. Declared GAP: a host whose C library or bracket could not be loaded.
       if (scope.ownerRoot) return refuse('no_descriptor_reach');
       const problem = await folderProblem(scope, parent, folder.identity);
       if (problem !== undefined) return refuse(problem);
@@ -849,7 +947,7 @@ async function removeChecked(scope: Scope, full: string, onlyIfEmpty: boolean): 
     const identity = await scope.fs.identity(through);
     if (identity === undefined) return;
     if (onlyIfEmpty && identity.kind === 'directory') {
-      await removeEmptyFolder(scope, through);
+      await removeEmptyFolder(() => scope.fs.rmdir(through));
       return;
     }
     await removeWithin(scope, through, identity);
@@ -1289,10 +1387,12 @@ async function setModeChecked(scope: Scope, full: string, bits: number): Promise
 /**
  * `rename` through the two checked folders: each parent is opened without following a link and proven, the entry at
  * `from` is looked at WITHOUT following it (it must exist: a link stays a link, a directory moves whole), nothing may
- * be at `to` (a link there included), and the move is `rename(2)` between the two folders' descriptors. A host that
- * cannot reach an entry through a held folder's descriptor (macOS today) is refused `no_descriptor_reach`: there the
- * move would resolve both parents by name again and follow a link swapped in after the proof, so it is never made
- * ([own] BEFORE-GREEN(runtimes): the owner runs macOS, so the provisioner's move-aside and undo fail there). No copy
+ * be at `to` (a link there included), and the move is `rename(2)` between the two folders' descriptors. Where no path
+ * reaches an entry through a held folder (macOS) the look and the move are the held folders' own descriptor calls
+ * (`OpenedDirectory.at`: `openat` with `O_NOFOLLOW`, `renameat`, each folder proven by device and inode first), so a
+ * parent swapped for a link after the proof still moves inside the folder that was checked. A host with neither a
+ * path nor those calls is refused `no_descriptor_reach`: the move would resolve both parents by name again and follow
+ * a link swapped in after the proof, so it is never made. No copy
  * is ever the fallback: any failure of the move itself (another device, a folder into itself, a full disk) is
  * `changed`, a fact with no path or content in it.
  *
@@ -1308,15 +1408,27 @@ async function renameChecked(from: Checked, to: Checked): Promise<void> {
   try {
     const target = await openCheckedFolder(to.scope, toParent);
     try {
-      // Without descriptor reach the move would run on plain paths, which resolve the parents afresh (as `removeWithin`
-      // refuses a folder it cannot hold). Refuse before anything is looked at or moved.
-      if (source.entryPath('') === undefined || target.entryPath('') === undefined)
-        return refuse('no_descriptor_reach');
-      const fromAt = await entry(from.scope, source, fromParent, basename(from.full));
-      const toAt = await entry(to.scope, target, toParent, basename(to.full));
+      const sourceName = basename(from.full);
+      const targetName = basename(to.full);
+      // A folder with no path to its entries (macOS) is reached through its held descriptor's own calls
+      // (`renameat` between the two descriptors, each proven by device and inode, the leaf never followed). A folder
+      // with neither would run the move on plain paths, which resolve the parents afresh (as `removeWithin` refuses a
+      // folder it cannot hold): refuse before anything is looked at or moved.
+      const withoutPath = source.entryPath('') === undefined || target.entryPath('') === undefined;
+      const sourceSteps = source.at;
+      const targetSteps = target.at;
+      if (withoutPath && (sourceSteps === undefined || targetSteps === undefined)) return refuse('no_descriptor_reach');
       // A name that IS a private place is neither moved (as the source) nor replaced (as the target), whatever it is called.
       await refuseHeldName(from.scope, from.full);
       await refuseHeldName(to.scope, to.full);
+      if (withoutPath && sourceSteps !== undefined && targetSteps !== undefined) {
+        if ((await sourceSteps.identity(sourceName)) === undefined) return refuse('outside');
+        if ((await targetSteps.identity(targetName)) !== undefined) return refuse('outside');
+        await sourceSteps.renameInto(sourceName, target, targetName).catch(() => refuse('changed'));
+        return;
+      }
+      const fromAt = await entry(from.scope, source, fromParent, sourceName);
+      const toAt = await entry(to.scope, target, toParent, targetName);
       if ((await from.scope.fs.identity(fromAt)) === undefined) return refuse('outside');
       if ((await to.scope.fs.identity(toAt)) !== undefined) return refuse('outside');
       await from.scope.fs.rename(fromAt, toAt).catch(() => refuse('changed'));

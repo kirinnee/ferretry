@@ -32,6 +32,14 @@ describe('the TOML Codex settings are written as', () => {
     }
   });
 
+  test('BG-031 OM1 a string value with a C0 control character or DEL is escaped, so the file still parses', () => {
+    // The written text is checked directly: no raw control character may reach the file.
+    expect(tomlDocument({ note: 'a\u0001b' })).toBe('note = "a\\u0001b"');
+    expect(tomlDocument({ note: 'a\u001bb' })).toBe('note = "a\\u001bb"');
+    expect(tomlDocument({ note: 'a\u007fb' })).toBe('note = "a\\u007fb"');
+    expect(tomlDocument({ 'k\u0001': 'v' })).toBe('"k\\u0001" = "v"');
+  });
+
   test('a key that tries to open a table is quoted, so it opens none', () => {
     const text = tomlDocument({ 'x]\n[y': 'z' });
 

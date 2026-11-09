@@ -17,7 +17,7 @@ import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
-import { RuntimesPort } from '../../../contract/index.ts';
+import { RuntimeHomeUnreadable, RuntimesPort } from '../../../contract/index.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
@@ -418,6 +418,46 @@ describe('a real apply through the composed daemon', () => {
     expect(await readdir(world.fleet)).not.toContain('manifest.json');
   });
 
+  it('BG-027 a refusal for a changed budget does not spend the proposal: a retry is refused the same way, and applies once the pause lifts', async () => {
+    const pause = {
+      period: 'daily',
+      level: 'over_trigger',
+      limitUsd: 40,
+      resetsAtMs: 1_800_000_000_000,
+      timeZone: 'UTC',
+    };
+    let pauses: { login: string; pause: typeof pause; phrase: string }[] = [];
+    const { host } = await compose({
+      assemble: ctx =>
+        hostAssembly({ ...ctx, uses: { usage: { current: () => ({ pauses: () => pauses }) } } } as never),
+    });
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+    const id = staged.json<{ id: string }>().id;
+
+    pauses = [{ login: 'claude-you', pause, phrase: '' }];
+    const first = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    const written = host.configChanges.length;
+    expect(first.status).toBe(409);
+    expect(JSON.stringify(first.json())).toContain('spend budget changed');
+    expect(host.configChanges.length).toBe(written);
+
+    const retry = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    expect(retry.status).toBe(409);
+    expect(JSON.stringify(retry.json())).toContain('spend budget changed');
+    expect(JSON.stringify(retry.json())).not.toContain('already been applied');
+    expect(host.configChanges.length).toBe(written);
+
+    // The pause lifts: the same proposal is back to what it was previewed against, so it applies.
+    pauses = [];
+    const lifted = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    expect(lifted.status).toBe(200);
+    expect(host.configChanges.length).toBeGreaterThan(written);
+
+    // A proposal is single use: the apply that landed spent it.
+    const again = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    expect(JSON.stringify(again.json())).toContain('already been applied');
+  });
+
   it('M3 a budget hold that starts or stops publishes the fleet again, so its wrappers follow Usage’s pause', async () => {
     let republished = 0;
     const { host } = await compose({
@@ -733,5 +773,31 @@ describe('the homes the composed daemon provides', () => {
     // A second ask after the first still answers: the service is built once and keeps what it listed.
     expect(port.home(HOME_ID)).toBeDefined();
     expect(port.home('00000000-0000-4000-8000-0000000000ff')).toBeUndefined();
+  });
+
+  it('BG-033 n2 a fleet root that cannot be opened: homes() rejects with the typed refusal and home(id) answers undefined', async () => {
+    const world = await fleetWorld();
+    const host = await testHost({
+      plugins: [runtimesDaemon(brokenFleet(world.roots)) as DaemonImplementation<any>],
+      fakes: {
+        ferrets: new FakeFerrets(),
+        logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
+        loginChanges: fakeLoginChanges(),
+      },
+      gate: new StandInAdmission(() => ownerStanding()),
+      config: CONFIG,
+      ownerHome: world.person,
+    });
+    const port = host.provided(RuntimesPort);
+
+    const failure = await port.homes().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(RuntimeHomeUnreadable);
+    expect((failure as Error).message).toBe('The fleet folder could not be opened.');
+    // `home()` is `RuntimeHomeReader | undefined`: it never throws, not even on the first call.
+    expect(() => port.home(HOME_ID)).not.toThrow();
+    expect(port.home(HOME_ID)).toBeUndefined();
   });
 });
