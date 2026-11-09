@@ -112,7 +112,7 @@ async function rolledBack(change: object): Promise<{ landed: readonly string[]; 
 }
 
 describe('the remedy after a rolled-back change is true whether the landed file was created, edited or removed', () => {
-  const undo = 'to undo the change instead, put that file back as it was.';
+  const undo = 'to undo the change instead, put that file back as it was, or delete it if it did not exist before.';
 
   it('BG-027 W1 an EDIT of an existing runtime never says to remove its file', async () => {
     const { landed, text } = await rolledBack({

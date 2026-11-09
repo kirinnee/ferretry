@@ -29,7 +29,7 @@ export function failedApplySentence(error: unknown, landed: readonly string[] = 
 export function configurationLanded(written: readonly string[]): string {
   const named =
     written.length === 1
-      ? `the configuration ${written[0]} was written first and is`
-      : `the configuration files ${written.join(', ')} were written first and are`;
+      ? `the change to the configuration ${written[0]} was made first and is`
+      : `the changes to the configuration files ${written.join(', ')} were made first and are`;
   return `${named} NOT rolled back with the fleet`;
 }

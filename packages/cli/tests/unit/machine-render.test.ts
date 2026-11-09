@@ -215,8 +215,30 @@ describe('the machine renderer says how an applied change ended', () => {
     should(rendered.text).containEql('runtimes/work.yaml');
     should(rendered.text).containEql('NOT rolled back');
     should(rendered.text).containEql(
-      'Fix the cause and apply again; to undo the change instead, put that file back as it was.',
+      'Fix the cause and apply again; to undo the change instead, put that file back as it was, or delete it if it did not exist before.',
     );
+  });
+
+  it('BG-027 R2-m1 a landed configuration is a change made first, never a file written first, whatever its kind', () => {
+    const outcome = (landed: string[]) =>
+      renderChangeOutcome({
+        outcome: 'applied',
+        apply: {
+          outcome: 'rolled-back',
+          failedOperation: 'directory fleet/bin',
+          reason: 'refused',
+          configurationLanded: landed,
+        },
+      } as never).text;
+    const one = outcome(['runtimes/work.yaml']);
+    should(one).containEql('The change to the configuration runtimes/work.yaml was made first and is NOT rolled back');
+    should(one).not.containEql('written first');
+    const two = outcome(['runtimes/work.yaml', 'runtimes.yaml']);
+    should(two).containEql(
+      'The changes to the configuration files runtimes/work.yaml, runtimes.yaml were made first and are NOT rolled back; the next apply publishes them.',
+    );
+    should(two).containEql('put those files back as they were, or delete any that did not exist before.');
+    should(two).not.containEql('written first');
   });
 
   it('BG-027 a rolled-back edit or removal never tells the owner to remove the file', () => {
@@ -231,7 +253,9 @@ describe('the machine renderer says how an applied change ended', () => {
         },
       } as never);
       should(rendered.text).not.match(/remove (it|them)/u);
-      should(rendered.text).match(/put (that file|those files) back as (it was|they were)\./u);
+      should(rendered.text).match(
+        /put (that file|those files) back as (it was|they were), or delete (it if it|any that) did not exist before\./u,
+      );
     }
   });
 

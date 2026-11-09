@@ -122,10 +122,13 @@ const landed = (files: readonly string[] | undefined): string | undefined => {
   if (files === undefined || files.length === 0) return undefined;
   const named =
     files.length === 1
-      ? `The configuration ${files[0]} was written first and is`
-      : `The configuration files ${files.join(', ')} were written first and are`;
+      ? `The change to the configuration ${files[0]} was made first and is`
+      : `The changes to the configuration files ${files.join(', ')} were made first and are`;
   const them = files.length === 1 ? 'it' : 'them';
-  const back = files.length === 1 ? 'put that file back as it was' : 'put those files back as they were';
+  const back =
+    files.length === 1
+      ? 'put that file back as it was, or delete it if it did not exist before'
+      : 'put those files back as they were, or delete any that did not exist before';
   return `${named} NOT rolled back; the next apply publishes ${them}. Fix the cause and apply again; to undo the change instead, ${back}.`;
 };
 const landedLines = (files: readonly string[] | undefined): string[] => {

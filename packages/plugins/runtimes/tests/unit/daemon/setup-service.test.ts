@@ -1133,7 +1133,7 @@ describe('the setup.import executor', () => {
     )();
     should(preflight).startWith('a source leads out of the folder');
     should(preflight).containEql('/state/config/model.yaml');
-    should(preflight).containEql('was written first and is NOT rolled back');
+    should(preflight).containEql('was made first and is NOT rolled back');
     should(preflight).not.containEql('nothing was left half-changed');
     // A rollback that landed after the configuration did: the rollback is the fleet's, the configuration stays.
     const rolled = await throwing(
@@ -1184,12 +1184,12 @@ describe('the setup.import executor', () => {
       const sentence = failedApplySentence(new FleetApplyAfterConfigError(config, failure));
       should(sentence).startWith(failure.message);
       should(sentence).containEql(
-        'the configuration files /state/config/model.yaml, /state/config/runtimes.yaml were written first and are NOT rolled back with the fleet',
+        'the changes to the configuration files /state/config/model.yaml, /state/config/runtimes.yaml were made first and are NOT rolled back with the fleet',
       );
       should(sentence).not.containEql('half-changed');
     }
     should(failedApplySentence(new FleetApplyAfterConfigError(config.slice(0, 1), new Error('x')))).equal(
-      'x; the configuration /state/config/model.yaml was written first and is NOT rolled back with the fleet',
+      'x; the change to the configuration /state/config/model.yaml was made first and is NOT rolled back with the fleet',
     );
   });
 
@@ -2433,7 +2433,7 @@ intervalMinutes: 5
       'fleet_change_failed',
     );
     should(refusal.message).startWith('another fleet apply holds the claim');
-    should(refusal.message).containEql('warden.yaml was written first and is NOT rolled back with the fleet');
+    should(refusal.message).containEql('warden.yaml was made first and is NOT rolled back with the fleet');
     should(refusal.message).not.containEql('half-changed');
 
     // A write the owner's judge HELD did not land: the sentence claims nothing about it.
@@ -2484,7 +2484,7 @@ intervalMinutes: 5
     );
 
     should(refusal.message).containEql('changed on this machine after it was reviewed');
-    should(refusal.message).containEql('was written first and is NOT rolled back with the fleet');
+    should(refusal.message).containEql('was made first and is NOT rolled back with the fleet');
     should(w.applied).deepEqual([]);
   });
 

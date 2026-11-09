@@ -293,9 +293,11 @@ describe('renderChangeOutcome', () => {
         configurationLanded: ['runtimes/work.yaml'],
       },
     });
-    should(rendered.text).containEql('The configuration runtimes/work.yaml was written first and is NOT rolled back');
     should(rendered.text).containEql(
-      'Fix the cause and apply again; to undo the change instead, put that file back as it was.',
+      'The change to the configuration runtimes/work.yaml was made first and is NOT rolled back',
+    );
+    should(rendered.text).containEql(
+      'Fix the cause and apply again; to undo the change instead, put that file back as it was, or delete it if it did not exist before.',
     );
   });
 
@@ -311,7 +313,9 @@ describe('renderChangeOutcome', () => {
         },
       } as never);
       should(rendered.text).not.match(/remove (it|them)/u);
-      should(rendered.text).match(/put (that file|those files) back as (it was|they were)\./u);
+      should(rendered.text).match(
+        /put (that file|those files) back as (it was|they were), or delete (it if it|any that) did not exist before\./u,
+      );
     }
   });
 
