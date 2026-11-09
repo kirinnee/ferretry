@@ -152,7 +152,17 @@ describe('PF-budget the real bound fails closed: a place past its budget is trun
     expect(await root.entries(named(root, '.'))).toEqual([]);
     // An owner's root is judged by the fence: an entry on the closed tree's device is refused there too.
     const fence = await fenceOf(REAL, l.home, LIST);
-    expect(fence.closed.size).toBe(1);
+    // The closed devices are exactly those the tree's indexed places answer with: one device on a disk that gives a file
+    // its folder's device, a folder's and a file's on a disk that does not (the CI runner's overlay), and never a device
+    // a place outside the tree answers with.
+    const head = snapshot.closed[0];
+    const inTree = snapshot.places.filter(
+      place => place.path === head?.path || place.path.startsWith(`${head?.path}/`),
+    );
+    const expected = new Set(inTree.map(place => place.device));
+    expect(expected.size).toBeGreaterThan(0);
+    expect(head?.devices).toEqual(expected);
+    expect(fence.closed).toEqual(expected);
     await mkdir(`${l.parent}/work`, { recursive: true });
     await writeFile(`${l.parent}/work/notes.md`, 'hello');
     expect(await fencedReal(REAL, fence, `${l.parent}/work/notes.md`)).toBe(true);
