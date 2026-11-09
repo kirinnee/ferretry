@@ -234,6 +234,91 @@ describe('renderChangeOutcome', () => {
       .and.match(/\/q: gone$/m);
   });
 
+  it('BG-031 should not open a list of paths that is empty after an incomplete rollback that only moved things aside', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [],
+        configurationLanded: ['runtimes/work.yaml'],
+      },
+    });
+    should(rendered.text).not.containEql('could not be put back');
+    should(rendered.text).startWith('link failed (denied).');
+  });
+
+  it('BG-031 MD2 should say the fleet could not be fully put back and list what was moved aside, when nothing is unrestored', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [],
+        displaced: [{ path: '/h/a', movedTo: '/h/a.moved' }],
+      },
+    } as never);
+    should(rendered.ok).equal(false);
+    should(rendered.text).equal(
+      'link failed (denied), and the fleet could not be fully put back:\n  /h/a (moved to /h/a.moved)',
+    );
+  });
+
+  it('BG-031 MD2 should list what was moved aside after the unrestored paths, under its own line', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [{ path: '/p', reason: 'gone' }],
+        displaced: [{ path: '/h/a', movedTo: '/h/a.moved' }],
+      },
+    } as never);
+    should(rendered.text).equal(
+      'link failed (denied) and these could not be put back:\n  /p: gone\nMoved aside:\n  /h/a (moved to /h/a.moved)',
+    );
+  });
+
+  it('BG-031 OM7 should name the landed configuration file after an incomplete rollback, and say what to do', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [{ path: '/p', reason: 'gone' }],
+        configurationLanded: ['runtimes/work.yaml'],
+      },
+    });
+    should(rendered.text).containEql(
+      'The change to the configuration runtimes/work.yaml was made first and is NOT rolled back',
+    );
+    should(rendered.text).containEql(
+      'Fix the cause and apply again; to undo the change instead, put that file back as it was, or delete it if it did not exist before.',
+    );
+  });
+
+  it('BG-027 a rolled-back edit or removal never tells the owner to remove the file', () => {
+    for (const landed of [['runtimes/work.yaml'], ['runtimes/work.yaml', 'profiles/main.yaml']]) {
+      const rendered = renderChangeOutcome({
+        outcome: 'applied',
+        apply: {
+          outcome: 'rolled-back',
+          failedOperation: 'directory fleet/bin',
+          reason: 'refused',
+          configurationLanded: landed,
+        },
+      } as never);
+      should(rendered.text).not.match(/remove (it|them)/u);
+      should(rendered.text).match(
+        /put (that file|those files) back as (it was|they were), or delete (it if it|any that) did not exist before\./u,
+      );
+    }
+  });
+
   it('should report a sign-out', () => {
     should(renderChangeOutcome({ outcome: 'signed-out', credential: { id: 'claude-you' } })).eql({
       ok: true,
