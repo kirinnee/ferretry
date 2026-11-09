@@ -264,6 +264,10 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
     )
   )
     return 'removed by design (§9.2: old files/markers; feature moves to its owner)';
+  // britnee ruling #6: v4's boot-time routing conversion is the home converter's packs step (proved by the converter's
+  // test J-0052); the daemon runs no conversion.
+  if (kind === 'J' && /new RoutingMigration\(/.test(what))
+    return "removed by design (§9.1, §9.2: removed from the daemon; the v4-to-v5 converter's packs step carries models-guide.yaml and pack.yaml, proved by its test J-0052)";
   if (/legacy|migration/.test(file) && !/session-migrate|session\/migrat|lib\/migration\/commands/.test(file)) {
     if (kind === 'J') return 'removed by design (§9.1, §9.2: one-shot conversion/old-format work)';
   }
@@ -285,8 +289,8 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
  * Rows the word rules above place with Runtimes ("runtime", "fleet", "component" in a name) but whose code is another
  * owner's in 5.0 (britnee ruling, parity-runtimes round 1: re-owned, none removed). Keyed by ROW ID, so a later row from
  * the same source file keeps the owner the rules gave it; `applyReowned` refuses an id the inventory does not hold.
- * J-0052 and J-0096 have no 5.0 plugin that really does the job; they stay `[ ]` under the nearest name, and the
- * owner decides each (a "removed by design" status needs her per-row yes).
+ * J-0052 (the boot-time routing conversion) is no longer a REOWNED row at all in effect: `removal()` marks it removed
+ * from the daemon, the v4-to-v5 converter's packs step doing that job (britnee ruling #6).
  */
 const REOWNED: Readonly<Record<string, string>> = {
   // Pack routing conversion at boot (the v4-to-v5 converter's packs step is the nearest owner).

@@ -121,6 +121,35 @@ test('only a routing prompt: packs.yaml holds routing alone; a home with neither
   });
 });
 
+test('J-0052 the one-time routing conversion v4 ran at boot is this step: the old guide keys are named and not carried, the prompt a home already has is', async () => {
+  // A home v4 had not yet folded: the old use-case guide and the old builder's preferences, and no prompt.
+  await raw('config/pack.yaml', ['enabled: true', 'routingPreferences: FAKE-OLD-PREFERENCES', ''].join('\n'));
+  await raw(
+    'config/models-guide.yaml',
+    ['useCases:', '  - FAKE-USE-CASE', 'routing: FAKE-OLD-ROUTING', 'models: [FAKE-MODEL]', ''].join('\n'),
+  );
+  let report = await packsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(whats(report)).toEqual(
+    expect.arrayContaining([
+      'config/pack.yaml routingPreferences',
+      'config/models-guide.yaml useCases, routing, models',
+    ]),
+  );
+  const unfolded = await config('packs.yaml');
+  for (const old of ['FAKE-USE-CASE', 'FAKE-OLD-ROUTING', 'FAKE-MODEL', 'FAKE-OLD-PREFERENCES', 'useCases'])
+    expect(unfolded).not.toContain(old);
+  expect(JSON.stringify(report)).not.toContain('FAKE-');
+  expect(PacksFileSchema.parse(parse(unfolded))).toEqual({ enabled: true });
+  // A home v4 had already folded holds the one prompt in models-guide.yaml: that prompt is carried, whole.
+  await raw('config/models-guide.yaml', 'prompt: the folded routing prompt\n');
+  report = await packsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(PacksFileSchema.parse(parse(await config('packs.yaml')))).toMatchObject({
+    routing: { prompt: 'the folded routing prompt' },
+  });
+});
+
 test('a raw secret or a key v5 refuses fails the step naming the file and key, never the value', async () => {
   await raw('config/models-guide.yaml', 'prompt: use sk-ant-FAKEFAKEFAKEFAKE1234 for everything\n');
   let report = await packsStep.run(f.ctx());
