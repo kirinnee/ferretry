@@ -731,6 +731,9 @@ async function bootLocked(
         // only state it may share; every tree it minted is revoked when it stops.
         shareTrees: manifest.permissions?.shareTrees === true,
         setMode: manifest.permissions?.setMode === true,
+        ...(manifest.permissions?.projectFiles === undefined
+          ? {}
+          : { projectFiles: manifest.permissions.projectFiles }),
         stateFiles: manifest.data?.state ?? [],
         onStop: fn => lifecycle.onStop(fn),
       },

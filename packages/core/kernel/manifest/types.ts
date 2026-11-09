@@ -285,6 +285,15 @@ export interface Permissions {
    */
   readonly harnessFiles?: readonly string[];
   /**
+   * The relative paths a `project-files` handle may reach inside the ONE absolute folder it is scoped to per call (MCP:
+   * `['.mcp.json']`; Skills: every skill folder under `.claude/skills` and `.agents/skills`, and everything below it). A pattern is `/`-separated: the first
+   * segment a literal name, any other a literal or `*` (exactly one segment), the last may be `**` (everything below the
+   * folder before it, at least one entry). Matched case-exactly. Never absolute, never `..`, never a bare `**` or a
+   * leading `*` (`plugin-graph` refuses one). Only legal with `project-files` in `roots`. Absent or no match: every name
+   * of the root is refused `not_declared`.
+   */
+  readonly projectFiles?: readonly string[];
+  /**
    * It may change the permission bits of an EXISTING name in its writable roots (`RootHandle.setMode`: the harness
    * launch step that makes a copied tool executable). Opt-in: a plugin that holds a writable owner root (`work`,
    * `worktrees`) could otherwise widen an existing folder or file there. `'*'` grants none. Absent: `setMode` is refused

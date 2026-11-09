@@ -50,10 +50,17 @@ import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
+import { type ProjectUse, projectFilesScope, projectPathRefusal } from '../manifest/project-files.ts';
 import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from './root-rules.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
-const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports', 'harness-home']);
+const OWNER_ROOTS: ReadonlySet<RootName> = new Set([
+  'harness-history',
+  'work',
+  'imports',
+  'harness-home',
+  'project-files',
+]);
 const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports', 'harness-home']);
 /**
  * Roots only one plugin may have, whatever another manifest declares: the sign-in material (Logins), the session
@@ -821,6 +828,8 @@ interface HandleSetup {
   readonly pins: PinRegistry | undefined;
   /** Whether the plugin declared `permissions.setMode`. */
   readonly setMode?: boolean;
+  /** The manifest's `permissions.projectFiles`: the relative set a `project-files` handle may reach. */
+  readonly projectFiles?: readonly string[];
 }
 
 /** What a held owner's root needs to judge every walk beneath it: the disk, the home it must not reach, the proven stores. */
@@ -1221,6 +1230,48 @@ function rootHandle(setup: HandleSetup): RootHandle {
   const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins } = setup;
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
+  const projectRoot = name === 'project-files';
+  /**
+   * `project-files` only (K3): the name is inside the plugin's declared relative set for this use, judged lexically
+   * BEFORE the disk is asked (the same order as the testing host): the folder is one this handle was scoped to, the
+   * path is plain and inside it (and outside the fence by name), and the set reaches it. Any other root: no rule here.
+   */
+  const gate = (path: FencedPath, use: ProjectUse): void => {
+    if (!projectRoot) return;
+    const root = base();
+    if (root === undefined) throw new RootError('outside');
+    const lexical = lexicalInRoot(home, root, ownerRoot, path);
+    if (!lexical.ok) throw new RootError(lexical.error);
+    const refusal = projectPathRefusal(setup.projectFiles, relative(absolute(root, 'a root'), lexical.value), use);
+    if (refusal !== undefined) refuse(refusal);
+  };
+  /**
+   * `project-files` only: a link at ANY level of the name, inside the folder, is refused (`link_escape`) even when it
+   * points to another place inside it, because the declared set is judged on the NAME and a link would carry a write
+   * to a name the set never reached. The resolved path must be exactly the lexical one below the (real) base.
+   */
+  const linkFree = (
+    root: string,
+    path: FencedPath,
+    resolved: { readonly full: string; readonly base: CheckedBase },
+  ): void => {
+    if (!projectRoot) return;
+    const lexical = lexicalInRoot(home, root, ownerRoot, path);
+    if (!lexical.ok) throw new RootError(lexical.error);
+    if (relative(resolved.base.real, resolved.full) !== relative(absolute(root, 'a root'), lexical.value))
+      refuse('link_escape');
+  };
+  /**
+   * `project-files` only: what is already at the leaf of a write. A link (dangling included) is refused, and so is a
+   * file with a second name — it may be a file from anywhere, and a replace must never touch it (S49).
+   */
+  const leafWritable = async (scope: Scope, full: string): Promise<void> => {
+    if (!projectRoot) return;
+    const found = await leafIdentity(scope, full);
+    if (found === undefined) return;
+    if (found.kind === 'link') refuse('link_escape');
+    if (found.kind === 'file' && found.links > 1) refuse('hard_link');
+  };
   /**
    * Reads through one held descriptor and fsyncs THAT descriptor. `hold` (if any) runs while the descriptor is still
    * open, so the inode it proved cannot be freed and reused before the caller's last compare (today's
@@ -1285,6 +1336,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     }
     const resolved = await resolveChecked(fs, home, root as string, ownerRoot, path, anchor);
     if (!resolved.ok) return refuse(resolved.error);
+    linkFree(root as string, path, resolved.value);
     return { full: resolved.value.full, scope: { fs, base: resolved.value.base, ownerRoot, immutable } };
   };
   /**
@@ -1313,13 +1365,17 @@ function rootHandle(setup: HandleSetup): RootHandle {
     options: T | undefined,
   ): T | undefined => (privateFolder ? ({ ...options, mode: (options?.mode ?? 0o600) & 0o600 } as T) : options);
   const read = async <T>(path: FencedPath, use: (file: OpenedFile) => Promise<T>): Promise<T> => {
+    gate(path, 'file');
     const { full, scope } = await real(path);
     return await withCheckedFile(scope, full, use);
   };
   const write = async (path: FencedPath, data: string | Uint8Array, options?: RootWriteOptions): Promise<void> => {
     writable();
-    const leafOnly = options?.exclusive === true || options?.replaceExisting === true;
+    gate(path, 'file');
+    // The leaf of a project file is never followed, whatever the options: its own link check comes right after.
+    const leafOnly = options?.exclusive === true || options?.replaceExisting === true || projectRoot;
     const { full, scope } = leafOnly ? await realParent(path, true) : await real(path, true);
+    await leafWritable(scope, full);
     await writeChecked(scope, full, data, random, privateWrite(options));
   };
   /**
@@ -1395,6 +1451,8 @@ function rootHandle(setup: HandleSetup): RootHandle {
     resolve: relativePath => {
       const root = base();
       if (root === undefined) return err(name === 'work' ? 'unknown_ferret' : 'outside');
+      // A project file is named by a RELATIVE path alone: an absolute one is never taken as already inside the folder.
+      if (projectRoot && (typeof relativePath !== 'string' || relativePath.startsWith('/'))) return err('outside');
       const lexical = lexicalInRoot(home, root, ownerRoot, relativePath);
       if (!lexical.ok) return lexical;
       return check(lexical.value) ?? lexical;
@@ -1415,22 +1473,31 @@ function rootHandle(setup: HandleSetup): RootHandle {
     writeBytes: async (path, bytes, options) => await write(path, bytes, options),
     publish: async (path, bytes, options) => {
       writable();
+      gate(path, 'file');
       const { full, scope } = await realParent(path, true);
+      await leafWritable(scope, full);
       return await publishChecked(scope, full, bytes, random, privateWrite(options));
     },
-    readDurable: async (path, limit, hold) =>
-      await readDurable(path, limit, async (read, stillNames) =>
+    readDurable: async (path, limit, hold) => {
+      gate(path, 'file');
+      return await readDurable(path, limit, async (read, stillNames) =>
         hold === undefined ? (read as never) : await hold({ ...read, stillNames }),
-      ),
+      );
+    },
     syncDirectory: async (path, options) => {
+      gate(path, 'make');
       const { full, scope } = await real(path);
       if (options?.parent === true && within(scope.base.real, dirname(full)) && dirname(full) !== full)
         await syncChecked(scope, dirname(full));
       await syncChecked(scope, full);
     },
-    fileIdentity: async path => await rootHandleIdentity(path),
+    fileIdentity: async path => {
+      gate(path, 'file');
+      return await rootHandleIdentity(path);
+    },
     copyTree: async (source, from, to, options) => {
       writable();
+      gate(to, 'tree');
       const known = HANDLES.get(source);
       if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
       const sourceFolder = await known.real(from);
@@ -1483,6 +1550,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     },
     ensurePrivateDirectory: async path => {
       writable();
+      gate(path, 'make');
       // A handle scoped to one folder of a private root (a ferret's `sessions` folder) can name ITS OWN folder: it is made
       // `0700` when missing and an existing wider one is narrowed through the descriptor just proven to be it. The parent
       // is outside the handle, so this is the only way the folder itself can be held private by its owner.
@@ -1516,12 +1584,14 @@ function rootHandle(setup: HandleSetup): RootHandle {
       }
     },
     lstat: async (path): Promise<RootLstat | undefined> => {
+      gate(path, 'probe');
       const { full, scope } = await realParent(path);
       const info = await leafIdentity(scope, full);
       return info === undefined ? undefined : leafOf(info);
     },
     makeDirectory: async (path, options) => {
       writable();
+      gate(path, 'make');
       const { full, scope } = await real(path, true);
       const made = await openFolderMaking(scope, full, privateFolder ? 0o700 : (options?.mode ?? 0o700), true);
       await made.folder.close();
@@ -1529,16 +1599,19 @@ function rootHandle(setup: HandleSetup): RootHandle {
     realPath: async path => {
       // `real` resolved every existing component inside the root; the whole must exist (a broken link throws), and a
       // name that moved between the two answers is refused rather than re-resolved.
+      gate(path, 'probe');
       const { full } = await real(path);
       const again = await fs.realpath(full);
       if (again !== full) refuse('link_escape');
       return full as FencedPath;
     },
     list: async path => {
+      gate(path, 'folder');
       const { full, scope } = await real(path);
       return await listChecked(scope, full);
     },
     entries: async path => {
+      gate(path, 'folder');
       const { full, scope } = await real(path);
       const out: RootEntry[] = [];
       for (const found of await entriesChecked(scope, full))
@@ -1546,11 +1619,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
       return out;
     },
     stat: async path => {
+      gate(path, 'probe');
       const { full, scope } = await real(path);
       return await statChecked(scope, full);
     },
     remove: async path => {
       writable();
+      gate(path, 'remove');
       const { full, scope } = await real(path);
       await removeChecked(scope, full);
     },
@@ -1602,10 +1677,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
       writable();
       const bits = permittedMode(isKernelMadeRoot(name), mode);
       if (bits === undefined) return refuse('outside');
+      gate(path, 'file');
       const { full, scope } = await realParent(path);
       await setModeChecked(scope, full, bits);
     },
     pin: async (path, options) => {
+      // A held folder is walked by descriptor beneath it with no per-name check, so it could reach past the declared set.
+      if (projectRoot) return refuse('not_declared');
       if (pins === undefined) return refuse('not_declared');
       const { full, scope } = await real(path);
       const pinned = await pins.pin(plugin, full, options);
@@ -1628,8 +1706,15 @@ function rootHandle(setup: HandleSetup): RootHandle {
   HANDLES.set(handle, {
     plugin,
     root: name,
-    real: path => real(path),
-    realParent: path => realParent(path),
+    // As a copy SOURCE a project handle reaches only what its grants cover (a folder at or below one), never above.
+    real: async path => {
+      gate(path, 'tree');
+      return await real(path);
+    },
+    realParent: async path => {
+      gate(path, 'tree');
+      return await realParent(path);
+    },
     folder: async path => {
       const { full, scope } = await real(path);
       const relative = full.startsWith(`${scope.base.real}/`) ? full.slice(scope.base.real.length + 1) : '';
@@ -1642,7 +1727,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const lexical = root === undefined ? undefined : lexicalInRoot(home, root, ownerRoot, path);
       return lexical?.ok === true && lexical.value !== full ? [full, lexical.value] : [full];
     },
-    linkTarget: async (path, dangling) => await linkTargetOf(await real(path), dangling),
+    // A project file is never the target of a link another root writes: the link would outlive the declared set.
+    linkTarget: async (path, dangling) =>
+      projectRoot ? refuse('not_declared') : await linkTargetOf(await real(path), dangling),
   });
   return handle;
 }
@@ -1766,6 +1853,8 @@ export interface RootsOptions {
   readonly setMode?: boolean;
   /** Whether the manifest declares `permissions.shareTrees` (`RootsPort.share`); absent, every share is refused. */
   readonly shareTrees?: boolean;
+  /** The manifest's `permissions.projectFiles`, for the `project-files` root; absent, every name of it is refused. */
+  readonly projectFiles?: readonly string[];
   /** The plugin's declared state files: a shared named tree must be one of its own opaque ones. */
   readonly stateFiles?: readonly StateFileDef[];
   /** Told the plugin's stop: every tree it minted is revoked then. Absent, its trees live as long as the port. */
@@ -1845,6 +1934,9 @@ export function rootsPortFor(
             return absolute(layout.worktrees, 'the worktrees folder');
           case 'work':
             return scope?.ferret === undefined ? undefined : workFolders()?.folderOf(scope.ferret);
+          case 'project-files':
+            // ONE absolute project folder per call, plain (no `.`, `..`, empty segment, NUL) and never the filesystem root.
+            return projectFilesScope(subfolder);
           case 'harness-history':
           case 'harness-home':
           case 'imports':
@@ -1878,6 +1970,7 @@ export function rootsPortFor(
         random,
         pins: options.pins,
         ...(options.setMode === true ? { setMode: true } : {}),
+        ...(options.projectFiles === undefined ? {} : { projectFiles: options.projectFiles }),
       });
     },
   };

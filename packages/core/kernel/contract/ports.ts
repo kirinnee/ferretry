@@ -551,7 +551,18 @@ export type RootName =
    * handle is scoped to the ABSOLUTE folder the caller names (`{ subfolder: '/home/me/.claude' }`, exactly as
    * `harness-history` is), refuses everything inside the fence, and never follows a link out of that folder.
    */
-  | 'harness-home';
+  | 'harness-home'
+  /**
+   * A project folder's own files the plugin writes on the owner's behalf (MCP's `<root>/.mcp.json`, Skills'
+   * `<root>/.claude/skills/<name>/**`): an owner's root, WRITABLE, and narrowed twice. The handle is scoped PER CALL to ONE
+   * absolute folder (`{ subfolder: '/home/me/project' }`, exactly as `harness-home` is) and to the relative paths the
+   * manifest declared in `permissions.projectFiles`; a name outside that set is refused `not_declared` whatever the
+   * folder holds. Every write is a checked, no-follow descriptor write as `work`'s is, with this root's one extra rule
+   * that a link at ANY level (inside the folder) and a file with a second hard link are refused, never followed. It
+   * refuses everything inside the fence. Whether the folder is one Projects or Ferrets names is the PLUGIN ADAPTER's
+   * rule, never the kernel's (declared limit, redesign §7.7).
+   */
+  | 'project-files';
 
 /**
  * {@link RootHandle.linkTo}'s target: a name in one of THIS plugin's own root handles (maybe the same one). The link

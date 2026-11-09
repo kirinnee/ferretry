@@ -5,6 +5,8 @@ import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSub
 import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from '../host/root-rules.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
+import { projectFilesScope } from '../manifest/project-files.ts';
+import { projectFileKey, projectFilesHandle } from './project-files.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
@@ -196,6 +198,11 @@ export interface TestHostOptions {
   readonly harnessFiles?: Readonly<Record<string, string>>;
   /** The kernel home the test roots' fence is judged against (`harnessFile` refuses a path in it). Default: `/test-home`. */
   readonly fenceHome?: string;
+  /**
+   * A host that cannot reach an entry through a held folder (macOS today): the `project-files` root, an owner's root,
+   * refuses every remove `no_descriptor_reach`, as the real host does there. Default: it has reach.
+   */
+  readonly noDescriptorReach?: true;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
@@ -320,6 +327,13 @@ export interface TestHost {
   /** Moves the stand-in output guard's generation: a guarded body built before now is withheld. */
   holdBegins(): void;
   putRoot(name: RootName, relative: string, text: string): void;
+  /**
+   * A link planted at `relative` of the test root `name` (for `project-files`, `relative` is the ABSOLUTE path of the name:
+   * its scope folder and then the name). The kernel never follows it: a root read or write through it is refused.
+   */
+  putRootLink(name: RootName, relative: string): void;
+  /** A file with a second name planted at `relative` of the test root `name` (see {@link TestHost.putRootLink}). */
+  putRootHardLink(name: RootName, relative: string, text: string): void;
   stop(): Promise<void>;
 }
 
@@ -383,6 +397,10 @@ interface Built {
  * and the admission decision behind the Admission port (§3.9, §7.8). Real route table (today's router), real final
  * check (`finalised`), real `closeAck`.
  */
+/** A name's key in the flat test world: `/<root>/<relative>`; a `project-files` name is keyed by its absolute path. */
+const rootKey = (name: RootName, relative: string): string =>
+  name === 'project-files' ? projectFileKey(relative) : `/${name}/${relative}`;
+
 export async function testHost(options: TestHostOptions): Promise<TestHost> {
   const throwaway = await testIdentity();
   const identity: IdentityPort =
@@ -1035,6 +1053,8 @@ async function start(world: World): Promise<TestHost> {
   const testLinks = new Map<string, string>();
   /** `setMode`'s modes in the test world, by path; a path never set keeps the default (`0o600` for a file). */
   const testModes = new Map<string, number>();
+  /** Files of the test world that have a second name (`TestHost.putRootHardLink`), by key. */
+  const testHardLinks = new Set<string>();
   /** A folder exists in the flat test world when a file OR a link lies under it. */
   const testFolderExists = (path: string): boolean =>
     [...world.roots.keys(), ...testLinks.keys()].some(key => key.startsWith(`${path}/`));
@@ -1121,8 +1141,37 @@ async function start(world: World): Promise<TestHost> {
         return sharedTrees.mint(folder.slice(folder.lastIndexOf('/') + 1), { files }, life);
       },
       root(name, scope) {
-        if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
+        if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name)) {
+          // The real host's refusal for the one root whose twin is the real rules (`testing/project-files.ts`).
+          if (name === 'project-files') throw new RootError('not_declared');
           throw new Error(`${manifest.id}: root ${name} is not declared`);
+        }
+        if (name === 'project-files') {
+          // The real host's rules over the flat world (`testing/project-files.ts`), with the same refusals.
+          const project = projectFilesHandle({
+            plugin: manifest.id,
+            patterns: manifest.permissions?.projectFiles,
+            folder: projectFilesScope(scope?.subfolder),
+            fenceHome: options.fenceHome ?? '/test-home',
+            setModeDeclared: manifest.permissions?.setMode === true,
+            noDescriptorReach: options.noDescriptorReach === true,
+            files: world.roots,
+            links: testLinks,
+            hardLinks: testHardLinks,
+            modes: testModes,
+            inodes,
+            nextInode: () => (nextInode += 1n),
+            now: () => clock.now(),
+            known: other => {
+              const found = testHandles.get(other);
+              return found === undefined
+                ? undefined
+                : { plugin: found.plugin, ...(found.root === 'project-files' ? { keyOf: projectFileKey } : {}) };
+            },
+          });
+          testHandles.set(project, { plugin: manifest.id, root: name, prefix: undefined });
+          return project;
+        }
         // The same scope rule as production (`scopedSubfolder`): a `sessions` handle is one minted ferret folder, an
         // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
         // see each other; a refused scope resolves nothing.
@@ -1987,7 +2036,14 @@ async function start(world: World): Promise<TestHost> {
       world.generation++;
     },
     putRoot(name, relative, text) {
-      world.roots.set(`/${name}/${relative}`, text);
+      world.roots.set(rootKey(name, relative), text);
+    },
+    putRootLink(name, relative) {
+      testLinks.set(rootKey(name, relative), '(planted)');
+    },
+    putRootHardLink(name, relative, text) {
+      world.roots.set(rootKey(name, relative), text);
+      testHardLinks.add(rootKey(name, relative));
     },
     async stop() {
       if (stopController.signal.aborted) return;
