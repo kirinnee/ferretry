@@ -570,6 +570,21 @@ describe('the apply pipeline over a fake config writer', () => {
       spent(await settle(w, staged.id));
       should(writes).equal(1);
     });
+
+    it('BG-027 PR4b two applies of one proposal at once, the first refused before writing: the second applies, once', async () => {
+      // Arrange: the first apply's last look before the write stands in; every look after it is clean.
+      const w = world();
+      const staged = await w.service.propose(CHANGE);
+      w.readings = [{}, { unreadable: LATE }, {}, {}];
+
+      // Act: both are asked at the same time.
+      const results = await Promise.all([settle(w, staged.id), settle(w, staged.id)]);
+
+      // Assert: exactly one wins and writes once (the other never hears "already applied" about a restored proposal).
+      should(results.map(result => result.ok).toSorted()).eql([false, true]);
+      should(w.written).have.length(1);
+      spent(await settle(w, staged.id));
+    });
   });
 
   it('should refuse when this daemon cannot say who is asking, before anything is written', async () => {
