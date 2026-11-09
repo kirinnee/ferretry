@@ -309,6 +309,14 @@ export function budgetHoldsOf(deps: Pick<FleetCatalogServiceDeps, 'budgetHolds'>
   return holds === undefined || Object.keys(holds).length === 0 ? {} : { budgetHolds: holds };
 }
 
+/**
+ * The budget holds as one comparable string. A plan publishes a held login's wrappers unavailable, so a plan made under
+ * one set of holds must not be applied under another: the pause Usage reports between a preview and its apply would
+ * otherwise publish a runnable wrapper for a login its budget has stopped.
+ */
+const holdsKey = (holds: BudgetHolds | undefined): string =>
+  JSON.stringify(Object.entries(holds ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+
 // ── Running sessions ─────────────────────────────────────────────────────────────────────────────
 
 /** How many of these sessions are still running. */
@@ -368,6 +376,8 @@ type ChangePayload =
   | {
       readonly kind: 'apply';
       readonly plan: FleetModelApplyPlan;
+      /** The budget holds this plan was made under ({@link holdsKey}); an apply under other holds is refused as stale. */
+      readonly holds: string;
       readonly documents: readonly FleetDocumentWrite[];
       readonly preview: Extract<AccountChangePreview, { kind: 'apply' }>;
       readonly consequences: readonly string[];
@@ -894,6 +904,8 @@ export class FleetCatalogService {
     const { edit, ids, runtimeFacts } = await this.#derive(reading, change);
     const bodies = await this.#bodies(edit.model, edit.files);
     const layout = this.deps.layout;
+    // Read once: the plan is made under these holds and the apply refuses to run under others.
+    const held = this.#budgetHolds();
     let plan: FleetModelApplyPlan;
     let preview: FleetApplyPreview;
     try {
@@ -912,7 +924,7 @@ export class FleetCatalogService {
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         ...(await this.#modelCatalogs()),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
-        ...this.#budgetHolds(),
+        ...held,
       });
       preview = await this.deps.provisioner.preview(plan);
     } catch (error) {
@@ -935,6 +947,7 @@ export class FleetCatalogService {
       payload: {
         kind: 'apply',
         plan,
+        holds: holdsKey(held.budgetHolds),
         documents,
         consequences: edit.consequences,
         preview: {
@@ -1227,6 +1240,13 @@ export class FleetCatalogService {
     if (payload.kind === 'apply') {
       // Refused here, ahead of the write, so a sentence that says "nothing was changed" is true: nothing has been written.
       await this.#preflight();
+      // Under the apply section the holds are read again: a pause that arrived since the preview is not in the plan.
+      if (holdsKey(this.deps.budgetHolds?.()) !== payload.holds) {
+        throw new FleetCatalogRefusal(
+          'fleet_change_stale',
+          'a login’s spend budget changed after this change was previewed; review it again',
+        );
+      }
       let written = false;
       try {
         // The documents are the source of truth, so they land first; a plan that then fails is republished from them.

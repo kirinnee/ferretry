@@ -388,6 +388,34 @@ describe('a real apply through the composed daemon', () => {
     expect(wrapper).toContain('over its daily budget');
   });
 
+  it('M3 refuses an apply when Usage’s pauses changed since the preview, and writes nothing', async () => {
+    const pause = {
+      period: 'daily',
+      level: 'over_trigger',
+      limitUsd: 40,
+      resetsAtMs: 1_800_000_000_000,
+      timeZone: 'UTC',
+    };
+    let pauses: { login: string; pause: typeof pause; phrase: string }[] = [];
+    const { host, world } = await compose({
+      assemble: ctx =>
+        hostAssembly({ ...ctx, uses: { usage: { current: () => ({ pauses: () => pauses }) } } } as never),
+    });
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+    expect(staged.status).toBe(200);
+
+    // The login's budget stops it AFTER the change was previewed and BEFORE it is applied.
+    pauses = [{ login: 'claude-you', pause, phrase: '' }];
+    const applied = await host.request('POST', `/v1/runtimes/proposals/${staged.json<{ id: string }>().id}/apply`, {
+      body: {},
+    });
+
+    expect(applied.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(applied.json())).toContain('spend budget changed');
+    expect(JSON.stringify((await host.request('GET', '/v1/runtimes')).json())).not.toContain('claude-work');
+    expect(await readdir(world.fleet)).not.toContain('manifest.json');
+  });
+
   it('M3 a budget hold that starts or stops publishes the fleet again, so its wrappers follow Usage’s pause', async () => {
     let republished = 0;
     const { host } = await compose({
