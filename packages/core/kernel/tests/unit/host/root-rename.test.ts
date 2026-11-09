@@ -293,7 +293,7 @@ describe('RootHandle.rename', () => {
 });
 
 describe('RootHandle.rename needs descriptor reach', () => {
-  test('a host without descriptor reach (macOS today) refuses with no_descriptor_reach and moves nothing', async () => {
+  test('a host with neither /proc nor descriptor calls refuses with no_descriptor_reach and moves nothing', async () => {
     const f = await fresh(nodeFs(() => crypto.randomUUID(), { descriptorFolder: '/nonexistent-descriptor-folder' }));
     await mkdir(`${f.dir}/sub`, { mode: 0o700 });
     await writeFile(`${f.dir}/sub/a`, 'AAA');

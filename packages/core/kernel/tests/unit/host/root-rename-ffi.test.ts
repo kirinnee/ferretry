@@ -12,7 +12,17 @@
  * The darwin-only copy at the end loads the library by its macOS name and cannot run on this box.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { closeSync, constants, fstatSync, linkSync, openSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  linkSync,
+  openSync,
+  readdirSync,
+  renameSync,
+  symlinkSync,
+  unlinkSync,
+} from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { FencedPath } from '../../../contract/bound.ts';
@@ -635,6 +645,73 @@ describe('BG-001 the seam: what each refusal is made of', () => {
     } finally {
       closeSync(first);
       closeSync(second);
+    }
+  });
+
+  test('BG-001 a DESTINATION folder whose descriptor no longer names the folder it was opened on is refused for a rename and a link, and nothing moves', async () => {
+    const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-dest-`));
+    parents.push(parent);
+    await mkdir(`${parent}/one`);
+    await mkdir(`${parent}/two`);
+    await writeFile(`${parent}/one/a`, 'AAA');
+    const first = openSync(`${parent}/one`, constants.O_RDONLY | constants.O_DIRECTORY);
+    const second = openSync(`${parent}/two`, constants.O_RDONLY | constants.O_DIRECTORY);
+    try {
+      const stat = fstatSync(first, { bigint: true });
+      // the SOURCE is exactly the folder it says it is; only the destination descriptor has been closed and reused
+      // by another folder, so it claims the source's identity while naming `two`
+      const source = { fd: first, device: stat.dev, inode: stat.ino };
+      const target = { fd: second, device: stat.dev, inode: stat.ino };
+      holdFolder(target, target);
+      const steps = folderSteps(standIn(), source, async () => {
+        throw new Error('not read');
+      });
+      await expect(steps.renameInto('a', target, 'b')).rejects.toMatchObject({ code: 'EBADF' });
+      await expect(steps.link('a', target, 'b')).rejects.toMatchObject({ code: 'EBADF' });
+      expect(await readFile(`${parent}/one/a`, 'utf8')).toBe('AAA');
+      expect(await readdir(`${parent}/two`)).toEqual([]);
+    } finally {
+      closeSync(first);
+      closeSync(second);
+    }
+  });
+
+  test('BG-001 BG-003 every descriptor a look, a create and a move open is closed again, on success and on every error path', async () => {
+    const openCount = (): number => readdirSync('/proc/self/fd').length;
+    for (const [provider, make] of PROVIDERS) {
+      const failing: DescriptorCalls = {
+        ...make(),
+        renameat: () => {
+          throw Object.assign(new Error('EXDEV: rename'), { code: 'EXDEV' });
+        },
+      };
+      const f = await fresh(() => failing);
+      const batch = async (): Promise<void> => {
+        await writeFile(`${f.dir}/taken`, 'T', { mode: 0o600 });
+        // looks: a file, nothing at all, a link, and the second look of the denied-for-reading retry
+        await f.fleet
+          .rename(at(f.fleet, 'homes/claude-a/missing'), at(f.fleet, 'homes/claude-a/x'))
+          .catch(() => undefined);
+        await f.fleet
+          .rename(at(f.fleet, 'homes/claude-a/taken'), at(f.fleet, 'homes/claude-a/taken'))
+          .catch(() => undefined);
+        await rm(`${f.dir}/link`, { force: true });
+        await symlink(`${f.parent}/nowhere`, `${f.dir}/link`);
+        await f.fleet
+          .writeText(at(f.fleet, 'homes/claude-a/link'), 'N', { replaceExisting: true })
+          .catch(() => undefined);
+        // creates: onto a taken name (the create fails), and a write whose rename fails after the temp exists
+        await f.fleet.writeText(at(f.fleet, 'homes/claude-a/taken'), 'N', { exclusive: true }).catch(() => undefined);
+        await f.fleet.writeText(at(f.fleet, 'homes/claude-a/fresh.json'), 'N').catch(() => undefined);
+        await f.fleet
+          .writeText(at(f.fleet, 'homes/claude-a/taken'), 'N', { replaceExisting: true })
+          .catch(() => undefined);
+      };
+      await batch();
+      const before = openCount();
+      for (let round = 0; round < 12; round += 1) await batch();
+      expect({ provider, open: openCount() }).toEqual({ provider, open: before });
+      expect((await readdir(f.dir)).sort()).toEqual(['link', 'taken']);
     }
   });
 

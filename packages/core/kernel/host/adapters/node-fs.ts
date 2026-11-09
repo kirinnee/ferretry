@@ -69,8 +69,9 @@ export interface OpenedDirectory {
   /**
    * Where `entryPath` has no path (macOS) but the host loaded the C library's descriptor calls: the steps a write
    * and a rename need, each through THIS open folder and proven against its device and inode first. `undefined` on a
-   * host with `/proc/self/fd` (it uses `entryPath`) and on one whose calls could not be loaded (it refuses
-   * `no_descriptor_reach`). Additive.
+   * host with `/proc/self/fd` (it uses `entryPath`) and on one whose calls could not be loaded: there a rename and a
+   * folder remove refuse `no_descriptor_reach`, while a write and a publish re-prove the folder once and go by path
+   * (as `roots.ts` says). Additive.
    */
   readonly at?: FolderSteps;
   /** Sets this folder's permission bits through the descriptor (`fchmod`), never by name. */
@@ -245,8 +246,8 @@ export function nodeFs(
     readonly groupDatabase?: string;
     /**
      * Where a host without `descriptorFolder` gets the C library's descriptor calls (`openat`, `renameat`, `linkat`,
-     * `unlinkat`): asked once, on the first folder opened, and a throw means none (the root refuses
-     * `no_descriptor_reach`). Default: loaded from the platform's C library on macOS, none elsewhere.
+     * `unlinkat`): asked once, on the first folder opened, and a throw means none (a rename and a folder remove then
+     * refuse `no_descriptor_reach`; a write and a publish re-prove the folder once and go by path). Default: loaded from the platform's C library on macOS, none elsewhere.
      */
     readonly descriptorCalls?: () => DescriptorCalls;
   } = {},
