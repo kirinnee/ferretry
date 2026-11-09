@@ -8,7 +8,8 @@
  * first and copies them again, and every file that changed between the passes is reported by name.
  */
 import { Database } from 'bun:sqlite';
-import { chmod, copyFile, lstat, mkdir, readdir, rm } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { decide } from './plan.ts';
 
@@ -53,22 +54,61 @@ export async function walk(home: string): Promise<Walked> {
 }
 
 const isSqlite = (path: string) => /\.sqlite$/u.test(path);
-const isSqliteSidecar = (path: string) => /\.sqlite-(wal|shm)$/u.test(path);
+const isSqliteSidecar = (path: string) => /\.sqlite-(journal|wal|shm)$/u.test(path);
+
+/** How many times a SQLite file is copied before it is refused by name. */
+export const SQLITE_COPY_TRIES = 3;
+const SQLITE_SIDECARS = ['-journal', '-wal'] as const;
+
+/** A plain single-name file at `path`, or false (absent, a link, a device, hard-linked elsewhere). */
+const plainFile = async (path: string): Promise<boolean> => {
+  const info = await lstat(path).catch(() => undefined);
+  return info !== undefined && info.isFile() && info.nlink === 1;
+};
 
 /**
- * A consistent copy of one SQLite file through the engine (`VACUUM INTO`), so a live writer never tears it.
- *
- * GAP, noted: no allowed folder holds a `*.sqlite` file today, so this is not reached. A read-only open of a live
- * WAL database still maps v4's `-shm` file; if one ever appears, copy the file and its `-wal` to a temp folder and
- * open THAT copy instead.
+ * A consistent copy of one SQLite file. bun:sqlite has no backup API, and opening v4's own database would let SQLite
+ * touch it (a shared lock that can fail a v4 writer, a hot journal rolled back, a `-shm` mapped). So v4's file is never
+ * opened by SQLite: the file and its `-journal` / `-wal` are copied byte for byte into a private (0700) temp folder, and
+ * `VACUUM INTO` runs from THAT copy, where a hot journal is rolled back (a WAL replayed) harmlessly.
  */
-export function copySqlite(from: string, to: string): void {
-  const source = new Database(from, { readonly: true });
+export async function copySqlite(
+  from: string,
+  to: string,
+  options: { readonly onAttempt?: (attempt: number) => void } = {},
+): Promise<void> {
+  const scratch = await mkdtemp(join(tmpdir(), 'fy-preview-sqlite-'));
   try {
-    // The target must not exist. The quote doubling is the SQL literal rule; the path is the tool's own.
-    source.run(`VACUUM INTO '${to.replaceAll("'", "''")}'`);
+    await chmod(scratch, 0o700);
+    const copy = join(scratch, 'copy.sqlite');
+    // v4 is live: the file and its sidecars are read in one pass, which a writer can tear. A torn copy fails
+    // `integrity_check` HERE (it only ever breaks the preview, never v4), so it is copied again, three tries in all.
+    for (let attempt = 1; attempt <= SQLITE_COPY_TRIES; attempt++) {
+      options.onAttempt?.(attempt);
+      await rm(copy, { force: true });
+      for (const suffix of SQLITE_SIDECARS) await rm(`${copy}${suffix}`, { force: true });
+      await copyFile(from, copy);
+      for (const suffix of SQLITE_SIDECARS)
+        if (await plainFile(`${from}${suffix}`)) await copyFile(`${from}${suffix}`, `${copy}${suffix}`);
+      let source: Database | undefined;
+      try {
+        // Not read-only: a hot journal in the COPY is rolled back (a WAL replayed) there, on first read.
+        source = new Database(copy);
+        const rows = source.query('PRAGMA integrity_check').all() as { integrity_check: string }[];
+        if (rows.length !== 1 || rows[0]?.integrity_check !== 'ok') continue;
+        // The target must not exist. The quote doubling is the SQL literal rule; the path is the tool's own.
+        await rm(to, { force: true });
+        source.run(`VACUUM INTO '${to.replaceAll("'", "''")}'`);
+        return;
+      } catch {
+        // A copy SQLite cannot even open is as torn as one that fails the check.
+      } finally {
+        source?.close();
+      }
+    }
+    throw new Error(`failed integrity_check on ${SQLITE_COPY_TRIES} copies`);
   } finally {
-    source.close();
+    await rm(scratch, { recursive: true, force: true });
   }
 }
 
@@ -81,7 +121,9 @@ async function copyOne(home: string, staging: string, path: string): Promise<voi
   await mkdir(dirname(target), { recursive: true, mode: 0o700 });
   if (isSqlite(path)) {
     await rm(target, { force: true });
-    copySqlite(join(home, path), target);
+    await copySqlite(join(home, path), target).catch(error => {
+      throw new Error(`${path} was refused: ${(error as Error).message}; nothing was copied for it`);
+    });
   } else await copyFile(join(home, path), target);
   await chmod(target, 0o600);
 }

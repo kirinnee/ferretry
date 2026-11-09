@@ -61,7 +61,7 @@ export async function dryRun(
       .map(([key, row]) => `  ${String(row.files).padStart(6)} files  ${mib(row.bytes).padStart(10)}  ${key}`),
     '',
     `ferret files copied (each ferret folder): ${SESSION_FILES.join(', ')}`,
-    `allowlist rows: ${ALLOWED.length}. SQLite files, if any, are copied through the engine (VACUUM INTO).`,
+    `allowlist rows: ${ALLOWED.length}. A SQLite file (the agenda versions) is copied byte for byte with its -journal/-wal into a private temp folder and VACUUMed from THAT copy: SQLite never opens v4's file.`,
     '',
     'LEFT OUT BY PATH, BEFORE ANY COPY (a left folder is counted, never listed):',
     ...LEFT_BEHIND.map(row => `  ${row.path.padEnd(70)} ${row.why}`),
@@ -84,8 +84,8 @@ export async function dryRun(
       : `GATE FORECAST: ${forecast.length} field(s) the gate would hit (the home would be refused):`,
     ...forecast.map(line => `  ${line}`),
     `FOLDERS: a ferret whose folder is inside v4's home or its worktree folder, inside a worktree v4's ledger lists, or under a .worktrees folder gets ${join(target, PREVIEW_WORKSPACE)} instead (it lost its folder). A ferret in a primary checkout keeps it, and shares that checkout with v4's agents.`,
-    `RESOURCE LIMITS: limits.yaml is NOT read for launches in 5.0. The preview daemon starts with XDG_RUNTIME_DIR set to ${join(target, PREVIEW.xdgRunFolder)} (private) and no DBUS_SESSION_BUS_ADDRESS, so it reaches no user systemd manager: launches run directly, with no slice, scope or set-property, and \`preview.sh start\` refuses to start if it can reach your manager.`,
-    "LOGIN SHELLS: preview Claude ferrets get __ETC_PROFILE_NIX_SOURCED=1, FY_HOME, FY_PORT and FY_URL in a harness settings item so bash -l and zsh -li find the preview's fy; `preview.sh start` refuses to start unless they do. In a preview terminal you open yourself, `fy` may be v4's: type `~/.ferretry-v5/bin/fy` or use `fy5`.",
+    `RESOURCE LIMITS: limits.yaml is NOT read for launches in 5.0. The preview daemon starts with XDG_RUNTIME_DIR set to ${join(target, PREVIEW.xdgRunFolder)} (private) and no DBUS_SESSION_BUS_ADDRESS. The kernel runs 5.0's systemd probe with only {PATH, HOME} (no bus at all), and the private folder is the second layer, so the daemon reaches no user systemd manager: launches run directly, with no slice, scope or set-property. \`preview.sh start\` asks the probe both ways and refuses to start if either reaches your manager.`,
+    "LOGIN SHELLS: preview ferrets get __ETC_PROFILE_NIX_SOURCED=1, FY_HOME, FY_PORT and FY_URL: Claude Code ferrets through settings.env, Codex ferrets through shell_environment_policy.set (a Codex settings item; 5.0 does not apply Codex settings items yet, so for Codex this is declared, not proven). `preview.sh start` refuses to start unless bash -l and zsh -li with that environment find the preview's fy. In a preview terminal you open yourself, `fy` may be v4's: type `~/.ferretry-v5/bin/fy` or use `fy5`.",
     '',
     '',
     'KNOWN GAPS:',
@@ -196,7 +196,8 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
       gate,
     };
   }
-  // Outside the preview home (its ferrets run as you and could rewrite a proof kept there) and outside every v4 path.
+  // Outside the preview home, so it is out of the ferrets' working tree (not out of their reach: they run as you), and
+  // outside every v4 path.
   await writeProof(home, target, v4Home, before);
   await writeFile(join(target, PREVIEW_MARKER), PREVIEW_MARKER_TEXT, { mode: 0o600 });
   return {
@@ -228,7 +229,7 @@ export async function cleanPreview(v4Home: string, target: string, home: string 
   const guarded = guardTarget(v4Home, target, home);
   if (!hasMarker(guarded.target))
     throw new Error(
-      `${guarded.target} has no ${PREVIEW_MARKER} marker, so it is not a preview home; nothing was removed. If a prepare died before its marker, remove it yourself: rm -rf '${guarded.target}' '${guarded.staging}'`,
+      `${guarded.target} has no ${PREVIEW_MARKER} marker, so it is not a preview home; nothing was removed. If a prepare died before its marker, remove it yourself: rm -rf '${guarded.target}' '${guarded.staging}' (and, if it exists, the proof file ${proofPathFor(home, guarded.target)})`,
     );
   await rm(guarded.target, { recursive: true, force: true });
   await rm(guarded.staging, { recursive: true, force: true });
@@ -272,6 +273,48 @@ const assertPlain = (path: string, what: string): void => {
     throw new Error(`${what} must not contain a quote, $, backtick, backslash, colon or newline`);
 };
 
+/**
+ * The ONE refusal block of `fy5` and the `bin/fy` shim: reads the verb after leading flags (and the word after it),
+ * refuses `update` and every verb of {@link REFUSED_DAEMON_VERBS}. `startRefused` is the shim's: `daemon start` there
+ * would launch fyd in the caller's own environment, so it points at `preview.sh start` (`fy5` is the one that starts).
+ */
+export function refusalLines(startRefused: boolean): string[] {
+  const refused = REFUSED_DAEMON_VERBS.map(verb => `daemon:${verb}`).join('|');
+  return [
+    '# The verb is the first word that is not a flag, the subcommand the next.',
+    'verb=""; sub=""',
+    'for word in "$@"; do',
+    '  case "$word" in',
+    '  -*) ;;',
+    '  *)',
+    '    if [ -z "$verb" ]; then verb="$word"; else sub="$word"; break; fi',
+    '    ;;',
+    '  esac',
+    'done',
+    'case "$verb" in',
+    'update)',
+    '  echo "the preview does not run update: it would swap programs and restart under v4\'s service unit." >&2',
+    '  exit 64',
+    '  ;;',
+    'esac',
+    'case "$verb:$sub" in',
+    `${refused})`,
+    '  echo "the preview does not run this daemon verb: it answers for v4\'s service unit or writes claim files beside it." >&2',
+    '  echo "Use the preview script instead: preview.sh start | stop | status | clean." >&2',
+    '  exit 64',
+    '  ;;',
+    ...(startRefused
+      ? [
+          'daemon:start)',
+          '  echo "the preview daemon is started only by preview.sh start (it checks the host first); use preview.sh start." >&2',
+          '  exit 64',
+          '  ;;',
+        ]
+      : []),
+    'esac',
+  ];
+}
+
 /** `<home>/bin/<name>`: pins the preview home, port and address, then runs the preview's own raw program. */
 export function shimText(home: string, name: (typeof PREVIEW_PROGRAMS)[number]): string {
   assertPlain(home, 'the preview home');
@@ -279,7 +322,10 @@ export function shimText(home: string, name: (typeof PREVIEW_PROGRAMS)[number]):
   return [
     '#!/bin/sh',
     `# ${name}: the 5.0 preview's own program. Generated; it pins the preview home and address so it never falls back to v4's.`,
-    `exec env FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" "${home}/libexec/${name}" "$@"`,
+    // Only the CLI has verbs; fyd and the browser worker are not told daemon verbs.
+    ...(name === 'fy' ? refusalLines(true) : []),
+    // The caller's environment passes through on purpose: a ferret's own session variables must reach `fy`.
+    `exec env FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" FY_UPDATE_CHECK=off "${home}/libexec/${name}" "$@"`,
     '',
   ].join('\n');
 }
@@ -289,7 +335,6 @@ export function wrapperText(home: string, v4Home: string): string {
   assertPlain(home, 'the preview home');
   assertPlain(v4Home, "v4's home");
   const url = `http://127.0.0.1:${PREVIEW.port}`;
-  const refused = REFUSED_DAEMON_VERBS.map(verb => `daemon:${verb}`).join('|');
   return [
     '#!/bin/sh',
     "# fy5: the 5.0 preview CLI. Generated; it sets the preview home, port and address, never v4's.",
@@ -299,33 +344,12 @@ export function wrapperText(home: string, v4Home: string): string {
     '# exact environment) gets NO reachable user systemd manager: XDG_RUNTIME_DIR is a private folder of the preview home and',
     "# DBUS_SESSION_BUS_ADDRESS is dropped, so 5.0 launches directly and never reconfigures v4's systemd slices. Every other",
     '# verb (`pair`, `status`, ...) keeps both.',
-    'daemon=0; probe=0; verb=""; sub=""',
+    'daemon=0; probe=0',
     'if [ "${1:-}" = "__daemon-probe" ]; then',
     '  daemon=1; probe=1; shift',
     'else',
-    '  # The verb is the first word that is not a flag, the subcommand the next.',
-    '  for word in "$@"; do',
-    '    case "$word" in',
-    '    -*) ;;',
-    '    *)',
-    '      if [ -z "$verb" ]; then verb="$word"; else sub="$word"; break; fi',
-    '      ;;',
-    '    esac',
-    '  done',
-    '  case "$verb" in',
-    '  update)',
-    '    echo "fy5 does not run update: it would swap programs and restart under v4\'s service unit." >&2',
-    '    exit 64',
-    '    ;;',
-    '  esac',
-    '  case "$verb:$sub" in',
-    `  ${refused})`,
-    '    echo "fy5 does not run this daemon verb: it answers for v4\'s service unit or writes claim files beside it." >&2',
-    '    echo "Use the preview script instead: preview.sh start | stop | status | clean." >&2',
-    '    exit 64',
-    '    ;;',
-    '  daemon:start) daemon=1 ;;',
-    '  esac',
+    ...refusalLines(false).map(line => `  ${line}`),
+    '  if [ "$verb:$sub" = "daemon:start" ]; then daemon=1; fi',
     'fi',
     "# PATH: the preview's own bin first (every bare fy, fyd and fyd-browser-worker is then the preview's), and nothing",
     "# under v4's home or its worktree folder.",

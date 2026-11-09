@@ -203,8 +203,9 @@ export function compare(before: Snapshot, after: Snapshot): Verdict {
 }
 
 /**
- * Where `prepare` keeps the before-snapshot: `~/.ferretry-v5-proof/` (0700), OUTSIDE the preview home (its ferrets run
- * as the same user and could rewrite a proof kept there) and outside every v4 path. One file per preview home, named
+ * Where `prepare` keeps the before-snapshot: `~/.ferretry-v5-proof/` (0700), OUTSIDE the preview home, so it is out
+ * of the ferrets' working tree (not out of their reach: they run as the same user and can rewrite it as easily) and
+ * outside every v4 path. One file per preview home, named
  * by a hash of the marked home's resolved path, so the proof belongs to that marker and no other. `clean` removes it.
  */
 export const PROOF_FOLDER = '.ferretry-v5-proof';

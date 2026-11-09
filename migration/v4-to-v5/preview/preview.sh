@@ -77,7 +77,7 @@ prepare)
   # Never opens a v4 file before the preview home is known to be new.
   if [ -e "${target}" ] && [ -n "$(ls -A "${target}" 2>/dev/null)" ]; then
     echo "${target} already exists; run '$0 clean' first. If clean refuses it (a prepare that died before its marker), remove it yourself:" >&2
-    echo "  rm -rf '${target}' '${target}.staging'" >&2
+    echo "  rm -rf '${target}' '${target}.staging'   (and, if it exists, its proof file in ~/.ferretry-v5-proof/)" >&2
     exit 1
   fi
   run_tool prepare

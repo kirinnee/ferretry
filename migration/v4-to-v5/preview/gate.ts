@@ -175,26 +175,32 @@ export function gatedFields(
 ): string[] {
   const hits: string[] = [];
   const strict = options.strict === true;
-  const visit = (value: unknown, path: string, gated: boolean, only: 'both' | 'harness'): void => {
+  // `inEnv`: the keys here are environment variable names (`env`), where a variable called NAME or PROMPT is a variable,
+  // not free text, so the free-text allowlist does not apply.
+  const visit = (value: unknown, path: string, gated: boolean, only: 'both' | 'harness', inEnv: boolean): void => {
     if (typeof value === 'string') {
       if (gated && valueHits(value, needles, only)) hits.push(path);
-    } else if (Array.isArray(value)) value.forEach((item, index) => visit(item, `${path}[${index}]`, gated, only));
+    } else if (Array.isArray(value))
+      value.forEach((item, index) => visit(item, `${path}[${index}]`, gated, only, inEnv));
     else if (value !== null && typeof value === 'object')
       for (const [key, inner] of Object.entries(value)) {
         if (path === '' && options.skipTop?.has(key) === true) continue;
-        if (strict && FREE_TEXT_KEYS.has(key.toLowerCase())) continue;
+        if (strict && !inEnv && FREE_TEXT_KEYS.has(key.toLowerCase())) continue;
         // A key that is itself a path (codex `projects."/abs"`): named by its place, never by the key's text.
         if (strict && valueHits(key, needles, only)) hits.push(path === '' ? '<path key>' : `${path}.<path key>`);
         const harnessOnly = only === 'harness' || (path === '' && options.harnessOnly?.has(key) === true);
+        // Any key that looks like a path is named by its place in every hit below it too.
+        const label = key.includes('/') ? '<path key>' : key;
         visit(
           inner,
-          path === '' ? key : `${path}.${key}`,
+          path === '' ? label : `${path}.${label}`,
           gated || GATED_LAST_WORDS.has(lastWord(key)),
           harnessOnly ? 'harness' : 'both',
+          key.toLowerCase() === 'env',
         );
       }
   };
-  visit(document, '', strict, 'both');
+  visit(document, '', strict, 'both', false);
   return hits;
 }
 

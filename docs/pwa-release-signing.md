@@ -349,8 +349,8 @@ update look like a bad deploy (a tampered cached copy is fetched again, not refu
   compiles, and nothing else can write, use an environment or read a secret except behind
   `github.ref == 'refs/heads/main'`. That is **not** "impossible from `rebuild/5.0`": a tag run uses the workflow file at
   the tagged commit, so CD's guard covers commits made after this merge only, and a tag on an older commit runs the
-  unguarded file. The rest needs **a repository tag ruleset** that limits creating `v*` tags to the release actor
-  (`scripts/local/setup-release-tag-ruleset.sh`, owner-run, with `--dry-run`).
+  unguarded file. A `v*` tag on a 5.0 commit made before the guard would still publish; no agent ever creates or
+  pushes a tag (team rule), and releases are tagged only by CI's semantic-release on `main`.
 - **Its Cloudflare token is its own.** The deploy reads `CLOUDFLARE_PAGES_V5_API_TOKEN` and
   `CLOUDFLARE_PAGES_V5_ACCOUNT_ID` from `pwa-deploy-v5`, names no repository-level secret has, so it never falls back to
   production's token; the setup script requires a Pages-only token for `ferretry-v5`. The signing key is still only as

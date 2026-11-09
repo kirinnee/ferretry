@@ -30,7 +30,7 @@
  * file is read back as the v5 kernel reads it and parsed with the declared schema BEFORE anything is written. A value
  * that looks like a raw secret fails the step naming the file and key; `${secret:NAME}` references are kept verbatim.
  */
-import { CODEX_CONFIG } from '@ferretry/plugin-codex/contract';
+import { CODEX_CONFIG, CODEX_SETTINGS } from '@ferretry/plugin-codex/contract';
 import { CLAUDE_CODE_CONFIG, CLAUDE_CODE_SETTINGS } from '@ferretry/plugin-claude-code/contract';
 import { INSTRUCTION_ITEMS_FOLDER, LimitsConfigFile } from '@ferretry/core-ferrets/contract';
 import { AccountsConfigSchema } from '@ferretry/plugin-accounts/contract';
@@ -461,16 +461,31 @@ async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: r
     forceFlag(plan, RUNTIMES_CONFIG, 'autoResume', false);
     forceFlag(plan, LimitsConfigFile, 'enabled', false);
     if (ctx.previewShellEnv !== undefined) {
-      // Login shells re-prepend the nix profile (v4's `fy`): every preview Claude ferret's environment carries the guard.
-      const item = new Document(
-        {
-          description:
-            'The 5.0 preview: keeps login shells on the preview fy (written by the preview, not carried from v4)',
-          settings: { env: { ...ctx.previewShellEnv } },
-        },
-        YAML_OPTIONS,
+      // Login shells re-prepend the nix profile (v4's `fy`): every preview ferret's shell environment carries the guard.
+      // 5.0's runtime and profile files are strict and hold no `env` (RuntimeFileSchema, ProfileFileSchema), so the only
+      // places a converted home can carry an environment are the two harnesses' settings items: Claude Code's
+      // `settings.env`, and Codex's own `shell_environment_policy.set` (Codex adds those variables to every command it
+      // runs). PATH is not written: a settings environment is literal and cannot say "this first, then yours".
+      const describe =
+        'The 5.0 preview: keeps login shells on the preview fy (written by the preview, not carried from v4)';
+      place(
+        plan,
+        CLAUDE_CODE_SETTINGS,
+        PREVIEW_SETTINGS_ITEM,
+        'the preview',
+        new Document({ description: describe, settings: { env: { ...ctx.previewShellEnv } } }, YAML_OPTIONS),
       );
-      place(plan, CLAUDE_CODE_SETTINGS, PREVIEW_SETTINGS_ITEM, 'the preview', item);
+      place(
+        plan,
+        CODEX_SETTINGS,
+        PREVIEW_SETTINGS_ITEM,
+        'the preview',
+        new Document(
+          { description: describe, settings: { shell_environment_policy: { set: { ...ctx.previewShellEnv } } } },
+          YAML_OPTIONS,
+        ),
+      );
+      count(plan, 'preview shell environment (settings item)');
       count(plan, 'preview shell environment (settings item)');
     }
   }

@@ -6,10 +6,12 @@
  *    `effectiveLimits`, so Terminals launches with the defaults), and with those defaults a daemon that can reach the
  *    user manager runs `systemctl --user set-property --runtime ferretry_fleet.slice ...` and the same on each ferret's
  *    slice: names v4's live daemon uses too. 5.0 falls back to direct execution only when its probe
- *    (`systemctl --user show-environment`, packages/plugins/terminals/daemon/lib/cgroups/enforcement.ts) fails. So the
- *    daemon is started where that probe fails: `fy5 daemon start` sets XDG_RUNTIME_DIR to a private folder of the
- *    preview home and drops DBUS_SESSION_BUS_ADDRESS. This check asks the probe in that exact environment (through
- *    `fy5 __daemon-probe`, the one place the wrapper builds it) and refuses to start if a manager answers.
+ *    (`systemctl --user show-environment`, packages/plugins/terminals/daemon/lib/cgroups/enforcement.ts) fails. That
+ *    probe is spawned by the kernel with only {PATH, HOME} (host/adapters/process.ts), so it is given no bus at all: that
+ *    is the first layer. The second: `fy5 daemon start` sets XDG_RUNTIME_DIR to a private folder of the preview home and
+ *    drops DBUS_SESSION_BUS_ADDRESS. This check asks the probe BOTH ways, as the kernel runs it ({PATH, HOME}) and in
+ *    the daemon's exact environment (through `fy5 __daemon-probe`, the one place the wrapper builds it), and refuses to
+ *    start if either reaches a manager.
  * 2. LOGIN SHELLS FIND THE PREVIEW'S `fy` (MAJOR-B). With the guard environment a preview ferret's shells get
  *    (`src/v5/preview-env.ts`), `bash -lc` and `zsh -lic` must resolve `fy` to the preview's shim, not to v4's.
  */
@@ -100,6 +102,14 @@ export async function startChecks(input: StartChecksInput): Promise<StartChecks>
       );
     else passed.push('no user systemd manager is reachable from the preview daemon (launches run directly, no slice)');
   }
+  // 1c. The probe as the kernel really runs it: only {PATH, HOME} (the daemon's PATH), no bus. Asked outside the wrapper.
+  const kernelEnv = { ...pick(callerEnv, ['HOME']), PATH: previewPath(target, v4Home, callerEnv.PATH) };
+  const kernel = await run(['systemctl', '--user', 'show-environment'], kernelEnv);
+  if (kernel.code === 0)
+    problems.push(
+      "refusing to start: `systemctl --user show-environment` with only {PATH, HOME} (the environment the kernel gives 5.0's systemd probe) reaches your user systemd manager, so the preview would reconfigure v4's live `ferretry_fleet.slice` and its per-ferret slices. Nothing was started.",
+    );
+  else passed.push('the kernel-environment probe ({PATH, HOME}) reaches no user systemd manager');
 
   // 2. Login and interactive shells with the guard environment must find the preview's own fy.
   const shimFy = join(target, 'bin', 'fy');

@@ -53,25 +53,7 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(result.err).toContain('must not read the repository-level CLOUDFLARE_API_TOKEN');
   });
 
-  test('the tag ruleset script, run with --dry-run, calls nothing and names exactly who may create a v* tag', () => {
-    const run = (...args: string[]) =>
-      Bun.spawnSync([join(repository, 'scripts/local/setup-release-tag-ruleset.sh'), '--dry-run', ...args], {
-        env: { PATH: '/usr/bin:/bin' },
-      });
-    const plain = run();
-    expect(plain.exitCode).toBe(0);
-    const text = plain.stdout.toString();
-    expect(text).toContain("the repository role 'admin'");
-    expect(text).toContain('refs/tags/v*');
-    expect(text).toContain('"type":"creation"');
-    expect(text).toContain('"actor_id":5,"actor_type":"RepositoryRole"');
-    const app = run('--app-id', '123');
-    expect(app.stdout.toString()).toContain('"actor_id":123,"actor_type":"Integration"');
-    expect(run('--app-id', 'x;rm').exitCode).toBe(64);
-    expect(run('--role', 'write').exitCode).toBe(64);
-  });
-
-  test('MAJOR-4 a CD job that is not behind main-only (even a new publishing job) is refused, and the text says what the ruleset is', () => {
+  test('MAJOR-4 a CD job that is not behind main-only (even a new publishing job) is refused', () => {
     const result = gate(
       checkout(p =>
         writeFileSync(
@@ -84,22 +66,6 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(result.status).toBe(1);
     expect(result.err).toContain('not behind main-only');
     expect(result.err).toContain('extra-publish');
-    const ok = gate(checkout());
-    expect(ok.out).toContain('does not stop an agent pushing as the owner (Admin)');
-    const script = readFileSync(join(repository, 'scripts/local/setup-release-tag-ruleset.sh'), 'utf8');
-    expect(script).toContain("an agent with the owner's credential can still push one");
-    expect(script).toContain('READS IT\n# BACK and prints the bypass actors by name');
-  });
-
-  test('n2 the ruleset script dies with a message when --repo has no value', () => {
-    const result = Bun.spawnSync(
-      [join(repository, 'scripts/local/setup-release-tag-ruleset.sh'), '--dry-run', '--repo'],
-      {
-        env: { PATH: '/usr/bin:/bin' },
-      },
-    );
-    expect(result.exitCode).toBe(64);
-    expect(result.stderr.toString()).toContain('--repo needs a value');
   });
 
   test('a CD compile that no longer waits for the main-only proof is refused', () => {
@@ -202,22 +168,14 @@ describe('scripts/validate/release-guards.sh', () => {
 });
 
 describe('the honest wording about a 5.0 commit that can publish', () => {
-  const honest =
-    'it cannot publish from a 5.0 commit made after this guard lands. Any commit made before it (all current 5.0 history) can still publish if tagged.';
-
-  test('the gate says an older 5.0 commit can still publish if tagged', () => {
+  test('the gate says an older 5.0 commit would still publish if tagged, and that no agent tags', () => {
     const { out } = gate(checkout());
-    expect(out).toContain('can still publish if tagged');
-  });
-
-  test('the ruleset script says the whole honest sentence in its header and its warning', () => {
-    const text = readFileSync(join(repository, 'scripts/local/setup-release-tag-ruleset.sh'), 'utf8');
-    const flat = text.replace(/\n# /gu, ' ');
-    expect(flat.split(honest).length - 1).toBeGreaterThanOrEqual(2);
+    expect(out).toContain('a v* tag on a 5.0 commit made before this guard would still publish');
+    expect(out).toContain('no agent ever creates or pushes a tag');
   });
 
   test('no script claims a 5.0 commit cannot publish without the made-after qualifier', () => {
-    for (const file of ['scripts/local/setup-release-tag-ruleset.sh', 'scripts/validate/release-guards.sh']) {
+    for (const file of ['scripts/validate/release-guards.sh']) {
       const text = readFileSync(join(repository, file), 'utf8').replace(/\n#\s*/gu, ' ');
       for (const match of text.matchAll(/cannot publish from a 5\.0 commit(?! made after this guard lands)/gu))
         throw new Error(`${file}: unqualified claim at ${match.index}`);
