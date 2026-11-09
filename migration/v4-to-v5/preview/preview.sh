@@ -15,7 +15,8 @@ set -euo pipefail
 #             then `clean` and `prepare --owner`. Without --owner they are all held and `start` stops the daemon.
 #             --drop-uncarried (prepare ONLY; dry-run ignores it. OWNER'S CHOICE, never the default; an agent never passes
 #             it without the owner's yes): a settings or hooks component the converter cannot carry (an unsupported flag,
-#             a `file:` that v4's rule would not have read: it is carried only when it resolves under fleet/assets/, a
+#             a `file:` outside fleet/assets/ (inside the v4 home: v4 would not have read it either; outside the v4
+#             home: v4 read it, but the preview carries only files under fleet/assets/, so copy it there), a hard link, a
 #             hooks folder, a secret-shaped value...) leaves the Settings step PENDING by default, because a profile still
 #             layers it. With this flag its layer is removed from every profile that names it (each profile is named in the
 #             report) so the preview can start, and the ferrets on those profiles may be LESS restricted than in v4.

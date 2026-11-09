@@ -2,7 +2,7 @@ import { acceptedName } from '@ferretry/kernel/contract';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -254,7 +254,11 @@ test('a bare name under fleet/assets and components/<kind>/<name> both carry', a
 
 describe('v4 fence: a component file carries only when it resolves under fleet/assets/', () => {
   const KEY = 'FAKE-PRIVATE-KEY-MATERIAL-NOT-REAL';
-  const notCarried = async (yaml: string, extra: () => Promise<void> = async () => {}) => {
+  const notCarried = async (
+    yaml: string,
+    extra: () => Promise<void> = async () => {},
+    wording = 'v4 would not have read it either',
+  ) => {
     await text('layout-version', '2\n');
     await text('state/daemon-identity.json', JSON.stringify({ schemaVersion: 1, privateKeyPem: KEY }));
     await extra();
@@ -262,7 +266,7 @@ describe('v4 fence: a component file carries only when it resolves under fleet/a
     const report = await done({ dropUncarried: true });
     const named = namedIn(settingsOf(report));
     expect(named).toContain('config/components/settings/probe.yaml');
-    expect(named).toContain('v4 would not have read it either');
+    expect(named).toContain(wording);
     await expect(stat(join(f.to, 'config/claude-code/settings/probe.yaml'))).rejects.toThrow();
     for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(KEY)).toBe(false);
     expect(JSON.stringify(report)).not.toContain(KEY);
@@ -287,14 +291,66 @@ describe('v4 fence: a component file carries only when it resolves under fleet/a
       text('config/components/settings/x.json', JSON.stringify({ model: 'x' })),
     );
   });
+  test('a path outside the v4 home says v4 read it from outside its home', async () => {
+    const named = await notCarried(
+      'harness: claude\nfile: ~/notes.json\n',
+      () => Promise.resolve(),
+      'v4 read this file from outside its home; the preview carries only files under fleet/assets; copy it there to carry it',
+    );
+    expect(named).not.toContain('would not have read it either');
+  });
+  test('an absolute path outside the v4 home says the same', async () => {
+    await notCarried(
+      `harness: claude\nfile: ${outside}/notes.json\n`,
+      () => Promise.resolve(),
+      'v4 read this file from outside its home',
+    );
+  });
+  test('a path inside the v4 home but outside fleet/assets says v4 would not have read it either', async () => {
+    const named = await notCarried('harness: claude\nfile: ../../state/daemon-identity.json\n');
+    expect(named).toContain('inside the v4 home but outside fleet/assets');
+    expect(named).not.toContain('read this file from outside its home');
+  });
+  test('a trailing-slash file: is not carried', async () => {
+    await notCarried(
+      'harness: claude\nfile: ok.json/\n',
+      () => text('fleet/assets/ok.json', JSON.stringify({ model: 'ok' })),
+      'not a plain file in fleet/assets',
+    );
+  });
+  test('H1 a hard link in fleet/assets to a key file is not carried through a settings component', async () => {
+    await notCarried(
+      'harness: claude\nfile: h.json\n',
+      async () => {
+        await mkdir(join(f.from, 'fleet/assets'), { recursive: true });
+        await link(join(f.from, 'state/daemon-identity.json'), join(f.from, 'fleet/assets/h.json'));
+      },
+      'a hard link (v4 refused it)',
+    );
+  });
+  test('H2 a hard link in fleet/assets to a key file is not copied through an instructions component', async () => {
+    await text('layout-version', '2\n');
+    await text('state/daemon-identity.json', JSON.stringify({ schemaVersion: 1, privateKeyPem: KEY }));
+    await mkdir(join(f.from, 'fleet/assets'), { recursive: true });
+    await link(join(f.from, 'state/daemon-identity.json'), join(f.from, 'fleet/assets/i.md'));
+    await text('config/components/instructions/i.yaml', 'file: i.md\n');
+    const report = await done({ dropUncarried: true });
+    for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(KEY)).toBe(false);
+    expect(JSON.stringify(report)).not.toContain(KEY);
+    await expect(stat(join(f.to, 'config/instructions/i.md'))).rejects.toThrow();
+  });
   test('a bare name present only beside the YAML is not carried', async () => {
-    await notCarried('harness: claude\nfile: beside.json\n', () =>
-      text('config/components/settings/beside.json', JSON.stringify({ model: 'beside' })),
+    await notCarried(
+      'harness: claude\nfile: beside.json\n',
+      () => text('config/components/settings/beside.json', JSON.stringify({ model: 'beside' })),
+      'not a plain file in fleet/assets',
     );
   });
   test('a components/<kind>/<name> value with the document only beside the YAML is not carried', async () => {
-    await notCarried('harness: claude\nfile: components/settings/beside.json\n', () =>
-      text('config/components/settings/beside.json', JSON.stringify({ model: 'beside' })),
+    await notCarried(
+      'harness: claude\nfile: components/settings/beside.json\n',
+      () => text('config/components/settings/beside.json', JSON.stringify({ model: 'beside' })),
+      'not a plain file in fleet/assets',
     );
   });
   test('an absolute or ~/ path that lands UNDER fleet/assets of the home is carried', async () => {

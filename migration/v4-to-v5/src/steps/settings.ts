@@ -494,13 +494,19 @@ async function planHarnessComponent(
         ? CODEX_HOOKS
         : CLAUDE_CODE_HOOKS;
 
-  // The file form: only a plain file inside the v4 home snapshot is read (component-files.ts), up to the size cap.
+  // The file form: only a plain, single-name file under fleet/assets/ of the v4 home snapshot is read (component-files.ts), up to the size cap.
   let fromFile: Record<string, unknown> | undefined;
   if (typeof v4.file === 'string') {
     const found = await componentFileSource(ctx, v4.file);
     if (!('source' in found))
       entry.reasons.push(
-        `its file is ${found.refused}, and v4 would not have read it either (v4 reads a component file only from fleet/assets/), so it was never read; copy it into fleet/assets/ and point file: at it`,
+        found.refused === 'outside the v4 home'
+          ? 'v4 read this file from outside its home; the preview carries only files under fleet/assets; copy it there to carry it'
+          : found.refused === 'outside fleet/assets (inside the v4 home)'
+            ? 'its file is inside the v4 home but outside fleet/assets, so v4 would not have read it either; copy it into fleet/assets/ and point file: at it'
+            : found.refused === 'a hard link'
+              ? 'its file is a hard link (v4 refused it), so it was never read; make it a plain file in fleet/assets/'
+              : 'its file is not a plain file in fleet/assets/, so it was never read; copy it into fleet/assets/ and point file: at it',
       );
     else if (((await lstat(found.source).catch(() => undefined))?.size ?? 0) > MAX_COMPONENT_BYTES)
       entry.reasons.push(`its file is over ${MAX_COMPONENT_BYTES / 1024 / 1024} MiB, so it was not read`);

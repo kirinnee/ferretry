@@ -161,9 +161,11 @@ schemas (the step reports `pending`).
 Settings and hooks components are inlined. A `file:` follows v4's rule exactly: it resolves the way v4's
 `expandAssetPath` did (relative to `fleet/assets/`; `~/`, `$HOME/` and absolute paths as real paths) and is carried only
 when the resolved path lies under the home's `fleet/assets/`. There is no "beside the YAML" fallback and nothing else
-in the home is read (v4 fenced it; a stray `.toml` beside the YAMLs is ignored); such a component is NOT CARRIED and the
-report says v4 would not have read it either. Every folder from the home root down is `lstat`ed (no links), the file must be a regular
-file, and at most 1 MiB is read. Flags: Claude `--disallowedTools` becomes `settings.permissions.deny` (merged,
+in the home is read (v4 fenced it; a stray `.toml` beside the YAMLs is ignored); such a component is NOT CARRIED. For a path inside the v4 home but outside `fleet/assets/` the report says v4 would not
+have read it either; for a path outside the v4 home (`~/`, `$HOME/`, absolute) it says v4 read the file from outside its
+home, that the preview carries only files under `fleet/assets/`, and that you can copy it there to carry it. A trailing
+`/` is never carried. Every folder from the home root down is `lstat`ed (no links), the file must be a regular file with
+ONE name (a hard link is refused as v4 refused it; the Nix-store exception is not carried), and at most 1 MiB is read. Flags: Claude `--disallowedTools` becomes `settings.permissions.deny` (merged,
 deduplicated) and Codex `-c key=value` becomes a key of the item's `settings` (secret values refused); an env value that
 is a string, number or boolean is carried as a string. Anything else a v5 settings item has no form for (any other flag,
 a file outside the home, a hooks `directory`, a secret-shaped or `${secret:...}` value, an oversize file, an unknown
