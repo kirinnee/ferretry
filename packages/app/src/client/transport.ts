@@ -82,16 +82,18 @@ export class DaemonCallError extends Error {
      * connection model is already retrying; an answer, whatever its status, is news.
      */
     readonly carrier?: true,
+    /** The failure this one stands for, kept so the original reason is never lost (S12). */
+    cause?: unknown,
   ) {
-    super(message);
+    super(message, cause === undefined ? undefined : { cause });
     this.name = 'DaemonCallError';
   }
 }
 
 /** The machine code a carrier outage carries; no daemon says it. */
 export const CARRIER_OUTAGE_CODE = 'carrier_outage';
-/** The machine code a call carries when the daemon no longer accepts this device (revoked, or unused for too long). */
-export const DEVICE_REVOKED_CODE = 'device_revoked';
+/** The machine code a call carries when a session ended with the device-refused close (`4403`). */
+export const DEVICE_REFUSED_CODE = 'device_refused';
 
 /** Whether a failure is a carrier outage (S12): the call never got an answer. Total; reads one `cause` level too. */
 export function isCarrierOutage(error: unknown): boolean {
@@ -113,4 +115,30 @@ export function isDeviceRefusal(error: unknown): boolean {
     error.name === 'RelaySessionError' &&
     (error as { readonly code?: unknown }).code === DEVICE_REFUSED_CLOSE_CODE
   );
+}
+
+/**
+ * The session close codes that mean the CARRIER went away rather than the daemon answering (S12): the rendezvous had
+ * no daemon on the route (`4404`), the claim timed out or was lost (`4402`, `4410`), the socket stopped answering
+ * heartbeats (`4408`), it is full or the hosted relay is off, over capacity or over its bandwidth (`4429`, `4431`-`4433`),
+ * a session ended with no sealed outcome (`4440`), its access lease ended (`4441`), or the rendezvous itself failed
+ * (`4500`). A parity test pins each to the session wire. Anything else — `4426` (the daemon's own "update this app"),
+ * the `4400`-class protocol and integrity codes, `4403` — is an ANSWER or a defect, not an outage.
+ */
+const CARRIER_GONE_CLOSE_CODES: ReadonlySet<number> = new Set([
+  4402, 4404, 4408, 4410, 4429, 4431, 4432, 4433, 4440, 4441, 4500,
+]);
+
+/**
+ * Whether a transport failure says the call died on the carrier before any answer (S12): a close with no outcome (a
+ * browser close code, `1006` included, is below 4000), one of the carrier-gone close codes above, a request that was never
+ * sent, or a machine read that gave up waiting. Total. Everything else (a refusal, a protocol error, a missing key, a
+ * plain `Error`) is not an outage and keeps its own words.
+ */
+export function isCarrierGone(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'RelayRequestNotSentError' || error.name === 'MachineDeadlineError') return true;
+  if (error.name !== 'RelaySessionError') return false;
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === 'number' && (code < 4000 || CARRIER_GONE_CLOSE_CODES.has(code));
 }

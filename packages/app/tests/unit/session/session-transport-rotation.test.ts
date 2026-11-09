@@ -55,12 +55,20 @@ const recordingRotation = (recorded: Recorded): SessionKeyRotation => ({
   },
 });
 
-const rig = async (options: { readonly drop?: boolean; readonly accepts?: () => readonly string[] } = {}) => {
+const rig = async (
+  options: {
+    readonly drop?: boolean;
+    readonly accepts?: () => readonly string[];
+    /** Dials from this count on fail as an unreachable carrier does. */
+    readonly failFrom?: number;
+  } = {},
+) => {
   const identity = await newDaemonIdentity();
   const device = await testDevice('fy_dev_rotation');
   const seen: RotatingRequest[] = [];
   const route = rotatingDial(identity, {
     accepts: options.accepts ?? (() => [device.publicKey]),
+    failFrom: () => options.failFrom,
     rotateBy: () => PAST,
     respond: async request => {
       seen.push(request);
@@ -116,6 +124,22 @@ describe('R248 the session transport carrying a rotation', () => {
     expect(test.seen).toHaveLength(1);
   });
 
+  test('C1 a pending-key attempt that dies on the carrier surfaces as the carrier failure, never the first 4403', async () => {
+    const pending = await testDevice('fy_dev_rotation');
+    // The old key is refused (the daemon already swapped), then the pending key's session dies on the carrier.
+    const test = await rig({ accepts: () => [], failFrom: 1 });
+    test.recorded.pendingKey = pending.claim.key;
+
+    const failure = await test.transport.request({ method: 'GET', path: '/v1/plugins' }).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    expect(failure).toMatchObject({ name: 'RelaySessionError', code: 1006 });
+    // The pending key is kept for the next session: nothing was discarded, nothing promoted.
+    expect(test.recorded.calls).toEqual(['pending']);
+  });
+
   test('R252 reads the claim again for every session it opens', async () => {
     const test = await rig();
     await test.transport.request({ method: 'GET', path: '/v1/plugins' });
@@ -160,6 +184,22 @@ describe('R252 a stream session the old key is refused on', () => {
     expect(events).toEqual(['open']);
     expect(test.recorded.calls).toEqual(['pending', 'promote']);
     expect(test.route.credentials.map(credential => credential.accepted)).toEqual([false, true]);
+  });
+
+  test('C1 a pending-key stream that dies on the carrier closes with the carrier failure and keeps the key', async () => {
+    const pending = await testDevice('fy_dev_rotation');
+    const test = await rig({ accepts: () => [], failFrom: 1 });
+    test.recorded.pendingKey = pending.claim.key;
+    const closes: (number | undefined)[] = [];
+
+    test.transport.socket('/v1/events', {
+      onFrame: () => undefined,
+      onClose: (_reason, code) => closes.push(code),
+    });
+    await settle();
+
+    expect(closes).toEqual([1006]);
+    expect(test.recorded.calls).toEqual(['pending']);
   });
 
   test('R252 discards the pending key when it is refused too, and closes with the first refusal', async () => {

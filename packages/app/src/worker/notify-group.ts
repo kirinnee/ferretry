@@ -57,16 +57,31 @@ export interface UrgentNotificationOptions {
 export const urgentNotificationOptions = (shown: {
   readonly urgency?: 'high';
   readonly tag?: string;
-}): UrgentNotificationOptions =>
-  shown.urgency === 'high' || (shown.tag !== undefined && isPhoneApprovalTag(shown.tag))
-    ? { requireInteraction: true, renotify: true, silent: false, vibrate: [200, 100, 200] }
-    : {};
+}): UrgentNotificationOptions => {
+  if (shown.urgency !== 'high' && !(shown.tag !== undefined && isPhoneApprovalTag(shown.tag))) return {};
+  // `renotify: true` with no tag is a TypeError in the Notifications spec, and an untagged show is legitimate (a tag that
+  // would not fit is sent untagged): the show would be rejected and the reader would see the generic line instead of
+  // the words. An untagged line has nothing to sound "again" over, so it stays loud without `renotify`.
+  return {
+    requireInteraction: true,
+    ...(shown.tag === undefined ? {} : { renotify: true }),
+    silent: false,
+    vibrate: [200, 100, 200],
+  };
+};
 
 export const groupedNotificationBody = (latest: string, count: number): string =>
   count > 1 ? `${latest}\n+${count - 1} more` : latest;
 
 /** The most "+N more" a merge ever claims, so a lock screen never promises a number it cannot back. */
 const MAX_GROUP_COUNT = 100;
+
+/**
+ * The kinds of push that are about one session (Access's `failed`, `completed` and `question`): the only ones whose
+ * repeats merge into "+N more", as in v4, where only a push carrying a `sessionId` merged. A fleet-style summary already
+ * counts sessions, so merging it would count them twice.
+ */
+const SESSION_KINDS: ReadonlySet<string> = new Set(['failed', 'completed', 'question']);
 
 /** One push, ready to show on one machine's registration. */
 export interface ShownPush {
@@ -127,9 +142,11 @@ const activeCount = (existing: readonly NotificationDataLike[]): number =>
 
 /**
  * Merges one incoming push with whatever is already showing under the same tag. A genuinely newer line replaces the
- * entry silently and carries the latest words plus a "+N more" tail. The count merge applies to a push about a SESSION
- * (a `kind` that is not the enrolment confirmation's nor the paired-device notice, which are never about one) and never
- * to an approval.
+ * entry silently and carries the latest words plus a "+N more" tail. The count merge applies only to the kinds v4 merged,
+ * the pushes about a SESSION ({@link SESSION_KINDS}); every other kind (an agenda item, the paired-device notice, a kind
+ * this app does not know) shows its own count, and an approval is never merged. v4 also skipped an exact `eventKey`
+ * twin; the kernel's envelope has no event key, so a push service's re-delivery of a session push bumps the count
+ * (declared in `ports-pending.json`).
  */
 export const planNotificationPresentation = (
   shown: ShownPush,
@@ -146,7 +163,7 @@ export const planNotificationPresentation = (
     if (existing.some(item => item.latestBody === shown.body)) return { action: 'skip' };
     return { action: 'show', body: shown.body, count: 1, data: data(1) };
   }
-  const aboutSession = shown.kind !== undefined && shown.kind !== 'device-paired';
+  const aboutSession = shown.kind !== undefined && SESSION_KINDS.has(shown.kind);
   const active = aboutSession ? activeCount(existing) : 0;
   const count = active > 0 ? Math.max(shown.count, Math.min(MAX_GROUP_COUNT, active + 1)) : shown.count;
   return { action: 'show', body: groupedNotificationBody(shown.body, count), count, data: data(count) };

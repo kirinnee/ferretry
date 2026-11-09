@@ -31,9 +31,9 @@
       "project": ["src/**/*.{ts,tsx,css}"],
       "ignore": [
         "src/worker/service-worker.ts",
+        "src/worker/filter-document.ts",
         "src/worker/notifications.ts",
         "src/release/keeper.ts",
-        "src/release/loopback.ts",
         "src/release/storage.ts"
       ]
     },
@@ -101,7 +101,6 @@
         "app/hooks/use-agenda.ts",
         "app/hooks/use-answered-suggestion-sweep.ts",
         "app/hooks/use-notifications.ts",
-        "app/lib/agenda-chat.ts",
         "app/lib/answer-chip.ts",
         "app/lib/item-conversation.ts",
         "app/lib/notification-ledger.ts",
@@ -111,7 +110,6 @@
         "app/lib/push-delivery.ts",
         "app/features/permission-request/approval-card.tsx",
         "app/features/agenda/agenda-inbox-composer.tsx",
-        "app/features/agenda/agenda-line.tsx",
         "app/features/agenda/agenda-nav.tsx",
         "app/features/agenda/agenda-replies-notice.tsx",
         "app/features/agenda/agenda.tsx",

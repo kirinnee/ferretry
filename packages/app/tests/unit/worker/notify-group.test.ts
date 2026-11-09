@@ -94,12 +94,22 @@ describe('S6 grouping', () => {
     expect(plan([{ count: 'x' }, { count: -3 }, { count: 1.5 }, {}]).count).toBe(1);
   });
 
-  test('no merge for a push with no kind or for the paired-device notice', () => {
+  test('no merge for a push with no kind, for the paired-device notice, for an agenda item or for a kind this app does not know', () => {
     const { kind: _unused, ...kindless } = shown() as Record<string, unknown>;
     expect((planNotificationPresentation(kindless as never, [{ count: 3 }]) as { count: number }).count).toBe(1);
-    expect(
-      (planNotificationPresentation(shown({ kind: 'device-paired' }), [{ count: 3 }]) as { count: number }).count,
-    ).toBe(1);
+    for (const kind of ['device-paired', 'agenda', 'fleet-summary'])
+      expect([
+        kind,
+        (planNotificationPresentation(shown({ kind }), [{ count: 3 }]) as { count: number }).count,
+      ]).toEqual([kind, 1]);
+  });
+
+  test('M3 only the session kinds v4 merged merge: a failed, completed or question repeat bumps the count', () => {
+    for (const kind of ['failed', 'completed', 'question'])
+      expect([
+        kind,
+        (planNotificationPresentation(shown({ kind }), [{ count: 3 }]) as { count: number }).count,
+      ]).toEqual([kind, 4]);
   });
 
   test('carries the daemon tag, un-namespaced, into the notification’s data', () => {
@@ -128,10 +138,33 @@ describe('S6 grouping', () => {
 describe('S6 urgentNotificationOptions', () => {
   test('a high push and every phone approval stay on screen and sound again; an ordinary push asks for nothing', () => {
     const loud = { requireInteraction: true, renotify: true, silent: false, vibrate: [200, 100, 200] };
-    expect(urgentNotificationOptions({ urgency: 'high' })).toEqual(loud as never);
+    expect(urgentNotificationOptions({ urgency: 'high', tag: 'fy-push:abc:agenda-A3' })).toEqual(loud as never);
     expect(urgentNotificationOptions({ tag: `fy-push:abc:${PA}` })).toEqual(loud as never);
     expect(urgentNotificationOptions({ tag: 'agenda-A3' })).toEqual({});
     expect(urgentNotificationOptions({})).toEqual({});
+  });
+
+  test('m2 an untagged high push stays loud but never asks to renotify (a TypeError with no tag)', () => {
+    const options = urgentNotificationOptions({ urgency: 'high' });
+    expect(options).toEqual({ requireInteraction: true, silent: false, vibrate: [200, 100, 200] });
+    expect('renotify' in options).toBe(false);
+  });
+
+  test('m2 an untagged high push is SHOWN with its words and without renotify', async () => {
+    const shownLines: { title: string; options: Record<string, unknown> }[] = [];
+    const result = await showGroupedNotification(
+      {
+        getNotifications: async () => [],
+        showNotification: async (title, options) => void shownLines.push({ title, options: options as never }),
+      },
+      { title: 'Work · Code', body: 'Code 123456', count: 1, urgency: 'high', url: 'u' },
+    );
+    expect(result).toBe('shown');
+    expect(shownLines).toHaveLength(1);
+    expect(shownLines[0]?.options.body).toBe('Code 123456');
+    expect(shownLines[0]?.options.renotify).toBe(false);
+    expect(shownLines[0]?.options.requireInteraction).toBe(true);
+    expect('tag' in (shownLines[0]?.options ?? {})).toBe(false);
   });
 });
 

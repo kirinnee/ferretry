@@ -29,13 +29,13 @@ export const WORK_SEARCH_LIMIT = 20;
 export const MAX_WORK_ROWS_PER_KIND = 6;
 
 /** The words the bar shows while the daemon's search is still out (today's palette said the same). */
-export const WORK_PENDING_LINE = 'Searching cards and agenda…';
+const WORK_PENDING_LINE = 'Searching cards and agenda…';
 
 /**
  * The chips the bar draws for this source (S11), as today's palette drew them: which kind, and whether closed work is
  * among the answer. The first option of each is the resting one: everything, so a finished card is still findable.
  */
-export const WORK_FILTERS: readonly CommandBarFilter[] = [
+const WORK_FILTERS: readonly CommandBarFilter[] = [
   {
     id: 'kind',
     label: 'Kind of work',

@@ -55,9 +55,15 @@ export class IndexedDbNotificationFilterMirror implements NotificationFilterMirr
   /** Overwrites the document in one transaction. Throws on failure; callers decide how to treat that. */
   async write(document: NotificationFilterDocument): Promise<void> {
     const database = await openMirrorDatabase(this.factory);
-    const transaction = database.transaction(NOTIFICATION_FILTER_STORE, 'readwrite');
-    transaction.objectStore(NOTIFICATION_FILTER_STORE).put(JSON.stringify(document), NOTIFICATION_FILTER_KEY);
-    await transactionComplete(transaction);
+    try {
+      const transaction = database.transaction(NOTIFICATION_FILTER_STORE, 'readwrite');
+      transaction.objectStore(NOTIFICATION_FILTER_STORE).put(JSON.stringify(document), NOTIFICATION_FILTER_KEY);
+      await transactionComplete(transaction);
+    } finally {
+      // Every write opens its own connection; one left open would block a later version bump of the database, and
+      // the worker's open would then wait on it and fall back to showing everything.
+      database.close();
+    }
   }
 }
 

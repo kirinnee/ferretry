@@ -43,9 +43,13 @@ const fakeIndexedDb = (options: { open?: OpenOutcome; failure?: Failure; stores?
   const stores = new Set(options.stores ?? []);
   const failure = options.failure ?? 'none';
   const cause = (withCause: boolean) => (withCause ? new DOMException('quota', 'QuotaExceededError') : null);
+  const closes = { count: 0 };
   const database = {
     objectStoreNames: { contains: (name: string) => stores.has(name) },
     createObjectStore: (name: string) => stores.add(name),
+    close: () => {
+      closes.count += 1;
+    },
     transaction: () => {
       const transaction = {
         error: null as DOMException | null,
@@ -81,7 +85,7 @@ const fakeIndexedDb = (options: { open?: OpenOutcome; failure?: Failure; stores?
       return request;
     },
   } as unknown as IDBFactory;
-  return { factory, stores, puts, opened };
+  return { factory, stores, puts, opened, closes };
 };
 
 const CUSTOM: NotificationFilterDocument = filterDocumentOf({
@@ -102,6 +106,21 @@ describe('IndexedDbNotificationFilterMirror', () => {
     should(idb.puts).eql([[NOTIFICATION_FILTER_KEY, JSON.stringify(CUSTOM)]]);
     // What the worker reads back through the kernel is exactly what Agenda wrote.
     should(readNotificationFilterDocument(idb.puts[0]?.[1])).eql(CUSTOM);
+  });
+
+  it('n1 closes its connection after every write, so a later version bump is never blocked by this page', async () => {
+    const idb = fakeIndexedDb();
+    const subject = new IndexedDbNotificationFilterMirror(idb.factory);
+    await subject.write(CUSTOM);
+    should(idb.closes.count).equal(1);
+    await subject.write(CUSTOM);
+    should(idb.closes.count).equal(2);
+  });
+
+  it('n1 closes its connection when the write fails too', async () => {
+    const idb = fakeIndexedDb({ failure: 'abort' });
+    await should(new IndexedDbNotificationFilterMirror(idb.factory).write(CUSTOM)).be.rejected();
+    should(idb.closes.count).equal(1);
   });
 
   it('reuses a store that already exists', async () => {

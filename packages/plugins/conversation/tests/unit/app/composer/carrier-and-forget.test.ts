@@ -1,6 +1,7 @@
 import { describe, expect, it, spyOn } from 'bun:test';
 import { DaemonCallError } from '@ferretry/app';
 import half from '../../../../app/index.ts';
+import { DaemonAttachmentBlobCache } from '../../../../app/composer/attachment-blob-cache.ts';
 import { documentDraftStore, documentRestoreStore } from '../../../../app/composer/drafts.ts';
 import { carrierDelivery } from '../../../../app/composer/seam.ts';
 
@@ -35,5 +36,27 @@ describe('S12 unpairing a machine clears its unsent words', () => {
       drafts.mockRestore();
       restores.mockRestore();
     }
+  });
+
+  it('m5 drops the cached attachment images of that machine, in every open cache, and no other machine’s', async () => {
+    const revoked: string[] = [];
+    const urls = { create: (blob: Blob) => `blob:${blob.size}`, revoke: (url: string) => void revoked.push(url) };
+    const first = new DaemonAttachmentBlobCache(urls);
+    const second = new DaemonAttachmentBlobCache(urls);
+    const gone = new DaemonAttachmentBlobCache(urls);
+    gone.dispose();
+    const scope = (daemonId: string, attachmentId: string) => ({
+      daemonId: daemonId as never,
+      ferretId: 'f1' as never,
+      attachmentId,
+    });
+    await first.acquire(scope('d1', 'a'), async () => new Blob(['1']));
+    await second.acquire(scope('d1', 'b'), async () => new Blob(['22']));
+    await second.acquire(scope('d2', 'c'), async () => new Blob(['333']));
+    (half.shell as { forget: (daemon: string) => void }).forget('d1');
+    // The two d1 images are revoked (sizes 1 and 2); d2's (size 3) and a disposed cache are untouched.
+    expect(revoked.sort()).toEqual(['blob:1', 'blob:2']);
+    first.dispose();
+    second.dispose();
   });
 });

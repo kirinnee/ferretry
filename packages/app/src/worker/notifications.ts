@@ -111,9 +111,10 @@ const askIn = (query: string): string | null => {
   return null;
 };
 
-const appHome = (origin: string): string => new URL(HOME_HREF, origin).href;
-
-/** Where a quiet line's tap goes: the machine's home, or — for the app-wide registration — the app. */
+/**
+ * Where a quiet line's tap goes, and where ANY tap that names no acceptable page goes: the machine's home, or — for the
+ * app-wide registration, which knows no machine — the app.
+ */
 export const machineHomeUrl = (machine: PushMachine | null, origin: string): string =>
   new URL(machine === null ? HOME_HREF : daemonHomeHref(machine.daemonId), origin).href;
 
@@ -191,15 +192,16 @@ const machineTarget = (raw: string, machine: PushMachine | null): { path: string
  * only a page the shell's route parse accepts and that belongs to the machine whose worker received the push:
  * that machine's home or a screen in {@link PUSH_TAP_SCREENS} under it. Anything else — another origin, `javascript:`,
  * `//host`, a backslash, encoded or literal traversal, an encoded slash, another machine's page, an unknown route, `/`
- * — opens the app (`/app/`).
+ * — opens THAT MACHINE'S HOME (S6: "an unknown URL goes to the machine home"; a tap on machine B's alert never shows
+ * machine A's page). The app-wide registration has no machine, so for it the fallback is the app (`/app/`).
  *
  * The app-wide registration knows no machine and its pushes are named "Unverified", so a PUSH it receives always carries
  * the app, whatever it says (see {@link notificationClickUrl} for a line a page showed).
  */
 export const notificationUrl = (raw: unknown, origin: string, machine: PushMachine | null): string => {
-  if (machine === null || typeof raw !== 'string') return appHome(origin);
+  if (machine === null || typeof raw !== 'string') return machineHomeUrl(machine, origin);
   const target = machineTarget(raw, machine);
-  if (target === null) return appHome(origin);
+  if (target === null) return machineHomeUrl(machine, origin);
   return new URL(target.ask === null ? target.path : `${target.path}?ask=${target.ask}`, origin).href;
 };
 
@@ -215,9 +217,9 @@ export const notificationUrl = (raw: unknown, origin: string, machine: PushMachi
 export const notificationClickUrl = (stored: unknown, origin: string, machine: PushMachine | null): string => {
   // A relative address (a page's own `data.url`) is read against this site, like the browser would.
   const url = typeof stored === 'string' ? URL.parse(stored, origin) : null;
-  if (url === null || url.origin !== origin) return appHome(origin);
+  if (url === null || url.origin !== origin) return machineHomeUrl(machine, origin);
   const target = machineTarget(`${url.pathname}${url.search}`, machine);
-  if (target === null) return appHome(origin);
+  if (target === null) return machineHomeUrl(machine, origin);
   return new URL(target.ask === null ? target.path : `${target.path}?ask=${target.ask}`, origin).href;
 };
 

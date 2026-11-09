@@ -8,7 +8,7 @@ import { buildPluginCommandSources, deviceLayoutSource, placeSource } from './co
 import { useScreenHref } from '../router/screen-href.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import type { NavEntry } from '../layout/engine.ts';
-import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, type Route } from '../router/routes.ts';
+import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, pairAgainHref, type Route } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import {
@@ -232,6 +232,32 @@ function ShellCommandBar(props: {
   return <CommandBar open={props.open} focusSignal={props.focusSignal} onClose={props.onClose} sources={sources} />;
 }
 
+/**
+ * The sentence that replaces a whole machine's page. A machine this page was refused on (`4403`) also offers the one
+ * repair, "Pair again" (S12): its key and pairing are kept, so the person chooses whether to repeat the pairing.
+ */
+function WholeLine({ daemon, line }: { readonly daemon: string | undefined; readonly line: string }) {
+  const { runtime } = useShell();
+  const { navigate } = useRouter();
+  const refused = daemon !== undefined && runtime.isRefused(daemon) ? daemon : undefined;
+  return (
+    <>
+      <ShellLine tone="warn">{line}</ShellLine>
+      {refused === undefined ? null : (
+        <button
+          type="button"
+          className="kt-btn"
+          data-variant="primary"
+          data-device-refused-pair=""
+          onClick={() => navigate(pairAgainHref(refused))}
+        >
+          Pair again
+        </button>
+      )}
+    </>
+  );
+}
+
 export function Frame() {
   const { runtime, plan, scroll } = useShell();
   useRuntimeVersion(runtime);
@@ -252,7 +278,7 @@ export function Frame() {
         <div className="fy-columns">
           <main className="fy-main" data-slot="main">
             <PageScrollRegion entryKey={entryKey} memory={scroll}>
-              {whole === undefined ? <Main route={route} /> : <ShellLine tone="warn">{whole}</ShellLine>}
+              {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
             </PageScrollRegion>
           </main>
           {whole === undefined ? <Side daemon={daemon} /> : null}

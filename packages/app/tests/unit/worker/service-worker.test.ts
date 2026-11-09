@@ -391,12 +391,25 @@ test('a notification tap opens only this site, and only the machine’s own page
     });
     expect(closed).toBe(true);
   }
+  // Whatever else it names, a machine's tap lands on THAT machine's home, never on the app or another machine.
   expect(machine.opened).toEqual([
-    `${APP_ORIGIN}/app/`,
-    `${APP_ORIGIN}/app/`,
+    `${APP_ORIGIN}/d/abc`,
+    `${APP_ORIGIN}/d/abc`,
     `${APP_ORIGIN}/d/abc/ferrets/f1/chat?ask=A3`,
-    `${APP_ORIGIN}/app/`,
+    `${APP_ORIGIN}/d/abc`,
   ]);
+});
+
+test('S6 a machine’s push naming an unknown page taps to the machine home, not the app', async () => {
+  const machine = await startWorker({
+    scope: `${APP_ORIGIN}/push/abc/`,
+    script: `${APP_ORIGIN}/sw.verified.js?machine=Beta`,
+  });
+  await machine.dispatch('push', { data: { json: () => ({ ...SENT, url: '/nowhere' }) } });
+  const data = machine.shown[0]?.options.data as { url: string };
+  expect(data.url).toBe(`${APP_ORIGIN}/d/abc`);
+  await machine.dispatch('notificationclick', { notification: { data, close: () => {} } });
+  expect(machine.opened).toEqual([`${APP_ORIGIN}/d/abc`]);
 });
 
 test('the release build refuses any plugin app/worker.ts, so no probe variant can reach the worker', async () => {

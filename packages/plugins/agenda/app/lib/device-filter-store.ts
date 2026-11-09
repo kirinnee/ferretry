@@ -8,7 +8,7 @@ import { DeviceNotificationFilterStore, type NotificationFilterStorage } from '.
 import { browserNotificationFilterMirror } from './notification-filter-mirror.ts';
 
 /** This browser's storage, or none where it is denied (memory state still works). */
-export const browserFilterStorage = (): NotificationFilterStorage | null => {
+const browserFilterStorage = (): NotificationFilterStorage | null => {
   try {
     return globalThis.localStorage ?? null;
   } catch {

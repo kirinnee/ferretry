@@ -1,6 +1,12 @@
 import { type ClientOrigin, DaemonClient, type ShellPluginClient } from '../client/daemon-client.ts';
 import type { Standing } from '../client/inventory.ts';
-import { blockedLine, remedyFor, type Remedy, wholeDaemonSentence } from '../client/sentences.ts';
+import {
+  blockedLine,
+  DEVICE_NOT_ACCEPTED_SENTENCE,
+  remedyFor,
+  type Remedy,
+  wholeDaemonSentence,
+} from '../client/sentences.ts';
 import type { DaemonTransport } from '../client/transport.ts';
 import { type DaemonList, daemonTitle, type PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RouteDecl } from '@ferretry/kernel/manifest';
@@ -81,6 +87,8 @@ const NOT_GRANTED: Authority = Object.freeze({ kind: 'refused', refusal: 'not-gr
 type Connection =
   | { readonly kind: 'connecting' }
   | { readonly kind: 'unreachable' }
+  /** A session ended with `4403` here: not dialled again by this page; the pairing and its key are untouched (S12). */
+  | { readonly kind: 'refused' }
   | { readonly kind: 'connected'; readonly client: DaemonClient; readonly transport: DaemonTransport };
 
 export class ShellRuntime {
@@ -215,6 +223,7 @@ export class ShellRuntime {
   /** The full-screen sentence when nothing may run on this daemon, else `undefined`. */
   wholeDaemonLine(daemon: string): string | undefined {
     const connection = this.#connections.get(daemon);
+    if (connection?.kind === 'refused') return DEVICE_NOT_ACCEPTED_SENTENCE;
     if (connection?.kind !== 'connected') return undefined;
     const inventory = connection.client.inventory;
     if (inventory === undefined) return undefined;
@@ -227,6 +236,7 @@ export class ShellRuntime {
   blockedLine(daemon: string, packageId: string): string | undefined {
     const connection = this.connection(daemon);
     if (connection.kind === 'unreachable') return 'This device cannot reach this daemon yet.';
+    if (connection.kind === 'refused') return DEVICE_NOT_ACCEPTED_SENTENCE;
     return blockedLine(this.titleOf(packageId), this.standing(daemon, packageId), this.remedy(daemon), this.titleOf);
   }
 
@@ -408,11 +418,12 @@ export class ShellRuntime {
       this.#grants.refresh(paired.daemon);
       this.#changed();
     });
-    // The daemon says it no longer accepts this device: the pairing is final, so it goes the way an unpair does (S12),
-    // once, and every plugin's `forget` fires from that one path. Another daemon's pairing is never touched.
-    client.onRevoked(() => {
+    // A session ended with `4403` (S12). That close is cleartext a relay can forge, so it is NOT an unpair: nothing is
+    // removed, no key is deleted and no plugin forgets anything. This page just stops dialling the machine and says
+    // so ("Pair again"); a reload asks the daemon again. Another machine is never touched.
+    client.onRefused(() => {
       const held = this.#connections.get(paired.daemon);
-      if (held?.kind === 'connected' && held.client === client) this.daemons.remove(paired.daemon);
+      if (held?.kind === 'connected' && held.client === client) this.#refuse(paired.daemon, held);
     });
     // The feed coming back is a re-read trigger; every change of it re-renders the views' `online`.
     client.onFeedLive(live => {
@@ -435,6 +446,23 @@ export class ShellRuntime {
     const client = connection.client.forPackage(packageId, { origin });
     noteClientDaemon(client, daemon);
     return client;
+  }
+
+  /** Stops dialling a machine this page was refused on (`4403`), keeping its pairing; see {@link DaemonClient.onRefused}. */
+  #refuse(daemon: string, held: Extract<Connection, { kind: 'connected' }>): void {
+    held.client.stop();
+    held.transport.close?.();
+    this.#connections.set(daemon, { kind: 'refused' });
+    this.#grants.drop(daemon);
+    this.#places.delete(daemon);
+    this.#halves.dropDaemon(daemon);
+    this.#hooks.clearDaemon(daemon);
+    this.#changed();
+  }
+
+  /** Whether this page was refused on this machine (`4403`): the frame says so and offers to pair again. */
+  isRefused(daemon: string): boolean {
+    return this.#connections.get(daemon)?.kind === 'refused';
   }
 
   #drop(daemon: string): void {

@@ -371,7 +371,7 @@ describe('notificationUrl (a push’s url is NOT trusted: only an accepted route
       '/ferrets/f1/chat?ask=3',
       '/agenda?ask=B3',
     ]) {
-      expect(notificationUrl(named, ORIGIN, WORK)).toBe(APP);
+      expect(notificationUrl(named, ORIGIN, WORK)).toBe(HOME);
     }
     expect(notificationUrl(`/ferrets/${'a'.repeat(128)}/chat`, ORIGIN, WORK)).toBe(
       `${HOME}/ferrets/${'a'.repeat(128)}/chat`,
@@ -401,7 +401,7 @@ describe('notificationUrl (a push’s url is NOT trusted: only an accepted route
     }
   });
 
-  it('opens the app for every hostile or unknown address — none is passed through', () => {
+  it('S6 opens the machine home for every hostile or unknown address — none is passed through', () => {
     for (const hostile of [
       'https://evil.test/d/sha256%3Awork%2Fone',
       'http://127.0.0.1/ferrets/x/chat',
@@ -462,13 +462,13 @@ describe('notificationUrl (a push’s url is NOT trusted: only an accepted route
       null,
       {},
     ]) {
-      expect(notificationUrl(hostile, ORIGIN, WORK)).toBe(APP);
+      expect(notificationUrl(hostile, ORIGIN, WORK)).toBe(HOME);
     }
   });
 
   it('has no /session/ alias, and a machine home carries no ask', () => {
-    expect(notificationUrl('/session/f1?ask=A3', ORIGIN, WORK)).toBe(APP);
-    expect(notificationUrl(`${HOME.slice(ORIGIN.length)}?ask=A3`, ORIGIN, WORK)).toBe(APP);
+    expect(notificationUrl('/session/f1?ask=A3', ORIGIN, WORK)).toBe(HOME);
+    expect(notificationUrl(`${HOME.slice(ORIGIN.length)}?ask=A3`, ORIGIN, WORK)).toBe(HOME);
   });
 });
 
@@ -487,7 +487,7 @@ describe('notificationClickUrl (a tap reads back only what the worker wrote)', (
       undefined,
       7,
     ]) {
-      expect(notificationClickUrl(foreign, ORIGIN, WORK)).toBe(APP);
+      expect(notificationClickUrl(foreign, ORIGIN, WORK)).toBe(HOME);
     }
   });
 
@@ -575,16 +575,16 @@ describe('notificationClick (a tap reads back only what the worker wrote)', () =
     }
   });
 
-  it('opens the app, with no tag, for data that is not a record', () => {
+  it('opens the machine home, with no tag, for data that is not a record', () => {
     for (const stored of [undefined, null, 'text', 7, [], { tag: 'agenda-A3' }]) {
-      expect(notificationClick(stored, ORIGIN, WORK).url).toBe(APP);
+      expect(notificationClick(stored, ORIGIN, WORK).url).toBe(HOME);
     }
-    expect(notificationClick({ tag: 'agenda-A3' }, ORIGIN, WORK)).toEqual({ url: APP, tag: 'agenda-A3' });
+    expect(notificationClick({ tag: 'agenda-A3' }, ORIGIN, WORK)).toEqual({ url: HOME, tag: 'agenda-A3' });
   });
 
-  it('never lets a tag widen the page: another machine’s page still opens the app', () => {
+  it('never lets a tag widen the page: another machine’s page still opens this machine’s home', () => {
     expect(notificationClick({ url: `${ORIGIN}/d/other/ferrets/x/chat`, tag: 'agenda-A3' }, ORIGIN, WORK)).toEqual({
-      url: APP,
+      url: HOME,
       tag: 'agenda-A3',
     });
   });
