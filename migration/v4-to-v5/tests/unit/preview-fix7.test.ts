@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { ownerNote, prepare, writeReport } from '../../preview/driver.ts';
 import { PREVIEW } from '../../preview/plan.ts';
 import { CHECK_TERMINAL, terminalCheck, terminalsFileState, type Run } from '../../preview/start-checks.ts';
+import { dryConfigsOf } from '../../src/convert.ts';
 import { acceptedConfigStep, previewAuthoredFiles } from '../../src/steps/accepted-config.ts';
 import { ferretsStep } from '../../src/steps/ferrets.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
@@ -154,6 +155,8 @@ describe('MAJOR-2 the preview records its own files as accepted', () => {
   const previewCtx = async (f: Awaited<ReturnType<typeof fixture>>, owner = true) => ({
     ...f.ctx(),
     plainConfigs: await plainOf(f),
+    // What the converter hands every step: the dry conversion of what v4 enforced (here just Settings).
+    dryConfigs: dryConfigsOf(f.from, f.to, undefined, [settingsStep]),
     preview: true,
     ...(owner ? { previewOwner: true } : {}),
     previewV4Home: f.from,

@@ -31,7 +31,7 @@ const listAccepted = () => readdir(acceptedDir()).catch(() => [] as string[]);
 /** Settings then the accepted step, on ONE writer, as the converter runs them. */
 async function convert(dryRun = false) {
   // `dryConfigs` is what the converter hands every step: the plain dry conversion of a v4 home (here just Settings).
-  const ctx = { ...f.ctx(dryRun), dryConfigs: dryConfigsOf(f.to, undefined, [settingsStep]) };
+  const ctx = { ...f.ctx(dryRun), dryConfigs: dryConfigsOf(f.from, f.to, undefined, [settingsStep]) };
   expect((await settingsStep.run(ctx)).status).toBe('converted');
   return await acceptedConfigStep.run(ctx);
 }

@@ -5,7 +5,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { ownerNote } from '../../preview/driver.ts';
 import { PREVIEW } from '../../preview/plan.ts';
-import { convert } from '../../src/convert.ts';
+import { convert, dryConfigsOf } from '../../src/convert.ts';
 import { acceptedConfigStep, previewAuthoredFiles, previewHeldFiles } from '../../src/steps/accepted-config.ts';
 import { daemonSettingsStep } from '../../src/steps/daemon-settings.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
@@ -165,7 +165,13 @@ test('MINOR-2 a write that names no source counts as held whenever anything is h
   await put('config/limits.yaml', 'enabled: true\n');
   await put('config/machine.yaml', 'timeZone: Europe/Berlin\n');
   await accept({ 'machine.yaml': 'timeZone: Europe/Berlin\n' });
-  const ctx = { ...f.ctx(), preview: true, previewOwner: true, plainConfigs: new Map<string, string>() };
+  const ctx = {
+    ...f.ctx(),
+    preview: true,
+    previewOwner: true,
+    plainConfigs: new Map<string, string>(),
+    dryConfigs: dryConfigsOf(f.from, f.to, undefined, [settingsStep]),
+  };
   await ctx.v5.config(CONFIG_TARGETS.RUNTIMES, undefined, 'autoResume: false\n');
   await ctx.v5.config(CONFIG_TARGETS.USAGE, undefined, 'timeZone: Europe/Berlin\n', ['config/machine.yaml']);
   await acceptedConfigStep.run(ctx);

@@ -45,8 +45,11 @@ import {
   rawSecretPaths,
   readV4Yaml,
   type V4ConfigFile,
+  v4ConfigFile,
+  v4ConfigOverride,
   YAML_OPTIONS,
 } from '../v4/config.ts';
+import type { V4Paths } from '../v4/layout.ts';
 import { failureNote, isRecord, readV4Json, V4InputError } from '../v4/documents.ts';
 import { configs, directories, json, runtimeIds } from '../v4/ferrets.ts';
 import {
@@ -127,11 +130,15 @@ function takeKey(map: YAMLMap, key: string): boolean {
   return true;
 }
 
-const v4File = (home: string, label: string): V4ConfigFile => ({
-  address: { kind: label === V4_PACK_YAML ? 'pack' : 'modelsGuide' },
-  label,
-  path: join(home, label),
-});
+const v4File = (v4: V4Paths, label: string): V4ConfigFile =>
+  v4ConfigFile(v4, { kind: label === V4_PACK_YAML ? 'pack' : 'modelsGuide' }, label);
+
+/** `kind` for a config file the run may read as an override (the enforced pass): the override says it all. */
+async function configKind(v4: V4Paths, label: string): Promise<'absent' | 'file' | 'folder' | 'other'> {
+  const override = v4ConfigOverride(v4, label);
+  if (override !== undefined) return override === null ? 'absent' : 'file';
+  return await kind(v4.home, join(v4.home, label));
+}
 
 function refuseRawSecrets(document: Document, label: string): void {
   const secrets = rawSecretPaths(document.toJS());
@@ -150,13 +157,12 @@ async function planConfig(
   resolve: Resolve,
   excluded: readonly string[],
 ): Promise<boolean> {
-  const home = ctx.v4.home;
-  const packKind = await kind(home, join(home, V4_PACK_YAML));
-  const guideKind = await kind(home, join(home, V4_MODELS_GUIDE_YAML));
+  const packKind = await configKind(ctx.v4, V4_PACK_YAML);
+  const guideKind = await configKind(ctx.v4, V4_MODELS_GUIDE_YAML);
   if (packKind === 'absent' && guideKind === 'absent') return false;
   let appended = false;
   const document =
-    packKind === 'absent' ? parseDocument('{}', YAML_OPTIONS) : await readV4Yaml(v4File(home, V4_PACK_YAML));
+    packKind === 'absent' ? parseDocument('{}', YAML_OPTIONS) : await readV4Yaml(v4File(ctx.v4, V4_PACK_YAML));
   if (packKind !== 'absent') {
     refuseRawSecrets(document, V4_PACK_YAML);
     dropModeline(document);
@@ -173,7 +179,7 @@ async function planConfig(
   if (packKind !== 'absent') count(plan, 'packs.yaml settings (from pack.yaml)');
 
   if (guideKind !== 'absent') {
-    const guide = await readV4Yaml(v4File(home, V4_MODELS_GUIDE_YAML));
+    const guide = await readV4Yaml(v4File(ctx.v4, V4_MODELS_GUIDE_YAML));
     refuseRawSecrets(guide, V4_MODELS_GUIDE_YAML);
     dropModeline(guide);
     const routing = guide.contents as YAMLMap;

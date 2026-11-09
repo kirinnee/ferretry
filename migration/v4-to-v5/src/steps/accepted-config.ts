@@ -17,12 +17,17 @@
  * that v4 still HELD stays held in v5 whatever its direction relative to v5's defaults: the v5 file carries v4's
  * CURRENT text converted (what the owner sees and may confirm), and the record carries the conversion of what v4
  * ENFORCED (v4's accepted text for each held file; a held file v4 never accepted is left out, because v4 used defaults
- * for it). The conversion is a plain dry run of the same steps on a view of the v4 home where each held file is replaced
- * by its accepted text ({@link StepContext.dryConfigs}). The kernel then judges the file on disk against the enforced
+ * for it). The conversion is a plain dry run of the config-writing steps in which each held file READS as its accepted
+ * text ({@link StepContext.dryConfigs}): an in-memory override, so no copy of any v4 file is written anywhere (a login
+ * file may hold a plain key) and every other file is read from v4 itself, read-only. A login file's enforced text goes
+ * through the same key rule as the live file: it is recorded only when the enforced conversion took the same keys under
+ * the same names, so no record ever holds a plain key. The kernel then judges the file on disk against the enforced
  * record, as v4 did: a loosening is held and the enforced version stays in effect. A held DELETION leaves the v5 file
  * absent but the record carries the enforced text, and the kernel treats a missing file with a record as a deletion (an
  * edit to the defaults, held when it loosens). Where v4 enforced nothing for a file, no record is carried. If the record
- * of v4 is damaged (what it enforced is unknown) or the dry conversion is not available, nothing is recorded (fail closed).
+ * of v4 is damaged (what it enforced is unknown), nothing is recorded for a held file (fail closed). If the dry conversion
+ * cannot run, or a config-writing step fails in it, NO record is written for any file, the step fails (the conversion is
+ * incomplete) and it never falls back to the current text.
  *
  * The files the PREVIEW itself wrote or changed (its text differs from the plain conversion's, e.g. `terminals.yaml`, the
  * `fy-preview` settings item, the forced `limits.yaml`) are recorded only when the owner ran `prepare --owner` (the flag
@@ -35,9 +40,8 @@
  */
 import { acceptedConfigFile, acceptedName } from '@ferretry/kernel/contract';
 import { createHash } from 'node:crypto';
-import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { lstat, readdir, readFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 import { z } from 'zod';
 import type { KeptItem, StepReport } from '../report.ts';
 import { readV4Json } from '../v4/documents.ts';
@@ -160,53 +164,45 @@ async function notInEffect(ctx: StepContext): Promise<V4State> {
   };
 }
 
-/** Every regular, non-YAML file under `from`, copied to the same place under `to` (no link is followed). */
-async function copyOthers(from: string, to: string, root = from): Promise<void> {
-  for (const entry of await readdir(from, { withFileTypes: true }).catch(() => [])) {
-    const path = join(from, entry.name);
-    if (entry.isDirectory()) {
-      if (relative(root, path) !== '.schema') await copyOthers(path, to, root);
-    } else if (entry.isFile() && !/\.ya?ml$/u.test(entry.name)) {
-      const target = join(to, relative(root, path));
-      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-      await copyFile(path, target);
-    }
+/** What v4 ENFORCED, converted (see {@link enforcedConfigs}). */
+type Enforced =
+  /** v4's record is damaged: what it enforced is unknown, so nothing is recorded for a held file (the old rule). */
+  | { readonly kind: 'unknown' }
+  /** The conversion could not run, or a config-writing step failed in it: the step fails closed (see the header). */
+  | { readonly kind: 'failed'; readonly why: string }
+  | {
+      readonly kind: 'ok';
+      readonly configs: ReadonlyMap<string, string>;
+      readonly fingerprint: (login: string) => string;
+    };
+
+/**
+ * What v4 ENFORCED, converted: the plain dry conversion of the v4 home in which every held file READS as v4's accepted
+ * text for it (a held deletion's file comes back; a held file v4 never accepted reads as absent, because v4 used the
+ * defaults for it). The override is a map held in memory ({@link V4Paths.configOverrides}): no copy of any v4 file is
+ * written anywhere, every other file is read from v4 itself, read-only. Never falls back to the current text.
+ */
+async function enforcedConfigs(ctx: StepContext, state: V4State): Promise<Enforced> {
+  if (!state.readable) return { kind: 'unknown' };
+  if (ctx.dryConfigs === undefined)
+    return { kind: 'failed', why: 'the conversion of what v4 enforced is not available' };
+  const overrides = new Map<string, string | null>();
+  for (const path of state.paths) overrides.set(`config/${path}`, state.accepted[path]?.text ?? null);
+  try {
+    const result = await ctx.dryConfigs(overrides);
+    if (result.failed.length > 0)
+      return {
+        kind: 'failed',
+        why: `the conversion of what v4 enforced failed in: ${result.failed.join(', ')}`,
+      };
+    return { kind: 'ok', configs: result.configs, fingerprint: result.fingerprint };
+  } catch {
+    return { kind: 'failed', why: 'the conversion of what v4 enforced could not run' };
   }
 }
 
-/**
- * What v4 ENFORCED, converted: the plain dry conversion of a view of the v4 home in which every held file is replaced
- * by v4's accepted text for it (a held deletion's file comes back; a held file v4 never accepted is left out, because
- * v4 used the defaults for it). The view is a private temporary folder (links to everything else, `config/` copied),
- * removed after. `undefined` when it cannot be made: the caller then records nothing for held files (fail closed).
- */
-async function enforcedConfigs(ctx: StepContext, state: V4State): Promise<ReadonlyMap<string, string> | undefined> {
-  if (ctx.dryConfigs === undefined || !state.readable) return undefined;
-  let view: string | undefined;
-  try {
-    view = await mkdtemp(join(tmpdir(), 'fy-enforced-'));
-    for (const entry of await readdir(ctx.v4.home))
-      if (entry !== 'config') await symlink(join(ctx.v4.home, entry), join(view, entry));
-    const config = join(view, 'config');
-    await mkdir(config, { mode: 0o700 });
-    await copyOthers(ctx.v4.config, config);
-    const put = async (path: string, text: string): Promise<void> => {
-      await mkdir(dirname(join(config, path)), { recursive: true, mode: 0o700 });
-      await writeFile(join(config, path), text, { mode: 0o600 });
-    };
-    const held = new Set(state.paths);
-    for (const [path, text] of state.onDisk) if (text !== null && !held.has(path)) await put(path, text);
-    for (const path of held) {
-      const entry = state.accepted[path];
-      if (entry !== undefined) await put(path, entry.text);
-    }
-    return await ctx.dryConfigs(view);
-  } catch {
-    return undefined;
-  } finally {
-    if (view !== undefined) await rm(view, { recursive: true, force: true });
-  }
-}
+/** The login a `config/logins/<id>.yaml` path names, or `undefined` for any other path. */
+const loginOf = (path: string): string | undefined => /^config\/logins\/([^/]+)\.yaml$/u.exec(path)?.[1];
 
 export const acceptedConfigStep: Step = {
   id: 'accepted-config',
@@ -261,19 +257,44 @@ export const acceptedConfigStep: Step = {
         // Also held: a file v4's ENFORCED conversion writes differently from the plain conversion of what v4 has now,
         // so a held v4 file (a deletion included) feeds it even though no step named that file as a source.
         const enforced = await enforcedConfigs(ctx, held);
+        // The conversion of what v4 enforced could not be made: nothing is recorded for ANY file it would have
+        // produced (never the current text instead), and the conversion is incomplete, so v5 does not start on it.
+        if (enforced.kind === 'failed')
+          return {
+            ...base,
+            status: 'failed',
+            note: `${enforced.why}; v4 was not enforcing as written (${held.paths.join(', ')}), so no accepted record was written for any file and the conversion is incomplete (it never falls back to the current text). Fix or confirm the v4 file named, then run again`,
+            kept: [],
+            notCarried: [],
+          };
+        const enforcedConfigsMap = enforced.kind === 'ok' ? enforced.configs : undefined;
         const heldSource = authored.filter(
           path =>
             sourceHeld(ctx, path, held) ||
-            (enforced?.has(path) === true && enforced.get(path) !== ctx.plainConfigs?.get(path)),
+            (enforcedConfigsMap?.has(path) === true && enforcedConfigsMap.get(path) !== ctx.plainConfigs?.get(path)),
         );
         const own = await record(configs.filter(([path]) => authored.includes(path) && !heldSource.includes(path)));
+        // A login file's enforced text holds `${secret:NAME}` where the live file does. It is recorded only when the
+        // enforced conversion took the SAME keys out of it under the SAME names as the live one (a comparison of digests);
+        // otherwise v4 enforced another key than the vault now holds, and no record is written for it (held).
+        const loginHeld: string[] = [];
         // Everything else carries what v4 ENFORCED, so a held edit stays held whatever its direction (see the header).
         const carried =
-          enforced === undefined
+          enforced.kind !== 'ok'
             ? { recorded: 0, unowned: [] as readonly string[] }
             : await record(
-                [...enforced]
+                [...enforced.configs]
                   .filter(([path]) => !authored.includes(path) || heldSource.includes(path))
+                  .filter(([path]) => {
+                    const login = loginOf(path);
+                    if (
+                      login === undefined ||
+                      enforced.fingerprint(login) === (ctx.loginKeys?.fingerprint(login) ?? '')
+                    )
+                      return true;
+                    loginHeld.push(path);
+                    return false;
+                  })
                   .sort(([a], [b]) => a.localeCompare(b)),
                 true,
               );
@@ -312,10 +333,18 @@ export const acceptedConfigStep: Step = {
                     why: 'no v5 plugin declares a config def for the path, so the kernel could not read a record for it: the file stays held until the owner confirms it',
                   },
                 ]),
+            ...(loginHeld.length === 0
+              ? []
+              : [
+                  {
+                    what: `no accepted record for ${loginHeld.join(', ')}`,
+                    why: 'v4 enforced another key for this login than the one now sealed in the vault (the enforced file would name a different secret or a different value), and a record never holds a plain key: the file stays held until the owner confirms it',
+                  },
+                ]),
             {
               what: `${V4_CONFIG_ACCEPTED} (v4 was not enforcing as written: ${held.paths.join(', ')})`,
               why:
-                enforced === undefined
+                enforced.kind === 'unknown'
                   ? "v4 was holding an unconfirmed edit, refusing a file, or had never accepted it, and what it enforced could not be converted (its record is damaged or the conversion was not available). Nothing is recorded as accepted (the preview's own files excepted): v5 judges every file against its defaults and holds any loosening until the owner confirms it again"
                   : "v4 was holding an unconfirmed edit, refusing a file, or had never accepted it. The v5 file carries v4's current text; the accepted record carries the conversion of what v4 ENFORCED, so v5 holds the difference until the owner confirms it (never wider than v4). A file v4 never accepted has no record: v4 used the defaults for it",
             },

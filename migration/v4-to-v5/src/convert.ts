@@ -6,9 +6,9 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type LockProbe, preflight } from './preflight.ts';
 import type { ConversionReport, StepReport } from './report.ts';
-import { type HostFacts, STEPS, type Step } from './steps/index.ts';
+import { type EnforcedConversion, type HostFacts, STEPS, type Step } from './steps/index.ts';
 import { LoginKeyHold } from './steps/login-keys.ts';
-import { v4Paths } from './v4/layout.ts';
+import { type V4ConfigOverrides, v4Paths } from './v4/layout.ts';
 import { writeHomeJson } from './v5/home.ts';
 import { v5Writer } from './v5/write.ts';
 
@@ -49,42 +49,58 @@ export type ConvertResult =
 /** `packages/core/kernel/host/home.ts` `openHome`: the folders a new v5 home starts with, each `0700`. */
 export const V5_HOME_TREE = ['config', 'state', 'state/kernel', 'run', 'logs'] as const;
 
-/** The accepted-record step reads what the others wrote; it is the one step the plain pass leaves out. */
-const ACCEPTED_STEP = 'accepted-config';
+/**
+ * The steps the plain dry pass runs: the ones that write config (`V5Writer.config`). Nothing else changes what a config
+ * file says, so the rest (agenda archives, conversations, ledgers) is not walked a second time. A test pins this list to
+ * the step files that call `config(`.
+ */
+export const CONFIG_STEPS: ReadonlySet<string> = new Set([
+  'settings',
+  'daemon-settings',
+  'lessons',
+  'packs',
+  'archive-setting',
+]);
 
 /**
  * What the plain (non-preview) conversion of the v4 home at `from` would write under `config/`, from a dry run (the
- * v4 home is only read). Used on the real home, and on the accepted-config step's view of what v4 ENFORCED.
+ * v4 home is only read). Used on the real home, and on the accepted-config step's view of what v4 ENFORCED, where
+ * `overrides` give the accepted text of each held file in memory (nothing is copied or written anywhere).
  */
 async function plainConfigs(
   from: string,
   to: string,
   host: HostFacts | undefined,
   steps: readonly Step[],
-): Promise<ReadonlyMap<string, string>> {
+  overrides?: V4ConfigOverrides,
+): Promise<EnforcedConversion> {
+  const loginKeys = new LoginKeyHold();
   const plain = {
-    v4: v4Paths(from),
+    v4: { ...v4Paths(from), ...(overrides === undefined ? {} : { configOverrides: overrides }) },
     v5: v5Writer(to, { dryRun: true }),
     dryRun: true,
-    loginKeys: new LoginKeyHold(),
+    loginKeys,
     ...(host === undefined ? {} : { host }),
   };
+  const failed: string[] = [];
   for (const step of steps) {
-    if (step.id === ACCEPTED_STEP) continue;
+    if (!CONFIG_STEPS.has(step.id)) continue;
     try {
-      await step.run(plain);
+      // A step that fails here leaves its files out: they then count as preview-authored (fail closed), and the
+      // enforced pass names it so the accepted-config step records nothing from it.
+      if ((await step.run(plain)).status === 'failed') failed.push(step.id);
     } catch {
-      // A step that fails here leaves its files out: they then count as preview-authored (fail closed).
+      failed.push(step.id);
     }
   }
-  return plain.v5.writtenConfigs();
+  return { configs: plain.v5.writtenConfigs(), failed, fingerprint: login => loginKeys.fingerprint(login) };
 }
 
-/** The plain dry conversion of any v4 home laid out like the real one (the accepted-config step's enforced view). */
+/** The plain dry conversion of the v4 home with the given config overrides (the accepted-config step's enforced view). */
 export const dryConfigsOf =
-  (to: string, host: HostFacts | undefined, steps: readonly Step[]) =>
-  (from: string): Promise<ReadonlyMap<string, string>> =>
-    plainConfigs(from, to, host, steps);
+  (from: string, to: string, host: HostFacts | undefined, steps: readonly Step[]) =>
+  (overrides: V4ConfigOverrides): Promise<EnforcedConversion> =>
+    plainConfigs(from, to, host, steps, overrides);
 
 export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   const checked = await preflight(options.from, options.to, options.lock);
@@ -111,10 +127,13 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   // A preview's authored files are found by comparison: a config file the preview wrote or changed differs from what the
   // plain conversion of the same v4 home writes. The plain pass is a dry run (nothing written) of every step that
   // writes config; a step that fails there leaves its files out, so they count as authored (fail closed).
-  const withEnforced = { ...ctx, dryConfigs: dryConfigsOf(options.to, options.host, steps) };
+  const withEnforced = { ...ctx, dryConfigs: dryConfigsOf(options.from, options.to, options.host, steps) };
   const withPlain =
     options.preview === true
-      ? { ...withEnforced, plainConfigs: await plainConfigs(options.from, options.to, options.host, steps) }
+      ? {
+          ...withEnforced,
+          plainConfigs: (await plainConfigs(options.from, options.to, options.host, steps)).configs,
+        }
       : withEnforced;
 
   const reports: StepReport[] = [];

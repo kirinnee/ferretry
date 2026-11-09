@@ -162,7 +162,7 @@ export function ownerNote(owner: boolean, files: readonly string[] = [], heldFil
   const held =
     heldFiles.length === 0
       ? ''
-      : ` NOT recorded (a v4 file each comes from has an unconfirmed edit, or a held deletion): ${heldFiles.join(', ')}. Each stays held (the kernel judges it against its defaults), and the report names it with the reason. The remedy: confirm the edit in v4 first, then preview.sh clean and preview.sh prepare --owner.`;
+      : ` NOT recorded (a v4 file each comes from has an unconfirmed edit, or a held deletion): ${heldFiles.join(', ')}. Each stays held: its record is what v4 enforced for it (the kernel judges the file against that, and against its defaults only where v4 enforced nothing), and the report names it with the reason. The remedy: confirm the edit in v4 first, then preview.sh clean and preview.sh prepare --owner.`;
   return `the config files the preview wrote or changed were recorded as accepted (--owner). Recorded: ${recorded.length === 0 ? 'none' : recorded.join(', ')}.${held}`;
 }
 

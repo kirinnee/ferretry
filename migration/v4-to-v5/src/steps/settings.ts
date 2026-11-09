@@ -470,7 +470,7 @@ export async function buildPlan(
     ids?.runtimes[name] !== undefined
       ? name
       : (Object.entries(ids?.runtimes ?? {}).find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
-  const listing = await listV4Config(ctx.v4.home);
+  const listing = await listV4Config(ctx.v4.home, ctx.v4.configOverrides);
   const plan: Plan = { files: new Map(), instructions: [], waiting: [], dropped: [], kept: new Map() };
   // machine.yaml last: it adds to files other v4 files may also own (limits.yaml).
   const machine = `config/${V4_SINGLETONS.machine}`;

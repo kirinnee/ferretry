@@ -18,7 +18,7 @@ export const holdsCodex = (ctx: Pick<StepContext, 'preview'>): boolean =>
 export async function heldRuntimeNames(ctx: StepContext): Promise<ReadonlySet<string>> {
   const held = new Set<string>();
   if (!holdsCodex(ctx)) return held;
-  for (const file of (await listV4Config(ctx.v4.home)).files) {
+  for (const file of (await listV4Config(ctx.v4.home, ctx.v4.configOverrides)).files) {
     if (file.address.kind !== 'runtime') continue;
     const map = (await readV4Yaml(file)).contents;
     const harness = isMap(map) ? map.get('harness', true) : undefined;

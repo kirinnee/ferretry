@@ -6,7 +6,7 @@
  * becomes real by replacing its `run` (the Vault and identity steps are real: `./secrets.ts`) — the table, the order and the not-carried list stay. While any step is
  * pending, `home.json` is not written and v5 refuses the folder: an incomplete conversion cannot be booted.
  */
-import type { V4Paths } from '../v4/layout.ts';
+import type { V4ConfigOverrides, V4Paths } from '../v4/layout.ts';
 import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
 import { accessStep } from './access.ts';
@@ -42,6 +42,16 @@ export interface HostFacts {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
+/** What the plain dry pass over the v4 home (with config overrides) produced. */
+export interface EnforcedConversion {
+  /** Every config file (`config/…` path to text) it would write. */
+  readonly configs: ReadonlyMap<string, string>;
+  /** The config-writing steps that failed in it (their files are missing from `configs`). */
+  readonly failed: readonly string[];
+  /** What it took out of one login's file (see `LoginKeyHold.fingerprint`): digests, never a value. */
+  readonly fingerprint: (login: string) => string;
+}
+
 export interface StepContext {
   readonly v4: V4Paths;
   readonly v5: V5Writer;
@@ -68,7 +78,7 @@ export interface StepContext {
    * text) it would write. The accepted-config step runs it on a VIEW of v4 as v4 enforced it. Absent: what v4 enforced
    * cannot be converted, so nothing is recorded for a held v4 file (fail closed).
    */
-  readonly dryConfigs?: (v4Home: string) => Promise<ReadonlyMap<string, string>>;
+  readonly dryConfigs?: (overrides: V4ConfigOverrides) => Promise<EnforcedConversion>;
   /** Absent in tests that do not read the host: a step needing it then reads nothing and says so. */
   readonly host?: HostFacts;
   /**
