@@ -176,8 +176,11 @@ Runtimes already reads, that nothing in v5 sweeps or refuses; the skill-folders 
 rules as a component file (every folder and the file `lstat`ed, no link, one name, a regular file, 1 MiB cap, refused if
 its content looks like a credential), and only that token is rewritten to the v5 copy. A file whose own content names
 the v4 home is NOT carried (a script that reaches back into v4 is never carried silently), and neither is a file under
-`fleet/assets/skills/` (the skill-folders step owns it). The owner mode bits are kept (an executable script stays
-executable, never wider than the source); the accepted record carries the rewritten text. The report names each carried
+`fleet/assets/skills/` (the skill-folders step owns it). The file is held to the same homes the last gate refuses in an
+inline command (v4's home and worktree folder, `~/.claude*`, `~/.codex*`; `$FY_HOME` carries) and to the one credential
+scan settings documents use over the whole content (every assignment, every word, `Authorization` headers). The file is
+written with mode 0600, or 0700 when the source has its owner-execute bit (the preview stage keeps that bit and no group
+or other bit); the bytes written are the bytes checked. The accepted record carries the rewritten text. The report names each carried
 file by its `fleet/assets/` path only. Any other string that names the v4 home (outside `fleet/assets/`, a folder, a
 missing file, a file that fails a rule) makes the component NOT CARRIED; the report names the component and the reason,
 never the command; remedy: copy the file under `fleet/assets` in v4, or remove the hook. Anything else a v5 settings item has no form for (any other flag,
