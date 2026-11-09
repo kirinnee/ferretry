@@ -882,6 +882,38 @@ describe('editConfigText — the file itself', () => {
     should(actual).not.containEql('machine.json');
   });
 
+  it('BG-007 should refresh a kernel modeline that points at another schema name, keeping the rest of the file', () => {
+    // Arrange — an item written before collections published `<name>--item.json` points at the collection's old name.
+    const old = '# yaml-language-server: $schema=../.schema/machine-old.json';
+    const existing = `${old}\n# my notes\na: 1\n`;
+
+    // Act
+    const actual = editConfigText(existing, { a: 2 }, { a: 1 }, MODELINE);
+
+    // Assert
+    should(occurrences(actual, 'yaml-language-server:')).equal(1);
+    should(actual).containEql(MODELINE);
+    should(actual).not.containEql('machine-old.json');
+    should(actual).containEql('# my notes');
+    should(actual).containEql('a: 2');
+  });
+
+  it('BG-007 should refresh a nested kernel modeline written with more ../ steps, and leave a URL or a relative path alone', () => {
+    // Arrange
+    const nested = '# yaml-language-server: $schema=../../.schema/runtimes.json\na: 1\n';
+    const remote = '# yaml-language-server: $schema=https://example.com/.schema/mine.json\na: 1\n';
+
+    // Act
+    const refreshed = editConfigText(nested, { a: 2 }, { a: 1 }, MODELINE);
+    const kept = editConfigText(remote, { a: 2 }, { a: 1 }, MODELINE);
+
+    // Assert
+    should(refreshed).containEql(MODELINE);
+    should(refreshed).not.containEql('runtimes.json');
+    should(kept).containEql('https://example.com/.schema/mine.json');
+    should(kept).not.containEql('machine.json');
+  });
+
   it('should end the text with one newline', () => {
     // Act
     const actual = editConfigText(undefined, { a: 1 }, {}, MODELINE);

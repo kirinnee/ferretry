@@ -7,8 +7,11 @@ import { type Carrier, type CarrierKey, type CarrierListenerPort, headersFrom } 
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { anonymous, device, owner } from '../../../../../core/kernel/testing/admission.ts';
 import { carrierListenerPort } from '../../../../../core/kernel/host/carrier-listener.ts';
+import { createConfigFiles } from '../../../../../core/kernel/host/config/service.ts';
+import { createMemoryHostFs } from '../../../../../core/kernel/host/state/memory-fs.ts';
 import { testHost } from '../../../../../core/kernel/testing/host.ts';
 import { HOSTED_APP_ORIGIN, TUNNEL_OFF_SENTENCE, TunnelStatusViewSchema } from '../../../contract/index.ts';
+import { composeOtherConnections, kernelTunnelHost } from '../../../daemon/compose-b.ts';
 import daemon, { buildConnections, kernelConnectionBindings } from '../../../daemon/index.ts';
 import { webrtcArrival } from '../../../daemon/lib/webrtc/carrier.ts';
 import manifest from '../../../manifest.ts';
@@ -111,6 +114,45 @@ describe('connections daemon half: tunnel and WebRTC composed', () => {
     expect(tunnel.status().state).toBe('failed');
     expect(host.published.filter(p => p.event === 'CarriersChanged')).toEqual([]);
     controller.abort();
+    await host.stop();
+  });
+
+  test('BG-012 m-3 the composed tunnel switch writes its setting through the kernel’s writer, and a refusal over a file that is not UTF-8 reaches the owner in the kernel’s sentence', async () => {
+    // The REAL kernel config service over memory, holding a connections.yaml that is Latin-1 (not UTF-8): it reads, and
+    // every write over it is refused by the kernel in its own sentence. Everything else is the test host's.
+    const memory = createMemoryHostFs();
+    const latin1 = new Uint8Array([...new TextEncoder().encode('# caf'), 0xe9, ...new TextEncoder().encode('\n')]);
+    memory.seed('/home/fy/config/connections.yaml', latin1);
+    const cancel = () => undefined;
+    const real = createConfigFiles({
+      home: '/home/fy',
+      fs: memory,
+      clock: { nowMs: () => 0, after: () => cancel, every: () => cancel },
+      log: { debug() {}, info() {}, warn() {}, error() {}, child: () => undefined } as never,
+      binary: 'fy',
+      defs: [{ plugin: 'connections', def: manifest.data.config[0] as never }],
+    });
+    await real.reload();
+    let other: ReturnType<typeof composeOtherConnections> | undefined;
+    const plugin = implementDaemon(manifest, {
+      build: ctx => {
+        other = composeOtherConnections({
+          kernel: { ...ctx.kernel, config: real.port('connections') },
+          config: undefined,
+          host: kernelTunnelHost(),
+          publishTunnel: () => {},
+        });
+        return buildConnections(ctx, kernelConnectionBindings(ctx.kernel));
+      },
+    });
+    const host = await testHost({ plugins: [plugin], ...noWorld });
+    // The composed switch's store is the one compose-b built: asking it to turn the tunnel on writes the setting.
+    const call = { request: { text: async () => JSON.stringify({ enabled: true }) } } as never;
+    await expect(other!.tunnelChange(call)).rejects.toThrow(
+      'the tunnel setting could not be written to its document: connections.yaml is not UTF-8: saving would change bytes you did not edit; nothing was written',
+    );
+    // Nothing was written over the owner's bytes.
+    expect(await memory.readBytes('/home/fy/config/connections.yaml')).toEqual(latin1);
     await host.stop();
   });
 
