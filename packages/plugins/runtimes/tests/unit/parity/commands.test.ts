@@ -276,7 +276,7 @@ describe('commands parity: profiles', () => {
 describe('commands parity: components (a model set is the kind Runtimes owns, `fy model-set …`)', () => {
   const heavy = { kind: 'modelSets', models: ['opus', 'sonnet'], default: 'opus' };
 
-  it('V-0182 fy component is one verb per kind: the model-set group, each declared under that first word', () => {
+  it('V-0182 fy component is one verb per kind: the model-set group (the kind Runtimes owns), each verb declared under that first word, and no `component` verb', () => {
     expect([...declared].filter(line => line.startsWith('model-set ')).sort()).toEqual(
       ['model-set add', 'model-set edit', 'model-set ls', 'model-set rm', 'model-set show'].sort(),
     );
@@ -291,7 +291,7 @@ describe('commands parity: components (a model set is the kind Runtimes owns, `f
     await expect(runVerb(fakeWorld(), 'model-set add', ['heavy'])).rejects.toThrow(/needs at least one --model <id>/);
   });
 
-  it('V-0184 fy component edit <kind/name> becomes `model-set edit`, keeping what a flag leaves out and changing every user', async () => {
+  it('V-0184 fy component edit <kind/name> becomes `model-set edit`, keeping what a flag leaves out, and refusing a model set that does not exist', async () => {
     await declaredAndRefusesWithoutName('model-set edit');
     expect(await staged('model-set edit', ['heavy'], { default: 'sonnet' }, LISTS)).toEqual([
       { kind: 'component.put', name: 'heavy', component: { ...heavy, default: 'sonnet' }, create: false },
@@ -301,7 +301,7 @@ describe('commands parity: components (a model set is the kind Runtimes owns, `f
     );
   });
 
-  it('V-0186 fy component rm <kind/name> --remove-from-profiles becomes `model-set rm`, refused while a profile uses it unless told', async () => {
+  it('V-0186 fy component rm <kind/name> --remove-from-profiles becomes `model-set rm`, staging the removal with the flag only when it is given', async () => {
     await declaredAndRefusesWithoutName('model-set rm');
     expect(await staged('model-set rm', ['heavy'], { 'remove-from-profiles': true })).toEqual([
       { kind: 'component.remove', componentKind: 'modelSets', name: 'heavy', removeFromProfiles: true },

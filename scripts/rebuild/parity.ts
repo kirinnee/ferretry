@@ -281,8 +281,56 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
     return 'removed by design (§9.2: fleet/config.yaml)';
   return undefined;
 }
+/**
+ * Rows whose source file the word rules above place with Runtimes ("runtime", "fleet", "component" in a name) but whose
+ * code is another owner's in 5.0 (britnee ruling, parity-runtimes round 1: re-owned, none removed). Each entry is
+ * `[kind, source file pattern, what pattern, 5.0 owner]`; the first match wins, so a file's other rows keep the owner
+ * the rules gave them.
+ */
+const REOWNED: readonly (readonly [Kind, RegExp, RegExp, string])[] = [
+  // Pack routing migration arm in the daemon's world builder.
+  ['J', /daemon\/bin\/fyd\.ts$/, /RoutingMigration/, 'packs'],
+  // Timers of the daemon's runtime host: the kernel's.
+  [
+    'J',
+    /adapters\/runtime\/(?:activity-timers|ordered-log-writer|bundled-worker-host|bundled-worker)\.ts$/,
+    /./,
+    'kernel',
+  ],
+  ['J', /daemon\/bin\/session\.worker\.ts$/, /runtime\.schedule\.timer/, 'kernel'],
+  // The relay carrier's reconnect scheduler is Connections'.
+  ['J', /adapters\/relay\/bun-relay-carrier\.ts$/, /runtimeScheduler\.after/, 'connections'],
+  // The housekeeping pass trigger: analytics ingestion's nudge plus its slow backstop is Usage's.
+  ['J', /lib\/runtime\/pass-trigger\.ts$/, /./, 'usage'],
+  // The credentials' usage reading, kept current by file events: Logins'.
+  ['J', /lib\/fleet-reading\//, /./, 'logins'],
+  // The transcript follower: Conversation's.
+  ['J', /adapters\/transcript\/file-source\.ts$/, /follow\.armWatch/, 'conversation'],
+  ['F', /adapters\/catalog\/node-catalog\.ts$/, /\/skills$/, 'skills'],
+  ['F', /cli\/src\/lib\/daemon\/layout\.ts$/, /lifecycle\.lock/, 'cli'],
+  ['F', /adapters\/file-shared-history\.ts$/, /\.lock$/, 'ferrets'],
+  ['F', /lib\/state-home-fence\.ts$/, /^\{home\}\/(?:config|fleet\/assets|fleet\/homes|state\/sessions)$/, 'kernel'],
+  ['F', /cli\/bin\/program\.ts$/, /fleet\/assets/, 'kernel'],
+  ['F', /adapters\/filesystem\/state-file-system\.ts$/, /^FY_HOME\/\{component\}$/, 'kernel'],
+  // Screens of the conversation, the files tab and the session pages.
+  [
+    'S',
+    /components\/(?:composer-add-menu|handoff-message|imported-history-page|ledger-message)\.tsx$/,
+    /./,
+    'conversation',
+  ],
+  [
+    'S',
+    /components\/(?:file-instance-surface|files-tab|files-views|migrate-sheet|new-session-page|sessions-page)\.tsx$/,
+    /./,
+    'ferrets',
+  ],
+  ['S', /components\/machine-status\.tsx$/, /./, 'app'],
+];
+
 function add(kind: Kind, what: string, file: string, line: number, descriptor = '', owner?: string) {
   let actualOwner = owner ?? ownerOf(file, what);
+  actualOwner = REOWNED.find(([k, f, w]) => k === kind && f.test(file) && w.test(what))?.[3] ?? actualOwner;
   if (kind === 'S' && actualOwner === 'asks') actualOwner = 'agenda';
   if (kind === 'F' && /\/channel\/|inbox\.jsonl|outbox\.jsonl|sends\.jsonl|answers\.jsonl/.test(what))
     actualOwner = 'conversation';
