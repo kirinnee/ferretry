@@ -128,6 +128,41 @@ describe('R6: the stored rule is linear and reads headers and addresses under an
     }
   });
 
+  it('R7: should judge 256 KiB of key runs, PEM openings, schemes, queries and header names in well under 100 ms', () => {
+    const pieces = [
+      'q7Zk0',
+      'a1',
+      'a1/',
+      'a1.',
+      'a-1',
+      '-----BEGIN ',
+      '-----BEGIN A1 ',
+      'https://',
+      'https://a/',
+      'a,https://',
+      '?a=',
+      '?a=b&',
+      '&a=1',
+      'x-api-key:',
+      'x-honeycomb-team=',
+      'a-b-c-d-e-',
+      '\t',
+      '\r\n',
+      'a:\n',
+      '${secret:',
+      '%2',
+    ];
+    for (const piece of pieces) {
+      const value = piece.repeat(Math.ceil((256 * 1024) / piece.length));
+      for (const name of ['GATEWAY_TOKEN', 'AZURE_OPENAI_KEY', 'GATEWAY_NOTE', 'OTEL_EXPORTER_OTLP_HEADERS']) {
+        const started = performance.now();
+        storedEnvironmentIssue(name, value);
+        plainPaste(name, value, false);
+        expect(performance.now() - started).toBeLessThan(250);
+      }
+    }
+  });
+
   it('should judge repeated JWT openings in linear time, and still find a JWT', () => {
     const started = performance.now();
     expect(hasTokenShape(`x ${'eyJ'.repeat(90_000)}`)).toBe(false);

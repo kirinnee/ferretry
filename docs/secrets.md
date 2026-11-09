@@ -357,6 +357,39 @@ published fleet — a start's account, the launch's bindings, the runtime names 
 (`packages/daemon/src/lib/fleet/publication.ts`). A second apply landing between the judgment and the
 pane's exec is still fail-closed: the new wrapper carries its own guard for every secret-backed variable.
 
+### The stored-login rule is a declared heuristic
+
+A login's `env` (a `logins/<id>.yaml` file, a `login.add` or `login.env` change, the paste screen) is judged by ONE
+rule, `plainPaste` in `packages/plugins/logins/contract/secret-shape.ts`. It is a **heuristic, not a proof**: a
+person who means to hide a key from it can. It is built to stop an accident (a key pasted into a plain field) and a
+casual agent edit, and it refuses a file it cannot judge rather than showing it:
+
+- **Under a credential-named variable** (a credential word anywhere, a last word `KEY` or `KEYS`, or one glued word
+  such as `GATEWAYTOKEN`) a value must be exactly one allowed shape: a placeholder under 8 characters with no `$`; one
+  or more `${secret:NAME}`; a scheme word and references; a header name, `:` or `=` and either of those; `$NAME` or
+  `${NAME}`; a number or flag word; one `http`, `https`, `ws`, `wss`, `socks5` or `socks5h` address with no user key,
+  password, fragment or bare query, only short query values, and no key-like run; or an absolute or `~/` path with no
+  key-like run. A **key-like run** is 24 or more letters, digits and `_` with a digit in them and entropy of at least
+  3.5 bits per character, read on the text split at `-`, `.`, `/` and `~`.
+- **Under any name** a token shape (a provider prefix, a JWT, a PEM private-key header), a credential-named header or
+  JSON member (`x-api-key: …`, `"api_key":"…"`) with a literal value, and an address carrying a password, a user key or
+  a credential-named query value are refused. In a variable that IS a header list (`…HEADERS`), a header with no
+  credential name is refused when its value holds a token shape or a key-like run (`x-honeycomb-team=…`).
+- **A value over 4096 characters is refused and not scanned.** Whatever else is wrong with a file, ONE refusal of this
+  rule keeps `config_read` from showing the file's text.
+
+Named residual heuristic GAPs (declared, not scheduled):
+
+- **GAP: a `$NAME` or `${NAME}` that is an all-upper-case base32 key** is read as a variable reference.
+- **GAP: a key cut into 7-character comma chunks** in a header value (`x-api-key: abcdefg,hijklmn,…`).
+- **GAP: a key shorter than 24 characters** in a path segment, host label or query value, and a key-like run with no
+  digit, are not seen by the run test.
+- **GAP: a header name with up to three words** may carry a key in a name word shorter than 17 characters.
+
+**This is the last round of widening.** From here, a further finding is either a regression, a leak through
+`config_read`, or a false refusal of a real owner setting, and is fixed; anything else (a new way to hide a key from a
+heuristic) is recorded here as a named GAP and is not another round.
+
 ## Accounts and sign-ins: the store
 
 The saved logins became **accounts** (one identity: label, plain username, password, 2FA keys) and

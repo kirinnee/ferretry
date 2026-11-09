@@ -745,3 +745,160 @@ describe('R6: under a credential name only an allowlisted shape is stored; heade
     ).be.an.Object();
   });
 });
+
+describe('R7: schemes, hosts, queries, paths and key-named variables; the owner settings stay accepted', () => {
+  /** 32 made-up characters of high entropy. */
+  const H = 'Xq9vT2mLp8RzW4kNc7HbJ3fGd6YsA1eU';
+  const GUID = '72f988bf-86f1-41af-91ab-2d7cd011db47';
+  const stage = (env: Record<string, string>): unknown =>
+    deriveLoginChange(
+      FILES,
+      { kind: 'login.add', id: 'r7', harness: 'claude-code', store: 'environment', env },
+      facts(),
+    );
+  const refusedRows: readonly (readonly [string, string])[] = [
+    // M3: shape (g) is an allowlist of schemes and of address parts
+    ['GATEWAY_TOKEN', `x://${H}`],
+    ['GATEWAY_TOKEN', `ws://${H}`],
+    ['GATEWAY_TOKEN', `file:///${H}`],
+    ['GATEWAY_TOKEN', `ftp://gw/${H}`],
+    ['GATEWAY_TOKEN', `https://${H}.example.com/`],
+    ['GATEWAY_TOKEN', `https://gw/?q=${H}`],
+    ['GATEWAY_TOKEN', `https://gw/?${H}`],
+    ['GATEWAY_TOKEN', `https://gw/#${H}`],
+    ['GATEWAY_TOKEN', `https://gw/v1;${H}`],
+    ['GATEWAY_TOKEN', `https://gw:443/${'0123456789abcdef'.repeat(2)}`],
+    ['GATEWAY_TOKEN', `https://gw/${H}`],
+    ['GATEWAY_TOKEN', `https://gw/a-b.${H}/c`],
+    ['GATEWAY_TOKEN', `https://gw/%58q9vT2mLp8RzW4kNc7HbJ3fGd6YsA1eU`],
+    ['GATEWAY_TOKEN', `wss://gw/?x=${H}`],
+    ['GATEWAY_TOKEN', `socks5://gw/#x`],
+    // m1: a name ending in KEY, a glued name
+    ['AZURE_OPENAI_KEY', `Bearer ${H}`],
+    ['AZURE_OPENAI_KEY', `${H} x`],
+    ['AZURE_OPENAI_KEY', `/${H}`],
+    ['AZURE_OPENAI_KEY', 'q7Zk'.repeat(10)],
+    ['OPENAI_KEY', `Bearer ${H}`],
+    ['GATEWAYTOKEN', `Bearer ${H}`],
+    // m2: a tab, CR or LF inside an address is dropped by a URL parser
+    ['HTTPS_PROXY', `http://alice:${H}\n@proxy:3128`],
+    ['HTTPS_PROXY', `http://alice:${H.slice(0, 10)}\t${H.slice(10)}@proxy:3128`],
+    ['HTTPS_PROXY', `http://alice:${H.slice(0, 10)}\r\n${H.slice(10)}@proxy:3128`],
+    // m3: a header whose NAME says nothing (Honeycomb), in a header list
+    ['OTEL_EXPORTER_OTLP_HEADERS', `x-honeycomb-team=${H}`],
+    ['OTEL_EXPORTER_OTLP_HEADERS', `x-org=acme,x-honeycomb-team=Bearer ${H}`],
+    // m4: a PEM private key under any name
+    ['SSH_KEY', '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----'],
+    ['GATEWAY_NOTE', '-----BEGIN PRIVATE KEY-----\nMIIEvQ'],
+    [
+      'VERTEX_SERVICE_ACCOUNT',
+      '{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBg\\n-----END PRIVATE KEY-----\\n"}',
+    ],
+    // M2: a header list is read under EVERY name, and so is a JSON body
+    ['GATEWAY_EXTRA', `x-api-key: ${H}`],
+    ['GATEWAY_EXTRA', `Authorization: Bearer ${H}`],
+    ['GATEWAY_CONFIG', `apiKey: ${H}`],
+    ['GATEWAY_CONFIG', `token=${H}`],
+    ['CLAUDE_CODE_EXTRA_BODY', `{"api_key":"${H}"}`],
+    ['CLAUDE_CODE_EXTRA_BODY', `{"x":1,"private_key":"${H}"}`],
+    // n1: a header name (shape d) that is long enough to hold a key
+    ['GATEWAY_TOKEN', `${H.slice(0, 16)}-${H.slice(16)}-aaaa-bbbb: \${secret:K}`],
+    ['GATEWAY_TOKEN', `${GUID}: \${secret:K}`],
+  ];
+  it.each(refusedRows)(
+    'should refuse %s holding a hidden key (row %#), naming the variable and never the value',
+    (name, value) => {
+      const message = refusal(() => stage({ [name]: value }));
+
+      should(message).startWith(`${name} in login r7 `);
+      should(message).not.containEql(H);
+      should(message).not.containEql(H.slice(0, 12));
+    },
+  );
+
+  /** The owner's own settings (66): every one stays accepted. */
+  const ownerSettings: readonly (readonly [string, string])[] = [
+    // OpenTelemetry
+    ['OTEL_EXPORTER_OTLP_HEADERS', 'Authorization=Bearer ${secret:OTEL_TOKEN}'],
+    ['OTEL_EXPORTER_OTLP_HEADERS', 'x-honeycomb-dataset=claude,x-org=acme'],
+    ['OTEL_EXPORTER_OTLP_ENDPOINT', 'https://otel.example.com:4318'],
+    ['OTEL_EXPORTER_OTLP_PROTOCOL', 'http/protobuf'],
+    ['OTEL_RESOURCE_ATTRIBUTES', 'service.name=claude-code,deployment.environment=prod'],
+    ['OTEL_METRICS_EXPORTER', 'otlp'],
+    // base URLs
+    ['ANTHROPIC_BASE_URL', 'https://gateway.ai.cloudflare.com/v1/0123456789abcdef0123456789abcdef/gw/anthropic'],
+    ['ANTHROPIC_BASE_URL', 'https://gw.example/v1?api-version=2024-10-21'],
+    ['ANTHROPIC_BASE_URL', 'https://my-resource.openai.azure.com/openai?api-version=2024-10-21'],
+    ['ANTHROPIC_BASE_URL', 'http://localhost:11434'],
+    ['ANTHROPIC_BEDROCK_BASE_URL', 'https://bedrock-runtime.us-east-1.amazonaws.com'],
+    ['ANTHROPIC_VERTEX_BASE_URL', 'https://us-east5-aiplatform.googleapis.com/v1'],
+    ['OPENAI_BASE_URL', 'http://127.0.0.1:8080/v1'],
+    ['GATEWAY_AUTH_URL', `https://login.microsoftonline.com/${GUID}/oauth2/v2.0/token`],
+    ['GATEWAY_TOKEN_URL', 'https://example.okta.com/oauth2/aus1b2c3d4e5f6g7h8i9/v1/token'],
+    // AWS and Bedrock
+    ['AWS_REGION', 'us-east-1'],
+    ['AWS_PROFILE', 'work-sso'],
+    ['ANTHROPIC_MODEL', 'arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet'],
+    ['AWS_BEARER_TOKEN_BEDROCK', '${secret:BEDROCK_TOKEN}'],
+    ['CLAUDE_CODE_USE_BEDROCK', '1'],
+    ['CLAUDE_CODE_SKIP_BEDROCK_AUTH', '1'],
+    ['AWS_ACCESS_KEY_ID', '$AWS_ACCESS_KEY_ID'],
+    ['AWS_SECRET_ACCESS_KEY', '${secret:AWS_SECRET}'],
+    // Vertex
+    ['CLOUD_ML_REGION', 'us-east5'],
+    ['ANTHROPIC_VERTEX_PROJECT_ID', 'my-project-123456'],
+    ['CLAUDE_CODE_USE_VERTEX', '1'],
+    ['CLAUDE_CODE_SKIP_VERTEX_AUTH', '1'],
+    // proxies and certificates
+    ['HTTPS_PROXY', 'http://proxy.example.com:3128'],
+    ['HTTP_PROXY', 'http://alice:${secret:PW}@proxy.example.com:3128'],
+    ['ALL_PROXY', 'socks5://127.0.0.1:1080'],
+    ['NO_PROXY', 'localhost,127.0.0.1,.corp.example'],
+    ['NODE_EXTRA_CA_CERTS', '/etc/ssl/certs/corp-root.pem'],
+    ['SSL_CERT_FILE', '/etc/ssl/certs/ca-bundle.crt'],
+    // custom headers
+    ['ANTHROPIC_CUSTOM_HEADERS', 'anthropic-beta: interleaved-thinking-2025-05-14'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'x-portkey-config: pc-claude-1234'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'x-portkey-provider: anthropic'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'cf-aig-authorization: Bearer ${secret:CF_AIG}'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'Helicone-Auth: Bearer ${secret:HELICONE}'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'x-org-id: 0f8fad5b-d9cb-469f-a165-70867728950e'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'X-Org: acme\nAuthorization: Bearer ${secret:K}'],
+    // Claude and Codex settings
+    ['CLAUDE_CODE_OAUTH_TOKEN', '${secret:CLAUDE_OAUTH}'],
+    ['MAX_THINKING_TOKENS', '31999'],
+    ['CLAUDE_CODE_MAX_OUTPUT_TOKENS', '64000'],
+    ['CLAUDE_CODE_API_KEY_HELPER_TTL_MS', '3600000'],
+    ['OPENAI_API_KEY', 'ollama'],
+    ['OPENAI_API_KEY', '${secret:OPENAI}'],
+    ['GATEWAY_TOKEN', '${GATEWAY_TOKEN}'],
+    ['ANTHROPIC_API_KEY', ''],
+    ['ANTHROPIC_AUTH_TOKEN', 'Bearer ${secret:GATEWAY}'],
+    ['ANTHROPIC_SMALL_FAST_MODEL', 'claude-haiku-4-5'],
+    ['DISABLE_TELEMETRY', '1'],
+    ['CODEX_MODEL', 'gpt-5.1-codex'],
+    ['API_TIMEOUT_MS', '600000'],
+    // m5: a file path under a credential name (shape h)
+    ['GOOGLE_APPLICATION_CREDENTIALS', '/home/owner/.config/gcloud/application_default_credentials.json'],
+    ['GOOGLE_APPLICATION_CREDENTIALS', '~/keys/vertex-sa.json'],
+    ['AWS_SHARED_CREDENTIALS_FILE', '/home/owner/.aws/credentials'],
+    ['AWS_WEB_IDENTITY_TOKEN_FILE', '/var/run/secrets/eks.amazonaws.com/serviceaccount/token'],
+    ['AZURE_FEDERATED_TOKEN_FILE', '/var/run/secrets/azure/tokens/azure-identity-token'],
+    ['AZURE_OPENAI_KEY', '${secret:AZURE_OPENAI}'],
+    ['AZURE_OPENAI_KEY', 'ollama'],
+    ['CLAUDE_CODE_CLIENT_KEY', '/etc/ssl/private/client.key'],
+    // m1: key-named and glued-name variables with a reference
+    ['OPENAI_KEY', 'Bearer ${secret:OPENAI}'],
+    ['GATEWAYTOKEN', '${secret:GATEWAY}'],
+    // (g) addresses under a credential name
+    ['GATEWAY_TOKEN', 'https://gw.example/v1'],
+    ['GATEWAY_TOKEN', 'wss://gw.example/stream?v=2'],
+    ['GATEWAY_TOKEN', 'socks5h://127.0.0.1:9050'],
+  ];
+  it.each(ownerSettings)('should accept the owner setting %s = %s', (name, value) => {
+    should(stage({ [name]: value })).be.an.Object();
+  });
+  it('should hold all 66 owner settings in the table', () => {
+    should(ownerSettings.length).be.aboveOrEqual(66);
+  });
+});

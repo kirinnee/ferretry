@@ -150,6 +150,9 @@ const SECRET_NAME_WORDS: ReadonlySet<string> = new Set([
   'PAT',
 ]);
 
+/** One glued word that ends in a credential word (`GATEWAYTOKEN`, `MYAPIKEY`); a plain `…KEY` ending (`PORTKEY`) is not enough. */
+const GLUED_CREDENTIAL_WORD = /(?:APIKEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)S?$/u;
+
 /** Name word pairs that say the same: `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`, `SECRET_KEY`. */
 const SECRET_NAME_PAIRS: ReadonlySet<string> = new Set(['API_KEY', 'ACCESS_KEY', 'PRIVATE_KEY', 'SECRET_KEY']);
 
@@ -173,6 +176,8 @@ const TOKEN_FORMATS: readonly (readonly [prefix: string, body: string])[] = [
   ['AIza', TOKEN_BODY],
   ['npm_', TOKEN_BODY],
   ['hf_', TOKEN_BODY],
+  // A PEM private key: the header alone is the shape (the body follows on later lines, or after an escaped `\n`).
+  ['-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----', ''],
 ];
 
 /** Value prefixes of well-known token formats, and of two more whose body is not a plain run (a Google OAuth token, a JWT). */
@@ -222,6 +227,9 @@ export function namesACredential(name: string): boolean {
     .split(/[^A-Z0-9]+/u)
     .filter(Boolean);
   if (words.some(word => SECRET_NAME_WORDS.has(word))) return true;
+  // A last word KEY or KEYS (`AZURE_OPENAI_KEY`), or one glued word that ends in a credential word (`GATEWAYTOKEN`).
+  const last = words.at(-1) ?? '';
+  if (last === 'KEY' || last === 'KEYS' || words.some(word => GLUED_CREDENTIAL_WORD.test(word))) return true;
   return words.some((word, index) => SECRET_NAME_PAIRS.has(`${word}_${words[index + 1] ?? ''}`));
 }
 
@@ -257,6 +265,37 @@ const HEADER_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
 /** The longest `-` or `_` word a header name may hold: a key does not fit in a header name. */
 const MAX_HEADER_NAME_WORD = 16;
 
+/** The most words a header name may have unless the name itself says it is a credential (`x-api-key`). */
+const MAX_PLAIN_HEADER_NAME_WORDS = 3;
+
+/** The address schemes a value under a credential name may open with: web, web socket and proxy ones. */
+const ALLOWED_ADDRESS_SCHEMES: ReadonlySet<string> = new Set(['http', 'https', 'ws', 'wss', 'socks5', 'socks5h']);
+
+/** The shortest run of letters, digits and `_` that can be a key, and the entropy (bits per character) that makes it read as one. */
+const MIN_KEY_RUN = 24;
+const MIN_KEY_RUN_ENTROPY = 3.5;
+const WORD_RUN = /[A-Za-z0-9_]+/gu;
+
+/**
+ * Whether a text holds a run of 24 or more letters, digits and `_` with entropy of at least 3.5 and a digit in it: the shape
+ * of a random key, as opposed to a long word (`application_default_credentials`) or a dashed id (a GUID is runs of 12 or
+ * fewer). `-`, `.`, `/`, `~` and every other character end a run. A whole `${secret:NAME}` is taken out first. Linear: each
+ * run is read once.
+ */
+function holdsKeyRun(text: string): boolean {
+  const bare = text.replace(REFERENCE_PATTERN, ' ');
+  for (const [run] of bare.matchAll(WORD_RUN)) {
+    if (run.length >= MIN_KEY_RUN && /[0-9]/u.test(run) && shannonEntropy(run) >= MIN_KEY_RUN_ENTROPY) return true;
+  }
+  return false;
+}
+
+/** Whether a header's value (after one scheme word, references taken out) has a token shape or a key run. */
+function headerValueHoldsKey(value: string): boolean {
+  const bare = value.trim().replace(SCHEME_WORD, '').replace(REFERENCE_PATTERN, ' ');
+  return hasTokenShape(bare) || holdsKeyRun(bare);
+}
+
 /** `$NAME` or `${NAME}`: an environment variable's own name, upper case by POSIX convention. */
 const ENVIRONMENT_REFERENCE = /^\$(?:\{[A-Z_][A-Z0-9_]{0,63}\}|[A-Z_][A-Z0-9_]{0,63})$/u;
 
@@ -271,6 +310,9 @@ const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//u;
 
 /** Where one address ends and the next begins in free text. */
 const ADDRESS_BREAK = /[\s"'`<>]+/u;
+
+/** The characters a URL parser removes before it reads an address (WHATWG: ASCII tab, CR and LF). */
+const PARSER_DROPPED = /[\t\r\n]/gu;
 
 /** Placeholder for a whole `${secret:NAME}` while an address is read, so its `:` is not a separator. */
 const REFERENCE_MARK = '\u0001';
@@ -304,20 +346,49 @@ function isHeaderThenReference(text: string): boolean {
   const split = text.search(/[:=]/u);
   if (split < 1 || split > 64) return false;
   const name = text.slice(0, split);
-  if (!HEADER_NAME.test(name) || name.split(/[-_]/u).some(word => word.length > MAX_HEADER_NAME_WORD)) return false;
+  if (!HEADER_NAME.test(name)) return false;
+  const words = name.split(/[-_]/u);
+  // A key does not fit in a header name: a short word, and a name of a few words unless it names a credential itself.
+  if (words.some(word => word.length > MAX_HEADER_NAME_WORD)) return false;
+  if (words.length > MAX_PLAIN_HEADER_NAME_WORDS && !headerNamesACredential(name)) return false;
   const rest = text.slice(split + 1).trimStart();
   return isReferences(rest) || isSchemeThenReferences(rest);
 }
 
 /** Allowed shape (g): the whole value is one address that carries no user, password or key. */
 function isCleanAddress(text: string): boolean {
-  if (!URL_SCHEME.test(text) || /\s/u.test(text)) return false;
+  const scheme = URL_SCHEME.exec(text);
+  if (scheme === null || /\s/u.test(text)) return false;
+  if (!ALLOWED_ADDRESS_SCHEMES.has(scheme[0].slice(0, -3).toLowerCase())) return false;
   try {
     new URL(text);
   } catch {
     return false;
   }
-  return urlCarries(text) === undefined;
+  // No fragment; a query of `name=value` pairs whose values are each under 8 characters outside a reference; no key-like run
+  // in the host, a path segment, a value or the user part (read as written and URL-decoded).
+  if (text.includes('#') || !queryIsClean(text) || urlCarries(text) !== undefined) return false;
+  return !holdsKeyRun(text.slice(scheme[0].length)) && !holdsKeyRun(decoded(text.slice(scheme[0].length)));
+}
+
+/** Whether an address's query (after the first `?`) is `name=value` pairs only, each value shorter than a key. */
+function queryIsClean(text: string): boolean {
+  const mark = text.indexOf('?');
+  if (mark < 0) return true;
+  return text
+    .slice(mark + 1)
+    .split(/[&;]/u)
+    .every(pair => {
+      if (pair === '') return true;
+      const at = pair.indexOf('=');
+      if (at < 1) return false;
+      return decoded(pair.slice(at + 1)).replace(REFERENCE_PATTERN, '').length < MIN_SECRET_VALUE_LENGTH;
+    });
+}
+
+/** Allowed shape (h): an absolute or `~/` path with no whitespace, no token shape and no key-like run (`GOOGLE_APPLICATION_CREDENTIALS`). */
+function isPlainPath(text: string): boolean {
+  return /^(?:\/|~\/)\S*$/u.test(text) && !hasTokenShape(text) && !holdsKeyRun(text) && !holdsKeyRun(decoded(text));
 }
 
 /**
@@ -329,7 +400,9 @@ function isCleanAddress(text: string): boolean {
  * - (d) a header name, `:` or `=`, optional whitespace, then (b) or (c);
  * - (e) `$NAME` or `${NAME}`, NAME being an upper-case environment variable name;
  * - (f) a number of up to 12 digits, or a flag word (`true`, `oauth`, `none`…);
- * - (g) one address that carries no password, user key or credential-named query.
+ * - (g) one `http`, `https`, `ws`, `wss`, `socks5` or `socks5h` address with no password, no user key, no fragment, only
+ *   `name=value` query pairs with short values, and no key-like run anywhere in it;
+ * - (h) an absolute or `~/` path with no whitespace, no token shape and no key-like run.
  */
 function allowedUnderCredentialName(value: string): boolean {
   if (value.length < MIN_SECRET_VALUE_LENGTH && !value.includes('$')) return true;
@@ -337,7 +410,7 @@ function allowedUnderCredentialName(value: string): boolean {
   if (isReferences(trimmed) || isSchemeThenReferences(trimmed) || isHeaderThenReference(trimmed)) return true;
   if (ENVIRONMENT_REFERENCE.test(trimmed) || SMALL_NUMBER.test(trimmed)) return true;
   if (trimmed.length <= 16 && FLAG_WORDS.has(trimmed.toLowerCase())) return true;
-  return isCleanAddress(trimmed);
+  return isCleanAddress(trimmed) || isPlainPath(trimmed);
 }
 
 /** The upper-case words of a variable's name. */
@@ -368,17 +441,21 @@ const HEADER_BREAK = /\r\n|\n|\r|,/u;
  * line ends and `,` (after a folded line is joined to the one before), each piece on its first `:` or `=` (the OpenTelemetry
  * list is `name=value,name=value`), and both halves are URL-decoded.
  */
-function headerListHoldsKey(value: string): boolean {
+function headerListHoldsKey(value: string, named: boolean): boolean {
+  // The `:` of a `${secret:NAME}` is not a separator: it is hidden while the list is split and put back in each piece.
   return value
     .replace(FOLDED_LINE, ' ')
+    .replace(REFERENCE_PATTERN, reference => reference.replace(':', REFERENCE_MARK))
     .split(HEADER_BREAK)
-    .some(piece => {
-      const split = piece.search(/[:=]/u);
-      if (split < 1) return false;
-      return (
-        headerNamesACredential(decoded(piece.slice(0, split)).trim()) &&
-        !isPlaceholderOrReference(decoded(piece.slice(split + 1)).trim())
-      );
+    .some(masked => {
+      const piece = masked.replaceAll(REFERENCE_MARK, ':');
+      const split = masked.search(/[:=]/u);
+      // An address, a path or a reference where a name should be (`${secret:U}:…`, `https:`) is no header.
+      if (split < 1 || /[$/@]/u.test(piece.slice(0, split))) return false;
+      const body = decoded(piece.slice(split + 1)).trim();
+      if (headerNamesACredential(decoded(piece.slice(0, split)).trim()) && !isPlaceholderOrReference(body)) return true;
+      // In a variable that IS a header list, a header whose name says nothing (`x-honeycomb-team`) still carries a key.
+      return named && headerValueHoldsKey(body);
     });
 }
 
@@ -465,13 +542,17 @@ function embeddedAddress(token: string): string | undefined {
  * `?api-version=…` and `?key=${secret:K}` carry nothing. Linear: it reads each piece of text a fixed number of times.
  */
 export function urlCarries(value: string): 'userinfo' | 'query' | undefined {
-  for (const token of value.split(ADDRESS_BREAK)) {
-    if (token === '') continue;
-    const carried = addressCarries(token);
-    if (carried !== undefined) return carried;
-    const inside = embeddedAddress(token);
-    const nested = inside === undefined ? undefined : addressCarries(inside);
-    if (nested !== undefined) return nested;
+  // Read twice: as written, and as a URL parser reads it, which drops every tab, CR and LF (`alice:pa\nss@proxy` is one password).
+  const asParsed = value.replace(PARSER_DROPPED, '');
+  for (const text of asParsed === value ? [value] : [value, asParsed]) {
+    for (const token of text.split(ADDRESS_BREAK)) {
+      if (token === '') continue;
+      const carried = addressCarries(token);
+      if (carried !== undefined) return carried;
+      const inside = embeddedAddress(token);
+      const nested = inside === undefined ? undefined : addressCarries(inside);
+      if (nested !== undefined) return nested;
+    }
   }
   return undefined;
 }
@@ -534,7 +615,7 @@ export function plainPaste(
     const refusedByName =
       (namesACredential(name) && !allowedUnderCredentialName(value)) ||
       (mode === 'prefill' && namesACredentialAtEnd(name) && !WHOLE_SECRET_REFERENCE.test(value.trim())) ||
-      (namesAHeaderList(name) && headerListHoldsKey(value));
+      headerListHoldsKey(value, namesAHeaderList(name));
     if (refusedByName) return { kind: 'withheld', reason: 'credential-name' };
     if (hasTokenShape(value)) return { kind: 'withheld', reason: 'token-shape' };
   }

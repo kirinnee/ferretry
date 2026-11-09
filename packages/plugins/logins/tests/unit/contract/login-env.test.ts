@@ -228,4 +228,70 @@ describe('R6 m4: config_read of a login file refused by the stored rule shows no
       should(JSON.stringify(answer)).not.containEql('hunter22x');
     });
   }
+
+  const H = 'Xq9vT2mLp8RzW4kNc7HbJ3fGd6YsA1eU';
+  for (const [what, disk] of [
+    [
+      'a raw key plus a typo key',
+      `harness: claude-code\nstore: environment\nlabl: x\nenv:\n  GATEWAY_TOKEN: "Bearer ${H}"\n`,
+    ],
+    [
+      'a raw key plus a 4097-character value',
+      `harness: claude-code\nstore: environment\nenv:\n  GATEWAY_TOKEN: "Bearer ${H}"\n  GATEWAY_NOTE: ${'a'.repeat(4097)}\n`,
+    ],
+    [
+      'a raw key plus a bad secret reference',
+      `harness: claude-code\nstore: environment\nenv:\n  GATEWAY_TOKEN: "Bearer ${H}"\n  OTHER: "\${secret:lower}"\n`,
+    ],
+    [
+      'one over-long credential value',
+      `harness: claude-code\nstore: environment\nenv:\n  GATEWAY_TOKEN: "${H}${'a'.repeat(4090)}"\n`,
+    ],
+    [
+      'a key inside an over-long value',
+      `harness: claude-code\nstore: environment\nenv:\n  GATEWAY_NOTE: "x-api-key: ${H} ${'a'.repeat(4097)}"\n`,
+    ],
+  ] as const) {
+    it(`R7 M1: should return no text for ${what}`, async () => {
+      const agent = await world(disk);
+      const answer = await agent.run(
+        AgentConfigCallSchema.parse({ tool: 'config.read', path: 'logins/gw.yaml' }),
+        standing,
+      );
+
+      should(answer.text).equal('');
+      should(answer.summary).containEql('its text is not shown because it holds a raw secret');
+      should(JSON.stringify(answer)).not.containEql(H);
+    });
+  }
+
+  it('R7 M1: should still mark a raw key beside an over-long variable NAME, a reserved name and a malformed reference', () => {
+    for (const bad of [{ ['A'.repeat(129)]: 'x' }, { CODEX_HOME: 'x' }, { OTHER: '${secret:lower}' }]) {
+      const result = LoginFileSchema.safeParse({
+        harness: 'claude-code',
+        store: 'environment',
+        env: { ...bad, GATEWAY_TOKEN: `Bearer ${H}` },
+      });
+
+      should(result.success).be.false();
+      const marked = (result.error?.issues ?? []).some(
+        issue => issue.code === 'custom' && (issue.params as { rawSecret?: boolean } | undefined)?.rawSecret === true,
+      );
+      should(marked).be.true();
+      should(JSON.stringify(result.error?.issues)).not.containEql(H);
+    }
+  });
+
+  it('R7 M1: should refuse a value over 4096 characters as a marked issue without scanning it', () => {
+    const result = LoginFileSchema.safeParse({
+      harness: 'claude-code',
+      store: 'environment',
+      env: { GATEWAY_NOTE: 'a'.repeat(4097) },
+    });
+
+    should(result.success).be.false();
+    const issue = result.error?.issues[0] as { code: string; params?: { rawSecret?: boolean } } | undefined;
+    should(issue?.code).equal('custom');
+    should(issue?.params?.rawSecret).be.true();
+  });
 });

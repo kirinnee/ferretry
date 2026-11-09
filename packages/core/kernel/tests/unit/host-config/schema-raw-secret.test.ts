@@ -1,7 +1,7 @@
 /**
- * A plugin's schema may mark an issue as a raw secret (`params: { rawSecret: true }`). When EVERY issue a file has is so
+ * A plugin's schema may mark an issue as a raw secret (`params: { rawSecret: true }`). When ANY issue a file has is so
  * marked the kernel classifies the refusal as `raw_secret`, exactly as for a key its own scan found: `config_read` withholds the
- * text. One unmarked issue keeps it a plain `schema` refusal.
+ * text. ONE marked issue is enough, whatever else is wrong with the file; a file with no marked issue stays a `schema` refusal.
  */
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
@@ -42,9 +42,9 @@ describe('a schema issue marked rawSecret', () => {
     expect(checked).toMatchObject({ ok: false, reason: 'raw_secret' });
   });
 
-  test('stays a schema refusal when one issue is not marked', () => {
+  test('is a raw_secret refusal when ONE issue is marked beside an unmarked one', () => {
     const checked = checkConfigText(markedDef, 'voice.yaml', `note: ${HELD}\nother: ${HELD}\n`, 'fy');
-    expect(checked).toMatchObject({ ok: false, reason: 'schema' });
+    expect(checked).toMatchObject({ ok: false, reason: 'raw_secret' });
   });
 
   test('stays a schema refusal for an ordinary schema failure', () => {
