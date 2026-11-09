@@ -23,6 +23,16 @@ export const GatePolicyChanged = defineEvent('gate.policy-changed', z.strictObje
 /** Today's `describeGrantRefusal`: the sentence a refused governed call carries. */
 export function describeGrantRefusal(
   demand: CapabilityDemand,
+  refusal: Exclude<GrantRefusal, 'granted'>,
+  clientName: string,
+): string;
+export function describeGrantRefusal(
+  demand: CapabilityDemand,
+  refusal: GrantRefusal,
+  clientName: string,
+): string | undefined;
+export function describeGrantRefusal(
+  demand: CapabilityDemand,
   refusal: GrantRefusal,
   clientName: string,
 ): string | undefined {

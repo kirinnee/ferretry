@@ -362,6 +362,18 @@ describe('AccountModelSchema', () => {
       ]);
     });
 
+    it('should refuse a settings component that names both a file and a document', () => {
+      const actual = withComponents({
+        settings: {
+          both: { harness: 'claude', file: 'components/settings/both.json', document: { permissions: {} } },
+        },
+      });
+
+      should(actual).deepEqual([
+        'components.settings.both: a settings component has a "file" or a "document", not both',
+      ]);
+    });
+
     it('should refuse settings or hooks that name no harness', () => {
       // Act
       const actual = withComponents({

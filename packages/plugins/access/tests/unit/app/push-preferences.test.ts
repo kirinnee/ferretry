@@ -32,6 +32,19 @@ describe('PushPreferences', () => {
     });
   });
 
+  it('reads a machine whose stored row is not a record as off, and leaves the machines beside it as they were', () => {
+    const storage = memory(
+      JSON.stringify({
+        version: 1,
+        daemons: { 'daemon-a': 'on', 'daemon-b': ['on'], 'daemon-c': { enabled: true, onlyWhenHidden: false } },
+      }),
+    );
+    const preferences = new PushPreferences(storage);
+    expect(preferences.get(daemonId('daemon-a')).enabled).toBe(false);
+    expect(preferences.get(daemonId('daemon-b')).enabled).toBe(false);
+    expect(preferences.get(daemonId('daemon-c')).enabled).toBe(true);
+  });
+
   it('keeps working in memory when storage refuses, and ignores a store it cannot read', () => {
     const refusing = {
       getItem: () => {

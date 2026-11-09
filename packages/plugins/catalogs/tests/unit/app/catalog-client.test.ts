@@ -32,6 +32,11 @@ describe('the Catalogs client by route key', () => {
     expect(routeFor('GET', '/v1/catalog-links/lnk_x')?.key).toBe('GET /v1/catalog-links/:linkId');
   });
 
+  it('hands a placeholder the segment as written when it is not valid percent-encoding, and decodes one that is', () => {
+    expect(routeFor('GET', '/v1/catalog-links/lnk%20x')?.params).toEqual({ linkId: 'lnk x' });
+    expect(routeFor('GET', '/v1/catalog-links/lnk%E0%A4%A')?.params).toEqual({ linkId: 'lnk%E0%A4%A' });
+  });
+
   it('sends params, query and a JSON body through the route key', async () => {
     calls.length = 0;
     const client = catalogClientOf(recording({ ok: true }));

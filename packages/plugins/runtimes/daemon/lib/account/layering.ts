@@ -213,7 +213,23 @@ export type StackExpansion<T, F> =
  * end. Only a base whose whole subtree resolved is remembered, and everything below such a base is known to be free of
  * loops, so a remembered base can never hide one. The depth and size bounds keep the answer small however the
  * profile files are written.
+ *
+ * A reader that can never answer `fail` (its layers cannot fail to parse) gets an expansion whose failure has no
+ * 'layer' arm, so the caller narrows by type rather than by cast; a reader that gains a `fail` answer stops matching
+ * that overload and the caller stops compiling.
  */
+export function expandStack<T>(
+  layersOf: (profile: string) => readonly string[] | undefined,
+  read: (text: string) => StackLayer<T, never>,
+  start: string,
+):
+  | { readonly ok: true; readonly entries: readonly StackEntry<T>[] }
+  | { readonly ok: false; readonly failure: Exclude<StackFailure<never>, { readonly kind: 'layer' }> };
+export function expandStack<T, F>(
+  layersOf: (profile: string) => readonly string[] | undefined,
+  read: (text: string) => StackLayer<T, F>,
+  start: string,
+): StackExpansion<T, F>;
 export function expandStack<T, F>(
   layersOf: (profile: string) => readonly string[] | undefined,
   read: (text: string) => StackLayer<T, F>,

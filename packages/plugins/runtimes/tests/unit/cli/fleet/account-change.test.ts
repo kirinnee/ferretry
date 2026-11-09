@@ -182,6 +182,30 @@ describe('runChange', () => {
     should(world.out.exitCode).equal(1);
   });
 
+  it('C2 should name every configuration file a rolled-back change left on disk, and say the next apply publishes them', async () => {
+    const world = fakeWorld({
+      gateway: {
+        apply: () => ({
+          outcome: 'applied',
+          apply: {
+            outcome: 'rolled-back',
+            failedOperation: 'directory fleet/bin',
+            reason: 'root refused: changed',
+            configurationLanded: ['runtimes/work.yaml', 'profiles/main.yaml'],
+          },
+        }),
+      },
+    });
+
+    await runChange(world.deps, { change: removeRuntime, destructive: false, options: {} });
+
+    const text = world.out.text('error');
+    should(text).containEql(
+      'The configuration files runtimes/work.yaml, profiles/main.yaml were written first and are NOT rolled back',
+    );
+    should(text).containEql('the next apply publishes them.');
+  });
+
   it('should describe a sign-out and an executor preview in words', async () => {
     const signOut = fakeWorld({
       gateway: {
