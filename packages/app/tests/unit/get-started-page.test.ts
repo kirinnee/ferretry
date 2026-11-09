@@ -8,6 +8,7 @@ import {
   GET_STARTED_PAGE,
   getStartedPagePlugin,
   HEADERS_FILE,
+  hasOwnPolicy,
   inlineScriptsOf,
   scriptSrcOf,
   unlistedScriptHashes,
@@ -195,6 +196,45 @@ describe('S14 m3 every HTML page the build emits is checked, not just this one',
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('m1 a generated sandbox-shaped page under a `!` path passes, in a tree where the shells WERE generated', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fy-get-started-'));
+    try {
+      // The shape `build:fy-render-shell` writes: one inline script, pinned by its own meta CSP, absent from `/*`.
+      for (const shell of ['fy-render-sandbox.html', 'fy-render-html.html'])
+        writeFileSync(
+          join(dir, shell),
+          '<meta http-equiv="Content-Security-Policy" content="x"><script>shell()</script>',
+        );
+      const plugin = getStartedPagePlugin({ version: release.version, publicDir: dir });
+      const { error } = build(plugin as unknown as BuildPlugin, asBundle({ 'index.html': landing }));
+      expect(error).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('m1 the same page under a normal path fails, and the message never advises adding its hash to `/*`', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fy-get-started-'));
+    try {
+      writeFileSync(join(dir, 'ordinary.html'), '<script>shell()</script>');
+      const plugin = getStartedPagePlugin({ version: release.version, publicDir: dir });
+      const { error } = build(plugin as unknown as BuildPlugin, asBundle({ 'index.html': landing }));
+      expect(error).toContain('The ordinary.html page');
+      expect(error).toContain('Remove the inline script');
+      expect(error).toContain('exclude the page');
+      expect(error).not.toContain('add ');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('m1 the `!` paths are read from _headers, in both spellings', () => {
+    expect(hasOwnPolicy('fy-render-sandbox.html', headers)).toBe(true);
+    expect(hasOwnPolicy('fy-render-html.html', headers)).toBe(true);
+    expect(hasOwnPolicy('index.html', headers)).toBe(false);
+    expect(hasOwnPolicy('oauth/callback.html', headers)).toBe(false);
   });
 
   it('n2 hashes the STAMPED page: a placeholder inside a script cannot pass on the strength of its unstamped text', () => {

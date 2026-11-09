@@ -56,6 +56,39 @@ export const unusedScriptHashes = (pages: readonly string[], headers: string): r
   return listedScriptHashes(headers).filter(hash => !used.has(hash));
 };
 
+/**
+ * The path patterns `_headers` takes OUT of the `/*` policy with `! Content-Security-Policy`. A page served there
+ * carries its own policy (the `fy-render` shells pin their scripts in a meta CSP), so it is not judged against `/*`.
+ * Read from the file itself, never from a hand list: a new reviewed exclusion needs no edit here.
+ */
+export const pathsWithOwnPolicy = (headers: string): readonly string[] => {
+  const found: string[] = [];
+  let current: string | undefined;
+  for (const line of headers.split('\n')) {
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    if (!/^\s/u.test(line)) current = line.trim();
+    else if (current !== undefined && line.trim() === '! Content-Security-Policy') found.push(current);
+  }
+  return found;
+};
+
+const patternMatches = (pattern: string, path: string): boolean =>
+  new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/gu, '\\$&').replaceAll('*', '.*')}$`, 'u').test(path);
+
+/** The paths a built page is served at: its own, its extensionless twin (Pages' pretty URLs) and a directory's root. */
+const servedPathsOf = (name: string): readonly string[] => {
+  const path = `/${name}`;
+  if (path.endsWith('/index.html'))
+    return [path, path.slice(0, -'index.html'.length), path.slice(0, -'/index.html'.length)];
+  return path.endsWith('.html') ? [path, path.slice(0, -'.html'.length)] : [path];
+};
+
+/** True when `_headers` removes this page's path from `/*` (it keeps its own policy). */
+export const hasOwnPolicy = (name: string, headers: string): boolean => {
+  const patterns = pathsWithOwnPolicy(headers);
+  return servedPathsOf(name).some(path => patterns.some(pattern => patternMatches(pattern, path)));
+};
+
 /** Every `.html` file under `dir` (the pages copied verbatim from `public/`), as `[path relative to dir, text]`. */
 export const htmlPagesUnder = (dir: string): readonly (readonly [string, string])[] => {
   const found: [string, string][] = [];
@@ -115,17 +148,19 @@ export function getStartedPagePlugin(options: GetStartedPageOptions): Plugin {
       }
       // Pages copied from `public/` never enter the bundle, but the main policy serves them all the same.
       for (const [name, source] of htmlPagesUnder(publicDir)) pages.push([name, source]);
-      for (const [name, source] of pages) {
+      // A page under a path `_headers` removes from `/*` (`! Content-Security-Policy`) keeps its own meta policy.
+      const governed = pages.filter(([name]) => !hasOwnPolicy(name, headers));
+      for (const [name, source] of governed) {
         const unlisted = unlistedScriptHashes(source, headers);
         if (unlisted.length > 0)
           this.error(
-            `The ${name} page has inline script(s) the CSP does not allow: add ${unlisted.join(' ')} to script-src ` +
-              `in packages/app/public/_headers (or the page and the header have drifted apart), otherwise the browser ` +
-              `blocks the script and the page does nothing.`,
+            `The ${name} page has inline script(s) (${unlisted.join(' ')}) that the main CSP does not allow, so the ` +
+              `browser blocks them. Remove the inline script, or exclude the page's path in packages/app/public/_headers ` +
+              `(a reviewed choice: \`! Content-Security-Policy\` on its path, with the page carrying its own policy).`,
           );
       }
       const unused = unusedScriptHashes(
-        pages.map(([, source]) => source),
+        governed.map(([, source]) => source),
         headers,
       );
       if (unused.length > 0)
