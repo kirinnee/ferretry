@@ -222,8 +222,9 @@ export interface TestHostOptions {
   /** The kernel home the test roots' fence is judged against (`harnessFile` refuses a path in it). Default: `/test-home`. */
   readonly fenceHome?: string;
   /**
-   * A host that cannot reach an entry through a held folder (macOS today): the `project-files` root, an owner's root,
-   * refuses every remove `no_descriptor_reach`, as the real host does there. Default: it has reach.
+   * A host that cannot reach an entry through a held folder (macOS whose C library or working-directory bracket could
+   * not be loaded): the `project-files` root, an owner's root, refuses every remove `no_descriptor_reach`, as the real
+   * host does there. Default: it has reach, as macOS does when both load (a remove goes through the folder's descriptor).
    */
   readonly noDescriptorReach?: true;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
