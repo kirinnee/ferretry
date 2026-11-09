@@ -99,6 +99,36 @@ describe('documents of a published runtime home', () => {
     expect((error as Error).message).toBe('/fleet/homes/a/.claude.json could not be read.');
   });
 
+  test('one request lists the published homes once, however many documents it reads', async () => {
+    let listings = 0;
+    const reader = { document: async () => '{}' } as unknown as RuntimeHomeReader;
+    const published: PublishedHomes = {
+      homes: async () => {
+        listings += 1;
+        return [HOME];
+      },
+      home: () => reader,
+    };
+    const documents = new PublishedHomeDocuments(() => published, parse, { read: async () => 'fallback' });
+    const request = documents.scoped();
+    expect(await request.read('/fleet/homes/a/.claude.json', 'json')).toEqual({});
+    expect(await request.read('/fleet/homes/a/settings.json', 'json')).toEqual({});
+    expect(await request.read('/work/app/settings.json', 'json')).toBe('fallback');
+    expect(listings).toBe(1);
+    // Without a request scope every document asks again; the next request lists afresh.
+    await documents.read('/fleet/homes/a/.claude.json', 'json');
+    await documents.read('/fleet/homes/a/settings.json', 'json');
+    expect(listings).toBe(3);
+    await documents.scoped().read('/fleet/homes/a/.claude.json', 'json');
+    expect(listings).toBe(4);
+  });
+
+  test('with Runtimes off a request is read as before', async () => {
+    const fallback: McpHarnessDocuments = { read: async () => 'fallback' };
+    const documents = new PublishedHomeDocuments(() => undefined, parse, fallback);
+    expect(await documents.scoped().read('/fleet/homes/a/.claude.json', 'json')).toBe('fallback');
+  });
+
   test('a document that does not parse says what it is and quotes none of it', async () => {
     const { documents } = setup(async () => 'not json "sk-secret-value"');
     const error = await documents.read('/fleet/homes/a/config.toml', 'toml').catch((cause: unknown) => cause);

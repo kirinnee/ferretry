@@ -52,8 +52,8 @@ export interface McpLaunchPartsDeps {
  *    and every `${secret:NAME}` an item's `env` names — is made current just before the launch, by the sign-in
  *    service, which never throws. A refresh that fails leaves the old token where it was (the server then says it
  *    needs a new sign-in) and the launch goes ahead.
- * 2. One `mcp` part per item the runtime's profile stack names ({@link mcpParts}); a signed-in one names its `bearer` VARIABLE (today's
- *    `adapt.ts`: Claude renders it as an `Authorization` header, Codex as `bearer_token_env_var`).
+ * 2. One `mcp` part per item the runtime's profile stack names ({@link mcpParts}); a signed-in one names its `bearer`
+ *    VARIABLE (today's `adapt.ts`: Claude renders it as an `Authorization` header, Codex as `bearer_token_env_var`).
  * 3. One `mcp` part per signed-in project server, as the local-scope entry for its project root.
  * 4. One `env` part binding each sign-in variable to its OPTIONAL `${secret?:NAME}` reference. The Vault opens the
  *    references into the child as it starts, so no part holds a value. Only a token the Vault HOLDS is bound: an

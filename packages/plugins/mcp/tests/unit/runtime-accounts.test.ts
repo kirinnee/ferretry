@@ -148,6 +148,44 @@ describe('MCP accounts and components, by runtime profile', () => {
     expect(view(inventory)).toEqual([['ferretry', 'ferretry', [B]]]);
   });
 
+  test('R-0112 a Codex runtime home’s config.toml is read as TOML: a layered server is a component, an unlayered one a user server, no problem', async () => {
+    const ferrets = new FakeFerrets();
+    const runtimes = fakeRuntimes();
+    const CODEX = 'codex-a' as RuntimeId;
+    runtimes.setRuntimes([{ ...summary(CODEX), harness: 'codex' } as RuntimeSummary]);
+    runtimes.setHomes([{ ...home('c', '/fleet/homes/c', CODEX), harness: 'codex' }], {
+      c: readerOf({
+        'config.toml': [
+          '[mcp_servers.docs]',
+          'url = "https://docs.example.com/mcp"',
+          '',
+          '[mcp_servers.tool]',
+          'command = "npx"',
+          'args = ["tool", "--secret-arg"]',
+          '',
+          '[mcp_servers.tool.env]',
+          'TOKEN = "sk-not-a-real-value"',
+        ].join('\n'),
+      }),
+    });
+    runtimes.setProfiles([], [{ runtime: CODEX, profile: 'full', mcp: ['docs'], skills: [] }]);
+    const h = await testHost({
+      plugins: [mcp],
+      fakes: { ferrets, vault: new FakeVault(), sealed: new FakeSealedDocuments() },
+      uses: { runtimes },
+      config: { mcp: ITEMS },
+    });
+    const response = await h.request('GET', '/v1/mcp', { as: as('fleet.use') });
+    expect(response.status).toBe(200);
+    const inventory = response.json<McpInventory>();
+    const rows = view(inventory);
+    expect(rows).toContainEqual(['docs', 'component', [CODEX]]);
+    expect(rows).toContainEqual(['tool', 'user', [CODEX]]);
+    expect(inventory.problems).toEqual([]);
+    expect(response.body).not.toContain('--secret-arg');
+    expect(response.body).not.toContain('sk-not-a-real-value');
+  });
+
   test('a home is read only by the three document names, through its reader', async () => {
     const { h, asked } = await world();
     await h.request('GET', '/v1/ferrets/on-a/mcp/servers', { as: as('filesystem.use') });

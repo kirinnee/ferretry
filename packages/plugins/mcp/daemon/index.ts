@@ -24,6 +24,7 @@ import { McpDocumentUnreadable, type McpInventoryAccount, McpInventoryService } 
 import { SignInReach } from './lib/reach.ts';
 import { combinedMcpOAuthServers, ProjectMcpLaunch, ProjectMcpOAuthServers } from './lib/inventory/project-sign-in.ts';
 import { PublishedHomeDocuments, type PublishedHomes } from './lib/inventory/home-documents.ts';
+import { parseHarnessDocument } from './lib/inventory/parse-document.ts';
 import { accountsOf, componentsOf, layeredMcp } from './lib/inventory/runtime-wiring.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
 import { mcpComponentSource } from './lib/profile-component-source.ts';
@@ -123,10 +124,6 @@ export default implementDaemon(manifest, {
     // document is read through the ferret folder that holds it, as before.
     const projectFile = projectRootMcpFile(root => kernel.roots.root('imports', { subfolder: root }));
     // A runtime home Runtimes published is read through its bounded reader, by exact document name; the rest as before.
-    const parseDocument = (text: string, format: 'json' | 'toml'): unknown => {
-      if (format === 'json') return JSON.parse(text) as unknown;
-      return NOT_YET('Reading a Codex config.toml');
-    };
     const rootDocuments = new RootMcpHarnessDocuments(async path => {
       if (path.endsWith(`/${PROJECT_MCP_FILE}`)) {
         const held = projectFile(
@@ -136,8 +133,8 @@ export default implementDaemon(manifest, {
         if (held !== undefined) return held;
       }
       return workRootFor(path);
-    }, parseDocument);
-    const documents = new PublishedHomeDocuments(published, parseDocument, rootDocuments);
+    }, parseHarnessDocument);
+    const documents = new PublishedHomeDocuments(published, parseHarnessDocument, rootDocuments);
     const held = async (): Promise<ReadonlySet<SecretName>> =>
       new Set((await vault.names()).map(summary => summary.name));
 

@@ -35,6 +35,18 @@ export class PublishedHomeDocuments implements McpHarnessDocuments {
     private readonly fallback: McpHarnessDocuments,
   ) {}
 
+  /** One request's view: the published homes are listed once (the first read that needs them), not for every path. */
+  scoped(): McpHarnessDocuments {
+    const published = this.published();
+    if (published === undefined) return this;
+    let listed: Promise<readonly RuntimeHome[]> | undefined;
+    const snapshot: PublishedHomes = {
+      homes: () => (listed ??= published.homes()),
+      home: id => published.home(id),
+    };
+    return new PublishedHomeDocuments(() => snapshot, this.parse, this.fallback);
+  }
+
   async read(path: string, format: 'json' | 'toml'): Promise<unknown> {
     const published = this.published();
     const cut = path.lastIndexOf('/');
