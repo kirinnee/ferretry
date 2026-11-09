@@ -1,7 +1,15 @@
+import { posix } from 'node:path';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
-import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
+import {
+  DEFAULT_COPY_ENTRIES,
+  isOwnerRoot,
+  isReadOnlyRoot,
+  mayHoldRoot,
+  RootError,
+  scopedSubfolder,
+} from '../host/roots.ts';
 import {
   harnessFileRefusal,
   permittedMode,
@@ -1098,7 +1106,8 @@ async function start(world: World): Promise<TestHost> {
       (path !== known.prefix && !path.startsWith(`${known.prefix}/`))
     )
       throw new Error(`${path} is outside the root`);
-    if (!processFolderAllowed(known.root, path.slice(known.prefix.length + 1)))
+    // judged against the UNSCOPED root, as production does (BG-008): `prefix` is `/<root>` or `/<root>/<scope>`
+    if (!processFolderAllowed(known.root, path.slice(`/${known.root}/`.length)))
       throw new Error('kernel.processes accepts only a folder at or under fleet/homes/<id>');
     if (![...world.roots.keys()].some(key => key.startsWith(`${path}/`))) throw new Error(`no such folder ${path}`);
     return [path];
@@ -1241,16 +1250,20 @@ async function start(world: World): Promise<TestHost> {
           mode: testModes.get(path) ?? 0o600,
           links: 1,
         });
-        /** A path of THIS handle's scope (no `..`), or the refusal production makes for one outside it. */
+        /**
+         * A path of THIS handle's scope, or the refusal production makes for one outside it: no NUL, no `..`, NORMALIZED
+         * (`.` segments, doubled and trailing slashes gone) and a relative name read from the scope's root, as
+         * `lexicalInRoot` does before every call that names a leaf (BG-006), so a forged spelling names the same leaf as
+         * its plain form on both hosts.
+         */
         const ownPath = (path: string): string => {
-          if (
-            prefix === undefined ||
-            typeof path !== 'string' ||
-            path.split('/').includes('..') ||
-            !path.startsWith(`${prefix}/`)
-          )
+          if (prefix === undefined || typeof path !== 'string' || path.includes('\0') || path.split('/').includes('..'))
             throw new RootError('outside');
-          return path;
+          const named = posix.normalize(path.startsWith('/') ? path : `${prefix}/${path}`).replace(/(?<=.)\/+$/u, '');
+          // the scope's own folder (`resolve('.')`) keeps its `/.` spelling: it is no leaf of the scope
+          if (named === prefix && path !== prefix) return `${prefix}/.`;
+          if (!named.startsWith(`${prefix}/`)) throw new RootError('outside');
+          return named;
         };
         const handle: RootHandle = {
           name,
@@ -1340,7 +1353,14 @@ async function start(world: World): Promise<TestHost> {
             // link is ever made from one into another root: the same two refusals as production (`HANDLES.real`, `linkTarget`).
             const projectSource = PROJECT_SOURCES.get(source);
             projectSource?.(from);
-            if (projectSource !== undefined && copyOptions?.link === true) throw new RootError('not_declared');
+            // The same two refusals, in the same order (`copyTree` in `host/roots.ts`): a link is written only into a root
+            // that takes links, and never from an owner's root.
+            if (copyOptions?.link === true) {
+              if (isReadOnlyRoot(name) || !takesLinks(name)) throw new RootError('read_only');
+              const sourceRoot = testHandles.get(source)?.root;
+              if (projectSource !== undefined || (sourceRoot !== undefined && isOwnerRoot(sourceRoot)))
+                throw new RootError('not_declared');
+            }
             // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
             const fromKey = projectSource === undefined ? from : projectFileKey(from);
             for (const [key, text] of [...world.roots])
@@ -1430,6 +1450,8 @@ async function start(world: World): Promise<TestHost> {
             if (isReadOnlyRoot(name) || !takesLinks(name)) throw new RootError('read_only');
             const known = testHandles.get(target?.root ?? {});
             if (known === undefined || known.plugin !== manifest.id) throw new RootError('not_declared');
+            // a project file is never the target of a link another root writes (`linkTarget` on the real host, BG-014 m1)
+            if (known.root === 'project-files') throw new RootError('not_declared');
             const to = target.path as string;
             const within = known.prefix;
             if (within === undefined || to.split('/').includes('..') || (to !== within && !to.startsWith(`${within}/`)))
