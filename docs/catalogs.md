@@ -1401,8 +1401,9 @@ A home the fleet places outside its own folder (an operator's own folder, a home
 
 Against the readers of the same homes before: this Skills list is **wider** than the machine skill inventory for a plain
 folder and an inside link (which listed neither in such a home), **narrower** than it for a link into the fleet's
-`assets/` (which listed it as Ferretry's; here it is skipped, because no root can name both the home and `assets/`; the
-decision on that is still open) and **narrower** than the session skill picker (which listed store links too). The documents follow a link out of the home, as the MCP document reader did, but under bounds that
+`assets/` (which listed it as Ferretry's; here it is skipped, because no root can name both the home and `assets/`: once
+Skills binds the homes and lists `fleet/assets/skills/<name>` itself as Ferretry's, such a link is a duplicate path to the
+same skill and is never followed; until then it is a before-green line in `ports-pending.json`) and **narrower** than the session skill picker (which listed store links too). The documents follow a link out of the home, as the MCP document reader did, but under bounds that
 reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file, the daemon's home,
 a sign-in file, or something that does not parse as the document is refused, and the refusal names only the link. A
 hard-linked `SKILL.md` is not listed. A file read is checked after it was read: if the name no longer reaches the file that
