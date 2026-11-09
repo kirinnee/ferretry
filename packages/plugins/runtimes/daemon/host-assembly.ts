@@ -23,9 +23,9 @@ import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { milliseconds } from '@ferretry/std';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
-import { PROFILE_COMPONENTS_KEY } from '../contract/index.ts';
+import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
-import { configDirectoryOf, documentRevision, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
+import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
@@ -195,7 +195,7 @@ export function fleetHost(
 export function fileAssembly(
   ctx: {
     readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
-      readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file'>;
+      readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file' | 'etag'>;
     };
     readonly needs: {
       readonly logins: FleetCatalogServiceDeps['credentials'] &
@@ -293,7 +293,9 @@ export function fileAssembly(
   return {
     catalog: services.catalog,
     setup: services.setup,
-    // The profile's file as the apply pins it: the sha256 of its bytes, or the absent sentinel. Read when asked.
-    profileEtag: async profile => await documentRevision(host.files, `${configDirectory}/profiles/${profile}.yaml`),
+    // The profile's file as the kernel's config writer reckons its etag (what `writeAll`'s `ifMatch` is compared with),
+    // or the absent sentinel: the kernel's own answer for Runtimes' own declared file, read when asked. (The files are
+    // not Runtimes' to read: `config/` is no folder `host.files` mounts.)
+    profileEtag: async profile => await ctx.kernel.config.etag(PROFILE_ITEMS as never, profile),
   };
 }

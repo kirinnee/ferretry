@@ -749,6 +749,21 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         const slot = slotFor(declaration, name);
         return statusOf(slot === undefined ? undefined : settled.get(slot.path)?.evaluated);
       },
+      // The etag only (`read` below carries the text and the issues, which a plugin is never handed). Its own def, an
+      // existing slot: the same two refusals every other member makes.
+      etag: async (def, name): Promise<string> => {
+        own(def);
+        const declaration = declared(pluginId, def as ConfigDef) as ConfigDeclaration;
+        const slot = slotFor(declaration, name);
+        if (slot === undefined) throw new Error(`${pluginId} has no config file of that name`);
+        // A full reload per ask is O(every config file), so a caller that asks once per file went quadratic. The disk is
+        // read for THIS file only, and when its etag is the one the last load settled it is the answer a reload would
+        // give (the same read, the same digest); anything else — a file that moved, one never loaded — takes the reload.
+        const disk = await readDisk(slot.path);
+        const onDisk = disk.kind === 'text' ? digest(disk.text) : ABSENT_CONFIG_ETAG;
+        if (loaded && settled.get(slot.path)?.diskEtag === onDisk) return onDisk;
+        return (await read(pluginId, def as ConfigDef, name))?.etag ?? ABSENT_CONFIG_ETAG;
+      },
       // A plugin's own write takes the one writer; a loosening goes into effect only on Gate's judge, else it is held.
       write: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
         writeOutcome(

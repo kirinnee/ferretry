@@ -35,9 +35,10 @@ const kernelOver = (world: FleetWorld) => {
       writeAll: async () => ({ kind: 'written' as const }),
       collection: () => new Map(),
       file: () => undefined,
+      etag: async () => 'absent',
     },
   } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
-    config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file'>;
+    config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file' | 'etag'>;
   };
   return { kernel, warned };
 };
