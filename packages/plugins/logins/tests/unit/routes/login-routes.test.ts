@@ -255,7 +255,7 @@ describe('changeRoutes — reading a held change', () => {
     };
     const routes = changeRoutes({
       stage: async () => view,
-      view: id => ({ ...view, id }),
+      view: (id: string) => ({ ...view, id }),
       apply: async () => ({ outcome: 'applied' }),
     } as never);
     should(bodyOf(await call(routes, 'GET /v1/logins/changes/:changeId', { path: '/v1/logins/changes/chg9' }))).match({

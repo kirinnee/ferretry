@@ -119,14 +119,16 @@ describe('a kind’s reads', () => {
       startSignIn: async () => flow({}),
       signInStatus: async () => flow({}),
     });
-    return await kinds.anthropic.quota('work');
+    const quota = kinds.anthropic.quota;
+    if (quota === undefined) throw new Error('every kind reads a quota');
+    return await quota('work');
   };
   const withUsage = (usage: LoginView['usage']): LoginView => sampleLogin('work', { usage });
 
   test('carries each window measured, and the reset of the first window that has one', async () => {
     expect(
       await quotaOf(withUsage({ fiveHour: { usedPercent: 12 }, weekly: { usedPercent: 80, resetsAt: AT as never } })),
-    ).toEqual({ fiveHourPercent: 12, weeklyPercent: 80, resetsAt: AT });
+    ).toEqual({ fiveHourPercent: 12, weeklyPercent: 80, resetsAt: AT } as never);
     expect(await quotaOf(withUsage({ fiveHour: {}, weekly: { usedPercent: 5 } }))).toEqual({ weeklyPercent: 5 });
     expect(await quotaOf(withUsage({ fiveHour: { usedPercent: 7 }, weekly: {} }))).toEqual({ fiveHourPercent: 7 });
   });
