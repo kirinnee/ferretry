@@ -596,6 +596,35 @@ describe('exportBundle', () => {
     ]);
   });
 
+  it('BG-029 should refuse to export while a part of the machine stands in for a file that could not be read', async () => {
+    const { service, state } = world();
+    state.reading = { ...configReading(SET_UP_MODEL(), 'r'), unreadable: ['the MCP server "docs" (not read)'] };
+    const refusal = await setupRefusal(service.exportBundle(), 'fleet_setup_refused');
+    should(refusal.message).containEql("studio can't be copied yet");
+    should(refusal.message).containEql('the MCP server "docs" (not read)');
+    should(refusal.message).endWith('Fix that first, then copy again.');
+  });
+
+  it('BG-029 should refuse to export while a login a runtime uses keeps its variables as a stand-in, and name the login', async () => {
+    const { service, state } = world();
+    state.reading = {
+      ...configReading(SET_UP_MODEL(), 'r'),
+      stoodInLogins: [{ id: 'claude-you', because: 'not read' }],
+    };
+    const refusal = await setupRefusal(service.exportBundle(), 'fleet_setup_refused');
+    should(refusal.message).containEql('the login "claude-you" keeps its variables as not read');
+    should(refusal.message).endWith('Fix the login in Logins first, then copy again.');
+  });
+
+  it('BG-029 should still export while a login no runtime uses stands in', async () => {
+    const { service, state } = world();
+    state.reading = {
+      ...configReading(SET_UP_MODEL(), 'r'),
+      stoodInLogins: [{ id: 'nobody-uses-this', because: 'not read' }],
+    };
+    should((await service.exportBundle()).machine).equal('studio');
+  });
+
   it('should leave out documents past the size a bundle may carry, and the emails when the list fails', async () => {
     const { service, state } = world();
     state.reading = configReading(SET_UP_MODEL(), 'r');
