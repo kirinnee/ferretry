@@ -11,15 +11,12 @@ import { type FleetManifest, harnessKeyOfKind, wrapperNameOf } from '../manifest
 /** A plain folder name: one segment, no dot-only name, nothing a path could climb with. */
 const HOME_ID = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 
-/** Whether `id` is a name a home folder can have. */
-export const isHomeId = (id: string): boolean => HOME_ID.test(id);
-
 /** The home id of an absolute path that is exactly `<fleetDirectory>/homes/<id>`, else `undefined`. */
-export function homeIdOf(home: string, fleetDirectory: string): string | undefined {
+function homeIdOf(home: string, fleetDirectory: string): string | undefined {
   const prefix = `${fleetDirectory}/homes/`;
   if (!home.startsWith(prefix)) return undefined;
   const id = home.slice(prefix.length);
-  return isHomeId(id) ? id : undefined;
+  return HOME_ID.test(id) ? id : undefined;
 }
 
 /** The homes of a manifest in manifest order; the runtimes of a home deduped in manifest order (an account's wrapper, then its runtimes'). */
