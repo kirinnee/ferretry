@@ -25,8 +25,12 @@ import {
   peerMessageKind,
   peerPreamble,
   type SendTarget,
+  authorizeSend,
+  SendDraftRefused,
+  SendPending,
   SendRefused,
   SessionInterrupt,
+  SessionSendService,
   sendPayload,
   sendRecordFor,
   sendRecordView,
@@ -55,6 +59,8 @@ import {
   terminalSeam,
   Unconfirmed,
 } from './harness-seam.ts';
+import { startupParkedPending } from './delivery/lib/service.ts';
+import { harnessSendTerminal } from './send-terminal.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferret-id.ts';
@@ -102,11 +108,33 @@ const refusalCode = (error: unknown): string => {
   );
 };
 
+/** A refusal of one of the send path's acts, as the port answers it: the route's own code, and the words. */
+const actRefusal = (error: unknown): ConversationRefusal => ({
+  code: refusalCode(error),
+  message: error instanceof Error ? error.message : String(error),
+});
+
 /** Today's session-layer refusals (`SendRefused` and its kinds), in the send route's taxonomy. */
 const sendRefusal = (error: unknown): never => {
   if (error instanceof SendRefused) throw new SessionSendError('refused', error.message);
   throw error;
 };
+
+/**
+ * The send path's own refusals (`SessionSendService`'s acts), in the send route's taxonomy: a person's draft rides along
+ * so the app can act on exactly that text, and a launch still in flight is pending (503), not refused.
+ */
+const sendActRefusal = (error: unknown): never => {
+  if (error instanceof SendPending) throw new SessionSendError('pending', error.message);
+  if (error instanceof SendDraftRefused) throw new SessionSendError('refused', error.message, error.draft);
+  return sendRefusal(error);
+};
+
+/**
+ * The journal fields that reach the log: ids and outcome words only. The queue-wait events carry the refusal's sentence
+ * in `reason`, and a sentence may quote a prompt or a person's words, so it is not here.
+ */
+const JOURNAL_LOG_KEYS = ['sendId', 'outcome', 'effect', 'from', 'by', 'turn', 'direct', 'proof'] as const;
 
 /** A ferret's lifecycle state, as the session status the interrupt's refusals are written against. */
 const statusOf = (ferret: FerretSummary): SessionStatus => {
@@ -172,6 +200,8 @@ export interface ConversationAHalf {
     | 'cancelSend'
     | 'enterSend'
     | 'composer'
+    | 'resubmitStuck'
+    | 'retractedDraft'
     | 'question'
     | 'answer'
     | 'compactAt'
@@ -225,7 +255,6 @@ export function buildConversationA(deps: {
   });
   const ledger = new StateSendLedger(kernel.state, clock);
   const channel = new StateSendChannel(kernel.state);
-  void channel; // handed to the send service when the full send path (queue, tracker) is wired
 
   const presence = new SharedDraftPresence();
   const drafts = new SharedDraftService(
@@ -268,6 +297,27 @@ export function buildConversationA(deps: {
     answer: async (_ferret: string, _request: AnswerToTerminal): Promise<SessionView> => pending(),
   };
   /**
+   * THE ONE LANE PER FERRET (as today's `serial.run(id, …)`): a typed send, a send-now's stop, cancel, Enter, the person's
+   * draft, the tracker's re-submit and an interrupt all run one at a time on a ferret, so a Cancel can never clear a
+   * message while its typing is still between paste and Enter, and a stop never lands between two keys of a send.
+   */
+  const lane = new KeyedSerialExecutor();
+  /** One ferret as the send path reads it; a ferret Ferrets does not know is 404. */
+  const readTarget = async (id: SessionId): Promise<SendTarget> => {
+    const ferret = await ferrets.get(id);
+    if (ferret === undefined) throw new SessionSendError('not_found', `session not found: ${id}`);
+    const question = await askedQuestion(id);
+    return {
+      id,
+      status: statusOf(ferret),
+      mode: ferret.mode ?? 'auto',
+      harness: ferret.harness,
+      // Ferrets keeps no turn count (turns are named by when they began), so none is claimed.
+      turn: 0,
+      ...(question === undefined ? {} : { pendingQuestion: { toolUseId: question.toolUseId } }),
+    };
+  };
+  /**
    * TODAY'S INTERRUPT (`SessionInterrupt`, the session layer's `interruptLocked`) over Ferrets' harness stop. The
    * session's own refusals come first — an unconfirmed shutdown, a pending structured question (`question.json`), a
    * ferret with no running turn — so the harness is never asked to press at a question; the harness then presses its
@@ -275,22 +325,9 @@ export function buildConversationA(deps: {
    * interactive pane handed back) from `interrupted`.
    */
   const interrupts = new SessionInterrupt({
-    serial: new KeyedSerialExecutor(),
+    serial: lane,
     repository: {
-      read: async (id): Promise<SendTarget> => {
-        const ferret = await ferrets.get(id);
-        if (ferret === undefined) throw new SessionSendError('not_found', `session not found: ${id}`);
-        const question = await askedQuestion(id);
-        return {
-          id,
-          status: statusOf(ferret),
-          mode: ferret.mode ?? 'auto',
-          harness: ferret.harness,
-          // Ferrets keeps no turn count (turns are named by when they began), so none is claimed.
-          turn: 0,
-          ...(question === undefined ? {} : { pendingQuestion: { toolUseId: question.toolUseId } }),
-        };
-      },
+      read: readTarget,
       transition: async (id, change) => {
         // The round the stop ended ends as interrupted, whichever way the ferret then settles (a round in progress
         // only: a stop at an idle ferret interrupted no round).
@@ -300,6 +337,49 @@ export function buildConversationA(deps: {
     },
     stopTurn: async id => await (await terminal.bind(id)).interrupt(),
   });
+  /**
+   * TODAY'S SEND-PATH ACTS on a send already made (`SessionSendService`: cancel, Enter, the person's draft, the tracker's
+   * re-submit), over the ferret's terminal through the harness seam (`harnessSendTerminal`, so every key is the runner's
+   * own act on the exact pane). They share the ledger the send writes and the one lane per ferret (`lane`, above). What is NOT wired is what
+   * only a TYPING send needs — the turn documents, the revive and the declared wait — so those ports refuse; the
+   * service's `send` and `reattempt` are not called from here (a send is `typeMessage`, below).
+   */
+  const unwiredTyping = (): never => pending(SEND_EXTRAS_UNAVAILABLE);
+  /** The send path's pane look and composer acts over the harness seam; the send-now reads the pane through it. */
+  const lookAtPane = harnessSendTerminal(ferrets);
+  const sendActs = new SessionSendService(
+    {
+      repository: {
+        read: async id => await readTarget(id).catch(() => undefined),
+        resolveSender: async () => undefined,
+        // Names and ids only: an act's outcome, never a message's words, a refusal's sentence or a person's draft. Only
+        // the keys of JOURNAL_LOG_KEYS are kept, so a field a later event adds is never logged by default.
+        journal: async (id, event, data) => {
+          const fields: Record<string, string | number | boolean> = { ferret: id };
+          for (const key of JOURNAL_LOG_KEYS) {
+            const value = data[key];
+            if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+              fields[key] = value;
+          }
+          kernel.log.info(event, fields);
+        },
+        // Ferrets' turn watch owns whose turn it is; an act here changes no state of its own.
+        transition: readTarget,
+      },
+      ledger,
+      terminal: lookAtPane,
+      turns: { writeTurn: unwiredTyping, writeQueuedPayload: unwiredTyping, clearMarkers: unwiredTyping },
+      channel,
+      gate: { launching: () => false, awaitSettled: async () => true },
+      reviver: { revive: unwiredTyping },
+      peerWaits: { endPeerWait: async () => undefined },
+      serial: lane,
+      clock,
+      // The tracker that looks for a send's true fate is not ticked from here yet (the BEFORE-GREEN #45(c) line).
+      tracking: { track: () => undefined },
+    },
+    defaultSessionSendSettings,
+  );
   /**
    * Stops the ferret's turn and answers its view, with the status the stop really left (`interrupted`, or
    * `awaiting_user` for an interactive pane handed back to its person). A closed gate answers before anything is read.
@@ -311,20 +391,17 @@ export function buildConversationA(deps: {
   };
   /**
    * Whether a send may be typed at all, before its text is prepared, opened or kept (a repeat of a kept id is answered
-   * without it). A closed gate refuses it. And refuses what the harness seam does not type yet: files, an fyi message
-   * (held to the turn's end), the send-now flag and a reply request would be dropped, and the send answered `sent` all
-   * the same (U3 carries them). A field is refused only when it asks for something: the CLI always sends `now: false`
+   * without it). A closed gate refuses it. And refuses what the harness seam does not type yet: files or an fyi message
+   * (held to the turn's end) would be dropped, and the send answered `sent` all the same. A send-now is refused while the
+   * interrupt gate is closed, as it presses a stop key. A field is refused only when it asks for something: the CLI always sends `now: false`
    * and a label (`action` by default), and those type exactly as the seam types.
    */
   const mayGo = (request: UnwiredSend): void => {
     if (!gate.send) pending(SEND_UNAVAILABLE);
-    if (
-      (request.attachmentIds?.length ?? 0) > 0 ||
-      request.label === 'fyi' ||
-      request.now === true ||
-      request.replyExpected === true
-    )
-      pending(SEND_EXTRAS_UNAVAILABLE);
+    // A send-now presses a stop key: with the interrupt gate closed (a stop could quit the agent) it presses nothing, so
+    // it types nothing either.
+    if (request.now === true && !gate.interrupt) pending(INTERRUPT_UNAVAILABLE);
+    if ((request.attachmentIds?.length ?? 0) > 0 || request.label === 'fyi') pending(SEND_EXTRAS_UNAVAILABLE);
   };
   /**
    * THE TEXT THE AGENT READS (today's `payload()`): the message, trimmed, and — when a FERRET sent it — the protocol's
@@ -384,6 +461,38 @@ export function buildConversationA(deps: {
     }
   };
   /**
+   * TODAY'S SEND-NOW STOP (`locked`: `request.now === true && first.activeWork`, after `observe` and `refuseWhileParked`).
+   * The pane is READ before any key, and the stop key is pressed only for a pane that is busy and nothing else:
+   *  - a pane Codex holds a submission on until startup ends is PENDING (nothing pressed, nothing typed);
+   *  - an idle pane is not pressed: nothing is running, and the pane may be parked on a prompt the stop would answer;
+   *  - a pane behind a blocking prompt (a permission, a picker) is not pressed: Escape would answer it for the person;
+   * Where it does not press, the send goes on as any send does, and the delivery decides (type, queue, or refuse).
+   * A ferret holding a pending structured question never reaches here: {@link refuseWhileAsking} refuses every send to it
+   * first. That check reads `question.json`, which NOTHING writes on 5.0 yet (the observer's question part is not
+   * mounted), so until it does, only this pane read stands between a send-now and a question form — and it is unproven on
+   * an AskUserQuestion screen (see the conversation line in `ports-pending.json`).
+   */
+  const stopForNow = async (ferret: SessionId, bound: Awaited<ReturnType<typeof terminal.bind>>): Promise<void> => {
+    const pane = await lookAtPane.observe(ferret);
+    // Pending, as the route and the port answer a launch still in flight (503 `session_launching`).
+    if (pane.startupParked === true) throw new SessionSendError('pending', startupParkedPending(ferret).message);
+    if (!pane.activeWork || pane.blockingPrompt !== undefined) return;
+    await bound.stopActive();
+  };
+  /**
+   * TODAY'S `authorizeSend` REFUSAL, for every send (plain or now): a ferret holding an unanswered structured question
+   * is showing a form, not a composer, and typing prose into it selects whichever option the keys land on. Nothing is
+   * typed, nothing is kept, and the sentence is today's (`SendUnavailable`, answered as the route answers every
+   * session-side refusal: 409 `send_refused`). Inert until something writes `question.json` (see {@link stopForNow}).
+   */
+  const refuseWhileAsking = async (ferret: SessionId): Promise<void> => {
+    try {
+      authorizeSend(await readTarget(ferret), []);
+    } catch (error) {
+      sendRefusal(error);
+    }
+  };
+  /**
    * Types one message. The send is ledgered as accepted BEFORE a key goes (the same id twice is one message), and a
    * refusal that typed nothing takes the record back so the id may start over. A send that was typed and not proven is
    * settled `unaccounted` and answered `send_unconfirmed` with its id, never typed again; a runner failure nobody could
@@ -391,18 +500,25 @@ export function buildConversationA(deps: {
    * the tracker's, so a delivered send's fate stays `accepted` here. A send to a ferret still working on its turn goes
    * to the harness's own queue ({@link deliverOrQueue}): `queued` once the pane shows it held there.
    */
-  const typeMessage = async (
-    ferret: SessionId,
-    request: UnwiredSend & {
-      readonly message: string;
-      readonly sendId: string;
-      readonly senderSessionId?: string | undefined;
-    },
-  ): Promise<SendResult> => {
+  type TypedSend = UnwiredSend & {
+    readonly message: string;
+    readonly sendId: string;
+    readonly senderSessionId?: string | undefined;
+    /** The Warden is speaking (`ConversationCaller` `warden`): typed bare, recorded as the daemon's own. */
+    readonly warden?: true;
+  };
+  /** One typed send on the ferret's one lane ({@link lane}): nothing else presses a key on this ferret meanwhile. */
+  const typeMessage = async (ferret: SessionId, request: TypedSend): Promise<SendResult> =>
+    await lane.run(ferret, async () => await typeLocked(ferret, request));
+  const typeLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
     const bound = await terminal.bind(ferret);
+    await refuseWhileAsking(ferret);
     const { text, fromName } = await typedText(ferret, request);
+    // SEND-NOW: the turn is stopped FIRST and BEFORE the record exists: a stop that is refused (a hold, a gone pane, a
+    // runner that cannot stop) types nothing and keeps nothing, so the id starts over. The pane is READ before any key.
+    if (request.now === true) await stopForNow(ferret, bound);
     const at = kernel.clock.now();
     const accepted = await ledger.accept(ferret, {
       sendId: request.sendId,
@@ -415,7 +531,9 @@ export function buildConversationA(deps: {
       fate: 'accepted',
       attempt: 1,
       attemptAt: at,
-      senderKind: request.senderSessionId === undefined ? 'human' : 'agent',
+      senderKind: request.warden === true ? 'daemon' : request.senderSessionId === undefined ? 'human' : 'agent',
+      // The Warden's words are Ferretry's own, shown as such (the sender chip reads `by`), as today's remedies were.
+      ...(request.warden === true ? { by: { kind: 'ferretry' as const, feature: 'Warden' } } : {}),
       ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
       ...(fromName === undefined ? {} : { fromName }),
     });
@@ -586,9 +704,14 @@ export function buildConversationA(deps: {
           await queue.edit(parseSessionId(id), messageId, text).catch(queueFailure),
         cancelQueued: async (id, messageId) => await queue.cancel(parseSessionId(id), messageId).catch(queueFailure),
         retry: async () => pending(),
-        cancel: async () => pending(),
-        submit: async () => pending(),
-        composer: async () => pending(),
+        cancel: async (id, sendId) =>
+          sendRecordView(await sendActs.cancel(parseSessionId(id), sendId).catch(sendActRefusal)),
+        submit: async (id, sendId) =>
+          sendRecordView(await sendActs.submit(parseSessionId(id), sendId).catch(sendActRefusal)),
+        composer: async (id, request) => ({
+          action: request.action,
+          outcome: await sendActs.resolveDraft(parseSessionId(id), request.action, request.draft).catch(sendActRefusal),
+        }),
         handoff: async () => pending(),
       },
       sentDraftClearer(drafts),
@@ -623,6 +746,7 @@ export function buildConversationA(deps: {
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
             // The route and the port follow one rule: a ferret is the message's SENDER, never a different target's rule.
             ...(caller.kind === 'ferret' ? { senderSessionId: caller.ferret } : {}),
+            ...(caller.kind === 'warden' ? { warden: true as const } : {}),
           }),
         );
       } catch (error) {
@@ -680,9 +804,40 @@ export function buildConversationA(deps: {
     sends: async ferret => ({ sends: [...(await records(ferret))] }),
     sendRecord: async (ferret, sendId) => sendRecordFor(await ledger.list(ferret), await queue.list(ferret), sendId),
     retrySend: async () => err(pendingRefusal()),
-    cancelSend: async () => err(pendingRefusal()),
-    enterSend: async () => err(pendingRefusal()),
-    composer: async () => err(pendingRefusal()),
+    cancelSend: async (ferret, sendId) => {
+      try {
+        return ok(sendRecordView(await sendActs.cancel(ferret, sendId).catch(sendActRefusal)));
+      } catch (error) {
+        return err(actRefusal(error));
+      }
+    },
+    enterSend: async (ferret, sendId) => {
+      try {
+        return ok(sendRecordView(await sendActs.submit(ferret, sendId).catch(sendActRefusal)));
+      } catch (error) {
+        return err(actRefusal(error));
+      }
+    },
+    resubmitStuck: async (ferret, caller, sendId) => {
+      // Only the Warden presses a stuck send's Enter: nobody else is the daemon, and a ferret or the owner has the
+      // ordinary send, cancel and Enter above. Checked before a pane is read.
+      if (caller.kind !== 'warden')
+        return err({ code: 'forbidden', message: "only the Warden re-submits a stuck send of Ferretry's own" });
+      try {
+        return ok(await sendActs.resubmitStuck(ferret, sendId).catch(sendActRefusal));
+      } catch (error) {
+        return err(actRefusal(error));
+      }
+    },
+    retractedDraft: async ferret => await sendActs.retractedDraft(ferret).catch(() => undefined),
+    composer: async (ferret, action, draft) => {
+      try {
+        const outcome = await sendActs.resolveDraft(ferret, action, draft).catch(sendActRefusal);
+        return ok({ action, outcome });
+      } catch (error) {
+        return err(actRefusal(error));
+      }
+    },
     question: async ferret => await askedQuestion(ferret),
     answer: async (ferret, request) => {
       try {

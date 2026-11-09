@@ -178,6 +178,7 @@ export default definePlugin({
       }),
     ],
     cli: [
+      verb('runtimes', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
       verb('runtime ls', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
       verb('runtime add', {
         summary: 'add a runtime: which sign-in, which profile, and whether Ferretry launches it as an agent',
@@ -196,6 +197,7 @@ export default definePlugin({
       verb('runtime scan', {
         summary: 'what the first run would find: each harness, its sign-in, instructions, settings, servers and skills',
       }),
+      verb('profiles', { summary: 'the profiles on this machine: scope, layers, overrides and where each is used' }),
       verb('profile ls', { summary: 'the profiles on this machine, each with its scope' }),
       verb('profile show', { summary: 'one profile: its layers, overrides and where it is used' }),
       verb('profile build', { summary: 'build a new profile from layers' }),
