@@ -80,12 +80,8 @@ import {
 } from '../account/clone.ts';
 import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
-import {
-  FleetApplyAfterConfigError,
-  FleetApplyFailureError,
-  type FleetDocumentWrite,
-  type FleetModelApplyPlan,
-} from '../provisioning.ts';
+import { type FleetDocumentWrite, type FleetModelApplyPlan } from '../provisioning.ts';
+import { configurationLanded, failedApplySentence } from './failed-apply.ts';
 import {
   freeName,
   type HostHarnessScan,
@@ -180,33 +176,6 @@ export interface CloneConfigFiles {
     ifMatch: string,
     mayLoosen: boolean,
   ): Promise<{ readonly outcome: 'applied' | 'pending' }>;
-}
-
-/**
- * What a failed apply says it left behind, for EVERY way it can fail. A document of the fleet folder rides the
- * provisioner's own boundary and rolls back with the plan. A configuration file is written BEFORE the plan (the files
- * are the source of truth, and the next republish retries the plan from them) and is NOT rolled back with it, so when
- * the adapter says files landed (`FleetApplyAfterConfigError`) the sentence names them, whatever the apply then threw:
- * a rollback, a refused source, a claim it could not take. "Nothing was left half-changed" is said only when the fleet
- * was rolled back cleanly AND no configuration file landed first; a rollback that could not be verified, and a fleet
- * that committed before its history failed, already say in their own words what they left and add no such claim.
- */
-export function failedApplySentence(error: unknown, landed: readonly string[] = []): string {
-  const cause = error instanceof FleetApplyAfterConfigError ? error.failure : error;
-  const failure = errorMessage(cause);
-  const written = [...new Set([...landed, ...(error instanceof FleetApplyAfterConfigError ? error.written : [])])];
-  if (written.length > 0) return `${failure}; ${configurationLanded(written)}`;
-  const cleanRollback = cause instanceof FleetApplyFailureError && cause.failure.kind === 'rolled-back';
-  return cleanRollback ? `${failure}; nothing was left half-changed` : failure;
-}
-
-/** What a person is told when configuration files were written before the change then failed. */
-function configurationLanded(written: readonly string[]): string {
-  const named =
-    written.length === 1
-      ? `the configuration ${written[0]} was written first and is`
-      : `the configuration files ${written.join(', ')} were written first and are`;
-  return `${named} NOT rolled back with the fleet`;
 }
 
 /** Every refusal the setup routes answer with, so a client branches on cause rather than on prose. */
@@ -1492,17 +1461,31 @@ export class FleetSetupService {
     };
     const instructions: Record<string, string> = {};
     for (const [name, component] of Object.entries(model.components.instructions)) {
+      if (component.text !== undefined) {
+        instructions[name] = component.text;
+        continue;
+      }
+      if (component.file === undefined) continue;
       const body = await text(component.file);
       if (body !== undefined) instructions[name] = body;
     }
     const settings: Record<string, SettingsObject> = {};
     for (const [name, component] of Object.entries(model.components.settings)) {
+      // A document the owning plugin projected is the body; otherwise the file in the asset tree is read.
+      if (component.document !== undefined) {
+        settings[name] = component.document;
+        continue;
+      }
       if (component.file === undefined) continue;
       const body = parsed(await text(component.file), SETTINGS_FORMAT[component.harness]);
       if (body !== undefined) settings[name] = body;
     }
     const hooks: Record<string, SettingsObject> = {};
     for (const [name, component] of Object.entries(model.components.hooks)) {
+      if (component.document !== undefined) {
+        hooks[name] = component.document;
+        continue;
+      }
       if (component.file === undefined) continue;
       const body = parsed(await text(component.file), 'json');
       if (body !== undefined) hooks[name] = body;

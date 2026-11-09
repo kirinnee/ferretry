@@ -1,3 +1,4 @@
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
 import { durationWords, InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { CAPABILITY_NAMES, type CapabilityName, CapabilityGrantsSchema } from '@ferretry/core-gate/contract';
@@ -130,8 +131,8 @@ export function formatPairingFragment(seed: PairingLinkSeed): string {
   return `v1;url=${encodeURIComponent(seed.daemonUrl)};code=${code};fp=${encodeURIComponent(daemonId)}`;
 }
 
-/** The hosted app's origin: where a pairing link, a catalog and a plan's card link point unless a machine serves its own. */
-export const HOSTED_APP_ORIGIN = 'https://ferretry.pages.dev';
+/** The hosted app's origin: where a pairing link, a catalog and a plan's card link point unless a machine serves its own. Owned by the kernel's hosted-app module. */
+export { HOSTED_APP_ORIGIN };
 
 export interface AppOriginChoice {
   /** The address to build links on: the machine's own, or the hosted app when it set none or set one that is refused. */

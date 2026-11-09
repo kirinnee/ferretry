@@ -6,6 +6,7 @@
  * and `harness-home` roots, `daemon/host-assembly.ts`) or a test supply the implementation. Nothing here falls back to
  * `node:fs`.
  */
+import type { StoodInLogin } from '../lib/account/runtimes-model.ts';
 import type { RuntimeRename } from '../lib/service/foreign.ts';
 import type { DisplacedState, FleetApplyPlan, FleetApplyPreview, UnrestoredPath } from '../lib/provisioning.ts';
 import type { FleetDisk } from './fleet-disk.ts';
@@ -58,11 +59,16 @@ interface TextStore {
 
 // ─── the configuration files (kernel-owned) ──────────────────────────────────────────────────────────────────────
 
-/** One configuration file edit: its path under `config/`, the new text (`undefined` removes it) and the etag it was composed against. */
+/**
+ * One configuration file edit: its path under `config/`, and either the new text (`undefined` with no patch removes it)
+ * or a patch of top-level keys the kernel's writer applies to the file it holds (`undefined` removes a key). `expect` is
+ * the etag it was composed against, when the caller read one.
+ */
 interface ConfigFileEdit {
   readonly path: string;
-  readonly content: string | undefined;
-  readonly expect: string;
+  readonly content?: string | undefined;
+  readonly patch?: Readonly<Record<string, unknown>>;
+  readonly expect?: string;
 }
 
 /**
@@ -81,6 +87,16 @@ interface ConfigLoad<Model, Files = unknown> {
     readonly effective: { readonly model: Model };
   };
   readonly files: Files;
+  /**
+   * What stands in, in THIS load, for a part that could not be read (empty when every part was read). It belongs to the
+   * load and is never a field shared between loads, so a decision about a plan asks the load the plan was made from.
+   */
+  readonly unreadable: readonly string[];
+  /**
+   * The environment logins whose variables stand in, in THIS load. They block only a model that names one (a runtime
+   * using it), so a change that stops using a login stays possible while a runtime on it is in effect.
+   */
+  readonly stoodInLogins: readonly StoodInLogin[];
 }
 
 export interface ConfigFilesPort<Model> {

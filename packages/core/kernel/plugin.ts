@@ -216,6 +216,10 @@ export default definePlugin({
       }),
     ],
   },
+  /** Never reached by a ferret, through any root: the daemon's signing key (`PrivacyDecl`). */
+  privacy: {
+    private: ['identity.json'],
+  },
   data: { publishes: [PluginsChanged, ConfigChanged], config: [PluginsConfig] },
   hooks: {
     offers: [{ hook: Carriers }, { hook: SessionModes }, { hook: DoctorChecks }],

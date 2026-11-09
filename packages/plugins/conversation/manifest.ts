@@ -329,6 +329,10 @@ export default definePlugin({
     renderers: [renderer('ask', { source: 'question' })],
   },
 
+  /** Never reached by a ferret, through any root: the key that signs a message token (`PrivacyDecl`). */
+  privacy: {
+    private: ['message-token.key'],
+  },
   data: {
     state: CONVERSATION_STATE,
     config: [CONVERSATION_CONFIG],

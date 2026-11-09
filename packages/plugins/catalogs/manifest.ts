@@ -583,6 +583,10 @@ export default definePlugin({
     ],
   },
 
+  /** Never reached by a ferret, through any root: link keys, member passkeys and member unlocks (`PrivacyDecl`). */
+  privacy: {
+    private: ['link-keys.json', 'member-passkeys.json', 'member-unlocks.json'],
+  },
   data: {
     config: [CatalogsConfigFile],
     state: [

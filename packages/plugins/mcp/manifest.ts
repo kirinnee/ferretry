@@ -4,6 +4,7 @@ import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferre
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { PROFILE_COMPONENTS_KEY, ProfileMcpSource } from '@ferretry/plugin-runtimes/contract';
 import {
   MCP_AUDIT,
   MCP_CONFIG,
@@ -190,6 +191,17 @@ export default definePlugin({
     settings: [settingsTab('mcp', { label: 'MCP servers', order: 50 })],
   },
 
+  /** Never reached by a ferret, through any root: the sealed OAuth refresh tokens and client secrets (`PrivacyDecl`). */
+  privacy: {
+    private: ['oauth-secrets.json'],
+    public: [
+      {
+        path: 'oauth.json',
+        reason:
+          'Sign-in facts that are not secret: issuer, endpoints, client id and expiry, never a token; the refresh tokens are sealed in oauth-secrets.json.',
+      },
+    ],
+  },
   data: {
     state: [MCP_INVENTORY_STATE, MCP_OAUTH_STATE, MCP_OAUTH_SECRETS.state, MCP_PAYLOADS_STATE],
     config: [MCP_CONFIG],
@@ -198,7 +210,8 @@ export default definePlugin({
   },
 
   hooks: {
-    takes: [{ hook: LaunchParts }],
+    // Runtimes reads the `mcp` components a profile names through this plugin, which alone owns them (its `takers` list).
+    takes: [{ hook: LaunchParts }, { hook: ProfileMcpSource, key: PROFILE_COMPONENTS_KEY }],
   },
 
   doctor: ['mcp-inventory'],

@@ -33,7 +33,7 @@ import {
 import { isAbsolute, join, sep } from 'node:path';
 import { z } from 'zod';
 import type { KeptItem } from '../report.ts';
-import { agentHomesRoot, inside } from '../v5/harness-paths.ts';
+import { agentHomesRoot, inside, previewFolder } from '../v5/harness-paths.ts';
 import { info, json, type V4Config } from '../v4/ferrets.ts';
 import { MAX_AGENT_PINS, V4AgentPinFile, V4PinSnapshot } from '../v4/pins.ts';
 import type { StepContext } from './index.ts';
@@ -118,12 +118,17 @@ export function sessionConfigDocument(
     sessionCapabilityHash,
     ...rest
   } = raw;
-  const isName = typeof agent === 'string' && !isAbsolute(agent);
-  const keepHash = !source.stopped && raw.credentialRevoked !== true && sessionCapabilityHash !== undefined;
+  const preview = ctx.preview === true;
+  const isName = (typeof agent === 'string' && !isAbsolute(agent)) || preview;
+  const keepHash = !preview && !source.stopped && raw.credentialRevoked !== true && sessionCapabilityHash !== undefined;
+  // The preview launches nothing from v4: no command, no pane address, no conversion, no live move or transfer plan.
+  const { tmuxSession: _tmux, conversion: _conversion, ...previewRest } = rest;
+  const kept = preview ? previewRest : rest;
   const body: Json = {
-    ...rest,
+    ...kept,
     agent: isName ? source.runtime : wrapper(ctx, source.runtime, agent),
-    ...(command === undefined
+    ...(preview ? { cwd: previewFolder(ctx, source.config.cwd) } : {}),
+    ...(command === undefined || preview
       ? {}
       : {
           command: Array.isArray(command)
@@ -131,18 +136,27 @@ export function sessionConfigDocument(
             : command,
         }),
     ...(source.transcript === undefined ? {} : { transcript: source.transcript }),
-    ...(rest.conversion === undefined ? {} : { conversion: conversion(ctx, rest.conversion) }),
-    ...(migration === undefined ? {} : { move: migration }),
-    ...(migrations === undefined ? {} : { moves: migrations }),
+    ...(kept.conversion === undefined ? {} : { conversion: conversion(ctx, kept.conversion) }),
+    ...(migration === undefined || preview ? {} : { move: migration }),
+    ...(migrations === undefined || preview ? {} : { moves: migrations }),
     ...(keepHash ? { capabilityHash: sessionCapabilityHash } : {}),
   };
   return { format: 1, ...listedOnly(body, CONFIG_KEYS, dropped) };
 }
 
 /** `state.json`: `format` first, the old `attention` key and cleared (`null`) values left out, then v5's list only. */
-export function sessionStateDocument(raw: Json, dropped: Set<string> = new Set()): Json {
+export function sessionStateDocument(raw: Json, dropped: Set<string> = new Set(), preview = false): Json {
   const { format: _format, attention: _attention, ...rest } = raw;
-  const body = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== null));
+  const live = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== null));
+  // The preview's ferrets are all stopped: no process id, no live-pane facts, no remote-control link.
+  const body = preview
+    ? Object.fromEntries(
+        Object.entries({ ...live, status: 'stopped' }).filter(
+          ([key]) =>
+            !['pid', 'promptReady', 'remoteControlUrl', 'openTools', 'pendingQuestion', 'health'].includes(key),
+        ),
+      )
+    : live;
   return { format: 1, ...listedOnly(body, STATE_KEYS, dropped) };
 }
 
@@ -233,7 +247,7 @@ export async function prepareDetails(ctx: StepContext, sources: readonly Details
 
     const state = await json(join(folder, 'state.json'), Document);
     if (state !== undefined) {
-      const document = StateDocument.parse(sessionStateDocument(state, droppedState));
+      const document = StateDocument.parse(sessionStateDocument(state, droppedState, ctx.preview === true));
       if (document.id !== id) throw new Error('v4 state identity mismatch');
       writes.push(() => ctx.v5.json(file(target('state.json'), StateDocument), document));
       counts.states += 1;

@@ -1,6 +1,15 @@
 import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { BEFORE_SUFFIX, insideFence, internalRootFolder } from '../contract/home.ts';
 import type { FileIdentity, HostFs } from './adapters/node-fs.ts';
+import {
+  identityKey,
+  type IndexInput,
+  type PrivateIndex,
+  type PrivateSnapshot,
+  privateIndexOf,
+  recheckIntervalOf,
+  type TruncationWatcher,
+} from './fence-index.ts';
 import { IDENTITY_FILE } from './identity.ts';
 import { INTERNAL_ROOT_FOLDERS } from './internal-roots.ts';
 
@@ -28,6 +37,12 @@ export const within = (directory: string, path: string): boolean => {
 export const same = (a: { readonly device: bigint; readonly inode: bigint }, b: FileIdentity | undefined): boolean =>
   b !== undefined && a.device === b.device && a.inode === b.inode;
 
+/** A set of identity keys that is only ever asked "is this one in it?": what the guards need, however it is held. */
+interface KeyLookup {
+  readonly has: (key: string) => boolean;
+  readonly size: number;
+}
+
 /** The fence by name (as configured and as resolved) and by identity. */
 export interface Fence {
   readonly named: string;
@@ -38,7 +53,15 @@ export interface Fence {
    * lives.
    */
   readonly places: readonly string[];
+  /** Every identity the fence holds. Read on demand: building it costs as many entries as there are places. */
   readonly identities: readonly { readonly device: bigint; readonly inode: bigint }[];
+  /** {@link identities} as comparable keys, for a lookup that does not grow with how many places are held. */
+  readonly keys: KeyLookup;
+  /**
+   * The devices of the private trees whose members were not all indexed: an entry on one of them cannot be proven
+   * not to be an alias of an unindexed member, so it is refused ({@link fencedReal}).
+   */
+  readonly closed: ReadonlySet<bigint>;
 }
 
 /**
@@ -75,6 +98,60 @@ export function internalRootPins(stateEntries: readonly string[]): readonly stri
     .flatMap(plugin => INTERNAL_ROOT_FOLDERS.map(root => internalRootFolder(plugin, root)));
 }
 
+/**
+ * The kept index of the places the plugins declared private ({@link privateIndexOf}): the identity of each declared
+ * place and, for a folder, of what it holds to a bounded depth (`credentials/<id>/auth.json`, a browser profile's
+ * cookies, a ferret's `environment.json`), so a member bind mounted or linked out under another name is held as well.
+ * One index per disk, home, declared list and look interval, shared by every root of every plugin.
+ */
+const INDEXES = new WeakMap<HostFs, Map<string, PrivateIndex>>();
+
+function indexOf(
+  fs: HostFs,
+  real: string,
+  privateFiles: readonly string[],
+  recheckMs: number,
+  watcher?: TruncationWatcher,
+): PrivateIndex {
+  const kept = INDEXES.get(fs) ?? new Map<string, PrivateIndex>();
+  INDEXES.set(fs, kept);
+  const key = JSON.stringify([real, privateFiles, recheckIntervalOf(recheckMs)]);
+  const found = kept.get(key);
+  const index =
+    found ??
+    privateIndexOf(
+      fs,
+      real,
+      {
+        pins: stateEntries => [...PINNED_KEY_PATHS, ...internalRootPins(stateEntries)],
+        private: privateFiles,
+      } satisfies IndexInput,
+      { recheckMs },
+    );
+  if (found === undefined) kept.set(key, index);
+  // Whoever asks may watch: the host hands every root the one watcher, so a truncation is told once, to it.
+  if (watcher !== undefined) index.watch(watcher);
+  return index;
+}
+
+/** What a snapshot's places are as lookups, made once per snapshot: every owner's fence and every guard reads them. */
+interface SnapshotKeys {
+  readonly keys: ReadonlySet<string>;
+  readonly closed: ReadonlySet<bigint>;
+}
+const SNAPSHOT_KEYS = new WeakMap<PrivateSnapshot, SnapshotKeys>();
+
+function keysOf(snapshot: PrivateSnapshot): SnapshotKeys {
+  const kept = SNAPSHOT_KEYS.get(snapshot);
+  if (kept !== undefined) return kept;
+  const made = {
+    keys: new Set(snapshot.places.map(place => place.key)),
+    closed: new Set(snapshot.closed.map(tree => tree.device)),
+  };
+  SNAPSHOT_KEYS.set(snapshot, made);
+  return made;
+}
+
 /** The folders of the home that today's fence holds beside the home itself (`NodeStateHomes([home, state, config])`). */
 const HOME_FOLDERS: readonly string[] = ['state', 'config'];
 
@@ -88,12 +165,19 @@ const isAbsent = (error: unknown): boolean => {
  * The fence of `home`: its real path, the real path and identity of its `state` and `config` folders (today's homes
  * `[home, state, config]`, each resolved to where it really is, so one linked or bind-mounted out of the home is held
  * wherever it lives), and the identity of the home, of every `<home>-before-*` and `state/<id>-before-*` folder, and of
- * each pinned key file and folder ({@link PINNED_KEY_PATHS}) that is there — the entry itself, never followed, as
+ * each pinned key file and folder ({@link PINNED_KEY_PATHS}) and each private place the plugins declared
+ * (`privateFiles`, the composed list of every manifest's `privacy.private`) that is there — the entry itself, never followed, as
  * today's `resolveStateHomes` takes it. A home that cannot be resolved, a `state` or `config` that is there but cannot
  * be resolved or is not a folder, or a key path that cannot be looked at, fails closed (throws); one that is absent is
  * left out.
  */
-export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
+export async function fenceOf(
+  fs: HostFs,
+  home: string,
+  privateFiles: readonly string[] = [],
+  recheckMs = 0,
+  watcher?: TruncationWatcher,
+): Promise<Fence> {
   const named = absolute(home, 'the home');
   const real = await fs.realpath(named);
   const folders = [real];
@@ -103,7 +187,7 @@ export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
     if (entry.startsWith(`${name}-before-`) && BEFORE_SUFFIX.test(entry)) folders.push(join(parent, entry));
   const stateEntries = await fs.list(join(real, 'state'));
   for (const entry of stateEntries) if (BEFORE_SUFFIX.test(entry)) folders.push(join(real, 'state', entry));
-  const identities = [];
+  const identities: FileIdentity[] = [];
   for (const folder of folders) {
     const identity = await fs.identity(folder);
     if (folder === real && identity?.kind !== 'directory') throw new Error('the home cannot be identified');
@@ -122,11 +206,20 @@ export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
     places.push(place);
     identities.push(identity);
   }
-  for (const key of [...PINNED_KEY_PATHS, ...internalRootPins(stateEntries)]) {
-    const identity = await fs.identity(join(real, key));
-    if (identity !== undefined) identities.push(identity);
-  }
-  return { named, real, places, identities };
+  const snapshot = await indexOf(fs, real, privateFiles, recheckMs, watcher).snapshot();
+  const own = new Set(identities.map(identityKey));
+  const indexed = keysOf(snapshot);
+  return {
+    named,
+    real,
+    places,
+    // The private places can be thousands: this list is built only for a caller that asks for it, never per answer.
+    get identities() {
+      return [...identities, ...snapshot.places.map(place => ({ device: place.device, inode: place.inode }))];
+    },
+    keys: { has: key => own.has(key) || indexed.keys.has(key), size: own.size + indexed.keys.size },
+    closed: indexed.closed,
+  };
 }
 
 /**
@@ -148,11 +241,93 @@ export function fencedByName(fence: Fence, path: string): boolean {
  */
 export async function fencedReal(fs: HostFs, fence: Fence, real: string): Promise<boolean> {
   if (fencedByName(fence, real)) return true;
+  for (let current = absolute(real, 'the path'), first = true; ; current = dirname(current), first = false) {
+    const entry = await fs.identity(current).catch(() => undefined);
+    if (entry === undefined) return true;
+    if (fence.keys.has(identityKey(entry))) return true;
+    // A private tree that was not indexed whole fails closed: this entry cannot be proven not to be an alias of a member.
+    if (first && fence.closed.has(entry.device)) return true;
+    if (dirname(current) === current) return false;
+  }
+}
+
+/**
+ * What a root that is NOT an owner's must still refuse (§7.7): the home's private places — the key paths, every plugin's
+ * declared private files and every other plugin's internal root folders — by name and by IDENTITY, so a file bind
+ * mounted or hard linked into a plugin's own folder under any name is refused (the hard link is already refused by
+ * link count; a bind mount keeps one link, so identity is the only thing that sees it). A place the root itself holds
+ * (its base, a folder above it, or anything below it) is the root's own and is left out.
+ */
+export interface PrivateGuard {
+  readonly keys: KeyLookup;
+  /**
+   * The devices of the private trees that were not indexed whole (a budget was reached) and are not the root's own: an
+   * entry on one of them cannot be proven not to be an alias of an unindexed member, so it is held. An entry on
+   * another device is proven not to be one (an alias keeps its source's device).
+   */
+  readonly closed: ReadonlySet<bigint>;
+}
+
+const GUARDS = new WeakMap<PrivateSnapshot, Map<string, PrivateGuard>>();
+
+/**
+ * Two places are nested when either holds the other, by name: the root's own folder and what lives in it. Both are
+ * normalized absolute real paths (the index joins them, `absolute` normalizes the base), so a prefix test is exact and
+ * does not resolve a path per place: this runs over every place the index holds.
+ */
+const nested = (a: string, b: string): boolean => {
+  const below = (outer: string, inner: string): boolean =>
+    inner === outer || inner.startsWith(outer.endsWith(sep) ? outer : `${outer}${sep}`);
+  return below(a, b) || below(b, a);
+};
+
+/**
+ * The guard for a root whose real base is `base`: the identity of each private place that is there, except the
+ * places that are the root's own. Recomputed on every ask (a file replaced by a rename has a new inode). A place that
+ * cannot be looked at fails closed (throws), as the fence does.
+ */
+export async function privateGuardOf(
+  fs: HostFs,
+  home: string,
+  base: string,
+  privateFiles: readonly string[],
+  recheckMs = 0,
+  watcher?: TruncationWatcher,
+): Promise<PrivateGuard> {
+  const real = await fs.realpath(absolute(home, 'the home'));
+  const snapshot = await indexOf(fs, real, privateFiles, recheckMs, watcher).snapshot();
+  // One guard per snapshot and base: the kept snapshot is the same object until the places change.
+  const bases = GUARDS.get(snapshot) ?? new Map<string, PrivateGuard>();
+  GUARDS.set(snapshot, bases);
+  const kept = bases.get(base);
+  if (kept !== undefined) return kept;
+  const indexed = keysOf(snapshot);
+  // Almost every root holds none of the places: then the snapshot's own set is the guard's, not a copy of it.
+  const theirs = snapshot.places.some(place => nested(place.path, base));
+  const keys = theirs
+    ? new Set(snapshot.places.filter(place => !nested(place.path, base)).map(place => place.key))
+    : indexed.keys;
+  const made = {
+    keys,
+    closed: new Set(snapshot.closed.filter(tree => !nested(tree.path, base)).map(tree => tree.device)),
+  };
+  bases.set(base, made);
+  return made;
+}
+
+/**
+ * Whether `real` is a private place or inside one, by identity: the entry itself first, then every folder up to and
+ * including the root's `base`, as {@link fencedReal} walks. A path that cannot be looked at is refused.
+ */
+export async function privatelyHeld(fs: HostFs, guard: PrivateGuard, real: string, base: string): Promise<boolean> {
+  if (guard.keys.size === 0 && guard.closed.size === 0) return false;
   for (let current = absolute(real, 'the path'); ; current = dirname(current)) {
     const entry = await fs.identity(current).catch(() => undefined);
     if (entry === undefined) return true;
-    if (fence.identities.some(identity => same(identity, entry))) return true;
-    if (dirname(current) === current) return false;
+    if (guard.keys.has(identityKey(entry))) return true;
+    // The base is the root's own folder, not an alias; everything below it on a closed tree's device is unproven.
+    if (current !== base && guard.closed.has(entry.device)) return true;
+    if (current === base || dirname(current) === current || !within(base, dirname(current))) return false;
   }
 }
 

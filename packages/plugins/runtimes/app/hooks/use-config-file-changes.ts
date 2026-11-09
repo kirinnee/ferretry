@@ -5,7 +5,7 @@ import { ConfigChanged } from '@ferretry/kernel/contract';
 import type { LiveRuntimesClient } from '../lib/client.ts';
 
 /**
- * Calls `onChange` when the kernel's `kernel.config-changed` frame (over `GET /v1/bus`) names THIS plugin's file at
+ * Calls `onChange` when the kernel's `kernel.config-changed` frame (over the kernel's event bus socket) names THIS plugin's file at
  * `path` (under `config/`): written, held for the owner, confirmed, discarded, broken or fixed or removed. The frame
  * carries the path, the state and the disk etag — never the text — so the caller reads the file again to see it.
  *

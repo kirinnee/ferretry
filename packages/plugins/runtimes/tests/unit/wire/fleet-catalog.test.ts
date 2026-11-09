@@ -284,29 +284,6 @@ const cases: readonly SchemaCase[] = [
     value: { kind: 'settings', harness: 'claude-code', flags: ['--verbose'], env: { LOG: 'debug' } },
   },
   { name: 'AccountChangeSchema', schema: catalog.AccountChangeSchema, value: change },
-  {
-    name: 'CatalogInstallChangeSchema',
-    schema: catalog.CatalogInstallChangeSchema,
-    value: {
-      kind: 'catalog.install',
-      name: 'pdf-tools',
-      component: { kind: 'skills', items: ['pdf-tools'] },
-      files: [{ path: 'SKILL.md', content: '# pdf\n' }],
-      profile: 'work',
-      installedFrom: {
-        publisher: `fy_daemon_${'p'.repeat(43)}`,
-        publisherName: 'kirin-box',
-        catalogId: `cat_${'c'.repeat(22)}`,
-        catalogName: 'Catalog',
-        itemId: `itm_${'i'.repeat(22)}`,
-        kind: 'skill',
-        name: 'pdf-tools',
-        version: 1,
-        digest: `sha256:${'a'.repeat(64)}`,
-      },
-      replace: false,
-    },
-  },
   { name: 'AccountChangeRequestSchema', schema: catalog.AccountChangeRequestSchema, value: { change } },
   {
     name: 'ChangedRuntimeSchema',
@@ -489,47 +466,6 @@ describe('the account-model catalogue wire contract', () => {
 
     // Assert
     should(parsed).deepEqual(changes.map(() => true));
-  });
-
-  it('should accept a catalog.install of an MCP server or a skill, and refuse any other kind of component', () => {
-    // Arrange
-    const installedFrom = {
-      publisher: `fy_daemon_${'p'.repeat(43)}`,
-      publisherName: 'kirin-box',
-      catalogId: `cat_${'c'.repeat(22)}`,
-      catalogName: 'Catalog',
-      itemId: `itm_${'i'.repeat(22)}`,
-      kind: 'skill',
-      name: 'pdf-tools',
-      version: 1,
-      digest: `sha256:${'a'.repeat(64)}`,
-    };
-    const sent = (component: unknown) => ({
-      kind: 'catalog.install',
-      name: 'pdf-tools',
-      component,
-      files: [{ path: 'SKILL.md', content: '# pdf\n' }],
-      profile: 'work',
-      installedFrom,
-      replace: false,
-    });
-    const install = (component: unknown) => catalog.CatalogInstallChangeSchema.safeParse(sent(component)).success;
-
-    // Act
-    const actual = [
-      install({ kind: 'skills', items: ['pdf-tools'] }),
-      install({ kind: 'mcp', url: 'https://mcp.example.com/x' }),
-      install({ kind: 'hooks', harness: 'claude-code' }),
-    ];
-
-    // Assert
-    should(actual).deepEqual([true, true, false]);
-    should(
-      catalog.CatalogInstallChangeSchema.safeParse({
-        ...sent({ kind: 'skills', items: ['x'] }),
-        files: [{ path: '../x', content: 'x' }],
-      }).success,
-    ).be.false();
   });
 
   it('should not let the public change schema express a catalog.install at all', () => {

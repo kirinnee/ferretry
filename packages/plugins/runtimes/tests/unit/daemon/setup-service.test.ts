@@ -39,11 +39,11 @@ import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
 } from '../../../daemon/lib/service/catalog-service.ts';
+import { failedApplySentence } from '../../../daemon/lib/service/failed-apply.ts';
 import { ConfigWriteConflict, ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
 import {
   type CloneConfigFiles,
   createFleetSetupSubsystem,
-  failedApplySentence,
   FleetSetupRefusal,
   type FleetSetupService,
   type FleetSetupServiceDeps,

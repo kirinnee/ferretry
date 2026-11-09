@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { chmod, mkdir, readFile, readdir, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, readFile, readdir, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { skillFoldersStep } from '../../src/steps/skill-folders.ts';
 import { fixture } from './ferret-fixture.ts';
@@ -39,6 +39,22 @@ test('skill folders are copied byte for byte to the path v5 Runtimes reads; link
     { what: 'links not followed or re-made', count: 2 },
   ]);
   expect(JSON.stringify(report)).not.toContain('FAKE');
+});
+
+test('M1 a hard link in a skill folder to a key file is not copied and is named by its path, never its content', async () => {
+  const KEY = 'FAKE-PRIVATE-KEY-0123456789';
+  await mkdir(join(f.from, 'state'), { recursive: true });
+  await writeFile(join(f.from, 'state/daemon-identity.json'), KEY, { mode: 0o600 });
+  await v4('s/SKILL.md', 'FAKE skill\n');
+  await link(join(f.from, 'state/daemon-identity.json'), join(f.from, 'fleet/assets/skills/s/notes.md'));
+
+  const report = await skillFoldersStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(await readFile(v5('s/SKILL.md'), 'utf8')).toBe('FAKE skill\n');
+  expect(await stat(v5('s/notes.md')).catch(() => undefined)).toBeUndefined();
+  expect(JSON.stringify(report)).toContain('skills/s/notes.md');
+  expect(JSON.stringify(report)).toContain('a hard link (v4 refused it');
+  expect(JSON.stringify(report)).not.toContain(KEY);
 });
 
 test('no asset tree converts to nothing; a dry run writes nothing', async () => {

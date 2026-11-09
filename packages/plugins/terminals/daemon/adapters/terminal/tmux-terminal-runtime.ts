@@ -73,6 +73,11 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
      * outside, because they are the person's shell and not the fleet's work.
      */
     private readonly limits?: TerminalLimiter,
+    /**
+     * The owner's configured terminal environment, asked afresh at every open (never cached). Every terminal gets it,
+     * whoever opened it. Each entry is passed as `new-session -e NAME=value`: argv, never a shell string.
+     */
+    private readonly environment: () => Readonly<Record<string, string>> = () => ({}),
   ) {}
 
   async list(): Promise<readonly TerminalRecord[]> {
@@ -171,6 +176,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       String(input.size.cols),
       '-y',
       String(input.size.rows),
+      ...Object.entries(this.environment()).flatMap(([name, value]) => ['-e', `${name}=${value}`]),
       ...argv,
       ';',
       'set-option',

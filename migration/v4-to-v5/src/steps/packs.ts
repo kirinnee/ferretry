@@ -27,7 +27,6 @@
 import {
   PACK_REPLACED,
   PACK_SWITCHES,
-  PACKS_CONFIG,
   PackInventorySchema,
   packConfigFromFile,
   PackRunFileSchema,
@@ -46,8 +45,11 @@ import {
   rawSecretPaths,
   readV4Yaml,
   type V4ConfigFile,
+  v4ConfigFile,
+  v4ConfigOverride,
   YAML_OPTIONS,
 } from '../v4/config.ts';
+import type { V4Paths } from '../v4/layout.ts';
 import { failureNote, isRecord, readV4Json, V4InputError } from '../v4/documents.ts';
 import { configs, directories, json, runtimeIds } from '../v4/ferrets.ts';
 import {
@@ -67,10 +69,12 @@ import {
   V4RoutingCatalog,
   V4SessionPack,
 } from '../v4/packs.ts';
-import { v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
+import { v5ConfigProblem } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
+import { CODEX_HELD_SENTENCE, heldRuntimeNames } from './preview-hold.ts';
 
-const PACKS_TARGET = PACKS_CONFIG as V5ConfigTarget;
+const PACKS_TARGET = CONFIG_TARGETS.PACKS;
 const STATE = 'state/packs';
 /** `packages/core/kernel/host/state/state-port.ts` `COLLECTION_NAME`: the names v5's `runs/*` store lists. */
 const V5_COLLECTION_NAME = /^[A-Za-z0-9_][A-Za-z0-9._%~-]{0,200}$/u;
@@ -87,6 +91,8 @@ interface Plan {
   readonly notes: string[];
   /** What to write, in order, once everything is planned and checked. */
   readonly writes: (() => Promise<void>)[];
+  /** Preview only: the runtimes held out of the preview (empty otherwise); nothing that names one is carried. */
+  readonly held: ReadonlySet<string>;
   /** Run folders that held a builder's draft.json, and runs v4 still showed as running. */
   drafts: number;
   running: number;
@@ -124,11 +130,15 @@ function takeKey(map: YAMLMap, key: string): boolean {
   return true;
 }
 
-const v4File = (home: string, label: string): V4ConfigFile => ({
-  address: { kind: label === V4_PACK_YAML ? 'pack' : 'modelsGuide' },
-  label,
-  path: join(home, label),
-});
+const v4File = (v4: V4Paths, label: string): V4ConfigFile =>
+  v4ConfigFile(v4, { kind: label === V4_PACK_YAML ? 'pack' : 'modelsGuide' }, label);
+
+/** `kind` for a config file the run may read as an override (the enforced pass): the override says it all. */
+async function configKind(v4: V4Paths, label: string): Promise<'absent' | 'file' | 'folder' | 'other'> {
+  const override = v4ConfigOverride(v4, label);
+  if (override !== undefined) return override === null ? 'absent' : 'file';
+  return await kind(v4.home, join(v4.home, label));
+}
 
 function refuseRawSecrets(document: Document, label: string): void {
   const secrets = rawSecretPaths(document.toJS());
@@ -147,13 +157,12 @@ async function planConfig(
   resolve: Resolve,
   excluded: readonly string[],
 ): Promise<boolean> {
-  const home = ctx.v4.home;
-  const packKind = await kind(home, join(home, V4_PACK_YAML));
-  const guideKind = await kind(home, join(home, V4_MODELS_GUIDE_YAML));
+  const packKind = await configKind(ctx.v4, V4_PACK_YAML);
+  const guideKind = await configKind(ctx.v4, V4_MODELS_GUIDE_YAML);
   if (packKind === 'absent' && guideKind === 'absent') return false;
   let appended = false;
   const document =
-    packKind === 'absent' ? parseDocument('{}', YAML_OPTIONS) : await readV4Yaml(v4File(home, V4_PACK_YAML));
+    packKind === 'absent' ? parseDocument('{}', YAML_OPTIONS) : await readV4Yaml(v4File(ctx.v4, V4_PACK_YAML));
   if (packKind !== 'absent') {
     refuseRawSecrets(document, V4_PACK_YAML);
     dropModeline(document);
@@ -170,7 +179,7 @@ async function planConfig(
   if (packKind !== 'absent') count(plan, 'packs.yaml settings (from pack.yaml)');
 
   if (guideKind !== 'absent') {
-    const guide = await readV4Yaml(v4File(home, V4_MODELS_GUIDE_YAML));
+    const guide = await readV4Yaml(v4File(ctx.v4, V4_MODELS_GUIDE_YAML));
     refuseRawSecrets(guide, V4_MODELS_GUIDE_YAML);
     dropModeline(guide);
     const routing = guide.contents as YAMLMap;
@@ -189,6 +198,13 @@ async function planConfig(
         });
       const via = pairOf(suggested, 'via')?.value;
       if (isScalar(via) && typeof via.value === 'string') via.value = resolve(via.value);
+      if (isScalar(via) && typeof via.value === 'string' && plan.held.has(via.value)) {
+        takeKey(routing, 'suggested');
+        plan.dropped.push({
+          what: `${V4_MODELS_GUIDE_YAML} suggested (routes to the held runtime ${via.value})`,
+          why: CODEX_HELD_SENTENCE,
+        });
+      }
     }
     appended = appendExcluded(routing, excluded);
     if (appended) count(plan, EXCLUDED_LINE_KEPT);
@@ -366,6 +382,14 @@ async function planRun(ctx: StepContext, plan: Plan, id: string, resolve: Resolv
     return;
   }
   const { session, ...job } = v4.data.job;
+  const via = isRecord(v4.data.suggestion?.suggested) ? v4.data.suggestion.suggested.via : undefined;
+  const heldName = [job.runtime, via]
+    .map(name => (typeof name === 'string' ? resolve(name) : undefined))
+    .find(name => name !== undefined && plan.held.has(name));
+  if (heldName !== undefined) {
+    plan.dropped.push({ what: `${label} (names the held runtime ${heldName})`, why: CODEX_HELD_SENTENCE });
+    return;
+  }
   const suggestion =
     v4.data.suggestion !== undefined && isRecord(v4.data.suggestion.suggested)
       ? {
@@ -573,7 +597,15 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
       ? name
       : (runtimes.find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
   const names = new Map(runtimes.map(([name, entry]) => [entry.id, name]));
-  const plan: Plan = { kept: new Map(), dropped: [], notes: [], writes: [], drafts: 0, running: 0 };
+  const plan: Plan = {
+    kept: new Map(),
+    dropped: [],
+    notes: [],
+    writes: [],
+    held: await heldRuntimeNames(ctx),
+    drafts: 0,
+    running: 0,
+  };
   const routing = await readRouting(ctx, names);
   const appended = await planConfig(ctx, plan, resolve, routing?.excluded ?? []);
   await planReplaced(ctx, plan);

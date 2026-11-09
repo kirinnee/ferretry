@@ -315,7 +315,7 @@ test('an unknown machine key, a syntax error and a non-mapping body each fail by
   expect((await settingsStep.run(f.ctx())).note).toBe('config/machine.yaml: is not a YAML mapping');
 });
 
-test('files with no v5 config schema yet leave the step pending, and everything else is still written', async () => {
+test('an instructions document outside the assets leaves the step pending; settings, hooks and voice never do', async () => {
   await yaml('voice.yaml', 'postProcessing:\n  provider: "off"\n');
   await yaml('pack.yaml', 'enabled: true\n');
   await yaml('components/settings/quiet.yaml', 'harness: claude\nenv:\n  DISABLE_TELEMETRY: "1"\n');
@@ -325,13 +325,14 @@ test('files with no v5 config schema yet leave the step pending, and everything 
   await yaml('learning.yaml', 'enabled: true\n');
   const report = await settingsStep.run(f.ctx());
   expect(report.status).toBe('pending');
+  expect(report.note).toContain('config/components/instructions/outside.yaml');
   for (const file of [
     'config/voice.yaml',
     'config/components/settings/quiet.yaml',
     'config/components/hooks/mine.yaml',
-    'config/components/instructions/outside.yaml',
   ])
-    expect(report.note).toContain(file);
+    expect(report.note).not.toContain(file);
+  expect(await exists('claude-code/settings/quiet.yaml')).toBe(true);
   expect(report.note).not.toContain('learning');
   // pack.yaml is the Packs step's.
   expect(report.note).not.toContain('pack.yaml');

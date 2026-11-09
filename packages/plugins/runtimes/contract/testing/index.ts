@@ -4,12 +4,13 @@
  */
 import { err, ok, type Result } from '@ferretry/std';
 import {
-  AccountChangeRequestSchema,
-  ApplyOutcomeSchema,
-  type CatalogInstallChange,
-  ProposalApplyRequestSchema,
+  type ProfileLayerChange,
+  type ProfileSummary,
   type ResolveResult,
+  type RuntimeHome,
+  type RuntimeHomeReader,
   type RuntimeId,
+  type RuntimeLayers,
   RuntimeIdSchema,
   type RuntimesApi,
   type RuntimeSummary,
@@ -18,14 +19,23 @@ import {
 
 export interface FakeRuntimes extends RuntimesApi {
   setRuntimes(runtimes: readonly RuntimeSummary[], defaultRuntime?: RuntimeId): void;
-  readonly installed: readonly CatalogInstallChange[];
+  /** The homes `homes()` answers, and the reader `home(id)` hands out for each id (an id with no reader gets none). */
+  setHomes(homes: readonly RuntimeHome[], readers?: Readonly<Record<string, RuntimeHomeReader>>): void;
+  /** The profiles `profiles()` answers, and the layers `layers(id)` answers for each runtime. */
+  setProfiles(profiles: readonly ProfileSummary[], layers?: readonly RuntimeLayers[]): void;
+  /** Every `changeProfileLayers` call, in order. The fake writes nothing. */
+  readonly changes: readonly ProfileLayerChange[];
 }
 
 /** An in-memory Runtimes: the machine's runtimes are whatever the test set. */
 export function fakeRuntimes(): FakeRuntimes {
   let runtimes: readonly RuntimeSummary[] = [];
   let defaultRuntime: RuntimeId | undefined;
-  const installed: CatalogInstallChange[] = [];
+  let homes: readonly RuntimeHome[] = [];
+  let readers: Readonly<Record<string, RuntimeHomeReader>> = {};
+  let profiles: readonly ProfileSummary[] = [];
+  let layerSets: ReadonlyMap<RuntimeId, RuntimeLayers> = new Map();
+  const changes: ProfileLayerChange[] = [];
   const get = async (id: RuntimeId): Promise<RuntimeSummary | undefined> => runtimes.find(runtime => runtime.id === id);
   return {
     list: async () => runtimes,
@@ -40,19 +50,29 @@ export function fakeRuntimes(): FakeRuntimes {
       if (!found.launch.available) return { ok: false, refusal: 'not_signed_in', sentence: found.launch.reason };
       return { ok: true, runtime: found };
     },
-    installCatalogItem: async change => {
-      installed.push(change);
-      return {
-        outcome: 'committed',
-        result: { accountCount: 0, operationCount: 0, manifestPath: '/fake', prunedWrappers: [], sharedHistory: [] },
-      };
+    // No fleet is published in memory: there are no homes until a test sets them, and a reader only for a listed id.
+    homes: async () => homes,
+    home: id => (homes.some(home => home.id === id) ? readers[id] : undefined),
+    profiles: async () => profiles,
+    layers: async id => layerSets.get(id),
+    changeProfileLayers: async change => {
+      changes.push(change);
+      return { kind: 'written', profiles: change.kind === 'add' ? [change.profile] : [] };
     },
     setRuntimes: (next, nextDefault) => {
       runtimes = next;
       defaultRuntime = nextDefault;
     },
-    get installed() {
-      return installed;
+    setHomes: (next, nextReaders = {}) => {
+      homes = next;
+      readers = nextReaders;
+    },
+    setProfiles: (next, nextLayers = []) => {
+      profiles = next;
+      layerSets = new Map(nextLayers.map(set => [set.runtime, set]));
+    },
+    get changes() {
+      return changes;
     },
   };
 }
@@ -70,11 +90,15 @@ export async function runtimesConformance(make: () => RuntimesApi): Promise<Resu
   const chosen = await api.default();
   if (chosen !== undefined && (await api.get(chosen)) === undefined)
     failures.push('default() names a runtime that exists');
-  // A change names one intent and never carries a configuration document.
-  if (AccountChangeRequestSchema.safeParse({ change: { kind: 'runtime.remove', name: 'x', document: {} } }).success)
-    failures.push('a change is strict: it carries no document');
-  // An apply has an EMPTY body: a step-up is the confirmation.
-  if (ProposalApplyRequestSchema.safeParse({ approval: 'x' }).success) failures.push('an apply body is empty');
-  if (ApplyOutcomeSchema.safeParse({ outcome: 'committed' }).success) failures.push('an outcome carries its result');
+  // The homes: each id once, and a reader only for an id `homes()` lists.
+  const homes = await api.homes();
+  if (new Set(homes.map(home => home.id)).size !== homes.length) failures.push('homes() lists each id once');
+  if (api.home('no-such-home') !== undefined) failures.push('home() is undefined for an id homes() does not list');
+  // The layers: each profile once, and nothing for a runtime that does not exist.
+  const profiles = await api.profiles();
+  if (new Set(profiles.map(profile => profile.name)).size !== profiles.length)
+    failures.push('profiles() lists each name once');
+  if ((await api.layers(RuntimeIdSchema.parse('no-such-runtime'))) !== undefined)
+    failures.push('layers() is undefined for a runtime that does not exist');
   return failures.length === 0 ? ok(true) : err(failures);
 }

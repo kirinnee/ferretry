@@ -11,7 +11,7 @@ import {
   RunManifestSchema,
   SuggestedFileSchema,
 } from '@ferretry/plugin-lessons/contract';
-import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
@@ -401,6 +401,16 @@ describe('damage is read the way v4 read it, counted and never quoted', () => {
     const report = await lessonsStep.run(f.ctx());
     expect(report.status).toBe('failed');
     expect(report.note).toBe('state/learning/proposals.json: is not a regular file');
+  });
+
+  test('n2 a hard-linked Global lessons document fails as "a hard link (v4 refused it)", key unread', async () => {
+    await putText('state/daemon-identity.json', `FAKE-KEY-${SECRET}`);
+    await mkdir(join(f.from, 'fleet/assets/instructions'), { recursive: true });
+    await link(join(f.from, 'state/daemon-identity.json'), join(f.from, 'fleet/assets/instructions/lessons.md'));
+    const report = await lessonsStep.run(f.ctx());
+    expect(report.status).toBe('failed');
+    expect(report.note).toContain('a hard link (v4 refused it)');
+    expect(JSON.stringify(report)).not.toContain('FAKE-KEY');
   });
 
   test('an unknown learning.yaml key fails by key, never by value', async () => {

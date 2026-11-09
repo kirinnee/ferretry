@@ -5,6 +5,7 @@
 import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
 import { err, instantFromEpochMs, ok, type Result } from '@ferretry/std';
 import {
+  type EnvironmentLoginTemplate,
   type LoginChange,
   type LoginChangesApi,
   LoginChangeError,
@@ -48,6 +49,8 @@ export function sampleLogin(id: string, overrides: Partial<LoginView> = {}): Log
 
 export interface FakeLogins extends LoginsApi {
   setLogins(logins: readonly LoginView[]): void;
+  /** What `environmentTemplates` answers (default none): variable templates, never a secret's value. */
+  setTemplates(templates: readonly EnvironmentLoginTemplate[]): void;
   /** Every `authorizeFetch` asked, as asked (a login, a variable, hosts; never a secret). */
   readonly spends: { readonly loginId: string; readonly variable: string; readonly hosts: readonly string[] }[];
   /** What `authorizeFetch` answers next (default `refused`). */
@@ -121,6 +124,7 @@ export function fakeLoginChanges(): FakeLoginChanges {
 
 export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
   let logins = [...initial];
+  let templates: readonly EnvironmentLoginTemplate[] = [];
   let spendAnswer: AuthorizedOutcome = { kind: 'refused' };
   const spends: FakeLogins['spends'] = [];
   const list = (): LoginList => LoginListSchema.parse({ format: 1, machine: 'fake', logins });
@@ -128,6 +132,7 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
     list: async () => list(),
     get: async id => logins.find(login => login.id === id),
     quota: async id => logins.find(login => login.id === id)?.usage,
+    environmentTemplates: async () => templates,
     presets: async () => ProviderPresetCatalogSchema.parse({ presets: [] }),
     models: async () =>
       ModelCatalogsViewSchema.parse({ published: { origin: 'https://example.invalid', enabled: false }, catalogs: [] }),
@@ -141,6 +146,9 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
     },
     setLogins: next => {
       logins = [...next];
+    },
+    setTemplates: next => {
+      templates = [...next];
     },
   };
 }

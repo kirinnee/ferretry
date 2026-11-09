@@ -866,7 +866,8 @@ export function scanFile(path: string, text: string): FileFacts {
   }
   const declarations: Declaration[] = [];
   const exported: { readonly exportName: string; readonly local: string | Declaration }[] = [];
-  const declare = (statement: Node): readonly string[] => {
+  // Bun 1.3.x erases calls to a function named declare (read as the TS modifier), so it is not called that.
+  const recordStatement = (statement: Node): readonly string[] => {
     const names: string[] = [];
     if ((statement.type === 'FunctionDeclaration' || statement.type === 'ClassDeclaration') && isNode(statement.id)) {
       declarations.push({ name: statement.id.name as string, start: statement.start, end: statement.end });
@@ -887,7 +888,7 @@ export function scanFile(path: string, text: string): FileFacts {
     if (statement.type === 'ExportNamedDeclaration') {
       if (statement.exportKind === 'type') continue;
       if (isNode(statement.declaration))
-        for (const name of declare(statement.declaration)) exported.push({ exportName: name, local: name });
+        for (const name of recordStatement(statement.declaration)) exported.push({ exportName: name, local: name });
       else if (!isNode(statement.source))
         for (const item of (statement.specifiers as Node[] | undefined) ?? []) {
           const local = staticName(item.local);
@@ -900,13 +901,13 @@ export function scanFile(path: string, text: string): FileFacts {
       if (declaration.type === 'Identifier')
         exported.push({ exportName: 'default', local: declaration.name as string });
       else {
-        declare(declaration);
+        recordStatement(declaration);
         exported.push({
           exportName: 'default',
           local: { name: 'default', start: declaration.start, end: declaration.end },
         });
       }
-    } else declare(statement);
+    } else recordStatement(statement);
   }
   const within = (declaration: Declaration, offset: number): boolean =>
     offset >= declaration.start && offset < declaration.end;

@@ -243,15 +243,16 @@ export function concatenateInstructions(
 }
 
 function adaptInstructions(
-  instructions: readonly Contribution<{ readonly file: string }>[],
+  instructions: readonly Contribution<{ readonly file?: string | undefined; readonly text?: string | undefined }>[],
   bodies: Readonly<Record<string, string>>,
   dest: string,
   problems: AdaptProblem[],
 ): AdaptedEntry | undefined {
   const [only] = instructions;
   if (only === undefined) return undefined;
-  if (instructions.length === 1) {
-    const source = only.component.file;
+  // A document with a file of its own is a link or a copy; one given as text has no file, so it is always generated.
+  const source = only.component.file;
+  if (instructions.length === 1 && source !== undefined) {
     return {
       kind: isAssetTreeReference(source) ? 'link' : 'copy',
       dest,
@@ -439,7 +440,8 @@ function adaptHooks(
 ): AdaptedHooks {
   const entries: AdaptedEntry[] = [];
   const absent: string[] = [];
-  const files = hooks.filter(hook => hook.component.file !== undefined);
+  // A hooks document is a `file` in the asset tree or, when the owning plugin projects it, a `document` given as data.
+  const files = hooks.filter(hook => hook.component.file !== undefined || hook.component.document !== undefined);
   const directories = hooks.filter(hook => hook.component.directory !== undefined);
 
   const scriptsDest = harnessAsset(assets, harness, 'hooksDir')?.dest ?? HOOK_SCRIPTS_FALLBACK_DEST;
@@ -464,7 +466,9 @@ function adaptHooks(
 
   const fileDest = hooksFileDest(assets, harness);
   // One hooks document with a file of its own is a link, so only a merge needs the bodies read.
-  const needsBodies = fileDest === undefined || files.length > 1;
+  // A document given as data has no file to link, so it is always merged from its body.
+  const needsBodies =
+    fileDest === undefined || files.length > 1 || files.some(hook => hook.component.document !== undefined);
   const read: { reference: LayerReferenceText; body: SettingsObject }[] = [];
   for (const { layer } of needsBodies ? files : []) {
     const body = bodies[layer.name];
@@ -488,7 +492,7 @@ function adaptHooks(
 
   const [onlyFile] = files;
   if (onlyFile === undefined) absent.push(fileDest);
-  else if (files.length === 1) {
+  else if (files.length === 1 && onlyFile.component.document === undefined) {
     const source = onlyFile.component.file as string;
     entries.push({
       kind: isAssetTreeReference(source) ? 'link' : 'copy',
