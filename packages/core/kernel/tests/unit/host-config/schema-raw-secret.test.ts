@@ -143,6 +143,39 @@ describe('a def marked credentialRecords never shows text that does not parse', 
   });
 });
 
+describe('a def marked credentialRecords never shows text that fails its check, whatever the reason', () => {
+  // A typo key only: the file parses, the strict schema refuses the unknown key, and no raw secret is in it.
+  const TYPO = 'labl: x\n';
+  const make = (flag: boolean) =>
+    defineConfig({
+      file: 'voice.yaml',
+      schema: z.strictObject({ label: z.string().optional() }),
+      axis: 'configure',
+      loosens: () => [],
+      ...(flag ? { credentialRecords: true as const } : {}),
+    });
+  const read = async (def: AnyConfigDef) => {
+    const { fs, files, agent } = world([{ plugin: 'voice', def }]);
+    const path = `${HOME}/config/voice.yaml`;
+    fs.seed(path, 'label: fine\n');
+    await files.reload();
+    fs.seed(path, TYPO);
+    await files.reload();
+    return agent.run(AgentConfigCallSchema.parse({ tool: 'config.read', path: 'voice.yaml' }), standing);
+  };
+
+  test('R9 M1 withholds a typo-only file of a flagged def and keeps its issues', async () => {
+    const answer = await read(make(true));
+    expect(answer.text).toBe('');
+    expect((answer.issues ?? []).length).toBeGreaterThan(0);
+  });
+
+  test('R9 M1 shows the text of the same failing file when the def has no flag', async () => {
+    const answer = await read(make(false));
+    expect(answer.text).toBe(TYPO);
+  });
+});
+
 describe('a schema that throws', () => {
   test('does not stop a reload: the throwing file is invalid and the others still load', async () => {
     const throwing = defineConfig({

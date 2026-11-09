@@ -177,9 +177,12 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
       checked !== undefined &&
       !checked.ok &&
       (checked.reason === 'raw_secret' ||
-        // A def of credential records never shows text it could not parse: its rule is a schema check, which a file that
-        // does not parse never reached, so no scan of the raw text can vouch for it.
-        (checked.reason === 'yaml' && (found.def.credentialRecords === true || rawTextHoldsSecret(file.text ?? ''))));
+        // A def of credential records never shows the text of a file that fails its check, whatever the reason (a parse
+        // fault, an unknown key, a key outside `env`, a throwing schema): the located issues stay, but no check of such a
+        // file can vouch that its text holds no secret. Any other def shows a failing file unless it does not parse and
+        // its raw text holds a secret.
+        found.def.credentialRecords === true ||
+        (checked.reason === 'yaml' && rawTextHoldsSecret(file.text ?? '')));
     const withheld = holdsSecret
       ? '; its text is not shown because it holds a raw secret, which the owner must move into the secret store'
       : tooLarge

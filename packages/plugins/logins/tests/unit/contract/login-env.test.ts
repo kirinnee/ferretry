@@ -412,6 +412,40 @@ describe('R8: an env that is not a map of strings is withheld, never skipped or 
     }
   });
 
+  for (const [what, body] of [
+    [
+      'a variable typed at column 0 beside env',
+      `harness: claude-code\nstore: environment\nenv:\n  ANTHROPIC_BASE_URL: https://gw.example\nANTHROPIC_AUTH_TOKEN: "Bearer ${H}"\n`,
+    ],
+    ['a short key at the top level, no env', 'OPENAI_API_KEY: hunter22x\n'],
+    [
+      'the same slip inside a half',
+      `claude:\n  env:\n    ANTHROPIC_BASE_URL: https://gw.example\n  ANTHROPIC_AUTH_TOKEN: "Bearer ${H}"\n`,
+    ],
+    ['a half that is a string', `claude: "ANTHROPIC_AUTH_TOKEN=Bearer ${H}"\n`],
+    ['a half that is a list', `claude:\n  - ANTHROPIC_AUTH_TOKEN=Bearer ${H}\n`],
+    ['a mistyped envs key', `harness: claude-code\nstore: environment\nenvs:\n  GATEWAY_TOKEN: "Bearer ${H}"\n`],
+    ['a mistyped Env key', `harness: claude-code\nstore: environment\nEnv:\n  OPENAI_API_KEY: hunter22x\n`],
+    ['a whole file that is a pasted dotenv', `A=1\nANTHROPIC_AUTH_TOKEN=Bearer ${H}\n`],
+    ['a whole file that is a list', `- ANTHROPIC_AUTH_TOKEN=Bearer ${H}\n`],
+    ['a typo-only file', 'labl: x\n'],
+  ] as const) {
+    it(`R9 M1: should return no text and keep the issues for ${what}`, async () => {
+      const { fs, files, agent } = await read('good');
+      fs.seed(`${HOME}/config/logins/gw.yaml`, body);
+      await files.reload();
+      const answer = await agent.run(
+        AgentConfigCallSchema.parse({ tool: 'config.read', path: 'logins/gw.yaml' }),
+        standing,
+      );
+
+      should(answer.text).equal('');
+      should((answer.issues ?? []).length).be.above(0);
+      should(JSON.stringify(answer)).not.containEql(H);
+      should(JSON.stringify(answer)).not.containEql('hunter22x');
+    });
+  }
+
   it('m1: should refuse a variable NAME over 128 characters as a marked issue, whatever its value', () => {
     const result = LoginFileSchema.safeParse({
       harness: 'claude-code',

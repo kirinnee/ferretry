@@ -362,8 +362,11 @@ pane's exec is still fail-closed: the new wrapper carries its own guard for ever
 A login's `env` (a `logins/<id>.yaml` file, a `login.add` or `login.env` change, the paste screen) is judged by ONE
 rule, `plainPaste` in `packages/plugins/logins/contract/secret-shape.ts`. It is a **heuristic, not a proof**: a
 person who means to hide a key from it can. It is built to stop an accident (a key pasted into a plain field) and a
-casual agent edit. `config_read` withholds the text of a login file it cannot judge: one that does not parse as YAML,
-one whose `env` is not a map of NAME: value strings, and one with a refusal of this rule:
+casual agent edit. `config_read` withholds the text of ANY login file (or MCP server file: the kernel rule is for every
+config def marked `credentialRecords`) that fails its check, whatever the reason, with its located issues kept: one that
+does not parse as YAML, one with a key outside `env` or a mistyped one, one whose `env` is not a map of NAME: value
+strings, and one with a refusal of this rule. The cost: a file whose only fault is a typo key (`labl: x`) is withheld
+too. A def without the flag shows a failing file's text.
 
 - **Under a credential-named variable** (a credential word anywhere, a last word `KEY` or `KEYS`, or one glued word
   such as `GATEWAYTOKEN`) a value must be exactly one allowed shape: a placeholder under 8 characters with no `$`; one
@@ -378,9 +381,9 @@ one whose `env` is not a map of NAME: value strings, and one with a refusal of t
   a credential-named query value are refused. In a variable that IS a header list (`…HEADERS`), a header with no
   credential name is refused when its value holds a token shape or a key-like run (`x-honeycomb-team=…`).
 - **A value over 4096 characters is refused and not scanned**, and so is a variable NAME over 128 characters.
-  Whatever else is wrong with a file that parses, ONE refusal of this rule keeps `config_read` from showing the file's
-  text; an `env` (or `claude.env` / `codex.env`) that is not a map, or a value under it that is not a string, is such a
-  refusal. A login file that does not parse as YAML never shows its text either (the kernel's `credentialRecords`).
+  Whatever else is wrong with a file, ONE failing check keeps `config_read` from showing the file's text (the kernel's
+  `credentialRecords`): a refusal of this rule, an `env` (or `claude.env` / `codex.env`) that is not a map, a value
+  under it that is not a string, a key outside `env`, a file that does not parse as YAML.
 
 Named residual heuristic GAPs (declared, not scheduled):
 
@@ -401,8 +404,25 @@ Named residual heuristic GAPs (declared, not scheduled):
   value, shorter than 8), in an address or a path, is not seen; it extends the "shorter than 24" GAP above.
 - **GAP: whitespace other than tab, CR and LF inside an address** (a vertical tab, a no-break space) splits it for the
   rule, so the part after it is not read as a password.
-- **GAP: only a login's `env` is judged by this rule.** `codexProvider.baseUrl` and `queryParams` are checked by the
-  kernel's raw-secret scan only.
+- **GAP: only a login's `env` is judged by this rule.** Fields the owner fills in on purpose, such as
+  `codexProvider.baseUrl` and `queryParams`, are checked by the kernel's raw-secret scan only. A variable that slipped
+  out of `env` is not such a field: any login file that fails its check is withheld whole (see above).
+- **GAP (D11): `defaultsOf` is an unguarded `safeParse({})` on the reload path** (evaluate.ts, reached when a file that
+  was in effect is deleted; also check-config.ts). A schema that throws on `{}` would still stop a reload. No current
+  schema does.
+- **GAP (D12): the withheld summary always says the file "holds a raw secret, which the owner must move into the secret
+  store".** It says so too for a YAML-broken login or MCP file with no key in it, a blank `env:`, and an unquoted number
+  such as `API_TIMEOUT_MS: 600000` (refused as v4's string-only value was). The issues list carries the real cause, but an
+  agent may relay the wrong instruction to the owner.
+- **GAP (D13): a login's `label`** (or any other free-text field) holding `Bearer <key>` checks as `ok` and is shown.
+  An owner does not paste a key into a label by accident.
+- **GAP (D14): a variable named `__proto__` under `env`** is dropped by the parser, so the rule never sees it and the
+  file checks as `ok` with its text shown. The variable is also never exported. This is contrived.
+- **GAP (D15): the scheme word may carry up to 16 letters** (no digit) of key material before a reference
+  (`GATEWAY_TOKEN=XqvTmLpRzWkNcHbJ ${secret:K}` is accepted). It extends the header-name GAP: a scheme word up to 16
+  letters.
+- **GAP (D16): `credentialRecords` also withholds a failing MCP server file.** A broken or failing `mcp/<name>.yaml` is
+  withheld whole by `config_read`, as a login file is; it is documented here and in `define.ts`.
 - **Known refusals** (not GAPs, and they may surprise an owner): under a credential-named variable a query value of 8 or
   more characters (`?api-version=2024-10-21`) is refused; in a header list a long hex id (`x-trace: <64 hex>`) is
   refused; in any value a JSON member whose name ends in `tokens` with a value of 8 or more characters
