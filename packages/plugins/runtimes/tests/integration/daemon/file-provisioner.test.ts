@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { FleetApplyFailureError, type FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
 import type { FleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 

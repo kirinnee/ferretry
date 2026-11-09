@@ -30,17 +30,7 @@ function below(base: string, path: string): string | undefined {
   return inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside) ? undefined : inside;
 }
 
-const kindOf = (stat: RootStat | RootLstat): HostEntry['kind'] => {
-  switch (stat.kind) {
-    case 'symlink':
-      return 'link';
-    case 'file':
-    case 'directory':
-      return stat.kind;
-    default:
-      return 'other';
-  }
-};
+const kindOf = (stat: RootStat | RootLstat): HostEntry['kind'] => (stat.kind === 'symlink' ? 'link' : stat.kind);
 const entryOf = (stat: RootStat | RootLstat): HostEntry => ({ kind: kindOf(stat), size: stat.size });
 
 export function rootHostFiles(mounts: HostMounts): HostFiles {

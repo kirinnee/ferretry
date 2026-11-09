@@ -98,6 +98,20 @@ describe('HostHarnessScanner over the kernel roots', () => {
     expect(JSON.stringify(claude)).not.toContain(INERT);
   });
 
+  it('serves the one declared file beside the home as bytes and as an entry, and a stat as a file', async () => {
+    const files = rootHostFiles(harnessMounts(roots(), [join(user, '.claude')], join(user, '.claude.json')));
+    const text = '{"mcpServers":{}}';
+
+    expect(new TextDecoder().decode(await files.readBytes(join(user, '.claude.json')))).toBe(text);
+    expect(await files.stat(join(user, '.claude.json'))).toEqual({ kind: 'file', size: text.length });
+    expect(await files.lstat(join(user, '.claude.json'))).toEqual({ kind: 'file', size: text.length });
+    // A document inside a home is a stat of the root it is in.
+    expect(await files.stat(join(user, '.claude/CLAUDE.md'))).toEqual({ kind: 'file', size: '# Rules\n'.length });
+    // A link inside a home is reported as a link, never followed.
+    await symlink(join(user, '.claude/CLAUDE.md'), join(user, '.claude/linked.md'));
+    expect(await files.lstat(join(user, '.claude/linked.md'))).toMatchObject({ kind: 'link' });
+  });
+
   it('serves nothing outside its mounts', async () => {
     const files = rootHostFiles(harnessMounts(roots(), [join(user, '.claude')], join(user, '.claude.json')));
 

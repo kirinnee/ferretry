@@ -11,6 +11,7 @@ import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
 import { API_KEY_SEED_NAME, API_KEY_SEED_SCRIPT, API_KEY_SEED_SHELL } from '../../daemon/lib/harness/api-key-seed.ts';
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
 import { ClaudeProjectApprovals } from '../../daemon/lib/project-approvals.ts';
+import { HarnessUpdateRefusal } from '../../daemon/lib/update/service.ts';
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -40,6 +41,14 @@ function build(
     tmux?: (args: readonly string[]) => number;
     state?: StatePort;
     config?: { file: () => unknown; collection: (definition: unknown) => unknown };
+    /** What `tmux capture-pane` prints: the frame of the ferret's pane. */
+    frame?: string;
+    /** A machine with no tmux to start: every call fails to launch. */
+    spawnThrows?: boolean;
+    location?: unknown;
+    update?: unknown;
+    permission?: unknown;
+    dialog?: unknown;
   } = {},
 ) {
   const roots = rootsPortFor(
@@ -70,7 +79,13 @@ function build(
     spawn: {
       run: async (_program: string, args: readonly string[]): Promise<SpawnResult> => {
         tmux.push([...args]);
-        return { exitCode: options.tmux?.(args) ?? 0, signal: null, stdout: '', stderr: '' } as SpawnResult;
+        if (options.spawnThrows === true) throw new Error('tmux is not installed');
+        return {
+          exitCode: options.tmux?.(args) ?? 0,
+          signal: null,
+          stdout: args[0] === 'capture-pane' ? (options.frame ?? '') : '',
+          stderr: '',
+        } as SpawnResult;
       },
     } as never,
     clock: { sleep: async () => {} } as never,
@@ -82,17 +97,17 @@ function build(
           cells: (g: unknown) => g,
         }),
     } as never,
-    location: {
+    location: (options.location ?? {
       locate: async () =>
         options.located === false
           ? { outcome: 'absent', searched: ['PATH'] }
           : { outcome: 'located', path: '/opt/bin/claude', rule: 'x', declaredBy: 'PATH' },
-    } as never,
+    }) as never,
     probe: { version: async () => ({ state: 'ok', version: '2.1.220' }) } as never,
-    update: {} as never,
+    update: (options.update ?? {}) as never,
     panes,
-    permission: {} as never,
-    dialog: {} as never,
+    permission: (options.permission ?? {}) as never,
+    dialog: (options.dialog ?? {}) as never,
     newConversationId: () => 'conv-1',
     historyHome: async () => HISTORY,
   });
@@ -697,6 +712,208 @@ describe('ClaudeHarness', () => {
   });
 });
 
+const frameOf = async (name: string): Promise<string> =>
+  await Bun.file(`${import.meta.dir}/../fixtures/${name}.txt`).text();
+
+describe('ClaudeHarness: finding claude and updating it', () => {
+  test('discover names the setting that points at a claude that is not there', async () => {
+    const { harness } = build({
+      location: {
+        locate: async () => ({
+          outcome: 'override-absent',
+          path: '/opt/nowhere/claude',
+          declaredBy: 'config/harness-claude-code.yaml binary',
+          reason: 'nothing there starts when asked for its version',
+        }),
+      },
+    });
+
+    expect(await harness.discover()).toEqual({
+      found: false,
+      reason:
+        'config/harness-claude-code.yaml binary names /opt/nowhere/claude, but nothing there starts when asked for its version',
+    });
+  });
+
+  test('update says what an update refused, raises what it did not expect, and reports a job that finished', async () => {
+    const report = (outcome: string, message: string, to?: string) => ({
+      state: 'finished',
+      report: { outcome, message, ...(to === undefined ? {} : { to }) },
+    });
+    const viewing = (job: unknown) => async () => ({ job });
+    const updating = (overrides: Record<string, unknown>) => ({
+      start: async () => ({}),
+      settled: async () => undefined,
+      view: viewing(null),
+      ...overrides,
+    });
+
+    const refused = build({
+      update: updating({
+        start: async () => {
+          throw new HarnessUpdateRefusal('harness_update_running' as never, 'an update is already running');
+        },
+      }),
+    });
+    const crashed = build({
+      update: updating({
+        start: async () => {
+          throw new Error('the disk is gone');
+        },
+      }),
+    });
+    const unfinished = build({ update: updating({ view: viewing(null) }) });
+    const succeeded = build({ update: updating({ view: viewing(report('succeeded', 'Updated claude.', '2.2.0')) }) });
+    const failed = build({ update: updating({ view: viewing(report('failed', 'The update stopped.')) }) });
+
+    expect(await refused.harness.update()).toEqual({ updated: false, sentence: 'an update is already running' });
+    await expect(crashed.harness.update()).rejects.toThrow('the disk is gone');
+    expect(await unfinished.harness.update()).toEqual({ updated: false, sentence: 'The update did not finish.' });
+    expect(await succeeded.harness.update()).toEqual({ updated: true, version: '2.2.0', sentence: 'Updated claude.' });
+    expect(await failed.harness.update()).toEqual({ updated: false, sentence: 'The update stopped.' });
+  });
+});
+
+describe('ClaudeHarness: what the pane asks and how it is answered', () => {
+  const answering = () => {
+    const sent: { to: string; body: unknown }[] = [];
+    const service = (to: string, cleared: boolean) => ({
+      answer: async (_ferret: string, body: unknown) => {
+        sent.push({ to, body });
+        return { cleared };
+      },
+    });
+    return { sent, service };
+  };
+
+  test('current names a permission prompt and a harness dialog, with the choices each offers', async () => {
+    const permission = build({ frame: await frameOf('permission-prompts/claude-2.1.220-bash') });
+    const dialog = build({ frame: await frameOf('harness-dialogs/claude-2.1.281-settings-error') });
+    permission.panes.remember(FERRET, '%7');
+    dialog.panes.remember(FERRET, '%7');
+
+    const asked = await permission.harness.dialogs.current(FERRET);
+    const raised = await dialog.harness.dialogs.current(FERRET);
+
+    expect(asked).toMatchObject({ kind: 'permission' });
+    expect(asked?.choices.length).toBeGreaterThan(1);
+    expect(raised).toMatchObject({ kind: 'harness' });
+    expect(raised?.choices.length).toBeGreaterThan(0);
+  });
+
+  test('answer sends a permission choice, a denial or an escape through the permission service, and queues what is not cleared', async () => {
+    const { sent, service } = answering();
+    const { harness, panes } = build({
+      frame: await frameOf('permission-prompts/claude-2.1.220-bash'),
+      permission: service('permission', true),
+    });
+    const queued = answering();
+    const queuing = build({
+      frame: await frameOf('permission-prompts/claude-2.1.220-bash'),
+      permission: queued.service('permission', false),
+    });
+    panes.remember(FERRET, '%7');
+    queuing.panes.remember(FERRET, '%7');
+    const id = (await harness.dialogs.current(FERRET))?.id as string;
+
+    expect(await harness.dialogs.answer(FERRET, id, '2')).toEqual({ status: 'delivered', id });
+    expect(await harness.dialogs.answer(FERRET, id, 'deny')).toEqual({ status: 'delivered', id });
+    expect(await harness.dialogs.answer(FERRET, id, 'escape')).toEqual({ status: 'delivered', id });
+    expect(await queuing.harness.dialogs.answer(FERRET, id, '1')).toEqual({ status: 'queued', id });
+    expect(sent.map(item => item.body)).toEqual([
+      { kind: 'choice', number: 2, requestId: id },
+      { kind: 'deny', requestId: id },
+      { kind: 'deny', requestId: id },
+    ]);
+  });
+
+  test('answer sends a harness dialog’s choice or escape through the dialog service, and refuses what is not a choice', async () => {
+    const { sent, service } = answering();
+    const { harness, panes } = build({
+      frame: await frameOf('harness-dialogs/claude-2.1.281-settings-error'),
+      dialog: service('dialog', true),
+    });
+    panes.remember(FERRET, '%7');
+    const id = (await harness.dialogs.current(FERRET))?.id as string;
+
+    expect(await harness.dialogs.answer(FERRET, id, '1')).toEqual({ status: 'delivered', id });
+    expect(await harness.dialogs.answer(FERRET, id, 'escape')).toEqual({ status: 'delivered', id });
+    expect(await harness.dialogs.answer(FERRET, id, 'maybe')).toEqual({
+      status: 'refused',
+      id,
+      reason: 'maybe is not a choice',
+    });
+    expect(sent.map(item => item.body)).toEqual([
+      { kind: 'choice', number: 1, dialogId: id },
+      { kind: 'escape', dialogId: id },
+    ]);
+  });
+
+  test('answer refuses with the service’s own sentence when it cannot send, and says nothing of a pane it cannot read', async () => {
+    const failing = {
+      answer: async () => {
+        throw new Error('the pane could not be typed into');
+      },
+    };
+    const refused = build({ frame: await frameOf('permission-prompts/claude-2.1.220-bash'), permission: failing });
+    const noTmux = build({ spawnThrows: true });
+    const unreadable = build({ tmux: () => 1 });
+    refused.panes.remember(FERRET, '%7');
+    noTmux.panes.remember(FERRET, '%7');
+    unreadable.panes.remember(FERRET, '%7');
+    const id = (await refused.harness.dialogs.current(FERRET))?.id as string;
+
+    expect(await refused.harness.dialogs.answer(FERRET, id, '1')).toEqual({
+      status: 'refused',
+      id,
+      reason: 'the pane could not be typed into',
+    });
+    expect(await noTmux.harness.dialogs.current(FERRET)).toBeUndefined();
+    expect(await unreadable.harness.dialogs.current(FERRET)).toBeUndefined();
+    // A ferret whose pane this daemon has never seen has no prompt to read.
+    expect(await build().harness.dialogs.current('f9' as FerretId)).toBeUndefined();
+  });
+
+  test('deliver says tmux is missing when it cannot be started', async () => {
+    const { harness } = build({ spawnThrows: true });
+
+    const outcome = await harness.deliver(FERRET, '%7' as never, { id: 'm1', text: 'hello' } as never);
+
+    expect(outcome).toEqual({ status: 'refused', id: 'm1', reason: 'tmux is not installed' });
+  });
+});
+
+describe('ClaudeHarness: the history folder and the transcript follower', () => {
+  test('lists a conversation whose first record is cut off, and none whose records name no folder', async () => {
+    const { harness } = build();
+    await mkdir(join(HISTORY, 'projects/p'), { recursive: true });
+    await Bun.write(join(HISTORY, 'projects/p/c-1.jsonl'), `{"cut off\n${JSON.stringify({ cwd: '/work' })}\n`);
+    await Bun.write(join(HISTORY, 'projects/p/c-2.jsonl'), `${JSON.stringify({ type: 'summary' })}\n`);
+
+    expect((await harness.conversations.list(undefined)).map(item => [item.id, item.folder])).toEqual([
+      ['c-1', '/work'],
+    ]);
+  });
+
+  test('follow yields each record once, however often the transcript is read again, and stops when told to', async () => {
+    const { harness, writeHome } = build();
+    await harness.start(spec(), runner({}), {} as never);
+    const record = (id: string) =>
+      JSON.stringify({ type: 'assistant', uuid: id, timestamp: T, message: { content: [] } });
+    await writeHome('projects/-work/conv-1.jsonl', `${record('one')}\n`);
+    const controller = new AbortController();
+    const seen: string[] = [];
+
+    for await (const entry of harness.transcript.follow(FERRET, controller.signal)) {
+      seen.push(entry.id);
+      if (seen.length === 1) await writeHome('projects/-work/conv-1.jsonl', `${record('one')}\n${record('two')}\n`);
+      if (seen.length === 2) controller.abort();
+    }
+
+    expect(seen).toEqual(['one', 'two']);
+  });
+});
+
 harnessConformance('Claude Code (real kernel roots)', () => {
   const { harness, tmux } = build();
   return {
@@ -998,6 +1215,25 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     expect(started.ok).toBe(true);
     expect(folder.raw(CLAUDE_CODE_LAUNCH_SETTINGS, FERRET)).toBeUndefined();
     expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'unknown' });
+  });
+
+  test('F-0422 a record that can be neither written nor removed still never fails the launch', async () => {
+    const config = configured();
+    const { folder } = await launchOf(config);
+    const port = folder.port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+    const failing = over(config, {
+      ...port,
+      write: async () => {
+        throw new Error('disk full');
+      },
+      remove: async () => {
+        throw new Error('disk gone');
+      },
+    });
+
+    const started = await failing.harness.start(spec(), runner({}), {} as never);
+
+    expect(started.ok).toBe(true);
   });
 });
 

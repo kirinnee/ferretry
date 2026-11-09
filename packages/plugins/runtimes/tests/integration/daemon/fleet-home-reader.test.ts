@@ -14,7 +14,7 @@ import { RuntimeHomeUnreadable } from '../../../contract/index.ts';
 import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 
@@ -817,5 +817,51 @@ describe('R1 m4 a home the manifest places outside fleet/homes is served read-on
     expect(await home.skillManifest('leaves', 100)).toBeUndefined();
     expect(await home.skillFile('plain', 'leak.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
     expect(await home.skillFile('managed-skill', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+  });
+
+  it('BG-033 a document link answers absent for a dangling target, too large over the bound, and unreadable for a target that is no settings file', async () => {
+    const { world, folder, home } = await away();
+    await symlink(join(world.parent, 'nowhere.json'), join(folder, '.claude.json'));
+    expect(await home.document('.claude.json', 100)).toBeNull();
+    await writeFile(join(world.parent, 'big.toml'), 'a = 1\nb = 2\n');
+    await symlink(join(world.parent, 'big.toml'), join(folder, 'config.toml'));
+    await expect(home.document('config.toml', 4)).rejects.toThrow('config.toml is larger than the 4 bytes');
+    expect(await home.document('config.toml', 100)).toBe('a = 1\nb = 2\n');
+    await writeFile(join(world.parent, 'notes.txt'), 'not a settings file at all');
+    await rm(join(folder, 'settings.json'));
+    await symlink(join(world.parent, 'notes.txt'), join(folder, 'settings.json'));
+    await expect(home.document('settings.json', 100)).rejects.toThrow(
+      'settings.json is a link whose target is not read',
+    );
+  });
+
+  it('a document that grew after the listing is refused whole, never cut short at the bound', async () => {
+    const { world } = await seed();
+    await writeFile(join(homeFolder(world), 'settings.json'), '{"a":1}');
+    let grown = false;
+    const growing: Pick<RootsPort, 'root'> = {
+      root: (name, scope) => {
+        const real = world.roots.root(name, scope);
+        return new Proxy(real, {
+          get(on, key) {
+            const value = Reflect.get(on, key) as unknown;
+            if (key !== 'readBytes') return typeof value === 'function' ? value.bind(on) : value;
+            return async (...args: Parameters<RootHandle['readBytes']>) => {
+              if (!grown) {
+                grown = true;
+                await writeFile(join(homeFolder(world), 'settings.json'), '{"a":1,"b":"much longer than before"}');
+              }
+              return await on.readBytes(...args);
+            };
+          },
+        });
+      },
+    };
+    const api = fleetHomes(growing, new FleetPublication());
+    await api.homes();
+    await expect(api.home(WORK)?.document('settings.json', 7)).rejects.toThrow(
+      'settings.json is larger than the 7 bytes',
+    );
+    expect(grown).toBe(true);
   });
 });

@@ -3,11 +3,12 @@
  * `.fy-fleet-apply.<uuid>`): one holder at a time, published whole, released by proof of its token, never taken over.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { lstat, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { applyClaimFor } from '../../../daemon/adapters/apply-claim.ts';
 import type { FleetDisk } from '../../../daemon/adapters/fleet-disk.ts';
-import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld } from '../../unit/support/fleet-world.ts';
+import { faultingDisk } from '../support/faulting-disk.ts';
 
 afterEach(cleanupWorlds);
 
@@ -249,6 +250,172 @@ describe('releasing a superseded claim', () => {
       );
 
     expect(refusal).not.toContain('.fy-fleet-backup-');
+  });
+});
+
+const faulting = faultingDisk;
+
+const impatient = { now: () => 0, sleep: async () => undefined, waitMs: 0 };
+
+describe('the claim when the disk misbehaves', () => {
+  it('lets the holder of the name keep it when the move onto it is refused, and refuses the waiter', async () => {
+    const world = await fleetWorld();
+    const manifest = manifestOf(world.fleet);
+    const racing = faulting(world.disk, async call => {
+      // Another claimer lands on the name between this holder's look and its move.
+      if (call === 'rename') await mkdir(lockOf(world.fleet), { recursive: true });
+    });
+
+    const act = applyClaimFor(racing, manifest, impatient).acquire();
+
+    await expect(act).rejects.toThrow(/its claim could not be read/u);
+    expect(
+      (await readdir(world.fleet)).filter(
+        name => name.startsWith('.fy-fleet-apply.') && name !== '.fy-fleet-apply.lock',
+      ),
+    ).toEqual([]);
+  });
+
+  it('raises a move that fails for any other reason, since nothing holds the name', async () => {
+    const world = await fleetWorld();
+    const broken = faulting(world.disk, async call => {
+      if (call === 'rename') throw new Error('the disk refused the move');
+    });
+
+    const act = applyClaimFor(broken, manifestOf(world.fleet), impatient).acquire();
+
+    await expect(act).rejects.toThrow('the disk refused the move');
+    expect(await readdir(world.fleet)).toEqual([]);
+  });
+
+  it('says the claim is gone when the holder it waited on released before the refusal was worded', async () => {
+    const world = await fleetWorld();
+    await mkdir(lockOf(world.fleet));
+    let looks = 0;
+    const clearing = faulting(world.disk, async (call, args) => {
+      if (call !== 'lstat' || args[0] !== lockOf(world.fleet)) return;
+      looks += 1;
+      // The first look (the attempt) sees the holder; by the second (the refusal's) it has released.
+      if (looks === 2) await rm(lockOf(world.fleet), { recursive: true });
+    });
+
+    const act = applyClaimFor(clearing, manifestOf(world.fleet), impatient).acquire();
+
+    await expect(act).rejects.toThrow(/and the claim is now gone; run the apply again/u);
+  });
+
+  it('says the claim could not be read when the disk will not list it', async () => {
+    const world = await fleetWorld();
+    await world.claimFor(manifestOf(world.fleet)).acquire();
+    const blind = faulting(world.disk, async (call, args) => {
+      if (call === 'entries' && args[0] === lockOf(world.fleet)) throw new Error('the folder could not be listed');
+    });
+
+    const act = applyClaimFor(blind, manifestOf(world.fleet), impatient).acquire();
+
+    await expect(act).rejects.toThrow(/its claim could not be read/u);
+  });
+
+  it('words the refusal without leftovers when the folder cannot be walked', async () => {
+    const world = await fleetWorld();
+    const token = await world.claimFor(manifestOf(world.fleet)).acquire();
+    await writeFile(join(world.fleet, '.fy-fleet-backup-aaaa'), 'original manifest');
+    const blind = faulting(world.disk, async (call, args) => {
+      if (call === 'entries' && args[0] === world.fleet) throw new Error('the folder could not be listed');
+    });
+
+    const refusal = await applyClaimFor(blind, manifestOf(world.fleet), impatient)
+      .acquire()
+      .then(
+        () => '',
+        error => (error as Error).message,
+      );
+
+    expect(refusal).toMatch(/another fleet apply holds .*\.fy-fleet-apply\.lock, claimed at /u);
+    expect(refusal).not.toContain('.fy-fleet-backup-');
+    expect(token).toBeDefined();
+  });
+
+  it('says the leftover search was only in part when the folder holds more entries than it will look through', async () => {
+    const world = await fleetWorld();
+    await world.claimFor(manifestOf(world.fleet)).acquire();
+    await writeFile(join(world.fleet, '.fy-fleet-backup-aaaa'), 'original manifest');
+    await mkdir(join(world.fleet, 'many'));
+    await Promise.all(
+      Array.from(
+        { length: 5001 },
+        async (_unused, index) => await writeFile(join(world.fleet, 'many', `f${String(index)}`), ''),
+      ),
+    );
+
+    const refusal = await world
+      .claimFor(manifestOf(world.fleet), 20)
+      .acquire()
+      .then(
+        () => '',
+        error => (error as Error).message,
+      );
+
+    expect(refusal).toContain('.fy-fleet-backup-aaaa');
+    expect(refusal).toContain('(and more: the folder was only searched in part)');
+  });
+
+  it('reports a claim that could not be cleared when its own token file will not go', async () => {
+    const world = await fleetWorld();
+    const token = await world.claimFor(manifestOf(world.fleet)).acquire();
+    const stuck = faulting(world.disk, async call => {
+      if (call === 'remove') throw new Error('the disk refused the removal');
+    });
+
+    const residue = await applyClaimFor(stuck, manifestOf(world.fleet), impatient).release(token);
+
+    expect(residue).toBe(lockOf(world.fleet));
+    expect(await readdir(lockOf(world.fleet))).toEqual([`claim-${token}.json`]);
+  });
+
+  it('reports the folder, not the file, when the token file went although the removal said it failed', async () => {
+    const world = await fleetWorld();
+    const token = await world.claimFor(manifestOf(world.fleet)).acquire();
+    const fickle = faulting(world.disk, async (call, args) => {
+      if (call !== 'remove' || !String(args[0]).endsWith(`claim-${token}.json`)) return;
+      await rm(String(args[0]));
+      throw new Error('the disk said it failed');
+    });
+
+    const residue = await applyClaimFor(fickle, manifestOf(world.fleet), impatient).release(token);
+
+    // The token file is gone, but the emptied folder was not removed by this release: it is named.
+    expect(residue).toBe(lockOf(world.fleet));
+    expect(await readdir(lockOf(world.fleet))).toEqual([]);
+  });
+
+  it('names the claim when the emptied folder cannot even be listed', async () => {
+    const world = await fleetWorld();
+    const token = await world.claimFor(manifestOf(world.fleet)).acquire();
+    const blind = faulting(world.disk, async (call, args) => {
+      if (call === 'entries' && args[0] === lockOf(world.fleet)) throw new Error('the folder could not be listed');
+    });
+
+    const residue = await applyClaimFor(blind, manifestOf(world.fleet), impatient).release(token);
+
+    expect(residue).toBe(lockOf(world.fleet));
+  });
+
+  it('still releases when the disk cannot say whether the token file is there', async () => {
+    const world = await fleetWorld();
+    const token = await world.claimFor(manifestOf(world.fleet)).acquire();
+    let refused = false;
+    const unsure = faulting(world.disk, async (call, args) => {
+      if (call !== 'lstat' || refused || !String(args[0]).endsWith(`claim-${token}.json`)) return;
+      refused = true;
+      throw new Error('the disk could not be asked');
+    });
+
+    const residue = await applyClaimFor(unsure, manifestOf(world.fleet), impatient).release(token);
+
+    expect(refused).toBe(true);
+    expect(residue).toBeUndefined();
+    expect(await readdir(world.fleet)).toEqual([]);
   });
 });
 

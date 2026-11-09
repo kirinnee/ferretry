@@ -4,7 +4,19 @@
  * name is never a source), S144.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { link, lstat, mkdir, readdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  readlink,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   credentialMounts,
@@ -13,7 +25,7 @@ import {
   sourceMounts,
 } from '../../../daemon/adapters/fleet-disk.ts';
 import type { HostMounts } from '../../../daemon/adapters/root-host-files.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 
@@ -208,6 +220,23 @@ describe('FleetDisk: every hop of a source is judged (S43, S144)', () => {
     await world.disk.copyInto(join(world.fleet, 'assets', 'alias'), join(world.fleet, 'homes', 'copied'), 0o700);
 
     expect(await readFile(join(world.fleet, 'homes', 'copied', 'SKILL.md'), 'utf8')).toBe('a skill');
+  });
+
+  it('refuses a name the fleet root cannot open, saying so', async () => {
+    const world = await fleetWorld();
+
+    expect(() => world.disk.fenced(join(world.fleet, 'a\0b'))).toThrow(
+      /the fleet folder could not open it \(outside\)/u,
+    );
+  });
+
+  it.skipIf(process.getuid?.() === 0)('reads a source file it cannot open as missing, not as a refusal', async () => {
+    const world = await fleetWorld();
+    const locked = join(world.person, '.claude', 'locked.md');
+    await writeFile(locked, 'private');
+    await chmod(locked, 0o000);
+
+    expect(await world.disk.readSource(locked, 1000)).toBeUndefined();
   });
 
   it('S43 a source in assets/ that is not there yet reads as missing, not as a refusal of the fleet', async () => {

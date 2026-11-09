@@ -16,7 +16,7 @@ import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
 import { followingHandle } from '../../../daemon/adapters/following-handle.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 
@@ -265,6 +265,11 @@ describe('BG-033 an outside account home follows a link only when it resolves in
     if (!at.ok) throw new Error('the link did not resolve');
     await expect(reach.writeText(at.value, 'overwritten')).rejects.toThrow();
     await expect(reach.remove(at.value)).rejects.toThrow();
+    // The read members answer for a followed link: its target's own text, and the same as bytes.
+    const placed = handle.resolve('settings.json');
+    if (!placed.ok) throw new Error('settings.json did not resolve');
+    expect(await handle.readText(placed.value, 100)).toBe('as it was');
+    expect(new TextDecoder().decode(await handle.readBytes(placed.value, 100))).toBe('as it was');
     expect(await readFile(join(linked, 'shared', 'settings.json'), 'utf8')).toBe('as it was');
     // The link is still a link and the target is still there after both refusals.
     expect(await readlink(join(linked, 'settings.json'))).toBe(join(linked, 'shared', 'settings.json'));
