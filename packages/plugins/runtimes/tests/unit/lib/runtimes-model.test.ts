@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { ProfileFile, RuntimeFile } from '../../../contract/index.ts';
-import { ownedFileBodies, ownedFileEdits } from '../../../daemon/lib/account/runtimes-edits.ts';
+import { ownedFileBodies, ownedFileEdits, unownedChanges } from '../../../daemon/lib/account/runtimes-edits.ts';
 import {
   assembleRuntimesModel,
   NO_COMPONENTS,
@@ -182,5 +182,39 @@ describe('the edits that move Runtimes’ own files to another model', () => {
     const edits = changed(files({ settings: { defaultRuntime: 'claude-default', autoResume: false } }));
 
     expect(edits).toEqual([{ path: 'runtimes.yaml', patch: { defaultRuntime: 'claude-default', autoResume: false } }]);
+  });
+});
+
+describe('C1 the parts of the model no file of Runtimes holds', () => {
+  const before = assembleRuntimesModel(files()).model;
+  const withMachine = (machine: Record<string, unknown>) => ({ ...before, machine: { ...before.machine, ...machine } });
+
+  it('names every machine setting a change moves except the two runtimes.yaml holds', () => {
+    const next = withMachine({
+      agentPermissions: 'skip',
+      publicUsageFeed: true,
+      browserMode: 'window',
+      defaultRuntime: 'claude-default',
+      autoResume: false,
+    });
+
+    expect(unownedChanges(before, next as never)).toEqual([
+      'the machine setting agentPermissions',
+      'the machine setting browserMode',
+      'the machine setting publicUsageFeed',
+    ]);
+  });
+
+  it('names a change of the advanced settings', () => {
+    const next = { ...before, advanced: { ...before.advanced, secretsFile: '/x/secrets.env' } };
+
+    expect(unownedChanges(before, next as never)).toEqual(['the advanced settings']);
+  });
+
+  it('says nothing for a change of only the default runtime and auto-resume, or of nothing', () => {
+    expect(unownedChanges(before, before)).toEqual([]);
+    expect(
+      unownedChanges(before, withMachine({ defaultRuntime: 'claude-default', autoResume: false }) as never),
+    ).toEqual([]);
   });
 });

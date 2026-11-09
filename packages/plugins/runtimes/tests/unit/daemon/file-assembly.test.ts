@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { KernelPorts } from '@ferretry/kernel/contract';
-import { configThenFleet } from '../../../daemon/adapters/account-model-files.ts';
+import { configThenFleet, fileFleetCatalogDeps } from '../../../daemon/adapters/account-model-files.ts';
 import { readTextFolder } from '../../../daemon/adapters/setup-files.ts';
 import { fileAssembly, fleetHost } from '../../../daemon/host-assembly.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
@@ -123,6 +123,38 @@ describe('the composed catalogue and setup', () => {
 
     const machine = await services.catalog.machine(undefined);
     expect(machine).toMatchObject({ format: 'none' });
+  });
+
+  it('S144 R8 a path that climbs out of the setup folder is never read as one of the fleet’s own records: a sign-in under credentials/ stays unread', async () => {
+    const world = await fleetWorld();
+    await mkdir(join(world.fleet, 'credentials', 'one'), { recursive: true });
+    await writeFile(join(world.fleet, 'credentials', 'one', '.credentials.json'), 'INERT_SIGN_IN_FIXTURE');
+    await mkdir(join(world.fleet, 'setup'), { recursive: true });
+    await writeFile(join(world.fleet, 'setup', 'import.json'), '{"record":true}');
+    const { host, directory } = fleetHost(kernelOver(world).kernel);
+    const deps = fileFleetCatalogDeps({
+      host,
+      paths: { home: world.home, fleet: directory, fleetManifest: join(directory, 'manifest.json') },
+      userHome: world.person,
+      sessionStatuses: async () => [],
+      credentials: { list: async () => ({ format: 1 as const, machine: 'this machine', logins: [] }) },
+      loginChanges: {} as never,
+      configWriter: { write: async () => undefined },
+      locate: () => undefined,
+      machineName: () => 'this machine',
+      clientName: 'fy',
+      config: {} as never,
+      sharedHistory: {} as never,
+      claudeStatusline: () => 'fy statusline',
+      configDirectory: join(world.home, 'config'),
+      publication: new FleetPublication(),
+    });
+
+    // The fleet's own record is read as a text file; the climb goes to the component-source fence, which refuses it.
+    expect(await deps.readAsset(join(directory, 'setup', 'import.json'))).toBe('{"record":true}');
+    await expect(deps.readAsset(`${directory}/setup/../credentials/one/.credentials.json`)).rejects.toThrow(
+      /outside the folders Runtimes may read a component from/u,
+    );
   });
 });
 

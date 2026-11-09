@@ -23,7 +23,7 @@ import {
   type RuntimeFile,
   type RuntimesFile,
 } from '../../contract/index.ts';
-import { foreignComponentChanges, ownedFileEdits } from '../lib/account/runtimes-edits.ts';
+import { foreignComponentChanges, ownedFileEdits, unownedChanges } from '../lib/account/runtimes-edits.ts';
 import { assembleRuntimesModel, type RuntimesModel } from '../lib/account/runtimes-model.ts';
 import type { AccountModel } from '../lib/account/schema.ts';
 import { FleetCatalogRefusal, type FleetCatalogServiceDeps } from '../lib/service/catalog-service.ts';
@@ -125,7 +125,17 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     // The last load; the files and the owners' components are live, so only the login list is reused.
     inEffect: async () => (lastLogins === undefined ? await load() : await evaluate(lastLogins)),
     load,
+    // Every refusal here is made while the change is PROPOSED, before any document is written, so each sentence's
+    // "nothing was changed" is true and the owner is never shown a plan that can only be refused at apply.
     editsFor: (loaded, next) => {
+      const standingIn = (loaded.files as RuntimesModel).unreadable;
+      if (standingIn.length > 0) throw new FleetCatalogRefusal('fleet_change_refused', unreadableRefusal(standingIn));
+      const unowned = unownedChanges(loaded.evaluation.effective.model, next);
+      if (unowned.length > 0)
+        throw new FleetCatalogRefusal(
+          'fleet_change_refused',
+          `this change also sets ${unowned.join(', ')}, which no file of Runtimes holds, so it would be reported as applied and save nothing; nothing was changed`,
+        );
       const foreign = foreignComponentChanges(loaded.evaluation.effective.model, next);
       if (foreign.length > 0)
         throw new FleetCatalogRefusal(
@@ -141,17 +151,38 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     // GAP(runtimes): Warden's accounts and Lessons' agent live in those plugins' own files, which Runtimes cannot
     // write (a change that spans owners is not one set, #52 Q3), so a renamed runtime is not re-pointed there.
     mentionsRenamed: () => [],
-    unreadable: () => (last === undefined ? [] : (last.files as RuntimesModel).unreadable),
+    // Fails closed: before the first load nothing is known to have been read, so nothing may be applied from it.
+    unreadable: () => (last === undefined ? [NOT_READ_YET] : (last.files as RuntimesModel).unreadable),
   };
 }
+
+/** What stands in before any file has been read: an apply is refused rather than built from nothing. */
+const NOT_READ_YET = 'the files of this machine have not been read yet';
 
 /** The sentence an apply is refused with while something stands in for a document it could not read. */
 const unreadableRefusal = (unreadable: readonly string[]): string =>
   `nothing was changed: ${unreadable.length === 1 ? 'a part of this machine' : `${String(unreadable.length)} parts of this machine`} could not be read from the Runtimes plugin, and a home written without ${unreadable.length === 1 ? 'it' : 'them'} would replace what is there (${unreadable.join('; ')})`;
 
 /**
- * The provisioner as the catalogue uses it, refusing a preview or an apply while the model holds a stand-in: the
- * homes the plan would write are built from documents Runtimes could not read, and an apply replaces every home.
+ * The check that runs BEFORE any configuration document is written (`FleetCatalogServiceDeps.preflight`): the model is
+ * read again and the change is refused while it holds a stand-in. A refusal at the provisioner alone comes too late, because
+ * the documents of a change land first and are not rolled back with the fleet.
+ */
+export function refuseBeforeWriting(
+  files: Pick<RuntimesConfigFiles, 'inEffect' | 'unreadable'>,
+): NonNullable<FleetCatalogServiceDeps['preflight']> {
+  return async () => {
+    await files.inEffect();
+    const unreadable = files.unreadable();
+    if (unreadable.length > 0) throw new Error(unreadableRefusal(unreadable));
+  };
+}
+
+/**
+ * The provisioner as the catalogue uses it, refusing an apply while the model holds a stand-in: the homes the plan would
+ * write are built from documents Runtimes could not read, and an apply replaces every home. A preview passes through (it
+ * writes nothing); a change that cannot be applied is refused earlier, when it is proposed (`editsFor`) and again before
+ * its documents are written ({@link refuseBeforeWriting}).
  */
 export function refuseWhileUnreadable(
   inner: FleetCatalogServiceDeps['provisioner'],

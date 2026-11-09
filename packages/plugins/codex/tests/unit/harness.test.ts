@@ -62,7 +62,7 @@ const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof 
     kernel: {
       roots,
       state: { write: async () => undefined } as never,
-      log: undefined as never,
+      log: { warn: () => undefined } as never,
       clock: realClock(),
       redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
     },

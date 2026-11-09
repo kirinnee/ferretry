@@ -24,6 +24,7 @@ const ALL: readonly RootName[] = [
   'sessions',
   'fleet',
   'harness-home',
+  'project-files',
 ];
 
 describe('takesLinks', () => {

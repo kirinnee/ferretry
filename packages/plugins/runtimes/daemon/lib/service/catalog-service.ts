@@ -82,6 +82,7 @@ import {
   runtimesUsingCredential,
 } from './catalog.ts';
 import type { RuntimeRename, SessionStatus } from './foreign.ts';
+import { failedApplySentence } from './failed-apply.ts';
 import { expandAssetPath, joinPath } from '../paths.ts';
 import type { ModelCatalogSources } from '../models/catalog.ts';
 import {
@@ -259,6 +260,12 @@ export interface FleetCatalogServiceDeps {
   readonly warn?: (message: string, fields: Readonly<Record<string, string>>) => void;
   /** Writes the configuration documents of a change. GAP(kernel): no plugin config write port; see `ports.ts`. */
   readonly configWriter: RuntimeConfigWriter;
+  /**
+   * Asked BEFORE any configuration document is written, by every path that writes one (an apply, an install, a setup
+   * or a clone). Throws a plain sentence when this machine cannot take the change at all, so that no document lands
+   * under a refusal that says "nothing was changed". Absent: nothing refuses ahead of a write.
+   */
+  preflight?(): Promise<void>;
   readonly provisioner: Pick<FleetProvisioner, 'preview' | 'apply'>;
   readonly layout: FleetLayout;
   /** A fresh runtime id (a UUID). */
@@ -495,8 +502,17 @@ export class FleetCatalogService {
    * whose manifest would be identical is left exactly as it is.
    *
    * Answers what it did. A machine with no fleet yet, or one wired without catalogs, has nothing to do.
+   *
+   * It runs under the same one-at-a-time section as an apply ({@link FleetCatalogService.apply}): a republish that read
+   * the model, then waited while an apply of another model committed, would otherwise land a plan made from the model
+   * BEFORE that apply and prune what the apply added.
    */
   async republish(): Promise<'applied' | 'unchanged' | 'skipped'> {
+    return await this.#exclusively(async () => await this.#republish());
+  }
+
+  /** {@link republish} for a caller that already holds the section (a login change republishes from inside its apply). */
+  async #republish(): Promise<'applied' | 'unchanged' | 'skipped'> {
     const reading = await this.#read();
     const sources = await this.#modelCatalogs();
     if (reading.format === 'none' || sources.modelCatalogs === undefined) return 'skipped';
@@ -1168,7 +1184,7 @@ export class FleetCatalogService {
       return { outcome: 'login-changed', result: 'held', sentences: result.sentences, ...summary, ...moved };
     }
     try {
-      await this.republish();
+      await this.#republish();
     } catch (error) {
       throw new FleetCatalogRefusal(
         'fleet_change_failed',
@@ -1225,9 +1241,13 @@ export class FleetCatalogService {
   ): Promise<AccountChangeOutcome> {
     const payload = record.payload;
     if (payload.kind === 'apply') {
+      // Refused here, ahead of the write, so a sentence that says "nothing was changed" is true: nothing has been written.
+      await this.#preflight();
+      let written = false;
       try {
         // The documents are the source of truth, so they land first; a plan that then fails is republished from them.
         await this.deps.configWriter.write(payload.documents);
+        written = payload.documents.length > 0;
         const result = await this.deps.provisioner.apply(payload.plan, []);
         this.#skipped = skippedWithinRuntimes(result.skipped, payload.plan.manifest.accounts);
         if (record.mutation.kind === 'runtime.rename') await this.#renameSessions(record.mutation);
@@ -1239,11 +1259,30 @@ export class FleetCatalogService {
             this.#skipped = skippedWithinRuntimes(failure.committed.skipped, failure.committed.manifest.accounts);
           return { outcome: 'applied', apply: applyFailureSummary(error) };
         }
-        throw new FleetCatalogRefusal('fleet_change_failed', errorMessage(error));
+        // A failure after the documents landed must say they are on disk: they are not rolled back with the fleet.
+        throw new FleetCatalogRefusal(
+          'fleet_change_failed',
+          written
+            ? failedApplySentence(
+                error,
+                payload.documents.map(document => document.path),
+              )
+            : errorMessage(error),
+        );
       }
     }
     if (payload.kind === 'login') return await this.#executeLogin(record, payload);
+    await this.#preflight();
     return { outcome: 'executed', executor: payload.preview.executor, summary: await payload.run(caller) };
+  }
+
+  /** The deps' preflight as a refusal in a sentence. */
+  async #preflight(): Promise<void> {
+    try {
+      await this.deps.preflight?.();
+    } catch (error) {
+      throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
+    }
   }
 
   /**

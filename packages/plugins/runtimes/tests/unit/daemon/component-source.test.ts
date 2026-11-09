@@ -297,11 +297,12 @@ describe('an apply with every kind a profile layer names provided', () => {
 });
 
 /** The sentence an apply is refused with, and that no home was written. */
+/** The sentence a change is refused with while a part stands in: at PROPOSE time, so there is nothing to apply. */
 async function refused(composed: Composed, body: unknown = put('claude-work')) {
-  const applied = await stageAndApply(composed.host, body);
-  expect(applied.status).toBeGreaterThanOrEqual(400);
+  const staged = await composed.host.request('POST', '/v1/runtimes/proposals', { body });
+  expect(staged.status).toBeGreaterThanOrEqual(400);
   expect(await readdir(composed.world.fleet)).not.toContain('manifest.json');
-  return applied.json<{ error: string }>().error;
+  return staged.json<{ error: string }>().error;
 }
 
 describe('a kind that is not provided, or whose provider fails, refuses in a sentence (fail closed)', () => {

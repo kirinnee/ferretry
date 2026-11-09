@@ -28,7 +28,10 @@ afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
 });
 
-function build(items: ReadonlyMap<string, unknown> = new Map()) {
+function build(
+  items: ReadonlyMap<string, unknown> = new Map(),
+  options: { readonly withoutConfig?: boolean; readonly warned?: string[] } = {},
+) {
   const roots = rootsPortFor(
     nodeFs(() => crypto.randomUUID()),
     { home: join(fixture, 'fy-home'), plugin: 'codex', worktrees: join(fixture, 'worktrees') },
@@ -43,10 +46,18 @@ function build(items: ReadonlyMap<string, unknown> = new Map()) {
         read: async (_def: unknown, name: string) => ok(state.get(name)),
         write: async (_def: unknown, value: unknown, name: string) => void state.set(name, value),
       } as never,
-      log: undefined as never,
+      log: (options.warned === undefined
+        ? undefined
+        : { warn: (message: string) => options.warned?.push(message) }) as never,
       clock: realClock(),
       redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
-      config: { collection: (definition: unknown) => (definition === CODEX_SETTINGS ? items : new Map()) } as never,
+      ...(options.withoutConfig === true
+        ? {}
+        : {
+            config: {
+              collection: (definition: unknown) => (definition === CODEX_SETTINGS ? items : new Map()),
+            } as never,
+          }),
     },
     locate: async () => ({
       outcome: 'located',
@@ -198,6 +209,17 @@ describe('the Codex harness over the real kernel roots', () => {
     expect(config).toContain('[mcp_servers.docs]\ncommand = "docs-mcp"');
     expect(config).toContain('[mcp_servers.kept]\ncommand = "k"');
     expect(config).not.toContain('"old"');
+  });
+
+  test('m7 a composition without a configuration port says once that no settings item reaches a home', async () => {
+    const warned: string[] = [];
+    const { harness } = build(new Map(), { withoutConfig: true, warned });
+
+    await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
+    await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
+
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain('no configuration port');
   });
 
   test('no settings item and no server writes no config.toml at all, as before', async () => {

@@ -76,6 +76,26 @@ export function ownedFileBodies(model: AccountModel): ReadonlyMap<string, Body> 
   return files;
 }
 
+/** The machine settings Runtimes' own `runtimes.yaml` holds (see {@link ownedFileBodies}); every other one has no file here. */
+const OWNED_MACHINE_KEYS: ReadonlySet<string> = new Set(['defaultRuntime', 'autoResume']);
+
+/**
+ * The parts of the model `next` moves that no file of Runtimes holds: a machine setting other than the default runtime and
+ * auto-resume (agent permissions, what agents may control, the browser settings, agenda mode, the usage feed, the time
+ * zone) and the `advanced` block. {@link ownedFileEdits} renders none of them, so a change carrying one would be reported
+ * as applied and save nothing, while the homes it published were built from a model that was never saved (a permission
+ * mode loosened with no owner hold). Such a change is refused instead.
+ */
+export function unownedChanges(before: AccountModel, next: AccountModel): readonly string[] {
+  const machine: Readonly<Record<string, unknown>> = before.machine;
+  const nextMachine: Readonly<Record<string, unknown>> = next.machine;
+  const changed = [...new Set([...Object.keys(machine), ...Object.keys(nextMachine)])]
+    .filter(key => !OWNED_MACHINE_KEYS.has(key) && !same(machine[key], nextMachine[key]))
+    .map(key => `the machine setting ${key}`);
+  if (!same(before.advanced, next.advanced)) changed.push('the advanced settings');
+  return changed.toSorted((left, right) => left.localeCompare(right));
+}
+
 /** The kinds whose components another plugin owns and Runtimes cannot write (`instructions` are Runtimes' own). */
 const FOREIGN_COMPONENT_KINDS = ['mcp', 'skills', 'settings', 'hooks'] as const;
 

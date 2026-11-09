@@ -189,14 +189,23 @@ export function runtimeLoosening(
  * nothing). A shell newly entered (Q18, new in 5.0, so no rule of today's) is held too, on a new file as well: the
  * shell's build then runs with this runtime's login in its environment, which the owner approved for other runtimes
  * only. Dropping the shell, or keeping the same one, loosens nothing.
+ *
+ * A REMOVAL (`after` undefined: the kernel judges a removed file with that) is judged by `before` alone and loosens
+ * nothing here: it never throws, so the owner's removal is admitted instead of held as "could not be judged". Today
+ * held a removed runtime only when its login HAD a budget ({@link runtimeLoosening}, `before.login` only); this half
+ * cannot see budgets and a held removal could not be confirmed through the apply, so that one refinement is the
+ * daemon half's, as for a re-point.
  */
-export const runtimeFileLoosens = (before: RuntimeFile | undefined, after: RuntimeFile): readonly string[] => [
-  ...(before === undefined || before.login === after.login
+export const runtimeFileLoosens = (
+  before: RuntimeFile | undefined,
+  after: RuntimeFile | undefined,
+): readonly string[] => [
+  ...(before === undefined || after === undefined || before.login === after.login
     ? []
     : [
         `a runtime moves off login "${before.login}" to "${after.login}", which may leave a budget that counts and stops it`,
       ]),
-  ...(after.shell === undefined || after.shell === before?.shell
+  ...(after?.shell === undefined || after.shell === before?.shell
     ? []
     : [`a runtime now enters the shell "${after.shell}"`]),
 ];

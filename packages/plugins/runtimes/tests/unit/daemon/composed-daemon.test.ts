@@ -10,11 +10,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
 import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
@@ -83,6 +85,22 @@ const put = (name: string, extra: Record<string, unknown> = {}) => ({
     addAnother: true,
     ...extra,
   },
+});
+
+/** A `machine.settings` change as a client sends it: every machine setting together, with the ones named here moved. */
+const MACHINE_SETTINGS = (moved: Record<string, unknown>) => ({
+  kind: 'machine.settings',
+  agentPermissions: 'auto',
+  defaultRuntime: null,
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
+  browserMode: 'headless',
+  browserProxy: null,
+  browserPorts: 'random',
+  browserFirewallFailure: 'warn',
+  autoResume: true,
+  agendaMode: true,
+  publicUsageFeed: false,
+  ...moved,
 });
 
 /** Stages a change and applies it as the owner; answers the apply's response. */
@@ -223,18 +241,188 @@ describe('a real apply through the composed daemon', () => {
     ]);
   });
 
-  it('refuses an apply in a sentence while a part of the model stands in for a document Runtimes cannot read', async () => {
+  it('C2 refuses a change in a sentence while a part of the model stands in, BEFORE any file is written: the runtime file is absent and the next apply does not publish it', async () => {
     const { host, world } = await compose({
       config: { ...CONFIG, profiles: { default: { contents: ['modelSets/heavy', 'mcp/github'] } } },
     });
 
-    const applied = await stageAndApply(host, put('claude-work'));
+    // Refused when it is proposed: no proposal exists to be applied, and the sentence is true.
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+
+    expect(staged.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(staged.json())).toContain('could not be read from the Runtimes plugin');
+    expect(JSON.stringify(staged.json())).toContain('mcp component');
+    expect(JSON.stringify(staged.json())).toContain('github');
+    expect(JSON.stringify(staged.json())).toContain('nothing was changed');
+    // The file the sentence says was not written is absent: the runtime is nowhere in the configuration or the fleet.
+    expect(JSON.stringify((await host.request('GET', '/v1/runtimes')).json())).not.toContain('claude-work');
+    expect(await readdir(world.fleet)).not.toContain('manifest.json');
+
+    // The stand-in goes away; an unrelated change applies, and publishes only what was applied.
+    host.setConfig('profiles', { default: { contents: ['modelSets/heavy'] } });
+    const applied = await stageAndApply(host, put('claude-two'));
+    expect(applied.status).toBe(200);
+    const manifest = JSON.parse(await readFile(join(world.fleet, 'manifest.json'), 'utf8')) as {
+      runtimes: { name: string }[];
+    };
+    expect(manifest.runtimes.map(runtime => runtime.name).toSorted()).toEqual(['claude-default', 'claude-two']);
+  });
+
+  it('C2 the check before a write also stops an apply whose proposal was staged before a part began to stand in', async () => {
+    const { host, world } = await compose();
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+    expect(staged.status).toBe(200);
+    const { id } = staged.json<{ id: string }>();
+    // The owner layers an MCP server by hand after the preview.
+    host.setConfig('profiles', { default: { contents: ['modelSets/heavy', 'mcp/github'] } });
+
+    const applied = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
 
     expect(applied.status).toBeGreaterThanOrEqual(400);
-    expect(JSON.stringify(applied.json())).toContain('could not be read from the Runtimes plugin');
-    expect(JSON.stringify(applied.json())).toContain('mcp component');
-    expect(JSON.stringify(applied.json())).toContain('github');
+    expect(JSON.stringify((await host.request('GET', '/v1/runtimes')).json())).not.toContain('claude-work');
     expect(await readdir(world.fleet)).not.toContain('manifest.json');
+  });
+
+  it('R1 refuses a change while a hooks component stands in too (each foreign kind is refused, not only mcp)', async () => {
+    const { host } = await compose({
+      config: { ...CONFIG, profiles: { default: { contents: ['modelSets/heavy', 'hooks/guard'] } } },
+    });
+
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+
+    expect(staged.status).toBeGreaterThanOrEqual(400);
+    // The stand-in's own sentence (a layer that names no component at all would be refused in other words).
+    expect(JSON.stringify(staged.json())).toContain('could not be read');
+    expect(JSON.stringify(staged.json())).toContain('hooks component');
+    expect(JSON.stringify(staged.json())).toContain('guard');
+  });
+
+  it('C1 refuses a machine.settings change of a field no file of Runtimes holds, saves nothing and writes no home with a loosened permission mode', async () => {
+    const { host, world } = await compose();
+
+    const staged = await host.request('POST', '/v1/runtimes/proposals', {
+      body: { change: MACHINE_SETTINGS({ agentPermissions: 'skip', publicUsageFeed: true }) },
+    });
+
+    expect(staged.status).toBeGreaterThanOrEqual(400);
+    const sentence = JSON.stringify(staged.json());
+    expect(sentence).toContain('agentPermissions');
+    expect(sentence).toContain('publicUsageFeed');
+    expect(sentence).toContain('nothing was changed');
+    // Nothing was reported applied, nothing saved, and no home or wrapper was published at all.
+    expect(await readdir(world.fleet)).not.toContain('manifest.json');
+    const machine = (await host.request('GET', '/v1/runtimes/machine')).json<{
+      agentPermissions: string;
+      publicUsageFeed: boolean;
+    }>();
+    expect(machine).toMatchObject({ agentPermissions: 'auto', publicUsageFeed: false });
+  });
+
+  it('C1 refuses the loosened permission mode for the owner as for anyone, and no later apply publishes bypassPermissions', async () => {
+    const { host, world } = await compose();
+    await host.request('POST', '/v1/runtimes/proposals', {
+      body: { change: MACHINE_SETTINGS({ agentPermissions: 'skip' }) },
+    });
+
+    const applied = await stageAndApply(host, put('claude-work'));
+
+    expect(applied.status).toBe(200);
+    const everything = async (folder: string): Promise<string[]> => {
+      const found: string[] = [];
+      for (const entry of await readdir(folder, { withFileTypes: true })) {
+        const path = join(folder, entry.name);
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) found.push(...(await everything(path)));
+        else found.push(await readFile(path, 'utf8'));
+      }
+      return found;
+    };
+    for (const folder of ['homes', 'bin'])
+      expect((await everything(join(world.fleet, folder))).join('\n')).not.toContain('bypassPermissions');
+  });
+
+  it('C1 saves the machine settings Runtimes does hold (default runtime, auto-resume) and reads them back', async () => {
+    const { host } = await compose({
+      config: {
+        ...CONFIG,
+        runtimes: {
+          'claude-default': { login: 'claude-you', profile: 'default', agent: true },
+          'claude-second': { login: 'claude-you', profile: 'default', agent: true },
+        },
+      },
+    });
+
+    const applied = await stageAndApply(host, {
+      change: MACHINE_SETTINGS({ defaultRuntime: 'claude-second', autoResume: false }),
+    });
+
+    expect(applied.status).toBe(200);
+    expect(applied.json<{ outcome: string }>().outcome).toBe('applied');
+    const machine = (await host.request('GET', '/v1/runtimes/machine')).json<{
+      defaultRuntime: string | null;
+      autoResume: boolean;
+    }>();
+    expect(machine).toMatchObject({ defaultRuntime: 'claude-second', autoResume: false });
+  });
+
+  it('M3 publishes a login its budget holds as unavailable, from Usage’s pauses in force', async () => {
+    const pause = {
+      period: 'daily',
+      level: 'over_trigger',
+      limitUsd: 40,
+      resetsAtMs: 1_800_000_000_000,
+      timeZone: 'UTC',
+    };
+    const { host, world } = await compose({
+      assemble: ctx =>
+        hostAssembly({
+          ...ctx,
+          uses: { usage: { current: () => ({ pauses: () => [{ login: 'claude-you', pause, phrase: '' }] }) } },
+        } as never),
+    });
+
+    const applied = await stageAndApply(host, put('claude-work'));
+
+    expect(applied.status).toBe(200);
+    const wrapper = await readFile(join(world.fleet, 'bin', 'claude-work'), 'utf8');
+    expect(wrapper).toContain('over its daily budget');
+  });
+
+  it('M3 a budget hold that starts or stops publishes the fleet again, so its wrappers follow Usage’s pause', async () => {
+    let republished = 0;
+    const { host } = await compose({
+      assemble: ctx => {
+        const real = hostAssembly(ctx);
+        // The catalogue's methods use private fields, so each is called on the catalogue itself.
+        const catalog = new Proxy(real.catalog, {
+          get: (target, key) =>
+            key === 'republish'
+              ? async () => {
+                  republished += 1;
+                  return 'unchanged';
+                }
+              : Reflect.get(target, key) instanceof Function
+                ? (Reflect.get(target, key) as (...args: unknown[]) => unknown).bind(target)
+                : Reflect.get(target, key),
+        });
+        return { ...real, catalog };
+      },
+    });
+
+    host.emit(LoginPaused, { login: 'claude-you' as never, level: 'over_trigger', period: 'daily' });
+    host.emit(LoginResumed, { login: 'claude-you' as never });
+    await host.settle();
+
+    expect(republished).toBe(2);
+  });
+
+  it('M3 publishes a runnable wrapper when Usage holds nothing (or is off)', async () => {
+    const { host, world } = await compose();
+
+    const applied = await stageAndApply(host, put('claude-work'));
+
+    expect(applied.status).toBe(200);
+    expect(await readFile(join(world.fleet, 'bin', 'claude-work'), 'utf8')).not.toContain('over its daily budget');
   });
 
   it('refuses a change that edits a component another plugin owns, and writes nothing', async () => {
@@ -270,6 +458,99 @@ describe('a real apply through the composed daemon', () => {
     const body = applied.json<{ outcome?: string; apply?: { outcome?: string } }>();
     expect(applied.status >= 400 || (body.outcome === 'applied' && body.apply?.outcome !== 'committed')).toBe(true);
     expect(await readdir(world.fleet)).not.toContain('manifest.json');
+  });
+});
+
+/** A kernel whose fleet root cannot be opened: everything else is the fleet world's. */
+const brokenFleet =
+  (roots: FleetWorld['roots']): RuntimesAssembler =>
+  ctx =>
+    hostAssembly({
+      ...ctx,
+      kernel: {
+        ...ctx.kernel,
+        roots: {
+          ...roots,
+          root: (name: string, ...rest: unknown[]) => {
+            if (name === 'fleet') throw new Error('the fleet root is not there');
+            return (roots.root as (...args: unknown[]) => unknown)(name, ...rest);
+          },
+        },
+      },
+    } as never);
+
+describe('the default composition stands in for the services and keeps a broken fleet root visible', () => {
+  const codexEnded = (ferrets: FakeFerrets): void => {
+    ferrets.add({ id: 'f1' as never, harness: 'codex', runtime: 'codex-default', state: 'stopped' });
+  };
+
+  it('a route reaches the real file assembly through the stand-in, and the doctor row says the fleet folder is open', async () => {
+    const { host } = await compose();
+
+    const machine = await host.request('GET', '/v1/runtimes/machine');
+    const finding = await host.doctor('runtimes', 'runtimes-config');
+
+    expect(machine.status).toBe(200);
+    expect(finding).toMatchObject({ state: 'ok' });
+  });
+
+  it('a ferret that stopped reaches wrapperOf through the stand-in and the follow-up runs without a warning', async () => {
+    const ferrets = new FakeFerrets();
+    codexEnded(ferrets);
+    const world = await fleetWorld();
+    const host = await testHost({
+      plugins: [
+        runtimesDaemon(ctx =>
+          hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
+        ) as DaemonImplementation<any>,
+      ],
+      fakes: {
+        ferrets,
+        logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
+        loginChanges: fakeLoginChanges(),
+      },
+      gate: new StandInAdmission(() => ownerStanding()),
+      config: CONFIG,
+      ownerHome: world.person,
+    });
+
+    host.emit(FerretsChanged, { ferret: 'f1', generation: 1, state: 'stopped' });
+    await host.settle();
+
+    expect(host.logs.filter(line => line.message.includes('follow-up could not run'))).toEqual([]);
+  });
+
+  it('a broken fleet root no longer fails the build, and is seen: the routes answer, the doctor row fails, the log says so once and the ended follow-up says why it did not run', async () => {
+    const ferrets = new FakeFerrets();
+    codexEnded(ferrets);
+    const world = await fleetWorld();
+    const host = await testHost({
+      plugins: [runtimesDaemon(brokenFleet(world.roots)) as DaemonImplementation<any>],
+      fakes: {
+        ferrets,
+        logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
+        loginChanges: fakeLoginChanges(),
+      },
+      gate: new StandInAdmission(() => ownerStanding()),
+      config: CONFIG,
+      ownerHome: world.person,
+    });
+
+    const finding = await host.doctor('runtimes', 'runtimes-config');
+    host.emit(FerretsChanged, { ferret: 'f1', generation: 1, state: 'stopped' });
+    await host.settle();
+
+    expect(finding).toMatchObject({ state: 'fail' });
+    expect(finding?.detail).toContain('the fleet root is not there');
+    const lines = host.logs.map(line => line.message);
+    expect(lines.filter(line => line.includes('could not open the fleet folder'))).toHaveLength(1);
+    expect(lines.some(line => line.includes('follow-up could not run'))).toBe(true);
+  });
+
+  it('the unavailable assembly is reported by the doctor row as a warning, not as a healthy half', async () => {
+    const { host } = await compose({ assemble: unavailableAssembly });
+
+    expect(await host.doctor('runtimes', 'runtimes-config')).toMatchObject({ state: 'warn' });
   });
 });
 

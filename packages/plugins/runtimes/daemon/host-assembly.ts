@@ -20,6 +20,7 @@
 import type { FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
+import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { milliseconds } from '@ferretry/std';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import { PROFILE_COMPONENTS_KEY } from '../contract/index.ts';
@@ -30,7 +31,7 @@ import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
 import type { AdapterHost } from './adapters/ports.ts';
-import { refuseWhileUnreadable, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
+import { refuseBeforeWriting, refuseWhileUnreadable, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
 import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
@@ -204,6 +205,8 @@ export function fileAssembly(
     };
     /** The hooks this plugin offers: the profile component sources the owning plugins take (read live, never kept). */
     readonly hooks: Pick<HookInvoker, 'provider'>;
+    /** Usage is an optional need (§2.4): its handle answers `undefined` when the plugin is off. */
+    readonly uses?: { readonly usage: { current(): Pick<UsageApi, 'pauses'> | undefined } };
   },
   publication: FleetPublication,
 ): Pick<ReturnType<typeof assembleServices>, 'catalog' | 'setup'> {
@@ -244,6 +247,13 @@ export function fileAssembly(
   });
   const catalog: FleetCatalogServiceDeps = {
     ...unguarded,
+    // Usage's pauses in force now, synchronously (they are memory-only): a login its budget holds is published
+    // unavailable, exactly as a disabled one is. Usage off (it is an optional need) holds nothing.
+    budgetHolds: () =>
+      Object.fromEntries(
+        (ctx.uses?.usage.current()?.pauses() ?? []).map(held => [held.login as string, held.pause] as const),
+      ),
+    preflight: refuseBeforeWriting(config),
     provisioner: refuseWhileUnreadable(unguarded.provisioner, config),
   };
   const refusing = unavailableSetupDeps(catalog);

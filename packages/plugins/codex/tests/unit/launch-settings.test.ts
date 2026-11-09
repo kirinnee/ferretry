@@ -8,7 +8,7 @@ import type { FencedPath, FerretId, KernelPorts, RootHandle, StatePort } from '@
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { state as kernelState } from '@ferretry/kernel/host';
 import { ok } from '@ferretry/std';
-import { CODEX_LAUNCH_SETTINGS, CODEX_ROLLOUTS, type HarnessConfig } from '../../contract/index.ts';
+import { CODEX_LAUNCH_SETTINGS, CODEX_ROLLOUTS, CODEX_SETTINGS, type HarnessConfig } from '../../contract/index.ts';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
 
@@ -47,7 +47,11 @@ const runner = {
   stop: async () => undefined,
 } as unknown as Runner;
 
-function over(mode: { value: HarnessConfig['permissionMode'] }, state: StatePort) {
+function over(
+  mode: { value: HarnessConfig['permissionMode'] },
+  state: StatePort,
+  items: ReadonlyMap<string, unknown> = new Map(),
+) {
   return codexHarness({
     kernel: {
       roots: roots(),
@@ -55,6 +59,7 @@ function over(mode: { value: HarnessConfig['permissionMode'] }, state: StatePort
       log: undefined as never,
       clock: realClock(),
       redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
+      config: { collection: (definition: unknown) => (definition === CODEX_SETTINGS ? items : new Map()) } as never,
     },
     permissionMode: () => mode.value,
     locate: async () => ({
@@ -130,7 +135,10 @@ async function realPortWithBadRecord(shape: keyof typeof damagedShapes, healthy:
   return { opening, port, changed, memory };
 }
 
-const HEALTHY_RECORD = `${JSON.stringify({ format: 1, sections: { 'permission-mode': 'a'.repeat(64), 'fixed-layer': 'b'.repeat(64) } })}\n`;
+const HEALTHY_RECORD = `${JSON.stringify({
+  format: 1,
+  sections: { 'permission-mode': 'a'.repeat(64), 'fixed-layer': 'b'.repeat(64), settings: 'c'.repeat(64) },
+})}\n`;
 
 describe('F-0422 one bad launch-settings record is that ferret’s nothing-to-say, never the whole plugin’s damage', () => {
   for (const shape of Object.keys(damagedShapes) as (keyof typeof damagedShapes)[]) {
@@ -165,7 +173,7 @@ describe('F-0422 one bad launch-settings record is that ferret’s nothing-to-sa
 });
 
 describe('F-0422 Codex records what a launch ran under', () => {
-  test('F-0422 a start records two values-free fingerprints in state/codex/launch-settings/<ferret>.json and is current', async () => {
+  test('F-0422 a start records three values-free fingerprints in state/codex/launch-settings/<ferret>.json and is current', async () => {
     const { folder, state } = fresh();
     const harness = over({ value: 'auto' }, state);
 
@@ -174,7 +182,7 @@ describe('F-0422 Codex records what a launch ran under', () => {
     const record = JSON.parse(raw) as { format: number; sections: Record<string, string> };
 
     expect(record.format).toBe(1);
-    expect(Object.keys(record.sections).toSorted()).toEqual(['fixed-layer', 'permission-mode']);
+    expect(Object.keys(record.sections).toSorted()).toEqual(['fixed-layer', 'permission-mode', 'settings']);
     for (const digest of Object.values(record.sections)) expect(digest).toMatch(/^[0-9a-f]{64}$/u);
     for (const value of [FOLDER, HOME, 'auto', 'on-request', 'workspace-write']) expect(raw).not.toContain(value);
     expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
@@ -275,5 +283,54 @@ describe('F-0422 Codex records what a launch ran under', () => {
     expect(started.ok).toBe(true);
     expect(folder.raw(CODEX_LAUNCH_SETTINGS, FERRET)).toBeUndefined();
     expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'unknown' });
+  });
+});
+
+describe('F-0422 a changed Codex settings item says relaunch needed, as Claude Code’s does', () => {
+  const guard = (value: string) => ({
+    settings: { shell_environment_policy: { set: { GUARD: value } } },
+  });
+
+  test('F-0422 settings unchanged since the launch is current', async () => {
+    const { state } = fresh();
+    const items = new Map<string, unknown>([['guard', guard('one')]]);
+    const harness = over({ value: 'auto' }, state, items);
+    await harness.start(spec, runner, {} as never);
+
+    expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+  });
+
+  test('F-0422 an item changed, added or removed since the launch drifts in the settings section only', async () => {
+    const { state } = fresh();
+    const items = new Map<string, unknown>([['guard', guard('one')]]);
+    const harness = over({ value: 'auto' }, state, items);
+    await harness.start(spec, runner, {} as never);
+    const drifted = { kind: 'drifted', sections: ['settings'] } as const;
+
+    items.set('guard', guard('two'));
+    expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+
+    items.set('guard', guard('one'));
+    expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+
+    items.set('extra', { settings: { model: 'other' } });
+    expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+
+    items.delete('extra');
+    items.delete('guard');
+    expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+  });
+
+  test('F-0422 the record keeps no settings value, and a resume records the settings afresh', async () => {
+    const { folder, state } = fresh();
+    const items = new Map<string, unknown>([['guard', guard('secret-looking-value')]]);
+    const harness = over({ value: 'auto' }, state, items);
+    await harness.start(spec, runner, {} as never);
+    expect(folder.raw(CODEX_LAUNCH_SETTINGS, FERRET) ?? '').not.toContain('secret-looking-value');
+
+    items.set('guard', guard('two'));
+    await harness.resume(spec, runner, {} as never, 'thread-1');
+
+    expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
   });
 });
