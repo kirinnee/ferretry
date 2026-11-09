@@ -286,7 +286,7 @@ export class SessionFiles {
       const document = resumeTurnDocument(trimmed ?? settings.defaultResumePrompt, settings);
       const number = await this.nextTurn(id, store, document, request.by);
       const file = await store.writeTurn(id, number, document, request.by);
-      turn = { turn: number, instruction: resumeTurnInstruction(file) };
+      turn = { turn: number, file, instruction: resumeTurnInstruction(file) };
     }
     await store.clearMarkers(id);
     // Today's order: the counter is saved BEFORE the relaunch (today's `session.resuming` transition carries the

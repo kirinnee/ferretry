@@ -1,6 +1,12 @@
 import { ApiError, type KernelPorts, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
 import { type AskId, AskIdSchema, type AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretsApi, FerretSummary, QueueOutcome, SitrepLineSource } from '@ferretry/core-ferrets/contract';
+import type {
+  FerretsApi,
+  FerretSummary,
+  FerretTurnAuthor,
+  QueueOutcome,
+  SitrepLineSource,
+} from '@ferretry/core-ferrets/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
 import { err, milliseconds, ok } from '@ferretry/std';
@@ -39,6 +45,9 @@ import {
   type SendPath,
   SendTracker,
   type SendTarget,
+  type SendTerminal,
+  type SendTurnStore,
+  TERMINAL_SEND_STATUSES,
   turnInstruction,
   authorizeSend,
   SendDraftRefused,
@@ -151,8 +160,13 @@ const sendActRefusal = (error: unknown): never => {
  */
 const JOURNAL_LOG_KEYS = ['sendId', 'outcome', 'effect', 'from', 'by', 'turn', 'direct', 'proof'] as const;
 
-/** Ferrets' harness key as the send policy and the transcript observers name the family: `claude-code` is `claude`. */
-const harnessFamily = (key: string): 'claude' | 'codex' => (key === 'codex' ? 'codex' : 'claude');
+/**
+ * Ferrets' harness key as the send policy and the transcript observers name the family: `claude-code` is `claude`. A
+ * harness this build knows nothing about is NO family: it gets no inline paste and no transcript evidence, so nothing is
+ * pasted whole or typed again on a guess.
+ */
+const harnessFamily = (key: string): 'claude' | 'codex' | undefined =>
+  key === 'claude-code' ? 'claude' : key === 'codex' ? 'codex' : undefined;
 
 /** A ferret's lifecycle state, as the session status the interrupt's refusals are written against. */
 const statusOf = (ferret: FerretSummary): SessionStatus => {
@@ -320,11 +334,18 @@ export function buildConversationA(deps: {
    * message while its typing is still between paste and Enter, and a stop never lands between two keys of a send.
    */
   const lane = new KeyedSerialExecutor();
+  /**
+   * The whose-turn watcher's last word per ferret (today's `turnState` / `turnStateAt`): `working` or `idle`, and the instant
+   * it last CHANGED. Fed by every look Ferrets' phase gets ({@link ConversationAHalf.turns}); the tracker's "a turn started
+   * after this send" guard reads it, so a send the transcript matcher missed but the agent took is held, not typed twice.
+   */
+  const turnStates = new Map<SessionId, { readonly state: 'working' | 'idle'; readonly at: string }>();
   /** One ferret as the send path reads it; a ferret Ferrets does not know is 404. */
   const readTarget = async (id: SessionId): Promise<SendTarget> => {
     const ferret = await ferrets.get(id);
     if (ferret === undefined) throw new SessionSendError('not_found', `session not found: ${id}`);
     const question = await askedQuestion(id);
+    const watched = turnStates.get(id);
     return {
       id,
       status: statusOf(ferret),
@@ -333,6 +354,7 @@ export function buildConversationA(deps: {
       harness: harnessFamily(ferret.harness),
       // Ferrets keeps no turn count (turns are named by when they began), so none is claimed.
       turn: 0,
+      ...(watched === undefined ? {} : { turnState: watched.state, turnStateAt: watched.at }),
       ...(question === undefined ? {} : { pendingQuestion: { toolUseId: question.toolUseId } }),
     };
   };
@@ -364,6 +386,21 @@ export function buildConversationA(deps: {
    * service's `send` and `reattempt` are not called from here (a send is `typeMessage`, below).
    */
   const unwiredTyping = (): never => pending(SEND_EXTRAS_UNAVAILABLE);
+  /** The ferret's turn documents and the files Ferrets writes for it; none when Ferrets offers none (or refuses the look). */
+  const turnsOf = async (ferret: SessionId) => await ferrets.turns?.(ferret).catch(() => undefined);
+  /**
+   * The send path's turn store, over Ferrets' writer: the act that presses Enter (a person's, the Warden's, the tracker's
+   * re-submit) starts the turn a typed pointer named, and that clears the markers the turn that ended left. The numbered
+   * writers belong to a TYPING send, which this host does not run through the service (see {@link typeMessage}), so they
+   * refuse as before.
+   */
+  const turnStore: SendTurnStore = {
+    writeTurn: unwiredTyping,
+    writeQueuedPayload: unwiredTyping,
+    clearMarkers: async id => {
+      await (await turnsOf(id))?.clearMarkers?.();
+    },
+  };
   /** The send path's pane look and composer acts over the harness seam; the send-now reads the pane through it. */
   const lookAtPane = harnessSendTerminal(ferrets);
   /** What the send path's acts and the tracker read of a ferret, and the journal they write (one object, shared). */
@@ -391,6 +428,7 @@ export function buildConversationA(deps: {
    * reads a whole transcript never holds the ferret's send lane. The proof is the transcript (`EntriesSendEvidence`,
    * through Ferrets' harness seam) and the pane (`lookAtPane`).
    */
+  /** The ferrets at boot: all `arm` walks. A ferret made later is looked at by its own sends (`track`), never by the walk. */
   const roster = new Set<SessionId>();
   /**
    * The ledger as the tracker reads it: the words a send is looked for by are MASKED the way the harness plugin hands the
@@ -410,6 +448,21 @@ export function buildConversationA(deps: {
       );
     },
   };
+  /**
+   * The pane as the tracker looks at it. The tracker holds the MASKED words of a send (the transcript is masked), but the
+   * pane is not: a send that carried a secret would be seen nowhere. So the pane is asked for the row's own words, found
+   * by the masked ones the tracker names.
+   */
+  const trackedPane: Pick<SendTerminal, 'observe' | 'heldAt'> = {
+    observe: async id => await lookAtPane.observe(id),
+    heldAt: async (id, text) => {
+      const records = await ledger.list(id);
+      const own = await kernel.redaction.read(scope =>
+        records.find(record => record.matchText !== undefined && scope.text(record.matchText) === text),
+      );
+      return await lookAtPane.heldAt(id, own?.matchText ?? text);
+    },
+  };
   const tracker = new SendTracker(
     {
       ledger: trackedLedger,
@@ -417,11 +470,13 @@ export function buildConversationA(deps: {
         const id = tryParseSessionId(ferret);
         const summary = id === undefined ? undefined : await ferrets.get(id);
         const harness = id === undefined ? undefined : await ferrets.harness?.(id);
-        return summary === undefined || harness === undefined
+        const family = summary === undefined ? undefined : harnessFamily(summary.harness);
+        // A harness this build does not know has no transcript reading: unreadable, so nothing is typed again on a guess.
+        return family === undefined || harness === undefined
           ? undefined
-          : { harness: harnessFamily(summary.harness), reader: harness.transcript };
+          : { harness: family, reader: harness.transcript };
       }),
-      terminal: lookAtPane,
+      terminal: trackedPane,
       repository: sendRepository,
       attempts: {
         reattempt: async (id, sendId) => await sendActs.reattempt(id, sendId, { by: 'daemon' }),
@@ -459,9 +514,10 @@ export function buildConversationA(deps: {
       repository: sendRepository,
       ledger,
       terminal: lookAtPane,
-      turns: { writeTurn: unwiredTyping, writeQueuedPayload: unwiredTyping, clearMarkers: unwiredTyping },
+      turns: turnStore,
       channel,
       gate: { launching: () => false, awaitSettled: async () => true },
+      // A send that revives is `reviveLocked`'s (below), not the service's; the service's acts never revive.
       reviver: { revive: unwiredTyping },
       peerWaits: { endPeerWait: async () => undefined },
       serial: lane,
@@ -607,12 +663,9 @@ export function buildConversationA(deps: {
     } finally {
       // Every transport finished (or refused), tracked or not: the tracker looks once soon, and again only for a send
       // that is still open (a ferret with nothing in flight costs one ledger read).
-      roster.add(ferret);
       tracker.track(ferret);
     }
   };
-  /** The ferret's turn documents and the files Ferrets writes for it; none when Ferrets offers none (or refuses the look). */
-  const turnsOf = async (ferret: SessionId) => await ferrets.turns?.(ferret).catch(() => undefined);
   /** Said when the turn document a message goes by could not be written: nothing is typed or kept. */
   const TURN_NOT_WRITTEN = 'the message could not be written for the agent to read, so nothing was typed. Try again';
   /**
@@ -629,6 +682,7 @@ export function buildConversationA(deps: {
   const turnDocument = async (
     ferret: SessionId,
     text: string,
+    by: FerretTurnAuthor | undefined,
   ): Promise<{ readonly typed: string; readonly path: 'direct' | 'turn-file'; readonly turn?: number }> => {
     const inline = { typed: text, path: 'direct' } as const;
     const turns = await turnsOf(ferret);
@@ -636,7 +690,10 @@ export function buildConversationA(deps: {
     const target = await readTarget(ferret);
     const pane = await lookAtPane.observe(ferret).catch(() => undefined);
     if (pane === undefined || routeSend(target, pane) !== 'idle' || paneMidTurn(target, pane)) return inline;
-    const written = await turns.write({ document: `${text}\n` }).catch(() => undefined);
+    // The author rides beside the document, so the owner's words never include a peer's or the Warden's.
+    const written = await turns
+      .write({ document: `${text}\n`, ...(by === undefined ? {} : { by }) })
+      .catch(() => undefined);
     if (written === undefined) throw new SessionSendError('failed', TURN_NOT_WRITTEN);
     return isDirectSend(target, text, defaultSessionSendSettings)
       ? { typed: text, path: 'direct', turn: written.turn }
@@ -675,28 +732,24 @@ export function buildConversationA(deps: {
       .catch(() => undefined);
     return revised === undefined ? undefined : { typed: pointer, path: 'native-file' };
   };
-  const typeLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
-    // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
-    // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
-    const bound = await terminal.bind(ferret);
-    await refuseWhileAsking(ferret);
-    const { text, fromName } = await typedText(ferret, request);
-    // SEND-NOW: the turn is stopped FIRST and BEFORE the record exists: a stop that is refused (a hold, a gone pane, a
-    // runner that cannot stop) types nothing and keeps nothing, so the id starts over. The pane is READ before any key.
-    if (request.now === true) await stopForNow(ferret, bound);
-    // The turn document first (today's order): a message that goes by file has its pointer, which the row must name.
-    const sent = await turnDocument(ferret, text);
+  /** What the row of a send is made of, whichever way it travels: who sent it, what it said, and when. */
+  const accepting = async (
+    ferret: SessionId,
+    request: TypedSend,
+    text: string,
+    fromName: string | undefined,
+    shape: { readonly path: SendPath; readonly matchText?: string; readonly turn?: number },
+  ) => {
     const at = kernel.clock.now();
-    const accepted = await ledger.accept(ferret, {
+    return await ledger.accept(ferret, {
       sendId: request.sendId,
       acceptedAt: at,
       acceptedTurn: 0,
-      path: sent.path,
+      path: shape.path,
       // What the agent reads, banner and all, as today's ledger keeps it: the row is the record of what was typed.
       message: text,
-      // What the transcript will hold: the message, or the pointer typed for it.
-      matchText: sent.typed,
-      ...(sent.turn === undefined ? {} : { turn: sent.turn }),
+      ...(shape.matchText === undefined ? {} : { matchText: shape.matchText }),
+      ...(shape.turn === undefined ? {} : { turn: shape.turn }),
       fate: 'accepted',
       attempt: 1,
       attemptAt: at,
@@ -705,6 +758,77 @@ export function buildConversationA(deps: {
       ...(request.warden === true ? { by: { kind: 'ferretry' as const, feature: 'Warden' } } : {}),
       ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
       ...(fromName === undefined ? {} : { fromName }),
+    });
+  };
+  /** Said when a send meant to revive a ferret handed the relaunch nothing to type: the id may go again. */
+  const NOT_CARRIED =
+    'the ferret came up, or could not be handed a turn, before this message was carried to it, so nothing was typed. Send it again';
+  /**
+   * TODAY'S REVIVE-ON-SEND (`SessionSendService.revive`): a send to a ferret that has stopped relaunches it with the message
+   * as its first turn. The row is accepted as `revive` BEFORE the relaunch (the same id twice is one message), Ferrets
+   * writes the message to the next numbered turn document and types the pointer at it, and tells this send what it typed
+   * (`onCarried`): that pointer, not the message, is what the transcript will record, so the row is settled to look for
+   * it (and for that turn) from then on. A relaunch Ferrets refuses, or one that carried nothing, typed nothing: the row
+   * is taken back and the id starts over.
+   */
+  const reviveLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
+    const { text, fromName } = await typedText(ferret, request);
+    const repeated = await keptSend(ferret, request.sendId);
+    if (repeated !== undefined) return repeated;
+    const accepted = await accepting(ferret, request, text, fromName, { path: 'revive' });
+    if (!accepted.created) return { ferret, disposition: 'sent' };
+    const told: { typed?: { readonly text: string; readonly turn: number } } = {};
+    const resumed = await ferrets
+      .resume(ferret, text, {
+        onCarried: typed => {
+          told.typed = typed;
+        },
+        ...(request.warden === true ? { actor: 'warden' as const } : {}),
+      })
+      .catch((): undefined => undefined);
+    if (told.typed === undefined) {
+      await ledger.withdraw(ferret, request.sendId, 'nothing was typed').catch(() => undefined);
+      throw new SessionSendError(
+        'refused',
+        resumed?.ok === false ? `the ferret could not be revived: ${resumed.error.reason}` : NOT_CARRIED,
+      );
+    }
+    await ledger.settle(ferret, request.sendId, {
+      matchText: told.typed.text,
+      turn: told.typed.turn,
+      attemptAt: kernel.clock.now(),
+    });
+    return { ferret, disposition: 'revived', sendId: request.sendId, fate: 'accepted' };
+  };
+  const typeLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
+    // A ferret that has stopped has no pane to type into: the message revives it (see {@link reviveLocked}).
+    if (TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status)) return await reviveLocked(ferret, request);
+    // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
+    // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
+    const bound = await terminal.bind(ferret);
+    await refuseWhileAsking(ferret);
+    const { text, fromName } = await typedText(ferret, request);
+    // SEND-NOW: the turn is stopped FIRST and BEFORE the record exists: a stop that is refused (a hold, a gone pane, a
+    // runner that cannot stop) types nothing and keeps nothing, so the id starts over. The pane is READ before any key.
+    if (request.now === true) await stopForNow(ferret, bound);
+    // A repeat of a send that already has a live row types nothing and writes no document: no orphan for the owner's words.
+    const repeated = await keptSend(ferret, request.sendId);
+    if (repeated !== undefined) return repeated;
+    // The turn document first (today's order): a message that goes by file has its pointer, which the row must name.
+    const sent = await turnDocument(
+      ferret,
+      text,
+      request.warden === true
+        ? { kind: 'ferretry', feature: 'Warden' }
+        : request.senderSessionId === undefined
+          ? undefined
+          : { kind: 'ferret', ...(fromName === undefined ? {} : { name: fromName }) },
+    );
+    // What the transcript will hold is the message, or the pointer typed for it.
+    const accepted = await accepting(ferret, request, text, fromName, {
+      path: sent.path,
+      matchText: sent.typed,
+      ...(sent.turn === undefined ? {} : { turn: sent.turn }),
     });
     if (!accepted.created) return (await keptSend(ferret, request.sendId)) ?? { ferret, disposition: 'sent' };
     /** Set once the message went to the harness's own queue: the row's path is then today's busy path. */
@@ -838,9 +962,12 @@ export function buildConversationA(deps: {
   const SETTLED_FATES: ReadonlySet<string> = new Set(['delivered', 'timed_out', 'unaccounted', 'cancelled']);
   /** How often a waiting `sendStatus` reads the ledger again; the tracker's own looks are what settle a fate. */
   const WAIT_READ_MS = 1_000;
+  /** How many sends one caller may wait on at once, and how many waiters this daemon holds in all. */
+  const MAX_WAITERS_PER_CALLER = 8;
+  const MAX_WAITERS = 64;
   /** The waiters now parked (`fy send --wait`): one per caller and send, each ended when the daemon stops. */
-  const waiters = new Map<string, { end(): void }>();
-  /** The send's row after a bounded look, or `undefined` while it has none (a message still in Ferretry's queue). */
+  const waiters = new Map<string, { readonly caller: string; end(): void }>();
+  /** The send's row after a bounded look, or `undefined` when it has none: not in the ledger, not in Ferretry's queue. */
   const statusNow = async (ferret: SessionId, sendId: string): Promise<SendRecord | undefined> => {
     await lookFirst(ferret);
     return sendRecordFor(await ledger.list(ferret), await queue.list(ferret), sendId);
@@ -851,7 +978,9 @@ export function buildConversationA(deps: {
    * One send's row, optionally HELD until its fate settles or `waitMs` has passed (`fy send --wait`; the shell gives a plugin
    * no clock, so the daemon waits). One waiter per caller and send: a second request for the same pair ends the first
    * (answering the row as it then is), so a caller that retries never stacks waiters; and every waiter ends when the daemon
-   * stops. A row that settles is answered at once.
+   * stops. A row that settles is answered at once, and an id that is neither a row nor a message in Ferretry's queue is 404
+   * at once, however long the caller asked to wait: nothing is parked for a send that does not exist. The waiters are
+   * capped per caller and in all, and the excess is refused (429) with the sentence that says so.
    */
   const awaitStatus = async (
     ferret: SessionId,
@@ -859,16 +988,26 @@ export function buildConversationA(deps: {
     options: { readonly waitMs?: number; readonly caller: string } | undefined,
   ): Promise<SendRecord> => {
     let found = await statusNow(ferret, sendId);
-    if (options?.waitMs === undefined) {
-      if (found === undefined) throw noSuchSend(sendId);
-      return found;
-    }
-    if (found !== undefined && SETTLED_FATES.has(found.fate)) return found;
+    if (found === undefined) throw noSuchSend(sendId);
+    if (options?.waitMs === undefined || SETTLED_FATES.has(found.fate)) return found;
     const key = `${options.caller}\u0000${ferret}\u0000${sendId}`;
-    waiters.get(key)?.end();
+    const replaced = waiters.get(key);
+    // A second request for the same pair takes the first one's place, so it never counts twice.
+    if (
+      replaced === undefined &&
+      (waiters.size >= MAX_WAITERS ||
+        [...waiters.values()].filter(w => w.caller === options.caller).length >= MAX_WAITERS_PER_CALLER)
+    )
+      throw new ApiError(
+        429,
+        'too many sends are being waited on right now; read the send again without waiting, or try again in a moment',
+        'too_many_waiters',
+      );
+    replaced?.end();
     let over = false;
     let wake: () => void = () => undefined;
     const mine = {
+      caller: options.caller,
       end: () => {
         over = true;
         wake();
@@ -877,20 +1016,19 @@ export function buildConversationA(deps: {
     waiters.set(key, mine);
     const deadline = kernel.clock.nowMs() + options.waitMs;
     try {
-      // A send with no row yet is still waited on: it is in Ferretry's queue and a key has not gone to the pane.
-      while (!over && (found === undefined || !SETTLED_FATES.has(found.fate)) && kernel.clock.nowMs() < deadline) {
+      while (!over && !SETTLED_FATES.has(found.fate) && kernel.clock.nowMs() < deadline) {
         let cancel: () => void = () => undefined;
         await new Promise<void>(resolve => {
           wake = resolve;
           cancel = kernel.clock.after(milliseconds(Math.min(WAIT_READ_MS, deadline - kernel.clock.nowMs())), resolve);
         });
         cancel();
-        if (!over) found = await statusNow(ferret, sendId);
+        // A row does not un-exist: a read that finds none keeps the last one.
+        if (!over) found = (await statusNow(ferret, sendId)) ?? found;
       }
     } finally {
       if (waiters.get(key) === mine) waiters.delete(key);
     }
-    if (found === undefined) throw noSuchSend(sendId);
     return found;
   };
 
@@ -1151,8 +1289,13 @@ export function buildConversationA(deps: {
     turns: {
       look: (ferret, phase) => {
         boundaries.look(ferret, phase, kernel.clock.now());
-        // A turn boundary is when a held or queued send is read or dropped: one tracker look, only for a ferret with sends open.
         const id = tryParseSessionId(ferret);
+        if (id !== undefined) {
+          // Only a CHANGE moves the stamp: the guard compares it with when a send was typed.
+          const state = phase === 'working' ? 'working' : 'idle';
+          if (turnStates.get(id)?.state !== state) turnStates.set(id, { state, at: kernel.clock.now() });
+        }
+        // A turn boundary is when a held or queued send is read or dropped: one tracker look, only for a ferret with sends open.
         if (id === undefined || phase === 'working') return;
         void tracker
           .watching(id)
@@ -1164,7 +1307,7 @@ export function buildConversationA(deps: {
       forget: ferret => {
         boundaries.forget(ferret);
         const id = tryParseSessionId(ferret);
-        if (id !== undefined) roster.delete(id);
+        if (id !== undefined) turnStates.delete(id);
       },
     },
     stop: () => {

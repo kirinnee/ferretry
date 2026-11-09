@@ -20,12 +20,13 @@ export function ferretsPort(service: FerretsService): FerretsApi {
     start: request => service.start(request),
     stop: (ferret, how, reason) => service.stop(ferret, how, reason),
     resume: (ferret, message, options) => {
-      // Only what the port declares: automated recovery, the Warden's attribution for the turn's author, and who must be
-      // told what the resume decided.
+      // Only what the port declares: automated recovery, the Warden's attribution for the turn's author, who must be
+      // told what the resume decided, and who must be told what it typed for the message.
       const forwarded = {
         ...(options?.automatic === true ? { automatic: true } : {}),
         ...(options?.actor === 'warden' ? { actor: 'warden' as const } : {}),
         ...(options?.decided === undefined ? {} : { decided: options.decided }),
+        ...(options?.onCarried === undefined ? {} : { onCarried: options.onCarried }),
       };
       return service.resume(ferret, message, Object.keys(forwarded).length === 0 ? undefined : forwarded);
     },

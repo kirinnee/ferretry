@@ -173,6 +173,16 @@ export interface ResumeOptions {
    * before it decided. Attribution of nothing: it changes no policy, admission or refusal.
    */
   readonly decided?: (disposition: 'running' | 'relaunching') => void;
+  /**
+   * Additive (#45 revive-on-send, today's `reviver.revive` answer): told, ONCE, what the relaunch typed into the new pane
+   * for the message — the one line pointing at the numbered turn document it was written to (`text`), that turn's number
+   * and the document's absolute path — right after it was typed. A message handed to a resume is carried as that pointer,
+   * so it is the pointer, not the message, that the transcript will record; a caller that must prove the message landed
+   * looks for exactly this text. Not called when nothing was typed (a ferret that was already running, a relaunch that
+   * failed, an interactive resume with no message). A caller's own failure here never changes the resume. Attribution of
+   * nothing: it changes no policy, admission or refusal; `resume`'s answer type is unchanged.
+   */
+  readonly onCarried?: (typed: { readonly text: string; readonly turn: number; readonly file: string }) => void;
 }
 
 /**

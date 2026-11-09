@@ -64,8 +64,8 @@ describe('SendMessageController', () => {
     should(lines.some(line => line.includes('do not send it again'))).be.true();
   });
 
-  it('should wait through a missing ledger row, then report the delivery, each round asking the daemon to hold the read', async () => {
-    const { lines, controller, asked } = parts({ statuses: [undefined, record('queued'), record('delivered')] });
+  it('should wait through a queued message, then report the delivery, each round asking the daemon to hold the read', async () => {
+    const { lines, controller, asked } = parts({ statuses: [record('queued'), record('queued'), record('delivered')] });
     await controller().execute('hadi', { message: 'hi', wait: true });
     should(lines.some(line => line.startsWith('note: delivered'))).be.true();
     should(asked).deepEqual([WAIT_ROUND_MS, WAIT_ROUND_MS, WAIT_ROUND_MS]);
@@ -104,17 +104,22 @@ describe('SendMessageController', () => {
     should(lines.some(line => line.includes('this send has no id, so it cannot be waited on'))).be.true();
   });
 
-  it('should stop waiting on a message still in the queue, say it is safe, and not fail', async () => {
-    const { lines, controller } = parts();
+  it('should stop at once on a send the daemon has no record of, say so, and not fail or loop', async () => {
+    const { lines, controller, asked } = parts();
     await controller().execute('hadi', { message: 'hi', wait: true });
+    should(asked).have.length(1);
     should(
-      lines.some(line => line.includes('still not typed into the agent after 5m') && line.includes('do not resend')),
+      lines.some(line => line.includes('no record of this send') && line.includes('before sending it again')),
     ).be.true();
+    should(lines.some(line => line.includes('5m'))).be.false();
   });
 
-  it('should stop waiting on a message that never settles, and say where it stands', async () => {
+  it('should stop waiting on a message that never settles, and count its checks rather than claim minutes', async () => {
     const { lines, controller } = parts({ after: record('queued') });
     await controller().execute('hadi', { message: 'hi', wait: true });
-    should(lines.some(line => line.startsWith('note: still queued') && line.includes('after 5m of waiting'))).be.true();
+    should(
+      lines.some(line => line.startsWith('note: still queued') && line.includes('after 10 checks of up to 30s each')),
+    ).be.true();
+    should(lines.some(line => line.includes('5m'))).be.false();
   });
 });

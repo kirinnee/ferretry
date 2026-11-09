@@ -712,6 +712,66 @@ describe('m2 a resume tells its caller what it decided, under the ferret’s own
   });
 });
 
+describe('M3 a resume tells its caller what it typed for the message (ResumeOptions.onCarried)', () => {
+  test('M3 a relaunch with a message tells the caller the pointer it typed, the turn and the file, once and after the typing', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    const typedBefore = w.runner.deliveries.length;
+    const told: { text: string; turn: number; file: string }[] = [];
+
+    const resumed = await w.service.resume(id as never, 'Carry on.', {
+      onCarried: typed => {
+        // Told AFTER the pointer reached the pane, never before.
+        expect(w.runner.deliveries).toHaveLength(typedBefore + 1);
+        told.push(typed);
+      },
+    });
+
+    expect(resumed.ok).toBe(true);
+    expect(told).toEqual([{ text: turnFileInstruction(turnFile(w, id, 2)), turn: 2, file: turnFile(w, id, 2) }]);
+    expect(w.runner.deliveries.at(-1)?.delivery.text).toBe(told[0]?.text);
+  });
+
+  test('M3 a running ferret was relaunched with nothing, so nothing is told', async () => {
+    const w = await world();
+    const id = await started(w);
+    const told: unknown[] = [];
+
+    await w.service.resume(id as never, 'Again.', { onCarried: typed => void told.push(typed) });
+
+    expect(told).toEqual([]);
+  });
+
+  test('M3 a relaunch that fails tells nothing: no pointer was typed', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    w.runner.refuseStarts = 1;
+    const told: unknown[] = [];
+
+    const resumed = await w.service.resume(id as never, 'Again.', { onCarried: typed => void told.push(typed) });
+
+    expect(resumed.ok).toBe(false);
+    expect(told).toEqual([]);
+  });
+
+  test('M3 a caller whose answer throws never changes the resume', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+
+    const resumed = await w.service.resume(id as never, 'Again.', {
+      onCarried: () => {
+        throw new Error('the caller broke');
+      },
+    });
+
+    expect(resumed.ok).toBe(true);
+    expect(w.registry.get(id as never)?.state).toBe('working');
+  });
+});
+
 describe('FerretsApi.turns: a ferret’s turn documents, behind the mayTouch caller rule', () => {
   test('turns lists the start’s task and every revive’s turn, oldest first, with who each is from', async () => {
     const w = await world();

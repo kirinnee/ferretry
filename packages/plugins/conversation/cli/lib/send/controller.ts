@@ -18,10 +18,9 @@ export interface SendCommandFlags extends Omit<SendFlags, 'fileMessage'> {
   readonly wait?: boolean;
 }
 
-/** How a `send --wait` waits: rounds of a status read the daemon holds open, ten at most (5 minutes). */
+/** How a `send --wait` waits: rounds of a status read the daemon holds open, ten at most (5 minutes at the longest). */
 export const WAIT_ROUND_MS = 30_000;
 const WAIT_ROUNDS = 10;
-const WAIT_LIMIT_MS = WAIT_ROUND_MS * WAIT_ROUNDS;
 
 /** Sends a message to a ferret: `fy send` (and its peer-reply spelling, `fy reply`). */
 export class SendMessageController {
@@ -68,26 +67,31 @@ export class SendMessageController {
       return;
     }
     // The DAEMON waits (the shell gives a plugin no clock): each round holds the status read open for up to
-    // WAIT_ROUND_MS, and returns the moment the fate settles. At most WAIT_ROUNDS rounds, so a wait is bounded by count.
+    // WAIT_ROUND_MS, and returns the moment the fate settles. At most WAIT_ROUNDS rounds: the shell gives this half no
+    // clock, so the bound is a COUNT of checks, and the closing note counts them rather than claiming minutes (a round the
+    // daemon ends early, a second waiter for the same send or a daemon that stops, is a check that waited less).
     let record: SendRecord | undefined;
     for (let round = 0; round < WAIT_ROUNDS; round += 1) {
       record = await this.gateway.sendStatus(result.ferret, sendId, WAIT_ROUND_MS);
-      if (record !== undefined && SETTLED_SEND_FATES.has(record.fate)) {
+      if (record === undefined) {
+        // A queued message has a row of its own, so a send the daemon has no row for is one it does not know: it ends the
+        // wait at once instead of looping. It does not say the message was lost, so it is no failure a script would answer
+        // by sending it again.
+        this.output.note(
+          `the daemon has no record of this send, so there is nothing to wait for (see \`fy queue ${reference}\`); check where it went before sending it again`,
+        );
+        return;
+      }
+      if (SETTLED_SEND_FATES.has(record.fate)) {
         // A cancelled message was not delivered either; it fails the wait as a proven absence does.
         if (record.fate === 'timed_out' || record.fate === 'cancelled') throw new CommandError(describeFate(record));
         this.output.note(describeFate(record));
         return;
       }
     }
-    if (record === undefined) {
-      // Still in Ferretry's queue: the ledger has no row until a key goes to the pane. That is waiting, never
-      // "no such send" — and never a failure a script would answer by sending it again.
-      this.output.note(
-        `still not typed into the agent after ${WAIT_LIMIT_MS / 60_000}m: it is waiting in Ferretry's queue (see \`fy queue ${reference}\`); do not resend`,
-      );
-      return;
-    }
-    this.output.note(`still ${describeFate(record)} after ${WAIT_LIMIT_MS / 60_000}m of waiting`);
+    this.output.note(
+      `still ${describeFate(record as SendRecord)} after ${WAIT_ROUNDS} checks of up to ${WAIT_ROUND_MS / 1_000}s each`,
+    );
   }
 
   /**

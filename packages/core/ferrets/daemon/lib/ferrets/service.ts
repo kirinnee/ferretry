@@ -310,6 +310,8 @@ export interface ReviveTurnRequest {
 /** A revive's turn, written: its number and the one line typed into the new pane so the agent reads it. */
 export interface ReviveTurn {
   readonly turn: number;
+  /** The absolute path of the numbered document the agent is pointed at. */
+  readonly file: string;
   readonly instruction: string;
 }
 
@@ -336,6 +338,18 @@ function tellDecided(options: ServiceResumeOptions | undefined, disposition: 'ru
     options?.decided?.(disposition);
   } catch {
     // The caller's bookkeeping; the resume goes on as decided.
+  }
+}
+
+/** Tells a resume's caller what was typed for its message; a caller's own failure there never changes the resume. */
+function tellCarried(
+  carried: ResumeOptions['onCarried'],
+  typed: { readonly text: string; readonly turn: number; readonly file: string },
+): void {
+  try {
+    carried?.(typed);
+  } catch {
+    // The caller's bookkeeping; the pointer is typed all the same.
   }
 }
 
@@ -881,11 +895,18 @@ export class FerretsService implements FerretsApi {
     // any, is the relaunch's own turn from here on.
     tellDecided(options, 'relaunching');
     const author = resumeTurnAuthor(options?.actor ?? 'unknown');
-    const resumed = await this.launch(starting, undefined, record.harnessConversation, 'resume', {
-      ...(message === undefined ? {} : { message }),
-      mode: starting.mode ?? 'auto',
-      ...(author === undefined ? {} : { by: author }),
-    });
+    const resumed = await this.launch(
+      starting,
+      undefined,
+      record.harnessConversation,
+      'resume',
+      {
+        ...(message === undefined ? {} : { message }),
+        mode: starting.mode ?? 'auto',
+        ...(author === undefined ? {} : { by: author }),
+      },
+      options?.onCarried,
+    );
     if (resumed.ok) {
       const text = message?.trim();
       await this.ports.history?.(ferret, 'session.resumed', {
@@ -1386,6 +1407,7 @@ export class FerretsService implements FerretsApi {
     conversation: string | undefined,
     kind: 'start' | 'resume',
     revive?: ReviveTurnRequest,
+    carried?: ResumeOptions['onCarried'],
   ): Promise<Result<FerretId, StartFailure>> {
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
@@ -1412,7 +1434,7 @@ export class FerretsService implements FerretsApi {
       const result = await this.launchAttempt(record, prompt, conversation, tracked);
       if (!result.ok) failure = result.error;
       else if (turn === undefined) return result;
-      else if (turn.kind === 'revive') return await this.deliverTurn(record.id, runner, turn.turn);
+      else if (turn.kind === 'revive') return await this.deliverTurn(record.id, runner, turn.turn, carried);
       else {
         // Today's `deliverFirstTurn`: a start whose task never arrives is an agent sitting at an idle prompt, so a
         // first turn that does not land fails the start (the pane is stopped and the credential revoked below).
@@ -1598,11 +1620,13 @@ export class FerretsService implements FerretsApi {
     ferret: FerretId,
     runner: Runner,
     turn: ReviveTurn,
+    carried: ResumeOptions['onCarried'],
   ): Promise<Result<FerretId, StartFailure>> {
     const handle = this.registry.get(ferret)?.handle as RunnerHandle | undefined;
     try {
       if (handle === undefined) throw new Error('no pane');
       await runner.deliver(handle, { text: turn.instruction });
+      tellCarried(carried, { text: turn.instruction, turn: turn.turn, file: turn.file });
     } catch {
       return failed(
         'failed',
