@@ -1,9 +1,10 @@
-import { Suspense, useCallback, useMemo, useSyncExternalStore } from 'react';
+import { createContext, Suspense, useCallback, useContext, useMemo, useSyncExternalStore } from 'react';
 import type { DevicePanelSlot, NavBadge, RegisteredDevicePanel } from '../connect/provides.ts';
 import { useRuntimeVersion, useShell, WithoutShell } from './context.tsx';
 import { identityOf, WithPluginIdentity } from './plugin-identity.tsx';
 import type { ShellRuntime } from './runtime.ts';
 import { ViewBoundary } from './views.tsx';
+import { WithViewPlace } from './view-place.tsx';
 
 /**
  * DEVICE-LEVEL PANELS AND NAV COUNTS (shell contract S4). A `device.settings` panel (Settings › Appearance) and a `nav`
@@ -11,10 +12,27 @@ import { ViewBoundary } from './views.tsx';
  * and no client, under `WithoutShell`, inside its plugin identity (`place: 'device-panel'`, with `reach`). A panel that
  * needs machines lists them with `useEveryDaemon`, one row per machine, each row writing only through its own client — so
  * a write can never go to "whichever machine is selected", and the nav can never show one machine's blocked or paused line.
+ *
+ * A `nav` panel is drawn in the left or right nav of every style (both built-in layouts are a rail, so a column-only rule
+ * would never draw it) and is told which FORM it is drawn in (`useNavForm`), so it can draw compact dots in a rail and
+ * its full group in a column. It is never drawn on the phone bar.
  */
 
+/** The form a nav panel is drawn in: the full column, or the narrow rail. */
+export type NavForm = 'column' | 'rail';
+
+const NavFormContext = createContext<NavForm>('column');
+
+/**
+ * THE FORM THIS NAV PANEL IS DRAWN IN (S4): `'rail'` when the layout's nav style is a rail, else `'column'`. A panel
+ * drawn anywhere else (a Settings page, a plugin's own harness) reads `'column'`.
+ */
+export function useNavForm(): NavForm {
+  return useContext(NavFormContext);
+}
+
 /** The panels the layout places in a device-level slot, in the layout's order, each in its own box. */
-export function DevicePanels({ slot }: { readonly slot: DevicePanelSlot }) {
+export function DevicePanels({ slot, form = 'column' }: { readonly slot: DevicePanelSlot; readonly form?: NavForm }) {
   const { runtime, plan } = useShell();
   useRuntimeVersion(runtime);
   const drawn = plan.panels(slot).flatMap(panel => {
@@ -26,7 +44,9 @@ export function DevicePanels({ slot }: { readonly slot: DevicePanelSlot }) {
     <div className="fy-slot fy-slot--device" data-device-slot={slot}>
       {drawn.map(entry => (
         <div key={`${entry.plugin}.${entry.id}`} className="fy-panel" data-panel={`${entry.plugin}.${entry.id}`}>
-          <DevicePanel runtime={runtime} entry={entry} />
+          <NavFormContext.Provider value={form}>
+            <DevicePanel runtime={runtime} entry={entry} />
+          </NavFormContext.Provider>
         </div>
       ))}
     </div>
@@ -39,11 +59,14 @@ function DevicePanel({ runtime, entry }: { readonly runtime: ShellRuntime; reado
   return (
     <ViewBoundary title={runtime.titleOf(entry.plugin)}>
       <WithPluginIdentity identity={identity}>
-        <WithoutShell>
-          <Suspense fallback={null}>
-            <View />
-          </Suspense>
-        </WithoutShell>
+        {/* No machine's place, whatever frame a later page wraps this in: a device panel is no machine's. */}
+        <WithViewPlace place={null}>
+          <WithoutShell>
+            <Suspense fallback={null}>
+              <View />
+            </Suspense>
+          </WithoutShell>
+        </WithViewPlace>
       </WithPluginIdentity>
     </ViewBoundary>
   );
@@ -105,7 +128,7 @@ export function NavCount({
   return (
     <span className="fy-nav__badge" data-count={total}>
       <span aria-hidden="true">{total > BADGE_CAP ? `${BADGE_CAP}+` : total}</span>
-      <span className="sr-only">{`${total} open ${label} items`}</span>
+      <span className="sr-only">{`${total} open ${label} ${total === 1 ? 'item' : 'items'}`}</span>
     </span>
   );
 }

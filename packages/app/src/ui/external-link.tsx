@@ -48,10 +48,18 @@ export type LinkDestination = 'in-app' | 'this-device-browser' | 'computer';
 /** What Browsers provides for one machine (`ShellProvides.links`): the behaviour, and where a tap on `href` will land. */
 export interface LinkProvision extends LinkBehaviour {
   readonly destination: (href: string) => LinkDestination;
+  /**
+   * The anchor's ARIA when a tap on `href` opens something in the app, as v4 drew it: `popup: 'dialog'` for the sheet,
+   * `controls` the id of the pane it opens. Optional: a provider that opens nothing in the app gives none.
+   */
+  readonly anchor?: (href: string) => { readonly popup?: 'dialog'; readonly controls?: string };
 }
 
 /** What a link's reader gets: the behaviour for the machine it is drawn in, and where its tap will open. */
-export type ResolvedLinkBehaviour = LinkBehaviour & { readonly destination: (href: string) => LinkDestination };
+export type ResolvedLinkBehaviour = LinkBehaviour & {
+  readonly destination: (href: string) => LinkDestination;
+  readonly anchor?: LinkProvision['anchor'];
+};
 
 const NATIVE: ResolvedLinkBehaviour = {
   activate: () => false,
@@ -97,8 +105,10 @@ export type ExternalLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'h
 export function ExternalLink({ href, onClick, download, children, title, ...rest }: ExternalLinkProps) {
   const links = useLinkBehaviour();
   const machine = useViewPlace()?.machine;
-  // Where the tap will open, said before it happens, for THIS machine; a title the caller gave is kept and the words follow.
-  const where = href === undefined ? undefined : destinationWords(links.destination(href), machine);
+  // Where the tap will open, said before it happens, for THIS machine — only when Browsers provides the behaviour: a
+  // native link keeps v4's bare anchor (no tooltip). A title the caller gave is kept and the words follow.
+  const where = href === undefined || links === NATIVE ? undefined : destinationWords(links.destination(href), machine);
+  const anchor = href === undefined ? undefined : links.anchor?.(href);
   const click = (event: ReactMouseEvent<HTMLAnchorElement>): void => {
     onClick?.(event);
     links.activate(event, { href, download, element: event.currentTarget });
@@ -107,7 +117,9 @@ export function ExternalLink({ href, onClick, download, children, title, ...rest
     <>
       <a
         {...rest}
+        aria-controls={anchor?.controls}
         aria-description={where}
+        aria-haspopup={anchor?.popup}
         download={download}
         href={href}
         onClick={click}

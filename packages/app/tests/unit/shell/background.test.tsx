@@ -20,6 +20,8 @@ interface Mount {
 const mounts: Mount[] = [];
 const unmounts: string[] = [];
 const rowClients: PluginClient[] = [];
+/** The client each machine's row handed the view, by daemon (what the Watcher captured, not what the runtime holds). */
+const rowOf = new Map<string, PluginClient>();
 const sent: { daemon: string; via: string; result: Promise<unknown> }[] = [];
 
 function Watcher({ daemon, client }: BackgroundViewProps): ReactNode {
@@ -30,6 +32,7 @@ function Watcher({ daemon, client }: BackgroundViewProps): ReactNode {
   }, [daemon, client]);
   useEffect(() => {
     rowClients.push(...rows.map(row => row.client));
+    for (const row of rows) rowOf.set(row.daemon, row.client);
   }, [rows]);
   return <p data-testid={`bg-${daemon}`}>watching {daemon}</p>;
 }
@@ -74,6 +77,7 @@ afterEach(async () => {
   mounts.length = 0;
   unmounts.length = 0;
   rowClients.length = 0;
+  rowOf.clear();
   sent.length = 0;
 });
 
@@ -174,11 +178,10 @@ describe('the background origin (R3 MJ1)', () => {
     view = app.view;
     const viaProp = mounts.find(each => each.daemon === 'd1');
     expect(viaProp).toBeDefined();
-    const rows = app.runtime.reach('bg', 'background').rows();
-    const viaRow = rows.find(row => row.daemon === 'd2');
+    const viaRow = rowOf.get('d2');
     expect(viaRow).toBeDefined();
     const first = (viaProp as Mount).client.call(PING, { body: {} });
-    const second = (viaRow as { client: PluginClient }).client.call(PING, { body: {} });
+    const second = (viaRow as PluginClient).call(PING, { body: {} });
     await settle();
     // Nothing was asked of the person: every confirm that reached the handler was a background one.
     expect(app.prompts.length).toBeGreaterThan(0);

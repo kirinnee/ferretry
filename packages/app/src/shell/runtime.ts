@@ -281,6 +281,10 @@ export class ShellRuntime {
    * The nav-badge providers of one plugin's screen, one per paired daemon where the plugin is ALLOWED (S4, MA5): built
    * EAGERLY over that daemon's cache client — the half need not be built (R3 m8) — so a machine never opened still counts.
    * A blocked, paused or unread machine has no client and a skeleton half has no provider; a locked machine adds 0.
+   *
+   * The client is the BACKGROUND-origin entry (R1 m5): a badge is built at app open for every machine while none is on
+   * screen and nobody pressed anything, so a provider that sends more than a read must never raise a passkey prompt for
+   * a machine the person is not looking at. It waits for the unlock instead, as a background view does.
    */
   navBadges(plugin: string, screen: string): readonly NavBadge[] {
     const registered = this.#navBadges.find(each => each.plugin === plugin && each.screen === screen);
@@ -288,7 +292,7 @@ export class ShellRuntime {
     const badges: NavBadge[] = [];
     for (const paired of this.daemons.snapshot().daemons) {
       if (this.#grants.isLocked(paired.daemon)) continue;
-      const client = this.#halves.client(paired.daemon, plugin);
+      const client = this.#halves.client(paired.daemon, plugin, 'background');
       if (client === undefined) continue;
       const built = this.#hooks.get(paired.daemon, plugin, `nav-badge:${screen}`, client, registered.provide);
       if (typeof (built as Partial<NavBadge> | undefined)?.count === 'function') badges.push(built as NavBadge);

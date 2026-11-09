@@ -59,7 +59,10 @@ const browsers = entryOf(
         },
         open: () => {},
         sheet: <p data-testid={`sheet-${daemon}`}>sheet of {daemon}</p>,
-        destination: () => (daemon === 'd2' ? 'in-app' : 'computer'),
+        destination: href => (href.endsWith('/two') ? 'this-device-browser' : daemon === 'd2' ? 'in-app' : 'computer'),
+        // As v4: the in-app sheet is a dialog, and a pane is named by id; other links carry no popup ARIA.
+        anchor: href =>
+          daemon === 'd2' ? (href.endsWith('/one') ? { popup: 'dialog' } : { controls: 'pane-d2' }) : {},
       };
     },
   }),
@@ -101,7 +104,7 @@ describe('the link takers', () => {
   test('shell S7: a provider that is not Browsers is ignored: the link is native and no sheet is drawn', async () => {
     const app = await bootApp({ surfaces: [chat, impostor], machines: ['d1'], path: '/d/d1/chat' });
     view = app.view;
-    expect(anchor('one').title).toBe("Opens in this device's browser");
+    expect(anchor('one').title).toBe('');
     expect(view.container.textContent).not.toContain('impostor sheet');
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
     await interact(() => void anchor('one').dispatchEvent(click));
@@ -110,14 +113,16 @@ describe('the link takers', () => {
 });
 
 describe('without a provider', () => {
-  test('shell S7: the link is a real new-tab anchor, native, and says it opens in this device’s browser', async () => {
+  test('shell S7 (R1 m2): the link is a real new-tab anchor, native, as v4 drew it: no tooltip, no description, no popup ARIA', async () => {
     const app = await bootApp({ surfaces: [chat], machines: ['d1'], path: '/d/d1/chat' });
     view = app.view;
     const one = anchor('one');
     expect(one.getAttribute('target')).toBe('_blank');
     expect(one.getAttribute('rel')).toBe('noopener noreferrer');
-    expect(one.title).toBe("Opens in this device's browser");
-    expect(one.getAttribute('aria-description')).toBe("Opens in this device's browser");
+    expect(one.title).toBe('');
+    expect(one.getAttribute('aria-description')).toBeNull();
+    expect(one.getAttribute('aria-haspopup')).toBeNull();
+    expect(one.getAttribute('aria-controls')).toBeNull();
     // A link with no address says nothing about where it opens; a caller's own title is kept.
     expect(anchor('none').title).toBe('');
     expect(anchor('three').title).toBe('mine');
@@ -137,6 +142,27 @@ describe('per machine', () => {
     expect(anchor('one').title).toBe('Opens in the browser on your computer');
     await interact(() => anchor('two').click());
     expect(activations.at(-1)).toEqual({ daemon: 'd1', href: 'https://example.com/two' });
+  });
+
+  test('shell S7 (R1 m2): a provider’s anchor ARIA reaches the anchor (popup dialog, or the pane it controls), and none where it gives none', async () => {
+    const app = await bootApp({ surfaces: [chat, browsers], machines: ['d1', 'd2'], path: '/d/d2/chat' });
+    view = app.view;
+    expect(anchor('one').getAttribute('aria-haspopup')).toBe('dialog');
+    expect(anchor('one').getAttribute('aria-controls')).toBeNull();
+    expect(anchor('two').getAttribute('aria-controls')).toBe('pane-d2');
+    expect(anchor('two').getAttribute('aria-haspopup')).toBeNull();
+    // A link with no address carries none, and a provider that gives none leaves the anchor bare.
+    expect(anchor('none').getAttribute('aria-haspopup')).toBeNull();
+    await view.unmount();
+    const first = await bootApp({ surfaces: [chat, browsers], machines: ['d1', 'd2'], path: '/d/d1/chat' });
+    view = first.view;
+    expect(anchor('one').getAttribute('aria-haspopup')).toBeNull();
+  });
+
+  test('shell S7: a provider that says this device’s browser is announced as such', async () => {
+    const app = await bootApp({ surfaces: [chat, browsers], machines: ['d2'], path: '/d/d2/chat' });
+    view = app.view;
+    expect(anchor('two').title).toBe("Opens in this device's browser");
   });
 
   test('shell S7: the destination is announced (aria-description) as well as in the title', async () => {
@@ -173,7 +199,7 @@ describe('per machine', () => {
       off: { d1: ['browsers'] },
     });
     view = onD1.view;
-    expect(anchor('one').title).toBe("Opens in this device's browser");
+    expect(anchor('one').title).toBe('');
     await onD1.reread('d1');
   });
 
@@ -184,7 +210,7 @@ describe('per machine', () => {
     app.machine('d1').off.add('browsers');
     await app.reread('d1');
     expect(view.container.querySelector('[data-testid="sheet-d1"]')).toBeNull();
-    expect(anchor('one').title).toBe("Opens in this device's browser");
+    expect(anchor('one').title).toBe('');
     app.machine('d1').off.delete('browsers');
     await app.reread('d1');
     expect(view.container.querySelector('[data-testid="sheet-d1"]')).not.toBeNull();
@@ -196,7 +222,7 @@ describe('a provision that is not one', () => {
     provided.broken = true;
     const app = await bootApp({ surfaces: [chat, browsers], machines: ['d1'], path: '/d/d1/chat' });
     view = app.view;
-    expect(anchor('one').title).toBe("Opens in this device's browser");
+    expect(anchor('one').title).toBe('');
     expect(view.container.querySelector('[data-testid="sheet-d1"]')).toBeNull();
   });
 });
@@ -205,7 +231,7 @@ describe('a daemon-less screen', () => {
   test('shell S7: says this device’s browser and is never handed a machine’s behaviour', async () => {
     const app = await bootApp({ surfaces: [chat, browsers], machines: ['d1', 'd2'], path: '/land' });
     view = app.view;
-    expect(anchor('one').title).toBe("Opens in this device's browser");
+    expect(anchor('one').title).toBe('');
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
     await interact(() => void anchor('one').dispatchEvent(click));
     expect(click.defaultPrevented).toBe(false);

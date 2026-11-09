@@ -14,6 +14,7 @@ import type {
   ScreenProps,
   SettingsProps,
 } from '@ferretry/kernel/manifest';
+import { SettingDisclosureRow } from '@ferretry/app';
 import type { ReactNode } from 'react';
 import { ChatScreen } from './chat/chat-screen.tsx';
 import { MessageMarksLegend } from './chat/message-marks-legend.tsx';
@@ -60,11 +61,13 @@ export interface ConversationSurfaces {
  */
 export const deviceSettingsPanels = {
   'chat-width': ChatWidthPanel,
+  // As v4 draws it: the last row of Appearance, closed until opened, with its one-line hint.
   'message-marks': () => (
-    <section>
-      <h3>Message marks</h3>
-      <MessageMarksLegend />
-    </section>
+    <ul className="m-0 list-none p-0">
+      <SettingDisclosureRow settingId="message-marks" name="Message marks" hint="What the clock, ticks and ! mean">
+        <MessageMarksLegend />
+      </SettingDisclosureRow>
+    </ul>
   ),
 } as const;
 

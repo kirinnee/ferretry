@@ -207,6 +207,7 @@ export {
   type InstallPrompt,
   useInstallPrompt,
 } from './shell/install-prompt.ts';
+export { type NavForm, useNavForm } from './shell/device-panels.tsx';
 export { handOff, type OwnScreenRef, useHandOff, useOwnScreen } from './shell/hand-off.ts';
 
 export {

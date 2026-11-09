@@ -1,13 +1,16 @@
 import { controlState, useEveryDaemon } from '@ferretry/app';
+import { useMemo } from 'react';
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { AddDeviceSurface } from './features/settings/add-device-settings.tsx';
 import { pairingClientOf, useMachineOf } from './daemon-scope.tsx';
 import { DevicePermissionsSetting } from './features/settings/device-permissions-settings.tsx';
 import {
-  MachineNotificationsSettings,
+  MachinesNotificationsSettings,
   NotificationsOffPanel,
 } from './features/settings/machine-notifications-settings.tsx';
+import type { MachineSource } from './hooks/use-machines-notifications.ts';
+import type { PushHost } from './lib/push-host.ts';
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { useOpenSecurity, useSelectedDaemon } from './shell-grants.ts';
 
@@ -45,26 +48,33 @@ export function UnlockPanel({ subject }: PanelProps) {
 }
 
 /**
- * `device.settings` › notifications: this browser's own permissions (notifications among them), and beneath them each
- * machine's Web Push — the permission, the switch that enrols this browser with it, and its registered devices, one
- * section per machine, each naming it. Drawn with NO machine and no client (shell contract S4): the machines come from
- * `useEveryDaemon`, each section writes only through its own row's client, and a machine this device may not use
- * (`not-granted`) is not listed.
+ * `device.settings` › notifications: this browser's own permissions, then ONE Notifications block — the browser's
+ * permission and notes once, ONE list with a row per machine (its switch, status and registered devices) and "Turn on
+ * for all machines". Drawn with NO machine and no client (shell contract S4): the machines come from `useEveryDaemon`,
+ * each row reads and writes only through its OWN row's client, a machine this device may not use (`not-granted`) is not
+ * listed, and a locked machine says so and offers Unlock. v4's per-row Mute is Agenda's notification filter, which
+ * Access has no seam to (GAP in ports-pending.json).
  */
-export function NotificationsDevicePanel() {
+export function NotificationsDevicePanel({ host }: { readonly host?: PushHost } = {}) {
   const rows = useEveryDaemon();
+  const sources: readonly MachineSource[] = useMemo(
+    () =>
+      rows
+        .filter(row => controlState(row.authorityOf('POST /v1/push/subscriptions')).shown)
+        .map(row => ({
+          daemon: row.daemon,
+          label: row.machine,
+          client: row.client,
+          locked: row.locked,
+          press: row.press,
+          unlock: row.unlock,
+        })),
+    [rows],
+  );
   return (
     <>
       <DevicePermissionsSetting />
-      {rows.map(row => {
-        const state = controlState(row.authorityOf('POST /v1/push/subscriptions'));
-        return state.shown ? (
-          <section key={row.daemon} data-machine={row.daemon}>
-            <h3>{row.machine}</h3>
-            <MachineNotificationsSettings client={row.client} label={row.machine} />
-          </section>
-        ) : null;
-      })}
+      <MachinesNotificationsSettings sources={sources} {...(host === undefined ? {} : { host })} />
     </>
   );
 }

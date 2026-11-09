@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { implementApp, type PanelProps } from '@ferretry/kernel/manifest';
+import { BUILT_IN_LAYOUTS } from '@ferretry/plugin-layouts/contract';
 import { type ReactNode, useState } from 'react';
 import { deviceControls, useDeviceControls } from '../../../src/compose/device-controls.ts';
 import { provideToShell } from '../../../src/connect/provides.ts';
 import { useAppHook } from '../../../src/shell/app-hooks.ts';
 import { PanelSlot } from '../../../src/shell/views.tsx';
+import { useViewPlace } from '../../../src/shell/view-place.tsx';
 import { useEveryDaemon } from '../../../src/shell/every-daemon.ts';
 import { useDevicePaired } from '../../../src/shell/device-context.tsx';
+import { useNavForm } from '../../../src/shell/device-panels.tsx';
 import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
 import { interact, type Mounted } from '../../support/dom.ts';
@@ -38,7 +41,7 @@ function NeedsYou(): ReactNode {
   const selected = useDevicePaired().selected;
   const shown = scope === 'current' ? rows.filter(row => row.daemon === selected) : rows;
   return (
-    <ul data-testid="needs-you">
+    <ul data-testid="needs-you" data-form={useNavForm()}>
       {shown.map(row => (
         <li key={row.daemon} data-testid={`needs-${row.daemon}`} data-online={String(row.online)}>
           {row.machine}
@@ -51,9 +54,12 @@ function NeedsYou(): ReactNode {
 const writes: string[] = [];
 /** What a device panel can reach by a daemon ARGUMENT: nothing. */
 const byArgument: unknown[] = [];
+/** The view place each device panel saw: none, whatever page it is drawn beside. */
+const placesSeen: unknown[] = [];
 function Marks(): ReactNode {
   const rows = useEveryDaemon();
   byArgument.push(useAppHook('d1', 'inbox.store'));
+  placesSeen.push(useViewPlace());
   const [, bump] = useState(0);
   return (
     <section data-testid="marks">
@@ -141,6 +147,24 @@ const quietManifest = manifestOf('quiet', {
 });
 const quiet = entryOf(quietManifest, implementApp(quietManifest, { skeleton: true } as never));
 
+/** What each machine's poster badge provider sends when poked (a "seen" mark), as a careless one could. */
+const pokes = new Map<string, () => void>();
+const posterManifest = manifestOf('poster', {
+  actions: { routes: [{ key: 'POST /v1/poster/seen', minimum: 'authenticated', caller: 'any', audit: 'skip' }] },
+  ui: { screens: [{ id: 'poster', path: 'poster', nav: { label: 'Poster', order: 3 } }] },
+});
+const poster = entryOf(
+  posterManifest,
+  provideToShell(implementApp(posterManifest, { build: () => ({ screens: { poster: () => <p>poster page</p> } }) }), {
+    navBadges: {
+      poster: ({ client, daemon }) => {
+        pokes.set(daemon, () => void client.call('POST /v1/poster/seen', { body: {} }).catch(() => {}));
+        return { count: () => 0, subscribe: () => () => {} };
+      },
+    },
+  }),
+);
+
 const LIST = { style: 'list', items: ['inbox', 'settings'] };
 const PHONE = { side: 'bottom', items: ['inbox'] };
 
@@ -169,8 +193,10 @@ afterEach(async () => {
   counts.clear();
   listeners.clear();
   built.length = 0;
+  pokes.clear();
   writes.length = 0;
   byArgument.length = 0;
+  placesSeen.length = 0;
   misbehave.countThrows = false;
   misbehave.subscribeThrows = false;
   deviceControls().setDeviceControls({ sessionsList: 'all' });
@@ -213,6 +239,18 @@ describe('the nav count', () => {
     view = app.view;
     expect(app.view.container.querySelector('.fy-nav--rail .fy-nav__badge')).not.toBeNull();
     expect(text()).toContain('4 open Inbox items');
+  });
+
+  test('shell S4 (R1 n2): a screen reader hears "1 open Inbox item", not "1 open Inbox items"', async () => {
+    counts.set('d1', 1);
+    const app = await bootApp({
+      surfaces: [inbox],
+      machines: ['d1'],
+      path: '/d/d1/inbox',
+      storage: deviceLayout(LIST),
+    });
+    view = app.view;
+    expect(app.view.container.querySelector('.fy-nav__badge .sr-only')?.textContent).toBe('1 open Inbox item');
   });
 
   test('shell S4: a sum of 0 draws no badge, and 100+ is capped at 99+', async () => {
@@ -292,6 +330,34 @@ describe('the nav count', () => {
   });
 });
 
+describe('the nav badge origin (R1 m5)', () => {
+  test('shell S4: a badge provider’s POST to a machine that locked after it was built raises no prompt (background origin), and goes once unlocked', async () => {
+    const app = await bootApp({
+      surfaces: [poster],
+      machines: ['d1', 'd2'],
+      path: '/d/d2/poster',
+      storage: deviceLayout({ style: 'list', items: ['poster'] }, { side: 'bottom', items: ['poster'] }),
+    });
+    view = app.view;
+    expect([...pokes.keys()].sort()).toEqual(['d1', 'd2']);
+    // d1 locks (its unlock expired) while nobody looks at it; the provider it was built with sends a mark.
+    app.machine('d1').locked = true;
+    pokes.get('d1')?.();
+    await settle();
+    expect(app.prompts.length).toBeGreaterThan(0);
+    expect(app.prompts.every(prompt => prompt.origin === 'background')).toBe(true);
+    // The one refused attempt is all that reached the machine; the mark waits for the unlock and then goes through.
+    const marks = (): number =>
+      app
+        .machine('d1')
+        .transport.paths()
+        .filter(path => path === 'POST /v1/poster/seen').length;
+    expect(marks()).toBe(1);
+    await app.unlock('d1');
+    expect(marks()).toBe(2);
+  });
+});
+
 describe('a provider that misbehaves', () => {
   test('shell S4: a count that is negative, not a number or throws counts 0, and a subscribe that throws breaks nothing', async () => {
     counts.set('d1', 2);
@@ -349,7 +415,46 @@ describe('the Needs-you nav panel (device-level)', () => {
     expect(app.view.container.querySelectorAll('[data-testid="needs-you"]')).toHaveLength(1);
   });
 
-  test('shell S4: nav panels are absent on the phone bar and on a collapsed rail', async () => {
+  test('shell S4: a nav panel is drawn in the rail too, once, told it is a rail, and the column is told it is a column', async () => {
+    const rail = await bootApp({
+      surfaces: [inbox],
+      machines: ['d1', 'd2'],
+      path: '/d/d1/inbox',
+      storage: deviceLayout({ style: 'rail', items: ['inbox'] }),
+    });
+    view = rail.view;
+    expect(panels('inbox.needs-you')).toBe(1);
+    expect(
+      rail.view.container.querySelector('.fy-nav--rail [data-testid="needs-you"]')?.getAttribute('data-form'),
+    ).toBe('rail');
+    expect(text()).toContain('d2-host');
+    await view.unmount();
+    const column = await bootApp({
+      surfaces: [inbox],
+      machines: ['d1'],
+      path: '/d/d1/inbox',
+      storage: deviceLayout(LIST),
+    });
+    view = column.view;
+    expect(column.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe('column');
+  });
+
+  for (const layout of BUILT_IN_LAYOUTS) {
+    test(`shell S4 (R1 M1): under the built-in "${layout.id}" layout the Needs-you panel is drawn, once, in its rail`, async () => {
+      const app = await bootApp({
+        surfaces: [inbox],
+        machines: ['d1', 'd2'],
+        path: '/d/d1/inbox',
+        storage: deviceLayout({ side: layout.nav.side, style: layout.nav.style, items: ['inbox'] }),
+      });
+      view = app.view;
+      expect(layout.nav.style).toBe('rail');
+      expect(panels('inbox.needs-you')).toBe(1);
+      expect(app.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe('rail');
+    });
+  }
+
+  test('shell S4: nav panels are absent on the phone bar, and on a top bar', async () => {
     const phone = await bootApp({
       surfaces: [inbox],
       machines: ['d1'],
@@ -360,13 +465,13 @@ describe('the Needs-you nav panel (device-level)', () => {
     view = phone.view;
     expect(panels('inbox.needs-you')).toBe(0);
     await view.unmount();
-    const rail = await bootApp({
+    const top = await bootApp({
       surfaces: [inbox],
       machines: ['d1'],
       path: '/d/d1/inbox',
-      storage: deviceLayout({ style: 'rail', items: ['inbox'] }),
+      storage: deviceLayout({ side: 'top', style: 'bar', items: ['inbox'] }),
     });
-    view = rail.view;
+    view = top.view;
     expect(panels('inbox.needs-you')).toBe(0);
   });
 
@@ -474,6 +579,13 @@ describe('the device.settings slot', () => {
     expect(byArgument.every(value => value === undefined)).toBe(true);
     // A PanelSlot in a device panel draws nothing (the side panel exists and is not drawn here).
     expect(app.view.container.querySelector('[data-testid="marks"] [data-testid="side-note"]')).toBeNull();
+  });
+
+  test('shell S4 (R1 n4): a device panel is drawn in no machine’s view place', async () => {
+    const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/settings' });
+    view = app.view;
+    expect(placesSeen.length).toBeGreaterThan(0);
+    expect(placesSeen.every(place => place === null)).toBe(true);
   });
 
   test('shell S4: a nav panel is drawn under WithoutShell too: it reaches machines only through its rows', async () => {

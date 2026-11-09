@@ -167,3 +167,8 @@
 .fy-slot--device {
   margin-top: 12px;
 }
+/* A nav panel in a rail (S4): the rail is narrow, so what a panel draws there stays inside it. */
+.fy-nav--rail .fy-slot--device {
+  min-width: 0;
+  overflow: hidden;
+}

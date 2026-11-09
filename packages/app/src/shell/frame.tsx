@@ -1,5 +1,5 @@
 import { BackgroundViews } from './background.tsx';
-import { DevicePanels, NavCount } from './device-panels.tsx';
+import { DevicePanels, NavCount, type NavForm } from './device-panels.tsx';
 import { DeviceViews } from './device-views.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
@@ -57,7 +57,10 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
     return daemon === undefined ? undefined : routes.href(screen, {}, daemon);
   };
   const side = plan.nav.side;
-  const columnNav = (side === 'left' || side === 'right') && plan.nav.style !== 'rail';
+  // A nav panel is drawn in a left or right nav of EVERY style (both built-in layouts are a rail), told which form it is
+  // in; never on the top or bottom bar.
+  const panelForm: NavForm | undefined =
+    side === 'left' || side === 'right' ? (plan.nav.style === 'rail' ? 'rail' : 'column') : undefined;
   return (
     <nav
       className={`fy-nav fy-nav--${side} fy-nav--${plan.nav.style}`}
@@ -84,9 +87,9 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
           </Link>
         );
       })}
-      {/* Device-level nav panels (S4, MJ3): drawn once, with no daemon, in a column nav only — never the phone bar
-      or a collapsed rail. */}
-      {columnNav ? <DevicePanels slot="nav" /> : null}
+      {/* Device-level nav panels (S4, MJ3): drawn once, with no daemon, in the column and in the rail (each told its
+      form), never on the phone bar. */}
+      {panelForm === undefined ? null : <DevicePanels slot="nav" form={panelForm} />}
     </nav>
   );
 }
