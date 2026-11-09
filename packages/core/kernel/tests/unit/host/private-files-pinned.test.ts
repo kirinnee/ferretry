@@ -312,7 +312,7 @@ describe.each(DISKS)('PF-budget a closed tree is closed against every root of an
 });
 
 describe('PF-budget the tree that is the root’s own is never closed against it, pinned or not', () => {
-  test('PF-budget a login’s own root, held open, reads while its 4,100 login folders are truncated, and a stranger’s pin is refused', async () => {
+  test('PF-budget a login’s own root, held open, reads while its 4,100 login folders are truncated, and a stranger’s open through its pin is refused', async () => {
     const parent = await realpath(await mkdtemp(`${tmpdir()}/fy-private-pinned-own-`));
     parents.push(parent);
     const home = `${parent}/home`;
@@ -363,8 +363,12 @@ describe('PF-budget the tree that is the root’s own is never closed against it
         pins,
       },
     ).root('agent-homes', { subfolder: 'F1' });
+    let held: HeldRoot | undefined;
     const ownPin = await own.pin(named(own, '.'));
-    const strangerPin = await stranger.pin(named(stranger, '.')).catch((error: unknown) => error);
+    const strangerPin = await stranger.pin(named(stranger, '.')).then(
+      held => held,
+      (error: unknown) => error,
+    );
     try {
       const target = await ownPin.open('own.txt');
       try {
@@ -373,14 +377,11 @@ describe('PF-budget the tree that is the root’s own is never closed against it
         await target.close();
       }
       // The control: the same truncated tree closes its device against every other root, pinned or not.
-      if (strangerPin instanceof Error) expect(strangerPin).toBeInstanceOf(RootError);
-      else {
-        expect(await outcome(async () => (await (strangerPin as HeldRoot).open('own.txt')).close())).toBe(
-          'refused:fenced',
-        );
-        await (strangerPin as HeldRoot).close();
-      }
+      expect(strangerPin).not.toBeInstanceOf(Error);
+      held = strangerPin as HeldRoot;
+      expect(await outcome(async () => (await held?.open('own.txt'))?.close())).toBe('refused:fenced');
     } finally {
+      await held?.close();
       await ownPin.close();
     }
   }, 60_000);
