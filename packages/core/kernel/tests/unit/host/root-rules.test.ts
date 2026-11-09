@@ -5,7 +5,13 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { RootName } from '../../../contract/ports.ts';
-import { harnessFileRefusal, permittedMode, takesLinks } from '../../../host/root-rules.ts';
+import {
+  harnessFileRefusal,
+  permittedMode,
+  renameNamesRefusal,
+  takesLinks,
+  takesRenames,
+} from '../../../host/root-rules.ts';
 
 const ALL: readonly RootName[] = [
   'agent-homes',
@@ -23,6 +29,40 @@ const ALL: readonly RootName[] = [
 describe('takesLinks', () => {
   test('only fleet and agent-homes take a link', () => {
     expect(ALL.filter(takesLinks)).toEqual(['agent-homes', 'fleet']);
+  });
+});
+
+describe('takesRenames', () => {
+  test('only fleet and agent-homes take a rename', () => {
+    expect(ALL.filter(takesRenames)).toEqual(['agent-homes', 'fleet']);
+  });
+});
+
+describe('renameNamesRefusal', () => {
+  test('two plain, different names are accepted', () => {
+    expect(renameNamesRefusal('/r/a', '/r/b')).toBeUndefined();
+  });
+
+  test('a .. segment, a NUL, an empty name and a non-string are refused', () => {
+    expect(renameNamesRefusal('/r/../a', '/r/b')).toBe('outside');
+    expect(renameNamesRefusal('/r/a', '/r/x/../b')).toBe('outside');
+    expect(renameNamesRefusal('/r/a\0', '/r/b')).toBe('outside');
+    expect(renameNamesRefusal('/r/a', '/r/b\0')).toBe('outside');
+    expect(renameNamesRefusal('', '/r/b')).toBe('outside');
+    expect(renameNamesRefusal('/r/a', '')).toBe('outside');
+    expect(renameNamesRefusal(undefined as unknown as string, '/r/b')).toBe('outside');
+  });
+
+  test('a . segment and an empty middle segment are refused, at either end', () => {
+    expect(renameNamesRefusal('/r/a', '/r/b/.')).toBe('outside');
+    expect(renameNamesRefusal('/r/./a', '/r/b')).toBe('outside');
+    expect(renameNamesRefusal('/r/a', '/r//b')).toBe('outside');
+    expect(renameNamesRefusal('/r//a', '/r/b')).toBe('outside');
+    expect(renameNamesRefusal('/r/a', '/r/b/')).toBe('outside');
+  });
+
+  test('the same name at both ends is refused: nothing would move', () => {
+    expect(renameNamesRefusal('/r/a', '/r/a')).toBe('outside');
   });
 });
 
