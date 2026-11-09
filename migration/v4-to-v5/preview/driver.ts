@@ -12,7 +12,8 @@ import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
 import { CODEX_HELD_SENTENCE, previewShellEnv } from '../src/v5/preview-env.ts';
-import { gateFiles, gateForecast, type Spellings } from './gate.ts';
+import { type Spellings } from '../src/v4/homes.ts';
+import { gateFiles, gateForecast } from './gate.ts';
 import { ALLOWED, GAPS, LEFT_BEHIND, PREVIEW, SESSION_FILES, stepPlan } from './plan.ts';
 import { guardTarget, hasMarker, PREVIEW_MARKER, PREVIEW_MARKER_TEXT } from './paths.ts';
 import {

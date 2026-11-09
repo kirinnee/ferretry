@@ -276,6 +276,62 @@ export function rawSecretPaths(value: unknown): readonly string[] {
   return found;
 }
 
+const AUTH_SHAPE = String.raw`(?:Bearer|Basic|token)\s+\S{16,}`;
+const AUTH_AT_START = new RegExp(`^${AUTH_SHAPE}`, 'iu');
+/** In free text: a real header (`Authorization:` / `Proxy-Authorization:` then a scheme and a value). */
+const AUTH_HEADER = /(?<![A-Za-z0-9])(?:Proxy-)?Authorization["']?\s*[:=]\s*["']?(?:Bearer|Basic|token)\s+\S{16,}/iu;
+/** In free text: a scheme word followed by a value (judged by {@link looksLikeTokenValue}). */
+const SCHEME_VALUE = /(?<![A-Za-z0-9])(?:Bearer|Basic|token)\s+(\S+)/giu;
+
+/** A value that itself looks like a credential: 20+ token-alphabet characters, no spaces, a letter and a digit. */
+const looksLikeTokenValue = (raw: string): boolean => {
+  const value = raw.replace(/^["'`(]+|["'`),;.]+$/gu, '');
+  return value.length >= 20 && /^[A-Za-z0-9._~+/=-]+$/u.test(value) && /[A-Za-z]/u.test(value) && /\d/u.test(value);
+};
+
+/** The key paths of a value that looks like an Authorization header: a header-named key, or `Bearer|Basic|token <16+>`. */
+export function credentialShaped(value: unknown): string[] {
+  const found: string[] = [];
+  const visit = (node: unknown, path: readonly string[]): void => {
+    if (typeof node === 'string') {
+      if (AUTH_AT_START.test(node)) found.push(path.join('.'));
+      return;
+    }
+    if (Array.isArray(node)) node.forEach((item, index) => visit(item, [...path, String(index)]));
+    else if (node !== null && typeof node === 'object')
+      for (const [key, item] of Object.entries(node)) {
+        const lower = key.toLowerCase();
+        if ((lower === 'authorization' || lower.includes('header')) && item !== undefined && item !== null)
+          found.push([...path, key].join('.'));
+        else visit(item, [...path, key]);
+      }
+  };
+  visit(value, []);
+  return found;
+}
+
+/** Every key path of a carried document that looks like a credential: the one rule settings documents are held to. */
+export const documentCredentialPaths = (value: unknown): readonly string[] => [
+  ...rawSecretPaths(value),
+  ...credentialShaped(value),
+];
+
+/**
+ * Whether the TEXT of a carried file looks like it holds a credential, by the same rules as a document: a private key,
+ * a known key shape in ANY word, a `NAME_KEY=<high-entropy>` assignment (EVERY assignment is judged; a later one never
+ * hides an earlier one), an `Authorization: Bearer|Basic|token <value>` header, and a `Bearer|Basic|token` word whose
+ * value itself looks like a credential. Prose that merely uses the words ("Basic troubleshooting", "token budget") carries.
+ */
+export function textLooksLikeCredential(text: string): boolean {
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(text) || AUTH_HEADER.test(text)) return true;
+  for (const match of text.matchAll(SCHEME_VALUE)) if (looksLikeTokenValue(match[1] as string)) return true;
+  const words = text.split(/\s+/u).filter(word => word !== '');
+  const assigned = [...text.matchAll(/([A-Za-z0-9_.-]+)["']?\s*[=:]\s*["']?([^\s"']+)/gu)].map(match => ({
+    [match[1] as string]: match[2] as string,
+  }));
+  return rawSecretPaths({ words, assigned }).length > 0;
+}
+
 // ── the modeline ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 const withoutModeline = (comment: string | null | undefined): string | null => {
