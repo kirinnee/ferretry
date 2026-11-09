@@ -194,7 +194,12 @@ describe('F-0184 the daemon half hands a launch the installed skills it selects'
       needs: { ferrets: { get: async () => undefined } },
       uses: {
         runtimes: {
-          current: () => ({ layers: async () => ({ runtime: 'a', profile: 'p', mcp: [], skills: ['mine'] }) }),
+          current: () => ({
+            layers: async (runtime: string) =>
+              runtime === 'broken'
+                ? Promise.reject(new Error('a base does not exist'))
+                : { runtime, profile: 'p', mcp: [], skills: runtime === 'a' ? ['mine'] : [] },
+          }),
         },
         projects: { current: () => undefined },
       },
@@ -208,5 +213,9 @@ describe('F-0184 the daemon half hands a launch the installed skills it selects'
     expect(parts?.map(part => part.name)).toEqual(['review']);
     expect(parts?.[0]?.tree).toBeDefined();
     expect(await taker[0]?.item.parts({ harness: 'codex', runtime: 'a' })).toEqual([]);
+    // D10: a launch on a runtime whose profile does not name the item, with no runtime, or whose profile cannot be resolved, gets none
+    expect(await taker[0]?.item.parts({ harness: 'claude-code', runtime: 'b' })).toEqual([]);
+    expect(await taker[0]?.item.parts({ harness: 'claude-code' })).toEqual([]);
+    expect(await taker[0]?.item.parts({ harness: 'claude-code', runtime: 'broken' })).toEqual([]);
   });
 });
