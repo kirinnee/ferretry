@@ -53,19 +53,27 @@ const ON_ITS_WAY_UP: ReadonlySet<SessionStatus> = new Set<SessionStatus>(['creat
  *
  * A REVIVE brings the document back from every status the one revive rule (`reviveRuling`, behind every Resume button)
  * calls revivable — `stopped`, `completed`, `failed`, `stalled` — as today's resume set `starting` from each
- * (`R/src/lib/session/resume/service.ts:232`); left there, the ferret would never be watched again. `kill_failed` is
- * NEVER moved by these edges: it says a stop was not confirmed, and no registry edge confirms one, so clearing it would
- * erase the only record that an old pane may still be alive (today refused that resume outright). Pure.
+ * (`R/src/lib/session/resume/service.ts:232`); left there, the ferret would never be watched again. It needs PROOF of a
+ * new live run: the registry's own start edge (`cause: 'lifecycle'`, state `starting`: a start, a resume or a fork's
+ * launch writes it before anything is launched). A plain turn edge (`working` / `idle`) never revives an ended document,
+ * and neither does a reconcile (`cause: 'reconcile'`, a registry read at arm that may be stale): a failure the lifecycle
+ * wrote stays failed. `kill_failed` is NEVER moved by these edges (today's transition table lets it go only to
+ * `stopped`): it says a stop was not confirmed, and no registry edge confirms one, so clearing it would erase the only
+ * record that an old pane may still be alive. Pure.
  */
-export function lifecycleStatus(current: SessionStatus, state: FerretState): SessionStatus | undefined {
+export function lifecycleStatus(
+  current: SessionStatus,
+  state: FerretState,
+  cause: 'lifecycle' | 'reconcile' = 'lifecycle',
+): SessionStatus | undefined {
   if (current === 'kill_failed') return undefined;
   const ended = reviveRuling(current).revivable;
   switch (state) {
     case 'starting':
-      return ended ? 'starting' : undefined;
+      return ended && cause === 'lifecycle' ? 'starting' : undefined;
     case 'working':
     case 'idle':
-      return ended || ON_ITS_WAY_UP.has(current) ? 'running' : undefined;
+      return ON_ITS_WAY_UP.has(current) ? 'running' : undefined;
     case 'stopped':
       return ended ? undefined : 'stopped';
   }

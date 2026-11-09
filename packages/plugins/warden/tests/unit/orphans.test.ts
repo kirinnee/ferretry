@@ -6,7 +6,6 @@ import {
   type OrphanMemory,
   type OrphanPlanInput,
   orphanFleetKey,
-  orphanNoticeSourceRef,
   planOrphanEscalations,
   WARDEN_LABEL,
   type WardenAnomaly,
@@ -129,7 +128,7 @@ describe('planOrphanEscalations', () => {
     const orphans = overrides.orphans ?? detectOrphanedCards(overrides.board, fleet, NOW);
     return planOrphanEscalations({ memory: {}, enabled: true, clientName: 'fy', ...overrides, fleet, orphans });
   };
-  const told = (via: 'owner' | 'notice', to: string, assignee = 'worker'): OrphanMemory => ({
+  const told = (via: 'owner' | 'list' | 'notice', to: string, assignee = 'worker'): OrphanMemory => ({
     F1: { assignee, via, to, at: '2026-07-31T11:30:00.000Z' },
   });
 
@@ -139,11 +138,11 @@ describe('planOrphanEscalations', () => {
 
     // Assert
     should(result.resolve).be.empty();
+    should(result.list).be.empty();
     should(result.tell).have.length(1);
     const tell = result.tell[0];
-    if (tell?.kind !== 'message') throw new Error('expected a message');
     should(tell).containDeep({ taskId: 'F1', assignee: 'worker', sessionId: 'lead' });
-    const text = tell.message;
+    const text = tell?.message ?? '';
     should(text).startWith('Your card &F1 "Ship the thing" has no ferret working on it. It is waiting in Implement');
     should(text).not.containEql('[ferretry]');
     should(text).not.containEql('This notice is from Ferretry');
@@ -154,95 +153,87 @@ describe('planOrphanEscalations', () => {
     should(text).containEql('`fy task drop F1 --reason "<why>"`');
   });
 
-  it('should notify the owner instead, tied to the card, when the owner ferret is finished too', () => {
+  it('should list the card, when the owner ferret is finished too', () => {
     // Arrange
     const fleet = [worker, session({ id: 'lead', status: 'completed' })];
 
     // Act
-    const result = plan({ board: boardOf(orphanView({ title: 'Ship the thing' })), fleet, machine: 'mac' });
+    const result = plan({ board: boardOf(orphanView({ title: 'Ship the thing' })), fleet });
 
     // Assert
-    const tell = result.tell[0];
-    if (tell?.kind !== 'notice') throw new Error('expected a notice');
-    should(tell.sessionId).equal('lead');
-    should(tell.notice).containDeep({
-      sourceRef: orphanNoticeSourceRef('F1'),
-      task: { id: 'F1' },
-      title: 'A card has nobody working on it',
-      subject: '&F1 Ship the thing is waiting in Implement, but no ferret is assigned, so nothing will happen to it.',
-      waitingSince: '2026-07-31T11:00:00.000Z',
-    });
-    should(tell.notice.why).equal(
-      'The last ferret on it, worker, has finished. The ferret that owns the card, lead, has finished too. A card only moves when a ferret works on it, so this one will sit in Implement until you act.',
-    );
-    should(tell.notice.premise).containEql('&F1 Ship the thing on mac, waiting in Implement');
-    should(tell.notice.howToResolve).containEql('start a ferret on it');
-    should(tell.notice.howToResolve).not.containEql('fy task');
-    const everything = Object.values(tell.notice).join('\n');
-    for (const jargon of ['active or review lane', 'nothing under it is alive', 'Left by', 'session '])
-      should(everything).not.containEql(jargon);
+    should(result.tell).be.empty();
+    should(result.list).eql([
+      {
+        id: 'F1',
+        assignee: 'worker',
+        line: '&F1 Ship the thing is waiting in Implement, but no ferret is assigned, so nothing will happen to it.',
+        waitingSince: '2026-07-31T11:00:00.000Z',
+      },
+    ]);
+    // Joining the list is news: it is remembered only once the item that names it has landed.
+    should(result.memory).eql({});
   });
 
-  it('should notify the owner when the card’s ferret owns it itself', () => {
+  it('should list the card when the card’s ferret owns it itself', () => {
+    // Act
+    const result = plan({ board: boardOf(orphanView({ owner: 'worker', assignee: null })) });
+
+    // Assert
+    should(result.tell).be.empty();
+    should(result.list.map(card => card.id)).eql(['F1']);
+  });
+
+  it('should list the card, never type into it, when the owner is in an interactive chat', () => {
     // Arrange
-    const board = boardOf(orphanView({ owner: 'worker', assignee: null }));
+    const chat = session({ id: 'lead', status: 'running', mode: 'interactive' });
 
     // Act
-    const tell = plan({ board }).tell[0];
+    const result = plan({ board: boardOf(orphanView()), fleet: [worker, chat] });
 
     // Assert
-    if (tell?.kind !== 'notice') throw new Error('expected a notice');
-    should(tell.sessionId).equal('worker');
-    should(tell.notice.why).containEql('It is the only ferret that answers for the card.');
+    should(result.tell).be.empty();
+    should(result.list.map(card => card.id)).eql(['F1']);
   });
 
-  it('should hold the notice on the finished ferret’s board when the owner is gone from this machine', () => {
-    // Act
-    const tell = plan({ board: boardOf(orphanView()), fleet: [worker] }).tell[0];
-
-    // Assert
-    should(tell).containDeep({ kind: 'notice', sessionId: 'worker' });
-  });
-
-  it('should report a card nobody on this machine can be told about, and remember nothing', () => {
+  it('should list a card even when nobody on this machine can be told: the item is the machine’s own', () => {
     // Act
     const result = plan({ board: boardOf(orphanView()), fleet: [] });
 
     // Assert
     should(result.tell).be.empty();
-    should(result.unreported).eql(['F1']);
+    should(result.list.map(card => card.id)).eql(['F1']);
     should(result.memory).eql({});
   });
 
-  it('should fit a long title into the notice’s limits', () => {
+  it('should fit a long title into a row, ending as every row ends', () => {
     // Arrange
-    const fleet = [worker];
     const title = 'A very long card title '.repeat(10).trim();
 
     // Act
-    const tell = plan({ board: boardOf(orphanView({ title })), fleet }).tell[0];
+    const [card] = plan({ board: boardOf(orphanView({ title })), fleet: [worker] }).list;
 
     // Assert
-    if (tell?.kind !== 'notice') throw new Error('expected a notice');
-    should(tell.notice.subject.length).be.belowOrEqual(120);
-    should(tell.notice.subject).startWith('&F1 A very long card');
-    should(tell.notice.subject).containEql('…');
-    should(tell.notice.subject).endWith(', but no ferret is assigned, so nothing will happen to it.');
+    should(card?.line.length).be.belowOrEqual(120);
+    should(card?.line).startWith('&F1 A very long card');
+    should(card?.line).containEql('…');
+    should(card?.line).endWith(', but no ferret is assigned, so nothing will happen to it.');
   });
 
-  it('should not tell anybody twice in one episode', () => {
+  it('should not tell anybody twice in one episode, and keep a listed card listed', () => {
     // Act
     const owner = plan({ board: boardOf(orphanView()), memory: told('owner', 'lead') });
-    const notice = plan({ board: boardOf(orphanView()), fleet: [worker], memory: told('notice', 'worker') });
+    const listed = plan({ board: boardOf(orphanView()), fleet: [worker], memory: told('list', 'machine-agenda') });
 
     // Assert
     should(owner.tell).be.empty();
+    should(owner.list).be.empty();
     should(owner.memory).eql(told('owner', 'lead'));
-    should(notice.tell).be.empty();
-    should(notice.memory).eql(told('notice', 'worker'));
+    should(listed.tell).be.empty();
+    should(listed.list.map(card => card.id)).eql(['F1']);
+    should(listed.memory).eql(told('list', 'machine-agenda'));
   });
 
-  it('should move on to the owner once the owner ferret it messaged has finished as well', () => {
+  it('should move on to the list once the owner ferret it messaged has finished as well', () => {
     // Arrange
     const fleet = [worker, session({ id: 'lead', status: 'stopped' })];
 
@@ -250,11 +241,11 @@ describe('planOrphanEscalations', () => {
     const result = plan({ board: boardOf(orphanView()), fleet, memory: told('owner', 'lead') });
 
     // Assert
-    should(result.tell).containDeep([{ kind: 'notice', sessionId: 'lead' }]);
+    should(result.list.map(card => card.id)).eql(['F1']);
     should(result.memory).eql({});
   });
 
-  it('should treat a card another ferret left as a new episode, clearing the old notice', () => {
+  it('should treat a card another ferret left as a new episode, closing the old per-card ask', () => {
     // Arrange
     const memory = told('notice', 'lead', 'earlier');
 
@@ -267,17 +258,37 @@ describe('planOrphanEscalations', () => {
         taskId: 'F1',
         sessionId: 'lead',
         sourceRef: 'warden-orphan:F1',
-        note: 'Cleared by the Warden: the card changed hands since.',
+        note: 'Closed by the Warden: the card changed hands since.',
       },
     ]);
-    should(result.tell).containDeep([{ kind: 'message', sessionId: 'lead', assignee: 'worker' }]);
+    should(result.tell).containDeep([{ sessionId: 'lead', assignee: 'worker' }]);
   });
 
-  it('should forget a card that recovered, and clear its notice when it had one', () => {
+  it('should close the per-card ask of an earlier Warden once, and list the card it was about', () => {
+    // Act
+    const result = plan({ board: boardOf(orphanView()), fleet: [worker], memory: told('notice', 'worker') });
+
+    // Assert
+    should(result.resolve).eql([
+      {
+        taskId: 'F1',
+        sessionId: 'worker',
+        sourceRef: 'warden-orphan:F1',
+        note: 'Closed by the Warden: the orphaned cards are one item on the machine agenda now.',
+      },
+    ]);
+    should(result.tell).be.empty();
+    should(result.list.map(card => card.id)).eql(['F1']);
+    // News on the list (the per-card ask that told the owner is closed), and no per-card ask is remembered any more.
+    should(result.memory).eql({});
+  });
+
+  it('should forget a card that recovered, closing a per-card ask only when it had one', () => {
     // Arrange
     const memory: OrphanMemory = {
       F1: { assignee: 'worker', via: 'notice', to: 'worker', at: '2026-07-31T11:30:00.000Z' },
       F2: { assignee: 'worker', via: 'owner', to: 'lead', at: '2026-07-31T11:30:00.000Z' },
+      F3: { assignee: 'worker', via: 'list', to: 'machine-agenda', at: '2026-07-31T11:30:00.000Z' },
     };
 
     // Act
@@ -286,23 +297,24 @@ describe('planOrphanEscalations', () => {
     // Assert
     should(result.memory).eql({});
     should(result.tell).be.empty();
+    should(result.list).be.empty();
     should(result.resolve).eql([
       {
         taskId: 'F1',
         sessionId: 'worker',
         sourceRef: 'warden-orphan:F1',
-        note: 'Cleared by the Warden: a ferret is on the card again, or it left its lane.',
+        note: 'Closed by the Warden: a ferret is on the card again, or it left its lane.',
       },
     ]);
   });
 
-  it('should tell nobody while the Warden is off, but keep what it told and still clear what recovered', () => {
+  it('should tell nobody new while the Warden is off, but keep what it told and still forget what recovered', () => {
     // Arrange
     const board = boardOf(orphanView(), orphanView({ id: 'F2' }));
     const fleet = [worker, session({ id: 'lead', status: 'stopped' })];
     const memory: OrphanMemory = {
       F1: { assignee: 'worker', via: 'owner', to: 'lead', at: '2026-07-31T11:30:00.000Z' },
-      F3: { assignee: 'worker', via: 'notice', to: 'worker', at: '2026-07-31T11:30:00.000Z' },
+      F3: { assignee: 'worker', via: 'list', to: 'machine-agenda', at: '2026-07-31T11:30:00.000Z' },
     };
 
     // Act
@@ -310,8 +322,8 @@ describe('planOrphanEscalations', () => {
 
     // Assert
     should(result.tell).be.empty();
+    should(result.list).be.empty();
     should(result.memory).eql({ F1: memory.F1 });
-    should(result.resolve.map(resolution => resolution.taskId)).eql(['F3']);
   });
 
   it('should skip an anomaly whose card is not on the board it was read from', () => {
@@ -330,20 +342,19 @@ describe('planOrphanEscalations', () => {
 
     // Assert
     should(result.tell).be.empty();
-    should(result.unreported).be.empty();
+    should(result.list).be.empty();
   });
 
-  it('should date a notice from the card’s creation when the anomaly carries no anchor', () => {
+  it('should date a row from the card’s creation when the anomaly carries no anchor', () => {
     // Arrange
     const view = orphanView();
     const [anomaly] = detectOrphanedCards(boardOf(view), [worker], NOW);
     const { since: _since, ...unanchored } = anomaly as WardenAnomaly;
 
     // Act
-    const tell = plan({ board: boardOf(view), fleet: [worker], orphans: [unanchored] }).tell[0];
+    const [card] = plan({ board: boardOf(view), fleet: [worker], orphans: [unanchored] }).list;
 
     // Assert
-    if (tell?.kind !== 'notice') throw new Error('expected a notice');
-    should(tell.notice.waitingSince).equal(view.createdAt);
+    should(card?.waitingSince).equal(view.createdAt);
   });
 });

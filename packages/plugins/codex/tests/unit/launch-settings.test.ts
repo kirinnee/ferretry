@@ -3,6 +3,9 @@
  * #27 Q9; today's `FileLaunchSettingsDigest` over the login's wrapper, F-0422).
  */
 import { describe, expect, test } from 'bun:test';
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { LaunchSpec, Runner, RunSpec } from '@ferretry/core-ferrets/contract';
 import type { FencedPath, FerretId, KernelPorts, RootHandle, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
@@ -167,9 +170,58 @@ describe('F-0422 one bad launch-settings record is that ferret’s nothing-to-sa
       expect(started.ok).toBe(true);
       expect(port.damaged()).toEqual([]);
       expect(changed).toEqual([]);
-      expect(await memory.readText('/fy/state/codex/launch-settings/f1.json')).toBeUndefined();
+      // BG-045: the bad record is removed AND this launch is recorded afresh (not left empty until the next launch).
+      const rewritten = await memory.readText('/fy/state/codex/launch-settings/f1.json');
+      expect(JSON.parse(rewritten ?? 'null')).toMatchObject({ format: 1 });
+      expect(rewritten).not.toBe(damagedShapes[shape]);
     });
   }
+
+  test('BG-045 F-0422 a REAL symlink at the record: a read is unknown, the launch removes the link and never follows it, and records afresh so the answer is current at once', async () => {
+    // Arrange: a real tmp dir, the record a symlink to a file outside the plugin's state holding a fake secret.
+    const dir = await mkdtemp(join(tmpdir(), 'codex-launch-link-'));
+    try {
+      const home = join(dir, 'home');
+      const base = join(home, 'state/codex/launch-settings');
+      await mkdir(base, { recursive: true, mode: 0o700 });
+      const target = join(dir, 'outside-target.json');
+      await writeFile(target, 'FAKE-SECRET-FIXTURE');
+      await symlink(target, join(base, 'f1.json'));
+      const fs = kernelState.createNodeHostFs();
+      const options = {
+        home,
+        pluginId: 'codex',
+        files: [CODEX_ROLLOUTS, CODEX_LAUNCH_SETTINGS],
+        fs,
+        clock: { now: () => 0 as never },
+      };
+      const opening = await kernelState.openPluginState({ ...options, kind: 'plugin', liveTargets: true });
+      const changed: unknown[] = [];
+      const port = kernelState.createStatePort({
+        ...options,
+        initialDamage: opening.damaged,
+        initialNarrowed: opening.narrowed,
+        changed: damage => changed.push(damage),
+      });
+      const harness = over({ value: 'auto' }, port);
+
+      // Act
+      const before = await harness.launchSettings?.(FERRET);
+      const started = await harness.start(spec, runner, {} as never);
+      const after = await harness.launchSettings?.(FERRET);
+
+      // Assert
+      expect(before).toEqual({ kind: 'unknown' });
+      expect(started.ok).toBe(true);
+      expect((await lstat(join(base, 'f1.json'))).isSymbolicLink()).toBe(false);
+      expect(await readFile(target, 'utf8')).toBe('FAKE-SECRET-FIXTURE');
+      expect(after?.kind).not.toBe('unknown');
+      expect(port.damaged()).toEqual([]);
+      expect(changed).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('F-0422 Codex records what a launch ran under', () => {

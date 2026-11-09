@@ -110,6 +110,23 @@ describe('GAP(composition) the environment store, task store and effect ledger a
     expect(kernel.received.every(handle => handle.internal === true && handle.name === 'sessions')).toBe(true);
   });
 
+  test('BG-036 removeEnvironment deletes an ended ferret’s file, and leaves a ferret that was resumed first (it has a new credential)', async () => {
+    // Arrange: a ferret holding an environment file.
+    const kernel = await wired();
+    const { subject } = await files(kernel.roots);
+    await subject.environmentStore(FERRET).write(FERRET, { A: 'fixture' });
+
+    // Act: the one still ended is removed; asked again while the registry no longer says ended, it stays.
+    await subject.removeEnvironment(FERRET, () => true);
+    const keptEnded = await subject.environmentStore(FERRET).read(FERRET);
+    await subject.environmentStore(FERRET).write(FERRET, { A: 'new-credential-fixture' });
+    await subject.removeEnvironment(FERRET, () => false);
+
+    // Assert
+    expect(keptEnded).toEqual({});
+    expect(await subject.environmentStore(FERRET).read(FERRET)).toEqual({ A: 'new-credential-fixture' });
+  });
+
   test('GAP(composition) 3: a work handle passed to any of the three constructors throws at construction', async () => {
     // Arrange
     const { work } = await wired();
