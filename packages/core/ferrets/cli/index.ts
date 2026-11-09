@@ -19,6 +19,7 @@ import { RenameSessionController } from './lib/session/rename-controller.ts';
 import { RevokeCredentialController } from './lib/session/revoke-credential.ts';
 import { SignalSessionController } from './lib/session/signal-controller.ts';
 import { StartSessionController } from './lib/session/start-controller.ts';
+import { promptFilePath, promptWith, readPromptFile, requestIdOf } from './lib/session/start-inputs.ts';
 import { START_FLAGS_ELSEWHERE } from './lib/session/start-request.ts';
 import { SessionStatusController } from './lib/session/status-controller.ts';
 import { SessionSubtreeController } from './lib/session/subtree-controller.ts';
@@ -63,15 +64,17 @@ const SESSION_USAGE = [
 
 /**
  * The flags of `fy new` that are not Ferrets' start: continuing an existing conversation (`--continue`, `--since`)
- * and where it compacts are the Conversation's, a scratch-folder override is not a field of the start, and a prompt
- * file is not this CLI half's to read. The model routing (`--model`, `--effort`, `--auto`), `--card` and
+ * and where it compacts are the Conversation's, a scratch-folder override is not a field of the start, and a start's idempotency key is `fy start`'s alone. The model routing (`--model`, `--effort`, `--auto`), `--card` and
  * `--name <title>` are sent with the start.
  */
-const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'compact-at', 'prompt-file'];
+const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id'];
+
+/** The short spelling a refused flag is also typed under (`-f` for `--file`). */
+const SHORT_SPELLINGS: Readonly<Record<string, readonly string[]>> = { file: ['f'] };
 
 /** Refuses, by name, a typed flag whose value has no field in Ferrets' routes. */
 function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], verb: string): void {
-  const found = names.filter(name => typed(invocation, name));
+  const found = names.filter(name => typed(invocation, name, ...(SHORT_SPELLINGS[name] ?? [])));
   if (found.length > 0)
     throw new SessionCommandError(
       `${found.map(name => `--${name}`).join(', ')}: not taken by \`${BINARY} ${verb}\` in this version of Ferretry (another plugin decides it now)`,
@@ -87,7 +90,7 @@ function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], v
  * folder `fy` was run in unless `--cwd` names another.
  */
 export default implementCli(manifest, {
-  build({ client, io: terminal, env, clock, sleep, exists }) {
+  build({ client, io: terminal, env, clock, sleep, exists, readText }) {
     const api = new ClientSessionApi(client);
     const environment: SessionEnvironment = { cwd: process.cwd() };
 
@@ -139,7 +142,12 @@ export default implementCli(manifest, {
         const login = text(invocation, 'login');
         const pack = text(invocation, 'pack');
         const cwd = text(invocation, 'cwd');
-        const prompt = joined(invocation.args);
+        const filePath = promptFilePath(invocation);
+        const requestId = requestIdOf(invocation);
+        const prompt =
+          filePath === undefined
+            ? joined(invocation.args)
+            : promptWith(role, joined(invocation.args), await readPromptFile(filePath, readText));
         const auto = role === 'new' && on(invocation, 'auto');
         // Today's `fy new` refinement: a sub-ferret names its runtime, or lets Ferretry pick one.
         if (role === 'new' && auto && agent !== undefined)
@@ -183,6 +191,7 @@ export default implementCli(manifest, {
           ...(pack === undefined ? {} : { pack }),
           ...(cwd === undefined ? {} : { cwd }),
           ...(prompt === undefined ? {} : { prompt }),
+          ...(requestId === undefined ? {} : { requestId }),
           ...json(invocation),
         });
       });
@@ -193,15 +202,19 @@ export default implementCli(manifest, {
         const value = first(invocation, kind === 'label' ? 'pack' : 'ferret');
         const selector: BulkStopSelector = kind === 'label' ? { kind, label: value } : { kind, rootId: value };
         const includeCaller = on(invocation, 'include-caller');
-        await new BulkStopController(api, io, { ask: async () => '' }, { interactive: false, binaryName: BINARY }).run(
-          selector,
-          {
-            ...(reason === undefined ? {} : { reason }),
-            ...(on(invocation, 'dry-run', 'n') ? { dryRun: true } : {}),
-            ...(on(invocation, 'yes', 'y') ? { yes: true } : {}),
-            ...(includeCaller ? { includeCaller: true } : {}),
-          },
-        );
+        // The ferret that typed the command (the shell passes FY_SESSION_ID): the plan keeps it out unless --include-caller.
+        const callerId = env?.FY_SESSION_ID?.trim() || undefined;
+        await new BulkStopController(
+          api,
+          io,
+          { ask: async () => '' },
+          { interactive: false, binaryName: BINARY, ...(callerId === undefined ? {} : { callerId }) },
+        ).run(selector, {
+          ...(reason === undefined ? {} : { reason }),
+          ...(on(invocation, 'dry-run', 'n') ? { dryRun: true } : {}),
+          ...(on(invocation, 'yes', 'y') ? { yes: true } : {}),
+          ...(includeCaller ? { includeCaller: true } : {}),
+        });
       });
 
     const usage = (lines: readonly string[]) =>
@@ -235,12 +248,12 @@ export default implementCli(manifest, {
     });
 
     const restart = verb(async (invocation, presenter) => {
-      if (typed(invocation, 'request-id'))
-        throw new SessionCommandError('--request-id: a restart carries no idempotency key in this version of Ferretry');
+      const requestId = requestIdOf(invocation);
       await new RestartController(new ClientRestartGateway(client), presenter).execute(invocation.args, {
         ...(on(invocation, 'outdated') ? { outdated: true } : {}),
         ...(on(invocation, 'all') ? { all: true } : {}),
         ...(on(invocation, 'cancel') ? { cancel: true } : {}),
+        ...(requestId === undefined ? {} : { requestId }),
         ...json(invocation),
       });
     });

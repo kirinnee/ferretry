@@ -5,11 +5,11 @@ import type { SessionEnvironment, StartBody } from './ports.ts';
 
 /**
  * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2): where a conversation compacts and the
- * opening attachments are the Conversation's, a prompt file and a detached start are not this CLI half's to read, a
- * start's idempotency key is the shell's header. A typed one is
+ * opening attachments are the Conversation's, an opening attachment waits on the start wire taking one (GAP(ferrets-start-flags)), and a detached start has
+ * no 5.0 meaning (a start always waits for the launch). A typed one is
  * refused by name rather than sent and dropped, because a flag that was accepted and ignored is worse than a refusal.
  */
-export const START_FLAGS_ELSEWHERE: readonly string[] = ['compact-at', 'file', 'prompt-file', 'detach', 'request-id'];
+export const START_FLAGS_ELSEWHERE: readonly string[] = ['compact-at', 'file', 'detach'];
 
 /**
  * A value at or below this many seconds looks like someone reaching for a readiness wait ("give it
@@ -119,7 +119,9 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
   assertNumericFlags(flags);
   const prompt = flags.prompt?.trim() ?? '';
   if (prompt === '' && flags.mode !== 'interactive')
-    throw new SessionCommandError('provide a prompt, or use --mode interactive to start bare');
+    throw new SessionCommandError(
+      'provide a prompt (arguments and/or --prompt-file), or use --mode interactive to start bare',
+    );
   const base = environment.cwd;
   const typed = flags.cwd?.trim();
   const folder =

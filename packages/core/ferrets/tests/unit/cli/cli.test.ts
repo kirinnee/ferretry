@@ -101,8 +101,8 @@ describe('the ferrets cli half', () => {
         headers: { 'x-fy-request-id': expect.any(String) },
       },
     });
-    expect(await verb('start [prompt...]', ['x'], { 'compact-at': '250k', 'prompt-file': 'brief.md' })).toBe(2);
-    expect(err.at(-1)).toContain('--compact-at, --prompt-file');
+    expect(await verb('start [prompt...]', ['x'], { 'compact-at': '250k', detach: true })).toBe(2);
+    expect(err.at(-1)).toContain('--compact-at, --detach');
     expect(await verb('start [prompt...]', ['x'], { mode: 'sideways' })).toBe(2);
     expect(calls).toHaveLength(2);
   });
@@ -284,7 +284,7 @@ describe('the ferrets cli half', () => {
     expect(err.at(-1)).toContain('--session');
   });
 
-  test('V-0375 restart reads, restarts and cancels through /v1/restarts; --request-id is refused', async () => {
+  test('V-0375 restart reads, restarts and cancels through /v1/restarts', async () => {
     const result = { restarted: [], queued: [], skipped: [], failed: [] };
     const { verb, calls } = run({
       [FERRET_ROUTES.restarts]: { outdated: [], queued: [] },
@@ -299,7 +299,6 @@ describe('the ferrets cli half', () => {
       { route: 'POST /v1/restarts', init: { body: { scope: 'ids', ids: ['wren'] } } },
       { route: 'DELETE /v1/restarts' },
     ]);
-    expect(await verb('restart [ids...]', [], { all: true, 'request-id': 'k' })).toBe(2);
   });
 
   test('V-0431 V-0434 V-0433 V-0435 the session verbs call their routes; a bare session prints them', async () => {
