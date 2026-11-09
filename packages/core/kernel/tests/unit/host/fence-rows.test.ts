@@ -245,3 +245,90 @@ describe('the fence (§7.7, §9.3), unit tier', () => {
     expect(await attempt(root, '../other')).toMatch(/^refused:/u);
   });
 });
+
+/**
+ * F-0033: the daemon's identity key (`state/kernel/identity.json`, the file the kernel writes) is pinned BY IDENTITY.
+ * Inside the home it is fenced by name; the pin matters where a name cannot help — a hard link to it placed in a work
+ * folder under an innocent name. Every door that could reach that name must refuse it as `fenced` (not merely as a
+ * hard link, which is a different and weaker rule), and the key's bytes must be what they were.
+ */
+describe('F-0033 the daemon identity key is held by identity, whatever door reaches it', () => {
+  const KEY = 'state/kernel/identity.json';
+  const KEY_BYTES = 'identity-key-fixture';
+
+  async function planted() {
+    const fixture = await layout();
+    await mkdir(`${fixture.home}/state/kernel`, { recursive: true });
+    await writeFile(`${fixture.home}/${KEY}`, KEY_BYTES);
+    await link(`${fixture.home}/${KEY}`, `${fixture.work}/innocent.txt`);
+    return fixture;
+  }
+
+  const refusal = async (run: () => Promise<unknown>): Promise<string> => {
+    try {
+      await run();
+      return 'allowed';
+    } catch (error) {
+      return error instanceof RootError ? `refused:${error.refusal}` : `error:${String(error)}`;
+    }
+  };
+
+  test('F-0033 the fence holds the key file by device and inode', async () => {
+    const { home } = await planted();
+    const fence = await fenceOf(fs, home);
+    const identity = await fs.identity(`${home}/${KEY}`);
+    expect(fence.identities.some(held => held.device === identity?.device && held.inode === identity.inode)).toBe(true);
+  });
+
+  test('F-0033 a name that is the key by identity is fenced in the real-path verdict', async () => {
+    const { home, work } = await planted();
+    expect(await fencedReal(fs, await fenceOf(fs, home), `${work}/innocent.txt`)).toBe(true);
+  });
+
+  for (const name of ['work', 'imports'] as const) {
+    test(`F-0033 the ${name} root refuses to read the key under another name: every read door says fenced`, async () => {
+      const { home, work, parent } = await planted();
+      const root =
+        name === 'work'
+          ? rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work })
+          : rootOf(home, 'imports', { subfolder: work });
+      const path = root.resolve('innocent.txt');
+      if (!path.ok) throw new Error('resolve');
+      expect(await refusal(() => root.readText(path.value))).toBe('refused:fenced');
+      expect(await refusal(() => root.readBytes(path.value))).toBe('refused:fenced');
+      expect(await refusal(() => root.readTail(path.value, 64))).toBe('refused:fenced');
+      expect(await refusal(() => root.readDurable(path.value))).toBe('refused:fenced');
+      expect(await readFile(`${home}/${KEY}`, 'utf8')).toBe(KEY_BYTES);
+      expect(await readdir(parent)).toContain('home');
+    });
+  }
+
+  test('F-0033 the work root refuses to write or remove the key under another name, and the key is unchanged', async () => {
+    const { home, work } = await planted();
+    const root = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work });
+    const path = root.resolve('innocent.txt');
+    if (!path.ok) throw new Error('resolve');
+    expect(await refusal(() => root.writeText(path.value, 'overwritten'))).toBe('refused:fenced');
+    expect(await refusal(() => root.writeBytes(path.value, new Uint8Array([1, 2, 3])))).toBe('refused:fenced');
+    expect(await refusal(() => root.remove(path.value))).toBe('refused:fenced');
+    expect(await readFile(`${home}/${KEY}`, 'utf8')).toBe(KEY_BYTES);
+    expect(await readFile(`${work}/innocent.txt`, 'utf8')).toBe(KEY_BYTES);
+  });
+
+  test('F-0033 a copy of the work folder does not carry the key out under another name', async () => {
+    const { home, work } = await planted();
+    const root = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work });
+    const from = root.resolve('.');
+    const to = root.resolve('copied');
+    if (!from.ok || !to.ok) throw new Error('resolve');
+    await root.copyTree(root, from.value, to.value).catch(() => undefined);
+    expect(await readdir(`${work}/copied`).catch(() => [])).not.toContain('innocent.txt');
+  });
+
+  test('F-0033 the key is also held when it is a link TARGET placed by name: a symlink to it from the work folder is refused (as an escape)', async () => {
+    const { home, work } = await planted();
+    await symlink(`${home}/${KEY}`, `${work}/via-link`);
+    const root = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work });
+    expect(await attempt(root, 'via-link')).toMatch(/^refused:/u);
+  });
+});
