@@ -154,6 +154,55 @@ describe('R2 a 20-deep diamond of profile bases answers at once through every pu
     should(took).be.below(DEADLINE_MS);
   });
 
+  // A draft that EDITS a profile so that the layer graph reaches back to it (a loop cut below every path) was exponential
+  // in the scope fold: 3.1 s at 42 files, x4 every two levels. These run synchronously, so a regression shows as a wall
+  // time over the deadline (or, with a deeper lattice, a hang bun's per-test timeout cannot cut) — keep DEPTH at 20.
+  it('R2 should preview a draft that makes the lattice’s bottom name its top (a loop) inside the deadline', async () => {
+    // Arrange
+    const service = world();
+
+    // Act
+    const { took, value } = await timed(
+      async () => await service.previewProfile({ layers: ['profile/a0'], editing: 'b20' }),
+    );
+
+    // Assert — b20 is the bottom of the lattice, so a0 reaches it: the loop is named, and nothing walks every path.
+    should(value.refusal).match(/would include itself/);
+    should(took).be.below(DEADLINE_MS);
+  });
+
+  it('R2 should preview a draft that makes a middle profile name the top, with a base below it, inside the deadline', async () => {
+    // Arrange
+    const service = world();
+
+    // Act
+    const { took, value } = await timed(
+      async () => await service.previewProfile({ layers: ['profile/a0', 'profile/b11', 'mcp/b3'], editing: 'a10' }),
+    );
+
+    // Assert
+    should(value.refusal).match(/would include itself/);
+    should(took).be.below(DEADLINE_MS);
+  });
+
+  it('R2 should refuse a proposed profile that makes the lattice’s bottom name its top inside the deadline', async () => {
+    // Arrange
+    const service = world();
+
+    // Act
+    const { took, value } = await timed(
+      async () =>
+        await service.propose({ kind: 'profile.put', name: 'b20', layers: ['profile/a0'], create: false }).then(
+          () => 'proposed',
+          (error: unknown) => (error as Error).message,
+        ),
+    );
+
+    // Assert
+    should(value).match(/would include itself/);
+    should(took).be.below(DEADLINE_MS);
+  });
+
   it('R2 should propose a change, which resolves every runtime’s profile as an apply does, inside the deadline', async () => {
     // Arrange
     const service = world();

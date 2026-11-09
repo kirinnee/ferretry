@@ -28,6 +28,13 @@ const itemsDef = defineConfig({
   axis: 'configure',
   loosens: () => [],
 });
+/** A file whose edit that RAISES the limit loosens, so a plugin's own write of one is held for the owner. */
+const capDef = defineConfig({
+  file: 'cap.yaml',
+  schema: z.strictObject({ limit: z.number().int().default(10) }),
+  axis: 'configure',
+  loosens: (before, after) => (after.limit > (before?.limit ?? 10) ? ['raises the limit'] : []),
+});
 const strangerDef = defineConfig({
   file: 'stranger.yaml',
   schema: z.strictObject({}),
@@ -42,7 +49,7 @@ const own = definePlugin({
   api: 5,
   core: false,
   kinds: [],
-  data: { config: [limitsDef, itemsDef] },
+  data: { config: [limitsDef, itemsDef, capDef] },
 });
 const other = definePlugin({
   id: 'stranger',
@@ -88,6 +95,7 @@ async function real(): Promise<Side & { readonly fs: MemoryHostFs }> {
     defs: [
       { plugin: 'runtimes', def: limitsDef },
       { plugin: 'runtimes', def: itemsDef },
+      { plugin: 'runtimes', def: capDef },
       { plugin: 'stranger', def: strangerDef },
     ],
   });
@@ -135,6 +143,24 @@ describe.each([
     await side.stop();
   });
 
+  test('a held edit is on the disk: the etag moves to the held edit’s, and a write pinned to the old one is a conflict', async () => {
+    const side = await make();
+    await side.config.write(capDef, undefined, { patch: { limit: 3 } });
+    const inEffect = await side.config.etag(capDef);
+
+    const held = await side.config.write(capDef, undefined, { patch: { limit: 50 } });
+    const afterHeld = await side.config.etag(capDef);
+    const stale = await side.config.write(capDef, undefined, { patch: { limit: 4 } }, { ifMatch: inEffect });
+    const pinned = await side.config.write(capDef, undefined, { patch: { limit: 51 } }, { ifMatch: afterHeld });
+
+    expect(held.kind).toBe('held');
+    expect(afterHeld).not.toBe(inEffect);
+    expect(afterHeld).toBe((held as { etag: string }).etag);
+    expect(stale.kind).toBe('conflict');
+    expect(pinned.kind).toBe('held');
+    await side.stop();
+  });
+
   test('the absent etag is accepted as ifMatch for a file that is not there yet', async () => {
     const side = await make();
     const written = await side.config.write(itemsDef, 'beta', { patch: { budget: 1 } }, { ifMatch: 'absent' });
@@ -170,6 +196,34 @@ describe('ConfigPort.etag — the real config service only', () => {
     expect(after).not.toBe(before);
     // sha256 of the TEXT, as every write reckons it
     expect(after).toBe(new Bun.CryptoHasher('sha256').update('limit: 8\n').digest('hex'));
+  });
+
+  test('the etag is over the decoded text the writer compares: a BOM is not part of it, a CRLF is', async () => {
+    const side = await real();
+    const sha = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex');
+
+    side.disk?.edit('limits.yaml', '﻿limit: 8\r\n');
+    const answer = await side.config.etag(limitsDef);
+
+    expect(answer).toBe(sha('limit: 8\r\n'));
+    expect(answer).not.toBe(sha('﻿limit: 8\r\n'));
+    expect(answer).not.toBe(sha('limit: 8\n'));
+  });
+
+  test('an unchanged file keeps its etag while another file moves, and a file that moved is seen at once', async () => {
+    const side = await real();
+    await side.config.write(limitsDef, undefined, { patch: { limit: 3 } });
+    const first = await side.config.etag(limitsDef);
+    // Another file moves behind the service's back: asking about THIS one must not need to read the other.
+    side.disk?.edit('items/alpha.yaml', 'budget: 1\n');
+
+    const again = await side.config.etag(limitsDef);
+    side.disk?.edit('limits.yaml', 'limit: 9\n');
+    const moved = await side.config.etag(limitsDef);
+
+    expect(again).toBe(first);
+    expect(moved).not.toBe(first);
+    expect(moved).toBe(new Bun.CryptoHasher('sha256').update('limit: 9\n').digest('hex'));
   });
 
   test('it hands back the etag and nothing of the file: no text, value or planted secret', async () => {

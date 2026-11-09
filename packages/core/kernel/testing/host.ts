@@ -781,6 +781,21 @@ async function start(world: World): Promise<TestHost> {
     const declared = manifest.data?.config ?? [];
     const keyOf = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): string =>
       def.shape === 'file' ? def.file : def.collection;
+    /**
+     * The etag of one file as the DISK has it, which is what `etag` answers and `ifMatch` is compared with (the real
+     * service reads both from the disk, "not from the version in effect"): the world's value, except that an edit held
+     * for the owner is on the disk while the tighter value stays in effect, so a held file answers the held edit's etag.
+     * A held REMOVAL leaves the file where it is, so it keeps the value's.
+     */
+    const diskEtagOf = (
+      def: ConfigFileDef<any> | ConfigCollectionDef<any>,
+      name: string | undefined,
+      inEffect: unknown,
+    ): string => {
+      const path = def.shape === 'file' ? def.file : `${def.collection}/${name as string}.yaml`;
+      const stamp = configStamps.get(keyOf(def))?.get(path)?.stamp;
+      return stamp?.state === 'held' && stamp.etag !== ABSENT_STAMP.etag ? stamp.etag : etagOfValue(inEffect);
+    };
     const assertDeclared = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): void => {
       if (!declared.includes(def)) throw new Error(`${manifest.id}: config ${keyOf(def)} is not declared`);
     };
@@ -811,7 +826,7 @@ async function start(world: World): Promise<TestHost> {
           issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })),
         };
       const etag = JSON.stringify(next);
-      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== etagOfValue(before))
+      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== diskEtagOf(def, name, before))
         return { kind: 'conflict' };
       const prior = before === undefined ? undefined : def.schema.safeParse(before);
       const priorValue = prior?.success === true ? prior.data : undefined;
@@ -883,7 +898,7 @@ async function start(world: World): Promise<TestHost> {
           throw new Error(`${manifest.id} has no config file of that name`);
         const all = world.config.get(keyOf(def));
         const value = def.shape === 'file' ? all : (all as Record<string, unknown> | undefined)?.[name as string];
-        return etagOfValue(value);
+        return diskEtagOf(def, name, value);
       },
       async write(def, name, edit, writeOptions = {}) {
         return await write(def, name, edit, writeOptions);
@@ -907,7 +922,7 @@ async function start(world: World): Promise<TestHost> {
           return { kind: 'refused', reason: 'bad_name', issues: [] };
         const all = world.config.get(key) as Record<string, unknown> | undefined;
         const before = def.shape === 'file' ? all : all?.[name as string];
-        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== etagOfValue(before))
+        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== diskEtagOf(def, name, before))
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
         const defaults = def.schema.safeParse({});
@@ -956,7 +971,7 @@ async function start(world: World): Promise<TestHost> {
           const ref = refs[index] as ConfigDocumentRef;
           const all = world.config.get(keyOf(def)) as Record<string, unknown> | undefined;
           const before = def.shape === 'file' ? all : all?.[name as string];
-          if (document.ifMatch !== undefined && document.ifMatch !== etagOfValue(before))
+          if (document.ifMatch !== undefined && document.ifMatch !== diskEtagOf(def, name, before))
             return { kind: 'conflict', ...ref };
           const prior = before === undefined ? undefined : def.schema.safeParse(before);
           const priorValue = prior?.success === true ? prior.data : undefined;

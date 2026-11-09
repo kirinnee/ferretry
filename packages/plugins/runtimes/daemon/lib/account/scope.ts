@@ -84,15 +84,19 @@ export const scopeFits = (scope: HarnessScope, harness: HarnessKind): boolean =>
   scope === 'generic' || scope === harness;
 
 /**
- * What one walk has learned. A base profile's derived scope does not depend on which way it was reached UNLESS a loop
- * was cut somewhere below it (`visiting` is what cuts it), so a base is remembered only when its whole subtree met no
- * cut: a lattice of shared bases then costs one fold per profile, not one per path, and a loop is read exactly as before.
+ * What one walk has learned: every base's derived scope, remembered the first time it is folded, so a lattice of
+ * shared bases costs one fold per profile, not one per path.
+ *
+ * It is remembered EVEN WHEN a loop was cut below it (`visiting` cuts a base that is already on the chain), and that is
+ * equivalent to folding every path: a scope is a union of the harnesses reachable (order never matters), a base's FIRST
+ * fold visits everything below it that no chain node cuts, and a later read of its remembered value can only repeat
+ * what that first fold already gave to an earlier layer (or to a layer enclosing this one), so the walk's answer —
+ * which harnesses its own layers have, and the FIRST layer of each — is the one the per-path fold gives. In effect the
+ * memo is a visited set. Remembering only loop-free subtrees (the earlier rule) was the exponential: a draft that edits
+ * a base to reach back to itself cuts under every path, so nothing was remembered. The seeded random graphs and drafts
+ * in `account-scope-memo.test.ts` hold this against the per-path fold.
  */
-interface Walk {
-  readonly remembered: Map<string, HarnessScope | 'mixed'>;
-  /** How many times a loop was cut so far. */
-  cuts: number;
-}
+type Walk = Map<string, HarnessScope | 'mixed'>;
 
 /** A layer's scope: a component's own, or a base profile's derived one (`mixed` when it is). */
 function layerScope(
@@ -109,16 +113,12 @@ function layerScope(
   }
   const base = catalogue.profiles[parsed.name];
   if (base === undefined) return 'generic';
-  if (visiting.has(parsed.name)) {
-    walk.cuts++;
-    return 'generic';
-  }
-  const known = walk.remembered.get(parsed.name);
+  if (visiting.has(parsed.name)) return 'generic';
+  const known = walk.get(parsed.name);
   if (known !== undefined) return known;
-  const cutsBefore = walk.cuts;
   const scope = foldLayers(catalogue, base.layers, new Set([...visiting, parsed.name]), walk);
   const derived = scope.kind === 'mixed' ? 'mixed' : scope.scope;
-  if (walk.cuts === cutsBefore) walk.remembered.set(parsed.name, derived);
+  walk.set(parsed.name, derived);
   return derived;
 }
 
@@ -126,7 +126,7 @@ function foldLayers(
   catalogue: Catalogue,
   layers: readonly string[],
   visiting: ReadonlySet<string>,
-  walk: Walk = { remembered: new Map(), cuts: 0 },
+  walk: Walk = new Map(),
 ): ProfileScope {
   let claude: LayerReferenceText | undefined;
   let codex: LayerReferenceText | undefined;
