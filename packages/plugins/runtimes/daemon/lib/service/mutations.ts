@@ -320,6 +320,8 @@ function componentBody(
     case 'instructions': {
       // Runtimes' own kind: the text is kept in the item itself, so an edit writes no document beside it.
       const text = given ?? (typeof existing?.text === 'string' ? existing.text : undefined);
+      // An item imported from a document keeps pointing at it when only its fields change.
+      if (text === undefined && keptFile !== undefined) return { component: { file: keptFile, ...harness } };
       if (text === undefined) refuse(`${owner} needs its text`);
       return { component: { text, ...harness } };
     }
