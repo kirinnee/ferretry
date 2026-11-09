@@ -231,15 +231,24 @@ describe.skipIf(!onLinux)('RootHandle.remove with onlyIfEmpty is rmdir', () => {
   test('the empty-check and the removal are ONE rmdir: nothing is listed, and an entry that lands first is kept', async () => {
     const calls: string[] = [];
     let late: string | undefined;
+    // The folder being removed, by identity: the remove reaches it through a descriptor path
+    // (`/proc/self/fd/N/empty`), whatever its spelling, so a call is also counted when its path IS that folder.
+    let folderKey: string | undefined;
     const base = withReach();
+    const isFolder = async (path: string): Promise<boolean> => {
+      const found = folderKey === undefined ? undefined : await base.identity(path);
+      return found !== undefined && `${found.device}:${found.inode}` === folderKey;
+    };
     const spy: HostFs = {
       ...base,
       list: async path => {
         calls.push(`list ${path}`);
+        if (await isFolder(path)) calls.push(`list the folder ${path}`);
         return await base.list(path);
       },
       remove: async path => {
         calls.push(`remove ${path}`);
+        if (await isFolder(path)) calls.push(`remove the folder ${path}`);
         await base.remove(path);
       },
       rmdir: async path => {
@@ -251,6 +260,8 @@ describe.skipIf(!onLinux)('RootHandle.remove with onlyIfEmpty is rmdir', () => {
     };
     const f = await fresh(spy);
     await mkdir(`${f.dir}/empty`);
+    const emptied = await base.identity(`${f.dir}/empty`);
+    folderKey = `${emptied?.device}:${emptied?.inode}`;
     late = `${f.dir}/empty/late.txt`;
     calls.length = 0;
     const refusal = await refusalOf(() => f.fleet.remove(at(f.fleet, 'homes/claude-a/empty'), { onlyIfEmpty: true }));
@@ -258,8 +269,10 @@ describe.skipIf(!onLinux)('RootHandle.remove with onlyIfEmpty is rmdir', () => {
     expect(await readFile(`${f.dir}/empty/late.txt`, 'utf8')).toBe('LATE');
     // What the claim is about is the FOLDER being removed: it is never listed and never emptied entry by entry. The
     // private-places index (§7.7) legitimately lists the home's own `state` folder (a fresh test home's is racy, so it
-    // is read again), which is not this folder, so only calls that name the removed folder count.
-    const named = (call: string): boolean => call.endsWith(`${f.dir}/empty`) || call.includes(`${f.dir}/empty/`);
+    // is read again), which is not this folder, so only calls that reach the removed folder count: by name (as the root
+    // spells it, or through a descriptor: any path ending in or running through `/empty`) or by identity.
+    const named = (call: string): boolean =>
+      call.endsWith('/empty') || call.includes('/empty/') || call.includes('the folder');
     expect(calls.filter(call => (call.startsWith('list') || call.startsWith('remove')) && named(call))).toEqual([]);
     expect(calls.filter(call => call === 'rmdir')).toEqual(['rmdir']);
   });

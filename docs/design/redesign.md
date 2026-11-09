@@ -2672,8 +2672,8 @@ scoped handle:
 - **Private files (`privacy`).** A plugin declares the files of its own `state/<id>/` a ferret must never reach —
   `privacy.private`, paths relative to that folder (a folder pins the folder and what it holds, to three levels — a
   login's `credentials/<id>/auth.json`, a browser profile's `data/<profile>/Default/Cookies`; a `credentials/*`
-  collection pins `credentials`; `sessions/*/environment.json` pins that one file in each member of `sessions`, Ferrets'
-  per-ferret plaintext `fys_` credential). The kernel COMPOSES every manifest's list into the one list its fence
+  collection pins `credentials`; `sessions/*/environment.json` pins that one file, and the member folder that holds it,
+  in each member of `sessions`, Ferrets' per-ferret plaintext `fys_` credential). The kernel COMPOSES every manifest's list into the one list its fence
   reads (no kernel → plugin import) and pins each place by **identity** (device and inode), beside the home's key
   paths and every other plugin's internal root folders, for EVERY root: an owner's, an internal one (`agent-homes`,
   `fleet`, `sessions`, `credentials`, `downloads`), a harness file, a pinned read, a shared tree and a copy's source.
@@ -2691,11 +2691,20 @@ scoped handle:
   is built once; a session folder (a member of a `*` collection) whose last change is older than a minute is
   **resting**, and a look does not touch it — resting folders are looked at in rotating slices of 512, so one look
   costs the folders that changed lately plus one slice, never every folder (measured at 2,000, 5,000 and 20,000
-  sessions with one writer, paired with 5.0: the median mean read is 1.5x, 1.7x and 1.55x of 5.0's — the guard's walk
-  of each path, not the sessions — with 21 filesystem calls a read at every size and a slowest read of about 6, 6 and 8
-  ms; a hostile writer that adds a session folder every 5 ms costs one 40–70 ms look at 20,000 sessions, once per
-  look; the very first fenced read after boot builds the index and waits for it: 0.14 s at 2,000, 0.4 s at 5,000, 1.8 s
-  at 20,000). The price is declared as GAP (7). The host looks at most every
+  sessions with one writer, paired with 5.0, one fresh process per read run: the median mean read is 1.25x, 1.11x and
+  1.58x of 5.0's on a loaded host, and the independent reviewer measured 1.23x, 1.34x and 1.71x — the guard's walk of
+  each path, not the sessions — with about 35 filesystem calls a read at every size. **A hostile writer that adds a
+  session folder every 5 ms is not flat:** at 20,000 sessions the mean read is about 4.5x of 5.0's (4.49x measured by
+  the reviewer on a quiet host, 4.9x re-measured and 7.5x by the next reviewer on a loaded one: more under load) and one look in each 250 ms takes 115–165 ms, because a changed
+  `sessions` folder is walked whole in memory (about 2 µs a member); p95 stays at a few ms. The actor is a same-user
+  shell, which can already stop the daemon, and nothing ordinary does it. The very first fenced read after boot builds
+  the index and waits for it: 0.2 s at 2,000, 0.5 s at 5,000, 2 s at 20,000). A resting folder's replaced FILE is
+  recognised when its slice comes round, but a rotated credential reached through an alias of its session FOLDER is
+  fenced at once: EVERY member folder of the collection is pinned by its own identity, whether it holds the file now
+  or not (a session that ended, its file removed, and was resumed is such a folder), one more place per member folder
+  and no budget spent (a member folder with no file costs nothing against the budget, and its pin leaves with it).
+  What stays stale until the slice is what that pin cannot name: a member folder REPLACED by another while it rests
+  (GAP (8)), and a privileged bind mount of the single file made AFTER the rotation (the class of (6)). The host looks at most every
   250 ms (a private file created or replaced is pinned within that, which is also the longest it can be reached under
   a second name; an interval that is not a finite number from 0 to 5 s — `Infinity`, `NaN`, a negative — is the 250 ms
   default, never "never"). A change is told by the folder's modification AND status-change times **to the
@@ -2727,8 +2736,8 @@ scoped handle:
   budget then counts live sessions, not history); until then, deleting an ended session's `environment.json` by hand
   lifts it. **It is never silent:** every change of what is past its budget is announced once — one `warn` log line
   naming the place (home-relative) with how many places were indexed against the limit, and one failing line in
-  `GET /v1/doctor` / `fyd --check` naming the place, the blast radius and the remedy until it fits again (one more log
-  line when it does).
+  the booted host's doctor report (`host.doctor()` and `GET /v1/doctor`; `fyd --check` runs without the host and does
+  not show it) naming the place, the blast radius and the remedy until it fits again (one more log line when it does).
   A check that cannot look at a place, or cannot LIST a private folder, **refuses**, never reads it as empty or
   allows. **Fail closed:**
   a state file whose name says key, secret, token, passkey, password, credential, oauth, auth or cookie
@@ -2750,15 +2759,16 @@ scoped handle:
   after the replace — the index holds the new inode, and the old one is no longer in it — so it reads the old
   credential until it is removed (a hard link needs the same user, who can read the file directly anyway; a bind
   mount needs privilege); the same-millisecond and 4096-place misses of earlier rounds are closed, this one is not;
-  (7) every ferret relaunch rotates its credential; it bites only with a PRIVILEGED bind of one RESTING session folder
-  (unchanged for a minute), whose rotated live `fys_` credential can then be read through the alias until that folder
-  comes round in the slice window (about 270 reads over 7 s at 20,000 sessions), closed by a follow-up unit that pins
-  each star-member folder by identity. A RESTING folder is looked at only when its slice comes round — at 512 folders a look and 250 ms a look, 5,000
-  sessions are all looked at in 2.5 s and 20,000 in 10 s, and it grows with the count (65,000: 32 s); a NEW session,
-  and any folder that changed within the minute, is looked at by the next look; an alias of the replaced file needs the
-  same user or privilege, as (6); (8) a filesystem whose clock steps by more than two seconds can still miss a member
-  that lands after the look in the same step (the window is 20 ms, two seconds where the times carry no fraction of a
-  second); (9) a tree is closed on the devices its INDEXED places answer with (plus the first member past its budget
+  (7) a filesystem whose clock steps by more than two seconds can still miss a member that lands after the look in the
+  same step (the window is 20 ms, two seconds where the times carry no fraction of a second); (8) a RESTING member
+  folder that is REPLACED by another (renamed aside and made again under its name, or any new inode) is pinned, and its
+  file indexed, only when its slice comes round — at 512 folders a look and 250 ms a look, 5,000 sessions are all looked
+  at in 2.5 s and 20,000 in 10 s, 65,000 in 32 s, and under steady churn up to about twice that — so an alias of the NEW
+  folder made after the replace (a privileged bind mount, or a path-following alias) reads what it holds for that long;
+  an alias made BEFORE the replace follows the old inode, which is the class of (6). What is closed: an alias of any
+  member folder the index holds (one that holds the file, one that rests empty, one whose session ended and was
+  resumed), made at any time before or after the rotation or the resume, is fenced at once, because the folder's own pin
+  does not wait for its slice; (9) a tree is closed on the devices its INDEXED places answer with (a pinned member folder's own device included; plus the first member past its budget
   that a `*` collection looks at), so an alias of an UNINDEXED member that sits on a device no indexed place of that tree
   answers with is allowed: an overlay's lower layer against its upper one (members written at run time sit on the
   upper, a baked one on the lower), a member folder past the budget that is a mountpoint or a btrfs subvolume, or a
