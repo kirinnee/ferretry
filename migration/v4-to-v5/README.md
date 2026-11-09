@@ -154,9 +154,24 @@ Settings (`src/steps/settings.ts`) turns each v4 `config/*.yaml` into the v5 plu
 `warden.yaml` (`autoMigrate` → `autoMove`, with v4's read-time upgrades applied), `limits.yaml`, `accounts.yaml`, and
 `machine.yaml` split key by key over eight owners. Comments survive (each file is edited as a `yaml` Document) and every
 file is checked by its v5 schema before anything is written. v4 `claude` is v5 `claude-code` in every `harness:` field.
-A runtime alias in `fleet/ids.json` `formerNames` is rewritten to the current name (M7). Settings and hooks components,
-an instructions document outside `fleet/assets/`, `voice.yaml`, `pack.yaml` and `models-guide.yaml` wait for v5 schemas
-(the step reports `pending`). The full per-key table is `docs/migration/v4-formats.md` §5a.
+A runtime alias in `fleet/ids.json` `formerNames` is rewritten to the current name (M7). `voice.yaml` is carried like
+any singleton (a cloud provider v4 never confirmed stays held). `pack.yaml` and `models-guide.yaml` still wait for v5
+schemas (the step reports `pending`).
+
+Settings and hooks components are inlined. A `file:` resolves the way v4 resolved it: relative to `fleet/assets/`, then
+beside the component YAML under `config/components/<kind>/`; `~/`, `$HOME/` and absolute paths count only when they point
+inside the home being converted. Every folder from the home root down is `lstat`ed (no links), the file must be a regular
+file, and at most 1 MiB is read. Flags: Claude `--disallowedTools` becomes `settings.permissions.deny` (merged,
+deduplicated) and Codex `-c key=value` becomes a key of the item's `settings` (secret values refused); an env value that
+is a string, number or boolean is carried as a string. Anything else a v5 settings item has no form for (any other flag,
+a file outside the home, a hooks `directory`, a secret-shaped or `${secret:...}` value, an oversize file, an unknown
+harness) makes the component NOT CARRIED. The report names the component, each flag by name only, and every profile that
+layers it, and says it may have restricted what the agent could do. **By default the step is then `pending` and no
+`home.json` is written**; the remedy is to fix it in v4 or to re-run with `--drop-uncarried`, which strips that layer from
+every profile that names it and says plainly the ferrets may now be LESS restricted than in v4. `--drop-uncarried` is the
+owner's choice and never a default; an agent never passes it without the owner's yes. (GAP: v5 settings items hold no
+launch flags; the Runtimes model has a `flags` field no provider fills.) The full per-key table is
+`docs/migration/v4-formats.md` §5a.
 
 Daemon settings (`src/steps/daemon-settings.ts`) splits `config/daemon.json` by owner: `grants` → `gate.yaml` with all eight
 capabilities and both axes written explicitly at v4's effective value (`configure` only where `use` is on), plus

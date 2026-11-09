@@ -93,7 +93,7 @@ const STEPS = [settingsStep, vaultStep, loginKeysStep, acceptedConfigStep];
 test('MAJOR-1 the enforced pass writes no copy of a v4 file: a plain key in a held and an unheld login is found nowhere on disk', async () => {
   await put('config/logins/work.yaml', login(KEY, "  EXTRA_FLAG: 'on'\n")); // held: v4 enforced the older text
   await put('config/logins/home.yaml', login(HOME_KEY)); // unheld
-  await put('config/voice.yaml', 'x: 2\n'); // held, never accepted
+  await put('config/pack.yaml', 'x: 2\n'); // held, never accepted
   await accept({ 'logins/work.yaml': login(KEY), 'logins/home.yaml': login(HOME_KEY) });
   const before = new Set(await readdir(tmpdir()));
   const { result: report, root } = await withUnwritableTemp(() => run(STEPS));

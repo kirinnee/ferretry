@@ -493,6 +493,12 @@ export const conversationStep: Step = {
       const damage = (problem: string, where: string): void => {
         counts.damaged.push(`${problem}: ${where}`);
       };
+      /** The one throw an answer receipt may cause: it is evidence an answer was typed, never to be dropped quietly. */
+      const stopForEvidence = (problem: string, file: string): V4InputError =>
+        new V4InputError(
+          `${problem}. An answer receipt is evidence that an answer was already typed, so the conversion stops rather than drop one. Repair or remove that line in v4 (with v4 stopped), then run again. The file`,
+          file,
+        );
       /** A record read that fails as `V4InputError` (torn, not JSON, wrong shape) is damage, not a failed step. */
       const damagedAs = async <T>(where: string, read: () => Promise<T>): Promise<T | 'damaged'> => {
         try {
@@ -552,10 +558,24 @@ export const conversationStep: Step = {
         v5Schema: z.ZodType<V5>,
         to: string,
         check: (line: V5) => boolean = () => true,
+        evidence = false,
       ): Promise<{ v4: readonly V4[]; written: number; skipped: number }> => {
-        const read = await damagedAs(label(from), () => readJsonlLines(reader, from, v4Schema));
-        // A log that cannot be read at all is one damaged record: named, nothing carried from it.
-        const lines = read === 'damaged' ? [] : read;
+        const bad: number[] = [];
+        let lines: readonly { line: number; value: V4 }[];
+        if (evidence) {
+          // Idempotency evidence (the answer ledger): any damage except a torn last line stops the conversion. Missing
+          // evidence is never evidence of absence: with no receipt a v5 daemon could type the same answer into a live pane twice.
+          try {
+            lines = await readJsonlLines(reader, from, v4Schema);
+          } catch (error) {
+            if (!(error instanceof V4InputError)) throw error;
+            throw stopForEvidence(error.message.split(': ')[0] ?? 'a v4 answer line is damaged', label(from));
+          }
+        } else {
+          // One bad line is skipped, counted and named by file and line number (never content); every other line is kept.
+          lines = await readJsonlLines(reader, from, v4Schema, bad);
+          for (const line of bad) damage(`v4 log line ${line} does not match its v4 schema`, label(from));
+        }
         const out: V5[] = [];
         let skipped = 0;
         for (const { line, value } of lines) {
@@ -566,10 +586,12 @@ export const conversationStep: Step = {
           }
           const parsed = v5Schema.safeParse(mapped);
           if (!parsed.success || !check(parsed.data)) {
+            if (evidence) throw stopForEvidence(`v4 log line ${line} has no v5 form`, label(from));
             damage(`v4 log line ${line} has no v5 form`, label(from));
             continue;
           }
           if (Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > V5_MAX_JSONL_LINE_BYTES) {
+            if (evidence) throw stopForEvidence(`v4 log line ${line} is longer than a v5 line may be`, label(from));
             damage(`v4 log line ${line} is longer than a v5 line may be`, label(from));
             continue;
           }
@@ -685,6 +707,8 @@ export const conversationStep: Step = {
           receipt => ({ format: 1, ...receipt }),
           V5AnswerLineSchema,
           v5AnswersFile(config.id),
+          () => true,
+          true,
         );
         counts.answerLines += answers.written;
         counts.answers += latestV4Answers(answers.v4).length;

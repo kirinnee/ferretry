@@ -13,6 +13,11 @@ set -euo pipefail
 #             the forced limits.yaml), EXCEPT any that comes from a v4 file with an unconfirmed edit: each stays held
 #             (the printed note and the report name every one, with the reason). Confirm the edit in v4,
 #             then `clean` and `prepare --owner`. Without --owner they are all held and `start` stops the daemon.
+#             --drop-uncarried (OWNER'S CHOICE, never the default; an agent never passes it without the owner's yes): a
+#             settings or hooks component the converter cannot carry (an unsupported flag, a file outside the v4 home, a
+#             hooks folder, a secret-shaped value...) leaves the Settings step PENDING by default, because a profile still
+#             layers it. With this flag its layer is removed from every profile that names it (each profile is named in the
+#             report) so the preview can start, and the ferrets on those profiles may be LESS restricted than in v4.
 #   build     compile fy, fyd and the browser worker from a CLEAN rebuild/5.0 checkout with the preview app origin, prove
 #             the compiled binaries name that origin, and only then install them into <target>/libexec (bin holds shims
 #             that pin the preview). Refuses unless the preview signing key is committed on that checkout
@@ -47,6 +52,7 @@ v4_home="${HOME}/.ferretry"
 target="${HOME}/.ferretry-v5"
 source_dir=""
 owner_flag=()
+drop_flag=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
   --v4)
@@ -65,6 +71,10 @@ while [ "$#" -gt 0 ]; do
     owner_flag=(--owner)
     shift
     ;;
+  --drop-uncarried)
+    drop_flag=(--drop-uncarried)
+    shift
+    ;;
   *)
     echo "unknown argument: $1" >&2
     exit 64
@@ -75,8 +85,8 @@ done
 # The converter's own dependencies (yaml, zod) are installed inside migration/v4-to-v5, not by the repo's install.
 # dry-run and prepare need them: a missing node_modules is installed here (one line says so); a failure names the command.
 if [ "${command}" = "dry-run" ] || [ "${command}" = "prepare" ]; then
-  if [ ! -d "${tool_dir}/node_modules" ]; then
-    echo "installing the converter's dependencies (migration/v4-to-v5/node_modules is missing)"
+  if [ ! -d "${tool_dir}/node_modules/yaml" ]; then
+    echo "installing the converter's dependencies (migration/v4-to-v5/node_modules is missing or has no yaml)"
     if ! (cd "${tool_dir}" && bun install --frozen-lockfile >/dev/null); then
       echo "could not install the converter's dependencies; run: cd '${tool_dir}' && bun install --frozen-lockfile" >&2
       exit 1
@@ -97,7 +107,7 @@ v4_home="$(printf '%s\n' "${resolved}" | sed -n 1p)"
 target="$(printf '%s\n' "${resolved}" | sed -n 2p)"
 
 case "${command}" in
-dry-run) run_tool dry-run ;;
+dry-run) run_tool dry-run ${drop_flag[@]+"${drop_flag[@]}"} ;;
 prepare)
   # Never opens a v4 file before the preview home is known to be new.
   if [ -e "${target}" ] && [ -n "$(ls -A "${target}" 2>/dev/null)" ]; then
@@ -105,7 +115,7 @@ prepare)
     echo "  rm -rf '${target}' '${target}.staging' '${target}.conversion-report.json'   (and, if it exists, its proof file in ~/.ferretry-v5-proof/)" >&2
     exit 1
   fi
-  run_tool prepare ${owner_flag[@]+"${owner_flag[@]}"}
+  run_tool prepare ${owner_flag[@]+"${owner_flag[@]}"} ${drop_flag[@]+"${drop_flag[@]}"}
   run_tool wrapper
   ;;
 build)

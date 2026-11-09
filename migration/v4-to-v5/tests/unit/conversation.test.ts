@@ -443,6 +443,84 @@ console.log(JSON.stringify({ text }));
     expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
   });
 
+  test('m6: one bad middle line in queue, sends, inbox and outbox is skipped and named; every other line is kept', async () => {
+    await f.session('f1');
+    const good = (message: string) => ({ at: AT, type: 'message', message });
+    await raw(
+      'state/sessions/f1/channel/inbox.jsonl',
+      jsonl([good('FAKE one'), { not: FAKE_VALUE }, good('FAKE three')]),
+    );
+    await raw(
+      'state/sessions/f1/channel/sends.jsonl',
+      jsonl([send('s1', 'accepted'), { sendId: FAKE_VALUE }, send('s2', 'accepted')]),
+    );
+    const report = await conversationStep.run(f.ctx());
+    expect(report.status).toBe('converted');
+    expect(report.kept).toContainEqual({ what: 'inbox lines', count: 2 });
+    expect(report.kept).toContainEqual({ what: 'send ledger lines', count: 2 });
+    expect(report.note).toContain('v4 log line 2 does not match its v4 schema: state/sessions/f1/channel/inbox.jsonl');
+    expect(report.note).toContain('v4 log line 2 does not match its v4 schema: state/sessions/f1/channel/sends.jsonl');
+    expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
+  });
+
+  test('M1: a damaged middle line of answers.jsonl stops the conversion, naming the file and the remedy', async () => {
+    await f.session('f1');
+    const receipt = (requestId: string) => ({
+      requestId,
+      toolUseId: 't1',
+      fingerprint: 'fp',
+      acceptedAt: AT,
+      outcome: 'accepted',
+      at: AT,
+    });
+    await raw('state/sessions/f1/channel/answers.jsonl', jsonl([receipt('r1'), { not: 'a receipt' }, receipt('r2')]));
+    const report = await conversationStep.run(f.ctx());
+    expect(report.status).toBe('failed');
+    expect(report.note).toContain('state/sessions/f1/channel/answers.jsonl');
+    expect(report.note).toContain('line 2');
+    expect(report.note).toContain('evidence that an answer was already typed');
+    expect(report.note).toContain('Repair or remove that line in v4');
+  });
+
+  test('M1: an answer receipt with no v5 form also stops the conversion', async () => {
+    await f.session('f1');
+    // Valid for v4, but longer than a v5 line may be, so it has no v5 form.
+    await raw(
+      'state/sessions/f1/channel/answers.jsonl',
+      jsonl([
+        {
+          requestId: 'r1',
+          toolUseId: 't1',
+          fingerprint: 'fp',
+          acceptedAt: AT,
+          outcome: 'failed',
+          reason: 'x'.repeat((1 << 20) + 10),
+          at: AT,
+        },
+      ]),
+    );
+    const report = await conversationStep.run(f.ctx());
+    expect(report.status).toBe('failed');
+    expect(report.note).toContain('v4 log line 1 is longer than a v5 line may be');
+    expect(report.note).toContain('state/sessions/f1/channel/answers.jsonl');
+  });
+
+  test('M1: a torn last answers.jsonl line (a crash during the v4 append) is still skipped', async () => {
+    await f.session('f1');
+    const line = JSON.stringify({
+      requestId: 'r1',
+      toolUseId: 't1',
+      fingerprint: 'fp',
+      acceptedAt: AT,
+      outcome: 'accepted',
+      at: AT,
+    });
+    await raw('state/sessions/f1/channel/answers.jsonl', `${line}\n{"requestId":"r2","tool`);
+    const report = await conversationStep.run(f.ctx());
+    expect(report.status).toBe('converted');
+    expect(report.kept).toContainEqual({ what: 'answer receipt lines', count: 1 });
+  });
+
   test('a live ferret’s open question is stored parsed, against its transcript in the new home', async () => {
     await claudeFerret('f1');
     await f.put(

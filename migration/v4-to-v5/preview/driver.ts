@@ -147,6 +147,12 @@ export interface PrepareInputs {
   readonly uid?: number | undefined;
   /** The owner ran `prepare --owner`: the preview's own two files are recorded as accepted. Never set by an agent. */
   readonly owner?: boolean;
+  /**
+   * The person running it chose `--drop-uncarried`: a profile layer that names a settings or hooks component the converter
+   * cannot carry is removed (the ferrets may be LESS restricted than in v4). Never the default; an agent never sets it
+   * without the owner's yes.
+   */
+  readonly dropUncarried?: boolean;
 }
 
 /**
@@ -209,7 +215,9 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
       preview: true,
       previewV4Home: v4Home,
       previewShellEnv: previewShellEnv(target, PREVIEW.port),
+      previewUserHome: home,
       ...(inputs.owner === true ? { previewOwner: true } : {}),
+      ...(inputs.dropUncarried === true ? { dropUncarried: true } : {}),
     });
   } finally {
     await rm(emptyHost, { recursive: true, force: true });

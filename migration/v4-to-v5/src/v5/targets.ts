@@ -23,6 +23,7 @@ import { MODEL_SET_ITEMS, PROFILE_ITEMS, RUNTIME_ITEMS, RUNTIMES_CONFIG } from '
 import { SKILLS_CONFIG } from '@ferretry/plugin-skills/contract';
 import { TerminalsConfigSchema } from '@ferretry/plugin-terminals/contract';
 import { USAGE_CONFIG } from '@ferretry/plugin-usage/contract';
+import { VOICE_CONFIG } from '@ferretry/plugin-voice/contract';
 import { WardenFileSchema } from '@ferretry/plugin-warden/contract';
 import { join } from 'node:path';
 import { configPath, type V5ConfigDef, type V5ConfigTarget } from './write.ts';
@@ -68,6 +69,7 @@ export const CONFIG_TARGETS = {
   SKILLS: owned('skills', SKILLS_CONFIG),
   TERMINALS: file('terminals', 'terminals.yaml', TerminalsConfigSchema),
   USAGE: owned('usage', USAGE_CONFIG),
+  VOICE: owned('voice', VOICE_CONFIG),
   WARDEN: file('warden', 'warden.yaml', WardenFileSchema),
 } as const satisfies Record<string, V5ConfigTarget>;
 

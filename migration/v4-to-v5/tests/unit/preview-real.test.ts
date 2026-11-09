@@ -1,12 +1,21 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { parse } from 'yaml';
+import { sampleLogin } from '../../../../packages/plugins/logins/contract/testing/index.ts';
 import { convert } from '../../src/convert.ts';
 import { conversationStep } from '../../src/steps/conversation.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
+import { CONFIG_TARGETS } from '../../src/v5/targets.ts';
+import { configPath } from '../../src/v5/write.ts';
+import {
+  assembleRuntimesModel,
+  NO_COMPONENTS,
+  type RuntimesFiles,
+} from '../../../../packages/plugins/runtimes/daemon/lib/account/runtimes-model.ts';
 import { fixture } from './ferret-fixture.ts';
 
 /**
@@ -45,7 +54,75 @@ const attachment = (bytes: Buffer) => {
   return { id, manifest: { id, filename: 'a.png', mime: 'image/png', size: bytes.length, sha256, createdAt: AT } };
 };
 
-/** A copy-shaped home: one good attachment, one manifest with no original, and the three component forms plus voice. */
+const run = async (extra: { dropUncarried?: boolean } = {}) =>
+  convert({
+    from: f.from,
+    to: f.to,
+    dryRun: false,
+    lock: { held: async () => false },
+    now: () => new Date('2026-11-09T00:00:00Z'),
+    host: { homeDirectory: f.root, env: {} },
+    steps: [conversationStep, settingsStep],
+    ...extra,
+  });
+
+const done = async (extra: { dropUncarried?: boolean } = {}) => {
+  const result = await run(extra);
+  if (result.kind !== 'done') throw new Error('expected a run');
+  return result.report;
+};
+
+const settingsOf = (report: Awaited<ReturnType<typeof done>>) => {
+  const step = report.steps.find(item => item.id === 'settings');
+  if (step === undefined) throw new Error('no settings step');
+  return step;
+};
+const namedIn = (step: ReturnType<typeof settingsOf>) =>
+  step.notCarried.map(item => `${item.what} :: ${item.why}`).join('\n');
+
+const readV5 = async (path: string) => readFile(join(f.to, path), 'utf8');
+
+/** The model Runtimes assembles from the converted home's profiles and settings/hooks items: no layer may dangle. */
+const profileNames = async (): Promise<string[]> =>
+  (await readdir(join(f.to, 'config', CONFIG_TARGETS.PROFILE_ITEMS.collection)).catch(() => [] as string[])).map(name =>
+    name.replace(/\.yaml$/u, ''),
+  );
+const itemsOf = async (harness: 'claude-code' | 'codex', kind: 'settings' | 'hooks'): Promise<Map<string, unknown>> => {
+  const folder = join(f.to, 'config', harness, kind);
+  const found = new Map<string, unknown>();
+  for (const name of await readdir(folder).catch(() => [] as string[])) {
+    const item = parse(await readFile(join(folder, name), 'utf8')) as Record<string, unknown>;
+    found.set(name.replace(/\.yaml$/u, ''), {
+      harness: harness === 'codex' ? 'codex' : 'claude',
+      document: item[kind],
+    });
+  }
+  return found;
+};
+const modelAccepts = async (): Promise<string[]> => {
+  const profiles = new Map<string, { contents: string[] }>();
+  for (const name of await profileNames())
+    profiles.set(name, parse(await readFile(join(f.to, configPath(CONFIG_TARGETS.PROFILE_ITEMS, name)), 'utf8')));
+  const merged = (kind: 'settings' | 'hooks') =>
+    (async () => new Map([...(await itemsOf('claude-code', kind)), ...(await itemsOf('codex', kind))]))();
+  const files = {
+    runtimes: new Map([['claude-default', { login: 'claude-you', profile: 'default', agent: true }]]),
+    profiles,
+    modelSets: new Map(),
+    settings: undefined,
+    logins: [sampleLogin('claude-you', { store: 'ferretry' })],
+    templates: new Map(),
+    components: {
+      ...NO_COMPONENTS,
+      settings: { state: 'read', components: await merged('settings') },
+      hooks: { state: 'read', components: await merged('hooks') },
+    },
+  } as unknown as RuntimesFiles;
+  // `assembleRuntimesModel` parses the WHOLE model with `AccountModelSchema`; a layer that names no component throws.
+  return Object.keys(assembleRuntimesModel(files).model.profiles);
+};
+
+/** A copy-shaped home: one good attachment, one manifest with no original, and the component forms plus voice. */
 const build = async () => {
   await text('layout-version', '2\n');
   await f.session('f1');
@@ -61,7 +138,7 @@ const build = async () => {
   // (a) flags + env, (b) a file inside the home, (c) a file outside the home.
   await text(
     'config/components/settings/claude-settings.yaml',
-    `harness: claude\nflags: ["--verbose"]\nenv:\n  DISABLE_TELEMETRY: "1"\n`,
+    `harness: claude\nflags: ["--disallowedTools", "Bash(rm:*)"]\nenv:\n  DISABLE_TELEMETRY: "1"\n`,
   );
   await text('fleet/assets/codex/config.toml', 'model = "fake-model"\n[shell_environment_policy]\ninherit = "all"\n');
   await text('config/components/settings/codex-settings.yaml', 'harness: codex\nfile: codex/config.toml\n');
@@ -78,22 +155,9 @@ const build = async () => {
   return { good, lost, outsidePath };
 };
 
-const run = async () =>
-  convert({
-    from: f.from,
-    to: f.to,
-    dryRun: false,
-    lock: { held: async () => false },
-    now: () => new Date('2026-11-09T00:00:00Z'),
-    host: { homeDirectory: f.root, env: {} },
-    steps: [conversationStep, settingsStep],
-  });
-
 test('the real-run shapes convert completely: home.json written, every case named, the outside file never read', async () => {
   const { good, lost } = await build();
-  const result = await run();
-  if (result.kind !== 'done') throw new Error('expected a run');
-  const { report } = result;
+  const report = await done();
   expect(report.complete).toBe(true);
   expect((await stat(join(f.to, 'home.json'))).isFile()).toBe(true);
   const states = Object.fromEntries(report.steps.map(step => [step.id, step.status]));
@@ -109,26 +173,22 @@ test('the real-run shapes convert completely: home.json written, every case name
     `f1~${good.id}.original`,
   ]);
 
-  // Settings: (a) inline env, flags named; (b) the inside file inlined; (c) the outside file not carried.
-  const claude = await readFile(join(f.to, 'config/claude-code/settings/claude-settings.yaml'), 'utf8');
+  // Settings: (a) flags and env carried; (b) the inside file inlined; (c) the outside file not carried.
+  const claude = await readV5('config/claude-code/settings/claude-settings.yaml');
   expect(claude).toContain('DISABLE_TELEMETRY');
-  const codex = await readFile(join(f.to, 'config/codex/settings/codex-settings.yaml'), 'utf8');
-  expect(codex).toContain('fake-model');
-  expect(
-    (await readFile(join(f.to, 'config/claude-code/hooks/claude-hooks.yaml'), 'utf8')).includes('PreToolUse'),
-  ).toBe(true);
-  const settings = report.steps.find(step => step.id === 'settings');
-  const named = (settings?.notCarried ?? []).map(item => `${item.what} :: ${item.why}`).join('\n');
-  expect(named).toContain('config/components/settings/claude-settings.yaml flags');
-  expect(named).toContain('config/components/settings/outside-settings.yaml file');
-  expect(named).toContain('config/components/hooks/outside-hooks.yaml file');
-  expect(named).toContain('config/components/hooks/scripts.yaml directory');
-  expect(named).toContain('re-create it in v5 Settings; v5 holds');
+  expect(claude).toContain('Bash(rm:*)');
+  expect(await readV5('config/codex/settings/codex-settings.yaml')).toContain('fake-model');
+  expect((await readV5('config/claude-code/hooks/claude-hooks.yaml')).includes('PreToolUse')).toBe(true);
+  const named = namedIn(settingsOf(report));
+  expect(named).toContain('config/components/settings/outside-settings.yaml');
+  expect(named).toContain('config/components/hooks/outside-hooks.yaml');
+  expect(named).toContain('config/components/hooks/scripts.yaml');
+  expect(named).toContain('this may have restricted what the agent could do');
   expect(named).toContain('config/components/settings/secretive.yaml');
-  expect(named).toContain('config/voice.yaml');
-  expect(named).toContain('re-enter your voice settings');
+  // voice.yaml is carried now (Voice declares VOICE_CONFIG), not named as left behind.
+  expect(await readV5('config/voice.yaml')).toContain('postProcessing');
 
-  // The outside file was never opened (mode 000 would refuse a reader; its marker is in no v5 file either).
+  // The outside file was never opened (its marker is in no v5 file either).
   // And no plain secret is in any v5 file or in the report.
   for (const path of await allFiles(f.to)) {
     const body = await readFile(path).catch(() => Buffer.alloc(0));
@@ -138,19 +198,226 @@ test('the real-run shapes convert completely: home.json written, every case name
   expect(JSON.stringify(report)).not.toContain(FAKE_SECRET);
 });
 
-test('a settings file inside the home that is secret-shaped is held by name, never written plain', async () => {
+test('the owner shape: three components whose file is a relative .json/.toml beside them, layered by one profile, carry inline', async () => {
   await text('layout-version', '2\n');
-  await text('fleet/assets/s.json', JSON.stringify({ env: { MY_API_KEY: FAKE_SECRET } }));
-  await text('config/components/settings/leaky.yaml', 'harness: claude\nfile: s.json\n');
-  const result = await run();
-  if (result.kind !== 'done') throw new Error('expected a run');
-  const settings = result.report.steps.find(step => step.id === 'settings');
-  expect(settings?.status).toBe('converted');
-  expect((settings?.notCarried ?? []).map(item => item.what)).toContain('config/components/settings/leaky.yaml');
-  for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(FAKE_SECRET)).toBe(false);
+  await text('config/components/hooks/claude-hooks.yaml', 'harness: claude\nfile: claude-hooks.json\n');
+  await text(
+    'config/components/hooks/claude-hooks.json',
+    JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'true' }] }] } }),
+  );
+  await text('config/components/settings/claude-settings.yaml', 'harness: claude\nfile: claude-settings.json\n');
+  await text(
+    'config/components/settings/claude-settings.json',
+    JSON.stringify({ permissions: { deny: ['Bash(rm:*)'] }, model: 'fake' }),
+  );
+  await text('config/components/settings/codex-settings.yaml', 'harness: codex\nfile: codex-settings.toml\n');
+  await text('config/components/settings/codex-settings.toml', 'model = "fake-codex"\n');
+  await text(
+    'config/profiles/default.yaml',
+    'contents:\n  - settings/claude-settings\n  - settings/codex-settings\n  - hooks/claude-hooks\n',
+  );
+  const report = await done();
+  expect(report.complete).toBe(true);
+  expect(settingsOf(report).status).toBe('converted');
+  expect((await stat(join(f.to, 'home.json'))).isFile()).toBe(true);
+  expect(await readV5('config/claude-code/settings/claude-settings.yaml')).toContain('Bash(rm:*)');
+  expect(await readV5('config/codex/settings/codex-settings.yaml')).toContain('fake-codex');
+  expect(await readV5('config/claude-code/hooks/claude-hooks.yaml')).toContain('PreToolUse');
+  expect(await modelAccepts()).toEqual(['default']);
 });
 
-test('preview.sh installs the converter dependencies when node_modules is missing, and names the command when that fails', async () => {
+test('a flags-only component carries Codex -c and Claude --disallowedTools; v4-superseded flags are named, never carried', async () => {
+  await text('layout-version', '2\n');
+  await text(
+    'config/components/settings/deny.yaml',
+    'harness: claude\nflags:\n  - --disallowedTools\n  - "Bash(git push:*) Edit"\n  - --disallowed-tools=Write\n  - --permission-mode\n  - bypassPermissions\n',
+  );
+  await text(
+    'config/components/settings/net.yaml',
+    'harness: codex\nflags:\n  - -c\n  - sandbox_workspace_write.network_access=false\n  - --config\n  - shell_environment_policy.inherit="core"\n  - -c\n  - sandbox_mode="danger-full-access"\n  - --full-auto\n',
+  );
+  await text('config/profiles/default.yaml', 'contents:\n  - settings/deny\n  - settings/net\n');
+  const report = await done();
+  expect(report.complete).toBe(true);
+  const deny = parse(await readV5('config/claude-code/settings/deny.yaml')) as {
+    settings: { permissions: { deny: string[] } };
+  };
+  expect(deny.settings.permissions.deny.sort()).toEqual(['Bash(git push:*)', 'Edit', 'Write']);
+  const net = parse(await readV5('config/codex/settings/net.yaml')) as { settings: Record<string, unknown> };
+  expect(net.settings).toEqual({
+    sandbox_workspace_write: { network_access: false },
+    shell_environment_policy: { inherit: 'core' },
+  });
+  // The loosening flags v4 itself discarded are never carried.
+  expect(JSON.stringify(net)).not.toContain('danger-full-access');
+  expect(JSON.stringify(deny)).not.toContain('bypassPermissions');
+  expect(namedIn(settingsOf(report))).toContain('--permission-mode');
+  expect(await modelAccepts()).toEqual(['default']);
+});
+
+test('an outside-file component: the Settings step is pending by default, naming the component, flag names and profiles', async () => {
+  await text('layout-version', '2\n');
+  const outsidePath = join(outside, 'settings.json');
+  await writeFile(outsidePath, JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o600 });
+  await text(
+    'config/components/settings/outside.yaml',
+    `harness: claude\nfile: ${outsidePath}\nflags:\n  - --strict-mcp-config\n  - --verbose\n  - FAKE-FLAG-VALUE-9\n`,
+  );
+  await text('config/profiles/careful.yaml', 'contents:\n  - settings/outside\n');
+  await text('config/profiles/other.yaml', 'contents:\n  - settings/outside\n');
+  await text('config/profiles/unrelated.yaml', 'contents: []\n');
+  const report = await done();
+  const step = settingsOf(report);
+  expect(step.status).toBe('pending');
+  expect(report.complete).toBe(false);
+  await expect(stat(join(f.to, 'home.json'))).rejects.toThrow();
+  const named = namedIn(step);
+  expect(named).toContain('config/components/settings/outside.yaml');
+  expect(named).toContain('--strict-mcp-config');
+  expect(named).toContain('--verbose');
+  expect(named).toContain('careful');
+  expect(named).toContain('other');
+  expect(named).not.toContain('unrelated');
+  expect(named).toContain('this may have restricted what the agent could do');
+  expect(JSON.stringify(report)).not.toContain('FAKE-FLAG-VALUE-9');
+  expect(step.note).toContain('--drop-uncarried');
+  expect(step.note).toContain('fix it in v4');
+  expect(JSON.stringify(report)).not.toContain(OUTSIDE_MARKER);
+  // Nothing is written for the component, and no profile was quietly changed.
+  await expect(stat(join(f.to, 'config/claude-code/settings/outside.yaml'))).rejects.toThrow();
+  expect(await readV5('config/profiles/careful.yaml').catch(() => '')).toContain('settings/outside');
+});
+
+test('--drop-uncarried strips the layer from every profile that names it, names each, and says the ferrets may be less restricted', async () => {
+  await text('layout-version', '2\n');
+  const outsidePath = join(outside, 'settings.json');
+  await writeFile(outsidePath, JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o600 });
+  await text('config/components/settings/outside.yaml', `harness: claude\nfile: ${outsidePath}\n`);
+  await text('config/components/settings/fine.yaml', 'harness: claude\nenv:\n  A: "1"\n');
+  await text('config/profiles/default.yaml', 'contents:\n  - settings/outside\n  - settings/fine\n');
+  await text('config/profiles/other.yaml', 'contents:\n  - settings/outside\n');
+  const report = await done({ dropUncarried: true });
+  expect(report.complete).toBe(true);
+  expect(settingsOf(report).status).toBe('converted');
+  const named = namedIn(settingsOf(report));
+  expect(named).toContain('config/components/settings/outside.yaml');
+  expect(named).toContain('default, other');
+  expect(named).toContain('LESS restricted than in v4');
+  expect(await readV5('config/profiles/default.yaml')).not.toContain('settings/outside');
+  expect(await readV5('config/profiles/default.yaml')).toContain('settings/fine');
+  expect(await readV5('config/profiles/other.yaml')).not.toContain('settings/outside');
+  expect(await modelAccepts()).toEqual(['default', 'other']);
+  for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(OUTSIDE_MARKER)).toBe(false);
+});
+
+test('env: a ${secret:...} value is not carried, numbers and booleans become text, other values are named; Codex semantics are said', async () => {
+  await text('layout-version', '2\n');
+  await text(
+    'config/components/settings/mixed.yaml',
+    'harness: claude\nenv:\n  GH: "${secret:GH}"\n  PORT: 8080\n  ON: true\n  NESTED:\n    a: 1\n',
+  );
+  await text('config/components/settings/codexenv.yaml', 'harness: codex\nenv:\n  PORT: 8080\n');
+  await text('config/profiles/default.yaml', 'contents:\n  - settings/mixed\n  - settings/codexenv\n');
+  const report = await done();
+  const step = settingsOf(report);
+  expect(step.status).toBe('pending');
+  const named = namedIn(step);
+  expect(named).toContain('env GH');
+  expect(named).toContain('env NESTED');
+  expect(named).toContain('never inside a settings document');
+  expect(named).toContain('NOT the Codex process itself');
+  expect(await readV5('config/codex/settings/codexenv.yaml')).toContain('PORT: "8080"');
+});
+
+test('m3: a header-shaped value in an inlined file is held, never written plain', async () => {
+  await text('layout-version', '2\n');
+  const bearer = 'Bearer abcdefghijklmnopqrstuvwxyz012345';
+  await text(
+    'fleet/assets/c.toml',
+    `[mcp_servers.x]\nurl = "https://example.test"\nhttp_headers = { "Authorization" = "${bearer}" }\n`,
+  );
+  await text('config/components/settings/hdr.yaml', 'harness: codex\nfile: c.toml\n');
+  await text('fleet/assets/d.json', JSON.stringify({ note: bearer }));
+  await text('config/components/settings/val.yaml', 'harness: claude\nfile: d.json\n');
+  const report = await done();
+  const named = namedIn(settingsOf(report));
+  expect(named).toContain('config/components/settings/hdr.yaml');
+  expect(named).toContain('config/components/settings/val.yaml');
+  for (const path of await allFiles(f.to))
+    expect((await readFile(path)).includes('abcdefghijklmnopqrstuvwxyz')).toBe(false);
+});
+
+test('a settings file over 1 MiB is held by name and never read', async () => {
+  await text('layout-version', '2\n');
+  await text('fleet/assets/big.json', JSON.stringify({ pad: 'x'.repeat(1024 * 1024 + 1) }));
+  await text('config/components/settings/big.yaml', 'harness: claude\nfile: big.json\n');
+  const report = await done();
+  expect(namedIn(settingsOf(report))).toContain('over 1 MiB');
+  await expect(stat(join(f.to, 'config/claude-code/settings/big.yaml'))).rejects.toThrow();
+});
+
+test('links are never followed: a file link in fleet/assets, fleet/assets itself a link, fleet a link', async () => {
+  await text('layout-version', '2\n');
+  const real = join(outside, 'real.json');
+  await writeFile(real, JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o600 });
+  // 1. a file link inside fleet/assets
+  await mkdir(join(f.from, 'fleet/assets'), { recursive: true });
+  await symlink(real, join(f.from, 'fleet/assets/link.json'));
+  await text('config/components/settings/filelink.yaml', 'harness: claude\nfile: link.json\n');
+  let report = await done();
+  expect(namedIn(settingsOf(report))).toContain('config/components/settings/filelink.yaml');
+  for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(OUTSIDE_MARKER)).toBe(false);
+  await rm(f.to, { recursive: true, force: true });
+
+  // 2. fleet/assets itself a link to a folder outside the home
+  await rm(join(f.from, 'fleet/assets'), { recursive: true, force: true });
+  await writeFile(join(outside, 'settings.json'), JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o600 });
+  await symlink(outside, join(f.from, 'fleet/assets'));
+  await text('config/components/settings/s.yaml', 'harness: claude\nfile: settings.json\n');
+  report = await done();
+  expect(namedIn(settingsOf(report))).toContain('config/components/settings/s.yaml');
+  for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(OUTSIDE_MARKER)).toBe(false);
+  await rm(f.to, { recursive: true, force: true });
+
+  // 3. a link in config/components/<kind> on the way to a beside file
+  await rm(join(f.from, 'fleet/assets'), { force: true });
+  await mkdir(join(f.from, 'config/components/hooks'), { recursive: true });
+  await symlink(real, join(f.from, 'config/components/hooks/h.json'));
+  await text('config/components/hooks/h.yaml', 'harness: claude\nfile: h.json\n');
+  report = await done();
+  expect(namedIn(settingsOf(report))).toContain('config/components/hooks/h.yaml');
+  for (const path of await allFiles(f.to)) expect((await readFile(path)).includes(OUTSIDE_MARKER)).toBe(false);
+});
+
+test('an absolute path inside the real v4 home is read from the snapshot copy; one outside it is not', async () => {
+  await text('layout-version', '2\n');
+  const real = '/fake-real-home/.ferretry';
+  await text(
+    'config/components/settings/abs.yaml',
+    `harness: claude\nfile: ${real}/config/components/settings/abs.json\n`,
+  );
+  await text('config/components/settings/abs.json', JSON.stringify({ model: 'from-copy' }));
+  const report = await done();
+  // The plain (non-preview) run's real home is the home itself, so a path under a DIFFERENT real home is outside.
+  expect(namedIn(settingsOf(report))).toContain('config/components/settings/abs.yaml');
+  await rm(f.to, { recursive: true, force: true });
+  const mapped = await convert({
+    from: f.from,
+    to: f.to,
+    dryRun: false,
+    lock: { held: async () => false },
+    now: () => new Date('2026-11-09T00:00:00Z'),
+    host: { homeDirectory: '/fake-real-home', env: {} },
+    steps: [settingsStep],
+    preview: true,
+    previewV4Home: real,
+    previewUserHome: '/fake-real-home',
+  });
+  if (mapped.kind !== 'done') throw new Error('expected a run');
+  expect(await readV5('config/claude-code/settings/abs.yaml')).toContain('from-copy');
+});
+
+test('preview.sh installs the converter dependencies when node_modules is missing or has no yaml, and names the command when that fails', async () => {
   const script = resolve(import.meta.dir, '../../preview/preview.sh');
   const root = await mkdtemp(join(tmpdir(), 'fy-sh-'));
   try {
@@ -160,24 +427,33 @@ test('preview.sh installs the converter dependencies when node_modules is missin
     await writeFile(join(tool, 'preview/preview.sh'), await readFile(script, 'utf8'), { mode: 0o755 });
     const bin = join(root, 'bin');
     await mkdir(bin);
+    const log = join(root, 'install.log');
     const stub = (body: string) => writeFile(join(bin, 'bun'), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
-    const env = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` };
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}`, INSTALL_LOG: log };
     const go = () =>
       spawnSync(
         'bash',
         [join(tool, 'preview/preview.sh'), 'dry-run', '--v4', join(root, 'v4'), '--target', join(root, 'v5')],
-        {
-          env,
-          encoding: 'utf8',
-        },
+        { env, encoding: 'utf8' },
       );
 
     await stub(
-      'if [ "$1" = install ]; then mkdir -p node_modules; echo "$@" >> "${INSTALL_LOG:-/dev/null}"; exit 0; fi\necho "bun $*" >&2\nexit 7',
+      'if [ "$1" = install ]; then mkdir -p node_modules/yaml; echo "$* in $(pwd)" >> "$INSTALL_LOG"; exit 0; fi\necho "bun $*" >&2\nexit 7',
     );
     const ok = go();
     expect(ok.stdout).toContain("installing the converter's dependencies");
-    expect((await stat(join(tool, 'node_modules'))).isDirectory()).toBe(true);
+    expect((await stat(join(tool, 'node_modules/yaml'))).isDirectory()).toBe(true);
+    // The stub got `install --frozen-lockfile`, and ran in the converter folder.
+    const logged = await readFile(log, 'utf8');
+    expect(logged).toContain('install --frozen-lockfile');
+    expect(logged.trim().endsWith(`in ${await realpath(tool)}`)).toBe(true);
+
+    // A node_modules without yaml also installs.
+    await rm(join(tool, 'node_modules'), { recursive: true });
+    await mkdir(join(tool, 'node_modules/other'), { recursive: true });
+    await rm(log);
+    go();
+    expect(await readFile(log, 'utf8')).toContain('install --frozen-lockfile');
 
     await rm(join(tool, 'node_modules'), { recursive: true });
     await stub('if [ "$1" = install ]; then exit 3; fi\nexit 7');

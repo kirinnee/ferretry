@@ -86,7 +86,7 @@ import { configPath, v5ConfigProblem } from '../v5/write.ts';
 
 const LESSONS_CONFIG = CONFIG_TARGETS.LESSONS;
 import { dropModeline } from '../v4/config.ts';
-import { instructionsSource } from './settings.ts';
+import { instructionsSource } from './component-files.ts';
 import type { Step, StepContext } from './index.ts';
 
 const V5_DIR = 'state/lessons';

@@ -25,14 +25,24 @@ const USAGE =
 async function main(argv: readonly string[]): Promise<number> {
   let parsed: ReturnType<
     typeof parseArgs<{
-      options: { v4: { type: 'string' }; target: { type: 'string' }; owner: { type: 'boolean' } };
+      options: {
+        v4: { type: 'string' };
+        target: { type: 'string' };
+        owner: { type: 'boolean' };
+        'drop-uncarried': { type: 'boolean' };
+      };
       allowPositionals: true;
     }>
   >;
   try {
     parsed = parseArgs({
       args: [...argv],
-      options: { v4: { type: 'string' }, target: { type: 'string' }, owner: { type: 'boolean' } },
+      options: {
+        v4: { type: 'string' },
+        target: { type: 'string' },
+        owner: { type: 'boolean' },
+        'drop-uncarried': { type: 'boolean' },
+      },
       allowPositionals: true,
       strict: true,
     });
@@ -67,6 +77,7 @@ async function main(argv: readonly string[]): Promise<number> {
         lock: hostLockProbe(),
         now: () => new Date(),
         ...(parsed.values.owner === true ? { owner: true } : {}),
+        ...(parsed.values['drop-uncarried'] === true ? { dropUncarried: true } : {}),
         ...(parsed.values.v4 === undefined ? {} : { v4Given: parsed.values.v4 }),
       });
       console.log(done.summary);
