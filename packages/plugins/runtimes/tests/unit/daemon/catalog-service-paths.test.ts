@@ -731,7 +731,37 @@ describe('a change to one login', () => {
     });
   });
 
-  it('should say the login changed but the runtimes could not be republished', async () => {
+  it('should say one true thing per sentence when a republish is refused after the login change was saved', async () => {
+    let afterApply = false;
+    const { service, changes } = world({
+      overrides: {
+        mint: () => {
+          if (afterApply) throw new Error('nothing was changed: no id could be minted');
+          return 'an-id';
+        },
+        modelCatalogs: async () => ({ catalogs: {}, presets: [] }),
+      },
+    });
+    const staged = await service.propose(relabel);
+    const apply = changes.apply;
+    changes.apply = async id => {
+      const result = await apply(id);
+      afterApply = true;
+      return result;
+    };
+
+    const failure = await rejection(service.apply(staged.id, OWNER));
+
+    should(failure).match({ code: 'fleet_change_failed' });
+    // The login change is saved; the republish's own "nothing was changed" is about the republish and sits in its own
+    // sentence, never after a "the login changed, but …" that it would contradict.
+    should((failure as Error).message).match(
+      /^the login change is saved\. Republishing the runtimes was refused: nothing was changed: no id could be minted$/u,
+    );
+    should((failure as Error).message).not.match(/changed, but/u);
+  });
+
+  it('should say the login change is saved but the runtimes could not be republished', async () => {
     let afterApply = false;
     const { service, changes } = world({
       overrides: {
@@ -757,6 +787,6 @@ describe('a change to one login', () => {
     };
     const failure = await rejection(service.apply(staged.id, OWNER));
     should(failure).match({ code: 'fleet_change_failed' });
-    should((failure as Error).message).match(/^the login changed, but the runtimes could not be republished: /u);
+    should((failure as Error).message).match(/^the login change is saved\. Republishing the runtimes failed: /u);
   });
 });

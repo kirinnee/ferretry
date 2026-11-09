@@ -314,6 +314,14 @@ export function budgetHoldsOf(deps: Pick<FleetCatalogServiceDeps, 'budgetHolds'>
   return holds === undefined || Object.keys(holds).length === 0 ? {} : { budgetHolds: holds };
 }
 
+/**
+ * The budget holds as one comparable string. A plan publishes a held login's wrappers unavailable, so a plan made under
+ * one set of holds must not be applied under another: the pause Usage reports between a preview and its apply would
+ * otherwise publish a runnable wrapper for a login its budget has stopped.
+ */
+const holdsKey = (holds: BudgetHolds | undefined): string =>
+  JSON.stringify(Object.entries(holds ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+
 // ── Running sessions ─────────────────────────────────────────────────────────────────────────────
 
 /** How many of these sessions are still running. */
@@ -375,6 +383,8 @@ type ChangePayload =
       readonly plan: FleetModelApplyPlan;
       /** What stood in for an unread part in the reading this plan was made from: the plan answers for itself. */
       readonly unreadable: readonly string[];
+      /** The budget holds this plan was made under ({@link holdsKey}); an apply under other holds is refused as stale. */
+      readonly holds: string;
       readonly documents: readonly FleetDocumentWrite[];
       readonly preview: Extract<AccountChangePreview, { kind: 'apply' }>;
       readonly consequences: readonly string[];
@@ -925,6 +935,8 @@ export class FleetCatalogService {
     const { edit, ids, runtimeFacts } = await this.#derive(reading, change);
     const bodies = await this.#bodies(edit.model, edit.files);
     const layout = this.deps.layout;
+    // Read once: the plan is made under these holds and the apply refuses to run under others.
+    const held = this.#budgetHolds();
     let plan: FleetModelApplyPlan;
     let preview: FleetApplyPreview;
     try {
@@ -943,7 +955,7 @@ export class FleetCatalogService {
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         ...(await this.#modelCatalogs()),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
-        ...this.#budgetHolds(),
+        ...held,
       });
       preview = await this.deps.provisioner.preview(plan);
     } catch (error) {
@@ -967,6 +979,7 @@ export class FleetCatalogService {
         kind: 'apply',
         plan,
         unreadable: reading.unreadable,
+        holds: holdsKey(held.budgetHolds),
         documents,
         consequences: edit.consequences,
         preview: {
@@ -1206,9 +1219,12 @@ export class FleetCatalogService {
     try {
       await this.#republish();
     } catch (error) {
+      // Two sentences, each saying one true thing: the login change is saved, and the republish (whose own reason may
+      // say "nothing was changed", which is about the republish alone) did not finish.
+      const refused = error instanceof FleetCatalogRefusal && error.code === 'fleet_change_refused';
       throw new FleetCatalogRefusal(
         'fleet_change_failed',
-        `the login changed, but the runtimes could not be republished: ${errorMessage(error)}`,
+        `the login change is saved. Republishing the runtimes ${refused ? 'was refused' : 'failed'}: ${errorMessage(error)}`,
       );
     }
     return { outcome: 'login-changed', result: 'applied', ...summary, ...moved };
@@ -1266,6 +1282,13 @@ export class FleetCatalogService {
       // Refused here, ahead of ANY write, so a sentence that says "nothing was changed" is true: nothing has been written.
       await this.#refuseBeforeWriting(payload, record.revision);
       await this.#preflight();
+      // Under the apply section the holds are read again: a pause that arrived since the preview is not in the plan.
+      if (holdsKey(this.deps.budgetHolds?.()) !== payload.holds) {
+        throw new FleetCatalogRefusal(
+          'fleet_change_stale',
+          'a login’s spend budget changed after this change was previewed; review it again',
+        );
+      }
       let written = false;
       try {
         // The documents are the source of truth, so they land first; a plan that then fails is republished from them.
@@ -1280,7 +1303,11 @@ export class FleetCatalogService {
           const { failure } = error;
           if (failure.kind === 'history-failed-after-commit')
             this.#skipped = skippedWithinRuntimes(failure.committed.skipped, failure.committed.manifest.accounts);
-          return { outcome: 'applied', apply: applyFailureSummary(error) };
+          // The documents landed before the plan and a rollback does not undo them: the outcome names them.
+          return {
+            outcome: 'applied',
+            apply: applyFailureSummary(error, written ? payload.documents.map(document => document.path) : []),
+          };
         }
         // A failure after the documents landed must say they are on disk: they are not rolled back with the fleet.
         throw new FleetCatalogRefusal(
