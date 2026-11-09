@@ -83,7 +83,7 @@ describe('parseProgressFile: a file that parses but is not a value', () => {
 
     // Assert
     should(said).equal(
-      's.yaml could not be read as a patch: Excessive alias count indicates a resource exhaustion attack',
+      's.yaml cannot be read as YAML or JSON:\n  line 4, column 24: the aliases (*name) in this file expand too far to read',
     );
   });
 });

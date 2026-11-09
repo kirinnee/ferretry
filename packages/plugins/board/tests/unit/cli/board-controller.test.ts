@@ -1531,7 +1531,7 @@ describe('fy card patch', () => {
 
     // Assert
     should(message).equal(
-      'card patch &F1 changed nothing:\n  f1.yaml could not be read as a patch: Excessive alias count indicates a resource exhaustion attack',
+      'card patch &F1 changed nothing:\n  f1.yaml is not YAML or JSON:\n  line 5, column 24: the aliases (*name) in this file expand too far to read',
     );
     should(gateway.cardCalls).be.empty();
     should(sent(gateway)).be.empty();
