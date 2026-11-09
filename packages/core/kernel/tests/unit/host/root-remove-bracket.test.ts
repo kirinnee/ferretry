@@ -478,6 +478,24 @@ for (const [provider, make] of PROVIDERS) {
       expect(f.layer.restored()).toBe(true);
     });
 
+    test('BG-002 a middle folder swapped for a link to ITSELF (same device and inode) is still refused changed: the link is never opened, so nothing in it is removed', async () => {
+      const f = await armed(make);
+      await mkdir(`${f.dir}/sub/tree/mid`, { recursive: true, mode: 0o700 });
+      await writeFile(`${f.dir}/sub/tree/mid/mine`, 'INSIDE');
+      f.arm(
+        once(
+          (verb, args) => verb === 'openat' && args[1] === 'mid',
+          () => {
+            renameSync(`${f.dir}/sub/tree/mid`, `${f.dir}/sub/tree/mid-moved`);
+            symlinkSync(`${f.dir}/sub/tree/mid-moved`, `${f.dir}/sub/tree/mid`);
+          },
+        ),
+      );
+      expect(await refusalOf(() => f.fleet.remove(at(f.fleet, 'homes/claude-a/sub/tree')))).toBe('changed');
+      expect(await readFile(`${f.dir}/sub/tree/mid-moved/mine`, 'utf8')).toBe('INSIDE');
+      expect(f.layer.restored()).toBe(true);
+    });
+
     test('BG-002 a middle folder swapped for a link after it was emptied is never rmdir-ed through the link: the outside folder stays', async () => {
       const f = await armed(make);
       await mkdir(`${f.outside}/mid`, { recursive: true });
