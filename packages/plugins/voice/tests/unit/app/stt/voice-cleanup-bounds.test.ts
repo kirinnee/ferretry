@@ -5,7 +5,9 @@ import { readVoiceCleanup, withVoiceCleanup } from '../../../../app/lib/stt/voic
 // Dictation cleanup reads the `voice.yaml` text the daemon serves in the person's own browser, on every machine view.
 // It reads through the shared bounded reader (`@ferretry/std/yaml`), so a planted file answers "no cleanup settings"
 // at once instead of stalling the tab. One hostile text of each shape, through THIS app's own entry points
-// (`readVoiceCleanup`, `withVoiceCleanup`).
+// (`readVoiceCleanup`, `withVoiceCleanup`). The voice schema is strict, so no alias-bearing text can ALSO be a valid
+// voice file: those answers are `null` for that reason too, and what these two shapes pin here is that the answer is
+// prompt. The size cap is the shape only the shared reader decides, and the reader's own tests prove the rest.
 
 const FAST_MS = 2000;
 
