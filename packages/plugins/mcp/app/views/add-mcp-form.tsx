@@ -30,6 +30,7 @@ import {
   draftRequest,
   EMPTY_MCP_DRAFT,
   type McpDraft,
+  dealtWith,
   otherLiveFerrets,
   projectFolderName,
   reloadReport,
@@ -469,7 +470,15 @@ function AddedStep({
     setFailure(null);
     try {
       const otherIds = reloadAll ? others.map(other => other.id) : [];
-      const report = reloadReport(await restartFerrets(client, [ferretId, ...otherIds]), ferretId, agentName, otherIds);
+      const result = await restartFerrets(client, [ferretId, ...otherIds]);
+      const report = reloadReport(result, ferretId, agentName, otherIds);
+      // A retry is for this ferret (and any other that was not reloaded or queued): the ones already dealt with stay out.
+      const settled = dealtWith(result, otherIds);
+      if (settled.size > 0) {
+        const remaining = others.filter(other => !settled.has(other.id));
+        setOthers(remaining);
+        if (remaining.length === 0) setReloadAll(false);
+      }
       if (report.closes) host.close();
       else if (report.retry) setFailure(report.sentence);
       else setQueued(report.sentence);

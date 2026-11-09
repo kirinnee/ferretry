@@ -266,3 +266,12 @@ export function projectFolderName(mcpJsonPath: string): string | null {
   const parts = mcpJsonPath.split('/').filter(part => part !== '');
   return parts.length >= 2 ? (parts[parts.length - 2] ?? null) : null;
 }
+
+/**
+ * The ids Ferrets already dealt with: restarted, or queued to restart at the next idle moment. A retry never sends
+ * these again, because the person was told they were done or are waiting.
+ */
+export function dealtWith(result: RestartResult, ids: readonly string[]): ReadonlySet<string> {
+  const done = new Set([...result.restarted, ...result.queued].map(row => row.id));
+  return new Set(ids.filter(id => done.has(id)));
+}

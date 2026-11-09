@@ -441,4 +441,42 @@ describe('mcp#1 Also reload the other ferrets on this login', () => {
     );
     expect(root.querySelector('[data-add-mcp-reload]')).not.toBeNull();
   });
+
+  it('mcp#1 a retry after this ferret failed does not restart the others again', async () => {
+    const { root, calls } = await addedOnLogin({
+      restarted: [{ id: 'f2' }, { id: 'f3' }],
+      queued: [],
+      skipped: [],
+      failed: [{ id: 'f1', reason: 'the pane did not answer' }],
+    });
+    await click(root, '.fy-action-form__check input');
+    await click(root, '[data-add-mcp-reload]');
+    expect(root.querySelector('.fy-action-form__check')).toBeNull();
+    await click(root, '[data-add-mcp-reload]');
+    const bodies = calls.filter(call => call.route === RESTART).map(call => call.body);
+    expect(bodies).toEqual([
+      { scope: 'ids', ids: ['f1', 'f2', 'f3'] },
+      { scope: 'ids', ids: ['f1'] },
+    ]);
+  });
+
+  it('mcp#1 a retry still sends an other ferret that was not reloaded or queued', async () => {
+    const { root, calls } = await addedOnLogin({
+      restarted: [{ id: 'f2' }],
+      queued: [],
+      skipped: [],
+      failed: [
+        { id: 'f1', reason: 'the pane did not answer' },
+        { id: 'f3', reason: 'no answer' },
+      ],
+    });
+    await click(root, '.fy-action-form__check input');
+    await click(root, '[data-add-mcp-reload]');
+    expect(label(root)).toBe('Also reload the other 1 ferret on this login now');
+    await click(root, '[data-add-mcp-reload]');
+    expect(calls.filter(call => call.route === RESTART).map(call => call.body)[1]).toEqual({
+      scope: 'ids',
+      ids: ['f1', 'f3'],
+    });
+  });
 });

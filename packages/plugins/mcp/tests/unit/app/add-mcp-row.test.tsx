@@ -7,7 +7,7 @@ import { AddMcpDialog } from '../../../app/views/add-mcp-dialog.tsx';
 import { createAddMcpRowPanel } from '../../../app/views/add-mcp-row.tsx';
 import { McpServersPanel } from '../../../app/views/servers-panel.tsx';
 import { MCP, NOW, scriptedClient } from './mcp-fixtures.ts';
-import { click, mountSettled, settle } from './mcp-view-support.tsx';
+import { click, mountSettled, settle, type } from './mcp-view-support.tsx';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {
@@ -15,6 +15,11 @@ afterEach(async () => {
   mounted = undefined;
 });
 const LISTING = 'GET /v1/ferrets/:ferretId/mcp';
+/** Unmounts what is on screen, so the next mount in the same test starts clean (a call TypeScript cannot narrow away). */
+const unmount = async (): Promise<void> => {
+  await mounted?.unmount();
+  mounted = undefined;
+};
 
 const mountRow = async (props: Record<string, unknown>) => {
   const offers: (readonly [string, ActionsRowOffer | null])[] = [];
@@ -100,43 +105,52 @@ describe('mcp#0 the dialog names the login and the ferret from Ferrets’ own re
     return mounted.container;
   };
 
+  const LOGIN_ANSWERS = {
+    'POST /v1/ferrets/:ferretId/mcp/login/preview': {
+      scope: 'login',
+      runtime: 'marin',
+      profile: 'default',
+      replaces: false,
+      ferrets: 1,
+    },
+    'POST /v1/ferrets/:ferretId/mcp/login': { scope: 'login', name: 'sentry', runtime: 'marin', profile: 'default' },
+    [RESTART]: { restarted: [], queued: [], skipped: [], failed: [] },
+  };
+  /** Fills the login form and adds the server, leaving the dialog on its Added step. */
+  const addOnLogin = async (answers: Record<string, unknown>, name?: string) => {
+    const root = await dialog({ ...LOGIN_ANSWERS, ...answers }, name);
+    await click(root, '[data-choice="login"] input');
+    await type(root, 'input[placeholder="sentry"]', 'sentry');
+    await type(root, 'input[placeholder="npx -y @sentry/mcp-server"]', 'npx x');
+    await new Promise(resolve => setTimeout(resolve, 400));
+    await settle();
+    await click(root, '[data-action-submit]');
+    return root;
+  };
+
   it('mcp#0 the login card names the ferret’s runtime, and the words use the ferret’s own name', async () => {
     const root = await dialog({ [FERRET]: ferret });
     expect(root.querySelector('[data-choice="login"]')?.textContent).toContain('Every ferret on marin.');
+    await unmount();
+    const added = await addOnLogin({ [FERRET]: ferret });
+    expect(added.querySelector('[data-add-mcp-added]')?.textContent).toContain('Marin picks it up after a reload');
+    expect(added.querySelector('[data-add-mcp-added]')?.textContent).not.toContain('This ferret');
   });
 
   it('mcp#0 a name the surface already has wins, and a refused read leaves the words general', async () => {
     const named = await dialog({ [FERRET]: ferret }, 'Given');
     expect(named.querySelector('[data-choice="login"]')?.textContent).toContain('marin');
-    await mounted?.unmount();
-    mounted = undefined;
+    await unmount();
+    const givenAdded = await addOnLogin({ [FERRET]: ferret }, 'Given');
+    expect(givenAdded.querySelector('[data-add-mcp-added]')?.textContent).toContain('Given picks it up after a reload');
+    expect(givenAdded.querySelector('[data-add-mcp-added]')?.textContent).not.toContain('Marin');
+    await unmount();
     const refused = await dialog({ [FERRET]: new Error('down') });
     expect(refused.querySelector('[data-choice="login"]')?.textContent).toContain('this login');
   });
 
   it('mcp#1 on the panel path a reload nobody reported names the ferret in lower case mid-sentence', async () => {
-    const root = await dialog({
-      [FERRET]: new Error('down'),
-      'POST /v1/ferrets/:ferretId/mcp/login/preview': {
-        scope: 'login',
-        runtime: 'marin',
-        profile: 'default',
-        replaces: false,
-        ferrets: 1,
-      },
-      'POST /v1/ferrets/:ferretId/mcp/login': { scope: 'login', name: 'sentry', runtime: 'marin', profile: 'default' },
-      [RESTART]: { restarted: [], queued: [], skipped: [], failed: [] },
-    });
-    await click(root, '[data-choice="login"] input');
-    await (await import('./mcp-view-support.tsx')).type(root, 'input[placeholder="sentry"]', 'sentry');
-    await (await import('./mcp-view-support.tsx')).type(
-      root,
-      'input[placeholder="npx -y @sentry/mcp-server"]',
-      'npx x',
-    );
-    await new Promise(resolve => setTimeout(resolve, 400));
-    await settle();
-    await click(root, '[data-action-submit]');
+    const root = await addOnLogin({ [FERRET]: new Error('down') });
     await click(root, '[data-add-mcp-reload]');
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('whether this ferret reloaded');
   });
