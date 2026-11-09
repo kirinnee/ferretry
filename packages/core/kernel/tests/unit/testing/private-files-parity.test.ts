@@ -228,6 +228,17 @@ test('PF-loud the real host says so when a private place passes its budget: one 
         return error instanceof RootError ? error.refusal : String(error);
       }
     };
+    // The index looks at the folders again at its own interval: ask until the answer is the wanted one (a deadline, not a
+    // fixed sleep), so a slow disk or a loaded runner only makes the wait longer and never the answer different.
+    const readUntil = async (wanted: string): Promise<string> => {
+      const deadline = Date.now() + 15_000;
+      let answer = await readOwn();
+      while (answer !== wanted && Date.now() < deadline) {
+        await new Promise(done => setTimeout(done, 50));
+        answer = await readOwn();
+      }
+      return answer;
+    };
     const ours = (): readonly LogRecord[] => records.filter(record => record.message.includes('private place'));
     const doctored = async (): Promise<readonly string[]> =>
       (await outcome.host.doctor()).filter(line => line.detail.includes('private place')).map(line => line.state);
@@ -239,8 +250,7 @@ test('PF-loud the real host says so when a private place passes its budget: one 
     await mkdir(vault, { recursive: true });
     for (let from = 0; from < 4100; from += 200)
       await Promise.all(Array.from({ length: 200 }, (_, at) => writeFile(`${vault}/f${from + at}`, 'x')));
-    await new Promise(done => setTimeout(done, 400));
-    expect(await readOwn()).toBe('fenced');
+    expect(await readUntil('fenced')).toBe('fenced');
     // Said once, with the place and the counts, and kept as a failing line until it fits again.
     expect(await readOwn()).toBe('fenced');
     expect(ours().length).toBe(1);
@@ -256,8 +266,7 @@ test('PF-loud the real host says so when a private place passes its budget: one 
     expect(route.body).toContain('state/holder/vault');
     // It fits again: the refusal is lifted at the next look, said once, and the failing line is gone.
     await Promise.all(Array.from({ length: 200 }, (_, at) => rm(`${vault}/f${at}`)));
-    await new Promise(done => setTimeout(done, 400));
-    expect(await readOwn()).toBe('own');
+    expect(await readUntil('own')).toBe('own');
     expect(ours().length).toBe(2);
     expect(ours()[1]?.message).toContain('fits its budget again');
     expect(await doctored()).toEqual([]);

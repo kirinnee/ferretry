@@ -2712,8 +2712,11 @@ scoped handle:
   against it. Breadth first, so the shallow files that matter come first; a folder met at the depth limit is itself
   pinned (a bind mount of it is held, and so is everything walked through it). **A budget that is reached fails
   closed:** the tree is `truncated`, and the guard of every root that does not own the tree (and the fence of an
-  owner's root) refuses every entry on that tree's device, because an alias of an unindexed member (a bind mount keeps
+  owner's root) refuses every entry on a device that tree's indexed places answer with (the folder's and the files'; an
+  overlay filesystem gives them different ones), because an alias of an unindexed member (a bind mount keeps
   its source's device) cannot be told from any other file there; an entry on another device is proven not to be one.
+  An owner's root asks that one rule at every door — its members and removes, and a held (pinned) root's open, name
+  verdict and probe alike, for the entry a walk ends on — so a held descriptor never serves what the unheld root refuses.
   **The blast radius is the whole device, not the tree:** home, state and the owner's repositories are one device on a
   normal Linux box or a macOS Data volume, so a place past its budget makes agent homes, fleet files, work folders,
   imports, harness homes and every login's credentials root read nothing (the root that owns the tree still reads it),
@@ -2755,7 +2758,13 @@ scoped handle:
   and any folder that changed within the minute, is looked at by the next look; an alias of the replaced file needs the
   same user or privilege, as (6); (8) a filesystem whose clock steps by more than two seconds can still miss a member
   that lands after the look in the same step (the window is 20 ms, two seconds where the times carry no fraction of a
-  second).
+  second); (9) a tree is closed on the devices its INDEXED places answer with (plus the first member past its budget
+  that a `*` collection looks at), so an alias of an UNINDEXED member that sits on a device no indexed place of that tree
+  answers with is allowed: an overlay's lower layer against its upper one (members written at run time sit on the
+  upper, a baked one on the lower), a member folder past the budget that is a mountpoint or a btrfs subvolume, or a
+  mount below a folder met at the depth limit (never looked at), or a split-device filesystem mounted at that folder
+  (its files answer a device its root folder does not). It needs a privileged bind or a mount of such a member, and it is
+  strictly narrower than the head's device only, which was all a closed tree held before.
   Residuals the secret-name rule cannot see, none named like a secret and none changed here: MCP's `inventory.json`
   keeps a server's address with its path (a key embedded in a path segment would be stored), Shells' `cache/*` keeps a
   devShell's exported variables verbatim, Warden's `state.json` is a loose object, and the kernel's `accepted-config/*`
