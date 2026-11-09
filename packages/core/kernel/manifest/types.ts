@@ -197,9 +197,10 @@ export interface OnboardingDecl {
 
 /**
  * One `permissions.spawn` / `permissions.network` entry: a program (its name, or the basename of an absolute path) or
- * a host (`*.example.com` for subdomains), or `{ items: kind }` — the programs or hosts NAMED BY the owner-installed,
- * pinned items of that kind (an MCP server's `command` / `url`), resolved by the kernel when the call is made from
- * the installed items it holds; refused when no installed item names it.
+ * a host (`*.example.com` for subdomains), or `{ items: kind }` — the programs or hosts NAMED BY the items of that kind
+ * (an MCP server's `command` / `url`): the installed, pinned data-plugin items, and the items of the owner's config
+ * collection (`itemKind`), read by the kernel when the call is made; refused when no item names it. Only the kind's
+ * owner may declare it.
  */
 export type PermissionEntry = string | { readonly items: ItemKind } | ResolverEntry;
 
@@ -209,7 +210,9 @@ export type PermissionEntry = string | { readonly items: ItemKind } | ResolverEn
  * () => readonly string[] }`, called with no request data. In `network` the host is allowed only when it equals one
  * answer exactly (`host` or `host:port`, no wildcard). In `spawn` the program is allowed only when an answer names it
  * exactly: an absolute answer allows only that path, a bare name allows that basename, and an answer with `*` in it
- * allows nothing. A throwing or missing resolver refuses.
+ * allows nothing. A throwing or missing resolver refuses. A resolver name serves ONE of the two fields (its answers are
+ * programs in `spawn` and hosts in `network`); a name in both is refused. The resolver is the plugin's own code: the
+ * kernel does not prove what it answers from.
  */
 export interface ResolverEntry {
   readonly resolver: string;

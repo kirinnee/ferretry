@@ -2558,17 +2558,31 @@ scoped handle:
 - **Reach of a declared program or host** (`permissions.spawn`, `permissions.network`). An entry is a literal name,
   `{ items: kind }` or `{ resolver: name }`; `'*'` is a core piece's alone.
   - `{ items: kind }` is what the kind's items name, read when the call is made. It is the union of the installed data
-    plugins' items (fixed at boot: an install is pinned) and the items of the config collection named for the kind,
-    owned by the plugin whose manifest `kinds` includes `'item'` (MCP's `config/mcp/<name>.yaml`). The config side is
-    **live**: it is read again whenever that collection moves (`config.watch`, a held edit is not in effect), so an
-    edit that drops an item takes its reach away at once. Only `command` (a program) and `url` (a host) are read, and
-    one with `*` in it names nothing. `plugin-graph` fails a plugin other than the collection's owner that declares
-    `{ items: kind }` for a config-backed kind: an item's reach is its owner's act to grant.
+    plugins' items (fixed at boot: an install is pinned) and the items of the config collection that DECLARES
+    `itemKind: kind` (MCP's `config/mcp/<name>.yaml` says `itemKind: 'mcp'`), owned by the plugin whose manifest `kinds`
+    includes `'item'`. A collection is a reach source only by that declaration, never by its name. The config side is
+    read **live**, at every check, from the version in effect (a held edit is not in effect): nothing is cached and
+    nothing waits for a change notice, so an item the collection no longer holds is refused on the very next check,
+    while the reload that dropped it is still running and even if that reload then fails. A collection that cannot be
+    read names nothing. Only `command` (a program) and `url` (a host) are read, and one with `*` in it names nothing.
+    A plugin other than the collection's owner that declares `{ items: kind }` for a config-backed kind is refused at
+    boot (the plugin does not start; the testing host throws) and fails `plugin-graph`; so does `itemKind` on a plugin
+    that is not an item plugin or on a kind another plugin already owns. What the kernel enforces is the owner-only
+    declaration and the live read. Whether an agent or the MCP half may put a NEW item into effect is the collection's
+    own gate (`MCP_CONFIG.loosens`, turned on with MCP's wiring unit): until it is on, any editor puts a new item into
+    effect at once, and the reach it names goes live only for a plugin that declares `{ items: kind }`.
   - `{ resolver: name }` works in `spawn` as it does in `network`: the plugin's own daemon half answers, called with
     nothing about the request, and the call is allowed only when an answer equals the program exactly (an absolute
-    answer allows only that path, a bare name allows that basename). An answer with `*` in it allows nothing, and a
-    missing, throwing or malformed resolver refuses. One `resolvers` section serves both fields. The testing host
-    refuses alike (one rule, `host/permissions.ts`).
+    answer allows only that path, a bare name allows that basename, never a suffix). An answer with `*` in it allows
+    nothing, and a missing, throwing or malformed resolver refuses. One `resolvers` section serves both fields. **One
+    resolver name serves one axis**: a name in both `spawn` and `network` of one manifest is refused at boot and fails
+    `plugin-graph`, because its answers are programs on one axis and hosts on the other, and a name in both would let a
+    host answer authorize a same-named program (and a program answer reach a single-label host). A plugin that needs
+    both declares two resolvers (a program one and a host one). The testing host refuses alike (one rule,
+    `host/permissions.ts`). What this bounds: a resolver is the plugin's OWN code, so against a compromised half it
+    can name any literal program it answers (`*` is the only limit), exactly as a network resolver names hosts;
+    "called with nothing about the request" is the plugin's review discipline, which the plugin's own tests prove —
+    the kernel cannot.
 - A plugin that must know whether a command is installed asks `kernel.paths.which(name, { directories? })`
   (`permissions.which`): one plain command name, the caller's absolute folders then the daemon's `PATH`, empty and
   relative entries dropped, at most 64 folders, the first regular executable file wins. No shell, nothing executed;

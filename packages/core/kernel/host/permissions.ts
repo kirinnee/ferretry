@@ -13,7 +13,7 @@ import { type DetachedCall, detachedAsked, detachedNotOffered, detachedRefusal }
 
 export { hostAllowed, WILDCARD };
 
-/** What the owner-installed, pinned items of one kind name: their programs and their hosts. */
+/** What the items of one kind name (installed, pinned ones and the owner's live config ones): programs and hosts. */
 export interface ItemReach {
   readonly programs: readonly string[];
   readonly hosts: readonly string[];
@@ -38,7 +38,7 @@ function expand(declared: readonly PermissionEntry[], items: ItemReachOf, pick: 
   );
 }
 
-/** A plugin's declared network resolvers by name (its daemon half's `resolvers` section), asked at each call. */
+/** A plugin's declared resolvers (programs in `spawn`, hosts in `network`) by name (its daemon half's `resolvers` section), asked at each call. */
 export type ResolverOf = (name: string) => (() => readonly string[]) | undefined;
 
 export const NO_RESOLVERS: ResolverOf = () => undefined;
