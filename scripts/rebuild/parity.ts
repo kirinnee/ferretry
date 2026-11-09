@@ -271,7 +271,12 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   if (kind === 'F' && what === 'FY_HOME/config/machine.yaml')
     return 'removed by design (duplicate of F-0377: machine.yaml is split key by key over its owners’ files, proved there)';
   if (kind === 'J' && /new RoutingMigration\(/.test(what))
-    return "removed by design (§9.1, §9.2: removed from the daemon; the v4-to-v5 converter's packs step renders the old models-guide.yaml keys and pack.yaml routingPreferences into the one routing prompt as v4 did, proved by its tests J-0052)";
+    return "removed by design (§9.1, §9.2: removed from the daemon; the v4-to-v5 converter's packs step renders the old models-guide.yaml keys and pack.yaml routingPreferences into the one routing prompt as v4 did; a home with routing prose and no use cases carries the prose alone, and the report names that v4’s default prompt prefix was not added; proved by its tests J-0052)";
+  // britnee ruling on J-0096: v4's watched read was cached until the file-event hub said it changed; Logins keeps no read
+  // cache, so there is nothing to clear. The condition of the ruling is its test: a login file changed on disk is seen
+  // by the very next read, with no restart and no watch callback.
+  if (kind === 'J' && /fleet-reading\/watched-document\.ts$/.test(file))
+    return 'removed by design (no read cache, nothing to clear), proved by its tests J-0096';
   if (/legacy|migration/.test(file) && !/session-migrate|session\/migrat|lib\/migration\/commands/.test(file)) {
     if (kind === 'J') return 'removed by design (§9.1, §9.2: one-shot conversion/old-format work)';
   }
@@ -314,7 +319,7 @@ const REOWNED: Readonly<Record<string, string>> = {
   // The housekeeping pass trigger: analytics ingestion's nudge plus its slow backstop is Usage's.
   'J-0227': 'usage',
   // The credentials' usage reading, kept current by file events: Logins'. J-0096 (a watched document is read again
-  // only when it changed) is Logins' own: its login files are read through the kernel's watched configuration.
+  // only when it changed) is Logins' own, and `removal()` marks it removed by design: Logins keeps no read cache.
   'J-0096': 'logins',
   'J-0232': 'logins',
   'J-0233': 'logins',
