@@ -7,7 +7,9 @@
  */
 import { afterEach, expect, test } from 'bun:test';
 import { link, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { AdmissionPort } from '../../../contract/bound.ts';
 import type { LogRecord } from '../../../host/log.ts';
+import { recordingAdmission, request } from '../host/fixtures.ts';
 import { tmpdir } from 'node:os';
 import { defineState } from '../../../contract/define.ts';
 import type { FencedPath } from '../../../contract/bound.ts';
@@ -198,6 +200,9 @@ test('PF-loud the real host says so when a private place passes its budget: one 
       homeLock: async () => ({ release: async () => {} }),
     },
     implementations: [
+      implementDaemon(definePlugin({ ...base, id: 'gate', core: true, provides: { admission: AdmissionPort } }), {
+        build: () => ({ provides: { admission: recordingAdmission() } }),
+      }),
       implementDaemon(
         definePlugin({ ...base, id: 'holder', data: { state: [VAULT] }, privacy: { private: ['vault'] } }),
         { build: () => ({}) },
@@ -245,6 +250,10 @@ test('PF-loud the real host says so when a private place passes its budget: one 
     const line = (await outcome.host.doctor()).find(found => found.detail.includes('private place'));
     expect(line?.detail).toContain('state/holder/vault');
     expect(line?.fix).toContain('state/holder/vault');
+    // The same line is in `GET /v1/doctor`, the route `fy doctor` and the app read.
+    const route = await outcome.host.dispatch(request('GET', '/v1/doctor'));
+    expect(route.status).toBe(200);
+    expect(route.body).toContain('state/holder/vault');
     // It fits again: the refusal is lifted at the next look, said once, and the failing line is gone.
     await Promise.all(Array.from({ length: 200 }, (_, at) => rm(`${vault}/f${at}`)));
     await new Promise(done => setTimeout(done, 400));

@@ -173,26 +173,7 @@ describe('PF-budget the real bound fails closed: a place past its budget is trun
     expect(await fencedReal(REAL, fence, `${l.parent}/work/notes.md`)).toBe(false);
   });
 
-  test('PF-budget the tree that is the root’s own is never closed against it: a login’s own root reads while its tree is truncated', async () => {
-    const l = await home();
-    await fill(`${l.home}/state/logins/credentials`, 60, n => `L${n}/auth.json`, 'sealed');
-    const real = await realpath(l.home);
-    const snapshot = await privateIndexOf(
-      REAL,
-      real,
-      { pins: () => [], private: LIST },
-      { bounds: { depth: 3, limit: 20 }, wall: LATER },
-    ).snapshot();
-    expect(snapshot.truncated).toEqual([`${real}/state/logins/credentials`]);
-    const own = rootsPortFor(
-      REAL,
-      { home: l.home, plugin: 'logins', worktrees: `${l.home}-worktrees` },
-      ['credentials'],
-      () => undefined,
-      { random: () => 'r', privateFiles: LIST },
-    ).root('credentials', {});
-    expect(await own.readText(named(own, 'L1/auth.json'))).toBe('sealed');
-  });
+  // The root's own truncated tree is tested where the root and the index share the real bound (private-files-flat.test.ts).
 });
 
 describe('PF-index the index is kept incrementally: a change is read again where it happened, not everywhere', () => {

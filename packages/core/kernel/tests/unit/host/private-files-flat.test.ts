@@ -146,6 +146,46 @@ describe('PF-flat a look costs what changed, not every session ever made', () =>
     expect(meter.lists()).toBe(lists);
   });
 
+  test('PF-flat a new login folder re-reads the folder it landed in and the new one, never its 30 unchanged siblings', async () => {
+    const l = await home();
+    await fill(`${l.home}/state/logins/credentials`, 30, n => `L${n}/auth.json`);
+    const real = await realpath(l.home);
+    const meter = counted(REAL);
+    const index = privateIndexOf(meter.fs, real, INPUT, { wall: LATER });
+    const first = await index.snapshot();
+    expect(meter.lists()).toBeGreaterThan(30);
+    const lists = meter.lists();
+    await fill(`${l.home}/state/logins/credentials`, 1, () => 'L99/auth.json');
+    const after = await index.snapshot();
+    expect(after.places.some(place => place.path.endsWith('L99/auth.json'))).toBe(true);
+    expect(after).not.toBe(first);
+    // The changed folder (`credentials`) and the new one (`L99`): two listings, not 32.
+    expect(meter.lists() - lists).toBeLessThanOrEqual(3);
+  });
+
+  test('PF-flat a scan that failed halfway is redone at the next look, never answered from the snapshot before it', async () => {
+    const l = await home();
+    await fill(`${l.home}/state/logins/credentials`, 1, () => 'L1/auth.json');
+    const real = await realpath(l.home);
+    let broken = false;
+    const flaky: HostFs = {
+      ...REAL,
+      list: async path => {
+        if (broken && path.endsWith('credentials/L2')) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+        return await REAL.list(path);
+      },
+    };
+    const index = privateIndexOf(flaky, real, INPUT, { wall: LATER });
+    await index.snapshot();
+    await fill(`${l.home}/state/logins/credentials`, 1, () => 'L2/auth.json');
+    broken = true;
+    await expect(index.snapshot()).rejects.toThrow('denied');
+    broken = false;
+    // The folders it learned of before it failed are as they are now; the failure must not make the look "unchanged".
+    const after = await index.snapshot();
+    expect(after.places.some(place => place.path.endsWith('L2/auth.json'))).toBe(true);
+  });
+
   test('PF-flat a file replaced in a session folder that changed lately is found at the very next look', async () => {
     const l = await home();
     await fill(l.sessions, 40, n => `s${n}/${ENV}`);
