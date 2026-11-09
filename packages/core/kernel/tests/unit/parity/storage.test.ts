@@ -8,17 +8,19 @@
  * Not proved here, and why (see the report): the `fy daemon` lifecycle claim files, the restart marker and the
  * syscall trace folder live in the `fy` shell, which a kernel test may not import (context-imports); `health.jsonl` /
  * `self-restart.json` are Ferrets' own files and not ported yet; `auth.json` belongs to Runtimes; the one-time conversion report
- * (F-0384) is an artefact that a clean slate does not keep. F-0033 (the identity key's pin) is not proved here: the fence
- * pins no 5.0 key path yet, and the unit that fixes it ticks the row.
+ * (F-0384) is an artefact that a clean slate does not keep. F-0033 (the identity key's pin) is proved in the identity
+ * key's describe below on the real fence; every door that reaches the pinned name is in host/fence-rows.test.ts, and the
+ * one owner of the path is host/identity-pin-single-source.test.ts.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { instantFromEpochMs } from '@ferretry/std';
 import { FerretIndexFile } from '../../../../ferrets/contract/state.ts';
 import { acceptedName } from '../../../contract/accepted.ts';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
+import { fencedReal, fenceOf, PINNED_KEY_PATHS } from '../../../host/fence-guard.ts';
 import { openHome } from '../../../host/home.ts';
 import { IDENTITY_FILE, loadIdentity } from '../../../host/identity.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
@@ -103,6 +105,22 @@ describe('the daemon identity key', () => {
     expect(again.kind === 'ready' && made.kind === 'ready' && again.identity.daemonId === made.identity.daemonId).toBe(
       true,
     );
+  });
+
+  test('F-0033 the key the kernel really writes is pinned by identity: a hard link to it under an innocent name is fenced', async () => {
+    const home = await freshHome();
+    await openHome(fs, home, 'fyd 5.0.0', instantFromEpochMs(Date.UTC(2026, 10, 8)));
+    await loadIdentity(fs, home);
+    const work = join(dirname(home), 'work');
+    await mkdir(work, { recursive: true });
+    await link(join(home, IDENTITY_FILE), join(work, 'innocent.txt'));
+    await writeFile(join(work, 'plain.txt'), 'not the key');
+
+    expect(PINNED_KEY_PATHS).toContain(IDENTITY_FILE);
+    const fence = await fenceOf(fs, home);
+    // The name outside the home means nothing; the identity (device and inode) is what is held.
+    expect(await fencedReal(fs, fence, join(work, 'innocent.txt'))).toBe(true);
+    expect(await fencedReal(fs, fence, join(work, 'plain.txt'))).toBe(false);
   });
 });
 
