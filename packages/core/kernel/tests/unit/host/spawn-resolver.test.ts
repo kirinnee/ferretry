@@ -47,6 +47,19 @@ describe('spawnPermitted: a resolver entry allows what its answer names', () => 
     expect(spawnPermitted(declared, NO_ITEMS, './npx', resolve)).toBe(true);
   });
 
+  test('BG-009 an answer’s case is exact: NODE allows neither node nor /x/node, and node does not allow NODE or /x/NODE', () => {
+    const upper = answering('NODE');
+    expect(spawnPermitted(upper.declared, NO_ITEMS, 'NODE', upper.resolve)).toBe(true);
+    for (const program of ['node', '/x/node', 'Node', '/x/Node'])
+      expect(spawnPermitted(upper.declared, NO_ITEMS, program, upper.resolve)).toBe(false);
+    const lower = answering('node');
+    for (const program of ['NODE', '/x/NODE', 'Node'])
+      expect(spawnPermitted(lower.declared, NO_ITEMS, program, lower.resolve)).toBe(false);
+    const absolute = answering('/opt/Srv/server');
+    expect(spawnPermitted(absolute.declared, NO_ITEMS, '/opt/srv/server', absolute.resolve)).toBe(false);
+    expect(spawnPermitted(absolute.declared, NO_ITEMS, '/opt/Srv/server', absolute.resolve)).toBe(true);
+  });
+
   test('a wildcard answer allows nothing, and a pattern in an answer is dropped beside its good neighbours', () => {
     const { resolve, declared } = answering('*', 'np*', '', 'npx');
     expect(spawnPermitted(declared, NO_ITEMS, 'rm', resolve)).toBe(false);
