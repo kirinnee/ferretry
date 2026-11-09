@@ -237,7 +237,7 @@ describe('the host arms the configuration', () => {
     expect(trace.at(-1)).toBe('watch:stop');
   });
 
-  test('J-0066 F-0151 boot publishes the editors’ schemas, config/.schema/<claim>.json, once the configuration is loaded', async () => {
+  test('J-0066 boot publishes the editors’ schemas, config/.schema/<claim>.json, once the configuration is loaded', async () => {
     const root = await mkdtemp(`${tmpdir()}/parity-schemas-`);
     roots.push(root);
     const home = `${root}/home`;
@@ -290,7 +290,14 @@ describe('the host arms the configuration', () => {
     roots.push(root);
     const home = `${root}/home`;
     const trace: string[] = [];
-    const real = realAdapters(home, () => {}, { binary: 'fy' });
+    const warnings: { message: string; fields?: Record<string, unknown> }[] = [];
+    const real = realAdapters(
+      home,
+      record => {
+        if (record.level === 'warn') warnings.push(record);
+      },
+      { binary: 'fy' },
+    );
     const adapters: HostOptions['adapters'] = {
       ...real,
       clock: fixedClock(),
@@ -329,6 +336,13 @@ describe('the host arms the configuration', () => {
     hosts.push(result.host);
     expect(trace.slice(0, 2)).toEqual(['load', 'publish']);
     expect(result.host).toBeDefined();
+    // The daemon serves, and the warning says why the schemas were not written.
+    expect(warnings).toContainEqual(
+      expect.objectContaining({
+        message: 'the configuration schemas could not be written',
+        fields: { reason: 'read-only' },
+      }),
+    );
   });
 });
 
@@ -343,7 +357,8 @@ describe('the spawn deadline', () => {
         '-e',
         "process.on('SIGTERM', () => {}); process.stdout.write(String(process.pid)); setInterval(() => {}, 1_000);",
       ],
-      { timeout: milliseconds(500) },
+      // Long enough for a fresh `bun -e` to start and write its pid on a loaded runner; far inside the five-second bound below.
+      { timeout: milliseconds(2_000) },
     );
     expect(answer.timedOut).toBe(true);
     expect(answer.exitCode).toBe(-1);

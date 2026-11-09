@@ -294,6 +294,41 @@ describe('applyFailureSummary', () => {
     });
   });
 
+  it('BG-031 OM6 should carry the landed configuration files on a rollback-incomplete outcome', () => {
+    const outcome = applyFailureSummary(
+      new FleetApplyFailureError({
+        kind: 'rollback-incomplete',
+        failedOperation: 'write /h/a',
+        reason: 'boom',
+        unrestored: [{ path: '/h/a', reason: 'changed' }],
+      }),
+      ['/c/runtimes/work.yaml'],
+    );
+    should(ApplyOutcomeSchema.safeParse(outcome).success).be.true();
+    should(outcome).have.property('configurationLanded', ['/c/runtimes/work.yaml']);
+  });
+
+  it('BG-031 OM8 should carry no landed files on a committed-with-history-failure outcome, which the strict client parse would reject', () => {
+    const outcome = applyFailureSummary(
+      new FleetApplyFailureError({
+        kind: 'history-failed-after-commit',
+        failedHarness: 'claude',
+        reason: 'disk full',
+        committed: {
+          accountCount: 1,
+          operationCount: 4,
+          manifestPath: '/fy/fleet/manifest.json',
+          manifest: MANIFEST,
+          prunedWrappers: [],
+          sharedHistory: HISTORY,
+        },
+      }),
+      ['/c/runtimes/work.yaml'],
+    );
+    should(ApplyOutcomeSchema.safeParse(outcome).success).be.true();
+    should(outcome).not.have.property('configurationLanded');
+  });
+
   it('should read a restored host as rolled-back', () => {
     should(
       applyFailureSummary(

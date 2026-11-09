@@ -9,10 +9,11 @@ import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/
 /**
  * A remove of a FOLDER needs descriptor reach. On a host without `/proc/self/fd` (macOS) the by-path fallback was a
  * hole: one re-proof of the parent, then `rm -r <parent>/<leaf>`, so a parent swapped for a link in between deleted an
- * OUTSIDE tree. A folder is refused until the descriptor bracket lands. A file or link leaf of an internal root is
- * still unlinked by path (the sessions root's markers, tidy's reclaim): `unlink` never removes a tree, so the worst a
- * swapped parent costs is ONE same-named file outside the root (declared GAP). An owner root removes nothing. S44 owns
- * the row.
+ * OUTSIDE tree. On a host that loaded neither the C library's descriptor calls nor the working-directory bracket a
+ * folder is refused (BG-002 owns the host that loaded both: `root-remove-bracket.test.ts`). A file or link leaf of an
+ * internal root is still unlinked by path (the sessions root's markers, tidy's reclaim): `unlink` never removes a tree,
+ * so the worst a swapped parent costs is ONE same-named file outside the root (declared GAP). An owner root removes
+ * nothing. S44 owns the row.
  */
 
 const parents: string[] = [];

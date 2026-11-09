@@ -81,7 +81,7 @@ export const readChangeAuthority = async (client: RuntimesClient): Promise<Fleet
  * An apply the daemon ANSWERED (200) but that did not finish: the fleet apply failed after the change was staged.
  *
  * - `rolled-back`: the fleet was put back. The configuration files the change wrote first are NOT undone by that
- *   (`landed`): they stay on disk and the next apply publishes them.
+ *   (`landed`, each one created, edited or removed): that change stays and the next apply publishes it.
  * - `rollback-incomplete`: the fleet could not be fully put back. `unrestored` (and `displaced`) are the paths left
  *   partly changed; the host needs a look.
  *
@@ -93,7 +93,7 @@ interface UnfinishedApply {
   readonly staged: AccountChangeView;
   /** One alert-sized message: the outcome first, then the files and what the owner can do. */
   readonly sentence: string;
-  /** Configuration files that stayed on disk and are live at the next apply. */
+  /** Configuration files the change created, edited or removed: that change stayed and is live at the next apply. */
   readonly landed: readonly string[];
   /** Paths left partly changed (empty for `rolled-back`). */
   readonly unrestored: readonly string[];
@@ -200,8 +200,8 @@ const applyOf = (outcome: AccountChangeOutcome): ApplyOutcome | undefined => {
 
 const landedSentence = (landed: readonly string[], remedy: string): string =>
   landed.length === 0
-    ? 'No configuration file was left on disk.'
-    : `${fileWord(landed.length, 'This configuration file stayed', 'These configuration files stayed')} on disk and ${fileWord(landed.length, 'goes', 'go')} live at the next apply: ${landed.join(', ')}. ${remedy}`.trimEnd();
+    ? `No configuration file was left on disk. ${remedy}`.trimEnd()
+    : `${fileWord(landed.length, 'This configuration change stayed', 'These configuration changes stayed')} and ${fileWord(landed.length, 'goes', 'go')} live at the next apply: ${landed.join(', ')}. ${remedy}`.trimEnd();
 
 /**
  * What an apply that did not finish says, in the order a person reads it: the outcome first, then what failed, then
@@ -224,7 +224,9 @@ const unfinished = (
         failure,
         landedSentence(
           landed,
-          `To undo it, remove ${fileWord(landed.length, 'that file', 'those files')}. Or fix the cause and apply again.`,
+          landed.length === 0
+            ? 'Fix the cause and apply again.'
+            : `Fix the cause and apply again. To undo the change instead, put ${fileWord(landed.length, 'that file back as it was, or delete it if it did not exist before', 'those files back as they were, or delete any that did not exist before')}.`,
         ),
       ].join(' '),
     };
@@ -241,10 +243,12 @@ const unfinished = (
     sentence: [
       'This change was not applied, and the fleet could not be fully put back, so this machine needs a look.',
       failure,
-      `${fileWord(left.length, 'This path was', 'These paths were')} left partly changed: ${left.join(', ')}.`,
+      ...(left.length === 0
+        ? []
+        : [`${fileWord(left.length, 'This path was', 'These paths were')} left partly changed: ${left.join(', ')}.`]),
       ...(moved.length === 0 ? [] : [`Moved aside: ${moved.join(', ')}.`]),
       landedSentence(landed, ''),
-      'Check these paths and files before you apply again, then fix the cause and apply again.',
+      'Check these paths and files, fix the cause, then apply again.',
     ].join(' '),
   };
 };

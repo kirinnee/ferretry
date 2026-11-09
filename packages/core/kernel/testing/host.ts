@@ -222,8 +222,9 @@ export interface TestHostOptions {
   /** The kernel home the test roots' fence is judged against (`harnessFile` refuses a path in it). Default: `/test-home`. */
   readonly fenceHome?: string;
   /**
-   * A host that cannot reach an entry through a held folder (macOS today): the `project-files` root, an owner's root,
-   * refuses every remove `no_descriptor_reach`, as the real host does there. Default: it has reach.
+   * A host that cannot reach an entry through a held folder (macOS whose C library or working-directory bracket could
+   * not be loaded): the `project-files` root, an owner's root, refuses every remove `no_descriptor_reach`, as the real
+   * host does there. Default: it has reach, as macOS does when both load (a remove goes through the folder's descriptor).
    */
   readonly noDescriptorReach?: true;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
@@ -925,14 +926,19 @@ async function start(world: World): Promise<TestHost> {
       // The in-memory world holds no edit held for the owner, so the owner's patch is a write of that patch (merged
       // one level deep into the keys `within` names, as the real writer merges it).
       async writeAsOwner(def, name, edit, writeOptions = {}) {
-        // As the real writer: a `within` that is not a list is refused, never read as something else.
-        if (!isWithinList(edit.within))
+        // As the real writer, in its order: an undeclared def and a bad name are answered first, then a `within` that is
+        // not a list is refused, never read as something else.
+        if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
+        if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
+          return { kind: 'refused', reason: 'bad_name', issues: [] };
+        const within = edit.within;
+        if (!isWithinList(within))
           return {
             kind: 'refused',
             reason: 'schema',
             issues: [{ path: keyOf(def), message: '`within` must be a list of top-level key names' }],
           };
-        return await write(def, name, { patch: edit.patch }, writeOptions, edit.within);
+        return await write(def, name, { patch: edit.patch }, writeOptions, within);
       },
       async remove(def, name, writeOptions = {}) {
         if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
@@ -1649,7 +1655,9 @@ async function start(world: World): Promise<TestHost> {
             stderr: result.stderr,
             stdoutTruncated: all.byteLength > cap,
             stderrTruncated: false,
-            timedOut: false,
+            // The real `runBytes` kills at its timeout and answers `timedOut`, `-1`; a fake `run` that answers the
+            // signal shape (`exitCode: null`) under a timeout the caller set is that same event.
+            timedOut: result.exitCode === null && spawnOptions?.timeout !== undefined,
           };
         },
         start(program, args, spawnOptions): ChildHandle {
