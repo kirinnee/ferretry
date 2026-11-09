@@ -8,7 +8,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import {
-  componentSourceFence,
   documentRevision,
   readConfigAccountDocument,
   readDeclaredAccountModel,
@@ -16,12 +15,7 @@ import {
   sessionStatusOf,
 } from '../../daemon/adapters/account-model-files.ts';
 import { readFleetManifest } from '../../daemon/adapters/manifest-file.ts';
-import {
-  adapterHostFrom,
-  type ConfigFilesPort,
-  refusedHostFiles,
-  refusedProvisionerKernel,
-} from '../../daemon/adapters/ports.ts';
+import { type ConfigFilesPort, refusedHostFiles } from '../../daemon/adapters/ports.ts';
 import { RuntimeIdsFile } from '../../daemon/adapters/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../../daemon/adapters/runtime-session-records.ts';
 import { MAX_FOLDER_FILES, readTextFolder, skillItemsIn } from '../../daemon/adapters/setup-files.ts';
@@ -51,22 +45,6 @@ describe('the refused seams', () => {
 
     // Assert
     await should(act).be.rejectedWith(/the host's files is not available to the Runtimes plugin yet/u);
-  });
-
-  it('should refuse the provisioner helpers rather than falling back to node:fs', () => {
-    // Act
-    const act = () => refusedProvisionerKernel.applyLockFor('/anywhere/manifest.json');
-
-    // Assert
-    should(act).throw(/not available to the Runtimes plugin yet/u);
-  });
-
-  it('should take the time from the kernel clock', () => {
-    // Arrange
-    const host = adapterHostFrom({ clock: { nowMs: () => 1234 } as never });
-
-    // Act / Assert
-    should(host.now()).equal(1234);
   });
 });
 
@@ -295,14 +273,6 @@ describe('the account model files', () => {
     should(await documentRevision(nodeHostFiles, path.join(root, 'none'))).equal(ABSENT_DOCUMENT_REVISION);
   });
 
-  it('should fence the daemon directories and open the asset tree', () => {
-    // Act
-    const fence = componentSourceFence({ home: '/h', state: '/h/state', config: '/h/config', fleet: '/h/fleet' });
-
-    // Assert
-    should(fence).deepEqual({ homes: ['/h', '/h/state', '/h/config'], open: ['/h/fleet/assets'] });
-  });
-
   it('should name a renamed runtime file new path to old path, under runtimes/', () => {
     // Act / Assert
     should([...runtimeFileMoves({ from: 'old', to: 'new' })]).deepEqual([['runtimes/new.yaml', 'runtimes/old.yaml']]);
@@ -333,8 +303,6 @@ describe('the account model files', () => {
         { path: 'runtimes/gone.yaml', content: undefined, expect: 'etag-2' },
       ],
       mentionsRenamed: (_load, rename) => [{ path: 'warden.yaml', content: `to: ${rename.to}\n`, expect: 'etag-3' }],
-      acknowledge: () => undefined,
-      acknowledgeRemoval: () => undefined,
     };
   };
 
