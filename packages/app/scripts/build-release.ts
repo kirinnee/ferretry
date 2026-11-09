@@ -63,7 +63,19 @@ const listFiles = async (directory: string): Promise<string[]> => {
     .map(entry => relative(directory, join(entry.parentPath, entry.name)).split(sep).join('/'));
 };
 
-const COMMITTED_RELEASE_KEY = join(packageRoot, 'release-signing-key.pub');
+/**
+ * Which hosted app this build belongs to is decided in ONE place, `scripts/ci/hosted-app-origin.sh`: it names the
+ * release public key (and the next-key file) to compile in, from the same `FY_HOSTED_APP_ORIGIN` switch that sets the
+ * app's and the daemon's origin. Ordinary builds get `release-signing-key.pub`.
+ */
+const hostedApp = (flag: '--key-file' | '--next-key-file'): string => {
+  const result = spawnSync(join(repositoryRoot, 'scripts/ci/hosted-app-origin.sh'), [flag], { encoding: 'utf8' });
+  if (result.status !== 0) fail(`scripts/ci/hosted-app-origin.sh ${flag} failed: ${result.stderr.trim()}`);
+  return result.stdout.trim();
+};
+
+const COMMITTED_RELEASE_KEY = hostedApp('--key-file');
+const NEXT_RELEASE_KEY = hostedApp('--next-key-file');
 
 /**
  * NO PLUGIN CODE RUNS IN THE RELEASE WORKER. Code evaluated in the worker's realm could rewrite the globals the release
@@ -152,7 +164,14 @@ const buildRelease = async (
   publicKeyFile = COMMITTED_RELEASE_KEY,
   identity: ReleaseIdentity,
 ): Promise<void> => {
-  const key = releaseKeyFromPem(await readFile(publicKeyFile, 'utf8'));
+  const pem = await readFile(publicKeyFile, 'utf8').catch(() => null);
+  if (pem === null) {
+    fail(
+      `${publicKeyFile} is not committed: a build for this hosted app signs with it ` +
+        '(scripts/local/setup-pwa-release-v5.sh makes the key; its public half is committed on the branch that deploys it)',
+    );
+  }
+  const key = releaseKeyFromPem(pem);
   if (key === null) fail(`${publicKeyFile} is not one Ed25519 public key`);
   const rewrites = parseReleaseRewrites(await readFile(join(packageRoot, 'public/_redirects'), 'utf8'));
   const headers = parseReleaseHeaders(await readFile(join(packageRoot, 'public/_headers'), 'utf8'));
@@ -183,9 +202,9 @@ const buildRelease = async (
     files[path] = await sha256Base64Url(new Uint8Array(await readFile(join(distDirectory, path))));
   }
 
-  const nextKeyPem = await readFile(join(packageRoot, 'release-signing-key.next.pub'), 'utf8').catch(() => null);
+  const nextKeyPem = await readFile(NEXT_RELEASE_KEY, 'utf8').catch(() => null);
   const nextKey = nextKeyPem === null ? null : releaseKeyFromPem(nextKeyPem);
-  if (nextKeyPem !== null && nextKey === null) fail('packages/app/release-signing-key.next.pub is not one Ed25519 key');
+  if (nextKeyPem !== null && nextKey === null) fail(`${NEXT_RELEASE_KEY} is not one Ed25519 key`);
 
   const manifest = ReleaseManifestSchema.parse({
     // The release this app ships from (`release.json`, §10.6): the app ships from the release, not from `main`.

@@ -13,7 +13,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dist="${1:?usage: verify-pwa-release.sh <dist> [<public-key.pem>]}"
-public_key="${2:-${script_dir}/../../packages/app/release-signing-key.pub}"
+public_key="${2:-$("${script_dir}/hosted-app-origin.sh" --key-file)}"
 manifest="${dist}/release-manifest.json"
 
 fail() {

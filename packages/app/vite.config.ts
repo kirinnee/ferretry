@@ -12,6 +12,7 @@
  * sealed session (§9.6); a proxy would reintroduce the single-origin coupling pairing removed.
  */
 import autoprefixer from 'autoprefixer';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
@@ -41,8 +42,23 @@ const getStartedPage = fileURLToPath(new URL('../plugins/onboarding/app/get-star
  */
 const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
 
+/**
+ * THE HOSTED APP'S ORIGIN this bundle links to, from the one script every build route asks
+ * (`scripts/ci/hosted-app-origin.sh`, switched by `FY_HOSTED_APP_ORIGIN`): the production address unless a build
+ * names another (the 5.0 preview). The daemon compile sets the same define from the same script, so a pairing link,
+ * a catalog and a share link point at one app on both ends. Plugin code reads it through the kernel's
+ * `hosted-app` module, the only place the address is spelled.
+ */
+const hostedAppOrigin = (() => {
+  const script = fileURLToPath(new URL('../../scripts/ci/hosted-app-origin.sh', import.meta.url));
+  const result = spawnSync(script, [], { encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`scripts/ci/hosted-app-origin.sh failed: ${result.stderr.trim()}`);
+  return result.stdout.trim();
+})();
+
 export default defineConfig({
   define: {
+    __FY_HOSTED_APP_ORIGIN__: JSON.stringify(hostedAppOrigin),
     __FY_RELAY_DIRECTORY__: JSON.stringify(
       overriddenDirectory === '' ? HOSTED_RELAY_DIRECTORY_ORIGIN : overriddenDirectory,
     ),

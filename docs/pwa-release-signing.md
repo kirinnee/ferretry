@@ -325,3 +325,24 @@ update look like a bad deploy (a tampered cached copy is fetched again, not refu
 - **A compromised signing key** — see above. The key is the root of this whole check.
 - **A copy that is never opened.** Checks happen when the app is opened or brought back into view;
   there is no timer.
+
+## The 5.0 preview app
+
+`rebuild/5.0` deploys its own app to its own Pages project, `ferretry-v5` (https://ferretry-v5.pages.dev), from
+`.github/workflows/pwa-pages-v5.yaml`, beside production and touching none of it:
+
+- **Its own counter, key and environments.** A workflow file of its own has its own run number. It signs with a key of
+  its own, kept in the `pwa-release-v5` environment (signing) while the Cloudflare credentials live in `pwa-deploy-v5`
+  (deploying), so the job that signs never holds the token and the job that deploys never holds the key. Both
+  environments allow `rebuild/5.0` and nothing else. `scripts/local/setup-pwa-release-v5.sh` creates them and the key;
+  the owner runs it once, before the first run, and commits the printed public key as
+  `packages/app/release-signing-key.preview.pub` on `rebuild/5.0`.
+- **One switch decides which app a build belongs to.** `FY_HOSTED_APP_ORIGIN` is read by `scripts/ci/hosted-app-origin.sh`
+  and nothing else. Unset, every build is production's, with `packages/app/release-signing-key.pub`. Set (the preview
+  workflow sets it), the script names the origin, the key file and the daemon's build defines, so the app's links, the
+  release key and a daemon compiled for the preview (`scripts/release/compile.sh`) agree. The origin itself is spelled in
+  one module, `packages/core/kernel/contract/hosted-app.ts`, and `scripts/validate/hosted-app-origin.sh` refuses a second
+  literal.
+- **It cannot release.** `scripts/validate/release-guards.sh` holds every link of the release chain to `main`: Release
+  runs only after CI on `main`, CD proves a tag is on `main` before it compiles, and nothing else can write, use an
+  environment or read a secret except behind `github.ref == 'refs/heads/main'`.

@@ -1,4 +1,5 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract/hosted-app';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
@@ -232,7 +233,7 @@ export default definePlugin({
       'chatgpt.com',
       'api.openai.com',
       'claude.ai',
-      'ferretry.pages.dev',
+      new URL(HOSTED_APP_ORIGIN).host,
       'openrouter.ai',
       'ai-gateway.vercel.sh',
       'api.deepseek.com',

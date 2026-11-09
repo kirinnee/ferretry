@@ -87,6 +87,15 @@ mkdir -p "${OUTDIR}"
 
 # The daemon compiles the hosted directory default from its one source constant. Do not add a build define
 # here: a release-only define was why Nix and GoReleaser could produce different reachability.
+#
+# The hosted APP's origin is the one build-time choice that may differ: `scripts/ci/hosted-app-origin.sh` (the
+# switch is FY_HOSTED_APP_ORIGIN) prints its defines, and prints NOTHING for the production app, so an ordinary
+# release compiles exactly as before. The 5.0 preview sets it to build a daemon that links to its own app.
+hosted_app_defines=()
+while IFS= read -r define; do
+  [ -z "${define}" ] && continue
+  hosted_app_defines+=(--define "${define}")
+done < <(./scripts/ci/hosted-app-origin.sh --defines)
 
 count=0
 while IFS=$'\t' read -r target suffix _ _; do
@@ -95,7 +104,7 @@ while IFS=$'\t' read -r target suffix _ _; do
     artifact="${prefix}-${suffix}"
     echo "🔨 compiling ${package} for ${target} -> ${OUTDIR}/${artifact}"
     bun ./scripts/release/compile-executable.ts --entry "./${package}/${entry}" --target "${target}" \
-      --outfile "${OUTDIR}/${artifact}"
+      --outfile "${OUTDIR}/${artifact}" ${hosted_app_defines[@]+"${hosted_app_defines[@]}"}
     count=$((count + 1))
   done < <(shipped_bins)
 done <<<"${targets}"

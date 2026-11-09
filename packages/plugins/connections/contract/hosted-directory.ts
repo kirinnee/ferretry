@@ -1,5 +1,7 @@
-/** The hosted app's origin: where a pairing link, a catalog and a share link point (today's `HOSTED_APP_ORIGIN`). */
-export const HOSTED_APP_ORIGIN = 'https://ferretry.pages.dev';
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract/hosted-app';
+
+/** The hosted app's origin: where a pairing link, a catalog and a share link point. Owned by the kernel's `hosted-app` module. */
+export { HOSTED_APP_ORIGIN };
 
 /**
  * Today's shared service origin, never a carrier or a daemon address. The no-store advertisement chooses the
