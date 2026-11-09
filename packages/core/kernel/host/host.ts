@@ -444,6 +444,14 @@ async function bootLocked(
   // Home and fence, identity (before anything is read from the home).
   const opened = await openHome(adapters.fs, home, `fyd ${options.version}`, clock.now() as Instant);
   if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace };
+  if (opened.kind === 'logs-refused') return { kind: 'refused', sentence: opened.sentence, trace };
+  // From here the log is written: a folder made or tightened now is the first thing it says.
+  if (opened.logs !== undefined)
+    log.info(
+      opened.logs === 'made'
+        ? 'logs/ did not exist and was made (0700)'
+        : 'logs/ was open to other users and is now 0700',
+    );
   const deadline = deadlineFrom(clock);
   trace.push('identity');
   const identityOutcome = await loadIdentity(adapters.fs, home);
@@ -1482,6 +1490,8 @@ async function bootLocked(
     })();
     return stopping;
   };
+  // The first line of every run: a log that stays empty on a healthy boot cannot be told from one nothing writes to.
+  log.info('the daemon is serving', { version: options.version });
   return { kind: 'running', host: running };
 }
 

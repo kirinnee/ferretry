@@ -123,6 +123,12 @@ describe('answering a harness dialog from the app', () => {
     );
   });
 
+  test('G32 another refusal passes through untouched', async () => {
+    const refused = new Refused(403, 'grant_refused', 'no');
+
+    await expect(answerHarnessDialog(client(refused), 'f1', { kind: 'escape', dialogId: ID })).rejects.toBe(refused);
+  });
+
   test('G32 the words name Claude Code and the trust a row grants', () => {
     const dialog = {
       id: ID,
@@ -149,6 +155,32 @@ describe('the plain words for a permission prompt', () => {
     expect(shortPermissionWhat(request({ action: 'run', what: 'curl   -s\nhttps://example.com' }))).toBe(
       'curl -s https://example.com',
     );
+  });
+
+  test('every kind of request is a verb phrase, with the command or path when it is known and a noun when it is not', () => {
+    expect(permissionPhrase(request({ action: 'run', what: 'curl -s https://example.com' }))).toBe(
+      'run `curl -s https://example.com`',
+    );
+    expect(permissionPhrase(request({ action: 'run', what: undefined }))).toBe('run a command');
+    expect(permissionPhrase(request({ action: 'read', what: '/etc/hostname' }))).toBe('read /etc/hostname');
+    expect(permissionPhrase(request({ action: 'edit', what: undefined }))).toBe('edit a file');
+    expect(permissionPhrase(request({ action: 'create', what: undefined }))).toBe('create a file');
+    expect(permissionPhrase(request({ action: 'fetch', what: undefined }))).toBe('fetch a web page');
+    expect(permissionPhrase(request({ action: 'use', tool: 'WebSearch', what: 'pdf tools' }))).toBe('use pdf tools');
+    expect(permissionPhrase(request({ action: 'use', tool: 'WebSearch', what: undefined }))).toBe('use WebSearch');
+    expect(permissionPhrase(request({ action: 'other', tool: 'Task' }))).toBe('use Task');
+  });
+
+  test('a request with nothing to draw after the verb is one whole sentence, and an unknown tool asks for permission', () => {
+    expect(permissionWords('Hadi', request({ action: 'exit-plan', what: undefined }))).toEqual({
+      lead: 'Hadi wants to exit plan mode and start',
+    });
+    expect(permissionWords('Hadi', request({ action: 'run', what: undefined }))).toEqual({
+      lead: 'Hadi wants to run a command',
+    });
+    expect(permissionWords('Hadi', request({ action: 'other', tool: 'Task' }))).toEqual({
+      lead: 'Hadi needs permission to use Task',
+    });
   });
 
   test('buttons say what they do and keep the harness label', () => {

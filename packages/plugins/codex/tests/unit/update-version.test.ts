@@ -7,6 +7,7 @@ import {
   codexVerification,
   compareVersions,
   harnessCommandLine,
+  harnessInstallLabel,
   type InstallFacts,
   isVersion,
   needsUnverifiedConsent,
@@ -203,5 +204,177 @@ describe('what updating takes', () => {
       explanation: 'Ferretry cannot update Codex here: no idea.',
       steps: [],
     });
+  });
+});
+
+describe('the rest of the version order', () => {
+  it('orders prereleases of one release by their dot-separated parts, as semver does', () => {
+    const order = (lower: string, higher: string) => [compareVersions(lower, higher), compareVersions(higher, lower)];
+    should(order('0.150.0-alpha.2', '0.150.0-alpha.10')).eql([-1, 1]);
+    should(order('0.150.0-1', '0.150.0-alpha')).eql([-1, 1]);
+    should(order('0.150.0-alpha', '0.150.0-beta')).eql([-1, 1]);
+    should(order('0.150.0-alpha', '0.150.0-alpha.1')).eql([-1, 1]);
+    should(compareVersions('0.150.0-alpha.1', '0.150.0-alpha.1')).equal(0);
+    should(compareVersions('0.150.0+build', '0.150.0')).equal(0);
+  });
+
+  it('names a prerelease of a later release as unverified, and of an earlier one as older', () => {
+    should(codexVerification('0.146.0-alpha.1')).equal('unverified');
+    should(codexVerification('0.144.0-rc.1')).equal('older');
+  });
+});
+
+describe('every way a Nix store file can have been reached', () => {
+  const store = '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-codex';
+  const reached = (launchedPath: string, extra: Partial<InstallFacts> = {}) =>
+    classifyCodexInstall(facts(`${store}/bin/codex`, { launchedPath, ...extra }));
+
+  it('reads a system profile as a module of the system’s own manager, on either platform', () => {
+    should(reached('/run/current-system/sw/bin/codex')).eql({ kind: 'nix-module', manager: 'nixos' });
+    should(reached('/etc/profiles/per-user/kirin/bin/codex', { platform: 'darwin' })).eql({
+      kind: 'nix-module',
+      manager: 'nix-darwin',
+    });
+    should(reached('/etc/profiles/per-user/kirin/bin/codex', { viaHomeManagerPath: true })).eql({
+      kind: 'nix-module',
+      manager: 'home-manager',
+      via: 'nixos',
+    });
+  });
+
+  it('reads a user profile as its element, as home-manager’s generation, or as nothing it can name', () => {
+    const profile = '/home/kirin/.nix-profile/bin/codex';
+    should(reached(profile, { nixProfileElement: 'codex' })).eql({ kind: 'nix-profile', element: 'codex' });
+    should(reached(profile, { homeManagerProfile: true })).eql({ kind: 'nix-module', manager: 'home-manager' });
+    should(reached(profile, { viaHomeManagerPath: true })).eql({ kind: 'nix-module', manager: 'home-manager' });
+    should(reached(profile)).eql({
+      kind: 'unknown',
+      reason: 'this nix profile has no element for it; it may have come from nix-env',
+    });
+  });
+
+  it('does not guess at a path it does not recognise', () => {
+    should(reached('/srv/odd/bin/codex')).eql({
+      kind: 'unknown',
+      reason: '/srv/odd/bin/codex leads into the Nix store by a path Ferretry does not recognise',
+    });
+  });
+});
+
+describe('the install methods that are not covered above', () => {
+  it('knows a Volta shim by the path it was launched as, and pnpm and bun globals by where they live', () => {
+    should(
+      classifyCodexInstall(
+        facts('/home/kirin/.volta/bin/volta-shim', { launchedPath: '/home/kirin/.volta/bin/codex' }),
+      ),
+    ).eql({
+      kind: 'npm-global',
+      tool: 'volta',
+      package: '@openai/codex',
+    });
+    should(classifyCodexInstall(facts('/home/kirin/.bun/install/global/node_modules/@openai/codex/bin/codex.js'))).eql({
+      kind: 'npm-global',
+      tool: 'bun',
+      package: '@openai/codex',
+    });
+    should(
+      classifyCodexInstall(facts('/home/kirin/.local/share/pnpm/global/5/node_modules/@openai/codex/bin/codex.js')),
+    ).eql({ kind: 'npm-global', tool: 'pnpm', package: '@openai/codex' });
+  });
+
+  it('gives every method a short plain name', () => {
+    should(
+      (
+        [
+          { kind: 'npm-global', tool: 'npm', package: 'p' },
+          { kind: 'npm-global', tool: 'volta', package: 'p' },
+          { kind: 'homebrew', type: 'formula', package: 'p' },
+          { kind: 'nix-profile', element: 'e' },
+          { kind: 'nix-shell', storePath: '/nix/store/x' },
+          { kind: 'nix-module', manager: 'nixos' },
+          { kind: 'standalone', directory: '/d' },
+          { kind: 'unknown', reason: 'r' },
+        ] as const
+      ).map(harnessInstallLabel),
+    ).eql([
+      'npm global',
+      'Volta',
+      'Homebrew',
+      'nix profile',
+      'nix shell (temporary)',
+      'Nix module',
+      'standalone binary',
+      'unrecognised',
+    ]);
+  });
+
+  it('reads Nix 2’s profile, an array whose index is the element’s name', () => {
+    const profile = {
+      version: 2,
+      elements: [{ storePaths: ['/nix/store/other'] }, { storePaths: ['/nix/store/x-codex'] }],
+    };
+    should(parseNixProfileList(profile, ['/nix/store/x-codex/bin/codex'])).eql({ element: '1', homeManager: false });
+  });
+
+  it('walks a path with dot-dot parts through the links it meets', async () => {
+    should(await symlinkHops('/a/./b/../claude', async () => undefined)).eql([]);
+    should(await symlinkHops('/a/../../codex', async () => undefined)).eql([]);
+    should(await symlinkHops('/a/b/../../codex', async path => (path === '/codex' ? '/real/codex' : undefined))).eql([
+      '/real/codex',
+    ]);
+  });
+});
+
+describe('the rest of what updating takes', () => {
+  const run = (method: Parameters<typeof codexUpdateRecipe>[0], target?: string) => {
+    const recipe = codexUpdateRecipe(method, target);
+    if (recipe.kind !== 'self') throw new Error('expected self');
+    return recipe;
+  };
+
+  it('installs with each node package tool in its own way, and can put the previous version back the same way', () => {
+    const lines = (tool: 'pnpm' | 'bun' | 'volta') => {
+      const recipe = run({ kind: 'npm-global', tool, package: '@openai/codex' }, '0.145.0');
+      return [recipe.run.map(harnessCommandLine), recipe.rollback?.('0.140.0').map(harnessCommandLine)];
+    };
+    should(lines('pnpm')).eql([['pnpm add -g @openai/codex@0.145.0'], ['pnpm add -g @openai/codex@0.140.0']]);
+    should(lines('bun')).eql([['bun add -g @openai/codex@0.145.0'], ['bun add -g @openai/codex@0.140.0']]);
+    should(lines('volta')).eql([['volta install @openai/codex@0.145.0'], ['volta install @openai/codex@0.140.0']]);
+  });
+
+  it('upgrades a nix profile element, refreshing it, and rolls the profile back', () => {
+    const recipe = run({ kind: 'nix-profile', element: 'codex' }, undefined);
+    should(recipe.run.map(harnessCommandLine)).eql(['nix profile upgrade --refresh codex']);
+    should(recipe.pinsVersion).be.false();
+    should(recipe.rollback?.('0.140.0').map(harnessCommandLine)).eql(['nix profile rollback']);
+  });
+
+  it('names the one switch command for each flavour of module, and where the flake is', () => {
+    const steps = (method: Parameters<typeof codexUpdatePlan>[0]) => {
+      const plan = codexUpdatePlan(method, undefined);
+      if (plan.kind !== 'manual') throw new Error('expected manual');
+      return { explanation: plan.explanation, steps: plan.steps };
+    };
+    const homeManager = steps({ kind: 'nix-module', manager: 'home-manager' });
+    should(homeManager.steps.map(step => step.command)).eql([
+      'nix flake update nixpkgs',
+      'home-manager switch --flake .',
+    ]);
+    should(homeManager.explanation).containEql('comes from your home-manager configuration');
+    const darwin = steps({ kind: 'nix-module', manager: 'nix-darwin' });
+    should(darwin.steps.map(step => step.command)).eql(['nix flake update nixpkgs', 'darwin-rebuild switch --flake .']);
+    should(darwin.explanation).containEql('comes from your nix-darwin configuration');
+    const nixos = steps({ kind: 'nix-module', manager: 'nixos' });
+    should(nixos.steps.at(-1)?.command).equal('sudo nixos-rebuild switch --flake .');
+    const inside = steps({ kind: 'nix-module', manager: 'home-manager', via: 'nixos' });
+    should(inside.steps.at(-1)?.command).equal('sudo nixos-rebuild switch --flake .');
+    should(inside.steps.at(-1)?.note).containEql('no separate home-manager switch');
+    should(inside.explanation).containEql('which nixos applies');
+  });
+
+  it('tells a standalone binary how to be replaced', () => {
+    const plan = codexUpdatePlan({ kind: 'standalone', directory: '/opt/x' }, undefined);
+    should(plan).containDeep({ kind: 'manual', steps: [{ command: 'npm install -g @openai/codex' }] });
+    should(plan.kind === 'manual' && plan.explanation).containEql('/opt/x');
   });
 });

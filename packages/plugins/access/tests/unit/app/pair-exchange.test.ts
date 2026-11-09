@@ -176,6 +176,29 @@ describe('the pairing exchange', () => {
     should(added).be.empty();
   });
 
+  it('keeps nothing when a relayed pairing crossed a rendezvous that cannot be dialled', async () => {
+    const { store, claims, added, base } = harness();
+    const ports: PairingPorts = {
+      ...base,
+      pairDirect: async () => {
+        throw new Error('unused');
+      },
+      pair: async input =>
+        ({
+          kind: 'paired',
+          response: await sealedPaired(input, response()),
+          via: { kind: 'relay', address: 'not a relay address' },
+        }) as PairedOver,
+    };
+
+    await exchangePairing({ ports, claims, store }, seed, 'My phone').should.be.rejectedWith(
+      /crossed a rendezvous that is not dialable/u,
+    );
+
+    should(store.keys.has(daemonId)).be.false();
+    should(added).be.empty();
+  });
+
   it('forgets the key again when the daemon list refuses the pairing', async () => {
     const { store, claims } = harness();
     const ports: PairingPorts = {

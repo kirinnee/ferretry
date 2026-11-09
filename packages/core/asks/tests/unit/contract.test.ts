@@ -8,7 +8,12 @@ import {
   AsksConfigFile,
   AskSourceSchema,
 } from '../../contract/index.ts';
-import { askSourceConformance, asksConformance, FakeAsks } from '../../contract/testing/index.ts';
+import { askSourceConformance, asksConformance, FakeAsks, standingConformance } from '../../contract/testing/index.ts';
+
+standingConformance('FakeAsks', () => {
+  const asks = new FakeAsks();
+  return { asks, boardWrites: () => asks.boardWrites };
+});
 
 asksConformance('FakeAsks', () => {
   const asks = new FakeAsks();
@@ -16,6 +21,7 @@ asksConformance('FakeAsks', () => {
     asks: {
       raise: asks.raise.bind(asks),
       notify: asks.notify.bind(asks),
+      standing: asks.standing.bind(asks),
       answers: asks.answers.bind(asks),
       close: asks.close.bind(asks),
       open: asks.open.bind(asks),

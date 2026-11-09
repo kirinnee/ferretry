@@ -38,7 +38,7 @@ import { endedSeams, fileAssembly } from './host-assembly.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
-import { autoResumeAnswer, autoResumeSwitch } from './lib/service/auto-resume-answer.ts';
+import { autoResumeAnswer, autoResumeSwitch, readAutoResume } from './lib/service/auto-resume-answer.ts';
 import { DisableExpiryWatch, earliestExpiry, keepUnpublished, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
 import { createProfileLayers } from './lib/service/profile-layers.ts';
@@ -82,8 +82,9 @@ export interface RuntimesAssembly {
    */
   readonly profileEtag?: (profile: string) => Promise<string>;
   /**
-   * The machine's "Auto-resume after restart" switch (`machine.yaml` `autoResume`): `true` on, `false` off. Absent, or
-   * answering `undefined`, until the host assembly reaches the account model: auto-resume then resumes nothing (W2-a).
+   * The machine's "Auto-resume after restart" switch: `true` on, `false` off, `undefined` when it cannot be read (a no:
+   * nothing is resumed). Absent, the switch is `runtimes.yaml` `autoResume` as that file stands; present, this answer is
+   * used as given and `undefined` never falls back to the file.
    */
   readonly autoResume?: () => boolean | undefined;
   /**
@@ -379,8 +380,9 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
             switchOn: () =>
-              assembly.autoResume?.() ??
-              autoResumeSwitch(config.fileState(runtimesFile).state, config.file(runtimesFile)),
+              readAutoResume(assembly.autoResume, () =>
+                autoResumeSwitch(config.fileState(runtimesFile).state, config.file(runtimesFile)),
+              ),
             resolve: async id => await api.resolve(id),
           }),
         },

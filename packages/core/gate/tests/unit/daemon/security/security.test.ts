@@ -211,6 +211,30 @@ describe('security settings', () => {
     expect(proof.state).toEqual({ fresh: true, claims: 0 });
   });
 
+  test('a document that cannot be read at all is a damaged one: the narrowest settings, and only the machine may replace it', async () => {
+    const svc = new SecuritySettingsService({
+      document: {
+        read: () => {
+          throw new Error('gate.yaml is unreadable');
+        },
+        write: async () => {},
+      },
+      history: { record: async () => {}, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+      clock: { now: () => '2026-11-07T12:00:00.000Z' },
+      widenCommand: 'fy daemon security set',
+    });
+    expect(svc.current()).toEqual(DAMAGED_SECURITY_SETTINGS);
+    expect(svc.view(phone).source).toBe('damaged');
+    expect(await svc.patch({ unlockValidityHours: 2 }, phone)).toEqual({ ok: false, refusal: 'unavailable' });
+  });
+
+  test('the view says when the document was last written, for the person who asks', () => {
+    const at = '2026-11-06T08:00:00.000Z';
+    const { svc } = service({ kind: 'document', settings: DEFAULT_SECURITY_SETTINGS, updatedAt: at });
+    expect(svc.view(host)).toMatchObject({ source: 'document', updatedAt: at, mayWiden: true });
+    expect(service({ kind: 'defaults' }).svc.view(phone)).not.toHaveProperty('updatedAt');
+  });
+
   test('a damaged document is read strictly, and only the machine may replace it', async () => {
     const { svc } = service({ kind: 'damaged' });
     expect(svc.current()).toEqual(DAMAGED_SECURITY_SETTINGS);

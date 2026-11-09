@@ -286,3 +286,199 @@ describe('HarnessUpdateService.start', () => {
     should(report?.message).containEql('Ferretry never runs sudo');
   });
 });
+
+/** The report an update settled with. */
+const reportOf = (view: HarnessCliView) => (view.job?.state === 'finished' ? view.job.report : undefined);
+
+describe('HarnessUpdateService, what a view and a refusal say about the less usual machines', () => {
+  it('shows a named path that does not exist as unusable, with who named it and why', async () => {
+    const world = new World();
+    world.location = {
+      outcome: 'override-absent',
+      path: '/nope/claude',
+      declaredBy: 'FY_CLAUDE_BIN',
+      reason: 'no such file',
+    };
+
+    const view = await world.service().view();
+
+    should(view.location).eql({
+      state: 'override-absent',
+      path: '/nope/claude',
+      declaredBy: 'FY_CLAUDE_BIN',
+      reason: 'no such file',
+    });
+    should(view.method).be.null();
+    should(view.available).be.false();
+  });
+
+  it('remembers the last good release through two failed checks in a row', async () => {
+    const world = new World();
+    const service = world.service();
+    await service.view();
+    (world as { latest: unknown }).latest = { kind: 'failed', reason: 'could not reach npm' };
+    world.now += HARNESS_CHECK_REUSE_MS + 1;
+    await service.view();
+    world.now += HARNESS_CHECK_REUSE_MS + 1;
+
+    const view = await service.view();
+
+    should(view.check).containEql({ state: 'failed', reason: 'could not reach npm' });
+    should(view.check.state === 'failed' && view.check.lastKnown?.latest.version).equal('2.1.230');
+    should(view.available).be.true();
+  });
+
+  it('has no release to remember when the very first check fails', async () => {
+    const world = new World();
+    (world as { latest: unknown }).latest = { kind: 'failed', reason: 'could not reach npm' };
+
+    const view = await world.service().view();
+
+    should(view.check).containEql({ state: 'failed', reason: 'could not reach npm' });
+    should(view.check.state === 'failed' && view.check.lastKnown).be.undefined();
+    should(view.available).be.false();
+  });
+
+  it('refuses a chosen version that is not newer than the one running, and says which', async () => {
+    const world = new World();
+
+    const refusal = await refusalOf(world.service().start({ target: '2.1.100' }));
+
+    should(refusal.code).equal(HARNESS_UPDATE_CODES.notAvailable);
+    should(refusal.message).containEql('already runs 2.1.200, which is not older than 2.1.100');
+  });
+
+  it('treats a version nobody could learn as one that needs the yes, and names no version', async () => {
+    const world = new World();
+    world.checks = false;
+
+    const refusal = await refusalOf(world.service().start({}));
+
+    should(refusal.code).equal(HARNESS_UPDATE_CODES.unverified);
+    should(refusal.message).containEql('could not learn which Claude Code version this would install');
+    should(refusal.unverified).eql({ verified: '2.1.220' });
+    should(world.runs).eql([]);
+  });
+});
+
+describe('HarnessUpdateService, the updates that do not go as planned', () => {
+  it('runs the native installer as the located claude, and as plain claude when it can no longer be found', async () => {
+    const world = new World();
+    world.resolved = `${HOME}/.local/share/claude/versions/2.1.200`;
+    world.script = [
+      () => {
+        world.version = { state: 'ok', version: '2.1.220' };
+        world.startup = { ok: false, reason: '--help exited 1' };
+        return { kind: 'exited', code: 0, tail: [] };
+      },
+      () => {
+        world.version = { state: 'ok', version: '2.1.200' };
+        world.startup = { ok: true };
+        return { kind: 'exited', code: 0, tail: [] };
+      },
+    ];
+    const service = world.service();
+
+    await service.start({ target: '2.1.220' });
+    const after = await finished(service);
+
+    should(world.runs.map(run => [run.program, run.args])).eql([
+      [CLAUDE, ['install', '2.1.220']],
+      [CLAUDE, ['install', '2.1.200']],
+    ]);
+    should(reportOf(after)?.outcome).equal('rolled-back');
+
+    // The same walk when the harness has gone from the machine by the time the rollback runs.
+    const gone = new World();
+    gone.resolved = `${HOME}/.local/share/claude/versions/2.1.200`;
+    gone.script = [
+      () => {
+        gone.version = { state: 'ok', version: '2.1.220' };
+        gone.location = { outcome: 'absent', searched: [] };
+        return { kind: 'exited', code: 0, tail: [] };
+      },
+      () => {
+        gone.version = { state: 'ok', version: '2.1.200' };
+        gone.location = { outcome: 'located', path: CLAUDE, rule: 'inherited environment', declaredBy: 'PATH' };
+        return { kind: 'exited', code: 0, tail: [] };
+      },
+    ];
+    const lost = gone.service();
+    await lost.start({ target: '2.1.220' });
+    await finished(lost);
+    should(gone.runs.map(run => run.program)).eql([CLAUDE, 'claude']);
+  });
+
+  it('rolls back when the install ends on a version older than the one asked for', async () => {
+    const world = new World();
+    world.script = [
+      world.installs('2.1.210'),
+      () => {
+        world.version = { state: 'ok', version: '2.1.200' };
+        return { kind: 'exited', code: 0, tail: [] };
+      },
+    ];
+    const service = world.service();
+
+    await service.start({ target: '2.1.220' });
+    const report = reportOf(await finished(service));
+
+    should(report?.outcome).equal('rolled-back');
+    should(report?.message).containEql('it runs 2.1.210, older than the 2.1.220 asked for');
+  });
+
+  it('reports an update that stopped on an error of its own, in its words', async () => {
+    const world = new World();
+    world.script = [
+      () => {
+        throw new Error('the process table is full');
+      },
+    ];
+    const service = world.service();
+
+    await service.start({ target: '2.1.220' });
+    const report = reportOf(await finished(service));
+
+    should(report?.outcome).equal('failed');
+    should(report?.message).equal('The update stopped: the process table is full.');
+  });
+
+  it('says when the install went past the version it was offered, and when its method is still behind npm', async () => {
+    const past = new World();
+    past.script = [past.installs('2.1.240')];
+    const service = past.service();
+    await service.start({ confirmUnverified: true });
+    should(reportOf(await finished(service))?.message).containEql('(newer than the 2.1.230 you were offered)');
+
+    const behind = new World();
+    behind.resolved = '/opt/homebrew/Caskroom/claude-code/2.1.200/claude';
+    behind.script = [behind.installs('2.1.220')];
+    const brew = behind.service();
+    await brew.start({ confirmUnverified: true });
+    const report = reportOf(await finished(brew));
+    should(report?.outcome).equal('succeeded');
+    should(report?.message).containEql('This install method does not have 2.1.230 yet.');
+  });
+
+  it('says the old version could not be put back when the rollback fails or does not restore it, with the command to run', async () => {
+    const failing = new World();
+    failing.startup = { ok: false, reason: '--help exited 1' };
+    failing.script = [failing.installs('2.1.220'), () => ({ kind: 'exited', code: 1, tail: ['npm ERR! nope'] })];
+    const service = failing.service();
+    await service.start({ target: '2.1.220' });
+    const failedReport = reportOf(await finished(service));
+    should(failedReport?.outcome).equal('failed');
+    should(failedReport?.message).containEql('Putting 2.1.200 back did not work either (');
+    should(failedReport?.message).containEql('stopped with exit code 1');
+    should(failedReport?.message).containEql(`npm install -g --prefix ${PREFIX} @anthropic-ai/claude-code@2.1.200`);
+
+    const unrestored = new World();
+    unrestored.startup = { ok: false, reason: '--help exited 1' };
+    unrestored.script = [unrestored.installs('2.1.220'), () => ({ kind: 'exited', code: 0, tail: [] })];
+    const quiet = unrestored.service();
+    await quiet.start({ target: '2.1.220' });
+    const quietReport = reportOf(await finished(quiet));
+    should(quietReport?.outcome).equal('failed');
+    should(quietReport?.message).containEql('Putting 2.1.200 back did not work either; run');
+  });
+});

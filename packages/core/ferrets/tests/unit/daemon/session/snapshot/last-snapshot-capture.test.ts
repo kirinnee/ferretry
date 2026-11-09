@@ -223,6 +223,30 @@ describe('F-0326 the last screen a stop keeps (last-snapshot.txt)', () => {
     }
   });
 
+  test('F-0326 a logger that throws cannot make a stop fail: the capture still settles and keeps no file', async () => {
+    const written: string[] = [];
+    const capture = new LastSnapshotCapture({
+      store: () => ({
+        write: async (_asked, text) => {
+          written.push(text);
+        },
+      }),
+      redaction: masker(),
+      sleep,
+      log: {
+        warn: () => {
+          throw new Error('the log sink is gone');
+        },
+      },
+      bound: milliseconds(2_000),
+    });
+    const failing = runnerLooking(async () => {
+      throw new Error('capture-pane failed');
+    });
+    await capture.capture(FERRET, failing, HANDLE);
+    expect(written).toEqual([]);
+  });
+
   test('F-0326 an id that is not a session id is never turned into a folder', async () => {
     const w = world();
     await w.capture.capture(

@@ -25,13 +25,10 @@ const DEFAULT_ROW: Row = { enabled: false, onlyWhenHidden: true };
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const rowOf = (value: unknown): Row =>
-  isRecord(value)
-    ? {
-        enabled: typeof value.enabled === 'boolean' ? value.enabled : DEFAULT_ROW.enabled,
-        onlyWhenHidden: typeof value.onlyWhenHidden === 'boolean' ? value.onlyWhenHidden : DEFAULT_ROW.onlyWhenHidden,
-      }
-    : DEFAULT_ROW;
+const rowOf = (value: Record<string, unknown>): Row => ({
+  enabled: typeof value.enabled === 'boolean' ? value.enabled : DEFAULT_ROW.enabled,
+  onlyWhenHidden: typeof value.onlyWhenHidden === 'boolean' ? value.onlyWhenHidden : DEFAULT_ROW.onlyWhenHidden,
+});
 
 /** Decodes the versioned store into one row per daemon, dropping anything that is not one. */
 const parsePushPreferenceStore = (raw: string | null): ReadonlyMap<DaemonId, Row> => {

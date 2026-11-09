@@ -44,6 +44,7 @@ import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { KeptItem, StepReport } from '../report.ts';
+import { keyPath } from '../key-path.ts';
 import { rewrapSealed, SealedEnvelopeError } from '../rewrap.ts';
 import { failureNote, isRecord, readV4Json, V4InputError } from '../v4/documents.ts';
 import {
@@ -77,8 +78,7 @@ export const V5CopyRulesBodySchema = z.strictObject({
 });
 
 /** The paths of a v5 refusal, never zod's messages (they may quote a host or a label). */
-const where = (error: z.ZodError): string =>
-  error.issues.map(issue => (issue.path.length === 0 ? '(top)' : issue.path.join('.'))).join(', ');
+const where = (error: z.ZodError): string => error.issues.map(issue => keyPath(issue.path)).join(', ');
 
 /** v4's `migration` origin is the owner's in v5 (the one origin v5 has). Answers the index and how many changed. */
 function ownerOrigins(accounts: Readonly<Record<string, unknown>>): {

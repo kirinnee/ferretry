@@ -89,17 +89,38 @@ class Obligations implements CardObligations {
 
   async open(cardId?: CardId): Promise<readonly OpenCardAskEntry[]> {
     if (this.openFails && cardId === undefined) throw new Error('Asks cannot list');
+    if (cardId !== undefined) this.scans.perCard += 1;
     return [...this.ledger.values()].filter(
       each => this.state.get(each.entry) === 'open' && (cardId === undefined || each.cardId === cardId),
     );
   }
 
   async answered(cardId: CardId): Promise<ReadonlySet<string>> {
+    this.scans.perCard += 1;
     return new Set(
       [...this.ledger.values()]
         .filter(e => e.cardId === cardId && this.state.get(e.entry) === 'answered')
         .map(e => e.entry),
     );
+  }
+
+  /** Whole-board scans a pass made (`openAll` and `answeredAll`), against the per-card reads it must not make. */
+  scans = { all: 0, perCard: 0 };
+
+  async openAll(): Promise<ReadonlyMap<CardId, readonly OpenCardAskEntry[]>> {
+    this.scans.all += 1;
+    const byCard = new Map<CardId, OpenCardAskEntry[]>();
+    for (const each of await this.open()) byCard.set(each.cardId, [...(byCard.get(each.cardId) ?? []), each]);
+    return byCard;
+  }
+
+  async answeredAll(): Promise<ReadonlyMap<CardId, ReadonlySet<string>>> {
+    this.scans.all += 1;
+    const byCard = new Map<CardId, Set<string>>();
+    for (const each of this.ledger.values())
+      if (this.state.get(each.entry) === 'answered')
+        byCard.set(each.cardId, (byCard.get(each.cardId) ?? new Set<string>()).add(each.entry));
+    return byCard;
   }
 
   /** Asks marks the entry answered once the Board has applied the answer. */
@@ -163,8 +184,12 @@ const fixture = (
       building: 0,
     };
   };
+  const boardCalls = { card: 0 };
   const board: GateBoard = {
-    card: read,
+    card: async id => {
+      boardCalls.card += 1;
+      return await read(id);
+    },
     cards: async () =>
       (await Promise.all([...store.cards.keys()].map(read))).flatMap(each => (each === undefined ? [] : [each])),
     act: async (id, request, caller, expect) => {
@@ -215,6 +240,7 @@ const fixture = (
     store,
     service,
     obligations,
+    boardCalls,
     warnings,
     told,
     answer,
@@ -254,6 +280,63 @@ describe('a card at a gate has one obligation through Asks, never an ask of its 
     await w.gates.written('F1');
 
     should(w.obligations.raised).have.length(1);
+  });
+
+  it('should read Asks twice for a pass over 100 gate cards, not twice per card', async () => {
+    const cards = Array.from({ length: 100 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(cards);
+    for (const each of cards) await w.service.trigger(each.id, 'release.running');
+    should(w.obligations.openEntries()).have.length(100);
+    w.obligations.scans.all = 0;
+    w.obligations.scans.perCard = 0;
+
+    const raised = await w.gates.sweep();
+
+    should(raised).equal(0);
+    should(w.obligations.scans.all).equal(2);
+    should(w.obligations.scans.perCard).equal(0);
+    should(w.obligations.openEntries()).have.length(100);
+  });
+
+  it('should look at no card on its own while sweeping 100 cards that hold an open ask', async () => {
+    const cards = Array.from({ length: 100 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(cards);
+    for (const each of cards) await w.service.trigger(each.id, 'release.running');
+    w.boardCalls.card = 0;
+
+    await w.gates.sweep();
+
+    should(w.boardCalls.card).equal(0);
+    should(w.obligations.openEntries()).have.length(100);
+  });
+
+  it('should read Asks twice for a pass over 3000 gate cards, not twice per card', async () => {
+    const cards = Array.from({ length: 3000 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(cards);
+    for (const each of cards) await w.service.trigger(each.id, 'release.running');
+    should(w.obligations.openEntries()).have.length(3000);
+    w.obligations.scans.all = 0;
+    w.obligations.scans.perCard = 0;
+
+    const raised = await w.gates.sweep();
+
+    should(raised).equal(0);
+    should(w.obligations.scans.all).equal(2);
+    should(w.obligations.scans.perCard).equal(0);
+  }, 60_000);
+
+  it('should stop a pass at the next card once its signal aborts', async () => {
+    const cards = Array.from({ length: 20 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(cards);
+    const controller = new AbortController();
+    controller.abort();
+
+    await w.gates.sweep(controller.signal).then(
+      () => should.fail(undefined, undefined, 'a stopped pass must not complete'),
+      (error: unknown) => should((error as Error).name).equal('AbortError'),
+    );
+
+    should(w.obligations.scans.perCard).equal(0);
   });
 
   it('should withdraw the ask when the owner moves the card on without answering it', async () => {

@@ -19,6 +19,7 @@ export * from './liveness.ts';
 export * from './liveness-monitor.ts';
 export * from './logins.ts';
 export * from './marker.ts';
+export * from './orphan-item.ts';
 export * from './orphans.ts';
 export * from './owner-hold.ts';
 export * from './owner-routes.ts';

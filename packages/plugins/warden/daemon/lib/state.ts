@@ -493,7 +493,7 @@ const RuntimeStateSchema = z.object({
       z.string(),
       z.object({
         assignee: z.string().min(1),
-        via: z.enum(['owner', 'notice']),
+        via: z.enum(['owner', 'list', 'notice']),
         to: z.string().min(1),
         at: Instant,
       }),

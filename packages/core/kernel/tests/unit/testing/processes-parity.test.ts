@@ -135,8 +135,18 @@ async function cases(
   await fleet.makeDirectory(at(fleet, 'bin'));
   const outsideHomes: OwnFolder = { root: fleet, path: at(fleet, 'bin') };
   const homesItself: OwnFolder = { root: fleet, path: at(fleet, 'homes') };
+  // BG-008: a handle SCOPED to one home answers as an unscoped handle does for the same folder
+  await fleet.writeText(at(fleet, 'bin/tools/x.txt'), 'x');
+  const scopedHome = runtimes.roots.root('fleet', { subfolder: 'homes/codex-a' });
+  const scopedPackages: OwnFolder = { root: scopedHome, path: at(scopedHome, 'packages/app-server-daemon') };
+  const scopedBin = runtimes.roots.root('fleet', { subfolder: 'bin' });
+  const scopedOutside: OwnFolder = { root: scopedBin, path: at(scopedBin, 'tools') };
   const p = runtimes.processes;
   const out: (readonly [string, Answer])[] = [
+    ['usersOf a scoped fleet home folder', await answer(() => p.usersOf('CODEX_HOME', scopedPackages))],
+    ['usersOf a scoped fleet folder outside homes', await answer(() => p.usersOf('CODEX_HOME', scopedOutside))],
+    ['runsFrom the daemon through a scoped fleet handle', await answer(() => p.runsFrom(4242, scopedPackages))],
+    ['runsFrom through a scope outside homes', await answer(() => p.runsFrom(4242, scopedOutside))],
     ['usersOf exact', await answer(() => p.usersOf('CODEX_HOME', home))],
     ['usersOf undeclared variable', await answer(() => p.usersOf('OPENAI_API_KEY', home))],
     ['usersOf a forged handle', await answer(() => p.usersOf('CODEX_HOME', forged))],
@@ -214,6 +224,11 @@ test('processes parity: the real host and the testing host answer every case ali
   const notHomes = { refused: 'kernel.processes accepts only a folder at or under fleet/homes/<id>' };
   expect(byCase['usersOf a fleet folder outside homes']).toEqual(notHomes);
   expect(byCase['usersOf homes itself']).toEqual(notHomes);
+  // BG-008: a scope at (or below) one home is judged against the unscoped root; a scope outside homes/<id> still refuses
+  expect(byCase['usersOf a scoped fleet home folder']).toEqual({ ok: [] });
+  expect(byCase['usersOf a scoped fleet folder outside homes']).toEqual(notHomes);
+  expect(byCase['runsFrom the daemon through a scoped fleet handle']).toEqual({ ok: true });
+  expect(byCase['runsFrom through a scope outside homes']).toEqual(notHomes);
   expect(byCase['runsFrom the daemon']).toEqual({ ok: true });
   expect(byCase['runsFrom the TUI']).toEqual({ ok: false });
   expect(byCase['runsFrom another uid']).toEqual({ ok: false });

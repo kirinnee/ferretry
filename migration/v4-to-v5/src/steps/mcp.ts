@@ -20,6 +20,7 @@ import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StepReport } from '../report.ts';
 import { rewrapSealed } from '../rewrap.ts';
+import { pathSegment } from '../key-path.ts';
 import { failureNote, readV4Json, V4InputError } from '../v4/documents.ts';
 import { V4_MCP_OAUTH, V4_MCP_OAUTH_SECRETS, V4McpOAuthDocument } from '../v4/mcp.ts';
 import type { Step } from './index.ts';
@@ -91,7 +92,7 @@ export const mcpStep: Step = {
       if (!document.success) {
         const [section, name] = document.error.issues[0]?.path ?? [];
         throw new V4InputError(
-          `${V4_MCP_OAUTH}: ${String(section)} of component ${JSON.stringify(String(name))} does not fit the v5 record`,
+          `${V4_MCP_OAUTH}: ${pathSegment(section ?? '')} of component ${JSON.stringify(pathSegment(name ?? ''))} does not fit the v5 record`,
         );
       }
       await ctx.v5.json(

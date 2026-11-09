@@ -305,6 +305,19 @@ export interface AsksApi {
   raise(ask: AskDraft): Promise<AskRef>;
   /** A notice: something the owner should know; no answer. Idempotent by `(source, entry)`. */
   notify(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskRef>;
+  /**
+   * A STANDING notice: ONE notice a source keeps current as its facts change (the Warden's list of cards nobody is
+   * working on). Keyed by `(source, entry)` like {@link notify}, but not an obligation for life:
+   *
+   * - an OPEN notice with this key has its wording replaced in place when it differs (same {@link AskRef}, same id),
+   *   and nothing is written when the wording is the same;
+   * - no OPEN notice with this key (never raised, or closed by the owner or the source): a NEW ask is raised, so a
+   *   cause that comes back is said again instead of being swallowed by the old, closed one.
+   *
+   * Close it with {@link close} (find it with {@link open} by source and entry). It is never answered, so `answers`
+   * hands a source nothing for it. The `kind` is always `notice`.
+   */
+  standing(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskRef>;
   answers(
     filter: { readonly source: SourceKey; readonly entry?: EntryId },
     since?: string,

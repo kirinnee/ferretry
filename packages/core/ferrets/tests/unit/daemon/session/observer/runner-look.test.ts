@@ -77,6 +77,29 @@ describe('promptOf (FerretsApi.prompt)', () => {
     should(promptOf({}, mask)).deepEqual({});
   });
 
+  it('should mask every string of a harness dialog the pane is asking, keys and nested options included', () => {
+    // Arrange
+    const mask = (text: string) => text.replaceAll('example.com', '***********');
+    const dialog = {
+      id: '0123456789abcdef',
+      harness: 'claude',
+      kind: 'trust',
+      title: 'Trust example.com?',
+      body: 'It will run hooks from example.com',
+      options: [{ number: 1, label: 'Yes, trust example.com', grantsTrust: true }],
+      selected: 1,
+    };
+
+    // Act
+    const prompt = promptOf({ harnessDialog: dialog as never }, mask);
+
+    // Assert
+    should(prompt.turnState).be.undefined();
+    should(JSON.stringify(prompt.dialog)).not.containEql('example.com');
+    should(JSON.stringify(prompt.dialog)).containEql('Trust ***********?');
+    should(JSON.stringify(prompt.dialog)).containEql('Yes, trust ***********');
+  });
+
   it('should keep the shape and every non-string of a value it masks', () => {
     // Act
     const masked = maskedStrings({ a: [1, true, null, 'secret'], b: { c: 'secret' } }, text => text.toUpperCase());
@@ -92,7 +115,7 @@ describe('lifecycleStatus (the state document follows the ferret’s lifecycle)'
     const answers = [
       lifecycleStatus('starting', 'working'),
       lifecycleStatus('starting', 'idle'),
-      lifecycleStatus('stopped', 'working'),
+      lifecycleStatus('created', 'working'),
       lifecycleStatus('stopped', 'starting'),
       lifecycleStatus('running', 'stopped'),
       lifecycleStatus('rate_limited', 'stopped'),
@@ -132,10 +155,11 @@ describe('lifecycleStatus (the state document follows the ferret’s lifecycle)'
       rate_limited: ['-', '-', '-', 'stopped'],
       waiting: ['-', '-', '-', 'stopped'],
       // Revivable (`reviveRuling`): a revive brings each back, and the ferret is watched again.
-      completed: ['starting', 'running', 'running', '-'],
-      failed: ['starting', 'running', 'running', '-'],
-      stalled: ['starting', 'running', 'running', '-'],
-      stopped: ['starting', 'running', 'running', '-'],
+      // Revived only by the start edge (proof of a new run); a plain turn edge never revives them (BG-039).
+      completed: ['starting', '-', '-', '-'],
+      failed: ['starting', '-', '-', '-'],
+      stalled: ['starting', '-', '-', '-'],
+      stopped: ['starting', '-', '-', '-'],
       // An unconfirmed stop: no registry edge confirms one, so none clears it.
       kill_failed: ['-', '-', '-', '-'],
     };
@@ -151,5 +175,45 @@ describe('lifecycleStatus (the state document follows the ferret’s lifecycle)'
     // Assert: every status is in the table (a new one must be decided here), and each moves as the table says.
     should(Object.keys(expected).sort()).deepEqual([...SessionStatusSchema.options].sort());
     should(answers).deepEqual(expected);
+  });
+
+  describe('BG-039 an ended document revives only on proof of a new live run', () => {
+    const ENDED = ['completed', 'failed', 'stalled', 'stopped'] as const;
+
+    for (const status of ENDED) {
+      it(`should revive a ${status} document on the lifecycle start edge (a start, resume or fork launch)`, () => {
+        should(lifecycleStatus(status, 'starting', 'lifecycle')).equal('starting');
+        should(lifecycleStatus(status, 'starting')).equal('starting');
+      });
+
+      it(`should leave a ${status} document ended on a stale registry (a reconcile), whatever state the registry reads`, () => {
+        for (const state of ['starting', 'working', 'idle'] as const)
+          should(lifecycleStatus(status, state, 'reconcile')).be.undefined();
+      });
+
+      it(`should leave a ${status} document ended on a plain turn edge (working or idle), which is no new run`, () => {
+        should(lifecycleStatus(status, 'working', 'lifecycle')).be.undefined();
+        should(lifecycleStatus(status, 'idle', 'lifecycle')).be.undefined();
+      });
+    }
+
+    it('should never revive kill_failed on any edge or cause: its last stop is unconfirmed (today moves it only to stopped)', () => {
+      for (const cause of ['lifecycle', 'reconcile'] as const)
+        for (const state of ['starting', 'working', 'idle', 'stopped'] as const)
+          should(lifecycleStatus('kill_failed', state, cause)).be.undefined();
+    });
+
+    it('should still repair a document a crash left on its way up, from a reconcile', () => {
+      for (const status of ['created', 'starting', 'retrying'] as const) {
+        should(lifecycleStatus(status, 'working', 'reconcile')).equal('running');
+        should(lifecycleStatus(status, 'idle', 'reconcile')).equal('running');
+      }
+    });
+
+    it('should revive and then follow the run: starting edge, then a turn edge gives running', () => {
+      const revived = lifecycleStatus('failed', 'starting', 'lifecycle');
+      should(revived).equal('starting');
+      should(lifecycleStatus(revived as 'starting', 'working', 'lifecycle')).equal('running');
+    });
   });
 });

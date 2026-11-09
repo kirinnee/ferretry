@@ -216,18 +216,15 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const service = new WardenSweepService(
     {
       orphans: {
-        // An orphaned card's notice stands on one ferret's board as an ask, exactly as the revive breaker's does. An
-        // Agenda that refuses it makes the sweep journal `fleet.warden_orphan_failed` and try again, nothing remembered.
-        add: async (sessionId, notice) => {
-          const written = await agenda.notice(sessionId, {
-            sourceRef: notice.sourceRef,
-            subject: notice.subject,
-            why: notice.why,
-            context: `${notice.premise}\n${notice.context}`,
-            howToResolve: notice.howToResolve,
-          });
-          if (written === 'rejected') throw new Error('the Agenda refused the orphaned-card notice');
+        // Every orphaned card nobody can be messaged about is a row of ONE item on the machine board, as v4 listed
+        // them (`AsksApi.standing`): the same item while the list changes, nothing written when it is the same,
+        // closed when it is empty, and raised again after the owner closed it only when a card joins. An Agenda that
+        // refuses it makes the sweep journal `fleet.warden_orphan_failed` once per reason and try again next sweep:
+        // one attempt of one item.
+        sync: async (item, announce) => {
+          await agenda.standingOrphans(item, announce);
         },
+        // The per-card asks an earlier Warden left on ferret boards, closed once (the memory names which boards).
         remove: async resolution => {
           await agenda.resolveSource(resolution.sessionId, 'agent-raised', resolution.sourceRef, resolution.note);
         },

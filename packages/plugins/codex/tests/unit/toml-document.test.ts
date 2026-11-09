@@ -56,3 +56,22 @@ describe('the TOML Codex settings are written as', () => {
     expect(parse(text)).toEqual({ mcp_servers: { 'my.server': { 'a b': 'x', 'c=d': 'y' } } });
   });
 });
+
+describe('the values that need care', () => {
+  test('a carriage return and any other control character are escaped, so no value can end its line', () => {
+    const document = { text: 'a\rb\u0001c\u007fd' };
+
+    const text = tomlDocument(document);
+
+    expect(text).toBe('text = "a\\rb\\u0001c\\u007fd"');
+    expect(parse(text)).toEqual(document);
+  });
+
+  test('an empty record inside an array is an empty inline table', () => {
+    expect(parse(tomlDocument({ list: [{}] }))).toEqual({ list: [{}] });
+  });
+
+  test('a value with no TOML spelling inside an array is an empty string, never a broken document', () => {
+    expect(parse(tomlDocument({ list: [undefined, 'x'] }))).toEqual({ list: ['', 'x'] });
+  });
+});

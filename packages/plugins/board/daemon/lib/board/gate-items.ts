@@ -76,6 +76,16 @@ export interface CardObligations {
   open(card?: CardId): Promise<readonly OpenCardAskEntry[]>;
   /** The entries of this card's asks the owner has already answered: each has been asked, for good. */
   answered(card: CardId): Promise<ReadonlySet<string>>;
+  /** {@link open} for every card in ONE scan, grouped by card: what a whole-board pass reads instead of one scan per card. */
+  openAll(): Promise<ReadonlyMap<CardId, readonly OpenCardAskEntry[]>>;
+  /** {@link answered} for every card in ONE scan, grouped by card. */
+  answeredAll(): Promise<ReadonlyMap<CardId, ReadonlySet<string>>>;
+}
+
+/** What one whole-board pass reads of Asks once: the open and the answered `card` asks of every card. */
+interface AsksPass {
+  readonly open: ReadonlyMap<CardId, readonly OpenCardAskEntry[]>;
+  readonly answered: ReadonlyMap<CardId, ReadonlySet<string>>;
 }
 
 /** The board as the card asks read and write it: one card or every card, and the owner's act on one. */
@@ -210,25 +220,49 @@ export class GateItems implements CardWriteObserver {
    * At boot: every card's ask is brought in line with its lane — one at a gate gets its ask, one whose card moved on
    * while the daemon was down loses it. Each card on its own; returns how many asks it raised.
    */
-  async backfill(): Promise<number> {
-    return await this.reconcileAll(card => card);
+  async backfill(signal?: AbortSignal): Promise<number> {
+    return await this.reconcileAll(card => card, signal);
   }
 
   /** Every card at a gate is looked at again, and asks nothing is waiting for are closed; returns how many asks it raised. */
-  async sweep(): Promise<number> {
-    const raised = await this.reconcileAll(card => (gateOf(card, this.ports.lanes) === undefined ? undefined : card));
-    await this.closeStrays().catch((error: unknown) =>
-      this.ports.diagnostics.warn(`the sweep of stray card asks failed: ${errorText(error)}`),
+  async sweep(signal?: AbortSignal): Promise<number> {
+    const raised = await this.reconcileAll(
+      card => (gateOf(card, this.ports.lanes) === undefined ? undefined : card),
+      signal,
     );
+    signal?.throwIfAborted();
+    await this.closeStrays(signal).catch((error: unknown) => {
+      if (signal?.aborted === true) throw error;
+      this.ports.diagnostics.warn(`the sweep of stray card asks failed: ${errorText(error)}`);
+    });
     return raised;
   }
 
-  private async reconcileAll(choose: (card: GateCard) => GateCard | undefined): Promise<number> {
+  /**
+   * One pass over every card. Asks is read ONCE for the pass (every open and every answered `card` ask, grouped by
+   * card) and each card takes its own slice, so a board of N cards costs two scans, not 2N (v4 read only the card's
+   * own holders). A stopped pass (`signal`) ends before the next card.
+   */
+  private async reconcileAll(choose: (card: GateCard) => GateCard | undefined, signal?: AbortSignal): Promise<number> {
     let raised = 0;
-    for (const card of (await this.ports.board.cards()).map(choose)) {
+    const cards = (await this.ports.board.cards()).map(choose);
+    signal?.throwIfAborted();
+    let pass: AsksPass;
+    try {
+      pass = {
+        open: await this.ports.obligations.openAll(),
+        answered: await this.ports.obligations.answeredAll(),
+      };
+    } catch (error) {
+      // "Not asking" would let a second ask through: with Asks unreadable, no card is reconciled this pass.
+      this.ports.diagnostics.warn(`the asks of the cards could not be read, so none was put: ${errorText(error)}`);
+      return 0;
+    }
+    for (const card of cards) {
+      signal?.throwIfAborted();
       if (card === undefined) continue;
       try {
-        if (await this.reconcile(card)) raised += 1;
+        if (await this.reconcile(card, pass)) raised += 1;
       } catch (error) {
         this.ports.diagnostics.warn(`the ask of ${formatCardRef(card.task)} could not be put: ${errorText(error)}`);
       }
@@ -313,14 +347,18 @@ export class GateItems implements CardWriteObserver {
   }
 
   /** Brings one card's ask in line with its lane, one pass per card at a time; `true` when it raised a new ask. */
-  private async reconcile(card: GateCard): Promise<boolean> {
-    return await serially(this.passes, card.task.id, async () => await this.reconcileAlone(card));
+  private async reconcile(card: GateCard, pass?: AsksPass): Promise<boolean> {
+    return await serially(this.passes, card.task.id, async () => await this.reconcileAlone(card, pass));
   }
 
-  private async reconcileAlone(card: GateCard): Promise<boolean> {
+  private async reconcileAlone(card: GateCard, pass?: AsksPass): Promise<boolean> {
     const { task } = card;
     const seen = gateOf(card, this.ports.lanes);
-    const asked = await this.ports.obligations.answered(task.id);
+    const asked =
+      pass === undefined
+        ? await this.ports.obligations.answered(task.id)
+        : (pass.answered.get(task.id) ?? new Set<string>());
+    const openNow = pass === undefined ? await this.ports.obligations.open(task.id) : (pass.open.get(task.id) ?? []);
     // At a try-it lane the daemon first asks whether there is anything to try (`tryItVerdict`).
     // A gate the owner already answered (a Not yet) is never closed under them: that ask was made, for good.
     const verdict =
@@ -336,11 +374,13 @@ export class GateItems implements CardWriteObserver {
     // (the card stays where it is; the next look after it is unblocked asks again).
     const wanted = gate === undefined || verdict?.kind === 'wait' ? undefined : gateReference(gate);
     // Every open ask of this card but the one its lane asks now goes.
-    for (const open of await this.ports.obligations.open(task.id)) {
+    for (const open of openNow) {
       if (open.entry !== wanted) await this.ports.obligations.withdraw(open.entry, 'withdrawn');
     }
     if (gate === undefined || wanted === undefined) return false;
     if (asked.has(wanted)) return false;
+    // Already open from the pass's own read: raising would find it and change nothing, after two more scans.
+    if (pass !== undefined && openNow.some(open => open.entry === wanted)) return false;
     const ferret = (await this.askersOf(task))[0] ?? task.owner;
     return await this.ports.obligations.raise(cardAskDraft(gate, task, ferret, this.ports.product));
   }
@@ -390,12 +430,17 @@ export class GateItems implements CardWriteObserver {
    * the gate it is at now (or the newest entry) and the other goes. Raising is idempotent by entry, so a twin of ONE
    * entry cannot exist; this catches the asks of different entries a missed write left behind.
    */
-  private async closeStrays(): Promise<void> {
+  private async closeStrays(signal?: AbortSignal): Promise<void> {
     const byCard = new Map<CardId, OpenCardAskEntry[]>();
     for (const open of await this.ports.obligations.open())
       byCard.set(open.cardId, [...(byCard.get(open.cardId) ?? []), open]);
+    if (byCard.size === 0) return;
+    // The cards come from ONE pass over the board; a derivation per card with an open ask would read the whole board each
+    // time. A card the pass did not have (written since) is looked for on its own.
+    const known = new Map((await this.ports.board.cards()).map(each => [each.task.id, each] as const));
     for (const [cardId, opens] of byCard) {
-      const card = await this.ports.board.card(cardId).catch(() => undefined);
+      signal?.throwIfAborted();
+      const card = known.get(cardId) ?? (await this.ports.board.card(cardId).catch(() => undefined));
       const gate = card === undefined ? undefined : gateOf(card, this.ports.lanes);
       const wanted = gate === undefined ? undefined : gateReference(gate);
       const newest = (entry: string): number => parseGateReference(entry)?.entry ?? 0;
