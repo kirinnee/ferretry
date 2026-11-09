@@ -26,7 +26,7 @@ const CONFIG = {
 };
 
 /** A composed daemon whose fleet folder holds a FILE where the bin folder goes, so the provisioner fails mid-plan. */
-async function composeWithBlockedBin(): Promise<TestHost> {
+async function composeWithBlockedBin(config: Readonly<Record<string, unknown>> = CONFIG): Promise<TestHost> {
   const world = await fleetWorld();
   await mkdir(world.fleet, { recursive: true });
   await writeFile(join(world.fleet, 'bin'), 'not a folder');
@@ -40,7 +40,7 @@ async function composeWithBlockedBin(): Promise<TestHost> {
       loginChanges: fakeLoginChanges(),
     },
     gate: new StandInAdmission(() => ownerStanding()),
-    config: CONFIG,
+    config,
     ownerHome: world.person,
     executables: ['/fixture/bin/claude', '/fixture/bin/codex'],
     searchPath: '/fixture/bin',
@@ -86,5 +86,72 @@ describe('a failure after the configuration landed, through the composed daemon'
     expect(rendered.text).not.toContain('Nothing changed');
     expect(rendered.text).toContain(landed[0] as string);
     expect(rendered.text).toContain('NOT rolled back');
+  });
+});
+
+const TWO_RUNTIMES = {
+  ...CONFIG,
+  runtimes: {
+    'claude-default': { login: 'claude-you', profile: 'default', agent: true },
+    'claude-work': { login: 'claude-you', profile: 'default', agent: true },
+  },
+};
+
+/** Stage and apply one change on a composed daemon that cannot publish, and answer the rolled-back outcome's words. */
+async function rolledBack(change: object): Promise<{ landed: readonly string[]; text: string }> {
+  const host = await composeWithBlockedBin(TWO_RUNTIMES);
+  const staged = await host.request('POST', '/v1/runtimes/proposals', { body: { change } });
+  expect(staged.status).toBe(200);
+  const applied = await host.request('POST', `/v1/runtimes/proposals/${staged.json<{ id: string }>().id}/apply`, {
+    body: {},
+  });
+  expect(applied.status).toBe(200);
+  const outcome = applied.json<AccountChangeOutcome>();
+  if (outcome.outcome !== 'applied' || outcome.apply.outcome !== 'rolled-back') throw new Error('expected rolled-back');
+  return { landed: outcome.apply.configurationLanded ?? [], text: renderChangeOutcome(outcome).text };
+}
+
+describe('the remedy after a rolled-back change is true whether the landed file was created, edited or removed', () => {
+  const undo = 'to undo the change instead, put that file back as it was, or delete it if it did not exist before.';
+
+  it('BG-027 W1 an EDIT of an existing runtime never says to remove its file', async () => {
+    const { landed, text } = await rolledBack({
+      kind: 'runtime.put',
+      name: 'claude-work',
+      credential: 'claude-you',
+      profile: 'default',
+      agent: false,
+      create: false,
+      addAnother: true,
+    });
+    expect(landed.map(path => path.split('/').pop())).toEqual(['claude-work.yaml']);
+    expect(text).toContain(undo);
+    expect(text).not.toMatch(/remove (it|them)/u);
+  });
+
+  it('BG-027 W2 a REMOVAL of a runtime never says to remove the file the change just removed', async () => {
+    const { landed, text } = await rolledBack({ kind: 'runtime.remove', name: 'claude-work' });
+    expect(landed.map(path => path.split('/').pop())).toEqual(['claude-work.yaml']);
+    expect(text).toContain(undo);
+    expect(text).not.toMatch(/remove (it|them)/u);
+  });
+
+  it('BG-027 a default-runtime change names runtimes.yaml and never says to remove it', async () => {
+    const { landed, text } = await rolledBack({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: 'claude-work',
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
+      browserMode: 'headless',
+      browserProxy: null,
+      browserPorts: 'random',
+      browserFirewallFailure: 'warn',
+      autoResume: true,
+      agendaMode: true,
+      publicUsageFeed: false,
+    });
+    expect(landed.map(path => path.split('/').pop())).toContain('runtimes.yaml');
+    expect(text).not.toMatch(/remove (it|them)/u);
+    expect(text).toContain('put ');
   });
 });

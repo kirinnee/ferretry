@@ -364,6 +364,7 @@ export function RemoveRuntimeDialog({
   // so it runs once per runtime rather than once per render.
   const latest = useRef(changes);
   latest.current = changes;
+  const tried = useRef(false);
   const change: AccountChange = { kind: 'runtime.remove', name: runtime.name };
 
   // The dry run: what removing it would do, and who is running on it — read before anything is asked.
@@ -415,6 +416,14 @@ export function RemoveRuntimeDialog({
       if (result.kind === 'applied') onRemoved();
       return;
     }
+    // A preview that was already tried and did not finish is spent (a rolled-back apply keeps it consumed), so a
+    // retry stages the removal afresh instead of re-sending that proposal.
+    if (tried.current) {
+      const retried = await changes.apply(change);
+      if (retried.kind === 'applied') onRemoved();
+      return;
+    }
+    tried.current = true;
     const result = await changes.applyStaged(phase.staged);
     if (result.kind === 'applied') onRemoved();
   };
