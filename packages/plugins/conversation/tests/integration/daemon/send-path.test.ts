@@ -138,6 +138,14 @@ async function conversation(
   await settle();
   const api = () => host.provided(ConversationPort);
   const row = async (sendId: string) => (await api().sends(F1)).sends.find(entry => entry.sendId === sendId);
+  /**
+   * The row as the ledger holds it, read WITHOUT asking the tracker for a look (a read through the API does ask for one).
+   * A test about what a timer settles reads here, so only the tracker's own looks can have moved the fate.
+   */
+  const stored = async (sendId: string, id: string = 'f1') =>
+    (await new StateSendLedger(state, { now: () => START as Instant }).list(parseSessionId(id))).find(
+      entry => entry.sendId === sendId,
+    );
   /** Moves the driven clock in steps and lets each step's looks finish: a tracker look schedules the next one. */
   const advance = async (totalMs: number, stepMs = 1_000): Promise<void> => {
     for (let spent = 0; spent < totalMs; spent += stepMs) {
@@ -145,7 +153,7 @@ async function conversation(
       await settle();
     }
   };
-  return { host, ferrets, api, state, clock, built, row, advance };
+  return { host, ferrets, api, state, clock, built, row, stored, advance };
 }
 
 const long = (length: number): string => 'x'.repeat(length);
@@ -381,41 +389,41 @@ describe('BG-053 a send queued by file is ledgered native-file, with the pointer
 
 describe('BG-052 only proof moves a fate', () => {
   test('BG-052 a delivered send settles delivered on the transcript’s proof', async () => {
-    const { host, ferrets, api, row, advance } = await conversation();
+    const { host, ferrets, api, stored, advance } = await conversation();
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE hello', sendId: 's-ok' });
-    expect((await row('s-ok'))?.fate).toBe('accepted');
+    expect((await stored('s-ok'))?.fate).toBe('accepted');
 
     ferrets.transcript = [userEntry('FIXTURE hello')];
     await advance(3_000);
 
-    expect(await row('s-ok')).toMatchObject({ fate: 'delivered' });
+    expect(await stored('s-ok')).toMatchObject({ fate: 'delivered' });
     await host.stop();
   });
 
   test('BG-052 a send by file settles delivered on the pointer the transcript records', async () => {
-    const { host, ferrets, api, row, advance } = await conversation();
+    const { host, ferrets, api, stored, advance } = await conversation();
     await api().send(F1, { kind: 'owner' }, { message: long(600), sendId: 's-file-ok' });
 
     ferrets.transcript = [userEntry(turnInstruction(ferrets.turnFileOf(2)))];
     await advance(3_000);
 
-    expect(await row('s-file-ok')).toMatchObject({ fate: 'delivered', path: 'turn-file' });
+    expect(await stored('s-file-ok')).toMatchObject({ fate: 'delivered', path: 'turn-file' });
     await host.stop();
   });
 
   test('BG-052 a never-proved send is typed again once, proven absent, and settles timed_out at its deadline', async () => {
-    const { host, ferrets, api, row, advance } = await conversation();
+    const { host, ferrets, api, stored, advance } = await conversation();
     ferrets.transcript = [otherEntry];
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE lost', sendId: 's-lost' });
     expect(ferrets.typed).toEqual(['FIXTURE lost']);
 
     // Before its deadline (a person's send: one minute) nothing is claimed.
     await advance(30_000, 5_000);
-    expect((await row('s-lost'))?.fate).toBe('accepted');
+    expect((await stored('s-lost'))?.fate).toBe('accepted');
 
     await advance(150_000, 5_000);
 
-    expect(await row('s-lost')).toMatchObject({ fate: 'timed_out', unaccountedReason: 'not_delivered' });
+    expect(await stored('s-lost')).toMatchObject({ fate: 'timed_out', unaccountedReason: 'not_delivered' });
     // Proven absent from the transcript, the queue and the composer: typed again under the same id, bounded.
     expect(ferrets.typed.length).toBeGreaterThan(1);
     expect(ferrets.typed.every(text => text === 'FIXTURE lost')).toBe(true);
@@ -423,33 +431,33 @@ describe('BG-052 only proof moves a fate', () => {
   });
 
   test('BG-052 a send the transcript cannot be read for is unconfirmed, never retyped', async () => {
-    const { host, ferrets, api, row, advance } = await conversation();
+    const { host, ferrets, api, stored, advance } = await conversation();
     ferrets.transcript = [];
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE unread', sendId: 's-unread' });
 
     await advance(150_000, 5_000);
 
-    expect(await row('s-unread')).toMatchObject({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' });
+    expect(await stored('s-unread')).toMatchObject({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' });
     expect(ferrets.typed).toEqual(['FIXTURE unread']);
     await host.stop();
   });
 
   test('BG-052 a held send settles delivered when the transcript shows the agent took it at the turn’s end', async () => {
-    const { host, ferrets, api, row, advance } = await conversation(f => {
+    const { host, ferrets, api, stored, advance } = await conversation(f => {
       f.busy = true;
     });
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE queued words', sendId: 's-held' });
-    expect((await row('s-held'))?.fate).toBe('queued');
+    expect((await stored('s-held'))?.fate).toBe('queued');
 
     ferrets.transcript = [userEntry('FIXTURE queued words')];
     await advance(3_000);
 
-    expect((await row('s-held'))?.fate).toBe('delivered');
+    expect((await stored('s-held'))?.fate).toBe('delivered');
     await host.stop();
   });
 
   test('BG-052 a queue left outcome stays accepted until the transcript proves it', async () => {
-    const { host, ferrets, api, row, advance } = await conversation(f => {
+    const { host, ferrets, api, stored, advance } = await conversation(f => {
       f.busy = true;
     });
     const real = ferrets.harness.bind(ferrets);
@@ -458,17 +466,17 @@ describe('BG-052 only proof moves a fate', () => {
       return harness === undefined ? undefined : { ...harness, queue: async () => ok('left' as const) };
     };
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE left words', sendId: 's-left' });
-    expect((await row('s-left'))?.fate).toBe('accepted');
+    expect((await stored('s-left'))?.fate).toBe('accepted');
 
     ferrets.transcript = [userEntry('FIXTURE left words')];
     await advance(3_000);
 
-    expect((await row('s-left'))?.fate).toBe('delivered');
+    expect((await stored('s-left'))?.fate).toBe('delivered');
     await host.stop();
   });
 
   test('BG-052 a queued-by-file row is proved delivered by the pointer the harness records', async () => {
-    const { host, ferrets, api, row, advance } = await conversation(f => {
+    const { host, ferrets, api, stored, advance } = await conversation(f => {
       f.busy = true;
     });
     await api().send(F1, { kind: 'owner' }, { message: long(1_500), sendId: 'send-q-9' });
@@ -476,12 +484,12 @@ describe('BG-052 only proof moves a fate', () => {
     ferrets.transcript = [userEntry(queuedPayloadInstruction(ferrets.fileOf('send-q-9')))];
     await advance(3_000);
 
-    expect(await row('send-q-9')).toMatchObject({ fate: 'delivered', path: 'native-file' });
+    expect(await stored('send-q-9')).toMatchObject({ fate: 'delivered', path: 'native-file' });
     await host.stop();
   });
 
   test('BG-052 a queued-by-file row is NOT proved by the full text: the pane held the pointer', async () => {
-    const { host, ferrets, api, row, advance } = await conversation(f => {
+    const { host, ferrets, api, stored, advance } = await conversation(f => {
       f.busy = true;
     });
     await api().send(F1, { kind: 'owner' }, { message: long(1_500), sendId: 'send-q-10' });
@@ -489,7 +497,7 @@ describe('BG-052 only proof moves a fate', () => {
     ferrets.transcript = [userEntry(long(1_500))];
     await advance(3_000);
 
-    expect((await row('send-q-10'))?.fate).not.toBe('delivered');
+    expect((await stored('send-q-10'))?.fate).not.toBe('delivered');
     await host.stop();
   });
 
@@ -503,12 +511,12 @@ describe('BG-052 only proof moves a fate', () => {
     }, first.state);
     await second.advance(1_000);
 
-    expect((await second.row('s-restart'))?.fate).toBe('delivered');
+    expect((await second.stored('s-restart'))?.fate).toBe('delivered');
     await second.host.stop();
   });
 
   test('BG-052 a turn boundary asks for a look at a ferret with sends open, without waiting for a deadline', async () => {
-    const { host, ferrets, api, row, built } = await conversation(f => {
+    const { host, ferrets, api, stored, built } = await conversation(f => {
       f.busy = true;
     });
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE boundary', sendId: 's-boundary' });
@@ -517,7 +525,7 @@ describe('BG-052 only proof moves a fate', () => {
     built.half?.hooks['ferret.changed']?.({ ferret: F1, state: 'idle', previous: 'working', change: 'state' });
     await settle();
 
-    expect((await row('s-boundary'))?.fate).toBe('delivered');
+    expect((await stored('s-boundary'))?.fate).toBe('delivered');
     // A ferret going to work is no boundary: nothing is looked at.
     await host.stop();
   });
@@ -568,25 +576,25 @@ describe('BG-052 / BG-053 what a look cannot prove, it does not claim', () => {
   });
 
   test('BG-052 a ferret the harness no longer knows leaves the transcript unreadable: unconfirmed, never retyped', async () => {
-    const { host, ferrets, api, row, advance } = await conversation();
+    const { host, ferrets, api, stored, advance } = await conversation();
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE gone', sendId: 's-gone' });
     ferrets.harness = async () => undefined;
 
     await advance(150_000, 5_000);
 
-    expect(await row('s-gone')).toMatchObject({ fate: 'unaccounted' });
+    expect(await stored('s-gone')).toMatchObject({ fate: 'unaccounted' });
     expect(ferrets.typed).toEqual(['FIXTURE gone']);
     await host.stop();
   });
 
   test('BG-052 a peer send that is never proved settles timed_out, and the sender’s notice is logged by id', async () => {
-    const { host, ferrets, api, row, advance } = await conversation();
+    const { host, ferrets, api, stored, advance } = await conversation();
     ferrets.transcript = [otherEntry];
     await api().send(F1, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE peer lost', sendId: 's-peer-lost' });
 
     await advance(200_000, 5_000);
 
-    expect(await row('s-peer-lost')).toMatchObject({ fate: 'timed_out', senderKind: 'agent' });
+    expect(await stored('s-peer-lost')).toMatchObject({ fate: 'timed_out', senderKind: 'agent' });
     await host.stop();
   });
 });
