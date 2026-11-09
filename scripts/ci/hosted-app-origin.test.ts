@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -33,6 +33,22 @@ function run(directory: string, args: readonly string[], origin?: string) {
 }
 
 describe('scripts/ci/hosted-app-origin.sh', () => {
+  test('callers run it by path: it is executable and answers when executed directly, not through bash', () => {
+    for (const script of [
+      'scripts/ci/hosted-app-origin.sh',
+      'scripts/validate/hosted-app-origin.sh',
+      'scripts/validate/release-guards.sh',
+      'scripts/local/setup-pwa-release-v5.sh',
+      'scripts/release/compile.sh',
+    ])
+      expect(statSync(join(root, script)).mode & 0o111).not.toBe(0);
+    const direct = Bun.spawnSync([join(tree(), 'scripts/ci/hosted-app-origin.sh')], {
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+    });
+    expect(direct.exitCode).toBe(0);
+    expect(direct.stdout.toString()).toBe('https://ferretry.pages.dev\n');
+  });
+
   test('unset or blank is the production app, its own key and no define', () => {
     const directory = tree();
     for (const origin of [undefined, '', '  ']) {

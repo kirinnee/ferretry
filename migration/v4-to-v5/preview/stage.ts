@@ -55,7 +55,13 @@ export async function walk(home: string): Promise<Walked> {
 const isSqlite = (path: string) => /\.sqlite$/u.test(path);
 const isSqliteSidecar = (path: string) => /\.sqlite-(wal|shm)$/u.test(path);
 
-/** A consistent copy of one SQLite file through the engine (`VACUUM INTO`), so a live writer never tears it. */
+/**
+ * A consistent copy of one SQLite file through the engine (`VACUUM INTO`), so a live writer never tears it.
+ *
+ * GAP, noted: no allowed folder holds a `*.sqlite` file today, so this is not reached. A read-only open of a live
+ * WAL database still maps v4's `-shm` file; if one ever appears, copy the file and its `-wal` to a temp folder and
+ * open THAT copy instead.
+ */
 export function copySqlite(from: string, to: string): void {
   const source = new Database(from, { readonly: true });
   try {
@@ -67,6 +73,10 @@ export function copySqlite(from: string, to: string): void {
 }
 
 async function copyOne(home: string, staging: string, path: string): Promise<void> {
+  // A path can be swapped for a link, or hard-linked to a file elsewhere, after the walk: look again, right before the
+  // copy, and copy only a plain file with one name.
+  const info = await lstat(join(home, path));
+  if (!info.isFile() || info.nlink > 1) throw new Error(`${path} is not a plain single-name file; it was not copied`);
   const target = join(staging, path);
   await mkdir(dirname(target), { recursive: true, mode: 0o700 });
   if (isSqlite(path)) {
@@ -81,6 +91,8 @@ export interface StageReport {
   readonly bytes: number;
   /** Files whose size or mtime moved between the walk and the second pass; each was copied again. */
   readonly changed: readonly string[];
+  /** Files copied in the first pass that v4 deleted before the second: removed from the snapshot again. */
+  readonly vanished: readonly string[];
   readonly left: readonly LeftOut[];
 }
 
@@ -117,10 +129,16 @@ export async function stage(home: string, staging: string): Promise<StageReport>
     });
   }
   const copied = second.files.filter(file => !isSqliteSidecar(file.path));
+  const present = new Set(second.files.map(file => file.path));
+  const gone = first.files
+    .filter(file => !isSqliteSidecar(file.path) && !present.has(file.path))
+    .map(file => file.path);
+  for (const path of gone) await rm(join(staging, path), { force: true });
   return {
     copied: copied.length,
     bytes: copied.reduce((sum, file) => sum + file.bytes, 0),
     changed,
+    vanished: gone,
     left: second.left,
   };
 }

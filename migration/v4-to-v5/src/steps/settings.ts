@@ -45,7 +45,7 @@ import { USAGE_CONFIG } from '@ferretry/plugin-usage/contract';
 import { WardenFileSchema } from '@ferretry/plugin-warden/contract';
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, sep } from 'node:path';
-import { Document, isMap, isScalar, isSeq, type Pair, type YAMLMap } from 'yaml';
+import { Document, isMap, isScalar, isSeq, Pair, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
   dropModeline,
@@ -443,6 +443,12 @@ async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: r
   const machine = `config/${V4_SINGLETONS.machine}`;
   const ordered = [...listing.files].sort((a, b) => Number(a.label === machine) - Number(b.label === machine));
   for (const file of ordered) await planFile(ctx, plan, file, resolve);
+  if (ctx.preview === true) {
+    // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say).
+    const runtimes = contents(place(plan, RUNTIMES_CONFIG, undefined, 'the preview').document);
+    take(runtimes, 'autoResume');
+    runtimes.items.push(new Pair('autoResume', false));
+  }
   return { ...plan, ignored: listing.ignored };
 }
 

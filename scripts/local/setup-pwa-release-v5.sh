@@ -19,8 +19,12 @@ set -euo pipefail
 #   2. Generates an Ed25519 key in a 0600 file inside a 0700 temp directory and sets it as the environment secret
 #      PWA_RELEASE_SIGNING_KEY, through STDIN. The private key is never printed, logged, put in an argument or an
 #      environment variable, and the temp directory is removed on every exit.
-#   3. Offers to set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in `pwa-deploy-v5`, through hidden prompts and stdin,
-#      never argv and never echoed. Blank skips a value: the repository's own secrets of those names are then used.
+#   3. REQUIRES a Cloudflare API token and account id for the `ferretry-v5` Pages project, and sets them in
+#      `pwa-deploy-v5` through hidden prompts and stdin, never argv and never echoed. A blank answer, or no terminal,
+#      stops the script: there is no fallback. They have names of their own (CLOUDFLARE_PAGES_V5_API_TOKEN and
+#      CLOUDFLARE_PAGES_V5_ACCOUNT_ID) that no repository-level secret has, so the deploy job can never run
+#      rebuild/5.0's wrangler holding production's account token. Make the token in the Cloudflare dashboard with
+#      ONLY "Account > Cloudflare Pages > Edit", limited to the one account; it is not production's token.
 #   4. Prints the PUBLIC key and the one next step: commit it as packages/app/release-signing-key.preview.pub on
 #      rebuild/5.0 (the build refuses without it, so the preview cannot ship unsigned or under the wrong key).
 #
@@ -111,21 +115,21 @@ else
   echo "✅ the signing key is set; the private half is gone from this machine"
 fi
 
-# ─── 3. the Cloudflare credentials, optional ───────────────────────────────────────────────────
-for secret in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+# ─── 3. the Cloudflare credentials, required ───────────────────────────────────────────────────
+for secret in CLOUDFLARE_PAGES_V5_API_TOKEN CLOUDFLARE_PAGES_V5_ACCOUNT_ID; do
   if [[ ${dry_run} -eq 1 ]]; then
-    echo "⚙️  [dry-run] would ask, with a hidden prompt, for ${secret}; blank skips it; then: printf '%s' <value> | gh secret set ${secret} --env ${deploy_env}"
+    echo "⚙️  [dry-run] would REQUIRE, with a hidden prompt, ${secret} (a blank answer or no terminal stops here); then: printf '%s' <value> | gh secret set ${secret} --env ${deploy_env}"
     continue
   fi
   if [[ ! -t 0 ]]; then
-    echo "📝 no terminal: skipping the ${secret} prompt (the repository secret of that name will be used)"
-    continue
+    echo "❌ no terminal for the ${secret} prompt, and there is no fallback to a repository secret; run this script in a terminal" >&2
+    exit 1
   fi
-  read -r -s -p "Paste ${secret} for ${deploy_env} (hidden; blank to use the repository secret): " value
+  read -r -s -p "Paste ${secret} for ${deploy_env} (hidden; required; a Pages-only token for ferretry-v5): " value
   echo
   if [[ -z ${value} ]]; then
-    echo "📝 ${secret} skipped; the repository secret of that name will be used"
-    continue
+    echo "❌ ${secret} is required: the deploy never falls back to a repository-level Cloudflare token" >&2
+    exit 1
   fi
   # `printf` is a shell builtin, so no process's arguments carry the value.
   printf '%s' "${value}" | gh secret set "${secret}" --env "${deploy_env}" --repo "${repo}"

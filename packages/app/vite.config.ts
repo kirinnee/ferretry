@@ -52,8 +52,12 @@ const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
 const hostedAppOrigin = (() => {
   const script = fileURLToPath(new URL('../../scripts/ci/hosted-app-origin.sh', import.meta.url));
   const result = spawnSync(script, [], { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(`scripts/ci/hosted-app-origin.sh failed: ${result.stderr.trim()}`);
-  return result.stdout.trim();
+  // A script that could not start (not executable, no bash) has an `error` and a null stderr: say so, never throw a
+  // TypeError from `.trim()`.
+  if (result.error !== undefined)
+    throw new Error(`scripts/ci/hosted-app-origin.sh could not run: ${result.error.message}`);
+  if (result.status !== 0) throw new Error(`scripts/ci/hosted-app-origin.sh failed: ${(result.stderr ?? '').trim()}`);
+  return (result.stdout ?? '').trim();
 })();
 
 export default defineConfig({

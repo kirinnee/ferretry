@@ -1,19 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Nothing on a branch other than `main` can tag, publish a GitHub release, touch Casks/ or run semantic-release, and
-# nothing but the 5.0 preview's own workflow can deploy the preview app.
+# What the workflow files of THIS tree promise about releases, and what they cannot. Read the table, not the title.
 #
 # WHY. `rebuild/5.0` is a long-lived branch whose workflows run on every push to it, and a TAG is not a branch:
 # `v*.*.*` fires for a tag on any commit. The release path is a chain of triggers (CI -> Release -> tag -> CD), and
 # one unguarded link is enough, so this reads every workflow's triggers and holds each link to the ref.
 #
+# THE PROOF, HONESTLY (what governs, and where it stops)
+#   workflow      trigger                    what keeps it off 5.0
+#   release.yaml  workflow_run of CI on main  main's copy of the file governs (a workflow_run workflow runs the DEFAULT
+#                                             branch's file), so this tree's copy decides nothing; the check below
+#                                             keeps the copy honest for readers. A tag it pushes is on main.
+#   cd.yaml       push of a v*.*.* tag        its `main-only` job refuses a tag not on main, but a tag run uses the file
+#                                             AT THE TAGGED COMMIT: it covers commits made AFTER this merge only. A tag on
+#                                             an older 5.0 commit (or a branch cut from one) runs the old, unguarded file.
+#   everything else                          no tag trigger; every job that can write, use an environment or read a
+#                                             secret is gated on main (the preview's own workflow on rebuild/5.0).
+#   THE REST needs the owner's repository tag ruleset (scripts/local/setup-release-tag-ruleset.sh): only the release
+#   actor may create a v* tag, so no workflow ever has to be trusted to refuse one. Until it is applied, any agent with
+#   push access can tag an old commit and publish.
+#
 # WHAT IS CHECKED (per workflow, with yq and jq; `--root <dir>` checks another checkout).
 #   1. Release (semantic-release): its only trigger is a `workflow_run` of CI on `main`, and its job repeats the
-#      branch in its `if`. `.releaserc.yaml` releases `main` alone.
+#      branch in its `if` (documentation of main's behaviour, not a guard on its own). `.releaserc.yaml` releases `main`
+#      alone.
 #   2. CD (GoReleaser, the cask, the daemon signature): the only workflow triggered by a tag. Its `main-only` job
 #      proves the tag is on main and `compile` needs it. GoReleaser publishes only after a green compile
-#      (scripts/validate/macos-policy.sh holds that `if`), so a tag off main reaches no publish, cask or signature.
+#      (scripts/validate/macos-policy.sh holds that `if`), so a tag off main reaches no publish, cask or signature
+#      WHEN CD ITSELF CARRIES THE GUARD, which is true only of commits after this change.
 #   3. Any other workflow with a job that can write (`contents: write`), use an environment or read a secret has every
 #      such job gated on `github.ref == 'refs/heads/main'`, and no `push.tags` trigger.
 #   4. The preview workflow (`pwa-pages-v5.yaml`) is triggered by pushes to `rebuild/5.0` alone, every job is gated on
@@ -94,6 +109,12 @@ if [[ -f ${preview} ]]; then
     fail "${preview}: sign must use pwa-release-v5 and deploy pwa-deploy-v5"
   json "${preview}" | jq -e '[.jobs[] | .permissions // {} | .["contents"] // "none"] | all(. == "read")' >/dev/null ||
     fail "${preview} may only read contents"
+  # The deploy holds a Pages-only token of its own, in its own environment: never the repository-level production token.
+  if rg -q 'secrets\.CLOUDFLARE_API_TOKEN|secrets\.CLOUDFLARE_ACCOUNT_ID' "${preview}"; then
+    fail "${preview} must not read the repository-level CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID; use the CLOUDFLARE_PAGES_V5_* secrets of pwa-deploy-v5"
+  fi
+  rg -q 'secrets\.CLOUDFLARE_PAGES_V5_API_TOKEN' "${preview}" ||
+    fail "${preview} must deploy with secrets.CLOUDFLARE_PAGES_V5_API_TOKEN"
 fi
 
 # 5. Casks/ and semantic-release are named only where they belong
@@ -105,4 +126,4 @@ for workflow in "${workflows[@]}"; do
 done
 
 ((status == 0)) || exit 1
-echo "✅ only main can tag, publish a release, touch Casks/ or run semantic-release; the preview deploys from rebuild/5.0 alone"
+echo "✅ these workflows hold every release link to main for commits from here on; the repository tag ruleset (scripts/local/setup-release-tag-ruleset.sh) covers the rest; the preview deploys from rebuild/5.0 alone"

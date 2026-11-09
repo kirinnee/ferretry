@@ -123,9 +123,10 @@ jobs:
     name: Deploy PWA
     needs: [build, sign]
     if: github.ref == 'refs/heads/rebuild/5.0'
-    # The Cloudflare credentials may live in this environment, which only `rebuild/5.0` may deploy to, so a branch
-    # cannot reach them; it is not the signing key's environment, so the deploy job never holds that key. An
-    # environment secret overrides a repository secret of the same name.
+    # The Cloudflare credentials live in this environment, which only `rebuild/5.0` may deploy to, so a branch cannot
+    # reach them; it is not the signing key's environment, so the deploy job never holds that key. They are named
+    # CLOUDFLARE_PAGES_V5_* and nothing at repository level has those names, so this job can NEVER fall back to
+    # production's account token (the secrets setup script requires a Pages-only token for ferretry-v5).
     environment: pwa-deploy-v5
     permissions:
       contents: read
@@ -162,10 +163,21 @@ jobs:
       # deploys its own build cannot supply from a browser. `project create` fails when the project
       # exists, so the list is checked first rather than swallowing the error — a create that fails
       # for any OTHER reason must still stop the deploy.
+      - name: Require the preview's own Cloudflare credentials
+        env:
+          CLOUDFLARE_PAGES_V5_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}
+          CLOUDFLARE_PAGES_V5_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_V5_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z ${CLOUDFLARE_PAGES_V5_API_TOKEN} || -z ${CLOUDFLARE_PAGES_V5_ACCOUNT_ID} ]]; then
+            echo "❌ the Pages-only credentials for ferretry-v5 are not set in the 'pwa-deploy-v5' environment" >&2
+            echo "   Run scripts/local/setup-pwa-release-v5.sh. This deploy never falls back to a repository-level token." >&2
+            exit 1
+          fi
       - name: Ensure the Pages project exists
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_V5_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           if nix develop .#ci -c bunx wrangler pages project list | grep -qE '(^|[[:space:]])ferretry-v5([[:space:]]|$)'; then
@@ -175,8 +187,8 @@ jobs:
           fi
       - name: Deploy production bundle
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_V5_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           nix develop .#ci -c bunx wrangler pages deploy packages/app/dist \

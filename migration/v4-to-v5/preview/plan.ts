@@ -46,7 +46,6 @@ export const ALLOWED: readonly Allowed[] = [
   file('config/pack.yaml', 'packs'),
   file('config/models-guide.yaml', 'packs'),
   file('config/routing.json', 'packs'),
-  folder('config/logins', 'login DEFINITIONS (names, budgets, secret NAMES); the sign-in files are not copied'),
   folder('config/runtimes', 'settings'),
   folder('config/profiles', 'settings'),
   folder('config/presets', 'settings'),
@@ -111,10 +110,25 @@ export const DENIED: readonly { readonly pattern: RegExp; readonly why: string }
   },
   { pattern: /(^|\/)daemon\.json/u, why: 'the daemon document: v4 port, relay and grants must not reach the preview' },
   { pattern: /(^|\/)security\.json$/u, why: 'v4 security settings' },
+  { pattern: /(^|\/)config\/logins(\/|$)/u, why: 'logins are left out entirely' },
+  // Inside the arbitrary folders that ARE copied (catalog installs, MCP bodies) anything may sit: refuse the names a
+  // credential usually has.
+  { pattern: /(^|\/)\.env(\.[^/]*)?$/u, why: 'an environment file' },
+  { pattern: /\.(pem|p12|pfx|jks|keystore|crt)$/iu, why: 'a certificate or private key file' },
+  { pattern: /(^|\/)id_(rsa|dsa|ecdsa|ed25519)[^/]*$/u, why: 'an ssh key' },
+  {
+    pattern: /(^|\/)(auth\.json|\.credentials\.json|\.netrc|\.npmrc|\.pypirc|\.git-credentials)$/u,
+    why: 'a sign-in file',
+  },
+  { pattern: /(^|\/)[^/]*token[^/]*$/iu, why: 'a token file' },
 ];
 
 /** Why each top-level name of a v4 home is NOT copied, for the report. Names only; nothing here is opened. */
 export const LEFT_BEHIND: readonly { readonly path: string; readonly why: string }[] = [
+  {
+    path: 'config/logins',
+    why: "logins are left out entirely: a host login is the owner's real sign-in; add them fresh",
+  },
   { path: 'api-token', why: 'admin token' },
   { path: 'api-warden-token', why: 'warden token' },
   { path: 'fleet/credentials', why: 'harness sign-ins (login tokens)' },

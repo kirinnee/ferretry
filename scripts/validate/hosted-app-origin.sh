@@ -20,9 +20,12 @@ set -euo pipefail
 #   4. The script itself behaves: the production app by default with no define, a named app with its own origin,
 #      key file and defines, and a refusal of anything but a plain https origin.
 #   5. Only the preview's workflow sets `FY_HOSTED_APP_ORIGIN`; production's must not.
+#   6. Every tracked shell script under scripts/ is committed executable (mode 100755). The app build, the daemon
+#      compile and the signing scripts RUN them by path: a script committed 100644 fails with EACCES there, and a
+#      caller that read the failure as "no output" once compiled a daemon for the production app, silently.
 #
 # SELF-TEST. Every run first plants each violation of (1) and (2) in a throwaway tree and requires the gate to catch
-# it, then requires a clean tree to pass. `--root <dir>` checks another tree and skips the self-test and (3) to (5).
+# it, then requires a clean tree to pass. `--root <dir>` checks another tree and skips the self-test and (3) to (6).
 
 source_rel="packages/core/kernel/contract/hosted-app.ts"
 production_host='ferretry\.pages\.dev'
@@ -123,6 +126,13 @@ check_routes() {
   rg -q 'hosted-app-origin\.sh' packages/app/vite.config.ts || fail "packages/app/vite.config.ts must take the app's origin from ${script}" || status=1
   rg -q 'hosted-app-origin\.sh' packages/app/scripts/build-release.ts || fail "packages/app/scripts/build-release.ts must take its release key from ${script}" || status=1
   rg -q 'hosted-app-origin\.sh --defines' scripts/release/compile.sh || fail "scripts/release/compile.sh must take the daemon's defines from ${script}" || status=1
+  # Captured as an assignment, never read through a process substitution: a failure inside `< <(...)` is ignored even
+  # under `set -e`, and the daemon then compiled for the production app, silently.
+  rg -q '^hosted_app_output="\$\(\./scripts/ci/hosted-app-origin\.sh --defines\)"$' scripts/release/compile.sh ||
+    fail "scripts/release/compile.sh must capture ${script} --defines in an assignment, so its failure stops the compile" || status=1
+  if rg -q '< <\(\./scripts/ci/hosted-app-origin\.sh' scripts/release/compile.sh; then
+    fail "scripts/release/compile.sh reads ${script} through a process substitution, which hides its failure" || status=1
+  fi
   local signing
   for signing in sign-pwa-release verify-pwa-release check-pwa-release; do
     rg -q 'hosted-app-origin\.sh' "scripts/ci/${signing}.sh" || fail "scripts/ci/${signing}.sh must take its key file from ${script}" || status=1
@@ -158,6 +168,14 @@ check_routes() {
   return "${status}"
 }
 
+check_executable() {
+  local status=0 mode _ _ path
+  while read -r mode _ _ path; do
+    [[ ${mode} == 100755 ]] || fail "${path} is committed ${mode}; callers run it by path, so it must be 100755 (git update-index --chmod=+x)" || status=1
+  done < <(git ls-files -s -- 'scripts/*.sh')
+  return "${status}"
+}
+
 main() {
   if [[ ${1:-} == --root ]]; then
     check_owner "$(cd "${2:?--root needs a directory}" && pwd)"
@@ -170,6 +188,7 @@ main() {
   local status=0
   check_owner "${root_dir}" || status=1
   check_routes || status=1
+  check_executable || status=1
   ((status == 0)) || exit 1
   echo "✅ the hosted app origin has one owner and every build route asks one script"
 }

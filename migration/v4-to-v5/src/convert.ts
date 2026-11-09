@@ -20,6 +20,13 @@ export interface ConvertOptions {
   /** The machine facts steps may read (service definitions, environment); absent reads none. */
   readonly host?: HostFacts;
   readonly steps?: readonly Step[];
+  /**
+   * The try-it preview (migration/v4-to-v5/preview/): a COPY that must never reach anything of the live v4. Every
+   * ferret is written stopped with no launch command, pane handle, transcript pointer, credential hash or token
+   * ledger row, no worktree ledger is carried, and the runtimes config switches auto-resume off. Absent, a normal
+   * conversion: nothing here changes it.
+   */
+  readonly preview?: boolean;
 }
 
 export type ConvertResult =
@@ -38,6 +45,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     v4: v4Paths(options.from),
     v5: v5Writer(options.to, { dryRun: options.dryRun }),
     dryRun: options.dryRun,
+    ...(options.preview === true ? { preview: true } : {}),
     ...(options.host === undefined ? {} : { host: options.host }),
   };
 

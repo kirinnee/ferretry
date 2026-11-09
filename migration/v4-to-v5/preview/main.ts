@@ -1,18 +1,23 @@
 /**
- * bun migration/v4-to-v5/preview/main.ts <dry-run|prepare|wrapper> [--v4 <home>] [--target <home>]
+ * bun migration/v4-to-v5/preview/main.ts <guard|dry-run|prepare|wrapper|clean|stop> [--v4 <home>] [--target <home>]
  *
- * `dry-run` touches nothing. `prepare` makes the preview home (OWNER-run, after review). `wrapper` writes
- * `<target>/bin/fy5`. Nothing here starts a daemon, a service or a terminal.
+ * `guard` prints the resolved preview home after refusing one that could reach v4. `dry-run` touches nothing.
+ * `prepare` makes the preview home (OWNER-run, after review). `wrapper` writes `<target>/bin/fy5`. `clean` removes a
+ * marked preview home. `stop` SIGTERMs the process that holds the preview home's daemon lock. Nothing here starts a
+ * daemon, a service or a terminal.
  */
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { hostLockProbe } from '../src/preflight.ts';
-import { dryRun, prepare, wrapperText } from './driver.ts';
+import { cleanPreview, dryRun, prepare, wrapperText } from './driver.ts';
+import { guardTarget } from './paths.ts';
 import { PREVIEW } from './plan.ts';
+import { pidsHolding, stopPreview } from './stop.ts';
 
-const USAGE = 'usage: bun preview/main.ts <dry-run|prepare|wrapper> [--v4 <v4 home>] [--target <preview home>]';
+const USAGE =
+  'usage: bun preview/main.ts <guard|dry-run|prepare|wrapper|clean|stop> [--v4 <v4 home>] [--target <preview home>]';
 
 async function main(argv: readonly string[]): Promise<number> {
   let parsed: ReturnType<
@@ -29,13 +34,21 @@ async function main(argv: readonly string[]): Promise<number> {
     console.error(`${error instanceof Error ? error.message : String(error)}\n${USAGE}`);
     return 64;
   }
-  const v4Home = resolve(parsed.values.v4 ?? join(homedir(), '.ferretry'));
-  const target = resolve(parsed.values.target ?? join(homedir(), PREVIEW.homeFolder));
-  if (v4Home === target) {
-    console.error('the preview home must not be the v4 home');
+  let guarded: ReturnType<typeof guardTarget>;
+  try {
+    guarded = guardTarget(
+      parsed.values.v4 ?? join(homedir(), '.ferretry'),
+      parsed.values.target ?? join(homedir(), PREVIEW.homeFolder),
+    );
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
     return 64;
   }
+  const { v4Home, target } = guarded;
   switch (parsed.positionals[0]) {
+    case 'guard':
+      console.log(`${v4Home}\n${target}`);
+      return 0;
     case 'dry-run':
       console.log(await dryRun(v4Home, target));
       return 0;
@@ -51,7 +64,11 @@ async function main(argv: readonly string[]): Promise<number> {
           ? 'v4 proof: unchanged'
           : `v4 proof: DIFFERENT\n${done.proof.changed.map(p => `  ${p}`).join('\n')}`,
       );
-      return done.report?.complete === true && done.proof.unchanged ? 0 : 3;
+      if (done.proof.v4Wrote.length > 0)
+        console.log(
+          `v4 rewrote these credential files by itself while it ran (stat only, not counted as damage):\n${done.proof.v4Wrote.map(p => `  ${p}`).join('\n')}`,
+        );
+      return done.report?.complete === true && done.proof.unchanged && done.gate.length === 0 ? 0 : 3;
     }
     case 'wrapper': {
       await mkdir(join(target, 'bin'), { recursive: true, mode: 0o700 });
@@ -60,6 +77,23 @@ async function main(argv: readonly string[]): Promise<number> {
       await chmod(path, 0o755);
       console.log(`wrote ${path}`);
       return 0;
+    }
+    case 'clean':
+      try {
+        console.log(await cleanPreview(v4Home, target));
+        return 0;
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        return 1;
+      }
+    case 'stop': {
+      const done = await stopPreview(target, {
+        holders: pidsHolding,
+        kill: (pid, signal) => process.kill(pid, signal),
+        sleep: ms => Bun.sleep(ms),
+      });
+      console.log(done.said);
+      return done.stopped ? 0 : 1;
     }
     default:
       console.error(USAGE);

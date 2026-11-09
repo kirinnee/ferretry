@@ -106,6 +106,7 @@ export const ferretsStep: Step = {
           Object.entries(ids?.runtimes ?? {}).find(
             ([current, value]) => current === name || value.formerNames.includes(name),
           )?.[0] ?? name;
+        const preview = ctx.preview === true;
         const record = FerretRecordSchema.parse({
           format: 1,
           id: config.id,
@@ -116,33 +117,36 @@ export const ferretsStep: Step = {
           runner: 'tmux',
           runtime,
           folder: config.cwd,
-          state: stopped
-            ? 'stopped'
-            : status === 'created' || status === 'starting'
-              ? 'starting'
-              : ['awaiting_user', 'awaiting_question', 'waiting', 'rate_limited'].includes(status ?? '')
-                ? 'idle'
-                : 'working',
-          harnessConversation: config.transcript?.harnessSessionId,
+          state:
+            stopped || preview
+              ? 'stopped'
+              : status === 'created' || status === 'starting'
+                ? 'starting'
+                : ['awaiting_user', 'awaiting_question', 'waiting', 'rate_limited'].includes(status ?? '')
+                  ? 'idle'
+                  : 'working',
+          harnessConversation: preview ? undefined : config.transcript?.harnessSessionId,
           transcript:
-            config.transcript === undefined
+            config.transcript === undefined || preview
               ? undefined
               : rewriteTranscript(ctx, config.harness, config.transcript, ids),
           provenance: config.provenance,
           transferredFrom: config.transferredFrom,
           projectId: config.projectId,
-          handle: pane?.paneId,
+          handle: preview ? undefined : pane?.paneId,
           createdAt: config.createdAt,
           stateAt: state?.finishedAt ?? state?.lastActivityAt ?? state?.startedAt ?? config.updatedAt,
         });
         records.push(record);
-        details.push({ config, runtime, transcript: record.transcript, stopped });
+        details.push({ config, runtime, transcript: record.transcript, stopped: stopped || preview });
         // M4: v4 hashes the full fys_ bearer with SHA-256, exactly the v5 token contract.
         // v4 has no issuance timestamp; creation is the known lower bound, not conversion time.
         // A person's cut-off (v4 `credentialRevoked`) is v5's `cutOff`. v4 drops the hash when it cuts a ferret off,
         // so there is often no hash to mark: write the same placeholder row v5's own `cutOff()` writes
         // (packages/core/ferrets/daemon/lib/tokens/tokens.ts), so the ferret is never relaunched until a person
         // resumes it. Dropping the mark would silently lift the cut-off.
+        // The preview carries no token ledger: every live v4 pane holds the plaintext of its row's hash.
+        if (preview) continue;
         if (config.credentialRevoked === true)
           tokens.push({
             ferret: config.id,

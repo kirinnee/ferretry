@@ -45,6 +45,8 @@ export interface StepContext {
   readonly v4: V4Paths;
   readonly v5: V5Writer;
   readonly dryRun: boolean;
+  /** The try-it preview (see `ConvertOptions.preview`): carry nothing that points into, or authenticates against, v4. */
+  readonly preview?: boolean;
   /** Absent in tests that do not read the host: a step needing it then reads nothing and says so. */
   readonly host?: HostFacts;
 }

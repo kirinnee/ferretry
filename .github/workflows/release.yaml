@@ -14,8 +14,11 @@ jobs:
   release:
     timeout-minutes: 20
     name: Semantic Release
-    # `branches: [main]` filters the triggering run's branch; this repeats it where a reader of the job sees it, so
-    # a run of any other branch (rebuild/5.0 included) can never reach semantic-release.
+    # What actually keeps another branch out is that a `workflow_run` workflow always runs the DEFAULT branch's copy of
+    # this file, so main's `branches: [main]` governs and a copy on any other branch decides nothing. This repeats the
+    # branch where a reader of the job sees it. (On main, `head_branch` is also `main` for a pull request from a fork
+    # whose branch is named `main`; adding `workflow_run.event == 'push'` and a `head_repository.full_name` check
+    # there is a follow-up for main, not part of this branch.)
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
     permissions:
       contents: write

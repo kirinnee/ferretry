@@ -39,6 +39,38 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(gate(checkout())).toMatchObject({ status: 0 });
   });
 
+  test('a preview deploy that falls back to the repository-level Cloudflare token is refused', () => {
+    const result = gate(
+      checkout(p =>
+        edit(
+          p('.github/workflows/pwa-pages-v5.yaml'),
+          /secrets\.CLOUDFLARE_PAGES_V5_API_TOKEN \}\}\n          CLOUDFLARE_ACCOUNT_ID/u,
+          'secrets.CLOUDFLARE_API_TOKEN }}\n          CLOUDFLARE_ACCOUNT_ID',
+        ),
+      ),
+    );
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('must not read the repository-level CLOUDFLARE_API_TOKEN');
+  });
+
+  test('the tag ruleset script, run with --dry-run, calls nothing and names exactly who may create a v* tag', () => {
+    const run = (...args: string[]) =>
+      Bun.spawnSync([join(repository, 'scripts/local/setup-release-tag-ruleset.sh'), '--dry-run', ...args], {
+        env: { PATH: '/usr/bin:/bin' },
+      });
+    const plain = run();
+    expect(plain.exitCode).toBe(0);
+    const text = plain.stdout.toString();
+    expect(text).toContain("the repository role 'admin'");
+    expect(text).toContain('refs/tags/v*');
+    expect(text).toContain('"type":"creation"');
+    expect(text).toContain('"actor_id":5,"actor_type":"RepositoryRole"');
+    const app = run('--app-id', '123');
+    expect(app.stdout.toString()).toContain('"actor_id":123,"actor_type":"Integration"');
+    expect(run('--app-id', 'x;rm').exitCode).toBe(64);
+    expect(run('--role', 'write').exitCode).toBe(64);
+  });
+
   test('a CD compile that no longer waits for the main-only proof is refused', () => {
     const result = gate(checkout(p => edit(p('.github/workflows/cd.yaml'), '    needs: main-only\n', '')));
     expect(result.status).toBe(1);

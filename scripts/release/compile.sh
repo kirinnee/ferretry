@@ -91,11 +91,14 @@ mkdir -p "${OUTDIR}"
 # The hosted APP's origin is the one build-time choice that may differ: `scripts/ci/hosted-app-origin.sh` (the
 # switch is FY_HOSTED_APP_ORIGIN) prints its defines, and prints NOTHING for the production app, so an ordinary
 # release compiles exactly as before. The 5.0 preview sets it to build a daemon that links to its own app.
+# Captured FIRST: a failure inside a process substitution is ignored even under `set -e`, so the loop would just get
+# no lines and compile a daemon with the production origin and key, silently. As an assignment, a failure stops here.
 hosted_app_defines=()
+hosted_app_output="$(./scripts/ci/hosted-app-origin.sh --defines)"
 while IFS= read -r define; do
   [ -z "${define}" ] && continue
   hosted_app_defines+=(--define "${define}")
-done < <(./scripts/ci/hosted-app-origin.sh --defines)
+done <<<"${hosted_app_output}"
 
 count=0
 while IFS=$'\t' read -r target suffix _ _; do

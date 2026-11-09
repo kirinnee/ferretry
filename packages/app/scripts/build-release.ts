@@ -166,13 +166,13 @@ const buildRelease = async (
 ): Promise<void> => {
   const pem = await readFile(publicKeyFile, 'utf8').catch(() => null);
   if (pem === null) {
-    fail(
+    return fail(
       `${publicKeyFile} is not committed: a build for this hosted app signs with it ` +
         '(scripts/local/setup-pwa-release-v5.sh makes the key; its public half is committed on the branch that deploys it)',
     );
   }
   const key = releaseKeyFromPem(pem);
-  if (key === null) fail(`${publicKeyFile} is not one Ed25519 public key`);
+  if (key === null) return fail(`${publicKeyFile} is not one Ed25519 public key`);
   const rewrites = parseReleaseRewrites(await readFile(join(packageRoot, 'public/_redirects'), 'utf8'));
   const headers = parseReleaseHeaders(await readFile(join(packageRoot, 'public/_headers'), 'utf8'));
   if (headers.length === 0) fail('public/_headers names no header rules');
