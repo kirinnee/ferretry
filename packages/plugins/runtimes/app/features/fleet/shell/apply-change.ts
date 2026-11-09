@@ -200,7 +200,7 @@ const applyOf = (outcome: AccountChangeOutcome): ApplyOutcome | undefined => {
 
 const landedSentence = (landed: readonly string[], remedy: string): string =>
   landed.length === 0
-    ? 'No configuration file was left on disk.'
+    ? `No configuration file was left on disk. ${remedy}`.trimEnd()
     : `${fileWord(landed.length, 'This configuration file stayed', 'These configuration files stayed')} on disk and ${fileWord(landed.length, 'goes', 'go')} live at the next apply: ${landed.join(', ')}. ${remedy}`.trimEnd();
 
 /**
@@ -224,7 +224,9 @@ const unfinished = (
         failure,
         landedSentence(
           landed,
-          `To undo it, remove ${fileWord(landed.length, 'that file', 'those files')}. Or fix the cause and apply again.`,
+          landed.length === 0
+            ? 'Fix the cause and apply again.'
+            : `To undo it, remove ${fileWord(landed.length, 'that file', 'those files')}. Or fix the cause and apply again.`,
         ),
       ].join(' '),
     };
@@ -241,10 +243,12 @@ const unfinished = (
     sentence: [
       'This change was not applied, and the fleet could not be fully put back, so this machine needs a look.',
       failure,
-      `${fileWord(left.length, 'This path was', 'These paths were')} left partly changed: ${left.join(', ')}.`,
+      ...(left.length === 0
+        ? []
+        : [`${fileWord(left.length, 'This path was', 'These paths were')} left partly changed: ${left.join(', ')}.`]),
       ...(moved.length === 0 ? [] : [`Moved aside: ${moved.join(', ')}.`]),
       landedSentence(landed, ''),
-      'Check these paths and files before you apply again, then fix the cause and apply again.',
+      'Check these paths and files, fix the cause, then apply again.',
     ].join(' '),
   };
 };

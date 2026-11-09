@@ -155,6 +155,32 @@ describe('R3-M1: an apply that did not finish is not applied', () => {
     expect(result.sentence).toContain('Publishing failed: x.');
   });
 
+  it('BG-028 a rolled-back apply with no landed file still says what to do', async () => {
+    const bare = { outcome: 'applied', apply: { outcome: 'rolled-back', failedOperation: 'Publishing', reason: 'x.' } };
+    const result = await applyAccountChange(answer(bare), CHANGE);
+    if (result.kind !== 'rolled-back') throw new Error('expected rolled-back');
+    expect(result.sentence).toEndWith('No configuration file was left on disk. Fix the cause and apply again.');
+  });
+
+  it('BG-028 a rollback-incomplete apply that only moved things aside has no empty "partly changed" list', async () => {
+    const displaced = {
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'Publishing',
+        reason: 'x',
+        unrestored: [],
+        displaced: [{ path: '/h/a', movedTo: '/h/a.moved' }],
+      },
+    };
+    const result = await applyAccountChange(answer(displaced), CHANGE);
+    if (result.kind !== 'rollback-incomplete') throw new Error('expected rollback-incomplete');
+    expect(result.sentence).not.toContain('partly changed');
+    expect(result.sentence).not.toContain(': .');
+    expect(result.sentence).toContain('Moved aside: /h/a (moved to /h/a.moved).');
+    expect(result.sentence).toEndWith('Check these paths and files, fix the cause, then apply again.');
+  });
+
   it('R3-M1: several landed files are all named', async () => {
     const two = {
       outcome: 'applied',
@@ -186,7 +212,8 @@ describe('R3-M1: an apply that did not finish is not applied', () => {
     expect(result.sentence).toContain(`${UNRESTORED_PATH} (the original is at ${BACKUP_PATH})`);
     expect(result.sentence).toContain('Moved aside: /h/a (moved to /h/a.moved).');
     expect(result.sentence).toContain(LANDED_FILE);
-    expect(result.sentence).toContain('Check these paths and files before you apply again');
+    expect(result.sentence).toContain('This path was left partly changed:');
+    expect(result.sentence).toContain('Check these paths and files, fix the cause, then apply again.');
   });
 
   it('R3-M1: a login removal whose moved runtimes rolled back is not applied either', async () => {
