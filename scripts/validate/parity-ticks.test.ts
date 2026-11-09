@@ -58,9 +58,21 @@ describe('parity-ticks: the test that names a row', () => {
     expect(run([row({})], ctx(root))).toEqual([]);
   });
 
-  test('an id in an enclosing describe title passes', () => {
-    const root = fixture({ [TEST]: "describe('F-0019 group', () => { test('does it', () => {}) })" });
-    expect(run([row({})], ctx(root))).toEqual([]);
+  test('an id only in a describe title fails: a describe runs nothing, so no case can turn red for the row', () => {
+    for (const source of [
+      "describe('F-0019 group', () => { test('does it', () => {}) })",
+      "describe.each([1])('F-0019 group', () => { test('does it', () => {}) })",
+    ]) {
+      const root = fixture({ [TEST]: source });
+      expect(run([row({})], ctx(root))[0], source).toContain('no live test() or it() title');
+    }
+  });
+
+  test('an id in a case title passes inside a describe, and moving it up to the describe makes the row fail', () => {
+    const inCase = fixture({ [TEST]: "describe('group', () => { test('F-0019 does it', () => {}) })" });
+    expect(run([row({})], ctx(inCase))).toEqual([]);
+    const moved = fixture({ [TEST]: "describe('F-0019 group', () => { test('does it', () => {}) })" });
+    expect(run([row({})], ctx(moved))[0]).toContain('names F-0019');
   });
 
   test('an id only in a comment fails', () => {

@@ -2,8 +2,8 @@
  * `parity-ticks`: a `[x]` in `docs/design/rebuild-parity.tsv` means a TEST proves the row, never a declaration. For every
  * ticked row, of any kind, it fails when
  *   - the check cell is not a regular `*.test.ts` / `*.test.tsx` file under a `tests/` folder;
- *   - the row id is in no LIVE `test(` / `it(` / `describe(` title of that file (parsed; a comment, a string elsewhere,
- *     or a title under `.skip` / `.todo` / `.only` / `.failing`, or inside such a describe, does not count);
+ *   - the row id is in no LIVE `test(` / `it(` title of that file (parsed; a describe's title, a comment, a string
+ *     elsewhere, or a title under `.skip` / `.todo` / `.only` / `.failing`, or inside such a describe, does not count);
  *   - results are given (`--results <junit.xml|folder>`, as `guarantees` takes them, with `--tier unit|int`) and the
  *     id-titled test did not PASS in them. Without results it says so and passes that part;
  *   - (a route) descriptor-parity does not ALSO prove it: today's route is at the same path or moved (both halves
@@ -240,13 +240,21 @@ const titleOf = (node: unknown): string | undefined => {
   return undefined;
 };
 
-/** Every title of a LIVE `test(` / `it(` / `describe(` call in a file: none of its own or its describes' modifiers is dead. */
-export function liveTitles(file: string): string[] {
+/** The calls whose title is a CASE: the thing that runs, so the thing that can go red. A describe only groups. */
+const CASE = new Set(['test', 'it']);
+
+/**
+ * Every title of a LIVE `test(` / `it(` (and, with `cases: false`, `describe(`) call in a file: none of its own or its
+ * describes' modifiers is dead. A row is proved by a CASE title (the default): an id only in a describe's title is
+ * proved by nothing that runs, and moving it there leaves a ticked row nothing can turn red.
+ */
+export function liveTitles(file: string, cases = true): string[] {
   const out: string[] = [];
+  const suites = cases ? CASE : SUITE;
   walk(parseFile(file).program, (node, parents) => {
     if (node.type !== 'CallExpression') return;
     const own = callee(node.callee);
-    if (own === undefined || !SUITE.has(own.base) || own.mods.some(m => DEAD.has(m)) || isOff(node.callee)) return;
+    if (own === undefined || !suites.has(own.base) || own.mods.some(m => DEAD.has(m)) || isOff(node.callee)) return;
     const title = titleOf((node.arguments as unknown[])[0]);
     if (title === undefined) return;
     const dead = parents.some(p => {
@@ -281,7 +289,7 @@ export function testProblem(row: LedgerRow, tc: TickContext): string | undefined
   if (!existsSync(path)) return `check path does not exist: ${check}`;
   if (!statSync(path).isFile()) return `check path is not a regular file: ${check}`;
   if (!liveTitles(path).some(title => namesRow(title, row.id)))
-    return `no live test(), it() or describe() title in ${check} names ${row.id} (a comment, a string elsewhere, or a skipped, todo or only title does not count)`;
+    return `no live test() or it() title in ${check} names ${row.id} (a describe() title, a comment, a string elsewhere, or a skipped, todo or only title does not count)`;
   if (tc.results === undefined || (tc.tier !== undefined && inTier(check, tc.tier) === false)) return undefined;
   const mine = tc.results.filter(
     c => (c.file === check || c.file.endsWith(`/${check}`)) && namesRow(c.fullName, row.id),
