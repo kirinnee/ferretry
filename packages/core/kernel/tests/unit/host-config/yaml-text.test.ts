@@ -273,6 +273,10 @@ describe('readConfigText — aliases it cannot read are syntax errors, never a t
 describe('readConfigText — a file at the size limit is read in ONE pass, whatever its aliases do', () => {
   /** A hard bound, far above what one linear pass takes; the quadratic paths this guards took seconds to minutes. */
   const BOUND_MS = 1500;
+  /** How many times a read is timed before a slow one counts. */
+  const ATTEMPTS = 3;
+  /** Each read is cheap alone; up to four of them under a loaded run must still fit one test's own timeout. */
+  const TEST_TIMEOUT_MS = 60_000;
   const fill = (head: string, line: (index: number) => string, tail = ''): string => {
     const lines = [head];
     let size = head.length + tail.length;
@@ -337,18 +341,27 @@ describe('readConfigText — a file at the size limit is read in ONE pass, whate
       'not a plain string',
     ],
   ] as const) {
-    it(`should read ${label} in under ${BOUND_MS} ms`, () => {
-      // Act
-      const started = performance.now();
-      const actual = readConfigText(text);
-      const took = performance.now() - started;
+    it(
+      `should read ${label} in under ${BOUND_MS} ms`,
+      () => {
+        // Act: the BEST of a few reads. A bound on the clock measures the box as much as the code (2.2 s under a loaded
+        // run, a few hundred ms alone): a quadratic path takes seconds in EVERY attempt, a busy moment spoils one.
+        const actual = readConfigText(text);
+        let took = Number.POSITIVE_INFINITY;
+        for (let attempt = 0; attempt < ATTEMPTS && took >= BOUND_MS / 2; attempt += 1) {
+          const started = performance.now();
+          readConfigText(text);
+          took = Math.min(took, performance.now() - started);
+        }
 
-      // Assert
-      should(took).be.below(BOUND_MS);
-      if (refused === undefined) should(actual.ok).be.true();
-      else if (refused instanceof RegExp) should(actual.ok ? '' : actual.errors[0]?.message).match(refused);
-      else should(actual.ok ? '' : actual.errors[0]?.message).containEql(refused);
-    });
+        // Assert
+        should(took).be.below(BOUND_MS);
+        if (refused === undefined) should(actual.ok).be.true();
+        else if (refused instanceof RegExp) should(actual.ok ? '' : actual.errors[0]?.message).match(refused);
+        else should(actual.ok ? '' : actual.errors[0]?.message).containEql(refused);
+      },
+      TEST_TIMEOUT_MS,
+    );
   }
 });
 

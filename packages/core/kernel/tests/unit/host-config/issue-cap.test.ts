@@ -39,10 +39,19 @@ const envDef = defineConfig({
 /** Fake only: a key shape assembled at run time. */
 const KEYLIKE = `${'sk'}-${'ant'}-${'A1B2'.repeat(10)}`;
 
+/**
+ * A check, and the BEST time of a few attempts at it: a bound on the clock measures the box as much as the code
+ * (2.2 s under a loaded run, 0.9 s alone), so a quadratic path fails every attempt and a busy moment fails one.
+ */
 function checked(text: string) {
-  const started = performance.now();
-  const result = checkConfigText(envDef, 'voice.yaml', text, 'fy');
-  return { result, ms: performance.now() - started };
+  let ms = Number.POSITIVE_INFINITY;
+  let result = checkConfigText(envDef, 'voice.yaml', text, 'fy');
+  for (let attempt = 0; attempt < 3 && ms >= BOUND_MS / 2; attempt += 1) {
+    const started = performance.now();
+    result = checkConfigText(envDef, 'voice.yaml', text, 'fy');
+    ms = Math.min(ms, performance.now() - started);
+  }
+  return { result, ms };
 }
 
 /** The issues of a refused check, or a failure. */
@@ -273,11 +282,11 @@ describe('a flood of % directive lines is refused without being parsed', () => {
     expect(readConfigText(`env:\n${'  K: "100% 50%"\n'.repeat(1)}${'# %\n'.repeat(100)}`).ok).toBe(true);
   });
 
-  test('T-0034 256 KiB of bare % lines answers in under the bound, at the check, and is told as a directive', () => {
+  test('T-0034 256 KiB of bare % lines is refused unparsed, at the check, and is told as ONE directive issue', () => {
     const text = '%\n'.repeat(CONFIG_FILE_MAX_BYTES / 2);
-    const { result, ms } = checked(text);
-    expect(ms).toBeLessThan(250);
-    const issues = issuesOf(result);
+    // The work, counted and not timed: parsed, 131 072 bare directives are as many parser errors (50 listed, the rest
+    // counted); refused by the pre-count, the answer is the one sentence at the 65th line, with nothing counted.
+    const issues = issuesOf(checked(text).result);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.message).toBe(`this is not valid YAML: ${FLOOD}`);
     expect(issues[0]?.line).toBe(65);
