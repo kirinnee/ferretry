@@ -19,6 +19,7 @@ export type VerbBody = (deps: AccountCommandDeps, invocation: VerbInvocation) =>
 
 /** Every verb the manifest declares, by its exact verb line. A verb the manifest adds is a type error here. */
 export const VERB_BODIES = {
+  runtimes: runtimeLs,
   'runtime ls': runtimeLs,
   'runtime add': runtimeAdd,
   'runtime show': runtimeShow,
@@ -29,6 +30,7 @@ export const VERB_BODIES = {
   'runtime rm': runtimeRm,
   'runtime link': runtimeLink,
   'runtime scan': runtimeScan,
+  profiles: profileLs,
   'profile ls': profileLs,
   'profile show': profileShow,
   'profile build': profileBuild,

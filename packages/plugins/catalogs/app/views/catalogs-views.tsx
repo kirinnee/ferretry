@@ -23,10 +23,17 @@ import {
 } from '@ferretry/app';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CatalogClient, catalogClientOf, machineCatalogClient } from '../lib/catalog-client.ts';
+import {
+  type CatalogClient,
+  catalogClientOf,
+  machineCatalogClient,
+  machinePluginClient,
+} from '../lib/catalog-client.ts';
 import { CatalogClientProvider } from '../lib/client-context.tsx';
 import { daemonConnection } from '../lib/machine.ts';
 import { sharedMembers } from '../lib/members.ts';
+import { fetchMachineSkillEntries } from '../lib/machine-skills.ts';
+import { readRegisteredProjects, useRegisteredProjects } from '../lib/registered-projects.ts';
 import { isSharingTab, JOIN_SCREEN_ID, SHARED_PATH } from '../lib/routes.ts';
 import type { InstallMachine } from '../features/shared/shared-item-sheet.tsx';
 import type { InstallHost } from '../features/catalogs/install-from-file-sheet.tsx';
@@ -67,15 +74,22 @@ function useCatalogClients(): ReadonlyMap<string, PluginClient> {
 }
 
 /** Installs go through THAT machine's own client: this one's, or Catalogs' own row on another paired daemon. */
-export function useInstallHost(own: CatalogClient, ownId: string): InstallHost {
+export function useInstallHost(own: CatalogClient, ownId: string, client: Pick<PluginClient, 'call'>): InstallHost {
   const others = useCatalogClients();
   const whyNone = useNoReach();
   const live = useRef(others);
   live.current = others;
-  return useMemo(
-    () => ({ createClient: machineCatalogClient(own, ownId, { clients: () => live.current, whyNone }) }),
-    [own, ownId, whyNone],
-  );
+  // The projects an install offers are the TARGET machine's, read through that machine's own client.
+  const projects = useRegisteredProjects(client);
+  return useMemo(() => {
+    const source = { clients: () => live.current, whyNone };
+    const projectClient = machinePluginClient(client, ownId, source);
+    return {
+      createClient: machineCatalogClient(own, ownId, source),
+      projects,
+      readProjects: async connection => readRegisteredProjects(await projectClient(connection)),
+    };
+  }, [own, ownId, whyNone, client, projects]);
 }
 
 export function createSharingScreen(client: PluginClient) {
@@ -88,7 +102,8 @@ export function createSharingScreen(client: PluginClient) {
       [id, paired],
     );
     const machines = useInstallMachines();
-    const installHost = useInstallHost(own, id);
+    const installHost = useInstallHost(own, id, client);
+    const loadMachineSkills = useCallback((signal: AbortSignal) => fetchMachineSkillEntries(client, signal), []);
     const { navigate } = useRouter();
     const tab = isSharingTab(params.tab) ? params.tab : undefined;
     return (
@@ -100,6 +115,7 @@ export function createSharingScreen(client: PluginClient) {
           members={sharedMembers()}
           machines={machines}
           installHost={installHost}
+          loadMachineSkills={loadMachineSkills}
         />
       </CatalogClientProvider>
     );

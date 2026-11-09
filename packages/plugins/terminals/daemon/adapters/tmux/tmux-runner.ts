@@ -4,6 +4,10 @@ import {
   type DeliveryOutcome,
   HARNESS_STOP_KEYS,
   type QueueOutcome,
+  type RunnerComposerCleared,
+  type RunnerComposerSubmitted,
+  type RunnerHeldAt,
+  type RunnerPaneObservation,
   type Runner,
   type RunnerDelivery,
   type RunnerDeliveryFailure,
@@ -44,6 +48,7 @@ import {
   type CapturedFrame,
   capturedFrameIsCurrent,
   paneShowsActiveWork,
+  paneShowsStartupWait,
   paneStateFrom,
   parsePaneActivity,
 } from '../../lib/tmux/pane.ts';
@@ -52,10 +57,15 @@ import {
   PaneDeliveryError,
   type PaneNotReadyCause,
   PaneNotReadyError,
+  blockedByDialog,
   PaneStrandedError,
   TmuxPaneDelivery,
 } from './pane-delivery.ts';
 import { TmuxPaneQueue } from './pane-queue.ts';
+import { ComposerActs } from './composer-acts.ts';
+
+/** A read waits for nothing. */
+const noSleep: DeliverySleep = async () => undefined;
 
 /**
  * Why the binding itself wrote nothing for one write: the pane behind the handle is not the one first bound (it died,
@@ -341,6 +351,16 @@ export class TmuxRunner implements Runner {
    * longer the one bound is a stop at a gone ferret pane). A hold that refused the press is its closed code.
    */
   async stopTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome> {
+    return await this.#stop(handle, stop, false);
+  }
+
+  /**
+   * `stopTurn`'s press. `overPrompt: false` is the person's own interrupt (today's rule: pressed whenever
+   * `shouldPressStopKey` says so). `true` is a send-now's stop: the frame read INSIDE the act must also show no
+   * blocking prompt and no startup wait, since a permission that came up after the caller's own read can sit beneath a
+   * still-drawn active-work line, and Escape would then answer it "no" for the person. Nothing is pressed then.
+   */
+  async #stop(handle: RunnerHandle, stop: RunnerStop, overPrompt: boolean): Promise<RunnerStopOutcome> {
     // Closed by the contract's type; refused here as well, so no caller can make this press another key.
     if (!STOP_KEYS.has(stop.key)) throw new PaneDeliveryError('that is not a harness stop key');
     const pane = await this.guardedPane(handle);
@@ -350,6 +370,8 @@ export class TmuxRunner implements Runner {
       if (before === undefined || !before.alive || before.dead)
         throw new PaneNotReadyError('the ferret pane is no longer live', 'exited');
       const working = paneShowsActiveWork(before.visible);
+      if (overPrompt && (blockedByDialog(before.visible) || paneShowsStartupWait(before.visible)))
+        return { pressed: false, working };
       if (!shouldPressStopKey(working, stop)) return { pressed: false, working };
       await tmux.sendKey(pane.session, stop.key);
       const after = await captureFrame(tmux, pane.session).catch(() => undefined);
@@ -397,6 +419,86 @@ export class TmuxRunner implements Runner {
     return captured.code === 0 ? captured.stdout : '';
   }
 
+  /**
+   * ONE read-only binding of the exact live ferret pane behind `handle` for a read: only questions reach tmux (anything
+   * else is refused before it), and every read re-proves the pane is the one first seen. Not an act, like `settled`'s.
+   */
+  private async readingPane(
+    handle: RunnerHandle,
+  ): Promise<{ readonly tmux: TmuxController; readonly session: string }> {
+    const pane = await this.guardedPane(handle);
+    const reading: TmuxCommandPort = {
+      execute: async (args, stdin) =>
+        STARTUP_READS.has(args[0] ?? '')
+          ? await pane.port.execute(args, stdin)
+          : { code: 1, stdout: '', stderr: 'a pane read writes nothing' },
+    };
+    return { tmux: new TmuxController(reading), session: pane.session };
+  }
+
+  /** A blocking prompt's words, masked inside one `Redaction.read`; with no redaction bound, a fixed sentence. */
+  private async maskedObservation(seen: RunnerPaneObservation): Promise<RunnerPaneObservation> {
+    const { blockingPrompt, ...rest } = seen;
+    if (blockingPrompt === undefined) return seen;
+    const redaction = this.options.look?.redaction;
+    if (redaction === undefined) return { ...rest, blockingPrompt: 'a prompt on its screen' };
+    const [masked] = await redaction.read(scope => scope.lines([blockingPrompt]));
+    return { ...rest, blockingPrompt: masked ?? 'a prompt on its screen' };
+  }
+
+  /** Today's `TmuxSendTerminal.observe`: one read of the pane for a send. Total: nothing live reads `undefined`. */
+  async observe(handle: RunnerHandle): Promise<RunnerPaneObservation | undefined> {
+    try {
+      const { tmux, session } = await this.readingPane(handle);
+      return await this.maskedObservation(await new ComposerActs(tmux, session, noSleep).observe());
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Today's `TmuxSendTerminal.heldAt`: rejects when the pane cannot be read (an unread pane proves nothing). */
+  async heldAt(handle: RunnerHandle, text: string): Promise<RunnerHeldAt | undefined> {
+    const { tmux, session } = await this.readingPane(handle);
+    return await new ComposerActs(tmux, session, noSleep).heldAt(text);
+  }
+
+  /** Today's `TmuxSendTerminal.clearComposer`, every `C-u` through the guarded binding (`kernel.act` on the pane). */
+  async clearComposer(handle: RunnerHandle, text: string): Promise<RunnerComposerCleared> {
+    const pane = await this.guardedPane(handle);
+    try {
+      return await new ComposerActs(new TmuxController(pane.port), pane.session, pane.sleep).clearComposer(text);
+    } catch (error) {
+      throw typedNotLost(error, { ...pane.written(), typings: 0 });
+    }
+  }
+
+  /** Today's `TmuxSendTerminal.submitComposer`: one Enter through the guarded binding. */
+  async submitComposer(handle: RunnerHandle, text: string, strict = false): Promise<RunnerComposerSubmitted> {
+    const pane = await this.guardedPane(handle);
+    try {
+      return await new ComposerActs(new TmuxController(pane.port), pane.session, pane.sleep).submitComposer(
+        text,
+        strict,
+      );
+    } catch (error) {
+      throw typedNotLost(error, { ...pane.written(), typings: 0 });
+    }
+  }
+
+  /**
+   * Today's `TmuxSendTerminal.stopActiveTurn`: the harness's stop under `stopTurn`'s rule (one keystroke, never `C-c`),
+   * then a bounded wait for a prompt that is NOT a failure when it gives up, then one read of the pane.
+   */
+  async stopActiveTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerPaneObservation | undefined> {
+    const stopped = await this.#stop(handle, stop, true);
+    if (!stopped.pressed) return await this.observe(handle);
+    const pane = await this.guardedPane(handle).catch(() => undefined);
+    if (pane !== undefined)
+      await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep)
+        .waitReady(pane.session)
+        .catch(() => undefined);
+    return await this.observe(handle);
+  }
   /**
    * One look at the live ferret pane behind `handle` for the turn watch (`Runner.look`): the activity stamp, the screen
    * captured again only when it may have changed (re-proving then that the pane is still a live ferret's own), masked

@@ -46,8 +46,20 @@ export interface ConversationRefusal {
   readonly message: string;
 }
 
-/** Who is calling a write: the owner, or a ferret (named). Gate stamped it; Conversation never decides it. */
-export type ConversationCaller = { readonly kind: 'owner' } | { readonly kind: 'ferret'; readonly ferret: FerretId };
+/**
+ * Who is calling a write: the owner, a ferret (named), or the Warden. Gate stamps the caller of a ROUTE; a caller of
+ * THIS port is trusted in-process: the kernel hands a provider no consumer id, so Conversation cannot prove which plugin
+ * is calling, and any plugin holding the conversation need could pass `warden` (declared in ports-pending as an open
+ * GAP; binding it to the Warden's consumer id waits for the kernel). The port's `cancelSend`, `enterSend` and
+ * `composer` take no caller at all, and the port's draft action has no `terminal.use` gate (the route does).
+ * `warden` (additive, D2 #19) is Ferretry's own watchdog speaking: its words are typed bare, recorded as the DAEMON's
+ * (`senderKind: 'daemon'`, `by` Ferretry's Warden), never as the owner's own message and never as a ferret's:
+ * a notice is not kept, retried or counted as the owner's.
+ */
+export type ConversationCaller =
+  | { readonly kind: 'owner' }
+  | { readonly kind: 'ferret'; readonly ferret: FerretId }
+  | { readonly kind: 'warden' };
 
 /**
  * What other plugins and the app read and ask of Conversation (§2.3): messages, the queue, turns, questions,
@@ -81,6 +93,23 @@ export interface ConversationApi {
     action: 'submit' | 'clear',
     draft: string,
   ): Promise<Result<ComposerResult, ConversationRefusal>>;
+  /**
+   * Additive (send path, today's `SessionSendService.resubmitStuck`): the Warden's ONE verified Enter on a send's own text
+   * left typed in a ferret's composer. It presses only when the composer holds exactly that send's text at an idle,
+   * undialogued pane, and no more than one Enter past the send path's own bound. `submitted` / `holding` say what the
+   * Enter did, `absent` that the box is empty (the message is not sitting there), `refused` that nothing was pressed.
+   * Only the `warden` caller may ask: any other is refused `forbidden` before a pane is read.
+   */
+  resubmitStuck?(
+    ferret: FerretId,
+    caller: ConversationCaller,
+    sendId: string,
+  ): Promise<Result<'submitted' | 'holding' | 'absent' | 'refused', ConversationRefusal>>;
+  /**
+   * Additive (send path, &B153): the id of the delivered pointer the harness took back into the ferret's box, when an idle,
+   * undialogued pane shows exactly it. Reads the pane and presses nothing; `undefined` when none (or the pane cannot be read).
+   */
+  retractedDraft?(ferret: FerretId): Promise<string | undefined>;
 
   // reading
   transcript(
