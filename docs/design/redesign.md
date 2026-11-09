@@ -2715,6 +2715,8 @@ scoped handle:
   owner's root) refuses every entry on a device that tree's indexed places answer with (the folder's and the files'; an
   overlay filesystem gives them different ones), because an alias of an unindexed member (a bind mount keeps
   its source's device) cannot be told from any other file there; an entry on another device is proven not to be one.
+  An owner's root asks that one rule at every door — its members and removes, and a held (pinned) root's open, name
+  verdict and probe alike, for the entry a walk ends on — so a held descriptor never serves what the unheld root refuses.
   **The blast radius is the whole device, not the tree:** home, state and the owner's repositories are one device on a
   normal Linux box or a macOS Data volume, so a place past its budget makes agent homes, fleet files, work folders,
   imports, harness homes and every login's credentials root read nothing (the root that owns the tree still reads it),
