@@ -149,7 +149,27 @@ function deferred<Target extends object>(make: () => Target): Target {
  */
 function onceHomes(make: () => RuntimeHomesApi): RuntimeHomesApi {
   const built = once(make);
-  return { homes: async () => await built().homes(), home: id => built().home(id) };
+  return {
+    homes: async () => await built().homes(),
+    home: id => built().home(id),
+    // The asset tree answers through the same built service; a fleet that cannot be opened lists and reads nothing.
+    assetSkills: () => ({
+      skills: async limit => {
+        try {
+          return (await built().assetSkills?.().skills(limit)) ?? [];
+        } catch {
+          return [];
+        }
+      },
+      skillManifest: async (name, maxBytes) => {
+        try {
+          return await built().assetSkills?.().skillManifest(name, maxBytes);
+        } catch {
+          return undefined;
+        }
+      },
+    }),
+  };
 }
 
 /**

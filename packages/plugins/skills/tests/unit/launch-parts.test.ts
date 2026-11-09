@@ -16,15 +16,17 @@ const trees = new Map<string, SharedTree>([
 const resolve = async (name: string) => trees.get(name);
 const names = (parts: readonly LaunchPart[]) => parts.map(part => part.kind === 'skill' && part.name);
 
+const both = new Set(['all', 'codex-only']);
+
 describe('skills launch parts', () => {
   test('F-0184 one skill part per installed folder an item names, for the harnesses it allows, skipping a folder the store lacks', async () => {
-    const parts = await skillParts(items, 'claude-code', resolve);
+    const parts = await skillParts(items, 'claude-code', resolve, both);
     expect(parts).toEqual([{ kind: 'skill', name: 'alpha', tree: trees.get('alpha') as SharedTree }]);
-    expect(names(await skillParts(items, 'codex', resolve))).toEqual(['alpha', 'gamma']);
+    expect(names(await skillParts(items, 'codex', resolve, both))).toEqual(['alpha', 'gamma']);
   });
 
   test('F-0184 a part carries the shared folder and never a path', async () => {
-    for (const part of await skillParts(items, 'codex', resolve)) expect(part).not.toHaveProperty('path');
+    for (const part of await skillParts(items, 'codex', resolve, both)) expect(part).not.toHaveProperty('path');
   });
 
   test('F-0184 a folder named by two items is added once', async () => {
@@ -32,7 +34,13 @@ describe('skills launch parts', () => {
       ['a', { items: ['alpha'] }],
       ['b', { items: ['alpha'] }],
     ]);
-    expect(await skillParts(twice, 'codex', resolve)).toHaveLength(1);
+    expect(await skillParts(twice, 'codex', resolve, new Set(['a', 'b']))).toHaveLength(1);
+  });
+
+  test('D10 a launch carries only the items its runtime’s profile selects', async () => {
+    expect(names(await skillParts(items, 'codex', resolve, new Set(['codex-only'])))).toEqual(['gamma']);
+    expect(await skillParts(items, 'codex', resolve, new Set())).toEqual([]);
+    expect(names(await skillParts(items, 'codex', resolve, new Set(['not-an-item'])))).toEqual([]);
   });
 });
 

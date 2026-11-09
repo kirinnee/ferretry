@@ -34,6 +34,7 @@
 import type { FencedPath, RootEntry, RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import {
   RUNTIME_HOME_DOCUMENTS,
+  type RuntimeAssetSkills,
   type RuntimeHome,
   type RuntimeHomeDocument,
   type RuntimeHomeFileRead,
@@ -301,6 +302,80 @@ class FleetHomeReader implements RuntimeHomeReader {
   }
 }
 
+/**
+ * A skill folder's name, as Skills' own rule has it (`usableSkillName`): one plain component a harness can load as a
+ * skill, no leading dot, no `..`. Copied here because Runtimes imports nothing of Skills; both ends test the same names.
+ */
+const ASSET_SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const assetSkillName = (name: string): boolean => ASSET_SKILL_NAME.test(name) && !name.includes('..');
+
+/** The most a listing of the asset tree asks for: past it nothing is listed (a bound the caller cannot widen). */
+const ASSET_SKILLS_LIMIT = 1000;
+
+/**
+ * The fleet's own installed skills (`<fleet>/assets/skills/<name>`), listed and read only as plain folders: `assets/skills`
+ * itself, each skill folder and its `SKILL.md` are judged by `lstat` on handles scoped to them, so a link at any of
+ * those names, a hard-linked `SKILL.md` or any other kind is skipped and nothing is followed. Each call runs inside ONE
+ * `publication.reading(...)`. A fault, a bound passed or an unreadable name gives an empty answer; nothing it says
+ * names a file's content or a path.
+ */
+function fleetAssetSkills(deps: Deps): RuntimeAssetSkills {
+  const skills = (): RootHandle => deps.roots.root('fleet', { subfolder: 'assets/skills' });
+  const plain = async (root: RootHandle, relative: string): Promise<boolean> =>
+    (await root.lstat(fenced(root, relative)))?.kind === 'directory';
+  /** The regular, singly-named `SKILL.md` of skill `name`, or `undefined`. */
+  const manifestOf = async (name: string): Promise<{ root: RootHandle; size: number } | undefined> => {
+    const folder = deps.roots.root('fleet', { subfolder: `assets/skills/${name}` });
+    const found = (await listing(folder, '.')).find(entry => entry.name === SKILL_MANIFEST);
+    return found?.kind === 'file' && found.links === 1 ? { root: folder, size: found.size } : undefined;
+  };
+  const listed = async (name: string): Promise<boolean> => {
+    if (!assetSkillName(name)) return false;
+    const fleet = deps.roots.root('fleet');
+    if (!(await plain(fleet, 'assets')) || !(await plain(fleet, 'assets/skills'))) return false;
+    const entry = (await listing(skills(), '.')).find(candidate => candidate.name === name);
+    return entry?.kind === 'directory' && (await manifestOf(name)) !== undefined;
+  };
+  return {
+    skills: async limit => {
+      if (!Number.isSafeInteger(limit) || limit < 0 || limit > ASSET_SKILLS_LIMIT) return [];
+      try {
+        return await deps.publication.reading(async () => {
+          const fleet = deps.roots.root('fleet');
+          if (!(await plain(fleet, 'assets')) || !(await plain(fleet, 'assets/skills'))) return [];
+          const found: RuntimeHomeSkillEntry[] = [];
+          for (const entry of await listing(skills(), '.')) {
+            if (found.length > limit) break;
+            if (entry.kind !== 'directory' || !assetSkillName(entry.name)) continue;
+            if ((await manifestOf(entry.name)) === undefined) continue;
+            found.push({
+              name: entry.name,
+              manifest: `${deps.directory}/assets/skills/${entry.name}/${SKILL_MANIFEST}`,
+              managed: true,
+            });
+          }
+          return found;
+        });
+      } catch {
+        return [];
+      }
+    },
+    skillManifest: async (name, maxBytes) => {
+      if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) return undefined;
+      try {
+        return await deps.publication.reading(async () => {
+          if (!(await listed(name))) return undefined;
+          const manifest = await manifestOf(name);
+          if (manifest === undefined || manifest.size > maxBytes) return undefined;
+          return await manifest.root.readText(fenced(manifest.root, SKILL_MANIFEST), maxBytes);
+        });
+      } catch {
+        return undefined;
+      }
+    },
+  };
+}
+
 /** The fleet folder's absolute path, as the `fleet` root names it. */
 function fleetDirectory(fleet: RootHandle): string {
   const base = fleet.resolve('.');
@@ -346,5 +421,6 @@ export function fleetHomes(
   return {
     homes: async () => await publication.reading(published),
     home: id => (known.has(id) ? new FleetHomeReader(id, deps) : undefined),
+    assetSkills: () => fleetAssetSkills(deps),
   };
 }

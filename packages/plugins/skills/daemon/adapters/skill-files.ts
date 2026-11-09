@@ -15,7 +15,7 @@ export class RootSkillFiles implements SkillFilesPort {
     private readonly base: string,
   ) {}
 
-  async list(directory: string, _confinedTo: string, limit: number): Promise<readonly SkillDirectoryEntry[]> {
+  async list(directory: string, limit: number): Promise<readonly SkillDirectoryEntry[]> {
     const listed = await this.#fenced(directory);
     if (listed === undefined) return [];
     const names = await this.root.list(listed).catch(() => [] as readonly string[]);

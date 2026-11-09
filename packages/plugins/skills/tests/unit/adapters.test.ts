@@ -72,7 +72,7 @@ describe('RootSkillFiles', () => {
       },
       ['/w/.claude/skills/b'],
     );
-    const found = await new RootSkillFiles(root, '/w').list('/w/.claude/skills', '/w', 200);
+    const found = await new RootSkillFiles(root, '/w').list('/w/.claude/skills', 200);
     expect(found.map(entry => entry.manifest)).toEqual(['/w/.claude/skills/a/SKILL.md']);
   });
 

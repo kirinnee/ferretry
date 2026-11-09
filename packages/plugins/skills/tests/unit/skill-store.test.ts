@@ -169,8 +169,11 @@ describe('F-0184 only an installed folder is shared', () => {
   test('F-0184 end to end: installed, selected by an item, shared, and linked into a ferret home the harness reads', async () => {
     const f = await fixture();
     await f.store.install('review', SKILL);
-    const parts = await skillParts(new Map([['mine', { items: ['review', 'not-installed'] }]]), 'claude-code', name =>
-      f.store.tree(name),
+    const parts = await skillParts(
+      new Map([['mine', { items: ['review', 'not-installed'] }]]),
+      'claude-code',
+      name => f.store.tree(name),
+      new Set(['mine']),
     );
     expect(parts.map(part => part.kind === 'skill' && part.name)).toEqual(['review']);
     const made = await materializeSkills(f.ferretHome, parts, []);
@@ -189,15 +192,21 @@ describe('F-0184 the daemon half hands a launch the installed skills it selects'
     const half = skillsDaemon.build?.({
       kernel: { state: f.port, roots: f.skillsRoots, config: { collection: () => items } },
       needs: { ferrets: { get: async () => undefined } },
+      uses: {
+        runtimes: {
+          current: () => ({ layers: async () => ({ runtime: 'a', profile: 'p', mcp: [], skills: ['mine'] }) }),
+        },
+        projects: { current: () => undefined },
+      },
     } as never);
     const taker = (
       (half as unknown as { hooks: Record<string, unknown> }).hooks['launch.parts'] as unknown as () => readonly {
         item: { parts(spec: unknown): Promise<readonly { kind: string; name: string; tree?: unknown }[]> };
       }[]
     )();
-    const parts = await taker[0]?.item.parts({ harness: 'claude-code' });
+    const parts = await taker[0]?.item.parts({ harness: 'claude-code', runtime: 'a' });
     expect(parts?.map(part => part.name)).toEqual(['review']);
     expect(parts?.[0]?.tree).toBeDefined();
-    expect(await taker[0]?.item.parts({ harness: 'codex' })).toEqual([]);
+    expect(await taker[0]?.item.parts({ harness: 'codex', runtime: 'a' })).toEqual([]);
   });
 });
