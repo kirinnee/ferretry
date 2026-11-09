@@ -49,7 +49,8 @@ import {
   YAML_OPTIONS,
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
-import { CODEX_HELD_SENTENCE, PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
+import { PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
+import { heldReason, type RuntimeHarness, runtimeHarnessOf } from './preview-hold.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
@@ -771,7 +772,7 @@ export async function buildPlan(
         count(plan, 'preview shell environment (settings item)');
       }
     }
-    if (!codexRuntimes) holdCodexRuntimes(plan);
+    if (!codexRuntimes) holdCodexRuntimes(plan, ctx);
   }
   settleUncarried(plan, ctx.dropUncarried === true);
   return { ...plan, ignored: listing.ignored };
@@ -790,33 +791,36 @@ const scalarOf = (map: YAMLMap, key: string): string | undefined => {
 
 /**
  * Preview only: leaves out every runtime that is not provably a Claude Code one, and every profile that only such
- * runtimes use. Only a runtime whose own file says `harness: claude` is kept: the preview leaves every v4 login out and
- * the owner adds logins fresh, so a runtime that does not say can become a Codex one the day its login is added.
+ * runtimes use. Only a runtime PROVEN to be a Claude Code one is kept: its own `harness`, else the harness its login
+ * names (the stage's map, `runtimeHarnessOf`; v4's own rule, never the runtime's name). The preview leaves every v4 login
+ * file out, so a login the map does not know leaves the harness unknown, and an unknown one is held, said truthfully.
  * Each held runtime is listed by NAME.
  */
-function holdCodexRuntimes(plan: Plan): void {
+function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarnesses'>): void {
   const planned = [...plan.files.entries()];
-  const held = new Set<string>();
-  const profilesOf = new Map<string, { held: number; kept: number }>();
+  const held = new Map<string, RuntimeHarness>();
+  const profilesOf = new Map<string, { held: number; kept: number; codex: number }>();
   for (const [path, file] of planned) {
     if (file.target !== RUNTIME_ITEMS || file.name === undefined || !isMap(file.document.contents)) continue;
     const map = file.document.contents;
-    const harness = scalarOf(map, 'harness');
+    const own = scalarOf(map, 'harness');
+    const harness = runtimeHarnessOf(ctx, own, scalarOf(map, 'login'));
     const profile = scalarOf(map, 'profile');
     const isHeld = harness !== 'claude-code';
     if (profile !== undefined) {
-      const tally = profilesOf.get(profile) ?? { held: 0, kept: 0 };
+      const tally = profilesOf.get(profile) ?? { held: 0, kept: 0, codex: 0 };
       if (isHeld) tally.held++;
       else tally.kept++;
+      if (harness === 'codex') tally.codex++;
       profilesOf.set(profile, tally);
     }
     if (!isHeld) continue;
-    held.add(file.name);
+    held.set(file.name, harness);
     plan.files.delete(path);
     uncount(plan, 'runtimes');
     plan.dropped.push({
-      what: `runtime ${file.name}${harness === undefined ? ' (its file does not say which harness; the preview has no logins to tell)' : ' (Codex)'}`,
-      why: CODEX_HELD_SENTENCE,
+      what: `runtime ${file.name}${harness === 'unknown' ? ' (its harness is unknown)' : ' (Codex)'}`,
+      why: heldReason(harness),
     });
   }
   for (const [path, file] of planned) {
@@ -825,14 +829,18 @@ function holdCodexRuntimes(plan: Plan): void {
     if (tally === undefined || tally.kept > 0 || tally.held === 0) continue;
     plan.files.delete(path);
     uncount(plan, 'profiles');
-    plan.dropped.push({ what: `profile ${file.name} (used only by held runtimes)`, why: CODEX_HELD_SENTENCE });
+    plan.dropped.push({
+      what: `profile ${file.name} (used only by held runtimes)`,
+      why: heldReason(tally.codex > 0 ? 'codex' : 'unknown'),
+    });
   }
   for (const [, file] of planned) {
     if (file.target !== RUNTIMES_CONFIG || !isMap(file.document.contents)) continue;
     const chosen = scalarOf(file.document.contents, 'defaultRuntime');
-    if (chosen === undefined || !held.has(chosen)) continue;
+    const why = chosen === undefined ? undefined : held.get(chosen);
+    if (chosen === undefined || why === undefined) continue;
     take(file.document.contents, 'defaultRuntime');
-    plan.dropped.push({ what: `defaultRuntime ${chosen}`, why: CODEX_HELD_SENTENCE });
+    plan.dropped.push({ what: `defaultRuntime ${chosen}`, why: heldReason(why) });
   }
 }
 

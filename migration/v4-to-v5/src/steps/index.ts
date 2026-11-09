@@ -69,6 +69,12 @@ export interface StepContext {
    * (the owner's act). Absent: nothing of the preview's own is accepted.
    */
   readonly previewOwner?: boolean;
+  /**
+   * With `preview`: login name to the ONE harness its v4 login file names (`claude` or `codex`), picked by the stage
+   * through a schema that reads only that field. A login with halves, or one that is unreadable, is absent. Nothing
+   * else of a login file ever reaches this.
+   */
+  readonly previewLoginHarnesses?: ReadonlyMap<string, 'claude' | 'codex'>;
   /** With `preview`: the user's real home folder, so a component's `~/…` file is mapped into the staged copy. */
   readonly previewUserHome?: string;
   /**
