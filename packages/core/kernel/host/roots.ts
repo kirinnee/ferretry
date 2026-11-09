@@ -1191,6 +1191,9 @@ async function renameChecked(from: Checked, to: Checked): Promise<void> {
         return refuse('no_descriptor_reach');
       const fromAt = await entry(from.scope, source, fromParent, basename(from.full));
       const toAt = await entry(to.scope, target, toParent, basename(to.full));
+      // A name that IS a private place is neither moved (as the source) nor replaced (as the target), whatever it is called.
+      await refuseHeldName(from.scope, from.full);
+      await refuseHeldName(to.scope, to.full);
       if ((await from.scope.fs.identity(fromAt)) === undefined) return refuse('outside');
       if ((await to.scope.fs.identity(toAt)) !== undefined) return refuse('outside');
       await from.scope.fs.rename(fromAt, toAt).catch(() => refuse('changed'));

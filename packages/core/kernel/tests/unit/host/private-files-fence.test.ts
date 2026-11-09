@@ -275,6 +275,35 @@ describe('PF-doors every root refuses a private file reached under another name,
   });
 });
 
+describe('PF-rename rename refuses a private file as the source and as the target, and the key is unchanged', () => {
+  test('PF-rename the name that is the key by identity is not moved out', async () => {
+    const l = await layout();
+    const decoy = `${l.agentHome}/${DECOY}`;
+    await writeFile(decoy, 'decoy');
+    const root = makeRoot(l.home, bound(REAL, decoy, l.key), 'agent-homes', { subfolder: 'F1' }, PRIVATE);
+    expect(await refusal(() => root.rename(named(root, DECOY), named(root, 'moved.txt')))).toBe('refused:fenced');
+    expect(await readFile(decoy, 'utf8')).toBe('decoy');
+    expect(await readFile(l.key, 'utf8')).toBe(SECRET_BYTES);
+  });
+
+  test('PF-rename the name that is the key by identity is not renamed OVER', async () => {
+    const l = await layout();
+    const decoy = `${l.agentHome}/${DECOY}`;
+    await writeFile(decoy, 'decoy');
+    const root = makeRoot(l.home, bound(REAL, decoy, l.key), 'agent-homes', { subfolder: 'F1' }, PRIVATE);
+    expect(await refusal(() => root.rename(named(root, 'own.txt'), named(root, DECOY)))).toBe('refused:fenced');
+    expect(await readFile(`${l.agentHome}/own.txt`, 'utf8')).toBe('mine');
+    expect(await readFile(l.key, 'utf8')).toBe(SECRET_BYTES);
+  });
+
+  test('PF-rename an ordinary rename still works', async () => {
+    const l = await layout();
+    const root = makeRoot(l.home, REAL, 'agent-homes', { subfolder: 'F1' }, PRIVATE);
+    await root.rename(named(root, 'own.txt'), named(root, 'moved.txt'));
+    expect(await root.readText(named(root, 'moved.txt'))).toBe('mine');
+  });
+});
+
 describe('PF-links linkTo refuses a private file as the link target and as the link place', () => {
   test('PF-links the target is a name of the same plugin that is the key by identity: refused fenced', async () => {
     const l = await layout();
