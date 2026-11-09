@@ -7,6 +7,10 @@ import { BudgetEditError, budgetInFile, withLoginBudget, withTimeZone } from '..
 // finishes at once. One hostile text of each shape, through THIS half's own entry points.
 
 const FAST_MS = 2000;
+// A flood of bare `%` lines parses in about a second when its guard is gone, so the flood shape is held to a tighter
+// bound: with the guard it answers in a few milliseconds.
+const FLOOD_FAST_MS = 250;
+const boundFor = (shape: string): number => (shape.includes('% directive') ? FLOOD_FAST_MS : FAST_MS);
 
 /** A nest of anchors, each aliasing the previous ten times: a million nodes from six short lines. */
 const laughs = (): string => {
@@ -40,14 +44,14 @@ describe('usage cli: a hostile usage.yaml is refused, and the command answers pr
       const hostile = text();
       const started = performance.now();
       expect(budgetInFile(hostile, 'login-1')).toBeNull();
-      expect(performance.now() - started).toBeLessThan(FAST_MS);
+      expect(performance.now() - started).toBeLessThan(boundFor(shape));
     });
 
     test(`usage cli withLoginBudget, ${shape}`, () => {
       const hostile = text();
       const started = performance.now();
       expect(() => withLoginBudget(hostile, 'login-1', undefined)).toThrow(BudgetEditError);
-      expect(performance.now() - started).toBeLessThan(FAST_MS);
+      expect(performance.now() - started).toBeLessThan(boundFor(shape));
     });
 
     test(`usage cli withTimeZone, ${shape}`, () => {
@@ -55,7 +59,7 @@ describe('usage cli: a hostile usage.yaml is refused, and the command answers pr
       const started = performance.now();
       if (sentence === undefined) expect(withTimeZone(hostile, 'UTC')).toContain('timeZone: UTC');
       else expect(() => withTimeZone(hostile, 'UTC')).toThrow(`the file does not parse: ${sentence}`);
-      expect(performance.now() - started).toBeLessThan(FAST_MS);
+      expect(performance.now() - started).toBeLessThan(boundFor(shape));
     });
   }
 });

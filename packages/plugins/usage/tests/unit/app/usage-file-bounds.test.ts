@@ -9,6 +9,10 @@ import { readMachineTimeZone, withLoginBudget, withMachineTimeZone } from '../..
 // shared module's own tests and the CLI half, which says them aloud).
 
 const FAST_MS = 2000;
+// A flood of bare `%` lines parses in about a second when its guard is gone, so the flood shape is held to a tighter
+// bound: with the guard it answers in a few milliseconds.
+const FLOOD_FAST_MS = 250;
+const boundFor = (shape: string): number => (shape.includes('% directive') ? FLOOD_FAST_MS : FAST_MS);
 
 /** A nest of anchors, each aliasing the previous ten times: a million nodes from six short lines. */
 const laughs = (): string => {
@@ -39,14 +43,14 @@ describe('usage app: the budget editor cannot edit a hostile usage.yaml, and ans
       const hostile = text();
       const started = performance.now();
       expect(readMachineTimeZone(hostile)).toBeNull();
-      expect(performance.now() - started).toBeLessThan(FAST_MS);
+      expect(performance.now() - started).toBeLessThan(boundFor(shape));
     });
 
     test(`usage app withLoginBudget, ${shape}`, () => {
       const hostile = text();
       const started = performance.now();
       expect(withLoginBudget(hostile, 'login-1', undefined)).toBeNull();
-      expect(performance.now() - started).toBeLessThan(FAST_MS);
+      expect(performance.now() - started).toBeLessThan(boundFor(shape));
     });
 
     test(`usage app withMachineTimeZone, ${shape}`, () => {
@@ -55,7 +59,7 @@ describe('usage app: the budget editor cannot edit a hostile usage.yaml, and ans
       const edited = withMachineTimeZone(hostile, 'UTC');
       if (editsRefused) expect(edited).toBeNull();
       else expect(edited).toContain('timeZone: UTC');
-      expect(performance.now() - started).toBeLessThan(FAST_MS);
+      expect(performance.now() - started).toBeLessThan(boundFor(shape));
     });
   }
 });
