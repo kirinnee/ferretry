@@ -28,7 +28,11 @@ import {
   type Runner,
   type RunnerHandle,
   runnerDeliveryFailure,
+  type RunnerComposerCleared,
+  type RunnerComposerSubmitted,
+  type RunnerHeldAt,
   type RunnerLook,
+  type RunnerPaneObservation,
   type RunnerStop,
   type RunnerStopOutcome,
   type RunningFerret,
@@ -128,6 +132,47 @@ export class FakeRunner implements Runner {
     if (!shouldPressStopKey(this.working, stop)) return { pressed: false, working: this.working };
     this.pressed.push({ handle, key: stop.key });
     return { pressed: true, working: false };
+  }
+  /**
+   * The send path's pane look and composer acts (additive). A test sets what the pane shows (`pane`, `held`), and sees
+   * every composer message cleared or submitted and every stop-and-wait. A handle with nothing live behind it observes
+   * nothing, and a write to it rejects `not_ready`/`exited`, as `deliver` does.
+   */
+  pane: RunnerPaneObservation = { alive: true, dead: false, promptReady: true, activeWork: false };
+  /** What `heldAt` answers; `'throw'` is a pane that cannot be read. */
+  held: RunnerHeldAt | undefined | 'throw' = undefined;
+  /** What the next `clearComposer` / `submitComposer` answers. */
+  clearOutcome: RunnerComposerCleared = 'cleared';
+  submitOutcome: RunnerComposerSubmitted = 'submitted';
+  readonly cleared: { readonly handle: RunnerHandle; readonly text: string }[] = [];
+  readonly submitted: { readonly handle: RunnerHandle; readonly text: string; readonly strict: boolean }[] = [];
+  readonly stoppedActive: { readonly handle: RunnerHandle; readonly stop: RunnerStop }[] = [];
+  async observe(handle: RunnerHandle): Promise<RunnerPaneObservation | undefined> {
+    return this.#live.has(handle) ? this.pane : undefined;
+  }
+  async heldAt(handle: RunnerHandle, text: string): Promise<RunnerHeldAt | undefined> {
+    void text;
+    if (!this.#live.has(handle) || this.held === 'throw') throw new Error('the fake runner could not read the pane');
+    return this.held;
+  }
+  async clearComposer(handle: RunnerHandle, text: string): Promise<RunnerComposerCleared> {
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    this.cleared.push({ handle, text });
+    return this.clearOutcome;
+  }
+  async submitComposer(handle: RunnerHandle, text: string, strict = false): Promise<RunnerComposerSubmitted> {
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    this.submitted.push({ handle, text, strict });
+    return this.submitOutcome;
+  }
+  async stopActiveTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerPaneObservation | undefined> {
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    this.stoppedActive.push({ handle, stop });
+    if (shouldPressStopKey(this.working, stop)) this.pressed.push({ handle, key: stop.key });
+    return this.pane;
   }
   /**
    * What `look` sees on each live handle's pane, set by a test (`frame` is the screen's identity); a live handle
