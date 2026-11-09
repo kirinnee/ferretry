@@ -28,9 +28,11 @@
  *
  *  - `skills()` lists a plain folder and a link that resolves INSIDE the home to a folder with a plain `SKILL.md`; it skips,
  *    with no line and no error, a link that leaves the home (a store, `~/.ssh`), leads nowhere, loops, or leads to a
- *    sign-in file. It is a SUPERSET of today's machine inventory (that listed neither a plain folder nor an inside link of
- *    such a home) and NARROWER than today's session picker (that listed store links). A skill folder whose `SKILL.md` is
- *    a hard link is not listed: nothing could read it.
+ *    sign-in file. Against today's readers it is WIDER than the machine inventory for a plain folder and an inside link
+ *    (that listed neither in such a home), NARROWER than the machine inventory for a link into the fleet's `assets/`
+ *    (that listed it as Ferretry's; here it is skipped, because no root can name both the home and `assets/`: an OPEN
+ *    decision, not yet declared), and NARROWER than the session picker (that listed store links). A skill folder whose
+ *    `SKILL.md` is a hard link is not listed: nothing could read it.
  *  - `skillManifest()` reads `SKILL.md` plain or through a link inside the home; a link out of the home is not read.
  *  - `document()` follows a link for the three documents ONLY, wherever it leads (a home-manager link into a store), as
  *    today's MCP document reader did, under the bounds of `document-link.ts` (a regular file of one name, at most 16 MiB,

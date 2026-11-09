@@ -1399,9 +1399,10 @@ A home the fleet places outside its own folder (an operator's own folder, a home
 | A file inside a skill folder | never followed (a link is listed as a link, unreadable) | never followed                                                                             | never followed                                              |
 | The three documents          | followed, read                                          | **followed**, read (one regular file of one name, at most 16 MiB, parsing as the document) | refused in one sentence naming the link; to nothing: absent |
 
-Against the readers of the same homes before: this Skills list is a **superset** of the machine skill inventory (which
-listed neither a plain folder nor an inside link of such a home) and **narrower** than the session skill picker (which
-listed store links too). The documents follow a link out of the home, as the MCP document reader did, but under bounds that
+Against the readers of the same homes before: this Skills list is **wider** than the machine skill inventory for a plain
+folder and an inside link (which listed neither in such a home), **narrower** than it for a link into the fleet's
+`assets/` (which listed it as Ferretry's; here it is skipped, because no root can name both the home and `assets/`; the
+decision on that is still open) and **narrower** than the session skill picker (which listed store links too). The documents follow a link out of the home, as the MCP document reader did, but under bounds that
 reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file, the daemon's home,
 a sign-in file, or something that does not parse as the document is refused, and the refusal names only the link. A
 hard-linked `SKILL.md` is not listed. A file read is checked after it was read: if the name no longer reaches the file that
