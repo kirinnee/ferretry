@@ -40,6 +40,9 @@ export function fakeRuntimes(): FakeRuntimes {
       if (!found.launch.available) return { ok: false, refusal: 'not_signed_in', sentence: found.launch.reason };
       return { ok: true, runtime: found };
     },
+    // No fleet is published in memory: there are no homes, and so no reader.
+    homes: async () => [],
+    home: () => undefined,
     installCatalogItem: async change => {
       installed.push(change);
       return {

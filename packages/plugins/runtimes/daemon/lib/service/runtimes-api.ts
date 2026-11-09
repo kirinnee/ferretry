@@ -17,6 +17,7 @@ import {
   type ProfileFile,
   type ResolveResult,
   type RuntimeFile,
+  type RuntimeHomesApi,
   type RuntimeId,
   RuntimeIdSchema,
   type RuntimesApi,
@@ -69,7 +70,7 @@ function activeBlock(
 const phrase = (block: { readonly reason?: string; readonly until?: string }): string =>
   `switched off${block.reason === undefined ? '' : ` (${block.reason})`}${block.until === undefined ? '' : ` until ${block.until}`}`;
 
-export function createRuntimesApi(deps: RuntimesApiDeps): RuntimesApi {
+export function createRuntimesApi(deps: RuntimesApiDeps): Omit<RuntimesApi, keyof RuntimeHomesApi> {
   type Read = { readonly summary: RuntimeSummary } | { readonly refusal: Extract<ResolveResult, { ok: false }> };
 
   const read = (name: string, file: RuntimeFile, logins: ReadonlyMap<string, LoginView>, now: number): Read => {

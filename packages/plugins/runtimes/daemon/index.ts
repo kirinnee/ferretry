@@ -31,9 +31,11 @@ import {
   type ModelSetFile,
   type ProfileFile,
   type RuntimeFile,
+  type RuntimeHomesApi,
   type RuntimesFile,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { fleetHomes } from './adapters/fleet-home-reader.ts';
 import { endedSeams, fileAssembly } from './host-assembly.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
@@ -80,6 +82,8 @@ export interface RuntimesAssembly {
    * dead pane's last screen. Absent until the host offers the process and pane seams; the subscriber then does nothing.
    */
   readonly ended?: RuntimeEndSeams;
+  /** The harness homes the fleet published and a reader of one. Absent: no homes (the fail-closed fallback). */
+  readonly homes?: RuntimeHomesApi;
   /**
    * The machine's "Auto-resume after restart" switch (`machine.yaml` `autoResume`): `true` on, `false` off. Absent, or
    * answering `undefined`, until the host assembly reaches the account model: auto-resume then resumes nothing (W2-a).
@@ -103,6 +107,9 @@ export const unavailableAssembly: RuntimesAssembler = ctx => {
   return services;
 };
 
+/** The homes of a daemon whose assembly offers none: no home is published, so no reader is handed out. */
+const noHomes: RuntimeHomesApi = { homes: async () => [], home: () => undefined };
+
 /** The names whose parsed value differs between two readings of a collection. */
 function changedNames<Shape>(before: ReadonlyMap<string, Shape>, after: ReadonlyMap<string, Shape>): readonly string[] {
   const names = new Set([...before.keys(), ...after.keys()]);
@@ -121,7 +128,11 @@ export const hostAssembly: RuntimesAssembler = ctx => {
   // ONE publication gate: every apply (the catalogue's and the setup's share one provisioner) runs exclusively under
   // it, and every read of the published fleet (the ended-runtime seams, the manifest the republish compares) waits (S67).
   const publication = new FleetPublication();
-  return { ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) };
+  return {
+    ...fileAssembly(ctx, publication),
+    ended: endedSeams(ctx.kernel, publication),
+    homes: fleetHomes(ctx.kernel.roots, publication),
+  };
 };
 
 export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
@@ -249,7 +260,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ...fleetSetupRoutes(assembly.setup),
           ...ferretRuntimeRoutes(assembly.runtime),
         },
-        provides: { runtimes: api },
+        provides: { runtimes: { ...api, ...(assembly.homes ?? noHomes) } },
         // Logins asks which runtimes use a login before it removes one (`logins.used-by`).
         hooks: {
           'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
