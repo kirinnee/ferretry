@@ -2721,7 +2721,8 @@ scoped handle:
   against it. Breadth first, so the shallow files that matter come first; a folder met at the depth limit is itself
   pinned (a bind mount of it is held, and so is everything walked through it). **A budget that is reached fails
   closed:** the tree is `truncated`, and the guard of every root that does not own the tree (and the fence of an
-  owner's root) refuses every entry on that tree's device, because an alias of an unindexed member (a bind mount keeps
+  owner's root) refuses every entry on a device that tree's indexed places answer with (the folder's and the files'; an
+  overlay filesystem gives them different ones), because an alias of an unindexed member (a bind mount keeps
   its source's device) cannot be told from any other file there; an entry on another device is proven not to be one.
   **The blast radius is the whole device, not the tree:** home, state and the owner's repositories are one device on a
   normal Linux box or a macOS Data volume, so a place past its budget makes agent homes, fleet files, work folders,

@@ -10,6 +10,7 @@ import { fencedReal, fenceOf } from '../../../host/fence-guard.ts';
 import { identityKey, type PlaceBudget, privateIndexOf } from '../../../host/fence-index.ts';
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
 import { composePrivateFiles } from '../../../manifest/privacy.ts';
+import { overlayDisk } from './private-files-overlay.ts';
 
 /**
  * The private-files index stays flat as ferret sessions pile up, never fails open, and is never silent (§7.7): a look
@@ -268,16 +269,22 @@ const made = (kind: 'directory' | 'file', inode: bigint, device: bigint): FileId
  */
 function longLived(
   base: HostFs,
-  sessions: string,
+  layout: { readonly sessions: string; readonly agentHome: string },
   counts: { readonly holders: number; readonly empties?: number },
   device?: bigint,
 ): HostFs {
+  const { sessions } = layout;
   const names = [
     ...Array.from({ length: counts.holders }, (_, n) => `h${n}`),
     ...Array.from({ length: counts.empties ?? 0 }, (_, n) => `e${n}`),
   ];
   // The device the made-up places answer with, asked once: a made-up answer must not cost a real look at the disk.
   const own = base.identity(sessions).then(found => device ?? (found?.device as bigint));
+  // A made-up FILE answers with the device a real file of this disk has (the agent home's), not its folder's: a disk
+  // may give the two different devices, and a simulation that assumed one would pass only where they are the same.
+  const fileOwn = Promise.all([own, base.identity(`${layout.agentHome}/own.txt`)]).then(
+    ([folder, found]) => device ?? found?.device ?? folder,
+  );
   return {
     ...base,
     list: async path => (path === sessions ? [...(await base.list(path)), ...names] : await base.list(path)),
@@ -290,9 +297,8 @@ function longLived(
       const [name, file] = path.slice(sessions.length + 1).split('/') as [string, string | undefined];
       if (!/^[he]\d+$/.test(name)) return await base.identity(path);
       const number = BigInt(name.slice(1));
-      const dev = await own;
-      if (file === undefined) return made('directory', 1_000_000_000n + number, dev);
-      return name.startsWith('h') && file === ENV ? made('file', 2_000_000_000n + number, dev) : undefined;
+      if (file === undefined) return made('directory', 1_000_000_000n + number, await own);
+      return name.startsWith('h') && file === ENV ? made('file', 2_000_000_000n + number, await fileOwn) : undefined;
     },
   };
 }
@@ -321,7 +327,7 @@ const refusal = async (run: () => Promise<unknown>): Promise<string> => {
 describe('PF-budget the real bound of a `*` collection (65,536 places: the folder and 65,535 members that hold the file) fails closed', () => {
   test('PF-budget 65,535 sessions that hold the file fit: nothing is truncated and an ordinary read is allowed', async () => {
     const l = await home();
-    const fs = longLived(REAL, l.sessions, { holders: 65_535 });
+    const fs = longLived(REAL, l, { holders: 65_535 });
     const real = await realpath(l.home);
     const snapshot = await privateIndexOf(fs, real, INPUT, { wall: LATER }).snapshot();
     expect(snapshot.truncated).toEqual([]);
@@ -332,7 +338,7 @@ describe('PF-budget the real bound of a `*` collection (65,536 places: the folde
 
   test('PF-budget the 65,536th session that holds the file is past it: truncated, closed, and every other root on that device refuses', async () => {
     const l = await home();
-    const fs = longLived(REAL, l.sessions, { holders: 65_536 });
+    const fs = longLived(REAL, l, { holders: 65_536 });
     const real = await realpath(l.home);
     const snapshot = await privateIndexOf(fs, real, INPUT, { wall: LATER }).snapshot();
     expect(snapshot.truncated).toEqual([`${real}/state/ferrets/sessions`]);
@@ -344,7 +350,7 @@ describe('PF-budget the real bound of a `*` collection (65,536 places: the folde
 
   test('PF-budget 70,000 session folders that hold nothing and 5 that hold the file are not truncated: only holders count', async () => {
     const l = await home();
-    const fs = longLived(REAL, l.sessions, { holders: 5, empties: 70_000 });
+    const fs = longLived(REAL, l, { holders: 5, empties: 70_000 });
     const real = await realpath(l.home);
     const snapshot = await privateIndexOf(fs, real, INPUT, { wall: LATER }).snapshot();
     expect(snapshot.truncated).toEqual([]);
@@ -362,7 +368,7 @@ describe('PF-budget the real bound of a `*` collection (65,536 places: the folde
     const here = (await REAL.identity(real))?.device as bigint;
     // The closed device is a different one from the work folder's, so the work folder itself is not refused whole.
     const closedDevice = here + 4242n;
-    const sessionsFs = longLived(REAL, l.sessions, { holders: 65_536 }, closedDevice);
+    const sessionsFs = longLived(REAL, l, { holders: 65_536 }, closedDevice);
     const bindMount = `${l.parent}/work/mounted.txt`;
     const fs: HostFs = {
       ...sessionsFs,
@@ -391,7 +397,8 @@ describe('PF-budget the real bound of a `*` collection (65,536 places: the folde
     expect(listed).not.toContain('mounted.txt');
   }, 60_000);
 
-  test('PF-budget the tree that is the root’s own is never closed against it: a login’s own root reads while 4,100 login folders are truncated', async () => {
+  /** A login's own root reads while its 4,100 login folders are truncated, on the disk `wrap` makes of the real one. */
+  const ownRootStaysOpen = async (wrap: (disk: HostFs) => HostFs): Promise<void> => {
     const l = await home();
     const credentials = `${l.home}/state/logins/credentials`;
     await mkdir(credentials, { recursive: true });
@@ -399,7 +406,7 @@ describe('PF-budget the real bound of a `*` collection (65,536 places: the folde
     const fake = Array.from({ length: 4100 }, (_, n) => `L${n}`);
     const real = await realpath(l.home);
     const dev = (await REAL.identity(real))?.device as bigint;
-    const fs: HostFs = {
+    const fs: HostFs = wrap({
       ...REAL,
       list: async path =>
         path === `${real}/state/logins/credentials` || path === credentials
@@ -413,7 +420,7 @@ describe('PF-budget the real bound of a `*` collection (65,536 places: the folde
           ? await REAL.identity(path)
           : made('directory', 3_000_000_000n + BigInt(path.slice(at + 14)), dev);
       },
-    };
+    });
     const snapshot = await privateIndexOf(fs, real, INPUT, { wall: LATER }).snapshot();
     expect(snapshot.truncated).toEqual([`${real}/state/logins/credentials`]);
     const own = rootsPortFor(
@@ -430,7 +437,51 @@ describe('PF-budget the real bound of a `*` collection (65,536 places: the folde
     // Every other root on that device is refused: the control for the read above.
     const stranger = agentHomeRoot(fs, l.home);
     expect(await refusal(() => stranger.readText(named(stranger, 'own.txt')))).toBe('refused:fenced');
+  };
+
+  test('PF-budget the tree that is the root’s own is never closed against it: a login’s own root reads while 4,100 login folders are truncated', async () => {
+    await ownRootStaysOpen(disk => disk);
   });
+
+  test('PF-budget the same on a disk that gives a file a device of its own (an overlay): the tree is closed on every device it holds', async () => {
+    await ownRootStaysOpen(overlayDisk);
+  });
+
+  test('PF-budget on a disk that gives a file a device of its own the 65,536th holder closes the file device too, not only its folder’s', async () => {
+    const l = await home();
+    const fs = overlayDisk(longLived(REAL, l, { holders: 65_536 }));
+    const real = await realpath(l.home);
+    const snapshot = await privateIndexOf(fs, real, INPUT, { wall: LATER }).snapshot();
+    expect(snapshot.truncated).toEqual([`${real}/state/ferrets/sessions`]);
+    const folder = (await fs.identity(l.sessions))?.device as bigint;
+    const file = (await fs.identity(`${l.agentHome}/own.txt`))?.device as bigint;
+    expect(file).not.toBe(folder);
+    expect(snapshot.closed[0]?.devices).toEqual(new Set([folder, file]));
+    const root = agentHomeRoot(fs, l.home);
+    expect(await refusal(() => root.readText(named(root, 'own.txt')))).toBe('refused:fenced');
+    const fence = await fenceOf(fs, l.home, LIST);
+    expect(fence.closed.has(file)).toBe(true);
+  }, 60_000);
+
+  test('PF-budget on a disk that gives a file a device of its own a bind alias of the unindexed 65,536th holder, on a device that is not its root’s, is refused', async () => {
+    const l = await home();
+    const decoy = `${l.agentHome}/${ENV}`;
+    await writeFile(decoy, 'rotated-secret-alias');
+    const sessions = overlayDisk(longLived(REAL, l, { holders: 65_536 }));
+    const file = (await sessions.identity(`${l.agentHome}/own.txt`))?.device as bigint;
+    const folder = (await sessions.identity(l.agentHome))?.device as bigint;
+    // The device of the root's own folder is not the device of the file: the alias keeps the source FILE's device.
+    expect(file).not.toBe(folder);
+    const unindexed = (await sessions.identity(`${l.sessions}/h65535/${ENV}`)) as FileIdentity;
+    const fs: HostFs = {
+      ...sessions,
+      identity: async path =>
+        path === decoy ? { ...unindexed, links: 1, inode: 9_000_000_000n } : await sessions.identity(path),
+    };
+    const root = agentHomeRoot(fs, l.home);
+    expect(await refusal(() => root.readText(named(root, ENV)))).toBe('refused:fenced');
+    expect(await refusal(() => root.readText(named(root, 'own.txt')))).toBe('refused:fenced');
+  }, 60_000);
 });
 
 describe('PF-loud a place past its budget is announced once per change, never silent', () => {
