@@ -124,6 +124,13 @@ export interface ConfigWriteJudgement {
   readonly path: string;
   readonly removal: boolean;
   readonly sentences: readonly string[];
+  /**
+   * Set by the kernel ONLY for a `ConfigPort.writeAsCaller`, never by a plugin: `sentences` are then the
+   * `${secret:NAME}` references the edit adds, and the question is whether the call in progress IS the owner (the host
+   * admin where it arrived on the host, or an unlocked device whose grants hold the file's configure capability). It
+   * is never a loosening to confirm with a step-up proof, so a judge claims no proof for it.
+   */
+  readonly secretAdd?: true;
   /** Who the call in progress runs as. */
   readonly actor: Actor;
   /**

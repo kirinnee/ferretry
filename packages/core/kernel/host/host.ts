@@ -206,6 +206,8 @@ export type ConfigJudge = (input: {
   readonly path: string;
   readonly removal: boolean;
   readonly sentences: readonly string[];
+  /** Only a `ConfigPort.writeAsCaller` sets it: `sentences` are the secret references the edit adds. */
+  readonly secretAdd?: true;
 }) => boolean;
 
 export interface HostAdapters {

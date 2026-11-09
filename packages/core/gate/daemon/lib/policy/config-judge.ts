@@ -40,7 +40,29 @@ export function claimLooseningProof(standing: CallStanding): boolean {
   return true;
 }
 
+/**
+ * Whether the call in progress IS the owner, for a `${secret:NAME}` reference an edit adds (`ConfigPort.writeAsCaller`,
+ * NN2): the host admin where the request ARRIVED on the host (`governance.governed === false`, decided from the carrier,
+ * so a relayed loopback is governed), or a governed device whose grants hold the file's `configure` capability and the
+ * fleet's `use` right now. The grant layer's `configure` decision already needs the device UNLOCKED (the passkey
+ * unlock stands for the step-up), so a locked device is refused there. It claims NO step-up proof: this is not a
+ * loosening to confirm, it is who is asking. A ferret, a warden, a job (no standing) and anything undetermined hold.
+ */
+export function judgeOwnerSecretAdd(input: ConfigWriteJudgement): 'apply' | 'hold' {
+  if (input.actor === 'ferret' || input.actor === 'warden') return 'hold';
+  const standing = input.standing;
+  if (standing === undefined) return 'hold';
+  if (isFerretCall(standing) || standing.wardenRemedy !== undefined) return 'hold';
+  const governance = standing.governance;
+  if (governance === undefined) return 'hold';
+  const capability = input.path === WARDEN_FILE ? CAPABILITIES.warden : CAPABILITIES.fleet;
+  if (!governance.decide({ capability, axis: 'configure' }).allowed) return 'hold';
+  if (!governance.decide({ capability: CAPABILITIES.fleet, axis: 'use' }).allowed) return 'hold';
+  return 'apply';
+}
+
 export function judgeLooseningWrite(input: ConfigWriteJudgement): 'apply' | 'hold' {
+  if (input.secretAdd === true) return judgeOwnerSecretAdd(input);
   if (input.actor === 'ferret' || input.actor === 'warden') return 'hold';
   const standing = input.standing;
   if (standing === undefined) return 'hold';

@@ -320,6 +320,22 @@ export interface ConfigPort {
     options?: { readonly ifMatch?: string },
   ): Promise<ConfigWriteOutcome>;
   /**
+   * The CALLER's own write of one of this plugin's declared files, for a route whose person authored the edit (an Add
+   * form). Judged exactly as {@link write} — the same validation, `ifMatch`, size cap, hold rules, raw-secret refusal
+   * and every other check — except for NN2: a `${secret:NAME}` reference the edit ADDS goes into effect (not held) only
+   * when the AMBIENT call, which the kernel carries and a plugin can neither pass nor set, is the owner: the host admin
+   * where the request arrived on the host (a relayed loopback is remote), or a governed device whose grants hold the
+   * file's configure capability and which is unlocked now. A ferret's session credential, a job, a member call and a
+   * caller outside a call keep the hold exactly as {@link write} holds it; no option can switch it off for an agent. The
+   * act is logged with the file and the secret NAME, never a value, and the kernel never reads a value to judge it.
+   */
+  writeAsCaller(
+    def: ConfigFileDef<any> | ConfigCollectionDef<any>,
+    name: string | undefined,
+    edit: ConfigEdit,
+    options?: { readonly ifMatch?: string },
+  ): Promise<ConfigWriteOutcome>;
+  /**
    * The OWNER's own patch of one of its own files (today's rule 3, docs/config-files.md: "a save never discards a
    * held edit"). A patch only — top-level keys, `undefined` removes one — because the owner's act is the keys they
    * changed, never a whole text rendered from what is in effect.

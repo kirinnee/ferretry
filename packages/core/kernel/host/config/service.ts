@@ -128,6 +128,12 @@ export interface ConfigWriteOptions {
   /** The etag the editor read; a file that moved since is refused `conflict`. */
   readonly ifMatch?: string;
   /**
+   * Set by `ConfigPort.writeAsCaller` ONLY (built here from the kernel's own judge, never from anything a plugin passes):
+   * asked once with the `${secret:NAME}` references an untrusted write adds, answers whether the AMBIENT call is the
+   * owner. Absent, or false: they are held (NN2). It is never asked for an edit that adds none.
+   */
+  readonly judgeSecretAdds?: (sentences: readonly string[]) => boolean;
+  /**
    * The plugin's OWN write (`kernel.config.write`): an edit that adds a `${secret:NAME}` reference is held for the
    * owner, and neither Gate's judge nor anything else confirms it (NN2). The owner's writer never sets it.
    */
@@ -212,6 +218,7 @@ export interface ConfigFilesOptions {
     readonly path: string;
     readonly removal: boolean;
     readonly sentences: readonly string[];
+    readonly secretAdd?: true;
   }) => boolean;
 }
 
@@ -802,6 +809,17 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
             ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
           }),
         ),
+      // As `write`, except that the secret references the edit adds go into effect when the ambient call is the owner.
+      // Nothing the plugin passes is read for that: the options carry `ifMatch` alone.
+      writeAsCaller: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
+        writeOutcome(
+          await write(pluginId, def as ConfigDef, name, edit, {
+            byPlugin: true,
+            judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
+            judgeSecretAdds: ownerJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
+            ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
+          }),
+        ),
       writeAsOwner: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
         writeOutcome(
           await writeAsOwner(pluginId, def as ConfigDef, name, edit, {
@@ -878,6 +896,21 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       return false;
     }
   };
+
+  /** Whether the ambient call is the owner, for the secret references an edit adds; false on anything but a clear yes. */
+  const askSecretAdds = (writeOptions: ConfigWriteOptions, sentences: readonly string[]): boolean => {
+    try {
+      return writeOptions.judgeSecretAdds?.(sentences) === true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** The judge of the secret references a `writeAsCaller` adds: the ambient call decides, at the moment it is asked. */
+  const ownerJudge =
+    (plugin: string, path: () => string) =>
+    (sentences: readonly string[]): boolean =>
+      options.judge?.({ plugin, path: path(), removal: false, sentences, secretAdd: true }) === true;
 
   /** A plugin's own write: Gate's judge, never a confirmation of its own. */
   const ownJudge =
@@ -957,10 +990,21 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     const unchanged = etag === settled.get(slot.path)?.evaluated.inEffect?.etag;
     const added =
       unchanged || !untrustedWrite(writeOptions) ? [] : addedSecretReferenceSentences(before, checked.value);
-    const loosens = unchanged ? [] : [...judgeLoosening(def, before, checked.value), ...added];
+    const other = unchanged ? [] : judgeLoosening(def, before, checked.value);
+    const loosens = [...other, ...added];
+    // The caller's own write only: the secret references go into effect when the ambient call is the owner. Every
+    // other loosening is judged as a plain write judges it; a held secret add holds the whole edit.
+    const ownerAdds = added.length > 0 && askSecretAdds(writeOptions, added);
     const confirmed =
-      added.length === 0 &&
-      (writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false)));
+      (added.length === 0 || ownerAdds) &&
+      (writeOptions.confirmedLoosening === true ||
+        (loosens.length > 0 && (other.length === 0 || askJudge(writeOptions, other, false))));
+    // Names only (a secret NAME is a name; the grammar keeps it to A-Z, digits and underscores); never a value.
+    if (ownerAdds && confirmed) {
+      const had = secretReferencesIn(before);
+      const names = [...secretReferencesIn(checked.value)].filter(name => !had.has(name)).sort();
+      log.info(`config ${slot.path}: the owner put a secret reference into effect (${names.join(', ')})`);
+    }
     if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
     landing = [{ path: slot.path, digest: etag, checked }];
     await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);

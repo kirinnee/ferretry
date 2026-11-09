@@ -781,7 +781,13 @@ async function start(world: World): Promise<TestHost> {
     };
   };
 
-  const judged = (plugin: string, path: string, removal: boolean, sentences: readonly string[]): boolean => {
+  const judged = (
+    plugin: string,
+    path: string,
+    removal: boolean,
+    sentences: readonly string[],
+    secretAdd?: true,
+  ): boolean => {
     try {
       return (
         admission.judgeConfigWrite?.({
@@ -789,6 +795,7 @@ async function start(world: World): Promise<TestHost> {
           path,
           removal,
           sentences,
+          ...(secretAdd === true ? { secretAdd } : {}),
           actor: actorScope.getStore()?.actor ?? 'ferret',
           standing: actorScope.getStore()?.standing,
         }) === 'apply'
@@ -823,8 +830,15 @@ async function start(world: World): Promise<TestHost> {
     // the admission in use (Gate's, when given) judges this call may apply it. `within` is the owner's only (the
     // real writer's one-level merge, `host/config/patch.ts`).
     const write: (
-      ...args: [...Parameters<ConfigPort['write']>, within?: readonly string[]]
-    ) => ReturnType<ConfigPort['write']> = async (def, name, edit, writeOptions = {}, within = undefined) => {
+      ...args: [...Parameters<ConfigPort['write']>, within?: readonly string[], asCaller?: true]
+    ) => ReturnType<ConfigPort['write']> = async (
+      def,
+      name,
+      edit,
+      writeOptions = {},
+      within = undefined,
+      asCaller = undefined,
+    ) => {
       if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
       const key = keyOf(def);
       if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
@@ -852,10 +866,15 @@ async function start(world: World): Promise<TestHost> {
       const priorValue = prior?.success === true ? prior.data : undefined;
       // as the real port: a plugin's own write that adds a secret reference is held for the owner, judge or not
       const added = addedSecretReferenceSentences(priorValue, checked.data);
-      const sentences = [...judgeLoosening(def, priorValue, checked.data), ...added];
+      const other = judgeLoosening(def, priorValue, checked.data);
+      const sentences = [...other, ...added];
       const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
       const subject = { path, ...(name === undefined ? {} : { name }) };
-      if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences))) {
+      // `writeAsCaller` only: the added secret references go into effect when the ambient call is the owner, as the
+      // real writer asks it (the same admission, the same `secretAdd` question); every other sentence is judged as before.
+      const ownerAdds = asCaller === true && added.length > 0 && judged(manifest.id, path, false, added, true);
+      const heldAdds = added.length > 0 && !ownerAdds;
+      if (heldAdds || (other.length > 0 && !judged(manifest.id, path, false, other))) {
         restamp(key, { ...subject, held: etag });
         return { kind: 'held', etag, id: `${path}@held`, sentences };
       }
@@ -925,6 +944,18 @@ async function start(world: World): Promise<TestHost> {
       },
       // The in-memory world holds no edit held for the owner, so the owner's patch is a write of that patch (merged
       // one level deep into the keys `within` names, as the real writer merges it).
+      // As `write`, except that the secret references the edit adds go into effect when the AMBIENT call is the owner,
+      // asked of the admission in use exactly as the real writer asks it. Only `ifMatch` is read from the options.
+      async writeAsCaller(def, name, edit, writeOptions = {}) {
+        return await write(
+          def,
+          name,
+          edit,
+          writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch },
+          undefined,
+          true,
+        );
+      },
       async writeAsOwner(def, name, edit, writeOptions = {}) {
         // As the real writer, in its order: an undeclared def and a bad name are answered first, then a `within` that is
         // not a list is refused, never read as something else.
