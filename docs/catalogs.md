@@ -1399,15 +1399,25 @@ A home the fleet places outside its own folder (an operator's own folder, a home
 | A file inside a skill folder | never followed (a link is listed as a link, unreadable) | never followed                                                                             | never followed                                              |
 | The three documents          | followed, read                                          | **followed**, read (one regular file of one name, at most 16 MiB, parsing as the document) | refused in one sentence naming the link; to nothing: absent |
 
-Against the readers of the same homes before: this Skills list is **wider** than the machine skill inventory for a plain
-folder and an inside link (which listed neither in such a home), **narrower** than it for a link into the fleet's
-`assets/` (which listed it as Ferretry's; here it is skipped, because no root can name both the home and `assets/`: once
-Skills binds the homes and lists `fleet/assets/skills/<name>` itself as Ferretry's, such a link is a duplicate path to the
-same skill and is never followed; until then it is a before-green line in `ports-pending.json`) and **narrower** than the session skill picker (which listed store links too). The documents follow a link out of the home, as the MCP document reader did, but under bounds that
-reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file, the daemon's home,
-a sign-in file, or something that does not parse as the document is refused, and the refusal names only the link. A
-hard-linked `SKILL.md` is not listed. A file read is checked after it was read: if the name no longer reaches the file that
-was judged, the bytes are dropped.
+Against the readers of the same homes before, reader by reader:
+
+- **Skills list.** What `skills()` lists is a **superset** of the machine skill inventory of such a home in what it lists
+  (a plain folder and an inside link are extra: that inventory listed neither), **except** where that inventory followed a
+  link into `fleet/`: a link into the fleet's `assets/` it listed as Ferretry's, and here it is skipped (waived, because
+  no root can name both the home and `assets/`). Skills unit S1 closes it: once Skills binds the homes and lists
+  `fleet/assets/skills/<name>` itself as Ferretry's, such a link is a duplicate path to the same skill and is never
+  followed; until then it is a before-green line in `ports-pending.json`. The list is also **narrower** than the session
+  skill picker (which listed store links too). A plain folder in such a home is listed only when it holds a plain,
+  single-name, non-sign-in `SKILL.md`.
+- **A skill's `SKILL.md`, and the files inside a skill folder.** The machine inventory followed links into `fleet/`, the
+  session picker followed every link, and the skill-folder reader (tree and file) followed none; here `SKILL.md` follows a
+  link inside the home only, and a walk or a file read follows none.
+- **The three documents.** They follow a link out of the home, as the MCP document reader did, but under bounds that
+  reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file, the daemon's
+  home, a sign-in file, or something that does not parse as the document is refused, and the refusal names only the link.
+
+A hard-linked `SKILL.md` is not listed. A file read is checked after it was read: if the name no longer reaches the file
+that was judged, the bytes are dropped.
 
 ## Links (catalogs 3f)
 

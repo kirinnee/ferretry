@@ -29,12 +29,13 @@
  *
  *  - `skills()` lists a plain folder and a link that resolves INSIDE the home to a folder with a plain `SKILL.md`; it skips,
  *    with no line and no error, a link that leaves the home (a store, `~/.ssh`), leads nowhere, loops, or leads to a
- *    sign-in file. Against today's readers it is WIDER than the machine inventory for a plain folder and an inside link
- *    (that listed neither in such a home), NARROWER than the machine inventory for a link into the fleet's `assets/`
- *    (that listed it as Ferretry's; here it is skipped, because no root can name both the home and `assets/`; once Skills
- *    binds the homes and lists `fleet/assets/skills/<name>` itself as Ferretry's, such a link is a duplicate path to the
- *    same skill and never needs following: ports-pending BEFORE-GREEN(runtimes)), and NARROWER than the session picker (that listed store links). A skill folder whose
- *    `SKILL.md` is a hard link is not listed: nothing could read it.
+ *    sign-in file. What it lists is a SUPERSET of today's machine skill inventory of such a home (a plain folder and an
+ *    inside link are extra: the inventory listed neither), EXCEPT where that inventory followed a link into `fleet/`:
+ *    a link into the fleet's `assets/` it listed as Ferretry's, and here it is skipped (waived, because no root can name both
+ *    the home and `assets/`; once Skills binds the homes (Skills unit S1) and lists `fleet/assets/skills/<name>` itself as
+ *    Ferretry's, such a link is a duplicate path to the same skill and never needs following: ports-pending
+ *    BEFORE-GREEN(runtimes)). It is also NARROWER than the session skill picker (that listed store links). A skill folder
+ *    whose `SKILL.md` is a hard link is not listed: nothing could read it.
  *  - `skillManifest()` reads `SKILL.md` plain or through a link inside the home; a link out of the home is not read.
  *  - `document()` follows a link for the three documents ONLY, wherever it leads (a home-manager link into a store), as
  *    today's MCP document reader did, under the bounds of `document-link.ts` (a regular file of one name, at most 16 MiB,
@@ -104,7 +105,8 @@ const isFleetHome = (deps: Deps, home: RuntimeHome): boolean => home.home.starts
 /**
  * A handle scoped to `home` (or to `inside`, a folder below it): the `fleet` root for a fleet home, `harness-home` scoped to
  * the account home for any other. `follow` (a home outside the fleet only) says whether a link in a listing that resolves
- * inside the home is followed: the listing of the home and of its `skills/` follow, a walk INSIDE one skill folder does not.
+ * inside the home is followed: the listing of the home, of its `skills/` and of the skill folder `skillManifest` reads follow;
+ * a walk or file read INSIDE one skill folder does not.
  */
 function scoped(deps: Deps, home: RuntimeHome, inside: string | undefined, follow: boolean): ReadHandle {
   const folder = inside === undefined ? home.home : `${home.home}/${inside}`;
