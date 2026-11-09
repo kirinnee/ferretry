@@ -55,13 +55,24 @@ class FakeFiles implements McpProjectFiles {
 interface LoginCalls {
   puts: { name: string; item: McpItem; create: boolean }[];
   layered: { profile: string; etag: string; layer: string; governance: unknown }[];
+  removed: { name: string; etag: string }[];
 }
 
-function login(options: { profiles?: McpLoginProfile[]; items?: string[]; runtimes?: McpLoginRuntime[] } = {}): {
+function login(
+  options: {
+    profiles?: McpLoginProfile[];
+    items?: string[];
+    runtimes?: McpLoginRuntime[];
+    /** The layer write is refused with this. */
+    layerFails?: Error;
+    /** The item cannot be taken back. */
+    stays?: true;
+  } = {},
+): {
   login: McpLoginTarget;
   calls: LoginCalls;
 } {
-  const calls: LoginCalls = { puts: [], layered: [] };
+  const calls: LoginCalls = { puts: [], layered: [], removed: [] };
   const runtimes = options.runtimes ?? [
     { name: 'claude-work', profile: 'work' },
     { name: 'orphan', profile: 'gone' },
@@ -75,9 +86,15 @@ function login(options: { profiles?: McpLoginProfile[]; items?: string[]; runtim
       hasItem: async name => (options.items ?? []).includes(name),
       putItem: async (name, item, create) => {
         calls.puts.push({ name, item, create });
+        return `written-${name}`;
+      },
+      removeItem: async (name, etag) => {
+        calls.removed.push({ name, etag });
+        return options.stays !== true;
       },
       layerProfile: async (profile, layer, governance) => {
         calls.layered.push({ profile: profile.name, etag: profile.etag, layer, governance });
+        if (options.layerFails !== undefined) throw options.layerFails;
       },
     },
   };
@@ -300,14 +317,80 @@ describe('adding to the login', () => {
     });
     const subject = service({ login: target });
 
-    await subject.addLogin('s1', { name: 'acme', server: URL_SERVER });
-    await subject.addLogin('s1', { name: 'acme', server: { ...URL_SERVER, oauth: false } });
+    const standing = { governed: false };
+    await subject.addLogin('s1', { name: 'acme', server: URL_SERVER }, standing);
+    await subject.addLogin('s1', { name: 'acme', server: { ...URL_SERVER, oauth: false } }, standing);
 
     should(calls.puts).deepEqual([
       { name: 'acme', item: { url: 'https://mcp.example.com', auth: 'oauth' }, create: false },
       { name: 'acme', item: { url: 'https://mcp.example.com' }, create: false },
     ]);
     should(calls.layered).be.empty();
+  });
+
+  it('R-0351 should refuse a caller with no standing BEFORE anything is written', async () => {
+    const { login: target, calls } = login();
+    const subject = service({ login: target });
+
+    const refused = await refusal(subject.addLogin('s1', { name: 'acme', server: COMMAND }));
+
+    should([refused.status, refused.code, refused.message]).deepEqual([
+      409,
+      'mcp_profile_refused',
+      'this daemon cannot say whether this caller may change the fleet',
+    ]);
+    should(calls.puts).be.empty();
+    should(calls.layered).be.empty();
+    should(calls.removed).be.empty();
+  });
+
+  it('R-0351 should take back an item it created when the profile layer is refused, and say what refused', async () => {
+    const layerFails = new SessionMcpRefusal(409, 'mcp_profile_refused', 'the fleet says no');
+    const { login: target, calls } = login({ layerFails });
+    const subject = service({ login: target });
+
+    const refused = await refusal(subject.addLogin('s1', { name: 'acme', server: COMMAND }, { governed: false }));
+
+    should([refused.status, refused.code, refused.message]).deepEqual([
+      409,
+      'mcp_profile_refused',
+      'the fleet says no',
+    ]);
+    should(calls.puts.map(put => put.create)).deepEqual([true]);
+    should(calls.removed).deepEqual([{ name: 'acme', etag: 'written-acme' }]);
+  });
+
+  it('R-0351 should keep an item it only replaced when the profile layer is refused', async () => {
+    const layerFails = new SessionMcpRefusal(409, 'mcp_profile_changed', 'the profile moved');
+    const { login: target, calls } = login({ items: ['acme'], layerFails });
+    const subject = service({ login: target });
+
+    const refused = await refusal(subject.addLogin('s1', { name: 'acme', server: COMMAND }, { governed: false }));
+
+    should(refused.code).equal('mcp_profile_changed');
+    should(calls.puts.map(put => put.create)).deepEqual([false]);
+    should(calls.removed).be.empty();
+  });
+
+  it('R-0351 should say so when the item it created cannot be taken back, and rethrow what it cannot name', async () => {
+    const stuck = login({
+      layerFails: new SessionMcpRefusal(409, 'mcp_profile_refused', 'the fleet says no'),
+      stays: true,
+    });
+    const refused = await refusal(
+      service({ login: stuck.login }).addLogin('s1', { name: 'acme', server: COMMAND }, { governed: false }),
+    );
+    should(refused.message).startWith('the fleet says no The new server acme could not be taken back');
+
+    const broken = login({ layerFails: new Error('disk gone'), stays: true });
+    const error = await service({ login: broken.login })
+      .addLogin('s1', { name: 'acme', server: COMMAND }, { governed: false })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+    should((error as Error).message).equal('disk gone');
+    should(broken.calls.removed).deepEqual([{ name: 'acme', etag: 'written-acme' }]);
   });
 
   it('should refuse a runtime the machine does not have, a missing profile and a raw secret', async () => {

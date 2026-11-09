@@ -62,7 +62,8 @@ async function world() {
       runtime: async () => undefined,
       profile: async () => undefined,
       hasItem: async () => false,
-      putItem: async () => undefined,
+      putItem: async () => 'etag',
+      removeItem: async () => true,
       layerProfile: async () => undefined,
     },
   });

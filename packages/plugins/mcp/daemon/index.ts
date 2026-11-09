@@ -167,7 +167,7 @@ export default implementDaemon(manifest, {
       project: async spec => {
         // The ferret folders are the read roots, so they are read fresh before the launch's own folder is.
         await refreshOwners();
-        // The launch is its own account: 5.0 carries the runtime, harness and home on the spec (no Runtimes import).
+        // The launch is its own account: the spec carries the runtime, harness and home it launches with.
         // Whether the runtime declined a server is its harness's answer, never a read of its home here (GAP above).
         const agent = spec.runtime ?? spec.ferret;
         return await new ProjectMcpLaunch({
@@ -244,6 +244,11 @@ export default implementDaemon(manifest, {
         hasItem: name => items().has(name),
         writeItem: async (name, patch, ifMatch) =>
           await kernel.config.write(MCP_CONFIG, name, { patch }, ifMatch === undefined ? undefined : { ifMatch }),
+        held: name => {
+          const status = kernel.config.fileState(MCP_CONFIG, name);
+          return status.state === 'held' ? status.sentences : undefined;
+        },
+        removeItem: async (name, ifMatch) => await kernel.config.remove(MCP_CONFIG, name, { ifMatch }),
       }),
     });
     async function inventoryFerret(id: string) {

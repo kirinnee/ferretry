@@ -23,11 +23,21 @@ interface Write {
   ifMatch: 'absent' | undefined;
 }
 
-function setup(options: { runtimes?: 'off'; items?: string[]; outcome?: ConfigWriteOutcome } = {}) {
+function setup(
+  options: {
+    runtimes?: 'off';
+    items?: string[];
+    outcome?: ConfigWriteOutcome;
+    /** The sentences of an edit of the item that waits for the owner. */
+    waiting?: readonly string[];
+    removal?: ConfigWriteOutcome;
+  } = {},
+) {
   const runtimes = fakeRuntimes();
   runtimes.setRuntimes([WORK]);
   runtimes.setProfiles([PROFILE]);
   const writes: Write[] = [];
+  const removals: { name: string; ifMatch: string }[] = [];
   const target = runtimesLoginTarget({
     runtimes: () => (options.runtimes === 'off' ? undefined : runtimes),
     hasItem: name => (options.items ?? []).includes(name),
@@ -35,8 +45,13 @@ function setup(options: { runtimes?: 'off'; items?: string[]; outcome?: ConfigWr
       writes.push({ name, patch, ifMatch });
       return options.outcome ?? { kind: 'written', etag: 'e', loosened: [] };
     },
+    held: () => options.waiting,
+    removeItem: async (name, ifMatch) => {
+      removals.push({ name, ifMatch });
+      return options.removal ?? { kind: 'written', etag: 'absent', loosened: [] };
+    },
   });
-  return { runtimes, target, writes };
+  return { runtimes, target, writes, removals };
 }
 
 async function refusal(work: Promise<unknown>): Promise<SessionMcpRefusal> {
@@ -93,6 +108,37 @@ describe('the login target writes the item', () => {
     await target.putItem('acme', { command: 'npx', args: ['acme'] }, false);
     expect(writes[0]?.ifMatch).toBeUndefined();
     expect(writes[0]?.patch).toMatchObject({ command: 'npx', args: ['acme'], url: undefined });
+  });
+
+  test('R-0351 a written item answers the etag of the file as written, and takes itself back only against that etag', async () => {
+    const { target, removals } = setup({ outcome: { kind: 'written', etag: 'etag-written', loosened: [] } });
+    expect(await target.putItem('acme', { command: 'npx' }, true)).toBe('etag-written');
+    expect(await target.removeItem('acme', 'etag-written')).toBe(true);
+    expect(removals).toEqual([{ name: 'acme', ifMatch: 'etag-written' }]);
+  });
+
+  test('R-0351 an item that cannot be taken back (the file moved) says false', async () => {
+    const { target } = setup({ removal: { kind: 'conflict' } });
+    expect(await target.removeItem('acme', 'old')).toBe(false);
+  });
+
+  test('R-0351 a held item says it is not in effect and the profile was not changed, naming the secret only', async () => {
+    const { target } = setup({
+      outcome: { kind: 'held', etag: 'e', id: 'h1', sentences: ['names the secret ACME_TOKEN.'] },
+    });
+    const refused = await refusal(target.putItem('acme', { command: 'npx' }, true));
+    expect(refused.message).toContain('not in effect');
+    expect(refused.message).toContain('profile was not changed');
+    expect(refused.message).toContain('ACME_TOKEN');
+    expect(refused.message).not.toContain('was written');
+  });
+
+  test('R-0351 a retry against an item still waiting for the owner answers held again, not "preview again"', async () => {
+    const { target } = setup({ outcome: { kind: 'conflict' }, waiting: ['names the secret ACME_TOKEN.'] });
+    const refused = await refusal(target.putItem('acme', { command: 'npx' }, true));
+    expect([refused.status, refused.code]).toEqual([409, 'mcp_change_held']);
+    expect(refused.message).toContain('ACME_TOKEN');
+    expect(refused.message).not.toContain('Preview again');
   });
 
   test.each([

@@ -42,6 +42,8 @@ async function world(options: Options = {}) {
   ferrets.add({ id: ferretId('f1'), folder: ROOT, runtime: RUNTIME.id });
   ferrets.add({ id: ferretId('f2'), folder: '/elsewhere/app', runtime: RUNTIME.id });
   ferrets.add({ id: ferretId('f3'), folder: ROOT });
+  // A runtime Runtimes does not answer (removed, or never there).
+  ferrets.add({ id: ferretId('f4'), folder: ROOT, runtime: RuntimeIdSchema.parse('ghost') });
   const projects = fakeProjects();
   if (options.projects !== 'off')
     for (const path of options.projects ?? [ROOT]) await projects.register({ kind: 'existing-folder', path });
@@ -170,11 +172,33 @@ describe('a login add at the runtime a ferret launches on', () => {
     });
     expect((await runtimes.profiles())[0]?.layers).toEqual(['instructions/base']);
     expect(h.published.filter(entry => entry.event === McpServerAdded.name)).toEqual([]);
+    // Refused before any write: no item file was made, so none is left in effect.
+    expect(h.configChanges).toEqual([]);
+    expect(runtimes.changes).toEqual([]);
+  });
+
+  test('R-0351 a profile Runtimes refuses AFTER the item was written takes the new item back', async () => {
+    const { h, runtimes } = await world({ owner: true });
+    runtimes.setChangeOutcome({ kind: 'conflict', profile: 'work' });
+
+    const refused = await h.request('POST', '/v1/ferrets/f1/mcp/login', { body: ADD });
+
+    expect(refused.status).toBe(409);
+    expect(refused.json<{ code: string }>().code).toBe('mcp_profile_changed');
+    // The item was written, then removed: its file is absent again, so a retry creates it cleanly.
+    expect(h.configChanges.map(change => `${change.path}:${change.state}`)).toEqual([
+      'mcp/acme.yaml:valid',
+      'mcp/acme.yaml:absent',
+    ]);
+    expect(h.published.filter(entry => entry.event === McpServerAdded.name)).toEqual([]);
+    runtimes.setChangeOutcome(undefined);
+    const again = await h.request('POST', '/v1/ferrets/f1/mcp/login', { body: ADD });
+    expect(again.status).toBe(200);
   });
 
   test('R-0352 a ferret with no runtime, an unknown runtime, or Runtimes off has no login to add to', async () => {
     const { h } = await world();
-    for (const id of ['f3']) {
+    for (const id of ['f3', 'f4']) {
       const none = await h.request('POST', `/v1/ferrets/${id}/mcp/login/preview`, {
         body: ADD,
         as: device('fleet.use'),

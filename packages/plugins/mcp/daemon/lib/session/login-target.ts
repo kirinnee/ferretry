@@ -23,6 +23,10 @@ export interface LoginTargetDeps {
     patch: Readonly<Record<string, unknown>>,
     ifMatch: 'absent' | undefined,
   ) => Promise<ConfigWriteOutcome>;
+  /** The sentences of an edit of `config/mcp/<name>.yaml` that waits for the owner, or `undefined` when none does. */
+  readonly held: (name: string) => readonly string[] | undefined;
+  /** Takes back the item this add just created: only while the file is still the one the add wrote (`ifMatch`). */
+  readonly removeItem: (name: string, ifMatch: string) => Promise<ConfigWriteOutcome>;
 }
 
 /** The keys that SAY what a server is: a replaced item loses the old ones, so a url never keeps a stale command. */
@@ -37,13 +41,21 @@ function patchOf(item: McpItem): Readonly<Record<string, unknown>> {
   return patch;
 }
 
-function itemRefusal(outcome: Exclude<ConfigWriteOutcome, { readonly kind: 'written' }>): SessionMcpRefusal {
-  if (outcome.kind === 'held')
-    return new SessionMcpRefusal(
-      409,
-      'mcp_change_held',
-      `The server was written but is held for the owner to confirm: ${outcome.sentences.join(' ')}`,
-    );
+/** An item edit that waits for the owner: not in effect, and the profile was not changed. */
+const heldRefusal = (sentences: readonly string[]): SessionMcpRefusal =>
+  new SessionMcpRefusal(
+    409,
+    'mcp_change_held',
+    `The server is not in effect and the profile was not changed: the owner has to confirm it first. ${sentences.join(' ')}`.trim(),
+  );
+
+function itemRefusal(
+  outcome: Exclude<ConfigWriteOutcome, { readonly kind: 'written' }>,
+  waiting: readonly string[] | undefined,
+): SessionMcpRefusal {
+  if (outcome.kind === 'held') return heldRefusal(outcome.sentences);
+  // A retry against an edit still waiting for the owner is that same answer, not "preview again" (which says the same).
+  if (outcome.kind === 'conflict' && waiting !== undefined) return heldRefusal(waiting);
   if (outcome.kind === 'conflict')
     return new SessionMcpRefusal(409, 'mcp_item_changed', 'This server changed since you looked. Preview again.');
   const issues = 'issues' in outcome ? outcome.issues.map(issue => `${issue.path}: ${issue.message}`).join(' ') : '';
@@ -85,8 +97,10 @@ export function runtimesLoginTarget(deps: LoginTargetDeps): McpLoginTarget {
     hasItem: async name => deps.hasItem(name),
     putItem: async (name, item, create) => {
       const outcome = await deps.writeItem(name, patchOf(item), create ? 'absent' : undefined);
-      if (outcome.kind !== 'written') throw itemRefusal(outcome);
+      if (outcome.kind !== 'written') throw itemRefusal(outcome, deps.held(name));
+      return outcome.etag;
     },
+    removeItem: async (name, etag) => (await deps.removeItem(name, etag)).kind === 'written',
     layerProfile: async (profile, layer, governance) => {
       const outcome = await runtimes().changeProfileLayers(
         { kind: 'add', profile: profile.name, layer: layer as `mcp/${string}`, ifMatch: profile.etag },

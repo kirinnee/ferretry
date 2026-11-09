@@ -92,7 +92,10 @@ export interface McpLoginTarget {
   runtime(name: string): Promise<McpLoginRuntime | undefined>;
   profile(name: string): Promise<McpLoginProfile | undefined>;
   hasItem(name: string): Promise<boolean>;
-  putItem(name: string, item: McpItem, create: boolean): Promise<void>;
+  /** Writes the item (`create`: it must not exist yet) and answers the etag of the file as written. */
+  putItem(name: string, item: McpItem, create: boolean): Promise<string>;
+  /** Takes back an item this add created, only while the file is still the one written (`etag`); false when it stays. */
+  removeItem(name: string, etag: string): Promise<boolean>;
   layerProfile(profile: McpLoginProfile, layer: string, governance: unknown): Promise<void>;
 }
 
@@ -121,6 +124,12 @@ export class SessionMcpRefusal extends Error {
 
 const CODEX_PROJECT =
   'Codex does not read .mcp.json, so a project server would never reach this ferret. Add it to This login instead.';
+
+/** Runtimes' own sentence for a caller it cannot place; said here first so nothing is written for such a caller. */
+const NO_STANDING = 'this daemon cannot say whether this caller may change the fleet';
+
+const NOT_TAKEN_BACK = (name: string): string =>
+  `The new server ${name} could not be taken back and is still in effect: remove it from the MCP servers if you do not want it.`;
 
 const withoutTrailingSlash = (path: string): string => posix.normalize(path).replace(/(?<=.)\/+$/u, '');
 
@@ -223,16 +232,29 @@ export class SessionMcpService {
 
   /**
    * The component, then the profile: two reviewed changes, each applied under the caller's governance.
-   * The profile change is skipped when the profile already names the component. If the second is
-   * refused the component exists and is not in the profile yet; adding again repeats both halves.
+   * A caller with no standing at all is refused BEFORE anything is written (as v4 did). The profile change is skipped
+   * when the profile already names the component. If it is refused or conflicts, an item this add CREATED is taken
+   * back, so a refused add leaves nothing in effect; an item it only REPLACED stays as written, and adding again
+   * repeats both halves.
    */
   async addLogin(sessionId: string, request: SessionMcpPreviewRequest, governance?: unknown): Promise<SessionMcpAdded> {
     const session = await this.#session(sessionId);
     refuseServer('login', request.server);
     const { runtime, profile, replaces } = await this.#loginTarget(session, request.name);
-    await this.deps.login.putItem(request.name, itemInput(request.server), !replaces);
+    // Every read above writes nothing; from here on a caller with no standing writes nothing either.
+    if (governance === undefined) throw new SessionMcpRefusal(409, 'mcp_profile_refused', NO_STANDING);
+    const etag = await this.deps.login.putItem(request.name, itemInput(request.server), !replaces);
     const reference = `mcp/${request.name}`;
-    if (!profile.layers.includes(reference)) await this.deps.login.layerProfile(profile, reference, governance);
+    if (!profile.layers.includes(reference)) {
+      try {
+        await this.deps.login.layerProfile(profile, reference, governance);
+      } catch (error) {
+        const taken = replaces || (await this.deps.login.removeItem(request.name, etag));
+        throw taken || !(error instanceof SessionMcpRefusal)
+          ? error
+          : new SessionMcpRefusal(error.status, error.code, `${error.message} ${NOT_TAKEN_BACK(request.name)}`);
+      }
+    }
     return { scope: 'login', name: request.name, runtime: runtime.name, profile: profile.name };
   }
 
