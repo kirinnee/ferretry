@@ -128,6 +128,7 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
       writer: () => service.writer(),
       status: () => service.status(),
       reload: () => service.reload(),
+      publishSchemas: () => service.publishSchemas(),
       startWatching: () => service.startWatching(),
       onStateChange: listener => service.onStateChange(listener),
     };
