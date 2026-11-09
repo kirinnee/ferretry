@@ -13,7 +13,7 @@ import {
   sourceMounts,
 } from '../../../daemon/adapters/fleet-disk.ts';
 import type { HostMounts } from '../../../daemon/adapters/root-host-files.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 

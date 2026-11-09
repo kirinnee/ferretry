@@ -14,7 +14,7 @@ import { RuntimeHomeUnreadable } from '../../../contract/index.ts';
 import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 

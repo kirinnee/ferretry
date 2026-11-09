@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { chmod, lstat, mkdir, readdir, readFile, readlink, rename, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FileMutationJournal, isMutationReservedName } from '../../../daemon/adapters/mutation-journal.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 

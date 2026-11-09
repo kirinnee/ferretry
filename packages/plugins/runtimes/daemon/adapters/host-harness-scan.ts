@@ -66,6 +66,8 @@ export interface HostHarnessScanDeps {
 // filenames also named by account/credentials.ts; refuse them in every component, before any host call.
 const SIGN_IN_FILES = new Set(['.credentials.json', 'auth.json']);
 
+const LINK_REFUSED = 'symbolic links are not readable setup paths';
+
 const DEFAULT_MAX_SKILL_FILES = 2_000;
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -204,17 +206,16 @@ export class HostHarnessScanner {
       throw new Error('sign-in files are not readable setup documents');
     }
     let current = home;
-    for (let index = 0; index <= components.length; index += 1) {
+    for (const component of components) {
       const info = await this.deps.files.lstat(current);
       if (info === undefined) return undefined;
-      if (info.kind === 'link') throw new Error('symbolic links are not readable setup paths');
-      if (index === components.length) return info;
+      if (info.kind === 'link') throw new Error(LINK_REFUSED);
       if (info.kind !== 'directory') throw new Error('a setup path ancestor is not a directory');
-      const component = components[index];
-      if (component === undefined) throw new Error('a setup path component is missing');
       current = join(current, component);
     }
-    return undefined;
+    const info = await this.deps.files.lstat(current);
+    if (info?.kind === 'link') throw new Error(LINK_REFUSED);
+    return info;
   }
 
   /**
@@ -238,12 +239,13 @@ export class HostHarnessScanner {
     }
   }
 
-  /** The one file beside a home: never a link, never a sign-in file. */
+  /**
+   * The one file beside a home: never a link. Its name is the constant `.claude.json`, which no sign-in file is called, so
+   * no name check is made here (a name check on a constant could never fire).
+   */
   async #inspectFile(path: string): Promise<HostEntry | undefined> {
-    if (SIGN_IN_FILES.has(basename(path).toLowerCase()))
-      throw new Error('sign-in files are not readable setup documents');
     const info = await this.deps.files.lstat(path);
-    if (info?.kind === 'link') throw new Error('symbolic links are not readable setup paths');
+    if (info?.kind === 'link') throw new Error(LINK_REFUSED);
     return info;
   }
 

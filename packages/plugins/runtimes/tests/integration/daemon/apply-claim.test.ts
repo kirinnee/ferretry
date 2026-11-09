@@ -7,7 +7,7 @@ import { lstat, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/prom
 import { join } from 'node:path';
 import { applyClaimFor } from '../../../daemon/adapters/apply-claim.ts';
 import type { FleetDisk } from '../../../daemon/adapters/fleet-disk.ts';
-import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
 

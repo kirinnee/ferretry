@@ -16,7 +16,7 @@ import {
 } from '../../daemon/adapters/account-model-files.ts';
 import { readFleetManifest } from '../../daemon/adapters/manifest-file.ts';
 import { type ConfigFilesPort, refusedHostFiles } from '../../daemon/adapters/ports.ts';
-import { RuntimeIdsFile } from '../../daemon/adapters/runtime-ids-file.ts';
+import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../../daemon/adapters/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../../daemon/adapters/runtime-session-records.ts';
 import { MAX_FOLDER_FILES, readTextFolder, skillItemsIn } from '../../daemon/adapters/setup-files.ts';
 import { ABSENT_DOCUMENT_REVISION } from '../../daemon/lib/provisioning.ts';
@@ -134,7 +134,52 @@ describe('ids.json', () => {
   });
 });
 
+describe('the runtime-aware account inventory', () => {
+  it('should answer the accounts of its inventory and the ids read from the real ids.json beside them', async () => {
+    // Arrange
+    const file = path.join(await temp(), 'ids.json');
+    await put(file, JSON.stringify({ version: 1, runtimes: {} }));
+    const inventory = new RuntimeAwareAccountInventory(
+      { accounts: async () => ['one', 'two'] },
+      new RuntimeIdsFile(nodeHostFiles, file),
+    );
+
+    // Act
+    const accounts = await inventory.accounts();
+    const ids = await inventory.ids();
+
+    // Assert
+    should(accounts).deepEqual(['one', 'two']);
+    should(ids).deepEqual({ version: 1, runtimes: {} });
+  });
+});
+
 describe('runtime session records', () => {
+  it('should skip a record that cannot be rewritten and still move the rest', async () => {
+    // Arrange
+    const written: Record<string, unknown> = {};
+    const configs: Record<string, unknown> = {
+      stuck: { agent: 'old', command: ['/old'] },
+      free: { agent: 'old', command: ['/old'] },
+    };
+    const records = new RuntimeSessionRecords({
+      listSessions: () => Object.keys(configs).map(id => ({ id })),
+      readConfig: async id => configs[id],
+      readState: async () => ({ status: 'running' }),
+      updateConfig: async (id, change) => {
+        if (id === 'stuck') throw new Error('the record is locked');
+        written[id] = change(configs[id]);
+      },
+    });
+
+    // Act
+    const moved = await records.renameSessions({ from: 'old', to: 'new', fromWrapper: '/old', toWrapper: '/new' });
+
+    // Assert
+    should(moved).equal(1);
+    should(written).deepEqual({ free: { agent: 'new', command: ['/new'] } });
+  });
+
   const storage = (configs: Record<string, unknown>, states: Record<string, unknown>) => {
     const written: Record<string, unknown> = { ...configs };
     return {
