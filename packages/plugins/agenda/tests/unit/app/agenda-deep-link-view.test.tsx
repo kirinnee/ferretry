@@ -91,7 +91,7 @@ async function open(
 describe("Agenda's device view", () => {
   it('declares the agenda key, and its one device view', () => {
     expect(half.shell.fragments).toEqual([{ form: 'keyed', key: 'agenda' }]);
-    expect(Object.keys(half.shell.device ?? {})).toEqual(['deep-link']);
+    expect(Object.keys(half.shell.device ?? {})).toEqual(['deep-link', 'notification-filter']);
   });
 
   it('takes the whole link off the address and opens the ask on the machine the link names', async () => {

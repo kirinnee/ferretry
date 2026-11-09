@@ -304,7 +304,7 @@
     ],
     "updates": [
       "[declare] GAP(updates): app/lib/changelog.ts is not reached by a What's new surface (today: packages/pwa/src/features/whats-new/whats-new-host.tsx:21 and whats-new-sheet.tsx:22) (owner: kaizen, app shell)",
-      "[declare] GAP(updates): the shell captures the browser's install prompt at boot (useInstallPrompt, S13) but Updates has not declared the offer (a device.settings panel and a background toast), so app/lib/install-prompt.ts is not reached by an install-as-app prompt. Updates also drops its own platform and capture (installPlatform, DeferredInstallPrompt, the boot capture: the shell is the one owner of the browser's fact, shell/install-prompt.ts) and keeps only the offer decisions (installBanner, installSetting, the dismissal), reading useInstallPrompt (today: packages/pwa/src/main.tsx:58, packages/pwa/src/App.tsx:211, packages/pwa/src/features/install/install-app.tsx:19) (owner: kaizen, app shell)"
+      "[declare] GAP(updates): app/lib/install-prompt.ts is not reached by an install-as-app prompt: the shell captures the browser's install prompt at boot (useInstallPrompt, S13) but Updates has not declared the offer (a device.settings panel and a background toast). Updates also drops its own platform and capture (installPlatform, DeferredInstallPrompt, the boot capture: the shell is the one owner of the browser's fact, shell/install-prompt.ts) and keeps only the offer decisions (installBanner, installSetting, the dismissal), reading useInstallPrompt (today: packages/pwa/src/main.tsx:58, packages/pwa/src/App.tsx:211, packages/pwa/src/features/install/install-app.tsx:19) (owner: kaizen, app shell)"
     ]
   },
   "pendingHalves": {
