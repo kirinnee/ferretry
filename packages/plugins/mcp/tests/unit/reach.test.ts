@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { SignInReach } from '../../daemon/lib/reach.ts';
-import { EMPTY_MCP_OAUTH_STATE } from '../../daemon/lib/oauth/service.ts';
+import { EMPTY_MCP_OAUTH_STATE, MAX_PENDING_FLOWS } from '../../daemon/lib/oauth/service.ts';
 import type { McpOAuthRecord, McpOAuthServer, McpOAuthStateDocument } from '../../daemon/lib/oauth/ports.ts';
 
 const TTL = 1000;
@@ -120,10 +120,18 @@ describe('the sign-in reach', () => {
     const { reach: r, expiry } = reach();
     for (let index = 0; index < 20; index += 1) r.discovered('one', `https://h${String(index)}.example.test`, expiry());
     expect(r.hosts().length).toBe(8);
-    for (let index = 0; index < 20; index += 1)
+    // The bound is twice the service's pending-flow limit, so the service stays the one place that evicts a live flow.
+    const flows = 2 * MAX_PENDING_FLOWS + 4;
+    for (let index = 0; index < flows; index += 1)
       r.discovered(`flow${String(index)}`, `https://f${String(index)}.example.test`, expiry());
-    expect(r.hosts().length).toBeLessThanOrEqual(16 * 8);
+    expect(r.hosts().length).toBeLessThanOrEqual(2 * MAX_PENDING_FLOWS * 8);
     expect(r.hosts()).not.toContain('h0.example.test');
-    expect(r.hosts()).toContain('f19.example.test');
+    expect(r.hosts()).not.toContain('f0.example.test');
+    expect(r.hosts()).toContain(`f${String(flows - 1)}.example.test`);
+    // Sixteen live flows and one more start: nobody's hosts are evicted.
+    const { reach: roomy, expiry: roomyExpiry } = reach();
+    for (let index = 0; index < MAX_PENDING_FLOWS + 1; index += 1)
+      roomy.discovered(`flow${String(index)}`, `https://f${String(index)}.example.test`, roomyExpiry());
+    expect(roomy.hosts()).toContain('f0.example.test');
   });
 });
