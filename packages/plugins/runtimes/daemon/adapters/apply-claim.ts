@@ -9,10 +9,14 @@
  * one file named after an unguessable token) and moved onto the lock's name with `rename`, which the root refuses when
  * anything is already at the name: an existing claim is never replaced, and a claim is never seen half-written.
  *
- * **Release takes the claim aside before it decides anything.** The directory is renamed to a private name in one
- * step, and only then is it looked at: if it holds exactly this holder's token file it is removed; if it holds anything
- * else (a person cleared our claim and a successor took the name) it is put back untouched and the path is reported.
- * Nothing is ever removed at the lock's name on a decision about what was there a moment ago.
+ * **Release never moves the lock's name.** It removes THIS holder's own token file, whose name only this holder can
+ * know, and then the folder it emptied. A holder that was superseded (a person cleared its claim, as the refusal
+ * invites, and a successor took the name) finds no token file of its own and touches nothing, so a lock name that a
+ * successor holds is never free, not for one step: today's release protocol, which rejected "aside, then judge" because
+ * it frees the name under a live successor and a third contender takes it. The folder is removed only if it is empty and
+ * still the very folder this holder published (identity), and what is left in it is never removed. [kernel] GAP: the
+ * root has no remove-if-empty, so the last step is a look (empty, same folder) and then a remove; the window between
+ * them is the instant after this holder's own token went, and it is named in `ports-pending.json`.
  *
  * **Nothing is taken over automatically, on purpose.** Reclaiming a dead holder's claim needs an atomic
  * compare-and-replace that a file system does not offer, and a reaper that gets it wrong lets two applies run, which is
@@ -26,6 +30,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { FleetDisk } from './fleet-disk.ts';
+import { isOriginalsName } from './mutation-journal.ts';
 import type { ApplyLock } from './ports.ts';
 
 /** The lock's name beside the manifest. */
@@ -34,8 +39,8 @@ const LOCK_NAME = '.fy-fleet-apply.lock';
 const CLAIM_PREFIX = 'claim-';
 /** A claim being built, before it is published under the lock's name. */
 const STAGED_CLAIM_PREFIX = '.fy-fleet-apply.';
-/** A claim taken aside by its release, to be looked at before it is removed. */
-const RELEASING_PREFIX = '.fy-fleet-apply-releasing.';
+/** The most entries the refusal looks through for originals an interrupted apply left moved aside. */
+const MAX_LEFTOVER_SCAN = 5000;
 
 const DEFAULT_WAIT_MS = 60 * 1000;
 const DEFAULT_POLL_MS = 25;
@@ -77,6 +82,8 @@ class FleetApplyClaim implements ApplyLock {
   readonly #pollMs: number;
   readonly #now: () => number;
   readonly #sleep: (ms: number) => Promise<void>;
+  /** The folder each claim this object published was moved onto the lock's name as, by its token. */
+  readonly #published = new Map<string, string | undefined>();
 
   constructor(
     private readonly disk: FleetDisk,
@@ -119,8 +126,11 @@ class FleetApplyClaim implements ApplyLock {
         new TextEncoder().encode(`${JSON.stringify(claim)}\n`),
         0o600,
       );
+      // The folder as built: a rename keeps it, so the release can tell the folder it published from any other.
+      const identity = await this.disk.identity(staged);
       try {
         await this.disk.rename(staged, this.path);
+        this.#published.set(token, identity);
         return true;
       } catch (error) {
         // The root refuses a name that is taken; anything else about the move is the same refusal (no copy fallback).
@@ -137,36 +147,99 @@ class FleetApplyClaim implements ApplyLock {
     if (state.kind === 'absent') {
       return `could not take ${this.path} before the deadline, and the claim is now gone; run the apply again`;
     }
+    const left = await this.#leftovers();
     if (state.kind === 'unreadable') {
-      return `another fleet apply holds ${this.path} and its claim could not be read; remove that folder once no apply is running`;
+      return `another fleet apply holds ${this.path} and its claim could not be read; remove that folder once no apply is running${left}`;
     }
-    return `another fleet apply holds ${this.path}, claimed at ${isoOf(state.claim.at)}; if no fleet change is running it was left behind by an interrupted apply, and it can be removed`;
+    return `another fleet apply holds ${this.path}, claimed at ${isoOf(state.claim.at)}; if no fleet change is running it was left behind by an interrupted apply, and it can be removed${left}`;
   }
 
-  /** Releases the claim; answers the path of a claim that could not be cleared. */
+  /**
+   * What an apply that was killed leaves beside its claim: the originals it moved aside (`.fy-fleet-backup-*`, `.fy-fleet-
+   * displaced-*`), each the ONLY copy of a file or folder it replaced. Nothing recovers them on boot, so the sentence
+   * that tells a person to remove the claim names them too, or removing the claim looks like the whole cleanup. Bounded:
+   * past the bound it says so rather than walking a whole home.
+   */
+  async #leftovers(): Promise<string> {
+    const found: string[] = [];
+    let seen = 0;
+    let complete = true;
+    const walk = async (folder: string, shown: string): Promise<void> => {
+      let entries: Awaited<ReturnType<FleetDisk['entries']>>;
+      try {
+        entries = await this.disk.entries(folder);
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        seen += 1;
+        if (seen > MAX_LEFTOVER_SCAN) {
+          complete = false;
+          return;
+        }
+        const name = shown === '' ? entry.name : `${shown}/${entry.name}`;
+        if (isOriginalsName(entry.name)) found.push(name);
+        else if (entry.kind === 'directory' && !entry.name.startsWith(STAGED_CLAIM_PREFIX))
+          await walk(`${folder}/${entry.name}`, name);
+      }
+    };
+    await walk(this.folder, '');
+    if (found.length === 0) return '';
+    return `. That apply also left ${found.length === 1 ? 'an original' : `${found.length} originals`} of what it replaced moved aside beside the ${found.length === 1 ? 'file' : 'files'} it replaced, and each is the only copy, so keep them: ${found.toSorted().join(', ')}${complete ? '' : ' (and more: the folder was only searched in part)'}`;
+  }
+
+  /**
+   * Releases the claim; answers the path of a claim that could not be cleared.
+   *
+   * The order is today's: this holder's OWN token file goes first (its name carries a token only this holder knows, so the
+   * call can never reach a successor's claim), then the folder it emptied, only if it is still empty and still the folder
+   * this holder published. The lock's name is never moved, so it is never free under somebody else's claim.
+   */
   async release(token: string): Promise<string | undefined> {
-    const aside = `${this.folder}/${RELEASING_PREFIX}${randomUUID()}`;
     try {
+      const tokenFile = this.#tokenFile(this.path, token);
+      if ((await this.#exists(tokenFile)) === false) {
+        // This holder's proof is not there, so it holds nothing and has nothing to remove: whatever occupies the name now
+        // (a successor's claim, or nothing) is not its business, and is said only if something is there to be told.
+        return (await this.#exists(this.path)) === false ? undefined : this.path;
+      }
       try {
-        await this.disk.rename(this.path, aside);
+        await this.disk.remove(tokenFile);
       } catch {
-        // Nothing at the name (already cleared) is released; anything else there could not be taken aside.
-        return (await this.disk.lstat(this.path)) === undefined ? undefined : this.path;
+        if ((await this.#exists(tokenFile)) !== false) return this.path;
+        return (await this.#exists(this.path)) === false ? undefined : this.path;
       }
-      const state = await this.#read(aside);
-      if (state.kind === 'held' && state.claim.token === token) {
-        await this.disk.remove(aside);
-        return undefined;
-      }
-      // Not ours: put it back exactly as it was, and say where it is.
-      try {
-        await this.disk.rename(aside, this.path);
-        return this.path;
-      } catch {
-        return aside;
-      }
+      return await this.#removeEmptied(token);
     } catch {
       return this.path;
+    } finally {
+      this.#published.delete(token);
+    }
+  }
+
+  /**
+   * The folder this holder emptied: removed only while it is empty and still the folder this holder published. Anything
+   * left in it is somebody else's (a successor's claim, or what no claim reader can trust) and stays; only something
+   * unreadable will block the next apply, so only that is named.
+   */
+  async #removeEmptied(token: string): Promise<string | undefined> {
+    const names = (await this.disk.entries(this.path)).map(entry => entry.name);
+    // A claim published by ANOTHER object (a release from a fresh handle) has no recorded folder to compare with: the
+    // token file this holder just removed from it is the proof the folder was this holder's.
+    const mine = !this.#published.has(token) || (await this.disk.identity(this.path)) === this.#published.get(token);
+    if (names.length === 0 && mine) {
+      await this.disk.remove(this.path);
+      return undefined;
+    }
+    return (await this.#read(this.path)).kind === 'unreadable' ? this.path : undefined;
+  }
+
+  /** Whether anything is at `path`; `undefined` when it could not be looked at (which is never "nothing"). */
+  async #exists(path: string): Promise<boolean | undefined> {
+    try {
+      return (await this.disk.lstat(path)) !== undefined;
+    } catch {
+      return undefined;
     }
   }
 

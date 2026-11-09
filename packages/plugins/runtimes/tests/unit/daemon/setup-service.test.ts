@@ -42,6 +42,7 @@ import { ConfigWriteConflict, ConfigWriteInvalid } from '../../../daemon/lib/ser
 import {
   type CloneConfigFiles,
   createFleetSetupSubsystem,
+  failedApplySentence,
   FleetSetupRefusal,
   type FleetSetupService,
   type FleetSetupServiceDeps,
@@ -1083,7 +1084,7 @@ describe('the setup.import executor', () => {
     should(refusal.message).startWith('importing would leave studio with a setup it cannot read');
   });
 
-  it('should turn a failed apply into a failure that says nothing was left half-changed', async () => {
+  it('M2 should say which configuration files were written before a failed apply, and not claim nothing changed', async () => {
     const { service, state } = world();
     state.apply = async () => {
       throw new FleetApplyFailureError({ kind: 'rolled-back', stage: 'x', reason: 'disk full' } as never, undefined);
@@ -1091,7 +1092,24 @@ describe('the setup.import executor', () => {
     const change = IMPORT();
     await service.executors.setup.describe(change);
     const failure = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed');
-    should(failure.message).endWith('; nothing was left half-changed');
+    // The configuration lands BEFORE the plan and is not rolled back with it: the sentence names it, never "nothing".
+    should(failure.message).containEql('/state/config/model.yaml');
+    should(failure.message).containEql('was written first and is NOT rolled back');
+    should(failure.message).not.containEql('nothing was left half-changed');
+  });
+
+  it('M2 failedApplySentence says nothing was left half-changed only when no configuration file was written first', () => {
+    const asset = { path: '/state/fleet/assets/skills/a.md', content: 'a', mode: 0o600 };
+    const config = { path: '/state/config/model.yaml', content: 'b', mode: 0o600 };
+
+    should(failedApplySentence('disk full', [asset], '/state/fleet')).equal('disk full; nothing was left half-changed');
+    should(failedApplySentence('disk full', [], '/state/fleet')).equal('disk full; nothing was left half-changed');
+    should(failedApplySentence('disk full', [asset, config], '/state/fleet')).equal(
+      'disk full; the configuration /state/config/model.yaml was written first and is NOT rolled back with the fleet',
+    );
+    should(
+      failedApplySentence('disk full', [config, { ...config, path: '/state/config/runtimes.yaml' }], '/state/fleet'),
+    ).containEql('the configuration files /state/config/model.yaml, /state/config/runtimes.yaml were written first');
   });
 
   it('should read settings, hooks and skill bodies the model names, ignoring one that does not parse', async () => {

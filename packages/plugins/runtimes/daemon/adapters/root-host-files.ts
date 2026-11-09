@@ -7,7 +7,7 @@
  * A path is served only when a mount names it. Anything else is refused in a sentence, never read: this is the seam
  * that replaced the raw-path reads, so it must not be a way back to them.
  */
-import { isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import type { RootFileHandle, RootHandle, RootLstat, RootStat, RootsPort } from '@ferretry/kernel/contract';
 import type { HostEntry, HostFiles } from './ports.ts';
 
@@ -126,9 +126,17 @@ export function harnessMounts(
   };
 }
 
-/** The mounts for the fleet folder: its absolute path (`fleetDirectory`) and the `fleet` root that holds it. */
-export function fleetMounts(root: RootHandle, fleetDirectory: string): HostMounts {
+/**
+ * The mounts for the fleet folder: its absolute path (`fleetDirectory`) and the `fleet` root that holds it. The
+ * `assets/` tree is served through a root SCOPED to it, so a component folder there that is a link out (into the
+ * credentials Ferretry keeps, or another runtime's home) is refused at its hop and never read into a bundle (S43).
+ */
+export function fleetMounts(roots: Pick<RootsPort, 'root'>, root: RootHandle, fleetDirectory: string): HostMounts {
+  const assetsBase = join(fleetDirectory, 'assets');
+  const assets = roots.root('fleet', { subfolder: 'assets' });
   return absolutePath => {
+    const inAssets = below(assetsBase, absolutePath);
+    if (inAssets !== undefined) return { kind: 'root', root: assets, inside: inAssets };
     const inside = below(fleetDirectory, absolutePath);
     return inside === undefined ? undefined : { kind: 'root', root, inside };
   };

@@ -14,7 +14,7 @@ import type { RootsPort } from '@ferretry/kernel/contract';
 import { nodeFs } from '../../../../../core/kernel/host/adapters/node-fs.ts';
 import { rootsPortFor } from '../../../../../core/kernel/host/roots.ts';
 import { applyClaimFor } from '../../../daemon/adapters/apply-claim.ts';
-import { FleetDisk, sourceMounts } from '../../../daemon/adapters/fleet-disk.ts';
+import { credentialMounts, FleetDisk, sourceMounts } from '../../../daemon/adapters/fleet-disk.ts';
 import { FileFleetProvisioner } from '../../../daemon/adapters/file-provisioner.ts';
 import type { ApplyLock, SharedHistoryPooling } from '../../../daemon/adapters/ports.ts';
 
@@ -64,7 +64,8 @@ export async function fleetWorld(): Promise<FleetWorld> {
   const disk = new FleetDisk({
     fleet: fleetRoot,
     directory: fleet,
-    sources: sourceMounts(roots, fleetRoot, fleet, [join(person, '.claude'), join(person, '.codex')]),
+    sources: sourceMounts(roots, fleet, [join(person, '.claude'), join(person, '.codex')]),
+    credentials: credentialMounts(roots, fleet),
   });
   let clock = 0;
   const claimFor = (manifestPath: string, waitMs = 50): ApplyLock =>

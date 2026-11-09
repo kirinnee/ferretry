@@ -200,7 +200,7 @@ export class HostHarnessScanner {
       throw new Error('the path is outside its harness home');
     }
     const components = inside === '' ? [] : inside.split(sep);
-    if ([basename(home), ...components].some(name => SIGN_IN_FILES.has(name))) {
+    if ([basename(home), ...components].some(name => SIGN_IN_FILES.has(name.toLowerCase()))) {
       throw new Error('sign-in files are not readable setup documents');
     }
     let current = home;
@@ -240,7 +240,8 @@ export class HostHarnessScanner {
 
   /** The one file beside a home: never a link, never a sign-in file. */
   async #inspectFile(path: string): Promise<HostEntry | undefined> {
-    if (SIGN_IN_FILES.has(basename(path))) throw new Error('sign-in files are not readable setup documents');
+    if (SIGN_IN_FILES.has(basename(path).toLowerCase()))
+      throw new Error('sign-in files are not readable setup documents');
     const info = await this.deps.files.lstat(path);
     if (info?.kind === 'link') throw new Error('symbolic links are not readable setup paths');
     return info;

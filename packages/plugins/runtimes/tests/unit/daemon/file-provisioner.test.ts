@@ -229,6 +229,87 @@ describe('FileFleetProvisioner over the fleet root', () => {
     expect(await readlink(link)).toBe(slot);
   });
 
+  it('S43 refuses an apply whose copy source is a link in assets/ out to the fleet’s credentials or homes, before any write', async () => {
+    const world = await fleetWorld();
+    const INERT = 'INERT_SIGN_IN_FIXTURE';
+    await mkdir(join(world.fleet, 'credentials', 'one'), { recursive: true });
+    await writeFile(join(world.fleet, 'credentials', 'one', 'auth.json'), INERT);
+    await writeFile(join(world.fleet, 'credentials', 'one', 'api-key'), INERT);
+    await mkdir(join(world.fleet, 'homes', 'two'), { recursive: true });
+    await writeFile(join(world.fleet, 'homes', 'two', 'history.jsonl'), INERT);
+    await mkdir(join(world.fleet, 'assets'), { recursive: true });
+    await symlink('../credentials/one/auth.json', join(world.fleet, 'assets', 'readme.md'));
+    await symlink('../homes/two/history.jsonl', join(world.fleet, 'assets', 'history.md'));
+    await symlink('../credentials', join(world.fleet, 'assets', 'folder'));
+    const before = await tree(world.fleet);
+
+    for (const name of ['readme.md', 'history.md', 'folder']) {
+      const operation = {
+        kind: 'copy' as const,
+        source: join(world.fleet, 'assets', name),
+        path: join(world.fleet, 'homes', 'one', name),
+      };
+      await expect(world.provisioner().apply(planFor(world, [operation]))).rejects.toThrow();
+      // A link is judged like a copy: it must not lead a runtime out of assets/ either.
+      await expect(
+        world.provisioner().apply(planFor(world, [{ ...operation, kind: 'symlink' as const }])),
+      ).rejects.toThrow();
+    }
+
+    expect(await tree(world.fleet)).toEqual(before);
+  });
+
+  it('M1 an apply with a Ferretry-kept Codex login links its stored credential (dangling, nothing read) and a copy of it is refused', async () => {
+    const world = await fleetWorld();
+    const stored = join(world.fleet, 'credentials', 'one', 'auth.json');
+    await mkdir(join(world.fleet, 'credentials', 'one'), { recursive: true });
+    const link = join(world.fleet, 'homes', 'one', 'auth.json');
+    const home = { kind: 'directory' as const, path: join(world.fleet, 'homes', 'one'), mode: 0o700 };
+
+    await world
+      .provisioner()
+      .apply(planFor(world, [home, { kind: 'symlink', source: stored, path: link, dangling: true }]));
+
+    expect(await readlink(link)).toBe(stored);
+    // The sign-in the harness then writes THROUGH the link lands in the stored place, and is still never a copy source.
+    await writeFile(stored, 'INERT_SIGN_IN_FIXTURE');
+    const before = await tree(world.fleet);
+    for (const source of [stored, join(world.fleet, 'credentials', 'one')]) {
+      await expect(
+        world
+          .provisioner()
+          .apply(planFor(world, [{ kind: 'copy', source, path: join(world.fleet, 'homes', 'one', 'copy') }])),
+      ).rejects.toThrow(/outside the folders Runtimes may read a component from/u);
+    }
+    // And not through a link that is NOT the dangling credential link.
+    await expect(
+      world
+        .provisioner()
+        .apply(planFor(world, [{ kind: 'symlink', source: stored, path: join(world.fleet, 'homes', 'one', 'other') }])),
+    ).rejects.toThrow(/outside the folders Runtimes may read a component from/u);
+    expect(await tree(world.fleet)).toEqual(before);
+  });
+
+  it('S144 C2 refuses an apply whose file source is a link to a sign-in, before any write', async () => {
+    const world = await fleetWorld();
+    await writeFile(join(world.person, '.claude', '.credentials.json'), 'INERT_SIGN_IN_FIXTURE');
+    await symlink('.credentials.json', join(world.person, '.claude', 'notes.md'));
+    const before = await tree(world.fleet);
+
+    const act = world.provisioner().apply(
+      planFor(world, [
+        {
+          kind: 'copy',
+          source: join(world.person, '.claude', 'notes.md'),
+          path: join(world.fleet, 'homes', 'one', 'notes.md'),
+        },
+      ]),
+    );
+
+    await expect(act).rejects.toThrow(/a sign-in file/u);
+    expect(await tree(world.fleet)).toEqual(before);
+  });
+
   it('rolls every earlier write back when a later one fails, a replaced file and a replaced link included', async () => {
     const world = await fleetWorld();
     const keepFile = join(world.fleet, 'homes', 'one', 'keep.txt');

@@ -153,6 +153,18 @@ describe('host setup filesystem aliases', () => {
     expect(JSON.stringify(result.scans)).not.toContain(inert);
   });
 
+  it('S144 m2 refuses a sign-in name in any letter case (a case-insensitive disk opens AUTH.JSON as auth.json)', async () => {
+    const result = await fixtureScan({
+      '/fixture/home/.claude/CLAUDE.md': { kind: 'file', text: 'ordinary instructions' },
+      '/fixture/home/.claude/skills': { kind: 'directory', names: ['ordinary-skill', 'AUTH.JSON'] },
+      '/fixture/home/.claude/skills/AUTH.JSON': { kind: 'file', text: inert },
+    });
+    expect(result.scans[0]?.problems.join(' ')).toContain('sign-in files');
+    expect(result.scans[0]?.skills).toEqual([]);
+    expect(result.opened).toEqual(['/fixture/home/.claude/CLAUDE.md']);
+    expect(JSON.stringify(result.scans)).not.toContain(inert);
+  });
+
   it('treats a skills path that is a file as no skills, without a problem', async () => {
     const result = await fixtureScan({
       '/fixture/home/.claude/skills': { kind: 'file', text: 'a file, not a folder' },

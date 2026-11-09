@@ -177,6 +177,24 @@ export interface CloneConfigFiles {
   ): Promise<{ readonly outcome: 'applied' | 'pending' }>;
 }
 
+/**
+ * What a failed apply says it left behind. A document of the fleet folder rides the provisioner's own boundary and rolls
+ * back with the plan. A configuration file is written BEFORE the plan (the files are the source of truth, and the next
+ * republish retries the plan from them) and is NOT rolled back with it, so the sentence names what was written: the
+ * words "nothing was left half-changed" are said only when no configuration file landed first.
+ */
+export function failedApplySentence(
+  failure: string,
+  documents: readonly FleetDocumentWrite[],
+  fleetDirectory: string,
+): string {
+  const written = documents.filter(document => !document.path.startsWith(`${fleetDirectory}/`)).map(({ path }) => path);
+  if (written.length === 0) return `${failure}; nothing was left half-changed`;
+  const named =
+    written.length === 1 ? `the configuration ${written[0]} was` : `the configuration files ${written.join(', ')} were`;
+  return `${failure}; ${named} written first and is NOT rolled back with the fleet`;
+}
+
 /** Every refusal the setup routes answer with, so a client branches on cause rather than on prose. */
 export class FleetSetupRefusal extends Error {
   constructor(
@@ -1420,7 +1438,7 @@ export class FleetSetupService {
     } catch (error) {
       const reason =
         error instanceof FleetApplyFailureError
-          ? `${errorMessage(error)}; nothing was left half-changed`
+          ? failedApplySentence(errorMessage(error), documents, catalog.layout.fleetDirectory)
           : errorMessage(error);
       throw new FleetCatalogRefusal('fleet_change_failed', reason);
     }

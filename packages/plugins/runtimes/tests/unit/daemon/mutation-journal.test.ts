@@ -4,7 +4,7 @@
  * it is kept and named. Rows: S44 (a backup is deleted only from the folder it was moved to, after the commit).
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { lstat, mkdir, readdir, readFile, readlink, rename, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, readlink, rename, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FileMutationJournal, isMutationReservedName } from '../../../daemon/adapters/mutation-journal.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
@@ -185,5 +185,43 @@ describe('the mutation journal', () => {
     expect(outcome.displaced[0]?.path).toBe(file);
     expect(await readFile(outcome.displaced[0]?.movedTo as string, 'utf8')).toBe('theirs');
     expect(await exists(file)).toBe(false);
+  });
+
+  it('S44 M8 discards a backup only from the folder it was moved to: a swapped folder keeps its look-alike', async () => {
+    const world = await fleetWorld();
+    const folder = join(world.fleet, 'homes');
+    await mkdir(folder);
+    await writeFile(join(folder, 'a.txt'), 'original');
+    const journal = journalOf(world);
+    await journal.capture(join(folder, 'a.txt'));
+    const [backupName] = (await readdir(folder)).filter(isMutationReservedName);
+    // The folder is moved away (with the real backup in it) and another put in its place holding a look-alike name.
+    await rename(folder, join(world.fleet, 'moved'));
+    await mkdir(folder);
+    await writeFile(join(folder, backupName as string), 'somebody else’s file with the same name');
+
+    const remaining = await journal.discard();
+
+    expect(remaining).toEqual([join(folder, backupName as string)]);
+    expect(await readFile(join(folder, backupName as string), 'utf8')).toBe('somebody else’s file with the same name');
+    expect(await readFile(join(world.fleet, 'moved', backupName as string), 'utf8')).toBe('original');
+  });
+
+  it('m5 does not call a mode restored when the fleet root could only give back the owner bits', async () => {
+    const world = await fleetWorld();
+    const folder = join(world.fleet, 'bin');
+    await mkdir(folder, { mode: 0o755 });
+    await chmod(folder, 0o755);
+    const journal = journalOf(world);
+    const mark = journal.beginOperation();
+    await journal.captureDirectory(folder, 0o500);
+    await world.disk.setMode(folder, 0o500);
+    await sealed(journal, mark);
+
+    const outcome = await journal.rollback();
+
+    expect(outcome.unrestored).toHaveLength(1);
+    expect(outcome.unrestored[0]?.reason).toMatch(/mode .*755.*700|owner/u);
+    expect((await stat(folder)).mode & 0o777).toBe(0o700);
   });
 });

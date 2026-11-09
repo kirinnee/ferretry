@@ -3,10 +3,11 @@
  * change that lands configuration documents ALL OR NONE before the fleet, and what is still unavailable and says so.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import { configThenFleet } from '../../../daemon/adapters/account-model-files.ts';
+import { readTextFolder } from '../../../daemon/adapters/setup-files.ts';
 import { fileAssembly, fleetHost } from '../../../daemon/host-assembly.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
@@ -69,6 +70,39 @@ describe('the host the file adapters stand on', () => {
     await expect(host.files.readText(join(world.home, 'machine.yaml'))).rejects.toThrow(
       /outside the folders Runtimes may read/u,
     );
+  });
+});
+
+describe('S43 the host reads of the fleet folder serve assets/ through a fence of its own', () => {
+  it('refuses a component folder or file in assets/ that is a link out of it, and reads a real one', async () => {
+    const world = await fleetWorld();
+    await mkdir(join(world.fleet, 'credentials', 'one'), { recursive: true });
+    await writeFile(join(world.fleet, 'credentials', 'one', 'auth.json'), 'INERT_SIGN_IN_FIXTURE');
+    await mkdir(join(world.fleet, 'assets', 'skills', 'real'), { recursive: true });
+    await writeFile(join(world.fleet, 'assets', 'skills', 'real', 'SKILL.md'), 'a skill');
+    await symlink('../../credentials', join(world.fleet, 'assets', 'skills', 'sneaky'));
+    await symlink('../credentials/one/auth.json', join(world.fleet, 'assets', 'leak.md'));
+    const { host } = fleetHost(kernelOver(world).kernel);
+
+    const real = await readTextFolder(host.files, join(world.fleet, 'assets', 'skills', 'real'));
+    expect(real.files).toEqual([{ path: 'SKILL.md', content: 'a skill' }]);
+    await expect(readTextFolder(host.files, join(world.fleet, 'assets', 'skills', 'sneaky'))).rejects.toThrow();
+    await expect(host.files.readText(join(world.fleet, 'assets', 'leak.md'))).rejects.toThrow();
+    // The rest of the fleet folder is still read as before (the manifest, the ids).
+    await writeFile(join(world.fleet, 'ids.json'), '{}');
+    expect(await host.files.readText(join(world.fleet, 'ids.json'))).toBe('{}');
+  });
+
+  it('reads a folder of assets/ that is not there yet as empty, as it did through the whole fleet root', async () => {
+    const world = await fleetWorld();
+    await mkdir(join(world.fleet, 'assets'), { recursive: true });
+    const { host } = fleetHost(kernelOver(world).kernel);
+
+    expect(await readTextFolder(host.files, join(world.fleet, 'assets', 'skills', 'none'))).toEqual({
+      files: [],
+      skipped: [],
+    });
+    expect(await host.files.stat(join(world.fleet, 'assets'))).toMatchObject({ kind: 'directory' });
   });
 });
 

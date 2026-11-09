@@ -41,7 +41,8 @@ import type { ApplyLock, MutationJournal, SharedHistoryPooling } from './ports.t
  *  - Modes are the root's: an internal root keeps owner bits only (`mode & 0o700`) when a mode is SET on an existing
  *    entry (a copied folder or file); a file created by `create` keeps exactly the mode it was given.
  *  - A source outside the fleet's assets and the harness homes is refused in a sentence: it has no root a plugin may
- *    declare (S43).
+ *    declare (S43). Both are read through roots scoped to them, so a link that leaves the folder at ANY hop is refused,
+ *    and a sign-in is refused by its real path too (S144); the stored credentials are only a dangling link's target.
  *  - The shared-history migration is `conversation`'s (GAP(conversation)).
  */
 

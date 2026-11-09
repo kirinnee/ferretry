@@ -4,17 +4,20 @@
  * Today's provisioner reached the disk by raw path and raw descriptor (`openSync`, `fchmodSync`, hard `link`). A plugin
  * has none of those: it holds a {@link RootHandle}, whose every call fences its path, opens each parent folder without
  * following a link and refuses a link on the way. This file is the one place an ABSOLUTE path (the plan's spelling) is
- * turned into a path inside that root, so the rules below hold for every caller and cannot be forgotten at one:
+ * turned into a path inside that root for the provisioner (the host reads of `root-host-files.ts` serve the same
+ * `assets/` fence through `fleetMounts`), so the rules below hold for every caller and cannot be forgotten at one:
  *
  *  - WRITES land in the fleet folder only. Anything else is refused in a sentence (`refusing to write outside configured
  *    fleet roots`), lexically first (no `..`, no second root) and then by the kernel (a link on the way is `link_escape`).
  *  - READS of a component SOURCE (a copy, a link target, a settings layer) are served only from the folders Runtimes may
- *    declare: the fleet's `assets/` tree and the harness homes. The rest of the fleet folder holds runtimes' own homes
- *    and the credentials Ferretry keeps (`credentials/`), so it is never a source. A path no mount names is refused,
- *    never opened.
- *  - A sign-in file (`.credentials.json`, `auth.json`) is never a source, as any component of the path or anywhere in a
- *    copied folder: a credential is stored once and LINKED, never copied (`link` is the one way a sign-in is reached,
- *    and it reads nothing).
+ *    declare: the fleet's `assets/` tree and the harness homes, each through a root SCOPED to that folder, so EVERY hop
+ *    of a path is judged by the kernel and a link that leaves the folder, anywhere on the way, is refused (today's
+ *    state-home guard judged each hop the same way). The rest of the fleet folder holds runtimes' own homes and the
+ *    credentials Ferretry keeps (`credentials/`), so it is never a source. A path no mount names is refused, never opened.
+ *  - A sign-in file (`.credentials.json`, `auth.json`, any letter case) is never a source, as any component of the path
+ *    as spelled AND of the real path it reaches (a link to a sign-in is a sign-in), or anywhere at any depth in a copied
+ *    folder: a credential is stored once and LINKED, never copied. `link` is the one way a sign-in is reached and it
+ *    reads nothing; the credentials folder itself is a LINK target only, and only for a dangling credential link.
  *
  * No text read here is ever put in a sentence, and no call returns a secret value (use, never read).
  */
@@ -62,8 +65,11 @@ function below(base: string, path: string): string | undefined {
   return inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside) ? undefined : inside;
 }
 
-/** The components of an absolute path below its base that name a sign-in file. */
-const namesSignIn = (inside: string): boolean => inside.split(sep).some(part => SIGN_IN_FILES.has(part));
+/** Whether one name is a sign-in's, in any letter case (a case-insensitive disk opens `AUTH.JSON` as `auth.json`). */
+const isSignInName = (name: string): boolean => SIGN_IN_FILES.has(name.toLowerCase());
+
+/** The components of a path below its base that name a sign-in file. */
+const namesSignIn = (inside: string): boolean => inside.split(sep).some(isSignInName);
 
 export interface FleetDiskOptions {
   /** The `fleet` root: the ONLY place anything is written. */
@@ -72,17 +78,24 @@ export interface FleetDiskOptions {
   readonly directory: string;
   /** What serves a SOURCE path (a copy, a link target, a settings layer): see {@link sourceMounts}. */
   readonly sources: HostMounts;
+  /**
+   * What serves the target of a DANGLING credential link and nothing else (see {@link credentialMounts}); a link-only
+   * reach that never serves a read or a copy.
+   */
+  readonly credentials?: HostMounts;
 }
 
 export class FleetDisk {
   readonly fleet: RootHandle;
   readonly directory: string;
   readonly #sources: HostMounts;
+  readonly #credentials: HostMounts;
 
   constructor(options: FleetDiskOptions) {
     this.fleet = options.fleet;
     this.directory = options.directory;
     this.#sources = options.sources;
+    this.#credentials = options.credentials ?? (() => undefined);
   }
 
   // ─── the destination: the fleet root ───────────────────────────────────────────────────────────────────────────
@@ -202,13 +215,39 @@ export class FleetDisk {
   }
 
   /**
+   * Proof that what the source names, real path and all, is no sign-in: the path as the root resolves it (every link
+   * followed, each hop checked inside the mount) is looked at below the mount's own base, component by component. A
+   * link that leaves the mount is refused here in a sentence; a name that is not there is `undefined`.
+   */
+  async #judgeReal(root: RootHandle, at: FencedPath, shown: string): Promise<string | undefined> {
+    let real: string;
+    let base: string;
+    try {
+      const own = root.resolve('.');
+      if (!own.ok) return undefined;
+      real = await root.realPath(at);
+      base = await root.realPath(own.value);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'root refused: link_escape') throw refusedLink(shown);
+      if (error instanceof Error && error.message === 'root refused: fenced') throw refusedLink(shown);
+      return undefined;
+    }
+    const inside = relative(base, real);
+    if (inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) throw refusedLink(shown);
+    if (namesSignIn(inside)) throw refusedSignIn(shown);
+    return inside;
+  }
+
+  /**
    * The text of a component document, or `undefined` when it is absent, not a regular file, over `maxBytes` or
-   * unreadable. A path no mount serves, or one naming a sign-in, throws: it is refused, not "not there".
+   * unreadable. A path no mount serves, one naming a sign-in (as spelled or as it resolves), or a link that leaves the
+   * mount throws: it is refused, not "not there".
    */
   async readSource(path: string, maxBytes: number): Promise<string | undefined> {
     const { root, at } = this.#source(path);
+    if ((await this.#judgeReal(root, at, path)) === undefined) return undefined;
     try {
-      const found = await root.lstat(at);
+      const found = await root.stat(at);
       if (found?.kind !== 'file' || found.size > maxBytes) return undefined;
       return await root.readText(at, maxBytes);
     } catch {
@@ -219,22 +258,28 @@ export class FleetDisk {
   /** The text of a settings layer: the same reach as {@link readSource}, but absent or unreadable is an error. */
   async readSourceText(path: string): Promise<string> {
     const { root, at } = this.#source(path);
+    await this.#judgeReal(root, at, path);
     return await root.readText(at, MAX_COPIED_FILE_BYTES);
   }
 
   /**
-   * Whether the source is a folder, and proof it may be a source at all: served, not a sign-in, present. A folder is
-   * walked for a sign-in file anywhere inside it (bounded), because the copy takes every file in it.
+   * Whether the source is a folder, and proof it may be a source at all: served, present, no sign-in by its name or by
+   * the real path it reaches, and no link out of its folder on the way. A folder is walked for a sign-in file at any
+   * depth inside it (bounded), because the copy takes every file in it.
    */
   async assertSource(path: string): Promise<'file' | 'directory'> {
     const { root, at, inside } = this.#source(path);
     const found = await lookAtSource(async () => await root.stat(at));
     if (found === undefined) throw new Error(`the source ${path} does not exist`);
-    if (found.kind === 'directory') await this.#assertNoSignIn(root, inside, path);
+    const real = await this.#judgeReal(root, at, path);
+    if (found.kind === 'directory') await this.#assertNoSignIn(root, real ?? inside, path);
     return found.kind;
   }
 
-  /** Walks the folder (bounded) and refuses at the first entry named like a sign-in; `inside` is relative to the root. */
+  /**
+   * Walks the folder (bounded) and refuses at the first entry, at ANY depth, named like a sign-in, whatever its kind;
+   * `inside` is relative to the root.
+   */
   async #assertNoSignIn(root: RootHandle, inside: string, shown: string): Promise<void> {
     let seen = 0;
     const walk = async (folder: string): Promise<void> => {
@@ -243,7 +288,7 @@ export class FleetDisk {
       for (const entry of await root.entries(at.value)) {
         seen += 1;
         if (seen > MAX_SOURCE_ENTRIES) throw new Error(`refusing to copy ${shown}: it holds too many entries`);
-        if (SIGN_IN_FILES.has(entry.name)) throw refusedSignIn(join(shown, entry.name));
+        if (isSignInName(entry.name)) throw refusedSignIn(join(shown, entry.name));
         if (entry.kind === 'directory') await walk(join(folder, entry.name));
       }
     };
@@ -253,7 +298,7 @@ export class FleetDisk {
   /**
    * Copies the source (a file or a folder) to the NEW name `destination` in the fleet folder. A folder is copied by
    * the root (a link inside is skipped, a file with a second hard link is skipped, modes kept); a file is read whole
-   * through a checked descriptor and created exclusively.
+   * through a checked descriptor and created exclusively. The source is judged again right before it is read.
    */
   async copyInto(source: string, destination: string, mode: number): Promise<'file' | 'directory'> {
     const kind = await this.assertSource(source);
@@ -262,19 +307,30 @@ export class FleetDisk {
       await this.fleet.copyTree(root, at, this.fenced(destination));
       return kind;
     }
+    await this.#judgeReal(root, at, source);
     const bytes = await root.readBytes(at, MAX_COPIED_FILE_BYTES);
     await this.create(destination, bytes, mode);
     return kind;
   }
 
   /**
+   * Where a link's target is reached: a folder Runtimes may declare, or, for a DANGLING credential link only, the fleet's
+   * `credentials/` folder (the stored sign-in a runtime's home links to). A link reads nothing, so this reach never
+   * serves a read or a copy: those go through {@link sourceMounts} alone.
+   */
+  #linkMount(source: string, dangling: boolean): { readonly root: RootHandle; readonly inside: string } {
+    const mounted = this.#sources(source) ?? (dangling ? this.#credentials(source) : undefined);
+    if (mounted === undefined || mounted.kind !== 'root') throw refusedSource(source);
+    return mounted;
+  }
+
+  /**
    * Proof, before anything is written, that `source` may be a link's target: served from a folder Runtimes may
-   * declare and, unless `dangling`, there. A sign-in file IS a valid target (a runtime's credential link leads to it),
-   * though never a copy source; nothing is read.
+   * declare (or, dangling, the credentials folder) and, unless `dangling`, there. A sign-in file IS a valid target (a
+   * runtime's credential link leads to it), though never a copy source; nothing is read.
    */
   async checkLinkTarget(source: string, dangling: boolean): Promise<void> {
-    const mounted = this.#sources(source);
-    if (mounted === undefined || mounted.kind !== 'root') throw refusedSource(source);
+    const mounted = this.#linkMount(source, dangling);
     if (dangling) return;
     const at = mounted.root.resolve(mounted.inside === '' ? '.' : mounted.inside);
     if (!at.ok || (await lookAtSource(async () => await mounted.root.lstat(at.value))) === undefined) {
@@ -285,11 +341,10 @@ export class FleetDisk {
   /**
    * A link at `at` (in the fleet folder) leading to `source`, which must be served from a folder Runtimes may declare.
    * Reads nothing: a credential link is the one way a sign-in is reached. `dangling` allows a target that is not
-   * there yet (an empty sign-in slot, which the harness writes THROUGH the link).
+   * there yet (an empty sign-in slot, which the harness writes THROUGH the link) and the credentials folder.
    */
   async linkTo(at: string, source: string, dangling: boolean): Promise<void> {
-    const mounted = this.#sources(source);
-    if (mounted === undefined || mounted.kind !== 'root') throw refusedSource(source);
+    const mounted = this.#linkMount(source, dangling);
     const target = mounted.root.resolve(mounted.inside === '' ? '.' : mounted.inside);
     if (!target.ok) throw new Error(`${source} could not be opened as a link target (${target.error})`);
     await this.fleet.linkTo(this.fenced(at), {
@@ -328,25 +383,46 @@ const refusedSource = (path: string): Error =>
     `${path} is outside the folders Runtimes may read a component from on this machine (the fleet's assets and the harness homes), so it was not opened`,
   );
 
+const refusedLink = (path: string): Error =>
+  new Error(
+    `${path} leads out of the folder it is read from (a link on the way goes somewhere else), so it was not opened`,
+  );
+
 const refusedSignIn = (path: string): Error =>
   new Error(`${path} is a sign-in file; a credential is stored once and linked, never read or copied`);
 
 /**
+ * A `fleet` root scoped to ONE folder of the fleet, shared by the mounts below: a link that leaves that folder, at any
+ * hop, is refused by the kernel (`link_escape`), so the folder is a fence for what is read through it.
+ */
+function scopedFleetFolder(roots: Pick<RootsPort, 'root'>, fleetDirectory: string, folder: string): HostMounts {
+  const scoped = roots.root('fleet', { subfolder: folder });
+  const base = join(fleetDirectory, folder);
+  return path => {
+    const inside = below(base, path);
+    return inside === undefined ? undefined : { kind: 'root', root: scoped, inside };
+  };
+}
+
+/**
  * The mounts that serve a SOURCE: the fleet's `assets/` tree (and only it: the rest of the fleet folder holds runtimes'
- * own homes and the credentials Ferretry keeps), and each harness home as a `harness-home` root scoped to that home.
+ * own homes and the credentials Ferretry keeps) through a root scoped to `assets/`, and each harness home as a
+ * `harness-home` root scoped to that home. A link that leaves either folder is refused at its hop.
  */
 export function sourceMounts(
   roots: Pick<RootsPort, 'root' | 'harnessFile'>,
-  fleet: RootHandle,
   fleetDirectory: string,
   harnessHomes: readonly string[],
 ): HostMounts {
-  const assets = join(fleetDirectory, 'assets');
+  const assets = scopedFleetFolder(roots, fleetDirectory, 'assets');
   const homes = harnessMounts(roots, harnessHomes);
-  return path => {
-    const inside = below(assets, path);
-    if (inside !== undefined)
-      return { kind: 'root', root: fleet, inside: inside === '' ? 'assets' : join('assets', inside) };
-    return homes(path);
-  };
+  return path => assets(path) ?? homes(path);
+}
+
+/**
+ * The reach of a DANGLING credential link's target: the fleet's `credentials/` folder through a root scoped to it. It
+ * is never a source (a copy or a read of a stored sign-in is refused), only where a runtime's credential link may lead.
+ */
+export function credentialMounts(roots: Pick<RootsPort, 'root'>, fleetDirectory: string): HostMounts {
+  return scopedFleetFolder(roots, fleetDirectory, 'credentials');
 }

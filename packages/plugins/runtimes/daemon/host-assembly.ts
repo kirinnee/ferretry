@@ -14,12 +14,12 @@
  * renderer: until they are ported every catalogue read still answers {@link UNAVAILABLE} in a sentence, and the
  * collaborators below it are real.
  */
-import type { ConfigPort, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
+import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { applyClaimFor } from './adapters/apply-claim.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
-import { FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
+import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
 import type { AdapterHost, ConfigFilesPort, SharedHistoryPooling } from './adapters/ports.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
@@ -49,11 +49,12 @@ function fleetDirectory(fleet: RootHandle): string {
  * The manifest is read between applies (S67): a read waits for an apply in flight rather than reading the gap.
  */
 async function publishedFleet(
+  roots: Pick<RootsPort, 'root'>,
   fleet: RootHandle,
   publication: FleetPublication,
 ): Promise<{ readonly directory: string; readonly manifest: FleetManifest | undefined }> {
   const directory = fleetDirectory(fleet);
-  const files = rootHostFiles(fleetMounts(fleet, directory));
+  const files = rootHostFiles(fleetMounts(roots, fleet, directory));
   return {
     directory,
     manifest: await publication.reading(async () => await readFleetManifest(files, `${directory}/${MANIFEST_FILE}`)),
@@ -67,7 +68,9 @@ export function endedSeams(
 ): RuntimeEndSeams {
   const fleet = kernel.roots.root('fleet');
   const supervisor = new CodexAppServerSupervisor({
-    inventory: { accounts: async () => (await publishedFleet(fleet, publication)).manifest?.accounts ?? [] },
+    inventory: {
+      accounts: async () => (await publishedFleet(kernel.roots, fleet, publication)).manifest?.accounts ?? [],
+    },
     host: { fleet, processes: kernel.processes },
     homesDirectory: () => `${fleetDirectory(fleet)}/homes`,
     sleep: async ms =>
@@ -78,8 +81,9 @@ export function endedSeams(
   return {
     supervisor,
     wrapperOf: async runtime =>
-      (await publishedFleet(fleet, publication)).manifest?.runtimes.find(published => published.name === runtime)
-        ?.wrapper,
+      (await publishedFleet(kernel.roots, fleet, publication)).manifest?.runtimes.find(
+        published => published.name === runtime,
+      )?.wrapper,
   };
 }
 
@@ -134,13 +138,17 @@ export function fleetHost(kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock'>
   const disk = new FleetDisk({
     fleet,
     directory,
-    sources: sourceMounts(kernel.roots, fleet, directory, harnessHomesOf(userHome)),
+    sources: sourceMounts(kernel.roots, directory, harnessHomesOf(userHome)),
+    credentials: credentialMounts(kernel.roots, directory),
   });
   const files = rootHostFiles(
     (
       (fleetOnly, homes) => (path: string) =>
         fleetOnly(path) ?? homes(path)
-    )(fleetMounts(fleet, directory), harnessMounts(kernel.roots, harnessHomesOf(userHome), `${userHome}/.claude.json`)),
+    )(
+      fleetMounts(kernel.roots, fleet, directory),
+      harnessMounts(kernel.roots, harnessHomesOf(userHome), `${userHome}/.claude.json`),
+    ),
   );
   const sleep = async (ms: number): Promise<void> =>
     await new Promise<void>(resolve => {

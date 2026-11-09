@@ -62,10 +62,17 @@ export const STAGE_PREFIX = '.fy-fleet-staged-';
 
 const RESERVED_PREFIXES = [BACKUP_PREFIX, DISPLACED_PREFIX, STAGE_PREFIX] as const;
 
+/** Whether a directory entry is the only copy of something an apply replaced: moved-aside evidence or displaced state. */
+export function isOriginalsName(name: string): boolean {
+  return name.startsWith(BACKUP_PREFIX) || name.startsWith(DISPLACED_PREFIX);
+}
+
 /** Whether a directory entry is the mutation machinery's own: moved-aside evidence, displaced state or a staged copy. */
 export function isMutationReservedName(name: string): boolean {
   return RESERVED_PREFIXES.some(prefix => name.startsWith(prefix));
 }
+
+const octal = (mode: number): string => `0o${(mode & PERMISSION_BITS).toString(8)}`;
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -312,6 +319,13 @@ export class FileMutationJournal implements MutationJournal {
         throw new Error(`refusing to restore the mode of ${entry.path}: it changed after this apply set it`);
       }
       await this.disk.setMode(entry.path, entry.mode);
+      // The fleet root keeps owner bits only, so a group or other bit cannot be given back: say so, never "restored".
+      const given = (await this.disk.lstat(entry.path))?.mode;
+      if (given !== undefined && (given & PERMISSION_BITS) !== entry.mode) {
+        throw new Error(
+          `the mode of ${entry.path} could only be given back as ${octal(given)}, not the original ${octal(entry.mode)} (the fleet folder keeps owner bits only)`,
+        );
+      }
       return;
     }
     await this.#removeCreatedDirectory(entry.path);
