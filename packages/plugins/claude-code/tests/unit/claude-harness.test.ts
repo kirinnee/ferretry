@@ -666,6 +666,17 @@ describe('ClaudeHarness', () => {
     await writeHome('projects/-work/conv-1.jsonl', `${bigResult}\n${bookkeeping}\n`);
     expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
 
+    // A bookkeeping line the tail DOES read (a compaction boundary) is kept, and the turn is still at work.
+    const compacted = JSON.stringify({
+      type: 'system',
+      subtype: 'compact_boundary',
+      timestamp: T,
+      compactMetadata: { trigger: 'auto', preTokens: 100, postTokens: 10 },
+    });
+    await writeHome('projects/-work/conv-1.jsonl', `${bigResult}\n${compacted}\n`);
+    const kept = await harness.transcriptTail(FERRET, 10);
+    expect(kept.kind === 'read' && kept.records.map(record => record.kind)).toEqual(['compaction', 'work']);
+
     // An unfinished line (being written right now) after it: the same.
     await writeHome('projects/-work/conv-1.jsonl', `${bigResult}\n${bookkeeping}\n{"type":"assistant","uu`);
     expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
