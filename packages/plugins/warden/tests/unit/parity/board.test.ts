@@ -81,7 +81,8 @@ async function wardenWith(board: BoardApi | undefined, options: WardenOptions = 
   /** The notices standing on a ferret's board, as `source`/`entry` pairs. */
   const notices = async (ferret: string) =>
     (await fake.open({ ferret: ferretId(ferret), state: 'open' })).map(ask => String(ask.entry));
-  return { run, typed, notices, attempts: fake instanceof RefusingAsks ? fake.attempts : [] };
+  const later = async (minutes: number) => await host.clock.advance(minutes * 60_000);
+  return { run, later, typed, notices, attempts: fake instanceof RefusingAsks ? fake.attempts : [] };
 }
 
 const kinds = (body: { readonly flags: readonly { readonly kind: string; readonly ferret: string }[] }) =>
@@ -181,16 +182,20 @@ describe('Board, an optional use of the Warden', () => {
     expect(typed).toHaveLength(1);
   });
 
-  test('Agenda off: the card is not remembered as told, so the next sweep tries again and spends nothing', async () => {
+  test('Agenda off: the card is not remembered as told, so it is tried again after the wait (not every sweep) and spends nothing', async () => {
     // Arrange
     const { board } = boardWithOrphan();
-    const { run, typed, attempts, notices } = await wardenWith(board, { agendaOff: true });
+    const { run, later, typed, attempts, notices } = await wardenWith(board, { agendaOff: true });
 
     // Act
     await run();
     await run();
+    const sameWait = attempts.length;
+    await later(5);
+    await run();
 
     // Assert
+    expect(sameWait).toBe(1);
     expect(attempts).toEqual(['f.worker.warden-orphan:F1', 'f.worker.warden-orphan:F1']);
     expect(await notices('worker')).toEqual([]);
     expect(typed).toEqual([]);

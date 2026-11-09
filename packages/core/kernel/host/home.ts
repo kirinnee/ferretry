@@ -26,8 +26,46 @@ export async function probeHome(fs: HostFs, home: string, underLock = false): Pr
 }
 
 export type HomeOutcome =
-  | { readonly kind: 'ready'; readonly created: boolean }
-  | { readonly kind: 'refused'; readonly decision: Extract<HomeDecision, { kind: 'refuse' }> };
+  | { readonly kind: 'ready'; readonly created: boolean; readonly logs?: 'made' | 'tightened' }
+  | { readonly kind: 'refused'; readonly decision: Extract<HomeDecision, { kind: 'refuse' }> }
+  /** `logs/` is there but is not a folder of ours, or cannot be made: the daemon would log nothing, so it does not start. */
+  | { readonly kind: 'logs-refused'; readonly sentence: string };
+
+/** The folder the daemon's one log is written in: `<home>/logs/fyd.log` (`fyd.ts`). */
+const LOGS_FOLDER = 'logs';
+
+const KIND_WORDS = { file: 'a file', link: 'a link', other: 'not a folder' } as const;
+
+/**
+ * `logs/` exists, as a folder only this user may enter, before anything is logged. The daemon's log lines are dropped
+ * until it does, so a home that was copied or restored without it logged NOTHING and said nothing. Looked at without
+ * following a link: a link or a file in its place is refused by name, never written through. A folder open to others
+ * is tightened to `0700` and reported; one that cannot be made is refused with the reason.
+ */
+async function ensureLogs(fs: HostFs, home: string): Promise<'present' | 'made' | 'tightened' | { sentence: string }> {
+  const path = `${home}/${LOGS_FOLDER}`;
+  const refuse = (why: string): { sentence: string } => ({
+    sentence: `${path} ${why}, so the daemon would have nowhere to write its log and did not start. Move it aside (or fix it) and start again.`,
+  });
+  try {
+    const info = await fs.lstat(path);
+    if (info === undefined) {
+      await fs.mkdirp(path, 0o700);
+      const made = await fs.lstat(path);
+      if (made?.kind !== 'directory') return refuse('is not a folder after it was made');
+      await fs.chmod(path, 0o700);
+      return 'made';
+    }
+    if (info.kind !== 'directory') return refuse(`is ${KIND_WORDS[info.kind]}, not a folder`);
+    if (info.mode !== undefined && (info.mode & 0o077) !== 0) {
+      await fs.chmod(path, 0o700);
+      return 'tightened';
+    }
+    return 'present';
+  } catch (error) {
+    return refuse(`could not be made (${error instanceof Error ? error.message : 'unknown error'})`);
+  }
+}
 
 /**
  * §7.6 step 2: `decideHome`, then the fence. Creates the tree on an empty or missing home and writes `home.json`;
@@ -51,7 +89,9 @@ export async function openHome(fs: HostFs, home: string, createdBy: string, now:
   }
   await fs.chmod(home, 0o700);
   await fenceFolders(fs, home);
-  return { kind: 'ready', created };
+  const logs = await ensureLogs(fs, home);
+  if (typeof logs === 'object') return { kind: 'logs-refused', sentence: logs.sentence };
+  return { kind: 'ready', created, ...(logs === 'present' ? {} : { logs }) };
 }
 
 /** Sets every fenced `-before-` folder to `0700` (§9.3 fence rule 1). */

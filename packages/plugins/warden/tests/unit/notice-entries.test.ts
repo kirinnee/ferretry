@@ -78,6 +78,31 @@ describe('a warden notice about one ferret', () => {
     should(second).equal('unchanged');
   });
 
+  it('should say why the Asks port refused a card notice, not only that it did', async () => {
+    // Arrange — a board already holding its 20 unresolved items refuses a twenty-first.
+    class FullBoard extends FakeAsks {
+      override async notify(): Promise<never> {
+        throw new Error('this session already has 20 unresolved items');
+      }
+    }
+    const agenda = new AsksWardenAgenda(new FullBoard(), new NoticeEntries());
+    const notice = {
+      sourceRef: 'warden-orphan:F1',
+      subject: 'F1 is waiting',
+      why: 'nobody is on it',
+      howToResolve: 'Start a ferret',
+      context: 'c',
+    };
+
+    // Act
+    const outcome = await agenda.noticeOutcome('f1', notice);
+    const plain = await agenda.notice('f1', notice);
+
+    // Assert
+    should(outcome).eql({ write: 'rejected', reason: 'this session already has 20 unresolved items' });
+    should(plain).equal('rejected');
+  });
+
   it('should read the notice back from its entry, even in a fresh process', () => {
     // Arrange
     const ref = wardenEscalationSourceRef('sus_thinking', 'child-1');
