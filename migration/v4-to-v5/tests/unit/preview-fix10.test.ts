@@ -144,5 +144,6 @@ test('Nit ownerNote lists the computed set, runtimes.yaml included, from the rep
     expect(ownerNote(false, files)).toContain(file);
     expect(ownerNote(true, files)).toContain(file);
   }
-  expect(ownerNote(true, files)).toContain('unconfirmed edit');
+  // With nothing held the note names no held file (preview-fix11 covers the held wording).
+  expect(ownerNote(true, files)).not.toContain('NOT recorded');
 });

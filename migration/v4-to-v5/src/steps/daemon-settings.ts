@@ -108,6 +108,8 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
 interface Planned {
   readonly target: V5ConfigTarget;
   readonly label: string;
+  /** Every v4 source that fed this file (the first is `label`), handed to the writer as the file's sources. */
+  readonly sources: Set<string>;
   readonly entries: Map<string, unknown>;
   readonly fresh: string;
 }
@@ -135,9 +137,11 @@ function add(plan: Plan, target: V5ConfigTarget, key: string, value: unknown, fr
   const planned = plan.files.get(path) ?? {
     target,
     label: from,
+    sources: new Set<string>(),
     entries: new Map<string, unknown>(),
     fresh: ` Carried from v4 ${from} by the v4 → v5 converter.`,
   };
+  planned.sources.add(from);
   if (planned.entries.has(key)) throw new V4InputError(`${from}: two v4 keys map to ${path} ${key}`);
   planned.entries.set(key, value);
   plan.files.set(path, planned);
@@ -476,7 +480,7 @@ export const daemonSettingsStep: Step = {
           `v5 would allow more than v4 enforced at ${wider.join(', ')}; nothing was written (a converter defect: report it)`,
         );
       for (const { planned, text } of texts.values())
-        await ctx.v5.config(planned.target, undefined, text, [planned.label]);
+        await ctx.v5.config(planned.target, undefined, text, [...planned.sources]);
     } catch (error) {
       return {
         ...base,

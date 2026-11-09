@@ -10,8 +10,8 @@ set -euo pipefail
 #             write the `fy5` wrapper. Never stops or writes to v4.
 #             --owner (OWNER ONLY, never an agent): records as accepted every config file the preview wrote or
 #             changed (found by comparing with the plain conversion: terminals.yaml, claude-code/settings/fy-preview.yaml,
-#             the forced limits.yaml), EXCEPT one that comes from a v4 file with an unconfirmed edit: that one stays held
-#             and the preview runs with the kernel's last good or default for it (tighter limits). Confirm the edit in v4,
+#             the forced limits.yaml), EXCEPT any that comes from a v4 file with an unconfirmed edit: each stays held
+#             (the printed note and the report name every one, with the reason). Confirm the edit in v4,
 #             then `clean` and `prepare --owner`. Without --owner they are all held and `start` stops the daemon.
 #   build     compile fy, fyd and the browser worker from a CLEAN rebuild/5.0 checkout with the preview app origin, prove
 #             the compiled binaries name that origin, and only then install them into <target>/libexec (bin holds shims

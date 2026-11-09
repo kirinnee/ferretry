@@ -269,14 +269,25 @@ each v5 config file this run wrote is recorded as accepted (`state/kernel/accept
 owns is not recorded and stays held), so a loosening the owner confirmed in v4 is not asked about again. In the preview,
 a file the PREVIEW wrote or changed (its text differs from a plain, non-preview conversion of the same v4 home, or the
 plain conversion writes no such file: `terminals.yaml`, the `fy-preview` settings item, the forced `limits.yaml`) is
-"preview-authored" and is recorded only with `prepare --owner`, never otherwise. When any v4 file was not in effect (a
-held edit, an invalid file, one never accepted, a held deletion), nothing else is recorded, the report names those
-files, and v5 holds any loosening until the owner confirms it again. Even then `--owner` records a preview-authored
-file whose v4 source files (the ones the writing step names for it) were all in effect, and a pure preview file (no v4
-source). A preview-authored file with a held v4 source gets NO record even with the flag: the owner's "not yet" stands.
-For `limits.yaml` (source `machine.yaml` `agentControl` and `limits.yaml`) that means the preview runs with the kernel's
-last good or default limits (tighter), and the report and the `prepare` note say so; the remedy is to confirm the edit in
-v4, then `preview.sh clean` and `preview.sh prepare --owner`. Texts are hashed and written, never reported.
+"preview-authored" and is recorded only with `prepare --owner`, never otherwise.
+
+**A v4 edit that v4 still held stays held in v5, whatever its direction relative to v5's defaults** (v4 judges an edit
+against the text it has in effect, v5 with no record would judge it against its defaults, and those differ when v4's
+enforced text was tighter than the defaults). When any v4 file was not in effect (a held edit, an invalid file, one never
+accepted, a held deletion), the v5 file carries v4's CURRENT text converted (what the owner sees and may confirm) and the
+record carries the conversion of what v4 ENFORCED: a plain dry run of the same steps on a view of the v4 home where each
+held file is replaced by v4's accepted text for it. The kernel then judges the file on disk against the enforced record
+and holds a loosening, enforcing the v4-enforced version. A held DELETION leaves the v5 file absent but records the
+enforced text, and the kernel treats a missing file with a record as a deletion (held when it loosens). Where v4 enforced
+nothing for a file (never accepted) no record is carried, and if v4's record is damaged, nothing is recorded. A file with
+no held edit is unchanged. The report names the held files.
+
+`--owner` records a preview-authored file whose v4 sources (the ones the writing step names for it; a held v4 DELETION of
+any file counts as a held source of every file that has a v4 source) were all in effect, and a pure preview file (no v4
+source). A preview-authored file with a held v4 source gets NO record of the preview's text even with the flag (the owner's "not yet" stands): its record is what v4 enforced, so the kernel holds the preview's text where it loosens that.
+The report and the `prepare` note name every such file with its reason, and the files they recorded; the remedy is to
+confirm the edit in v4, then `preview.sh clean` and `preview.sh prepare --owner`. Texts are hashed and written, never
+reported.
 
 ## Tests
 

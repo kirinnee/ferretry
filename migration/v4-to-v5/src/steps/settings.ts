@@ -194,7 +194,7 @@ const contents = (document: Document): YAMLMap => document.contents as YAMLMap;
 // ── the plan ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The `from` of a file the preview itself creates (its header says so instead of "Carried from v4"). */
-const PREVIEW_AUTHOR = 'the preview';
+export const PREVIEW_AUTHOR = 'the preview';
 
 /** Writes `key: value` into a planned file (made if absent), replacing whatever v4 said for that key. */
 function forceFlag(plan: Plan, target: V5ConfigTarget, key: string, value: boolean): void {

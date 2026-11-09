@@ -10,30 +10,41 @@
  * v5 keeps one document per config path under `state/kernel/accepted-config/` (`acceptedConfigFile`,
  * `acceptedName(path)`), `{etag: sha256(text), text, plugin}`, where `plugin` is the plugin whose def owns the path
  * (the kernel reads a record only for the plugin it names; a path no def owns is not recorded and stays held). The converter's v5 files are not v4's texts, so the record cannot
- * be copied; instead, when EVERY v4 config file was in effect as written, every config file this run wrote is recorded
- * as accepted with its own text: v5 then starts with exactly what v4 enforced, confirmations included. When ANY v4
- * file was not (a held edit, an invalid file, a file v4 never accepted, a deletion still held), nothing is recorded and
- * the report names those files: v5 judges every file against its defaults and holds any loosening until the owner
- * confirms it again — the safe direction to be wrong in, never wider than v4. The one exception is the files the
- * PREVIEW itself wrote or changed (its text differs from the plain conversion's, e.g. `terminals.yaml`, the `fy-preview`
- * settings item, the forced `limits.yaml`), and only the ones with NO held v4 source: they are recorded either way, but
- * ONLY when the owner ran `prepare --owner` (the flag is the owner's act of accepting them; without it nothing of theirs
- * is recorded). A preview-changed file whose v4 source files (the ones the writing step named for it) include a held
- * one gets no record even with the flag: the owner's "not yet" on that edit stands, and the preview runs with the
- * kernel's last good or default for it.
+ * be copied. When EVERY v4 config file was in effect as written, every config file this run wrote is recorded as
+ * accepted with its own text: v5 then starts with exactly what v4 enforced, confirmations included.
+ *
+ * When ANY v4 file was not (a held edit, an invalid file, a file v4 never accepted, a deletion still held), a v4 edit
+ * that v4 still HELD stays held in v5 whatever its direction relative to v5's defaults: the v5 file carries v4's
+ * CURRENT text converted (what the owner sees and may confirm), and the record carries the conversion of what v4
+ * ENFORCED (v4's accepted text for each held file; a held file v4 never accepted is left out, because v4 used defaults
+ * for it). The conversion is a plain dry run of the same steps on a view of the v4 home where each held file is replaced
+ * by its accepted text ({@link StepContext.dryConfigs}). The kernel then judges the file on disk against the enforced
+ * record, as v4 did: a loosening is held and the enforced version stays in effect. A held DELETION leaves the v5 file
+ * absent but the record carries the enforced text, and the kernel treats a missing file with a record as a deletion (an
+ * edit to the defaults, held when it loosens). Where v4 enforced nothing for a file, no record is carried. If the record
+ * of v4 is damaged (what it enforced is unknown) or the dry conversion is not available, nothing is recorded (fail closed).
+ *
+ * The files the PREVIEW itself wrote or changed (its text differs from the plain conversion's, e.g. `terminals.yaml`, the
+ * `fy-preview` settings item, the forced `limits.yaml`) are recorded only when the owner ran `prepare --owner` (the flag
+ * is the owner's act of accepting them; without it nothing of theirs is recorded), and only the ones with NO held v4
+ * source (a held edit, or a held deletion, of any v4 file the writing step named for it). One with a held v4 source gets
+ * no record of the PREVIEW's text even with the flag (the owner's "not yet" on that edit stands); it carries the record
+ * of what v4 enforced instead (none when v4 enforced nothing), so the kernel holds the preview's text where it loosens it.
  *
  * Runs LAST, after every step that writes config. Texts are hashed and written, never reported.
  */
 import { acceptedConfigFile, acceptedName } from '@ferretry/kernel/contract';
 import { createHash } from 'node:crypto';
-import { lstat, readdir, readFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative } from 'node:path';
 import { z } from 'zod';
 import type { KeptItem, StepReport } from '../report.ts';
 import { readV4Json } from '../v4/documents.ts';
 import { configOwner } from '../v5/targets.ts';
 import { UNKNOWN_SOURCE } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
+import { PREVIEW_AUTHOR } from './settings.ts';
 
 export const V4_CONFIG_ACCEPTED = 'state/config-accepted.json';
 const V5_ACCEPTED_DIR = 'state/kernel/accepted-config';
@@ -64,15 +75,27 @@ export function previewAuthoredFiles(steps: readonly StepReport[]): readonly str
   return item === undefined ? [] : item.what.slice(AUTHORED_PREFIX.length).split(', ');
 }
 
+/** The report item that names the preview-authored config files NOT accepted even with `--owner` (a held v4 source). */
+const HELD_PREFIX = 'preview-authored config files NOT accepted (a v4 source has an unconfirmed edit): ';
+
+/** The preview-authored config files the report names as held (`previewHeldFiles`'s counterpart of the authored list). */
+export function previewHeldFiles(steps: readonly StepReport[]): readonly string[] {
+  const item = steps.find(step => step.id === 'accepted-config')?.kept.find(kept => kept.what.startsWith(HELD_PREFIX));
+  return item === undefined ? [] : item.what.slice(HELD_PREFIX.length).split(', ');
+}
+
 /**
  * Whether a v4 file the target came from was held (not in effect as written). The sources are the v4 files the writing
  * step named for the target (`V5Writer.writtenSources`), not a map kept here. A target with no v4 source (the preview
- * wrote it whole) has none held. Unknown sources count as held whenever anything was held (fail closed).
+ * wrote it whole) has none held. Unknown sources count as held whenever anything was held (fail closed). A held v4
+ * DELETION counts too: a deleted file is never read, so it is in no source set, and a held deletion holds every target
+ * that has any v4 source at all (fail closed).
  */
-const sourceHeld = (ctx: StepContext, path: string, held: readonly string[]): boolean => {
+const sourceHeld = (ctx: StepContext, path: string, state: V4State): boolean => {
   const sources = ctx.v5.writtenSources().get(path);
-  if (sources === undefined || sources.has(UNKNOWN_SOURCE)) return held.length > 0;
-  return held.some(file => sources.has(`config/${file}`) || sources.has(file));
+  if (sources === undefined || sources.has(UNKNOWN_SOURCE)) return state.paths.length > 0;
+  if (state.deleted.length > 0 && [...sources].some(source => source !== PREVIEW_AUTHOR)) return true;
+  return state.paths.some(file => sources.has(`config/${file}`) || sources.has(file));
 };
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -95,21 +118,94 @@ async function v4ConfigFiles(root: string): Promise<Map<string, string | null>> 
   return files;
 }
 
-/** The v4 config files that were NOT in effect as written (by path only). */
-async function notInEffect(ctx: StepContext): Promise<{ readonly paths: string[]; readonly files: number }> {
+interface V4State {
+  /** The v4 config files that were NOT in effect as written (by path only). */
+  readonly paths: string[];
+  readonly files: number;
+  /** v4's accepted record (what it enforced), by config-relative path. Empty when it is absent or damaged. */
+  readonly accepted: Readonly<Record<string, { etag: string; text: string }>>;
+  /** False when the record is damaged: what v4 enforced is then unknown. */
+  readonly readable: boolean;
+  /** Every v4 config file on disk, by config-relative path (`null`: a link, never read). */
+  readonly onDisk: ReadonlyMap<string, string | null>;
+  /** The held paths whose file is gone (a held deletion). */
+  readonly deleted: string[];
+}
+
+async function notInEffect(ctx: StepContext): Promise<V4State> {
   const decoded = await readV4Json(ctx.v4.home, join(ctx.v4.home, V4_CONFIG_ACCEPTED)).catch(() => null);
   const parsed = decoded === undefined ? { success: true as const, data: {} } : V4AcceptedRecord.safeParse(decoded);
   const accepted: Record<string, { etag: string; text: string }> = parsed.success ? parsed.data : {};
   const files = await v4ConfigFiles(ctx.v4.config);
   const paths: string[] = [];
+  const deleted: string[] = [];
   if (!parsed.success) paths.push(V4_CONFIG_ACCEPTED);
   for (const [path, text] of files) {
     const entry = accepted[path];
     if (text === null || entry === undefined || entry.etag !== sha256(text) || entry.text !== text) paths.push(path);
   }
   // An entry whose file is gone: v4 was holding the deletion and still enforced the old text.
-  for (const path of Object.keys(accepted)) if (!files.has(path)) paths.push(path);
-  return { paths: [...new Set(paths)].sort(), files: files.size };
+  for (const path of Object.keys(accepted))
+    if (!files.has(path)) {
+      paths.push(path);
+      deleted.push(path);
+    }
+  return {
+    paths: [...new Set(paths)].sort(),
+    files: files.size,
+    accepted,
+    readable: parsed.success,
+    onDisk: files,
+    deleted,
+  };
+}
+
+/** Every regular, non-YAML file under `from`, copied to the same place under `to` (no link is followed). */
+async function copyOthers(from: string, to: string, root = from): Promise<void> {
+  for (const entry of await readdir(from, { withFileTypes: true }).catch(() => [])) {
+    const path = join(from, entry.name);
+    if (entry.isDirectory()) {
+      if (relative(root, path) !== '.schema') await copyOthers(path, to, root);
+    } else if (entry.isFile() && !/\.ya?ml$/u.test(entry.name)) {
+      const target = join(to, relative(root, path));
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+      await copyFile(path, target);
+    }
+  }
+}
+
+/**
+ * What v4 ENFORCED, converted: the plain dry conversion of a view of the v4 home in which every held file is replaced
+ * by v4's accepted text for it (a held deletion's file comes back; a held file v4 never accepted is left out, because
+ * v4 used the defaults for it). The view is a private temporary folder (links to everything else, `config/` copied),
+ * removed after. `undefined` when it cannot be made: the caller then records nothing for held files (fail closed).
+ */
+async function enforcedConfigs(ctx: StepContext, state: V4State): Promise<ReadonlyMap<string, string> | undefined> {
+  if (ctx.dryConfigs === undefined || !state.readable) return undefined;
+  let view: string | undefined;
+  try {
+    view = await mkdtemp(join(tmpdir(), 'fy-enforced-'));
+    for (const entry of await readdir(ctx.v4.home))
+      if (entry !== 'config') await symlink(join(ctx.v4.home, entry), join(view, entry));
+    const config = join(view, 'config');
+    await mkdir(config, { mode: 0o700 });
+    await copyOthers(ctx.v4.config, config);
+    const put = async (path: string, text: string): Promise<void> => {
+      await mkdir(dirname(join(config, path)), { recursive: true, mode: 0o700 });
+      await writeFile(join(config, path), text, { mode: 0o600 });
+    };
+    const held = new Set(state.paths);
+    for (const [path, text] of state.onDisk) if (text !== null && !held.has(path)) await put(path, text);
+    for (const path of held) {
+      const entry = state.accepted[path];
+      if (entry !== undefined) await put(path, entry.text);
+    }
+    return await ctx.dryConfigs(view);
+  } catch {
+    return undefined;
+  } finally {
+    if (view !== undefined) await rm(view, { recursive: true, force: true });
+  }
 }
 
 export const acceptedConfigStep: Step = {
@@ -132,11 +228,13 @@ export const acceptedConfigStep: Step = {
        */
       const record = async (
         entries: readonly (readonly [string, string])[],
+        enforced = false,
       ): Promise<{ readonly recorded: number; readonly unowned: readonly string[] }> => {
         let recorded = 0;
         const unowned: string[] = [];
         for (const [path, text] of entries) {
-          if (isPreviewAuthored(ctx, path, text) && !ownerRan) continue;
+          // An enforced text is the PLAIN conversion of what v4 enforced: never a preview-authored one.
+          if (!enforced && isPreviewAuthored(ctx, path, text) && !ownerRan) continue;
           const plugin = configOwner(path);
           if (plugin === undefined) {
             unowned.push(path);
@@ -160,27 +258,66 @@ export const acceptedConfigStep: Step = {
         // `prepare --owner`), recorded whatever v4's record says: a held terminals.yaml would open every terminal with only
         // {PATH, HOME} and reach v4's `fy`. One that carries a held v4 file's text stays held even with the flag: the
         // owner's "not yet" on that edit stands.
-        const heldSource = authored.filter(path => sourceHeld(ctx, path, held.paths));
+        // Also held: a file v4's ENFORCED conversion writes differently from the plain conversion of what v4 has now,
+        // so a held v4 file (a deletion included) feeds it even though no step named that file as a source.
+        const enforced = await enforcedConfigs(ctx, held);
+        const heldSource = authored.filter(
+          path =>
+            sourceHeld(ctx, path, held) ||
+            (enforced?.has(path) === true && enforced.get(path) !== ctx.plainConfigs?.get(path)),
+        );
         const own = await record(configs.filter(([path]) => authored.includes(path) && !heldSource.includes(path)));
+        // Everything else carries what v4 ENFORCED, so a held edit stays held whatever its direction (see the header).
+        const carried =
+          enforced === undefined
+            ? { recorded: 0, unowned: [] as readonly string[] }
+            : await record(
+                [...enforced]
+                  .filter(([path]) => !authored.includes(path) || heldSource.includes(path))
+                  .sort(([a], [b]) => a.localeCompare(b)),
+                true,
+              );
         return {
           ...base,
           status: 'converted',
           kept: [
             ...named,
+            ...(ownerRan && heldSource.length > 0
+              ? [{ what: `${HELD_PREFIX}${heldSource.join(', ')}`, count: heldSource.length }]
+              : []),
             ...(own.recorded === 0
               ? []
               : [{ what: "the preview's own config files recorded as accepted", count: own.recorded }]),
+            ...(carried.recorded === 0
+              ? []
+              : [
+                  {
+                    what: 'v5 config files recorded as what v4 enforced (held edits stay held)',
+                    count: carried.recorded,
+                  },
+                ]),
           ],
           notCarried: [
             ...(ownerRan
               ? heldSource.map(path => ({
                   what: `${path} (the preview's forced setting, NOT accepted even with --owner)`,
-                  why: `v4 had an unconfirmed edit in a v4 file it comes from (${held.paths.join(', ')}), so the preview's text stays held and the preview runs with the kernel's last good or default for it (for limits.yaml: tighter limits). To fix: confirm it in v4 first, then \`preview.sh clean\` and \`preview.sh prepare --owner\``,
+                  why: `a v4 file it comes from has an unconfirmed edit or a held deletion (${held.paths.join(', ')}), so the preview's text is not recorded as accepted. The record carries what v4 enforced for it instead (none when v4 enforced nothing, then the kernel judges it against its defaults), so the kernel holds the preview's text wherever it loosens that; a file that can loosen nothing (runtimes.yaml) is in effect anyway. To fix: confirm the edit in v4 first, then \`preview.sh clean\` and \`preview.sh prepare --owner\``,
                 }))
               : []),
+            ...(carried.unowned.length === 0
+              ? []
+              : [
+                  {
+                    what: `no accepted record for ${carried.unowned.join(', ')}`,
+                    why: 'no v5 plugin declares a config def for the path, so the kernel could not read a record for it: the file stays held until the owner confirms it',
+                  },
+                ]),
             {
               what: `${V4_CONFIG_ACCEPTED} (v4 was not enforcing as written: ${held.paths.join(', ')})`,
-              why: "v4 was holding an unconfirmed edit, refusing a file, or had never accepted it, so what it enforced is not the text on disk. Nothing is recorded as accepted (the preview's own files excepted): v5 judges every file against its defaults and holds any loosening until the owner confirms it again (never wider than v4)",
+              why:
+                enforced === undefined
+                  ? "v4 was holding an unconfirmed edit, refusing a file, or had never accepted it, and what it enforced could not be converted (its record is damaged or the conversion was not available). Nothing is recorded as accepted (the preview's own files excepted): v5 judges every file against its defaults and holds any loosening until the owner confirms it again"
+                  : "v4 was holding an unconfirmed edit, refusing a file, or had never accepted it. The v5 file carries v4's current text; the accepted record carries the conversion of what v4 ENFORCED, so v5 holds the difference until the owner confirms it (never wider than v4). A file v4 never accepted has no record: v4 used the defaults for it",
             },
           ],
         };

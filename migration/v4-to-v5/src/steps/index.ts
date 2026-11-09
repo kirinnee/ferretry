@@ -63,6 +63,12 @@ export interface StepContext {
    * "preview-authored". Absent in a preview run: nothing is known to be unchanged, so every file counts as authored.
    */
   readonly plainConfigs?: ReadonlyMap<string, string>;
+  /**
+   * The plain, non-preview dry conversion of a v4 home laid out like the real one: every config file (`config/…` path to
+   * text) it would write. The accepted-config step runs it on a VIEW of v4 as v4 enforced it. Absent: what v4 enforced
+   * cannot be converted, so nothing is recorded for a held v4 file (fail closed).
+   */
+  readonly dryConfigs?: (v4Home: string) => Promise<ReadonlyMap<string, string>>;
   /** Absent in tests that do not read the host: a step needing it then reads nothing and says so. */
   readonly host?: HostFacts;
   /**

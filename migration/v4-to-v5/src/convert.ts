@@ -52,14 +52,22 @@ export const V5_HOME_TREE = ['config', 'state', 'state/kernel', 'run', 'logs'] a
 /** The accepted-record step reads what the others wrote; it is the one step the plain pass leaves out. */
 const ACCEPTED_STEP = 'accepted-config';
 
-/** What the plain (non-preview) conversion of the same v4 home would write under `config/`, from a dry run. */
-async function plainConfigs(options: ConvertOptions, steps: readonly Step[]): Promise<ReadonlyMap<string, string>> {
+/**
+ * What the plain (non-preview) conversion of the v4 home at `from` would write under `config/`, from a dry run (the
+ * v4 home is only read). Used on the real home, and on the accepted-config step's view of what v4 ENFORCED.
+ */
+async function plainConfigs(
+  from: string,
+  to: string,
+  host: HostFacts | undefined,
+  steps: readonly Step[],
+): Promise<ReadonlyMap<string, string>> {
   const plain = {
-    v4: v4Paths(options.from),
-    v5: v5Writer(options.to, { dryRun: true }),
+    v4: v4Paths(from),
+    v5: v5Writer(to, { dryRun: true }),
     dryRun: true,
     loginKeys: new LoginKeyHold(),
-    ...(options.host === undefined ? {} : { host: options.host }),
+    ...(host === undefined ? {} : { host }),
   };
   for (const step of steps) {
     if (step.id === ACCEPTED_STEP) continue;
@@ -71,6 +79,12 @@ async function plainConfigs(options: ConvertOptions, steps: readonly Step[]): Pr
   }
   return plain.v5.writtenConfigs();
 }
+
+/** The plain dry conversion of any v4 home laid out like the real one (the accepted-config step's enforced view). */
+export const dryConfigsOf =
+  (to: string, host: HostFacts | undefined, steps: readonly Step[]) =>
+  (from: string): Promise<ReadonlyMap<string, string>> =>
+    plainConfigs(from, to, host, steps);
 
 export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   const checked = await preflight(options.from, options.to, options.lock);
@@ -97,7 +111,11 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   // A preview's authored files are found by comparison: a config file the preview wrote or changed differs from what the
   // plain conversion of the same v4 home writes. The plain pass is a dry run (nothing written) of every step that
   // writes config; a step that fails there leaves its files out, so they count as authored (fail closed).
-  const withPlain = options.preview === true ? { ...ctx, plainConfigs: await plainConfigs(options, steps) } : ctx;
+  const withEnforced = { ...ctx, dryConfigs: dryConfigsOf(options.to, options.host, steps) };
+  const withPlain =
+    options.preview === true
+      ? { ...withEnforced, plainConfigs: await plainConfigs(options.from, options.to, options.host, steps) }
+      : withEnforced;
 
   const reports: StepReport[] = [];
   for (const step of steps) {
