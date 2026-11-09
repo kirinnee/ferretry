@@ -6,11 +6,15 @@
  *
  * Every read is live: nothing is kept between calls (a stale answer here would launch an item a profile no longer
  * names, or hide one it does). Every failure to read or write says so in a sentence; none ends as a success.
+ *
+ * A change reads a profile and writes it back, so it runs in the SAME one-at-a-time section as an apply (S67): an
+ * apply's documents are key patches with no etag, and one that landed between this act's read and its write would
+ * overwrite the layer it just added.
  */
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import type { ConfigWriteAllDocument, ConfigWriteAllOutcome } from '@ferretry/kernel/contract';
 import {
-  ItemNameSchema,
+  layerNameRefusal,
   PROFILE_ITEMS,
   PROFILE_LAYER_PREFIX,
   RuntimeIdSchema,
@@ -43,27 +47,27 @@ export interface ProfileLayerDeps {
   etag(profile: string): Promise<string>;
   /** `ConfigPort.writeAll`: the kernel's all-or-none writer of Runtimes' own files. */
   writeAll(documents: readonly ConfigWriteAllDocument[]): Promise<ConfigWriteAllOutcome>;
+  /** Runs `act` in the one-at-a-time section every apply runs in, so no apply is between its read and its write. */
+  serialise<T>(act: () => Promise<T>): Promise<T>;
 }
 
-const LAYER = /^(mcp|skills)\/([\s\S]*)$/u;
-
-/** Why `layer` is not a layer a caller may add or remove, in words; `undefined` when it is one. */
-export function layerNameRefusal(layer: string): string | undefined {
-  const match = LAYER.exec(layer);
-  if (match === null) return 'a layer is written mcp/<name> or skills/<name>';
-  const name = match[2] ?? '';
-  if ([...name].some(character => (character.codePointAt(0) ?? 0) < 0x20 || character === '\u007f'))
-    return 'a layer name holds a control character';
-  if (/^\.+$/u.test(name)) return 'a layer name cannot be only dots';
-  if (!ItemNameSchema.safeParse(name).success)
-    return 'a layer name is one word or phrase of at most 64 characters with no slash';
-  return undefined;
+/** The layers of a list with each one kept once, at its newest position (a newer layer overrides an older one). */
+function newestOnly(layers: readonly string[]): readonly string[] {
+  const newest = new Map<string, number>();
+  for (const [index, layer] of layers.entries()) newest.set(layer, index);
+  return layers.filter((layer, index) => newest.get(layer) === index);
 }
+
+type Expansion = { readonly layers: readonly string[] } | { readonly refusal: string };
 
 /**
  * The MCP servers and skills a profile names, oldest first, with every `profile/<base>` layer expanded where it stands
  * and each item kept once at its newest position (a newer layer overrides an older one). A base that does not exist,
  * or a loop of bases, is refused in a sentence.
+ *
+ * Each profile is expanded ONCE: its expansion does not depend on who reached it, so a base shared by many profiles
+ * (a lattice of diamonds) costs one expansion, not one per path. Keeping only the newest copy of each item per
+ * profile before the parent concatenates gives the same list as keeping it once at the end.
  */
 function resolveProfileStack(
   profiles: ReadonlyMap<string, ProfileFile>,
@@ -71,33 +75,42 @@ function resolveProfileStack(
 ):
   | { readonly ok: true; readonly mcp: readonly string[]; readonly skills: readonly string[] }
   | { readonly ok: false; readonly sentence: string } {
-  const seen: string[] = [];
-  const expand = (name: string, chain: readonly string[]): string | undefined => {
+  // Only a profile whose whole subtree resolved is remembered, so a profile in a loop is never in here.
+  const expanded = new Map<string, readonly string[]>();
+  const expand = (name: string, chain: readonly string[]): Expansion => {
+    const done = expanded.get(name);
+    if (done !== undefined) return { layers: done };
     const profile = profiles.get(name);
     if (profile === undefined)
-      return chain.length === 1
-        ? `profile ${name} does not exist`
-        : `profile ${chain[chain.length - 2]} names the base profile ${name}, which does not exist`;
+      return {
+        refusal:
+          chain.length === 1
+            ? `profile ${name} does not exist`
+            : `profile ${chain[chain.length - 2]} names the base profile ${name}, which does not exist`,
+      };
+    const layers: string[] = [];
     for (const layer of profile.contents) {
-      if (layer.startsWith(`${PROFILE_LAYER_PREFIX}/`)) {
-        const base = layer.slice(PROFILE_LAYER_PREFIX.length + 1);
-        if (chain.includes(base))
-          return `profile ${name} names the base profile ${base}, which leads back to itself (${[...chain.slice(chain.indexOf(base)), base].join(' → ')})`;
-        const refusal = expand(base, [...chain, base]);
-        if (refusal !== undefined) return refusal;
+      if (!layer.startsWith(`${PROFILE_LAYER_PREFIX}/`)) {
+        layers.push(layer);
         continue;
       }
-      seen.push(layer);
+      const base = layer.slice(PROFILE_LAYER_PREFIX.length + 1);
+      if (chain.includes(base))
+        return {
+          refusal: `profile ${name} names the base profile ${base}, which leads back to itself (${[...chain.slice(chain.indexOf(base)), base].join(' → ')})`,
+        };
+      const inner = expand(base, [...chain, base]);
+      if ('refusal' in inner) return inner;
+      for (const kept of inner.layers) layers.push(kept);
     }
-    return undefined;
+    const kept = newestOnly(layers);
+    expanded.set(name, kept);
+    return { layers: kept };
   };
-  const refusal = expand(start, [start]);
-  if (refusal !== undefined) return { ok: false, sentence: refusal };
-  const newest = new Map<string, number>();
-  for (const [index, layer] of seen.entries()) newest.set(layer, index);
-  const kept = seen.filter((layer, index) => newest.get(layer) === index);
+  const stack = expand(start, [start]);
+  if ('refusal' in stack) return { ok: false, sentence: stack.refusal };
   const named = (kind: 'mcp' | 'skills'): readonly string[] =>
-    kept.filter(layer => layer.startsWith(`${kind}/`)).map(layer => layer.slice(kind.length + 1));
+    stack.layers.filter(layer => layer.startsWith(`${kind}/`)).map(layer => layer.slice(kind.length + 1));
   return { ok: true, mcp: named('mcp'), skills: named('skills') };
 }
 
@@ -117,10 +130,16 @@ const refuse = (sentence: string, code: 'fleet_change_unknown' | 'fleet_change_r
 
 export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
   /** The refusal of a caller that may not change the fleet: the same standing `apply` demands. */
-  const callerRefusal = (governance: unknown, profile: string): ProfileLayerOutcome | undefined => {
+  const callerRefusal = (governance: unknown, path: string): ProfileLayerOutcome | undefined => {
     const standing = governanceOf(governance);
     if (standing === undefined) return refuse('this daemon cannot say whether this caller may change the fleet');
-    const sentence = configFileWriteRefusal(standing, `profiles/${profile}.yaml`, 'apply');
+    let sentence: string | undefined;
+    try {
+      sentence = configFileWriteRefusal(standing, path, 'apply');
+    } catch {
+      // A standing that cannot answer is no standing: refused, never a rejection, and nothing was written.
+      return refuse('this daemon cannot say whether this caller may change the fleet');
+    }
     return sentence === undefined ? undefined : refuse(sentence);
   };
 
@@ -131,24 +150,33 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
     ifMatch: etag,
   });
 
-  /** One document through the writer, in the words of the outcome. */
-  const write = async (profile: string, document: ConfigWriteAllDocument): Promise<ProfileLayerOutcome> => {
+  const describe = (profiles: readonly string[]): string =>
+    profiles.length === 1 ? `profile ${profiles[0] ?? ''}` : `profiles ${profiles.join(', ')}`;
+
+  /**
+   * These documents through the writer, ALL OR NONE, in the words of the outcome. `written` names every profile; any
+   * other outcome means nothing at all was written.
+   */
+  const writeSet = async (
+    profiles: readonly string[],
+    documents: readonly ConfigWriteAllDocument[],
+  ): Promise<ProfileLayerOutcome> => {
     let outcome: ConfigWriteAllOutcome;
     try {
-      outcome = await deps.writeAll([document]);
+      outcome = await deps.writeAll(documents);
     } catch (error) {
-      return refuse(`profile ${profile} could not be written: ${errorText(error)}; nothing was changed`);
+      return refuse(`${describe(profiles)} could not be written: ${errorText(error)}; nothing was changed`);
     }
     switch (outcome.kind) {
       case 'written':
-        return { kind: 'written', profiles: [profile] };
+        return { kind: 'written', profiles };
       case 'held':
         return { kind: 'held', sentence: outcome.sentence };
       case 'conflict':
-        return { kind: 'conflict', profile };
+        return { kind: 'conflict', profile: outcome.name ?? profiles[0] ?? '' };
       case 'refused':
         return refuse(
-          `profile ${profile} was refused (${outcome.reason}): ${outcome.issues.map(issue => issue.message).join('; ')}`,
+          `${describe(profiles)} was refused (${outcome.reason}): ${outcome.issues.map(issue => issue.message).join('; ')}`,
         );
     }
   };
@@ -159,6 +187,51 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
     } catch (error) {
       return refuse(`profile ${profile} could not be read, so nothing was changed: ${errorText(error)}`);
     }
+  };
+
+  const add = async (change: Extract<ProfileLayerChange, { kind: 'add' }>): Promise<ProfileLayerOutcome> => {
+    const layer: ProfileLayerName = change.layer;
+    const file = deps.profiles().get(change.profile);
+    if (file === undefined) return refuse(`profile ${change.profile} does not exist`, 'fleet_change_unknown');
+    const etag = await etagOf(change.profile);
+    if (typeof etag !== 'string') return etag;
+    if (file.contents.includes(layer)) {
+      // Already there: nothing to write. A caller that read the profile before it moved is still told.
+      return change.ifMatch !== undefined && change.ifMatch !== etag
+        ? { kind: 'conflict', profile: change.profile }
+        : { kind: 'written', profiles: [] };
+    }
+    return await writeSet(
+      [change.profile],
+      [patchOf(change.profile, [...file.contents, layer], change.ifMatch ?? etag)],
+    );
+  };
+
+  /** Every profile naming the layer loses it in ONE set: all of them, or (a conflict, a refusal) none. */
+  const removeEverywhere = async (layer: ProfileLayerName): Promise<ProfileLayerOutcome> => {
+    const naming = [...deps.profiles()]
+      .filter(([, file]) => file.contents.includes(layer))
+      .map(([name]) => name)
+      .toSorted((left, right) => left.localeCompare(right));
+    const documents: ConfigWriteAllDocument[] = [];
+    for (const name of naming) {
+      const file = deps.profiles().get(name);
+      if (file === undefined) continue;
+      const etag = await etagOf(name);
+      if (typeof etag !== 'string') return etag;
+      documents.push(
+        patchOf(
+          name,
+          file.contents.filter(entry => entry !== layer),
+          etag,
+        ),
+      );
+    }
+    if (documents.length === 0) return { kind: 'written', profiles: [] };
+    return await writeSet(
+      documents.flatMap(document => (document.name === undefined ? [] : [document.name])),
+      documents,
+    );
   };
 
   return {
@@ -182,59 +255,19 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
     },
 
     changeProfileLayers: async (change: ProfileLayerChange, governance?: unknown): Promise<ProfileLayerOutcome> => {
-      const layer: ProfileLayerName = change.layer;
-      if (change.kind === 'add') {
-        const refused = callerRefusal(governance, change.profile);
-        if (refused !== undefined) return refused;
-        const wrong = layerNameRefusal(layer);
-        if (wrong !== undefined) return refuse(wrong);
-        const file = deps.profiles().get(change.profile);
-        if (file === undefined) return refuse(`profile ${change.profile} does not exist`, 'fleet_change_unknown');
-        const etag = await etagOf(change.profile);
-        if (typeof etag !== 'string') return etag;
-        if (file.contents.includes(layer)) {
-          // Already there: nothing to write. A caller that read the profile before it moved is still told.
-          return change.ifMatch !== undefined && change.ifMatch !== etag
-            ? { kind: 'conflict', profile: change.profile }
-            : { kind: 'written', profiles: [] };
-        }
-        return await write(change.profile, patchOf(change.profile, [...file.contents, layer], change.ifMatch ?? etag));
-      }
-
-      // Whoever asks is judged first and for every profile, so a caller that may not change the fleet learns nothing
-      // about which profiles name the layer.
-      const refused = callerRefusal(governance, '*');
+      // Whoever asks is judged first (for `remove-everywhere`, for every profile), so a caller that may not change the
+      // fleet learns nothing about which profiles exist or name the layer.
+      const refused = callerRefusal(
+        governance,
+        change.kind === 'add' ? `profiles/${change.profile}.yaml` : 'the profile files',
+      );
       if (refused !== undefined) return refused;
-      const wrong = layerNameRefusal(layer);
+      const wrong = layerNameRefusal(change.layer);
       if (wrong !== undefined) return refuse(wrong);
-      const naming = [...deps.profiles()]
-        .filter(([, file]) => file.contents.includes(layer))
-        .map(([name]) => name)
-        .toSorted((left, right) => left.localeCompare(right));
-      const written: string[] = [];
-      for (const name of naming) {
-        const file = deps.profiles().get(name);
-        if (file === undefined) continue;
-        const etag = await etagOf(name);
-        if (typeof etag !== 'string') return etag;
-        const outcome = await write(
-          name,
-          patchOf(
-            name,
-            file.contents.filter(entry => entry !== layer),
-            etag,
-          ),
-        );
-        if (outcome.kind !== 'written') {
-          return written.length === 0 || outcome.kind === 'conflict'
-            ? outcome
-            : outcome.kind === 'held'
-              ? { kind: 'held', sentence: `${outcome.sentence} (already removed from ${written.join(', ')})` }
-              : refuse(`${outcome.sentence} (already removed from ${written.join(', ')})`);
-        }
-        written.push(name);
-      }
-      return { kind: 'written', profiles: written };
+      // The read and the write of the file happen inside the section, never across an apply.
+      return await deps.serialise(async () =>
+        change.kind === 'add' ? await add(change) : await removeEverywhere(change.layer),
+      );
     },
   };
 }

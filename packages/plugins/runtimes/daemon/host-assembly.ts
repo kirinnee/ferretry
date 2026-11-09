@@ -25,7 +25,7 @@ import { milliseconds } from '@ferretry/std';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import { PROFILE_COMPONENTS_KEY } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
-import { configDirectoryOf, documentRevision, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
+import { configDirectoryOf, configEtag, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
@@ -293,7 +293,8 @@ export function fileAssembly(
   return {
     catalog: services.catalog,
     setup: services.setup,
-    // The profile's file as the apply pins it: the sha256 of its bytes, or the absent sentinel. Read when asked.
-    profileEtag: async profile => await documentRevision(host.files, `${configDirectory}/profiles/${profile}.yaml`),
+    // The profile's file as the kernel's config writer reckons its etag (what `writeAll`'s `ifMatch` is compared with),
+    // or the absent sentinel. Read when asked.
+    profileEtag: async profile => await configEtag(host.files, `${configDirectory}/profiles/${profile}.yaml`),
   };
 }

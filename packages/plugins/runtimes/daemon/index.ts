@@ -59,7 +59,7 @@ const runtimesFile = RUNTIMES_CONFIG as unknown as ConfigFileDef<RuntimesFile>;
 export interface RuntimesAssembly {
   readonly catalog: Pick<
     FleetCatalogService,
-    'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply'
+    'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply' | 'serialise'
   > &
     Partial<Pick<FleetCatalogService, 'republish'>>;
   readonly setup: Pick<
@@ -76,7 +76,8 @@ export interface RuntimesAssembly {
   /** The harness homes the fleet published and a reader of one. Absent: no homes (the fail-closed fallback). */
   readonly homes?: RuntimeHomesApi;
   /**
-   * The etag of one profile file as it is on disk right now (the same revision a change is pinned to). Absent: the
+   * The etag of one profile file as it is on disk right now, reckoned as the kernel's config writer reckons it (what a
+   * change's `ifMatch` is compared with; `configEtag` for a host). Absent: the
    * profile layers answer in a sentence that they cannot read the files, and change nothing.
    */
   readonly profileEtag?: (profile: string) => Promise<string>;
@@ -214,6 +215,21 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           return await assembly.profileEtag(name);
         },
         writeAll: async documents => await config.writeAll(documents),
+        // The same one-at-a-time section as an apply (S67). A daemon whose catalogue cannot be opened has no apply to
+        // run beside, so the act stands alone there (and its etag read refuses in a sentence).
+        serialise: async act => {
+          let entered = false;
+          try {
+            return await assembly.catalog.serialise(async () => {
+              entered = true;
+              return await act();
+            });
+          } catch (error) {
+            // The section itself could not be reached: stand alone. Whatever the act itself threw is not caught here.
+            if (entered) throw error;
+            return await act();
+          }
+        },
       });
 
       // A change to the files wakes the views, once per change and naming what moved. The first reading is the baseline.
