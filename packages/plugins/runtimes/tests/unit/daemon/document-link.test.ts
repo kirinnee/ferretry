@@ -284,11 +284,16 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
 
     await writeFile(join(store, '.credentials.json'), `{"k":"${SECRET}"}`);
     await link(join(store, '.credentials.json'), join(store, 'shared.json'));
-    await symlink(join(store, '.credentials.json'), join(linked, 'config.toml'));
+    // Linked as a JSON document name and holding a JSON object, so the parse would accept it: only the sign-in judge refuses.
+    await rm(join(linked, 'settings.json'));
+    await symlink(join(store, '.credentials.json'), join(linked, 'settings.json'));
     const refusedSignIn = await reader()
-      .document('config.toml', 1000)
+      .document('settings.json', 1000)
       .catch((failure: unknown) => failure);
     expect(refusedSignIn).toBeInstanceOf(Error);
+    expect((refusedSignIn as Error).message).toBe(
+      'settings.json is a link whose target is not read (it is not a plain settings file this reader may open).',
+    );
     expect(everythingOf(refusedSignIn)).not.toContain('SECRET');
     expect(everythingOf(refusedSignIn)).not.toContain(store);
   });
