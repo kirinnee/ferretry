@@ -1626,7 +1626,14 @@ function rootHandle(setup: HandleSetup): RootHandle {
     remove: async path => {
       writable();
       gate(path, 'remove');
-      const { full, scope } = await real(path);
+      // A link at the name is the thing removed: it is unlinked, never resolved to the tree it points at and removed
+      // there (a swept skill link would otherwise delete the folder it pointed to). Any other leaf is judged where it
+      // really is (the fence, hard links and the containment of a base that is itself a link are all decided by `real`).
+      const named = await realParent(path).then(
+        async at => ((await leafIdentity(at.scope, at.full))?.kind === 'link' ? at : undefined),
+        () => undefined,
+      );
+      const { full, scope } = named ?? (await real(path));
       await removeChecked(scope, full);
     },
     linkTo: async (at: FencedPath, target: RootLinkTarget) => {

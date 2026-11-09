@@ -85,18 +85,19 @@ describe('the resume turn store keeps a ferret’s turns on its own private fold
     });
   }
 
-  test('F-0305 a link at a marker’s name that leads out of the folder is refused, and what it points at is kept', async () => {
+  test('F-0305 a link at a marker’s name that leads out of the folder is unlinked as itself, and what it points at is kept', async () => {
     const { store, folder } = await subject();
     await mkdir(folder, { recursive: true, mode: 0o700 });
     const elsewhere = `${folder}/../keep-me`;
     await writeFile(elsewhere, 'kept\n');
     await symlink(elsewhere, `${folder}/done.marker`);
 
-    // The kernel's fence: nothing outside the ferret's folder is reached through a link, so the revive fails closed.
-    await expect(store.clearMarkers(FERRET)).rejects.toThrow('link_escape');
+    // The kernel's fence (S44): a link at the name is the thing removed. It is never followed, so nothing outside
+    // the ferret's folder is reached or removed.
+    await store.clearMarkers(FERRET);
 
     expect(await readFile(elsewhere, 'utf8')).toBe('kept\n');
-    expect((await lstat(`${folder}/done.marker`)).isSymbolicLink()).toBe(true);
+    await expect(lstat(`${folder}/done.marker`)).rejects.toThrow();
   });
 
   test('every turn reads back oldest first with its author; a best-effort read skips an author that does not parse', async () => {
