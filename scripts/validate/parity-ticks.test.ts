@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { DescriptorRow } from '../../packages/core/kernel/testing/parity.ts';
-import { movedFindings } from './descriptor-parity.ts';
+import { movedFindings, readChanges } from './descriptor-parity.ts';
 import { junitCases } from './guarantees.ts';
-import { type LedgerRow, type TickContext, readKnown, routeWorld, tickFindings } from './parity-ticks.ts';
+import { FROZEN_IDS, type LedgerRow, type TickContext, readKnown, routeWorld, tickFindings } from './parity-ticks.ts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -88,6 +88,20 @@ describe('parity-ticks: the test that names a row', () => {
     }
   });
 
+  test('a title with an expression in it does not read as the id, and a literal if(false) is dead', () => {
+    for (const source of [
+      "const x = 'z'; test(`F-00${x}19 x`, () => {})",
+      "const x = 'z'; test(`F-0019${x} x`, () => {})",
+      "test.if(false)('F-0019 x', () => {})",
+      "describe.if(false)('group', () => { test('F-0019 x', () => {}) })",
+    ]) {
+      const root = fixture({ [TEST]: source });
+      expect(run([row({})], ctx(root))[0], source).toContain('names F-0019');
+    }
+    const live = fixture({ [TEST]: "test.if(process.platform === 'linux')('F-0019 x', () => {})" });
+    expect(run([row({})], ctx(live))).toEqual([]);
+  });
+
   test('a longer id does not stand for a shorter one', () => {
     const root = fixture({ [TEST]: "test('F-00191 x', () => {})" });
     expect(run([row({})], ctx(root))[0]).toContain('names F-0019');
@@ -126,6 +140,11 @@ describe('parity-ticks: the test that names a row', () => {
     expect(run([row({})], fail)[0]).toContain('FAILED');
     expect(run([row({})], skipped)[0]).toContain('no passing run');
     expect(run([row({})], absent)[0]).toContain('no passing run');
+    // a case with no file attribute does not satisfy any check path
+    const nofile = ctx(root, noWorld, {
+      results: junitCases('<testsuites><testsuite name="x"><testcase name="F-0019 does it"/></testsuite></testsuites>'),
+    });
+    expect(run([row({})], nofile)[0]).toContain('no passing run');
     // the other tier's report cannot judge a unit file
     expect(run([row({})], { ...absent, tier: 'int' })).toEqual([]);
   });
@@ -224,7 +243,39 @@ describe('parity-ticks: a route also needs descriptor-parity', () => {
   });
 });
 
+describe('parity-ticks: a rescued flake is a pass', () => {
+  test('a first run that failed and a rerun that passed passes; only failed runs fail', () => {
+    const root = fixture({ [TEST]: "test('F-0019 does it', () => {})" });
+    const xml = (inner: string) =>
+      junitCases(`<testsuites><testsuite name="a.test.ts" file="${TEST}">${inner}</testsuite></testsuites>`);
+    const failed = '<testcase name="F-0019 does it"><failure message="x"/></testcase>';
+    const passed = '<testcase name="F-0019 does it"/>';
+    expect(run([row({})], ctx(root, noWorld, { results: xml(failed + passed) }))).toEqual([]);
+    expect(run([row({})], ctx(root, noWorld, { results: xml(failed) }))[0]).toContain('FAILED');
+  });
+});
+
+describe('descriptor-parity-changes: one record per key', () => {
+  test('a key recorded twice is refused', () => {
+    const line = 'route\tGET /v1/a\tchanged\twhy\n';
+    expect(readChanges(line).size).toBe(1);
+    expect(() => readChanges(line + line)).toThrow('recorded twice');
+  });
+});
+
 describe('parity-ticks: the known list only shrinks', () => {
+  test('FROZEN_IDS holds no R row and at most 42 ids (the 64 descriptor-only R rows are open again)', () => {
+    expect(FROZEN_IDS.size).toBeLessThanOrEqual(42);
+    expect([...FROZEN_IDS].filter(id => id.startsWith('R-'))).toEqual([]);
+  });
+
+  test('a frozen id that is no longer listed fails (the two sets are equal)', () => {
+    const root = fixture({ [TEST]: "test('F-0019 ok', () => {})" });
+    expect(run([row({})], ctx(root), new Map(), new Set(['F-0019']))).toEqual([
+      'F-0019: in FROZEN_IDS but not listed in scripts/validate/parity-ticks-known.tsv: delete it from FROZEN_IDS (the two sets must be equal)',
+    ]);
+  });
+
   test('an id added to the known list that FROZEN_IDS does not hold fails', () => {
     const root = fixture({ [TEST]: "test('unrelated', () => {})" });
     const known = readKnown('# note\nF-0019\tstill being fixed\n');

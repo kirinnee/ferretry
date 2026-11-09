@@ -1,72 +1,8 @@
 # Ticked parity rows that parity-ticks.ts cannot prove yet: id<TAB>reason. TEMPORARY - this list must shrink to empty
 # before 5.0 is green. Its ids are pinned in FROZEN_IDS (scripts/validate/parity-ticks.ts): an id not in that set fails, an
-# entry whose row passes (or is unticked) fails, so the list can only shrink. Fix a row, then delete it from both.
+# entry whose row passes (or is unticked) fails, so the list can only shrink, and the two sets must stay equal. Fix a row, then delete it from both.
 F-0305	no live test(), it() or describe() title in packages/core/ferrets/tests/unit/parity/storage.test.ts names F-0305 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
 F-0422	no live test(), it() or describe() title in packages/core/ferrets/tests/unit/parity/storage.test.ts names F-0422 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
-R-0017	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity; route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-R-0024	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0057	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0058	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0072	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0079	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0083	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity; route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-R-0085	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity; route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-R-0088	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity; route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-R-0093	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0103	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0104	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0105	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0106	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0107	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0108	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0109	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0113	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0114	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0130	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0144	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0169	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0179	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0199	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0206	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0207	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0208	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0209	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0220	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0222	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0228	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0245	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity; route removed in 5.0 (recorded), no single counterpart derivable: learning is lessons and /v1/agent/… is replaced (agent word, design §1.4): the ferret files a lesson at /v1/lessons/suggest; Gate admits the ferret credential, so minimum none becomes authenticated and the handler still refuses any caller without a ferret credential (403 forbidden)
-R-0255	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0256	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0274	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0281	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0286	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity; route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-R-0287	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity; route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-R-0288	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity; route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-R-0289	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity; route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
-R-0296	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0299	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0300	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0301	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0303	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0304	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0307	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0308	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0325	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0326	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0327	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0328	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0331	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0338	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0373	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0374	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0397	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0400	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0403	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0406	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0407	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0408	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0419	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
-R-0426	check is not a *.test.ts(x) file under a tests/ folder: descriptor-parity
 S-0010	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
 S-0255	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
 S-0262	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx

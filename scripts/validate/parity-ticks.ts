@@ -11,7 +11,7 @@
  *     `noStore`, `privilegedOnly` or a `catalog` resolver added). A record never blesses a loosening.
  * `parity-ticks-known.tsv` (`id<TAB>reason`) lists rows that fail today. The ids it may hold are PINNED in
  * `FROZEN_IDS` below: an id not in that set fails, so the list can only shrink; an entry whose row passes (or is no
- * longer ticked) fails too.
+ * longer ticked) fails too, and so does a frozen id that is no longer listed (the two sets must be equal).
  *
  *   bun scripts/validate/parity-ticks.ts [--results <junit.xml|folder>] [--tier unit|int]
  */
@@ -35,70 +35,6 @@ export const KNOWN = 'scripts/validate/parity-ticks-known.tsv';
 export const FROZEN_IDS: ReadonlySet<string> = new Set([
   'F-0305',
   'F-0422',
-  'R-0017',
-  'R-0024',
-  'R-0057',
-  'R-0058',
-  'R-0072',
-  'R-0079',
-  'R-0083',
-  'R-0085',
-  'R-0088',
-  'R-0093',
-  'R-0103',
-  'R-0104',
-  'R-0105',
-  'R-0106',
-  'R-0107',
-  'R-0108',
-  'R-0109',
-  'R-0113',
-  'R-0114',
-  'R-0130',
-  'R-0144',
-  'R-0169',
-  'R-0179',
-  'R-0199',
-  'R-0206',
-  'R-0207',
-  'R-0208',
-  'R-0209',
-  'R-0220',
-  'R-0222',
-  'R-0228',
-  'R-0245',
-  'R-0255',
-  'R-0256',
-  'R-0274',
-  'R-0281',
-  'R-0286',
-  'R-0287',
-  'R-0288',
-  'R-0289',
-  'R-0296',
-  'R-0299',
-  'R-0300',
-  'R-0301',
-  'R-0303',
-  'R-0304',
-  'R-0307',
-  'R-0308',
-  'R-0325',
-  'R-0326',
-  'R-0327',
-  'R-0328',
-  'R-0331',
-  'R-0338',
-  'R-0373',
-  'R-0374',
-  'R-0397',
-  'R-0400',
-  'R-0403',
-  'R-0406',
-  'R-0407',
-  'R-0408',
-  'R-0419',
-  'R-0426',
   'S-0010',
   'S-0255',
   'S-0262',
@@ -272,11 +208,28 @@ function callee(node: unknown): { base: string; mods: string[] } | undefined {
   return undefined;
 }
 
+/** `.if(false)` with a literal false: the test never runs (a computed condition cannot be judged here; CI's JUnit does). */
+function isOff(node: unknown): boolean {
+  const n = node as AstNode | undefined;
+  if (n === undefined) return false;
+  if (n.type === 'CallExpression') {
+    const c = n.callee as AstNode;
+    const arg = (n.arguments as AstNode[])[0];
+    if (c.type === 'MemberExpression' && c.computed !== true && (c.property as AstNode).name === 'if')
+      return arg?.type === 'Literal' && arg.value === false;
+    return isOff(c);
+  }
+  return n.type === 'MemberExpression' && n.computed !== true ? isOff(n.object) : false;
+}
+
 const titleOf = (node: unknown): string | undefined => {
   const n = node as AstNode | undefined;
   if (n?.type === 'Literal' && typeof n.value === 'string') return n.value;
+  // An expression between the parts is joined with an alphanumeric sentinel that breaks an id token: `R-00${x}23` is not R-0023.
   if (n?.type === 'TemplateLiteral')
-    return (n.quasis as { value: { cooked?: string; raw: string } }[]).map(q => q.value.cooked ?? q.value.raw).join('');
+    return (n.quasis as { value: { cooked?: string; raw: string } }[])
+      .map(q => q.value.cooked ?? q.value.raw)
+      .join('X');
   return undefined;
 };
 
@@ -286,13 +239,13 @@ export function liveTitles(file: string): string[] {
   walk(parseFile(file).program, (node, parents) => {
     if (node.type !== 'CallExpression') return;
     const own = callee(node.callee);
-    if (own === undefined || !SUITE.has(own.base) || own.mods.some(m => DEAD.has(m))) return;
+    if (own === undefined || !SUITE.has(own.base) || own.mods.some(m => DEAD.has(m)) || isOff(node.callee)) return;
     const title = titleOf((node.arguments as unknown[])[0]);
     if (title === undefined) return;
     const dead = parents.some(p => {
       if (p.type !== 'CallExpression') return false;
       const c = callee(p.callee);
-      return c !== undefined && c.base === 'describe' && c.mods.some(m => DEAD.has(m));
+      return c !== undefined && c.base === 'describe' && (c.mods.some(m => DEAD.has(m)) || isOff(p.callee));
     });
     if (!dead) out.push(title);
   });
@@ -324,12 +277,13 @@ export function testProblem(row: LedgerRow, tc: TickContext): string | undefined
     return `no live test(), it() or describe() title in ${check} names ${row.id} (a comment, a string elsewhere, or a skipped, todo or only title does not count)`;
   if (tc.results === undefined || (tc.tier !== undefined && inTier(check, tc.tier) === false)) return undefined;
   const mine = tc.results.filter(
-    c => (c.file === '' || c.file === check || c.file.endsWith(`/${check}`)) && namesRow(c.fullName, row.id),
+    c => (c.file === check || c.file.endsWith(`/${check}`)) && namesRow(c.fullName, row.id),
   );
+  // The rule of `guarantees`: a test passed when ANY run of it passed (a quarantined flake rescued on rerun is a pass);
+  // it failed only when no run passed and one failed.
+  if (mine.some(c => c.status === 'passed')) return undefined;
   if (mine.some(c => c.status === 'failed')) return `the test naming ${row.id} FAILED in the results: ${check}`;
-  if (!mine.some(c => c.status === 'passed'))
-    return `no passing run of a test naming ${row.id} in the results (skipped or not run): ${check}`;
-  return undefined;
+  return `no passing run of a test naming ${row.id} in the results (skipped or not run): ${check}`;
 }
 
 /** The reason one ticked row fails, or `undefined`. A route must be proven by a test AND by descriptor-parity. */
@@ -363,6 +317,14 @@ export function tickFindings(
     if (problem === undefined && listed)
       out.push({ check: 'parity-ticks', where: row.id, message: `passes now; remove it from ${KNOWN} and FROZEN_IDS` });
   }
+  // The two sets are equal: an id frozen but no longer listed would let a regression be re-added to the list.
+  for (const id of frozen)
+    if (!known.has(id))
+      out.push({
+        check: 'parity-ticks',
+        where: id,
+        message: `in FROZEN_IDS but not listed in ${KNOWN}: delete it from FROZEN_IDS (the two sets must be equal)`,
+      });
   for (const id of known.keys())
     if (!ticked.has(id))
       out.push({

@@ -51,5 +51,8 @@ bun scripts/ci/unit-timings.ts || status=1
 # the packages still pending, which are skipped by design until then.
 bun scripts/gen/check.ts guarantees --tier unit --results coverage/unit --results coverage/scripts || status=1
 # THE TICK PROOF: every `[x]` parity row names a test that exists AND passed in these same reports (integration.sh judges its own tier).
+# LOAD-BEARING: a row whose test is under tests/integration/ is skipped here by design and judged only by the integration job, which
+# a pull request runs only with the `full-ci` label. Without that label such a tick is not proven by any run; keep the label on
+# the rebuild PR (or run integration.sh) before trusting an integration-tier tick.
 bun scripts/gen/check.ts parity-ticks --tier unit --results coverage/unit --results coverage/scripts || status=1
 exit "${status}"

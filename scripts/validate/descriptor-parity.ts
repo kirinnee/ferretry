@@ -158,6 +158,8 @@ export function readChanges(text: string): Map<string, { change: string; reason:
       reason.trim() === ''
     )
       throw new Error(`${PARITY_CHANGES}: "${line}" is not table<TAB>key<TAB>change<TAB>reason`);
+    if (out.has(`${table}\t${key}`))
+      throw new Error(`${PARITY_CHANGES}: ${table} ${key} is recorded twice (a later line would shadow the first)`);
     out.set(`${table}\t${key}`, { change, reason });
   }
   return out;

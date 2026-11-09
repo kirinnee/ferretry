@@ -12,6 +12,10 @@
  * `refuses every request` and `not ported`, and it names the lines of those markers the handler FILE carries
  * ("maybe", the handler may reach a stub through a helper). It also reads `ports-pending.json`'s reasons for the
  * route's path. A route whose key is not a literal (built by a helper) says so.
+ *
+ * `no-marker` means ONLY that no marker sits in the handler window and its file: it is NOT "works". A stub reached
+ * through a helper or a default port shows as `no-marker`, so `TRACED_STUBS` seeds the rows a review traced by hand to
+ * always refuse (they are `stub` whatever the scan says). Delete a row from it when its handler is wired.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -33,8 +37,36 @@ export const ROUTES_DOC = 'docs/design/rebuild-parity-routes.md';
 const MARKER = /\bpending\(|\w*Pending\b|\bunavailable\w*|\bGAP\(|refuses every request|not ported|is pending/;
 const NEXT_KEY = /^\s*'(?:GET|POST|PUT|PATCH|DELETE|WS) \//;
 
+/** Rows a review traced to a handler that always refuses (or answers a degraded "nothing usable"), by id. */
+export const TRACED_STUBS: Readonly<Record<string, string>> = {
+  'R-0145': 'conversation host: compact-at get/set are pending() (503 conversation_terminal_unavailable)',
+  'R-0226': 'conversation host: compact-at get/set are pending() (503 conversation_terminal_unavailable)',
+  'R-0367': 'conversation host: send cancel is pending()',
+  'R-0368': 'conversation host: send enter (submit) is pending()',
+  'R-0369': 'conversation host: send retry is pending()',
+  'R-0339': 'conversation host: composer is pending()',
+  'R-0153': 'conversation host: handoffs read is pending()',
+  'R-0345': 'ferrets session-handover refuses every request until its seams land',
+  'R-0171': 'runtimes ferret-runtime: unavailableFerretRuntime is never replaced in the assembly',
+  'R-0365': 'runtimes ferret-runtime: unavailableFerretRuntime is never replaced in the assembly',
+  'R-0302': 'lessons miner: minerFolder is never wired (503 miner_unavailable)',
+  'R-0301': 'lessons miner: spawn:true calls folderFor, which throws unavailable (LESSONS_MINER_GAP)',
+  'R-0311': 'packs: the guide-file write throws 503 config_write_unavailable',
+  'R-0313': 'packs: the guide-file write throws 503 config_write_unavailable',
+  'R-0312': 'packs: cleanup home is undefined, so the cleanup is refused',
+  'R-0158': 'conversation reading: transcripts is harnessPending (503)',
+  'R-0159': 'conversation reading: transcripts is harnessPending (503)',
+  'R-0160': 'conversation reading: transcripts is harnessPending (503)',
+  'R-0163': 'conversation reading: transcripts is harnessPending (503)',
+  'R-0098': 'conversation reading: harnesses is harnessPending (503)',
+  'R-0099': 'conversation reading: harnesses is harnessPending (503)',
+  'R-0115': 'packs: no runtime facts, so "no model is usable now" (degraded)',
+  'R-0310': 'packs: no runtime facts, so "no model is usable now" (degraded)',
+  'R-0424': 'kernel events socket: ports-pending GAP(kernel), ported but not mounted',
+};
+
 export interface Handler {
-  readonly verdict: 'stub' | 'maybe' | 'ok' | 'not-found' | 'no-route';
+  readonly verdict: 'stub' | 'maybe' | 'no-marker' | 'not-found' | 'no-route';
   readonly text: string;
 }
 
@@ -66,7 +98,7 @@ export function scanHandler(
           verdict: 'maybe',
           text: `${file.rel}:${at + 1}; the file carries pending/GAP markers at ${marks.slice(0, 6).join(', ')}`,
         }
-      : { verdict: 'ok', text: `${file.rel}:${at + 1}` };
+      : { verdict: 'no-marker', text: `${file.rel}:${at + 1}` };
   }
   // The key is built by a helper: look for the route's last literal segment (`compact-at`, `cancel`) beside a marker.
   const word = path
@@ -131,7 +163,7 @@ export async function report(root: string): Promise<string> {
     // The 5.0 route: the same key, or the one it moved to.
     const now = movedKey(row, world, table);
     const s = now === undefined ? undefined : (owner.get(`${table}\t${now}`) ?? owner.get(`member\t${now}`));
-    const handler: Handler =
+    let handler: Handler =
       now === undefined || s === undefined
         ? { verdict: 'no-route', text: 'no single 5.0 route derivable, so no handler to scan' }
         : scanHandler(now, filesOf(s), pendingReasons[s.id] ?? []);
@@ -140,6 +172,8 @@ export async function report(root: string): Promise<string> {
       count.not++;
       why.set(status.kind, (why.get(status.kind) ?? 0) + 1);
     }
+    const traced = TRACED_STUBS[row.id];
+    if (traced !== undefined) handler = { verdict: 'stub', text: `traced by review: ${traced}` };
     if (handler.verdict === 'stub') count.stub++;
     if (handler.verdict === 'maybe') count.maybe++;
     const state = status.kind === 'proven' ? 'descriptor proven' : `not proven (${status.kind}): ${status.text}`;
@@ -155,7 +189,8 @@ export async function report(root: string): Promise<string> {
     'Descriptor parity is NECESSARY, never sufficient: a route row is `[x]` only with a route test that drives the real handler',
     'through the host and whose title names the row id (enforced by `scripts/validate/parity-ticks.ts`). Use this report to see',
     'which open routes are stubs (`stub`: a pending or GAP refusal in the handler; `maybe`: the handler file carries a marker, or',
-    '`ports-pending.json` names the route) before spending a batch on them.',
+    '`ports-pending.json` names the route; a row a review traced by hand is a `stub` too) before spending a batch on them.',
+    '`no-marker` means only that the scan found no marker: it does NOT mean the handler works.',
     '',
     `Open route rows: ${rows.length}. Descriptor proven: ${count.proven}. Not proven: ${count.not}${
       [...why].length > 0
