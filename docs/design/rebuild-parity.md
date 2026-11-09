@@ -25,16 +25,16 @@ Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.j
 <!-- prettier-ignore -->
 | 5.0 owner | R | V | T | S | J | F | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| kernel | 12 | 30 | 3 | 19 | 54 | 62 | 180 |
+| kernel | 10 | 30 | 3 | 19 | 54 | 62 | 178 |
 | gate | 3 | 10 | 0 | 10 | 2 | 15 | 40 |
 | vault | 14 | 37 | 1 | 7 | 6 | 6 | 71 |
-| ferrets | 56 | 54 | 1 | 42 | 18 | 44 | 215 |
+| ferrets | 57 | 54 | 1 | 42 | 18 | 44 | 216 |
 | asks | 14 | 1 | 0 | 0 | 12 | 18 | 45 |
 | access | 29 | 8 | 0 | 13 | 2 | 13 | 65 |
 | connections | 5 | 4 | 0 | 7 | 22 | 3 | 41 |
 | updates | 5 | 1 | 0 | 13 | 5 | 7 | 31 |
 | terminals | 17 | 14 | 8 | 8 | 17 | 10 | 74 |
-| browsers | 10 | 64 | 29 | 12 | 23 | 12 | 150 |
+| browsers | 11 | 64 | 29 | 12 | 23 | 12 | 151 |
 | claude-code | 0 | 4 | 0 | 3 | 1 | 2 | 10 |
 | codex | 0 | 0 | 0 | 0 | 1 | 7 | 8 |
 | logins | 11 | 18 | 0 | 8 | 13 | 10 | 60 |
@@ -86,7 +86,7 @@ None.
 
 No unresolved Commander declarations.
 
-## kernel (180)
+## kernel (178)
 
 <!-- prettier-ignore -->
 | id | Kind | Today | Today’s source | Today’s module | 5.0 owner package | 5.0 name | Descriptor / detail | Check to add | Status |
@@ -208,17 +208,15 @@ No unresolved Commander declarations.
 | J-0266 | J | timer/watcher timers.setTimeout in watchConfigFiles.poll; cadence=options.debounceMs ?? CONFIG_WATCH_DEBOUNCE_MS; action=settle | packages/daemon/src/lib/config-files/watcher.ts:110 | config-files | packages/core/kernel | timer/watcher timers.setTimeout in watchConfigFiles.poll; cadence=options.debounceMs ?? CONFIG_WATCH_DEBOUNCE_MS; action=settle | call=timers.setTimeout(settle, options.debounceMs ?? CONFIG_WATCH_DEBOUNCE_MS); callback=settle; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/core/kernel/tests/unit/parity/jobs.test.ts | [x] |
 | J-0270 | J | timer/watcher watch in nodePrimitives.watch; cadence={ persistent: false }; action=directory | packages/daemon/src/adapters/file-events/bun-file-event-source.ts:20 | file-events | packages/core/kernel | timer/watcher watch in nodePrimitives.watch; cadence={ persistent: false }; action=directory | call=watch(directory, { persistent: false }, () =&gt; onEvent()); callback=directory; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/core/kernel/tests/unit/parity/jobs.test.ts | [ ] |
 | R-0036 | R | GET /healthz | packages/daemon/src/lib/api/routes/health.ts:128 | api | packages/core/kernel | GET /healthz | minimum=none; caller=any; capability=none; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
-| R-0072 | R | GET /v1/config/file | packages/daemon/src/lib/runtime/mounts/config-files.ts:366 | config-files | packages/core/kernel | GET /v1/config/file | minimum=operator; caller=any; capability={"capability":"fleet","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
-| R-0073 | R | GET /v1/config/status | packages/daemon/src/lib/runtime/mounts/config-files.ts:357 | config-files | packages/core/kernel | GET /v1/config/status | minimum=operator; caller=any; capability={"capability":"fleet","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
-| R-0081 | R | GET /v1/doctor | packages/daemon/src/lib/runtime/mounts/doctor.ts:12 | doctor | packages/core/kernel | GET /v1/doctor | minimum=operator; caller=any; capability=none; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
+| R-0072 | R | GET /v1/config/file | packages/daemon/src/lib/runtime/mounts/config-files.ts:366 | config-files | packages/core/kernel | GET /v1/config/file | minimum=operator; caller=any; capability={"capability":"fleet","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | packages/core/kernel/tests/unit/host-config/config-routes-host.test.ts | [x] |
+| R-0073 | R | GET /v1/config/status | packages/daemon/src/lib/runtime/mounts/config-files.ts:357 | config-files | packages/core/kernel | GET /v1/config/status | minimum=operator; caller=any; capability={"capability":"fleet","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | packages/core/kernel/tests/unit/host/agent-config-door.test.ts | [x] |
+| R-0081 | R | GET /v1/doctor | packages/daemon/src/lib/runtime/mounts/doctor.ts:12 | doctor | packages/core/kernel | GET /v1/doctor | minimum=operator; caller=any; capability=none; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | packages/core/kernel/tests/unit/host/doctor-route.test.ts | [x] |
 | R-0097 | R | GET /v1/health | packages/daemon/src/lib/runtime/mounts/health.ts:167 | health | packages/core/kernel | GET /v1/health | minimum=none; caller=any; capability=none; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
 | R-0201 | R | GET /v1/tasks | packages/daemon/src/lib/runtime/mounts/legacy-tasks.ts:34 | legacy-tasks | packages/core/kernel | GET /v1/tasks | minimum=operator; caller=any; capability=none; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | removed by design (§9.1, §9.2: per-ferret tasks/old readers) |
-| R-0244 | R | POST /v1/agent/config | packages/daemon/src/lib/runtime/mounts/config-files.ts:397 | config-files | packages/core/kernel | POST /v1/agent/config | minimum=none; caller=any; capability=none; privilegedOnly=true; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
-| R-0246 | R | POST /v1/agent/tools | packages/daemon/src/lib/runtime/mounts/agent-tools.ts:306 | agent-tools | packages/core/kernel | POST /v1/agent/tools | minimum=none; caller=any; capability=none; privilegedOnly=true; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
-| R-0274 | R | POST /v1/config/confirm | packages/daemon/src/lib/runtime/mounts/config-files.ts:388 | config-files | packages/core/kernel | POST /v1/config/confirm | minimum=operator; caller=person; capability={"capability":"fleet","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
-| R-0401 | R | POST /v1/system/open-url | packages/daemon/src/lib/runtime/mounts/system-open.ts:29 | system-open | packages/core/kernel | POST /v1/system/open-url | minimum=operator; caller=any; capability=none; privilegedOnly=true; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
-| R-0419 | R | PUT /v1/config/file | packages/daemon/src/lib/runtime/mounts/config-files.ts:378 | config-files | packages/core/kernel | PUT /v1/config/file | minimum=operator; caller=person; capability={"capability":"fleet","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
-| R-0424 | R | WS GET /v1/events | packages/daemon/src/lib/runtime/mounts/fleet-events.ts:121 | fleet-events | packages/core/kernel | WS GET /v1/events | minimum=operator; caller=any; capability=none; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
+| R-0244 | R | POST /v1/agent/config | packages/daemon/src/lib/runtime/mounts/config-files.ts:397 | config-files | packages/core/kernel | POST /v1/agent/config | minimum=none; caller=any; capability=none; privilegedOnly=true; unlockExempt=false; wardenRemedy=none | packages/core/kernel/tests/unit/host/agent-config-door.test.ts | [x] |
+| R-0246 | R | POST /v1/agent/tools | packages/daemon/src/lib/runtime/mounts/agent-tools.ts:306 | agent-tools | packages/core/kernel | POST /v1/agent/tools | minimum=none; caller=any; capability=none; privilegedOnly=true; unlockExempt=false; wardenRemedy=none | packages/core/kernel/tests/unit/host/agent-tools-route.test.ts | [x] |
+| R-0274 | R | POST /v1/config/confirm | packages/daemon/src/lib/runtime/mounts/config-files.ts:388 | config-files | packages/core/kernel | POST /v1/config/confirm | minimum=operator; caller=person; capability={"capability":"fleet","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | packages/core/kernel/tests/unit/host-config/config-routes-host.test.ts | [x] |
+| R-0419 | R | PUT /v1/config/file | packages/daemon/src/lib/runtime/mounts/config-files.ts:378 | config-files | packages/core/kernel | PUT /v1/config/file | minimum=operator; caller=person; capability={"capability":"fleet","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | packages/core/kernel/tests/unit/host-config/config-routes-host.test.ts | [x] |
 | S-0067 | S | component ConfigFilesPanel | packages/pwa/src/features/config-files/config-files-settings.tsx:255 | config-files | packages/core/kernel | component ConfigFilesPanel | UI declaration; feature/shell surface | packages/core/kernel/tests/unit/parity/app.test.tsx | [ ] |
 | S-0068 | S | component ConfigFilesSurface | packages/pwa/src/features/config-files/config-files-settings.tsx:616 | config-files | packages/core/kernel | component ConfigFilesSurface | UI declaration; feature/shell surface | packages/core/kernel/tests/unit/parity/app.test.tsx | [ ] |
 | S-0107 | S | component GrantsPanel | packages/pwa/src/features/settings/daemon-settings-frame.tsx:307 | settings | packages/core/kernel | component GrantsPanel | UI declaration; settings surface | packages/core/kernel/tests/unit/parity/app.test.tsx | [ ] |
@@ -395,7 +393,7 @@ No unresolved Commander declarations.
 | V-0428 | V | fy secret set &lt;name&gt; | packages/cli/src/lib/secrets/commands.ts:60 | secrets | packages/core/vault | fy secret set &lt;name&gt; | store or replace a secret, reading its VALUE from stdin; flags (including inherited): --as-owner; -h, --help; -v, --version | packages/core/vault/tests/unit/parity/commands.test.ts | [ ] |
 | V-0429 | V | fy secret use &lt;command...&gt; | packages/cli/src/lib/secrets/commands.ts:75 | secrets | packages/core/vault | fy secret use &lt;command...&gt; | run a command with secrets in ITS environment; output comes back masked; flags (including inherited): --as-owner; --cwd &lt;path&gt;; --json; --timeout &lt;ms&gt;; -h, --help; -v, --version; -w, --with &lt;name...&gt; | packages/core/vault/tests/unit/parity/commands.test.ts | [ ] |
 
-## ferrets (215)
+## ferrets (216)
 
 <!-- prettier-ignore -->
 | id | Kind | Today | Today’s source | Today’s module | 5.0 owner package | 5.0 name | Descriptor / detail | Check to add | Status |
@@ -518,6 +516,7 @@ No unresolved Commander declarations.
 | R-0382 | R | POST /v1/sessions/:sessionId/unpin | packages/daemon/src/lib/runtime/mounts/session-pin.ts:54 | session-pin | packages/core/ferrets | POST /v1/ferrets/:sessionId/unpin | minimum=operator; caller=person; capability=none; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
 | R-0410 | R | POST /v1/worktrees | packages/daemon/src/lib/runtime/mounts/worktrees.ts:156 | worktrees | packages/core/ferrets | POST /v1/worktrees | minimum=operator; caller=any; capability={"capability":"filesystem","axis":"configure"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
 | R-0411 | R | POST /v1/worktrees/remove | packages/daemon/src/lib/runtime/mounts/worktrees.ts:138 | worktrees | packages/core/ferrets | POST /v1/worktrees/remove | minimum=operator; caller=any; capability={"capability":"filesystem","axis":"configure"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
+| R-0424 | R | WS GET /v1/events | packages/daemon/src/lib/runtime/mounts/fleet-events.ts:121 | fleet-events | packages/core/ferrets | WS GET /v1/events | minimum=operator; caller=any; capability=none; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
 | S-0006 | S | component ActionDrawer | packages/pwa/src/features/session-actions/action-drawer.tsx:18 | session-actions | packages/core/ferrets | component ActionDrawer | UI declaration; feature/shell surface | packages/core/ferrets/tests/unit/parity/app.test.tsx | [ ] |
 | S-0008 | S | component ActionsMenu | packages/pwa/src/features/session-actions/actions-menu.tsx:64 | session-actions | packages/core/ferrets | component ActionsMenu | UI declaration; feature/shell surface | packages/core/ferrets/tests/unit/parity/app.test.tsx | [ ] |
 | S-0074 | S | component ContextActionsMenu | packages/pwa/src/features/session-actions/context-actions-menu.tsx:69 | session-actions | packages/core/ferrets | component ContextActionsMenu | UI declaration; feature/shell surface | packages/core/ferrets/tests/unit/parity/app.test.tsx | [ ] |
@@ -902,7 +901,7 @@ No unresolved Commander declarations.
 | V-0492 | V | fy terminal takeover &lt;name&gt; | packages/cli/src/lib/agent-tools/commands.ts:124 | agent-tools | packages/plugins/terminals | fy terminal takeover &lt;name&gt; | take a terminal over from the agent: its tools are refused there until you hand it back; flags (including inherited): --as-owner; -h, --help; -s, --session &lt;id&gt;; -v, --version | packages/plugins/terminals/tests/unit/parity/commands.test.ts | [ ] |
 | V-0493 | V | fy terminal wait &lt;name&gt; | packages/cli/src/lib/agent-tools/commands.ts:124 | agent-tools | packages/plugins/terminals | fy terminal wait &lt;name&gt; | wait until text appears or the running command ends; exits 1 on timeout; flags (including inherited): --as-owner; --exit; --text &lt;text&gt;; -h, --help; -s, --session &lt;id&gt;; -t, --timeout &lt;ms&gt;; -v, --version | packages/plugins/terminals/tests/unit/parity/commands.test.ts | [ ] |
 
-## browsers (150)
+## browsers (151)
 
 <!-- prettier-ignore -->
 | id | Kind | Today | Today’s source | Today’s module | 5.0 owner package | 5.0 name | Descriptor / detail | Check to add | Status |
@@ -951,6 +950,7 @@ No unresolved Commander declarations.
 | R-0338 | R | POST /v1/sessions/:sessionId/browser | packages/daemon/src/lib/runtime/mounts/browser-login.ts:150 | browser-login | packages/plugins/browsers | POST /v1/ferrets/:sessionId/browser | minimum=operator; caller=any; capability={"capability":"browser","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
 | R-0373 | R | POST /v1/sessions/:sessionId/surfaces/browser/control | packages/daemon/src/lib/runtime/mounts/agent-tools.ts:351 | agent-tools | packages/plugins/browsers | POST /v1/ferrets/:sessionId/surfaces/browser/control | minimum=operator; caller=person; capability={"capability":"browser","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
 | R-0374 | R | POST /v1/sessions/:sessionId/surfaces/browser/tools | packages/daemon/src/lib/runtime/mounts/agent-tools.ts:342 | agent-tools | packages/plugins/browsers | POST /v1/ferrets/:sessionId/surfaces/browser/tools | minimum=operator; caller=person; capability={"capability":"browser","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
+| R-0401 | R | POST /v1/system/open-url | packages/daemon/src/lib/runtime/mounts/system-open.ts:29 | system-open | packages/plugins/browsers | POST /v1/system/open-url | minimum=operator; caller=any; capability=none; privilegedOnly=true; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
 | R-0426 | R | WS GET /v1/sessions/:sessionId/browser/stream | packages/daemon/src/lib/runtime/mounts/browser-login.ts:209 | browser-login | packages/plugins/browsers | WS GET /v1/ferrets/:sessionId/browser/stream | minimum=operator; caller=any; capability={"capability":"browser","axis":"use"}; privilegedOnly=false; unlockExempt=false; wardenRemedy=none | descriptor-parity | [ ] |
 | S-0043 | S | component BrowserModeSection | packages/pwa/src/features/fleet/machine/browser-mode-section.tsx:22 | fleet | packages/plugins/browsers | component BrowserModeSection | UI declaration; feature/shell surface | packages/plugins/browsers/tests/unit/parity/app.test.tsx | [ ] |
 | S-0044 | S | component BrowserProxySection | packages/pwa/src/features/fleet/machine/browser-proxy-section.tsx:26 | fleet | packages/plugins/browsers | component BrowserProxySection | UI declaration; feature/shell surface | packages/plugins/browsers/tests/unit/parity/app.test.tsx | [ ] |
