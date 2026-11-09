@@ -96,6 +96,38 @@ async function setSentence(kase: Case): Promise<string> {
   return outcome.issues[0]?.message ?? '';
 }
 
+describe('BG-012 m-1: the owner’s held-edit path refuses a target that became unreadable after the edit was held', () => {
+  for (const kase of CASES) {
+    test(`${kase.name}: a held removal, the path planted before the next reload, then the owner writes`, async () => {
+      const home = await mkdtemp(join(tmpdir(), 'fy-kernel-unreadable-held-'));
+      homes.push(home);
+      await mkdir(join(home, 'config'), { recursive: true });
+      const path = join(home, 'config', 'updates.yaml');
+      const files = createConfigFiles({
+        home,
+        fs: createNodeHostFs(),
+        clock: manualClock(),
+        log: captureLog(),
+        binary: 'fy',
+        defs: [{ plugin: 'updates', def: updatesDef }],
+      });
+      await files.reload();
+      expect((await files.write('updates', updatesDef, undefined, 'limit: 5\n')).kind).toBe('applied');
+      // Removing a file is an edit to its defaults (limit 10 > 5): a loosening, so the removal is held for the owner.
+      expect((await files.remove('updates', updatesDef, undefined)).kind).toBe('held');
+      expect(files.held()).toHaveLength(1);
+      // The path is something the kernel cannot read before any reload sees it.
+      const same = await kase.plant(path, home);
+      const before = await same();
+
+      const outcome = await files.writeAsOwner('updates', updatesDef, undefined, { patch: { limit: 7 } });
+
+      expect(outcome.kind === 'refused' && outcome.reason).toBe('unreadable');
+      expect(await same()).toBe(before);
+    });
+  }
+});
+
 const PINS: readonly (string | undefined)[] = ['absent', undefined];
 const pinName = (pin: string | undefined): string => (pin === undefined ? 'no ifMatch' : `ifMatch ${pin}`);
 
