@@ -30,8 +30,10 @@ import { LIBC } from './directory-syscalls.ts';
  *
  * VARIADIC `mode`. Apple's arm64 ABI passes the variadic arguments of a C call on the STACK, where this binding puts
  * `mode` in a register: a file `openat` creates (`O_CREAT`) can therefore get an arbitrary mode. The caller never
- * relies on it: the descriptor is `fchmod`ed to the exact mode before any content is written, and the file is empty,
- * owned by this process and not yet linked anywhere until then.
+ * relies on it: the descriptor is `fchmod`ed to the exact mode before any content is written. The file IS named in the
+ * target folder from the moment `openat` returns until then, so the create runs under an owner-only umask
+ * (`createOwnerOnly` in `descriptor-folder.ts`): whatever mode the kernel reads, no other user's bits survive, and the
+ * file is empty until the `fchmod`.
  *
  * A symbol this process cannot load makes `loadDescriptorCalls` THROW one sentence (see `refusalSentence`): the
  * caller keeps today's `no_descriptor_reach` refusal and the host boots; nothing is ever loaded at import time.

@@ -63,6 +63,25 @@ export const fstatOf = (fd: number): Promise<BigIntStats> =>
 
 const closeOf = (fd: number): Promise<void> => settle(done => close(fd, done));
 
+/**
+ * Runs the one synchronous create `make` under a process umask of `0o077`, restored in the same synchronous block.
+ *
+ * Why: on an Apple arm64 host the C call's variadic `mode` is read from a stack slot this binding does not fill, so a
+ * created file can get ANY mode (see `descriptor-calls.ts`), and it is named in the folder from the moment `openat`
+ * returns, until the `fchmod` that follows. A umask can only clear bits: under `0o077` whatever mode the kernel read
+ * leaves at most the owner's bits, so no other user can open the file in that window. There is no `await` between the
+ * set and the restore, so nothing else in this single-threaded process can create a file under the tighter umask, and
+ * the restore runs when `make` throws too.
+ */
+function createOwnerOnly(make: () => number): number {
+  const before = process.umask(0o077);
+  try {
+    return make();
+  } finally {
+    process.umask(before);
+  }
+}
+
 /** The folder a step must reach, refused `EBADF` (as the kernel would) when the descriptor no longer names it. */
 async function proveHeld(verb: string, ...folders: readonly HeldFolder[]): Promise<void> {
   for (const folder of folders) {
@@ -118,13 +137,13 @@ export function folderSteps(
     identity: look,
     writeNew: async (leaf, data, mode) => {
       await proveHeld('create', folder);
-      const fd = calls.openat(folder.fd, leaf, CREATE, mode);
+      const fd = createOwnerOnly(() => calls.openat(folder.fd, leaf, CREATE, mode));
       let created: HeldIdentity | undefined;
       let closed = false;
       try {
         created = await identityOf(fd);
         // exactly the asked bits, before any content: the mode `openat` was given is filtered by the umask (and on an
-        // arm64 Mac is not read reliably at all, see `descriptor-calls.ts`)
+        // arm64 Mac is not read reliably at all: the create above ran under an owner-only umask, see `createOwnerOnly`)
         await settle(done => fchmod(fd, mode, done));
         const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
         for (let written = 0; written < bytes.byteLength; )

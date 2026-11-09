@@ -70,6 +70,44 @@ const watched = (inner: DescriptorCalls, before: Before): DescriptorCalls => ({
   },
 });
 
+/** What a create looked like when it happened: the umask in force during `openat`, and the new file's mode right after it. */
+interface Seen {
+  readonly umasks: number[];
+  readonly modes: number[];
+}
+
+/**
+ * Wraps `inner` to observe every CREATE. `ignoreMode` makes the call pass that mode whatever it was asked (an Apple
+ * arm64 host reads the variadic mode from a stack slot the binding does not fill: the file gets an arbitrary one);
+ * `failCreate` makes the create throw that errno code.
+ */
+const recording = (
+  inner: DescriptorCalls,
+  options: { readonly ignoreMode?: number; readonly failCreate?: string },
+  seen: Seen,
+): DescriptorCalls => ({
+  ...inner,
+  openat: (fd, name, flags, mode) => {
+    if (!creates('openat', [fd, name, flags])) return inner.openat(fd, name, flags, mode);
+    seen.umasks.push(process.umask());
+    if (options.failCreate !== undefined)
+      throw Object.assign(new Error(`${options.failCreate}: open`), { code: options.failCreate });
+    const created = inner.openat(fd, name, flags, options.ignoreMode ?? mode);
+    seen.modes.push(fstatSync(created).mode & 0o777);
+    return created;
+  },
+});
+
+/** Runs `act` with the process umask set to `mask`, put back after (the wider the umask-free case, the harder the test). */
+async function withUmask(mask: number, act: () => Promise<unknown>): Promise<void> {
+  const before = process.umask(mask);
+  try {
+    await act();
+  } finally {
+    process.umask(before);
+  }
+}
+
 const PROVIDERS: readonly (readonly [string, () => DescriptorCalls])[] = [
   ['stand-in', standIn],
   ['libc', () => loadDescriptorCalls()],
@@ -436,6 +474,53 @@ for (const [provider, make] of PROVIDERS) {
       expect(await readFile(`${f.dir}/settings.json`, 'utf8')).toBe('{"a":1}');
       expect(((await lstat(`${f.dir}/settings.json`)).mode & 0o7777).toString(8)).toBe('640');
       expect(await readdir(f.dir)).toEqual(['settings.json']);
+    });
+  });
+
+  describe(`BG-003 the temp file is never open to another user while it is created [${provider}]`, () => {
+    test('BG-003 a create whose mode is ignored (an arbitrary 0o777) is still owner-only at the create, and exact after the fchmod', async () => {
+      const seen: Seen = { umasks: [], modes: [] };
+      const f = await fresh(() => recording(make(), { ignoreMode: 0o777 }, seen));
+      await withUmask(0o000, () =>
+        f.fleet.writeText(at(f.fleet, 'homes/claude-a/settings.json'), '{"a":1}', { mode: 0o644 }),
+      );
+      expect(seen.modes.length).toBe(1);
+      // nothing another user could open: no group or other bit at the moment the name exists
+      for (const mode of seen.modes) expect(mode & 0o077).toBe(0);
+      expect(((await lstat(`${f.dir}/settings.json`)).mode & 0o7777).toString(8)).toBe('644');
+      expect(await readdir(f.dir)).toEqual(['settings.json']);
+    });
+
+    test('BG-003 a wide requested mode is applied by the fchmod only after the create, never by the create itself', async () => {
+      const seen: Seen = { umasks: [], modes: [] };
+      const f = await fresh(() => recording(make(), {}, seen));
+      await withUmask(0o000, () =>
+        f.fleet.writeText(at(f.fleet, 'homes/claude-a/wide.json'), 'W', { mode: 0o666, exclusive: true }),
+      );
+      expect(seen.umasks).toEqual([0o077]);
+      for (const mode of seen.modes) expect(mode & 0o077).toBe(0);
+      expect(((await lstat(`${f.dir}/wide.json`)).mode & 0o7777).toString(8)).toBe('666');
+    });
+
+    test('BG-003 the process umask is back to what it was after a create and after a create that throws', async () => {
+      const seen: Seen = { umasks: [], modes: [] };
+      const f = await fresh(() => recording(make(), { failCreate: 'ENOSPC' }, seen));
+      await withUmask(0o022, async () => {
+        const refused = await f.fleet.writeText(at(f.fleet, 'homes/claude-a/a.json'), 'A').then(
+          () => 'written',
+          () => 'refused',
+        );
+        expect(refused).toBe('refused');
+        expect(process.umask()).toBe(0o022);
+      });
+      expect(seen.umasks).toEqual([0o077]);
+      const ok: Seen = { umasks: [], modes: [] };
+      const g = await fresh(() => recording(make(), {}, ok));
+      await withUmask(0o027, async () => {
+        await g.fleet.writeText(at(g.fleet, 'homes/claude-a/b.json'), 'B');
+        expect(process.umask()).toBe(0o027);
+      });
+      expect(ok.umasks).toEqual([0o077]);
     });
   });
 }
