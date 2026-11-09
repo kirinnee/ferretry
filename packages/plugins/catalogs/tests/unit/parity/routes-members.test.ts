@@ -95,8 +95,29 @@ describe('the share and member routes', () => {
     const listed = await fx.host.request('GET', '/v1/catalog-members', { as: ferret });
     expect(listed.status).toBe(200);
     expect(listed.json()).toMatchObject({ members: [{ label: 'Alice', keys: [expect.anything()] }] });
+    await joinWith(
+      fx,
+      await browser(),
+      (await mintShare(fx, { catalogIds: [catalog], member: { kind: 'new', label: 'Bob' } })).code,
+    );
+    expect(listed.json<{ members: unknown[] }>().members).toHaveLength(1);
+    expect((await fx.host.request('GET', '/v1/catalog-members')).json<{ members: unknown[] }>().members).toHaveLength(
+      2,
+    );
     const byName = await fx.host.request('GET', '/v1/catalog-members', { query: { name: 'Alice' } });
     expect(byName.status).toBe(200);
+    // The by-name answer says WHO holds that name: Alice's id, not Bob's, and nobody for a name no one holds.
+    const everyone = byName.json<{ members: { label: string; memberId: string }[]; match?: string }>();
+    expect(everyone.match).toBe(everyone.members.find(member => member.label === 'Alice')?.memberId);
+    expect(everyone.match).toBeDefined();
+    const bob = (await fx.host.request('GET', '/v1/catalog-members', { query: { name: 'Bob' } })).json<{
+      match?: string;
+    }>().match;
+    expect(bob).toBeDefined();
+    expect(bob).not.toBe(everyone.match);
+    const nobody = await fx.host.request('GET', '/v1/catalog-members', { query: { name: 'Nobody' } });
+    expect(nobody.status).toBe(200);
+    expect(nobody.json<{ match?: string }>().match).toBeUndefined();
     expect((await fx.host.request('GET', '/v1/catalog-members', { query: { who: 'x' } })).status).toBe(400);
   });
 
@@ -144,10 +165,18 @@ describe('the share and member routes', () => {
     const who = await browser();
     const joined = await joinWith(fx, who, (await mintShare(fx, { catalogIds: [catalog] })).code);
     const end = await memberSession(fx, who, joined.keyId);
+    const second = await mintShare(fx, {
+      catalogIds: [catalog],
+      member: { kind: 'existing', memberId: joined.memberId },
+    });
     const gone = await fx.host.request('DELETE', `/v1/catalog-members/${joined.memberId}`);
     expect(gone.status).toBe(200);
     await end.pump();
     expect(end.end?.code).toBeDefined();
+    // Their open share ends with them: its code opens nothing now.
+    const late = await fx.open().handshake();
+    await late.join(await browser(), second.code);
+    expect(late.records[0]?.message.t).not.toBe('joined');
     expect(await members(fx)).toEqual([]);
     expect((await fx.host.request('DELETE', `/v1/catalog-members/${joined.memberId}`)).status).toBe(404);
   });
@@ -180,11 +209,13 @@ describe('the member routes, over a member session', () => {
     expect(manifest.body).toMatchObject({ sig: expect.any(String), manifest: { catalogId: catalog } });
     const versions = await end.ask('GET', `/v1/shared/catalogs/${catalog}/items/${itemId}/versions`);
     expect(versions.status).toBe(200);
+    expect(JSON.stringify(versions.body)).toContain('"sig"');
+    expect(JSON.stringify(versions.body)).toContain(itemId);
     const frozen = await end.ask('GET', `/v1/shared/catalogs/${catalog}/items/${itemId}/1`);
     expect(frozen.status).toBe(200);
     expect(frozen.body).toMatchObject({ itemId, itemVersion: 1 });
     const stranger = await end.ask('GET', `/v1/shared/catalogs/cat_${'z'.repeat(22)}/manifest`);
-    expect(stranger.status).toBeGreaterThanOrEqual(400);
+    expect(stranger.status).toBe(404);
   });
 
   test('R-0385 POST /v1/shared/redeem adds the catalogs of a code the owner made for this member', async () => {
