@@ -444,11 +444,25 @@ export type ComponentKind = z.infer<typeof ComponentKindSchema>;
 const ComponentFileSchema = NonEmptyString;
 
 /** Instructions (generic, K2): one document, optionally narrowed to one harness (K3). */
-const InstructionsComponentSchema = z.strictObject({
-  file: ComponentFileSchema,
-  harness: HarnessKindSchema.optional(),
-  ...CLONE_ORIGIN_SHAPE,
-});
+const InstructionsComponentSchema = z
+  .strictObject({
+    /** The document in the asset tree. */
+    file: ComponentFileSchema.optional(),
+    /** The document itself, as Runtimes' own `config/instructions/<name>.yaml` holds it. A component has a `file` or a `text`. */
+    text: NonEmptyString.optional(),
+    harness: HarnessKindSchema.optional(),
+    ...CLONE_ORIGIN_SHAPE,
+  })
+  .check(ctx => {
+    if ((ctx.value.file === undefined) === (ctx.value.text === undefined)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'an instructions component needs exactly one of "file" (a document) or "text" (the document itself)',
+        input: ctx.value,
+        path: [],
+      });
+    }
+  });
 export type InstructionsComponent = z.infer<typeof InstructionsComponentSchema>;
 
 /**
@@ -580,16 +594,34 @@ const SettingsComponentSchema = z
   .strictObject({
     harness: HarnessKindSchema,
     file: ComponentFileSchema.optional(),
+    /**
+     * The settings document itself, as the plugin that owns the component projects it (the profile component source):
+     * parsed data rather than a file in the asset tree. A component has a `file` or a `document`, not both.
+     */
+    document: z.record(z.string(), z.unknown()).optional(),
     flags: z.array(NonEmptyString).min(1).optional(),
     env: EnvSchema.optional(),
     ...CLONE_ORIGIN_SHAPE,
   })
   .check(ctx => {
     const settings = ctx.value;
-    if (settings.file === undefined && settings.flags === undefined && settings.env === undefined) {
+    if (settings.file !== undefined && settings.document !== undefined) {
       ctx.issues.push({
         code: 'custom',
-        message: 'a settings component needs at least one of "file", "flags" or "env"',
+        message: 'a settings component has a "file" or a "document", not both',
+        input: settings,
+        path: [],
+      });
+    }
+    if (
+      settings.file === undefined &&
+      settings.document === undefined &&
+      settings.flags === undefined &&
+      settings.env === undefined
+    ) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'a settings component needs at least one of "file", "document", "flags" or "env"',
         input: settings,
         path: [],
       });
@@ -606,14 +638,18 @@ const HooksComponentSchema = z
     harness: HarnessKindSchema,
     file: ComponentFileSchema.optional(),
     directory: ComponentFileSchema.optional(),
+    /** The hooks document itself, as the plugin that owns the component projects it: parsed data, not a file. */
+    document: z.record(z.string(), z.unknown()).optional(),
     ...CLONE_ORIGIN_SHAPE,
   })
   .check(ctx => {
     const hooks = ctx.value;
-    if ((hooks.file === undefined) === (hooks.directory === undefined)) {
+    const given = [hooks.file, hooks.directory, hooks.document].filter(part => part !== undefined).length;
+    if (given !== 1) {
       ctx.issues.push({
         code: 'custom',
-        message: 'a hooks component needs exactly one of "file" (a hooks document) or "directory" (hook scripts)',
+        message:
+          'a hooks component needs exactly one of "file" (a hooks document), "directory" (hook scripts) or "document" (a hooks document given as data)',
         input: hooks,
         path: [],
       });
@@ -655,6 +691,28 @@ export type ModelSetComponent = z.infer<typeof ModelSetComponentSchema>;
 
 /** The component name grammar: safe as a path component, and never containing the layer separator. */
 const ComponentNameSchema = SafeNameSchema;
+
+const FOREIGN_COMPONENT_SCHEMAS = {
+  instructions: InstructionsComponentSchema,
+  mcp: McpComponentSchema,
+  skills: SkillsComponentSchema,
+  settings: SettingsComponentSchema,
+  hooks: HooksComponentSchema,
+} as const;
+
+/**
+ * Checks one component of a kind another plugin owns, as that plugin projected it, before it joins the model. Names the
+ * rules it broke and never echoes a value.
+ */
+export function parseForeignComponent(
+  kind: keyof typeof FOREIGN_COMPONENT_SCHEMAS,
+  value: unknown,
+): { readonly ok: true; readonly component: unknown } | { readonly ok: false; readonly issues: readonly string[] } {
+  const parsed = FOREIGN_COMPONENT_SCHEMAS[kind].safeParse(value);
+  return parsed.success
+    ? { ok: true, component: parsed.data }
+    : { ok: false, issues: parsed.error.issues.map(issue => issue.message) };
+}
 
 const ComponentsSchema = z
   .strictObject({

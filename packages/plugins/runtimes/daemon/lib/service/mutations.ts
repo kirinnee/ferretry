@@ -32,6 +32,7 @@ import type { HarnessKind } from '../manifest.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { skillSourceReference } from '../account/adapt.ts';
 import { slugName } from '../account/document.ts';
+import { holdsControlCharacter, INSTRUCTIONS_TEXT_LIMIT } from '../../../contract/index.ts';
 import type {
   AccountChange as WireAccountChange,
   AgentControl,
@@ -317,9 +318,19 @@ function componentBody(
   const existingEnv = existing?.env as Readonly<Record<string, string>> | undefined;
   const harness = 'harness' in input && input.harness !== undefined ? { harness: input.harness } : {};
   switch (input.kind) {
-    case 'instructions':
-      if (file === undefined) refuse(`${owner} needs its text`);
-      return { component: { file, ...harness }, ...(written === undefined ? {} : { file: written }) };
+    case 'instructions': {
+      // Runtimes' own kind: the text is kept in the item itself, so an edit writes no document beside it.
+      const text = given ?? (typeof existing?.text === 'string' ? existing.text : undefined);
+      // An item imported from a document keeps pointing at it when only its fields change.
+      if (text === undefined && keptFile !== undefined) return { component: { file: keptFile, ...harness } };
+      const held = text ?? refuse(`${owner} needs its text`);
+      // Refused here, when it is proposed, so nothing is written under a sentence that says nothing was changed.
+      if (held.length > INSTRUCTIONS_TEXT_LIMIT)
+        refuse(`${owner} is longer than ${String(INSTRUCTIONS_TEXT_LIMIT)} characters`);
+      if (holdsControlCharacter(held))
+        refuse(`${owner} holds a control character (NUL or another, besides tab and line breaks)`);
+      return { component: { text: held, ...harness } };
+    }
     case 'mcp': {
       const env = resolvedEnv(input.env, existingEnv, owner);
       return {

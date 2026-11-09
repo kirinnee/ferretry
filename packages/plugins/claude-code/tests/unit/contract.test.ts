@@ -16,7 +16,12 @@ describe('claude-code contract', () => {
       'POST /v1/ferrets/:ferretId/permission',
       'POST /v1/ferrets/:ferretId/dialog',
     ]);
-    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['harnesses', 'start.decide']);
+    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
+      'harnesses',
+      'start.decide',
+      'runtimes.components.settings.claude',
+      'runtimes.components.hooks.claude',
+    ]);
   });
 
   test('G31 (declaration only) the permission answer is terminal/use, a person act, audited as input and never with the choice', () => {

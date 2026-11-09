@@ -11,6 +11,7 @@ import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { type Document, isMap, isScalar, LineCounter, parseDocument, type YAMLMap } from 'yaml';
 import { V4InputError } from './documents.ts';
+import type { V4ConfigOverrides, V4Paths } from './layout.ts';
 
 /** The singleton files at the top of `config/` (`SINGLETON_FILES`). */
 export const V4_SINGLETONS = {
@@ -49,7 +50,33 @@ export interface V4ConfigFile {
   /** Relative to the v4 home, e.g. `config/runtimes/claude-work.yaml`: how every message names it. */
   readonly label: string;
   readonly path: string;
+  /** The text to read instead of the file on disk (an override, see {@link V4ConfigOverrides}); the disk is not touched. */
+  readonly text?: string;
 }
+
+/**
+ * One config file as the steps read it: with its override text when the run has one for that label. The ONE place a step
+ * names a config file it did not find by listing (Packs, Lessons).
+ */
+export const v4ConfigFile = (v4: V4Paths, address: V4ConfigAddress, label: string): V4ConfigFile => {
+  const text = v4.configOverrides?.get(label);
+  return { address, label, path: join(v4.home, label), ...(typeof text === 'string' ? { text } : {}) };
+};
+
+/** `undefined`: no override for the label (read the disk); `null`: it reads as absent; else the text it reads as. */
+export const v4ConfigOverride = (v4: V4Paths, label: string): string | null | undefined =>
+  v4.configOverrides?.get(label);
+
+const bySegments = (a: V4ConfigFile, b: V4ConfigFile): number => {
+  const left = a.label.split('/');
+  const right = b.label.split('/');
+  for (let n = 0; n < Math.min(left.length, right.length); n++) {
+    const l = left[n] as string;
+    const r = right[n] as string;
+    if (l !== r) return l < r ? -1 : 1;
+  }
+  return left.length - right.length;
+};
 
 /** v4's `MAX_CONFIG_FILE_BYTES` (`packages/daemon/src/adapters/config-files/files.ts`): a bigger file never loaded. */
 const MAX_BYTES = 256 * 1024;
@@ -101,7 +128,7 @@ export interface V4ConfigListing {
  * Every file under `config/`, sorted. A link is never followed (v4 refused one too) and `.schema/` (generated editor
  * schemas, rebuilt by v5) is skipped whole. `config/daemon.json` and `config/routing.json` are not YAML config kinds.
  */
-export async function listV4Config(home: string): Promise<V4ConfigListing> {
+export async function listV4Config(home: string, overrides?: V4ConfigOverrides): Promise<V4ConfigListing> {
   const root = join(home, 'config');
   const files: V4ConfigFile[] = [];
   const ignored: string[] = [];
@@ -127,7 +154,22 @@ export async function listV4Config(home: string): Promise<V4ConfigListing> {
     }
   };
   await visit(root);
-  return { files, ignored };
+  if (overrides === undefined || overrides.size === 0) return { files, ignored };
+  // The overrides (in memory) replace, remove or restore a file; every other file is the disk's, listed above.
+  const byLabel = new Map(files.map(file => [file.label, file]));
+  let added = false;
+  for (const [label, text] of overrides) {
+    if (text === null) {
+      byLabel.delete(label);
+      continue;
+    }
+    const address = classifyV4ConfigPath(relative('config', label));
+    if (address === undefined) continue;
+    added ||= !byLabel.has(label);
+    byLabel.set(label, { address, label, path: join(home, label), text });
+  }
+  const merged = [...byLabel.values()];
+  return { files: added ? merged.sort(bySegments) : merged, ignored };
 }
 
 /** YAML 1.2's core schema with unique keys: how v4 and v5 both read a config file. */
@@ -138,6 +180,11 @@ export const YAML_OPTIONS = { version: '1.2', uniqueKeys: true, prettyErrors: fa
  * Refuses a link, a folder, an oversized file, a syntax error (located by line only) and a non-mapping body.
  */
 export async function readV4Yaml(file: V4ConfigFile): Promise<Document> {
+  if (file.text !== undefined) {
+    if (Buffer.byteLength(file.text, 'utf8') > MAX_BYTES)
+      throw new V4InputError(`${file.label}: is larger than v4's 256 KiB limit`);
+    return parseV4Yaml(file.label, file.text);
+  }
   const facts = await lstat(file.path).catch(() => {
     throw new V4InputError(`${file.label}: cannot be inspected`);
   });

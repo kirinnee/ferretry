@@ -533,11 +533,11 @@ describe('component.put', () => {
     ...over,
   });
 
-  it('should add an instructions component and write its document into the asset tree', () => {
+  it('should add an instructions component that keeps its text in its own item', () => {
     const edit = derive(put({ kind: 'instructions' }, { content: '# hi' }));
     should(edit.summary).equal('Add instructions fresh');
-    should(edit.files).eql([{ file: 'components/instructions/fresh.md', content: '# hi' }]);
-    should(edit.model.components.instructions.fresh).containEql({ file: 'components/instructions/fresh.md' });
+    should(edit.files).eql([]);
+    should(edit.model.components.instructions.fresh).containEql({ text: '# hi' });
   });
 
   it('should refuse instructions with no text, and keep the file an existing one has when only fields change', () => {

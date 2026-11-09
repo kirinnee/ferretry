@@ -37,6 +37,7 @@ import { CREDENTIAL_LIST_FRESH_MS, FleetCredentialsService } from './lib/credent
 import { CredentialStatusService } from './lib/credentials/credential-status.ts';
 import { HarnessLoginService } from './lib/harness-login/service.ts';
 import { loginKinds } from './lib/kinds.ts';
+import { environmentTemplates } from './lib/profile-templates.ts';
 import { ModelCatalogService } from './lib/models/service.ts';
 import { PublishedModelCatalogService } from './lib/models/published.ts';
 import { modelCatalogsView, type PublishedCatalogState } from './lib/models/view.ts';
@@ -216,6 +217,9 @@ export function buildLoginsDaemon() {
 
       const api: Omit<LoginsApi, 'authorizeFetch'> = {
         list: () => credentials.list(),
+        // Read live from each login's own file, kept nowhere: Runtimes asks on every read of its model.
+        environmentTemplates: async () =>
+          environmentTemplates(files(), id => config.fileState(LOGINS_CONFIG, id).state),
         get: async id => (await credentials.list()).logins.find(login => login.id === id),
         quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
         presets: () => credentials.presets(),

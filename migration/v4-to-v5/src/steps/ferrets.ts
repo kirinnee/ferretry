@@ -6,8 +6,9 @@ import {
   FerretTokensSchema,
 } from '@ferretry/core-ferrets/contract';
 import { join } from 'node:path';
-import type { StepReport } from '../report.ts';
-import { rewriteTranscript } from '../v5/harness-paths.ts';
+import type { NotCarried, StepReport } from '../report.ts';
+import { CODEX_HELD_SENTENCE, heldRuntimeNames, holdsCodex } from './preview-hold.ts';
+import { previewFolder, rewriteTranscript } from '../v5/harness-paths.ts';
 import { configs, json, paneFor, runtimeIds, runtimeName, State } from '../v4/ferrets.ts';
 import type { Step } from './index.ts';
 import { type DetailsSource, prepareDetails } from './ferret-details.ts';
@@ -90,7 +91,37 @@ export const ferretsStep: Step = {
     try {
       const records = [];
       const ids = await runtimeIds(ctx.v4.fleet);
-      const sourceRecords = await configs(ctx.v4.sessions);
+      const runtimeOf = (config: { readonly agent: string }): string => {
+        const name = runtimeName(config.agent);
+        return (
+          Object.entries(ids?.runtimes ?? {}).find(
+            ([current, value]) => current === name || value.formerNames.includes(name),
+          )?.[0] ?? name
+        );
+      };
+      // The preview holds every ferret that is not a Claude Code one (or sits on a held runtime): no record, details
+      // or token row. It would be a Codex ferret again the day a Codex login is added.
+      const heldRuntimes = await heldRuntimeNames(ctx);
+      const held: NotCarried[] = [];
+      const heldIds = new Set<string>();
+      const sourceRecords = (await configs(ctx.v4.sessions)).filter(config => {
+        if (!holdsCodex(ctx)) return true;
+        const isCodex = config.harness !== 'claude';
+        if (!isCodex && !heldRuntimes.has(runtimeOf(config))) return true;
+        held.push({
+          what: `ferret ${config.id} (${isCodex ? 'Codex' : `on the held runtime ${runtimeOf(config)}`})`,
+          why: CODEX_HELD_SENTENCE,
+        });
+        heldIds.add(config.id);
+        return false;
+      });
+      // A carried helper may name a lead that was held out: its `parent` then dangles. Harmless for v4 reach, but said.
+      for (const config of sourceRecords)
+        if (config.parent !== undefined && heldIds.has(config.parent))
+          held.push({
+            what: `ferret ${config.id} (a helper whose parent ${config.parent} is held out of the preview)`,
+            why: `its parent field names ${config.parent}, which is not in the preview, so the link dangles`,
+          });
       const ledgers = await prepareLedgers(ctx, sourceRecords);
       const details: DetailsSource[] = [];
       const tokens: { ferret: string; digest: string; issuedAt: string; revoked?: true; cutOff?: true }[] = [];
@@ -101,11 +132,8 @@ export const ferretsStep: Step = {
         const status = state?.status;
         const stopped =
           status === undefined || ['completed', 'failed', 'stalled', 'stopped', 'interrupted'].includes(status);
-        const name = runtimeName(config.agent);
-        const runtime =
-          Object.entries(ids?.runtimes ?? {}).find(
-            ([current, value]) => current === name || value.formerNames.includes(name),
-          )?.[0] ?? name;
+        const runtime = runtimeOf(config);
+        const preview = ctx.preview === true;
         const record = FerretRecordSchema.parse({
           format: 1,
           id: config.id,
@@ -115,34 +143,37 @@ export const ferretsStep: Step = {
           harness: config.harness === 'claude' ? 'claude-code' : 'codex',
           runner: 'tmux',
           runtime,
-          folder: config.cwd,
-          state: stopped
-            ? 'stopped'
-            : status === 'created' || status === 'starting'
-              ? 'starting'
-              : ['awaiting_user', 'awaiting_question', 'waiting', 'rate_limited'].includes(status ?? '')
-                ? 'idle'
-                : 'working',
-          harnessConversation: config.transcript?.harnessSessionId,
+          folder: previewFolder(ctx, config.cwd, ledgers.worktreeFolders),
+          state:
+            stopped || preview
+              ? 'stopped'
+              : status === 'created' || status === 'starting'
+                ? 'starting'
+                : ['awaiting_user', 'awaiting_question', 'waiting', 'rate_limited'].includes(status ?? '')
+                  ? 'idle'
+                  : 'working',
+          harnessConversation: preview ? undefined : config.transcript?.harnessSessionId,
           transcript:
-            config.transcript === undefined
+            config.transcript === undefined || preview
               ? undefined
               : rewriteTranscript(ctx, config.harness, config.transcript, ids),
           provenance: config.provenance,
           transferredFrom: config.transferredFrom,
           projectId: config.projectId,
-          handle: pane?.paneId,
+          handle: preview ? undefined : pane?.paneId,
           createdAt: config.createdAt,
           stateAt: state?.finishedAt ?? state?.lastActivityAt ?? state?.startedAt ?? config.updatedAt,
         });
         records.push(record);
-        details.push({ config, runtime, transcript: record.transcript, stopped });
+        details.push({ config, runtime, transcript: record.transcript, stopped: stopped || preview });
         // M4: v4 hashes the full fys_ bearer with SHA-256, exactly the v5 token contract.
         // v4 has no issuance timestamp; creation is the known lower bound, not conversion time.
         // A person's cut-off (v4 `credentialRevoked`) is v5's `cutOff`. v4 drops the hash when it cuts a ferret off,
         // so there is often no hash to mark: write the same placeholder row v5's own `cutOff()` writes
         // (packages/core/ferrets/daemon/lib/tokens/tokens.ts), so the ferret is never relaunched until a person
         // resumes it. Dropping the mark would silently lift the cut-off.
+        // The preview carries no token ledger: every live v4 pane holds the plaintext of its row's hash.
+        if (preview) continue;
         if (config.credentialRevoked === true)
           tokens.push({
             ferret: config.id,
@@ -171,7 +202,7 @@ export const ferretsStep: Step = {
       return {
         ...base,
         status: 'converted',
-        notCarried: [...this.notCarried, ...documents.notCarried],
+        notCarried: [...this.notCarried, ...held, ...documents.notCarried],
         kept: [
           { what: 'ferret records (including archived sessions)', count: records.length },
           { what: 'ferret credential hashes', count: tokens.length },

@@ -30,22 +30,10 @@
  * file is read back as the v5 kernel reads it and parsed with the declared schema BEFORE anything is written. A value
  * that looks like a raw secret fails the step naming the file and key; `${secret:NAME}` references are kept verbatim.
  */
-import { CODEX_CONFIG } from '@ferretry/plugin-codex/contract';
-import { CLAUDE_CODE_CONFIG } from '@ferretry/plugin-claude-code/contract';
-import { INSTRUCTION_ITEMS_FOLDER, LimitsConfigFile } from '@ferretry/core-ferrets/contract';
-import { AccountsConfigSchema } from '@ferretry/plugin-accounts/contract';
-import { AGENDA_CONFIG } from '@ferretry/plugin-agenda/contract';
-import { BrowsersConfigSchema } from '@ferretry/plugin-browsers/contract';
-import { CONVERSATION_CONFIG } from '@ferretry/plugin-conversation/contract';
-import { ENDPOINTS_CONFIG, LOGINS_CONFIG, MODELS_CONFIG } from '@ferretry/plugin-logins/contract';
-import { MCP_CONFIG } from '@ferretry/plugin-mcp/contract';
-import { MODEL_SET_ITEMS, PROFILE_ITEMS, RUNTIME_ITEMS, RUNTIMES_CONFIG } from '@ferretry/plugin-runtimes/contract';
-import { SKILLS_CONFIG } from '@ferretry/plugin-skills/contract';
-import { USAGE_CONFIG } from '@ferretry/plugin-usage/contract';
-import { WardenFileSchema } from '@ferretry/plugin-warden/contract';
+import { INSTRUCTION_ITEMS_FOLDER } from '@ferretry/core-ferrets/contract';
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, sep } from 'node:path';
-import { Document, isMap, isScalar, isSeq, type Pair, type YAMLMap } from 'yaml';
+import { Document, isMap, isScalar, isSeq, Pair, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
   dropModeline,
@@ -57,15 +45,37 @@ import {
   YAML_OPTIONS,
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
+import { CODEX_HELD_SENTENCE, PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
 import { takeLoginKeys, v4VaultNames } from './login-keys.ts';
 
-/** v5 files declared in a plugin MANIFEST (not its contract): restated with the file name and the contract's schema. */
-const WARDEN_CONFIG: V5ConfigTarget = { shape: 'file', file: 'warden.yaml', schema: WardenFileSchema };
-const ACCOUNTS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'accounts.yaml', schema: AccountsConfigSchema };
-const BROWSERS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'browsers.yaml', schema: BrowsersConfigSchema };
+/** Every v5 file this step writes, with its owning plugin, from the one registry of targets. */
+const {
+  WARDEN: WARDEN_CONFIG,
+  ACCOUNTS: ACCOUNTS_CONFIG,
+  BROWSERS: BROWSERS_CONFIG,
+  TERMINALS: TERMINALS_CONFIG,
+  CODEX: CODEX_CONFIG,
+  CODEX_SETTINGS,
+  CLAUDE_CODE: CLAUDE_CODE_CONFIG,
+  CLAUDE_CODE_SETTINGS,
+  LIMITS: LimitsConfigFile,
+  AGENDA: AGENDA_CONFIG,
+  CONVERSATION: CONVERSATION_CONFIG,
+  ENDPOINTS: ENDPOINTS_CONFIG,
+  LOGINS: LOGINS_CONFIG,
+  MODELS: MODELS_CONFIG,
+  MCP: MCP_CONFIG,
+  MODEL_SET_ITEMS,
+  PROFILE_ITEMS,
+  RUNTIME_ITEMS,
+  RUNTIMES: RUNTIMES_CONFIG,
+  SKILLS: SKILLS_CONFIG,
+  USAGE: USAGE_CONFIG,
+} = CONFIG_TARGETS;
 
 /** v4's `LEGACY_TRIAGE_LAYERS` and `DEFAULT_WARDEN_JEV_ACTS` (`packages/protocol/src/lib/warden.ts`). */
 const LEGACY_TRIAGE_LAYERS: Readonly<Record<string, { jev: boolean; llm: boolean }>> = {
@@ -183,6 +193,18 @@ const contents = (document: Document): YAMLMap => document.contents as YAMLMap;
 
 // ── the plan ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** The `from` of a file the preview itself creates (its header says so instead of "Carried from v4"). */
+export const PREVIEW_AUTHOR = 'the preview';
+
+/** Writes `key: value` into a planned file (made if absent), replacing whatever v4 said for that key. */
+function forceFlag(plan: Plan, target: V5ConfigTarget, key: string, value: boolean): void {
+  const planned = place(plan, target, undefined, PREVIEW_AUTHOR);
+  if (!isMap(planned.document.contents)) planned.document.contents = planned.document.createNode({}) as YAMLMap;
+  const map = contents(planned.document);
+  take(map, key);
+  map.items.push(new Pair(key, value));
+}
+
 function place(plan: Plan, target: V5ConfigTarget, name: string | undefined, from: string, document?: Document) {
   const path = configPath(target, name);
   const existing = plan.files.get(path);
@@ -197,7 +219,10 @@ function place(plan: Plan, target: V5ConfigTarget, name: string | undefined, fro
     document:
       document ??
       Object.assign(new Document({}, YAML_OPTIONS), {
-        commentBefore: ` Carried from v4 ${from} by the v4 → v5 converter.`,
+        commentBefore:
+          from === PREVIEW_AUTHOR
+            ? ' Written by the 5.0 preview (not carried from v4).'
+            : ` Carried from v4 ${from} by the v4 → v5 converter.`,
       }),
     from: new Set([from]),
   };
@@ -430,7 +455,11 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
   }
 }
 
-async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: readonly string[] }> {
+/** `codexRuntimes` is {@link PREVIEW_CODEX_RUNTIMES}; a test injects the switch on to see the Codex settings item. */
+export async function buildPlan(
+  ctx: StepContext,
+  codexRuntimes: boolean = PREVIEW_CODEX_RUNTIMES,
+): Promise<Plan & { readonly ignored: readonly string[] }> {
   let ids: Awaited<ReturnType<typeof runtimeIds>>;
   try {
     ids = await runtimeIds(ctx.v4.fleet);
@@ -441,13 +470,122 @@ async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: r
     ids?.runtimes[name] !== undefined
       ? name
       : (Object.entries(ids?.runtimes ?? {}).find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
-  const listing = await listV4Config(ctx.v4.home);
+  const listing = await listV4Config(ctx.v4.home, ctx.v4.configOverrides);
   const plan: Plan = { files: new Map(), instructions: [], waiting: [], dropped: [], kept: new Map() };
   // machine.yaml last: it adds to files other v4 files may also own (limits.yaml).
   const machine = `config/${V4_SINGLETONS.machine}`;
   const ordered = [...listing.files].sort((a, b) => Number(a.label === machine) - Number(b.label === machine));
   for (const file of ordered) await planFile(ctx, plan, file, resolve);
+  if (ctx.preview === true) {
+    // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say). `limits.yaml` is
+    // written off too, but NOTHING relies on it: 5.0 does not read that file for launches (Ferrets offers no
+    // `effectiveLimits`), so what keeps the preview off v4's systemd slices is its daemon having no reachable user
+    // systemd manager (preview/driver.ts `wrapperText`, checked by `preview.sh start`).
+    forceFlag(plan, RUNTIMES_CONFIG, 'autoResume', false);
+    forceFlag(plan, LimitsConfigFile, 'enabled', false);
+    if (ctx.previewShellEnv !== undefined) {
+      // Login shells re-prepend the nix profile (v4's `fy`): every preview ferret's shell environment carries the guard.
+      // 5.0's runtime and profile files are strict and hold no `env` (RuntimeFileSchema, ProfileFileSchema), so the only
+      // places a converted home can carry an environment are the two harnesses' settings items: Claude Code's
+      // `settings.env`, and Codex's own `shell_environment_policy.set` (Codex adds those variables to every command it
+      // runs). PATH is not written: a settings environment is literal and cannot say "this first, then yours".
+      const describe =
+        'The 5.0 preview: keeps login shells on the preview fy (written by the preview, not carried from v4)';
+      place(
+        plan,
+        CLAUDE_CODE_SETTINGS,
+        PREVIEW_SETTINGS_ITEM,
+        PREVIEW_AUTHOR,
+        new Document({ description: describe, settings: { env: { ...ctx.previewShellEnv } } }, YAML_OPTIONS),
+      );
+      count(plan, 'preview shell environment (settings item)');
+      // Terminals the daemon opens (the owner's web terminal and a ferret's) are not a harness child: they get only the
+      // kernel's {PATH, HOME}, so the same environment is Terminals' own `environment`, passed to every terminal.
+      place(
+        plan,
+        TERMINALS_CONFIG,
+        undefined,
+        PREVIEW_AUTHOR,
+        new Document({ environment: { ...ctx.previewShellEnv } }, YAML_OPTIONS),
+      );
+      count(plan, 'preview terminal environment (terminals.yaml)');
+      // What Codex ferrets will need once 5.0 applies Codex settings items; written only with the switch on.
+      if (codexRuntimes) {
+        place(
+          plan,
+          CODEX_SETTINGS,
+          PREVIEW_SETTINGS_ITEM,
+          PREVIEW_AUTHOR,
+          new Document(
+            { description: describe, settings: { shell_environment_policy: { set: { ...ctx.previewShellEnv } } } },
+            YAML_OPTIONS,
+          ),
+        );
+        count(plan, 'preview shell environment (settings item)');
+      }
+    }
+    if (!codexRuntimes) holdCodexRuntimes(plan);
+  }
   return { ...plan, ignored: listing.ignored };
+}
+
+const uncount = (plan: Plan, what: string): void => {
+  const left = (plan.kept.get(what) ?? 0) - 1;
+  if (left > 0) plan.kept.set(what, left);
+  else plan.kept.delete(what);
+};
+
+const scalarOf = (map: YAMLMap, key: string): string | undefined => {
+  const value = pairOf(map, key)?.value;
+  return isScalar(value) && typeof value.value === 'string' ? value.value : undefined;
+};
+
+/**
+ * Preview only: leaves out every runtime that is not provably a Claude Code one, and every profile that only such
+ * runtimes use. Only a runtime whose own file says `harness: claude` is kept: the preview leaves every v4 login out and
+ * the owner adds logins fresh, so a runtime that does not say can become a Codex one the day its login is added.
+ * Each held runtime is listed by NAME.
+ */
+function holdCodexRuntimes(plan: Plan): void {
+  const planned = [...plan.files.entries()];
+  const held = new Set<string>();
+  const profilesOf = new Map<string, { held: number; kept: number }>();
+  for (const [path, file] of planned) {
+    if (file.target !== RUNTIME_ITEMS || file.name === undefined || !isMap(file.document.contents)) continue;
+    const map = file.document.contents;
+    const harness = scalarOf(map, 'harness');
+    const profile = scalarOf(map, 'profile');
+    const isHeld = harness !== 'claude-code';
+    if (profile !== undefined) {
+      const tally = profilesOf.get(profile) ?? { held: 0, kept: 0 };
+      if (isHeld) tally.held++;
+      else tally.kept++;
+      profilesOf.set(profile, tally);
+    }
+    if (!isHeld) continue;
+    held.add(file.name);
+    plan.files.delete(path);
+    uncount(plan, 'runtimes');
+    plan.dropped.push({
+      what: `runtime ${file.name}${harness === undefined ? ' (its file does not say which harness; the preview has no logins to tell)' : ' (Codex)'}`,
+      why: CODEX_HELD_SENTENCE,
+    });
+  }
+  for (const [path, file] of planned) {
+    if (file.target !== PROFILE_ITEMS || file.name === undefined) continue;
+    const tally = profilesOf.get(file.name);
+    if (tally === undefined || tally.kept > 0 || tally.held === 0) continue;
+    plan.files.delete(path);
+    uncount(plan, 'profiles');
+    plan.dropped.push({ what: `profile ${file.name} (used only by held runtimes)`, why: CODEX_HELD_SENTENCE });
+  }
+  for (const [, file] of planned) {
+    if (file.target !== RUNTIMES_CONFIG || !isMap(file.document.contents)) continue;
+    const chosen = scalarOf(file.document.contents, 'defaultRuntime');
+    if (chosen === undefined || !held.has(chosen)) continue;
+    take(file.document.contents, 'defaultRuntime');
+    plan.dropped.push({ what: `defaultRuntime ${chosen}`, why: CODEX_HELD_SENTENCE });
+  }
 }
 
 export const settingsStep: Step = {
@@ -490,7 +628,9 @@ export const settingsStep: Step = {
           throw new V4InputError(`${[...planned.from].join(' + ')}: v5 refuses it as ${path}: ${problem}`);
       }
       for (const planned of plan.files.values())
-        await ctx.v5.config(planned.target, planned.name, planned.document.toString({ lineWidth: 0 }));
+        await ctx.v5.config(planned.target, planned.name, planned.document.toString({ lineWidth: 0 }), [
+          ...planned.from,
+        ]);
       for (const item of plan.instructions) {
         const bytes = await readFile(item.source).catch(() => {
           throw new V4InputError(`${item.from}: its document cannot be read`);
