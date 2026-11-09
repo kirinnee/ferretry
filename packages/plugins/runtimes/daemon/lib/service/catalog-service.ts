@@ -638,6 +638,10 @@ export class FleetCatalogService {
    * from a model an earlier apply has since changed: run beside that apply it would pass, and its plan would then
    * prune what the first one added.
    */
+  async serialise<T>(act: () => Promise<T>): Promise<T> {
+    return await this.#exclusively(act);
+  }
+
   async #exclusively<T>(act: () => Promise<T>): Promise<T> {
     const run = this.#applyTail.then(act, act);
     this.#applyTail = run.then(

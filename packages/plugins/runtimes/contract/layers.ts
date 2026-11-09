@@ -4,7 +4,26 @@
  * when an item is installed or removed. The item is the owner's to write first; Runtimes only edits the profile files
  * that name it, through its own config writer, so no plugin ever writes another plugin's file.
  */
+import { ITEM_NAME_PATTERN } from './config.ts';
 import type { RuntimeId } from './index.ts';
+
+const LAYER = /^(mcp|skills)\/([\s\S]*)$/u;
+const LAYER_NAME_MAX_CHARACTERS = 64;
+
+/**
+ * Why `layer` is not a layer a caller may add or remove, in words; `undefined` when it is one. The name after the
+ * slash is an ITEM's name, so it follows the one item-name rule ({@link ITEM_NAME_PATTERN}): ASCII letters and digits
+ * joined by single dashes, at most 64 characters. A slash look-alike, a direction override, a zero-width or control
+ * character, a dot or a space is therefore never a layer, however it is spelt.
+ */
+export function layerNameRefusal(layer: string): string | undefined {
+  const match = LAYER.exec(layer);
+  if (match === null) return 'a layer is written mcp/<name> or skills/<name>';
+  const name = match[2] ?? '';
+  if (name.length > LAYER_NAME_MAX_CHARACTERS || !ITEM_NAME_PATTERN.test(name))
+    return `a layer name is letters and digits joined by single dashes, at most ${String(LAYER_NAME_MAX_CHARACTERS)} characters`;
+  return undefined;
+}
 
 /** What a runtime's profile stack names, resolved through `profile/<base>` layers, in layer order (oldest first). */
 export interface RuntimeLayers {

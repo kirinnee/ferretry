@@ -72,6 +72,7 @@ export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(v
       return () => listeners.delete(listener);
     },
     watchState: (): Cancel => () => {},
+    etag: async () => 'absent',
     set: value => {
       current = value;
       for (const listener of listeners) listener();

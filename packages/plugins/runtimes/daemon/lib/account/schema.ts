@@ -32,6 +32,7 @@ import {
 } from '../../../contract/index.ts';
 import { SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
+import { ITEM_NAME_PATTERN } from '../../../contract/config.ts';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { isLoopbackHost } from '../foreign.ts';
 import { HarnessKindSchema } from '../manifest.ts';
@@ -60,10 +61,8 @@ const secureMcpUrl = (url: string): boolean => {
 
 const NonEmptyString = z.string().min(1);
 
-const NAME_GRAMMAR = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
-
 const nameSchema = () =>
-  z.string().max(64).regex(NAME_GRAMMAR, {
+  z.string().max(64).regex(ITEM_NAME_PATTERN, {
     message: 'use only letters, digits and dashes, starting and ending with a letter or digit',
   });
 

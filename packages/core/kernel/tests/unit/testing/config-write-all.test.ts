@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { z } from 'zod';
-import type { ConfigPort, ConfigWriteAllDocument, ConfigWriteAllOutcome } from '../../../contract/ports.ts';
+import type { ConfigEdit, ConfigPort, ConfigWriteAllDocument, ConfigWriteAllOutcome } from '../../../contract/ports.ts';
 import { defineConfig } from '../../../contract/index.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
@@ -99,8 +99,20 @@ const CASES: readonly {
   readonly label: string;
   readonly kind: ConfigWriteAllOutcome['kind'];
   readonly verdict: boolean;
+  /** Edits written one by one BEFORE the set (a loosening under a `false` verdict is held for the owner). */
+  readonly before?: readonly { readonly def: ConfigWriteAllDocument['def']; readonly edit: ConfigEdit }[];
   readonly set: readonly ConfigWriteAllDocument[];
 }[] = [
+  {
+    label: 'a file with an edit already held for the owner refuses the set (already_held), and the held edit stays',
+    kind: 'refused',
+    verdict: false,
+    before: [{ def: limitsDef, edit: 'limit: 50\n' }],
+    set: [
+      { def: itemsDef, name: 'a', edit: 'budget: 1\n' },
+      { def: limitsDef, edit: 'limit: 1\n' },
+    ],
+  },
   {
     label: 'a tightening set is written whole',
     kind: 'written',
@@ -192,9 +204,15 @@ const CASES: readonly {
 ];
 
 test('parity: the testing host answers every writeAll case as the real writer does, with the same value in effect after', async () => {
-  for (const { label, kind, verdict, set } of CASES) {
+  for (const { label, kind, verdict, before = [], set } of CASES) {
     const production = await real(verdict);
     const stand = await testing(verdict);
+    for (const { def, edit } of before) {
+      const prior = await production.config.write(def, undefined, edit);
+      const standIn = await stand.config.write(def, undefined, edit);
+      expect({ label, prior: prior.kind }).toEqual({ label, prior: standIn.kind });
+      expect({ label, prior: prior.kind }).toEqual({ label, prior: 'held' });
+    }
     const realOutcome = await production.config.writeAll(set);
     const testOutcome = await stand.config.writeAll(set);
     expect({ label, kind: realOutcome.kind }).toEqual({ label, kind });

@@ -89,16 +89,20 @@ describe('runtimes contract', () => {
     expect(await fake.resolve()).toMatchObject({ ok: false, refusal: 'unknown' });
   });
 
-  test('R2 the fake answers the profiles and layers a test set, and records a layer change without writing', async () => {
+  test('R2 the fake answers the profiles and layers a test set, edits the profiles it holds, and records every change', async () => {
     const fake = fakeRuntimes();
+    const owner = { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) };
     const layers = { runtime: RuntimeIdSchema.parse('r'), profile: 'p', mcp: ['notes'], skills: [] };
     fake.setProfiles([{ name: 'p', layers: ['mcp/notes'], etag: 'e1' }], [layers]);
     expect(await fake.profiles()).toEqual([{ name: 'p', layers: ['mcp/notes'], etag: 'e1' }]);
     expect(await fake.layers(layers.runtime)).toEqual(layers);
     expect(await fake.layers(RuntimeIdSchema.parse('nope'))).toBeUndefined();
     const change = { kind: 'add', profile: 'p', layer: 'skills/x' } as const;
-    expect(await fake.changeProfileLayers(change)).toEqual({ kind: 'written', profiles: ['p'] });
-    expect(fake.changes).toEqual([change]);
+    expect(await fake.changeProfileLayers(change, owner)).toEqual({ kind: 'written', profiles: ['p'] });
+    expect((await fake.profiles())[0]?.layers).toEqual(['mcp/notes', 'skills/x']);
+    // As the real act: a caller carrying no standing is refused, and nothing changes.
+    expect(await fake.changeProfileLayers(change)).toMatchObject({ kind: 'refused', code: 'fleet_change_refused' });
+    expect(fake.changes).toEqual([change, change]);
   });
 
   test('the conformance suite names each way an implementation can fail it', async () => {
