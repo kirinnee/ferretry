@@ -14,6 +14,7 @@
   "exports": {
     "./contract": "./contract/index.ts",
     "./contract/push-envelope": "./contract/push-envelope.ts",
+    "./contract/hosted-app": "./contract/hosted-app.ts",
     "./contract/notification-filter": "./contract/notification-filter.ts",
     "./manifest": "./manifest/index.ts",
     "./testing": "./testing/index.ts",
