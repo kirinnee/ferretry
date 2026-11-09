@@ -75,22 +75,25 @@ export interface McpLoginRuntime {
   readonly profile: string;
 }
 
-/** A profile as a login add needs it: its name and the layers it names (`mcp/<name>` references among them). */
+/** A profile as a login add needs it: its name, the layers it names (`mcp/<name>` references among them) and its etag. */
 export interface McpLoginProfile {
   readonly name: string;
   readonly layers: readonly string[];
+  /** The profile file's etag as read now; the layer write is refused as a conflict when the file moved since. */
+  readonly etag: string;
 }
 
 /**
- * The runtime half of a login add: the two reviewed changes go through Gate's config route, which is not a port this
- * plugin may import. Reads come from the setup; `putItem` and `layerProfile` are the writes.
+ * The runtime half of a login add: the two reviewed changes. Reads come from Runtimes; `putItem` writes this plugin's
+ * own item file and `layerProfile` asks Runtimes to add ONE `mcp/<name>` layer to one profile, under the caller's own
+ * standing (`governance`, which Runtimes judges: an unknown or insufficient standing is refused with nothing written).
  */
 export interface McpLoginTarget {
   runtime(name: string): Promise<McpLoginRuntime | undefined>;
   profile(name: string): Promise<McpLoginProfile | undefined>;
   hasItem(name: string): Promise<boolean>;
   putItem(name: string, item: McpItem, create: boolean): Promise<void>;
-  layerProfile(profile: string, layers: readonly string[]): Promise<void>;
+  layerProfile(profile: McpLoginProfile, layer: string, governance: unknown): Promise<void>;
 }
 
 export interface SessionMcpServiceDeps {
@@ -223,15 +226,13 @@ export class SessionMcpService {
    * The profile change is skipped when the profile already names the component. If the second is
    * refused the component exists and is not in the profile yet; adding again repeats both halves.
    */
-  async addLogin(sessionId: string, request: SessionMcpPreviewRequest): Promise<SessionMcpAdded> {
+  async addLogin(sessionId: string, request: SessionMcpPreviewRequest, governance?: unknown): Promise<SessionMcpAdded> {
     const session = await this.#session(sessionId);
     refuseServer('login', request.server);
     const { runtime, profile, replaces } = await this.#loginTarget(session, request.name);
     await this.deps.login.putItem(request.name, itemInput(request.server), !replaces);
     const reference = `mcp/${request.name}`;
-    if (!profile.layers.includes(reference)) {
-      await this.deps.login.layerProfile(profile.name, [...profile.layers, reference]);
-    }
+    if (!profile.layers.includes(reference)) await this.deps.login.layerProfile(profile, reference, governance);
     return { scope: 'login', name: request.name, runtime: runtime.name, profile: profile.name };
   }
 

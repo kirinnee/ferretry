@@ -4,7 +4,7 @@ import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferre
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
-import { PROFILE_COMPONENTS_KEY, ProfileMcpSource } from '@ferretry/plugin-runtimes/contract';
+import { PROFILE_COMPONENTS_KEY, ProfileMcpSource, RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import {
   MCP_AUDIT,
   MCP_CONFIG,
@@ -47,7 +47,7 @@ export default definePlugin({
   // (no project server bound) and each folder its own project. Codex is not asked: its answer is always `not-taken`
   // (today handed a Codex launch nothing), so MCP answers that itself, whether or not Codex's daemon half is built.
   // Neither uses MCP, so the graph stays acyclic.
-  uses: { claudeCode: ClaudeCodePort, projects: ProjectsPort },
+  uses: { claudeCode: ClaudeCodePort, projects: ProjectsPort, runtimes: RuntimesPort },
 
   provides: { mcp: McpPort },
 

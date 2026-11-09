@@ -54,7 +54,7 @@ class FakeFiles implements McpProjectFiles {
 
 interface LoginCalls {
   puts: { name: string; item: McpItem; create: boolean }[];
-  layered: { profile: string; layers: readonly string[] }[];
+  layered: { profile: string; etag: string; layer: string; governance: unknown }[];
 }
 
 function login(options: { profiles?: McpLoginProfile[]; items?: string[]; runtimes?: McpLoginRuntime[] } = {}): {
@@ -66,7 +66,7 @@ function login(options: { profiles?: McpLoginProfile[]; items?: string[]; runtim
     { name: 'claude-work', profile: 'work' },
     { name: 'orphan', profile: 'gone' },
   ];
-  const profiles = options.profiles ?? [{ name: 'work', layers: ['instructions/base'] }];
+  const profiles: McpLoginProfile[] = options.profiles ?? [{ name: 'work', layers: ['instructions/base'], etag: ETAG }];
   return {
     calls,
     login: {
@@ -76,8 +76,8 @@ function login(options: { profiles?: McpLoginProfile[]; items?: string[]; runtim
       putItem: async (name, item, create) => {
         calls.puts.push({ name, item, create });
       },
-      layerProfile: async (profile, layers) => {
-        calls.layered.push({ profile, layers });
+      layerProfile: async (profile, layer, governance) => {
+        calls.layered.push({ profile: profile.name, etag: profile.etag, layer, governance });
       },
     },
   };
@@ -279,20 +279,25 @@ describe('adding to the login', () => {
     const { login: target, calls } = login();
     const subject = service({ login: target });
 
-    const added = await subject.addLogin('s1', {
-      name: 'acme',
-      server: { ...COMMAND, env: { TOKEN: secretRef('ACME') } },
-    });
+    const standing = { governed: false };
+    const added = await subject.addLogin(
+      's1',
+      { name: 'acme', server: { ...COMMAND, env: { TOKEN: secretRef('ACME') } } },
+      standing,
+    );
 
     should(added).deepEqual({ scope: 'login', name: 'acme', runtime: 'claude-work', profile: 'work' });
     should(calls.puts).deepEqual([
       { name: 'acme', item: { command: 'npx', args: ['acme'], env: { TOKEN: secretRef('ACME') } }, create: true },
     ]);
-    should(calls.layered).deepEqual([{ profile: 'work', layers: ['instructions/base', 'mcp/acme'] }]);
+    should(calls.layered).deepEqual([{ profile: 'work', etag: ETAG, layer: 'mcp/acme', governance: standing }]);
   });
 
   it('should replace an item the profile already names without touching the profile', async () => {
-    const { login: target, calls } = login({ items: ['acme'], profiles: [{ name: 'work', layers: ['mcp/acme'] }] });
+    const { login: target, calls } = login({
+      items: ['acme'],
+      profiles: [{ name: 'work', layers: ['mcp/acme'], etag: ETAG }],
+    });
     const subject = service({ login: target });
 
     await subject.addLogin('s1', { name: 'acme', server: URL_SERVER });

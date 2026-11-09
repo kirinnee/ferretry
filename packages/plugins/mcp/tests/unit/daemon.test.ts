@@ -16,6 +16,7 @@ test('G177 the daemon refuses project preview and add without a registered-proje
     uses: {
       claudeCode: { current: () => undefined },
       projects: { current: () => undefined },
+      runtimes: { current: () => undefined },
     },
     hooks: {} as never,
     kernel: {

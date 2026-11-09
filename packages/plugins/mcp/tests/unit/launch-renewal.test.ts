@@ -280,6 +280,7 @@ describe('MCP launch renewal through the daemon half', () => {
       uses: {
         claudeCode: { current: () => undefined },
         projects: { current: () => undefined },
+        runtimes: { current: () => undefined },
       },
       hooks: {} as never,
       kernel: {
