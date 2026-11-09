@@ -3,7 +3,7 @@ import { afterAll, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { z } from 'zod';
-import { AdmissionPort } from '../../../contract/bound.ts';
+import { type Admission, AdmissionPort } from '../../../contract/bound.ts';
 import { bootHost } from '../../../host/host.ts';
 import { realAdapters } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon, tool } from '../../../manifest/index.ts';
@@ -55,7 +55,29 @@ const browsers = definePlugin({
   actions: { agentTools: [tool('shared_name', { ...descriptor, summary: 'the other of two' })] },
 });
 
-async function boot() {
+/** Names of the tools whose handler actually ran. */
+const ran: string[] = [];
+
+/** Gate's per-tool answer: admits the route and every tool but the ones named, which it refuses as it refuses a caller with no standing. */
+function refusingTools(refused: ReadonlySet<string>): Admission {
+  const open = recordingAdmission();
+  return {
+    ...open,
+    admit: input =>
+      input.table === 'tool' && refused.has(input.descriptor.path.split('/').at(-1) ?? '')
+        ? {
+            outcome: 'refused',
+            response: {
+              status: 403,
+              headers: new Map(),
+              body: '{"error":"no standing for this tool","code":"forbidden"}',
+            },
+          }
+        : open.admit(input),
+  };
+}
+
+async function boot(admission: Admission = recordingAdmission()) {
   const root = await mkdtemp(`${tmpdir()}/agent-tools-`);
   roots.push(root);
   const home = `${root}/home`;
@@ -68,11 +90,14 @@ async function boot() {
       homeLock: async () => ({ release: async () => {} }),
     },
     implementations: [
-      implementDaemon(gate, { build: () => ({ provides: { admission: recordingAdmission() } }) }),
+      implementDaemon(gate, { build: () => ({ provides: { admission } }) }),
       implementDaemon(terminals, {
         build: () => ({
           tools: {
-            terminal_list: async () => ({ text: 'two terminals', data: { surfaces: [] } }),
+            terminal_list: async () => {
+              ran.push('terminal_list');
+              return { text: 'two terminals', data: { surfaces: [] } };
+            },
             shared_name: async () => ({ text: 'from terminals' }),
           },
         }),
@@ -132,6 +157,28 @@ test('R-0246 a tool input that does not fit its declared schema is the tool’s 
   try {
     const response = await host.dispatch(post(JSON.stringify({ tool: 'terminal_list', input: { extra: 1 } })));
     expect(JSON.parse(response.body)).toMatchObject({ isError: true });
+  } finally {
+    await host.stop();
+  }
+});
+
+test('R-0246 the tool door admits the tool PER TOOL: when Gate refuses the tool’s own declaration the answer is the refusal and the tool never ran', async () => {
+  ran.length = 0;
+  const host = await boot(refusingTools(new Set(['terminal_list'])));
+  try {
+    const refused = await host.dispatch(post(JSON.stringify({ tool: 'terminal_list', input: {} })));
+    expect(JSON.parse(refused.body)).toMatchObject({ isError: true });
+    expect(JSON.parse(refused.body).text).not.toContain('two terminals');
+    expect(ran).toEqual([]);
+    // The same call with nothing refused runs the tool: the refusal above is Gate's answer, not a broken door.
+    const allowed = await boot(refusingTools(new Set()));
+    try {
+      const response = await allowed.dispatch(post(JSON.stringify({ tool: 'terminal_list', input: {} })));
+      expect(JSON.parse(response.body)).toEqual({ text: 'two terminals', data: { surfaces: [] } });
+      expect(ran).toEqual(['terminal_list']);
+    } finally {
+      await allowed.stop();
+    }
   } finally {
     await host.stop();
   }
