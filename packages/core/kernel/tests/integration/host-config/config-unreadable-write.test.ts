@@ -182,6 +182,12 @@ describe('BG-005 a config write refuses a file that is not UTF-8, and leaves its
     expect((await readFile(path)).toString('hex')).toBe(LATIN1.toString('hex'));
   });
 
+  test('a set that only removes it is not refused as unreadable: it replaces no byte', async () => {
+    const { port } = await latin1World();
+    const outcome = await port.writeAll([{ def: updatesDef, edit: { remove: true } }]);
+    expect(outcome.kind === 'refused' && outcome.reason).not.toBe('unreadable');
+  });
+
   test('a removal is not refused: it replaces no byte', async () => {
     const { port } = await latin1World();
     // limit 5 → the default 10 loosens, so the removal is held for the owner: judged like any removal, not refused
