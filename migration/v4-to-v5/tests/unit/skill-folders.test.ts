@@ -57,6 +57,38 @@ test('M1 a hard link in a skill folder to a key file is not copied and is named 
   expect(JSON.stringify(report)).not.toContain(KEY);
 });
 
+test('n1 the step lists the hard-link skip up front, and the file-level skip says only that file is left behind', async () => {
+  const header = skillFoldersStep.notCarried.map(row => row.what).join('|');
+  expect(header).toContain('files with a second hard link inside fleet/assets/skills');
+  await v4('s/SKILL.md', 'FAKE skill\n');
+  await writeFile(join(f.from, 'keep.txt'), 'FAKE', { mode: 0o600 });
+  await link(join(f.from, 'keep.txt'), join(f.from, 'fleet/assets/skills/s/extra.md'));
+  const report = await skillFoldersStep.run(f.ctx());
+  expect(report.notCarried.map(row => row.what)).toContain('skills/s/extra.md');
+  expect(JSON.stringify(report)).toContain('only this file is left behind');
+});
+
+test('n3 a skill whose SKILL.md is a hard link is refused whole by name; its other files and other skills are unaffected', async () => {
+  await writeFile(join(f.from, 'outside.md'), 'FAKE outside\n', { mode: 0o600 });
+  await v4('broken/scripts/run.sh', '#!/bin/sh\necho FAKE\n', 0o700);
+  await v4('broken/notes.md', 'FAKE notes\n');
+  await link(join(f.from, 'outside.md'), join(f.from, 'fleet/assets/skills/broken/SKILL.md'));
+  await v4('fine/SKILL.md', 'FAKE fine\n');
+
+  const report = await skillFoldersStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(await stat(v5('broken')).catch(() => undefined)).toBeUndefined();
+  expect(await readFile(v5('fine/SKILL.md'), 'utf8')).toBe('FAKE fine\n');
+  const row = report.notCarried.find(entry => entry.what === 'skills/broken');
+  expect(row?.why).toContain('SKILL.md is a hard link (v4 refused it');
+  expect(row?.why).toContain('not carried at all');
+  expect(report.kept).toContainEqual({ what: 'skill folders', count: 1 });
+  expect(JSON.stringify(report)).not.toContain('FAKE');
+  // A dry run names the same skill and writes nothing.
+  const dry = await skillFoldersStep.run(f.ctx(true));
+  expect(dry.notCarried.map(entry => entry.what)).toContain('skills/broken');
+});
+
 test('no asset tree converts to nothing; a dry run writes nothing', async () => {
   expect((await skillFoldersStep.run(f.ctx())).status).toBe('converted');
   await v4('review/SKILL.md', 'FAKE\n');

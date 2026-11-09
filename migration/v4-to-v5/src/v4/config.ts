@@ -11,6 +11,7 @@ import { constants } from 'node:fs';
 import { lstat, open, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { type Document, isMap, isScalar, LineCounter, parseDocument, type YAMLMap } from 'yaml';
+import { pathSegment } from '../key-path.ts';
 import { V4InputError } from './documents.ts';
 import type { V4ConfigOverrides, V4Paths } from './layout.ts';
 
@@ -338,7 +339,7 @@ export function rawSecretPaths(value: unknown): readonly string[] {
           node,
         )
       )
-        found.push(path.join('.'));
+        found.push(path.map(pathSegment).join('.'));
       return;
     }
     if (Array.isArray(node)) node.forEach((item, index) => visit(item, [...path, index]));
@@ -352,13 +353,20 @@ export function rawSecretPaths(value: unknown): readonly string[] {
 const AUTH_SHAPE = String.raw`(?:Bearer|Basic|token)\s+\S{16,}`;
 const AUTH_AT_START = new RegExp(`^${AUTH_SHAPE}`, 'iu');
 /** In free text: a real header (`Authorization:` / `Proxy-Authorization:` then a scheme and a value). */
-const AUTH_HEADER = /(?<![A-Za-z0-9])(?:Proxy-)?Authorization["']?\s*[:=]\s*["']?(?:Bearer|Basic|token)\s+\S{16,}/iu;
+const AUTH_HEADER =
+  /(?<![A-Za-z0-9])(?:Proxy-)?Authorization["']?\s*[:=]\s*["']?(?:Bearer|Basic|token)\s+(?!\$)\S{16,}/iu;
 /** In free text: a scheme word followed by a value (judged by {@link looksLikeTokenValue}). */
 const SCHEME_VALUE = /(?<![A-Za-z0-9])(?:Bearer|Basic|token)\s+(\S+)/giu;
 
-/** A value that itself looks like a credential: 20+ token-alphabet characters, no spaces, a letter and a digit. */
+/**
+ * A value that itself looks like a credential: 20+ token-alphabet characters, no spaces, a letter and a digit. Prose
+ * names paths and versions right after the word "token" ("the token /home/x/notes/2026-11-09.md", "token
+ * v4.291.5-rc.1+build.20261109"): a value that starts with `/`, `~` or `.` (as {@link looksLikeRawSecret} also reads it)
+ * or reads as a version number is not one. A hex or UUID value still is (an old API key can look exactly like that).
+ */
 const looksLikeTokenValue = (raw: string): boolean => {
   const value = raw.replace(/^["'`(]+|["'`),;.]+$/gu, '');
+  if (/^[/~.]/u.test(value) || /^v?\d+(?:\.\d+){2,}(?:[-+][A-Za-z0-9.+-]*)?$/u.test(value)) return false;
   return value.length >= 20 && /^[A-Za-z0-9._~+/=-]+$/u.test(value) && /[A-Za-z]/u.test(value) && /\d/u.test(value);
 };
 
@@ -367,7 +375,7 @@ export function credentialShaped(value: unknown): string[] {
   const found: string[] = [];
   const visit = (node: unknown, path: readonly string[]): void => {
     if (typeof node === 'string') {
-      if (AUTH_AT_START.test(node)) found.push(path.join('.'));
+      if (AUTH_AT_START.test(node)) found.push(path.map(pathSegment).join('.'));
       return;
     }
     if (Array.isArray(node)) node.forEach((item, index) => visit(item, [...path, String(index)]));
@@ -375,7 +383,7 @@ export function credentialShaped(value: unknown): string[] {
       for (const [key, item] of Object.entries(node)) {
         const lower = key.toLowerCase();
         if ((lower === 'authorization' || lower.includes('header')) && item !== undefined && item !== null)
-          found.push([...path, key].join('.'));
+          found.push([...path, key].map(pathSegment).join('.'));
         else visit(item, [...path, key]);
       }
   };

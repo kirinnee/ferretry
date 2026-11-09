@@ -11,6 +11,11 @@
  *
  * Files are copied byte for byte and never opened (`moveSealed`); a link is never followed or re-made (as for harness
  * folders) and is counted; an unreadable file fails the step with a `chmod u+r` remedy and its path.
+ *
+ * WHAT IS SKIPPED. A file with a second hard link is not copied and is named by its path (v4's skill reader skipped it:
+ * "a hard link can be a file from outside the folder"); the rest of its folder is carried. A skill whose `SKILL.md` is
+ * that hard link is not carried at all, and is named: a skill folder without its `SKILL.md` is not a skill, and copying
+ * the rest would leave a husk behind. Symbolic links are skipped and counted.
  */
 import { constants } from 'node:fs';
 import { access, chmod, mkdir, readdir, utimes } from 'node:fs/promises';
@@ -35,12 +40,17 @@ export const skillFoldersStep: Step = {
       what: `links inside ${V4_SKILL_FOLDERS}`,
       why: 'never followed or re-made (a link could point anywhere on the machine); counted in the report',
     },
+    {
+      what: `files with a second hard link inside ${V4_SKILL_FOLDERS}`,
+      why: 'v4 refused them (a hard link can be a file from outside the folder); each one found is named by path, and a skill whose SKILL.md is one is not carried at all',
+    },
   ],
   async run(ctx) {
     const base = { id: this.id, title: this.title, notCarried: this.notCarried };
     const root = join(ctx.v4.home, V4_SKILL_FOLDERS);
     const sealed: { file: string; bytes: number }[] = [];
     const hardLinks: string[] = [];
+    const refusedSkills: string[] = [];
     let links = 0;
     let skills = 0;
     try {
@@ -90,7 +100,15 @@ export const skillFoldersStep: Step = {
           links++;
           continue;
         }
-        if (entry.isDirectory()) skills++;
+        if (entry.isDirectory()) {
+          // A skill whose SKILL.md is a hard link is refused whole: its other files would be a skill with no SKILL.md.
+          const manifest = await info(join(root, entry.name, 'SKILL.md'));
+          if (manifest?.isFile() === true && manifest.nlink !== 1) {
+            refusedSkills.push(entry.name);
+            continue;
+          }
+          skills++;
+        }
         await copy(join(root, entry.name), join(V5_SKILL_FOLDERS, entry.name));
       }
     } catch (error) {
@@ -108,6 +126,10 @@ export const skillFoldersStep: Step = {
       ...(ctx.dryRun ? { note: 'dry run: nothing written' } : {}),
       notCarried: [
         ...this.notCarried,
+        ...refusedSkills.map(name => ({
+          what: `skills/${name}`,
+          why: 'its SKILL.md is a hard link (v4 refused it, as it can be a file from outside the folder), so the skill is not carried at all rather than without its SKILL.md',
+        })),
         ...hardLinks.map(path => ({
           what: `skills/${path}`,
           why: 'a hard link (v4 refused it, as it can be a file from outside the folder); only this file is left behind',

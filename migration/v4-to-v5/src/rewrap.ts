@@ -11,6 +11,7 @@
 import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { z } from 'zod';
+import { pathSegment } from './key-path.ts';
 
 const CIPHER = 'AES-256-GCM';
 
@@ -69,7 +70,7 @@ export async function rewrapSealed<Shape>(from: string, to: string, spec: Rewrap
   const result = spec.schema.safeParse({ format: 1, cipher: CIPHER, entries: copied });
   if (!result.success) {
     // Only the paths of the failing fields; zod's own messages may quote a received value.
-    const where = result.error.issues.map(issue => issue.path.join('.')).join(', ');
+    const where = result.error.issues.map(issue => issue.path.map(pathSegment).join('.')).join(', ');
     throw new SealedEnvelopeError(`${from} does not fit the v5 schema at: ${where || '(root)'}`);
   }
   const names = Object.keys(copied);

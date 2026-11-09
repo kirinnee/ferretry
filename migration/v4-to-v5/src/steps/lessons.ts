@@ -85,6 +85,7 @@ import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem } from '../v5/write.ts';
 
 const LESSONS_CONFIG = CONFIG_TARGETS.LESSONS;
+import { keyPath, looksLikeKey } from '../key-path.ts';
 import { dropModeline } from '../v4/config.ts';
 import { instructionsSource } from './component-files.ts';
 import type { Step, StepContext } from './index.ts';
@@ -185,7 +186,7 @@ function each<T>(value: unknown, schema: z.ZodType<T, unknown>): { readonly reco
 }
 
 /** The first schema issue's path, for an error that names where a value is wrong without quoting it. */
-const where = (error: z.ZodError): string => error.issues[0]?.path.join('.') || '(top)';
+const where = (error: z.ZodError): string => keyPath(error.issues[0]?.path ?? []);
 
 function stateToV5(state: V4LearningStateValue): Record<string, unknown> {
   const { scan, ...rest } = state;
@@ -463,7 +464,8 @@ const keyOf = (pair: Pair): unknown => (isScalar(pair.key) ? pair.key.value : pa
 async function globalSource(ctx: StepContext): Promise<string | undefined> {
   const home = ctx.v4.home;
   let file: unknown = V4_GLOBAL_LESSONS_FILE;
-  if (await configPresent(ctx.v4, V4_LESSONS_COMPONENT)) {
+  const hasComponent = await configPresent(ctx.v4, V4_LESSONS_COMPONENT);
+  if (hasComponent) {
     const document = await readV4Yaml(
       v4ConfigFile(ctx.v4, { kind: 'component', componentKind: 'instructions', name: 'lessons' }, V4_LESSONS_COMPONENT),
     );
@@ -471,10 +473,19 @@ async function globalSource(ctx: StepContext): Promise<string | undefined> {
     file = isScalar(pair?.value) ? pair.value.value : undefined;
   }
   const source = await instructionsSource(home, file);
-  if (source === 'hard-link')
+  if (source === 'hard-link') {
+    // The fix is on the file that is the hard link: the one the component names, else the default document. Only a
+    // name that reads as a plain relative path is said; anything else is not echoed (it is an owner-typed value).
+    const named =
+      typeof file === 'string' &&
+      /^[A-Za-z0-9_./-]{1,100}$/u.test(file) &&
+      !isAbsolute(file) &&
+      file.split('/').every(part => !looksLikeKey(part));
+    const target = `fleet/assets/${named ? file : V4_GLOBAL_LESSONS_FILE}`;
     throw new V4InputError(
-      `${V4_LESSONS_COMPONENT}: the Global lessons document it names is a hard link (v4 refused it), so it was never read; make it a plain file at fleet/assets/${V4_GLOBAL_LESSONS_FILE} and run the conversion again`,
+      `${hasComponent ? `${V4_LESSONS_COMPONENT}: the Global lessons document it names` : 'the default Global lessons document'} is a hard link (v4 refused it), so it was never read; make ${target} a plain file and run the conversion again`,
     );
+  }
   if (source !== undefined) return source;
   // Not found as a plain file inside the assets: absent is no document (v4 read it as empty); anything else is refused.
   const assets = join(home, 'fleet', 'assets');

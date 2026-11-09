@@ -63,6 +63,7 @@ import {
   V4SecurityDocument,
   type V4SecuritySettings,
 } from '../v4/daemon.ts';
+import { keyPath, pathSegment } from '../key-path.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
@@ -340,8 +341,8 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
   if (!parsed.success) {
     // Key paths and zod codes only: a parser's message can quote the value.
     const where = parsed.error.issues.map(issue => {
-      const keys = issue.code === 'unrecognized_keys' ? ` ${issue.keys.join(', ')}` : '';
-      return `${issue.path.length === 0 ? '(top)' : issue.path.join('.')} (${issue.code}${keys})`;
+      const keys = issue.code === 'unrecognized_keys' ? ` ${issue.keys.map(pathSegment).join(', ')}` : '';
+      return `${keyPath(issue.path)} (${issue.code}${keys})`;
     });
     throw new V4InputError(`${V4_DAEMON_JSON}: is not a document v4 booted with, at ${where.join(', ')}`);
   }

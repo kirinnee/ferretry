@@ -149,6 +149,15 @@ const refusedCases: readonly (readonly [string, () => Promise<void>])[] = [
     'a file with a token followed by a credential-shaped value',
     async () => put(`fleet/assets/${BEFORE}`, `token ${FAKE_MIXED}\n`),
   ],
+  // n1/n2 narrowing keeps these: a hex value after the word, a value that merely contains a dollar, a literal header.
+  [
+    'a file with a token followed by a 40-hex value',
+    async () => put(`fleet/assets/${BEFORE}`, 'token 0123456789abcdef0123456789abcdef01234567\n'),
+  ],
+  [
+    'a file with an Authorization header whose value only contains a dollar',
+    async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Bearer ${FAKE_MIXED}$x" x\n`),
+  ],
   // M2: the content is held to the same homes the last gate refuses in an inline command.
   [
     "a file whose content names v4's worktree folder",
@@ -323,6 +332,21 @@ describe('prose in a carried file is not a credential (m1)', () => {
       'When compacting, keep the plan and the open questions. Basic troubleshooting steps can go. Mention the token ' +
         'budget used so far, and every file path the user named, for example token /home/user/notes/summary.md. ' +
         'Bearer of bad news: say so plainly. Keep the list of decisions and drop the chatter.\n',
+    ],
+    // n1: a token-like word then a long value that carries digits but is a path or a version, not a credential.
+    ['token before a dated path', 'Resume from the token /home/x/notes/2026-11-09/summary.md next time\n'],
+    ['token before a home-relative dated path', 'see the token ~/notes/2026-11-09/summary-final.md\n'],
+    ['token before a dot-relative dated path', 'the token ./docs/2026-11-09/summary-final.md\n'],
+    ['token before a version', 'token v4.291.5-rc.1+build.20261109 is the one to use\n'],
+    ['Bearer before a dated path', 'Bearer /var/log/2026-11-09/session-0001.log\n'],
+    // n2: a real header whose value is an environment reference, not a value.
+    [
+      'an Authorization header that reads its token from the environment',
+      'curl -H "Authorization: Bearer ${FERRETRY_HOOK_TOKEN}" x\n',
+    ],
+    [
+      'a Proxy-Authorization header on a long variable',
+      'curl -H "Proxy-Authorization: Basic $PROXY_PASSWORD_FROM_THE_ENV" x\n',
     ],
   ];
   for (const [name, text] of prose)

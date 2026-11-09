@@ -242,7 +242,9 @@ and the moved vault key. `local-skill-installs.json` becomes Skills' `state/skil
 Skill folders (`src/steps/skill-folders.ts`): the runtime-installed skills under `fleet/assets/skills/<name>/` are
 copied byte for byte, never opened, to the same path in the v5 home, which is where v5 Runtimes reads its asset tree
 (`join(paths.fleet, 'assets')`; only the kernel root that hands it the folder is still a GAP). Links are never followed
-or re-made and are counted; an unreadable file fails the step with a `chmod u+r` remedy.
+or re-made and are counted; an unreadable file fails the step with a `chmod u+r` remedy. A file with a second hard link
+is NOT copied and is named by its path (v4's skill reader skipped it, as it can be a file from outside the folder); the
+rest of its folder is carried. A skill whose `SKILL.md` is that hard link is not carried at all, and is named.
 
 MCP (`src/steps/mcp.ts`): `mcp-oauth.json` → `state/mcp/oauth.json`, envelope only (`v` → `format`); the records are
 the same in both. The access tokens are vault secrets kept by name (the Vault step). The sealed
