@@ -2,7 +2,13 @@ import { describe, it } from 'bun:test';
 import { DEFAULT_SECURITY_SETTINGS } from '@ferretry/core-gate/contract';
 import should from 'should';
 import { toBase64Url } from '../../../../daemon/lib/proof/binary.ts';
-import { type StagedSignInRuleBinding, stepUpRoutes } from '../../../../daemon/lib/routes/step-up.ts';
+import {
+  type StagedPasteRuleBinding,
+  type StagedSeedBinding,
+  type StagedSignInRuleBinding,
+  type StagedTaskPlanBinding,
+  stepUpRoutes,
+} from '../../../../daemon/lib/routes/step-up.ts';
 import {
   ChallengeLedger,
   type PasskeyStore,
@@ -69,7 +75,13 @@ const verifier: PasskeyVerifierPort = {
   },
 };
 
-function machine() {
+interface StagedBindings {
+  readonly seeds?: StagedSeedBinding;
+  readonly plans?: StagedTaskPlanBinding;
+  readonly pasteRules?: StagedPasteRuleBinding;
+}
+
+function machine(bindings: StagedBindings = {}) {
   const clock = { now: T0 };
   const registry = new StepUpRegistry({ nowMs: () => clock.now });
   registry.open(phone);
@@ -115,7 +127,7 @@ function machine() {
       return stage === STAGE && deviceId === phoneId ? DERIVED : undefined;
     },
   };
-  const routes = stepUpRoutes(service, undefined, undefined, rules);
+  const routes = stepUpRoutes(service, bindings.seeds, bindings.plans, rules, bindings.pasteRules);
   const ask = (key: string, body: unknown, overrides: CallOverrides) =>
     respond(routes, key, { body: JSON.stringify(body), ...overrides });
   return { clock, registry, service, routes, ask, audited, draws, asked };
@@ -146,6 +158,150 @@ describe('the standing-rule step-up options', () => {
     should(world.draws).deepEqual([]);
     // The machine's caller named no device, so the stage was never even asked about for it.
     should(world.asked).deepEqual([`${STAGE} ${laptopId}`, `srs_${'b'.repeat(24)} ${phoneId}`, `${STAGE} ${phoneId}`]);
+  });
+});
+
+describe('the staged-subject step-up options', () => {
+  const SEED_STAGE = `st_${'a'.repeat(24)}` as const;
+  const PLAN_STAGE = `tps_${'a'.repeat(24)}` as const;
+  const PASTE_STAGE = `prs_${'a'.repeat(24)}` as const;
+  const options = (act: string, subject: string) => ({ origin: ORIGIN, act, subject });
+
+  it('G86 should bind a 2FA key save to the one stage that is waiting, and issue no challenge for any other or when none are staged', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const staged = machine({
+      seeds: {
+        boundSubjectOf: stage => {
+          asked.push(stage);
+          return stage === SEED_STAGE ? 'account-1/st-a' : undefined;
+        },
+      },
+    });
+    const none = machine();
+    const body = (stage: string) => options(STEP_UP_ACTS.addTwoFactorKey, stage);
+
+    // Act
+    const waiting = await staged.ask('POST /v1/step-up/options', body(SEED_STAGE), { device: phone });
+    const elsewhere = await staged.ask('POST /v1/step-up/options', body(`st_${'b'.repeat(24)}`), { device: phone });
+    const unstaged = await none.ask('POST /v1/step-up/options', body(SEED_STAGE), { device: phone });
+
+    // Assert
+    should(waiting.status).equal(200);
+    should(jsonBody(waiting)).have.property('challenge');
+    for (const refused of [elsewhere, unstaged]) {
+      refusedAs(refused, 404, 'stage_not_found');
+      should(jsonBody(refused)).not.have.property('challenge');
+    }
+    should(asked).deepEqual([SEED_STAGE, `st_${'b'.repeat(24)}`]);
+    should(none.draws).deepEqual([]);
+  });
+
+  it('G86 should bind a task plan approval to the one staged selection that is waiting, and issue no challenge otherwise', async () => {
+    // Arrange
+    const staged = machine({
+      plans: { boundSubjectOf: stage => (stage === PLAN_STAGE ? 'plan-1/lines' : undefined) },
+    });
+    const none = machine();
+    const body = (stage: string) => options(STEP_UP_ACTS.approveTaskPlan, stage);
+
+    // Act
+    const waiting = await staged.ask('POST /v1/step-up/options', body(PLAN_STAGE), { device: phone });
+    const elsewhere = await staged.ask('POST /v1/step-up/options', body(`tps_${'b'.repeat(24)}`), { device: phone });
+    const unstaged = await none.ask('POST /v1/step-up/options', body(PLAN_STAGE), { device: phone });
+
+    // Assert
+    should(waiting.status).equal(200);
+    for (const refused of [elsewhere, unstaged]) {
+      refusedAs(refused, 404, 'stage_not_found');
+      should(jsonBody(refused)).not.have.property('challenge');
+    }
+  });
+
+  it('G86 should ask the paste rule binding for this device and this kind of change, and refuse a stage not waiting for it', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const staged = machine({
+      pasteRules: {
+        boundSubjectOf: (stage, kind, deviceId) => {
+          asked.push(`${stage} ${kind} ${deviceId}`);
+          return stage === PASTE_STAGE && deviceId === phoneId ? `bound-${kind}` : undefined;
+        },
+      },
+    });
+    const none = machine();
+
+    // Act
+    const rule = await staged.ask('POST /v1/step-up/options', options(STEP_UP_ACTS.approvePasteRule, PASTE_STAGE), {
+      device: phone,
+    });
+    const targets = await staged.ask(
+      'POST /v1/step-up/options',
+      options(STEP_UP_ACTS.allowProfileTargets, PASTE_STAGE),
+      { device: phone },
+    );
+    const otherDevice = await staged.ask(
+      'POST /v1/step-up/options',
+      options(STEP_UP_ACTS.approvePasteRule, PASTE_STAGE),
+      { device: laptop },
+    );
+    const atMachine = await staged.ask(
+      'POST /v1/step-up/options',
+      options(STEP_UP_ACTS.approvePasteRule, PASTE_STAGE),
+      { host: true },
+    );
+    const unstaged = await none.ask('POST /v1/step-up/options', options(STEP_UP_ACTS.approvePasteRule, PASTE_STAGE), {
+      device: phone,
+    });
+
+    // Assert: the stage is only ever asked about for a device, and with the kind the act names
+    should([rule.status, targets.status]).deepEqual([200, 200]);
+    for (const refused of [otherDevice, atMachine, unstaged]) {
+      refusedAs(refused, 404, 'paste_rule_stage_not_found');
+      should(jsonBody(refused)).not.have.property('challenge');
+    }
+    should(asked).deepEqual([
+      `${PASTE_STAGE} rule ${phoneId}`,
+      `${PASTE_STAGE} profile-targets ${phoneId}`,
+      `${PASTE_STAGE} rule ${laptopId}`,
+    ]);
+  });
+});
+
+describe('the ceremonies that need no staged subject', () => {
+  it('P2 should issue a step-up challenge for a plain act, then grant the step-up on an assertion the device proves', async () => {
+    // Arrange
+    const world = machine();
+    const assertion = {
+      credentialId: 'AQIDBA',
+      clientDataJSON: 'Y2xpZW50',
+      authenticatorData: 'YXV0aA',
+      signature: 'c2ln',
+    };
+
+    // Act
+    const issued = await world.ask('POST /v1/step-up/options', { origin: ORIGIN }, { device: phone });
+    const granted = await world.ask('POST /v1/step-up', assertion, { device: phone });
+
+    // Assert
+    should(issued.status).equal(200);
+    should(jsonBody(issued)).have.property('challenge');
+    should(granted.status).equal(200);
+    should(jsonBody(granted)).have.property('expiresAt');
+  });
+
+  it('P2 should refuse a passkey registration from a caller that is not a device, and one with no challenge issued', async () => {
+    // Arrange
+    const world = machine();
+    const registration = { credentialId: 'AQIDBA', clientDataJSON: 'Y2xpZW50', attestationObject: 'YXR0ZXN0' };
+
+    // Act
+    const atMachine = await world.ask('POST /v1/passkeys', registration, { host: true });
+    const unchallenged = await world.ask('POST /v1/passkeys', registration, { device: phone });
+
+    // Assert
+    refusedAs(atMachine, 400, stepUpRefusalCode('not-a-device'));
+    refusedAs(unchallenged, 401, stepUpRefusalCode('not-verified'));
   });
 });
 
