@@ -758,7 +758,7 @@ describe('a change to one login', () => {
     [' ..  ', ''],
   ];
   for (const [said, reason] of REPUBLISH_REASONS) {
-    it(`BG-034 n3 should say the republish was refused without an empty reason when its message is ${JSON.stringify(said)}`, async () => {
+    it(`BG-031 n3 should say the republish was refused without an empty reason when its message is ${JSON.stringify(said)}`, async () => {
       let afterApply = false;
       const { service, changes } = world({
         overrides: {
