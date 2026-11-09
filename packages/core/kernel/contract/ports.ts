@@ -551,7 +551,25 @@ export type RootName =
    * handle is scoped to the ABSOLUTE folder the caller names (`{ subfolder: '/home/me/.claude' }`, exactly as
    * `harness-history` is), refuses everything inside the fence, and never follows a link out of that folder.
    */
-  | 'harness-home';
+  | 'harness-home'
+  /**
+   * A project folder's own files the plugin writes on the owner's behalf (MCP's `<root>/.mcp.json`, Skills'
+   * `<root>/.claude/skills/<name>/**`): an owner's root, WRITABLE, and narrowed twice. The handle is scoped PER CALL to ONE
+   * absolute folder (`{ subfolder: '/home/me/project' }`, exactly as `harness-home` is) and to the relative paths the
+   * manifest declared in `permissions.projectFiles`; a name outside that set is refused `not_declared` whatever the
+   * folder holds. A write is as `work`'s is, with this root's one extra rule that a link at ANY level (inside the folder)
+   * and a file with a second hard link are refused, never followed. It refuses everything inside the fence.
+   *
+   * GAP, stated exactly (redesign §7.7, `ports-pending.json` writeChecked): the write is a checked, no-follow DESCRIPTOR
+   * write only on a host with descriptor reach (`/proc/self/fd`). On a host without it (macOS today) the temp create and
+   * the rename are by path, so a folder swapped for a link between the check and the syscall can make a write overwrite
+   * one same-named file outside the folder; writes are not refused there. Even with reach the parent is proved, not held
+   * (an ABA swap is not seen). No link is made into or out of this root, `copyTree` included.
+   *
+   * Whether the folder is one Projects or Ferrets names is the PLUGIN ADAPTER's rule, never the kernel's (declared limit,
+   * redesign §7.7, which lists what an adapter must check).
+   */
+  | 'project-files';
 
 /**
  * {@link RootHandle.linkTo}'s target: a name in one of THIS plugin's own root handles (maybe the same one). The link
@@ -777,9 +795,16 @@ export interface RootHandle {
    */
   pin(path: FencedPath, options?: PinOptions): Promise<HeldRoot>;
   /**
-   * Removes the name, a folder one entry at a time through descriptors. Remove of a folder needs descriptor reach; refused `no_descriptor_reach` without it (macOS until the descriptor bracket lands), and an owner root refuses every remove then. On a host without descriptor reach a file or link of an internal root is unlinked by path after one re-proof of its folder: a parent swapped in between can delete ONE same-named file outside the root, never a tree (declared GAP). [own] BEFORE-GREEN(runtimes) closed by the bracket unit.
+   * Removes the name, a folder one entry at a time through descriptors. The LEAF IS NEVER FOLLOWED: the folder it sits in is
+   * resolved and judged inside the root, then the entry is removed by its own name, so a link at the name goes as a link
+   * and what it points at (inside the root or outside it) is untouched. Remove of a folder needs descriptor reach; refused `no_descriptor_reach` without it (macOS until the descriptor bracket lands), and an owner root refuses every remove then. On a host without descriptor reach a file or link of an internal root is unlinked by path after one re-proof of its folder: a parent swapped in between can delete ONE same-named file outside the root, never a tree (declared GAP). [own] BEFORE-GREEN(runtimes) closed by the bracket unit.
+   *
+   * With `onlyIfEmpty` a folder is removed with `rmdir` semantics: ONE kernel call, empty-check and removal in the same
+   * syscall, so a folder that holds any entry (a link included) is refused `not_empty` and nothing is removed, never
+   * recursing. A file or link at the name behaves as without the option. A folder without descriptor reach is refused
+   * `no_descriptor_reach` exactly as above (the option never widens what a host without reach may remove).
    */
-  remove(path: FencedPath): Promise<void>;
+  remove(path: FencedPath, options?: { readonly onlyIfEmpty?: boolean }): Promise<void>;
   /**
    * A symlink at `at` (today's "stored once, never copied" link from a runtime home to the host's credential or
    * history) whose text is the REAL path of `target` in one of THIS plugin's own root handles — the rule `copyTree`'s

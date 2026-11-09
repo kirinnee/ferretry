@@ -10,7 +10,8 @@
  *   IN: it says what was asked and how many, and opens the conversation at its first open item. Nothing on a row
  *   answers, clears or hides an item — a Done on a row could not say which item it meant.
  *
- * GAP(agenda-nav): the 5.0 shell offers no navigation-column slot yet, so nothing mounts these until it does.
+ * GAP(agenda-nav): the 5.0 shell draws nav counts (`shell.navBadges`) and nav panels (`shell.navPanels`, told its form
+ * by `useNavForm`); Agenda has not provided them yet, so nothing mounts these until it does.
  */
 
 import { ASK_LINK_PARAMETER } from '@ferretry/core-asks/contract';

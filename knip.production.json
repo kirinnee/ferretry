@@ -31,9 +31,9 @@
       "project": ["src/**/*.{ts,tsx,css}"],
       "ignore": [
         "src/worker/service-worker.ts",
+        "src/worker/filter-document.ts",
         "src/worker/notifications.ts",
         "src/release/keeper.ts",
-        "src/release/loopback.ts",
         "src/release/storage.ts"
       ]
     },
@@ -100,21 +100,16 @@
         "app/hooks/use-agenda-replies.ts",
         "app/hooks/use-agenda.ts",
         "app/hooks/use-answered-suggestion-sweep.ts",
-        "app/hooks/use-notification-open.ts",
         "app/hooks/use-notifications.ts",
-        "app/lib/agenda-chat.ts",
         "app/lib/answer-chip.ts",
         "app/lib/item-conversation.ts",
         "app/lib/notification-ledger.ts",
-        "app/lib/notification-open.ts",
         "app/lib/notification-preferences.ts",
-        "app/lib/notification-tap.ts",
         "app/lib/notify.ts",
         "app/lib/permission-request.ts",
         "app/lib/push-delivery.ts",
         "app/features/permission-request/approval-card.tsx",
         "app/features/agenda/agenda-inbox-composer.tsx",
-        "app/features/agenda/agenda-line.tsx",
         "app/features/agenda/agenda-nav.tsx",
         "app/features/agenda/agenda-replies-notice.tsx",
         "app/features/agenda/agenda.tsx",
@@ -148,17 +143,13 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
         "daemon/adapters/account-model-files.ts",
-        "daemon/adapters/file-provisioner.ts",
-        "daemon/adapters/host-harness-scan.ts",
-        "daemon/adapters/manifest-file.ts",
         "daemon/adapters/ports.ts",
         "daemon/adapters/runtime-ids-file.ts",
         "daemon/adapters/runtime-session-records.ts",
         "daemon/adapters/setup-files.ts",
         "daemon/lib/env-profiles.ts",
         "daemon/lib/harness-env.ts",
-        "daemon/lib/harness.ts",
-        "daemon/lib/service/publication.ts"
+        "daemon/lib/harness.ts"
       ]
     },
     "packages/plugins/updates": {
@@ -194,7 +185,6 @@
       "entry": ["app/surfaces.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
-        "app/composer/composer-references.ts",
         "app/render/fy-render-workspace-media.ts",
         "app/render/workspace-path.ts",
         "daemon/questions/lib/answer-wording.ts",
@@ -206,7 +196,6 @@
         "daemon/reader/lib/session/reader.ts",
         "daemon/reader/lib/session/tail-cache.ts",
         "daemon/reader/lib/session/log-page.ts",
-        "app/chat/message-marks-legend.tsx",
         "daemon/attachments/adapters/raw-deflate.ts"
       ]
     },
@@ -257,7 +246,6 @@
         "app/features/settings/security-log-settings.tsx",
         "app/harness/pair-from-menu.tsx",
         "app/lib/device-preference.ts",
-        "app/lib/push-clear.ts",
         "app/lib/push-seen.ts",
         "cli/lib/grants/commands.ts",
         "cli/lib/grants/controller.ts",
@@ -312,31 +300,7 @@
     "packages/plugins/onboarding": {
       "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "app/command-block.tsx",
-        "app/command-syntax.ts",
-        "app/connection-disclosure.ts",
-        "app/copy-button.tsx",
-        "app/device-kind.ts",
-        "app/first-run-entry.ts",
-        "app/landing-geometry.ts",
-        "app/link-costs.ts",
-        "app/onboarding-brand.tsx",
-        "app/onboarding-chooser.tsx",
-        "app/onboarding-connection-note.tsx",
-        "app/onboarding-doer-chooser.tsx",
-        "app/onboarding-model.ts",
-        "app/onboarding-page.tsx",
-        "app/onboarding-progress.ts",
-        "app/onboarding-stages.tsx",
-        "app/onboarding-target-chooser.tsx",
-        "app/onboarding-track.tsx",
-        "app/pending-connections.ts",
-        "app/setup-diagram.tsx",
-        "app/setup-handoff-panel.tsx",
-        "app/setup-handoff.ts",
-        "app/setup-qr.ts"
-      ]
+      "ignore": ["app/landing-geometry.ts"]
     },
     "packages/plugins/codex": {
       "entry": [],

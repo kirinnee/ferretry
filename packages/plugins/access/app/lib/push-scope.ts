@@ -41,7 +41,7 @@ export const pushWorkerUrl = (workerUrl: string, label: string): string =>
 export { type PushMachine, pushMachineOf };
 
 /** Where a quiet line's tap goes: the machine's home, or — for the app-wide registration — the app. */
-export const machineHomeUrl = (machine: PushMachine | null, origin: string): string =>
+const machineHomeUrl = (machine: PushMachine | null, origin: string): string =>
   new URL(machine === null ? '/app/' : daemonHomePath(machine.daemonId as DaemonId), origin).href;
 
 /** Whether a registration scope URL is a per-machine push scope. */

@@ -7,16 +7,19 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 import { daemonOfClient } from '@ferretry/app';
 import { type ReactNode, useMemo } from 'react';
 import { type MachineNotification, useMachineNotification } from '../../hooks/use-machine-notification.ts';
+import { type MachineSource, useMachinesNotifications } from '../../hooks/use-machines-notifications.ts';
 import { clientPushService } from '../../lib/push-client-service.ts';
 import { browserPushHost, type PushHost } from '../../lib/push-host.ts';
 import { MachineNotificationList, NotificationsOffBanner } from './notification-machines.tsx';
-import { NotificationSettingsView } from './notification-settings.tsx';
+import { NotificationSettingsView, PushDeviceList } from './notification-settings.tsx';
 
-/** The shell hands a half no machine name, so a machine is "This machine" on its own screens. */
+/** On a machine's own screens it is just "This machine"; the device-level list names each machine. */
 export const THIS_MACHINE = 'This machine';
 
 export interface MachineNotificationsProps {
   readonly client: PluginClient;
+  /** What the machine is called in the rows and the banner; "This machine" when absent. */
+  readonly label?: string;
   /** The browser's push facilities; the page's own unless a suite hands one in. */
   readonly host?: PushHost;
 }
@@ -24,6 +27,7 @@ export interface MachineNotificationsProps {
 function Bound({
   client,
   host,
+  label,
   daemon,
   children,
 }: MachineNotificationsProps & {
@@ -32,47 +36,78 @@ function Bound({
 }) {
   const service = useMemo(() => clientPushService(client), [client]);
   const pushHost = useMemo(() => host ?? browserPushHost(), [host]);
-  return <>{children(useMachineNotification({ daemon, label: THIS_MACHINE, service, host: pushHost }))}</>;
+  return <>{children(useMachineNotification({ daemon, label: label ?? THIS_MACHINE, service, host: pushHost }))}</>;
 }
 
 /** The notifications of the machine `client` talks to; nothing for a client the shell did not make. */
 function ForMachine({
   client,
   host,
+  label,
   children,
 }: MachineNotificationsProps & { readonly children: (notification: MachineNotification) => ReactNode }) {
   const daemon = daemonOfClient(client);
   if (daemon === undefined) return null;
   return (
-    <Bound client={client} {...(host === undefined ? {} : { host })} daemon={daemon}>
+    <Bound
+      client={client}
+      {...(host === undefined ? {} : { host })}
+      {...(label === undefined ? {} : { label })}
+      daemon={daemon}
+    >
       {children}
     </Bound>
   );
 }
 
-/** `device.settings` › notifications: the permission, this machine's switch, and its registered devices. */
-export function MachineNotificationsSettings(props: MachineNotificationsProps) {
+export interface MachinesNotificationsProps {
+  /** Every machine the panel reaches, each with its OWN client (from `useEveryDaemon`). */
+  readonly sources: readonly MachineSource[];
+  /** The browser's push facilities; the page's own unless a suite hands one in. */
+  readonly host?: PushHost;
+}
+
+/**
+ * `device.settings` › notifications: the "Notifications are off" banner first (a machine with no device enrolled
+ * anywhere, one Enable each), then ONE permission block (the browser's permission, its notes), then ONE list of the
+ * machines this device reaches — each row a switch that enrols this browser with THAT machine through its own client,
+ * its status and its registered devices — and "Turn on for all machines". A machine that wants its unlock says so and
+ * offers Unlock.
+ */
+export function MachinesNotificationsSettings({ sources, host }: MachinesNotificationsProps) {
+  const pushHost = useMemo(() => host ?? browserPushHost(), [host]);
+  const notifications = useMachinesNotifications({ sources, host: pushHost });
+  const unlocks = useMemo(
+    () => new Map(sources.filter(source => source.locked).map(source => [source.daemon, () => void source.unlock()])),
+    [sources],
+  );
   return (
-    <ForMachine {...props}>
-      {notification => (
-        <div className="flex flex-col gap-4" data-machine-notifications="">
-          <NotificationSettingsView
-            permission={notification.permission}
-            devices={notification.devices}
-            currentDeviceId={notification.currentDeviceId}
-            onRevokeDevice={notification.revokeDevice}
+    <div className="flex flex-col gap-4" data-machine-notifications="">
+      <NotificationsOffBanner
+        rows={notifications.rows}
+        canEnrol={notifications.canEnrol}
+        busy={notifications.busy}
+        onEnable={notifications.enable}
+      />
+      <NotificationSettingsView permission={notifications.permission} />
+      <MachineNotificationList
+        rows={notifications.rows}
+        canEnrol={notifications.canEnrol}
+        busy={notifications.busy}
+        failures={notifications.failures}
+        onEnable={notifications.enable}
+        onDisable={notifications.disable}
+        onTurnOnAll={notifications.turnOnAll}
+        unlocks={unlocks}
+        detail={row => (
+          <PushDeviceList
+            devices={notifications.devicesOf(row.daemonId)}
+            currentDeviceId={notifications.currentDeviceId(row.daemonId)}
+            onRevokeDevice={deviceId => notifications.revokeDevice(row.daemonId, deviceId)}
           />
-          <MachineNotificationList
-            rows={notification.rows}
-            canEnrol={notification.canEnrol}
-            busy={notification.busy}
-            failures={notification.failures}
-            onEnable={notification.enable}
-            onDisable={notification.disable}
-          />
-        </div>
-      )}
-    </ForMachine>
+        )}
+      />
+    </div>
   );
 }
 

@@ -1,3 +1,5 @@
+import { BackgroundViews } from './background.tsx';
+import { DevicePanels, NavCount, type NavForm } from './device-panels.tsx';
 import { DeviceViews } from './device-views.tsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
@@ -8,7 +10,7 @@ import { buildPluginCommandSources, deviceLayoutSource, placeSource } from './co
 import { useScreenHref } from '../router/screen-href.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import type { NavEntry } from '../layout/engine.ts';
-import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, type Route } from '../router/routes.ts';
+import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, pairAgainHref, type Route } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import {
@@ -20,8 +22,9 @@ import {
   NotFoundPage,
 } from './pages.tsx';
 import { PageScrollRegion } from '../scroll/page-scroll-region.tsx';
+import { FrameRootContext } from './frame-root.tsx';
 import { PasskeyMount } from './passkey-mount.tsx';
-import { ScreenView, ShellLine } from './views.tsx';
+import { PanelSlot, ScreenView, ShellLine } from './views.tsx';
 
 /**
  * THE FRAME (§5.2): the shell's slots, placed by the layout. `nav` (or `bottom` when the layout puts nav there on a
@@ -55,6 +58,10 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
     return daemon === undefined ? undefined : routes.href(screen, {}, daemon);
   };
   const side = plan.nav.side;
+  // A nav panel is drawn in a left or right nav of EVERY style (the default built-in is a list, compact is a rail), told which form it is
+  // in; never on the top or bottom bar.
+  const panelForm: NavForm | undefined =
+    side === 'left' || side === 'right' ? (plan.nav.style === 'rail' ? 'rail' : 'column') : undefined;
   return (
     <nav
       className={`fy-nav fy-nav--${side} fy-nav--${plan.nav.style}`}
@@ -64,16 +71,26 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
         const to = navHref(entry, daemon, href);
         const label = entry.kind === 'screen' ? entry.screen.label : entry.item === 'settings' ? 'Settings' : 'Daemons';
         const key = entry.kind === 'screen' ? `${entry.screen.plugin}.${entry.screen.id}` : entry.item;
+        // A plugin's count for its own entry, summed over every machine (S4), on every nav form.
+        const badge =
+          entry.kind === 'screen' ? (
+            <NavCount key="count" plugin={entry.screen.plugin} screen={entry.screen.id} label={label} />
+          ) : null;
         return to === undefined ? (
           <span key={key} className="fy-nav__item fy-nav__item--off">
             {label}
+            {badge}
           </span>
         ) : (
           <Link key={key} to={to} className="fy-nav__item">
             {label}
+            {badge}
           </Link>
         );
       })}
+      {/* Device-level nav panels (S4, MJ3): drawn once, with no daemon, in the column and in the rail (each told its
+      form), never on the phone bar. */}
+      {panelForm === undefined ? null : <DevicePanels slot="nav" form={panelForm} />}
     </nav>
   );
 }
@@ -164,6 +181,8 @@ function Side({ daemon }: { readonly daemon: string | undefined }) {
   return (
     <aside className="fy-side" data-slot="side">
       {holds.kind === 'screen' ? <ScreenView daemon={daemon} screen={holds.screen} params={{}} /> : null}
+      {/* The side column that holds panels (S4): the `side` slot's panels, for the route's daemon. */}
+      {holds.kind === 'panels' ? <PanelSlot daemon={daemon} slot="side" /> : null}
     </aside>
   );
 }
@@ -232,6 +251,32 @@ function ShellCommandBar(props: {
   return <CommandBar open={props.open} focusSignal={props.focusSignal} onClose={props.onClose} sources={sources} />;
 }
 
+/**
+ * The sentence that replaces a whole machine's page. A machine this page was refused on (`4403`) also offers the one
+ * repair, "Pair again" (S12): its key and pairing are kept, so the person chooses whether to repeat the pairing.
+ */
+function WholeLine({ daemon, line }: { readonly daemon: string | undefined; readonly line: string }) {
+  const { runtime } = useShell();
+  const { navigate } = useRouter();
+  const refused = daemon !== undefined && runtime.isRefused(daemon) ? daemon : undefined;
+  return (
+    <>
+      <ShellLine tone="warn">{line}</ShellLine>
+      {refused === undefined ? null : (
+        <button
+          type="button"
+          className="kt-btn"
+          data-variant="primary"
+          data-device-refused-pair=""
+          onClick={() => navigate(pairAgainHref(refused))}
+        >
+          Pair again
+        </button>
+      )}
+    </>
+  );
+}
+
 export function Frame() {
   const { runtime, plan, scroll } = useShell();
   useRuntimeVersion(runtime);
@@ -244,31 +289,37 @@ export function Frame() {
   useCommandBarShortcut(openBar);
   // The visible height (`--app-h`) and the keyboard-open attribute every screen lays itself out by, as today.
   useAppViewport();
+  // The frame root, handed to the shell's own overlays (the machine picker, S10) so they draw above every plugin sheet.
+  const [frameRoot, setFrameRoot] = useState<HTMLElement | null>(null);
   return (
-    <div className={`fy-frame fy-frame--nav-${plan.nav.side}`} data-layout={plan.layoutId}>
-      <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
-      <div className="fy-body">
-        <TopBar daemon={daemon} onSearch={openBar} />
-        <div className="fy-columns">
-          <main className="fy-main" data-slot="main">
-            <PageScrollRegion entryKey={entryKey} memory={scroll}>
-              {whole === undefined ? <Main route={route} /> : <ShellLine tone="warn">{whole}</ShellLine>}
-            </PageScrollRegion>
-          </main>
-          {whole === undefined ? <Side daemon={daemon} /> : null}
+    <FrameRootContext.Provider value={frameRoot}>
+      <div ref={setFrameRoot} className={`fy-frame fy-frame--nav-${plan.nav.side}`} data-layout={plan.layoutId}>
+        <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
+        <div className="fy-body">
+          <TopBar daemon={daemon} onSearch={openBar} />
+          <div className="fy-columns">
+            <main className="fy-main" data-slot="main">
+              <PageScrollRegion entryKey={entryKey} memory={scroll}>
+                {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
+              </PageScrollRegion>
+            </main>
+            {whole === undefined ? <Side daemon={daemon} /> : null}
+          </div>
         </div>
-      </div>
-      <ShellCommandBar
-        daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
-        open={bar.open}
-        focusSignal={bar.signal}
-        onClose={closeBar}
-      />
-      {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
+        <ShellCommandBar
+          daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
+          open={bar.open}
+          focusSignal={bar.signal}
+          onClose={closeBar}
+        />
+        {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
       raises it, and only the machine on screen may raise a background one (G95, G105). */}
-      <PasskeyMount onScreen={daemon ?? runtime.daemons.snapshot().selected} />
-      {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
-      <DeviceViews />
-    </div>
+        <PasskeyMount onScreen={runtime.passkeyOnScreen.chosen() ?? daemon ?? runtime.daemons.snapshot().selected} />
+        {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
+        <DeviceViews />
+        {/* Every plugin's background views, once per paired daemon where it may run (S5): watchers and overlays. */}
+        <BackgroundViews />
+      </div>
+    </FrameRootContext.Provider>
   );
 }

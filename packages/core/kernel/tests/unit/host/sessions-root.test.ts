@@ -241,6 +241,7 @@ describe('K1 RootHandle.internal', () => {
       worktrees: false,
       work: false,
       imports: false,
+      'project-files': false,
     };
     for (const name of Object.keys(expected) as RootName[]) {
       // credentials, sessions, fleet and harness-home have an owner; every other plugin gets its own name

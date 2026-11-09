@@ -5,6 +5,8 @@ import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSub
 import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from '../host/root-rules.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
+import { projectFilesScope } from '../manifest/project-files.ts';
+import { PROJECT_SOURCES, projectFileKey, projectFilesHandle } from './project-files.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
@@ -103,8 +105,10 @@ import {
   type ItemReachOf,
   NO_ITEMS,
   PermissionError,
+  type ResolverOf,
   spawnPermitted,
 } from '../host/permissions.ts';
+import { configOwnedKinds, itemReach } from '../host/items.ts';
 import { scratchPort } from '../host/scratch.ts';
 import { type DetachedCall, detachedAsked, detachedHandle, detachedRefusal } from '../host/detached.ts';
 import { PinRegistry } from '../host/pins.ts';
@@ -126,6 +130,7 @@ import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
 import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
+import { reachFaults } from '../manifest/reach.ts';
 import type { HookTake, Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
 import { type TestCaller, owner, standInAdmission, testArrival, testPrincipal } from './admission.ts';
@@ -142,11 +147,13 @@ function refuseDetached(
   call: DetachedCall,
   program: string,
   spawnOptions: SpawnOptions,
+  resolve: ResolverOf,
 ): void {
   const spawnDeclared = spawnPermitted(
     effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
     items,
     program,
+    resolve,
   );
   const why = detachedRefusal(manifest.id, manifest.permissions?.detached, spawnDeclared, call, program, spawnOptions);
   if (why !== undefined) throw new PermissionError(why);
@@ -196,6 +203,11 @@ export interface TestHostOptions {
   readonly harnessFiles?: Readonly<Record<string, string>>;
   /** The kernel home the test roots' fence is judged against (`harnessFile` refuses a path in it). Default: `/test-home`. */
   readonly fenceHome?: string;
+  /**
+   * A host that cannot reach an entry through a held folder (macOS today): the `project-files` root, an owner's root,
+   * refuses every remove `no_descriptor_reach`, as the real host does there. Default: it has reach.
+   */
+  readonly noDescriptorReach?: true;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
@@ -320,6 +332,13 @@ export interface TestHost {
   /** Moves the stand-in output guard's generation: a guarded body built before now is withheld. */
   holdBegins(): void;
   putRoot(name: RootName, relative: string, text: string): void;
+  /**
+   * A link planted at `relative` of the test root `name` (for `project-files`, `relative` is the ABSOLUTE path of the name:
+   * its scope folder and then the name). The kernel never follows it: a root read or write through it is refused.
+   */
+  putRootLink(name: RootName, relative: string): void;
+  /** A file with a second name planted at `relative` of the test root `name` (see {@link TestHost.putRootLink}). */
+  putRootHardLink(name: RootName, relative: string, text: string): void;
   stop(): Promise<void>;
 }
 
@@ -383,6 +402,10 @@ interface Built {
  * and the admission decision behind the Admission port (§3.9, §7.8). Real route table (today's router), real final
  * check (`finalised`), real `closeAck`.
  */
+/** A name's key in the flat test world: `/<root>/<relative>`; a `project-files` name is keyed by its absolute path. */
+const rootKey = (name: RootName, relative: string): string =>
+  name === 'project-files' ? projectFileKey(relative) : `/${name}/${relative}`;
+
 export async function testHost(options: TestHostOptions): Promise<TestHost> {
   const throwaway = await testIdentity();
   const identity: IdentityPort =
@@ -407,6 +430,9 @@ export async function testHost(options: TestHostOptions): Promise<TestHost> {
 async function start(world: World): Promise<TestHost> {
   const { options, clock, identity, identitySigner } = world;
   const manifests: readonly Manifest[] = options.plugins.map(plugin => plugin.manifest);
+  // The real host refuses a plugin whose reach declarations it does not honour; a suite learns it the same way.
+  const fault = reachFaults(manifests)[0];
+  if (fault !== undefined) throw new Error(`testHost: ${fault.plugin} ${fault.sentence}`);
   const hookOffers = new Map(
     manifests.flatMap(manifest => (manifest.hooks?.offers ?? []).map(offer => [offer.hook.name, offer.hook] as const)),
   );
@@ -1035,9 +1061,14 @@ async function start(world: World): Promise<TestHost> {
   const testLinks = new Map<string, string>();
   /** `setMode`'s modes in the test world, by path; a path never set keeps the default (`0o600` for a file). */
   const testModes = new Map<string, number>();
-  /** A folder exists in the flat test world when a file OR a link lies under it. */
+  /** Files of the test world that have a second name (`TestHost.putRootHardLink`), by key. */
+  const testHardLinks = new Set<string>();
+  /** Folders `makeDirectory` made, so an EMPTY folder exists in the flat test world (a rmdir has something to remove). */
+  const testMadeFolders = new Set<string>();
+  /** A folder exists in the flat test world when it was made, or a file, a link or a made folder lies under it. */
   const testFolderExists = (path: string): boolean =>
-    [...world.roots.keys(), ...testLinks.keys()].some(key => key.startsWith(`${path}/`));
+    testMadeFolders.has(path) ||
+    [...world.roots.keys(), ...testLinks.keys(), ...testMadeFolders].some(key => key.startsWith(`${path}/`));
   const testHarnessFile = (manifest: Manifest, absolutePath: string): RootFileHandle => {
     const refusal = harnessFileRefusal({
       plugin: manifest.id,
@@ -1121,8 +1152,37 @@ async function start(world: World): Promise<TestHost> {
         return sharedTrees.mint(folder.slice(folder.lastIndexOf('/') + 1), { files }, life);
       },
       root(name, scope) {
-        if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name))
+        if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name)) {
+          // The real host's refusal for the one root whose twin is the real rules (`testing/project-files.ts`).
+          if (name === 'project-files') throw new RootError('not_declared');
           throw new Error(`${manifest.id}: root ${name} is not declared`);
+        }
+        if (name === 'project-files') {
+          // The real host's rules over the flat world (`testing/project-files.ts`), with the same refusals.
+          const project = projectFilesHandle({
+            plugin: manifest.id,
+            patterns: manifest.permissions?.projectFiles,
+            folder: projectFilesScope(scope?.subfolder),
+            fenceHome: options.fenceHome ?? '/test-home',
+            setModeDeclared: manifest.permissions?.setMode === true,
+            noDescriptorReach: options.noDescriptorReach === true,
+            files: world.roots,
+            links: testLinks,
+            hardLinks: testHardLinks,
+            modes: testModes,
+            inodes,
+            nextInode: () => (nextInode += 1n),
+            now: () => clock.now(),
+            known: other => {
+              const found = testHandles.get(other);
+              return found === undefined
+                ? undefined
+                : { plugin: found.plugin, ...(found.root === 'project-files' ? { keyOf: projectFileKey } : {}) };
+            },
+          });
+          testHandles.set(project, { plugin: manifest.id, root: name, prefix: undefined });
+          return project;
+        }
         // The same scope rule as production (`scopedSubfolder`): a `sessions` handle is one minted ferret folder, an
         // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
         // see each other; a refused scope resolves nothing.
@@ -1229,11 +1289,16 @@ async function start(world: World): Promise<TestHost> {
             for (const [key, value] of files) world.roots.set(`${to}/${key}`, value);
             return copyOptions?.link === true ? 'linked' : 'copied';
           },
-          copyTree: async (_source, from, to, copyOptions) => {
+          copyTree: async (source, from, to, copyOptions) => {
+            // A SOURCE that is a project folder is gated by its own handle (the declared set, no link on the way), and no
+            // link is ever made from one into another root: the same two refusals as production (`HANDLES.real`, `linkTarget`).
+            const projectSource = PROJECT_SOURCES.get(source);
+            projectSource?.(from);
+            if (projectSource !== undefined && copyOptions?.link === true) throw new RootError('not_declared');
             // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
+            const fromKey = projectSource === undefined ? from : projectFileKey(from);
             for (const [key, text] of [...world.roots])
-              if (key.startsWith(`${from}/`)) world.roots.set(`${to}${key.slice(from.length)}`, text);
-            void copyOptions;
+              if (key.startsWith(`${fromKey}/`)) world.roots.set(`${to}${key.slice(fromKey.length)}`, text);
           },
           ensurePrivateDirectory: async () => {},
           lstat: async path => {
@@ -1243,7 +1308,9 @@ async function start(world: World): Promise<TestHost> {
               ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
               : undefined;
           },
-          makeDirectory: async () => {},
+          makeDirectory: async path => {
+            testMadeFolders.add(ownPath(path));
+          },
           realPath: async path => {
             if (!world.roots.has(path) && !testFolderExists(path)) throw new Error(`no such file ${path}`);
             return path;
@@ -1268,8 +1335,49 @@ async function start(world: World): Promise<TestHost> {
               })),
           ],
           stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
-          remove: async path => {
-            world.roots.delete(path);
+          // The real host's rules over the flat test world, with the same refusals: the LEAF IS NEVER FOLLOWED (the parent
+          // is opened first, then the entry goes by its own name; a link goes as a link and its target stays), and
+          // `onlyIfEmpty` is `rmdir` (one step: refused `not_empty` when anything is inside, never recursing).
+          remove: async (path, removeOptions) => {
+            if (isReadOnlyRoot(name)) throw new RootError('read_only');
+            const named = ownPath(path);
+            // The PARENT is resolved (a link on the way is followed, and judged: one that leaves this root is
+            // `link_escape`); the leaf's own name is appended as it is.
+            let parent = named.slice(0, named.lastIndexOf('/'));
+            for (let hops = 0; ; hops += 1) {
+              const parts = parent.split('/');
+              const index = parts.findIndex((_, at) => testLinks.has(parts.slice(0, at + 1).join('/')));
+              if (index < 0) break;
+              const pointsAt = testLinks.get(parts.slice(0, index + 1).join('/')) as string;
+              if (hops > 40 || prefix === undefined || (pointsAt !== prefix && !pointsAt.startsWith(`${prefix}/`)))
+                throw new RootError('link_escape');
+              parent = [pointsAt, ...parts.slice(index + 1)].join('/');
+            }
+            if (parent !== prefix && (world.roots.has(parent) || !testFolderExists(parent)))
+              throw new RootError('changed');
+            const place = `${parent}/${named.slice(named.lastIndexOf('/') + 1)}`;
+            const under = (key: string): boolean => key === place || key.startsWith(`${place}/`);
+            if (testLinks.has(place)) {
+              testLinks.delete(place);
+              testModes.delete(place);
+              return;
+            }
+            if (world.roots.has(place)) {
+              world.roots.delete(place);
+              testModes.delete(place);
+              return;
+            }
+            if (!testFolderExists(place)) return;
+            if (removeOptions?.onlyIfEmpty === true) {
+              const holdsEntry = [...world.roots.keys(), ...testLinks.keys(), ...testMadeFolders].some(key =>
+                key.startsWith(`${place}/`),
+              );
+              if (holdsEntry) throw new RootError('not_empty');
+            }
+            for (const key of [...world.roots.keys()]) if (under(key)) world.roots.delete(key);
+            for (const key of [...testLinks.keys()]) if (under(key)) testLinks.delete(key);
+            for (const key of [...testModes.keys()]) if (under(key)) testModes.delete(key);
+            for (const key of [...testMadeFolders]) if (under(key)) testMadeFolders.delete(key);
           },
           // The real host's rules (`host/root-rules.ts`) over the flat test world, with the same refusals.
           linkTo: async (at, target) => {
@@ -1329,6 +1437,11 @@ async function start(world: World): Promise<TestHost> {
                 testModes.set(placed(key), mode);
                 testModes.delete(key);
               }
+            for (const key of [...testMadeFolders])
+              if (under(key)) {
+                testMadeFolders.delete(key);
+                testMadeFolders.add(placed(key));
+              }
           },
           setMode: async (path, mode) => {
             if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');
@@ -1357,6 +1470,30 @@ async function start(world: World): Promise<TestHost> {
     };
   };
 
+  // What an item names, by the real host's rule (`host/items.ts`): the installed items `options.items` names, united with
+  // the owner's config collection of each kind, read from the world at every check. Built on first use, when every
+  // plugin's config is declared.
+  let liveItems: ItemReachOf | undefined;
+  const itemsOf: ItemReachOf = kind => {
+    liveItems ??= itemReach({
+      installed: options.items ?? NO_ITEMS,
+      configOwned: configOwnedKinds(
+        options.plugins.map(plugin => plugin.manifest as Manifest),
+        id => configPort(options.plugins.find(plugin => plugin.manifest.id === id)?.manifest as Manifest),
+      ),
+    });
+    return liveItems(kind);
+  };
+  /** A plugin's own declared resolvers, asked at each call, as the real host asks them. */
+  const resolversOf =
+    (id: string): ResolverOf =>
+    name =>
+      (
+        built.find(b => b.manifest.id === id)?.half?.resolvers as
+          | Readonly<Record<string, (() => readonly string[]) | undefined>>
+          | undefined
+      )?.[name];
+
   const kernelFor = (manifest: Manifest): KernelPorts => {
     let state = world.states.get(manifest.id);
     if (state === undefined) {
@@ -1366,18 +1503,7 @@ async function start(world: World): Promise<TestHost> {
     const publishes = new Set((manifest.data?.publishes ?? []).map(event => event.name));
     const declaredNetwork = effectivePermissions(manifest.id, manifest.permissions?.network ?? []);
     const mayReach = (hostname: string, host: string): boolean =>
-      hostPermitted(
-        declaredNetwork,
-        options.items ?? NO_ITEMS,
-        hostname,
-        name =>
-          (
-            built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-              | Readonly<Record<string, (() => readonly string[]) | undefined>>
-              | undefined
-          )?.[name],
-        host,
-      );
+      hostPermitted(declaredNetwork, itemsOf, hostname, resolversOf(manifest.id), host);
     const fetchPort: FetchPort = {
       async request(url, init) {
         const parsed = new URL(url);
@@ -1418,12 +1544,13 @@ async function start(world: World): Promise<TestHost> {
       spawn: {
         async run(program, args, spawnOptions) {
           if (detachedAsked(spawnOptions))
-            refuseDetached(manifest, options.items ?? NO_ITEMS, 'run', program, spawnOptions);
+            refuseDetached(manifest, itemsOf, 'run', program, spawnOptions, resolversOf(manifest.id));
           if (
             !spawnPermitted(
               effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
-              options.items ?? NO_ITEMS,
+              itemsOf,
               program,
+              resolversOf(manifest.id),
             )
           )
             throw new Error(`${manifest.id}: spawn ${program} is not declared`);
@@ -1432,7 +1559,7 @@ async function start(world: World): Promise<TestHost> {
         },
         async runBytes(program, args, spawnOptions) {
           if (detachedAsked(spawnOptions))
-            refuseDetached(manifest, options.items ?? NO_ITEMS, 'runBytes', program, spawnOptions);
+            refuseDetached(manifest, itemsOf, 'runBytes', program, spawnOptions, resolversOf(manifest.id));
           const result = await this.run(program, args, spawnOptions);
           const all = new TextEncoder().encode(result.stdout);
           const cap = spawnOptions?.maxStdoutBytes ?? 1024 * 1024;
@@ -1447,7 +1574,7 @@ async function start(world: World): Promise<TestHost> {
         },
         start(program, args, spawnOptions): ChildHandle {
           if (detachedAsked(spawnOptions)) {
-            refuseDetached(manifest, options.items ?? NO_ITEMS, 'start', program, spawnOptions);
+            refuseDetached(manifest, itemsOf, 'start', program, spawnOptions, resolversOf(manifest.id));
             if (options.detachedStart === undefined)
               throw new Error(`${manifest.id}: detached ${program} with no detachedStart fake`);
             return detachedHandle(options.detachedStart(program, args, spawnOptions));
@@ -1467,14 +1594,9 @@ async function start(world: World): Promise<TestHost> {
           if (
             !hostPermitted(
               effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
-              options.items ?? NO_ITEMS,
+              itemsOf,
               parsed.hostname,
-              name =>
-                (
-                  built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
-                    | undefined
-                )?.[name],
+              resolversOf(manifest.id),
               parsed.host,
             )
           )
@@ -1987,7 +2109,14 @@ async function start(world: World): Promise<TestHost> {
       world.generation++;
     },
     putRoot(name, relative, text) {
-      world.roots.set(`/${name}/${relative}`, text);
+      world.roots.set(rootKey(name, relative), text);
+    },
+    putRootLink(name, relative) {
+      testLinks.set(rootKey(name, relative), '(planted)');
+    },
+    putRootHardLink(name, relative, text) {
+      world.roots.set(rootKey(name, relative), text);
+      testHardLinks.add(rootKey(name, relative));
     },
     async stop() {
       if (stopController.signal.aborted) return;

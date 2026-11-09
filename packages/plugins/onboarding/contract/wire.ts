@@ -28,6 +28,12 @@ export const StepViewSchema = z.strictObject({
   order: z.number().int(),
   state: StepStateSchema,
   at: InstantSchema.optional(),
+  /**
+   * With `found`: what was found is the terminal's own sign-in, linked rather than made for Ferretry. The step's live
+   * check says so when it records the answer, so the fact stays with the check that saw it (the plugin that owns the
+   * step), and no screen names a plugin to know it.
+   */
+  linked: z.literal(true).optional(),
 });
 export type StepView = z.infer<typeof StepViewSchema>;
 
@@ -36,17 +42,36 @@ export const OnboardingViewSchema = z.strictObject({
   steps: z.array(StepViewSchema),
   /** Every step is found, done, later or skipped (none pending). */
   complete: z.boolean(),
+  /**
+   * True when Runtimes `list()` names at least one runtime: v4's "a runtime exists", counted through `list()`. v4
+   * counted every runtime key; a runtime `list()` leaves out (an unknown harness, or every login-derived one while
+   * Logins is unreadable) does not count here (a declared GAP). False when Runtimes is off or cannot be read. It is the
+   * machine's fact, not a step answer: a machine set up without `fy onboard` has every step `pending` and is still
+   * set up.
+   */
+  setUp: z.boolean(),
 });
 export type OnboardingView = z.infer<typeof OnboardingViewSchema>;
 
 /** `POST /v1/onboarding/steps/:plugin/:stepId`: record how the owner answered. Grants nothing by itself. */
-export const StepAnswerRequestSchema = z.strictObject({ state: z.enum(['found', 'done', 'later', 'skipped']) });
+export const StepAnswerRequestSchema = z
+  .strictObject({
+    state: z.enum(['found', 'done', 'later', 'skipped']),
+    /** Only a `found` answer can be a linked sign-in (see {@link StepViewSchema}). */
+    linked: z.literal(true).optional(),
+  })
+  .refine(answer => answer.linked === undefined || answer.state === 'found', {
+    message: 'only a found step can be a linked sign-in',
+  });
 export type StepAnswerRequest = z.infer<typeof StepAnswerRequestSchema>;
 
 /** `state/onboarding/progress.json`. */
 export const ProgressSchema = z.strictObject({
   format: z.literal(1),
-  steps: z.record(z.string(), z.strictObject({ state: StepStateSchema, at: InstantSchema })),
+  steps: z.record(
+    z.string(),
+    z.strictObject({ state: StepStateSchema, at: InstantSchema, linked: z.literal(true).optional() }),
+  ),
 });
 export type Progress = z.infer<typeof ProgressSchema>;
 

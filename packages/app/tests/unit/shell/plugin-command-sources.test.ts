@@ -77,7 +77,9 @@ describe('buildPluginCommandSources', () => {
       changed,
     });
     expect(built).toHaveLength(1);
-    expect(built[0]?.('abc').map(entry => entry.id)).toEqual(['hit-abc']);
+    expect((built[0] as (query: string) => readonly { id: string }[])('abc').map(entry => entry.id)).toEqual([
+      'hit-abc',
+    ]);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.daemon).toBe('d1');
     expect(seen[0]?.navigate).toBe(navigate);
@@ -131,6 +133,6 @@ describe('buildPluginCommandSources', () => {
       changed,
     });
     expect(built).toHaveLength(1);
-    expect(built[0]?.('').map(entry => entry.id)).toEqual(['kept']);
+    expect((built[0] as (query: string) => readonly { id: string }[])('').map(entry => entry.id)).toEqual(['kept']);
   });
 });

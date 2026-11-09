@@ -1,4 +1,4 @@
-import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import {
   SHELLS_AUDIT,
   SHELLS_CACHE,
@@ -111,6 +111,8 @@ export default definePlugin({
 
   ui: {
     settings: [settingsTab('shells', { label: 'Shells', order: 70 })],
+    // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
+    panels: [panel('onboarding.step', { id: 'onboarding-step', order: 80 })],
   },
 
   data: {

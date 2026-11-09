@@ -1309,6 +1309,69 @@ describe('app-hooks', () => {
   });
 });
 
+describe('app-hooks: a shared action is one provider, many callers (S15)', () => {
+  const add = (value: unknown) => typeof value === 'object' && value !== null && 'add' in value;
+  const declared = [{ plugin: 'conversation', hooks: { 'conversation.add-to-chat': add } }];
+  const gives = (plugin: string, name: string, value: unknown = { add: () => undefined }) => ({
+    plugin,
+    hooks: { [name]: () => value },
+  });
+  const found = (...args: Parameters<typeof appHookFindings>) => appHookFindings(...args).map(x => x.message);
+
+  test('S15 a provider-named hook its own plugin gives, with the shape, passes without any offerer', () => {
+    expect(found([], [gives('conversation', 'conversation.add-to-chat')], declared)).toEqual([]);
+  });
+  test('S15 a provider-named hook is not mistaken for an offerer-named one (no "no provider"/"which nobody offers")', () => {
+    const offers = [{ plugin: 'agenda', hooks: { 'agenda.card-answer': add } }];
+    expect(
+      found(
+        offers,
+        [gives('board', 'agenda.card-answer'), gives('conversation', 'conversation.add-to-chat')],
+        declared,
+      ),
+    ).toEqual([]);
+  });
+  test('planted: a wrong prefix is found (the name is not the declaring plugin’s own id)', () => {
+    expect(
+      found(
+        [],
+        [gives('conversation', 'board.add-to-chat')],
+        [{ plugin: 'conversation', hooks: { 'board.add-to-chat': add } }],
+      ),
+    ).toEqual([
+      'provides shared action "board.add-to-chat", whose prefix is not "conversation" (the provider\'s own id)',
+    ]);
+  });
+  test('planted: another plugin giving the shared action is found', () => {
+    expect(
+      found(
+        [],
+        [gives('conversation', 'conversation.add-to-chat'), gives('board', 'conversation.add-to-chat')],
+        declared,
+      ),
+    ).toEqual(['provides "conversation.add-to-chat", the shared action of conversation; only conversation may']);
+  });
+  test('planted: a declared shared action its half does not give is found', () => {
+    expect(found([], [], declared)).toEqual([
+      expect.stringContaining('"conversation.add-to-chat" is declared but its half does not give'),
+    ]);
+  });
+  test('planted: a shared action that fails to build or has the wrong shape is found', () => {
+    const throws = {
+      plugin: 'conversation',
+      hooks: {
+        'conversation.add-to-chat': () => {
+          throw new Error('boom');
+        },
+      },
+    };
+    expect(found([], [throws], declared)).toEqual(['shared action "conversation.add-to-chat" failed to build: boom']);
+    expect(found([], [gives('conversation', 'conversation.add-to-chat', {})], declared)).toEqual([
+      'shared action "conversation.add-to-chat" builds a value without the shape its contract declares',
+    ]);
+  });
+});
+
 // ─── shell-provides (S3: declared fragments and device views) ────────────────────────────────────────────────────
 
 describe('shell-provides', () => {
@@ -1377,6 +1440,69 @@ describe('shell-provides', () => {
     expect(found(half('agenda', { fragments: [{ form: 'query', key: 'x' }, null] }))).toEqual([
       'declares a fragment in no known form: {"form":"query","key":"x"}',
       'declares a fragment in no known form: null',
+    ]);
+  });
+  test('the frame sections (S4, S5, S7): real shapes pass', () => {
+    expect(
+      found(
+        half('agenda', {
+          screens: [{ id: 'inbox', nav: { label: 'Inbox' } }],
+          panels: [{ id: 'needs-you', slot: 'nav' }],
+          navPanels: ['needs-you'],
+          navBadges: ['inbox'],
+          background: ['watch'],
+        }),
+        half('updates', {
+          panels: [{ id: 'install', slot: 'device.settings' }],
+          deviceSettings: ['install'],
+        }),
+        half('browsers', { links: true }),
+        // A panel in another slot needs no device view, and a skeleton half's panels are not asked for.
+        half('conversation', { panels: [{ id: 'queue', slot: 'ferret.side' }] }),
+        half('late', { skeleton: true, panels: [{ id: 'x', slot: 'nav' }] }),
+      ),
+    ).toEqual([]);
+  });
+  test('planted: a links provider outside the taker list is found', () => {
+    expect(found(half('conversation', { links: true }))).toEqual([
+      expect.stringContaining('provides `shell.links`, but only browsers may'),
+    ]);
+  });
+  test('planted: a navBadges key that is not an own screen with a nav entry is found', () => {
+    expect(found(half('agenda', { navBadges: ['inbox'] }))).toEqual([
+      'has a `shell.navBadges` key "inbox", which is not one of its own screens',
+    ]);
+    expect(found(half('agenda', { screens: [{ id: 'inbox' }], navBadges: ['inbox'] }))).toEqual([
+      expect.stringContaining('whose screen declares no `nav` entry'),
+    ]);
+  });
+  test('planted: a device.settings or nav view that is no declared panel, and a declared panel with no view, are found', () => {
+    expect(found(half('updates', { deviceSettings: ['install'] }))).toEqual([
+      'has a `shell.deviceSettings` view "install", which is not a panel it declares in `device.settings`',
+    ]);
+    expect(
+      found(half('agenda', { navPanels: ['needs-you'], panels: [{ id: 'needs-you', slot: 'device.settings' }] })),
+    ).toEqual([
+      expect.stringContaining('declares the `device.settings` panel "needs-you" with no `shell.deviceSettings` view'),
+      'has a `shell.navPanels` view "needs-you", which is not a panel it declares in `nav`',
+    ]);
+    expect(found(half('agenda', { panels: [{ id: 'needs-you', slot: 'nav' }] }))).toEqual([
+      expect.stringContaining('declares the `nav` panel "needs-you" with no `shell.navPanels` view'),
+    ]);
+  });
+  test('planted: background and navBadges on a skeleton half are found', () => {
+    expect(
+      found(
+        half('agenda', {
+          skeleton: true,
+          background: ['watch'],
+          navBadges: ['inbox'],
+          screens: [{ id: 'inbox', nav: {} }],
+        }),
+      ),
+    ).toEqual([
+      'is a skeleton half with `shell.background` views (watch): nothing mounts them',
+      'is a skeleton half with `shell.navBadges` (inbox): nothing draws them',
     ]);
   });
   test('over a workspace: a half that declares a key with no taker fails, and a half that fails to load is said', async () => {
