@@ -74,6 +74,8 @@ export interface AgendaLedgerRepository {
   /** Durable original changes, delivered outside the ledger transaction queue, including recovered mutations. */
   readonly changeOutbox?: {
     flush(sessionId: string, observer: AgendaChangeObserver): Promise<void>;
+    /** The ferrets whose outbox may still hold an event to deliver, so a periodic drain reads only those. */
+    pendingFerrets?(): readonly string[];
   };
   /** `by` names who made the change, for the version it is kept as (see {@link AgendaVersionStore}). */
   transact(
@@ -266,6 +268,12 @@ export class AgendaService {
   async raisedObligation(sessionId: string, sourceRef: string): Promise<AgendaId | undefined> {
     const ledger = await this.read(sessionId);
     return ledger?.raisedObligations?.[sourceRef];
+  }
+
+  /** Every source obligation a board has raised, `sourceRef -> first ask` (one read of one ledger). */
+  async raisedObligations(sessionId: string): Promise<Readonly<Record<string, AgendaId>>> {
+    const ledger = await this.read(sessionId);
+    return ledger?.raisedObligations ?? {};
   }
 
   /**
@@ -919,6 +927,17 @@ export class AgendaService {
     const ledger = await this.repository.read(sessionId);
     await this.flushChanges(sessionId);
     return ledger;
+  }
+
+  /**
+   * Delivers the change events still waiting in an outbox, for the ferrets the outbox says have one: no ledger is
+   * listed or read, so with nothing pending a drain does no work. `stopped` ends the drain before the next ferret.
+   */
+  async flushPending(report: (error: unknown) => void, stopped?: AbortSignal): Promise<void> {
+    for (const ferret of this.repository.changeOutbox?.pendingFerrets?.() ?? []) {
+      stopped?.throwIfAborted();
+      await this.flushChanges(ferret).catch(report);
+    }
   }
 
   private async flushChanges(sessionId: string): Promise<void> {

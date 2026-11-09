@@ -262,7 +262,7 @@ interface BoardNudgeSender {
 
 export interface BoardSweepPorts {
   readonly board: {
-    sweepBoard(): Promise<SweepBoard>;
+    sweepBoard(signal?: AbortSignal): Promise<SweepBoard>;
     /** Closes a helper whose ferret ended; `true` when it closed. */
     closeEndedHelper(id: CardId): Promise<boolean>;
     /**
@@ -303,28 +303,31 @@ export class BoardSweep {
 
   constructor(private readonly ports: BoardSweepPorts) {}
 
-  async tick(): Promise<SweepReport> {
+  /** A stopped tick (`signal`) ends at the next read or card instead of finishing the board. */
+  async tick(signal?: AbortSignal): Promise<SweepReport> {
     if (this.running) return { nudged: [], unblocked: [], closed: [], returned: [] };
     this.running = true;
     try {
-      return await this.sweep();
+      return await this.sweep(signal);
     } finally {
       this.running = false;
     }
   }
 
-  private async sweep(): Promise<SweepReport> {
+  private async sweep(signal?: AbortSignal): Promise<SweepReport> {
     const [memory, board, roster] = await Promise.all([
       this.ports.memory.read(),
-      this.ports.board.sweepBoard(),
+      this.ports.board.sweepBoard(signal),
       this.ports.sessions.roster(),
     ]);
+    signal?.throwIfAborted();
     const now = this.ports.clock.now();
     const plan = planSweep(memory, board, roster, now);
     const nudged: CardId[] = [];
     const unblocked: CardId[] = [];
     const seen = { ...plan.memory.seen };
     for (const nudge of plan.nudges) {
+      signal?.throwIfAborted();
       await this.ports.nudges.send(nudge.ferret, nudge.message, nudge.kind).then(
         () => (nudge.kind === 'stale' ? nudged : unblocked).push(nudge.cardId),
         (error: unknown) => {

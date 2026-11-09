@@ -169,8 +169,9 @@ export const gatherDerivation = async (
     readonly parents?: FerretParents;
   },
   board: readonly Card[] = cards,
+  signal?: AbortSignal,
 ): Promise<DerivationInputs> => {
-  const asks = await ports.asks.asksFor(cards, board);
+  const asks = await ports.asks.asksFor(cards, board, signal);
   const activity = await ports.activity.derive({ cards, index, laneSets, asks });
   if (ports.parents === undefined) return { index, laneSets, activity, asks };
   return { index, laneSets, activity, asks, origins: await originFacts(cards, ports.parents) };

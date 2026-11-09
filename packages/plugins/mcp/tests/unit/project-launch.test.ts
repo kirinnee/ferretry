@@ -134,6 +134,7 @@ function kernelRoots(
         linkTo: missing('link'),
         setMode: missing('change a mode'),
         rename: missing('move an entry'),
+        unlink: missing('remove a link'),
       };
     },
   };

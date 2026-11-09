@@ -100,6 +100,7 @@ function kernelRoot(
     linkTo: record('linkTo'),
     setMode: record('setMode'),
     rename: record('rename'),
+    unlink: record('unlink'),
   };
 }
 

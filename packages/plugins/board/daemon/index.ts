@@ -119,15 +119,15 @@ export default implementDaemon(manifest, {
     kernel.jobs.add({
       id: 'board-sweep',
       schedule: { every: milliseconds(BOARD_SWEEP_INTERVAL_MS) },
-      run: async () => {
-        await world.sweepTick();
+      run: async signal => {
+        await world.sweepTick(signal);
       },
     });
     kernel.jobs.add({
       id: 'board-gates',
       schedule: { onceAfterStart: true },
-      run: async () => {
-        await world.gateReconcile();
+      run: async signal => {
+        await world.gateReconcile(signal);
       },
     });
     // The GitHub watch: a first tick 20 s after start, then one 30 s (±10%) after each tick finishes. The Unfiled

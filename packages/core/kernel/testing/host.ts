@@ -2,7 +2,15 @@ import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
 import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
-import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from '../host/root-rules.ts';
+import {
+  harnessFileRefusal,
+  permittedMode,
+  renameNamesRefusal,
+  takesLinks,
+  takesRenames,
+  takesUnlinks,
+  unlinkNameRefusal,
+} from '../host/root-rules.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
@@ -1478,6 +1486,18 @@ async function start(world: World): Promise<TestHost> {
                 testMadeFolders.delete(key);
                 testMadeFolders.add(placed(key));
               }
+          },
+          unlink: async linkName => {
+            if (isReadOnlyRoot(name) || !takesUnlinks(name)) throw new RootError('read_only');
+            const refused = unlinkNameRefusal(linkName);
+            if (refused !== undefined) throw new RootError(refused);
+            const place = ownPath(linkName);
+            // As production, the parent is opened first: a link anywhere on the way to it is `link_escape`.
+            const parent = place.slice(0, place.lastIndexOf('/'));
+            const steps = parent.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
+            if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+            if (!testLinks.has(place)) throw new RootError('outside');
+            testLinks.delete(place);
           },
           setMode: async (path, mode) => {
             if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');

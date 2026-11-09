@@ -151,10 +151,24 @@ export class AsksWardenAgenda implements WardenAgendaPort {
       readonly context: string;
     },
   ): Promise<WardenAgendaWrite> {
+    return (await this.noticeOutcome(sessionId, notice)).write;
+  }
+
+  /** {@link notice}, and WHY when it was refused (the Asks port's own sentence, such as a full board). */
+  async noticeOutcome(
+    sessionId: string,
+    notice: {
+      readonly sourceRef: string;
+      readonly subject: string;
+      readonly why: string;
+      readonly howToResolve: string;
+      readonly context: string;
+    },
+  ): Promise<{ readonly write: WardenAgendaWrite; readonly reason?: string }> {
     try {
       const entry = this.entries.entryOf(notice.sourceRef, sessionId);
       const standing = await this.asks.open({ source: DAEMON, entry, ferret: sessionId as FerretId, state: 'open' });
-      if (standing.length > 0) return 'unchanged';
+      if (standing.length > 0) return { write: 'unchanged' };
       await this.asks.notify({
         source: DAEMON,
         entry,
@@ -166,9 +180,9 @@ export class AsksWardenAgenda implements WardenAgendaPort {
         raisedBy: { kind: 'daemon' },
         ferret: sessionId,
       });
-      return 'created';
-    } catch {
-      return 'rejected';
+      return { write: 'created' };
+    } catch (error) {
+      return { write: 'rejected', reason: error instanceof Error ? oneLine(error.message, 240) : 'it was refused' };
     }
   }
 

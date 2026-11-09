@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LaunchSpec, Runner, RunSpec } from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
-import type { FerretId } from '@ferretry/kernel/contract';
+import { defineState, type FerretId } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { CODEX_SETTINGS } from '../../contract/index.ts';
@@ -278,4 +278,61 @@ harnessConformance('Codex (real kernel roots)', async () => {
     deliveredCount: () => runner.deliveries.length,
     deliversElsewhere: true,
   };
+});
+
+// ─── skills: Skills' shared folders linked into the Codex home (kernel batch #10, owner decision !A466) ──────────────
+
+describe('F-0006 prepareHome links the selected skills into the Codex home', () => {
+  const INSTALLED = defineState({ name: 'installed', path: 'installed/*', store: 'opaque', format: 1 });
+  async function minted(name: string) {
+    const installed = join(fixture, 'fy-home/state/skills/installed', name);
+    await mkdir(installed, { recursive: true, mode: 0o700 });
+    await writeFile(join(installed, 'SKILL.md'), `${name}\n`);
+    const roots = rootsPortFor(
+      nodeFs(() => crypto.randomUUID()),
+      { home: join(fixture, 'fy-home'), plugin: 'skills', worktrees: join(fixture, 'worktrees') },
+      [],
+      () => undefined,
+      { shareTrees: true, stateFiles: [INSTALLED], onStop: () => {} },
+    );
+    return await roots.share({ state: INSTALLED, name });
+  }
+  const exists = async (path: string) =>
+    await lstat(path).then(
+      () => true,
+      () => false,
+    );
+
+  test('F-0006 a skill part with a shared folder is ONE link at skills/<name>, readable by Codex', async () => {
+    const { harness } = build();
+    const home = await harness.homeFor('f2' as FerretId);
+    const tree = await minted('review');
+    await harness.prepareHome({ ...spec('f2', home), parts: [{ kind: 'skill', name: 'review', tree }] } as LaunchSpec);
+    const at = join(home, 'skills', 'review');
+    expect((await lstat(at)).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(at, 'SKILL.md'), 'utf8')).toBe('review\n');
+  });
+
+  test('F-0006 Codex’s own skills/.system is never swept, a stale folder is, and a project skill part makes nothing', async () => {
+    const { harness } = build();
+    const home = await harness.homeFor('f2' as FerretId);
+    await mkdir(join(home, 'skills', '.system'), { recursive: true });
+    await writeFile(join(home, 'skills', '.system', 'bundled.md'), 'codex\n');
+    await mkdir(join(home, 'skills', 'stale'), { recursive: true });
+    const project = { kind: 'skill', name: 'local', path: '/work/.agents/skills/local' };
+    await harness.prepareHome({ ...spec('f2', home), parts: [project] } as unknown as LaunchSpec);
+    expect(await readFile(join(home, 'skills', '.system', 'bundled.md'), 'utf8')).toBe('codex\n');
+    expect(await exists(join(home, 'skills', 'stale'))).toBe(false);
+    expect(await exists(join(home, 'skills', 'local'))).toBe(false);
+  });
+
+  test('F-0006 a part named .system is skipped, never replacing Codex’s own folder', async () => {
+    const { harness } = build();
+    const home = await harness.homeFor('f2' as FerretId);
+    await mkdir(join(home, 'skills', '.system'), { recursive: true });
+    await writeFile(join(home, 'skills', '.system', 'bundled.md'), 'codex\n');
+    const tree = await minted('review');
+    await harness.prepareHome({ ...spec('f2', home), parts: [{ kind: 'skill', name: '.system', tree }] } as LaunchSpec);
+    expect(await readFile(join(home, 'skills', '.system', 'bundled.md'), 'utf8')).toBe('codex\n');
+  });
 });

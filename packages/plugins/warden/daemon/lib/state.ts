@@ -44,6 +44,7 @@ import type { BackoffStore, InvestigationBackoff } from './backoff.ts';
 import type { Blessing, BlessingStore, ClearStreak, ClearStreakStore } from './bless.ts';
 import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
+import type { OrphanRetryMemory } from './orphan-retry.ts';
 import type { OrphanMemory } from './orphans.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
 import type { InboxStuckMemory } from './inbox-stuck.ts';
@@ -415,6 +416,11 @@ export interface WardenRuntimeState {
    */
   readonly orphans?: OrphanMemory;
   /**
+   * The orphaned cards whose notice could not be placed (`orphan-retry.ts`), keyed by card id, kept while each card
+   * stays orphaned: what makes a refused notice wait longer each time instead of being tried every sweep.
+   */
+  readonly orphanRetries?: OrphanRetryMemory;
+  /**
    * The sub-ferrets the Warden nudged or whose parent it told about an unanswered message
    * (`report-overdue.ts`), keyed by session id, kept while each lives: what stops it repeating either.
    */
@@ -496,6 +502,17 @@ const RuntimeStateSchema = z.object({
         via: z.enum(['owner', 'notice']),
         to: z.string().min(1),
         at: Instant,
+      }),
+    )
+    .optional(),
+  orphanRetries: z
+    .record(
+      z.string(),
+      z.object({
+        key: z.string().min(1),
+        failures: z.number().int().min(1),
+        retryAt: Instant,
+        reason: z.string(),
       }),
     )
     .optional(),

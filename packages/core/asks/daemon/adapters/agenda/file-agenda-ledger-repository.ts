@@ -126,6 +126,8 @@ function archiveRecords(text: string): AgendaArchiveRecord[] {
 export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   private readonly tails = new Map<string, Promise<void>>();
   private readonly cache = new Map<string, CachedLedger>();
+  /** Ferrets whose unfinished-change file was found absent: only this daemon writes one, so it is looked for again only after it does. */
+  private readonly noPendingVersions = new Set<string>();
   readonly changeOutbox?: FileAgendaChangeOutbox;
 
   constructor(
@@ -268,6 +270,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
         // This fsynced intent precedes archive requests and the hot commit. Recovery always replays the SAME
         // snapshots and per-item identity, including a worker commit whose acknowledgement was lost, and only
         // while the agenda file is still the one it was prepared from or the one it commits.
+        this.noPendingVersions.delete(sessionId);
         await this.files.writeAtomic(
           sessionId,
           AGENDA_VERSION_PENDING,
@@ -289,8 +292,12 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   }
 
   private async recoverVersions(sessionId: string): Promise<void> {
+    if (this.noPendingVersions.has(sessionId)) return;
     const text = await this.files.read(sessionId, AGENDA_VERSION_PENDING);
-    if (text === undefined) return;
+    if (text === undefined) {
+      this.noPendingVersions.add(sessionId);
+      return;
+    }
     if (this.versions === NO_AGENDA_VERSIONS)
       throw new Error('agenda version archive is required to recover this transaction');
     const raw: unknown = JSON.parse(text);
@@ -361,6 +368,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     await this.versions.record(sessionId, drafts);
     // The moment the agenda file lands the intent says so, ahead of the history mark and the event: from there on a
     // failure leaves a committed intent, which nothing sets aside.
+    this.noPendingVersions.delete(sessionId);
     await this.commit(sessionId, commit.document, commit.archive, commit.records, () =>
       this.files.writeAtomic(sessionId, AGENDA_VERSION_PENDING, JSON.stringify({ committed: true, effect })),
     );

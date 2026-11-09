@@ -1,5 +1,6 @@
 import type { FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
+import type { CardRef } from '../../contract/index.ts';
 import type {
   FerretFocus,
   FerretLiveness,
@@ -46,10 +47,10 @@ export class FerretsNames implements FerretNames {
   }
 }
 
-const livenessOf = async (summary: FerretSummary, focus: Pick<FerretFocus, 'focusOf'>): Promise<FerretLiveness> => ({
+const livenessOf = (summary: FerretSummary, focusCard: CardRef | null): FerretLiveness => ({
   id: summary.id,
   status: summary.state,
-  focusCard: await focus.focusOf(summary.id).catch(() => null),
+  focusCard,
   declaredWait: false,
   ...(summary.parent === undefined ? {} : { lead: summary.parent }),
   configRead: true,
@@ -65,14 +66,16 @@ const livenessOf = async (summary: FerretSummary, focus: Pick<FerretFocus, 'focu
 export class FerretsLiveness implements FerretLivenessSource, FerretLivenessGuard {
   constructor(
     private readonly ferrets: Pick<FerretsApi, 'list' | 'get'>,
-    private readonly focus: Pick<FerretFocus, 'focusOf'>,
+    private readonly focus: Pick<FerretFocus, 'focusOfAll'>,
     private readonly serial: SerialRun,
   ) {}
 
   async roster(): Promise<FerretRoster> {
     const all = await this.ferrets.list();
+    // The focus file is read once per roster, not once per ferret.
+    const focused = await this.focus.focusOfAll().catch(() => new Map<string, CardRef | null>());
     const sessions = new Map<string, FerretLiveness>();
-    for (const summary of all) sessions.set(summary.id, await livenessOf(summary, this.focus));
+    for (const summary of all) sessions.set(summary.id, livenessOf(summary, focused.get(summary.id) ?? null));
     return { held: new Set(sessions.keys()), sessions };
   }
 
@@ -85,11 +88,12 @@ export class FerretsLiveness implements FerretLivenessSource, FerretLivenessGuar
     return await this.serial.run('board:liveness', async () => {
       const sessions = new Map<string, FerretLiveness>();
       const held = new Set<string>();
+      const focused = await this.focus.focusOfAll().catch(() => new Map<string, CardRef | null>());
       for (const id of ids) {
         const summary = await this.ferrets.get(asId(id)).catch(() => undefined);
         if (summary === undefined) continue;
         held.add(id);
-        sessions.set(id, await livenessOf(summary, this.focus));
+        sessions.set(id, livenessOf(summary, focused.get(id) ?? null));
       }
       return await work({ held, sessions });
     });

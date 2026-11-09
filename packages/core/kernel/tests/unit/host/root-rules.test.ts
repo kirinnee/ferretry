@@ -11,6 +11,8 @@ import {
   renameNamesRefusal,
   takesLinks,
   takesRenames,
+  takesUnlinks,
+  unlinkNameRefusal,
 } from '../../../host/root-rules.ts';
 
 const ALL: readonly RootName[] = [
@@ -64,6 +66,25 @@ describe('renameNamesRefusal', () => {
 
   test('the same name at both ends is refused: nothing would move', () => {
     expect(renameNamesRefusal('/r/a', '/r/a')).toBe('outside');
+  });
+});
+
+describe('takesUnlinks', () => {
+  test('only fleet and agent-homes take an unlink', () => {
+    expect(ALL.filter(takesUnlinks)).toEqual(['agent-homes', 'fleet']);
+  });
+});
+
+describe('unlinkNameRefusal', () => {
+  test('a plain name is accepted', () => {
+    expect(unlinkNameRefusal('/r/a')).toBeUndefined();
+  });
+
+  test('a .. segment, a NUL, an empty name and a non-string are refused', () => {
+    expect(unlinkNameRefusal('/r/../a')).toBe('outside');
+    expect(unlinkNameRefusal('/r/a\0')).toBe('outside');
+    expect(unlinkNameRefusal('')).toBe('outside');
+    expect(unlinkNameRefusal(undefined as unknown as string)).toBe('outside');
   });
 });
 

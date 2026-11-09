@@ -108,6 +108,8 @@ export default definePlugin({
 
   permissions: {
     roots: ['work', 'imports'],
+    // Mints a shared folder of its own installed skills for the harness that links them into a ferret home (kernel batch #10).
+    shareTrees: true,
     network: [],
     spawn: [],
     secrets: [],
