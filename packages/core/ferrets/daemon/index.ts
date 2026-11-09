@@ -353,7 +353,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // re-reads that status under the lock, so a document left `starting` would never be given a turn. One lane per
   // ferret, in the order the registry changed; a ferret with no document yet is left alone.
   const statusLane = new KeyedSerialExecutor();
-  const followStatus = (ferret: FerretId, state: FerretState): void => {
+  const followStatus = (ferret: FerretId, state: FerretState, cause: 'lifecycle' | 'reconcile'): void => {
     const id = tryParseSessionId(ferret);
     if (id === undefined) return;
     void statusLane
@@ -361,7 +361,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         if ((await sessionStore.readState(id).catch(() => undefined)) === undefined) return;
         await sessionStore.updateState(id, raw => {
           const current = SessionStateSchema.safeParse(raw);
-          const next = current.success ? lifecycleStatus(current.data.status, state) : undefined;
+          const next = current.success ? lifecycleStatus(current.data.status, state, cause) : undefined;
           return next === undefined
             ? raw
             : withLifecycleStatus(raw as Record<string, unknown>, next, kernel.clock.now());
@@ -437,7 +437,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     delivered: ferret => wakeTurnWatch?.(ferret),
     changed: payload => {
-      followStatus(payload.ferret, payload.state);
+      followStatus(payload.ferret, payload.state, 'lifecycle');
       if (payload.state === 'stopped') forgetTranscript?.(payload.ferret);
       hooks.observe(FerretChanged, payload);
     },
@@ -535,7 +535,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       // Once per arm, every held ferret's document is brought to its registry state: one left `starting` by a crash
       // between the registry's write and the status lane's (or written before U4) would otherwise never be given a
       // turn, and no registry change would come to repair it. The same lane and rule as every later edge.
-      for (const record of registry.list()) followStatus(record.id, record.state);
+      // A registry read at arm may be stale, so it is no proof of a new run: it never revives an ended document.
+      for (const record of registry.list()) followStatus(record.id, record.state, 'reconcile');
       turnWatch.host.arm();
       kernel.lifecycle.onStop(async () => await turnWatch.host.close());
     },
