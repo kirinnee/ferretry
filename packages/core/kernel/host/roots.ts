@@ -1580,10 +1580,18 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * at the name (a link included) is then judged by the call itself, reached through the checked folder.
    */
   const realParent = async (path: FencedPath, create = false): Promise<Checked> => {
-    const slash = path.lastIndexOf('/');
-    const leaf = path.slice(slash + 1);
-    if (slash <= 0 || leaf === '' || leaf === '.' || leaf === '..') return await real(path, create);
-    const parent = await real(path.slice(0, slash) as FencedPath, create);
+    // The lexical half FIRST (no NUL, no `..`, normalized, inside the root, outside the fence): the parent and the leaf
+    // are then taken from the NORMALIZED name, so a forged spelling (`x/`, `x/.`, a single relative name) names the same
+    // leaf as its plain form and a NUL anywhere is `outside`, never a raw TypeError from the disk.
+    const root = base();
+    if (root === undefined) refuse(name === 'work' ? 'unknown_ferret' : 'outside');
+    const lexical = lexicalInRoot(home, root as string, ownerRoot, path);
+    if (!lexical.ok) return refuse(lexical.error);
+    const named: string = lexical.value;
+    // The root itself has no parent inside the root: it is judged as itself.
+    if (named === absolute(root as string, 'a root')) return await real(path, create);
+    const leaf = basename(named);
+    const parent = await real(dirname(named) as FencedPath, create);
     const full = join(parent.full, leaf);
     if (!within(parent.scope.base.real, full)) refuse('link_escape');
     if (parent.scope.base.fence !== undefined && fencedByName(parent.scope.base.fence, full)) refuse('fenced');

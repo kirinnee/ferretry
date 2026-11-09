@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
@@ -1246,16 +1247,20 @@ async function start(world: World): Promise<TestHost> {
           mode: testModes.get(path) ?? 0o600,
           links: 1,
         });
-        /** A path of THIS handle's scope (no `..`), or the refusal production makes for one outside it. */
+        /**
+         * A path of THIS handle's scope, or the refusal production makes for one outside it: no NUL, no `..`, NORMALIZED
+         * (`.` segments, doubled and trailing slashes gone) and a relative name read from the scope's root, as
+         * `lexicalInRoot` does before every call that names a leaf (BG-006), so a forged spelling names the same leaf as
+         * its plain form on both hosts.
+         */
         const ownPath = (path: string): string => {
-          if (
-            prefix === undefined ||
-            typeof path !== 'string' ||
-            path.split('/').includes('..') ||
-            !path.startsWith(`${prefix}/`)
-          )
+          if (prefix === undefined || typeof path !== 'string' || path.includes('\0') || path.split('/').includes('..'))
             throw new RootError('outside');
-          return path;
+          const named = posix.normalize(path.startsWith('/') ? path : `${prefix}/${path}`).replace(/(?<=.)\/+$/u, '');
+          // the scope's own folder (`resolve('.')`) keeps its `/.` spelling: it is no leaf of the scope
+          if (named === prefix && path !== prefix) return `${prefix}/.`;
+          if (!named.startsWith(`${prefix}/`)) throw new RootError('outside');
+          return named;
         };
         const handle: RootHandle = {
           name,
