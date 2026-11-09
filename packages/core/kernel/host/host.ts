@@ -170,6 +170,8 @@ export interface HostConfig {
   /** What every declared file stands at (`GET /v1/config/status`, `config_read`). Absent: none can be listed. */
   status?(): ConfigStatus;
   reload(): Promise<void>;
+  /** Writes the editors' JSON Schema for every declared file under `config/.schema/`. Absent: none is written. */
+  publishSchemas?(): Promise<void>;
   startWatching?(): () => void;
   /**
    * Every declared file of every plugin that moved on disk or in state at a reload, with its plugin: what the host
@@ -471,6 +473,8 @@ async function bootLocked(
     },
   );
   await config.reload();
+  // The modeline of every file points an editor at its schema, so the schemas are there once a daemon serves.
+  await config.publishSchemas?.().catch(() => log.warn('the configuration schemas could not be written'));
   const stopWatching = config.startWatching?.();
   if (stopWatching !== undefined) own(stopWatching);
   const pluginsYaml = readPluginsYaml(config.port('kernel'));
