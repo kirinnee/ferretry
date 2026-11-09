@@ -850,6 +850,15 @@ export interface RootHandle {
    * refused move (another device, a folder into itself) is `changed`, with no path or content in it.
    */
   rename(from: FencedPath, to: FencedPath): Promise<void>;
+  /**
+   * Removes the SYMLINK at `name` and nothing else: the link is never followed and what it points at (inside this root
+   * or outside it) is never touched, so a link whose target lies outside the root is still removable (`remove` follows
+   * the leaf and refuses that). Only inside an internal, writable root that takes links (`fleet`, `agent-homes`); any
+   * other root refuses `read_only`. The name is fenced and every parent is opened without following a link
+   * (`link_escape`). A name that is a file or folder, or is absent, is refused `outside` and left as it was. A refused
+   * removal is `changed`; no refusal carries a path or content.
+   */
+  unlink(name: FencedPath): Promise<void>;
 }
 
 export interface RootsPort {

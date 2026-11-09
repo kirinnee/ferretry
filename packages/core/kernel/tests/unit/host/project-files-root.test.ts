@@ -423,6 +423,7 @@ describe('S179 descriptor reach, links, moves and held folders', () => {
     expect(await refusalOf(() => f.root.rename(at(f.root, '.claude/skills/x'), at(f.root, '.claude/skills/z')))).toBe(
       'read_only',
     );
+    expect(await refusalOf(() => f.root.unlink(at(f.root, '.claude/skills/x/l')))).toBe('read_only');
     expect(await refusalOf(() => f.root.pin(at(f.root, '.claude/skills/x')))).toBe('not_declared');
     expect(await exists(`${f.proj}/.claude/skills/x/a.md`)).toBe(true);
   });

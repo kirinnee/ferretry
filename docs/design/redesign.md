@@ -2599,6 +2599,11 @@ scoped handle:
     the way to either end is `link_escape`; the testing host answers the same. A link moves as the text it holds:
     kernel-made links are absolute, so they still point where they did; a RELATIVE link made by a harness and moved to
     a parent at another depth points somewhere else afterwards, and the kernel does not follow it either way.
+  - `unlink(name)` removes a SYMLINK LEAF in `fleet` or `agent-homes` and nothing else: the link is never followed and its
+    target is never touched (so a link pointing outside the root is removable); unlike `remove`, a file, a folder
+    or a missing name is `outside` and left as it was, and every parent is fenced and opened without following a link.
+    A name that is one of the home's private places by identity (a bind mount or alias kept under an innocent name) is
+    `fenced`, as it is for `remove` and `rename`.
   - `kernel.roots.harnessFile(absolutePath)` (`permissions.harnessFiles`, by exact basename, Runtimes with
     `harness-home` only) reads ONE file beside a harness home (`~/.claude.json` sits beside `~/.claude`), read-only.
     Its folder is never listable. The leaf is never a link, never a second hard link, never a device, and the name

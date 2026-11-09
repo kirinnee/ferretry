@@ -259,11 +259,14 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
       for (const map of [files, links] as const)
         for (const each of [...map.keys()]) if (each === name || each.startsWith(`${name}/`)) map.delete(each);
     },
-    // A project folder takes no link and no move: the same refusal production gives a root that takes neither.
+    // A project folder takes no link, no move and no link removal: the same refusal production gives a root that takes none.
     linkTo: async () => {
       throw new RootError('read_only');
     },
     rename: async () => {
+      throw new RootError('read_only');
+    },
+    unlink: async () => {
       throw new RootError('read_only');
     },
     setMode: async (path, mode) => {
