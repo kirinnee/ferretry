@@ -38,13 +38,18 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 - Sealed and secret files (vault, its key, the identity key, push keys, harness sign-ins, the message-token key) are
   moved with `copyFile` + mode + times (`src/sealed.ts`): their bytes never become a value in this program, and the
   report names a file and its size, never content.
-- One exception, and only to ADD: a key v4 saved in plain text in a login file's `env` is sealed into the v5 vault
+- One exception, and only to ADD: a key v4 saved in plain text in a login file's `env`, `claude.env` or `codex.env` is sealed into the v5 vault
   (`src/steps/login-keys.ts`) and the login file names it `${secret:LOGIN_<ID>_<VAR>}`. For that the tool holds the
   vault key in memory only long enough to import it (one Buffer, zeroed at once and again on any exit), seals each new
   value exactly as the vault does, and writes the vault with a temp file + rename. Existing vault entries are still
   copied byte for byte and never decrypted. The report names login, variable and secret name, never a value; if a key
   cannot be sealed the step fails and the run has no `home.json`, so a key is never left plain. The v4 login file in
-  the backup still holds the key in plain text.
+  the backup still holds the key in plain text. Two more cases, both said out loud and never with the value:
+  the rule is exactly what v5's login schema refuses as a raw secret (a key, or an address with a password or a key in
+  its query), a refused value of 8 or more characters is moved, and a refused value under 8 characters (which the
+  vault cannot hold) fails the step naming the login and variable; edit or remove it in the v4 file, then run again.
+  Login keys are sealed only when the vault step converted; if it failed or did not run, the login-keys step fails
+  naming each login and variable it could not move, and mints no key and writes no `vault.json`.
 - The live tmux socket is given a second name in the new home with `link(2)`, so v5 reaches the same running server.
 
 ## State (Phase B)

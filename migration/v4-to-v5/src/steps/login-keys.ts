@@ -43,7 +43,7 @@ import { constants } from 'node:fs';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { isMap, isScalar, type Document } from 'yaml';
-import { storedEnvironmentIssue } from '@ferretry/plugin-logins/contract';
+import { LoginFileSchema, storedEnvironmentIssue } from '@ferretry/plugin-logins/contract';
 import type { KeptItem, StepReport } from '../report.ts';
 import { V4InputError } from '../v4/documents.ts';
 import { V5_VAULT_FILE, V5_VAULT_KEY_FILE } from './secrets.ts';
@@ -65,6 +65,16 @@ export interface HeldLoginKey {
 export class LoginKeyHold {
   readonly #items: { key: HeldLoginKey; value: string }[] = [];
   readonly #taken = new Set<string>();
+  #vaultMoved = false;
+
+  /** The vault step calls this once it has moved (or found no) v4 vault: only then may login keys be sealed beside it. */
+  markVaultMoved(): void {
+    this.#vaultMoved = true;
+  }
+
+  get vaultMoved(): boolean {
+    return this.#vaultMoved;
+  }
 
   /** Names already in use: the v4 vault's and the ones given out in this run. */
   reserve(names: Iterable<string>): void {
@@ -115,11 +125,54 @@ export class LoginKeyHold {
   }
 }
 
-/** Whether an env value is a key to move: the shared rule says secret, it is long enough for the vault, and it is no reference. */
+/**
+ * Whether an env value is one v5's login schema refuses as a raw secret (whatever the issue code: a key by name, shape or
+ * entropy, an address with a password, an address with a key in its query) and is no reference. It is the rule itself, not
+ * a copy: a value this says no to is one v5 accepts.
+ */
 export function isPlainLoginKey(variable: string, value: string): boolean {
-  if (value.length < MIN_SECRET_VALUE_LENGTH || secretReferencesIn(value).length > 0) return false;
-  return storedEnvironmentIssue(variable, value) === 'secret';
+  if (secretReferencesIn(value).length > 0) return false;
+  return storedEnvironmentIssue(variable, value) !== undefined;
 }
+
+/** A made-up value every login env map refuses (never a real key): it finds the maps without a hand list. */
+const PROBE_VARIABLE = 'ANTHROPIC_API_KEY';
+const PROBE_VALUE = `sk-ant-${'PROBE000'.repeat(5)}`;
+
+type SchemaNode = { readonly _zod: { readonly def: Record<string, unknown> } };
+
+/** Every path in the v5 login file schema at which an env map is judged by the raw-secret rule. Found from the schema. */
+function findLoginEnvPaths(): readonly (readonly string[])[] {
+  const found: (readonly string[])[] = [];
+  const walk = (node: SchemaNode, path: readonly string[]): void => {
+    const def = node._zod.def;
+    if (def.type === 'optional' || def.type === 'default') walk(def.innerType as SchemaNode, path);
+    else if (def.type === 'object')
+      for (const [key, child] of Object.entries(def.shape as Record<string, SchemaNode>)) walk(child, [...path, key]);
+    else if (def.type === 'record' && path.length > 0) found.push(path);
+  };
+  walk(LoginFileSchema as unknown as SchemaNode, []);
+  const refuses = (path: readonly string[]): boolean => {
+    const probe: Record<string, unknown> = { harness: 'claude', store: 'environment' };
+    let at = probe;
+    for (const [n, key] of path.entries()) {
+      const next: Record<string, unknown> = n === path.length - 1 ? { [PROBE_VARIABLE]: PROBE_VALUE } : {};
+      at[key] = next;
+      at = next;
+    }
+    const result = LoginFileSchema.safeParse(probe);
+    return (
+      !result.success &&
+      result.error.issues.some(
+        issue => issue.path.length === path.length + 1 && path.every((key, n) => issue.path[n] === key),
+      )
+    );
+  };
+  return found.filter(refuses);
+}
+
+/** The env maps of a v5 login file the raw-secret rule judges: `env` and each harness half's `env`. */
+export const LOGIN_ENV_PATHS: readonly (readonly string[])[] = findLoginEnvPaths();
 
 /**
  * The names of the v4 vault's entries (names only: the file is read for its keys and no value is looked at), so a new
@@ -140,23 +193,30 @@ export async function v4VaultNames(path: string): Promise<readonly string[]> {
  * in the hold. Throws, naming login and variable only, for a key the vault cannot hold (over its size limit).
  */
 export function takeLoginKeys(document: Document, login: string, hold: LoginKeyHold): number {
-  const env = document.get('env', true);
-  if (!isMap(env)) return 0;
   let taken = 0;
-  for (const pair of env.items) {
-    const variable = isScalar(pair.key) ? pair.key.value : undefined;
-    const node = pair.value;
-    if (typeof variable !== 'string' || !isScalar(node) || typeof node.value !== 'string') continue;
-    if (!isPlainLoginKey(variable, node.value)) continue;
-    const value = node.value;
-    if (!SecretValueSchema.safeParse(value).success)
-      throw new V4InputError(
-        `config/logins/${login}.yaml: env.${variable} is a key the vault cannot hold (over ${String(MAX_SECRET_VALUE_LENGTH)} characters)`,
-      );
-    const name = hold.claim(login, variable);
-    hold.add({ login, variable, name }, value);
-    node.value = secretReference(SecretNameSchema.parse(name));
-    taken++;
+  for (const path of LOGIN_ENV_PATHS) {
+    const env = document.getIn(path, true);
+    if (!isMap(env)) continue;
+    const where = path.join('.');
+    for (const pair of env.items) {
+      const variable = isScalar(pair.key) ? pair.key.value : undefined;
+      const node = pair.value;
+      if (typeof variable !== 'string' || !isScalar(node) || typeof node.value !== 'string') continue;
+      if (!isPlainLoginKey(variable, node.value)) continue;
+      const value = node.value;
+      if (value.length < MIN_SECRET_VALUE_LENGTH)
+        throw new V4InputError(
+          `config/logins/${login}.yaml: ${where}.${variable} is refused by v5 as a secret but is under ${String(MIN_SECRET_VALUE_LENGTH)} characters, which the vault cannot hold; edit or remove it in the v4 file, then run again`,
+        );
+      if (!SecretValueSchema.safeParse(value).success)
+        throw new V4InputError(
+          `config/logins/${login}.yaml: ${where}.${variable} is a key the vault cannot hold (over ${String(MAX_SECRET_VALUE_LENGTH)} characters)`,
+        );
+      const name = hold.claim(login, variable);
+      hold.add({ login, variable: path.length === 1 ? variable : `${where}.${variable}`, name }, value);
+      node.value = secretReference(SecretNameSchema.parse(name));
+      taken++;
+    }
   }
   return taken;
 }
@@ -212,8 +272,11 @@ export async function sealValues(
 export async function writeAtomic(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${String(process.pid)}.tmp`;
+  // Only a temporary file this call created is removed: one that was already there makes the exclusive open fail and stays.
+  let created = false;
   try {
     const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+    created = true;
     try {
       await handle.writeFile(text);
       await handle.sync();
@@ -222,7 +285,7 @@ export async function writeAtomic(path: string, text: string): Promise<void> {
     }
     await rename(temporary, path);
   } catch (error) {
-    await rm(temporary, { force: true });
+    if (created) await rm(temporary, { force: true });
     throw error;
   }
 }
@@ -301,6 +364,17 @@ export const loginKeysStep: Step = {
     const keyPath = ctx.v5.resolve(V5_VAULT_KEY_FILE);
     const first = held[0];
     const listed = held.map(key => `login ${key.login} variable ${key.variable}`).join(', ');
+    if (!hold.vaultMoved) {
+      // The vault step failed or did not run: sealing now would mint a key beside a vault v4 never handed over.
+      hold.clear();
+      return {
+        ...base,
+        status: 'failed',
+        note: `the vault step did not move the vault, so nothing was sealed: ${listed} could not be moved`,
+        kept: [],
+        sealed: [],
+      };
+    }
     try {
       const existing = (await readVault(vaultPath)) ?? {
         format: 1 as const,
@@ -318,13 +392,11 @@ export const loginKeysStep: Step = {
           );
 
       let keyBytes = await readKeyBytes(keyPath);
-      let minted = false;
       if (keyBytes === undefined) {
         if (Object.keys(existing.entries).length > 0)
           throw new V4InputError(`${V5_VAULT_KEY_FILE}: the vault holds secrets but its key is missing`);
         keyBytes = Buffer.from(crypto.getRandomValues(new Uint8Array(VAULT_KEY_BYTES)));
         await writeAtomic(keyPath, `${keyBytes.toString('base64')}\n`);
-        minted = true;
       }
       const values = hold.drain().map(item => ({ name: item.key.name, value: item.value }));
       const sealed = await sealValues(keyBytes, values);
@@ -336,14 +408,13 @@ export const loginKeysStep: Step = {
       const written = VaultDocumentSchema.parse({ format: 1, cipher: SECRET_CIPHER_ALGORITHM, entries });
       const text = `${JSON.stringify(written, null, 2)}\n`;
       await writeAtomic(vaultPath, text);
+      // vault.json is rewritten, not moved unopened, so it is not listed under `sealed` (that line says "moved unopened").
       return {
         ...base,
         status: 'converted',
+        note: `${V5_VAULT_FILE} rewritten: entries copied unopened, new login keys added`,
         kept: named,
-        sealed: [
-          { file: V5_VAULT_FILE, bytes: Buffer.byteLength(text) },
-          ...(minted ? [{ file: V5_VAULT_KEY_FILE, bytes: Math.ceil(VAULT_KEY_BYTES / 3) * 4 + 1 }] : []),
-        ],
+        sealed: [],
       };
     } catch (error) {
       hold.clear();

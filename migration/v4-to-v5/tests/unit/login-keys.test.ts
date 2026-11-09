@@ -9,7 +9,14 @@ import {
   FileSecretKey,
   WebCryptoSecretCipher,
 } from '../../../../packages/core/vault/daemon/adapters/secrets/webcrypto-secret-cipher.ts';
-import { isPlainLoginKey, LoginKeyHold, loginKeysStep, sealValues, writeAtomic } from '../../src/steps/login-keys.ts';
+import {
+  isPlainLoginKey,
+  LOGIN_ENV_PATHS,
+  LoginKeyHold,
+  loginKeysStep,
+  sealValues,
+  writeAtomic,
+} from '../../src/steps/login-keys.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
 import { vaultStep } from '../../src/steps/secrets.ts';
 import type { StepReport } from '../../src/report.ts';
@@ -214,7 +221,7 @@ describe('a key is never left plain', () => {
     expect(report.note).toContain('state/vault/vault.json');
     expect(JSON.stringify(report).includes(KEY)).toBe(false);
     expect(hold.size).toBe(0);
-    expect(await readdir(join(f.to, 'state', 'vault'))).not.toContain('vault.json.tmp');
+    expect((await readdir(join(f.to, 'state', 'vault'))).filter(name => name.endsWith('.tmp'))).toEqual([]);
     expect((await everyFileText(join(f.to, 'state', 'vault'))).some(text => text.includes(KEY))).toBe(false);
   });
 
@@ -262,6 +269,10 @@ describe('the seal agrees with the vault', () => {
     const read = await new FileSecretDocumentStore(files).read();
     const opened = await new WebCryptoSecretCipher(new FileSecretKey(files)).openAll(read?.entries ?? {});
     expect(opened.get('LOGIN_X_Y') === KEY).toBe(true);
+
+    // The name is bound: the vault's own reader refuses this tool's entry under another name.
+    const swapped = { LOGIN_X_Z: read?.entries.LOGIN_X_Y as NonNullable<typeof read>['entries'][string] };
+    await expect(new WebCryptoSecretCipher(new FileSecretKey(files)).openAll(swapped)).rejects.toThrow();
   });
 
   test('what the vault’s own writer seals opens with this tool’s reading of the format (a golden both ways)', async () => {
@@ -295,6 +306,20 @@ describe('the seal agrees with the vault', () => {
     expect(short.every(byte => byte === 0)).toBe(true);
   });
 
+  test('the key bytes are already zeroed when the first value is read, right after the import', async () => {
+    const live = Buffer.from(key);
+    let zeroedAtFirstRead: boolean | undefined;
+    const item = {
+      value: KEY,
+      get name(): string {
+        zeroedAtFirstRead ??= live.every(byte => byte === 0);
+        return 'LOGIN_X_Y';
+      },
+    };
+    await sealValues(live, [item]);
+    expect(zeroedAtFirstRead).toBe(true);
+  });
+
   test('a key this tool mints is one the vault’s own reader accepts', async () => {
     await login('work', `  ANTHROPIC_API_KEY: ${KEY}\n`);
     await run();
@@ -315,5 +340,137 @@ describe('writeAtomic', () => {
     await writeFile(join(dir, 'b.json', 'inside'), 'x');
     await expect(writeAtomic(join(dir, 'b.json'), 'two')).rejects.toThrow();
     expect((await readdir(dir)).sort()).toEqual(['a.json', 'b.json']);
+  });
+
+  test('a file already at the temporary path makes it fail and is left alone', async () => {
+    const dir = join(f.root, 'atomic-taken');
+    await mkdir(dir, { recursive: true });
+    const taken = join(dir, `a.json.${String(process.pid)}.tmp`);
+    await writeFile(taken, 'not ours');
+    await expect(writeAtomic(join(dir, 'a.json'), 'one')).rejects.toThrow();
+    expect(await readFile(taken, 'utf8')).toBe('not ours');
+    expect(await readdir(dir)).toEqual([`a.json.${String(process.pid)}.tmp`]);
+  });
+});
+
+describe('every env map the v5 login schema judges is taken', () => {
+  test('the maps are found from the schema: env and each half', () => {
+    expect(LOGIN_ENV_PATHS).toEqual([['env'], ['claude', 'env'], ['codex', 'env']]);
+  });
+
+  test('a plain key in claude.env is moved and named by its path in the report', async () => {
+    await login('work', `  OTHER_SETTING: fine\nclaude:\n  env:\n    ANTHROPIC_API_KEY: ${KEY}\n`);
+    const { reports, output } = await run();
+
+    expect(reports['login-keys']?.status).toBe('converted');
+    expect((await v5Login('work')).claude?.env?.ANTHROPIC_API_KEY).toBe('${secret:LOGIN_WORK_ANTHROPIC_API_KEY}');
+    expect((await openedByTheVault(f.to)).get('LOGIN_WORK_ANTHROPIC_API_KEY') === KEY).toBe(true);
+    expect(reports['login-keys']?.kept.map(item => item.what)).toEqual([
+      'LOGIN_WORK_ANTHROPIC_API_KEY (login work, variable claude.env.ANTHROPIC_API_KEY)',
+    ]);
+    expect((JSON.stringify(reports) + output).includes(KEY)).toBe(false);
+  });
+
+  test('a plain key in codex.env is moved', async () => {
+    await login('work', `  OTHER_SETTING: fine\ncodex:\n  env:\n    OPENAI_API_KEY: ${OTHER_KEY}\n`);
+    const { reports } = await run();
+
+    expect(reports['login-keys']?.status).toBe('converted');
+    expect((await v5Login('work')).codex?.env?.OPENAI_API_KEY).toBe('${secret:LOGIN_WORK_OPENAI_API_KEY}');
+    expect((await openedByTheVault(f.to)).get('LOGIN_WORK_OPENAI_API_KEY') === OTHER_KEY).toBe(true);
+  });
+
+  test('the same variable in env and in a half gets two names', async () => {
+    await login('work', `  ANTHROPIC_API_KEY: ${KEY}\nclaude:\n  env:\n    ANTHROPIC_API_KEY: ${OTHER_KEY}\n`);
+    const { reports } = await run();
+
+    expect(reports['login-keys']?.status).toBe('converted');
+    const file = await v5Login('work');
+    expect(file.env?.ANTHROPIC_API_KEY).toBe('${secret:LOGIN_WORK_ANTHROPIC_API_KEY}');
+    expect(file.claude?.env?.ANTHROPIC_API_KEY).toBe('${secret:LOGIN_WORK_ANTHROPIC_API_KEY_2}');
+    const opened = await openedByTheVault(f.to);
+    expect(opened.get('LOGIN_WORK_ANTHROPIC_API_KEY') === KEY).toBe(true);
+    expect(opened.get('LOGIN_WORK_ANTHROPIC_API_KEY_2') === OTHER_KEY).toBe(true);
+  });
+});
+
+describe('the rule is what v5 refuses', () => {
+  test('an address with a password is moved whole, though no name or shape calls it a key', async () => {
+    const address = 'http://user:FAKEPASS99@proxy.example.com:8080';
+    await login('work', `  HTTPS_PROXY: ${address}\n`);
+    const { reports, output } = await run();
+
+    expect(reports.settings?.status).toBe('converted');
+    expect(reports['login-keys']?.status).toBe('converted');
+    expect((await v5Login('work')).env?.HTTPS_PROXY).toBe('${secret:LOGIN_WORK_HTTPS_PROXY}');
+    expect((await openedByTheVault(f.to)).get('LOGIN_WORK_HTTPS_PROXY') === address).toBe(true);
+    expect((JSON.stringify(reports) + output).includes('FAKEPASS99')).toBe(false);
+  });
+
+  test('a refused value under 8 characters fails Settings with a sentence naming login and variable, never the value', async () => {
+    const short = 'sk-abcd';
+    await login('work', `  SOME_SETTING: ${short}\n`);
+    const { reports, output } = await run();
+
+    expect(reports.settings?.status).toBe('failed');
+    expect(reports.settings?.note).toContain('config/logins/work.yaml');
+    expect(reports.settings?.note).toContain('env.SOME_SETTING');
+    expect(reports.settings?.note).toContain('edit or remove it in the v4 file, then run again');
+    expect((JSON.stringify(reports) + output).includes(short)).toBe(false);
+    await expect(stat(join(f.to, 'config', 'logins', 'work.yaml'))).rejects.toThrow();
+  });
+
+  test('the isPlainLoginKey rule says yes to every refused value of any length and no to what v5 accepts', () => {
+    expect(isPlainLoginKey('SOME_SETTING', 'sk-abcd')).toBe(true);
+    expect(isPlainLoginKey('HTTPS_PROXY', 'http://user:FAKEPASS99@proxy.example.com')).toBe(true);
+    expect(isPlainLoginKey('HTTPS_PROXY', 'http://proxy.example.com:8080')).toBe(false);
+  });
+});
+
+describe('login keys are sealed only when the vault step converted', () => {
+  test('a failed vault step: login-keys fails naming each login and variable, mints no key and writes no vault.json', async () => {
+    await login('work', `  ANTHROPIC_API_KEY: ${KEY}\n`);
+    await login('home', `  OTHER_SETTING: fine\nclaude:\n  env:\n    ANTHROPIC_API_KEY: ${OTHER_KEY}\n`);
+    // A v4 vault document with no key beside it: the vault step fails.
+    await mkdir(join(f.from, 'state'), { recursive: true });
+    await writeFile(
+      join(f.from, 'state', 'secrets.json'),
+      JSON.stringify({ v: 1, cipher: 'AES-256-GCM', entries: {} }),
+    );
+    const { reports, output } = await run();
+
+    expect(reports.vault?.status).toBe('failed');
+    expect(reports['login-keys']?.status).toBe('failed');
+    expect(reports['login-keys']?.note).toContain('login work variable ANTHROPIC_API_KEY');
+    expect(reports['login-keys']?.note).toContain('login home variable claude.env.ANTHROPIC_API_KEY');
+    expect((JSON.stringify(reports) + output).includes(KEY)).toBe(false);
+    expect((JSON.stringify(reports) + output).includes(OTHER_KEY)).toBe(false);
+    const vaultFiles = await readdir(join(f.to, 'state', 'vault')).catch(() => [] as string[]);
+    expect(vaultFiles).toEqual([]);
+    await expect(stat(join(f.to, 'home.json'))).rejects.toThrow();
+  });
+
+  test('a skipped vault step: login-keys fails the same way and writes nothing', async () => {
+    await login('work', `  ANTHROPIC_API_KEY: ${KEY}\n`);
+    const hold = new LoginKeyHold();
+    const ctx: StepContext = { ...f.ctx(), loginKeys: hold };
+    expect((await settingsStep.run(ctx)).status).toBe('converted');
+    const report = await loginKeysStep.run(ctx);
+
+    expect(report.status).toBe('failed');
+    expect(report.note).toContain('login work variable ANTHROPIC_API_KEY');
+    expect(JSON.stringify(report).includes(KEY)).toBe(false);
+    expect(hold.size).toBe(0);
+    expect(await readdir(join(f.to, 'state', 'vault')).catch(() => [] as string[])).toEqual([]);
+  });
+
+  test('a converted run says vault.json was rewritten, entries copied unopened, and lists no sealed file', async () => {
+    await login('work', `  ANTHROPIC_API_KEY: ${KEY}\n`);
+    const { reports } = await run();
+
+    expect(reports['login-keys']?.note).toBe(
+      'state/vault/vault.json rewritten: entries copied unopened, new login keys added',
+    );
+    expect(reports['login-keys']?.sealed).toEqual([]);
   });
 });
