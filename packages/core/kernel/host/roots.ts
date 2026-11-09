@@ -1575,10 +1575,10 @@ function harnessFileHandle(setup: HarnessFileSetup): RootFileHandle {
 function rootHandle(setup: HandleSetup): RootHandle {
   const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins, privateFiles } = setup;
   /**
-   * A scope that names an anchor (`within`): every folder from the anchor down to the scoped folder is looked at
-   * WITHOUT following it, and a link at any of them is refused `link_escape`, the anchor included. The anchor's own
-   * ancestors are not looked at (a project under a linked workspace folder is fine). A folder that is not there yet is
-   * no link, and nothing below it exists either.
+   * A scope that names an anchor (`within`): every folder from the anchor's first child down to the scoped folder is
+   * looked at WITHOUT following it, and a link at any of them is refused `link_escape`. The anchor itself and its
+   * ancestors are not looked at (a symlinked project folder works). A folder that is not there yet is no link, and
+   * nothing below it exists either. An anchor equal to the scoped folder walks nothing.
    */
   const anchoredFolders = async (): Promise<void> => {
     for (const folder of setup.linkFreeFolders() ?? []) {

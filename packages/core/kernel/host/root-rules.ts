@@ -127,11 +127,13 @@ export function takesAnchor(name: RootName): boolean {
 }
 
 /**
- * The folders, from the anchor `within` down to the scoped `folder` (both ends included), that the kernel must find to
- * be no link; `undefined` when `within` is not `folder` itself or one of its ancestors, or is not a plain absolute
- * folder (no NUL, no `.`, `..` or empty segment, never the filesystem root). Compared COMPONENT by component: `/p/.claud`
- * and `/p/.claude2` are not ancestors of `/p/.claude/skills`, whatever their spelling shares. The anchor's own
- * ancestors are never listed, so a project under a linked workspace folder is judged by what is below the anchor only.
+ * The folders, from the anchor's FIRST CHILD down to the scoped `folder` (the folder included, the anchor NOT), that the
+ * kernel must find to be no link; `undefined` when `within` is not `folder` itself or one of its ancestors, or is not a
+ * plain absolute folder (no NUL, no `.`, `..` or empty segment, never the filesystem root). Compared COMPONENT by
+ * component: `/p/.claud` and `/p/.claude2` are not ancestors of `/p/.claude/skills`, whatever their spelling shares.
+ * The anchor is the caller's own named base and is never looked at (a symlinked project folder works, as it did
+ * where `checkedFolder` looked only at the parts below its root), and neither are the anchor's ancestors. When `within`
+ * IS `folder` the walk is empty: it checks nothing, exactly as no `within` at all — allowed, never refused.
  * One fact, read by the real roots port and by the testing host.
  */
 export function anchorWalk(folder: string, within: string): readonly string[] | undefined {
@@ -144,5 +146,5 @@ export function anchorWalk(folder: string, within: string): readonly string[] | 
   const anchor = plain(within);
   if (below === undefined || anchor === undefined || anchor.length > below.length) return undefined;
   if (anchor.some((part, index) => part !== below[index])) return undefined;
-  return below.slice(anchor.length - 1).map((_, index) => `/${below.slice(0, anchor.length + index).join('/')}`);
+  return below.slice(anchor.length).map((_, index) => `/${below.slice(0, anchor.length + index + 1).join('/')}`);
 }

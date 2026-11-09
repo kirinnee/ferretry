@@ -1,9 +1,10 @@
 /**
  * `RootsPort.root(name, { subfolder, within })` on the real disk: the optional ANCHOR above a scoped folder. With one,
- * every folder from the anchor down to the scoped folder (both included) is looked at without being followed, and a link
- * at any of them is refused `link_escape` by every door; the anchor's own ancestors are not looked at (a project under a
- * linked workspace folder works); an anchor that is not the folder or an ancestor of it (compared by component, never by
- * string prefix) names no folder and every door answers `outside`. Without one the handle is exactly what it was.
+ * every folder from the anchor's FIRST CHILD down to the scoped folder is looked at without being followed, and a link
+ * at any of them is refused `link_escape` by every door; the anchor itself and its ancestors are not looked at (a
+ * symlinked project folder, or a project under a linked workspace folder, works); an anchor equal to the scoped folder
+ * walks nothing; an anchor that is not the folder or an ancestor of it (compared by component, never by string prefix)
+ * names no folder and every door answers `outside`. Without one the handle is exactly what it was.
  *
  * Fixture content only: the hostile target holds a REAL skills tree (`<name>/SKILL.md`) so a missed refusal would
  * list and read it. Each test names the door it proves.
@@ -102,10 +103,13 @@ const NONE_REFUSED = {
 };
 
 describe('anchorWalk: the one rule both hosts read', () => {
-  test('the folder itself or an ancestor of it names the folders from the anchor down, both ends included', () => {
-    expect(anchorWalk('/p/.claude/skills', '/p')).toEqual(['/p', '/p/.claude', '/p/.claude/skills']);
-    expect(anchorWalk('/p/.claude/skills', '/p/.claude')).toEqual(['/p/.claude', '/p/.claude/skills']);
-    expect(anchorWalk('/p/.claude/skills', '/p/.claude/skills')).toEqual(['/p/.claude/skills']);
+  test('the folder itself or an ancestor of it names the folders from the anchor’s first child down, the anchor excluded', () => {
+    expect(anchorWalk('/p/.claude/skills', '/p')).toEqual(['/p/.claude', '/p/.claude/skills']);
+    expect(anchorWalk('/p/.claude/skills', '/p/.claude')).toEqual(['/p/.claude/skills']);
+  });
+
+  test('the anchor is the scoped folder itself: allowed, and the walk is empty (it checks nothing, as no anchor)', () => {
+    expect(anchorWalk('/p/.claude/skills', '/p/.claude/skills')).toEqual([]);
   });
 
   test('a sibling or a prefix of a name is not an ancestor: components, never a string prefix', () => {
@@ -175,12 +179,25 @@ describe('an anchored scope refuses a link from the anchor down to the scoped fo
     expect(await doors(root)).toEqual(ALL_REFUSED);
   });
 
-  test('the anchor is the scoped folder itself and that folder is a link: refused', async () => {
+  test('the anchor is the scoped folder itself: allowed and not refused, it lists as the same folder without an anchor does', async () => {
+    const w = await world();
+    const folder = `${w.project}/.claude/skills`;
+    const root = w.handle({ subfolder: folder, within: folder });
+    expect(root.resolve('')).toMatchObject({ ok: true });
+    expect(await doors(root)).toEqual(NONE_REFUSED);
+    const listed = root.resolve('');
+    if (!listed.ok) throw new Error('refused');
+    expect(await root.list(listed.value)).toEqual([NAME]);
+  });
+
+  test('the anchor is the scoped folder itself and that folder is a link: the walk is empty, so it is followed like no anchor', async () => {
     const w = await world();
     await rm(`${w.project}/.claude/skills`, { recursive: true });
     await symlink(`${w.parent}/outside/skills`, `${w.project}/.claude/skills`);
     const folder = `${w.project}/.claude/skills`;
-    expect(await doors(w.handle({ subfolder: folder, within: folder }))).toEqual(ALL_REFUSED);
+    expect(await doors(w.handle({ subfolder: folder, within: folder }))).toEqual(
+      await doors(w.handle({ subfolder: folder })),
+    );
   });
 
   test('the anchor is the middle folder and the folder below it is the link: refused', async () => {
@@ -191,12 +208,34 @@ describe('an anchored scope refuses a link from the anchor down to the scoped fo
     expect(await doors(root)).toEqual(ALL_REFUSED);
   });
 
-  test('the anchor itself being a link is refused too: the walk starts AT the anchor', async () => {
+  test('the anchor itself being a link is fine: a symlinked project folder still lists and reads (the anchor is never looked at)', async () => {
     const w = await world();
     await symlink(w.project, `${w.parent}/workspace/proj-link`);
     const linked = `${w.parent}/workspace/proj-link`;
     const root = w.handle({ subfolder: `${linked}/.claude/skills`, within: linked });
-    expect(await doors(root)).toEqual(ALL_REFUSED);
+    expect(await doors(root)).toEqual(NONE_REFUSED);
+    const folder = root.resolve('');
+    if (!folder.ok) throw new Error('refused');
+    expect(await root.list(folder.value)).toEqual([NAME]);
+    const file = root.resolve(`${NAME}/SKILL.md`);
+    if (!file.ok) throw new Error('refused');
+    expect(await root.readText(file.value)).toBe(OWN);
+  });
+
+  test('a symlinked project folder with a hostile link at its first child (.claude) is still link_escape', async () => {
+    const w = await world();
+    await symlink(w.project, `${w.parent}/workspace/proj-link`);
+    await rm(`${w.project}/.claude`, { recursive: true });
+    await symlink(`${w.parent}/outside/claude`, `${w.project}/.claude`);
+    const linked = `${w.parent}/workspace/proj-link`;
+    expect(await doors(w.handle({ subfolder: `${linked}/.claude/skills`, within: linked }))).toEqual(ALL_REFUSED);
+  });
+
+  test('the first child of the anchor being a link out is refused, whatever folder is scoped below it', async () => {
+    const w = await world();
+    await rm(`${w.project}/.claude`, { recursive: true });
+    await symlink(`${w.parent}/outside/claude`, `${w.project}/.claude`);
+    expect(await doors(w.handle({ subfolder: `${w.project}/.claude`, within: w.project }))).toEqual(ALL_REFUSED);
   });
 
   test('a project UNDER a linked workspace folder (the anchor under a link) still works', async () => {
