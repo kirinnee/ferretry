@@ -100,6 +100,38 @@ describe('FleetCredentialCatalog — which credentials exist and where each one 
     should(work.resolution).match({ unavailable: /cannot reach the directories logins are signed in to/u });
   });
 
+  it('should answer an environment login with no paths and no host resolver, never throw', async () => {
+    const reference = (cloudCredential: string) =>
+      files({
+        glm: FILES.get('glm') as never,
+        google: { harness: 'claude-code', store: 'environment', env: {}, cloudCredential },
+      });
+    const { catalog } = catalogOf({ paths: undefined, logins: () => reference('gcloud-adc:~/adc/key.json') });
+    const plain = await entryOf(catalog, 'glm');
+    const homed = await entryOf(catalog, 'google');
+    // Needs no directory: its own variables are all it launches with.
+    should(plain.resolution).match({ store: 'environment', env: { ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' } });
+    should((plain.resolution as { problem?: string }).problem).be.undefined();
+    // Its credentials file is under a home this build cannot name: the cannot-launch answer the launch already reads.
+    should(homed.resolution).match({ store: 'environment', problem: /under your home directory/u });
+    should(catalog.emailSource(plain)).be.undefined();
+    should(catalog.emailSource(homed)).be.undefined();
+  });
+
+  it('should name no account file for a host Claude login the host resolved when no home is named', async () => {
+    const { catalog } = catalogOf({
+      paths: undefined,
+      resolveStore: () => ({
+        harness: 'claude',
+        store: 'host',
+        secureStorage: '',
+        storageDirectory: '/h/.claude',
+        credentialFile: '/h/.claude/.credentials.json',
+      }),
+    });
+    should(catalog.emailSource(await entryOf(catalog, 'claude-you'))).be.undefined();
+  });
+
   it('should take a resolution the host gives over its own', async () => {
     const { catalog } = catalogOf({
       resolveStore: (_id, credential) => ({
