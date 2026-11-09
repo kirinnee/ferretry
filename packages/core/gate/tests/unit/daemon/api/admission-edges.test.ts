@@ -51,7 +51,7 @@ describe('the watchers of a policy change', () => {
 });
 
 describe('an audit log that fails is never the call’s failure', () => {
-  test('a descriptor-declared record the log refuses to take leaves the answer as it was decided', () => {
+  test('a descriptor-declared record the log refuses to take is attempted once and does not throw', () => {
     const w = world();
     const route = descriptor({
       method: 'DELETE',
@@ -60,7 +60,9 @@ describe('an audit log that fails is never the call’s failure', () => {
     });
     const { decision, call } = admit(w, route, { bearer: ADMIN, arrival: local() });
     if (decision.outcome !== 'admitted') throw new Error('expected admitted');
+    let attempts = 0;
     w.recorded.push = () => {
+      attempts += 1;
       throw new Error('the audit log is full');
     };
     expect(() =>
@@ -75,6 +77,7 @@ describe('an audit log that fails is never the call’s failure', () => {
         response: { status: 200, headers: new Map(), body: '{}' },
       }),
     ).not.toThrow();
+    expect(attempts).toBe(1);
   });
 
   test('a ferret token refused for naming another ferret is still answered 401 when the audit log will not take the refusal', () => {

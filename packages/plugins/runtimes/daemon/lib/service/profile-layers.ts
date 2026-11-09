@@ -90,7 +90,7 @@ function resolveProfileStack(
 ):
   | { readonly ok: true; readonly mcp: readonly string[]; readonly skills: readonly string[] }
   | { readonly ok: false; readonly sentence: string } {
-  const stack = expandStack<string, never>(
+  const stack = expandStack<string>(
     name => profiles.get(name)?.contents,
     text =>
       text.startsWith(`${PROFILE_LAYER_PREFIX}/`)
@@ -98,10 +98,8 @@ function resolveProfileStack(
         : { kind: 'leaf', key: text, item: text },
     start,
   );
-  if (!stack.ok) {
-    // The leaf reader above never answers `fail`, so the expansion cannot end in a 'layer' failure.
-    return { ok: false, sentence: stackRefusal(stack.failure as Parameters<typeof stackRefusal>[0], start) };
-  }
+  // The leaf reader above never answers `fail`, so the expansion's failure type has no 'layer' arm.
+  if (!stack.ok) return { ok: false, sentence: stackRefusal(stack.failure, start) };
   const named = (kind: 'mcp' | 'skills'): readonly string[] =>
     stack.entries
       .map(entry => entry.key)
