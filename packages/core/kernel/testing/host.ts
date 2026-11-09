@@ -1448,6 +1448,8 @@ async function start(world: World): Promise<TestHost> {
             if (isReadOnlyRoot(name) || !takesLinks(name)) throw new RootError('read_only');
             const known = testHandles.get(target?.root ?? {});
             if (known === undefined || known.plugin !== manifest.id) throw new RootError('not_declared');
+            // a project file is never the target of a link another root writes (`linkTarget` on the real host, BG-014 m1)
+            if (known.root === 'project-files') throw new RootError('not_declared');
             const to = target.path as string;
             const within = known.prefix;
             if (within === undefined || to.split('/').includes('..') || (to !== within && !to.startsWith(`${within}/`)))
