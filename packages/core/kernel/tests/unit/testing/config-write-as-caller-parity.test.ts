@@ -106,6 +106,55 @@ test('the testing host holds a writeAsCaller whose owner question is not answere
   await host.stop();
 });
 
+/** Edits made to a file that already holds an edit for the owner: the writer and the testing host take the same base. */
+const OVER_HELD: readonly { readonly label: string; readonly held: string; readonly patch: Record<string, unknown> }[] =
+  [
+    {
+      label: 'a held secret, another field patched',
+      held: 'env:\n  EVIL: ${secret:GITHUB_TOKEN}\n',
+      patch: { note: 'x' },
+    },
+    {
+      label: 'a held secret, the owner adds its own',
+      held: 'env:\n  EVIL: ${secret:GITHUB_TOKEN}\n',
+      patch: { env: { EVIL: '${secret:GITHUB_TOKEN}', OWN: '${secret:OWN_TOKEN}' } },
+    },
+    {
+      label: 'a held loosening, the owner adds its own secret',
+      held: 'limit: 99\n',
+      patch: { env: { OWN: '${secret:OWN_TOKEN}' } },
+    },
+    { label: 'a held loosening, another field patched', held: 'limit: 99\n', patch: { note: 'x' } },
+  ];
+
+test('the testing host takes the same base as the real writer over a file holding an edit for the owner', async () => {
+  for (const owner of [true, false])
+    for (const other of [true, false])
+      for (const { label, held, patch } of OVER_HELD) {
+        const port = await real(owner, other);
+        const { host, config } = await testing(owner, other);
+        // the file is first held by a plain write of the same text, which asks only the plain question
+        const realHeld = await port.write(mcpDef, 'acme', held);
+        const testHeld = await config.write(mcpDef, 'acme', held);
+        expect({ label, kind: testHeld.kind }).toEqual({ label, kind: realHeld.kind });
+        const realOutcome = await port.writeAsCaller(mcpDef, 'acme', { patch });
+        const testOutcome = await config.writeAsCaller(mcpDef, 'acme', { patch });
+        expect({ label, owner, other, kind: testOutcome.kind }).toEqual({
+          label,
+          owner,
+          other,
+          kind: realOutcome.kind,
+        });
+        expect({ label, owner, other, value: config.collection(mcpDef).get('acme') }).toEqual({
+          label,
+          owner,
+          other,
+          value: port.collection(mcpDef).get('acme'),
+        });
+        await host.stop();
+      }
+});
+
 test('the testing host answers a stale ifMatch on writeAsCaller as a conflict, as write does', async () => {
   const { host, config } = await testing(true, true);
   expect((await config.writeAsCaller(mcpDef, 'acme', 'note: a\n', { ifMatch: 'absent' })).kind).toBe('written');

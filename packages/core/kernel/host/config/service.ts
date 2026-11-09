@@ -912,6 +912,16 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     (sentences: readonly string[]): boolean =>
       options.judge?.({ plugin, path: path(), removal: false, sentences, secretAdd: true }) === true;
 
+  /**
+   * What a disk text that is NOT the version in effect (an edit held for the owner) names: its parsed value when it
+   * checks, and its raw text besides, so a reference that does not parse is still counted. Only ever used to keep a
+   * reference out of the owner's yes, so counting more is the fail-closed side.
+   */
+  const heldDiskReferences = (def: ConfigDef, slot: Slot, text: string): readonly unknown[] => {
+    const read = check(def, slot.path, text);
+    return read.ok ? [read.value, text] : [text];
+  };
+
   /** A plugin's own write: Gate's judge, never a confirmation of its own. */
   const ownJudge =
     (plugin: string, path: () => string) =>
@@ -992,22 +1002,37 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       unchanged || !untrustedWrite(writeOptions) ? [] : addedSecretReferenceSentences(before, checked.value);
     const other = unchanged ? [] : judgeLoosening(def, before, checked.value);
     const loosens = [...other, ...added];
-    // The caller's own write only: the secret references go into effect when the ambient call is the owner. Every
-    // other loosening is judged as a plain write judges it; a held secret add holds the whole edit.
-    const ownerAdds = added.length > 0 && askSecretAdds(writeOptions, added);
+    // The caller's own write only (`judgeSecretAdds`): a secret reference goes into effect when the ambient call is the
+    // owner, and the owner's yes covers ONLY a reference the caller's edit introduces. A reference that is in neither the
+    // version in effect nor the caller's edit comes from an edit already HELD on the disk (a ferret's): the owner never
+    // answered for it, so it keeps the whole write held as a plain write holds it. The disk text is looked at only when it
+    // is not the version in effect, so a clean file asks exactly what it asked before.
+    const diskHeld = existing !== undefined && found !== settled.get(slot.path)?.evaluated.inEffect?.etag;
+    const onDisk = diskHeld ? heldDiskReferences(def, slot, existing) : undefined;
+    const known = [before, onDisk];
+    const byCaller = added.length === 0 ? [] : addedSecretReferenceSentences(known, checked.value);
+    const fromHeld = added.length > byCaller.length;
+    const ownerAdds = byCaller.length > 0 && !fromHeld && askSecretAdds(writeOptions, byCaller);
     const confirmed =
       (added.length === 0 || ownerAdds) &&
       (writeOptions.confirmedLoosening === true ||
         (loosens.length > 0 && (other.length === 0 || askJudge(writeOptions, other, false))));
-    // Names only (a secret NAME is a name; the grammar keeps it to A-Z, digits and underscores); never a value.
+    if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
+    landing = [{ path: slot.path, digest: etag, checked }];
+    try {
+      await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);
+    } catch (error) {
+      // Nothing landed: no acknowledgement may outlive a write that did not happen.
+      if (acknowledged.get(slot.path)?.etag === etag) acknowledged.delete(slot.path);
+      throw error;
+    }
+    // Names only (a secret NAME is a name; the grammar keeps it to A-Z, digits and underscores); never a value. Written
+    // once the file is on disk, and credits the owner only for the references the owner's own edit added.
     if (ownerAdds && confirmed) {
-      const had = secretReferencesIn(before);
+      const had = secretReferencesIn(known);
       const names = [...secretReferencesIn(checked.value)].filter(name => !had.has(name)).sort();
       log.info(`config ${slot.path}: the owner put a secret reference into effect (${names.join(', ')})`);
     }
-    if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
-    landing = [{ path: slot.path, digest: etag, checked }];
-    await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);
     await load();
     const held = settled.get(slot.path)?.evaluated.held;
     return held !== undefined && held.etag === etag

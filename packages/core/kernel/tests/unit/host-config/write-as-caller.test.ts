@@ -281,3 +281,76 @@ describe('writeAsCaller: names and ids only in the log, never a value', () => {
     expect(JSON.stringify([h.log.lines, outcome, h.asked])).not.toContain(raw);
   });
 });
+
+describe('writeAsCaller C1: the owner question covers only what the caller’s edit adds to the text it edits', () => {
+  const HELD = 'env:\n  EVIL: ${secret:GITHUB_TOKEN}\n';
+  const ownerLines = (lines: readonly string[]) => lines.filter(line => line.includes('the owner put a secret'));
+
+  test('writeAsCaller C1 a patch of one field over a held secret reference keeps the whole write held, whatever the owner would say', async () => {
+    const h = harness({ owner: true, other: true });
+    await h.files.reload();
+    const port = h.files.port('mcp');
+    expect((await port.write(mcpDef, 'acme', HELD)).kind).toBe('held');
+    h.asked.length = 0;
+    const outcome = await port.writeAsCaller(mcpDef, 'acme', { patch: { note: 'owner renamed it' } });
+    expect(outcome.kind).toBe('held');
+    expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+    // the owner was never asked about a reference the caller did not add
+    expect(h.asked.filter(input => input.secretAdd === true)).toEqual([]);
+    expect(ownerLines(h.log.lines)).toEqual([]);
+  });
+
+  test('writeAsCaller C1 the owner is asked about its OWN reference only, and a held one still holds the write', async () => {
+    const h = harness({ owner: true, other: true });
+    await h.files.reload();
+    const port = h.files.port('mcp');
+    await port.write(mcpDef, 'acme', HELD);
+    h.asked.length = 0;
+    const outcome = await port.writeAsCaller(mcpDef, 'acme', {
+      patch: { env: { EVIL: '${secret:GITHUB_TOKEN}', OWN: '${secret:OWN_TOKEN}' } },
+    });
+    expect(outcome.kind).toBe('held');
+    expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+    expect(ownerLines(h.log.lines)).toEqual([]);
+  });
+
+  test('writeAsCaller C1 an owner reference on top of a held NON-secret edit is asked alone and credited alone', async () => {
+    const staged = harness({ owner: true, other: false });
+    await staged.files.reload();
+    expect((await staged.files.port('mcp').write(mcpDef, 'acme', 'limit: 99\n')).kind).toBe('held');
+    staged.asked.length = 0;
+    const outcome = await staged.files
+      .port('mcp')
+      .writeAsCaller(mcpDef, 'acme', { patch: { env: { OWN: '${secret:OWN_TOKEN}' } } });
+    // the secret question was asked with the owner reference alone; the held limit is the plain judge's, as for write
+    expect(staged.asked.filter(input => input.secretAdd === true).map(input => input.sentences)).toEqual([
+      ['names the secret OWN_TOKEN, which only the owner may add to a configuration'],
+    ]);
+    expect(outcome.kind).toBe('held');
+    expect(ownerLines(staged.log.lines)).toEqual([]);
+  });
+
+  test('writeAsCaller C1 the owner adds its own reference on a clean file: asked, written and credited', async () => {
+    const h = harness({ owner: true, other: false });
+    await h.files.reload();
+    const outcome = await h.files
+      .port('mcp')
+      .writeAsCaller(mcpDef, 'acme', { patch: { env: { OWN: '${secret:OWN_TOKEN}' } } });
+    expect(outcome.kind).toBe('written');
+    expect(ownerLines(h.log.lines)).toEqual([
+      'info config mcp/acme.yaml: the owner put a secret reference into effect (OWN_TOKEN)',
+    ]);
+  });
+
+  test('writeAsCaller C1 a write whose file cannot be written logs no owner line and leaves no acknowledgement', async () => {
+    const h = harness({ owner: true, other: false });
+    await h.files.reload();
+    h.fs.failNextWrite(new Error('the disk is full'));
+    await expect(h.files.port('mcp').writeAsCaller(mcpDef, 'acme', ADD)).rejects.toThrow('the disk is full');
+    expect(ownerLines(h.log.lines)).toEqual([]);
+    // the file was never written, so a reload finds nothing in effect and nothing held
+    await h.files.reload();
+    expect(h.files.port('mcp').collection(mcpDef).get('acme')).toBeUndefined();
+    expect(h.files.held()).toEqual([]);
+  });
+});

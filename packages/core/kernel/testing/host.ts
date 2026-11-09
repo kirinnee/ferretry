@@ -494,6 +494,8 @@ async function start(world: World): Promise<TestHost> {
   const stopController = new AbortController();
   const jobs = new Map<string, (signal: AbortSignal) => Promise<void>>();
   const configListeners = new Map<string, Set<() => void>>();
+  /** The value of the edit held at each config path (`write` keeps it so the next edit is made to it, as on a disk). */
+  const heldValues = new Map<string, { readonly etag: string; readonly value: unknown }>();
   // `watchState` over the in-memory world: by file or collection key, the moves the shared rule finds there. The world
   // holds values, not texts, so a file's etag is its value's JSON (as this host's writes answer) and a held edit (which
   // the world never holds) is a stamp kept for its path until that path is written, removed or set again.
@@ -825,6 +827,14 @@ async function start(world: World): Promise<TestHost> {
       const stamp = configStamps.get(keyOf(def))?.get(path)?.stamp;
       return stamp?.state === 'held' && stamp.etag !== ABSENT_STAMP.etag ? stamp.etag : etagOfValue(inEffect);
     };
+    /** The value of the edit held at `path`, when one is held now (its stamp is held and names that very edit). */
+    const heldValueAt = (key: string, path: string): { readonly held: boolean; readonly value?: unknown } => {
+      const stamp = configStamps.get(key)?.get(path)?.stamp;
+      const saved = heldValues.get(path);
+      return stamp?.state === 'held' && saved !== undefined && saved.etag === stamp.etag
+        ? { held: true, value: saved.value }
+        : { held: false };
+    };
     const assertDeclared = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): void => {
       if (!declared.includes(def)) throw new Error(`${manifest.id}: config ${keyOf(def)} is not declared`);
     };
@@ -847,13 +857,21 @@ async function start(world: World): Promise<TestHost> {
         return { kind: 'refused', reason: 'bad_name', issues: [] };
       const all = world.config.get(key) as Record<string, unknown> | undefined;
       const before = def.shape === 'file' ? all : name === undefined ? undefined : all?.[name];
+      const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
+      // As the real writer: an edit is made to the DISK text, which for a file with an edit held is the HELD one.
+      const onDisk = heldValueAt(key, path);
       let next: unknown;
       if (typeof edit === 'string') {
         // The kernel's bounded reader, as the real writer reads an edit: never a raw parse of a text a test hands in.
         const read = readConfigText(edit);
         if (!read.ok) return { kind: 'refused', reason: 'yaml', issues: [{ path: key, message: 'this is not YAML' }] };
         next = read.read.value ?? {};
-      } else next = patchedValue((before as Record<string, unknown> | undefined) ?? {}, edit.patch, within);
+      } else
+        next = patchedValue(
+          ((onDisk.held ? onDisk.value : before) as Record<string, unknown> | undefined) ?? {},
+          edit.patch,
+          within,
+        );
       const checked = def.schema.safeParse(next);
       if (!checked.success)
         return {
@@ -870,13 +888,20 @@ async function start(world: World): Promise<TestHost> {
       const added = addedSecretReferenceSentences(priorValue, checked.data);
       const other = judgeLoosening(def, priorValue, checked.data);
       const sentences = [...other, ...added];
-      const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
       const subject = { path, ...(name === undefined ? {} : { name }) };
       // `writeAsCaller` only: the added secret references go into effect when the ambient call is the owner, as the
-      // real writer asks it (the same admission, the same `secretAdd` question); every other sentence is judged as before.
-      const ownerAdds = asCaller === true && added.length > 0 && judged(manifest.id, path, false, added, true);
+      // real writer asks it (the same admission, the same `secretAdd` question) and about the same references: only the
+      // ones the caller's edit introduces. One that only an edit already held on the disk names keeps the write held.
+      const byCaller =
+        added.length === 0 ? [] : addedSecretReferenceSentences([priorValue, onDisk.value], checked.data);
+      const ownerAdds =
+        asCaller === true &&
+        byCaller.length > 0 &&
+        byCaller.length === added.length &&
+        judged(manifest.id, path, false, byCaller, true);
       const heldAdds = added.length > 0 && !ownerAdds;
       if (heldAdds || (other.length > 0 && !judged(manifest.id, path, false, other))) {
+        heldValues.set(path, { etag, value: next });
         restamp(key, { ...subject, held: etag });
         return { kind: 'held', etag, id: `${path}@held`, sentences };
       }

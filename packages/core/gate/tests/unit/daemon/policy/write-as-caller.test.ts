@@ -19,7 +19,7 @@ import { definePlugin, implementDaemon, route } from '@ferretry/kernel/manifest'
 import { testHost } from '@ferretry/kernel/testing';
 import { DEFAULT_GATE_CONFIG, FULL_DEVICE_GRANTS } from '../../../../contract/index.ts';
 import { StandInAdmission } from '../../../../contract/testing/index.ts';
-import { CLIENT_HEADER } from '../../../../daemon/lib/api/admission.ts';
+import { CLIENT_HEADER, SESSION_ID_HEADER } from '../../../../daemon/lib/api/admission.ts';
 import { judgeLooseningWrite, judgeOwnerSecretAdd } from '../../../../daemon/lib/policy/config-judge.ts';
 import { ADMIN, admit, carried, descriptor, FERRET_TOKEN, local, type World, world } from '../support.ts';
 
@@ -316,5 +316,67 @@ describe('writeAsCaller: the testing host judges the same, from the same Gate ju
     const held = await twinAs(callOf(v, { device: 'phone' }).standing);
     expect(held.kind).toBe('held');
     expect(held.inEffect).toBeUndefined();
+  });
+});
+
+describe('writeAsCaller: the owner answers only for the references its own edit adds, never for a held edit', () => {
+  const ferretCall = (w: World = world()): Call =>
+    callOf(w, { bearer: ADMIN, arrival: local(), headers: { [SESSION_ID_HEADER]: 'F12', [CLIENT_HEADER]: 'cli' } });
+  const HELD_SECRET = 'env:\n  EVIL: ${secret:GITHUB_TOKEN}\n';
+  const OWNER_NAMES = (lines: readonly string[]) => lines.filter(line => line.includes('the owner put a secret'));
+
+  test('writeAsCaller C1 an owner patch of one field does not put a ferret’s held secret reference into effect', async () => {
+    const { port, lines } = await realPort();
+    const held = await runInCall(ferretCall(), async () => port.writeAsCaller(mcpDef, 'acme', HELD_SECRET));
+    expect(held.kind).toBe('held');
+    expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+    const owner = await runInCall(callOf(world(), atMachine), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { note: 'owner renamed it' } }),
+    );
+    expect(owner.kind).toBe('held');
+    expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+    expect(OWNER_NAMES(lines)).toEqual([]);
+    // visibly held, with the existing held sentence
+    expect(lines.some(line => line.includes('an edit is held for the owner') && line.includes('GITHUB_TOKEN'))).toBe(
+      true,
+    );
+  });
+
+  test('writeAsCaller C1 an owner who adds its OWN secret over a ferret’s held one still leaves the whole write held', async () => {
+    const { port, lines } = await realPort();
+    await runInCall(ferretCall(), async () => port.writeAsCaller(mcpDef, 'acme', HELD_SECRET));
+    const owner = await runInCall(callOf(world(), atMachine), async () =>
+      port.writeAsCaller(mcpDef, 'acme', {
+        patch: { note: 'x', env: { EVIL: '${secret:GITHUB_TOKEN}', OWN: '${secret:OWN_TOKEN}' } },
+      }),
+    );
+    expect(owner.kind).toBe('held');
+    expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+    expect(OWNER_NAMES(lines)).toEqual([]);
+  });
+
+  test('writeAsCaller C1 an owner adds its own secret on top of a ferret’s held non-secret edit: credited for its own reference only', async () => {
+    const { port, lines } = await realPort();
+    const staged = await runInCall(ferretCall(), async () => port.writeAsCaller(mcpDef, 'acme', 'limit: 99\n'));
+    expect(staged.kind).toBe('held');
+    const owner = await runInCall(callOf(world(), atMachine), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { env: { OWN: '${secret:OWN_TOKEN}' } } }),
+    );
+    expect(owner.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toMatchObject({ env: { OWN: '${secret:OWN_TOKEN}' } });
+    expect(OWNER_NAMES(lines)).toEqual([
+      'config mcp/acme.yaml: the owner put a secret reference into effect (OWN_TOKEN)',
+    ]);
+  });
+
+  test('writeAsCaller C1 an owner adds its own secret on a clean file: written, the intended path', async () => {
+    const { port, lines } = await realPort();
+    const owner = await runInCall(callOf(world(), atMachine), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { env: { OWN: '${secret:OWN_TOKEN}' } } }),
+    );
+    expect(owner.kind).toBe('written');
+    expect(OWNER_NAMES(lines)).toEqual([
+      'config mcp/acme.yaml: the owner put a secret reference into effect (OWN_TOKEN)',
+    ]);
   });
 });
