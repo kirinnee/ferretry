@@ -1,10 +1,10 @@
-import type { AppImplementation, Manifest } from '@ferretry/kernel/manifest';
+import type { AppImplementation, Manifest, PluginClient } from '@ferretry/kernel/manifest';
 import type { MemberCarriers } from './member.ts';
 import type { NavigateOptions } from '../router/router.tsx';
 import type { DeclaredFragment, FragmentDecl } from '../router/address.ts';
 import type { ScreenRef } from '../layout/engine.ts';
 import type { PluginCommandSource } from '../shell/command-sources.ts';
-import type { AppHookProviders } from '../surfaces/app-hooks.ts';
+import type { AppHookContext, AppHookProviders } from '../surfaces/app-hooks.ts';
 import type { View } from '../surfaces/halves.ts';
 import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RelayPairingOutcome, SessionDeviceClaim } from '../session/session-client.ts';
@@ -14,6 +14,7 @@ import type { WebCryptoRelayCrypto } from '../session/webcrypto.ts';
 import type { OwnerPayload, PrivateKeyHandle, RelayCrypto } from '../session/wire/index.ts';
 import type { ShellPluginClient } from '../client/daemon-client.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
+import type { LinkProvision } from '../ui/external-link.tsx';
 import { PASSKEY_TAKERS, type PasskeyPorts, type PasskeyProvision } from '../passkey/passkey.ts';
 
 /**
@@ -37,6 +38,8 @@ import { PASSKEY_TAKERS, type PasskeyPorts, type PasskeyProvision } from '../pas
 
 /** The one plugin whose device claims the shell takes (the `device` and `pair` session modes are Access's). */
 export const CLAIM_TAKERS: readonly string[] = Object.freeze(['access']);
+/** The one plugin whose link behaviour the shell takes (S7): where a link opens is Browsers'. */
+export const LINK_TAKERS: readonly string[] = Object.freeze(['browsers']);
 /** The one plugin whose carriers the shell takes (§4.8: the carrier choice is Connections'). */
 export const CARRIER_TAKERS: readonly string[] = Object.freeze(['connections']);
 
@@ -227,8 +230,60 @@ export interface DeviceViewProps {
   readonly navigate: (to: string, options?: NavigateOptions) => void;
 }
 
+/**
+ * What a background view is drawn with (S5, R3 MJ1): the paired daemon it runs for, and the plugin's OWN client there
+ * in BACKGROUND passkey origin — every call from it is a background read, whatever its method, so a call to a locked
+ * machine waits for the unlock and never raises a prompt. It is the `background` entry of the one client cache.
+ */
+export interface BackgroundViewProps {
+  readonly daemon: string;
+  readonly client: PluginClient;
+}
+
+/**
+ * One nav entry's count on ONE machine, built per daemon and EAGERLY (like an app hook) over that daemon's cache client
+ * — the half need not be built (R3 m8). The frame draws the SUM over every paired daemon where the plugin is allowed (MA5).
+ */
+export interface NavBadge {
+  /** This machine's share; a sum of 0 draws no badge. */
+  readonly count: () => number;
+  readonly subscribe: (changed: () => void) => () => void;
+}
+
 /** What a plugin app half may hand the shell. Each part is a factory over the {@link ConnectPorts}. */
 export interface ShellProvides {
+  /**
+   * Any plugin: views the frame mounts ONCE PER PAIRED DAEMON where the plugin may run, at the frame root and outside the
+   * router (S5) — a watcher that renders nothing, or an overlay (a toast, a sheet). Each is handed its background-origin
+   * client as a prop, and its `useEveryDaemon` rows are background-origin too (`place: 'background'`), so nothing it
+   * sends raises a passkey prompt. It unmounts when the plugin is blocked or paused there or the daemon is unpaired.
+   */
+  readonly background?: Readonly<Record<string, View<BackgroundViewProps>>>;
+  /**
+   * Any plugin: the views of the panels its manifest declares in `device.settings` (S4, M3), drawn on this device's
+   * settings page under the Appearance block, by order. They are drawn with NO daemon and NO client; a panel that needs
+   * machines lists them with `useEveryDaemon`, one row per machine (`place: 'device-panel'`).
+   */
+  readonly deviceSettings?: Readonly<Record<string, View<Record<string, never>>>>;
+  /**
+   * Any plugin: the views of the panels its manifest declares in `nav` (S4, R3 MJ3). A nav panel is device-level: drawn
+   * ONCE under the nav entries (a column nav only), with no daemon and no client, so the nav can never show one machine's
+   * blocked or paused line; it lists machines with `useEveryDaemon`.
+   */
+  readonly navPanels?: Readonly<Record<string, View<Record<string, never>>>>;
+  /**
+   * Any plugin: a count on the nav entry of one of its own screens (key = the screen id, which must declare `nav`),
+   * built per daemon over that daemon's cache client. The badge is the SUM across every paired daemon where the plugin
+   * is allowed: a blocked, paused, skeleton or locked machine adds 0, and a machine never opened still counts.
+   */
+  readonly navBadges?: Readonly<Record<string, (ctx: AppHookContext) => NavBadge>>;
+  /**
+   * Browsers only (`LINK_TAKERS`): where a tap on an external link opens, built PER DAEMON like an app hook, over
+   * Browsers' own client there. `destination(href)` says what a tap will do ON THAT MACHINE before it happens (the
+   * anchor's title, the sheet's heading); the `sheet` is drawn once per machine at the frame root. Any other provider
+   * is ignored.
+   */
+  readonly links?: (ctx: AppHookContext) => LinkProvision;
   /** Access only. */
   readonly claims?: (ports: ConnectPorts) => DeviceClaims;
   /** Connections only. */
@@ -439,4 +494,81 @@ export function registeredDeviceViews(surfaces: readonly SurfaceEntry[]): readon
   return surfaces.flatMap(entry =>
     Object.entries(shellProvidesOf(entry)?.device ?? {}).map(([id, view]) => ({ plugin: entry.id, id, view })),
   );
+}
+
+/** One plugin's background view, as the host mounts it (once per paired daemon where the plugin may run). */
+export interface RegisteredBackgroundView {
+  readonly plugin: string;
+  readonly id: string;
+  readonly view: View<BackgroundViewProps>;
+}
+
+/** Every plugin's background views, in registry order (a skeleton half provides none). */
+export function registeredBackgroundViews(surfaces: readonly SurfaceEntry[]): readonly RegisteredBackgroundView[] {
+  return surfaces.flatMap(entry =>
+    Object.entries(shellProvidesOf(entry)?.background ?? {}).map(([id, view]) => ({ plugin: entry.id, id, view })),
+  );
+}
+
+/** One plugin's device-level panel (a `device.settings` or `nav` panel), as the frame draws it. */
+export interface RegisteredDevicePanel {
+  readonly plugin: string;
+  readonly id: string;
+  readonly view: View<Record<string, never>>;
+}
+
+/** The slots whose panels are device-level, and the `shell` section that holds their views. */
+export type DevicePanelSlot = 'device.settings' | 'nav';
+
+const DEVICE_PANEL_SECTION = { 'device.settings': 'deviceSettings', nav: 'navPanels' } as const;
+
+/**
+ * The device-level panels the registered halves gave for one slot, by `<plugin>.<panel>`. Only a panel the plugin's
+ * manifest declares in that slot is taken: a view for any other id is dropped, so a per-daemon panel can never be drawn
+ * without its daemon this way.
+ */
+export function registeredDevicePanels(
+  surfaces: readonly SurfaceEntry[],
+  slot: DevicePanelSlot,
+): ReadonlyMap<string, RegisteredDevicePanel> {
+  const panels = new Map<string, RegisteredDevicePanel>();
+  for (const entry of surfaces) {
+    const declared = new Set(
+      (entry.manifest.ui?.panels ?? []).filter(panel => panel.slot === slot).map(panel => panel.id),
+    );
+    for (const [id, view] of Object.entries(shellProvidesOf(entry)?.[DEVICE_PANEL_SECTION[slot]] ?? {})) {
+      if (declared.has(id)) panels.set(`${entry.id}.${id}`, { plugin: entry.id, id, view });
+    }
+  }
+  return panels;
+}
+
+/** One plugin's nav badge provider for one of its own nav screens. */
+export interface RegisteredNavBadge {
+  readonly plugin: string;
+  readonly screen: string;
+  readonly provide: (ctx: AppHookContext) => NavBadge;
+}
+
+/** Every nav badge the registered halves gave, for a screen the plugin's manifest declares with a `nav` entry. */
+export function registeredNavBadges(surfaces: readonly SurfaceEntry[]): readonly RegisteredNavBadge[] {
+  return surfaces.flatMap(entry => {
+    const withNav = new Set(
+      (entry.manifest.ui?.screens ?? []).filter(screen => screen.nav !== undefined).map(screen => screen.id),
+    );
+    return Object.entries(shellProvidesOf(entry)?.navBadges ?? {}).flatMap(([screen, provide]) =>
+      withNav.has(screen) ? [{ plugin: entry.id, screen, provide }] : [],
+    );
+  });
+}
+
+/** The one link provider the registered halves gave (Browsers'; any other plugin's is ignored), or `undefined`. */
+export function registeredLinkProvider(
+  surfaces: readonly SurfaceEntry[],
+): { readonly plugin: string; readonly provide: (ctx: AppHookContext) => LinkProvision } | undefined {
+  for (const entry of surfaces) {
+    const provide = shellProvidesOf(entry)?.links;
+    if (provide !== undefined && LINK_TAKERS.includes(entry.id)) return { plugin: entry.id, provide };
+  }
+  return undefined;
 }
