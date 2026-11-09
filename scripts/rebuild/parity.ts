@@ -1754,7 +1754,10 @@ function applyReowned(all: ReadonlyMap<string, Row>) {
       throw new Error(`REOWNED names ${id}, which is not in the inventory`);
     }
     row.owner = owner;
-    row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
+    // A ticked route row already names the test that proves it (kept from the registry above); moving the row to its
+    // real owner must not put the default check back, or the owner's tick loses its test path on the next regeneration.
+    const provenRoute = row.kind === 'R' && row.status.startsWith('[x]') && row.check !== 'descriptor-parity';
+    if (!provenRoute) row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
   }
 }
 applyReowned(unique);
