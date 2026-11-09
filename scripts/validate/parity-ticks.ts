@@ -371,7 +371,15 @@ export function statusProofFindings(
   const cache = new Map<string, readonly string[]>();
   const named = (id: string): boolean =>
     files.some(file => {
-      if (!read(file).includes(id)) return false;
+      // A tracked file deleted in the working tree is not a naming file: skip it, never crash the gate.
+      const text = (() => {
+        try {
+          return read(file);
+        } catch {
+          return undefined;
+        }
+      })();
+      if (text === undefined || !text.includes(id)) return false;
       const titles = cache.get(file) ?? titlesOf(file);
       cache.set(file, titles);
       return titles.some(title => namesRow(title, id));

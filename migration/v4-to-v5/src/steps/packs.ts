@@ -155,7 +155,7 @@ function refuseRawSecrets(document: Document, label: string): void {
 /** Why an old routing key is not carried as a key: its words are in the prompt, or there was nothing to put there. */
 const foldedWhy = (folded: boolean): string =>
   folded
-    ? "the old guide's key, which v4 renders into the ONE routing prompt once at boot and this home had not yet: its words are rendered into routing.prompt exactly as v4 would have (see the notes); v5 reads the key itself nowhere"
+    ? "the old guide's key, which v4 renders into the ONE routing prompt once at boot and this home had not yet: its words are rendered into routing.prompt as v4 would have, except the default prompt v4 put in front of prose alone (see the notes); v5 reads the key itself nowhere"
     : "the old guide's key, which v4 renders into the routing prompt once at boot and this home had not yet; this home's prompt is its own (v4 never overwrote one) or the key said nothing a prompt could carry, so v5 reads it nowhere and its prompt is the file's own, else the one rendered from the model catalogs";
 
 /**
