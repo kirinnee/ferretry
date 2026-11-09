@@ -9,12 +9,15 @@
  *   - (a route) descriptor-parity does not ALSO prove it: today's route is at the same path or moved (both halves
  *     recorded) and every field that differs is a recorded tightening (minimum up, caller any → person, a capability,
  *     `noStore`, `privilegedOnly` or a `catalog` resolver added). A record never blesses a loosening.
+ * A status that says a row is "proved by test(s) <id>" (any row, ticked or not) fails when no live `test(` / `it(` title
+ * in a tracked test file names that id.
  * `parity-ticks-known.tsv` (`id<TAB>reason`) lists rows that fail today. The ids it may hold are PINNED in
  * `FROZEN_IDS` below: an id not in that set fails, so the list can only shrink; an entry whose row passes (or is no
  * longer ticked) fails too, and so does a frozen id that is no longer listed (the two sets must be equal).
  *
  *   bun scripts/validate/parity-ticks.ts [--results <junit.xml|folder>] [--tier unit|int]
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -350,6 +353,47 @@ export function tickFindings(
   return out;
 }
 
+/** A status that says a row is proved by a test: `proved by its tests J-0052`, `proved by test V-0001, V-0002`. */
+const PROVED_BY = /proved by (?:its |the )?tests? ((?:[A-Z]-\d{4}(?:,? |\b))+)/;
+
+/**
+ * A row's status that names the test proving it (the `removed by design … proved by its tests J-0052` text) must name
+ * one that exists: some tracked `*.test.ts(x)` file holds a LIVE `test(` / `it(` title naming each id. A status is
+ * prose nothing else reads, so without this a skipped or deleted test leaves the claim standing.
+ */
+export function statusProofFindings(
+  rows: readonly LedgerRow[],
+  files: readonly string[],
+  read: (file: string) => string,
+  titlesOf: (file: string) => string[],
+): Finding[] {
+  const out: Finding[] = [];
+  const cache = new Map<string, readonly string[]>();
+  const named = (id: string): boolean =>
+    files.some(file => {
+      if (!read(file).includes(id)) return false;
+      const titles = cache.get(file) ?? titlesOf(file);
+      cache.set(file, titles);
+      return titles.some(title => namesRow(title, id));
+    });
+  for (const row of rows) {
+    const claimed = PROVED_BY.exec(row.status)?.[1]?.match(/[A-Z]-\d{4}/g) ?? [];
+    for (const id of claimed)
+      if (!named(id))
+        out.push({
+          check: 'parity-ticks',
+          where: row.id,
+          message: `its status says it is proved by test ${id}, but no live test() or it() title in a tracked test file names ${id} (skipped, todo, only, untitled or deleted)`,
+        });
+  }
+  return out;
+}
+
+const trackedTests = (root: string): string[] =>
+  execFileSync('git', ['-C', root, 'ls-files', '--', '*.test.ts', '*.test.tsx'], { encoding: 'utf8' })
+    .split('\n')
+    .filter(file => file !== '');
+
 export async function loadWorld(
   root: string,
   model: () => ReturnType<typeof import('../gen/registries.ts').buildModel>,
@@ -386,16 +430,24 @@ export const check: Check = {
         'parity-ticks: not verified against results (no --results given); titles are checked, passes are not',
       );
     const results = files?.flatMap(file => junitCases(readFileSync(file, 'utf8')));
-    return tickFindings(
-      rows,
-      {
-        root: ctx.root,
-        world: () => world,
-        ...(results === undefined ? {} : { results }),
-        ...(ctx.tier === undefined ? {} : { tier: ctx.tier }),
-      },
-      known,
-    );
+    return [
+      ...tickFindings(
+        rows,
+        {
+          root: ctx.root,
+          world: () => world,
+          ...(results === undefined ? {} : { results }),
+          ...(ctx.tier === undefined ? {} : { tier: ctx.tier }),
+        },
+        known,
+      ),
+      ...statusProofFindings(
+        rows,
+        trackedTests(ctx.root),
+        file => readFileSync(join(ctx.root, file), 'utf8'),
+        file => liveTitles(join(ctx.root, file)),
+      ),
+    ];
   },
 };
 
