@@ -10,7 +10,10 @@ import {
 } from '../../contract/index.ts';
 import { askSourceConformance, asksConformance, FakeAsks, standingConformance } from '../../contract/testing/index.ts';
 
-standingConformance('FakeAsks', () => new FakeAsks());
+standingConformance('FakeAsks', () => {
+  const asks = new FakeAsks();
+  return { asks, boardWrites: () => asks.boardWrites };
+});
 
 asksConformance('FakeAsks', () => {
   const asks = new FakeAsks();

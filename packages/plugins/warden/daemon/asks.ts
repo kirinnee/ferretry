@@ -4,9 +4,11 @@ import {
   type AskSummary,
   type EntryId,
   EntryIdSchema,
+  MACHINE_AGENDA_ID,
   type SourceKey,
 } from '@ferretry/core-asks/contract';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
+import { ORPHANS_ENTRY, type OrphanItem } from './lib/orphan-item.ts';
 import type {
   AgendaBoardInput,
   WardenAgendaPort,
@@ -184,6 +186,35 @@ export class AsksWardenAgenda implements WardenAgendaPort {
     } catch (error) {
       return { write: 'rejected', reason: error instanceof Error ? oneLine(error.message, 240) : 'it was refused' };
     }
+  }
+
+  /**
+   * The ONE item on the machine board that lists every orphaned card nobody can be messaged about
+   * (`AsksApi.standing`, keyed `daemon` + `warden.orphans`): the same item while the list changes, nothing written when
+   * it is the same. `undefined` closes it. An item that is not open (the owner tapped "Got it") is raised again only
+   * for `announce`: a card joined the list. A refusal throws: the sweep says why and tries again next time.
+   */
+  async standingOrphans(item: OrphanItem | undefined, announce: boolean): Promise<void> {
+    const entry = EntryIdSchema.parse(ORPHANS_ENTRY);
+    const open = async (): Promise<readonly AskSummary[]> =>
+      await this.asks.open({ source: DAEMON, entry, ferret: MACHINE_AGENDA_ID as FerretId, state: 'open' });
+    if (item !== undefined) {
+      if (!announce && (await open()).length === 0) return;
+      await this.asks.standing({
+        source: DAEMON,
+        entry,
+        ref: {},
+        subject: oneLine(item.subject, 240),
+        why: item.why,
+        howToResolve: item.howToResolve,
+        context: item.context,
+        raisedBy: { kind: 'daemon' },
+        ferret: MACHINE_AGENDA_ID,
+        blocking: true,
+      });
+      return;
+    }
+    for (const ask of await open()) await this.asks.close({ ferret: MACHINE_AGENDA_ID, id: ask.id }, 'source-gone');
   }
 
   async resolveSource(sessionId: string, source: AgendaSource, sourceRef: string, _note: string): Promise<boolean> {
