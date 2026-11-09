@@ -94,6 +94,11 @@ export function mayHoldRoot(plugin: string, name: RootName): boolean {
   return owner === undefined || owner === plugin;
 }
 
+/** Whether a root is an owner's own (`work`, `imports`, `harness-*`, `project-files`). One fact for both hosts. */
+export function isOwnerRoot(name: RootName): boolean {
+  return OWNER_ROOTS.has(name);
+}
+
 /** Whether a root is read-only through every handle (an owner's harness or import folder). One fact for both hosts. */
 export function isReadOnlyRoot(name: RootName): boolean {
   return READ_ONLY_ROOTS.has(name);
@@ -1575,10 +1580,19 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * at the name (a link included) is then judged by the call itself, reached through the checked folder.
    */
   const realParent = async (path: FencedPath, create = false): Promise<Checked> => {
-    const slash = path.lastIndexOf('/');
-    const leaf = path.slice(slash + 1);
-    if (slash <= 0 || leaf === '' || leaf === '.' || leaf === '..') return await real(path, create);
-    const parent = await real(path.slice(0, slash) as FencedPath, create);
+    // The lexical half FIRST (no NUL, no `..`, normalized, inside the root, outside the fence): the parent and the leaf
+    // are then taken from the NORMALIZED name, so a forged spelling (`x/`, `x/.`, a single relative name) names the same
+    // leaf as its plain form and a NUL anywhere is `outside`, never a raw TypeError from the disk.
+    const root = base();
+    if (root === undefined) refuse(name === 'work' ? 'unknown_ferret' : 'outside');
+    const lexical = lexicalInRoot(home, root as string, ownerRoot, path);
+    if (!lexical.ok) return refuse(lexical.error);
+    const named: string = lexical.value;
+    // The root itself (any spelling of it) has no leaf and no parent inside the root: it is `outside` for every call
+    // that names a leaf (`remove` of the root's own folder is judged as itself before it gets here).
+    if (named === absolute(root as string, 'a root')) return refuse('outside');
+    const leaf = basename(named);
+    const parent = await real(dirname(named) as FencedPath, create);
     const full = join(parent.full, leaf);
     if (!within(parent.scope.base.real, full)) refuse('link_escape');
     if (parent.scope.base.fence !== undefined && fencedByName(parent.scope.base.fence, full)) refuse('fenced');
@@ -1734,11 +1748,14 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const known = HANDLES.get(source);
       if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
       const sourceFolder = await known.real(from);
-      // A link is never made INTO a project folder (`linkTo` refuses it: it would carry a write to a name the declared
-      // set never reached) nor FROM one into another root (`linkTarget`: the link would outlive the declared set). A copy
-      // is the only door; this is the same two refusals the link door gives, so `copyTree` is not a second way round them.
-      if (options?.link === true && projectRoot) return refuse('read_only');
-      if (options?.link === true && known.root === 'project-files') return refuse('not_declared');
+      // A link is written only INTO a root that takes links (`linkTo`'s rule: `fleet` and `agent-homes`; never a project
+      // folder, `work` or any other, where it would carry a write to a name the declared set never reached) and never
+      // FROM an owner's root (a project folder, `work`, ...: the link would outlive what the owner declared). A copy is
+      // the only door there; these are the refusals the link door gives, so `copyTree` is not a second way round them.
+      if (options?.link === true && !takesLinks(name)) return refuse('read_only');
+      // (A source whose root is unknown is refused too: the table only holds handles made for a root, so none is.)
+      if (options?.link === true && (known.root === undefined || isOwnerRoot(known.root)))
+        return refuse('not_declared');
       const checkedSource = await openCheckedFolder(sourceFolder.scope, sourceFolder.full).catch((error: unknown) => {
         if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
         throw error;
@@ -1983,8 +2000,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
     },
     folder: async path => {
       const { full, scope } = await real(path);
-      const relative = full.startsWith(`${scope.base.real}/`) ? full.slice(scope.base.real.length + 1) : '';
-      if (!processFolderAllowed(name, relative))
+      // Judged against the UNSCOPED root (BG-008): a handle scoped to `homes/<id>` (or to anything below) names the very
+      // folders an unscoped one does and gets the very same answer, so the folder rule never reads a scope's own base as
+      // the root. A root that cannot be placed, or a folder that is not inside it, is refused (fail closed).
+      const unscoped =
+        scopedParent === undefined ? scope.base.real : await fs.realpath(scopedParent).catch(() => undefined);
+      const below = unscoped !== undefined && full.startsWith(`${unscoped}/`) ? full.slice(unscoped.length + 1) : '';
+      if (!processFolderAllowed(name, below))
         throw new Error('kernel.processes accepts only a folder at or under fleet/homes/<id>');
       // Held open and checked as `copyTree`'s source is: a folder, the one at that real path, inside the root.
       const held = await openCheckedFolder(scope, full);

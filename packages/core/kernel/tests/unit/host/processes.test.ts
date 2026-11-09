@@ -251,6 +251,69 @@ describe('processes: the real host’s own-root check', () => {
     await expect(ownFolderSpellings('runtimes', { root: f.root, path: f.at('homes/missing') })).rejects.toThrow();
   });
 
+  test('BG-008 a fleet handle scoped to homes/<id> (or below it) is answered as an unscoped one is; a scope outside homes/<id> still refuses', async () => {
+    const f = await fleet();
+    await f.root.makeDirectory(f.at('bin/tools'));
+    await f.root.makeDirectory(f.at('homes/codex-b'));
+    const scoped = (subfolder: string) => f.roots('runtimes').root('fleet', { subfolder });
+    const inside = (handle: RootHandle, path: string): FencedPath => {
+      const answer = handle.resolve(path);
+      if (!answer.ok) throw new Error(answer.error);
+      return answer.value;
+    };
+    const ask = async (handle: RootHandle, path: string) =>
+      await ownFolderSpellings('runtimes', { root: handle, path: inside(handle, path) });
+    const RULE = 'kernel.processes accepts only a folder at or under fleet/homes/<id>';
+    const homeA = `${f.home}/fleet/homes/codex-a`;
+
+    // the scope names the home itself, a folder below it, and (scoped one step up) the home as a name below the scope
+    const home = scoped('homes/codex-a');
+    expect(await ask(home, '')).toEqual([homeA]);
+    expect(await ask(home, 'packages/app-server-daemon')).toEqual([`${homeA}/packages/app-server-daemon`]);
+    expect(await ask(scoped('homes/codex-a/packages'), 'app-server-daemon')).toEqual([
+      `${homeA}/packages/app-server-daemon`,
+    ]);
+    expect(await ask(scoped('homes'), 'codex-a')).toEqual([homeA]);
+    // the same folder, unscoped, gets the same answer
+    expect(await ask(f.root, 'homes/codex-a')).toEqual([homeA]);
+
+    // everything else still refuses: `homes` itself, a scope that is not under `homes/<id>`, a sibling reached from it
+    await expect(ask(scoped('homes'), '')).rejects.toThrow(RULE);
+    await expect(ask(scoped('bin'), '')).rejects.toThrow(RULE);
+    await expect(ask(scoped('bin'), 'tools')).rejects.toThrow(RULE);
+    await expect(ask(f.root, 'homes')).rejects.toThrow(RULE);
+    await expect(ask(f.root, 'bin')).rejects.toThrow(RULE);
+    await expect(ask(f.root, '')).rejects.toThrow(RULE);
+    await expect(ask(home, '../codex-b')).rejects.toThrow();
+    // a scope that is not an existing folder, and a scope the kernel refuses, resolve nothing
+    await expect(ask(scoped('homes/missing'), '')).rejects.toThrow();
+    await expect(ask(scoped('../outside'), '')).rejects.toThrow();
+    // another plugin's scoped handle is nobody's
+    expect(
+      await ownFolderSpellings('claude-code', { root: home, path: inside(home, 'packages/app-server-daemon') }),
+    ).toBeUndefined();
+  });
+
+  test('BG-008 an agent-homes handle (any folder is allowed) answers the same scoped or not', async () => {
+    const f = await fleet();
+    const bases = await ensureInternalRootBases(
+      nodeFs(() => crypto.randomUUID()),
+      { home: f.home, plugin: 'runtimes' },
+      ['agent-homes'],
+    );
+    expect(bases).toEqual([]);
+    const agent = f.roots('runtimes').root('agent-homes', { subfolder: 'one' });
+    const whole = f.roots('runtimes').root('agent-homes');
+    const target = whole.resolve('one/deep');
+    if (!target.ok) throw new Error(target.error);
+    await whole.makeDirectory(target.value);
+    const scopedTarget = agent.resolve('deep');
+    if (!scopedTarget.ok) throw new Error(scopedTarget.error);
+    const spelled = `${f.home}/state/runtimes/agent-homes/one/deep`;
+    expect(await ownFolderSpellings('runtimes', { root: whole, path: target.value })).toEqual([spelled]);
+    expect(await ownFolderSpellings('runtimes', { root: agent, path: scopedTarget.value })).toEqual([spelled]);
+  });
+
   test('an owner-root (harness-home) folder is refused, even one the caller scoped to a folder it holds', async () => {
     const f = await fleet();
     const outside = `${f.parent}/outside`;
