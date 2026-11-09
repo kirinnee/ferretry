@@ -84,7 +84,7 @@ const readV5 = async (path: string) => readFile(join(f.to, path), 'utf8');
 
 /** The model Runtimes assembles from the converted home's profiles and settings/hooks items: no layer may dangle. */
 const profileNames = async (): Promise<string[]> =>
-  (await readdir(join(f.to, 'config', CONFIG_TARGETS.PROFILE_ITEMS.collection)).catch(() => [] as string[])).map(name =>
+  (await readdir(join(f.to, 'config', 'profiles')).catch(() => [] as string[])).map(name =>
     name.replace(/\.yaml$/u, ''),
   );
 const itemsOf = async (harness: 'claude-code' | 'codex', kind: 'settings' | 'hooks'): Promise<Map<string, unknown>> => {
