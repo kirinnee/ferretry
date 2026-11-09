@@ -39,6 +39,7 @@ import { join } from 'node:path';
 import { Document, isMap, isScalar, isSeq, Pair, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
+  documentCredentialPaths,
   dropModeline,
   listV4Config,
   rawSecretPaths,
@@ -607,7 +608,7 @@ async function planHarnessComponent(
   }
 
   if (Object.keys(body).length > 0) {
-    const secrets = [...rawSecretPaths(body), ...credentialShaped(body)];
+    const secrets = documentCredentialPaths(body);
     if (secrets.length > 0)
       entry.reasons.push(
         `the value at ${secrets.join(', ')} looks like a credential, so it was held; store it with \`fy secret set NAME\` and write \${secret:NAME}`,
@@ -634,27 +635,6 @@ async function planHarnessComponent(
   }
   if (entry.reasons.length === 0) plan.uncarried.push({ ...entry, empty: true });
   else plan.uncarried.push(entry);
-}
-
-/** The key paths of a value that looks like an Authorization header: a header-named key, or `Bearer|Basic|token <16+>`. */
-function credentialShaped(value: unknown): string[] {
-  const found: string[] = [];
-  const visit = (node: unknown, path: readonly string[]): void => {
-    if (typeof node === 'string') {
-      if (/^(Bearer|Basic|token)\s+\S{16,}/iu.test(node)) found.push(path.join('.'));
-      return;
-    }
-    if (Array.isArray(node)) node.forEach((item, index) => visit(item, [...path, String(index)]));
-    else if (isRecordValue(node))
-      for (const [key, item] of Object.entries(node)) {
-        const lower = key.toLowerCase();
-        if ((lower === 'authorization' || lower.includes('header')) && item !== undefined && item !== null)
-          found.push([...path, key].join('.'));
-        else visit(item, [...path, key]);
-      }
-  };
-  visit(value, []);
-  return found;
 }
 
 const withoutLayer = (map: YAMLMap, layer: string): boolean => {
@@ -906,12 +886,8 @@ export const settingsStep: Step = {
         await ctx.v5.opaque(join('config', INSTRUCTION_ITEMS_FOLDER, `${item.name}.md`), bytes);
         count(plan, 'instruction documents');
       }
-      for (const asset of plan.assets.values()) {
-        const bytes = await readFile(asset.source).catch(() => {
-          throw new V4InputError(`fleet/assets/${asset.rel}: a file a hook points at cannot be read`);
-        });
-        await ctx.v5.opaque(v5AssetPath(asset.rel), bytes, asset.mode);
-      }
+      // The bytes the checks read, never a second read of the path.
+      for (const asset of plan.assets.values()) await ctx.v5.opaque(v5AssetPath(asset.rel), asset.bytes, asset.mode);
     } catch (error) {
       // Nothing was finished, so no key is sealed for a file that was never written.
       ctx.loginKeys?.clear();

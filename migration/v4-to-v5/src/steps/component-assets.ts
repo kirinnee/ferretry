@@ -15,16 +15,22 @@
  * 3. Anything else in the document that names the v4 home (a path outside `fleet/assets/`, a folder, a missing file,
  *    a file that fails a rule) is NOT carried: the reasons name the field and the kind of refusal, never the value.
  *
- * The file keeps only its owner mode bits (an executable script stays executable; never wider than the source).
+ * The file is written with mode 0600, or 0700 when the source has its owner-execute bit (an executable script stays
+ * executable; group and other bits are never carried). The content is held to the SAME homes the last gate refuses in an
+ * inline command (`needlesFor`: v4's home and worktree folder, `~/.claude*`, `~/.codex*`) and to the one credential scan
+ * settings documents use (`textLooksLikeCredential`); `$FY_HOME` carries. The bytes written are the bytes checked.
  *
  * WHERE: v5 Runtimes reads its asset tree at `join(paths.fleet, 'assets')` (the skill-folders step writes there too).
  * Nothing in v5 sweeps, prunes or refuses a file under it: the runtimes adapters only read it through a root scoped to
  * `assets/` (`fleet-disk.ts`, `fleet-home-reader.ts`, `root-host-files.ts`), and the kernel never refuses a folder it
  * has not declared.
  */
-import { lstat, readFile, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { isAbsolute, join, normalize, relative, sep } from 'node:path';
-import { rawSecretPaths } from '../v4/config.ts';
+import { type Needles, needlesFor, valueHits } from '../../preview/gate.ts';
+import { textLooksLikeCredential } from '../v4/config.ts';
 import { componentFileSource, MAX_COMPONENT_BYTES } from './component-files.ts';
 import type { StepContext } from './index.ts';
 
@@ -32,8 +38,9 @@ import type { StepContext } from './index.ts';
 export interface CarriedAsset {
   /** Relative to `fleet/assets/` (also relative to the v5 home's `fleet/assets/`). */
   readonly rel: string;
-  readonly source: string;
-  /** `mode & 0o700` of the source: never wider than it. */
+  /** The bytes that were checked: exactly what is written. */
+  readonly bytes: Buffer;
+  /** 0600, or 0700 when the source has its owner-execute bit: never group or other bits. */
   readonly mode: number;
 }
 
@@ -49,7 +56,10 @@ export const v5AssetPath = (rel: string): string => join('fleet', 'assets', rel)
 
 const REMEDY = 'copy the file under fleet/assets in v4, or remove the hook';
 const HOME_FORMS = ['~', '$HOME', '${HOME}'] as const;
-const TOKEN_BREAKS = /([\s"'`]+)/u;
+/** A token ends at whitespace, a quote, or a shell operator glued to it (`a.sh;x`, `a.sh>out`, `a.txt|head`). */
+const TOKEN_BREAKS = /([\s"'`;|&<>()]+)/u;
+/** A v5 path spliced unquoted into a shell command: only characters a shell never splits or expands. */
+const SHELL_SAFE_PATH = /^[A-Za-z0-9._/-]+$/u;
 
 const isRecordValue = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -92,20 +102,29 @@ async function v4Spellings(ctx: StepContext): Promise<readonly string[]> {
 const namesV4 = (text: string, spellings: readonly string[]): boolean =>
   [text, decoded(text)].some(form => spellings.some(spelling => namesWhole(form, spelling)));
 
-/** Text that looks like it holds a credential (a known key shape, a private key, or `NAME_KEY=<high-entropy>`). */
-function looksLikeCredential(bytes: Buffer): boolean {
-  const text = bytes.toString('latin1');
-  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(text)) return true;
-  const values: string[] = [];
-  const assigned: Record<string, string> = {};
-  for (const word of text.split(/\s+/u)) if (word !== '') values.push(word);
-  for (const match of text.matchAll(/([A-Za-z0-9_.-]+)\s*[=:]\s*["']?([^\s"']+)/gu))
-    assigned[match[1] as string] = match[2] as string;
-  return rawSecretPaths({ values, ...assigned }).length > 0;
+/**
+ * The one read of a carried file: opened without following a link, judged on the open handle (a regular file, ONE name,
+ * under the cap) and read from it, so the bytes checked are the bytes written.
+ */
+async function readChecked(path: string): Promise<{ bytes: Buffer; mode: number } | string> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => undefined);
+  if (handle === undefined) return 'not a plain file (a link, a folder or a missing file)';
+  try {
+    const facts = await handle.stat();
+    if (!facts.isFile()) return 'not a plain file (a link, a folder or a missing file)';
+    if (facts.nlink !== 1) return 'a hard link';
+    if (facts.size > MAX_COMPONENT_BYTES) return `over ${MAX_COMPONENT_BYTES / 1024 / 1024} MiB`;
+    // Owner bits only, and always readable and writable by its owner: 0600, or 0700 when the source is executable.
+    return { bytes: await handle.readFile(), mode: (facts.mode & 0o100) | 0o600 };
+  } catch {
+    return 'unreadable';
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Why a file under `fleet/assets/` cannot be carried, or the asset itself. */
-async function assetFor(ctx: StepContext, token: string, spellings: readonly string[]): Promise<CarriedAsset | string> {
+async function assetFor(ctx: StepContext, token: string, needles: Needles): Promise<CarriedAsset | string> {
   const found = await componentFileSource(ctx, token.replace(/^\$\{HOME\}/u, '$HOME'));
   if (!('source' in found))
     return found.refused === 'a hard link' ? 'a hard link' : 'not a plain file (a link, a folder or a missing file)';
@@ -113,15 +132,15 @@ async function assetFor(ctx: StepContext, token: string, spellings: readonly str
     .split(sep)
     .join('/');
   // The skill-folders step carries `fleet/assets/skills/` whole, under its own rules; one file is never written twice.
-  if (rel === 'skills' || rel.startsWith('skills/')) return 'inside the skill folders, which have their own step';
-  const facts = await lstat(found.source).catch(() => undefined);
-  if (facts === undefined || !facts.isFile()) return 'not a plain file (a link, a folder or a missing file)';
-  if (facts.size > MAX_COMPONENT_BYTES) return `over ${MAX_COMPONENT_BYTES / 1024 / 1024} MiB`;
-  const bytes = await readFile(found.source).catch(() => undefined);
-  if (bytes === undefined) return 'unreadable';
-  if (namesV4(bytes.toString('latin1'), spellings)) return 'its content names the v4 home';
-  if (looksLikeCredential(bytes)) return 'its content looks like a credential';
-  return { rel, source: found.source, mode: facts.mode & 0o700 };
+  if (rel.toLowerCase() === 'skills' || rel.toLowerCase().startsWith('skills/'))
+    return 'inside fleet/assets/skills, which has its own step; keep the file outside fleet/assets/skills';
+  const read = await readChecked(found.source);
+  if (typeof read === 'string') return read;
+  const text = read.bytes.toString('latin1');
+  // The same homes the last gate refuses in an inline command (v4's home and worktree folder, the harness homes).
+  if (valueHits(text, needles)) return 'its content names the v4 home or a harness home';
+  if (textLooksLikeCredential(text)) return 'its content looks like a credential';
+  return { rel, bytes: read.bytes, mode: read.mode };
 }
 
 /**
@@ -130,6 +149,11 @@ async function assetFor(ctx: StepContext, token: string, spellings: readonly str
  */
 export async function carryAssetReferences(ctx: StepContext, value: unknown): Promise<AssetRewrite> {
   const spellings = await v4Spellings(ctx);
+  const userHome = ctx.previewUserHome ?? ctx.host?.homeDirectory ?? homedir();
+  const needles = needlesFor(ctx.previewV4Home ?? ctx.v4.home, userHome, {
+    v4Given: ctx.v4.home,
+    homeGiven: [userHome],
+  });
   const assets = new Map<string, CarriedAsset>();
   const reasons: string[] = [];
   const refuse = (field: string, why: string): void => {
@@ -144,14 +168,23 @@ export async function carryAssetReferences(ctx: StepContext, value: unknown): Pr
       if (index % 2 === 1 || token === '') continue;
       const spelling = spellings.find(item => token.startsWith(`${item}/fleet/assets/`));
       if (spelling === undefined) continue;
-      const result = await assetFor(ctx, token, spellings);
+      const result = await assetFor(ctx, token, needles);
       if (typeof result === 'string') {
         failed = true;
         refuse(field, `names a file under the v4 home's fleet/assets that was not carried (${result})`);
         continue;
       }
+      const copy = ctx.v5.resolve(v5AssetPath(result.rel));
+      if (!SHELL_SAFE_PATH.test(copy)) {
+        failed = true;
+        refuse(
+          field,
+          'names a file whose v5 copy has a path a shell command would split (use a v5 home without spaces)',
+        );
+        continue;
+      }
       assets.set(result.rel, result);
-      parts[index] = ctx.v5.resolve(v5AssetPath(result.rel));
+      parts[index] = copy;
     }
     const rewritten = parts.join('');
     if (!failed && namesV4(rewritten, spellings))

@@ -1,7 +1,11 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { link, mkdir, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { chmod, link, mkdir, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { stage } from '../../preview/stage.ts';
 import { convert } from '../../src/convert.ts';
+import { acceptedConfigStep } from '../../src/steps/accepted-config.ts';
+import { carryAssetReferences } from '../../src/steps/component-assets.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
 import { fixture } from './ferret-fixture.ts';
 
@@ -40,7 +44,7 @@ const hooksJson = (before: string, after: string) =>
   });
 
 /** The component + a profile layering it, then the preview conversion of the settings step. */
-const run = async (before: string, after: string) => {
+const run = async (before: string, after: string, steps: Parameters<typeof convert>[0]['steps'] = [settingsStep]) => {
   await put('layout-version', '2\n');
   await put('config/components/hooks/claude-hooks.yaml', 'harness: claude\nfile: components/hooks/claude-hooks.json\n');
   await put('fleet/assets/components/hooks/claude-hooks.json', hooksJson(before, after));
@@ -52,7 +56,7 @@ const run = async (before: string, after: string) => {
     lock: { held: async () => false },
     now: () => new Date('2026-11-09T00:00:00Z'),
     host: { homeDirectory: USER_HOME, env: {} },
-    steps: [settingsStep],
+    steps,
     preview: true,
     previewV4Home: REAL,
     previewUserHome: USER_HOME,
@@ -112,6 +116,40 @@ const refusedCases: readonly (readonly [string, () => Promise<void>])[] = [
     async () => put(`fleet/assets/${BEFORE}`, 'cat $HOME/.ferretry/state/x\n'),
   ],
   ['a missing file', async () => undefined],
+  // M1: the credential scan covers the WHOLE content, as settings documents are scanned.
+  [
+    'a file with a `values=1` line and a bare key word',
+    async () => put(`fleet/assets/${BEFORE}`, `values=1\necho ${FAKE_KEY}\n`),
+  ],
+  [
+    'a file that assigns a key, then reassigns it to a reference',
+    async () => put(`fleet/assets/${BEFORE}`, 'API_TOKEN=Zx9qLm2Pw8Rt5Vb7Nc4K\nAPI_TOKEN=$OTHER\n'),
+  ],
+  [
+    'a file with an Authorization: Bearer header',
+    async () => put(`fleet/assets/${BEFORE}`, 'curl -H "Authorization: Bearer abcdefghijklmnopqrstuvwx" x\n'),
+  ],
+  [
+    'a file with an Authorization: Basic header',
+    async () => put(`fleet/assets/${BEFORE}`, 'Authorization: Basic abcdefghijklmnopqrstuvwx\n'),
+  ],
+  ['a file with a token header', async () => put(`fleet/assets/${BEFORE}`, 'x: token abcdefghijklmnopqrstuvwx\n')],
+  // M2: the content is held to the same homes the last gate refuses in an inline command.
+  [
+    "a file whose content names v4's worktree folder",
+    async () => put(`fleet/assets/${BEFORE}`, `cd ${REAL}-worktrees/x\n`),
+  ],
+  [
+    'a file whose content names ~/.ferretry-worktrees',
+    async () => put(`fleet/assets/${BEFORE}`, 'cd ~/.ferretry-worktrees/x\n'),
+  ],
+  ['a file whose content names ~/.claude', async () => put(`fleet/assets/${BEFORE}`, 'cat ~/.claude/x\n')],
+  ['a file whose content names $HOME/.codex', async () => put(`fleet/assets/${BEFORE}`, 'cat $HOME/.codex/x\n')],
+  [
+    'a file whose content names the user home .claude by path',
+    async () => put(`fleet/assets/${BEFORE}`, `cat ${USER_HOME}/.claude/x\n`),
+  ],
+  ['a file whose content names ${HOME}/.codex', async () => put(`fleet/assets/${BEFORE}`, 'cat ${HOME}/.codex/x\n')],
 ];
 
 for (const [name, arrange] of refusedCases)
@@ -164,4 +202,96 @@ test('a home-relative spelling that resolves to the v4 home is carried and rewri
   const text = await hooksYaml();
   expect(text).toContain(`${f.to}/fleet/assets/${BEFORE}`);
   expect(text).not.toContain('.ferretry');
+});
+
+test('the ${HOME}/ spelling is carried and rewritten', async () => {
+  await put(`fleet/assets/${BEFORE}`, 'FAKE notes\n');
+  await put(`fleet/assets/${AFTER}`, SCRIPT, 0o700);
+  const { step } = await run(cat(), `sh \${HOME}/.ferretry/fleet/assets/${AFTER}`);
+  expect(step.status).toBe('converted');
+  expect(await hooksYaml()).toContain(`sh ${f.to}/fleet/assets/${AFTER}`);
+});
+
+test('a shell operator glued to the token does not make a false refusal', async () => {
+  await put(`fleet/assets/${BEFORE}`, 'FAKE notes\n');
+  await put(`fleet/assets/${AFTER}`, SCRIPT, 0o700);
+  const { step } = await run(`${cat()}|head`, `${sh()};echo done`);
+  expect(step.status).toBe('converted');
+  const text = await hooksYaml();
+  expect(text).toContain(`cat ${f.to}/fleet/assets/${BEFORE}|head`);
+  expect(text).toContain(`sh ${f.to}/fleet/assets/${AFTER};echo done`);
+});
+
+describe('a path that climbs or is not a file is never carried (the rel stays inside fleet/assets)', () => {
+  const cases: readonly (readonly [string, string])[] = [
+    ['a .. out of fleet/assets', `${REAL}/fleet/assets/../state/notes.txt`],
+    ['a .. out of a deeper folder', `${REAL}/fleet/assets/components/hooks/../../../state/notes.txt`],
+    ['a folder', `${REAL}/fleet/assets/components/hooks`],
+    ['a folder with a trailing slash', `${REAL}/fleet/assets/components/hooks/`],
+  ];
+  for (const [name, path] of cases)
+    test(name, async () => {
+      await put('state/notes.txt', 'FAKE\n');
+      await put(`fleet/assets/${BEFORE}`, 'FAKE notes\n');
+      await put(`fleet/assets/${AFTER}`, SCRIPT, 0o700);
+      const { step } = await run(`cat ${path}`, sh());
+      expect(step.status).toBe('pending');
+      expect(JSON.stringify(step)).not.toContain(REAL);
+      // Nothing was written outside fleet/assets for it: no copy of the climbed-to file, anywhere.
+      for (const file of await everyFile(f.to)) expect(file.endsWith('notes.txt')).toBe(false);
+    });
+});
+
+test('the accepted record of the item holds the rewritten command, never a v4 path', async () => {
+  await put(`fleet/assets/${BEFORE}`, 'FAKE notes\n');
+  await put(`fleet/assets/${AFTER}`, SCRIPT, 0o700);
+  // v4 enforced this component as written: its accepted record names the component's own text.
+  const component = 'harness: claude\nfile: components/hooks/claude-hooks.json\n';
+  const etag = createHash('sha256').update(component, 'utf8').digest('hex');
+  await put(
+    'state/config-accepted.json',
+    JSON.stringify({ 'components/hooks/claude-hooks.yaml': { etag, text: component } }),
+  );
+  const { step } = await run(cat(), sh(), [settingsStep, acceptedConfigStep]);
+  expect(step.status).toBe('converted');
+  const folder = join(f.to, 'state/kernel/accepted-config');
+  const texts = await Promise.all(
+    (await readdir(folder)).map(
+      async name => (JSON.parse(await readFile(join(folder, name), 'utf8')) as { text: string }).text,
+    ),
+  );
+  const record = texts.find(text => text.includes('PreCompact'));
+  expect(record).toBeDefined();
+  expect(record).toContain(`cat ${f.to}/fleet/assets/${BEFORE}`);
+  expect(record).toContain(`sh ${f.to}/fleet/assets/${AFTER}`);
+  expect(record).not.toContain(REAL);
+});
+
+test('the checked bytes are what the plan carries, with mode 0600 or 0700 only', async () => {
+  await put(`fleet/assets/${BEFORE}`, 'FAKE notes\n', 0o664);
+  await put(`fleet/assets/${AFTER}`, SCRIPT, 0o755);
+  const ctx = { ...f.ctx(false), previewV4Home: REAL, previewUserHome: USER_HOME };
+  const { assets } = await carryAssetReferences(ctx, { a: cat(), b: sh() });
+  const byRel = new Map(assets.map(asset => [asset.rel, asset]));
+  expect(byRel.get(BEFORE)?.bytes.toString()).toBe('FAKE notes\n');
+  expect(byRel.get(BEFORE)?.mode).toBe(0o600);
+  expect(byRel.get(AFTER)?.bytes.toString()).toBe(SCRIPT);
+  expect(byRel.get(AFTER)?.mode).toBe(0o700);
+});
+
+test('the preview stage keeps the owner-execute bit and never group or other bits', async () => {
+  await put('layout-version', '2\n');
+  await put(`fleet/assets/${BEFORE}`, 'FAKE notes\n', 0o644);
+  await put(`fleet/assets/${AFTER}`, SCRIPT, 0o755);
+  await put('fleet/assets/components/hooks/group.sh', SCRIPT, 0o770);
+  // writeFile honours the umask; set the exact modes.
+  await chmod(join(f.from, 'fleet/assets', BEFORE), 0o644);
+  await chmod(join(f.from, 'fleet/assets', AFTER), 0o755);
+  await chmod(join(f.from, 'fleet/assets/components/hooks/group.sh'), 0o770);
+  const staging = join(f.root, 'staging');
+  await stage(f.from, staging);
+  const modeOf = async (name: string) => (await stat(join(staging, 'fleet/assets', name))).mode & 0o777;
+  expect(await modeOf(BEFORE)).toBe(0o600);
+  expect(await modeOf(AFTER)).toBe(0o700);
+  expect(await modeOf('components/hooks/group.sh')).toBe(0o700);
 });

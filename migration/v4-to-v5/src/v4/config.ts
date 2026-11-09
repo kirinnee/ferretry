@@ -276,6 +276,51 @@ export function rawSecretPaths(value: unknown): readonly string[] {
   return found;
 }
 
+const AUTH_SHAPE = String.raw`(?:Bearer|Basic|token)\s+\S{16,}`;
+const AUTH_AT_START = new RegExp(`^${AUTH_SHAPE}`, 'iu');
+const AUTH_ANYWHERE = new RegExp(`(?<![A-Za-z0-9])${AUTH_SHAPE}`, 'iu');
+
+/** The key paths of a value that looks like an Authorization header: a header-named key, or `Bearer|Basic|token <16+>`. */
+export function credentialShaped(value: unknown): string[] {
+  const found: string[] = [];
+  const visit = (node: unknown, path: readonly string[]): void => {
+    if (typeof node === 'string') {
+      if (AUTH_AT_START.test(node)) found.push(path.join('.'));
+      return;
+    }
+    if (Array.isArray(node)) node.forEach((item, index) => visit(item, [...path, String(index)]));
+    else if (node !== null && typeof node === 'object')
+      for (const [key, item] of Object.entries(node)) {
+        const lower = key.toLowerCase();
+        if ((lower === 'authorization' || lower.includes('header')) && item !== undefined && item !== null)
+          found.push([...path, key].join('.'));
+        else visit(item, [...path, key]);
+      }
+  };
+  visit(value, []);
+  return found;
+}
+
+/** Every key path of a carried document that looks like a credential: the one rule settings documents are held to. */
+export const documentCredentialPaths = (value: unknown): readonly string[] => [
+  ...rawSecretPaths(value),
+  ...credentialShaped(value),
+];
+
+/**
+ * Whether the TEXT of a carried file looks like it holds a credential, by the same rules as a document: a private key,
+ * a known key shape in ANY word, a `NAME_KEY=<high-entropy>` assignment (EVERY assignment is judged; a later one never
+ * hides an earlier one) and an `Authorization: Bearer|Basic|token <value>` header anywhere.
+ */
+export function textLooksLikeCredential(text: string): boolean {
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(text) || AUTH_ANYWHERE.test(text)) return true;
+  const words = text.split(/\s+/u).filter(word => word !== '');
+  const assigned = [...text.matchAll(/([A-Za-z0-9_.-]+)["']?\s*[=:]\s*["']?([^\s"']+)/gu)].map(match => ({
+    [match[1] as string]: match[2] as string,
+  }));
+  return rawSecretPaths({ words, assigned }).length > 0;
+}
+
 // ── the modeline ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 const withoutModeline = (comment: string | null | undefined): string | null => {
