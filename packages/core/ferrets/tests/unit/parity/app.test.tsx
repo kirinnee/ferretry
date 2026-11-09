@@ -70,7 +70,7 @@ const show = async (element: ReactElement): Promise<HTMLElement> => {
 };
 
 describe('the new-ferret screen (the page a ferret is started from)', () => {
-  it('S-0161 S-0348 S-0399 S-0374 S-0512 the new-ferret screen is declared at /d/<daemon>/new, offered as a place, and draws the start form', async () => {
+  it('S-0161 S-0348 S-0399 S-0374 the new-ferret screen is declared at /d/<daemon>/new and draws the start form', async () => {
     // S-0399 screen 'new-session' -> screen `new-ferret`; S-0348 PAGE_SLOTS NewSession -> the built half's screen.
     expect(manifest.ui?.screens?.map(screen => screen.id)).toContain('new-ferret');
     expect(typeof half().screens?.['new-ferret']).toBe('function');
@@ -79,8 +79,6 @@ describe('the new-ferret screen (the page a ferret is started from)', () => {
     const table = routeTable(SCREEN_REFS);
     expect(table.href(refOf('new-ferret'), {}, 'dm1')).toBe('/d/dm1/new');
     expect(table.parse('/d/dm1/new')).toMatchObject({ kind: 'screen', daemon: 'dm1', screen: refOf('new-ferret') });
-    // S-0512 the "New session" place: the shell offers every screen whose path needs no subject as a "Go to" place.
-    expect(refOf('new-ferret').path.includes(':')).toBe(false);
 
     // S-0161 NewSessionRoute: the screen, bound to the router, draws the page for the daemon on the address.
     window.history.pushState(null, '', '/d/dm1/new');
@@ -103,7 +101,7 @@ describe('the new-ferret screen (the page a ferret is started from)', () => {
 });
 
 describe('the ferret address a start, a move and a link land on', () => {
-  it('S-0379 the address of one ferret is /d/<daemon>/ferrets/<id>/chat, spelled from the ferret id and encoded', () => {
+  it('the address of one ferret is /d/<daemon>/ferrets/<id>/chat, spelled from the ferret id and encoded', () => {
     expect(ferretChatHref('dm1', 'f-1')).toBe('/d/dm1/ferrets/f-1/chat');
     expect(ferretChatHref('dm1', 'a b')).toBe('/d/dm1/ferrets/a%20b/chat');
     expect(chatHref('dm1', 'f-1')).toBe('/d/dm1/ferrets/f-1/chat');

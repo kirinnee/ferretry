@@ -49,7 +49,8 @@ import ferrets, { TURN_WATCH_JOB } from '../../../daemon/index.ts';
 import { FileHandoverReceiptStore } from '../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { fleetEventsAccept, HistoryEventSource } from '../../../daemon/modules/fleet-events.ts';
 import { AUTO_RESUME_JOB } from '../../../daemon/modules/auto-resume.ts';
-import { sessionHandoverModule } from '../../../daemon/modules/session-handover.ts';
+import { type SessionHandoverNeeds, sessionHandoverModule } from '../../../daemon/modules/session-handover.ts';
+import type { SessionDirectorySubsystem } from '../../../daemon/lib/session/directory/subsystem.ts';
 import { createSessionEvent, encodeSessionEvent } from '../../../daemon/lib/storage/journal.ts';
 import type { SessionId } from '../../../daemon/lib/session-id.ts';
 import { sessionHandoverNeedsForTest } from '../daemon/modules/session-handover/fixture.ts';
@@ -649,7 +650,7 @@ describe('the handover reconcile loop (J-0069 J-0107 J-0245 J-0247)', () => {
         return (value as (...a: unknown[]) => unknown).bind(target);
       },
     });
-  const world = async (open: readonly string[]) => {
+  const world = async (open: readonly string[], needs: Partial<SessionHandoverNeeds> = {}) => {
     const folder = new MemoryStateFolder();
     const real = folder.port([HandoverFiles]);
     for (const source of open) await new FileHandoverReceiptStore(real).write(handoverReceiptFor(source, 'req-1'));
@@ -659,6 +660,7 @@ describe('the handover reconcile loop (J-0069 J-0107 J-0245 J-0247)', () => {
     const built = sessionHandoverModule.build(
       sessionHandoverNeedsForTest({
         state: counting(real, calls),
+        ...needs,
         every: (intervalMs, tick) => {
           const timer = { intervalMs, tick, cancelled: 0 };
           armed.push(timer);
@@ -685,27 +687,36 @@ describe('the handover reconcile loop (J-0069 J-0107 J-0245 J-0247)', () => {
   });
 
   test('J-0107 J-0247 while a handover is open the loop ticks every 15 s and each tick advances every open receipt; the tick is dropped once none is open', async () => {
-    const { folder, calls, armed, built } = await world(['source-1']);
+    // The source session cannot be read at boot (the directory rejects), so the boot pass advances nothing: both
+    // receipts stay "requested". The directory then answers "this session is gone", and ONLY the follow tick can
+    // move the receipts: each is settled `failed` / `source_lost`.
+    const directory: { answer: 'unreadable' | 'gone' } = { answer: 'unreadable' };
+    const sessions = {
+      get: async () => {
+        if (directory.answer === 'unreadable') throw new Error('the session directory is closed');
+        return undefined;
+      },
+    } as unknown as SessionDirectorySubsystem;
+    const { folder, calls, armed, built } = await world(['source-1', 'source-2'], { sessions });
+    const receipts = new FileHandoverReceiptStore(folder.port([HandoverFiles]));
     built.jobs.arm();
     await settleLoop();
     expect(armed.map(timer => timer.intervalMs).sort((a, b) => a - b)).toEqual([FOLLOW_MS, BACKSTOP_MS]);
     const follow = armed.find(timer => timer.intervalMs === FOLLOW_MS);
     if (follow === undefined) throw new Error('the follow tick is armed');
-    const bootReads = calls.read;
     const bootLists = calls.list;
-    expect(bootReads).toBeGreaterThan(0);
+    expect((await receipts.read('source-1'))?.phase).toBe('requested');
+    expect((await receipts.read('source-2'))?.phase).toBe('requested');
 
+    directory.answer = 'gone';
     follow.tick();
     await settleLoop();
-    expect(calls.read).toBeGreaterThan(bootReads);
     expect(calls.list).toBe(bootLists);
-    expect(follow.cancelled).toBe(0);
-
-    folder.files.delete('source-1/handover.json');
-    const backstop = armed.find(timer => timer.intervalMs === BACKSTOP_MS);
-    if (backstop === undefined) throw new Error('the backstop is armed');
-    backstop.tick();
-    await settleLoop();
+    for (const source of ['source-1', 'source-2']) {
+      const receipt = await receipts.read(source);
+      expect(receipt).toMatchObject({ phase: 'failed', refusal: { failure: 'source_lost' } });
+      expect(receipt?.phaseHistory.at(-1)?.phase).toBe('failed');
+    }
     expect(follow.cancelled).toBe(1);
   });
 
