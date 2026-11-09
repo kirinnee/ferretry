@@ -263,21 +263,20 @@ describe.each(DISKS)('PF-budget a closed tree is closed against every root of an
     return { l, split, root: workRoot(l, fs, split) };
   };
 
-  test('PF-budget the unpinned root and the pinned root answer every case alike, and as the closed device demands', async () => {
-    const { root } = await setup();
-    const doors = [unpinnedDoor(root), await pinnedDoor(root)];
-    try {
-      const table: string[][] = [];
-      for (const { rel, op, answer } of CASES) {
+  test.each(CASES)(
+    'PF-budget the unpinned root and the pinned root answer alike, and as the closed device demands: $op $rel is $answer',
+    async ({ rel, op, answer }) => {
+      const { root } = await setup();
+      const doors = [unpinnedDoor(root), await pinnedDoor(root)];
+      try {
         const answers = await Promise.all(doors.map(door => door.run(op, rel)));
-        table.push([`${op} ${rel}`, ...answers]);
-        expect(answers, `${op} ${rel}`).toEqual([answer, answer]);
+        expect(answers).toEqual([answer, answer]);
+      } finally {
+        for (const door of doors) await door.close();
       }
-      expect(table.length).toBe(CASES.length);
-    } finally {
-      for (const door of doors) await door.close();
-    }
-  }, 120_000);
+    },
+    120_000,
+  );
 
   test('PF-budget the pinned root’s name verdict refuses an entry on the closed device, and the probe skips what sits inside it', async () => {
     const { root } = await setup();
