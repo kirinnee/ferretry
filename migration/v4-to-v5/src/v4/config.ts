@@ -278,7 +278,16 @@ export function rawSecretPaths(value: unknown): readonly string[] {
 
 const AUTH_SHAPE = String.raw`(?:Bearer|Basic|token)\s+\S{16,}`;
 const AUTH_AT_START = new RegExp(`^${AUTH_SHAPE}`, 'iu');
-const AUTH_ANYWHERE = new RegExp(`(?<![A-Za-z0-9])${AUTH_SHAPE}`, 'iu');
+/** In free text: a real header (`Authorization:` / `Proxy-Authorization:` then a scheme and a value). */
+const AUTH_HEADER = /(?<![A-Za-z0-9])(?:Proxy-)?Authorization["']?\s*[:=]\s*["']?(?:Bearer|Basic|token)\s+\S{16,}/iu;
+/** In free text: a scheme word followed by a value (judged by {@link looksLikeTokenValue}). */
+const SCHEME_VALUE = /(?<![A-Za-z0-9])(?:Bearer|Basic|token)\s+(\S+)/giu;
+
+/** A value that itself looks like a credential: 20+ token-alphabet characters, no spaces, a letter and a digit. */
+const looksLikeTokenValue = (raw: string): boolean => {
+  const value = raw.replace(/^["'`(]+|["'`),;.]+$/gu, '');
+  return value.length >= 20 && /^[A-Za-z0-9._~+/=-]+$/u.test(value) && /[A-Za-z]/u.test(value) && /\d/u.test(value);
+};
 
 /** The key paths of a value that looks like an Authorization header: a header-named key, or `Bearer|Basic|token <16+>`. */
 export function credentialShaped(value: unknown): string[] {
@@ -310,10 +319,12 @@ export const documentCredentialPaths = (value: unknown): readonly string[] => [
 /**
  * Whether the TEXT of a carried file looks like it holds a credential, by the same rules as a document: a private key,
  * a known key shape in ANY word, a `NAME_KEY=<high-entropy>` assignment (EVERY assignment is judged; a later one never
- * hides an earlier one) and an `Authorization: Bearer|Basic|token <value>` header anywhere.
+ * hides an earlier one), an `Authorization: Bearer|Basic|token <value>` header, and a `Bearer|Basic|token` word whose
+ * value itself looks like a credential. Prose that merely uses the words ("Basic troubleshooting", "token budget") carries.
  */
 export function textLooksLikeCredential(text: string): boolean {
-  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(text) || AUTH_ANYWHERE.test(text)) return true;
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(text) || AUTH_HEADER.test(text)) return true;
+  for (const match of text.matchAll(SCHEME_VALUE)) if (looksLikeTokenValue(match[1] as string)) return true;
   const words = text.split(/\s+/u).filter(word => word !== '');
   const assigned = [...text.matchAll(/([A-Za-z0-9_.-]+)["']?\s*[=:]\s*["']?([^\s"']+)/gu)].map(match => ({
     [match[1] as string]: match[2] as string,

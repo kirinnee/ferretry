@@ -7,6 +7,7 @@ import { convert } from '../../src/convert.ts';
 import { acceptedConfigStep } from '../../src/steps/accepted-config.ts';
 import { carryAssetReferences } from '../../src/steps/component-assets.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
+import { v5Writer } from '../../src/v5/write.ts';
 import { fixture } from './ferret-fixture.ts';
 
 /**
@@ -18,6 +19,8 @@ const USER_HOME = '/fake-real-home';
 const BEFORE = 'components/hooks/compact-before.txt';
 const AFTER = 'components/hooks/compact-after.sh';
 const FAKE_KEY = 'sk-ant-FAKEFAKEFAKEFAKEFAKE0123';
+// 24 characters from the token alphabet, a letter and a digit, no known prefix: FAKE.
+const FAKE_MIXED = 'Zx9qLm2Pw8Rt5Vb7Nc4Kabcd';
 // The owner's script reaches its home through $FY_HOME, never a literal v4 path: that must carry.
 const SCRIPT = '#!/bin/sh\necho compacted\ncat "$FY_HOME/state/compact-notes.txt"\n';
 
@@ -127,13 +130,20 @@ const refusedCases: readonly (readonly [string, () => Promise<void>])[] = [
   ],
   [
     'a file with an Authorization: Bearer header',
-    async () => put(`fleet/assets/${BEFORE}`, 'curl -H "Authorization: Bearer abcdefghijklmnopqrstuvwx" x\n'),
+    async () => put(`fleet/assets/${BEFORE}`, `Authorization: Bearer ${FAKE_MIXED}\n`),
   ],
   [
-    'a file with an Authorization: Basic header',
-    async () => put(`fleet/assets/${BEFORE}`, 'Authorization: Basic abcdefghijklmnopqrstuvwx\n'),
+    'a file with a curl Authorization: Basic header',
+    async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Basic ${FAKE_MIXED}" x\n`),
   ],
-  ['a file with a token header', async () => put(`fleet/assets/${BEFORE}`, 'x: token abcdefghijklmnopqrstuvwx\n')],
+  [
+    'a file with a Proxy-Authorization header in any case',
+    async () => put(`fleet/assets/${BEFORE}`, `proxy-authorization: Basic ${FAKE_MIXED}\n`),
+  ],
+  [
+    'a file with a token followed by a credential-shaped value',
+    async () => put(`fleet/assets/${BEFORE}`, `token ${FAKE_MIXED}\n`),
+  ],
   // M2: the content is held to the same homes the last gate refuses in an inline command.
   [
     "a file whose content names v4's worktree folder",
@@ -296,4 +306,92 @@ test('the preview stage keeps the owner-execute bit and never group or other bit
   expect(await modeOf(BEFORE)).toBe(0o600);
   expect(await modeOf(AFTER)).toBe(0o700);
   expect(await modeOf('components/hooks/group.sh')).toBe(0o700);
+});
+
+describe('prose in a carried file is not a credential (m1)', () => {
+  const prose: readonly (readonly [string, string])[] = [
+    ['Basic as a word', 'Basic troubleshooting: restart the daemon\n'],
+    ['token as a word', 'token consumption-and-budget\n'],
+    ['token before a path', 'token /home/x/notes\n'],
+    [
+      'a compaction-guidance paragraph',
+      'When compacting, keep the plan and the open questions. Basic troubleshooting steps can go. Mention the token ' +
+        'budget used so far, and every file path the user named, for example token /home/user/notes/summary.md. ' +
+        'Bearer of bad news: say so plainly. Keep the list of decisions and drop the chatter.\n',
+    ],
+  ];
+  for (const [name, text] of prose)
+    test(`${name} carries`, async () => {
+      await put(`fleet/assets/${BEFORE}`, text);
+      await put(`fleet/assets/${AFTER}`, SCRIPT, 0o700);
+      const { step } = await run(cat(), sh());
+      expect(step.status).toBe('converted');
+      expect(await readFile(join(f.to, 'fleet/assets', BEFORE), 'utf8')).toBe(text);
+    });
+});
+
+describe('the harness homes in a carried file are checked only in a preview (m2)', () => {
+  const real = () => ({ ...f.ctx(false) });
+  test('a real run carries a file that reads ~/.claude', async () => {
+    await put(`fleet/assets/${BEFORE}`, 'cat ~/.claude/notes.txt\n');
+    const out = await carryAssetReferences(real(), { a: `cat ${f.from}/fleet/assets/${BEFORE}` });
+    expect(out.reasons).toEqual([]);
+    expect(out.assets.map(asset => asset.rel)).toEqual([BEFORE]);
+  });
+  test('a real run still refuses a file that names the v4 home', async () => {
+    await put(`fleet/assets/${BEFORE}`, `cat ${f.from}/state/x\n`);
+    const out = await carryAssetReferences(real(), { a: `cat ${f.from}/fleet/assets/${BEFORE}` });
+    expect(out.assets).toEqual([]);
+    expect(out.reasons.join('\n')).toContain('names the v4 home or a harness home');
+  });
+  test('a preview refuses a file that reads ~/.claude', async () => {
+    await put(`fleet/assets/${BEFORE}`, 'cat ~/.claude/notes.txt\n');
+    const ctx = { ...f.ctx(false), previewV4Home: REAL, previewUserHome: USER_HOME };
+    const out = await carryAssetReferences(ctx, { a: cat() });
+    expect(out.assets).toEqual([]);
+  });
+});
+
+test('a v5 copy whose path a shell would split is refused', async () => {
+  await put(`fleet/assets/${BEFORE}`, 'FAKE notes\n');
+  const ctx = {
+    ...f.ctx(false),
+    v5: v5Writer(join(f.root, 'v5 with space'), { dryRun: false }),
+    previewV4Home: REAL,
+    previewUserHome: USER_HOME,
+  };
+  const out = await carryAssetReferences(ctx, { a: cat() });
+  expect(out.assets).toEqual([]);
+  expect(out.reasons.join('\n')).toContain('a shell command would split');
+});
+
+describe('fleet/assets/skills has its own step (either case)', () => {
+  for (const folder of ['skills', 'Skills'])
+    test(`a file under ${folder}/ is refused`, async () => {
+      await put(`fleet/assets/${folder}/x.sh`, SCRIPT, 0o700);
+      const ctx = { ...f.ctx(false), previewV4Home: REAL, previewUserHome: USER_HOME };
+      const out = await carryAssetReferences(ctx, { a: sh(`${folder}/x.sh`) });
+      expect(out.assets).toEqual([]);
+      expect(out.reasons.join('\n')).toContain('fleet/assets/skills');
+    });
+});
+
+describe('the mode floor and an unreadable file', () => {
+  const carry = async (mode: number) => {
+    await put(`fleet/assets/${BEFORE}`, 'FAKE notes\n');
+    await chmod(join(f.from, 'fleet/assets', BEFORE), mode);
+    const ctx = { ...f.ctx(false), previewV4Home: REAL, previewUserHome: USER_HOME };
+    return carryAssetReferences(ctx, { a: cat() });
+  };
+  test('a read-only source is written 0600', async () => {
+    expect((await carry(0o400)).assets[0]?.mode).toBe(0o600);
+  });
+  test('a read-and-execute source is written 0700', async () => {
+    expect((await carry(0o500)).assets[0]?.mode).toBe(0o700);
+  });
+  test.skipIf(process.getuid?.() === 0)('a file its owner cannot read is called unreadable', async () => {
+    const out = await carry(0o000);
+    expect(out.assets).toEqual([]);
+    expect(out.reasons.join('\n')).toContain('unreadable');
+  });
 });

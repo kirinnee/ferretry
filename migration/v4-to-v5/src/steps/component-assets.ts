@@ -17,7 +17,8 @@
  *
  * The file is written with mode 0600, or 0700 when the source has its owner-execute bit (an executable script stays
  * executable; group and other bits are never carried). The content is held to the SAME homes the last gate refuses in an
- * inline command (`needlesFor`: v4's home and worktree folder, `~/.claude*`, `~/.codex*`) and to the one credential scan
+ * inline command (`needlesFor`: v4's home and worktree folder; in a preview also `~/.claude*`, `~/.codex*`, because only
+ * a preview runs that gate, and on a real machine a hook may read its own harness home) and to the one credential scan
  * settings documents use (`textLooksLikeCredential`); `$FY_HOME` carries. The bytes written are the bytes checked.
  *
  * WHERE: v5 Runtimes reads its asset tree at `join(paths.fleet, 'assets')` (the skill-folders step writes there too).
@@ -29,8 +30,8 @@ import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join, normalize, relative, sep } from 'node:path';
-import { type Needles, needlesFor, valueHits } from '../../preview/gate.ts';
 import { textLooksLikeCredential } from '../v4/config.ts';
+import { decoded, type Needles, namesWhole, needlesFor, valueHits } from '../v4/homes.ts';
 import { componentFileSource, MAX_COMPONENT_BYTES } from './component-files.ts';
 import type { StepContext } from './index.ts';
 
@@ -64,23 +65,6 @@ const SHELL_SAFE_PATH = /^[A-Za-z0-9._/-]+$/u;
 const isRecordValue = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** `needle` followed by anything that ends a path component (`<v4 home>-old` is another folder). */
-function namesWhole(text: string, needle: string): boolean {
-  for (let at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1)) {
-    const next = text[at + needle.length];
-    if (next === undefined || !/[\w.-]/u.test(next)) return true;
-  }
-  return false;
-}
-
-const decoded = (text: string): string => {
-  try {
-    return decodeURIComponent(text);
-  } catch {
-    return text;
-  }
-};
-
 /** Every way a value can spell v4's home, longest first. */
 async function v4Spellings(ctx: StepContext): Promise<readonly string[]> {
   const real = normalize(ctx.previewV4Home ?? ctx.v4.home);
@@ -107,15 +91,29 @@ const namesV4 = (text: string, spellings: readonly string[]): boolean =>
  * under the cap) and read from it, so the bytes checked are the bytes written.
  */
 async function readChecked(path: string): Promise<{ bytes: Buffer; mode: number } | string> {
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => undefined);
-  if (handle === undefined) return 'not a plain file (a link, a folder or a missing file)';
+  let denied = false;
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW).catch((error: unknown) => {
+    denied = (error as NodeJS.ErrnoException).code === 'EACCES';
+    return undefined;
+  });
+  if (handle === undefined) return denied ? 'unreadable' : 'not a plain file (a link, a folder or a missing file)';
   try {
     const facts = await handle.stat();
     if (!facts.isFile()) return 'not a plain file (a link, a folder or a missing file)';
     if (facts.nlink !== 1) return 'a hard link';
-    if (facts.size > MAX_COMPONENT_BYTES) return `over ${MAX_COMPONENT_BYTES / 1024 / 1024} MiB`;
+    const tooBig = `over ${MAX_COMPONENT_BYTES / 1024 / 1024} MiB`;
+    if (facts.size > MAX_COMPONENT_BYTES) return tooBig;
+    // Read at most cap + 1 bytes: a file that grew after the stat still cannot pass the cap.
+    const buffer = Buffer.alloc(MAX_COMPONENT_BYTES + 1);
+    let filled = 0;
+    while (filled < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
+    }
+    if (filled > MAX_COMPONENT_BYTES) return tooBig;
     // Owner bits only, and always readable and writable by its owner: 0600, or 0700 when the source is executable.
-    return { bytes: await handle.readFile(), mode: (facts.mode & 0o100) | 0o600 };
+    return { bytes: buffer.subarray(0, filled), mode: (facts.mode & 0o100) | 0o600 };
   } catch {
     return 'unreadable';
   } finally {
@@ -138,7 +136,9 @@ async function assetFor(ctx: StepContext, token: string, needles: Needles): Prom
   if (typeof read === 'string') return read;
   const text = read.bytes.toString('latin1');
   // The same homes the last gate refuses in an inline command (v4's home and worktree folder, the harness homes).
-  if (valueHits(text, needles)) return 'its content names the v4 home or a harness home';
+  // The harness homes are checked only in a preview (where the inline gate runs); the v4 home in both modes.
+  const checked = ctx.previewV4Home !== undefined ? needles : { v4: needles.v4, harness: [] };
+  if (valueHits(text, checked)) return 'its content names the v4 home or a harness home';
   if (textLooksLikeCredential(text)) return 'its content looks like a credential';
   return { rel, bytes: read.bytes, mode: read.mode };
 }
