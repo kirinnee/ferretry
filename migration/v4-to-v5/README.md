@@ -331,6 +331,13 @@ The report and the `prepare` note name every such file with its reason, and the 
 confirm the edit in v4, then `preview.sh clean` and `preview.sh prepare --owner`. Texts are hashed and written, never
 reported.
 
+`preview.sh prepare` reads each `config/logins/*.yaml` once, for its `harness` field and whether it has both `claude:`
+and `codex:` halves, and nothing else (the file is opened without following links, YAML warnings are silenced, and no
+other key is read into a variable); an agent's `dry-run` reads no login file. A runtime on a login that drives both
+CLIs runs as v4 decides it: the CLI its profile is scoped to, else the login's own harness. It is held, with a reason
+saying so, only when its profile includes a model set without a `harness` (v4 scopes that by model ids the preview does
+not read).
+
 ## Tests
 
 `bun test tests` (unit; temp folders only, never a real home).

@@ -16,6 +16,7 @@ import { parseArgs } from 'node:util';
 import { convert } from './convert.ts';
 import { hostLockProbe } from './preflight.ts';
 import { summarise } from './report.ts';
+import { clearYamlLogSwitches } from './v4/config.ts';
 
 const USAGE =
   'usage: bun src/main.ts --from <stopped v4 home> --to <new v5 home> [--report <file>] [--dry-run] [--drop-uncarried]';
@@ -71,4 +72,5 @@ async function main(argv: readonly string[]): Promise<number> {
   return (dryRun ? wouldComplete : result.report.complete) ? 0 : 3;
 }
 
+clearYamlLogSwitches();
 process.exit(await main(process.argv.slice(2)));

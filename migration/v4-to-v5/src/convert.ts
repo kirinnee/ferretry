@@ -4,6 +4,7 @@
  */
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { LoginHarness } from './steps/preview-hold.ts';
 import { type LockProbe, preflight } from './preflight.ts';
 import type { ConversionReport, StepReport } from './report.ts';
 import { type EnforcedConversion, type HostFacts, STEPS, type Step, type StepContext } from './steps/index.ts';
@@ -42,6 +43,8 @@ export interface ConvertOptions {
   readonly previewOwner?: boolean;
   /** With `preview`: the user's real home folder (see `StepContext.previewUserHome`). */
   readonly previewUserHome?: string;
+  /** With `preview`: login name to its harness, from the stage (see `StepContext.previewLoginHarnesses`). */
+  readonly previewLoginHarnesses?: ReadonlyMap<string, LoginHarness>;
   /** The person running it chose to drop uncarried settings or hooks layers (see `StepContext.dropUncarried`). */
   readonly dropUncarried?: boolean;
 }
@@ -138,6 +141,9 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
           ...(options.previewShellEnv === undefined ? {} : { previewShellEnv: options.previewShellEnv }),
           ...(options.previewOwner === true ? { previewOwner: true } : {}),
           ...(options.previewUserHome === undefined ? {} : { previewUserHome: options.previewUserHome }),
+          ...(options.previewLoginHarnesses === undefined
+            ? {}
+            : { previewLoginHarnesses: options.previewLoginHarnesses }),
         }
       : {}),
     ...(options.dropUncarried === true ? { dropUncarried: true } : {}),

@@ -7,7 +7,9 @@ set -euo pipefail
 #
 #   dry-run   print what would be copied, left out, converted and started. Touches nothing.
 #   prepare   copy a snapshot of v4 (credentials left out by path), convert it into the preview home, prove v4 unchanged,
-#             write the `fy5` wrapper. Never stops or writes to v4.
+#             write the `fy5` wrapper. Never stops or writes to v4. It reads each config/logins/*.yaml once, for its
+#             `harness` field (and whether it has both claude and codex halves) only, to know which runtimes are Claude
+#             Code ones; no other key of a login is kept, and an agent's dry-run reads no login file.
 #             --owner (OWNER ONLY, never an agent): records as accepted every config file the preview wrote or
 #             changed (found by comparing with the plain conversion: terminals.yaml, claude-code/settings/fy-preview.yaml,
 #             the forced limits.yaml), EXCEPT any that comes from a v4 file with an unconfirmed edit: each stays held
@@ -103,8 +105,10 @@ if [ "${command}" = "dry-run" ] || [ "${command}" = "prepare" ]; then
 fi
 
 # One fact, one owner: the port and the app origin are read from plan.ts, never restated here.
-fact() { (cd "${tool_dir}" && bun -e "import { PREVIEW } from './preview/plan.ts'; console.log(PREVIEW.$1)"); }
-run_tool() { (cd "${tool_dir}" && bun preview/main.ts "$@" --v4 "${v4_home}" --target "${target}"); }
+# The yaml library prints every token it parses when LOG_TOKENS or LOG_STREAM is set, and a config can hold a key: bun
+# never starts with either (the entry files clear them too).
+fact() { (cd "${tool_dir}" && env -u LOG_TOKENS -u LOG_STREAM bun -e "import { PREVIEW } from './preview/plan.ts'; console.log(PREVIEW.$1)"); }
+run_tool() { (cd "${tool_dir}" && env -u LOG_TOKENS -u LOG_STREAM bun preview/main.ts "$@" --v4 "${v4_home}" --target "${target}"); }
 fy5() { "${target}/bin/fy5" "$@"; }
 
 # One owner for where the preview may write and remove (preview/paths.ts): it resolves links, refuses `..`, v4's home

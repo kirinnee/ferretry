@@ -9,7 +9,7 @@
  */
 import { readdir, readFile, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { parse as parseYaml } from 'yaml';
+import { quietYaml as parseYaml } from '../src/v4/config.ts';
 import { type Needles, needlesFor, type Spellings, valueHits } from '../src/v4/homes.ts';
 
 /** The last word of a key (split on case and punctuation) that makes the whole subtree under it executed or a path. */
