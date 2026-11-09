@@ -49,6 +49,35 @@ describe('a ferret Ferrets says died is a failed session the revive can read (th
       should(read.state.finishedAt).equal(T0);
     });
 
+  it('BG-043 should call failed exactly the five end causes Ferrets writes a later stop over (its twin: end-cause.test.ts)', () => {
+    // Arrange: the SAME partition Ferrets pins; a record typed per kind, so a new end cause must be placed here.
+    const samples = {
+      tmux_crashed: { kind: 'tmux_crashed' },
+      terminal_gone: { kind: 'terminal_gone' },
+      signal: { kind: 'signal', signal: 9 },
+      agent_crashed: { kind: 'agent_crashed', exitCode: 2 },
+      start_failed: { kind: 'start_failed' },
+      stopped: { kind: 'stopped' },
+      completed: { kind: 'completed' },
+      clean_exit: { kind: 'clean_exit' },
+    } as const satisfies Record<FerretEndCause['kind'], FerretEndCause>;
+    const failed: readonly FerretEndCause['kind'][] = [
+      'tmux_crashed',
+      'terminal_gone',
+      'signal',
+      'agent_crashed',
+      'start_failed',
+    ];
+
+    // Act
+    const readAsFailed = Object.values(samples).map(
+      cause => [cause.kind, session(stopped(cause)).state.status === 'failed'] as const,
+    );
+
+    // Assert
+    should(readAsFailed).eql(Object.values(samples).map(cause => [cause.kind, failed.includes(cause.kind)]));
+  });
+
   it('should read a stop, a finish and a clean exit as somebody’s decision, never failed', () => {
     // Arrange / Act
     const stop = session(stopped({ kind: 'stopped' }));
