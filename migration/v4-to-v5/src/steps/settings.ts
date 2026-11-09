@@ -60,6 +60,7 @@ import { failureNote, V4InputError } from '../v4/documents.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
+import { takeLoginKeys, v4VaultNames } from './login-keys.ts';
 
 /** v5 files declared in a plugin MANIFEST (not its contract): restated with the file name and the contract's schema. */
 const WARDEN_CONFIG: V5ConfigTarget = { shape: 'file', file: 'warden.yaml', schema: WardenFileSchema };
@@ -343,6 +344,9 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
     return;
   }
   const document = await readV4Yaml(file);
+  // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
+  // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
+  if (address.kind === 'login' && ctx.loginKeys !== undefined) takeLoginKeys(document, address.name, ctx.loginKeys);
   const secrets = rawSecretPaths(document.toJS());
   if (secrets.length > 0)
     throw new V4InputError(
@@ -478,6 +482,7 @@ export const settingsStep: Step = {
     const base = { id: this.id, title: this.title, sealed: [] };
     let plan: Awaited<ReturnType<typeof buildPlan>>;
     try {
+      ctx.loginKeys?.reserve(await v4VaultNames(join(ctx.v4.state, 'secrets.json')));
       plan = await buildPlan(ctx);
       for (const [path, planned] of plan.files) {
         const problem = v5ConfigProblem(planned.target, planned.name, planned.document.toString({ lineWidth: 0 }));
@@ -494,6 +499,8 @@ export const settingsStep: Step = {
         count(plan, 'instruction documents');
       }
     } catch (error) {
+      // Nothing was finished, so no key is sealed for a file that was never written.
+      ctx.loginKeys?.clear();
       return {
         ...base,
         status: 'failed',

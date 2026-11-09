@@ -1,4 +1,4 @@
-import { definePlugin, route, screen, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import {
   ONBOARDING_AUDIT,
   ONBOARDING_PROGRESS,
@@ -7,6 +7,7 @@ import {
   OnboardingChanged,
   OnboardingPort,
 } from './contract/index.ts';
+import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 
 /**
@@ -25,6 +26,8 @@ export default definePlugin({
   kinds: ['onboarding', 'command', 'view'],
   words: ONBOARDING_WORDS,
 
+  // Runtimes is optional: it says whether the machine is set up (it has a runtime). Off, the answer is "not set up".
+  uses: { runtimes: RuntimesPort },
   provides: { onboarding: OnboardingPort },
 
   actions: {
@@ -63,7 +66,13 @@ export default definePlugin({
 
   ui: {
     // Daemon-less on purpose: the first run happens before any daemon is paired.
-    screens: [screen('onboarding', { path: '/onboarding', daemonless: true })],
+    screens: [
+      screen('onboarding', { path: '/onboarding', daemonless: true }),
+      // The steps every plugin declared, on one machine: it OFFERS the `onboarding.step` slot (contract/slots.ts).
+      screen('steps', { path: 'onboarding/steps' }),
+    ],
+    // The way back to the steps screen for a machine that was paired but not set up: nothing else links to it.
+    settings: [settingsTab('setup', { label: 'Setup', order: 60 })],
   },
 
   data: {

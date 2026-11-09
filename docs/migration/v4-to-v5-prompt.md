@@ -139,7 +139,7 @@ Tell the owner this list before starting v5, and say which items the summary sho
 | MCP server sign-ins (OAuth)                                                                                                        | **Kept**            | the sign-in records move, and the sealed refresh tokens move byte for byte with the vault key that opens them                                                                                                                                                                                |
 | Security log (pairings, grants, secrets used)                                                                                      | **Kept**            | the v4 logs are merged into one v5 log, names and ids only                                                                                                                                                                                                                                   |
 | Harness sign-ins                                                                                                                   | **Kept**            | the sign-in folders move whole; never read                                                                                                                                                                                                                                                   |
-| Secrets                                                                                                                            | **Kept**            | the sealed vault and its key move byte for byte; no value is ever opened                                                                                                                                                                                                                     |
+| Secrets                                                                                                                            | **Kept**            | the sealed vault and its key move byte for byte; no existing value is ever opened. A key v4 had saved in plain text in a login file is sealed into the vault as `LOGIN_<ID>_<VAR>` and the login file names it with `${secret:…}` (listed by name in the summary)                            |
 | Paired phones and browsers, passkeys, unlock settings, push                                                                        | **Kept**            | the daemon identity, device public keys, grants, passkey ids and push keys move as they are                                                                                                                                                                                                  |
 | Admin and warden tokens                                                                                                            | **Kept**            | moved byte for byte, never opened; `fy` keeps working without signing in again                                                                                                                                                                                                               |
 | Global lessons (the rules applied from Lessons)                                                                                    | **Kept, wider**     | they now reach EVERY ferret, where v4 gave them only to ferrets whose profile listed `instructions/lessons`; that profile entry is removed, so no ferret gets them twice                                                                                                                     |
@@ -169,9 +169,13 @@ Run each check and show the owner the result. Command names are v5's; if one dif
 5. **Agenda**: open asks and their answers are there (`fy ask list`).
 6. **Secrets by USE**: `fy secret list` shows every name; with the owner's yes run one harmless command that uses a
    secret by name (never print it), e.g. `fy secret run <NAME> -- true`. It must succeed. You never see the value.
-7. **Devices**: on one paired phone, reload the app: it connects without pairing again and unlocks with its passkey.
-8. **Sign-ins**: `fy login list` shows every login signed in.
-9. `fy doctor` is clean.
+7. **No key in plain text in a login file**: `fy config check` passes (v5 refuses a login file that holds a key, so a pass is
+   the proof; do not open the login files to look). Every key the converter moved out of a login file is listed in its
+   summary by login, variable and secret name (`LOGIN_<ID>_<VAR>`), never by value. With the owner's yes run
+   `fy secret run <NAME> -- true` for one of them; it must succeed. You never see the value.
+8. **Devices**: on one paired phone, reload the app: it connects without pairing again and unlocks with its passkey.
+9. **Sign-ins**: `fy login list` shows every login signed in.
+10. `fy doctor` is clean.
 
 Then turn automatic updates back on if the owner had them on.
 

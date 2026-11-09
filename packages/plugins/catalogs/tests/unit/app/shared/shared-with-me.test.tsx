@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { SharedWithMe } from '../../../../app/features/shared/shared-with-me.tsx';
+import type { ChooseInstall } from '../../../../app/features/shared/shared-item-sheet.tsx';
 import {
   INSTALL,
   LEAVE_NOTE,
@@ -53,13 +54,17 @@ beforeAll(async () => {
 
 const alpha = daemonConnection({ daemonId: 'alpha' });
 
-async function open(handlers: Parameters<typeof fakeMembers>[0], options: { machines?: boolean } = {}) {
+async function open(
+  handlers: Parameters<typeof fakeMembers>[0],
+  options: { machines?: boolean; chooseInstall?: ChooseInstall } = {},
+) {
   const fake = fakeMembers(handlers);
   let homes = 0;
   const view = await mount(
     <SharedWithMe
       members={fake.members}
       machines={options.machines === true ? [{ connection: alpha, name: 'Studio laptop' }] : []}
+      {...(options.chooseInstall === undefined ? {} : { chooseInstall: options.chooseInstall })}
       onHome={() => {
         homes += 1;
       }}
@@ -528,6 +533,72 @@ describe('opening an item', () => {
     });
     await click(q('[data-shared-item]'));
     expect(q('[data-access-refused]')).not.toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('S10 Install on a screen with no machine of its own asks the person which machine', () => {
+  const opened = async () => {
+    const entry = shared.entries.find(candidate => candidate.itemId === shared.skill.itemId);
+    if (entry === undefined) throw new Error('no entry');
+    return okAttempt({ item: shared.skill, opened: shared.opened, entry });
+  };
+  const chosen =
+    (installs: string[]): ChooseInstall =>
+    async () => {
+      installs.push('asked');
+      return {
+        machine: { connection: daemonConnection({ daemonId: 'beta', daemonName: 'Desk' }), name: 'Desk' },
+        host: {
+          createClient: async () => {
+            installs.push('client');
+            throw new Error('stop here');
+          },
+          readProjects: async () => [],
+        },
+      };
+    };
+
+  it('shows Install on a row with no machine listed, and asks only when the person presses the sheet’s button', async () => {
+    const asked: string[] = [];
+    const { view } = await open(
+      { list: async () => [studio], browse: browseOk, openItem: opened },
+      { chooseInstall: chosen(asked) },
+    );
+    expect(q('[data-shared-item-install]')).not.toBeNull();
+    await click(q('[data-shared-item]'));
+    // Opening the item asks nothing: the question is the Install button's.
+    expect(asked).toEqual([]);
+    expect(text()).not.toContain(NOT_PAIRED_NOTE);
+    await click(q('[data-shared-install-button]'));
+    expect(asked[0]).toBe('asked');
+    expect(q('[data-catalog-sheet="install"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('a cancelled question installs nothing and leaves the item open', async () => {
+    const { view } = await open(
+      { list: async () => [studio], browse: browseOk, openItem: opened },
+      { chooseInstall: async () => undefined },
+    );
+    await click(q('[data-shared-item]'));
+    await click(q('[data-shared-install-button]'));
+    expect(q('[data-catalog-sheet="install"]')).toBeNull();
+    expect(q('[data-catalog-sheet="shared-item"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('closing the install sheet forgets the chosen machine: the next Install asks again', async () => {
+    const asked: string[] = [];
+    const { view } = await open(
+      { list: async () => [studio], browse: browseOk, openItem: opened },
+      { chooseInstall: chosen(asked) },
+    );
+    await click(q('[data-shared-item]'));
+    await click(q('[data-shared-install-button]'));
+    await click(q('button[aria-label^="Close"][aria-label*="Install"]') ?? q('[data-catalog-sheet="install"] button'));
+    await click(q('[data-shared-install-button]'));
+    expect(asked.filter(entry => entry === 'asked')).toHaveLength(2);
     await view.unmount();
   });
 });
