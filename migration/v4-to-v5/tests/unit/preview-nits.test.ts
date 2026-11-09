@@ -120,8 +120,9 @@ test('the failure note keeps the inner cause: the failing step and its own note,
 });
 
 test('a login held for another key says the enforced file would name a different secret, and no key leaks', async () => {
-  await put('config/logins/work.yaml', login(KEY));
-  await accept({ 'logins/work.yaml': login(OLD_KEY) });
+  // Held in v4 only because the budget was RAISED (a key edit alone is applied at once, never held).
+  await put('config/logins/work.yaml', `${login(KEY)}budget:\n  daily:\n    hard: 10\n`);
+  await accept({ 'logins/work.yaml': `${login(OLD_KEY)}budget:\n  daily:\n    hard: 5\n` });
   const report = await run();
   const item = accepted(report)?.notCarried.find(n => n.what.includes('config/logins/work.yaml'));
   expect(item?.why).toContain('a different value, a different name, or none');
