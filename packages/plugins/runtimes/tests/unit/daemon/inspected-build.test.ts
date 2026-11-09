@@ -8,7 +8,7 @@ import daemon from '../../../daemon/index.ts';
 
 describe('the daemon half built against an inert kernel', () => {
   it('builds without spelling any path, so the manifest comparison can inspect it', () => {
-    const inspected = implementedSections(daemon);
+    const inspected = implementedSections(daemon as unknown as Parameters<typeof implementedSections>[0]);
 
     expect(inspected).not.toHaveProperty('error');
     expect(Object.keys((inspected as { sections: Record<string, unknown> }).sections)).toContain('routes');

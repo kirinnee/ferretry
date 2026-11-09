@@ -267,7 +267,10 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
 /** `make` run at most once, on the first call. */
 function once<Value>(make: () => Value): () => Value {
   let made: { readonly value: Value } | undefined;
-  return () => (made ??= { value: make() }).value;
+  return () => {
+    made ??= { value: make() };
+    return made.value;
+  };
 }
 
 /** An object that stands for `make()` and builds it on the first property read; methods run on the real object. */
