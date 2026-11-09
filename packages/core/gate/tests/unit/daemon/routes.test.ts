@@ -34,7 +34,7 @@ const call = (
 ): CallContext => {
   const base = request({ arrival: onHost ? local(true) : carried() });
   return {
-    request: { ...base, query: new Map(Object.entries(query)), text },
+    request: { ...base, query: new Map(Object.entries(query).map(([name, value]) => [name, [value]])), text },
     params: {},
     actor: onHost ? 'admin-cli' : 'device:phone',
     ...(onHost ? { credential: { tokenClass: 'admin' } } : {}),
@@ -50,6 +50,33 @@ describe('Gate routes', () => {
     expect(response.status).toBe(200);
     expect(json(response)).toEqual({ records: [], kept: [], keptTotal: 0, unreadable: 3 });
     await expect(routes['GET /v1/audit'](call({ limit: 'many' }))).rejects.toMatchObject({ status: 400 });
+  });
+
+  test('R-0048 GET /v1/audit pages the security changes from the offset it is asked for, and refuses one that is not a whole number', async () => {
+    const asked: Array<{ limit: number; keptOffset: number }> = [];
+    const paged = gateRoutes({
+      audit: {
+        recent: async (limit, keptOffset) => {
+          asked.push({ limit, keptOffset });
+          return { records: [], kept: [], keptTotal: 40, unreadable: 0 };
+        },
+      },
+      security: new SecuritySettingsService({
+        document: { read: () => ({ kind: 'defaults' }), write: async () => undefined },
+        history: {
+          record: async () => undefined,
+          recent: async () => ({ entries: [], unreadable: 0, truncated: false }),
+        },
+        clock: { now: () => '2026-11-07T12:00:00.000Z' },
+        widenCommand: 'fy daemon security set',
+      }),
+    });
+    const response = await paged['GET /v1/audit'](call({ limit: '5', keptOffset: '20' }));
+    expect(response.status).toBe(200);
+    expect(asked).toEqual([{ limit: 5, keptOffset: 20 }]);
+    await expect(paged['GET /v1/audit'](call({ keptOffset: '-1' }))).rejects.toMatchObject({ status: 400 });
+    await expect(paged['GET /v1/audit'](call({ keptOffset: 'later' }))).rejects.toMatchObject({ status: 400 });
+    expect(asked).toHaveLength(1);
   });
 
   test('R-0133 GET /v1/security is readable while locked, and says who may widen', async () => {

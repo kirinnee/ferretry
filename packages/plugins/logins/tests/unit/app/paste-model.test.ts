@@ -190,6 +190,22 @@ describe('withheldSentence', () => {
   });
 });
 
+describe('withheldSentence — an address alone', () => {
+  it('speaks only of the address when no key was withheld, singular and plural', () => {
+    expect(withheldSentence([{ name: 'ANTHROPIC_BASE_URL', reason: 'url-query' }])).toBe(
+      'ANTHROPIC_BASE_URL carried a user, a password or a query string, so it was not filled in: type the plain address.',
+    );
+    expect(
+      withheldSentence([
+        { name: 'A_URL', reason: 'url-userinfo' },
+        { name: 'B_URL', reason: 'url-query' },
+      ]),
+    ).toBe(
+      'A_URL, B_URL carried a user, a password or a query string, so they were not filled in: type the plain address.',
+    );
+  });
+});
+
 describe('detectTable', () => {
   it('keeps only the presets that declare clues, as the table detection reads', () => {
     expect(detectTable(CATALOG)).toEqual([

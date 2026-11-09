@@ -124,6 +124,23 @@ describe('the sign-in-approval asks', () => {
     should(asks.closed.map(([, reason]) => reason)).eql(['expired']);
   });
 
+  it('should close a task plan’s ask as expired when its time ran out, and as withdrawn for any other reason', async () => {
+    const asks = new Recording();
+    const adapter = new TaskPlanAsksAdapter(new SignInApprovalAsks(asks));
+    const raised = await adapter.raise('s1', {
+      planId: PLAN,
+      pastes: false,
+      expiresAt: '2026-11-01T14:00:00.000Z',
+      ...card,
+    });
+    if (!raised.ok) throw new Error('not raised');
+
+    await adapter.close('s1', raised.id, 'The task plan expired.');
+    await adapter.close('s1', raised.id, 'The ferret took the plan back.');
+
+    should(asks.closed.map(([, reason]) => reason)).eql(['expired', 'withdrawn']);
+  });
+
   it('should turn a refused raise into words, never a throw into the service', async () => {
     const refusing = { raise: async () => Promise.reject(new Error('Asks is paused')), close: async () => undefined };
     const raised = await new TaskPlanAsksAdapter(new SignInApprovalAsks(refusing)).raise('s1', {

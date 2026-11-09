@@ -483,11 +483,9 @@ export class GateAdmission implements Admission {
     const demand = descriptor.capability;
     let governance: CallerGovernance | undefined;
     if (demand !== undefined) {
-      const decision = this.#guard.decide(demand, presentation) ?? { allowed: false, refusal: 'undetermined' };
+      const decision = this.#guard.decide(demand, presentation);
       if (!decision.allowed) {
-        const message =
-          this.#guard.explain(demand, decision.refusal) ??
-          `this daemon cannot say whether the UI may use ${demand.capability}, so it is refusing`;
+        const message = this.#guard.explain(demand, decision.refusal);
         return refused(
           decision.refusal === 'step-up-required'
             ? jsonResponse(
