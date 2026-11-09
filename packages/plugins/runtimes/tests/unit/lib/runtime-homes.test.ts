@@ -59,7 +59,7 @@ describe('the harness homes a manifest names', () => {
       FLEET,
     );
 
-    expect(homes).toEqual([
+    expect(homes.map(home => ({ ...home, runtimes: home.runtimes.map(String) }))).toEqual([
       {
         id: 'one',
         harness: 'claude-code',
