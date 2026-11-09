@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { FerretsPort, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { configDef } from './config-def.ts';
 import {
+  ITEM_NAME_PATTERN,
   InstructionsFileSchema,
   ModelSetFileSchema,
   ProfileFileSchema,
@@ -130,8 +131,6 @@ export const RuntimesLaunchFailed = defineEvent(
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
-const ITEM_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
-
 /** `config/runtimes.yaml`: the default runtime. Pointing it elsewhere changes where an unnamed start spends: not a loosening. */
 export const RUNTIMES_CONFIG = configDef(
   defineConfig({ file: 'runtimes.yaml', schema: RuntimesFileSchema, axis: 'configure', loosens: neverLoosens }),
@@ -141,7 +140,7 @@ export const RUNTIMES_CONFIG = configDef(
 export const RUNTIME_ITEMS = configDef(
   defineConfig({
     collection: 'runtimes',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: RuntimeFileSchema,
     axis: 'configure',
     loosens: runtimeFileLoosens,
@@ -152,7 +151,7 @@ export const RUNTIME_ITEMS = configDef(
 export const PROFILE_ITEMS = configDef(
   defineConfig({
     collection: 'profiles',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: ProfileFileSchema,
     axis: 'configure',
     loosens: neverLoosens,
@@ -166,7 +165,7 @@ export const PROFILE_ITEMS = configDef(
 export const INSTRUCTION_ITEMS = configDef(
   defineConfig({
     collection: 'instructions',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: InstructionsFileSchema,
     axis: 'configure',
     loosens: neverLoosens,
@@ -177,7 +176,7 @@ export const INSTRUCTION_ITEMS = configDef(
 export const MODEL_SET_ITEMS = configDef(
   defineConfig({
     collection: 'model-sets',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: ModelSetFileSchema,
     axis: 'configure',
     loosens: neverLoosens,

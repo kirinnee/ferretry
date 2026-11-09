@@ -1,6 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { OrphanMemory, WardenBoardPort, WardenBoardRead, WardenFocusCard } from '../../daemon/lib/index.ts';
+import {
+  type OrphanMemory,
+  orphanRetryDelayMs,
+  type WardenBoardPort,
+  type WardenBoardRead,
+  type WardenFocusCard,
+} from '../../daemon/lib/index.ts';
 import { lanes, PROJECT } from '../support/board.ts';
 import { boardOf, cardView, orphanView } from './board-fixtures.ts';
 import { enabled, harness, type JevScript, journalTypes, NOW, no, session, triageable } from './sweep-harness.ts';
@@ -229,6 +235,192 @@ describe('an orphaned card', () => {
 
     // Assert
     should(subject.notices[0]?.notice.premise).containEql(' on mac, waiting in Implement');
+  });
+});
+
+/** A Warden whose notices the Agenda always refuses, and a clock the test moves. */
+const refused = (reason: () => string = () => 'this session already has 20 unresolved items') => {
+  let clock = NOW;
+  const board = boardPort(boardOf(orphanView(), orphanView({ id: 'F2' })));
+  const subject = harness({
+    config: enabled(),
+    fleet: [worker],
+    board,
+    noticeWrite: 'rejected',
+    noticeReason: reason,
+    now: () => clock,
+  });
+  return {
+    subject,
+    board,
+    at: (minutes: number): void => {
+      clock = NOW + minutes * MINUTE;
+    },
+  };
+};
+
+const failures = (subject: ReturnType<typeof harness>) =>
+  subject.journal.filter(entry => entry.type === 'fleet.warden_orphan_failed');
+
+describe('an orphaned card whose notice the Agenda refuses', () => {
+  it('should be sent once however many sweeps see it, and be logged once', async () => {
+    // Arrange — two cards of one finished ferret, every notice refused: 2 sends and 2 lines the first sweep, then silence.
+    const { subject, at } = refused();
+
+    // Act
+    for (const minute of [0, 1, 2, 3, 4]) {
+      at(minute);
+      await subject.service.run({ force: false });
+    }
+
+    // Assert
+    should(subject.noticeAttempts.count).equal(2);
+    should(failures(subject)).have.length(2);
+    should(failures(subject)[0]?.data).containEql({
+      taskId: 'F1',
+      via: 'notice',
+      sessionId: 'worker',
+      reason: 'this session already has 20 unresolved items',
+    });
+  });
+
+  it('should wait twice as long after each failure of the same notice', async () => {
+    // Arrange — one card, so each attempt is one send: 5 minutes, then 10, then 20.
+    const { subject, board, at } = refused();
+    board.set(boardOf(orphanView()));
+    const attemptsAt: number[] = [];
+
+    // Act
+    for (const minute of [0, 4, 5, 14, 15, 34, 35]) {
+      at(minute);
+      await subject.service.run({ force: false });
+      attemptsAt.push(subject.noticeAttempts.count);
+    }
+
+    // Assert
+    should(attemptsAt).eql([1, 1, 2, 2, 3, 3, 4]);
+    should(subject.state().orphanRetries?.F1).containEql({ failures: 4 });
+  });
+
+  it('should be logged again only when the reason changes, not when the same refusal repeats', async () => {
+    // Arrange
+    let reason = 'this session already has 20 unresolved items';
+    const { subject, board, at } = refused(() => reason);
+    board.set(boardOf(orphanView()));
+
+    // Act
+    await subject.service.run({ force: false });
+    at(5);
+    await subject.service.run({ force: false });
+    at(15);
+    reason = 'the Agenda could not be written';
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.noticeAttempts.count).equal(3);
+    should(failures(subject).map(entry => entry.data.reason)).eql([
+      'this session already has 20 unresolved items',
+      'the Agenda could not be written',
+    ]);
+    should(failures(subject)[1]?.data.retryAt).equal(iso(NOW + 15 * MINUTE + 20 * MINUTE));
+  });
+
+  it('should be sent at once when what it is about changes: its owner ferret is alive to be told', async () => {
+    // Arrange
+    const { subject, board, at } = refused();
+    board.set(boardOf(orphanView()));
+    await subject.service.run({ force: false });
+
+    // Act — one minute on, well inside the wait, the card's owner ferret is running.
+    at(1);
+    subject.setFleet([worker, lead]);
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.noticeAttempts.count).equal(1);
+    should(subject.remedies.map(remedy => [remedy.action, remedy.sessionId])).eql([['nudge', 'lead']]);
+    should(subject.state().orphans?.F1).containEql({ via: 'owner', to: 'lead' });
+    should(subject.state()).not.have.property('orphanRetries');
+  });
+
+  it('should be sent at once to the new ferret when the card changes hands', async () => {
+    // Arrange
+    const { subject, board, at } = refused();
+    board.set(boardOf(orphanView()));
+    await subject.service.run({ force: false });
+
+    // Act
+    at(1);
+    subject.setFleet([worker, session({ id: 'second', status: 'stopped' })]);
+    board.set(boardOf(orphanView({ assignee: 'second' })));
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.noticeAttempts.count).equal(2);
+    should(failures(subject).map(entry => entry.data.sessionId)).eql(['worker', 'second']);
+  });
+
+  it('should stop being sent once a ferret is back on the card, and be news again if it is orphaned again', async () => {
+    // Arrange
+    const { subject, board, at } = refused();
+    board.set(boardOf(orphanView()));
+    await subject.service.run({ force: false });
+
+    // Act
+    at(1);
+    board.set(boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })));
+    await subject.service.run({ force: false });
+    const recovered = { attempts: subject.noticeAttempts.count, state: subject.state() };
+    at(2);
+    board.set(boardOf(orphanView()));
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(recovered.attempts).equal(1);
+    should(recovered.state).not.have.property('orphanRetries');
+    should(subject.noticeAttempts.count).equal(2);
+    should(failures(subject)).have.length(2);
+  });
+
+  it('should be told as before once a notice lands, and forget the failures', async () => {
+    // Arrange — a failure remembered from an earlier sweep (and an earlier run of the daemon): wait until its time.
+    const failed = { F1: { key: 'notice|worker|worker', failures: 1, retryAt: iso(NOW + 5 * MINUTE), reason: 'full' } };
+    const early = harness({
+      config: enabled(),
+      fleet: [worker],
+      board: boardPort(boardOf(orphanView())),
+      state: { orphanRetries: failed },
+      now: () => NOW + 4 * MINUTE,
+    });
+    const due = harness({
+      config: enabled(),
+      fleet: [worker],
+      board: boardPort(boardOf(orphanView())),
+      state: { orphanRetries: failed },
+      now: () => NOW + 5 * MINUTE,
+    });
+
+    // Act
+    await early.service.run({ force: false });
+    await due.service.run({ force: false });
+
+    // Assert
+    should(early.noticeAttempts.count).equal(0);
+    should(early.state().orphanRetries).eql(failed);
+    should(due.notices).have.length(1);
+    should(due.state().orphans?.F1).containEql({ via: 'notice', to: 'worker' });
+    should(due.state()).not.have.property('orphanRetries');
+  });
+});
+
+describe('the wait between two sends of one orphan notice', () => {
+  it('should double from five minutes and stop at six hours', () => {
+    // Arrange
+    const waits = [1, 2, 3, 4, 5, 6, 7, 8, 9, 40].map(orphanRetryDelayMs);
+
+    // Assert
+    should(waits.map(wait => wait / MINUTE)).eql([5, 10, 20, 40, 80, 160, 320, 360, 360, 360]);
+    should(orphanRetryDelayMs(0)).equal(0);
   });
 });
 

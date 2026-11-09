@@ -328,6 +328,10 @@ export class FakeFocus implements FerretFocus {
     return this.focused.get(ferret) ?? null;
   }
 
+  async focusOfAll(): Promise<ReadonlyMap<string, CardRef | null>> {
+    return new Map(this.focused);
+  }
+
   async anchorOf(ferret: string): Promise<CardRef | null> {
     return this.anchors.get(ferret) ?? null;
   }

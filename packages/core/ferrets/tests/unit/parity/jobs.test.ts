@@ -1,10 +1,16 @@
 /**
  * Parity rows J-0001, J-0260 (docs/design/rebuild-parity.tsv): the turn watch, mounted in Ferrets (U4); J-0240: the live
  * readout and the transcript signal on `GET /v1/events`, mounted in Ferrets (U5).
+ *
+ * Parity rows J-0002, J-0015, J-0057, J-0069, J-0084, J-0107, J-0239, J-0245, J-0247, J-0259: the auto-resume job, the
+ * agenda's turn hook, pack starts, the handover reconcile loop, the event stream's idle proof and the document read.
  */
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
+import { queryFrom, type SocketDownstream, type StatePort } from '@ferretry/kernel/contract';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { state } from '@ferretry/kernel/host';
 import {
   deviceStanding,
   FakeGate,
@@ -18,9 +24,16 @@ import type { CallStanding, FerretId, HookDecision } from '@ferretry/kernel/cont
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import type { Result } from '@ferretry/std';
+import manifest from '../../../manifest.ts';
 import {
+  AutoResumeDecide,
+  type AutoResumeDecideInput,
+  AutoResumeSummaryFile,
   FerretChanged,
   type FerretChangedPayload,
+  FerretHistoryFiles,
+  HandoverFiles,
+  type PackId,
   FerretStateFile,
   FerretsPort,
   Harnesses,
@@ -33,6 +46,18 @@ import {
 } from '../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../contract/testing/index.ts';
 import ferrets, { TURN_WATCH_JOB } from '../../../daemon/index.ts';
+import { FileHandoverReceiptStore } from '../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
+import { fleetEventsAccept, HistoryEventSource } from '../../../daemon/modules/fleet-events.ts';
+import { AUTO_RESUME_JOB } from '../../../daemon/modules/auto-resume.ts';
+import { type SessionHandoverNeeds, sessionHandoverModule } from '../../../daemon/modules/session-handover.ts';
+import type { SessionDirectorySubsystem } from '../../../daemon/lib/session/directory/subsystem.ts';
+import { createSessionEvent, encodeSessionEvent } from '../../../daemon/lib/storage/journal.ts';
+import type { SessionId } from '../../../daemon/lib/session-id.ts';
+import { sessionHandoverNeedsForTest } from '../daemon/modules/session-handover/fixture.ts';
+import { fakePacks, host as ferretsHost } from '../daemon/ferrets/route-fixture.ts';
+import { handoverReceiptFor } from '../../support/daemon/parity-fj-docs.ts';
+import { memoryStorage, sessionConfig, sessionState } from '../../support/daemon/storage.ts';
+import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import { QUESTION_FILE_VARIABLE } from '../../../daemon/lib/ferrets/service.ts';
 import { ARCHIVE_PASS_JOB } from '../../../daemon/modules/archive.ts';
 import {
@@ -74,10 +99,10 @@ const runnerPlugin = (runner: FakeRunner) =>
     { build: () => ({ hooks: { 'runners:tmux': runner } }) },
   );
 /** A listener with a real plugin's shape: Conversation hears `ferret.changed` this way (its `turn.ended`). */
-const listenerPlugin = (heard: FerretChangedPayload[]) =>
+const listenerPlugin = (heard: FerretChangedPayload[], id = 'conversation') =>
   implementDaemon(
     definePlugin({
-      id: 'conversation',
+      id,
       title: 'Conversation (fake)',
       version: '5.0.0',
       api: 5,
@@ -487,5 +512,309 @@ describe('the archive pass (U6)', () => {
     await tickArchive(h);
     expect((await archived(h)).sessions.map(view => view.config.id).sort()).toEqual([first, second].sort());
     await h.stop();
+  });
+});
+
+describe('auto-resume and the agenda hook (J-0002 J-0015)', () => {
+  const runtimesAllowing = (seen: AutoResumeDecideInput[]) =>
+    implementDaemon(
+      definePlugin({
+        id: 'runtimes',
+        title: 'Runtimes (fake)',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        hooks: { takes: [{ hook: AutoResumeDecide }] },
+      }),
+      {
+        build: () => ({
+          hooks: {
+            'auto-resume.decide': (input: AutoResumeDecideInput) => {
+              seen.push(input);
+              return { allow: true };
+            },
+          },
+        }),
+      },
+    );
+
+  test('J-0002 auto-resume is a job the daemon arms once it serves: nothing is resumed before it runs, one run resumes the ferret a host restart took down', async () => {
+    const runner = new FakeRunner();
+    const asked: AutoResumeDecideInput[] = [];
+    let h = await ferretsHost([], { harness: new FakeHarness(), runner, plugins: [runtimesAllowing(asked)] });
+    const started = await h.request('POST', '/v1/ferrets', {
+      headers: { 'x-fy-request-id': 'parity-j2' },
+      body: { folder: '/work/a', name: 'wren', runtime: 'claude-work' },
+    });
+    expect(started.status).toBe(201);
+    await h.settle();
+    runner.reboot();
+    h = await h.restart();
+    expect(h.jobIds()).toContain(AUTO_RESUME_JOB);
+    expect(AUTO_RESUME_JOB).toBe('ferrets.auto-resume');
+    expect(asked).toEqual([]);
+    expect(h.state('ferrets').raw(AutoResumeSummaryFile)).toBeUndefined();
+
+    await h.runJob(AUTO_RESUME_JOB);
+    await h.settle();
+    expect(asked.length).toBeGreaterThan(0);
+    expect(JSON.parse(h.state('ferrets').raw(AutoResumeSummaryFile) ?? '{}')).toEqual({
+      format: 1,
+      at: h.clock.now(),
+      resumed: 1,
+      skipped: [],
+    });
+    await h.stop();
+  });
+
+  test('J-0015 every turn edge the watch records says ferret.changed to the plugins that take it (Agenda refreshes its projection on it), and a frame that moves nothing says nothing', async () => {
+    const agenda: FerretChangedPayload[] = [];
+    const { h, runner, harness } = await host(() => ownerStanding(), [listenerPlugin(agenda, 'agenda') as never]);
+    const id = await start(h, 'bodhi');
+    harness.transcripts.set(id, { stamp: STAMP('/t/bodhi.jsonl', 10), records: [{ kind: 'work' }] });
+    const handle = (await h.provided(FerretsPort).handle(id)) as RunnerHandle;
+    await h.runJob(TURN_WATCH_JOB);
+    runner.screens.set(handle, working('w1'));
+    await tick(h);
+    const afterStart = agenda.filter(change => change.change === 'state').map(change => change.state);
+    expect(afterStart.at(-1)).toBe('working');
+
+    const heardBefore = agenda.length;
+    runner.screens.set(handle, working('w1 again'));
+    await tick(h);
+    expect(agenda.length).toBe(heardBefore);
+
+    runner.screens.delete(handle);
+    await tick(h);
+    await tick(h);
+    expect(agenda.slice(heardBefore)).toEqual([{ ferret: id, state: 'idle', previous: 'working', change: 'state' }]);
+    await h.stop();
+  });
+});
+
+describe('pack starts (J-0057 J-0084)', () => {
+  test('J-0057 a pack starts a helper through the port with its parent: Packs is asked on start.decide, and two identical starts are two ferrets, never one replayed', async () => {
+    const packs = fakePacks();
+    const { h, runner } = await host(() => ownerStanding(), [packs.plugin as never]);
+    const lead = await start(h, 'ada');
+    const request = {
+      folder: '/work/cleo',
+      parent: lead,
+      by: 'pack' as const,
+      pack: 'pack-1' as PackId,
+      prompt: 'tidy the notes',
+    };
+    const first = await h.provided(FerretsPort).start(request);
+    const second = await h.provided(FerretsPort).start(request);
+    if (!first.ok || !second.ok) throw new Error('both pack starts are admitted');
+    expect(first.value).not.toBe(second.value);
+    const helpers = packs.asked.filter(asked => asked.parent === lead);
+    expect(helpers).toHaveLength(2);
+    expect(helpers[0]).toMatchObject({ parent: lead, by: 'pack', role: 'helper', folder: '/work/cleo' });
+    expect(await h.provided(FerretsPort).get(first.value)).toMatchObject({ parent: lead, role: 'helper' });
+    expect(runner.starts).toBe(3);
+    await h.stop();
+  });
+
+  test('J-0084 the pack clean-up starts under the next system callsign (pack-000001, then pack-000002), with no parent and no delegation', async () => {
+    const { h } = await host();
+    const port = h.provided(FerretsPort);
+    const callsign = (await port.systemCallsign?.('pack')) ?? '';
+    expect(callsign).toBe('pack-000001');
+    const started = await port.start({ folder: '/work/cleanup', by: 'pack', name: callsign });
+    if (!started.ok) throw new Error('the clean-up starts');
+    expect(await port.get(started.value)).toMatchObject({ name: 'pack-000001', role: 'lead' });
+    expect(await port.systemCallsign?.('pack')).toBe('pack-000002');
+    expect(JSON.parse(h.state('ferrets').files.get('system-callsigns.json') ?? '{}')).toEqual({ format: 1, pack: 2 });
+    await h.stop();
+  });
+});
+
+describe('the handover reconcile loop (J-0069 J-0107 J-0245 J-0247)', () => {
+  const FOLLOW_MS = 15_000;
+  const BACKSTOP_MS = 15 * 60_000;
+  const settleLoop = async () => {
+    for (let turn = 0; turn < 20; turn += 1) await Bun.sleep(0);
+  };
+  const counting = (port: StatePort, calls: { list: number; read: number }): StatePort =>
+    new Proxy(port, {
+      get: (target, property) => {
+        const value = Reflect.get(target, property) as unknown;
+        if (typeof value !== 'function') return value;
+        if (property === 'list' || property === 'read')
+          return (...args: unknown[]) => {
+            calls[property] += 1;
+            return (value as (...a: unknown[]) => unknown).apply(target, args);
+          };
+        return (value as (...a: unknown[]) => unknown).bind(target);
+      },
+    });
+  const world = async (open: readonly string[], needs: Partial<SessionHandoverNeeds> = {}) => {
+    const folder = new MemoryStateFolder();
+    const real = folder.port([HandoverFiles]);
+    for (const source of open) await new FileHandoverReceiptStore(real).write(handoverReceiptFor(source, 'req-1'));
+    const calls = { list: 0, read: 0 };
+    const armed: { intervalMs: number; tick: () => void; cancelled: number }[] = [];
+    const releases: Array<() => void | Promise<void>> = [];
+    const built = sessionHandoverModule.build(
+      sessionHandoverNeedsForTest({
+        state: counting(real, calls),
+        ...needs,
+        every: (intervalMs, tick) => {
+          const timer = { intervalMs, tick, cancelled: 0 };
+          armed.push(timer);
+          return () => {
+            timer.cancelled += 1;
+          };
+        },
+      }),
+      undefined,
+      { onRelease: (_label, release) => void releases.push(release) },
+    );
+    return { folder, calls, armed, releases, built };
+  };
+
+  test('J-0069 the daemon declares ferrets.handover-reconcile: running it arms the loop on the kernel clock, and stopping the daemon cancels the timer', async () => {
+    const { h } = await host();
+    expect(h.jobIds()).toContain('ferrets.handover-reconcile');
+    const before = h.clock.pending();
+    await h.runJob('ferrets.handover-reconcile');
+    await settleLoop();
+    expect(h.clock.pending()).toBe(before + 1);
+    await h.stop();
+    expect(h.clock.pending()).toBe(before);
+  });
+
+  test('J-0107 J-0247 while a handover is open the loop ticks every 15 s and each tick advances every open receipt; the tick is dropped once none is open', async () => {
+    // The source session cannot be read at boot (the directory rejects), so the boot pass advances nothing: both
+    // receipts stay "requested". The directory then answers "this session is gone", and ONLY the follow tick can
+    // move the receipts: each is settled `failed` / `source_lost`.
+    const directory: { answer: 'unreadable' | 'gone' } = { answer: 'unreadable' };
+    const sessions = {
+      get: async () => {
+        if (directory.answer === 'unreadable') throw new Error('the session directory is closed');
+        return undefined;
+      },
+    } as unknown as SessionDirectorySubsystem;
+    const { folder, calls, armed, built } = await world(['source-1', 'source-2'], { sessions });
+    const receipts = new FileHandoverReceiptStore(folder.port([HandoverFiles]));
+    built.jobs.arm();
+    await settleLoop();
+    expect(armed.map(timer => timer.intervalMs).sort((a, b) => a - b)).toEqual([FOLLOW_MS, BACKSTOP_MS]);
+    const follow = armed.find(timer => timer.intervalMs === FOLLOW_MS);
+    if (follow === undefined) throw new Error('the follow tick is armed');
+    const bootLists = calls.list;
+    expect((await receipts.read('source-1'))?.phase).toBe('requested');
+    expect((await receipts.read('source-2'))?.phase).toBe('requested');
+
+    directory.answer = 'gone';
+    follow.tick();
+    await settleLoop();
+    expect(calls.list).toBe(bootLists);
+    for (const source of ['source-1', 'source-2']) {
+      const receipt = await receipts.read(source);
+      expect(receipt).toMatchObject({ phase: 'failed', refusal: { failure: 'source_lost' } });
+      expect(receipt?.phaseHistory.at(-1)?.phase).toBe('failed');
+    }
+    expect(follow.cancelled).toBe(1);
+  });
+
+  test('J-0245 a slow 15 min backstop forgets what is remembered and reads every receipt again, for a document that changed behind the daemon', async () => {
+    const { folder, calls, armed, built } = await world([]);
+    built.jobs.arm();
+    await settleLoop();
+    expect(armed.map(timer => timer.intervalMs)).toEqual([BACKSTOP_MS]);
+    const listsAfterBoot = calls.list;
+
+    await new FileHandoverReceiptStore(folder.port([HandoverFiles])).write(handoverReceiptFor('source-2', 'req-2'));
+    armed[0]?.tick();
+    await settleLoop();
+    expect(calls.list).toBe(listsAfterBoot + 1);
+    expect(armed.map(timer => timer.intervalMs).sort((a, b) => a - b)).toEqual([FOLLOW_MS, BACKSTOP_MS]);
+  });
+});
+
+describe('the event stream keeps proving it is alive (J-0239)', () => {
+  test('J-0239 GET /v1/events is a declared socket, and a quiet stream says idle again every 30 s; a real event re-arms the window instead', async () => {
+    expect(manifest.actions?.sockets?.map(socket => socket.key)).toContain('GET /v1/events');
+    const port = state.createStatePort({
+      home: '/home/fy',
+      pluginId: 'ferrets',
+      files: [FerretHistoryFiles],
+      fs: state.createMemoryHostFs(),
+    });
+    const event = createSessionEvent('wren' as SessionId, 0, '2026-11-08T10:00:00.000Z', 'session.turn', { n: 1 });
+    await port.append(FerretHistoryFiles, encodeSessionEvent(event), 'wren');
+    const source = new HistoryEventSource(port, () => ['wren']);
+    const windows: { delay: number; fire: () => void; cancelled: boolean }[] = [];
+    const accept = fleetEventsAccept(
+      source,
+      {
+        after: (delay, fire) => {
+          const window = { delay, fire, cancelled: false };
+          windows.push(window);
+          return {
+            cancel: () => {
+              window.cancelled = true;
+            },
+          };
+        },
+      },
+      id => id === 'wren',
+    );
+    const attach = await accept({
+      request: {
+        query: queryFrom([
+          ['sessionId', 'wren'],
+          ['after', '0'],
+        ]),
+      },
+      params: new Map(),
+    } as never);
+    const frames: { kind: string }[] = [];
+    const downstream: SocketDownstream = {
+      send: frame => {
+        frames.push(JSON.parse(String(frame)) as { kind: string });
+        return 1;
+      },
+      close: () => undefined,
+      bufferedBytes: () => 0,
+    };
+    const handler = await attach(downstream);
+    await handler.open();
+    expect(frames.map(frame => frame.kind)).toEqual(['event', 'idle']);
+    expect(windows.map(window => window.delay)).toEqual([30_000]);
+
+    windows[0]?.fire();
+    expect(frames.map(frame => frame.kind)).toEqual(['event', 'idle', 'idle']);
+    expect(windows.map(window => window.delay)).toEqual([30_000, 30_000]);
+
+    source.publish({
+      sequence: 2,
+      sessionId: 'wren',
+      time: '2026-11-08T10:01:00.000Z',
+      type: 'session.turn',
+      data: { n: 2 },
+    });
+    expect(frames.map(frame => frame.kind)).toEqual(['event', 'idle', 'idle', 'event']);
+    expect(windows[1]?.cancelled).toBe(true);
+    expect(windows.map(window => window.delay)).toEqual([30_000, 30_000, 30_000]);
+    handler.close();
+    expect(windows[2]?.cancelled).toBe(true);
+  });
+});
+
+describe('the cached document read (J-0259)', () => {
+  test('J-0259 no watcher guards a cached copy any more: a session document changed behind the daemon is read as it now is', async () => {
+    const { storage, folder } = await memoryStorage();
+    const id = parseSessionId('mw7bp88g-50e00159');
+    await storage.writeConfig(id, sessionConfig(id, { name: 'zelda' }));
+    expect(((await storage.readConfig(id)) as { name: string }).name).toBe('zelda');
+    folder.files.set(`${id}/config.json`, JSON.stringify({ format: 1, ...sessionConfig(id, { name: 'wren' }) }));
+    expect(((await storage.readConfig(id)) as { name: string }).name).toBe('wren');
+    folder.files.set(`${id}/state.json`, JSON.stringify({ format: 1, ...sessionState(id, { turn: 7 }) }));
+    expect(((await storage.readState(id)) as { turn: number }).turn).toBe(7);
+    await storage.close();
   });
 });

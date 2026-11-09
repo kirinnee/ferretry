@@ -18,7 +18,10 @@ import type { FileIdentity, HostFs } from './adapters/node-fs.ts';
  *   every folder ever made. A resting folder that changed is found when its slice comes round (at 512 a slice and a
  *   250 ms look, 5,000 sessions are all looked at in 2.5 s and 20,000 in 10 s) and is then hot again. A new member, or
  *   a folder that changed lately, is always looked at by the next look. That a replaced file in a RESTING folder is
- *   recognised only when its slice comes round is the declared staleness of the tiering (§7.7, GAP 7).
+ *   recognised only when its slice comes round is the staleness of the tiering; it cannot be used through an alias of
+ *   the session FOLDER, because every member folder of the collection, one that holds the file or not, is pinned by its
+ *   own identity (§7.7). A member folder REPLACED by another while it rests (renamed aside, made again under its name)
+ *   is not pinned until its slice comes round: the declared GAP of §7.7.
  *
  * What bounds the SIZE, and what the bound does:
  * - every declared place has its OWN budget ({@link MEMBER_LIMIT} places for a tree, {@link PATTERN_LIMIT} for a `*`
@@ -163,6 +166,8 @@ interface FolderRecord {
   readonly child: Map<string, FileIdentity | undefined>;
   /** The place pinned in this member folder, made once: a look that finds the folder as it was reuses it. */
   place?: IndexedPlace;
+  /** The place of the member folder itself (its identity), pinned beside its file: made once, while the folder stays as it is. */
+  folderPlace?: IndexedPlace;
 }
 
 /** The records of every folder the last successful scan visited, kept between scans. */
@@ -246,6 +251,8 @@ async function renew(
   for (const folder of stirred) {
     const old = memory.records.get(folder) as FolderRecord;
     if (!old.tiered || old.names !== undefined) return false;
+    // A folder that is no longer the folder it was (another inode, or gone) is pinned afresh by a scan: its pin is its identity.
+    if (!sameFile(old.identity, batch.get(folder))) return false;
     const child = new Map<string, FileIdentity | undefined>();
     for (const [name, before] of old.child) {
       const now = await fs.identity(join(folder, name));
@@ -431,6 +438,17 @@ async function build(
         found = kept.child.get(rest);
         place = kept.place;
       } else found = rest === '' ? await memberOf(headPath, name) : await pick(target, true);
+      // Every member folder is pinned by its own identity whether or not it holds the file NOW, and the pin spends no
+      // budget: an alias of the FOLDER (a bind mount made at any time) is held however stale the folder's slice is, and
+      // a session that ended (its file removed) and is resumed (a new credential written into it) is held too. It
+      // lives on the folder's record, so it leaves with the folder, and costs one place per record, never a walk.
+      const folder = single ? visited.get(member) : undefined;
+      if (folder?.identity !== undefined) {
+        folder.folderPlace ??= placeOf(member, folder.identity);
+        places.push(folder.folderPlace);
+        // A pinned member folder answers its own device: an alias of a file on it is closed like an indexed place's.
+        tree.devices.add(folder.identity.device);
+      }
       if (found === undefined) continue;
       tree.devices.add(found.device);
       if (budget.left <= 0) {

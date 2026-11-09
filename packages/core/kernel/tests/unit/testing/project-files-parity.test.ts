@@ -331,6 +331,7 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
       'rename in a project folder',
       await answer(() => project.rename(at(project, '.claude/skills/x'), at(project, '.claude/skills/z'))),
     ],
+    ['unlink in a project folder', await answer(() => project.unlink(at(project, '.claude/skills/x/l')))],
     ['pin a project folder', await answer(() => project.pin(at(project, '.claude/skills/x')))],
     ['remove outside the set', await answer(() => project.remove(at(project, 'package.json')))],
     ['remove above a grant', await answer(() => project.remove(at(project, '.claude/skills')))],
@@ -478,6 +479,7 @@ test('S179 project-files parity: every case is answered alike on the testing hos
   expect(byCase['a second folder: the first one’s path']).toEqual({ refused: 'outside' });
   expect(byCase['linkTo in a project folder']).toEqual({ refused: 'read_only' });
   expect(byCase['rename in a project folder']).toEqual({ refused: 'read_only' });
+  expect(byCase['unlink in a project folder']).toEqual({ refused: 'read_only' });
   expect(byCase['pin a project folder']).toEqual({ refused: 'not_declared' });
   expect(byCase['a plugin without the root']).toEqual({ refused: 'not_declared' });
   expect(byCase['kind of the handle']).toEqual({ ok: ['project-files', false] });

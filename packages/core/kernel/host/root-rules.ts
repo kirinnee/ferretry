@@ -1,7 +1,7 @@
 /**
- * The pure rules of `RootHandle.linkTo`, `RootHandle.setMode`, `RootHandle.rename` and `RootsPort.harnessFile`
- * (§7.7): one fact, read by the real roots port (`./roots.ts`, which adds the descriptor checks) and by the testing
- * host, so a plugin's unit test meets exactly the refusals production makes.
+ * The pure rules of `RootHandle.linkTo`, `RootHandle.setMode`, `RootHandle.rename`, `RootHandle.unlink` and
+ * `RootsPort.harnessFile` (§7.7): one fact, read by the real roots port (`./roots.ts`, which adds the descriptor
+ * checks) and by the testing host, so a plugin's unit test meets exactly the refusals production makes.
  */
 import { posix } from 'node:path';
 import { insideFence } from '../contract/home.ts';
@@ -92,4 +92,25 @@ export function harnessFileRefusal(ask: HarnessFileAsk): HarnessFileRefusal | un
   if (!declared.includes(leaf)) return 'not_declared';
   if (insideFence(ask.home, path)) return 'fenced';
   return undefined;
+}
+
+/**
+ * The roots a link may be REMOVED from (`RootHandle.unlink`): the same internal, writable, kernel-made roots a link
+ * may be written into, and no other. Never an owner's root, never a read-only one.
+ */
+const UNLINK_ROOTS: ReadonlySet<RootName> = new Set(['fleet', 'agent-homes']);
+
+/** Whether `unlink` may remove a link inside this root. */
+export function takesUnlinks(name: RootName): boolean {
+  return UNLINK_ROOTS.has(name);
+}
+
+/**
+ * The refusal `unlink` gives before any disk is asked, from the name alone: `undefined` when it is sane. A name is a
+ * string without NUL, with no `..` segment and at least one segment.
+ */
+export function unlinkNameRefusal(name: string): 'outside' | undefined {
+  return typeof name !== 'string' || name === '' || name.includes('\0') || name.split('/').includes('..')
+    ? 'outside'
+    : undefined;
 }

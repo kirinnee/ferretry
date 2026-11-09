@@ -221,7 +221,10 @@ export interface AskBoards {
  * `ask.sources` — and its `ref` parses with that source's own schema before anything is written.
  */
 export function asksPort(
-  agenda: Pick<AgendaService, 'list' | 'raise' | 'resolve' | 'dismiss' | 'snooze' | 'unsnooze' | 'raisedObligation'>,
+  agenda: Pick<
+    AgendaService,
+    'list' | 'raise' | 'resolve' | 'dismiss' | 'snooze' | 'unsnooze' | 'raisedObligation' | 'raisedObligations'
+  >,
   boards: AskBoards,
   sources: (key: SourceKey) => AskSourceSpec | 'unavailable',
   tell?: NonNullable<AsksApi['tell']>,
@@ -237,15 +240,36 @@ export function asksPort(
     const listed = await agenda.list(ferret);
     return listed.ok ? listed.value : undefined;
   };
+  // The obligations this port holds, (source, entry) -> board. Built from one pass over the boards the first time a
+  // raise needs it, then kept current by this port's own raises (every raise goes through it), so a raise costs one
+  // lookup and one read of the target board, never a read of every board.
+  const held = new Map<string, AskRef>();
+  let indexed: Promise<void> | undefined;
+  const heldOn = async (ferret: string, sourceRef: string): Promise<AskRef | undefined> => {
+    const known = held.get(sourceRef);
+    if (known !== undefined) return known;
+    const direct = await agenda.raisedObligation(ferret, sourceRef);
+    if (direct !== undefined) return { ferret, id: direct as AskId };
+    indexed ??= (async () => {
+      for (const board of await boards.ferrets()) {
+        const ledger = await agenda.raisedObligations(board);
+        for (const [ref, id] of Object.entries(ledger))
+          if (!held.has(ref)) held.set(ref, { ferret: board, id: id as AskId });
+      }
+    })().catch(error => {
+      indexed = undefined;
+      throw error;
+    });
+    await indexed;
+    return held.get(sourceRef);
+  };
   const raise = async (draft: AskDraft, notice: boolean): Promise<AskRef> => {
     const parsed = AskDraftSchema.parse(draft);
     const ferret = boardOf(parsed);
     const sourceRef = obligationOf(parsed.source, parsed.entry);
     // (source, entry) identifies an obligation for life, even when retried on another board or with its source off.
-    for (const board of new Set([...(await boards.ferrets()), ferret])) {
-      const held = await agenda.raisedObligation(board, sourceRef);
-      if (held !== undefined) return { ferret: board, id: held as AskId };
-    }
+    const known = await heldOn(ferret, sourceRef);
+    if (known !== undefined) return known;
     checkSource(parsed);
     const kind = parsed.kind === 'notice' ? 'info' : parsed.kind;
     const ask = askForKind(kind, parsed.options ?? []);
@@ -266,11 +290,15 @@ export function asksPort(
     if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
     const id = mutation.item?.id ?? (await agenda.raisedObligation(ferret, sourceRef));
     if (id === undefined) throw new AskRefusedError('the board took the ask but named no item for it');
+    held.set(sourceRef, { ferret, id: id as AskId });
     return { ferret, id: id as AskId };
   };
-  const everyBoard = async <T>(read: (ferret: string, board: AgendaSnapshot) => readonly T[]): Promise<T[]> => {
+  const everyBoard = async <T>(
+    read: (ferret: string, board: AgendaSnapshot) => readonly T[],
+    only?: string,
+  ): Promise<T[]> => {
     const out: T[] = [];
-    for (const ferret of await boards.ferrets()) {
+    for (const ferret of only === undefined ? await boards.ferrets() : [only]) {
       const board = await snapshot(ferret).catch(() => undefined);
       if (board !== undefined) out.push(...read(ferret, board));
     }
@@ -327,10 +355,9 @@ export function asksPort(
     },
     open: async (filter: AskFilter) => {
       const state = filter.state ?? 'open';
-      const listed = await everyBoard((ferret, board) =>
-        filter.ferret !== undefined && filter.ferret !== ferret
-          ? []
-          : state === 'open'
+      const listed = await everyBoard(
+        (ferret, board) =>
+          state === 'open'
             ? board.items.map(item => summaryOf(ferret, item, 'open', sources))
             : board.resolved.map(item =>
                 summaryOf(
@@ -340,6 +367,7 @@ export function asksPort(
                   sources,
                 ),
               ),
+        filter.ferret,
       );
       return listed.filter(
         ask =>

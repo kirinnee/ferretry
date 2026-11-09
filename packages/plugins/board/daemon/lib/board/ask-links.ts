@@ -50,12 +50,17 @@ export class CardAskLinks implements CardAskLinkSource {
     private readonly homes: AskHomeLookup = SELF_HOMES,
   ) {}
 
-  async asksFor(cards: readonly Card[], board: readonly Card[] = cards): Promise<ReadonlyMap<CardId, CardAsks>> {
+  async asksFor(
+    cards: readonly Card[],
+    board: readonly Card[] = cards,
+    signal?: AbortSignal,
+  ): Promise<ReadonlyMap<CardId, CardAsks>> {
     const ferrets = [...new Set(board.flatMap(card => [card.owner, effectiveAssignee(card)]))];
     const homes = await Promise.all(ferrets.map(async each => await this.homes.of(each).catch(() => each)));
     const ledgers = [...new Set([...ferrets, ...homes])];
     const found = new Map<CardId, { open: AskRef[]; asking: AskRef[] }>();
     for (let start = 0; start < ledgers.length; start += ASK_READ_CONCURRENCY) {
+      signal?.throwIfAborted();
       const batch = ledgers.slice(start, start + ASK_READ_CONCURRENCY);
       const read = await Promise.all(batch.map(async ferret => [ferret, await this.read(ferret)] as const));
       for (const [ferret, items] of read) {
