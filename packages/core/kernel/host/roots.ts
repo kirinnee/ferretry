@@ -1578,6 +1578,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // name (a link leaf is removed as a link). The root's own folder has no parent inside the root, so it is judged
       // as itself.
       const { full, scope } = path === base() ? await real(path) : await realParent(path);
+      // What sits at the name is judged by its own identity, still without following it: a second name of a fenced
+      // file (the key, planted as a hard link) is refused, while a link leaf (never the thing it points at) goes.
+      const fence = scope.base.fence;
+      if (fence !== undefined) {
+        const found = await scope.fs.identity(full);
+        if (found !== undefined && found.kind !== 'link' && heldByFence(fence, [toComponent(found)])) refuse('fenced');
+      }
       await removeChecked(scope, full, removeOptions?.onlyIfEmpty === true);
     },
     linkTo: async (at: FencedPath, target: RootLinkTarget) => {
