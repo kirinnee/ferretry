@@ -43,11 +43,11 @@ export const OnboardingViewSchema = z.strictObject({
   /** Every step is found, done, later or skipped (none pending). */
   complete: z.boolean(),
   /**
-   * True when Runtimes `list()` names at least one runtime. That is the v4 meaning ("a runtime exists to start work
-   * with"): a runtime `list()` cannot name (an unknown harness) does not count, which only ever opens the steps page
-   * for a machine that has one. False when Runtimes is off or cannot be
-   * read. It is the machine's fact, not a step answer: a machine set up without `fy onboard` has every step `pending`
-   * and is still set up.
+   * True when Runtimes `list()` names at least one runtime: v4's "a runtime exists", counted through `list()`. v4
+   * counted every runtime key; a runtime `list()` leaves out (an unknown harness, or every login-derived one while
+   * Logins is unreadable) does not count here (a declared GAP). False when Runtimes is off or cannot be read. It is the
+   * machine's fact, not a step answer: a machine set up without `fy onboard` has every step `pending` and is still
+   * set up.
    */
   setUp: z.boolean(),
 });

@@ -61,33 +61,68 @@ export const unusedScriptHashes = (pages: readonly string[], headers: string): r
  * carries its own policy (the `fy-render` shells pin their scripts in a meta CSP), so it is not judged against `/*`.
  * Read from the file itself, never from a hand list: a new reviewed exclusion needs no edit here.
  */
-export const pathsWithOwnPolicy = (headers: string): readonly string[] => {
-  const found: string[] = [];
-  let current: string | undefined;
+export const pathsWithOwnPolicy = (headers: string): readonly string[] =>
+  headerRulesOf(headers)
+    .filter(rule => rule.lines.includes('! Content-Security-Policy'))
+    .map(rule => rule.pattern);
+
+/** One `_headers` block: the path pattern and its indented lines, trimmed. */
+interface HeaderRule {
+  readonly pattern: string;
+  readonly lines: readonly string[];
+}
+
+const headerRulesOf = (headers: string): readonly HeaderRule[] => {
+  const rules: { pattern: string; lines: string[] }[] = [];
   for (const line of headers.split('\n')) {
     if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
-    if (!/^\s/u.test(line)) current = line.trim();
-    else if (current !== undefined && line.trim() === '! Content-Security-Policy') found.push(current);
+    if (!/^\s/u.test(line)) rules.push({ pattern: line.trim(), lines: [] });
+    else rules.at(-1)?.lines.push(line.trim());
   }
-  return found;
+  return rules;
 };
 
 const patternMatches = (pattern: string, path: string): boolean =>
   new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/gu, '\\$&').replaceAll('*', '.*')}$`, 'u').test(path);
 
-/** The paths a built page is served at: its own, its extensionless twin (Pages' pretty URLs) and a directory's root. */
-const servedPathsOf = (name: string): readonly string[] => {
+/**
+ * The ONE spelling Cloudflare Pages serves a built file at: `/x` for `x.html`, `/d/` for `d/index.html`, `/` for the
+ * root `index.html`. Every other spelling (`/x.html`, `/d`, `/d/index.html`) is a 308 redirect, and `_headers` matches
+ * the path that was REQUESTED, so a rule on a redirecting spelling never reaches the document itself.
+ */
+export const servedPathOf = (name: string): string => {
   const path = `/${name}`;
-  if (path.endsWith('/index.html'))
-    return [path, path.slice(0, -'index.html'.length), path.slice(0, -'/index.html'.length)];
-  return path.endsWith('.html') ? [path, path.slice(0, -'.html'.length)] : [path];
+  if (path.endsWith('/index.html')) return path.slice(0, -'index.html'.length);
+  return path.endsWith('.html') ? path.slice(0, -'.html'.length) : path;
 };
 
-/** True when `_headers` removes this page's path from `/*` (it keeps its own policy). */
-export const hasOwnPolicy = (name: string, headers: string): boolean => {
-  const patterns = pathsWithOwnPolicy(headers);
-  return servedPathsOf(name).some(path => patterns.some(pattern => patternMatches(pattern, path)));
+/** True when `_headers` removes the spelling this page is SERVED at from `/*` (it keeps its own policy). */
+export const hasOwnPolicy = (name: string, headers: string): boolean =>
+  pathsWithOwnPolicy(headers).some(pattern => patternMatches(pattern, servedPathOf(name)));
+
+/** The `!` patterns that match only a redirecting spelling of the page, not the one it is served at. */
+const redirectingRulesOf = (name: string, headers: string): readonly string[] => {
+  const path = `/${name}`;
+  const others = [path, path.endsWith('/index.html') ? path.slice(0, -'/index.html'.length) : undefined];
+  return pathsWithOwnPolicy(headers).filter(
+    pattern =>
+      !patternMatches(pattern, servedPathOf(name)) &&
+      others.some(other => other !== undefined && patternMatches(pattern, other)),
+  );
 };
+
+/**
+ * True when a skipped page really carries its own policy: a `<meta http-equiv="Content-Security-Policy">` in the
+ * document, or a `_headers` rule on the spelling it is served at that sends a `Content-Security-Policy` of its own.
+ */
+export const carriesOwnPolicy = (name: string, source: string, headers: string): boolean =>
+  /<meta\s[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?/iu.test(source) ||
+  headerRulesOf(headers).some(
+    rule =>
+      rule.pattern !== '/*' && // the main policy is the one a `!` rule removes, not a policy of the page's own
+      patternMatches(rule.pattern, servedPathOf(name)) &&
+      rule.lines.some(line => /^Content-Security-Policy:/iu.test(line)),
+  );
 
 /** Every `.html` file under `dir` (the pages copied verbatim from `public/`), as `[path relative to dir, text]`. */
 export const htmlPagesUnder = (dir: string): readonly (readonly [string, string])[] => {
@@ -148,16 +183,31 @@ export function getStartedPagePlugin(options: GetStartedPageOptions): Plugin {
       }
       // Pages copied from `public/` never enter the bundle, but the main policy serves them all the same.
       for (const [name, source] of htmlPagesUnder(publicDir)) pages.push([name, source]);
-      // A page under a path `_headers` removes from `/*` (`! Content-Security-Policy`) keeps its own meta policy.
+      // A page whose SERVED spelling `_headers` removes from `/*` (`! Content-Security-Policy`) must carry its own policy.
       const governed = pages.filter(([name]) => !hasOwnPolicy(name, headers));
+      for (const [name, source] of pages) {
+        if (hasOwnPolicy(name, headers) && !carriesOwnPolicy(name, source, headers))
+          this.error(
+            `The ${name} page is served at ${servedPathOf(name)}, which _headers takes out of the main CSP, but it ` +
+              `carries no policy of its own: add a <meta http-equiv="Content-Security-Policy"> to the page or a ` +
+              `Content-Security-Policy line to its _headers rule.`,
+          );
+      }
       for (const [name, source] of governed) {
         const unlisted = unlistedScriptHashes(source, headers);
-        if (unlisted.length > 0)
-          this.error(
-            `The ${name} page has inline script(s) (${unlisted.join(' ')}) that the main CSP does not allow, so the ` +
-              `browser blocks them. Remove the inline script, or exclude the page's path in packages/app/public/_headers ` +
-              `(a reviewed choice: \`! Content-Security-Policy\` on its path, with the page carrying its own policy).`,
-          );
+        if (unlisted.length === 0) continue;
+        const redirecting = redirectingRulesOf(name, headers);
+        const served = servedPathOf(name);
+        this.error(
+          `The ${name} page has inline script(s) (${unlisted.join(' ')}) that the main CSP does not allow, so the ` +
+            `browser blocks them. ` +
+            (redirecting.length > 0
+              ? `A \`! Content-Security-Policy\` rule names ${redirecting.join(' ')}, a spelling Pages redirects: the ` +
+                `page is served at ${served}, so put the rule on ${served} instead. `
+              : '') +
+            `Remove the inline script, or exclude ${served} in packages/app/public/_headers ` +
+            `(a reviewed choice: \`! Content-Security-Policy\` on that path, with the page carrying its own policy).`,
+        );
       }
       const unused = unusedScriptHashes(
         governed.map(([, source]) => source),

@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  carriesOwnPolicy,
   cspHashOf,
+  servedPathOf,
   GET_STARTED_PAGE,
   getStartedPagePlugin,
   HEADERS_FILE,
@@ -223,7 +225,7 @@ describe('S14 m3 every HTML page the build emits is checked, not just this one',
       const { error } = build(plugin as unknown as BuildPlugin, asBundle({ 'index.html': landing }));
       expect(error).toContain('The ordinary.html page');
       expect(error).toContain('Remove the inline script');
-      expect(error).toContain('exclude the page');
+      expect(error).toContain('exclude /ordinary');
       expect(error).not.toContain('add ');
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -235,6 +237,64 @@ describe('S14 m3 every HTML page the build emits is checked, not just this one',
     expect(hasOwnPolicy('fy-render-html.html', headers)).toBe(true);
     expect(hasOwnPolicy('index.html', headers)).toBe(false);
     expect(hasOwnPolicy('oauth/callback.html', headers)).toBe(false);
+  });
+
+  /** Runs the real plugin over a temp `public/` holding `files`, with `_headers` replaced by `headerText`. */
+  const buildWith = (files: Record<string, string>, headerText: string): string | undefined => {
+    const dir = mkdtempSync(join(tmpdir(), 'fy-get-started-'));
+    try {
+      for (const [name, text] of Object.entries(files)) {
+        mkdirSync(join(dir, name, '..'), { recursive: true });
+        writeFileSync(join(dir, name), text);
+      }
+      const planted = join(dir, '_headers.txt');
+      writeFileSync(planted, headerText);
+      const plugin = getStartedPagePlugin({ version: release.version, publicDir: dir, headersPath: planted });
+      return build(plugin as unknown as BuildPlugin, asBundle({ 'index.html': landing })).error;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const base = headers.slice(0, headers.indexOf('# The `fy-render` sandbox shell'));
+  const own = '<meta http-equiv="Content-Security-Policy" content="x"><script>shell()</script>';
+  const bang = (path: string): string => `${base}\n${path}\n  ! Content-Security-Policy\n`;
+
+  it('m1 a `!` rule on the REDIRECT spelling only does not skip the page; the SERVED spelling does', () => {
+    // x.html is served at /x
+    const onHtml = buildWith({ 'x.html': own }, bang('/x.html'));
+    expect(onHtml).toContain('The x.html page');
+    expect(onHtml).toContain('/x.html, a spelling Pages redirects');
+    expect(onHtml).toContain('put the rule on /x');
+    expect(buildWith({ 'x.html': own }, bang('/x'))).toBeUndefined();
+    // d/index.html is served at /d/
+    expect(buildWith({ 'd/index.html': own }, bang('/d'))).toContain('The d/index.html page');
+    expect(buildWith({ 'd/index.html': own }, bang('/d/index.html'))).toContain('The d/index.html page');
+    expect(buildWith({ 'd/index.html': own }, bang('/d/'))).toBeUndefined();
+  });
+
+  it('m1 servedPathOf is the one spelling Pages serves', () => {
+    expect(servedPathOf('x.html')).toBe('/x');
+    expect(servedPathOf('d/index.html')).toBe('/d/');
+    expect(servedPathOf('index.html')).toBe('/');
+    expect(hasOwnPolicy('x.html', bang('/x.html'))).toBe(false);
+    expect(hasOwnPolicy('x.html', bang('/x'))).toBe(true);
+  });
+
+  it('n1 a skipped page’s inline script does not count as using a `/*` hash: an unused `/*` hash is refused', () => {
+    const listed = `${base.replace("script-src 'self'", `script-src 'self' ${cspHashOf('shell()')}`)}\n/x\n  ! Content-Security-Policy\n`;
+    const error = buildWith({ 'x.html': own }, listed);
+    expect(error).toContain(cspHashOf('shell()'));
+    expect(error).toContain('no page');
+  });
+
+  it('n3 a skipped page with no policy of its own fails; a meta CSP or a `_headers` CSP line on its path passes', () => {
+    const bare = '<script>shell()</script>';
+    expect(buildWith({ 'x.html': bare }, bang('/x'))).toContain('carries no policy of its own');
+    expect(buildWith({ 'x.html': own }, bang('/x'))).toBeUndefined();
+    expect(
+      buildWith({ 'x.html': bare }, `${bang('/x')}  Content-Security-Policy: frame-ancestors 'self'\n`),
+    ).toBeUndefined();
+    expect(carriesOwnPolicy('x.html', bare, bang('/x'))).toBe(false);
   });
 
   it('n2 hashes the STAMPED page: a placeholder inside a script cannot pass on the strength of its unstamped text', () => {
