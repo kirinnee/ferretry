@@ -314,12 +314,14 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
       const hook: { current?: Hook } = {};
       const { store, linked, reader } = await seed(hook);
       const target = join(store, 'grow.toml');
-      const longer = Array.from(
+      // The judged file ends inside a comment, so the one-byte-longer prefix of what it grows into is STILL valid TOML: only
+      // the size comparison (not the parse) can refuse it.
+      const longer = `x\n${Array.from(
         { length: 100 },
         (_, index) => `k${String(index).padStart(3, '0')} = "${SECRET}"\n`,
-      ).join('');
-      await writeFile(target, 'a000 = 11\n');
-      await writeFile(join(store, 'bigger.toml'), longer);
+      ).join('')}`;
+      await writeFile(target, 'a = 1\n#');
+      await writeFile(join(store, 'bigger.toml'), `a = 1\n#${longer}`);
       await symlink(target, join(linked, 'config.toml'));
       let grown = false;
       hook.current = async (method, path) => {
