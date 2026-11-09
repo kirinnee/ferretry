@@ -12,9 +12,11 @@
  *     load from it and every subresource it lists, from bytes re-hashed on the way out, with the headers `_headers`
  *     names; leave everything else — every daemon request included — exactly as the page sent it;
  *   - message: answer the page's "check now", "what happened" and "is this new worker signed?";
- *   - push / notificationclick: show a push's envelope (`push-envelope.ts`) titled for the machine whose registration this
- *     copy is, carrying the page it named only when the shell's route parse accepts it; on a tap open that page — never
- *     another origin or machine's (`notifications.ts`).
+ *   - push / notificationclick: read the push as the kernel's message (`readPushMessage`). A SHOW is filtered by this device's
+ *     own document (`filter-document.ts`), titled for the machine whose registration this copy is, filed under that
+ *     machine's tag, grouped and replaced in place, and carries the page it named only when the shell's route parse
+ *     accepts it (`notify-group.ts`, `notifications.ts`). A CLEAR names tags and nothing else and takes those lines down
+ *     (`push-clear.ts`). On a tap open that page — never another origin or machine's.
  *
  * NO PLUGIN CODE RUNS IN THIS WORKER. Every byte is the shell's own: the build compiles this file and nothing else, and
  * FAILS if any `packages/{core,plugins}/<id>/app/worker.ts` exists. Code evaluated in this realm could rewrite the
@@ -33,17 +35,22 @@
 
 import type { ReleaseHeaderRule } from '../release/headers.ts';
 import { answerReleaseRequest, parseReleaseRequest, ReleaseKeeper } from '../release/keeper.ts';
+import { readPushMessage } from '@ferretry/kernel/contract/push-envelope';
+import { shouldShowPush } from '@ferretry/kernel/contract/notification-filter';
 import { isLoopbackHost } from '../release/loopback.ts';
 import type { ReleaseRewrite } from '../release/manifest.ts';
 import { CacheStorageReleaseCaches, FetchReleaseNetwork, IndexedDbReleaseState } from '../release/storage.ts';
+import { readFilterDocument } from './filter-document.ts';
+import { filteredPushNotification, machineShow, showGroupedNotification } from './notify-group.ts';
 import {
   notificationBrand,
-  notificationClickUrl,
+  notificationClick,
   notificationWindow,
   openInWindow,
-  presentPush,
   pushMachineOf,
+  unreadablePush,
 } from './notifications.ts';
+import { applyClear, RecentlyCleared, settleIfCleared, type ClearRegistration } from './push-clear.ts';
 
 declare const __FY_RELEASE_KEY__: string;
 declare const __FY_RELEASE_REWRITES__: readonly ReleaseRewrite[];
@@ -67,6 +74,11 @@ interface PushEvent extends ExtendableEvent {
 interface NotificationEvent extends ExtendableEvent {
   readonly notification: { readonly data?: unknown; close(): void };
 }
+/** What a registration holds that the push handler uses: showing, listing and closing lines, and its subscription. */
+type PushRegistration = ClearRegistration & {
+  readonly scope: string;
+  showNotification(title: string, options?: NotificationOptions): Promise<void>;
+};
 interface WindowClientLike {
   readonly url: string;
   readonly focused: boolean;
@@ -77,18 +89,7 @@ interface WindowClientLike {
 }
 interface WorkerScope {
   readonly location: { readonly origin: string; readonly hostname: string; readonly href: string };
-  readonly registration: {
-    readonly scope: string;
-    showNotification(
-      title: string,
-      options: {
-        readonly body: string;
-        readonly icon: string;
-        readonly badge: string;
-        readonly data?: { readonly url: string };
-      },
-    ): Promise<void>;
-  };
+  readonly registration: PushRegistration;
   readonly clients: {
     claim(): Promise<void>;
     matchAll(options: { type: 'window'; includeUncontrolled?: boolean }): Promise<readonly WindowClientLike[]>;
@@ -106,6 +107,8 @@ const worker = globalThis as unknown as WorkerScope;
 const origin = worker.location.origin;
 /** The machine this copy serves, or `null` for the app-wide registration. Fixed for the worker's life. */
 const machine = pushMachineOf(worker.registration.scope, worker.location.href);
+/** The order pushes reached this worker, and what each clear took down (`push-clear.ts`). */
+const recentlyCleared = new RecentlyCleared(() => Date.now());
 
 const network = new FetchReleaseNetwork((input, init) => globalThis.fetch(input, init), origin);
 const keeper = new ReleaseKeeper({
@@ -179,39 +182,79 @@ worker.addEventListener('message', event => {
 });
 
 worker.addEventListener('push', event => {
-  // The envelope (`title`, `body`, `url`) is the only part of a push this worker reads (`push-envelope.ts`). One that has none
-  // is shown plainly: a subscription that receives a push and shows nothing is penalised by the browser and revoked.
+  // Its place in arrival order, taken before anything is awaited (`RecentlyCleared`).
+  const place = recentlyCleared.arrived();
   let json: unknown = null;
   try {
     json = event.data?.json() ?? null;
   } catch {
     json = null;
   }
-  const shown = presentPush(json, origin, machine);
+  // The kernel's message, picked by name and parsed strictly; `null` is unreadable. Total — it never throws.
+  const message = readPushMessage(json);
+  const registration = worker.registration;
+  // A subscription that receives a push and shows nothing is penalised by the browser and revoked: whatever goes wrong
+  // below, something quiet is shown rather than nothing.
+  const plain = async (): Promise<void> => {
+    const unreadable = unreadablePush(machine);
+    await registration.showNotification(unreadable.title, { ...notificationBrand(), body: unreadable.body });
+  };
   event.waitUntil(
-    worker.registration
-      .showNotification(shown.title, {
-        ...notificationBrand(),
-        body: shown.body,
-        ...(shown.data === undefined ? {} : { data: shown.data }),
-      })
-      .catch(() => undefined),
+    (async () => {
+      if (message === null) return await plain();
+      if (message.type === 'clear') {
+        // A handled item: its lines come down here, never through the filter — a clear carries nothing to hide.
+        const { clear } = message;
+        await recentlyCleared.serial(
+          async () => await applyClear(registration, clear, machine, origin, { recent: recentlyCleared, place }),
+        );
+        return;
+      }
+      const { show } = message;
+      // This device's own filter is the only thing left that decides (a service worker cannot read `localStorage`): the
+      // document Agenda keeps in IndexedDB, evaluated by the kernel's one decision so the page and the worker agree.
+      const document = await readFilterDocument(globalThis.indexedDB);
+      const visible = shouldShowPush(
+        document,
+        { kind: show.kind ?? null, daemon: machine?.daemonId ?? null },
+        new Date(),
+      );
+      if (!visible) {
+        // The least-bad compliant answer: quiet, never the suppressed words, one fixed tag per machine.
+        const quiet = filteredPushNotification(machine, origin);
+        await registration.showNotification(quiet.title, quiet.options);
+        return;
+      }
+      const shown = machineShow(show, machine, origin);
+      // One show or clear at a time, so a clear always sees this line once it is up; and a clear that arrived after this
+      // push, while it read its filter, settles it as the clear would have instead of letting it show.
+      await recentlyCleared.serial(async () => {
+        if (
+          shown.tag !== undefined &&
+          (await settleIfCleared(registration, shown.tag, recentlyCleared, place, machine, origin))
+        )
+          return;
+        await showGroupedNotification(registration, shown);
+      });
+    })().catch(async () => {
+      // A show that failed part-way still leaves the reader something (never for a clear, which has nothing to say).
+      if (message?.type !== 'clear') await plain().catch(() => undefined);
+    }),
   );
 });
 
 worker.addEventListener('notificationclick', event => {
   event.notification.close();
-  const data = event.notification.data as { readonly url?: unknown } | undefined;
   // Only this site's own pages, and only this machine's: a notification can never open another origin, and one
   // machine's notification can never open another machine's pages.
-  const url = notificationClickUrl(data?.url, origin, machine);
+  const { url, tag } = notificationClick(event.notification.data, origin, machine);
   const openWindow = (target: string): Promise<unknown> => worker.clients.openWindow(target);
   event.waitUntil(
     worker.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async windows => {
       const open = notificationWindow(windows, origin);
       if (open === undefined) return await openWindow(url);
-      // Routed by the page itself when it answers (`notifications.ts`): a navigate here would reload the whole app.
-      return await openInWindow(open, url, openWindow);
+      // Routed by the page itself when it answers (`notification-open.ts`): a navigate here would reload the whole app.
+      return await openInWindow(open, url, openWindow, undefined, tag);
     }),
   );
 });

@@ -83,11 +83,27 @@ export function componentScope(kind: ComponentKind, component: unknown): Harness
 export const scopeFits = (scope: HarnessScope, harness: HarnessKind): boolean =>
   scope === 'generic' || scope === harness;
 
+/**
+ * What one walk has learned: every base's derived scope, remembered the first time it is folded, so a lattice of
+ * shared bases costs one fold per profile, not one per path.
+ *
+ * It is remembered EVEN WHEN a loop was cut below it (`visiting` cuts a base that is already on the chain), and that is
+ * equivalent to folding every path: a scope is a union of the harnesses reachable (order never matters), a base's FIRST
+ * fold visits everything below it that no chain node cuts, and a later read of its remembered value can only repeat
+ * what that first fold already gave to an earlier layer (or to a layer enclosing this one), so the walk's answer —
+ * which harnesses its own layers have, and the FIRST layer of each — is the one the per-path fold gives. In effect the
+ * memo is a visited set. Remembering only loop-free subtrees (the earlier rule) was the exponential: a draft that edits
+ * a base to reach back to itself cuts under every path, so nothing was remembered. The seeded random graphs and drafts
+ * in `account-scope-memo.test.ts` hold this against the per-path fold.
+ */
+type Walk = Map<string, HarnessScope | 'mixed'>;
+
 /** A layer's scope: a component's own, or a base profile's derived one (`mixed` when it is). */
 function layerScope(
   catalogue: Catalogue,
   reference: LayerReferenceText,
   visiting: ReadonlySet<string>,
+  walk: Walk,
 ): HarnessScope | 'mixed' {
   const parsed = parseLayerReference(reference);
   if (parsed === undefined) return 'generic';
@@ -96,17 +112,27 @@ function layerScope(
     return component === undefined ? 'generic' : componentScope(parsed.componentKind, component);
   }
   const base = catalogue.profiles[parsed.name];
-  if (base === undefined || visiting.has(parsed.name)) return 'generic';
-  const scope = foldLayers(catalogue, base.layers, new Set([...visiting, parsed.name]));
-  return scope.kind === 'mixed' ? 'mixed' : scope.scope;
+  if (base === undefined) return 'generic';
+  if (visiting.has(parsed.name)) return 'generic';
+  const known = walk.get(parsed.name);
+  if (known !== undefined) return known;
+  const scope = foldLayers(catalogue, base.layers, new Set([...visiting, parsed.name]), walk);
+  const derived = scope.kind === 'mixed' ? 'mixed' : scope.scope;
+  walk.set(parsed.name, derived);
+  return derived;
 }
 
-function foldLayers(catalogue: Catalogue, layers: readonly string[], visiting: ReadonlySet<string>): ProfileScope {
+function foldLayers(
+  catalogue: Catalogue,
+  layers: readonly string[],
+  visiting: ReadonlySet<string>,
+  walk: Walk = new Map(),
+): ProfileScope {
   let claude: LayerReferenceText | undefined;
   let codex: LayerReferenceText | undefined;
   for (const text of layers) {
     const reference = text as LayerReferenceText;
-    const scope = layerScope(catalogue, reference, visiting);
+    const scope = layerScope(catalogue, reference, visiting, walk);
     if ((scope === 'claude' || scope === 'mixed') && claude === undefined) claude = reference;
     if ((scope === 'codex' || scope === 'mixed') && codex === undefined) codex = reference;
   }

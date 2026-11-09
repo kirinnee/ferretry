@@ -20,7 +20,7 @@
  *   - canSubmitComposer ..................................... copy of today's `session-screens.ts` one-liner (C3's split).
  */
 
-import { type ComposerDaemonId, DaemonCallError } from '@ferretry/app';
+import { type ComposerDaemonId, DaemonCallError, isCarrierOutage } from '@ferretry/app';
 
 export {
   clearForegroundPinScope,
@@ -51,8 +51,9 @@ export { DaemonCallError };
 
 /**
  * Whether a request that failed on the carrier may have reached the daemon: `unsent` (proved not to have left), or
- * `unknown`; `undefined` for anything that is not a carrier outage. GAP(app-shell): the 5.0 client marks no outage yet,
- * so this walks the chain for a `delivery` mark exactly as today's walk did and, absent one, says "not an outage".
+ * `unknown`; `undefined` for anything that is not a carrier outage. The 5.0 client marks an outage (S12,
+ * `isCarrierOutage`) but cannot prove a request never left, so a marked outage reads `unknown` ("checking whether it
+ * arrived") and never `unsent`; a `delivery` mark found down the chain still wins, as today's walk read it.
  */
 export type CarrierDelivery = 'unsent' | 'unknown';
 
@@ -63,7 +64,7 @@ export const carrierDelivery = (reason: unknown): CarrierDelivery | undefined =>
     if (delivery === 'unsent' || delivery === 'unknown') return delivery;
     current = current.cause;
   }
-  return undefined;
+  return isCarrierOutage(reason) ? 'unknown' : undefined;
 };
 
 // ─── Agenda's "re:" chips (copies of today's agenda-reply.ts / answer-chip.ts) ────────────────────────────────────

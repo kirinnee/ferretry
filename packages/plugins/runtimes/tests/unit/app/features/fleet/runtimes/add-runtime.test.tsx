@@ -7,18 +7,24 @@ import { useState } from 'react';
 import { interact, type Mounted, mount as mountView, must } from '../../../../support/dom.ts';
 import {
   APPLIED,
+  BACKUP_PATH,
   type Call,
   CHANGE_ID,
+  COMMITTED,
   CREDENTIALS,
   credential,
   DATA,
+  LANDED_FILE,
   machine,
   PROFILES,
   profile,
   READS,
+  ROLLBACK_INCOMPLETE,
+  ROLLED_BACK,
   runtime,
   scripted,
   stagedFrom,
+  UNRESTORED_PATH,
   withStatus,
 } from '../account-support.ts';
 import { credentialsOf, NOT_INSTALLED_CODEX, refusal, withRuntime } from './support-b.ts';
@@ -519,6 +525,51 @@ describe('Add runtime: Name and Create', () => {
     expect(text(view.container, '[data-add-runtime-done]')).toContain(
       'Claude hooks profile. Sign in before you launch.',
     );
+  });
+
+  it('R3-M1: a rolled-back apply names the file that stayed, and the form does not say the runtime is made', async () => {
+    const reloads: string[] = [];
+    const view = await ready({
+      reloads,
+      routes: { ...READS(), [PROPOSE]: (call: Call) => stagedFrom(call), [APPLY]: ROLLED_BACK },
+    });
+    await click(view.container, '[data-change-submit]');
+    await waitFor(view.container, '[data-change-refusal]');
+    const alert = must(view.container.querySelector('[data-change-refusal]'), 'alert');
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toStartWith('This change was not applied: the fleet apply failed and was rolled back.');
+    expect(alert.textContent).toContain(LANDED_FILE);
+    expect(alert.textContent).toContain('remove that file');
+    expect(view.container.querySelector('[data-add-runtime-done]')).toBeNull();
+    expect(nameInput(view.container).value).toBe('claude-claude-hooks');
+    expect(reloads).toEqual([]);
+  });
+
+  it('R3-M1: a rollback-incomplete apply names the paths left partly changed and says the machine needs a look', async () => {
+    const reloads: string[] = [];
+    const view = await ready({
+      reloads,
+      routes: { ...READS(), [PROPOSE]: (call: Call) => stagedFrom(call), [APPLY]: ROLLBACK_INCOMPLETE },
+    });
+    await click(view.container, '[data-change-submit]');
+    await waitFor(view.container, '[data-change-refusal]');
+    const said = text(view.container, '[data-change-refusal]');
+    expect(said).toContain('could not be fully put back');
+    expect(said).toContain('needs a look');
+    expect(said).toContain(UNRESTORED_PATH);
+    expect(said).toContain(BACKUP_PATH);
+    expect(said).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-add-runtime-done]')).toBeNull();
+    expect(reloads).toEqual([]);
+  });
+
+  it('R3-M1: a finished apply still makes the runtime', async () => {
+    const view = await ready({
+      routes: { ...READS(), [PROPOSE]: (call: Call) => stagedFrom(call), [APPLY]: COMMITTED },
+    });
+    await click(view.container, '[data-change-submit]');
+    await waitFor(view.container, '[data-add-runtime-done]');
+    expect(view.container.querySelector('[data-change-refusal]')).toBeNull();
   });
 
   it('a refusal is one sentence on the form, and nothing moves on until it works', async () => {

@@ -13,6 +13,7 @@ import { composerSkills } from './lib/composer.ts';
 import { MAX_SKILL_MANIFEST_BYTES, SkillsInventoryService } from './lib/inventory.ts';
 import { inventoryRoutes } from './routes.ts';
 import { skillParts } from './lib/launch-parts.ts';
+import { skillsComponentSource } from './lib/profile-component-source.ts';
 import { SkillStore } from './lib/skill-store.ts';
 import { skillReferenceProvider } from './lib/reference-catalog.ts';
 
@@ -86,6 +87,10 @@ export default implementDaemon(manifest, {
         // The composer's `/` and `$` menus: one provider, because Claude's `/name` and Codex's `$name` are one skill.
         'reference.catalog:/': skillReferenceProvider(api.forComposer),
         'reference.catalog:$': skillReferenceProvider(api.forComposer),
+        // Runtimes' read of the `skills` components a profile names: this plugin's own items, live, no cache.
+        'runtimes.components.skills:components': skillsComponentSource(() =>
+          kernel.config.collection(SKILLS_CONFIG as ConfigCollectionDef<SkillsItem>),
+        ),
         'launch.parts': () => [
           {
             id: 'skills',

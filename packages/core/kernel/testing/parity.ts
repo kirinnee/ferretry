@@ -68,6 +68,24 @@ const canonical = (value: unknown): string =>
       ? JSON.stringify(Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))))
       : String(value);
 
+export interface FieldDiff {
+  readonly field: (typeof COMPARED)[number];
+  readonly before: string;
+  readonly after: string;
+}
+
+/** Every compared field that differs between today's row and 5.0's (a field today could not resolve is skipped). */
+export function fieldDiffs(was: DescriptorRow, now: DescriptorRow): FieldDiff[] {
+  const out: FieldDiff[] = [];
+  for (const field of COMPARED) {
+    const before = was[field];
+    if (typeof before === 'string' && before.startsWith('unresolved:')) continue;
+    if (canonical(before) !== canonical(now[field]))
+      out.push({ field, before: canonical(before), after: canonical(now[field]) });
+  }
+  return out;
+}
+
 export interface ParityResult {
   readonly findings: readonly Finding[];
   readonly unresolved: number;
@@ -85,6 +103,9 @@ export function parity(
   const findings: Finding[] = [];
   let unresolved = 0;
   const recorded = (key: string, change: string): boolean => changes.get(key)?.change === change;
+  // A 5.0-only route that replaces a removed one and differs from it as its reason says (checked against its pair by
+  // `movedFindings`) is recorded `moved-changed`; it is a new route as far as this comparison goes.
+  const recordedAdded = (key: string): boolean => recorded(key, 'added') || recorded(key, 'moved-changed');
   for (const [key, was] of todayBy) {
     const now = nextBy.get(key);
     const where = `${was.table} ${was.key}`;
@@ -93,29 +114,25 @@ export function parity(
         findings.push({ check, where, message: `today has it; 5.0 declares no ${was.table} ${was.key}` });
       continue;
     }
-    const diffs: string[] = [];
     // Today an agent tool is an MCP wrapper in `fy` with no descriptor of its own: only its presence is compared.
     if (was.table === 'tool') continue;
+    const diffs = fieldDiffs(was, now);
     for (const field of COMPARED) {
       const before = was[field];
-      if (typeof before === 'string' && before.startsWith('unresolved:')) {
-        unresolved++;
-        continue;
-      }
-      const after = now[field];
-      if (canonical(before) !== canonical(after)) diffs.push(`${field} ${canonical(before)} → ${canonical(after)}`);
+      if (typeof before === 'string' && before.startsWith('unresolved:')) unresolved++;
     }
-    if (diffs.length > 0 && !recorded(key, 'changed')) findings.push({ check, where, message: diffs.join('; ') });
+    if (diffs.length > 0 && !recorded(key, 'changed'))
+      findings.push({ check, where, message: diffs.map(d => `${d.field} ${d.before} → ${d.after}`).join('; ') });
   }
   for (const [key, now] of nextBy)
-    if (!todayBy.has(key) && !recorded(key, 'added'))
+    if (!todayBy.has(key) && !recordedAdded(key))
       findings.push({ check, where: `${now.table} ${now.key}`, message: 'new in 5.0; record it with a reason' });
   for (const [key, { change }] of changes) {
     const inToday = todayBy.has(key);
     const inNext = nextBy.has(key);
     const stale =
       (change === 'removed' && (inNext || !inToday)) ||
-      (change === 'added' && (inToday || !inNext)) ||
+      ((change === 'added' || change === 'moved-changed') && (inToday || !inNext)) ||
       (change === 'changed' && !(inToday && inNext));
     if (stale)
       findings.push({

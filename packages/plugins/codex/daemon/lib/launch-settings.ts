@@ -5,8 +5,9 @@ import {
   type HarnessLaunchSettings,
 } from '@ferretry/core-ferrets/contract';
 import { canonicalJson } from '@ferretry/std';
-import type { CodexLaunchSettingsRecord, HarnessConfig } from '../../contract/index.ts';
+import type { CodexLaunchSettingsRecord, HarnessConfig, SettingsItem } from '../../contract/index.ts';
 import { codexFixedArguments } from './fixed-layer.ts';
+import { settingsDocument } from './settings.ts';
 
 /**
  * WHAT A CODEX LAUNCH RAN UNDER, AS FINGERPRINTS (W2-c; today's `FileLaunchSettingsDigest`, `fyd.ts:8020`).
@@ -29,13 +30,22 @@ function fingerprint(value: unknown): string {
   return createHash('sha256').update(spelled.text, 'utf8').digest('hex');
 }
 
-/** One fingerprint per section of what a launch would run under with this permission mode. */
-export function codexLaunchSettingsRecord(permissionMode: HarnessConfig['permissionMode']): CodexLaunchSettingsRecord {
+/**
+ * One fingerprint per section of what a launch would run under with this permission mode and these settings items
+ * (`config/codex/settings/`, merged into every Codex home's `config.toml`, so a changed item is a relaunch for a running
+ * ferret exactly as Claude Code's is). There is no `hooks` section: this plugin has no hooks collection yet, so no hook
+ * reaches a Codex home and there is nothing to fingerprint.
+ */
+export function codexLaunchSettingsRecord(
+  permissionMode: HarnessConfig['permissionMode'],
+  items: ReadonlyMap<string, SettingsItem>,
+): CodexLaunchSettingsRecord {
   return {
     format: 1,
     sections: {
       'permission-mode': fingerprint(permissionMode),
       'fixed-layer': fingerprint(codexFixedArguments(permissionMode, FOLDER_STAND_IN)),
+      settings: fingerprint(settingsDocument(items)),
     },
   };
 }

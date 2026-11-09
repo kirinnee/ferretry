@@ -40,6 +40,13 @@ export function wholeDaemonSentence(remedy: Remedy): string {
     : 'Reload to get the new app.';
 }
 
+/**
+ * Said when a session ended with the device-refused close (`4403`): the machine no longer accepts this browser, or the
+ * carrier said so. Nothing is deleted — the key and the pairing stay — and pairing again is the repair (S12).
+ */
+export const DEVICE_NOT_ACCEPTED_SENTENCE =
+  'This machine no longer accepts this browser — it was removed, or went unused for too long. Pair it again to keep using it.';
+
 /** The one line for a blocked package, or `undefined` when it is allowed. */
 export function blockedLine(
   title: string,

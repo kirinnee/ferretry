@@ -160,7 +160,7 @@ describe('mcpFileOnly: a kernel root narrowed to the one .mcp.json', () => {
     expect(calls).toEqual(['resolve:.mcp.json']);
   });
 
-  test('lists, writes, copies, makes, pins and removes nothing, not even .mcp.json', async () => {
+  test('lists, writes, copies, makes, pins, removes and moves nothing, not even .mcp.json', async () => {
     // Arrange
     const calls: string[] = [];
     const source = kernelRoot(REPO, FILES, calls);
@@ -180,6 +180,7 @@ describe('mcpFileOnly: a kernel root narrowed to the one .mcp.json', () => {
     await expect(root.pin(file.value)).rejects.toThrow(/does not hold a folder open/u);
     await expect(root.realPath(file.value)).rejects.toThrow(/does not resolve a path/u);
     await expect(root.remove(file.value)).rejects.toThrow(/does not remove/u);
+    await expect(root.rename(file.value, file.value)).rejects.toThrow(/does not move an entry/u);
     expect(calls).toEqual(['resolve:.mcp.json']);
   });
 });

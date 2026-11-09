@@ -1,9 +1,10 @@
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { audit, cap } from '@ferretry/core-gate/contract';
-import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
+import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { PROFILE_COMPONENTS_KEY, ProfileMcpSource } from '@ferretry/plugin-runtimes/contract';
 import {
   MCP_AUDIT,
   MCP_CONFIG,
@@ -24,10 +25,10 @@ import {
  * descriptor fields copied exactly. Paths follow §3.2/§1.4: `/v1/fleet/mcp-auth…` → `/v1/mcp/auth…`;
  * `/v1/sessions/:sessionId/…` → `/v1/ferrets/:ferretId/…`.
  *
- * GAPS (for the port / the lead): `permissions.spawn` and `permissions.network` cannot be enumerated here. A check starts
- * the owner's own stdio command (any program) and a remote server or its authorization server is any host the owner
- * names; today's code spawns and fetches freely. The kernel ports refuse what is undeclared, so the port needs a
- * decision on a data-driven allowance before `ports-pending` can drop `mcp`.
+ * GAPS (for the port / the lead): `permissions.spawn` is empty and a check's own network reach is undeclared. A check
+ * starts the owner's own stdio command (any program) and reaches the server it checks; today's code spawns and fetches
+ * freely. The kernel ports refuse what is undeclared, so the check needs the data-driven allowance (the M3 unit) before
+ * `ports-pending` can drop `mcp`. The sign-in's reach is declared (`network`, the `mcp-sign-in` resolver).
  */
 export default definePlugin({
   id: 'mcp',
@@ -182,10 +183,25 @@ export default definePlugin({
 
   ui: {
     // Info › Folder › MCP and the Tools row of a ferret (docs/mcp-scopes.md).
-    panels: [panel('ferret.side', { id: 'mcp-servers', order: 40 })],
+    panels: [
+      panel('ferret.side', { id: 'mcp-servers', order: 40 }),
+      // Ferrets' Actions ▾ menu: MCP's own row, "Add MCP server…".
+      panel(ACTIONS_ROW_SLOT, { id: 'add-mcp-row', order: 10 }),
+    ],
     settings: [settingsTab('mcp', { label: 'MCP servers', order: 50 })],
   },
 
+  /** Never reached by a ferret, through any root: the sealed OAuth refresh tokens and client secrets (`PrivacyDecl`). */
+  privacy: {
+    private: ['oauth-secrets.json'],
+    public: [
+      {
+        path: 'oauth.json',
+        reason:
+          'Sign-in facts that are not secret: issuer, endpoints, client id and expiry, never a token; the refresh tokens are sealed in oauth-secrets.json.',
+      },
+    ],
+  },
   data: {
     state: [MCP_INVENTORY_STATE, MCP_OAUTH_STATE, MCP_OAUTH_SECRETS.state, MCP_PAYLOADS_STATE],
     config: [MCP_CONFIG],
@@ -194,7 +210,8 @@ export default definePlugin({
   },
 
   hooks: {
-    takes: [{ hook: LaunchParts }],
+    // Runtimes reads the `mcp` components a profile names through this plugin, which alone owns them (its `takers` list).
+    takes: [{ hook: LaunchParts }, { hook: ProfileMcpSource, key: PROFILE_COMPONENTS_KEY }],
   },
 
   doctor: ['mcp-inventory'],
@@ -203,8 +220,9 @@ export default definePlugin({
     // `work`: a ferret's own folder. `imports`: ONLY the `.mcp.json` of a registered project root or a live managed
     // worktree, read-only (lead ruling (B); `daemon/adapters/project-root-files.ts`).
     roots: ['work', 'imports'],
-    // GAP: see the note above. Declared empty rather than guessed.
-    network: [],
+    // Sign-in: the servers being signed in to, and the issuer and endpoints their metadata named, answered by the
+    // `mcp-sign-in` resolver (`daemon/lib/reach.ts`). The check's own reach is still the GAP above.
+    network: [{ resolver: 'mcp-sign-in' }],
     spawn: [],
     secrets: [],
     // The OAuth access tokens a sign-in files in the Vault (`mcpOAuthSecretNames`): today's exact names, and no others.

@@ -11,10 +11,12 @@ import {
   BudgetsTab,
   ComposerQuotaPanel,
   FerretInsightsPanel,
+  FerretUsageInfoPanel,
   InsightsScreen,
   ModelPricingTab,
   PerformanceTab,
   QuotaPanel,
+  SpendTodayPanel,
 } from './views.tsx';
 
 /**
@@ -43,6 +45,9 @@ export default implementApp(manifest, {
             store: usage,
             ...(props.account === undefined ? {} : { account: props.account }),
           }),
+        usage: ({ subject }) =>
+          createElement(FerretUsageInfoPanel, { client, store: usage, ...(subject === undefined ? {} : { subject }) }),
+        'spend-today': () => createElement(SpendTodayPanel, { client }),
         insights: ({ subject }) =>
           createElement(FerretInsightsPanel, { client, ...(subject === undefined ? {} : { subject }) }),
       },

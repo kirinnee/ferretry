@@ -3,7 +3,20 @@ import { InstantSchema } from '@ferretry/std';
 import type { MachineView, RuntimeCatalog } from '../../../../../../contract/index.ts';
 import { RuntimesTab } from '../../../../../../app/features/fleet/runtimes/runtimes-tab.tsx';
 import { interact, type Mounted, mount as mountView, must } from '../../../../support/dom.ts';
-import { type Call, CHANGE_ID, machine, READS, type Route, runtime, scripted, stagedFrom } from '../account-support.ts';
+import {
+  type Call,
+  CHANGE_ID,
+  LANDED_FILE,
+  machine,
+  READS,
+  ROLLBACK_INCOMPLETE,
+  ROLLED_BACK,
+  type Route,
+  runtime,
+  scripted,
+  stagedFrom,
+  UNRESTORED_PATH,
+} from '../account-support.ts';
 import { chooseRuntimeAction, menuButton, openRuntimeMenu } from './runtime-menu-support.tsx';
 
 const PROPOSE = 'POST /v1/runtimes/proposals';
@@ -231,6 +244,36 @@ describe('Default for new agents on the Runtimes tab', () => {
     );
     await click(view.container, '[data-default-runtime-undo]');
     expect(select(view.container).value).toBe('');
+  });
+
+  it('R3-M1: a rolled-back save names the file that stayed, keeps the pick and does not refresh', async () => {
+    const refreshes: string[] = [];
+    const view = await open({ refreshes, routes: { [APPLY]: ROLLED_BACK } });
+    await choose(select(view.container), 'claude-work');
+
+    await click(view.container, '[data-change-submit]');
+
+    const alert = must(view.container.querySelector('[data-change-refusal]'), 'alert');
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toStartWith('This change was not applied: the fleet apply failed and was rolled back.');
+    expect(alert.textContent).toContain(LANDED_FILE);
+    expect(select(view.container).value).toBe('claude-work');
+    expect(refreshes).toEqual([]);
+  });
+
+  it('R3-M1: a rollback-incomplete save names the paths left partly changed and does not refresh', async () => {
+    const refreshes: string[] = [];
+    const view = await open({ refreshes, routes: { [APPLY]: ROLLBACK_INCOMPLETE } });
+    await choose(select(view.container), 'claude-work');
+
+    await click(view.container, '[data-change-submit]');
+
+    const said = must(view.container.querySelector('[data-change-refusal]'), 'alert').textContent ?? '';
+    expect(said).toContain('needs a look');
+    expect(said).toContain(UNRESTORED_PATH);
+    expect(said).toContain(LANDED_FILE);
+    expect(select(view.container).value).toBe('claude-work');
+    expect(refreshes).toEqual([]);
   });
 
   it('a refused save says why and keeps the pick', async () => {

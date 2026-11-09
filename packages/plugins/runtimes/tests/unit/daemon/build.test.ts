@@ -14,14 +14,19 @@ import { type DrivenClock, fixedClock, type TestHost, testHost } from '@ferretry
 import type { Instant } from '@ferretry/std';
 import should from 'should';
 import {
-  type CatalogInstallChange,
+  PROFILE_ITEMS,
   RuntimeIdSchema,
   RuntimesChanged,
   RuntimesDefaultChanged,
   RuntimesPort,
 } from '../../../contract/index.ts';
 import { runtimesConformance } from '../../../contract/testing/index.ts';
-import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
+import {
+  type RuntimesAssembler,
+  type RuntimesAssembly,
+  runtimesDaemon,
+  unavailableAssembly,
+} from '../../../daemon/index.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { LoginChanged, type LoginView } from '@ferretry/plugin-logins/contract';
 import { type FakeLogins, fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
@@ -40,7 +45,6 @@ const FILES = {
 interface Built {
   readonly host: TestHost;
   readonly ferrets: FakeFerrets;
-  readonly installs: CatalogInstallChange[];
   readonly logins: ProjectedLogins;
 }
 
@@ -98,36 +102,18 @@ async function build(
   } = {},
 ): Promise<Built> {
   const ferrets = new FakeFerrets();
-  const installs: CatalogInstallChange[] = [];
   const logins = projectedLogins(
     fakeLogins(options.logins ?? [login('claude-you'), login('codex-work', { harness: 'codex' })]),
     () => options.clock?.nowMs() ?? Date.now(),
   );
-  const assembly = (): RuntimesAssembly => ({
-    catalog: {
-      installCatalogItem: async (change: CatalogInstallChange) => {
-        installs.push(change);
-        return {
-          outcome: {
-            outcome: 'applied',
-            apply: {
-              outcome: 'committed',
-              result: {
-                accountCount: 0,
-                operationCount: 0,
-                manifestPath: '/fy',
-                prunedWrappers: [],
-                sharedHistory: [],
-              },
-            },
-          },
-        };
-      },
-    } as unknown as RuntimesAssembly['catalog'],
+  const assembly = (ctx: Parameters<RuntimesAssembler>[0]): RuntimesAssembly => ({
+    catalog: {} as unknown as RuntimesAssembly['catalog'],
     setup: {} as RuntimesAssembly['setup'],
+    // The testing host's own etag of a stored profile: its value's JSON (the host's writes answer the same).
+    profileEtag: async name => JSON.stringify(ctx.kernel.config.collection(PROFILE_ITEMS as never).get(name)),
   });
   const daemon = (
-    options.assembled === false ? runtimesDaemon() : runtimesDaemon(assembly)
+    options.assembled === false ? runtimesDaemon(unavailableAssembly) : runtimesDaemon(assembly)
   ) as DaemonImplementation<any>;
   const host = await testHost({
     plugins: [daemon],
@@ -136,7 +122,7 @@ async function build(
     config: options.config ?? FILES,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
   });
-  return { host, ferrets, installs, logins };
+  return { host, ferrets, logins };
 }
 
 describe('the runtimes daemon', () => {
@@ -311,20 +297,21 @@ describe('the runtimes daemon', () => {
     ]);
   });
 
-  it('should publish the profile an installed catalog item landed in', async () => {
+  it('R2 should publish the profile a layer was added to, through the port', async () => {
     // Arrange
-    const { host, installs } = await build();
+    const { host } = await build();
     const before = host.published.length;
-    const change = { kind: 'catalog.install', profile: 'work' } as unknown as CatalogInstallChange;
+    const owner = { governed: false, decide: () => ({ allowed: true }) };
 
     // Act
-    const outcome = await host.provided(RuntimesPort).installCatalogItem(change);
+    const outcome = await host
+      .provided(RuntimesPort)
+      .changeProfileLayers({ kind: 'add', profile: 'default', layer: 'mcp/notes' }, owner);
 
     // Assert
-    should(outcome.outcome).equal('committed');
-    should(installs).deepEqual([change]);
+    should(outcome).deepEqual({ kind: 'written', profiles: ['default'] });
     should(host.published.slice(before)).deepEqual([
-      { event: RuntimesChanged.name, payload: { runtimes: [], profiles: ['work'], modelSets: [] } },
+      { event: RuntimesChanged.name, payload: { runtimes: [], profiles: ['default'], modelSets: [] } },
     ]);
   });
 

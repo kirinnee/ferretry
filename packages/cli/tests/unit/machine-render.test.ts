@@ -200,6 +200,37 @@ describe('the machine renderer says how an applied change ended', () => {
     should(rendered).eql({ ok: false, text: 'Nothing changed. write runtimes/work.yaml failed: disk full' });
   });
 
+  it('C2 should name a configuration file that landed before a rollback instead of saying nothing changed', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rolled-back',
+        failedOperation: 'directory fleet/bin',
+        reason: 'root refused: changed',
+        configurationLanded: ['runtimes/work.yaml'],
+      },
+    } as never);
+    should(rendered.ok).equal(false);
+    should(rendered.text).not.containEql('Nothing changed');
+    should(rendered.text).containEql('runtimes/work.yaml');
+    should(rendered.text).containEql('NOT rolled back');
+  });
+
+  it('C2 should name a landed configuration file after a rollback that could not put everything back', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'directory fleet/bin',
+        reason: 'root refused: changed',
+        unrestored: [{ path: 'fleet/bin', reason: 'busy' }],
+        configurationLanded: ['runtimes/a.yaml', 'runtimes/b.yaml'],
+      },
+    } as never);
+    should(rendered.text).containEql('runtimes/a.yaml, runtimes/b.yaml');
+    should(rendered.text).containEql('NOT rolled back');
+  });
+
   it('should name every path a failed rollback could not put back, and where its original is', () => {
     const rendered = renderChangeOutcome({
       outcome: 'applied',

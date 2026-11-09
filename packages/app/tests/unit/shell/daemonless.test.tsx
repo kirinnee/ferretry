@@ -145,14 +145,16 @@ describe('daemon-less screens', () => {
   test('guard (a): the props carry no client, and a runtime probe finds none', async () => {
     delete got.props;
     const { mounted } = await open('/landing/start', true);
-    expect(Object.keys(current() ?? {}).toSorted()).toEqual(['location', 'navigate', 'params']);
+    // `chooseDaemon` (S10) is the one door to a machine, and it opens only on the person's click.
+    expect(Object.keys(current() ?? {}).toSorted()).toEqual(['chooseDaemon', 'location', 'navigate', 'params']);
     const found = (value: unknown, depth = 0): boolean => {
       if (depth > 2 || typeof value !== 'object' || value === null) return false;
       return Object.entries(value).some(
         ([key, inner]) => /client|transport|daemon/iu.test(key) || found(inner, depth + 1),
       );
     };
-    expect(found(current())).toBe(false);
+    const { chooseDaemon: _door, ...rest } = current() as DaemonlessScreenProps;
+    expect(found(rest)).toBe(false);
     await mounted.unmount();
   });
 

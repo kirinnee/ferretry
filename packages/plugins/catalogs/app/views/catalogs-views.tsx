@@ -8,6 +8,7 @@
  */
 
 import {
+  type DaemonlessPorts,
   type DaemonlessScreenProps,
   daemonOfClient,
   daemonTitle,
@@ -22,11 +23,19 @@ import {
   useRouter,
 } from '@ferretry/app';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CatalogClient, catalogClientOf, machineCatalogClient } from '../lib/catalog-client.ts';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  type CatalogClient,
+  catalogClientOf,
+  machineCatalogClient,
+  machinePluginClient,
+} from '../lib/catalog-client.ts';
 import { CatalogClientProvider } from '../lib/client-context.tsx';
 import { daemonConnection } from '../lib/machine.ts';
 import { sharedMembers } from '../lib/members.ts';
+import { fetchMachineSkillEntries } from '../lib/machine-skills.ts';
+import { installChooser } from '../lib/choose-install.ts';
+import { readRegisteredProjects, useRegisteredProjects } from '../lib/registered-projects.ts';
 import { isSharingTab, JOIN_SCREEN_ID, SHARED_PATH } from '../lib/routes.ts';
 import type { InstallMachine } from '../features/shared/shared-item-sheet.tsx';
 import type { InstallHost } from '../features/catalogs/install-from-file-sheet.tsx';
@@ -67,15 +76,22 @@ function useCatalogClients(): ReadonlyMap<string, PluginClient> {
 }
 
 /** Installs go through THAT machine's own client: this one's, or Catalogs' own row on another paired daemon. */
-export function useInstallHost(own: CatalogClient, ownId: string): InstallHost {
+export function useInstallHost(own: CatalogClient, ownId: string, client: Pick<PluginClient, 'call'>): InstallHost {
   const others = useCatalogClients();
   const whyNone = useNoReach();
   const live = useRef(others);
   live.current = others;
-  return useMemo(
-    () => ({ createClient: machineCatalogClient(own, ownId, { clients: () => live.current, whyNone }) }),
-    [own, ownId, whyNone],
-  );
+  // The projects an install offers are the TARGET machine's, read through that machine's own client.
+  const projects = useRegisteredProjects(client);
+  return useMemo(() => {
+    const source = { clients: () => live.current, whyNone };
+    const projectClient = machinePluginClient(client, ownId, source);
+    return {
+      createClient: machineCatalogClient(own, ownId, source),
+      projects,
+      readProjects: async connection => readRegisteredProjects(await projectClient(connection)),
+    };
+  }, [own, ownId, whyNone, client, projects]);
 }
 
 export function createSharingScreen(client: PluginClient) {
@@ -88,7 +104,8 @@ export function createSharingScreen(client: PluginClient) {
       [id, paired],
     );
     const machines = useInstallMachines();
-    const installHost = useInstallHost(own, id);
+    const installHost = useInstallHost(own, id, client);
+    const loadMachineSkills = useCallback((signal: AbortSignal) => fetchMachineSkillEntries(client, signal), []);
     const { navigate } = useRouter();
     const tab = isSharingTab(params.tab) ? params.tab : undefined;
     return (
@@ -100,6 +117,7 @@ export function createSharingScreen(client: PluginClient) {
           members={sharedMembers()}
           machines={machines}
           installHost={installHost}
+          loadMachineSkills={loadMachineSkills}
         />
       </CatalogClientProvider>
     );
@@ -150,9 +168,23 @@ export function createJoinScreen() {
   };
 }
 
-/** `/shared`, what is shared with this browser across publishers. No client, so no machine to install on is offered here. */
-export function createSharedScreen() {
-  return function SharedRoute({ navigate }: DaemonlessScreenProps) {
-    return <SharedWithMe members={sharedMembers()} machines={[]} onHome={() => navigate(HOME_HREF)} />;
+/**
+ * `/shared`, what is shared with this browser across publishers. It has no client, so no machine is listed: Install
+ * ASKS (`chooseDaemon`), and only the machine the person picks gives this half a client, its own on that machine. The
+ * choice spends no share code: the item was already opened and verified through the member transport.
+ */
+export function createSharedScreen(ports: Pick<DaemonlessPorts, 'daemons'>) {
+  return function SharedRoute({ navigate, chooseDaemon }: DaemonlessScreenProps) {
+    const chooseInstall = useMemo(() => installChooser(chooseDaemon), [chooseDaemon]);
+    // With no paired machine there is nothing to pick: the screen says to pair one first, instead of offering Install.
+    const paired = useSyncExternalStore(ports.daemons.subscribe, ports.daemons.snapshot, ports.daemons.snapshot);
+    return (
+      <SharedWithMe
+        members={sharedMembers()}
+        machines={[]}
+        {...(paired.daemons.length === 0 ? {} : { chooseInstall })}
+        onHome={() => navigate(HOME_HREF)}
+      />
+    );
   };
 }

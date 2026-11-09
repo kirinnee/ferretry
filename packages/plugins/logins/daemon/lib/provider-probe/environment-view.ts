@@ -13,7 +13,7 @@ import { cloudCredentialSentence, cloudCredentialVariable, parseCloudCredential 
 import { credentialCodexProvider, credentialVariables } from '../shared/halves.ts';
 import { type HarnessKind, harnessKey } from '../shared/harness.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
-import { looksLikeRawSecret, looksSecret } from '../shared/secret-shape.ts';
+import { looksLikeRawSecret, looksSecret } from '../../../contract/secret-shape.ts';
 import type { LoginEnvironment, LoginEnvironmentVariable } from '../../../contract/index.ts';
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { planProviderProbe } from './plan.ts';

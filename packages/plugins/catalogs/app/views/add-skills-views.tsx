@@ -55,7 +55,7 @@ export function createAddSkillsScreen(
     const paired = usePairedDaemons().find(daemon => daemon.daemon === id);
     const machineName = paired === undefined ? 'This machine' : daemonTitle(paired);
     const connection = useMemo(() => daemonConnection({ daemonId: id, daemonName: machineName }), [id, machineName]);
-    const installHost = useInstallHost(own, id);
+    const installHost = useInstallHost(own, id, client);
     const href = useScreenHref();
     const { navigate } = useRouter();
     const ferret = params.ferret ?? '';

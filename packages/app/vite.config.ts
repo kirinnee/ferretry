@@ -12,11 +12,13 @@
  * sealed session (§9.6); a proxy would reintroduce the single-origin coupling pairing removed.
  */
 import autoprefixer from 'autoprefixer';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
 import tailwindConfig from './tailwind.config.ts';
+import { getStartedPagePlugin } from './scripts/get-started-page.ts';
 import { textScalePostcss } from './scripts/text-scale-postcss.ts';
 import { entityDecoderTrustedTypes, leafletTrustedTypes } from './scripts/trusted-types-plugins.ts';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '../plugins/connections/contract/hosted-directory.ts';
@@ -27,13 +29,6 @@ const release = JSON.parse(readFileSync(fileURLToPath(new URL('../../release.jso
 };
 
 /**
- * THE GET-STARTED PAGE (`/get-started/`) is Onboarding's own static document. Vite names an HTML input by its path
- * under this package, so a page outside it cannot be an input that lands at `get-started/index.html`: the build emits
- * it there instead, with the release version stamped in exactly as `fy-release-version` stamps the app's pages.
- */
-const getStartedPage = fileURLToPath(new URL('../plugins/onboarding/app/get-started/index.html', import.meta.url));
-
-/**
  * THE RELAY DIRECTORY ORIGIN this bundle discovers the hosted rendezvous from (R580), copied from today's PWA build:
  * Connections' shared `HOSTED_RELAY_DIRECTORY_ORIGIN`, overridden by `FY_RELAY_DIRECTORY_ORIGIN` exactly as the daemon
  * honours it, so both ends of a session read the same advertisement. A blank value is not an override; `off` (CI)
@@ -41,8 +36,27 @@ const getStartedPage = fileURLToPath(new URL('../plugins/onboarding/app/get-star
  */
 const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
 
+/**
+ * THE HOSTED APP'S ORIGIN this bundle links to, from the one script every build route asks
+ * (`scripts/ci/hosted-app-origin.sh`, switched by `FY_HOSTED_APP_ORIGIN`): the production address unless a build
+ * names another (the 5.0 preview). The daemon compile sets the same define from the same script, so a pairing link,
+ * a catalog and a share link point at one app on both ends. Plugin code reads it through the kernel's
+ * `hosted-app` module, the only place the address is spelled.
+ */
+const hostedAppOrigin = (() => {
+  const script = fileURLToPath(new URL('../../scripts/ci/hosted-app-origin.sh', import.meta.url));
+  const result = spawnSync(script, [], { encoding: 'utf8' });
+  // A script that could not start (not executable, no bash) has an `error` and a null stderr: say so, never throw a
+  // TypeError from `.trim()`.
+  if (result.error !== undefined)
+    throw new Error(`scripts/ci/hosted-app-origin.sh could not run: ${result.error.message}`);
+  if (result.status !== 0) throw new Error(`scripts/ci/hosted-app-origin.sh failed: ${(result.stderr ?? '').trim()}`);
+  return (result.stdout ?? '').trim();
+})();
+
 export default defineConfig({
   define: {
+    __FY_HOSTED_APP_ORIGIN__: JSON.stringify(hostedAppOrigin),
     __FY_RELAY_DIRECTORY__: JSON.stringify(
       overriddenDirectory === '' ? HOSTED_RELAY_DIRECTORY_ORIGIN : overriddenDirectory,
     ),
@@ -57,17 +71,7 @@ export default defineConfig({
         handler: html => html.replaceAll('%FY_RELEASE_VERSION%', release.version),
       },
     },
-    {
-      name: 'fy-get-started-page',
-      apply: 'build',
-      generateBundle() {
-        this.emitFile({
-          type: 'asset',
-          fileName: 'get-started/index.html',
-          source: readFileSync(getStartedPage, 'utf8').replaceAll('%FY_RELEASE_VERSION%', release.version),
-        });
-      },
-    },
+    getStartedPagePlugin({ version: release.version }),
   ],
   // POSTCSS IS CONFIGURED HERE, not in a sibling `postcss.config.js` (as today): the Tailwind config is a TypeScript
   // module, so the plugin and `tailwind.config.ts` cannot drift. The text scale runs AFTER Tailwind so its utilities

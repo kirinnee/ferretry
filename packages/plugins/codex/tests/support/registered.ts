@@ -127,7 +127,7 @@ export function registeredCodex() {
         state.set(stateKey(def, name), structuredClone(value));
       },
     },
-    config: { file: () => ({ permissionMode, searchPaths: [] }) },
+    config: { file: () => ({ permissionMode, searchPaths: [] }), collection: () => new Map() },
     spawn: {
       start: childSpawn.start,
       run: async (program: string, args: string[]) => ({

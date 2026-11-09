@@ -41,6 +41,8 @@ export interface RuntimeEndSupervisionDeps {
   readonly ferrets: Pick<FerretsApi, 'get'>;
   /** `undefined` while the host offers none: the subscriber stays attached and does nothing. */
   readonly seams: RuntimeEndSeams | undefined;
+  /** A line for the daemon log when the follow-up of an ended ferret could not run. Names no value. */
+  readonly warn?: (message: string) => void;
   /** The owner is to be told why a Codex ferret never started. */
   readonly launchFailed: (failure: {
     readonly ferret: string;
@@ -58,8 +60,12 @@ export class RuntimeEndSupervision {
     if (seams === undefined || change.state !== 'stopped') return;
     try {
       await this.#ended(seams, change.ferret);
-    } catch {
-      // Housekeeping; the ending already happened.
+    } catch (error) {
+      // Housekeeping; the ending already happened. It is said, not swallowed: a follow-up that cannot run (the fleet
+      // folder cannot be opened) must be seen in the log, since the ferret's end never shows it.
+      this.deps.warn?.(
+        `a Codex ferret stopped, but its runtime's follow-up could not run: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

@@ -1,14 +1,12 @@
 /**
  * THE BROWSER ENTRY POINT — wiring only (≤150 lines, §10.3). Every decision is in `src/` behind a port; every browser
- * object is bound here, once: storage, IndexedDB, WebCrypto, the WebSocket constructor, the timer, the clock, the
- * document.
+ * object is bound here, once: storage, IndexedDB, WebCrypto, the WebSocket, the timer, the clock, the document.
  *
  * Load order: index.html → public/pre-paint.js (theme before first paint) → this file → <App />.
  *
  * NO GLOBAL NETWORK FUNCTION reaches the app: the only way to a daemon is the sealed session over the WebSocket bound
- * below, behind the generated client's hash guard (§9.6). Access's app half supplies the device claims and
- * Connections' the carriers (`src/connect/provides.ts`), both read from the generated surfaces registry; with neither
- * built, every daemon reads "cannot reach yet" and nothing is sent.
+ * below, behind the generated client's hash guard (§9.6). Access supplies the device claims and Connections the
+ * carriers (`src/connect/provides.ts`); with neither built, every daemon reads "cannot reach yet", nothing is sent.
  */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -19,11 +17,13 @@ import { registeredConnect, registeredDaemonless, registeredPasskey } from './co
 import { DaemonList } from './daemons/daemon-list.ts';
 import { generated } from './generated/surfaces.ts';
 import { DeviceLayoutStore } from './layout/device-layout.ts';
+import { browserNotificationOpens } from './worker/notification-open.ts';
 import { ScrollMemory } from './scroll/scroll-memory.ts';
 import { trustedWorkerUrl } from './security/trusted-types.ts';
 import { directDial, type SocketLike } from './session/direct-dial.ts';
 import { WebCryptoRelayCrypto } from './session/webcrypto.ts';
 import { App } from './shell/app.tsx';
+import { createBrowserInstallPrompt } from './shell/install-prompt.ts';
 import { ShellRuntime } from './shell/runtime.ts';
 import type { KeyValueStore } from './storage/records.ts';
 import { preloadThemeFonts } from './theme/fonts.ts';
@@ -79,7 +79,7 @@ const daemons = new DaemonList({
   storage,
   now,
   // The device key goes with its pairing (Access keeps it).
-  forget: daemon => void registered.claims?.forget(daemon).catch(() => {}),
+  forget: daemon => registered.claims?.forget(daemon).catch(() => {}),
 });
 
 // The session layer's parts and the pairing walk (R582: direct first, then the one discovered rendezvous).
@@ -124,9 +124,11 @@ const runtime = new ShellRuntime({
   daemonless: { views: daemonless.views, location: () => window.location.href },
   onVisible: whenBackOnScreen(document),
   address: window, // the declared fragments leave the address bar here, before the first render (S3)
+  notificationOpens: browserNotificationOpens(window, navigator), // held before React mounts: a tap is never lost (S6)
 });
 
 const themes = new ThemePreferenceStore(storage);
+const install = createBrowserInstallPrompt(window); // before React: Chromium fires beforeinstallprompt once, early (S13)
 const layouts = new DeviceLayoutStore(storage);
 // Another tab changed the theme or this device's layout: take it on without writing it back.
 window.addEventListener('storage', () => {
@@ -134,17 +136,15 @@ window.addEventListener('storage', () => {
   layouts.adopt();
 });
 preloadThemeFonts(themes.snapshot().family);
-// A phone held sideways gets today's portrait gate (the app is drawn for an upright phone).
-installPortraitLock(window, document);
+installPortraitLock(window, document); // a phone held sideways gets today's portrait gate
 themes.subscribe(() => preloadThemeFonts(themes.snapshot().family));
-// The signed-release service worker (docs/pwa-release-signing.md, built by scripts/build-release.ts; absent in `vite
-// dev`). Its URL goes through the `fy-worker` Trusted Types policy, which `_headers` requires at every script sink.
+// The signed-release service worker (docs/pwa-release-signing.md; absent in `vite dev`), URL via the `fy-worker` policy.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   void navigator.serviceWorker.register(trustedWorkerUrl('/sw.verified.js'), { scope: '/' }).catch(() => {});
 }
 
 createRoot(host).render(
   <StrictMode>
-    <App runtime={runtime} themes={themes} layouts={layouts} browser={window} scroll={new ScrollMemory(tabStore())} />
+    <App {...{ runtime, themes, layouts, install }} browser={window} scroll={new ScrollMemory(tabStore())} />
   </StrictMode>,
 );

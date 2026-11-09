@@ -37,7 +37,7 @@ export class Sequence {
 export class FakeDaemon implements OnboardClient {
   readonly calls: string[] = [];
   readonly checked: string[] = [];
-  readonly recorded: { plugin: string; id: string; state: StepAnswerRequest['state'] }[] = [];
+  readonly recorded: { plugin: string; id: string; state: StepAnswerRequest['state']; linked?: true }[] = [];
   resets = 0;
   viewFails: Error | undefined;
   recordFails: Error | undefined;
@@ -51,17 +51,27 @@ export class FakeDaemon implements OnboardClient {
   async view(): Promise<OnboardingView> {
     this.calls.push('view');
     if (this.viewFails !== undefined) throw this.viewFails;
-    return { steps: [...this.steps], complete: this.steps.every(each => each.state !== 'pending') };
+    return { steps: [...this.steps], complete: this.steps.every(each => each.state !== 'pending'), setUp: false };
   }
 
   async record(plugin: string, id: string, answer: StepAnswerRequest): Promise<StepView | undefined> {
     this.calls.push('record');
     if (this.recordFails !== undefined) throw this.recordFails;
-    this.recorded.push({ plugin, id, state: answer.state });
+    this.recorded.push({
+      plugin,
+      id,
+      state: answer.state,
+      ...(answer.linked === true ? { linked: true as const } : {}),
+    });
     const at = this.steps.findIndex(each => each.plugin === plugin && each.id === id);
     const found = this.steps[at];
     if (found === undefined) return undefined;
-    const next = { ...found, state: answer.state, at: AT };
+    const next = {
+      ...found,
+      state: answer.state,
+      at: AT,
+      ...(answer.linked === true ? { linked: true as const } : {}),
+    };
     this.steps[at] = next;
     return next;
   }

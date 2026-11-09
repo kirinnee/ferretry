@@ -80,7 +80,8 @@ import {
 } from '../account/clone.ts';
 import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
-import { FleetApplyFailureError, type FleetDocumentWrite, type FleetModelApplyPlan } from '../provisioning.ts';
+import { type FleetDocumentWrite, type FleetModelApplyPlan } from '../provisioning.ts';
+import { configurationLanded, failedApplySentence } from './failed-apply.ts';
 import {
   freeName,
   type HostHarnessScan,
@@ -612,8 +613,21 @@ export class FleetSetupService {
     // other held edit.
     const mayLoosen = caller?.governance?.governed === false;
     let held = 0;
-    for (const write of composed.configWrites ?? []) held += await this.#writeConfigFile(write, mayLoosen);
-    await this.#applyModel(composed.model, composed.documents);
+    // The settings files that really landed (a held one did not): a later failure must say they are on disk.
+    const landed: string[] = [];
+    for (const write of composed.configWrites ?? []) {
+      try {
+        const waiting = await this.#writeConfigFile(write, mayLoosen);
+        held += waiting;
+        if (waiting === 0) landed.push(write.path);
+      } catch (error) {
+        if (landed.length > 0 && error instanceof FleetCatalogRefusal) {
+          throw new FleetCatalogRefusal(error.code, `${error.message}; ${configurationLanded(landed)}`);
+        }
+        throw error;
+      }
+    }
+    await this.#applyModel(composed.model, composed.documents, landed);
     return held === 0
       ? composed.summary
       : `${composed.summary} ${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`;
@@ -1392,7 +1406,11 @@ export class FleetSetupService {
   }
 
   /** Materialise the model and apply it with these documents, inside the provisioner's one boundary. */
-  async #applyModel(model: AccountModel, documents: readonly FleetDocumentWrite[]): Promise<void> {
+  async #applyModel(
+    model: AccountModel,
+    documents: readonly FleetDocumentWrite[],
+    landed: readonly string[],
+  ): Promise<void> {
     const { catalog } = this.deps;
     let plan: FleetModelApplyPlan;
     try {
@@ -1413,16 +1431,15 @@ export class FleetSetupService {
         ...(await this.#modelCatalogs()),
       });
     } catch (error) {
-      throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
+      throw new FleetCatalogRefusal(
+        'fleet_change_refused',
+        landed.length === 0 ? errorMessage(error) : `${errorMessage(error)}; ${configurationLanded(landed)}`,
+      );
     }
     try {
       await catalog.provisioner.apply(plan, documents);
     } catch (error) {
-      const reason =
-        error instanceof FleetApplyFailureError
-          ? `${errorMessage(error)}; nothing was left half-changed`
-          : errorMessage(error);
-      throw new FleetCatalogRefusal('fleet_change_failed', reason);
+      throw new FleetCatalogRefusal('fleet_change_failed', failedApplySentence(error, landed));
     }
   }
 
@@ -1444,17 +1461,31 @@ export class FleetSetupService {
     };
     const instructions: Record<string, string> = {};
     for (const [name, component] of Object.entries(model.components.instructions)) {
+      if (component.text !== undefined) {
+        instructions[name] = component.text;
+        continue;
+      }
+      if (component.file === undefined) continue;
       const body = await text(component.file);
       if (body !== undefined) instructions[name] = body;
     }
     const settings: Record<string, SettingsObject> = {};
     for (const [name, component] of Object.entries(model.components.settings)) {
+      // A document the owning plugin projected is the body; otherwise the file in the asset tree is read.
+      if (component.document !== undefined) {
+        settings[name] = component.document;
+        continue;
+      }
       if (component.file === undefined) continue;
       const body = parsed(await text(component.file), SETTINGS_FORMAT[component.harness]);
       if (body !== undefined) settings[name] = body;
     }
     const hooks: Record<string, SettingsObject> = {};
     for (const [name, component] of Object.entries(model.components.hooks)) {
+      if (component.document !== undefined) {
+        hooks[name] = component.document;
+        continue;
+      }
       if (component.file === undefined) continue;
       const body = parsed(await text(component.file), 'json');
       if (body !== undefined) hooks[name] = body;

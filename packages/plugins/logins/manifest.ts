@@ -1,4 +1,5 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
@@ -202,10 +203,16 @@ export default definePlugin({
       panel('settings', { id: 'codex-login', order: 13 }),
       panel('settings', { id: 'local-models', order: 14 }),
       panel('daemon.status', { id: 'quota-readout', order: 30 }),
+      // The first-run step's body (Onboarding's steps screen offers this slot): the sign-ins view.
+      panel('onboarding.step', { id: 'onboarding-step', order: 30 }),
     ],
     settings: [settingsTab('logins', { label: 'Logins', order: 25 })],
   },
 
+  /** Never reached by a ferret, through any root: the sign-in material of every login (`PrivacyDecl`). */
+  privacy: {
+    private: ['credentials'],
+  },
   data: {
     state: [LOGINS_CREDENTIALS, LOGINS_MODELS],
     config: [LOGINS_CONFIG, ENDPOINTS_CONFIG, MODELS_CONFIG],
@@ -232,7 +239,7 @@ export default definePlugin({
       'chatgpt.com',
       'api.openai.com',
       'claude.ai',
-      'ferretry.pages.dev',
+      new URL(HOSTED_APP_ORIGIN).host,
       'openrouter.ai',
       'ai-gateway.vercel.sh',
       'api.deepseek.com',

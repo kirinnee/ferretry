@@ -11,7 +11,11 @@ import type {
   HarnessQueueOptions,
   HarnessRefusal,
   QueueOutcome,
+  RunnerComposerCleared,
+  RunnerComposerSubmitted,
   RunnerDelivery,
+  RunnerHeldAt,
+  RunnerPaneObservation,
 } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { ferretActor } from '@ferretry/core-gate/contract';
@@ -41,6 +45,9 @@ const OPEN: HarnessGate = HARNESS_OPEN;
 /** Both actions held back: what a gate that is not open answers. */
 const CLOSED: HarnessGate = { send: false, interrupt: false };
 
+/** A pane that is visibly mid-turn and shows no prompt: the only pane a send-now's stop key may be pressed at. */
+const BUSY_PANE = ok({ alive: true, dead: false, promptReady: false, activeWork: true });
+
 const F1 = ferretId('f1');
 const CALLER = ferretId('lead');
 /** The calling ferret's name, apart from its id so a banner that names the wrong one shows. */
@@ -64,6 +71,11 @@ interface Script {
   deliver?: () => Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>>;
   queue?: (text: string, options?: HarnessQueueOptions) => Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;
   interrupt?: () => Promise<Result<HarnessInterrupted, HarnessRefusal>>;
+  observe?: () => Promise<Result<RunnerPaneObservation, HarnessRefusal>>;
+  heldAt?: (text: string) => Promise<Result<RunnerHeldAt | undefined, HarnessRefusal>>;
+  clearComposer?: (text: string) => Promise<Result<RunnerComposerCleared, HarnessDeliveryFailure>>;
+  submitComposer?: (text: string, strict?: boolean) => Promise<Result<RunnerComposerSubmitted, HarnessDeliveryFailure>>;
+  stopActive?: () => Promise<Result<RunnerPaneObservation | undefined, HarnessRefusal>>;
 }
 
 /** Ferrets with the harness seam: every open is recorded with the caller it was given. */
@@ -75,6 +87,9 @@ class HarnessFerrets extends FakeFerrets {
   /** The options each queue call carried, in order (the `sendId` the send row is named by). */
   readonly queueOptions: (HarnessQueueOptions | undefined)[] = [];
   interrupts = 0;
+  /** Every composer key the send path asked for, in order, and the stops a send-now asked for. */
+  readonly composerKeys: string[] = [];
+  stopsActive = 0;
   script: Script = {};
   /** Set when `harness()` itself refuses, as Ferrets' mayTouch rule does. */
   refuseOpen: ApiError | undefined;
@@ -97,6 +112,22 @@ class HarnessFerrets extends FakeFerrets {
       interrupt: async () => {
         this.interrupts += 1;
         return await (this.script.interrupt?.() ?? Promise.resolve(ok({ pressed: true, working: false })));
+      },
+      observe: async () =>
+        await (this.script.observe?.() ??
+          Promise.resolve(ok({ alive: true, dead: false, promptReady: true, activeWork: false }))),
+      heldAt: async text => await (this.script.heldAt?.(text) ?? Promise.resolve(ok(undefined))),
+      clearComposer: async text => {
+        this.composerKeys.push(`clear:${text}`);
+        return await (this.script.clearComposer?.(text) ?? Promise.resolve(ok('cleared' as const)));
+      },
+      submitComposer: async (text, strict) => {
+        this.composerKeys.push(`submit:${text}`);
+        return await (this.script.submitComposer?.(text, strict) ?? Promise.resolve(ok('submitted' as const)));
+      },
+      stopActive: async () => {
+        this.stopsActive += 1;
+        return await (this.script.stopActive?.() ?? Promise.resolve(ok(undefined)));
       },
       transcript: {
         read: async () => {
@@ -787,6 +818,60 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     await host.stop();
   });
 
+  test('D2 #19 the port’s send by the Warden is typed bare, ledgered as the daemon’s own (never the owner’s, never a ferret’s)', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    const sent = await api().send(
+      F1,
+      { kind: 'warden' },
+      { message: 'are you stuck?', sendId: 's-w', label: 'action' },
+    );
+
+    expect(sent.ok).toBe(true);
+    // Bare: no peer banner, so the agent does not read it as a teammate, and no sender id is named.
+    expect(ferrets.delivered).toEqual([{ text: 'are you stuck?' }]);
+    expect(ferrets.opens).toEqual([{ ferret: F1, caller: undefined }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
+      ['s-w', 'daemon', undefined],
+    ]);
+    // m5: shown as Ferretry's own Warden (the sender chip reads `by`), as today's remedies were.
+    expect((await api().sends(F1)).sends.map(row => row.by)).toEqual([{ kind: 'ferretry', feature: 'Warden' }]);
+    await host.stop();
+  });
+
+  test('D2 #19 a Warden send to a ferret with no live pane types nothing, and its record is taken back', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.deliver = async () => err({ refused: 'no_pane' });
+    const { host, api } = await conversation(ferrets, OPEN, { state: 'stopped' });
+
+    const sent = await api().send(F1, { kind: 'warden' }, { message: 'are you stuck?', sendId: 's-w' });
+
+    expect(sent.ok).toBe(false);
+    expect(ferrets.delivered).toHaveLength(1);
+    expect(await live(api)).toEqual([]);
+    await host.stop();
+  });
+
+  test('D2 #19 a Warden send to a ferret this machine does not know is not_found: nothing typed, nothing kept', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    const sent = await api().send(ferretId('elsewhere'), { kind: 'warden' }, { message: 'are you stuck?' });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(ferrets.delivered).toEqual([]);
+    await host.stop();
+  });
+
+  test('D2 #19 a Warden send honours the closed gate and an fyi hold exactly as every caller does', async () => {
+    const closed = await conversation(undefined, CLOSED);
+    expect(await closed.api().send(F1, { kind: 'warden' }, { message: 'x' })).toMatchObject({
+      ok: false,
+      error: { code: 'conversation_terminal_unavailable' },
+    });
+    expect(closed.ferrets.delivered).toEqual([]);
+    await closed.host.stop();
+  });
+
   test('the send ROUTE names no caller: a ferret messaging its parent or a peer is not a ferret acting on a helper', async () => {
     const { host, ferrets } = await conversation();
 
@@ -1052,38 +1137,36 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
   });
 });
 
-describe('a send carrying what the seam does not type yet is refused 503, never answered sent', () => {
+describe('a send carrying files or an fyi hold is refused 503, never answered sent', () => {
   const post = async (
     host: Awaited<ReturnType<typeof conversation>>['host'],
     extra: Record<string, unknown>,
     as: TestCaller = owner(),
   ) => await send(host, 'req-x', 'f1', { message: 'hello there', ...extra }, as);
 
-  test.each([
-    ['attachmentIds', { attachmentIds: ['file-1'] }],
-    ['now', { now: true }],
-    ['replyExpected', { replyExpected: true }],
-  ] as const)('the route refuses %s: 503, nothing opened, typed or recorded', async (_name, extra) => {
-    const { host, ferrets, api } = await conversation();
+  // A label is a ferret's: the route does not honour the owner's, so only the port (below) can carry an fyi.
+  test.each([['attachmentIds', { attachmentIds: ['file-1'] }]] as const)(
+    'the route refuses %s: 503, nothing opened, typed or recorded',
+    async (_name, extra) => {
+      const { host, ferrets, api } = await conversation();
 
-    const response = await post(host, extra);
+      const response = await post(host, extra);
 
-    expect([response.status, response.json<{ code: string }>().code]).toEqual([
-      503,
-      'conversation_terminal_unavailable',
-    ]);
-    expect(response.json<{ error: string }>().error).toBe(SEND_EXTRAS_UNAVAILABLE);
-    expect(ferrets.opens).toEqual([]);
-    expect(ferrets.delivered).toEqual([]);
-    expect((await api().sends(F1)).sends).toEqual([]);
-    await host.stop();
-  });
+      expect([response.status, response.json<{ code: string }>().code]).toEqual([
+        503,
+        'conversation_terminal_unavailable',
+      ]);
+      expect(response.json<{ error: string }>().error).toBe(SEND_EXTRAS_UNAVAILABLE);
+      expect(ferrets.opens).toEqual([]);
+      expect(ferrets.delivered).toEqual([]);
+      expect((await api().sends(F1)).sends).toEqual([]);
+      await host.stop();
+    },
+  );
 
   test.each<[string, { attachmentIds?: string[]; label?: 'fyi'; now?: boolean; replyExpected?: boolean }]>([
     ['attachmentIds', { attachmentIds: ['file-1'] }],
     ['label', { label: 'fyi' }],
-    ['now', { now: true }],
-    ['replyExpected', { replyExpected: true }],
   ])('the port refuses %s the same way', async (_name, extra) => {
     const { host, ferrets, api } = await conversation();
 
@@ -1304,6 +1387,583 @@ describe('interrupt: the session’s own refusals first, then the harness’s st
 
     expect(result).toMatchObject({ ok: false, error: { code: 'question_abandon_unsupported' } });
     expect(ferrets.interrupts).toBe(0);
+    await host.stop();
+  });
+});
+
+describe('send path: the send-now and reply flags are carried', () => {
+  test('now stops the active turn BEFORE the message is typed, once, and the message is then delivered', async () => {
+    const order: string[] = [];
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
+    ferrets.script.stopActive = async () => {
+      order.push('stop');
+      return ok(undefined);
+    };
+    ferrets.script.deliver = async () => {
+      order.push('deliver');
+      return ok('turn-started' as const);
+    };
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent.ok).toBe(true);
+    expect(order).toEqual(['stop', 'deliver']);
+    expect(ferrets.stopsActive).toBe(1);
+    await host.stop();
+  });
+
+  test('now through a seam that offers no stop is plugin_unavailable: nothing typed, nothing kept', async () => {
+    class NoStop extends HarnessFerrets {
+      override async harness(ferret: FerretId, caller?: FerretId): Promise<FerretHarness | undefined> {
+        const seam = await super.harness(ferret, caller);
+        return seam === undefined ? undefined : { ...seam, stopActive: undefined };
+      }
+    }
+    const ferrets = new NoStop();
+    ferrets.script.observe = async () => BUSY_PANE;
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'plugin_unavailable' } });
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('a send without now presses nothing', async () => {
+    const { host, ferrets, api } = await conversation();
+    await api().send(F1, { kind: 'owner' }, { message: 'later', sendId: 's-1', now: false });
+    expect(ferrets.stopsActive).toBe(0);
+    await host.stop();
+  });
+
+  test('C1 now at an IDLE pane presses no stop key: nothing is running, and the message is simply typed', async () => {
+    const { host, ferrets, api } = await conversation();
+    // The default pane is idle at its prompt (promptReady, no active work).
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent.ok).toBe(true);
+    expect(ferrets.stopsActive).toBe(0);
+    expect(ferrets.delivered).toEqual([{ text: 'now!' }]);
+    await host.stop();
+  });
+
+  test('C1 now at an idle INTERACTIVE Claude pane presses no stop key either (the interrupt’s idle rule is not the send-now’s)', async () => {
+    const { host, ferrets, api } = await conversation(new HarnessFerrets(), OPEN, { mode: 'interactive' });
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent.ok).toBe(true);
+    expect(ferrets.stopsActive).toBe(0);
+    await host.stop();
+  });
+
+  test('C1 now behind a blocking prompt (a permission, a picker) presses no stop key: Escape would answer it', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () =>
+      ok({
+        alive: true,
+        dead: false,
+        promptReady: false,
+        activeWork: true,
+        blockingPrompt: 'Allow Bash? 1 Yes 2 No',
+      });
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(ferrets.stopsActive).toBe(0);
+    expect(sent.ok).toBe(true);
+    await host.stop();
+  });
+
+  test('C1 now with a structured question pending is refused: no stop key, nothing typed, nothing kept (Escape would dismiss the form)', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
+    const { host, api, asking } = await conversation(ferrets);
+    await asking();
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    expect(ferrets.stopsActive).toBe(0);
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('M1 a PLAIN send with a structured question pending is refused with today’s sentence: nothing typed, nothing kept', async () => {
+    const { host, ferrets, api, asking } = await conversation();
+    await asking();
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'prose', sendId: 's-plain' });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    expect(!sent.ok && sent.error.message).toContain(
+      `holding an unanswered structured question (${QUESTION_TOOL_USE}); answer or abandon it before sending prose`,
+    );
+    expect(ferrets.delivered).toEqual([]);
+    expect(ferrets.stopsActive).toBe(0);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('C1 now at a pane Codex holds a submission on until startup ends is PENDING: nothing pressed, typed or kept', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () =>
+      ok({ alive: true, dead: false, promptReady: false, activeWork: true, startupParked: true });
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'session_launching' } });
+    expect(ferrets.stopsActive).toBe(0);
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('C1 now through a pane that cannot be read presses nothing and keeps nothing', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => err({ refused: 'input_pending' });
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'input_pending' } });
+    expect(ferrets.stopsActive).toBe(0);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('n4 now to a gone pane answers the SEND’S no-pane words, not the interrupt’s', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
+    ferrets.script.stopActive = async () => err({ refused: 'no_pane' });
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({
+      ok: false,
+      error: { code: 'send_refused', message: 'session f1 has no live agent to type into; revive it first' },
+    });
+    await host.stop();
+  });
+
+  test('m3 now with the interrupt gate closed presses nothing and types nothing; a plain send still goes', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
+    const { host, api } = await conversation(ferrets, { send: true, interrupt: false });
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({
+      ok: false,
+      error: { code: 'conversation_terminal_unavailable', message: INTERRUPT_UNAVAILABLE },
+    });
+    expect(ferrets.opens).toEqual([]);
+    expect(ferrets.stopsActive).toBe(0);
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    expect((await api().send(F1, { kind: 'owner' }, { message: 'plain', sendId: 's-2', now: false })).ok).toBe(true);
+    await host.stop();
+  });
+
+  test.each<[string, Result<undefined, HarnessRefusal>, string]>([
+    ['a hold', err({ refused: 'input_pending' }), 'input_pending'],
+    ['a gone pane', err({ refused: 'no_pane' }), 'send_refused'],
+    ['a runner that cannot stop', err({ refused: 'plugin_unavailable' }), 'plugin_unavailable'],
+  ])('now with %s types NOTHING and keeps nothing: the id starts over', async (_name, stop, code) => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () => BUSY_PANE;
+    ferrets.script.stopActive = async () => stop;
+    const { host, api } = await conversation(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
+
+    expect(sent).toMatchObject({ ok: false, error: { code } });
+    expect(ferrets.delivered).toEqual([]);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    await host.stop();
+  });
+
+  test('a reply request from a ferret is typed under the question banner, and a plain one under the message banner', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    await api().send(
+      F1,
+      { kind: 'ferret', ferret: CALLER },
+      { message: 'what do you think?', sendId: 's-q', replyExpected: true },
+    );
+    await api().send(
+      F1,
+      { kind: 'ferret', ferret: CALLER },
+      { message: 'fyi only', sendId: 's-m', replyExpected: false },
+    );
+
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([
+      `[question from ferret ${LEAD_NAME} (session lead) — not from the owner] ${LEAD_NAME} is waiting for your answer. Reply with: fy send ${LEAD_NAME} "<reply>"\nwhat do you think?`,
+      `${banner('message')}fyi only`,
+    ]);
+    await host.stop();
+  });
+});
+
+describe('m2 one lane per ferret: typing, the acts and an interrupt press keys one at a time (as today’s serial.run)', () => {
+  /** A deliver that waits for the test to let it finish, so a second call can be tried while a send is mid-typing. */
+  const slowDeliver = (ferrets: HarnessFerrets) => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    ferrets.script.deliver = async () => {
+      await gate;
+      return ok('turn-started' as const);
+    };
+    return release;
+  };
+  const settle = async () => await new Promise(resolve => setTimeout(resolve, 20));
+
+  test('m2 an interrupt waits for a send that is mid-typing, then presses', async () => {
+    const ferrets = new HarnessFerrets();
+    const release = slowDeliver(ferrets);
+    const { host, api } = await conversation(ferrets);
+
+    const typing = api().send(F1, { kind: 'owner' }, { message: 'slow one', sendId: 's-1' });
+    await settle();
+    const stopping = api().interrupt(F1, {});
+    await settle();
+    expect(ferrets.interrupts).toBe(0);
+
+    release();
+    await typing;
+    await stopping;
+    expect(ferrets.interrupts).toBe(1);
+    await host.stop();
+  });
+
+  test('m2 a send Ferrets refuses as dialog is refused and frees the lane: the interrupt behind it waits for that answer, then runs', async () => {
+    const ferrets = new HarnessFerrets();
+    // Ferrets answers `not_ready` `dialog` the moment its look shows a permission prompt (its own test); here the answer
+    // is held on a deferred so the order is visible: the lane is held until Ferrets answers, and freed by the refusal.
+    let answer: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      answer = resolve;
+    });
+    ferrets.script.deliver = async () => {
+      await gate;
+      return err({ refused: 'not_ready' as const, why: 'dialog' as const });
+    };
+    const { host, api } = await conversation(ferrets);
+
+    const sending = api().send(F1, { kind: 'owner' }, { message: 'to a parked ferret', sendId: 's-1' });
+    await settle();
+    const stopping = api().interrupt(F1, {});
+    await settle();
+    expect(ferrets.interrupts).toBe(0);
+
+    answer();
+    const [sent] = await Promise.all([sending, stopping]);
+    expect(sent.ok).toBe(false);
+    expect(ferrets.interrupts).toBe(1);
+    await host.stop();
+  });
+
+  test('m2 a Cancel waits for the send it cancels while that send is mid-typing, so it never clears half a message', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.heldAt = async () => ok('composer');
+    const { host, api } = await conversation(ferrets);
+    await api().send(F1, { kind: 'owner' }, { message: 'first', sendId: 's-1' });
+    const release = slowDeliver(ferrets);
+
+    const typing = api().send(F1, { kind: 'owner' }, { message: 'slow one', sendId: 's-2' });
+    await settle();
+    const cancelling = api().cancelSend(F1, 's-1');
+    await settle();
+    expect(ferrets.composerKeys).toEqual([]);
+
+    release();
+    await typing;
+    await cancelling;
+    expect(ferrets.composerKeys).toEqual(['clear:first']);
+    await host.stop();
+  });
+
+  test('m2 two sends to one ferret type one at a time', async () => {
+    const ferrets = new HarnessFerrets();
+    const release = slowDeliver(ferrets);
+    const { host, api } = await conversation(ferrets);
+
+    const first = api().send(F1, { kind: 'owner' }, { message: 'one', sendId: 's-1' });
+    await settle();
+    const second = api().send(F1, { kind: 'owner' }, { message: 'two', sendId: 's-2' });
+    await settle();
+    expect(ferrets.delivered).toEqual([{ text: 'one' }]);
+
+    release();
+    await first;
+    await second;
+    expect(ferrets.delivered).toEqual([{ text: 'one' }, { text: 'two' }]);
+    await host.stop();
+  });
+});
+
+describe('send path: cancel, Enter and the person’s draft act on the ferret’s composer through the seam', () => {
+  const typed = async (ferrets: HarnessFerrets = new HarnessFerrets()) => {
+    const world = await conversation(ferrets);
+    await world.api().send(F1, { kind: 'owner' }, { message: 'one send', sendId: 's-1' });
+    return world;
+  };
+  const row = async (
+    api: () => {
+      sendRecord(ferret: FerretId, id: string): Promise<{ fate: string; cancelEffect?: string } | undefined>;
+    },
+  ) => await api().sendRecord(F1, 's-1');
+
+  test('cancel erases its own message from the composer and records the effect', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.heldAt = async () => ok('composer');
+    const { host, api } = await typed(ferrets);
+
+    const cancelled = await api().cancelSend(F1, 's-1');
+
+    expect(cancelled).toMatchObject({ ok: true, value: { fate: 'cancelled', cancelEffect: 'cleared' } });
+    expect(ferrets.composerKeys).toEqual(['clear:one send']);
+    expect(await row(api)).toMatchObject({ fate: 'cancelled' });
+    await host.stop();
+  });
+
+  test('cancel of a message the harness already queued presses nothing and says it was left there', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.heldAt = async () => ok('queue');
+    const { host, api } = await typed(ferrets);
+
+    expect(await api().cancelSend(F1, 's-1')).toMatchObject({ ok: true, value: { cancelEffect: 'left_in_queue' } });
+    expect(ferrets.composerKeys).toEqual([]);
+    await host.stop();
+  });
+
+  test('cancel is never destructive of what it cannot read: an unreadable pane is not_in_pane, nothing pressed', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.heldAt = async () => {
+      throw new Error('could not read the pane');
+    };
+    const { host, api } = await typed(ferrets);
+
+    expect(await api().cancelSend(F1, 's-1')).toMatchObject({ ok: true, value: { cancelEffect: 'not_in_pane' } });
+    expect(ferrets.composerKeys).toEqual([]);
+    await host.stop();
+  });
+
+  test('cancel of an unknown send is refused, and a delivered one cannot be taken back', async () => {
+    const { host, api } = await typed();
+    expect(await api().cancelSend(F1, 'nope')).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    await host.stop();
+  });
+
+  test('Enter presses once for the send’s own text and settles it', async () => {
+    const ferrets = new HarnessFerrets();
+    const { host, api } = await typed(ferrets);
+
+    const entered = await api().enterSend(F1, 's-1');
+
+    expect(entered.ok).toBe(true);
+    expect(ferrets.composerKeys).toEqual(['submit:one send']);
+    await host.stop();
+  });
+
+  test('Enter refuses a message not sitting in the composer (nothing pressed) and a parked startup as pending', async () => {
+    const absent = new HarnessFerrets();
+    const first = await typed(absent);
+    absent.script.submitComposer = async () => ok('absent');
+    expect(await first.api().enterSend(F1, 's-1')).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    await first.host.stop();
+
+    const parked = new HarnessFerrets();
+    const second = await typed(parked);
+    parked.script.observe = async () =>
+      ok({ alive: true, dead: false, promptReady: false, activeWork: false, startupParked: true });
+    parked.composerKeys.length = 0;
+    expect(await second.api().enterSend(F1, 's-1')).toMatchObject({ ok: false, error: { code: 'session_launching' } });
+    expect(parked.composerKeys).toEqual([]);
+    await second.host.stop();
+  });
+
+  test('a hold on the composer write is answered as its closed code and nothing is pressed', async () => {
+    const ferrets = new HarnessFerrets();
+    const { host, api } = await typed(ferrets);
+    ferrets.script.submitComposer = async () => err({ refused: 'input_pending' });
+    expect(await api().enterSend(F1, 's-1')).toMatchObject({ ok: false, error: { code: 'input_pending' } });
+    await host.stop();
+  });
+
+  const withDraft = (draft: string | undefined, more: Partial<RunnerPaneObservation> = {}) => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () =>
+      ok({
+        alive: true,
+        dead: false,
+        promptReady: true,
+        activeWork: false,
+        ...(draft === undefined ? {} : { draft }),
+        ...more,
+      });
+    return ferrets;
+  };
+
+  test('G33 acts only while the composer holds exactly the quoted draft, writes no ledger row, and logs the outcome without the text', async () => {
+    const ferrets = withDraft('a private draft');
+    const { host, api } = await conversation(ferrets);
+
+    await api().composer(F1, 'submit', 'a private draft');
+    await api().composer(F1, 'submit', 'an edited draft');
+
+    expect(ferrets.composerKeys).toEqual(['submit:a private draft']);
+    expect((await api().sends(F1)).sends).toEqual([]);
+    expect(JSON.stringify(host.logs)).not.toContain('a private draft');
+    expect(JSON.stringify(host.logs)).not.toContain('an edited draft');
+    await host.stop();
+  });
+
+  test('the person’s draft is submitted only while the composer still holds exactly it', async () => {
+    const ferrets = withDraft('half a thought');
+    const { host, api } = await conversation(ferrets);
+
+    expect(await api().composer(F1, 'submit', 'half a thought')).toEqual({
+      ok: true,
+      value: { action: 'submit', outcome: 'submitted' },
+    });
+    expect(ferrets.composerKeys).toEqual(['submit:half a thought']);
+    // Edited since: nothing pressed.
+    ferrets.composerKeys.length = 0;
+    expect(await api().composer(F1, 'submit', 'something else')).toEqual({
+      ok: true,
+      value: { action: 'submit', outcome: 'changed' },
+    });
+    expect(ferrets.composerKeys).toEqual([]);
+    await host.stop();
+  });
+
+  test('the person’s draft is cleared, and a foreign clear is changed; no draft is absent', async () => {
+    const ferrets = withDraft('half a thought');
+    const { host, api } = await conversation(ferrets);
+    expect(await api().composer(F1, 'clear', 'half a thought')).toMatchObject({
+      ok: true,
+      value: { outcome: 'cleared' },
+    });
+    ferrets.script.clearComposer = async () => ok('foreign');
+    expect(await api().composer(F1, 'clear', 'half a thought')).toMatchObject({
+      ok: true,
+      value: { outcome: 'changed' },
+    });
+    await host.stop();
+
+    const none = withDraft(undefined);
+    const world = await conversation(none);
+    expect(await world.api().composer(F1, 'clear', 'x')).toMatchObject({ ok: true, value: { outcome: 'absent' } });
+    expect(none.composerKeys).toEqual([]);
+    await world.host.stop();
+  });
+
+  test('the person’s draft is never acted on behind a prompt or at a pane that is gone', async () => {
+    const prompt = withDraft('half', { blockingPrompt: 'Do you trust this folder?' });
+    const a = await conversation(prompt);
+    expect(await a.api().composer(F1, 'submit', 'half')).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    expect(prompt.composerKeys).toEqual([]);
+    await a.host.stop();
+
+    const gone = new HarnessFerrets();
+    gone.script.observe = async () => err({ refused: 'no_pane' });
+    const b = await conversation(gone);
+    expect(await b.api().composer(F1, 'submit', 'half')).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    expect(gone.composerKeys).toEqual([]);
+    await b.host.stop();
+  });
+
+  test('the route serves the composer: 200 with the outcome, and the draft rides in the 409 of a refusal', async () => {
+    const ferrets = withDraft('half a thought');
+    const { host } = await conversation(ferrets);
+    const ok200 = await host.request('POST', '/v1/ferrets/f1/composer', {
+      as: owner(),
+      body: { action: 'clear', draft: 'half a thought' },
+    });
+    expect([ok200.status, ok200.json()]).toEqual([200, { action: 'clear', outcome: 'cleared' }]);
+    await host.stop();
+  });
+
+  test('the route serves cancel and Enter for a send of its own', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.heldAt = async () => ok('composer');
+    const { host } = await typed(ferrets);
+    const entered = await host.request('POST', '/v1/ferrets/f1/sends/s-1/enter', { as: owner(), body: {} });
+    expect(entered.status).toBe(200);
+    const cancelled = await host.request('POST', '/v1/ferrets/f1/sends/s-1/cancel', { as: owner(), body: {} });
+    expect([cancelled.status, cancelled.json<{ fate: string }>().fate]).toEqual([200, 'cancelled']);
+    await host.stop();
+  });
+
+  test('a draft act on a ferret the daemon does not know is refused as today refuses it (409 send_refused), pressing nothing', async () => {
+    const { host } = await conversation();
+    const response = await host.request('POST', '/v1/ferrets/ghost/composer', {
+      as: owner(),
+      body: { action: 'clear', draft: 'x' },
+    });
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'send_refused']);
+    await host.stop();
+  });
+});
+
+describe('send path: the Warden’s one verified Enter and the taken-back pointer look', () => {
+  test('only the warden caller may re-submit a stuck send: the owner and a ferret are refused forbidden BEFORE any pane is read', async () => {
+    const ferrets = new HarnessFerrets();
+    const { host, api } = await conversation(ferrets);
+    await api().send(F1, { kind: 'owner' }, { message: 'one send', sendId: 's-1' });
+    let reads = 0;
+    ferrets.script.observe = async () => {
+      reads += 1;
+      return ok({ alive: true, dead: false, promptReady: true, activeWork: false });
+    };
+
+    for (const caller of [{ kind: 'owner' }, { kind: 'ferret', ferret: CALLER }] as const)
+      expect(await api().resubmitStuck!(F1, caller, 's-1')).toMatchObject({ ok: false, error: { code: 'forbidden' } });
+    expect(reads).toBe(0);
+    expect(ferrets.composerKeys).toEqual([]);
+    await host.stop();
+  });
+
+  test('the warden’s Enter presses only when the box holds exactly that send’s text, and an empty box is absent', async () => {
+    const ferrets = new HarnessFerrets();
+    const { host, api } = await conversation(ferrets);
+    const message = 'please look at the failing build and report back';
+    await api().send(F1, { kind: 'owner' }, { message, sendId: 's-1' });
+    // A box that holds OTHER text (the person's own draft) is never pressed.
+    ferrets.script.observe = async () =>
+      ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: 'something the person typed here' });
+    expect(await api().resubmitStuck!(F1, { kind: 'warden' }, 's-1')).toEqual({ ok: true, value: 'refused' });
+    expect(ferrets.composerKeys).toEqual([]);
+    // The send was typed and its Enter never took (the box holds exactly its text): ONE Enter, for exactly that text.
+    ferrets.script.observe = async () =>
+      ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: message });
+    expect(await api().resubmitStuck!(F1, { kind: 'warden' }, 's-1')).toEqual({ ok: true, value: 'submitted' });
+    expect(ferrets.composerKeys).toEqual([`submit:${message}`]);
+
+    ferrets.script.observe = async () => ok({ alive: true, dead: false, promptReady: true, activeWork: false });
+    expect(await api().resubmitStuck!(F1, { kind: 'warden' }, 's-1')).toEqual({ ok: true, value: 'absent' });
+    expect(await api().resubmitStuck!(F1, { kind: 'warden' }, 'nope')).toEqual({ ok: true, value: 'refused' });
+    await host.stop();
+  });
+
+  test('retractedDraft reads and presses nothing, and answers undefined when nothing was taken back', async () => {
+    const ferrets = new HarnessFerrets();
+    const { host, api } = await conversation(ferrets);
+    await api().send(F1, { kind: 'owner' }, { message: 'one send', sendId: 's-1' });
+    expect(await api().retractedDraft!(F1)).toBeUndefined();
+    expect(ferrets.composerKeys).toEqual([]);
     await host.stop();
   });
 });

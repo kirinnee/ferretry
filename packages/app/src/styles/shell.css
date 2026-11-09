@@ -139,3 +139,36 @@
 .contents {
   display: contents;
 }
+
+/* A nav entry's count (S4): a filled pill, capped at "99+" so it never widens its entry. Decoration; the words are for a screen reader. */
+.fy-nav__item {
+  position: relative;
+}
+.fy-nav__badge {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 1.4em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  font-size: calc(var(--fy-text-scale, 1) * 0.75rem);
+  line-height: 1.5;
+  text-align: center;
+}
+.fy-nav__badge .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.fy-slot--device {
+  margin-top: 12px;
+}
+/* A nav panel in a rail (S4): the rail is narrow, so what a panel draws there stays inside it. */
+.fy-nav--rail .fy-slot--device {
+  min-width: 0;
+  overflow: hidden;
+}

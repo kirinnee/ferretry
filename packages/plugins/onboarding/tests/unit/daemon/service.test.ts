@@ -9,12 +9,13 @@ const entries: readonly OnboardingEntry[] = [
   { plugin: 'claude-code' as PluginId, id: 'harness', title: 'Claude Code', order: 20 },
 ];
 
-function make(list: readonly OnboardingEntry[] = entries) {
+function make(list: readonly OnboardingEntry[] = entries, setUp: () => Promise<boolean> = async () => false) {
   const state = new FakeProgressState();
   const clock = new TickingClock();
   const events = new RecordingEvents();
   const service = new OnboardingService({
     entries: () => list,
+    setUp,
     state: state.port,
     clock: clock as unknown as Clock,
     events,
@@ -31,6 +32,11 @@ describe('OnboardingService', () => {
       'logins:login:pending',
     ]);
     expect(view.complete).toBe(false);
+  });
+
+  test('the view says whether the machine is set up, as the injected read answers', async () => {
+    expect((await make(entries, async () => true).service.view()).setUp).toBe(true);
+    expect((await make(entries, async () => false).service.view()).setUp).toBe(false);
   });
 
   test('an answer is stored with the clock time and returned as the step', async () => {
@@ -78,6 +84,7 @@ describe('OnboardingService', () => {
     const state = new FakeProgressState();
     const service = new OnboardingService({
       entries: () => list,
+      setUp: async () => false,
       state: state.port,
       clock: new TickingClock() as unknown as Clock,
       events: new RecordingEvents(),

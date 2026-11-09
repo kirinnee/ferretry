@@ -138,7 +138,29 @@ pre-commit-lib.run {
       enable = true;
       name = "Cloudflare Pages configuration";
       entry = validator "scripts/validate/pages-config.sh";
-      files = "^(wrangler\\.jsonc|packages/app/(vite\\.config\\.ts|package\\.json|public/_(headers|redirects))|scripts/(ci/build-pwa|validate/pages-config)\\.sh|\\.github/workflows/pwa-pages\\.yaml)$";
+      files = "^(wrangler\\.jsonc|packages/app/(vite\\.config\\.ts|package\\.json|public/_(headers|redirects))|scripts/(ci/build-pwa|validate/pages-config)\\.sh|\\.github/workflows/pwa-pages(-v5)?\\.yaml)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # The hosted app's origin has one owner (the kernel's hosted-app module) and every build route asks one script for
+    # it; a second literal would pair phones to one app and read the catalog from another.
+    a-hosted-app-origin = {
+      enable = true;
+      name = "Hosted app origin";
+      entry = validator "scripts/validate/hosted-app-origin.sh";
+      files = "^(packages/.*|scripts/(ci/(hosted-app-origin|sign-pwa-release|verify-pwa-release|check-pwa-release)|release/compile|validate/hosted-app-origin)\\.sh|\\.github/workflows/.*\\.ya?ml)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # Only main can tag, publish a release, touch Casks/ or run semantic-release; the 5.0 preview deploys from
+    # rebuild/5.0 alone. A tag is not a branch, so every link of the release chain is held to the ref.
+    a-release-guards = {
+      enable = true;
+      name = "Release guards";
+      entry = validator "scripts/validate/release-guards.sh";
+      files = "^(\\.releaserc\\.yaml|\\.github/workflows/.*\\.ya?ml|scripts/validate/release-guards\\.sh)$";
       pass_filenames = false;
       language = "system";
     };
@@ -178,7 +200,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Ferretry 5.0 checks";
       entry = bun-script "scripts/validate/rebuild-checks.sh";
-      files = "^(packages/.*|scripts/(gen|validate)/.*|ports-pending\\.json|release\\.json|docs/rebuild/guarantees\\.tsv|package\\.json)$";
+      files = "^(packages/.*|scripts/(gen|validate)/.*|ports-pending\\.json|release\\.json|docs/rebuild/guarantees\\.tsv|docs/design/rebuild-parity\\.tsv|package\\.json)$";
       pass_filenames = false;
       language = "system";
     };

@@ -3,7 +3,9 @@ import {
   cancelMcpSignIn,
   checkMcpServer,
   finishMcpSignIn,
+  readFerret,
   readFerretMcpServers,
+  readFerrets,
   readMachineMcpServers,
   readMcpSignIns,
   signOutMcp,
@@ -129,5 +131,26 @@ describe('the MCP sign-in client', () => {
       'DELETE /v1/mcp/auth/flows/:flowId',
       'DELETE /v1/mcp/auth/:component',
     ]);
+  });
+});
+
+describe('mcp#1 the ferret reads, through Ferrets’ own routes', () => {
+  // The daemon answers a whole summary; MCP keeps the five fields it uses and ignores the rest.
+  const summary = { id: 'f1', name: 'Marin', runtime: 'marin', state: 'idle', harness: 'claude-code', folder: '/w' };
+
+  it('reads one ferret by id and the whole list, keeping only what MCP uses', async () => {
+    const calls: Call[] = [];
+    const client = scriptedClient({ 'GET /v1/ferrets/:ferretId': summary, 'GET /v1/ferrets': [summary] }, calls);
+    expect(await readFerret(client, 'f1')).toMatchObject({ id: 'f1', name: 'Marin', runtime: 'marin', state: 'idle' });
+    expect(await readFerrets(client)).toHaveLength(1);
+    expect(calls.map(call => [call.route, call.params])).toEqual([
+      ['GET /v1/ferrets/:ferretId', { ferretId: 'f1' }],
+      ['GET /v1/ferrets', undefined],
+    ]);
+  });
+
+  it('refuses an answer that is not a ferret', async () => {
+    const client = scriptedClient({ 'GET /v1/ferrets/:ferretId': { id: 'f1', name: 'Marin', state: 'asleep' } });
+    await expect(readFerret(client, 'f1')).rejects.toThrow();
   });
 });

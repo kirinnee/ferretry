@@ -370,6 +370,49 @@ export const DATA: MachineData = {
 
 export const APPLIED = { outcome: 'executed', executor: 'setup', summary: 'Done.' };
 
+/** The R3-M1 file, planted where the fleet needs a directory: the apply fails after the runtime's file landed. */
+export const LANDED_FILE = '/home/kirin/.ferretry/config/runtimes/claude-work.yaml';
+export const UNRESTORED_PATH = '/home/kirin/.ferretry/fleet/homes/rt-1/settings.json';
+export const BACKUP_PATH = '/home/kirin/.ferretry/fleet/homes/rt-1/settings.json.bak';
+
+/** A 200 answer: the daemon applied the change, the fleet apply failed and was put back, the file stayed. */
+export const ROLLED_BACK = {
+  outcome: 'applied',
+  apply: {
+    outcome: 'rolled-back',
+    failedOperation: 'Publishing the fleet',
+    reason: 'fleet/bin is a file, not a directory',
+    configurationLanded: [LANDED_FILE],
+  },
+};
+
+/** A 200 answer: the fleet apply failed and part of it could not be put back. */
+export const ROLLBACK_INCOMPLETE = {
+  outcome: 'applied',
+  apply: {
+    outcome: 'rollback-incomplete',
+    failedOperation: 'Publishing the fleet',
+    reason: 'disk is full',
+    unrestored: [{ path: UNRESTORED_PATH, reason: 'permission denied', backup: BACKUP_PATH }],
+    configurationLanded: [LANDED_FILE],
+  },
+};
+
+/** A 200 answer: the apply finished. */
+export const COMMITTED = {
+  outcome: 'applied',
+  apply: {
+    outcome: 'committed',
+    result: {
+      accountCount: 1,
+      operationCount: 1,
+      manifestPath: '/home/kirin/.ferretry/fleet/manifest.json',
+      prunedWrappers: [],
+      sharedHistory: [],
+    },
+  },
+};
+
 /** The four reads and an open authority: a machine that answers everything and asks for nothing. */
 export const READS = (data: MachineData = DATA): Record<string, unknown> => ({
   'GET /v1/logins': data.credentials,

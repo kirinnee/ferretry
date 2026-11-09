@@ -219,7 +219,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
       create: true,
       ...(draft.addAnother ? { addAnother: true } : {}),
     });
-    if (result.kind === 'refused') return;
+    if (result.kind !== 'applied') return;
     await reload();
     setMade(name);
   };

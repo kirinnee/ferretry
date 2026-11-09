@@ -24,8 +24,6 @@ import {
 } from './clone.ts';
 import {
   AutoResumeSummarySchema,
-  CATALOG_SKILL_MAX_FILES,
-  CatalogSkillFileSchema,
   BrowserFirewallFailureSchema,
   BrowserModeSchema,
   BrowserPortsSettingSchema,
@@ -618,33 +616,6 @@ export type ComponentInput = z.infer<typeof ComponentInputSchema>;
 
 /** The longest component text one change may carry. */
 export const MAX_COMPONENT_CONTENT_BYTES = 256 * 1024;
-
-/**
- * Put an MCP server or a skill that a catalog published into this machine's setup, and add it to one
- * profile — in ONE change, so the provisioner's rollback boundary covers the component, the skill's
- * files and the profile together.
- *
- * THIS IS AN INTERNAL CHANGE, NOT A WIRE ONE. It is deliberately outside `AccountChangeSchema`:
- * `POST /v1/runtimes/proposals` cannot express it, because what makes it safe — the publisher's
- * signature, the item's digest, the passkey, the refusal of a ferret — is checked by the catalog
- * installer before it exists, and `installedFrom` is only ever what the installer VERIFIED. The
- * installer hands it to the runtimes port's `installCatalogItem`; no route parses it. A skill's
- * `files` are relative to its own folder and land under the skills store (docs/catalogs.md).
- * `replace` means "the component of this name is the one this publisher's item installed before".
- */
-export const CatalogInstallChangeSchema = z.strictObject({
-  kind: z.literal('catalog.install'),
-  name: ComponentNameSchema,
-  component: ComponentInputSchema.refine(
-    component => component.kind === 'mcp' || component.kind === 'skills',
-    'only an MCP server or a skill is installed from a catalog',
-  ),
-  files: z.array(CatalogSkillFileSchema).max(CATALOG_SKILL_MAX_FILES),
-  profile: ComponentNameSchema,
-  installedFrom: CatalogProvenanceSchema,
-  replace: z.boolean(),
-});
-export type CatalogInstallChange = z.infer<typeof CatalogInstallChangeSchema>;
 
 /**
  * One change to this machine's setup. `create: true` means "this name must be new": a clash is

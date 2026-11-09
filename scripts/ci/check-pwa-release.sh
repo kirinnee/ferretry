@@ -29,7 +29,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository="${script_dir}/../.."
 sequence=""
 commit=""
-next_public_key="${repository}/packages/app/release-signing-key.next.pub"
+next_public_key="$("${script_dir}/hosted-app-origin.sh" --next-key-file)"
 public_dir="${repository}/packages/app/public"
 dist=""
 while [[ $# -gt 0 ]]; do

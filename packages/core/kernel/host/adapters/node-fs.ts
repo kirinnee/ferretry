@@ -32,6 +32,10 @@ export interface FileIdentity {
   readonly links: number;
   readonly size: number;
   readonly mtimeMs: number;
+  /** The modification time to the nanosecond: a whole-millisecond compare misses a change made in the same millisecond. */
+  readonly mtimeNs: bigint;
+  /** The status-change time to the nanosecond: it moves on every create, rename and remove in a folder, and cannot be set back. */
+  readonly ctimeNs: bigint;
   /** The permission bits. */
   readonly mode: number;
   readonly owner: number;
@@ -152,6 +156,8 @@ function fileIdentityOf(entry: BigIntStats): FileIdentity {
     links: Number(entry.nlink),
     size: Number(entry.size),
     mtimeMs: Number(entry.mtimeMs),
+    mtimeNs: entry.mtimeNs,
+    ctimeNs: entry.ctimeNs,
     mode: Number(entry.mode & 0o7777n),
     owner: Number(entry.uid),
     group: Number(entry.gid),
@@ -220,7 +226,8 @@ async function listedGroups(database: string, user: string): Promise<readonly nu
 
 /**
  * `descriptorFolder`: where an open descriptor is reached by number (Linux `/proc/self/fd`); a host without it reaches
- * entries by their real path, re-proved before each step, and a remove or move outside daemon folders is refused.
+ * entries by their real path, re-proved before each step; a folder remove is refused there, and so is any remove of an
+ * owner root.
  */
 export function nodeFs(
   randomSuffix: () => string,

@@ -26,6 +26,8 @@ function subject(
     readonly screen?: string;
     readonly refusal?: Error;
     readonly absent?: boolean;
+    /** The pane-absent question throws before it returns anything, as a port that is not async may. */
+    readonly absentThrowsSync?: boolean;
     readonly tree?: ProcessTreeRead;
     /** The walk of the tree itself fails, as a table that cannot be read does. */
     readonly walkThrows?: Error;
@@ -70,9 +72,10 @@ function subject(
     incarnation: {
       startOf: async pid => options.startNow?.(pid) ?? latest.find(row => row.pid === pid)?.start,
     },
-    paneAbsent: async ferret => {
+    paneAbsent: ferret => {
       asked.absent.push(ferret);
-      return options.absent ?? false;
+      if (options.absentThrowsSync === true) throw new Error('tmux gone');
+      return Promise.resolve(options.absent ?? false);
     },
     screen: async paneId => {
       asked.screens.push(paneId);
@@ -391,5 +394,18 @@ describe('a walk of the pane that fails', () => {
       kind: 'unobservable',
       reason: 'the pane could not be inspected: plain text',
     });
+  });
+
+  it('should stay total when the pane-absent question throws before it answers', async () => {
+    const { look } = subject({
+      refusal: new SessionAttachError('pane_unavailable', 'the registered pane is not live'),
+      absentThrowsSync: true,
+    });
+    should(await look.processes('f1')).eql({ kind: 'unobservable', reason: 'the registered pane is not live' });
+  });
+
+  it('should stay total when the refusal has no readable text', async () => {
+    const { look } = subject({ refusal: Object.create(null) as Error });
+    should(await look.processes('f1')).eql({ kind: 'unobservable', reason: 'an unreadable failure' });
   });
 });

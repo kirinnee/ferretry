@@ -4,7 +4,7 @@
  * an existing target is refused, and a move the disk refuses is a facts-only error, never a copy.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { FencedPath } from '../../../contract/bound.ts';
 import type { RootHandle, RootName } from '../../../contract/ports.ts';
@@ -289,5 +289,41 @@ describe('RootHandle.rename', () => {
     ).toBe('changed');
     expect(await readFile(`${f.dir}/b/keep`, 'utf8')).toBe('keep');
     expect(await readFile(`${f.dir}/a`, 'utf8')).toBe('AAA');
+  });
+});
+
+describe('RootHandle.rename needs descriptor reach', () => {
+  test('a host without descriptor reach (macOS today) refuses with no_descriptor_reach and moves nothing', async () => {
+    const f = await fresh(nodeFs(() => crypto.randomUUID(), { descriptorFolder: '/nonexistent-descriptor-folder' }));
+    await mkdir(`${f.dir}/sub`, { mode: 0o700 });
+    await writeFile(`${f.dir}/sub/a`, 'AAA');
+    expect(
+      await refusalOf(() => f.fleet.rename(at(f.fleet, 'homes/claude-a/sub/a'), at(f.fleet, 'homes/claude-a/sub/b'))),
+    ).toBe('no_descriptor_reach');
+    expect(await readFile(`${f.dir}/sub/a`, 'utf8')).toBe('AAA');
+    expect(await gone(`${f.dir}/sub/b`)).toBe(true);
+  });
+
+  test('a parent swapped for a link AFTER the check cannot carry the move outside the root (the held folder is used)', async () => {
+    let swapped = false;
+    const base = nodeFs(() => crypto.randomUUID());
+    const f = await fresh({
+      ...base,
+      rename: async (from, to) => {
+        if (!swapped) {
+          swapped = true;
+          await rename(`${f.dir}/sub`, `${f.dir}/sub-moved`);
+          await symlink(`${f.parent}/outside`, `${f.dir}/sub`);
+        }
+        await base.rename(from, to);
+      },
+    });
+    await mkdir(`${f.parent}/outside`);
+    await mkdir(`${f.dir}/sub`, { mode: 0o700 });
+    await writeFile(`${f.dir}/sub/a`, 'AAA');
+    await f.fleet.rename(at(f.fleet, 'homes/claude-a/sub/a'), at(f.fleet, 'homes/claude-a/sub/b'));
+    expect(swapped).toBe(true);
+    expect(await readFile(`${f.dir}/sub-moved/b`, 'utf8')).toBe('AAA');
+    expect(await gone(`${f.parent}/outside/b`)).toBe(true);
   });
 });

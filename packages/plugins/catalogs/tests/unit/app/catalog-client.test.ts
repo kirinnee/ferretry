@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   catalogClientOf,
   machineCatalogClient,
+  machinePluginClient,
   NO_MACHINE_SENTENCE,
   routeFor,
 } from '../../../app/lib/catalog-client.ts';
@@ -123,5 +124,21 @@ describe('the catalog client of any paired machine', () => {
     const pending = client({ daemonId: 'd2' });
     setTimeout(() => rows.set('d2', elsewhere), 150);
     await pending;
+  });
+});
+
+describe('the plugin client of any paired machine', () => {
+  const own = recording({ own: true });
+  const elsewhere = recording({ elsewhere: true }) as PluginClient;
+  const clientOf = machinePluginClient(own, 'd1', new Map([['d2', elsewhere]]));
+
+  it('answers the half’s own client for its machine and the row client for another, never the own for another', async () => {
+    expect(await clientOf({ daemonId: 'd1' })).toBe(own);
+    expect(await clientOf({ daemonId: 'd2' })).toBe(elsewhere);
+    expect(await clientOf({ daemonId: 'd2' })).not.toBe(own);
+  });
+
+  it('refuses, saying so, for a machine with no row', async () => {
+    await expect(clientOf({ daemonId: 'd3' })).rejects.toThrow(NO_MACHINE_SENTENCE);
   });
 });

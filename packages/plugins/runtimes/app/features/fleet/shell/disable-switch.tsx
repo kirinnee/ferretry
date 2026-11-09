@@ -106,7 +106,7 @@ export function DisableSwitch({
       return;
     }
     const result = await changes.apply(enableChange(target));
-    if (result.kind === 'refused') {
+    if (result.kind !== 'applied') {
       setFailed(result.sentence);
       return;
     }
@@ -116,7 +116,7 @@ export function DisableSwitch({
   const submit = async (): Promise<void> => {
     if (until.kind === 'problem' || why !== null) return;
     const result = await changes.apply(disableChange(target, reason, until.until));
-    if (result.kind === 'refused') return;
+    if (result.kind !== 'applied') return;
     setAsking(false);
     setReason('');
     setChoice('forever');

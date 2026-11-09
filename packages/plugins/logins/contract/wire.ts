@@ -17,6 +17,7 @@ import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSche
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { malformedSecretReference } from '@ferretry/core-vault/contract';
+import { storedEnvironmentIssue } from './secret-shape.ts';
 
 const HarnessKindSchema = HarnessKeySchema;
 const NonEmpty = z.string().min(1);
@@ -465,17 +466,30 @@ export const RESERVED_LOGIN_ENV_NAMES = [
  * `login.env`): no reserved variable, and no malformed `${secret:…}` reference (which would be exported as literal
  * text and fail as a credential with no visible cause). A refusal names the KEY only, never the value.
  */
+const MAX_ENVIRONMENT_NAME = 128;
+
 const refuseUnsafeEnvironment = (ctx: {
   readonly value: Readonly<Record<string, unknown>>;
   readonly issues: z.core.$ZodRawIssue[];
 }): void => {
   for (const [name, value] of Object.entries(ctx.value)) {
-    if (!POSIX_ENV_NAME.test(name)) {
+    if (name.length > MAX_ENVIRONMENT_NAME) {
+      // The record leaves no key out any more, so the rule sees every name. Nothing can vouch that the value under a name this long holds no key.
+      ctx.issues.push({
+        code: 'custom',
+        message: `A variable name is longer than ${MAX_ENVIRONMENT_NAME} characters: a variable name is short, and the value under it is not read`,
+        input: name.slice(0, 16),
+        path: [name],
+        params: { rawSecret: true },
+        continue: true,
+      });
+    } else if (!POSIX_ENV_NAME.test(name)) {
       ctx.issues.push({
         code: 'custom',
         message: `"${name}" must be a POSIX environment variable name`,
         input: name,
         path: [name],
+        continue: true,
       });
     } else if ((RESERVED_LOGIN_ENV_NAMES as readonly string[]).includes(name)) {
       ctx.issues.push({
@@ -483,6 +497,7 @@ const refuseUnsafeEnvironment = (ctx: {
         message: `"${name}" is reserved: Ferretry sets it for the runtime itself`,
         input: name,
         path: [name],
+        continue: true,
       });
     } else if (typeof value === 'string' && malformedSecretReference(value) !== undefined) {
       ctx.issues.push({
@@ -490,21 +505,100 @@ const refuseUnsafeEnvironment = (ctx: {
         message: `"${name}" holds a malformed secret reference: a secret name is uppercase letters, digits and underscores, as in \${secret:WORK_KEY}`,
         input: name,
         path: [name],
+        continue: true,
       });
     }
   }
 };
 
 /**
- * The ONE builder of a login's environment record, for the login file, the harness half, `login.add` and `login.env`:
- * the key is any string up to 128 characters at the record, and `refuseUnsafeEnvironment` refuses every unsafe key (not
- * POSIX, reserved) and value (malformed reference) together, so a file with two faults reports both.
+ * The longest value a login's environment variable may hold, on the wire and in a file.
  */
-const loginEnvironment = <V extends z.ZodType>(value: V) =>
-  z.record(z.string().max(128), value).check(refuseUnsafeEnvironment);
+const MAX_ENVIRONMENT_VALUE = 4096;
 
-/** A login's environment: POSIX names, plain values or `${secret:NAME}` references, no reserved variable. */
-export const LoginEnvSchema = loginEnvironment(z.string());
+/**
+ * The ONE builder of a login's environment record, for the login file, the harness half, `login.add` and `login.env`:
+ * the key is any string at the record (a key the record dropped would never reach the stored-secret rule), and
+ * `refuseUnsafeEnvironment` refuses every unsafe key (over 128 characters, not POSIX, reserved) and value (malformed
+ * reference) together, so a file with two faults reports both.
+ */
+const loginEnvironment = <V extends z.ZodType>(value: V) => z.record(z.string(), value).check(refuseUnsafeEnvironment);
+
+const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * What a login FILE's environment may not hold: a secret value, or an address carrying one. The same rule the staging route
+ * applies ({@link storedEnvironmentIssue}), so a file written by the config editor or `config_write` is judged as a login
+ * add is. A value over 4096 characters (the wire's cap) is refused here, as a marked issue, and is NOT scanned: nothing can
+ * vouch that an over-long value holds no key, which is also why the scan stays linear. A refusal names the VARIABLE only,
+ * never the value, and is marked `rawSecret`, so the kernel withholds the file's text from `config_read` whatever ELSE is
+ * wrong with the file, as for a file holding a raw key. A file that fails is reported invalid: an edit keeps the last good
+ * version in effect, but a file saved before this rule is not in effect until it is fixed (the kernel re-checks the accepted
+ * text at start).
+ */
+const refuseStoredSecrets = (ctx: { readonly value: unknown; readonly issues: z.core.$ZodRawIssue[] }): void => {
+  // The check runs even when the record's own type check failed, so the value can be anything (null for a blank `env:`).
+  // An environment that is not a map, or a value under it that is not a string, cannot be judged, so it is withheld.
+  if (!isPlainObject(ctx.value)) {
+    ctx.issues.push({
+      code: 'custom',
+      message: 'env must be a map of NAME: value',
+      input: undefined,
+      path: [],
+      params: { rawSecret: true },
+    });
+    return;
+  }
+  for (const [name, value] of Object.entries(ctx.value)) {
+    if (typeof value !== 'string') {
+      ctx.issues.push({
+        code: 'custom',
+        message: `"${name}": env must be a map of NAME: value`,
+        input: name,
+        path: [name],
+        params: { rawSecret: true },
+      });
+      continue;
+    }
+    if (value.length > MAX_ENVIRONMENT_VALUE) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `"${name}" is longer than ${MAX_ENVIRONMENT_VALUE} characters: keep a long value in the secret store and write \${secret:NAME} here`,
+        input: name,
+        path: [name],
+        params: { rawSecret: true },
+      });
+      continue;
+    }
+    const issue = storedEnvironmentIssue(name, value);
+    if (issue === undefined) continue;
+    ctx.issues.push({
+      code: 'custom',
+      message:
+        issue === 'secret'
+          ? `"${name}" holds a secret: save it in the secret store and write \${secret:NAME} here instead`
+          : `"${name}" is an address holding a ${issue === 'userinfo' ? 'password' : 'key in its query string'}: write the address without it and keep it in the secret store`,
+      input: name,
+      path: [name],
+      params: { rawSecret: true },
+    });
+  }
+};
+
+/** A login's environment: POSIX names, plain values or `${secret:NAME}` references, no reserved variable, no secret value. */
+export const LoginEnvSchema = loginEnvironment(z.string()).check(alwaysRun(refuseStoredSecrets));
+
+/**
+ * A check that runs even when an earlier issue (an over-long variable NAME, which the record raises before any check) has
+ * already failed the value: zod skips a later check after a non-continuable issue unless it says `when` it runs. The secret
+ * rule must run beside every other fault, so a file's text is never shown just because it has a second mistake.
+ */
+function alwaysRun<T>(check: (payload: z.core.ParsePayload<T>) => void): z.core.$ZodCheck<T> {
+  const wrapped = z.check<T>(check);
+  wrapped._zod.def.when = () => true;
+  return wrapped;
+}
 
 const ChangeLabelSchema = NonEmptyStringSchema.max(200);
 
@@ -520,7 +614,7 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
     /** `store: environment` only: the preset it is made from. */
     preset: NonEmptyStringSchema.max(64).optional(),
     /** `store: environment` only: each variable as a plain value or a `${secret:NAME}` reference. */
-    env: loginEnvironment(z.string().max(4096)).optional(),
+    env: loginEnvironment(z.string().max(MAX_ENVIRONMENT_VALUE)).optional(),
     /** `store: environment` only: `aws-profile:<name>`, `gcloud-adc[:<path>]` or `azure-cli`. */
     cloudCredential: NonEmptyStringSchema.max(512).optional(),
   }),
@@ -532,7 +626,7 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
      */
     kind: z.literal('login.env'),
     id: NonEmptyStringSchema,
-    env: loginEnvironment(z.union([z.string().max(4096), z.strictObject({ keep: z.literal(true) })])),
+    env: loginEnvironment(z.union([z.string().max(MAX_ENVIRONMENT_VALUE), z.strictObject({ keep: z.literal(true) })])),
     cloudCredential: NonEmptyStringSchema.max(512).nullable().optional(),
   }),
   z.strictObject({ kind: z.literal('login.label'), id: NonEmptyStringSchema, label: ChangeLabelSchema.nullable() }),
@@ -1181,6 +1275,37 @@ export const LoginFileSchema = z.strictObject({
   codex: LoginHalfSchema.optional(),
 });
 export type LoginFile = z.infer<typeof LoginFileSchema>;
+
+/**
+ * An environment login's own variables as Runtimes reads them to build a runtime's home (`LoginsApi.environmentTemplates`):
+ * the login file's variable TEMPLATES, exactly as written. A value is plain text or contains `${secret:NAME}` references;
+ * the file schema refuses a raw secret, so no value of a secret is here to be read, and nothing else of the file travels
+ * (not its budget, not its text).
+ */
+export const EnvironmentLoginTemplateSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('templates'),
+    id: z.string().min(1),
+    harness: HarnessKindSchema,
+    env: LoginEnvSchema.optional(),
+    preset: z.string().min(1).max(64).optional(),
+    cloudCredential: CloudCredentialReferenceSchema.optional(),
+    codexProvider: CodexProviderSchema.optional(),
+    claude: LoginHalfSchema.optional(),
+    codex: LoginHalfSchema.optional(),
+  }),
+  /**
+   * A login whose file is not a clean, checked version in effect (it is invalid, a loosening edit of it is held, or a
+   * variable holds something that looks like a raw secret): its NAME and its variable NAMES only, never a value.
+   */
+  z.strictObject({
+    kind: z.literal('withheld'),
+    id: z.string().min(1),
+    harness: HarnessKindSchema,
+    variables: z.array(z.string().min(1)).readonly(),
+  }),
+]);
+export type EnvironmentLoginTemplate = z.infer<typeof EnvironmentLoginTemplateSchema>;
 
 const PresetVariableFileSchema = z
   .strictObject({

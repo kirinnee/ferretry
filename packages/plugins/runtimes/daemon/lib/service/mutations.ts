@@ -6,7 +6,6 @@
  * whole-config replacement can differ from what was previewed in ways nobody reads, while "add this
  * runtime" has one meaning and one derivation.
  */
-import { posix } from 'node:path';
 import { type BrowserMode, type BrowserPortsSetting, type LoweredHarness, lowerHarness } from './foreign.ts';
 import {
   type AccountModel,
@@ -30,12 +29,11 @@ import {
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
-import { skillSourceReference } from '../account/adapt.ts';
 import { slugName } from '../account/document.ts';
+import { holdsControlCharacter, INSTRUCTIONS_TEXT_LIMIT } from '../../../contract/index.ts';
 import type {
   AccountChange as WireAccountChange,
   AgentControl,
-  CatalogInstallChange as WireCatalogInstallChange,
   ComponentInput as WireComponentInput,
   EnvInput,
   RunningSession,
@@ -90,17 +88,17 @@ export type LoginAccountChange = Extract<
 >;
 
 /** Whether Logins owns this change (every `credential.*`). */
-export const isLoginAccountChange = (
-  change: WireAccountChange | WireCatalogInstallChange,
-): change is LoginAccountChange => change.kind.startsWith('credential.');
+export const isLoginAccountChange = (change: WireAccountChange): change is LoginAccountChange =>
+  change.kind.startsWith('credential.');
 
 /** A login's removal, as Runtimes sees it: the runtimes still on it, to move or remove before Logins removes the login. */
 export type LoginRemoval = Extract<LoginAccountChange, { kind: 'credential.remove' }>;
 
 /** The changes that derive a new configuration in Runtimes, as they arrive. Setup and clone run their own executors. */
-export type AccountPlanChange =
-  | Exclude<WireAccountChange, LoginAccountChange | { kind: 'setup.import' } | { kind: 'clone.import' }>
-  | WireCatalogInstallChange;
+export type AccountPlanChange = Exclude<
+  WireAccountChange,
+  LoginAccountChange | { kind: 'setup.import' } | { kind: 'clone.import' }
+>;
 
 type PlanChange = LoweredHarness<AccountPlanChange | LoginRemoval>;
 
@@ -108,9 +106,8 @@ type PlanChange = LoweredHarness<AccountPlanChange | LoginRemoval>;
 const EXECUTED_KINDS: ReadonlySet<string> = new Set(['setup.import', 'clone.import']);
 
 /** Whether this change derives a new configuration (and so goes through the plan and its apply). */
-export const isAccountPlanChange = (
-  change: WireAccountChange | WireCatalogInstallChange,
-): change is AccountPlanChange => !EXECUTED_KINDS.has(change.kind) && !isLoginAccountChange(change);
+export const isAccountPlanChange = (change: WireAccountChange): change is AccountPlanChange =>
+  !EXECUTED_KINDS.has(change.kind) && !isLoginAccountChange(change);
 
 /** One component document a change writes, relative to the asset tree. */
 export interface AccountComponentFile {
@@ -317,9 +314,19 @@ function componentBody(
   const existingEnv = existing?.env as Readonly<Record<string, string>> | undefined;
   const harness = 'harness' in input && input.harness !== undefined ? { harness: input.harness } : {};
   switch (input.kind) {
-    case 'instructions':
-      if (file === undefined) refuse(`${owner} needs its text`);
-      return { component: { file, ...harness }, ...(written === undefined ? {} : { file: written }) };
+    case 'instructions': {
+      // Runtimes' own kind: the text is kept in the item itself, so an edit writes no document beside it.
+      const text = given ?? (typeof existing?.text === 'string' ? existing.text : undefined);
+      // An item imported from a document keeps pointing at it when only its fields change.
+      if (text === undefined && keptFile !== undefined) return { component: { file: keptFile, ...harness } };
+      const held = text ?? refuse(`${owner} needs its text`);
+      // Refused here, when it is proposed, so nothing is written under a sentence that says nothing was changed.
+      if (held.length > INSTRUCTIONS_TEXT_LIMIT)
+        refuse(`${owner} is longer than ${String(INSTRUCTIONS_TEXT_LIMIT)} characters`);
+      if (holdsControlCharacter(held))
+        refuse(`${owner} holds a control character (NUL or another, besides tab and line breaks)`);
+      return { component: { text: held, ...harness } };
+    }
     case 'mcp': {
       const env = resolvedEnv(input.env, existingEnv, owner);
       return {
@@ -435,8 +442,6 @@ function applyAccountChange(
       return putComponent(model, draft, change, facts, files, consequences);
     case 'component.remove':
       return removeComponent(model, draft, change, consequences);
-    case 'catalog.install':
-      return installCatalogItem(model, draft, change, facts, files, consequences);
     case 'runtime.disable': {
       if (model.runtimes[change.name] === undefined) return refuse(`no runtime ${change.name} exists on this machine`);
       (draft.runtimes[change.name] as Record<string, unknown>).disabled = disabledBlock(change);
@@ -974,67 +979,6 @@ function putComponent(
     if (consequence !== undefined) consequences.push(consequence);
   }
   return existing === undefined ? `Add ${word} ${change.name}` : `Change ${word} ${change.name}`;
-}
-
-/**
- * An MCP server or a skill a catalog published, put into the setup and into ONE profile. It is a
- * component put with three differences: the component records where it came from (`installedFrom`,
- * which the installer verified), a skill's files are written under the skills store in the same
- * apply, and the profile gains the layer. A component already there is replaced only when it is the
- * very item this publisher's catalog installed before — never because the names match.
- */
-function installCatalogItem(
-  model: AccountModel,
-  draft: Draft,
-  change: Extract<PlanChange, { kind: 'catalog.install' }>,
-  facts: AccountChangeFacts,
-  files: AccountComponentFile[],
-  consequences: string[],
-): string {
-  const kind = change.component.kind === 'skills' ? 'skills' : 'mcp';
-  const word = KIND_WORDS[kind];
-  const origin = change.installedFrom;
-  const existing = model.components[kind][change.name] as Record<string, unknown> | undefined;
-  const earlier = existing?.installedFrom as { publisher?: string; catalogId?: string; itemId?: string } | undefined;
-  if (existing !== undefined && !change.replace) {
-    refuse(`${change.name} is already a ${word} on ${facts.machineName}, and no install of this item put it there`);
-  }
-  if (
-    existing !== undefined &&
-    (earlier?.publisher !== origin.publisher ||
-      earlier.catalogId !== origin.catalogId ||
-      earlier.itemId !== origin.itemId)
-  ) {
-    refuse(`${change.name} is a ${word} on ${facts.machineName} that this item did not install`);
-  }
-  if (existing === undefined && change.replace) refuse(`no ${word} ${change.name} exists to replace`);
-  const profile = model.profiles[change.profile];
-  if (profile === undefined) return refuse(`no profile ${change.profile} exists on this machine`);
-  if (change.component.kind === 'skills' && change.component.items.join('/') !== change.name)
-    refuse('a skill installed from a catalog is the one folder that carries its name');
-  const built = componentOf(change.name, change.component, undefined, existing, undefined);
-  draft.components[kind][change.name] = { ...built.component, installedFrom: origin };
-  if (kind === 'skills') {
-    const folder = skillSourceReference(change.name);
-    for (const file of change.files) {
-      // Defence in depth: the installer's schema already refuses these spellings, and a write that
-      // resolves anywhere but inside this skill's own folder is refused here whatever called us.
-      const landed = posix.normalize(`${folder}/${file.path}`);
-      if (file.path === '' || !landed.startsWith(`${folder}/`) || landed === `${folder}/`)
-        refuse(`${JSON.stringify(file.path)} is not a file inside the skill's own folder`);
-      files.push({ file: landed, content: file.content });
-    }
-  }
-  const reference = `${kind}/${change.name}` as const;
-  const layers = (draft.profiles[change.profile] as { layers: string[] }).layers;
-  if (!layers.includes(reference)) layers.push(reference);
-  const consequence = existing === undefined ? undefined : editConsequence(componentUsage(model, reference));
-  if (consequence !== undefined) consequences.push(consequence);
-  consequences.push(
-    `It becomes a layer of profile ${change.profile}, so every runtime on that profile gets it the next time it starts.`,
-  );
-  const verb = existing === undefined ? 'Install' : 'Replace';
-  return `${verb} ${word} ${change.name} from ${origin.publisherName}`;
 }
 
 function removeComponent(

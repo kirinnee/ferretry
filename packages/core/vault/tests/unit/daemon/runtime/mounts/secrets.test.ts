@@ -136,6 +136,23 @@ describe('the secret routes', () => {
     ]);
   });
 
+  it('S28 the app never receives a value: write-only in, and only the mask or the summary ever comes back out', async () => {
+    // Arrange
+    const { handlers } = subsystem();
+
+    // Act — the app writes a value, lists, and a use echoes it back
+    const put = await handlers['POST /v1/secrets'](call(ownerStanding(), { name: 'TOKEN', value: TOKEN }));
+    const listing = await handlers['GET /v1/secrets']();
+    const used = await handlers['POST /v1/secrets/use'](
+      call(ownerStanding(), { command: ['printenv', 'TOKEN'], cwd: '/srv/app', secrets: ['TOKEN'] }),
+    );
+
+    // Assert — no answer carries the value; the use answer holds the mask
+    for (const answer of [put, listing, used]) should(answer.body).not.containEql(TOKEN);
+    should(JSON.parse(used.body).stdout).equal('token=[redacted:TOKEN]');
+    should(manifest.actions.routes.map(route => route.key)).not.containEql('GET /v1/secrets/:name');
+  });
+
   it('S157 a put answers the summary only, never what it stored', async () => {
     // Arrange
     const { handlers, changes } = subsystem();
@@ -356,9 +373,9 @@ describe('the secret routes', () => {
       await source.directory.put('API_KEY', TOKEN);
       const opened = await target.handlers['POST /v1/secrets/imports'](call(ownerStanding()));
       const offer = JSON.parse(opened.body) as { readonly importId: string };
-      const seal = (standing: ReturnType<typeof governedOn> | ReturnType<typeof ownerStanding>) =>
+      const seal = (standing: ReturnType<typeof governedOn> | ReturnType<typeof ownerStanding>, names = ['API_KEY']) =>
         source.handlers['POST /v1/secrets/exports/:importId'](
-          call(standing as never, { offer, names: ['API_KEY'] }, { importId: offer.importId }),
+          call(standing as never, { offer, names }, { importId: offer.importId }),
         );
       return { source, seal };
     }
@@ -417,6 +434,25 @@ describe('the secret routes', () => {
       should(again.status).equal(403);
       should(source.seals()).equal(1);
       should(proof.taken()).equal(1);
+    });
+
+    it('S147 one passkey proof covers every key of a copy; a declined proof seals nothing and the next try asks again', async () => {
+      // Arrange — two keys held, ONE fresh proof
+      const { source, seal } = await sourceAndOffer();
+      await source.directory.put('DB_PASSWORD', 'fake-value-db-password');
+      const proof = oneProof();
+
+      // Act — one act naming both keys, then a device whose proof is gone
+      const both = await seal(governedOn(proof.claim), ['API_KEY', 'DB_PASSWORD']);
+      const declined = await seal(governedOn(proof.claim), ['API_KEY', 'DB_PASSWORD']);
+
+      // Assert — one proof sealed both keys; the declined act sealed nothing and says what to do
+      should(both.status).equal(200);
+      should(proof.taken()).equal(1);
+      should(source.seals()).equal(1);
+      should(declined.status).equal(403);
+      should(JSON.parse(declined.body)).match({ code: 'grant_step_up_required', demand: { act: 'clone-secrets' } });
+      should(declined.body).not.containEql('bundle');
     });
 
     it('S159 the owner at the machine claims no proof at all', async () => {

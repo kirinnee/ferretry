@@ -39,7 +39,7 @@ describe('codex storage parity', () => {
       kernel: {
         roots,
         state: undefined as never,
-        log: undefined as never,
+        log: { warn: () => undefined } as never,
         clock: realClock(),
         redaction: undefined as never,
       },

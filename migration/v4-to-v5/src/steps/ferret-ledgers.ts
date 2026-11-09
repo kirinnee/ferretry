@@ -91,15 +91,16 @@ export async function prepareLedgers(ctx: StepContext, records: readonly V4Confi
       intents: ManagedWorktreeDocumentSchema.shape.intents.default([]),
     }),
   );
-  if (registry !== undefined) {
+  // The preview carries no worktree ownership: a clean-up there must never remove a worktree a live v4 ferret works in.
+  if (registry !== undefined && ctx.preview !== true) {
     const document = Worktrees.parse({ format: 1, worktrees: registry.worktrees, intents: registry.intents });
     writes.push(() =>
       ctx.v5.json({ ...WorktreesFile, path: join('state/ferrets', WorktreesFile.path), schema: Worktrees }, document),
     );
   }
   kept.push(
-    { what: 'managed worktrees', count: registry?.worktrees.length ?? 0 },
-    { what: 'worktree intents', count: registry?.intents.length ?? 0 },
+    { what: 'managed worktrees', count: ctx.preview === true ? 0 : (registry?.worktrees.length ?? 0) },
+    { what: 'worktree intents', count: ctx.preview === true ? 0 : (registry?.intents.length ?? 0) },
   );
 
   const forks = join(ctx.v4.state, 'forks');
@@ -119,6 +120,8 @@ export async function prepareLedgers(ctx: StepContext, records: readonly V4Confi
   kept.push({ what: 'fork receipts', count: forkCount });
   return {
     kept,
+    /** Folders of the managed worktrees v4 lists (the preview swaps a ferret working in one of them). */
+    worktreeFolders: (registry?.worktrees ?? []).map(record => record.path),
     async write() {
       for (const write of writes) await write();
     },

@@ -8,6 +8,8 @@ import { z } from 'zod';
 import { FerretsPort, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { configDef } from './config-def.ts';
 import {
+  ITEM_NAME_PATTERN,
+  InstructionsFileSchema,
   ModelSetFileSchema,
   ProfileFileSchema,
   RuntimeFileSchema,
@@ -15,9 +17,13 @@ import {
   RuntimesFileSchema,
   runtimeFileLoosens,
 } from './config.ts';
-import type { ApplyOutcomeSchema, CatalogInstallChangeSchema } from './wire/index.ts';
+import { RUNTIME_HOME_READ_MODELS, type RuntimeHomesApi } from './homes.ts';
+import { RUNTIME_LAYER_READ_MODELS, type RuntimeLayersApi } from './layers.ts';
 
 export * from './codex-launch.ts';
+export * from './component-source.ts';
+export * from './homes.ts';
+export * from './layers.ts';
 export * from './config.ts';
 export * from './wire/index.ts';
 
@@ -74,7 +80,7 @@ export type ResolveResult =
   | { readonly ok: true; readonly runtime: RuntimeSummary }
   | { readonly ok: false; readonly refusal: ResolveRefusal; readonly sentence: string };
 
-export interface RuntimesApi {
+export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
   /** Every runtime on this machine, in name order. */
   list(): Promise<readonly RuntimeSummary[]>;
   get(id: RuntimeId): Promise<RuntimeSummary | undefined>;
@@ -82,17 +88,19 @@ export interface RuntimesApi {
   default(): Promise<RuntimeId | undefined>;
   /** What a start on this runtime (or the default, when `id` is omitted) would use, or why it cannot start. */
   resolve(id?: RuntimeId): Promise<ResolveResult>;
-  /**
-   * Put a catalog-published MCP server or skill into this machine's setup and add it to one profile, in ONE change.
-   * The signature, digest, passkey and refusal of a ferret are the installer's to have checked first (docs/catalogs.md).
-   */
-  installCatalogItem(change: z.infer<typeof CatalogInstallChangeSchema>): Promise<z.infer<typeof ApplyOutcomeSchema>>;
 }
 export const RuntimesPort = definePort<RuntimesApi>('runtimes');
 export { FerretsPort };
 
 /** Read models others and the app may call through `RuntimesPort` (`manifest.data.readModels`). */
-export const RUNTIMES_READ_MODELS = ['list', 'get', 'default', 'resolve'] as const;
+export const RUNTIMES_READ_MODELS = [
+  'list',
+  'get',
+  'default',
+  'resolve',
+  ...RUNTIME_HOME_READ_MODELS,
+  ...RUNTIME_LAYER_READ_MODELS,
+] as const;
 
 // ─── events ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -123,8 +131,6 @@ export const RuntimesLaunchFailed = defineEvent(
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
-const ITEM_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
-
 /** `config/runtimes.yaml`: the default runtime. Pointing it elsewhere changes where an unnamed start spends: not a loosening. */
 export const RUNTIMES_CONFIG = configDef(
   defineConfig({ file: 'runtimes.yaml', schema: RuntimesFileSchema, axis: 'configure', loosens: neverLoosens }),
@@ -134,7 +140,7 @@ export const RUNTIMES_CONFIG = configDef(
 export const RUNTIME_ITEMS = configDef(
   defineConfig({
     collection: 'runtimes',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: RuntimeFileSchema,
     axis: 'configure',
     loosens: runtimeFileLoosens,
@@ -145,8 +151,22 @@ export const RUNTIME_ITEMS = configDef(
 export const PROFILE_ITEMS = configDef(
   defineConfig({
     collection: 'profiles',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: ProfileFileSchema,
+    axis: 'configure',
+    loosens: neverLoosens,
+  }),
+);
+
+/**
+ * `config/instructions/<name>.yaml`: the instructions components. No other plugin owns this kind, so Runtimes does; the
+ * profile component source reads it live as its own. An edit changes what an agent runs with, nothing it may spend.
+ */
+export const INSTRUCTION_ITEMS = configDef(
+  defineConfig({
+    collection: 'instructions',
+    name: ITEM_NAME_PATTERN,
+    schema: InstructionsFileSchema,
     axis: 'configure',
     loosens: neverLoosens,
   }),
@@ -156,7 +176,7 @@ export const PROFILE_ITEMS = configDef(
 export const MODEL_SET_ITEMS = configDef(
   defineConfig({
     collection: 'model-sets',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: ModelSetFileSchema,
     axis: 'configure',
     loosens: neverLoosens,

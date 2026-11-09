@@ -1,17 +1,21 @@
 /**
  * THE ONE PER-MACHINE NOTIFICATIONS LIST, and the banner that says a machine reaches nobody.
  *
- * This machine is one row: its own enrol switch (this browser with THAT daemon) and its status. Render-only;
- * `use-machine-notification.ts` owns the read and the enrolment, and `machine-notifications.ts` the row model.
+ * Every machine the device-level panel reaches is one row: its own enrol switch (this browser with THAT daemon) and its
+ * status, and a machine that wants its unlock says so with an Unlock instead of a switch. Render-only;
+ * `use-machines-notifications.ts` owns the reads and the enrolment, and `machine-notifications.ts` the row model.
  *
- * NO MUTE HERE. Which machines this browser shows or silences is Agenda's notification filter, a different store.
+ * NO MUTE HERE (GAP in ports-pending.json): v4's per-row Mute is the reader's local notification filter, which is
+ * Agenda's store; Access has no seam to it.
  */
 import { BellOff } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Button, cn } from '../../shell-grants.ts';
 import {
   type MachineNotificationRow,
   machinesOffEverywhere,
   offEverywhereSentence,
+  turnOnAllTargets,
 } from '../../lib/machine-notifications.ts';
 
 export interface MachineNotificationListProps {
@@ -22,6 +26,12 @@ export interface MachineNotificationListProps {
   readonly failures: Readonly<Record<string, string>>;
   readonly onEnable: (daemonId: string) => void;
   readonly onDisable: (daemonId: string) => void;
+  /** Enrols every machine that is answering and off. */
+  readonly onTurnOnAll: () => void;
+  /** A machine that wants its unlock, by id: its row says so and offers this instead of a switch. */
+  readonly unlocks: ReadonlyMap<string, () => void>;
+  /** What is drawn under one machine's row (its registered devices). */
+  readonly detail: (row: MachineNotificationRow) => ReactNode;
 }
 
 const STATUS_TONE: Readonly<Record<MachineNotificationRow['status'], string>> = {
@@ -37,12 +47,17 @@ function MachineRow({
   canEnrol,
   busy,
   failure,
+  unlock,
+  detail,
   onEnable,
   onDisable,
-}: { readonly row: MachineNotificationRow; readonly busy: boolean; readonly failure: string | undefined } & Pick<
-  MachineNotificationListProps,
-  'canEnrol' | 'onEnable' | 'onDisable'
->) {
+}: {
+  readonly row: MachineNotificationRow;
+  readonly busy: boolean;
+  readonly failure: string | undefined;
+  readonly unlock: (() => void) | undefined;
+  readonly detail: ReactNode;
+} & Pick<MachineNotificationListProps, 'canEnrol' | 'onEnable' | 'onDisable'>) {
   const on = row.status === 'on';
   // A machine that is on can always be turned off; one that is off needs permission and an answering machine.
   const disabled = busy || (on ? false : row.status !== 'off' || !canEnrol);
@@ -54,41 +69,55 @@ function MachineRow({
     >
       <div className="flex min-h-[36px] items-center gap-2">
         <span className="min-w-0 truncate text-ui font-semibold text-fg">{row.label}</span>
-        <span
-          className={cn('shrink-0 text-meta leading-base', STATUS_TONE[row.status])}
-          data-machine-status-text=""
-          role="status"
-        >
-          {busy ? 'Working…' : row.statusText}
-        </span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
-          aria-label={`Notifications from ${row.label}`}
-          disabled={disabled}
-          onClick={() => (on ? onDisable(row.daemonId) : onEnable(row.daemonId))}
-          className={cn(
-            'ml-auto flex shrink-0 items-center justify-center',
-            disabled && 'cursor-not-allowed opacity-60',
-          )}
-        >
+        {unlock === undefined ? (
           <span
-            aria-hidden="true"
+            className={cn('shrink-0 text-meta leading-base', STATUS_TONE[row.status])}
+            data-machine-status-text=""
+            role="status"
+          >
+            {busy ? 'Working…' : row.statusText}
+          </span>
+        ) : (
+          <>
+            <span className="shrink-0 text-meta leading-base text-warn" data-machine-locked="" role="status">
+              {`Locked — unlock ${row.label}`}
+            </span>
+            <Button variant="primary" data-machine-unlock="" onClick={unlock}>
+              Unlock
+            </Button>
+          </>
+        )}
+        {unlock === undefined ? (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={on}
+            aria-label={`Notifications from ${row.label}`}
+            disabled={disabled}
+            onClick={() => (on ? onDisable(row.daemonId) : onEnable(row.daemonId))}
             className={cn(
-              'relative block h-6 w-11 shrink-0 rounded-full border transition-colors',
-              on ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
+              'ml-auto flex shrink-0 items-center justify-center',
+              disabled && 'cursor-not-allowed opacity-60',
             )}
           >
             <span
+              aria-hidden="true"
               className={cn(
-                'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-fg transition-transform',
-                on ? 'translate-x-[22px]' : 'translate-x-[2px]',
+                'relative block h-6 w-11 shrink-0 rounded-full border transition-colors',
+                on ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
               )}
-            />
-          </span>
-        </button>
+            >
+              <span
+                className={cn(
+                  'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-fg transition-transform',
+                  on ? 'translate-x-[22px]' : 'translate-x-[2px]',
+                )}
+              />
+            </span>
+          </button>
+        ) : null}
       </div>
+      {detail}
       {failure === undefined ? null : (
         <p className="m-0 text-meta leading-base text-warn" role="alert">
           {failure}
@@ -105,11 +134,20 @@ export function MachineNotificationList({
   failures,
   onEnable,
   onDisable,
+  onTurnOnAll,
+  unlocks,
+  detail,
 }: MachineNotificationListProps) {
   if (rows.length === 0) return null;
+  const turnOnable = turnOnAllTargets(rows).length > 0 && canEnrol;
   return (
     <section className="flex flex-col gap-2" aria-label="Notifications per machine">
-      <span className="text-meta font-semibold text-muted">Machine</span>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-meta font-semibold text-muted">Machines</span>
+        <Button variant="primary" data-notification-turn-on-all="" disabled={!turnOnable} onClick={onTurnOnAll}>
+          Turn on for all machines
+        </Button>
+      </div>
       <p className="m-0 text-meta leading-base text-muted">
         Turn a machine on to be notified from it on this browser, even when the app is closed.
       </p>
@@ -121,6 +159,8 @@ export function MachineNotificationList({
             canEnrol={canEnrol}
             busy={busy.has(row.daemonId)}
             failure={failures[row.daemonId]}
+            unlock={unlocks.get(row.daemonId)}
+            detail={detail(row)}
             onEnable={onEnable}
             onDisable={onDisable}
           />

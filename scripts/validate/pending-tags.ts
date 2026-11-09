@@ -153,7 +153,7 @@ export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
     'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
   ],
   [
-    'knip.production.json#workspaces["packages/app"].ignore:src/release/loopback.ts',
+    'knip.production.json#workspaces["packages/app"].ignore:src/worker/filter-document.ts',
     'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
   ],
   [

@@ -26,4 +26,5 @@ status=0
 # runs here: `guarantee-owner` reads source alone and quick.sh already judges it.
 # STRICT MODE becomes required once `ports-pending.json` is empty: add `--strict` here too (see quick.sh).
 bun scripts/validate/guarantees.ts --tier int --results coverage/int || status=1
+bun scripts/validate/parity-ticks.ts --tier int --results coverage/int || status=1
 exit "${status}"

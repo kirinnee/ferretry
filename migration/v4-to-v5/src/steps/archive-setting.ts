@@ -32,7 +32,7 @@
  */
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { ARCHIVE_MAX_HOURS, ArchiveConfigFile } from '@ferretry/core-ferrets/contract';
+import { ARCHIVE_MAX_HOURS } from '@ferretry/core-ferrets/contract';
 import { Document } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
@@ -44,15 +44,12 @@ import {
   V4_ARCHIVE_VARIABLE,
 } from '../v4/archive-after.ts';
 import { YAML_OPTIONS } from '../v4/config.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
 
 /** Ferrets' own `archive.yaml`: its file name and the schema the daemon reads it with. */
-export const ARCHIVE_CONFIG: V5ConfigTarget = {
-  shape: 'file',
-  file: ArchiveConfigFile.file,
-  schema: ArchiveConfigFile.schema,
-};
+export const ARCHIVE_CONFIG: V5ConfigTarget = CONFIG_TARGETS.ARCHIVE;
 
 /** What a source said: where, and the raw value (`undefined` = it does not name the variable). */
 interface Found {

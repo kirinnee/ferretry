@@ -18,13 +18,19 @@ export function fakeOnboarding(): FakeOnboarding {
   const view = (): OnboardingView => ({
     steps: [...steps].sort((a, b) => a.order - b.order),
     complete: steps.every(step => step.state !== 'pending'),
+    setUp: false,
   });
   return {
     view: async () => view(),
     answer: async (plugin, step, answer: StepAnswerRequest) => {
       const found = find(plugin, step);
       if (found === undefined) return undefined;
-      const next: StepView = { ...found, state: answer.state };
+      const { linked: _before, ...rest } = found;
+      const next: StepView = {
+        ...rest,
+        state: answer.state,
+        ...(answer.state === 'found' && answer.linked === true ? { linked: true as const } : {}),
+      };
       steps.splice(steps.indexOf(found), 1, next);
       return next;
     },

@@ -66,7 +66,7 @@ export default definePlugin({
   // every link-store host, so making, refreshing or deleting a download link fails closed.
   needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
   /** Projects is optional: off, an install can only target the project folders the item providers name. */
-  // Skills: the app half reads the skills.add slot's props shape (add-skills page); no daemon call.
+  // Skills: the app half reads the skills.add slot's props shape (add-skills page) and Skills' machine inventory (`GET /v1/skills`).
   uses: { connections: ConnectionsPort, projects: ProjectsPort, skills: SkillsPort },
   provides: { catalogs: CatalogsPort },
 
@@ -583,6 +583,10 @@ export default definePlugin({
     ],
   },
 
+  /** Never reached by a ferret, through any root: link keys, member passkeys and member unlocks (`PrivacyDecl`). */
+  privacy: {
+    private: ['link-keys.json', 'member-passkeys.json', 'member-unlocks.json'],
+  },
   data: {
     config: [CatalogsConfigFile],
     state: [

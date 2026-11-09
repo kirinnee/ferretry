@@ -10,7 +10,7 @@
 import { type CatalogInstallPreview, type CatalogInstalled, revealHidden } from '../../../contract/wire/index.ts';
 import { WebCryptoRelayCrypto, type RelayCrypto } from '@ferretry/app';
 import { CircleCheck, FileUp } from 'lucide-react';
-import { type ReactNode, useCallback, useId, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
 import { Button } from '@ferretry/app/ui';
@@ -59,6 +59,13 @@ export interface InstallHost {
   readonly crypto?: RelayCrypto;
   /** The projects to offer, instead of the ones this browser knows. */
   readonly projects?: readonly { readonly name: string; readonly path: string }[];
+  /**
+   * The projects registered on the TARGET machine, read through that machine's own client. Wins over `projects`: a
+   * sheet that installs onto another paired machine must offer that machine's folders, never this screen's.
+   */
+  readonly readProjects?: (
+    connection: DaemonConnection,
+  ) => Promise<readonly { readonly name: string; readonly path: string }[]>;
   /** GAP(runtimes): the runtime and profile choices are Runtimes' list, which Catalogs has no edge to; the host names them. */
   readonly runtimes?: TargetOptions['runtimes'];
 }
@@ -84,10 +91,43 @@ const NO_RUNTIMES: TargetOptions['runtimes'] = [];
 
 type Project = { readonly name: string; readonly path: string };
 
-/** The projects this browser already knows for the machine, unless the host names some. */
-/** GAP(projects): the projects to offer are Projects' list, which Catalogs has no edge to; the host names them. */
+const NO_PROJECTS: readonly Project[] = [];
+
+/**
+ * The projects registered on the machine being installed onto: read through that machine's own client when the host
+ * can (`readProjects`), else the list the host names. A machine whose list cannot be read offers none.
+ */
+function useTargetProjects(host: InstallHost | undefined, connection: DaemonConnection): readonly Project[] {
+  const read = host?.readProjects;
+  const [fetched, setFetched] = useState<{ readonly daemonId: string; readonly projects: readonly Project[] } | null>(
+    null,
+  );
+  const daemonId = connection.daemonId;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the machine's id is the key; the connection object is rebuilt per render
+  useEffect(() => {
+    if (read === undefined) return;
+    let live = true;
+    read(connection).then(
+      projects => {
+        if (live) setFetched({ daemonId, projects });
+      },
+      () => {
+        if (live) setFetched({ daemonId, projects: NO_PROJECTS });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [read, daemonId]);
+  if (read === undefined) return host?.projects ?? NO_PROJECTS;
+  // A list read for another machine is never offered for this one while its own is still coming.
+  return fetched !== null && fetched.daemonId === daemonId ? fetched.projects : NO_PROJECTS;
+}
+
+/** The host names the projects: the target machine's registered ones, read from Projects' own list (views/catalogs-views.tsx). */
 export function InstallFromFileSheet(props: InstallFromFileSheetProps) {
-  return <InstallSheetBody {...props} projects={props.host?.projects ?? []} />;
+  const projects = useTargetProjects(props.host, props.connection);
+  return <InstallSheetBody {...props} projects={projects} />;
 }
 
 type Landed = CatalogInstalled;

@@ -1,6 +1,7 @@
 import { PLUGIN_API, PluginIdSchema } from '../contract/ids.ts';
 import type { MemberRouteDescriptor, RouteDescriptor } from '../contract/route.ts';
 import { parseRouteKey } from '../contract/route.ts';
+import { privacyProblems } from './privacy.ts';
 import type { SocketDescriptor } from '../contract/socket.ts';
 import type {
   AppActionDecl,
@@ -102,5 +103,7 @@ export function definePlugin<const M extends Manifest>(manifest: M): M {
     if (keys.has(decl.key)) throw new TypeError(`plugin ${manifest.id}: route ${decl.key} declared twice`);
     keys.add(decl.key);
   }
+  const refused = privacyProblems(manifest);
+  if (refused.length > 0) throw new TypeError(refused.join('\n'));
   return manifest;
 }
