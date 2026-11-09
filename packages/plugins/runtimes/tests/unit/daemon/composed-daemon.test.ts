@@ -15,7 +15,9 @@ import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/te
 import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
+import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
 
@@ -158,6 +160,30 @@ describe('a real apply through the composed daemon', () => {
     expect(await readFile(join(world.fleet, 'bin', 'claude-work'), 'utf8')).toContain('/fixture/bin/claude');
   });
 
+  it('S144 a real apply links a login’s sign-in folder and never copies or reads it: its bytes are in no home, no wrapper and no manifest', async () => {
+    const { host, world } = await compose();
+    await mkdir(join(world.fleet, 'credentials', 'claude-you'), { recursive: true });
+    await writeFile(join(world.fleet, 'credentials', 'claude-you', '.credentials.json'), INERT);
+
+    const applied = await stageAndApply(host, put('claude-work'));
+
+    expect(applied.status).toBe(200);
+    const everything = async (folder: string): Promise<string[]> => {
+      const found: string[] = [];
+      for (const entry of await readdir(folder, { withFileTypes: true })) {
+        const path = join(folder, entry.name);
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) found.push(...(await everything(path)));
+        else found.push(await readFile(path, 'utf8'));
+      }
+      return found;
+    };
+    for (const folder of ['homes', 'bin'])
+      expect((await everything(join(world.fleet, folder))).join('\n')).not.toContain(INERT);
+    expect(await readFile(join(world.fleet, 'manifest.json'), 'utf8')).not.toContain(INERT);
+    expect(JSON.stringify(applied.json())).not.toContain(INERT);
+  });
+
   it('answers the daemon’s DEFAULT composition with real data too (the unavailable assembly is no longer the default)', async () => {
     const host = await testHost({
       plugins: [runtimesDaemon() as DaemonImplementation<any>],
@@ -278,6 +304,30 @@ describe('the fences hold through the composed path', () => {
     await writeFile(join(world.person, '.claude', 'skills', 'tidy', 'auth.json'), `${INERT}-changed`);
     const again = await host.request('GET', '/v1/runtimes/setup/scan');
     expect(JSON.stringify(again.json())).toBe(JSON.stringify(scan.json()));
+  });
+
+  it('S67 every apply runs its file mutation inside the one publication gate, and the published fleet is read between applies', async () => {
+    const gate = new (class extends FleetPublication {
+      readonly mutations: string[] = [];
+      override async publishing<T>(apply: () => Promise<T>): Promise<T> {
+        this.mutations.push('publishing');
+        return await super.publishing(apply);
+      }
+      override async reading<T>(read: () => Promise<T>): Promise<T> {
+        this.mutations.push('reading');
+        return await super.reading(read);
+      }
+    })();
+    const { host } = await compose({
+      assemble: ctx => ({ ...fileAssembly(ctx as never, gate), ended: endedSeams(ctx.kernel, gate) }),
+    });
+
+    const applied = await stageAndApply(host, put('claude-work'));
+
+    expect(applied.status).toBe(200);
+    expect(gate.mutations.filter(step => step === 'publishing').length).toBeGreaterThanOrEqual(1);
+    // The republish compares against the published manifest, which is read through the gate too.
+    expect(gate.mutations).toContain('reading');
   });
 
   it('S67 two applies at once land one at a time: one commits, the other is refused, and the manifest holds only the committed one', async () => {
