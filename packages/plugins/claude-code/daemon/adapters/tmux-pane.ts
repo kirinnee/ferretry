@@ -56,7 +56,7 @@ export class TmuxPane implements FerretPane {
     });
     if (result.exitCode !== 0)
       throw new Error(
-        `ferret ${ferretId}'s pane could not be read: ${result.stderr.trim() || `tmux exited ${String(result.exitCode)}`}`,
+        `ferret ${ferretId}'s pane could not be read: ${result.stderr.trim() || `tmux exited ${String(result.exitCode ?? result.signal)}`}`,
       );
     return result.stdout;
   }
@@ -72,7 +72,7 @@ export class TmuxPane implements FerretPane {
     );
     if (result.exitCode !== 0)
       throw new Error(
-        `ferret ${ferretId}'s pane could not be typed into: ${result.stderr.trim() || `tmux exited ${String(result.exitCode)}`}`,
+        `ferret ${ferretId}'s pane could not be typed into: ${result.stderr.trim() || `tmux exited ${String(result.exitCode ?? result.signal)}`}`,
       );
     return bytes.length;
   }

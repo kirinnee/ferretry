@@ -149,7 +149,8 @@ export function buildLoginsDaemon() {
           const [program, ...args] = spec.command as [string, ...string[]];
           const env: Record<string, string> = {};
           for (const [name, value] of Object.entries(spec.environment)) if (value !== undefined) env[name] = value;
-          return (await kernel.spawn.run(program, args, { env })).exitCode ?? 1;
+          const ended = await kernel.spawn.run(program, args, { env });
+          return ended.exitCode ?? ended.signal ?? 'a signal';
         },
         baseEnvironment: () => sanitizeHarnessEnv({}),
         environment: {
