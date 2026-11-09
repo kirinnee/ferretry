@@ -120,6 +120,17 @@ function findCycle(graph: ReadonlyMap<string, ReadonlySet<string>>): string[] {
   return found;
 }
 
+/** The plugin whose `item` manifest declares the config collection named for this item kind, if any (the kernel's rule). */
+function configItemOwner(graph: StartGraph, kind: string): string | undefined {
+  return graph.ids.find(owner => {
+    const manifest = graph.manifests.get(owner) as Manifest;
+    return (
+      manifest.kinds.includes('item') &&
+      (manifest.data?.config ?? []).some(def => def.shape === 'collection' && def.collection === kind)
+    );
+  });
+}
+
 /** `plugin-graph` (§7.9): cycles, missing providers, kernel-bound port providers, security-path takers, key clashes. */
 export function pluginGraphFindings(graph: StartGraph): Finding[] {
   const check = 'plugin-graph';
@@ -161,6 +172,19 @@ export function pluginGraphFindings(graph: StartGraph): Finding[] {
       for (const field of ['spawn', 'network'] as const)
         if ((manifest.permissions?.[field] ?? []).some(entry => entry === '*'))
           findings.push({ check, where: id, message: `declares permissions.${field} '*'; only a core piece may` });
+    // `{ items: kind }` for a kind whose items live in one plugin's config collection counts THAT owner's items live:
+    // naming another plugin's items is the owner's act to grant, so only the owner may declare it.
+    for (const field of ['spawn', 'network'] as const)
+      for (const entry of manifest.permissions?.[field] ?? []) {
+        if (typeof entry !== 'object' || !('items' in entry)) continue;
+        const owner = configItemOwner(graph, entry.items);
+        if (owner !== undefined && owner !== id)
+          findings.push({
+            check,
+            where: id,
+            message: `declares permissions.${field} { items: '${entry.items}' }, whose items are ${owner}'s config collection; only ${owner} may`,
+          });
+      }
     for (const token of Object.values(manifest.provides ?? {}))
       if (token.boundBy !== undefined && token.boundBy !== id)
         findings.push({

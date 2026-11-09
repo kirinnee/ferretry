@@ -56,6 +56,19 @@ function resolverAllows(
 ): boolean {
   const lowerName = hostname.toLowerCase();
   const lowerHost = host.toLowerCase();
+  return resolverAnswers(declared, resolve).some(wanted => {
+    const lower = wanted.toLowerCase();
+    return lower === lowerName || lower === lowerHost;
+  });
+}
+
+/**
+ * What the declared `{ resolver }` entries answer now, each resolver called with NOTHING about the request. A missing
+ * or throwing resolver answers nothing (fail closed), and so does an answer that is not a string or has `*` in it:
+ * a pattern is a core piece's alone, never a resolver's.
+ */
+function resolverAnswers(declared: readonly PermissionEntry[], resolve: ResolverOf): readonly string[] {
+  const answered: string[] = [];
   for (const entry of declared) {
     if (typeof entry !== 'object' || !('resolver' in entry)) continue;
     const resolver = resolve(entry.resolver);
@@ -67,13 +80,10 @@ function resolverAllows(
       continue;
     }
     if (!Array.isArray(answers)) continue;
-    for (const answer of answers) {
-      if (typeof answer !== 'string' || answer.includes('*')) continue;
-      const wanted = answer.toLowerCase();
-      if (wanted === lowerName || wanted === lowerHost) return true;
-    }
+    for (const answer of answers)
+      if (typeof answer === 'string' && answer !== '' && !answer.includes('*')) answered.push(answer);
   }
-  return false;
+  return answered;
 }
 import { resolveEnv } from './adapters/process.ts';
 
@@ -87,11 +97,17 @@ export class PermissionError extends Error {
 /**
  * Whether `program` is declared: a declared name matches the program or its basename (an absolute path to a declared
  * program passes, today's rule); an installed item that names an ABSOLUTE path allows exactly that path, never another
- * file of the same name. Shared with the test host so both refuse alike.
+ * file of the same name. A `{ resolver }` entry's answers follow the same rule (an absolute answer allows only that
+ * path, a bare name its basename), never a wildcard. Shared with the test host so both refuse alike.
  */
-export function spawnPermitted(declared: readonly PermissionEntry[], items: ItemReachOf, program: string): boolean {
+export function spawnPermitted(
+  declared: readonly PermissionEntry[],
+  items: ItemReachOf,
+  program: string,
+  resolve: ResolverOf = NO_RESOLVERS,
+): boolean {
   const named = expand(declared, items, 'programs');
-  return programAmong(named, program);
+  return programAmong(named, program) || programAmong(resolverAnswers(declared, resolve), program);
 }
 
 /** Whether `hostname` is declared, directly or by an installed item of a declared `{ items }` kind. */
@@ -118,12 +134,13 @@ export function restrictSpawn(
   base: SpawnPort,
   items: ItemReachOf = NO_ITEMS,
   pins?: Pick<PinRegistry, 'lookup'>,
+  resolve: ResolverOf = NO_RESOLVERS,
 ): SpawnPort {
   /** Refuses an undeclared program, and a pinned cwd this plugin's roots did not mint; a Linux pin's alias is used. */
   const check = <O extends SpawnOptions | undefined>(program: string, options: O): O => {
     // A detached start is offered only by `allowDetachedSpawn` around this port; through this one it is refused.
     if (detachedAsked(options)) throw new PermissionError(detachedNotOffered(plugin, program));
-    if (!spawnPermitted(declared, items, program))
+    if (!spawnPermitted(declared, items, program, resolve))
       throw new PermissionError(`${plugin} may not run ${programName(program)}: its manifest does not declare it.`);
     const cwd = options?.cwd;
     if (cwd === undefined || typeof cwd === 'string') return options;
@@ -153,12 +170,13 @@ export function allowDetachedSpawn(
   base: SpawnPort,
   items: ItemReachOf = NO_ITEMS,
   started: (program: string, pid: number) => void = () => undefined,
+  resolve: ResolverOf = NO_RESOLVERS,
 ): SpawnPort {
   const judge = (call: DetachedCall, program: string, options: SpawnOptions): void => {
     const why = detachedRefusal(
       plugin,
       declared,
-      spawnPermitted(spawnDeclared, items, program),
+      spawnPermitted(spawnDeclared, items, program, resolve),
       call,
       program,
       options,

@@ -204,17 +204,19 @@ export interface OnboardingDecl {
 export type PermissionEntry = string | { readonly items: ItemKind } | ResolverEntry;
 
 /**
- * A `permissions.network` entry whose hosts the plugin's OWN daemon half answers at each call (Connections' relay
- * endpoint, from its configured or advertised value): the half implements `resolvers: { [name]: () => readonly
- * string[] }`, called with no request data; the host is allowed only when it equals one answer exactly (`host` or
- * `host:port`, no wildcard). A throwing resolver refuses.
+ * A `permissions.network` or `permissions.spawn` entry whose answers the plugin's OWN daemon half gives at each call
+ * (Connections' relay endpoint, from its configured or advertised value): the half implements `resolvers: { [name]:
+ * () => readonly string[] }`, called with no request data. In `network` the host is allowed only when it equals one
+ * answer exactly (`host` or `host:port`, no wildcard). In `spawn` the program is allowed only when an answer names it
+ * exactly: an absolute answer allows only that path, a bare name allows that basename, and an answer with `*` in it
+ * allows nothing. A throwing or missing resolver refuses.
  */
 export interface ResolverEntry {
   readonly resolver: string;
 }
 
-/** A `permissions.spawn` entry: a program, or what installed items name. A resolver reaches hosts, never programs. */
-export type SpawnEntry = string | { readonly items: ItemKind };
+/** A `permissions.spawn` entry: a program, what installed items name, or what the plugin's own resolver answers. */
+export type SpawnEntry = string | { readonly items: ItemKind } | ResolverEntry;
 
 /**
  * `permissions.processes`: the environment variables, by exact name, `kernel.processes.usersOf` may match. A name is

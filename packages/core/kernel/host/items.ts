@@ -1,4 +1,5 @@
-import type { ItemKind } from '../manifest/types.ts';
+import type { Cancel, ConfigPort } from '../contract/ports.ts';
+import type { ItemKind, Manifest } from '../manifest/types.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import type { ItemReach, ItemReachOf } from './permissions.ts';
 import { readConfigText } from './config/yaml-text.ts';
@@ -103,4 +104,84 @@ export async function installedItemReach(
     ]),
   );
   return (kind: ItemKind) => frozen.get(kind) ?? { programs: [], hosts: [] };
+}
+
+/**
+ * One item kind whose items live in its OWNER's config collection (`config/mcp/<name>.yaml`): the plugin whose manifest
+ * `kinds` includes `'item'` and which declares the collection named for the kind. `read` answers the collection in
+ * effect now (never a held edit); `watch` fires when that version moves.
+ */
+export interface ConfigOwnedKind {
+  readonly kind: ItemKind;
+  readonly read: () => ReadonlyMap<string, unknown>;
+  readonly watch: (listener: () => void) => Cancel;
+}
+
+/** The kinds whose items a plugin owns as a config collection: an `item` plugin's collection named for the kind. */
+export function configOwnedKinds(
+  manifests: readonly Manifest[],
+  configOf: (plugin: string) => ConfigPort,
+): readonly ConfigOwnedKind[] {
+  const owned: ConfigOwnedKind[] = [];
+  for (const manifest of manifests) {
+    if (!manifest.kinds.includes('item')) continue;
+    for (const def of manifest.data?.config ?? []) {
+      if (def.shape !== 'collection') continue;
+      const port = configOf(manifest.id);
+      owned.push({
+        kind: def.collection as ItemKind,
+        read: () => port.collection(def),
+        watch: listener => port.watch(def, listener),
+      });
+    }
+  }
+  return owned;
+}
+
+/**
+ * What the items of each kind name now: the installed data plugins' (`installed`, fixed at boot: an install is pinned)
+ * united with the items of the kind's owner config collection (`configOwned`), which is read again whenever that
+ * collection moves, so an edit that drops an item takes its reach away at once. The same rules apply to both: only
+ * `command` and `url` are read, and one with `*` in it names nothing. A collection that cannot be read names nothing.
+ * `stop` ends the watching.
+ */
+export function itemReach(input: {
+  readonly installed: ItemReachOf;
+  readonly configOwned: readonly ConfigOwnedKind[];
+}): { readonly of: ItemReachOf; readonly stop: () => void } {
+  const owned = new Map<string, ItemReach>();
+  const refresh = (source: ConfigOwnedKind): void => {
+    const programs = new Set<string>();
+    const hosts = new Set<string>();
+    try {
+      for (const value of source.read().values()) {
+        const reach = reachOf(value);
+        if (reach.program !== undefined) programs.add(reach.program);
+        if (reach.host !== undefined) hosts.add(reach.host);
+      }
+    } catch {
+      programs.clear();
+      hosts.clear();
+    }
+    owned.set(source.kind, Object.freeze({ programs: [...programs], hosts: [...hosts] }));
+  };
+  const cancels: Cancel[] = [];
+  for (const source of input.configOwned) {
+    refresh(source);
+    cancels.push(source.watch(() => refresh(source)));
+  }
+  return {
+    of: (kind: ItemKind) => {
+      const fromInstall = input.installed(kind);
+      const fromConfig = owned.get(kind);
+      if (fromConfig === undefined) return fromInstall;
+      return {
+        programs: [...new Set([...fromInstall.programs, ...fromConfig.programs])],
+        hosts: [...new Set([...fromInstall.hosts, ...fromConfig.hosts])],
+      };
+    },
+    stop: () => {
+      for (const cancel of cancels.splice(0)) cancel();
+    },
+  };
 }
