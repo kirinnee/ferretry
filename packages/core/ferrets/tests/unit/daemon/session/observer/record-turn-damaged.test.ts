@@ -6,6 +6,7 @@ import { recordTurnChange } from '../../../../../daemon/adapters/session/observe
 import { InvalidStateDocumentError } from '../../../../../daemon/adapters/storage/session-storage.ts';
 import {
   buildTurnWatch,
+  turnWatchFailureFields,
   turnWatchFailureKey,
   turnWatchFailureSentence,
 } from '../../../../../daemon/modules/turn-watch.ts';
@@ -216,7 +217,7 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
     should(await storage.readState(healthy)).have.property('turnState', 'your-turn');
   });
 
-  it('BG-037 one damaged state.json among 30 does not stop the watch for the other 29, and is said ONCE until its bytes change', async () => {
+  it('BG-037 one damaged state.json among 30 does not stop the watch for the other 29, and is said ONCE until the file is written again', async () => {
     // Arrange: thirty live ferrets mid-turn, every pane drawing (a turn in progress, nothing to record). The state port
     // is the REAL one, so a corrupt file's refusal quotes it, as in production.
     const { storage, plant, raw } = await openedReal();
@@ -328,26 +329,37 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
 
   it("BG-037 the daemon's own refused write is told as that, not as damage on disk, and leaves the file as it was", async () => {
     // Arrange: a healthy state.json on the real port, and a value the daemon computed that the declared schema refuses.
+    // zod's issues quote a key the schema does not know (never a value), so the FAKE secret is planted as such a key:
+    // that is how a reason can really carry it.
     const { storage, raw } = await openedReal();
     const id = await working(storage, 'refused-1');
     const before = await raw(id);
 
     // Act
     const thrown = await storage
-      .writeState(id, { id, status: 'not-a-status', turn: 1, turnState: CONTENT } as never)
+      .writeState(id, { id, status: 'not-a-status', turn: 1, turnState: CONTENT, [SECRET]: 1 } as never)
       .then(
         () => undefined,
         (error: unknown) => error,
       );
 
-    // Assert: its own kind, a sentence that does not send the owner to mend a file that is fine, and nothing written.
+    // Assert: its own kind, and the port's reason does quote the key (so the checks below can see an echo)...
     should(thrown).be.instanceOf(InvalidStateDocumentError);
-    should((thrown as InvalidStateDocumentError).damage).equal('refused_write');
+    const refusal = thrown as InvalidStateDocumentError;
+    should(refusal.damage).equal('refused_write');
+    should(refusal.reason).containEql(SECRET);
+    // ...yet the sentence, the log fields and the dedupe key carry none of it: the sentence does not send the owner to
+    // mend a file that is fine, and nothing was written.
     const sentence = turnWatchFailureSentence('refused-1', thrown);
     should(sentence).containEql('could not be recorded');
     should(sentence).containEql('as it was');
     should(sentence).not.containEql('mended');
     should(sentence).not.containEql(CONTENT);
+    const shown = [sentence, JSON.stringify(turnWatchFailureFields(thrown)), turnWatchFailureKey(thrown) ?? ''];
+    for (const text of shown) {
+      should(text).not.containEql(SECRET);
+      should(text).not.containEql(CONTENT);
+    }
     should(await raw(id)).equal(before);
   });
 
