@@ -77,6 +77,29 @@ describe('promptOf (FerretsApi.prompt)', () => {
     should(promptOf({}, mask)).deepEqual({});
   });
 
+  it('should mask every string of a harness dialog the pane is asking, keys and nested options included', () => {
+    // Arrange
+    const mask = (text: string) => text.replaceAll('example.com', '***********');
+    const dialog = {
+      id: '0123456789abcdef',
+      harness: 'claude',
+      kind: 'trust',
+      title: 'Trust example.com?',
+      body: 'It will run hooks from example.com',
+      options: [{ number: 1, label: 'Yes, trust example.com', grantsTrust: true }],
+      selected: 1,
+    };
+
+    // Act
+    const prompt = promptOf({ harnessDialog: dialog as never }, mask);
+
+    // Assert
+    should(prompt.turnState).be.undefined();
+    should(JSON.stringify(prompt.dialog)).not.containEql('example.com');
+    should(JSON.stringify(prompt.dialog)).containEql('Trust ***********?');
+    should(JSON.stringify(prompt.dialog)).containEql('Yes, trust ***********');
+  });
+
   it('should keep the shape and every non-string of a value it masks', () => {
     // Act
     const masked = maskedStrings({ a: [1, true, null, 'secret'], b: { c: 'secret' } }, text => text.toUpperCase());
