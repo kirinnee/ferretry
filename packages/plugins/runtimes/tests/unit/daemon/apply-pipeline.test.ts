@@ -203,6 +203,35 @@ describe('the apply pipeline over a fake config writer', () => {
     should(w.written).deepEqual([]);
   });
 
+  it('C2 should ask the preflight before a setup or a clone runs its own writes too, and run nothing when it refuses', async () => {
+    // Arrange: an executor that would write settings files and a preflight that refuses.
+    const ran: string[] = [];
+    const executor = {
+      describe: async () => 'import it',
+      execute: async () => {
+        ran.push('execute');
+        return 'imported';
+      },
+    };
+    const w = world('fake', { setup: executor, clone: executor } as never, {
+      preflight: async () => {
+        throw new Error('nothing was changed: a part of this machine could not be read');
+      },
+    });
+    const staged = await w.service.propose({ kind: 'setup.import' } as never);
+
+    // Act
+    const failure = await w.service.apply(staged.id, OWNER).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.instanceOf(FleetCatalogRefusal);
+    should((failure as FleetCatalogRefusal).message).containEql('nothing was changed');
+    should(ran).deepEqual([]);
+  });
+
   it('C2 should name the configuration files that stay written when the plan fails after them', async () => {
     // Arrange: the documents land, then the provisioner fails with a sentence that knows nothing of them.
     const w = world('fake', undefined, {
