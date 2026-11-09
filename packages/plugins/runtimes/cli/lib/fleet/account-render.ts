@@ -129,6 +129,23 @@ function renderLoginChanged(outcome: Extract<AccountChangeOutcome, { outcome: 'l
 const leftAsItWas = (skipped: readonly { readonly path: string; readonly reason: string }[] | undefined): string[] =>
   (skipped ?? []).map(({ path, reason }) => `Left ${path} as it was: ${reason}`);
 
+/**
+ * The configuration files a failed change wrote first. A rollback puts the fleet back but not these, and the next
+ * apply publishes them, so the sentence names them; with none landed there is nothing to say.
+ */
+const landed = (files: readonly string[] | undefined): string | undefined => {
+  if (files === undefined || files.length === 0) return undefined;
+  const named =
+    files.length === 1
+      ? `The configuration ${files[0]} was written first and is`
+      : `The configuration files ${files.join(', ')} were written first and are`;
+  return `${named} NOT rolled back; the next apply publishes ${files.length === 1 ? 'it' : 'them'}.`;
+};
+const landedLines = (files: readonly string[] | undefined): string[] => {
+  const line = landed(files);
+  return line === undefined ? [] : [line];
+};
+
 function renderApply(apply: ApplyOutcome): RenderedOutcome {
   switch (apply.outcome) {
     case 'committed': {
@@ -151,7 +168,15 @@ function renderApply(apply: ApplyOutcome): RenderedOutcome {
         ].join('\n'),
       };
     case 'rolled-back':
-      return { ok: false, text: `Nothing changed. ${apply.failedOperation} failed: ${apply.reason}` };
+      return {
+        ok: false,
+        text: [
+          landed(apply.configurationLanded) === undefined
+            ? `Nothing changed. ${apply.failedOperation} failed: ${apply.reason}`
+            : `${apply.failedOperation} failed: ${apply.reason}. The fleet was put back.`,
+          ...landedLines(apply.configurationLanded),
+        ].join('\n'),
+      };
     case 'rollback-incomplete':
       return {
         ok: false,
@@ -162,6 +187,7 @@ function renderApply(apply: ApplyOutcome): RenderedOutcome {
               path => `${path.path}: ${path.reason}${path.backup ? ` (the original is at ${path.backup})` : ''}`,
             ),
           ),
+          ...landedLines(apply.configurationLanded),
         ].join('\n'),
       };
   }

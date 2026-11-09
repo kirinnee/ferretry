@@ -155,6 +155,33 @@ describe('runChange', () => {
     should(world.out.exitCode).equal(1);
   });
 
+  it('C2 should not say nothing changed when a rolled-back change left its configuration file on disk', async () => {
+    // Arrange
+    const world = fakeWorld({
+      gateway: {
+        apply: () => ({
+          outcome: 'applied',
+          apply: {
+            outcome: 'rolled-back',
+            failedOperation: 'directory fleet/bin',
+            reason: 'root refused: changed',
+            configurationLanded: ['runtimes/work.yaml'],
+          },
+        }),
+      },
+    });
+
+    // Act
+    await runChange(world.deps, { change: removeRuntime, destructive: false, options: {} });
+
+    // Assert
+    const text = world.out.text('error');
+    should(text).not.containEql('Nothing changed');
+    should(text).containEql('runtimes/work.yaml');
+    should(text).containEql('NOT rolled back');
+    should(world.out.exitCode).equal(1);
+  });
+
   it('should describe a sign-out and an executor preview in words', async () => {
     const signOut = fakeWorld({
       gateway: {

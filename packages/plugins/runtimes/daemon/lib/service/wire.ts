@@ -191,11 +191,21 @@ const committedSummary = (committed: FleetApplyCommittedState): FleetWireCommitt
  * A failed apply as the outcome a person reads: rolled back, rolled back only in part, or committed
  * with the history step failing afterwards.
  *
+ * `landed` names the configuration files written BEFORE the plan ran. A rollback does not undo them, so a rolled-back
+ * or only partly restored apply carries them (a commit does not: the fleet then holds what they say).
  */
-export function applyFailureSummary(error: FleetApplyFailureError): FleetWireApplyOutcome {
+export function applyFailureSummary(
+  error: FleetApplyFailureError,
+  landed: readonly string[] = [],
+): FleetWireApplyOutcome {
   const failure = error.failure;
   // A claim nobody cleared blocks the next apply whatever else happened, so it travels with every ending.
-  const residue = error.lockResidue === undefined ? {} : { lockResidue: error.lockResidue };
+  const residue = {
+    ...(error.lockResidue === undefined ? {} : { lockResidue: error.lockResidue }),
+    ...(landed.length === 0 || failure.kind === 'history-failed-after-commit'
+      ? {}
+      : { configurationLanded: [...landed] }),
+  };
   if (failure.kind === 'history-failed-after-commit') {
     return {
       outcome: 'committed-with-history-failure',

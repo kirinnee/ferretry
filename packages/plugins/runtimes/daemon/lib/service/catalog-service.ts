@@ -1241,7 +1241,11 @@ export class FleetCatalogService {
           const { failure } = error;
           if (failure.kind === 'history-failed-after-commit')
             this.#skipped = skippedWithinRuntimes(failure.committed.skipped, failure.committed.manifest.accounts);
-          return { outcome: 'applied', apply: applyFailureSummary(error) };
+          // The documents landed before the plan and a rollback does not undo them: the outcome names them.
+          return {
+            outcome: 'applied',
+            apply: applyFailureSummary(error, written ? payload.documents.map(document => document.path) : []),
+          };
         }
         // A failure after the documents landed must say they are on disk: they are not rolled back with the fleet.
         throw new FleetCatalogRefusal(
