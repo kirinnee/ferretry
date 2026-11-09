@@ -267,6 +267,26 @@ describe('BG-005 a config write refuses a file that is not UTF-8, and leaves its
     expect(await Bun.file(world.loginsPath).exists()).toBe(false);
   });
 
+  test('discarding a held edit of a non-UTF-8 file restores the version in effect as UTF-8: the owner’s own act', async () => {
+    // The in-effect version was itself read from a Latin-1 file, so its accepted text holds U+FFFD: dropping the held
+    // bytes (a loosening Latin-1 save) writes that text back, where the é byte was. The held bytes are meant to go.
+    const { files, path, bytes } = await latin1World();
+    const loosened = Buffer.concat([Buffer.from('# caf'), Buffer.from([0xe9]), Buffer.from('\nlimit: 50\n')]);
+    await writeFile(path, loosened);
+    await files.reload();
+    const held = files.held();
+    expect(held).toHaveLength(1);
+    await files.discard(held[0]?.id ?? '');
+    expect(files.held()).toHaveLength(0);
+    const after = await bytes();
+    expect(after).toBe(
+      Buffer.concat([Buffer.from('# caf'), Buffer.from([0xef, 0xbf, 0xbd]), Buffer.from('\nlimit: 5\n')]).toString(
+        'hex',
+      ),
+    );
+    expect(Buffer.from(after, 'hex').toString('utf8')).toBe('# caf�\nlimit: 5\n');
+  });
+
   test('a removal is not refused: it replaces no byte', async () => {
     const { port } = await latin1World();
     // limit 5 → the default 10 loosens, so the removal is held for the owner: judged like any removal, not refused

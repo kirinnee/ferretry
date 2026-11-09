@@ -144,6 +144,13 @@ the user can. A link, or a file over 256 KiB, is reported as unreadable and keep
 text over 256 KiB from an agent (`config_validate`, `config_write`) is refused in one fixed sentence before any
 of it is read.
 
+A file that is not UTF-8 still reads and keeps its last good version, but every write over it (single, owner,
+held, set) is refused (re-save it as UTF-8): saving would replace the bytes nobody edited with U+FFFD. A set
+refuses it even when the set only removes it, because the set's intent record keeps each file as decoded text, so
+a roll-back would put U+FFFD back; the removal of the whole file by itself is not refused, as it journals
+nothing. Discarding a held edit over such a file is the owner's own act and is not refused: it restores the
+version in effect as UTF-8, and the held bytes go.
+
 ## Secrets never go in a file
 
 A secret lives in the secret store (`fy secret set NAME`) and a file names it as `${secret:NAME}`
