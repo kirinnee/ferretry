@@ -97,7 +97,7 @@ const DAMAGE_SENTENCE: Readonly<Record<InvalidStateDocumentError['damage'], stri
  * What a failed look says in the log, for one ferret: WHICH ferret and WHY, and nothing of the document (never its bytes,
  * nor the parser's account of it, which can quote them).
  */
-function turnWatchFailureSentence(ferret: string, error: unknown): string {
+export function turnWatchFailureSentence(ferret: string, error: unknown): string {
   if (error instanceof InvalidStateDocumentError)
     return `ferret ${ferret}'s turn cannot be watched until its state.json is mended: ${DAMAGE_SENTENCE[error.damage]}`;
   return `ferret ${ferret}'s turn could not be watched this time`;
@@ -109,7 +109,7 @@ function turnWatchFailureSentence(ferret: string, error: unknown): string {
  * document, so only its digest is kept and it is never logged). A fixed file clears it by recording a turn again;
  * changed bytes are a new key. Any other failure has no key, so it is told every time.
  */
-function turnWatchFailureKey(error: unknown): string | undefined {
+export function turnWatchFailureKey(error: unknown): string | undefined {
   if (!(error instanceof InvalidStateDocumentError)) return undefined;
   const digest = createHash('sha256')
     .update(error.etag ?? error.reason, 'utf8')
