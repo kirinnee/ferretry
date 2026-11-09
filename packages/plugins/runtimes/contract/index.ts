@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { FerretsPort, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { configDef } from './config-def.ts';
 import {
+  InstructionsFileSchema,
   ModelSetFileSchema,
   ProfileFileSchema,
   RuntimeFileSchema,
@@ -19,6 +20,7 @@ import { RUNTIME_HOME_READ_MODELS, type RuntimeHomesApi } from './homes.ts';
 import type { ApplyOutcomeSchema, CatalogInstallChangeSchema } from './wire/index.ts';
 
 export * from './codex-launch.ts';
+export * from './component-source.ts';
 export * from './homes.ts';
 export * from './config.ts';
 export * from './wire/index.ts';
@@ -149,6 +151,20 @@ export const PROFILE_ITEMS = configDef(
     collection: 'profiles',
     name: ITEM_NAME,
     schema: ProfileFileSchema,
+    axis: 'configure',
+    loosens: neverLoosens,
+  }),
+);
+
+/**
+ * `config/instructions/<name>.yaml`: the instructions components. No other plugin owns this kind, so Runtimes does; the
+ * profile component source reads it live as its own. An edit changes what an agent runs with, nothing it may spend.
+ */
+export const INSTRUCTION_ITEMS = configDef(
+  defineConfig({
+    collection: 'instructions',
+    name: ITEM_NAME,
+    schema: InstructionsFileSchema,
     axis: 'configure',
     loosens: neverLoosens,
   }),

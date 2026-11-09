@@ -1461,17 +1461,31 @@ export class FleetSetupService {
     };
     const instructions: Record<string, string> = {};
     for (const [name, component] of Object.entries(model.components.instructions)) {
+      if (component.text !== undefined) {
+        instructions[name] = component.text;
+        continue;
+      }
+      if (component.file === undefined) continue;
       const body = await text(component.file);
       if (body !== undefined) instructions[name] = body;
     }
     const settings: Record<string, SettingsObject> = {};
     for (const [name, component] of Object.entries(model.components.settings)) {
+      // A document the owning plugin projected is the body; otherwise the file in the asset tree is read.
+      if (component.document !== undefined) {
+        settings[name] = component.document;
+        continue;
+      }
       if (component.file === undefined) continue;
       const body = parsed(await text(component.file), SETTINGS_FORMAT[component.harness]);
       if (body !== undefined) settings[name] = body;
     }
     const hooks: Record<string, SettingsObject> = {};
     for (const [name, component] of Object.entries(model.components.hooks)) {
+      if (component.document !== undefined) {
+        hooks[name] = component.document;
+        continue;
+      }
       if (component.file === undefined) continue;
       const body = parsed(await text(component.file), 'json');
       if (body !== undefined) hooks[name] = body;

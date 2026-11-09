@@ -294,7 +294,7 @@ describe('a real apply through the composed daemon', () => {
 
     expect(staged.status).toBeGreaterThanOrEqual(400);
     // The stand-in's own sentence (a layer that names no component at all would be refused in other words).
-    expect(JSON.stringify(staged.json())).toContain('belongs to another part of Ferretry');
+    expect(JSON.stringify(staged.json())).toContain('could not be read');
     expect(JSON.stringify(staged.json())).toContain('hooks component');
     expect(JSON.stringify(staged.json())).toContain('guard');
   });
@@ -462,19 +462,47 @@ describe('a real apply through the composed daemon', () => {
       body: {
         change: {
           kind: 'component.put',
-          name: 'house-rules',
-          component: { kind: 'instructions' },
-          content: 'Be brief.',
+          name: 'house-server',
+          component: { kind: 'mcp', command: 'house-mcp' },
           create: true,
         },
       },
     });
 
     expect(staged.status).toBeGreaterThanOrEqual(400);
-    expect(JSON.stringify(staged.json())).toContain('house-rules');
-    expect(JSON.stringify(staged.json())).toContain('another part of Ferretry owns');
+    expect(JSON.stringify(staged.json())).toContain('house-server');
+    expect(JSON.stringify(staged.json())).toContain('another part of Ferretry owns or that Runtimes does not write');
     expect(await readdir(world.fleet)).not.toContain('manifest.json');
   });
+
+  it.each([
+    ['mcp', { kind: 'mcp', command: 'house-mcp' }],
+    ['skills', { kind: 'skills', items: ['review'] }],
+    ['settings', { kind: 'settings', harness: 'claude-code', flags: ['--verbose'] }],
+    ['hooks', { kind: 'hooks', harness: 'claude-code' }],
+  ])(
+    'O6 refuses a change that puts a %s component, because another part of Ferretry owns that kind',
+    async (_kind, component) => {
+      const { host, world } = await compose();
+
+      const staged = await host.request('POST', '/v1/runtimes/proposals', {
+        body: {
+          change: {
+            kind: 'component.put',
+            name: 'house-item',
+            component,
+            create: true,
+            // A hooks component is its document: without one the change is refused for that, not for who owns the kind.
+            ...(component.kind === 'hooks' ? { content: '{"hooks":{}}' } : {}),
+          },
+        },
+      });
+
+      expect(staged.status).toBeGreaterThanOrEqual(400);
+      expect(JSON.stringify(staged.json())).toContain('another part of Ferretry owns or that Runtimes does not write');
+      expect(await readdir(world.fleet)).not.toContain('manifest.json');
+    },
+  );
 
   it('never lets an error be swallowed into success: a refused apply answers an error and leaves no manifest', async () => {
     const { host, world } = await compose();

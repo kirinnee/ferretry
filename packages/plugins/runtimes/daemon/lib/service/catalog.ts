@@ -251,7 +251,7 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
   const text = (key: string) => (typeof component[key] === 'string' ? { [key]: component[key] as string } : {});
   switch (kind) {
     case 'instructions':
-      return { kind, file: component.file as string };
+      return { kind, file: typeof component.file === 'string' ? component.file : 'config/instructions' };
     case 'mcp':
       return {
         kind,

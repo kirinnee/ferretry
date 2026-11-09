@@ -20,6 +20,7 @@ import {
   BUDGET_PERIODS,
   type EndpointFile,
   EndpointFileSchema,
+  type EnvironmentLoginTemplate,
   type LocalModels,
   type LoginFile,
   LoginFileSchema,
@@ -65,6 +66,13 @@ export interface LoginsApi {
   /** Every login on this machine, with status, usage, budget and what signing out would do. */
   list(): Promise<LoginList>;
   get(id: z.output<typeof LoginIdSchema>): Promise<LoginView | undefined>;
+  /**
+   * The variable TEMPLATES of every environment login, read live from each login's own file: plain values and
+   * `${secret:NAME}` references as written, never a secret's value (the file schema refuses a raw one) and never the
+   * file's text. Runtimes builds a runtime's home from it; a login that is not an environment login has none. Nothing is
+   * kept between calls.
+   */
+  environmentTemplates(): Promise<readonly EnvironmentLoginTemplate[]>;
   /** The login's rate-limit windows and provider quota, as last read. Never reads on an idle timer. */
   quota(id: z.output<typeof LoginIdSchema>): Promise<LoginUsage | undefined>;
   /** The provider presets this machine offers (`endpoints/*.yaml` and the built-in catalogue). */
@@ -145,7 +153,7 @@ export class LoginChangeError extends Error {
 }
 
 /** Read models others and the app may call (`manifest.data.readModels`). */
-export const LOGINS_READ_MODELS = ['list', 'get', 'quota', 'presets', 'models'] as const;
+export const LOGINS_READ_MODELS = ['list', 'get', 'quota', 'presets', 'models', 'environmentTemplates'] as const;
 
 // ─── events ──────────────────────────────────────────────────────────────────────────────────────────────────────
 

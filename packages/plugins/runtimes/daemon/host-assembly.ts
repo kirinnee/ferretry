@@ -19,16 +19,20 @@
  */
 import type { FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
+import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { milliseconds } from '@ferretry/std';
+import type { LoginsApi } from '@ferretry/plugin-logins/contract';
+import { PROFILE_COMPONENTS_KEY } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
+import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
 import type { AdapterHost } from './adapters/ports.ts';
-import { refuseBeforeWriting, refuseWhileUnreadable, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
+import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
 import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
@@ -194,10 +198,14 @@ export function fileAssembly(
       readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file'>;
     };
     readonly needs: {
-      readonly logins: FleetCatalogServiceDeps['credentials'] & Parameters<typeof fileFleetSetupDeps>[0]['logins'];
+      readonly logins: FleetCatalogServiceDeps['credentials'] &
+        Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
+        Pick<LoginsApi, 'environmentTemplates'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
       readonly ferrets: { list(): Promise<readonly { readonly state: FerretState }[]> };
     };
+    /** The hooks this plugin offers: the profile component sources the owning plugins take (read live, never kept). */
+    readonly hooks: Pick<HookInvoker, 'provider'>;
     /** Usage is an optional need (§2.4): its handle answers `undefined` when the plugin is off. */
     readonly uses?: { readonly usage: { current(): Pick<UsageApi, 'pauses'> | undefined } };
   },
@@ -212,6 +220,8 @@ export function fileAssembly(
   const config = runtimesConfigFiles({
     config: ctx.kernel.config,
     logins: ctx.needs.logins,
+    components: hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY),
+    within: withinMs((delay, fn) => ctx.kernel.clock.after(milliseconds(delay), fn), PROVIDER_ANSWER_MS),
     prime: async model => {
       const wanted = new Set<string>(HARNESS_COMMANDS);
       for (const component of Object.values(model?.components.mcp ?? {}))
@@ -245,8 +255,8 @@ export function fileAssembly(
       Object.fromEntries(
         (ctx.uses?.usage.current()?.pauses() ?? []).map(held => [held.login as string, held.pause] as const),
       ),
+    // The setup's and the clone's own writes ask this; a catalogue apply asks the PLAN it applies (catalog-service.ts).
     preflight: refuseBeforeWriting(config),
-    provisioner: refuseWhileUnreadable(unguarded.provisioner, config),
   };
   const refusing = unavailableSetupDeps(catalog);
   // The tool installer's PLANS are real (what is installed, and the command a person would run); running a package

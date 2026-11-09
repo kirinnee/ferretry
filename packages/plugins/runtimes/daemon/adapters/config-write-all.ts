@@ -11,7 +11,13 @@
  * No document's text is ever put in a sentence: the refusals name a file and an issue, never a value.
  */
 import type { ConfigCollectionDef, ConfigFileDef, ConfigPort, ConfigWriteAllDocument } from '@ferretry/kernel/contract';
-import { MODEL_SET_ITEMS, PROFILE_ITEMS, RUNTIME_ITEMS, RUNTIMES_CONFIG } from '../../contract/index.ts';
+import {
+  INSTRUCTION_ITEMS,
+  MODEL_SET_ITEMS,
+  PROFILE_ITEMS,
+  RUNTIME_ITEMS,
+  RUNTIMES_CONFIG,
+} from '../../contract/index.ts';
 import { type FleetDocumentWrite } from '../lib/provisioning.ts';
 import { ConfigWriteConflict, ConfigWriteInvalid, type RuntimeConfigWriter } from '../lib/service/ports.ts';
 
@@ -24,6 +30,7 @@ const COLLECTIONS: readonly (readonly [string, ConfigCollectionDef<any>])[] = [
   ['runtimes', RUNTIME_ITEMS as unknown as ConfigCollectionDef<any>],
   ['profiles', PROFILE_ITEMS as unknown as ConfigCollectionDef<any>],
   ['model-sets', MODEL_SET_ITEMS as unknown as ConfigCollectionDef<any>],
+  ['instructions', INSTRUCTION_ITEMS as unknown as ConfigCollectionDef<any>],
 ];
 
 /** Which of Runtimes' own declared files a path under `config/` is, or `undefined` for anything else. */
