@@ -133,6 +133,7 @@ function kernelRoots(
         remove: missing('remove a file'),
         linkTo: missing('link'),
         setMode: missing('change a mode'),
+        rename: missing('move an entry'),
       };
     },
   };

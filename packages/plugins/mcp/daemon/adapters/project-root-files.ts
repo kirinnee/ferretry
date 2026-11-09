@@ -102,6 +102,7 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
     remove: refuse('remove'),
     linkTo: refuse('link'),
     setMode: refuse('change a mode'),
+    rename: refuse('move an entry'),
   };
 }
 
