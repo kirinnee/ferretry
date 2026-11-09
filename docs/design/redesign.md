@@ -2608,24 +2608,43 @@ scoped handle:
   as the link's place), delete, mode change and copy, whatever its spelling: the verdict is the inode's, so a case
   variant, a double slash or a `.` segment changes nothing, and a bind mount (one link, the same device and inode —
   which the hard-link rule cannot see) is refused as a hard link is; `entries()` leaves such a name out. **The index.**
-  The places are indexed ONCE (`host/fence-index.ts`, one per home and list, shared by every root) and kept: each
-  check first looks at the folders the index was built from (one identity per folder, never a file) and rescans only
-  when one changed, and the host looks at most every 250 ms (a private file created or replaced is pinned within
-  that, which is also the longest it can be reached under a second name). A recursive remove asks only each member's
-  own identity, its folders already judged. **The bound:** at most three levels below a private folder and 4096
-  places in all, breadth first; a folder met at the depth limit is itself pinned (a bind mount of it is held, and so
-  is everything walked through it), and a check that cannot look at a place **refuses**, never allows. **Fail closed:**
+  The places are indexed ONCE (`host/fence-index.ts`, one per home and list, shared by every root) and kept
+  INCREMENTALLY: the index remembers every folder it looked at with what was in it, each check looks at those folders
+  again (one identity per folder, never a file, all in one parallel batch) and re-reads only the folders that changed,
+  so a write into one ferret's session folder costs that folder, not the whole tree. The host looks at most every
+  250 ms (a private file created or replaced is pinned within that, which is also the longest it can be reached under
+  a second name; an interval that is not a finite number from 0 to 5 s — `Infinity`, `NaN`, a negative — is the 250 ms
+  default, never "never"). A change is told by the folder's modification AND status-change times **to the
+  nanosecond** (plus device, inode, size and links), and a folder whose last change is within 20 ms of the look that
+  recorded it (the filesystem's clock has a step, so the next change could land in the same tick) is **racy**: it is read
+  again at the next look until it is old enough to trust. A recursive remove asks only each member's own identity, its
+  folders already judged. **The bounds:** at most three levels below a private folder; and every declared place has its
+  OWN place budget — 4096 for a tree, 65,536 for a `*` collection such as `sessions/*/environment.json` — so a place
+  with thousands of folders (a few thousand ferret sessions, kept for ever) can never starve a login's `auth.json` of
+  its pin. Breadth first, so the shallow files that matter come first; a folder met at the depth limit is itself
+  pinned (a bind mount of it is held, and so is everything walked through it). **A budget that is reached fails
+  closed:** the tree is `truncated`, and the guard of every root that does not own the tree (and the fence of an
+  owner's root) refuses every entry on that tree's device, because an alias of an unindexed member (a bind mount keeps
+  its source's device) cannot be told from any other file there; an entry on another device is proven not to be one.
+  A check that cannot look at a place, or cannot LIST a private folder, **refuses**, never reads it as empty or
+  allows. **Fail closed:**
   a state file whose name says key, secret, token, passkey, password, credential, oauth, auth or cookie
   (case-insensitive substrings), or that the plugin seals itself (`store: 'secret'`), must be declared `private` or
   `public` with a written reason (`privacy.public: [{ path, reason }]`), or `definePlugin`, both hosts at load and
   the `private-files` check refuse the manifest; an entry that names no declared file is a finding. Declared GAPs:
-  (1) a single FILE deeper than the bound (a cache file inside a browser profile) or past the 4096 places is not
-  indexed, so a bind mount of exactly that file under another name is not recognised (its folders are held); (2) the
+  (1) a single FILE deeper than the depth bound — a browser profile's web storage (`Local Storage`, `Session Storage`,
+  IndexedDB: where web apps keep bearer tokens; at depth 4–5 under `data/<profile>/Default/`) and its caches — is not
+  indexed, so a bind mount of exactly that file under another name is not recognised (its folders are held; a place
+  past its BUDGET is not this gap, it fails closed as above); (2) the
   names INSIDE a `*` collection (`cache/*`) are not judged by the secret-name rule, only the folder's; (3) a FUSE or
   overlay re-export of a private file shows a different device, and often a different inode, so identity cannot see
   it — same-user ferrets can read such a file directly anyway ([secrets](../secrets.md)); (4) a ferret's own agent
   home is that root's own place, so another ferret's harness sign-in files inside `agent-homes/<ferret>/` are held by
-  their folder only; (5) a name that no manifest declares is not private to the fence.
+  their folder only; (5) a name that no manifest declares is not private to the fence; (6) an alias of a private
+  file made BEFORE the owner replaced that file (a hard link, or a bind mount, of the old inode) is not recognised
+  after the replace — the index holds the new inode, and the old one is no longer in it — so it reads the old
+  credential until it is removed (a hard link needs the same user, who can read the file directly anyway; a bind
+  mount needs privilege); the same-millisecond and 4096-place misses of earlier rounds are closed, this one is not.
   Residuals the secret-name rule cannot see, none named like a secret and none changed here: MCP's `inventory.json`
   keeps a server's address with its path (a key embedded in a path segment would be stored), Shells' `cache/*` keeps a
   devShell's exported variables verbatim, Warden's `state.json` is a loose object, and the kernel's `accepted-config/*`
