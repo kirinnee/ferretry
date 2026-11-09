@@ -4,8 +4,13 @@ import { LoginChangesPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract
 import { AutoResumeDecide } from '@ferretry/core-ferrets/contract';
 import {
   AccountChangeRequestSchema,
+  ApplyOutcomeSchema,
+  type CatalogInstallChange,
   CloneBundleSchema,
   ModelSetFileSchema,
+  ProposalApplyRequestSchema,
+  type RuntimeHomeReader,
+  type RuntimeSummary,
   ProfileFileSchema,
   RuntimeFileSchema,
   RuntimeIdSchema,
@@ -28,6 +33,101 @@ describe('runtimes contract', () => {
   test('the fake passes the conformance suite', async () => {
     const result = await runtimesConformance(fakeRuntimes);
     expect(result.ok).toBe(true);
+  });
+
+  test('the fake answers the homes a test sets, and a reader only for a listed id', async () => {
+    const fake = fakeRuntimes();
+    const home = {
+      id: 'h1',
+      harness: 'claude-code',
+      runtimes: [],
+      home: '/fleet/homes/h1',
+      wrapper: '/fleet/bin/w',
+    } as const;
+    const reader = {} as RuntimeHomeReader;
+    expect(await fake.homes()).toEqual([]);
+    expect(fake.home('h1')).toBeUndefined();
+    fake.setHomes([home], { h1: reader, h2: reader });
+    expect(await fake.homes()).toEqual([home]);
+    expect(fake.home('h1')).toBe(reader);
+    expect(fake.home('h2')).toBeUndefined();
+    fake.setHomes([home]);
+    expect(fake.home('h1')).toBeUndefined();
+    expect((await runtimesConformance(() => fake)).ok).toBe(true);
+    fake.setHomes([home, home]);
+    expect((await runtimesConformance(() => fake)).ok).toBe(false);
+  });
+
+  test('the conformance suite fails an implementation that answers a reader for an unlisted id', async () => {
+    const result = await runtimesConformance(() => ({ ...fakeRuntimes(), home: () => ({}) as RuntimeHomeReader }));
+    expect(result).toEqual({ ok: false, error: ['home() is undefined for an id homes() does not list'] });
+  });
+
+  const summary = (id: string, extra: Partial<RuntimeSummary> = {}): RuntimeSummary => ({
+    id: RuntimeIdSchema.parse(id),
+    harness: 'claude-code',
+    login: 'work',
+    profile: 'default',
+    agent: true,
+    launch: { available: true },
+    ...extra,
+  });
+
+  test('the fake resolves a runtime as Runtimes does: unknown, switched off, not signed in, or ready', async () => {
+    const fake = fakeRuntimes();
+    const ready = summary('ready');
+    const off = summary('off', { disabled: { reason: 'paused' } });
+    const out = summary('out', { launch: { available: false, reason: 'Sign in first.' } });
+    fake.setRuntimes([ready, off, out], ready.id);
+    expect(await fake.resolve(RuntimeIdSchema.parse('nope'))).toMatchObject({ ok: false, refusal: 'unknown' });
+    expect(await fake.resolve(off.id)).toEqual({ ok: false, refusal: 'disabled', sentence: 'off is switched off.' });
+    expect(await fake.resolve(out.id)).toEqual({ ok: false, refusal: 'not_signed_in', sentence: 'Sign in first.' });
+    expect(await fake.resolve(ready.id)).toEqual({ ok: true, runtime: ready });
+    // no id: the default
+    expect(await fake.resolve()).toEqual({ ok: true, runtime: ready });
+    expect(await fake.default()).toBe(ready.id);
+    fake.setRuntimes([ready]);
+    expect(await fake.resolve()).toMatchObject({ ok: false, refusal: 'unknown' });
+  });
+
+  test('the fake records a catalogue install and answers a committed outcome', async () => {
+    const fake = fakeRuntimes();
+    const change = { kind: 'catalog.install', name: 'notes' } as unknown as CatalogInstallChange;
+    const outcome = await fake.installCatalogItem(change);
+    expect(outcome.outcome).toBe('committed');
+    expect(fake.installed).toEqual([change]);
+  });
+
+  test('the conformance suite names each way an implementation can fail it', async () => {
+    const fake = fakeRuntimes();
+    const bad = { ...summary('bad'), harness: 'nonsense' } as unknown as RuntimeSummary;
+    fake.setRuntimes([bad], RuntimeIdSchema.parse('ghost'));
+    expect(await runtimesConformance(() => fake)).toEqual({
+      ok: false,
+      error: ['list() returns summaries (bad)', 'default() names a runtime that exists'],
+    });
+    const wrongWord = { ...fakeRuntimes(), resolve: async () => ({ ok: false, refusal: 'disabled', sentence: 's' }) };
+    expect(await runtimesConformance(() => wrongWord as never)).toEqual({
+      ok: false,
+      error: ['resolve() names an unknown runtime "unknown"'],
+    });
+    const lenient = { ...fakeRuntimes(), resolve: async () => ({ ok: true, runtime: summary('x') }) };
+    expect(await runtimesConformance(() => lenient as never)).toEqual({
+      ok: false,
+      error: ['resolve() refuses an unknown runtime'],
+    });
+    const twice = fakeRuntimes();
+    const home = { id: 'h', harness: 'claude-code', runtimes: [], home: '/f/h', wrapper: '/f/w' } as const;
+    twice.setHomes([home, home]);
+    expect(await runtimesConformance(() => twice)).toEqual({ ok: false, error: ['homes() lists each id once'] });
+  });
+
+  test('a change is strict: it carries no document; an apply body is empty; an outcome carries its result', () => {
+    expect(
+      AccountChangeRequestSchema.safeParse({ change: { kind: 'runtime.remove', name: 'x', document: {} } }).success,
+    ).toBe(false);
+    expect(ProposalApplyRequestSchema.safeParse({ approval: 'x' }).success).toBe(false);
+    expect(ApplyOutcomeSchema.safeParse({ outcome: 'committed' }).success).toBe(false);
   });
 
   test('the manifest owns sixteen routes and requires Logins', () => {

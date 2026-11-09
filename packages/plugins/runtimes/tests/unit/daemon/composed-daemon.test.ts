@@ -17,6 +17,8 @@ import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
+import { RuntimesPort } from '../../../contract/index.ts';
+import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
@@ -659,5 +661,49 @@ describe('the fences hold through the composed path', () => {
     expect(manifest.runtimes.map(runtime => runtime.name).filter(name => name !== 'claude-default')).toHaveLength(1);
     // No apply claim is left behind: whatever refused released it.
     expect((await readdir(world.fleet)).filter(name => name.includes('.lock'))).toEqual([]);
+  });
+});
+
+describe('the homes the composed daemon provides', () => {
+  const HOME_ID = '00000000-0000-4000-8000-000000000001';
+
+  it('M1 the provided port lists a seeded home, then answers home(id) for it, and keeps answering it', async () => {
+    const { host, world } = await compose();
+    const home = join(world.fleet, 'homes', HOME_ID);
+    await mkdir(home, { recursive: true });
+    await writeFile(join(home, 'settings.json'), '{"a":1}');
+    await writeFile(
+      join(world.fleet, 'manifest.json'),
+      JSON.stringify(
+        buildFleetManifest({
+          generatedAt: '2027-01-15T08:00:00.000Z',
+          accounts: [
+            {
+              id: HOME_ID,
+              kind: 'claude',
+              mode: 'interactive',
+              wrapper: `${world.fleet}/bin/claude-work`,
+              home,
+              displayName: 'claude-work',
+              defaultModel: 'm',
+              models: [{ id: 'm', available: true }],
+              available: true,
+              unavailableReason: null,
+            },
+          ],
+          runtimes: [],
+        }),
+      ),
+    );
+
+    const port = host.provided(RuntimesPort);
+
+    expect(typeof port.homes).toBe('function');
+    expect((await port.homes()).map(listed => listed.id)).toEqual([HOME_ID]);
+    const reader = port.home(HOME_ID);
+    expect(await reader?.document('settings.json', 100)).toBe('{"a":1}');
+    // A second ask after the first still answers: the service is built once and keeps what it listed.
+    expect(port.home(HOME_ID)).toBeDefined();
+    expect(port.home('00000000-0000-4000-8000-0000000000ff')).toBeUndefined();
   });
 });

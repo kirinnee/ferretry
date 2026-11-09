@@ -31,9 +31,11 @@ import {
   type ModelSetFile,
   type ProfileFile,
   type RuntimeFile,
+  type RuntimeHomesApi,
   type RuntimesFile,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { fleetHomes } from './adapters/fleet-home-reader.ts';
 import { endedSeams, fileAssembly } from './host-assembly.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
@@ -80,6 +82,8 @@ export interface RuntimesAssembly {
    * dead pane's last screen. Absent until the host offers the process and pane seams; the subscriber then does nothing.
    */
   readonly ended?: RuntimeEndSeams;
+  /** The harness homes the fleet published and a reader of one. Absent: no homes (the fail-closed fallback). */
+  readonly homes?: RuntimeHomesApi;
   /**
    * The machine's "Auto-resume after restart" switch (`machine.yaml` `autoResume`): `true` on, `false` off. Absent, or
    * answering `undefined`, until the host assembly reaches the account model: auto-resume then resumes nothing (W2-a).
@@ -109,6 +113,9 @@ export const unavailableAssembly: RuntimesAssembler = ctx => {
   return services;
 };
 
+/** The homes of a daemon whose assembly offers none: no home is published, so no reader is handed out. */
+const noHomes: RuntimeHomesApi = { homes: async () => [], home: () => undefined };
+
 /** The names whose parsed value differs between two readings of a collection. */
 function changedNames<Shape>(before: ReadonlyMap<string, Shape>, after: ReadonlyMap<string, Shape>): readonly string[] {
   const names = new Set([...before.keys(), ...after.keys()]);
@@ -136,6 +143,15 @@ function deferred<Target extends object>(make: () => Target): Target {
     },
     has: (_stand, property) => property in make(),
   });
+}
+
+/**
+ * The homes service built once, on the first call, and handed out as a plain object (a spread copies its own keys; a
+ * proxy has none). One build keeps the homes `homes()` listed for the `home(id)` that follows.
+ */
+function onceHomes(make: () => RuntimeHomesApi): RuntimeHomesApi {
+  const built = once(make);
+  return { homes: async () => await built().homes(), home: id => built().home(id) };
 }
 
 /**
@@ -169,6 +185,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     catalog: deferred(() => assembled().catalog),
     setup: deferred(() => assembled().setup),
     ended: deferred(() => assembled().ended),
+    homes: onceHomes(() => fleetHomes(ctx.kernel.roots, publication)),
     probe: () => {
       assembled();
     },
@@ -314,7 +331,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ...fleetSetupRoutes(assembly.setup),
           ...ferretRuntimeRoutes(assembly.runtime),
         },
-        provides: { runtimes: api },
+        provides: { runtimes: { ...api, ...(assembly.homes ?? noHomes) } },
         doctor: {
           // The half builds without opening the fleet folder, so a broken fleet root shows here, not as a failed boot.
           'runtimes-config': async (): Promise<DoctorFinding> => {
