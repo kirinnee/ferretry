@@ -30,6 +30,8 @@ afterEach(async () => {
 
 const REAL = nodeFs(() => 'r');
 const DECOY = 'Innocent.txt';
+/** A wall clock an hour past now: no folder the disk stamped in a test is too recent to trust. */
+const LATER = (): bigint => BigInt(Date.now() + 3_600_000) * 1_000_000n;
 
 /** The composed list of the plugins whose real layouts these fixtures copy. */
 const LIST = composePrivateFiles([
@@ -281,10 +283,10 @@ describe('PF-bound the index looks to a bounded depth, pins every folder it reac
     for (let index = 0; index < 12; index += 1) await writeFile(`${many}/f${index}`, 'x');
     const real = await realpath(l.home);
     const input = { pins: () => [], private: ['state/browsers/data'] } as const;
-    const small = await privateIndexOf(REAL, real, input, 0, () => 0, { depth: 3, limit: 8 }).snapshot();
+    const small = await privateIndexOf(REAL, real, input, { bounds: { depth: 3, limit: 8 } }).snapshot();
     expect(small.truncated).toEqual([`${real}/state/browsers/data`]);
     expect(small.places.length).toBeLessThanOrEqual(8);
-    const roomy = await privateIndexOf(REAL, real, input, 0, () => 0, { depth: 3, limit: 4096 }).snapshot();
+    const roomy = await privateIndexOf(REAL, real, input, { bounds: { depth: 3, limit: 4096 } }).snapshot();
     expect(roomy.truncated).toEqual([]);
     expect(roomy.places.some(place => place.path.endsWith('P2/f11'))).toBe(true);
   });
@@ -293,10 +295,10 @@ describe('PF-bound the index looks to a bounded depth, pins every folder it reac
     const l = await layout();
     const real = await realpath(l.home);
     const input = { pins: () => [], private: ['state/browsers/data'] } as const;
-    const shallow = await privateIndexOf(REAL, real, input, 0, () => 0, { depth: 2, limit: 4096 }).snapshot();
+    const shallow = await privateIndexOf(REAL, real, input, { bounds: { depth: 2, limit: 4096 } }).snapshot();
     expect(shallow.places.some(place => place.path.endsWith('P1/Default'))).toBe(true);
     expect(shallow.places.some(place => place.path.endsWith('Default/Cookies'))).toBe(false);
-    const deeper = await privateIndexOf(REAL, real, input, 0, () => 0, { depth: 3, limit: 4096 }).snapshot();
+    const deeper = await privateIndexOf(REAL, real, input, { bounds: { depth: 3, limit: 4096 } }).snapshot();
     expect(deeper.places.some(place => place.path.endsWith('Default/Cookies'))).toBe(true);
   });
 });
@@ -321,7 +323,8 @@ describe('PF-index the index is kept, looks again only at the folders it was bui
     const l = await layout();
     const real = await realpath(l.home);
     const meter = counted(REAL);
-    const index = privateIndexOf(meter.fs, real, { pins: () => [], private: LIST });
+    // A clock far past every time the disk stamped: nothing is "too recent to trust", so only a real change shows.
+    const index = privateIndexOf(meter.fs, real, { pins: () => [], private: LIST }, { wall: LATER });
     const first = await index.snapshot();
     const scanned = meter.calls();
     const second = await index.snapshot();
@@ -361,7 +364,12 @@ describe('PF-index the index is kept, looks again only at the folders it was bui
     const real = await realpath(l.home);
     let clock = 0;
     const meter = counted(REAL);
-    const index = privateIndexOf(meter.fs, real, { pins: () => [], private: LIST }, 1000, () => clock);
+    const index = privateIndexOf(
+      meter.fs,
+      real,
+      { pins: () => [], private: LIST },
+      { recheckMs: 1000, now: () => clock },
+    );
     const first = await index.snapshot();
     await writeFile(`${l.files.auth}.new`, 'rotated');
     await rename(`${l.files.auth}.new`, l.files.auth);
@@ -378,7 +386,7 @@ describe('PF-index the index is kept, looks again only at the folders it was bui
     const l = await layout();
     const real = await realpath(l.home);
     const meter = counted(REAL);
-    const index = privateIndexOf(meter.fs, real, { pins: () => [], private: LIST });
+    const index = privateIndexOf(meter.fs, real, { pins: () => [], private: LIST }, { wall: LATER });
     const [a, b, c] = await Promise.all([index.snapshot(), index.snapshot(), index.snapshot()]);
     expect(b).toBe(a);
     expect(c).toBe(a);

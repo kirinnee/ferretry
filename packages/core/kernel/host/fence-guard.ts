@@ -7,6 +7,7 @@ import {
   type PrivateIndex,
   type PrivateSnapshot,
   privateIndexOf,
+  recheckIntervalOf,
 } from './fence-index.ts';
 import { IDENTITY_FILE } from './identity.ts';
 import { INTERNAL_ROOT_FOLDERS } from './internal-roots.ts';
@@ -48,6 +49,11 @@ export interface Fence {
   readonly identities: readonly { readonly device: bigint; readonly inode: bigint }[];
   /** {@link identities} as comparable keys, for a lookup that does not grow with how many places are held. */
   readonly keys: ReadonlySet<string>;
+  /**
+   * The devices of the private trees whose members were not all indexed: an entry on one of them cannot be proven
+   * not to be an alias of an unindexed member, so it is refused ({@link fencedReal}).
+   */
+  readonly closed: ReadonlySet<bigint>;
 }
 
 /**
@@ -95,14 +101,14 @@ const INDEXES = new WeakMap<HostFs, Map<string, PrivateIndex>>();
 function indexOf(fs: HostFs, real: string, privateFiles: readonly string[], recheckMs: number): PrivateIndex {
   const kept = INDEXES.get(fs) ?? new Map<string, PrivateIndex>();
   INDEXES.set(fs, kept);
-  const key = JSON.stringify([real, privateFiles, recheckMs]);
+  const key = JSON.stringify([real, privateFiles, recheckIntervalOf(recheckMs)]);
   const found = kept.get(key);
   if (found !== undefined) return found;
   const input: IndexInput = {
     pins: stateEntries => [...PINNED_KEY_PATHS, ...internalRootPins(stateEntries)],
     private: privateFiles,
   };
-  const made = privateIndexOf(fs, real, input, recheckMs);
+  const made = privateIndexOf(fs, real, input, { recheckMs });
   kept.set(key, made);
   return made;
 }
@@ -160,9 +166,16 @@ export async function fenceOf(
     places.push(place);
     identities.push(identity);
   }
-  for (const place of (await indexOf(fs, real, privateFiles, recheckMs).snapshot()).places)
-    identities.push({ device: place.device, inode: place.inode });
-  return { named, real, places, identities, keys: new Set(identities.map(identityKey)) };
+  const snapshot = await indexOf(fs, real, privateFiles, recheckMs).snapshot();
+  for (const place of snapshot.places) identities.push({ device: place.device, inode: place.inode });
+  return {
+    named,
+    real,
+    places,
+    identities,
+    keys: new Set(identities.map(identityKey)),
+    closed: new Set(snapshot.closed.map(tree => tree.device)),
+  };
 }
 
 /**
@@ -184,10 +197,12 @@ export function fencedByName(fence: Fence, path: string): boolean {
  */
 export async function fencedReal(fs: HostFs, fence: Fence, real: string): Promise<boolean> {
   if (fencedByName(fence, real)) return true;
-  for (let current = absolute(real, 'the path'); ; current = dirname(current)) {
+  for (let current = absolute(real, 'the path'), first = true; ; current = dirname(current), first = false) {
     const entry = await fs.identity(current).catch(() => undefined);
     if (entry === undefined) return true;
     if (fence.keys.has(identityKey(entry))) return true;
+    // A private tree that was not indexed whole fails closed: this entry cannot be proven not to be an alias of a member.
+    if (first && fence.closed.has(entry.device)) return true;
     if (dirname(current) === current) return false;
   }
 }
@@ -201,6 +216,12 @@ export async function fencedReal(fs: HostFs, fence: Fence, real: string): Promis
  */
 export interface PrivateGuard {
   readonly keys: ReadonlySet<string>;
+  /**
+   * The devices of the private trees that were not indexed whole (a budget was reached) and are not the root's own: an
+   * entry on one of them cannot be proven not to be an alias of an unindexed member, so it is held. An entry on
+   * another device is proven not to be one (an alias keeps its source's device).
+   */
+  readonly closed: ReadonlySet<bigint>;
 }
 
 const GUARDS = new WeakMap<PrivateSnapshot, Map<string, PrivateGuard>>();
@@ -227,7 +248,10 @@ export async function privateGuardOf(
   GUARDS.set(snapshot, bases);
   const kept = bases.get(base);
   if (kept !== undefined) return kept;
-  const made = { keys: new Set(snapshot.places.filter(place => !nested(place.path, base)).map(place => place.key)) };
+  const made = {
+    keys: new Set(snapshot.places.filter(place => !nested(place.path, base)).map(place => place.key)),
+    closed: new Set(snapshot.closed.filter(tree => !nested(tree.path, base)).map(tree => tree.device)),
+  };
   bases.set(base, made);
   return made;
 }
@@ -237,11 +261,13 @@ export async function privateGuardOf(
  * including the root's `base`, as {@link fencedReal} walks. A path that cannot be looked at is refused.
  */
 export async function privatelyHeld(fs: HostFs, guard: PrivateGuard, real: string, base: string): Promise<boolean> {
-  if (guard.keys.size === 0) return false;
+  if (guard.keys.size === 0 && guard.closed.size === 0) return false;
   for (let current = absolute(real, 'the path'); ; current = dirname(current)) {
     const entry = await fs.identity(current).catch(() => undefined);
     if (entry === undefined) return true;
     if (guard.keys.has(identityKey(entry))) return true;
+    // The base is the root's own folder, not an alias; everything below it on a closed tree's device is unproven.
+    if (current !== base && guard.closed.has(entry.device)) return true;
     if (current === base || dirname(current) === current || !within(base, dirname(current))) return false;
   }
 }

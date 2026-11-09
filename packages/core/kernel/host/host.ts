@@ -82,6 +82,7 @@ import {
   type Serving,
 } from './dispatch.ts';
 import { EventBus } from './events.ts';
+import { DEFAULT_RECHECK_MS } from './fence-index.ts';
 import { dependentsOf, type GraphRefusal, planGraph } from './graph.ts';
 import { type Deadline, HookEngine } from './hooks.ts';
 import {
@@ -189,7 +190,7 @@ export interface HostConfig {
  * How often the kept index of the home's private places is looked at again (§7.7, `host/fence-index.ts`): a private file
  * created or replaced is pinned within this long, which is also the longest one can be reached under a second name.
  */
-const PRIVATE_RECHECK_MS = 250;
+const PRIVATE_RECHECK_MS = DEFAULT_RECHECK_MS;
 
 /** The kernel's own `GET /v1/config/file` declaration: what a `kernel.config-changed` frame is asked about as. */
 const CONFIG_FILE_READ = (() => {

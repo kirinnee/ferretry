@@ -133,3 +133,50 @@ test('PF-parity the real host composes the declared list into every root: a hard
     await outcome.host.stop();
   }
 });
+
+test('PF-parity the real host looks at the private places again: a file made after the first fenced read is fenced once the look interval has passed', async () => {
+  const parent = await realpath(await mkdtemp(`${tmpdir()}/private-parity-`));
+  parents.push(parent);
+  const home = `${parent}/home`;
+  const seen: { stranger?: KernelPorts } = {};
+  const outcome = await bootHost({
+    home,
+    version: '5.0.0',
+    adapters: {
+      ...realAdapters(home, () => {}, { binary: 'fy' }),
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => {} }),
+    },
+    implementations: halves(seen, SOUND),
+  });
+  if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+  try {
+    const roots = (seen.stranger as KernelPorts).roots;
+    const agentHome = roots.root('agent-homes', { subfolder: 'F1' });
+    const at = (name: string): FencedPath => {
+      const resolved = agentHome.resolve(name);
+      if (!resolved.ok) throw new Error(resolved.error);
+      return resolved.value;
+    };
+    // The first fenced read builds the kept index while the private file does not exist yet.
+    await agentHome.writeText(at('own.txt'), 'own');
+    expect(await agentHome.readText(at('own.txt'))).toBe('own');
+    const key = `${home}/state/holder/signing.key`;
+    await mkdir(`${home}/state/holder`, { recursive: true });
+    await writeFile(key, 'signing-fixture', { mode: 0o600 });
+    await link(key, `${home}/state/stranger/agent-homes/F1/borrowed.json`);
+    // The host's look interval is 250 ms: past it, the next read looks again and finds the file.
+    await new Promise(done => setTimeout(done, 400));
+    const refusal = async (): Promise<string> => {
+      try {
+        await agentHome.readText(at('borrowed.json'));
+        return 'allowed';
+      } catch (error) {
+        return error instanceof RootError ? error.refusal : String(error);
+      }
+    };
+    expect(await refusal()).toBe('fenced');
+  } finally {
+    await outcome.host.stop();
+  }
+});

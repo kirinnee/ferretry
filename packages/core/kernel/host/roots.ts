@@ -52,7 +52,7 @@ import {
 import { identityKey } from './fence-index.ts';
 import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
-import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
+import { holdsPrivate, ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
 import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from './root-rules.ts';
 
@@ -212,7 +212,8 @@ function privateCheckOf(fs: HostFs, home: string, real: string, privateFiles: Pr
   };
   return {
     held: async path => await answer(kept => privatelyHeld(fs, kept, path, real)),
-    heldIdentity: async identity => await answer(kept => kept.keys.has(identityKey(identity))),
+    heldIdentity: async identity =>
+      await answer(kept => kept.keys.has(identityKey(identity)) || kept.closed.has(identity.device)),
   };
 }
 
@@ -1948,7 +1949,8 @@ export function rootsPortFor(
     share: async (source: SharedTreeSource) => {
       if (options.shareTrees !== true) return refuseShared('not_permitted');
       const folder = ownStateTree(options.stateFiles ?? [], source.state, source.name);
-      if (folder === undefined) return refuseShared('not_own');
+      if (folder === undefined || holdsPrivate(layout.plugin, folder, privateFiles.files))
+        return refuseShared('not_own');
       const base = absolute(join(pluginStateFolder(home, layout.plugin), folder), 'a shared tree');
       const access = stateTreeAccess(fs, home, layout.plugin, base, immutable, privateFiles);
       await existingFolder(access, base as FencedPath);
