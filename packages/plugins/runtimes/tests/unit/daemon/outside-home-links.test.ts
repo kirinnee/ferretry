@@ -1,9 +1,10 @@
 /**
- * BG-033: an account home outside the fleet is read THROUGH its links (a home-manager home is made of them), read-only
- * and bounded. Real kernel roots over a temp world; the "store" is a temp folder standing in for `/nix/store`.
+ * BG-033: an account home outside the fleet follows a link ONLY when it resolves INSIDE that home, read-only (v4 parity:
+ * `node-skill-files.ts` skipped, silently, a folder whose real path was outside the home). Real kernel roots over a temp
+ * world; `store` is a folder OUTSIDE every home, standing in for a place the links of a home-manager home lead to.
  *
- *   <parent>/store           the content the links lead to
- *   <parent>/person/<home>   the account homes outside the fleet (made of links, or of plain files)
+ *   <parent>/store           a place outside every account home
+ *   <parent>/person/<home>   the account homes outside the fleet
  *   <parent>/fy-home         the daemon's own home (the fence): fleet/, state/
  */
 import { afterEach, describe, expect, it } from 'bun:test';
@@ -11,7 +12,7 @@ import { mkdir, readFile, readlink, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path';
 import type { RuntimeHomeReader } from '../../../contract/index.ts';
 import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
-import { followingHandle, MAX_LINK_HOPS } from '../../../daemon/adapters/following-handle.ts';
+import { followingHandle } from '../../../daemon/adapters/following-handle.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
@@ -90,155 +91,181 @@ async function everything(reader: RuntimeHomeReader, folder: string) {
   };
 }
 
-describe('BG-033 an outside account home is read through its links', () => {
-  it('BG-033 a home of links into a store (folders, per-file links, settings, MCP config) reads exactly like the same plain home', async () => {
-    const { store, linked, plain, reader } = await seed();
-    await content(plain);
+describe('BG-033 an outside account home follows a link only when it resolves inside the home', () => {
+  it('BG-033 a link to a store-like folder OUTSIDE the home is skipped: not listed, not read, no error line (skills)', async () => {
+    const { store, linked, reader } = await seed();
     await content(store);
-    // The home-manager shapes: the whole `skills/` folder is a link, a settings file is a link, and a skill folder that is
-    // a real folder holds a link per file.
+    await put(join(store, 'loose', 'SKILL.md'), '# loose\n');
+    // The home-manager shape: the whole `skills/` folder is a link out.
     await symlink(join(store, 'skills'), join(linked, 'skills'));
-    await symlink(join(store, 'settings.json'), join(linked, 'settings.json'));
-    await symlink(join(store, '.claude.json'), join(linked, '.claude.json'));
-    await symlink(join(store, 'config.toml'), join(linked, 'config.toml'));
+    expect(await reader(LINKED).skills(50)).toEqual([]);
+    expect(await reader(LINKED).skillManifest('alpha', 100)).toBeUndefined();
+    expect(await reader(LINKED).skillTree('alpha', { entries: 10, depth: 3 })).toBeUndefined();
+    expect(await reader(LINKED).skillFile('alpha', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+  });
+
+  it('BG-033 a skill folder that is a link out, and a real skill folder whose SKILL.md is a link out, are skipped; the plain skill beside them is listed', async () => {
+    const { store, linked, reader } = await seed();
+    await content(store);
+    await put(join(linked, 'skills', 'real', 'SKILL.md'), '# real\n');
+    await symlink(join(store, 'skills', 'alpha'), join(linked, 'skills', 'out-folder'));
+    await mkdir(join(linked, 'skills', 'out-manifest'), { recursive: true });
+    await symlink(join(store, 'skills', 'beta', 'SKILL.md'), join(linked, 'skills', 'out-manifest', 'SKILL.md'));
+    // Not one line, not one error: the listing is exactly the skills inside the home.
+    expect((await reader(LINKED).skills(50)).map(skill => skill.name)).toEqual(['real']);
+    expect(await reader(LINKED).skillManifest('out-manifest', 100)).toBeUndefined();
+    expect(await reader(LINKED).skillManifest('out-folder', 100)).toBeUndefined();
+  });
+
+  it('BG-033 a document that is a link out of the home is refused in one sentence and its target is not read', async () => {
+    const { store, linked, reader } = await seed();
+    await content(store);
+    for (const file of ['settings.json', '.claude.json', 'config.toml'])
+      await symlink(join(store, file), join(linked, file));
+    for (const file of ['settings.json', '.claude.json', 'config.toml'] as const)
+      await expect(reader(LINKED).document(file, 1000)).rejects.toThrow(
+        `${file} is a link that is not followed (it leads nowhere, loops, or leads outside this home).`,
+      );
+  });
+
+  it('BG-033 a link that resolves INSIDE the home is followed, and the home reads exactly like the same plain home', async () => {
+    const { linked, plain, reader } = await seed();
+    await content(plain);
+    // Everything lives in `.shared` inside the home; the home itself is made of links to it.
+    await content(join(linked, '.shared'));
+    await symlink(join(linked, '.shared', 'skills'), join(linked, 'skills'));
+    for (const file of ['settings.json', '.claude.json', 'config.toml'])
+      await symlink(join(linked, '.shared', file), join(linked, file));
     const expected = await everything(reader(PLAIN), plain);
     expect(expected.skills.map(skill => skill.name)).toEqual(['alpha', 'beta']);
     expect(expected.settings).toBe('{"permissions":{}}');
     expect(await everything(reader(LINKED), linked)).toEqual(expected);
   });
 
-  it('BG-033 a skill folder that holds a link per file (a recursive home-manager link tree) reads like a plain one', async () => {
-    const { store, linked, plain, reader } = await seed();
+  it('BG-033 skill folders that are links inside the home are followed (a real `skills/` of links), identical to plain ones', async () => {
+    const { linked, plain, reader } = await seed();
     await content(plain);
-    await content(store);
-    for (const name of ['alpha', 'beta']) {
-      await mkdir(join(linked, 'skills', name), { recursive: true });
-      await symlink(join(store, 'skills', name, 'SKILL.md'), join(linked, 'skills', name, 'SKILL.md'));
-    }
-    await symlink(join(store, 'skills', 'alpha', 'refs'), join(linked, 'skills', 'alpha', 'refs'));
+    await content(join(linked, '.shared'));
+    await mkdir(join(linked, 'skills'), { recursive: true });
+    for (const name of ['alpha', 'beta'])
+      await symlink(join(linked, '.shared', 'skills', name), join(linked, 'skills', name));
     for (const file of ['settings.json', '.claude.json', 'config.toml'])
-      await symlink(join(store, file), join(linked, file));
+      await symlink(join(linked, '.shared', file), join(linked, file));
     expect(await everything(reader(LINKED), linked)).toEqual(await everything(reader(PLAIN), plain));
   });
 
-  it("BG-033 a followed file keeps the caller's size bound and a followed folder keeps the entry bound", async () => {
-    const { store, linked, reader } = await seed();
-    await content(store);
-    await symlink(join(store, 'settings.json'), join(linked, 'settings.json'));
-    await symlink(join(store, 'skills'), join(linked, 'skills'));
-    await expect(reader(LINKED).document('settings.json', 3)).rejects.toThrow('is larger than the 3 bytes');
-    expect((await reader(LINKED).skills(0)).length).toBe(1);
-    const tree = await reader(LINKED).skillTree('alpha', { entries: 1, depth: 5 });
-    expect(tree?.truncated).toBe(true);
-    expect(tree?.entries.length).toBe(1);
-  });
-
-  it('BG-033 a link nested more than the bound is left as a link, and one inside the bound is read', async () => {
-    const { store, linked, reader } = await seed();
-    await put(join(linked, 'skills', 'deep', 'SKILL.md'), '# deep\n');
-    // deep/l1 -> store/d1, d1/l2 -> store/d2 ... d(N-1)/lN -> store/dN, which holds `bottom.md`.
-    const levels = MAX_LINK_HOPS + 2;
-    for (let index = 1; index <= levels; index += 1) {
-      await mkdir(join(store, `d${index}`), { recursive: true });
-      const from = index === 1 ? join(linked, 'skills', 'deep') : join(store, `d${index - 1}`);
-      await symlink(join(store, `d${index}`), join(from, `l${index}`));
-    }
-    await writeFile(join(store, `d${levels}`, 'bottom.md'), 'bottom');
-    const tree = await reader(LINKED).skillTree('deep', { entries: 100, depth: 30 });
-    const folders = tree?.entries.filter(entry => entry.type === 'file').map(entry => entry.path);
-    const last = Array.from({ length: MAX_LINK_HOPS }, (_, index) => `l${index + 1}`).join('/');
-    // The folder reached through MAX_LINK_HOPS links is listed; the link inside it is not followed.
-    expect(
-      tree?.entries.some(entry => entry.path === `${last}/l${MAX_LINK_HOPS + 1}` && entry.type === 'symlink'),
-    ).toBe(true);
-    expect(folders).toEqual(['SKILL.md']);
-    expect(await reader(LINKED).skillFile('deep', `${last}/l${MAX_LINK_HOPS + 1}/bottom.md`, 100)).toEqual({
-      ok: false,
-      reason: 'unreadable',
-    });
-  });
-
-  it('BG-033 a link back to the folder it is in, or to a folder above it, is a loop: it ends and is left as a link', async () => {
-    const { store, linked, reader } = await seed();
-    await put(join(store, 'a', 'SKILL.md'), '# a\n');
-    await mkdir(join(store, 'b'), { recursive: true });
-    await symlink(join(store, 'a'), join(store, 'a', 'self')); // a/self -> a
-    await symlink(join(store, 'b'), join(store, 'a', 'to-b')); // a/to-b -> b
-    await symlink(join(store, 'a'), join(store, 'b', 'to-a')); // b/to-a -> a   (a -> b -> a)
+  it('BG-033 inside links chained (a -> b -> c -> folder) are followed; a chain longer than the system allows is skipped', async () => {
+    const { linked, reader } = await seed();
+    await put(join(linked, 'real', 'SKILL.md'), '# real\n');
     await mkdir(join(linked, 'skills'), { recursive: true });
-    await symlink(join(store, 'a'), join(linked, 'skills', 'loop'));
-    const tree = await reader(LINKED).skillTree('loop', { entries: 100, depth: 30 });
-    expect(tree?.truncated).toBe(false);
-    const byPath = new Map(tree?.entries.map(entry => [entry.path, entry.type]));
-    expect(byPath.get('self')).toBe('symlink');
-    expect(byPath.get('to-b/to-a')).toBe('symlink');
-    expect([...byPath.keys()].some(path => path.split('/').length > 2)).toBe(false);
+    await symlink(join(linked, 'real'), join(linked, 'c'));
+    await symlink(join(linked, 'c'), join(linked, 'b'));
+    await symlink(join(linked, 'b'), join(linked, 'skills', 'chained'));
+    // 60 links, one to the next: more than the operating system resolves.
+    await symlink(join(linked, 'real'), join(linked, 'n0'));
+    for (let index = 1; index < 60; index += 1) await symlink(join(linked, `n${index - 1}`), join(linked, `n${index}`));
+    await symlink(join(linked, 'n59'), join(linked, 'skills', 'too-long'));
+    expect((await reader(LINKED).skills(50)).map(skill => skill.name)).toEqual(['chained']);
+    expect(await reader(LINKED).skillManifest('chained', 100)).toBe('# real\n');
+  });
+
+  it('BG-033 a link back to the folder it is in or to one above it is a loop and is skipped; so are mutual and self links', async () => {
+    const { linked, reader } = await seed();
+    await put(join(linked, 'skills', 'SKILL.md'), '# the folder holds a manifest, so a link to it would be listed\n');
+    await put(join(linked, 'skills', 'ok', 'SKILL.md'), '# ok\n');
+    await symlink(join(linked, 'skills'), join(linked, 'skills', 'self')); // skills/self -> skills
+    await symlink(linked, join(linked, 'skills', 'whole-home')); // skills/whole-home -> the home
+    await symlink(join(linked, 'skills', 'm2'), join(linked, 'skills', 'm1')); // m1 -> m2 -> m1
+    await symlink(join(linked, 'skills', 'm1'), join(linked, 'skills', 'm2'));
+    await symlink(join(linked, 'skills', 'me'), join(linked, 'skills', 'me')); // me -> me
+    expect((await reader(LINKED).skills(50)).map(skill => skill.name)).toEqual(['ok']);
   });
 
   it('BG-033 a dangling link is skipped (not an error); a dangling document says so in one sentence', async () => {
-    const { store, linked, reader } = await seed();
+    const { linked, reader } = await seed();
     await put(join(linked, 'skills', 'ok', 'SKILL.md'), '# ok\n');
-    await symlink(join(store, 'missing'), join(linked, 'skills', 'gone'));
-    await symlink(join(store, 'missing.md'), join(linked, 'skills', 'ok', 'gone.md'));
-    await symlink(join(store, 'missing.json'), join(linked, 'settings.json'));
+    await symlink(join(linked, 'missing'), join(linked, 'skills', 'gone'));
+    await symlink(join(linked, 'missing.md'), join(linked, 'skills', 'ok', 'gone.md'));
+    await symlink(join(linked, 'missing.json'), join(linked, 'settings.json'));
     expect((await reader(LINKED).skills(10)).map(skill => skill.name)).toEqual(['ok']);
     const tree = await reader(LINKED).skillTree('ok', { entries: 10, depth: 3 });
     expect(tree?.entries).toContainEqual({ path: 'gone.md', type: 'symlink', size: 0 });
     await expect(reader(LINKED).document('settings.json', 100)).rejects.toThrow(
-      'settings.json is a link that is not followed (it leads nowhere, loops, is nested too deep, or leads to a place that is never read).',
+      'settings.json is a link that is not followed (it leads nowhere, loops, or leads outside this home).',
     );
     expect(await reader(LINKED).skillFile('gone', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
   });
 
-  it("BG-033 a link to a private place is never followed: the daemon's own home, a runtime home in the fleet, a sign-in file", async () => {
-    const { world, store, linked, reader } = await seed();
+  it('BG-033 inside a skill folder no link is followed: a link there is a link (tree) and unreadable (file), inside the home or not', async () => {
+    const { store, linked, reader } = await seed();
+    await put(join(linked, 'keep', 'notes.md'), 'notes');
+    await put(join(store, 'out.md'), 'out');
+    await put(join(linked, 'skills', 'alpha', 'SKILL.md'), '# alpha\n');
+    await symlink(join(linked, 'keep', 'notes.md'), join(linked, 'skills', 'alpha', 'inside.md'));
+    await symlink(join(linked, 'keep'), join(linked, 'skills', 'alpha', 'folder'));
+    await symlink(join(store, 'out.md'), join(linked, 'skills', 'alpha', 'outside.md'));
+    const tree = await reader(LINKED).skillTree('alpha', { entries: 10, depth: 3 });
+    expect(tree?.entries.toSorted((left, right) => (left.path < right.path ? -1 : 1))).toEqual([
+      { path: 'SKILL.md', type: 'file', size: 8 },
+      { path: 'folder', type: 'symlink', size: 0 },
+      { path: 'inside.md', type: 'symlink', size: 0 },
+      { path: 'outside.md', type: 'symlink', size: 0 },
+    ]);
+    for (const file of ['inside.md', 'outside.md', 'folder/notes.md'])
+      expect(await reader(LINKED).skillFile('alpha', file, 100)).toEqual({ ok: false, reason: 'unreadable' });
+  });
+
+  it('BG-033 a SKILL.md that is a link to a file inside the home lists and reads (the inventory read it through one)', async () => {
+    const { linked, reader } = await seed();
+    await put(join(linked, 'shared', 'manifest.md'), '# via link\n');
+    await mkdir(join(linked, 'skills', 'alpha'), { recursive: true });
+    await symlink(join(linked, 'shared', 'manifest.md'), join(linked, 'skills', 'alpha', 'SKILL.md'));
+    expect((await reader(LINKED).skills(10)).map(skill => skill.name)).toEqual(['alpha']);
+    expect(await reader(LINKED).skillManifest('alpha', 100)).toBe('# via link\n');
+    expect(await reader(LINKED).skillFile('alpha', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+  });
+
+  it("BG-033 a link to a private place is never followed: the daemon's own home, a runtime home in the fleet, a sign-in file inside the home", async () => {
+    const { world, linked, reader } = await seed();
     await put(join(world.home, 'state', 'secret.txt'), SECRET);
     await put(join(world.fleet, 'homes', 'someone', 'settings.json'), SECRET);
-    await put(join(world.fleet, 'homes', 'someone', '.credentials.json'), SECRET);
-    await put(join(world.person, '.codex', 'auth.json'), SECRET);
-    await put(join(world.person, '.claude', '.credentials.json'), SECRET);
+    await put(join(linked, '.credentials.json'), SECRET);
+    await put(join(linked, 'auth.json'), SECRET);
+    await put(join(linked, 'nested', '.credentials.json'), SECRET);
+    await put(join(linked, 'nested', 'SKILL.md'), '# nested\n');
     await symlink(join(world.home, 'state', 'secret.txt'), join(linked, 'settings.json'));
     await symlink(join(world.fleet, 'homes', 'someone', 'settings.json'), join(linked, '.claude.json'));
-    await symlink(join(world.person, '.codex', 'auth.json'), join(linked, 'config.toml'));
-    await mkdir(join(linked, 'skills', 'inside'), { recursive: true });
+    await symlink(join(linked, 'auth.json'), join(linked, 'config.toml')); // inside the home, but a sign-in file
+    await mkdir(join(linked, 'skills'), { recursive: true });
     await symlink(join(world.home, 'state'), join(linked, 'skills', 'state'));
     await symlink(join(world.fleet, 'homes', 'someone'), join(linked, 'skills', 'someone'));
-    await symlink(join(world.person, '.claude'), join(linked, 'skills', 'whole-home'));
-    // Through the store too: a link in the store to the daemon's own home is the same refusal.
-    await symlink(join(world.home, 'state', 'secret.txt'), join(store, 'hop.json'));
-    await symlink(join(store, 'hop.json'), join(linked, 'skills', 'inside', 'SKILL.md'));
-    await symlink(join(world.person, '.codex', 'auth.json'), join(linked, 'skills', 'inside', 'notes.md'));
+    await symlink(join(linked, 'nested'), join(linked, 'skills', 'nested'));
+    await symlink(join(linked, '.credentials.json'), join(linked, 'skills', 'creds'));
     const found = reader(LINKED);
     for (const file of ['settings.json', '.claude.json', 'config.toml'] as const)
       await expect(found.document(file, 1000)).rejects.toThrow('is a link that is not followed');
-    expect((await found.skills(10)).map(skill => skill.name)).toEqual(['inside', 'whole-home']);
-    // The folder that IS followed (the person's own `.claude`) never lists or reads its sign-in file.
-    const whole = await found.skillTree('whole-home', { entries: 10, depth: 3 });
-    expect(JSON.stringify(whole)).not.toContain('credentials');
-    expect(await found.skillFile('whole-home', '.credentials.json', 100)).toEqual({ ok: false, reason: 'unreadable' });
-    expect(await found.skillFile('inside', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
-    expect(await found.skillFile('inside', 'notes.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
-    expect(await found.skillManifest('inside', 100)).toBeUndefined();
+    expect((await found.skills(10)).map(skill => skill.name)).toEqual(['nested']);
+    // The folder that IS followed never lists or reads its sign-in file.
+    const nested = await found.skillTree('nested', { entries: 10, depth: 3 });
+    expect(JSON.stringify(nested)).not.toContain('credentials');
+    expect(await found.skillFile('nested', '.credentials.json', 100)).toEqual({ ok: false, reason: 'unreadable' });
     expect(await found.skillFile('state', 'secret.txt', 100)).toEqual({ ok: false, reason: 'unreadable' });
     expect(await found.skillFile('someone', 'settings.json', 100)).toEqual({ ok: false, reason: 'unreadable' });
   });
 
   it('BG-033 the handle has no write member, and the root under it refuses a write through a link, leaving the target as it was', async () => {
-    const { world, store, linked } = await seed();
-    await put(join(store, 'settings.json'), 'as it was');
-    await symlink(join(store, 'settings.json'), join(linked, 'settings.json'));
-    const handle = followingHandle(world.roots, linked, linked);
+    const { world, linked } = await seed();
+    await put(join(linked, 'shared', 'settings.json'), 'as it was');
+    await symlink(join(linked, 'shared', 'settings.json'), join(linked, 'settings.json'));
+    const handle = followingHandle(world.roots, linked, linked, true);
     expect(Object.keys(handle).toSorted()).toEqual(['entries', 'readBytes', 'readText', 'resolve']);
-    const reach = world.roots.root('harness-home', { subfolder: '/' });
+    const reach = world.roots.root('harness-home', { subfolder: linked });
     const at = reach.resolve(join(linked, 'settings.json'));
     if (!at.ok) throw new Error('the link did not resolve');
     await expect(reach.writeText(at.value, 'overwritten')).rejects.toThrow();
     await expect(reach.remove(at.value)).rejects.toThrow();
-    expect(await readFile(join(store, 'settings.json'), 'utf8')).toBe('as it was');
-    const folder = reach.resolve(linked);
-    if (!folder.ok) throw new Error('the home did not resolve');
-    expect((await reach.entries(folder.value)).map(entry => entry.name)).toContain('settings.json');
-    // The link is still a link and the store file is still there after both refusals.
-    expect(await readlink(join(linked, 'settings.json'))).toBe(join(store, 'settings.json'));
+    expect(await readFile(join(linked, 'shared', 'settings.json'), 'utf8')).toBe('as it was');
+    // The link is still a link and the target is still there after both refusals.
+    expect(await readlink(join(linked, 'settings.json'))).toBe(join(linked, 'shared', 'settings.json'));
   });
 });

@@ -20,15 +20,16 @@
  * a file inside a skill folder swapped for a link can reach another file of the same skill folder.
  *
  * A home the manifest places outside `fleet/homes` (an operator's own folder, a home-manager home) is served read-only
- * through `following-handle.ts` with the same menu and bounds, and its links are FOLLOWED: such a home is made of links
- * (`skills/`, `settings.json` into `/nix/store`) and its catalogs read the same through them as through plain files. The
- * follow is bounded (at most `MAX_LINK_HOPS` links on the way down, a link back to a folder above it is a loop, a dangling
- * link or a link the kernel refuses is left as a link and named as one), it never reaches the daemon's own home or a
- * sign-in file, and nothing here writes. A fleet home is unchanged: a link there is read only when it resolves into the
- * fleet's own `assets/`.
- *
- * A link in a skill's own tree (`skillTree`) is followed the same way, so a skill folder made of links into a store lists
- * and reads as the same folder made of files.
+ * through `following-handle.ts` with the same menu and bounds, scoped to the account home itself. A link is followed ONLY
+ * when it resolves INSIDE that home, and only where today's readers followed one: in the listing of the home (a document
+ * that is a link, the `skills` folder that is a link) and of `skills/` (a skill folder that is a link). A link that leads
+ * outside the home (into a store, into `~/.ssh`, anywhere else), nowhere, or round to a folder above it is skipped: in
+ * `skills()` with no line and no error, as the inventory of today skipped it; in `document()` as one sentence. A skill
+ * folder of a home outside the fleet is listed only when its `SKILL.md` resolves to a file inside the home. Inside a skill
+ * folder (`skillTree`, `skillFile`) no link is followed: it is reported as a link and never opened, as today's skill-folder
+ * reader does; only `skillManifest` reads `SKILL.md` through a link inside the home. The follow reaches neither the daemon's
+ * own home nor a sign-in file, and nothing here writes. A fleet home is unchanged: a link there is read only when it
+ * resolves into the fleet's own `assets/`.
  *
  * Each method runs whole inside ONE `publication.reading(...)` (the manifest is read inside it, ungated, never nested),
  * so an apply that moves a home's documents aside is never observed half-done (S67).
@@ -82,23 +83,29 @@ interface Deps {
   readonly published: () => Promise<readonly RuntimeHome[]>;
 }
 
-/** A handle scoped to `home` (or to `inside`, a folder below it): the `fleet` root for a fleet home, `harness-home` for any other. */
-function scoped(deps: Deps, home: RuntimeHome, inside?: string): ReadHandle {
+const isFleetHome = (deps: Deps, home: RuntimeHome): boolean => home.home.startsWith(`${deps.directory}/homes/`);
+
+/**
+ * A handle scoped to `home` (or to `inside`, a folder below it): the `fleet` root for a fleet home, `harness-home` scoped to
+ * the account home for any other. `follow` (a home outside the fleet only) says whether a link in a listing that resolves
+ * inside the home is followed: the listing of the home and of its `skills/` follow, a walk INSIDE one skill folder does not.
+ */
+function scoped(deps: Deps, home: RuntimeHome, inside: string | undefined, follow: boolean): ReadHandle {
   const folder = inside === undefined ? home.home : `${home.home}/${inside}`;
-  return home.home.startsWith(`${deps.directory}/homes/`)
+  return isFleetHome(deps, home)
     ? deps.roots.root('fleet', { subfolder: folder.slice(deps.directory.length + 1) })
-    : followingHandle(deps.roots, home.home, folder);
+    : followingHandle(deps.roots, home.home, folder, follow);
 }
 
 /**
  * The asset folder (below the fleet folder) a link in `<home>/skills` resolves to, or `undefined` when it does not resolve
  * to a folder inside the fleet's `assets/`. Resolved once per call; a home outside the fleet has none (a link there is
- * followed as a plain link by `following-handle.ts`, and is never a Ferretry-managed skill).
+ * followed by `following-handle.ts` only inside the home, and is never a Ferretry-managed skill).
  */
 type ManagedResolver = (name: string) => Promise<string | undefined>;
 
 function managedResolver(deps: Deps, home: RuntimeHome): ManagedResolver {
-  if (!home.home.startsWith(`${deps.directory}/homes/`)) return async () => undefined;
+  if (!isFleetHome(deps, home)) return async () => undefined;
   // `fleet` is opened only to resolve a link (`realPath`); nothing is read through it.
   const fleet = deps.roots.root('fleet');
   let realFleet: Promise<string> | undefined;
@@ -146,14 +153,14 @@ class FleetHomeReader implements RuntimeHomeReader {
       throw unreadable(`${file} needs a size bound of at least one byte.`);
     try {
       return await this.#gate(async home => {
-        const root = scoped(this.#deps, home);
+        const root = scoped(this.#deps, home, undefined, true);
         const entry = (await listing(root, '.')).find(candidate => candidate.name === file);
         if (entry === undefined) return null;
         if (entry.kind === 'symlink')
           throw unreadable(
-            home.home.startsWith(`${this.#deps.directory}/homes/`)
+            isFleetHome(this.#deps, home)
               ? `${file} is a link, which is never read.`
-              : `${file} is a link that is not followed (it leads nowhere, loops, is nested too deep, or leads to a place that is never read).`,
+              : `${file} is a link that is not followed (it leads nowhere, loops, or leads outside this home).`,
           );
         if (entry.kind !== 'file') throw unreadable(`${file} is not a regular file.`);
         if (entry.links > 1) throw unreadable(`${file} has another name on this machine, so it is not read.`);
@@ -171,7 +178,7 @@ class FleetHomeReader implements RuntimeHomeReader {
     if (!Number.isSafeInteger(limit) || limit < 0) throw unreadable('The skills list needs a bound of zero or more.');
     try {
       return await this.#gate(async home => {
-        const root = scoped(this.#deps, home);
+        const root = scoped(this.#deps, home, undefined, true);
         if ((await listing(root, '.')).find(entry => entry.name === 'skills')?.kind !== 'directory') return [];
         const managedOf = managedResolver(this.#deps, home);
         const found: RuntimeHomeSkillEntry[] = [];
@@ -179,7 +186,10 @@ class FleetHomeReader implements RuntimeHomeReader {
           if (found.length > limit) break;
           if (entry.name.startsWith('.')) continue;
           const managed = entry.kind === 'symlink';
+          // A link that was not followed (it leads outside the home, nowhere, or loops) is passed over with no line and no
+          // error, as the inventory of today passed it over.
           if (entry.kind !== 'directory' && !(managed && (await managedOf(entry.name)) !== undefined)) continue;
+          if (!isFleetHome(this.#deps, home) && !(await this.#manifestInside(home, entry.name))) continue;
           found.push({ name: entry.name, manifest: `${home.home}/skills/${entry.name}/${SKILL_MANIFEST}`, managed });
         }
         return found;
@@ -190,13 +200,26 @@ class FleetHomeReader implements RuntimeHomeReader {
     }
   }
 
-  /** A handle scoped to the folder of a skill `skills()` lists right now, or `undefined`. */
-  async #folder(home: RuntimeHome, name: string): Promise<ReadHandle | undefined> {
+  /**
+   * Whether the skill folder `name` of a home outside the fleet has a `SKILL.md` that resolves to a file INSIDE the home (the
+   * inventory of today passed a folder over whose `SKILL.md` did not).
+   */
+  async #manifestInside(home: RuntimeHome, name: string): Promise<boolean> {
+    const folder = scoped(this.#deps, home, `skills/${name}`, true);
+    return (await listing(folder, '.')).some(entry => entry.name === SKILL_MANIFEST && entry.kind === 'file');
+  }
+
+  /**
+   * A handle scoped to the folder of a skill `skills()` lists right now, or `undefined`. `follow`: a link in the folder
+   * is followed when it resolves inside the home (for the one `SKILL.md` read the inventory of today made through a link),
+   * and reported as a link otherwise (every walk and file read of a skill folder).
+   */
+  async #folder(home: RuntimeHome, name: string, follow: boolean): Promise<ReadHandle | undefined> {
     if (!SKILL_NAME.test(name)) return undefined;
-    const root = scoped(this.#deps, home);
+    const root = scoped(this.#deps, home, undefined, true);
     if ((await listing(root, '.')).find(entry => entry.name === 'skills')?.kind !== 'directory') return undefined;
     const entry = (await listing(root, 'skills')).find(candidate => candidate.name === name);
-    if (entry?.kind === 'directory') return scoped(this.#deps, home, `skills/${name}`);
+    if (entry?.kind === 'directory') return scoped(this.#deps, home, `skills/${name}`, follow);
     if (entry?.kind !== 'symlink') return undefined;
     const managed = await managedResolver(this.#deps, home)(name);
     return managed === undefined ? undefined : this.#deps.roots.root('fleet', { subfolder: managed });
@@ -218,7 +241,8 @@ class FleetHomeReader implements RuntimeHomeReader {
   }
 
   async skillManifest(name: string, maxBytes: number): Promise<string | undefined> {
-    const read = await this.skillFile(name, SKILL_MANIFEST, maxBytes);
+    // The one read of a skill folder that follows a link (inside the home): the inventory of today read `SKILL.md` through one.
+    const read = await this.#read(name, SKILL_MANIFEST, maxBytes, true);
     return read.ok ? new TextDecoder().decode(read.bytes) : undefined;
   }
 
@@ -235,7 +259,7 @@ class FleetHomeReader implements RuntimeHomeReader {
       return undefined;
     try {
       return await this.#gate(async home => {
-        const folder = await this.#folder(home, name);
+        const folder = await this.#folder(home, name, false);
         return folder === undefined ? undefined : await this.#walk(folder, limits);
       });
     } catch (error) {
@@ -286,6 +310,10 @@ class FleetHomeReader implements RuntimeHomeReader {
   }
 
   async skillFile(name: string, relativePath: string, maxBytes: number): Promise<RuntimeHomeFileRead> {
+    return await this.#read(name, relativePath, maxBytes, false);
+  }
+
+  async #read(name: string, relativePath: string, maxBytes: number, follow: boolean): Promise<RuntimeHomeFileRead> {
     const segments = relativePath.split('/');
     if (
       !Number.isSafeInteger(maxBytes) ||
@@ -295,7 +323,7 @@ class FleetHomeReader implements RuntimeHomeReader {
       return { ok: false, reason: 'unreadable' };
     try {
       return await this.#gate(async (home): Promise<RuntimeHomeFileRead> => {
-        const folder = await this.#folder(home, name);
+        const folder = await this.#folder(home, name, follow);
         const found = folder === undefined ? undefined : await this.#lookup(folder, segments);
         if (folder === undefined || found === undefined || found.entry.kind !== 'file' || found.entry.links > 1)
           return { ok: false, reason: 'unreadable' };

@@ -67,16 +67,16 @@ export class RuntimeHomeUnreadable extends Error {
 export interface RuntimeHomeReader {
   /** `null`: absent. Bounded; a link or a hard-linked file is refused ({@link RuntimeHomeUnreadable}). */
   document(file: RuntimeHomeDocument, limitBytes: number): Promise<string | null>;
-  /** Folders directly in `<home>/skills`, at most `limit + 1`, dot-entries skipped. A fleet home lists a link only when it resolves into `fleet/assets/`; a home outside the fleet lists a link to a folder (followed with bounds, read-only), and skips one that leads nowhere, loops or leads to a place never read. */
+  /** Folders directly in `<home>/skills`, at most `limit + 1`, dot-entries skipped. A fleet home lists a link only when it resolves into `fleet/assets/`; a home outside the fleet lists a link only when it resolves to a folder INSIDE that home (with a `SKILL.md` inside it too), and skips every other link silently. */
   skills(limit: number): Promise<readonly RuntimeHomeSkillEntry[]>;
   /** The text of `<home>/skills/<name>/SKILL.md`, or `undefined` (not listed, absent, too large, not a regular file). */
   skillManifest(name: string, maxBytes: number): Promise<string | undefined>;
-  /** Catalogs' publish walk of one LISTED home skill folder (a link in a fleet home is reported as a link; in a home outside the fleet it is followed with bounds); `undefined` for a folder that is not listed. */
+  /** Catalogs' publish walk of one LISTED home skill folder, no link followed; `undefined` for a folder that is not listed. */
   skillTree(
     name: string,
     limits: { readonly entries: number; readonly depth: number },
   ): Promise<RuntimeHomeSkillTree | undefined>;
-  /** One file of a LISTED skill folder; a `..` segment, a hard link, or a link that is not followed (fleet home, dangling, loop, too deep, refused) is `unreadable`. */
+  /** One file of a LISTED skill folder; a link on the way, a `..` segment or a hard link is `unreadable`. */
   skillFile(name: string, relativePath: string, maxBytes: number): Promise<RuntimeHomeFileRead>;
 }
 
