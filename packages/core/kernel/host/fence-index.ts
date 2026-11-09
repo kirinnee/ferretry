@@ -156,6 +156,8 @@ interface FolderRecord {
   readonly child: Map<string, FileIdentity | undefined>;
   /** The place pinned in this member folder, made once: a look that finds the folder as it was reuses it. */
   place?: IndexedPlace;
+  /** The place of the member folder itself (its identity), pinned beside its file: made once, while the folder stays as it is. */
+  folderPlace?: IndexedPlace;
 }
 
 /** The records of every folder the last successful scan visited, kept between scans. */
@@ -427,6 +429,13 @@ async function build(
         if (record !== undefined) record.place = place;
       }
       places.push(place);
+      // The member folder is pinned by its own identity beside its file, and spends no budget: an alias of the FOLDER
+      // (a bind mount made at any time) is held whatever the folder holds now and however stale its slice is.
+      const folder = single ? visited.get(member) : undefined;
+      if (folder?.identity !== undefined) {
+        folder.folderPlace ??= placeOf(member, folder.identity);
+        places.push(folder.folderPlace);
+      }
       budget.left -= 1;
       if (found.kind === 'directory') await walk(target, bounds.depth, budget, tree, limit, true);
     }

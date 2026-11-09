@@ -533,4 +533,77 @@ describe('PF-time a clock that cannot tell two changes apart is never trusted', 
     await index.snapshot();
     expect(meter.lists()).toBe(lists);
   });
+
+  test('PF-time a disk with no status-change time (zero) still finds a replaced session credential at the next look', async () => {
+    const l = await home();
+    await fill(l.sessions, 3, n => `s${n}/${ENV}`);
+    const real = await realpath(l.home);
+    const quiet = stamped(REAL, 5_000_000_000n, 0n);
+    const index = privateIndexOf(quiet, real, INPUT, { wall: LATER });
+    const first = await index.snapshot();
+    await index.snapshot();
+    await writeFile(`${l.sessions}/s1/${ENV}.new`, 'rotated');
+    await rename(`${l.sessions}/s1/${ENV}.new`, `${l.sessions}/s1/${ENV}`);
+    expect(keyOf((await index.snapshot()).places, `s1/${ENV}`)).not.toBe(keyOf(first.places, `s1/${ENV}`));
+  });
+
+  test('PF-time a filesystem that stamps whole seconds finds a session credential replaced in the same second at the next look', async () => {
+    const l = await home();
+    await fill(l.sessions, 3, n => `s${n}/${ENV}`);
+    const real = await realpath(l.home);
+    // Every folder is stamped 7 s exactly and the clock stands half a second later: the replace lands in the same second,
+    // so nothing the disk reports about the session folder changes. A racy folder is never answered from its record.
+    const stamp = 7_000_000_000n;
+    const index = privateIndexOf(stamped(REAL, stamp, stamp), real, INPUT, { wall: () => stamp + 500_000_000n });
+    const first = await index.snapshot();
+    await writeFile(`${l.sessions}/s1/${ENV}.new`, 'rotated');
+    await rename(`${l.sessions}/s1/${ENV}.new`, `${l.sessions}/s1/${ENV}`);
+    expect(keyOf((await index.snapshot()).places, `s1/${ENV}`)).not.toBe(keyOf(first.places, `s1/${ENV}`));
+  });
+});
+
+/** A disk where the folders in `rested` answer as two hours older than they are: they rest. The others are as they are. */
+const aged = (base: HostFs, rested: ReadonlySet<string>): HostFs => ({
+  ...base,
+  identity: async path => {
+    const found = await base.identity(path);
+    return found !== undefined && rested.has(path)
+      ? { ...found, mtimeNs: found.mtimeNs - 7_200_000_000_000n, ctimeNs: found.ctimeNs - 7_200_000_000_000n }
+      : found;
+  },
+});
+
+describe('PF-flat a session folder that changed within the minute is looked at by the very next look, however many rest', () => {
+  test('PF-flat once a resting session was found changed it is hot: a second replace in it is pinned at the very next look', async () => {
+    const l = await home();
+    const names = Array.from({ length: 600 }, (_, n) => `s${String(n).padStart(3, '0')}`);
+    await fill(l.sessions, 600, n => `${names[n]}/${ENV}`);
+    const real = await realpath(l.home);
+    const rested = new Set([l.sessions, ...names.map(name => `${l.sessions}/${name}`)]);
+    // The real clock: a folder changed now is within the minute; the aged ones rest. A slice of 5 of 600.
+    const index = privateIndexOf(aged(REAL, rested), real, INPUT, { bounds: { depth: 3, limit: 4096, slice: 5 } });
+    const folder = `${l.sessions}/s300`;
+    const replace = async (text: string): Promise<void> => {
+      await writeFile(`${folder}/${ENV}.new`, text);
+      await rename(`${folder}/${ENV}.new`, `${folder}/${ENV}`);
+    };
+    const first = await index.snapshot();
+    let key = keyOf(first.places, `s300/${ENV}`);
+    // A resting folder is found only when its slice comes round.
+    await replace('first rotation');
+    rested.delete(folder);
+    let looks = 0;
+    let now = key;
+    while (now === key && looks < 130) {
+      looks += 1;
+      now = keyOf((await index.snapshot()).places, `s300/${ENV}`);
+    }
+    expect(now).not.toBe(key);
+    // It is hot now (changed within the minute): let the clock's step pass so it is trusted as hot, not racy.
+    await new Promise(done => setTimeout(done, 40));
+    await index.snapshot();
+    key = keyOf((await index.snapshot()).places, `s300/${ENV}`);
+    await replace('second rotation');
+    expect(keyOf((await index.snapshot()).places, `s300/${ENV}`)).not.toBe(key);
+  }, 60_000);
 });
