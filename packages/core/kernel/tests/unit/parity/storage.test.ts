@@ -46,7 +46,7 @@ const modeOf = async (path: string): Promise<number> => (await stat(path)).mode 
 const kindOf = async (path: string): Promise<'directory' | 'file'> =>
   (await stat(path)).isDirectory() ? 'directory' : 'file';
 
-describe('the home tree (§9.2): one home, FY_HOME, with the folders today keeps', () => {
+describe('F-0047 F-0212 F-0131 F-0424 F-0204 the home tree (§9.2): one home, FY_HOME, with the folders today keeps', () => {
   test.each([
     ['F-0047 F-0212', 'state'],
     ['F-0131 F-0424', 'config'],
@@ -191,7 +191,7 @@ const SCHEMA_ROWS: readonly (readonly [ids: string, v4: string, now: string, wit
   ['F-0150', 'warden.json', 'warden.json', 'mayActAlone'],
 ];
 
-describe('the generated schemas: FY_HOME/config/.schema', () => {
+describe('F-0132 F-0133 F-0135 F-0136 F-0137 F-0138 F-0139 F-0140 F-0141 F-0143 F-0144 F-0145 F-0146 F-0147 F-0148 F-0149 F-0150 the generated schemas: FY_HOME/config/.schema', () => {
   async function published() {
     const memory = createMemoryHostFs();
     const files = createConfigFiles({

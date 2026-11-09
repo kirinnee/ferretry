@@ -42,7 +42,7 @@ const run = async (argv: string[], probe: 'up' | 'down' = 'up', exitCode = 0) =>
   return { ...built, code, out: built.io.stdout(), err: built.io.stderr() };
 };
 
-describe('fy daemon', () => {
+describe('V-0233 V-0249 V-0244 fy daemon', () => {
   it('V-0223 bare fy daemon names the daemon verbs it manages and exits as a usage error', async () => {
     const result = await run(['daemon']);
     expect(result.code).toBe(2);
