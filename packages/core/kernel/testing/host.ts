@@ -1055,9 +1055,12 @@ async function start(world: World): Promise<TestHost> {
   const testModes = new Map<string, number>();
   /** Files of the test world that have a second name (`TestHost.putRootHardLink`), by key. */
   const testHardLinks = new Set<string>();
-  /** A folder exists in the flat test world when a file OR a link lies under it. */
+  /** Folders `makeDirectory` made, so an EMPTY folder exists in the flat test world (a rmdir has something to remove). */
+  const testMadeFolders = new Set<string>();
+  /** A folder exists in the flat test world when it was made, or a file, a link or a made folder lies under it. */
   const testFolderExists = (path: string): boolean =>
-    [...world.roots.keys(), ...testLinks.keys()].some(key => key.startsWith(`${path}/`));
+    testMadeFolders.has(path) ||
+    [...world.roots.keys(), ...testLinks.keys(), ...testMadeFolders].some(key => key.startsWith(`${path}/`));
   const testHarnessFile = (manifest: Manifest, absolutePath: string): RootFileHandle => {
     const refusal = harnessFileRefusal({
       plugin: manifest.id,
@@ -1292,7 +1295,9 @@ async function start(world: World): Promise<TestHost> {
               ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
               : undefined;
           },
-          makeDirectory: async () => {},
+          makeDirectory: async path => {
+            testMadeFolders.add(ownPath(path));
+          },
           realPath: async path => {
             if (!world.roots.has(path) && !testFolderExists(path)) throw new Error(`no such file ${path}`);
             return path;
@@ -1317,8 +1322,49 @@ async function start(world: World): Promise<TestHost> {
               })),
           ],
           stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
-          remove: async path => {
-            world.roots.delete(path);
+          // The real host's rules over the flat test world, with the same refusals: the LEAF IS NEVER FOLLOWED (the parent
+          // is opened first, then the entry goes by its own name; a link goes as a link and its target stays), and
+          // `onlyIfEmpty` is `rmdir` (one step: refused `not_empty` when anything is inside, never recursing).
+          remove: async (path, removeOptions) => {
+            if (isReadOnlyRoot(name)) throw new RootError('read_only');
+            const named = ownPath(path);
+            // The PARENT is resolved (a link on the way is followed, and judged: one that leaves this root is
+            // `link_escape`); the leaf's own name is appended as it is.
+            let parent = named.slice(0, named.lastIndexOf('/'));
+            for (let hops = 0; ; hops += 1) {
+              const parts = parent.split('/');
+              const index = parts.findIndex((_, at) => testLinks.has(parts.slice(0, at + 1).join('/')));
+              if (index < 0) break;
+              const pointsAt = testLinks.get(parts.slice(0, index + 1).join('/')) as string;
+              if (hops > 40 || prefix === undefined || (pointsAt !== prefix && !pointsAt.startsWith(`${prefix}/`)))
+                throw new RootError('link_escape');
+              parent = [pointsAt, ...parts.slice(index + 1)].join('/');
+            }
+            if (parent !== prefix && (world.roots.has(parent) || !testFolderExists(parent)))
+              throw new RootError('changed');
+            const place = `${parent}/${named.slice(named.lastIndexOf('/') + 1)}`;
+            const under = (key: string): boolean => key === place || key.startsWith(`${place}/`);
+            if (testLinks.has(place)) {
+              testLinks.delete(place);
+              testModes.delete(place);
+              return;
+            }
+            if (world.roots.has(place)) {
+              world.roots.delete(place);
+              testModes.delete(place);
+              return;
+            }
+            if (!testFolderExists(place)) return;
+            if (removeOptions?.onlyIfEmpty === true) {
+              const holdsEntry = [...world.roots.keys(), ...testLinks.keys(), ...testMadeFolders].some(key =>
+                key.startsWith(`${place}/`),
+              );
+              if (holdsEntry) throw new RootError('not_empty');
+            }
+            for (const key of [...world.roots.keys()]) if (under(key)) world.roots.delete(key);
+            for (const key of [...testLinks.keys()]) if (under(key)) testLinks.delete(key);
+            for (const key of [...testModes.keys()]) if (under(key)) testModes.delete(key);
+            for (const key of [...testMadeFolders]) if (under(key)) testMadeFolders.delete(key);
           },
           // The real host's rules (`host/root-rules.ts`) over the flat test world, with the same refusals.
           linkTo: async (at, target) => {
@@ -1377,6 +1423,11 @@ async function start(world: World): Promise<TestHost> {
               if (under(key)) {
                 testModes.set(placed(key), mode);
                 testModes.delete(key);
+              }
+            for (const key of [...testMadeFolders])
+              if (under(key)) {
+                testMadeFolders.delete(key);
+                testMadeFolders.add(placed(key));
               }
           },
           setMode: async (path, mode) => {
