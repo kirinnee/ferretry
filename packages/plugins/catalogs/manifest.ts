@@ -60,10 +60,6 @@ export default definePlugin({
   kinds: ['session-mode', 'credential-provider', 'item', 'command', 'view'],
   words: CATALOGS_WORDS,
 
-  // TODO(kernel contract): `permissions: { network: [{ resolver: 'link-store' }] }` and the half's
-  // `resolvers['link-store']` (the configured `catalogs.linkStore.url` or Connections' directory origin, plus every
-  // existing link's remembered origin) need rebuild/port-kernel's ResolverEntry. Until then `kernel.fetch` refuses
-  // every link-store host, so making, refreshing or deleting a download link fails closed.
   needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
   /** Projects is optional: off, an install can only target the project folders the item providers name. */
   // Skills: the app half reads the skills.add slot's props shape (add-skills page) and Skills' machine inventory (`GET /v1/skills`).
@@ -72,7 +68,9 @@ export default definePlugin({
 
   // The install mapping offers the person the NAMES of their secrets for a `${secret:NAME}` placeholder (never a value),
   // behind the secrets-use grant. Catalogs mints no Vault secret and writes none: its link keys are its own sealed documents.
-  permissions: { secretNamePicker: true },
+  // The link store is the one outside host Catalogs reaches: the configured (or directory-advertised) store plus every
+  // store an existing link remembers. The half's `resolvers['link-store']` answers them; nothing else is allowed.
+  permissions: { secretNamePicker: true, network: [{ resolver: 'link-store' }] },
 
   actions: {
     routes: [

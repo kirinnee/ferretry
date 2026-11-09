@@ -180,19 +180,7 @@ export default implementDaemon(manifest, {
       folders,
       connections: async () => await oauth.connections(),
       documents,
-      ferrets: {
-        get: async id => {
-          const ferret = await ferrets.get(id as FerretId);
-          return ferret === undefined
-            ? undefined
-            : {
-                id: ferret.id,
-                harness: ferret.harness,
-                folder: ferret.folder,
-                ...(ferret.runtime === undefined ? {} : { runtime: ferret.runtime }),
-              };
-        },
-      },
+      ferrets: { get: async id => await inventoryFerret(id) },
     });
     const check = new McpCheckService({
       inventory,
@@ -235,6 +223,8 @@ export default implementDaemon(manifest, {
       },
     });
     async function inventoryFerret(id: string) {
+      // The ferret folders are the read roots of the project file, so they are current before a folder is read.
+      await refreshOwners();
       const ferret = await ferrets.get(id as FerretId);
       return ferret === undefined
         ? undefined

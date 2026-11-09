@@ -11,6 +11,11 @@
  * Fakes are only what Catalogs does not own: who is calling (Gate's StandInAdmission), the passkey verifier, the
  * clock, and the daemon's identity (`kernel.identity` / `kernel.signer`), which the half is given here over a real
  * Ed25519 key so every signature it makes is checked by the real verifier.
+ *
+ * WHAT THE MCP ITEM PROVIDER HERE IS: a STAND-IN. `catalog.items:mcp` is a provider production does not have yet:
+ * MCP and Skills take no `catalog.items` hook, so on a real daemon Catalogs' item routes answer 503 until they do.
+ * Tests built on `mcp` / `mcpProvider` prove Catalogs' own checks (signatures, digests, preview ids, project roots,
+ * grants) against that stand-in, never the pipeline behind an item.
  */
 import {
   type Admission,
@@ -309,6 +314,11 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
   const wireIdentity = await wireCrypto.importDaemonIdentity(pem);
   if (kernelIdentity.daemonId !== wireIdentity.daemonId) throw new Error('one key, one daemon id');
   const signer: CatalogSigningIdentity['signer'] = {
+    signLinkStoreRequest: async ({ canonicalBody }) => ({
+      daemonId: wireIdentity.daemonId,
+      publicKey: toBase64Url(wireIdentity.publicKeySpki),
+      signature: toBase64Url(await wireCrypto.signEd25519(wireIdentity.privateKey, canonicalBody)),
+    }),
     signCatalog: async ({ kind, canonical }) => {
       const digest = await wireCrypto.sha256(canonical);
       const message =

@@ -25,7 +25,8 @@ import { StateUnlockLedger } from './adapters/member-unlocks.ts';
 import { memberVerifier } from './adapters/access.ts';
 import { memberMode } from './adapters/member-mode.ts';
 import { HttpLinkStoreClient } from './adapters/http-link-store-client.ts';
-import { ConfiguredLinkStoreLocator } from './adapters/link-store-locator.ts';
+import { ConfiguredLinkStoreLocator, type LinkStoreSetting } from './adapters/link-store-locator.ts';
+import { LinkStoreHosts } from './adapters/link-store-hosts.ts';
 import { SharedCatalogService } from './lib/shared-catalogs/service.ts';
 import { CatalogsDocumentSchema, EMPTY_CATALOGS_DOCUMENT } from './lib/shared-catalogs/document.ts';
 import { linkUsageOf } from './lib/catalog-links/usage.ts';
@@ -94,7 +95,23 @@ export default implementDaemon(manifest, {
       'catalog',
       catalogsDamage,
     );
-    const linkDocuments = store('links', LinksDocumentSchema, EMPTY_LINKS_DOCUMENT, 'link', linksDamage);
+    const linkSetting = (): LinkStoreSetting => kernel.config.file(CatalogsConfigFile)?.linkStore ?? { enabled: false };
+    const linkDirectory = () => (facts() === undefined ? undefined : DIRECTORY_ORIGIN);
+    // The kernel asks the resolver synchronously, so the stores existing links name are kept in memory and refreshed
+    // each time links.json is read or written.
+    const linkHosts = new LinkStoreHosts(linkSetting, linkDirectory);
+    const storedLinks = store('links', LinksDocumentSchema, EMPTY_LINKS_DOCUMENT, 'link', linksDamage);
+    const linkDocuments = {
+      read: async () => {
+        const document = await storedLinks.read();
+        linkHosts.remember(document.links.map(link => link.storeOrigin));
+        return document;
+      },
+      write: async (value: Parameters<typeof storedLinks.write>[0]) => {
+        await storedLinks.write(value);
+        linkHosts.remember(value.links.map(link => link.storeOrigin));
+      },
+    };
     const identity = {
       identity: async () => ({ daemonId: kernel.identity.daemonId, signer: kernel.signer }),
       publisherName: () => kernel.identity.daemonName,
@@ -196,11 +213,7 @@ export default implementDaemon(manifest, {
     const links = new CatalogLinkService({
       documents: linkDocuments,
       vault: linkKeyVault(ctx.needs.sealed.open(kernel.state, CatalogLinkKeys)),
-      locator: new ConfiguredLinkStoreLocator(
-        () => kernel.config.file(CatalogsConfigFile)?.linkStore ?? { enabled: false },
-        () => (facts() === undefined ? undefined : DIRECTORY_ORIGIN),
-        client,
-      ),
+      locator: new ConfiguredLinkStoreLocator(linkSetting, linkDirectory, client),
       client,
       items: catalogs,
       identity,
@@ -331,6 +344,7 @@ export default implementDaemon(manifest, {
       kernel.jobs.add({ id, schedule: { every: milliseconds(every) }, run });
     }
     return {
+      resolvers: { 'link-store': () => linkHosts.resolve() },
       routes: routes as DaemonHalf<typeof manifest>['routes'],
       memberRoutes: memberRoutes as DaemonHalf<typeof manifest>['memberRoutes'],
       hooks: {

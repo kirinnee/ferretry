@@ -3,9 +3,11 @@
  * check. Driven through the real daemon half on the kernel's test host, over servers in `config/components/mcp`
  * and a project `.mcp.json` in the ferret's folder. One test per row, named by its id.
  *
- * Not here, and named in ports-pending.json: the sign-in routes (the manifest declares no network, so the host
- * refuses every authorization server) and the project and login adds (declared refusals until Projects and Runtimes
- * have a contract).
+ * Ticked from here: R-0162 only. The other tests in this file prove grants, 404s and refusals but are NOT ticks, and
+ * each row is named in ports-pending.json: R-0112 (the machine inventory lists no account's servers until Runtimes'
+ * homes are bound), R-0161 (the ferret's project listing, until Projects' list is bound), R-0306 (the check run: the
+ * manifest declares no spawn or network), and the sign-in routes (no network) and the project and login adds
+ * (declared refusals until Projects and Runtimes have a contract).
  */
 import { describe, expect, test } from 'bun:test';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -49,7 +51,13 @@ describe('the MCP routes', () => {
     const h = await host();
     const seen = await h.request('GET', '/v1/ferrets/f1/mcp/servers', { as: as('filesystem.use') });
     expect(seen.status).toBe(200);
-    expect(seen.json()).toMatchObject({ servers: [{ name: 'ferretry', scope: 'ferretry', target: 'fy mcp serve' }] });
+    const servers = seen.json<{ servers: { name: string; scope: string; target?: string }[]; problems: unknown[] }>();
+    expect(servers.servers.map(server => [server.name, server.scope])).toEqual([
+      ['ferretry', 'ferretry'],
+      ['local', 'project'],
+    ]);
+    expect(servers.servers.find(server => server.name === 'ferretry')?.target).toBe('fy mcp serve');
+    expect(servers.problems).toEqual([]);
     expect((await h.request('GET', '/v1/ferrets/nobody/mcp/servers', { as: as('filesystem.use') })).status).toBe(404);
     expect((await h.request('GET', '/v1/ferrets/f1/mcp/servers', { as: as('fleet.use') })).status).toBe(403);
   });
