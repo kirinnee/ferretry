@@ -59,6 +59,7 @@ import { useKeyboardOpen } from '@ferretry/app/ui';
 import type { ClipboardWriter } from '@ferretry/app/ui';
 import type { HostedRelayFallback } from './pending-connections.ts';
 import { activeCarrierStatus, carrierDisclosure } from './connection-disclosure.ts';
+import { DEVICE_SENTENCES } from './device-kind.ts';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
 import { OnboardingConnectionNote } from './onboarding-connection-note.tsx';
@@ -259,6 +260,9 @@ export function OnboardingPage({
           from both questions on purpose — their job is to be answered, and a
           diagram of a journey nobody has chosen yet is decoration.
         */}
+        <p className="m-0 text-meta leading-base text-muted" data-device-kind={device} data-device-sentence="">
+          {DEVICE_SENTENCES[device]}
+        </p>
         {at.stage === 'walk' ? <SetupDiagram step={at.current} /> : null}
       </header>
 

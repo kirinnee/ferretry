@@ -30,7 +30,7 @@ import { Share2 } from 'lucide-react';
 
 import { type ClipboardWriter, CopyButton } from '@ferretry/app/ui';
 import type { HandoffReceiver } from './onboarding-model.ts';
-import { qrModules } from './setup-qr.ts';
+import { tryQrModules } from './setup-qr.ts';
 
 /**
  * How this browser hands something to the operating system, or nothing.
@@ -68,8 +68,7 @@ const QR_SIZE = 176;
  * the page happens to be. That also means the QR stays black-on-white in dark
  * mode, deliberately: a camera reads contrast, not taste.
  */
-function HandoffQr({ url, label }: { readonly url: string; readonly label: string }) {
-  const modules = qrModules(url);
+function HandoffQr({ modules, label }: { readonly modules: readonly (readonly boolean[])[]; readonly label: string }) {
   const quiet = 4;
   const span = modules.length + quiet * 2;
   return (
@@ -112,11 +111,17 @@ export interface SetupHandoffPanelProps {
 }
 
 export function SetupHandoffPanel({ url, plainUrl, receiver, write, share, label }: SetupHandoffPanelProps) {
+  // A link too long for a code a phone reads (a first-run page opened with a long query string) is shown without one.
+  const modules = receiver === 'phone' ? tryQrModules(url) : undefined;
   return (
     <div className="flex min-w-0 flex-col gap-2" data-onboarding-handoff={receiver}>
-      {receiver === 'phone' ? (
+      {receiver === 'phone' && modules === undefined ? (
+        <p className="m-0 text-meta leading-base text-muted" data-onboarding-qr-unavailable="">
+          This link is too long to draw as a code a phone can scan. Copy or share the link below instead.
+        </p>
+      ) : receiver === 'phone' && modules !== undefined ? (
         <div className="flex min-w-0 items-center gap-3 rounded-control border border-border bg-surface-2 p-3">
-          <HandoffQr url={url} label={label} />
+          <HandoffQr modules={modules} label={label} />
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <p className="m-0 text-meta leading-base text-fg">Point your phone's camera at this.</p>
             <p className="m-0 text-2xs leading-base text-faint">

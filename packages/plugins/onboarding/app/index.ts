@@ -1,5 +1,5 @@
 import { type DaemonlessPorts, type DaemonlessScreenProps, type DaemonlessViews, provideToShell } from '@ferretry/app';
-import type { AppComponent, PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
+import type { AppComponent, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { lazyComponent } from './lazy.ts';
@@ -13,6 +13,11 @@ const loadViews = (): Promise<Record<string, unknown>> => import('./views/onboar
 const stepsScreen = (client: PluginClient): AppComponent<ScreenProps> =>
   lazyComponent<ScreenProps>(async () =>
     ((await loadViews()).createStepsScreen as (client: PluginClient) => AppComponent<ScreenProps>)(client),
+  );
+
+const setupTab = (client: PluginClient): AppComponent<SettingsProps> =>
+  lazyComponent<SettingsProps>(async () =>
+    ((await loadViews()).createSetupTab as (client: PluginClient) => AppComponent<SettingsProps>)(client),
   );
 
 /** The per-machine slot of the daemon-less `onboarding` screen: never drawn (its route is under no `/d/<machine>/`). */
@@ -29,7 +34,7 @@ export default provideToShell(
     build: ({ client }) => ({
       screens: { onboarding: daemonlessPlaceholder, steps: stepsScreen(client) },
       panels: {},
-      settings: {},
+      settings: { setup: setupTab(client) },
       renderers: {},
     }),
   }),

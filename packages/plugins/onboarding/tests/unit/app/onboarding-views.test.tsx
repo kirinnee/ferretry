@@ -10,9 +10,14 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   browserSetupShare,
   createOnboardingRoute,
+  createSetupTab,
   createStepsScreen,
+  PAIR_AND_RETURN,
   PAIR_PATH,
 } from '../../../app/views/onboarding-views.tsx';
+import { RouterProvider } from '@ferretry/app/testing/router';
+import { DEVICE_SENTENCES } from '../../../app/device-kind.ts';
+import { LINK_COSTS } from '../../../app/link-costs.ts';
 import { interact, mount } from '../support/dom.ts';
 
 interface Listing {
@@ -85,25 +90,146 @@ describe('S14 the steps screen', () => {
     expect(stopped()).toBe(1);
   });
 
-  it('keeps saying so when the read fails, and draws the steps once a machine is noted for the client', async () => {
-    const failing = clientOf(() => {
-      throw new Error('offline');
+  it('n3 says a failed read failed, offers a retry, and draws the steps when the retry works', async () => {
+    let offline = true;
+    const flaky = clientOf(() => {
+      if (offline) throw new Error('offline');
+      return VIEW;
     });
-    noteClientDaemon(failing.client, 'd1');
-    const Failing = createStepsScreen(failing.client);
-    const broken = await mount(<Failing params={{}} />);
+    noteClientDaemon(flaky.client, 'd1');
+    const Flaky = createStepsScreen(flaky.client);
+    const broken = await mount(<Flaky params={{}} />);
     await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    expect(broken.container.textContent).toContain('Loading the setup steps');
+    expect(broken.container.textContent).not.toContain('Loading the setup steps');
+    expect(broken.container.querySelector('[data-onboarding-read-failed]')?.textContent).toContain(
+      'Could not read the setup steps',
+    );
+    offline = false;
+    await interact(() => {
+      broken.container.querySelector<HTMLElement>('[data-onboarding-retry]')?.click();
+    });
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    expect(broken.container.querySelector('[data-onboarding-read-failed]')).toBeNull();
+    expect(broken.container.querySelector('[data-step="logins.login"]')).not.toBeNull();
     await broken.unmount();
+  });
 
+  it('draws the steps once a machine is noted for the client, with the machine link on the router', async () => {
     const working = clientOf(() => VIEW);
     noteClientDaemon(working.client, 'd1');
     const Working = createStepsScreen(working.client);
-    const drawn = await mount(<Working params={{}} />);
+    const drawn = await mount(
+      <RouterProvider>
+        <Working params={{}} />
+      </RouterProvider>,
+    );
     await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
     expect(drawn.container.querySelector('[data-step="logins.login"]')).not.toBeNull();
-    expect(drawn.container.querySelector('[data-onboarding-open-machine]')?.getAttribute('href')).toBe('/d/d1');
+    const link = drawn.container.querySelector<HTMLAnchorElement>('[data-onboarding-open-machine]');
+    expect(link?.getAttribute('href')).toBe('/d/d1');
+    // n2: a plain click moves with the router (the browser's own navigation is held back), no page load.
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    await interact(() => {
+      link?.dispatchEvent(click);
+    });
+    expect(click.defaultPrevented).toBe(true);
+    expect(window.location.pathname).toBe('/d/d1');
+    // A modified click is the browser's (a new tab), not the router's.
+    const modified = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ctrlKey: true });
+    await interact(() => {
+      link?.dispatchEvent(modified);
+    });
+    expect(modified.defaultPrevented).toBe(false);
+    window.history.replaceState(null, '', '/');
     await drawn.unmount();
+  });
+
+  it('M3 says what linking the terminal’s sign-in costs under a found harness or login step, and nowhere else', async () => {
+    const steps = [
+      { plugin: 'claude-code', id: 'harness', title: 'Claude Code', order: 20, state: 'found' as const },
+      { plugin: 'codex', id: 'harness', title: 'Codex', order: 21, state: 'pending' as const },
+      { plugin: 'logins', id: 'login', title: 'Sign in', order: 30, state: 'found' as const },
+      { plugin: 'shells', id: 'nix', title: 'Shells', order: 80, state: 'found' as const },
+      { plugin: 'runtimes', id: 'runtimes', title: 'Name your runtimes', order: 40, state: 'done' as const },
+    ];
+    const { client } = clientOf(() => ({ steps, complete: false }));
+    noteClientDaemon(client, 'd1');
+    const Steps = createStepsScreen(client);
+    const view = await mount(<Steps params={{}} />);
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    const costs = (subject: string): string | null =>
+      view.container.querySelector(`[data-step="${subject}"] [data-link-costs]`)?.textContent ?? null;
+    expect(costs('claude-code.harness')).toBe(LINK_COSTS);
+    expect(costs('logins.login')).toBe(LINK_COSTS);
+    expect(costs('codex.harness')).toBeNull();
+    expect(costs('shells.nix')).toBeNull();
+    expect(costs('runtimes.runtimes')).toBeNull();
+    expect(view.container.querySelectorAll('[data-link-costs]')).toHaveLength(2);
+    await view.unmount();
+  });
+
+  it('M2 the Setup tab is the way back to the steps page: it counts what is pending and links there', async () => {
+    const pending = { steps: [VIEW.steps[0], { ...VIEW.steps[0], id: 'b' }], complete: false };
+    const { client } = clientOf(() => pending);
+    noteClientDaemon(client, 'd1');
+    const Tab = createSetupTab(client);
+    const view = await mount(<Tab />);
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    const tab = view.container.querySelector('[data-onboarding-setup-tab]');
+    expect(tab?.getAttribute('data-onboarding-setup-tab')).toBe('2');
+    expect(tab?.textContent).toContain('2 setup steps on this machine have not been looked at yet.');
+    expect(view.container.querySelector('[data-onboarding-open-steps]')?.getAttribute('href')).toBe(
+      '/d/d1/onboarding/steps',
+    );
+    await view.unmount();
+
+    for (const [steps, sentence] of [
+      [[VIEW.steps[0]], '1 setup step on this machine has not been looked at yet.'],
+      [[{ ...VIEW.steps[0], state: 'done' as const }], 'Every setup step on this machine has an answer.'],
+    ] as const) {
+      const one = clientOf(() => ({ steps, complete: false }));
+      noteClientDaemon(one.client, 'd1');
+      const OneTab = createSetupTab(one.client);
+      const drawn = await mount(<OneTab />);
+      await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+      expect(drawn.container.textContent).toContain(sentence);
+      await drawn.unmount();
+    }
+  });
+
+  it('the Setup tab draws nothing outside a machine, says it is looking, and says a failed read failed', async () => {
+    const outside = clientOf(() => VIEW);
+    const Outside = createSetupTab(outside.client);
+    const none = await mount(<Outside />);
+    expect(none.container.textContent).toBe('');
+    await none.unmount();
+
+    const waiting = clientOf(() => new Promise(() => undefined));
+    noteClientDaemon(waiting.client, 'd1');
+    const Waiting = createSetupTab(waiting.client);
+    const looking = await mount(<Waiting />);
+    expect(looking.container.textContent).toContain('Looking at the setup steps');
+    await looking.unmount();
+
+    let offline = true;
+    const flaky = clientOf(() => {
+      if (offline) throw new Error('offline');
+      return VIEW;
+    });
+    noteClientDaemon(flaky.client, 'd1');
+    const Flaky = createSetupTab(flaky.client);
+    const view = await mount(<Flaky />);
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    expect(view.container.querySelector('[data-onboarding-read-failed]')?.textContent).toContain(
+      'Could not read the setup steps',
+    );
+    offline = false;
+    await interact(() => {
+      view.container.querySelector<HTMLElement>('[data-onboarding-retry]')?.click();
+    });
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    expect(view.container.querySelector('[data-onboarding-open-steps]')).not.toBeNull();
+    await view.unmount();
   });
 });
 
@@ -137,6 +263,12 @@ describe('S14 answering a step', () => {
       'POST /v1/onboarding/steps/:plugin/:stepId',
     ]);
     expect(view.container.querySelector('[data-step="logins.login"]')).not.toBeNull();
+    // n3: the failed answer says so and can be tried again; a good one clears the sentence.
+    expect(view.container.querySelector('[data-onboarding-unsaved]')?.textContent).toContain('not saved');
+    fail = false;
+    await press('[data-onboarding-retry-answer]');
+    expect(sent).toHaveLength(4);
+    expect(view.container.querySelector('[data-onboarding-unsaved]')).toBeNull();
     await view.unmount();
   });
 });
@@ -161,7 +293,7 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     await interact(() => {
       open?.click();
     });
-    expect(moves).toEqual([PAIR_PATH]);
+    expect(moves).toEqual([PAIR_AND_RETURN]);
     expect(paired.listening()).toBeGreaterThan(0);
     await view.unmount();
     expect(paired.listening()).toBe(0);
@@ -183,6 +315,83 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     expect(screen()).not.toBe('done');
     await interact(() => paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' }));
     expect(screen()).toBe('done');
+    await view.unmount();
+  });
+
+  it('M2 coming back from the pairing page with a new machine finishes the step and shows the next stage', async () => {
+    const here = 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan';
+    const moves: string[] = [];
+    const paired = pairedList({ daemons: [], selected: null });
+    const OnboardingRoute = Route(paired.ports);
+    const draw = () => (
+      <OnboardingRoute
+        params={{}}
+        navigate={to => moves.push(to)}
+        location={() => here}
+        chooseDaemon={async () => undefined}
+      />
+    );
+    const first = await mount(draw());
+    await interact(() => {
+      first.container.querySelector<HTMLElement>('[data-onboarding-open-pair]')?.click();
+    });
+    // The first run left for Access's page and asked to be sent back here.
+    expect(moves).toEqual([PAIR_AND_RETURN]);
+    expect(PAIR_AND_RETURN.startsWith(`${PAIR_PATH}?return=`)).toBe(true);
+    expect(decodeURIComponent(PAIR_AND_RETURN)).toBe('/pair?return=/onboarding');
+    await first.unmount();
+    // Access paired a machine and navigated back: the journey is remounted, and the pairing step is not asked again.
+    paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
+    const back = await mount(draw());
+    const screen = () =>
+      back.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
+    expect(screen()).toBe('done');
+    expect(back.container.querySelector('[data-onboarding-open-pair]')).toBeNull();
+    await back.unmount();
+  });
+
+  it('M2 coming back with no new machine stays on the pairing step, and a later visit starts from the list as it is', async () => {
+    const here = 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan';
+    const paired = pairedList({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
+    const OnboardingRoute = Route(paired.ports);
+    const draw = () => (
+      <OnboardingRoute
+        params={{}}
+        navigate={() => undefined}
+        location={() => here}
+        chooseDaemon={async () => undefined}
+      />
+    );
+    const first = await mount(draw());
+    await interact(() => {
+      first.container.querySelector<HTMLElement>('[data-onboarding-open-pair]')?.click();
+    });
+    await first.unmount();
+    // Back with the same single machine (the person backed out): nothing was paired, the step stays.
+    const again = await mount(draw());
+    expect(again.container.querySelector('[data-onboarding-open-pair]')).not.toBeNull();
+    // The trip is over: a machine appearing now is a pairing seen while the step is open, not a stale trip.
+    await again.unmount();
+    paired.set({ daemons: [{ daemon: 'd1' }, { daemon: 'd2' }], selected: 'd1' });
+    const later = await mount(draw());
+    expect(later.container.querySelector('[data-onboarding-open-pair]')).not.toBeNull();
+    await later.unmount();
+  });
+
+  it('m1 says what kind of device this is on the first run, once', async () => {
+    const paired = pairedList({ daemons: [], selected: null });
+    const OnboardingRoute = Route(paired.ports);
+    const view = await mount(
+      <OnboardingRoute
+        params={{}}
+        navigate={() => undefined}
+        location={() => 'https://f.invalid/onboarding'}
+        chooseDaemon={async () => undefined}
+      />,
+    );
+    const sentences = view.container.querySelectorAll('[data-device-sentence]');
+    expect(sentences).toHaveLength(1);
+    expect(sentences[0]?.textContent).toBe(DEVICE_SENTENCES.desktop);
     await view.unmount();
   });
 

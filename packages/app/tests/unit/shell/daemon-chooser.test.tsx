@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { lazy, type ReactNode } from 'react';
+import { lazy, type ReactNode, useState } from 'react';
+import { BottomSheet } from '../../../src/ui/bottom-sheet.tsx';
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
 import {
   type ChosenDaemon,
@@ -41,6 +42,7 @@ const askManifest = {
     screens: [
       { id: 'ask', path: '/ask', daemonless: true },
       { id: 'other', path: '/other', daemonless: true },
+      { id: 'sheet', path: '/sheet', daemonless: true },
       { id: 'slow', path: '/slow', daemonless: true },
     ],
   },
@@ -79,6 +81,30 @@ function Ask({ chooseDaemon }: DaemonlessScreenProps): ReactNode {
   );
 }
 
+/** A plugin screen like `/shared`: Install is pressed INSIDE the plugin's own open BottomSheet (a `fixed` z-40 overlay). */
+function SheetAsk({ chooseDaemon }: DaemonlessScreenProps): ReactNode {
+  const [open, setOpen] = useState(true);
+  return (
+    <div data-testid="sheet-screen">
+      <BottomSheet id="plugin-sheet" open={open} onClose={() => setOpen(false)} closeLabel="Close the item">
+        <button
+          type="button"
+          data-testid="sheet-install"
+          onClick={() => {
+            void chooseDaemon('Install on which machine?').then(chosen => {
+              answers.chosen.push(chosen);
+              if (chosen !== undefined)
+                void chosen.client.call('GET /v1/asker/preview').then(r => answers.previews.push(r));
+            });
+          }}
+        >
+          Install on a machine
+        </button>
+      </BottomSheet>
+    </div>
+  );
+}
+
 // A half whose chunk arrives later: the first draw suspends.
 let releaseChunk: (() => void) | undefined;
 const Slow = lazy(
@@ -92,6 +118,7 @@ const askerApp = provideToShell(implementApp(askManifest, { build: () => ({}) })
   daemonless: () => ({
     ask: Ask as never,
     other: (() => <p data-testid="other">Other</p>) as never,
+    sheet: SheetAsk as never,
     slow: (props: DaemonlessScreenProps) => <Slow {...props} />,
   }),
 });
@@ -250,6 +277,74 @@ describe('S10 a daemon-less screen may ask for a machine', () => {
     expect(view.container.querySelector('[data-chooser] h2')?.textContent).toBe('Install on which machine?');
     await settle();
     expect(answers.chosen).toEqual([]);
+    await view.unmount();
+  });
+
+  test('S10 M1 the picker is a real overlay: outside the screen’s subtree and on top of an open BottomSheet', async () => {
+    go('/sheet');
+    const { app, transportOf } = setup(provision().made);
+    const view = await mount(app);
+    await settle();
+    const pluginSheet = view.container.querySelector('[data-bottom-sheet="plugin-sheet"]') as HTMLElement;
+    expect(pluginSheet.className).toContain('z-40');
+    expect(pluginSheet.querySelector('[aria-modal="true"]')).not.toBeNull();
+    await click(view, '[data-testid="sheet-install"]');
+
+    const picker = view.container.querySelector('[data-chooser]') as HTMLElement;
+    expect(picker).not.toBeNull();
+    // Drawn OUTSIDE the screen's subtree and outside the plugin's sheet (and its scrim and focus trap) ...
+    expect(view.container.querySelector('[data-testid="sheet-screen"]')?.contains(picker)).toBe(false);
+    expect(pluginSheet.contains(picker)).toBe(false);
+    // ... as its own overlay on the frame root, painted ABOVE the plugin's z-40 overlay, modal, with its own focus.
+    const overlay = picker.closest('[data-bottom-sheet]') as HTMLElement;
+    expect(overlay.className).toContain('kt-overlay');
+    expect(overlay.className).toContain('z-50');
+    expect(overlay.parentElement).toBe(view.container.querySelector('.fy-frame'));
+    const dialog = overlay.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.getAttribute('aria-labelledby')).toBe(picker.querySelector('h2')?.id ?? 'none');
+    expect(picker.querySelector('h2')?.textContent).toBe('Install on which machine?');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    // Picking answers the question while the plugin's sheet is still open, and the call rides the chosen machine.
+    await click(view, '[data-chooser-machine="d1"]');
+    expect(view.container.querySelector('[data-chooser]')).toBeNull();
+    expect(view.container.querySelector('[data-bottom-sheet="plugin-sheet"]')).not.toBeNull();
+    expect(answers.chosen[0]?.daemon).toBe('d1');
+    expect(answers.previews).toEqual([{ ok: 'd1' }]);
+    expect(transportOf('d1').paths()).toContain('GET /v1/asker/preview');
+    expect(transportOf('d2').paths()).not.toContain('GET /v1/asker/preview');
+    await view.unmount();
+  });
+
+  test('S10 M1 Escape closes the picker first and leaves the plugin’s sheet open', async () => {
+    go('/sheet');
+    const { app } = setup(provision().made);
+    const view = await mount(app);
+    await settle();
+    await click(view, '[data-testid="sheet-install"]');
+    await interact(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await settle();
+    expect(answers.chosen).toEqual([undefined]);
+    expect(view.container.querySelector('[data-chooser]')).toBeNull();
+    expect(view.container.querySelector('[data-bottom-sheet="plugin-sheet"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  test('S10 m3 two machines with one name are told apart in the picker and in the answer', async () => {
+    go('/ask');
+    const { app, daemons } = setup(provision().made);
+    daemons.add({ daemon: 'd4', machine: 'laptop', deviceId: 'dev', address: 'http://192.168.1.9:40245' });
+    const view = await mount(app);
+    await settle();
+    await click(view, '[data-testid="ask"]');
+    const labels = [...view.container.querySelectorAll('[data-chooser-machine]')].map(node => node.textContent);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels).toContain('laptop (127.0.0.1:40245)');
+    await click(view, '[data-chooser-machine="d1"]');
+    expect(answers.chosen[0]?.machine).toBe('laptop (127.0.0.1:40245)');
     await view.unmount();
   });
 

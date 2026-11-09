@@ -20,7 +20,7 @@ import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
  * screen offers the `onboarding.step` slot, and every plugin that declared a step reaches it with a panel.
  */
 
-const ids = ['onboarding', 'access', 'claude-code', 'codex', 'logins', 'runtimes', 'shells'] as const;
+const ids = ['onboarding', 'claude-code', 'codex', 'logins', 'runtimes', 'shells'] as const;
 const real = ids.map(id => generated.surfaces.find(entry => entry.id === id) as SurfaceEntry);
 const surfaces: SurfaceEntry[] = [...CORE, ...real];
 
@@ -37,7 +37,7 @@ async function until(done: () => boolean, turns = 300): Promise<void> {
   }
 }
 
-/** The steps the daemon lists: exactly the ones the six plugins declare in their manifests. */
+/** The steps the daemon lists: exactly the ones the five plugins declare in their manifests. */
 const declaredSteps = real.flatMap(entry =>
   (entry.manifest.onboarding ?? []).map(step => ({
     plugin: entry.id,
@@ -150,17 +150,31 @@ describe('S14 the steps come from the plugins', () => {
     go('/d/d1/onboarding/steps');
     const { app } = boot({ paired: true });
     const view = await mount(app);
-    await until(() => view.container.querySelector('[data-device-step]') !== null);
+    await until(() => view.container.querySelectorAll('[data-step]').length >= declaredSteps.length);
     // Every declared step has its box, and each box mounts the slot once.
     const boxes = [...view.container.querySelectorAll('[data-step]')].map(node => node.getAttribute('data-step'));
     expect(boxes.toSorted()).toEqual(declaredSteps.map(step => `${step.plugin}.${step.id}`).toSorted());
     expect(declaredSteps.map(step => step.plugin).toSorted()).toEqual(
-      ['access', 'claude-code', 'codex', 'logins', 'runtimes', 'shells'].toSorted(),
+      ['claude-code', 'codex', 'logins', 'runtimes', 'shells'].toSorted(),
     );
-    // Access's step draws its own sentence, and only inside its own step's box.
-    const device = view.container.querySelector('[data-step="access.device"] [data-device-step]');
-    expect(device?.textContent).toContain('This is a computer');
-    expect(view.container.querySelectorAll('[data-device-step]')).toHaveLength(1);
+    await view.unmount();
+  });
+
+  test('S14 M2 a machine with steps still pending reaches its steps page from its Settings › Setup tab', async () => {
+    go('/d/d1/settings/onboarding');
+    const { app } = boot({ paired: true });
+    const view = await mount(app);
+    await until(() => view.container.querySelector('[data-onboarding-open-steps]') !== null);
+    expect(view.container.querySelector('[data-onboarding-setup-tab]')?.getAttribute('data-onboarding-setup-tab')).toBe(
+      String(declaredSteps.length),
+    );
+    const open = view.container.querySelector<HTMLElement>('[data-onboarding-open-steps]');
+    expect(open?.getAttribute('href')).toBe('/d/d1/onboarding/steps');
+    await interact(() => {
+      open?.click();
+    });
+    await until(() => view.container.querySelector('[data-onboarding-steps]') !== null);
+    expect(window.location.pathname).toBe('/d/d1/onboarding/steps');
     await view.unmount();
   });
 
@@ -168,7 +182,7 @@ describe('S14 the steps come from the plugins', () => {
     go('/d/d1/onboarding/steps');
     const { app, answered } = boot({
       paired: true,
-      steps: [{ plugin: 'access', id: 'device', title: 'This device', order: 1, state: 'pending' }],
+      steps: [{ plugin: 'nobody', id: 'nothing', title: 'No panel', order: 1, state: 'pending' }],
     });
     const view = await mount(app);
     await until(() => view.container.querySelector('[data-step-done]') !== null);
@@ -176,7 +190,7 @@ describe('S14 the steps come from the plugins', () => {
       view.container.querySelector<HTMLElement>('[data-step-done]')?.click();
     });
     await until(() => answered.length > 0);
-    expect(answered).toEqual(['POST /v1/onboarding/steps/access/device {"state":"done"}']);
+    expect(answered).toEqual(['POST /v1/onboarding/steps/nobody/nothing {"state":"done"}']);
     await view.unmount();
   });
 

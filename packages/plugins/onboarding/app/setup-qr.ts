@@ -3,7 +3,7 @@
  * is the only one that does, and the encoder is the shell's one local copy (`localQr`, S14).
  */
 
-import { localQr } from '@ferretry/app';
+import { localQr, QrEncodeError } from '@ferretry/app';
 
 /**
  * The QR, as a grid of dark/light modules.
@@ -15,3 +15,17 @@ import { localQr } from '@ferretry/app';
  * tab, and no image service ever sees it.
  */
 export const qrModules = (text: string): readonly (readonly boolean[])[] => localQr(text).modules;
+
+/**
+ * {@link qrModules}, or `undefined` when the link cannot be drawn as a code a phone reads (empty, or longer than the
+ * encoder's cap: a first-run page opened with a long query string builds such a link). Any other failure is a bug and
+ * still throws.
+ */
+export const tryQrModules = (text: string): readonly (readonly boolean[])[] | undefined => {
+  try {
+    return qrModules(text);
+  } catch (error: unknown) {
+    if (error instanceof QrEncodeError) return undefined;
+    throw error;
+  }
+};

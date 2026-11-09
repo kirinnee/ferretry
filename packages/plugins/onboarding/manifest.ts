@@ -1,4 +1,4 @@
-import { definePlugin, route, screen, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import {
   ONBOARDING_AUDIT,
   ONBOARDING_PROGRESS,
@@ -68,6 +68,8 @@ export default definePlugin({
       // The steps every plugin declared, on one machine: it OFFERS the `onboarding.step` slot (contract/slots.ts).
       screen('steps', { path: 'onboarding/steps' }),
     ],
+    // The way back to the steps screen for a machine that was paired but not set up: nothing else links to it.
+    settings: [settingsTab('setup', { label: 'Setup', order: 60 })],
   },
 
   data: {

@@ -26,9 +26,9 @@ describe('S14 forSubject', () => {
 const contributors = generated.surfaces.filter(entry => (entry.manifest.onboarding ?? []).length > 0);
 
 describe('S14 every plugin that declares a first-run step contributes its panel', () => {
-  test('S14 the contributors are the six the design names', () => {
+  test('S14 the contributors are the five that declare a per-machine step', () => {
     expect(contributors.map(entry => entry.id).toSorted()).toEqual(
-      ['access', 'claude-code', 'codex', 'logins', 'runtimes', 'shells'].toSorted(),
+      ['claude-code', 'codex', 'logins', 'runtimes', 'shells'].toSorted(),
     );
   });
 

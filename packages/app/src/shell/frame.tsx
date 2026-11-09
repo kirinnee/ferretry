@@ -20,6 +20,7 @@ import {
   NotFoundPage,
 } from './pages.tsx';
 import { PageScrollRegion } from '../scroll/page-scroll-region.tsx';
+import { FrameRootContext } from './frame-root.tsx';
 import { PasskeyMount } from './passkey-mount.tsx';
 import { ScreenView, ShellLine } from './views.tsx';
 
@@ -244,31 +245,35 @@ export function Frame() {
   useCommandBarShortcut(openBar);
   // The visible height (`--app-h`) and the keyboard-open attribute every screen lays itself out by, as today.
   useAppViewport();
+  // The frame root, handed to the shell's own overlays (the machine picker, S10) so they draw above every plugin sheet.
+  const [frameRoot, setFrameRoot] = useState<HTMLElement | null>(null);
   return (
-    <div className={`fy-frame fy-frame--nav-${plan.nav.side}`} data-layout={plan.layoutId}>
-      <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
-      <div className="fy-body">
-        <TopBar daemon={daemon} onSearch={openBar} />
-        <div className="fy-columns">
-          <main className="fy-main" data-slot="main">
-            <PageScrollRegion entryKey={entryKey} memory={scroll}>
-              {whole === undefined ? <Main route={route} /> : <ShellLine tone="warn">{whole}</ShellLine>}
-            </PageScrollRegion>
-          </main>
-          {whole === undefined ? <Side daemon={daemon} /> : null}
+    <FrameRootContext.Provider value={frameRoot}>
+      <div ref={setFrameRoot} className={`fy-frame fy-frame--nav-${plan.nav.side}`} data-layout={plan.layoutId}>
+        <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
+        <div className="fy-body">
+          <TopBar daemon={daemon} onSearch={openBar} />
+          <div className="fy-columns">
+            <main className="fy-main" data-slot="main">
+              <PageScrollRegion entryKey={entryKey} memory={scroll}>
+                {whole === undefined ? <Main route={route} /> : <ShellLine tone="warn">{whole}</ShellLine>}
+              </PageScrollRegion>
+            </main>
+            {whole === undefined ? <Side daemon={daemon} /> : null}
+          </div>
         </div>
-      </div>
-      <ShellCommandBar
-        daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
-        open={bar.open}
-        focusSignal={bar.signal}
-        onClose={closeBar}
-      />
-      {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
+        <ShellCommandBar
+          daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
+          open={bar.open}
+          focusSignal={bar.signal}
+          onClose={closeBar}
+        />
+        {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
       raises it, and only the machine on screen may raise a background one (G95, G105). */}
-      <PasskeyMount onScreen={runtime.passkeyOnScreen.chosen() ?? daemon ?? runtime.daemons.snapshot().selected} />
-      {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
-      <DeviceViews />
-    </div>
+        <PasskeyMount onScreen={runtime.passkeyOnScreen.chosen() ?? daemon ?? runtime.daemons.snapshot().selected} />
+        {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
+        <DeviceViews />
+      </div>
+    </FrameRootContext.Provider>
   );
 }
