@@ -21,7 +21,12 @@
  *
  * A home the manifest places outside `fleet/homes` (an operator's own folder) is served read-only through Runtimes' own
  * `harness-home` root scoped to that absolute folder, with the same menu and bounds. A link in such a home is skipped:
- * the root cannot follow it out of the folder, so none can reach the fleet's `assets/`.
+ * the root cannot follow it out of the folder, so none can reach the fleet's `assets/`. That costs nothing v5 can make:
+ * v4 listed a link there into the fleet, but v5's apply never writes outside the fleet folder, so it never makes one.
+ *
+ * A WIDENING from v4, said plainly: v4 listed only linked skills in an account home outside the fleet; v5 lists its plain
+ * folders and skips its links, because following a link there needs a kernel readLink. It is read-only and bounded, and
+ * the owner publishes from those folders (publishing is an owner act).
  *
  * Each method runs whole inside ONE `publication.reading(...)` (the manifest is read inside it, ungated, never nested),
  * so an apply that moves a home's documents aside is never observed half-done (S67).
@@ -40,11 +45,13 @@ import {
 } from '../../contract/index.ts';
 import { homesOf } from '../lib/service/runtime-homes.ts';
 import type { FleetPublication } from '../lib/service/publication.ts';
-import { fleetMounts, rootHostFiles } from './root-host-files.ts';
 import { readFleetManifest } from './manifest-file.ts';
 
 const MANIFEST_FILE = 'manifest.json';
 const SKILL_MANIFEST = 'SKILL.md';
+
+/** The most of `manifest.json` that is read: a manifest of a thousand accounts is far under it. */
+const MANIFEST_LIMIT = 4 * 1024 * 1024;
 
 /** A skill folder's name: one plain segment, never a dot-entry. */
 const SKILL_NAME = /^[^./\\\0][^/\\\0]*$/u;
@@ -314,7 +321,14 @@ export function fleetHomes(
 ): RuntimeHomesApi {
   const fleet = roots.root('fleet');
   const directory = fleetDirectory(fleet);
-  const files = rootHostFiles(fleetMounts(roots, fleet, directory));
+  // The manifest through the fleet root itself, so the kernel bounds the read (`HostFiles.readText` takes no limit).
+  const files = {
+    readText: async (): Promise<string | undefined> => {
+      const at = fleet.resolve(MANIFEST_FILE);
+      if (!at.ok) throw unreadable(`The fleet manifest could not be opened (${at.error}).`);
+      return (await fleet.lstat(at.value)) === undefined ? undefined : await fleet.readText(at.value, MANIFEST_LIMIT);
+    },
+  };
   let known: ReadonlySet<string> = new Set();
   /** The manifest's homes, read OUTSIDE the gate (the caller holds it); damage is a typed refusal naming the file. */
   const published = async (): Promise<readonly RuntimeHome[]> => {

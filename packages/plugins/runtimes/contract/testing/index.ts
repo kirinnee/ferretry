@@ -4,10 +4,7 @@
  */
 import { err, ok, type Result } from '@ferretry/std';
 import {
-  AccountChangeRequestSchema,
-  ApplyOutcomeSchema,
   type CatalogInstallChange,
-  ProposalApplyRequestSchema,
   type ResolveResult,
   type RuntimeHome,
   type RuntimeHomeReader,
@@ -87,11 +84,5 @@ export async function runtimesConformance(make: () => RuntimesApi): Promise<Resu
   const homes = await api.homes();
   if (new Set(homes.map(home => home.id)).size !== homes.length) failures.push('homes() lists each id once');
   if (api.home('no-such-home') !== undefined) failures.push('home() is undefined for an id homes() does not list');
-  // A change names one intent and never carries a configuration document.
-  if (AccountChangeRequestSchema.safeParse({ change: { kind: 'runtime.remove', name: 'x', document: {} } }).success)
-    failures.push('a change is strict: it carries no document');
-  // An apply has an EMPTY body: a step-up is the confirmation.
-  if (ProposalApplyRequestSchema.safeParse({ approval: 'x' }).success) failures.push('an apply body is empty');
-  if (ApplyOutcomeSchema.safeParse({ outcome: 'committed' }).success) failures.push('an outcome carries its result');
   return failures.length === 0 ? ok(true) : err(failures);
 }

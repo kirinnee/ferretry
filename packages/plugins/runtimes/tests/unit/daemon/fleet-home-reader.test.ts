@@ -136,6 +136,9 @@ describe('R1 homes() reads fleet/manifest.json', () => {
       `${world.person}/../escape`,
       `${world.fleet}/setup`,
       world.fleet,
+      // The Ferretry home and everything under it is the kernel's own: every read of it would be refused.
+      world.home,
+      `${world.home}/state/x`,
       `${world.person}/a\\b`,
     ];
     await publish(world, {
@@ -732,6 +735,12 @@ describe('R1 m5 every escape is typed', () => {
     }
     expect(await home.skillManifest('plain', 100)).toBeUndefined();
     expect(await home.skillFile('plain', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+  });
+
+  it('refuses a manifest over the byte bound, naming the path and no content', async () => {
+    const { world, api } = await seed();
+    await writeFile(join(world.fleet, 'manifest.json'), `{"pad":"${'x'.repeat(4 * 1024 * 1024)}"}`);
+    await expect(api.homes()).rejects.toThrow(`The fleet manifest at ${world.fleet}/manifest.json could not be read.`);
   });
 
   it('maps a kernel refusal while skillTree lists skills/ to RuntimeHomeUnreadable', async () => {

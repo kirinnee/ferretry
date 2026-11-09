@@ -4,8 +4,8 @@
  * Pure: a manifest and the fleet folder's absolute path in, the homes out. A home at exactly `<fleet>/homes/<id>` is a
  * fleet home and its id is that folder's name. A home an operator placed elsewhere (a `~/.claude-work` opt-out) is
  * listed too, under its account's id, so the reader can serve it read-only through the `harness-home` root scoped to
- * that absolute folder; a home that is not a plain absolute folder, or that sits at or inside the fleet folder itself,
- * is not listed (the fleet's own files are never a harness home).
+ * that absolute folder; a home that is not a plain absolute folder, or that sits at or inside the Ferretry home (the
+ * fleet folder's parent, so the fleet's own files and the daemon's state are never a harness home), is not listed.
  */
 import { type RuntimeHome, RuntimeIdSchema, type RuntimeId } from '../../../contract/index.ts';
 import { type FleetManifest, harnessKeyOfKind, wrapperNameOf } from '../manifest.ts';
@@ -30,9 +30,15 @@ function fleetHomeIdOf(home: string, fleetDirectory: string): string | undefined
   return HOME_ID.test(id) ? id : undefined;
 }
 
-/** True when `path` is the fleet folder or sits inside it. */
-const inFleet = (path: string, fleetDirectory: string): boolean =>
-  path === fleetDirectory || path.startsWith(`${fleetDirectory}/`);
+/**
+ * True when `path` is the Ferretry home (the fleet folder's parent, always `<home>/fleet`) or sits inside it. A home
+ * there but outside `fleet/homes` would be listed and then refused on every read (the kernel fences its own home), so
+ * it is not listed.
+ */
+const inFerretryHome = (path: string, fleetDirectory: string): boolean => {
+  const ferretryHome = fleetDirectory.slice(0, fleetDirectory.lastIndexOf('/'));
+  return path === ferretryHome || path.startsWith(`${ferretryHome}/`);
+};
 
 /** The homes of a manifest in manifest order; the runtimes of a home deduped in manifest order (an account's wrapper, then its runtimes'). */
 export function homesOf(manifest: FleetManifest | undefined, fleetDirectory: string): readonly RuntimeHome[] {
@@ -42,7 +48,8 @@ export function homesOf(manifest: FleetManifest | undefined, fleetDirectory: str
     const inside = fleetHomeIdOf(account.home, fleetDirectory);
     // An account's id is a UUID (the manifest schema), so it is always a plain name.
     const id = inside ?? account.id;
-    if (inside === undefined && !(plainAbsolute(account.home) && !inFleet(account.home, fleetDirectory))) continue;
+    if (inside === undefined && !(plainAbsolute(account.home) && !inFerretryHome(account.home, fleetDirectory)))
+      continue;
     const found = homes.get(id);
     // An id two different folders claim belongs to the first; the second is not served.
     if (found !== undefined && found.home !== account.home) continue;
