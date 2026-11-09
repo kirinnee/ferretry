@@ -30,9 +30,9 @@
  * private places) is read and returned as that document, as the reader of today did; the caller reads it as settings.
  * Inside that window a folder ABOVE the target swapped for a link to another folder after the judge can make the read
  * return a same-named file there: a regular file that parses (with a second name only inside a proven-immutable store),
- * outside the daemon's private places, never one whose own name is a sign-in file's. A link to a name that does not exist inside the daemon's home answers absent like any link to
- * nothing, so whoever owns the link can tell whether that name exists there (never a byte of it; the reader of today
- * answered the same).
+ * outside the daemon's private places, never one whose own name is a sign-in file's. A link to a name that does not
+ * exist inside the daemon's home answers absent like any link to nothing, so whoever owns the link can tell whether that
+ * name exists there (never a byte of it; the reader of today answered the same).
  */
 import { basename, dirname } from 'node:path';
 import type { RootsPort } from '@ferretry/kernel/contract';
