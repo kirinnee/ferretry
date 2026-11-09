@@ -309,6 +309,59 @@ describe('the output guard', () => {
     should(guard.stillShowable(guard.stamp([pane]))).be.true();
   });
 
+  it('I73 the kernel Dispatcher is the one publication gate: a screen read whose build awaited while quarantine began is discarded, a later read is shown', async () => {
+    // Arrange — a `guard: 'secrets'` route on the kernel's own dispatcher, bound to this HoldRegistry. Its handler
+    // awaits, and the hold begins on its pane during that await (the read was stamped before the hold).
+    const guard = new HoldRegistry();
+    const admitted: AdmissionDecision = { outcome: 'admitted', standing: {} as CallStanding, actor: 'owner-tools' };
+    const admission = {
+      admit: () => admitted,
+      admitMember: () => admitted,
+      readmit: () => true,
+      inventory: (_request: unknown, entries: unknown) => entries,
+    } as unknown as Admission;
+    let holdBeginsDuringBuild = true;
+    const route: MountedRoute = {
+      method: 'GET',
+      path: '/v1/screen',
+      minimum: 'authenticated',
+      caller: 'any',
+      audit: { skip: 'test' },
+      guard: 'secrets',
+      owner: { plugin: 'terminals' as PluginId, title: 'Terminals', serving: () => ({ kind: 'serving' }) },
+      handle: async () => {
+        await Promise.resolve();
+        if (holdBeginsDuringBuild) guard.moved(pane);
+        await Promise.resolve();
+        return jsonResponse({ text: 'screen of the pane the value went into' });
+      },
+    };
+    const dispatcher = new Dispatcher(
+      { admission: () => admission, outputGuard: () => guard, version: '5.0.0' },
+      { routes: [route], sockets: [], memberRoutes: [] },
+    );
+    const call = (): ApiRequest => ({
+      method: 'GET',
+      path: '/v1/screen',
+      query: queryFrom([]),
+      headers: headersFrom({}),
+      arrival: localArrival(false),
+      text: async () => '',
+    });
+
+    // Act
+    const stale = finalised(await dispatcher.dispatch(call()));
+    holdBeginsDuringBuild = false;
+    const later = finalised(await dispatcher.dispatch(call()));
+
+    // Assert — the stale read never left (the withheld sentence went instead); a read taken after the hold may
+    should(stale.status).equal(409);
+    should(stale.body).containEql(WITHHELD_SENTENCE);
+    should(stale.body).not.containEql('the value went into');
+    should(later.status).equal(200);
+    should(later.body).containEql('the value went into');
+  });
+
   it('should read a stamp it cannot check as not showable', () => {
     const guard = new HoldRegistry();
     should(guard.stillShowable({ generation: 0, targets: null as never })).be.false();

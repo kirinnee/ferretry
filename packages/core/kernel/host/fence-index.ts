@@ -30,7 +30,8 @@ import type { FileIdentity, HostFs } from './adapters/node-fs.ts';
  *   holds is indexed breadth first, so the shallow files that matter come before the deep ones, to {@link MEMBER_DEPTH}
  *   levels. A folder met at the depth limit is itself pinned though its members are not looked at;
  * - past a place's budget the rest are not indexed and the snapshot FAILS CLOSED: the tree is `truncated`, and the
- *   guard refuses every entry on that tree's device, because an alias of an unindexed member (a bind mount keeps its
+ *   guard refuses every entry on a device the tree's indexed places answer with (the folder's AND the files', which a
+ *   disk may give different devices), because an alias of an unindexed member (a bind mount keeps its
  *   source's device) cannot be told from any other file there. Only an entry on another device is proven not to be
  *   one. That a single file beyond the DEPTH bound is not recognised under a second name is the declared GAP. A
  *   truncation is never silent: every change of what is truncated is announced to whoever watches the index.
@@ -97,10 +98,16 @@ interface IndexedPlace {
   readonly inode: bigint;
 }
 
-/** A private tree whose members were not all indexed: where, and the device an alias of one of them would show. */
+/**
+ * A private tree whose members were not all indexed: where, and the devices an alias of one of them would show. A bind
+ * mount keeps the device of its SOURCE, and a disk need not give a file the device it gives the folder that holds it
+ * (an overlay filesystem answers a folder with its own device and a file with the layer's), so the tree is closed on
+ * EVERY device its indexed places answer with: the head's, a member folder's and a member file's.
+ */
 interface ClosedTree {
   readonly path: string;
-  readonly device: bigint;
+  /** Every device the head and the places indexed in the tree answer with (the head's included). */
+  readonly devices: ReadonlySet<bigint>;
 }
 
 /** A declared place that reached its budget: where, how many places it was allowed, and how many were indexed. */
@@ -213,6 +220,13 @@ const placeOf = (path: string, identity: FileIdentity): IndexedPlace => ({
 interface Budget {
   left: number;
 }
+
+/** Whether two trees closed on the same devices. */
+const sameDevices = (a: ReadonlySet<bigint>, b: ReadonlySet<bigint> | undefined): boolean =>
+  b !== undefined && a.size === b.size && [...a].every(device => b.has(device));
+
+/** A tree while it is being indexed: the devices its places answer with are collected as they are met. */
+type GrowingTree = ClosedTree & { readonly devices: Set<bigint> };
 
 /**
  * Renews the records of the member folders that changed when every one of them still holds the file it held (the same
@@ -349,7 +363,7 @@ async function build(
     start: string,
     depth: number,
     budget: Budget,
-    tree: ClosedTree,
+    tree: GrowingTree,
     limit: number,
     tiered: boolean,
   ): Promise<void> => {
@@ -364,6 +378,7 @@ async function build(
           }
           const identity = await memberOf(folder, name, tiered);
           add(join(folder, name), identity);
+          if (identity !== undefined) tree.devices.add(identity.device);
           budget.left -= 1;
           if (identity?.kind === 'directory') next.push(join(folder, name));
         }
@@ -388,7 +403,7 @@ async function build(
     const identity = await pick(headPath);
     add(headPath, identity);
     if (identity?.kind !== 'directory') continue;
-    const tree: ClosedTree = { path: headPath, device: identity.device };
+    const tree: GrowingTree = { path: headPath, devices: new Set([identity.device]) };
     const limit = each ? (bounds.patternLimit ?? PATTERN_LIMIT) : bounds.limit;
     // The head is one of the place's own: its budget is what is left for what the head holds.
     const budget: Budget = { left: limit - 1 };
@@ -417,6 +432,7 @@ async function build(
         place = kept.place;
       } else found = rest === '' ? await memberOf(headPath, name) : await pick(target, true);
       if (found === undefined) continue;
+      tree.devices.add(found.device);
       if (budget.left <= 0) {
         reached(tree, limit, budget);
         break;
@@ -440,7 +456,7 @@ async function build(
     previous.places.length === places.length &&
     previous.places.every((place, at) => place.path === places[at]?.path && place.key === places[at]?.key) &&
     previous.truncated.join('\0') === truncated.join('\0') &&
-    previous.closed.every((tree, at) => tree.device === closed[at]?.device) &&
+    previous.closed.every((tree, at) => sameDevices(tree.devices, closed[at]?.devices)) &&
     previous.closed.length === closed.length &&
     previous.budgets.every((one, at) => one.indexed === budgets[at]?.indexed && one.limit === budgets[at]?.limit);
   // A snapshot that came out the same is the same one: what is built from it is not built again.
