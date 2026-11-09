@@ -55,6 +55,7 @@ import {
   protectedResourceMetadataUrls,
   requestedScope,
 } from './discovery.ts';
+import type { McpDiscoveryRecorder } from '../reach.ts';
 import { flowIdentifier, flowState, pkcePair } from './pkce.ts';
 import {
   type McpOAuthClientAuth,
@@ -153,6 +154,8 @@ export interface McpOAuthServiceDeps {
   readonly values: McpOAuthSecretValues;
   /** The daemon-internal store: refresh tokens and client secrets, which nothing but this reads. */
   readonly internal: McpOAuthInternalSecrets;
+  /** Told which hosts discovery named, once each passed the endpoint rule, and when a flow ends (`lib/reach.ts`). */
+  readonly reach?: McpDiscoveryRecorder;
 }
 
 /** What discovery found for one server. */
@@ -302,7 +305,7 @@ export class McpOAuthService {
         );
       pwaOrigin = new URL(checked).origin;
     }
-    const discovered = await this.discover(serverUrl);
+    const discovered = await this.discover(component, serverUrl);
     const path = mcpOAuthRedirectPath(discovered.server.issuer);
     const registered =
       server.client === undefined
@@ -351,15 +354,23 @@ export class McpOAuthService {
 
   /** One sign-in per component: a new start replaces the old one, whose code can then finish nothing. */
   private admit(flow: McpOAuthPendingFlow): void {
-    this.prune();
+    // The old flow of this component goes first and silently: its hosts and the new flow's are one entry.
     for (const [id, pending] of this.flows) if (pending.component === flow.component) this.flows.delete(id);
-    while (this.flows.size >= MAX_PENDING_FLOWS) this.flows.delete(this.flows.keys().next().value as string);
+    this.prune();
+    while (this.flows.size >= MAX_PENDING_FLOWS) this.end(this.flows.keys().next().value as string);
     this.flows.set(flow.flowId, flow);
   }
 
   private prune(): void {
     const now = this.deps.clock.now();
-    for (const [id, flow] of this.flows) if (flow.expiresAt <= now) this.flows.delete(id);
+    for (const [id, flow] of this.flows) if (flow.expiresAt <= now) this.end(id);
+  }
+
+  /** A flow is over: forget it, and the hosts its discovery named. */
+  private end(flowId: string): boolean {
+    const flow = this.flows.get(flowId);
+    if (flow !== undefined) this.deps.reach?.release(flow.component);
+    return this.flows.delete(flowId);
   }
 
   /**
@@ -402,13 +413,17 @@ export class McpOAuthService {
 
   // ── Discovery ──────────────────────────────────────────────────────────────────────────────────
 
-  private async discover(serverUrl: string): Promise<Discovered> {
+  private async discover(component: string, serverUrl: string): Promise<Discovered> {
     try {
       const challenge = await this.challengeOf(serverUrl);
       const resource = await this.protectedResource(serverUrl, challenge.resourceMetadata);
-      // A server with no resource metadata is its own authorization server (MCP 2025-03-26).
+      // A server with no resource metadata is its own authorization server (MCP 2025-03-26). A named one is reachable
+      // for this flow only, and only because it passed `endpointAllowed` in `protectedResourceFrom`.
       const issuer = resource?.issuer ?? new URL(serverUrl).origin;
+      if (resource !== undefined) this.deps.reach?.discovered(component, issuer);
       const server = await this.authorizationServer(issuer, serverUrl);
+      for (const endpoint of [server.tokenEndpoint, server.registrationEndpoint, server.revocationEndpoint])
+        if (endpoint !== undefined) this.deps.reach?.discovered(component, endpoint);
       const scope = requestedScope(challenge, resource);
       return {
         resource: resource?.resource ?? canonicalResource(serverUrl),
@@ -416,6 +431,7 @@ export class McpOAuthService {
         ...(scope === undefined ? {} : { scope }),
       };
     } catch (error) {
+      this.deps.reach?.release(component);
       if (error instanceof DiscoveryRefusal) throw new McpOAuthRefusal('mcp_auth_discovery', error.message);
       if (error instanceof Unanswered)
         throw new McpOAuthRefusal(
@@ -686,10 +702,19 @@ export class McpOAuthService {
     const checked = checkCallback(request.callback, flow);
     if (checked.kind === 'refused') throw new McpOAuthRefusal('mcp_auth_callback', checked.reason);
     this.flows.delete(flowId);
+    // The hosts discovery named stay reachable until the code is redeemed and the record (which now names them) is filed.
+    try {
+      return await this.redeem(flow, checked.code);
+    } finally {
+      this.deps.reach?.release(flow.component);
+    }
+  }
+
+  private async redeem(flow: McpOAuthPendingFlow, code: string): Promise<McpOAuthCompletion> {
     const names = mcpOAuthSecretNames(flow.component, flow.serverUrl);
     const form = new URLSearchParams({
       grant_type: 'authorization_code',
-      code: checked.code,
+      code,
       redirect_uri: flow.redirectUri,
       client_id: flow.clientId,
       code_verifier: flow.verifier,
@@ -738,7 +763,7 @@ export class McpOAuthService {
 
   /** Ends a sign-in nobody will finish. */
   cancel(flowId: string): McpOAuthFlowCancelled {
-    return { flowId, cancelled: this.flows.delete(flowId) };
+    return { flowId, cancelled: this.end(flowId) };
   }
 
   /**
