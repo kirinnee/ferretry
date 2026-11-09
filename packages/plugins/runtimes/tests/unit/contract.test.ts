@@ -5,7 +5,6 @@ import { AutoResumeDecide } from '@ferretry/core-ferrets/contract';
 import {
   AccountChangeRequestSchema,
   ApplyOutcomeSchema,
-  type CatalogInstallChange,
   CloneBundleSchema,
   ModelSetFileSchema,
   ProposalApplyRequestSchema,
@@ -90,12 +89,16 @@ describe('runtimes contract', () => {
     expect(await fake.resolve()).toMatchObject({ ok: false, refusal: 'unknown' });
   });
 
-  test('the fake records a catalogue install and answers a committed outcome', async () => {
+  test('R2 the fake answers the profiles and layers a test set, and records a layer change without writing', async () => {
     const fake = fakeRuntimes();
-    const change = { kind: 'catalog.install', name: 'notes' } as unknown as CatalogInstallChange;
-    const outcome = await fake.installCatalogItem(change);
-    expect(outcome.outcome).toBe('committed');
-    expect(fake.installed).toEqual([change]);
+    const layers = { runtime: RuntimeIdSchema.parse('r'), profile: 'p', mcp: ['notes'], skills: [] };
+    fake.setProfiles([{ name: 'p', layers: ['mcp/notes'], etag: 'e1' }], [layers]);
+    expect(await fake.profiles()).toEqual([{ name: 'p', layers: ['mcp/notes'], etag: 'e1' }]);
+    expect(await fake.layers(layers.runtime)).toEqual(layers);
+    expect(await fake.layers(RuntimeIdSchema.parse('nope'))).toBeUndefined();
+    const change = { kind: 'add', profile: 'p', layer: 'skills/x' } as const;
+    expect(await fake.changeProfileLayers(change)).toEqual({ kind: 'written', profiles: ['p'] });
+    expect(fake.changes).toEqual([change]);
   });
 
   test('the conformance suite names each way an implementation can fail it', async () => {

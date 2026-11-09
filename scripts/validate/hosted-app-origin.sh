@@ -147,9 +147,14 @@ check_routes() {
     fail "${script} must print no define for the production app" || status=1
   [[ "$(FY_HOSTED_APP_ORIGIN=https://preview.example "${script}")" == 'https://preview.example' ]] ||
     fail "${script} must print the named origin" || status=1
-  FY_HOSTED_APP_ORIGIN=https://preview.example "${script}" --key-file | rg -q 'release-signing-key\.preview\.pub$' ||
+  # Capture first, then match: `producer | rg -q` under pipefail fails with SIGPIPE when rg exits on its first match
+  # while the producer is still writing (the --defines output grows a line once the preview key is committed).
+  local named_key_file named_defines
+  named_key_file="$(FY_HOSTED_APP_ORIGIN=https://preview.example "${script}" --key-file)" || named_key_file=''
+  rg -q 'release-signing-key\.preview\.pub$' <<<"${named_key_file}" ||
     fail "${script} must name the preview key file for a named app" || status=1
-  FY_HOSTED_APP_ORIGIN=https://preview.example "${script}" --defines 2>/dev/null | rg -q '^__FY_HOSTED_APP_ORIGIN__="https://preview\.example"$' ||
+  named_defines="$(FY_HOSTED_APP_ORIGIN=https://preview.example "${script}" --defines 2>/dev/null)" || named_defines=''
+  rg -q '^__FY_HOSTED_APP_ORIGIN__="https://preview\.example"$' <<<"${named_defines}" ||
     fail "${script} must define the origin for a named app" || status=1
   if FY_HOSTED_APP_ORIGIN='https://preview.example/path' "${script}" >/dev/null 2>&1; then
     fail "${script} must refuse an origin with a path" || status=1
