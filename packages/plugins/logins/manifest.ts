@@ -202,6 +202,8 @@ export default definePlugin({
       panel('settings', { id: 'codex-login', order: 13 }),
       panel('settings', { id: 'local-models', order: 14 }),
       panel('daemon.status', { id: 'quota-readout', order: 30 }),
+      // The first-run step's body (Onboarding's steps screen offers this slot): the sign-ins view.
+      panel('onboarding.step', { id: 'onboarding-step', order: 30 }),
     ],
     settings: [settingsTab('logins', { label: 'Logins', order: 25 })],
   },

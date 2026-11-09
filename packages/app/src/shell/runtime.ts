@@ -120,6 +120,8 @@ export class ShellRuntime {
   /** Each plugin's rows on every daemon (S2), per client origin, over the one client cache. */
   readonly #reach = new DaemonReachCache(this);
   #handlerWatched = false;
+  /** The machine a daemon-less screen's chooser handed out, counted as on screen until its screen goes (S10). */
+  #chosenOnScreen: { readonly daemon: string } | undefined;
   /** The owner's layout per daemon (the Layouts plugin), read through each daemon's guarded client. */
   readonly layouts: DaemonLayouts;
   /** The plugins' declared fragments, held off the address until their one taker comes (S3). */
@@ -206,6 +208,26 @@ export class ShellRuntime {
   };
 
   titleOf = (id: string): string => this.byId.get(id)?.title ?? id;
+
+  /**
+   * THE ON-SCREEN OVERRIDE (S10, MA6): the machine a daemon-less screen's chooser handed out counts as the machine on
+   * screen, so its reads are not left waiting. It is held here and handed to `PasskeyMount`, the only caller of
+   * `focus`. `choose` answers a release that clears the override ONLY if it is still that choice's own, so a second
+   * chooser is never cleared by the first. Setting or releasing re-renders the frame (R3 n3).
+   */
+  readonly passkeyOnScreen = {
+    choose: (daemon: string): (() => void) => {
+      const mine = { daemon };
+      this.#chosenOnScreen = mine;
+      this.#changed();
+      return () => {
+        if (this.#chosenOnScreen !== mine) return;
+        this.#chosenOnScreen = undefined;
+        this.#changed();
+      };
+    },
+    chosen: (): string | undefined => this.#chosenOnScreen?.daemon,
+  };
 
   /** The one passkey provision (the handler and its prompts), or `undefined` when Access gave none. */
   passkey(): PasskeyProvision | undefined {

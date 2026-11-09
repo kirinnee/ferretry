@@ -49,6 +49,22 @@ describe('onboarding daemon half', () => {
     expect(view.complete).toBe(false);
   });
 
+  test('n2 the composed daemon answers setUp true when Runtimes lists a runtime, false when it lists none', async () => {
+    const withRuntimes = async (listed: readonly unknown[]) =>
+      (
+        await testHost({
+          plugins: [shells, logins, harnesses, onboarding],
+          clock: fixedClock('2026-11-06T09:00:00.000Z'),
+          uses: { runtimes: { list: async () => listed } },
+        })
+      ).request('GET', '/v1/onboarding');
+    expect(OnboardingViewSchema.parse((await withRuntimes([{ id: 'r1' }])).json()).setUp).toBe(true);
+    expect(OnboardingViewSchema.parse((await withRuntimes([])).json()).setUp).toBe(false);
+    expect(OnboardingViewSchema.parse((await (await boot()).request('GET', '/v1/onboarding')).json()).setUp).toBe(
+      false,
+    );
+  });
+
   test('an answer is recorded with the clock time and announced', async () => {
     const host = await boot();
     const response = await host.request('POST', '/v1/onboarding/steps/logins/login', { body: { state: 'found' } });

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import '../support/dom.ts';
 
-// NEEDS-APP-SHELL: boots the page's own script in a DOM; `../support/dom.ts` (happy-dom) is the app shell's.
+// Boots the page's own script in a DOM; `../support/dom.ts` is happy-dom.
 const pluginDir = join(import.meta.dir, '../../..');
 const page = readFileSync(join(pluginDir, 'app/get-started/index.html'), 'utf8');
 const goldenPrompt = readFileSync(join(pluginDir, 'tests/fixtures/agent-setup-prompt.txt'), 'utf8').replace(/\n$/, '');

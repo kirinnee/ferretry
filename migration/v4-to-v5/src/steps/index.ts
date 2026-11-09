@@ -23,6 +23,7 @@ import { ferretsStep } from './ferrets.ts';
 import { gateStep } from './gate.ts';
 import { harnessHomesStep } from './harness-homes.ts';
 import { lessonsStep } from './lessons.ts';
+import { loginKeysStep, type LoginKeyHold } from './login-keys.ts';
 import { loginsStep } from './logins.ts';
 import { mcpStep } from './mcp.ts';
 import { packsStep } from './packs.ts';
@@ -47,6 +48,11 @@ export interface StepContext {
   readonly dryRun: boolean;
   /** Absent in tests that do not read the host: a step needing it then reads nothing and says so. */
   readonly host?: HostFacts;
+  /**
+   * Plain keys the Settings step took out of login files, waiting for the login-keys step to seal them in the vault.
+   * Absent: a login file holding a plain key then fails Settings, as it did before this existed (never left plain).
+   */
+  readonly loginKeys?: LoginKeyHold;
 }
 
 export interface Step {
@@ -99,6 +105,8 @@ export const STEPS: readonly Step[] = [
   packsStep,
   loginsStep,
   vaultStep,
+  // After the vault step: it adds entries to the vault the step above moved (and mints its key if v4 had none).
+  loginKeysStep,
   // After the vault: MCP's sealed document is opened by the key the vault step moves (once).
   mcpStep,
   identityStep,
