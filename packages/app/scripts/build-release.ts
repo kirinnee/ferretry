@@ -115,9 +115,12 @@ export function workerInputGuard(root = packageRoot, inputs?: Set<string>): BunP
   const app = realpathSync(root);
   const zod = realpathSync(resolve(Bun.resolveSync('zod/package.json', packageRoot), '..'));
   const allowed = ['worker', 'release', 'router', 'storage'].map(directory => join(app, 'src', directory) + sep);
-  // The kernel contract's push envelope, by its own subpath: the one declaration of the three fields a push shows, shared with
-  // Access's payload. It imports zod and nothing else; the contract barrel, which does import more, is not an allowed input.
-  const envelope = realpathSync(Bun.resolveSync('@ferretry/kernel/contract/push-envelope', packageRoot));
+  // The kernel contract's push envelope and notification filter document, each by its own subpath: the one declaration of
+  // what a push says and of the device's filter, shared with the plugins that send and write them. They import zod and each
+  // other and nothing else; the contract barrel, which does import more, is not an allowed input.
+  const contracts = ['push-envelope', 'notification-filter'].map(name =>
+    realpathSync(Bun.resolveSync(`@ferretry/kernel/contract/${name}`, packageRoot)),
+  );
   return {
     name: 'shell-worker-inputs',
     setup(build) {
@@ -132,7 +135,7 @@ export function workerInputGuard(root = packageRoot, inputs?: Set<string>): BunP
         if (
           !allowed.some(directory => path.startsWith(directory)) &&
           !path.startsWith(zod + sep) &&
-          path !== envelope
+          !contracts.includes(path)
         ) {
           throw new Error(`no plugin code may run in the signed service worker: refused input ${path}`);
         }

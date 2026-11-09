@@ -15,7 +15,7 @@
  * collapse happened.
  *
  * QUIET HOURS CAN WRAP MIDNIGHT. A window from 22:00 to 07:00 has its start AFTER its end on the
- * 0–1439 minute-of-day line, so `isWithinQuietHours` treats `start > end` as "wraps around
+ * 0–1439 minute-of-day line, so the kernel's `shouldShowPush` treats `start > end` as "wraps around
  * midnight" rather than as an empty range. `start === end` is read as the full day: a reader who set
  * identical start and end asked for quiet always, not for a window of zero width that can never be
  * open.
@@ -41,6 +41,7 @@
 /** The push kinds a notification names (today's protocol `PushNotificationKind`). */
 export type PushNotificationKind = 'attention' | 'agenda' | 'question' | 'failed' | 'completed' | 'device-paired';
 
+import { type NotificationFilterDocument, shouldShowPush } from '@ferretry/kernel/contract/notification-filter';
 import type { NotificationFilterMirrorWriter } from './notification-filter-mirror.ts';
 
 /**
@@ -157,19 +158,24 @@ export function formatTimeOfDay(minute: number): string {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
+/** The longest machine id a filter document may name (the kernel's bound); a longer id cannot be muted. */
+const MUTED_DAEMON_ID_MAX = 200;
+
 /**
- * Whether `now` falls inside a quiet window that may wrap midnight.
- *
- * `start === end` reads as quiet all day: a reader who set identical bounds asked for quiet always,
- * not for a zero-width window that could never open.
+ * THIS DEVICE'S PREFERENCES AS THE DOCUMENT THE SIGNED WORKER EVALUATES (S6). Agenda owns the categories, so it
+ * expands each switched-off category to the push kinds it covers; the worker holds no kind→category map and only calls
+ * the kernel's `shouldShowPush` over the result. An id the document cannot hold is dropped rather than letting the
+ * kernel reset the whole document to "show everything".
  */
-export function isWithinQuietHours(quiet: QuietHours, now: Date): boolean {
-  if (!quiet.enabled) return false;
-  if (quiet.startMinute === quiet.endMinute) return true;
-  const minuteOfDay = now.getHours() * 60 + now.getMinutes();
-  return quiet.startMinute < quiet.endMinute
-    ? minuteOfDay >= quiet.startMinute && minuteOfDay < quiet.endMinute
-    : minuteOfDay >= quiet.startMinute || minuteOfDay < quiet.endMinute;
+export function filterDocumentOf(prefs: DeviceNotificationFilterPreferences): NotificationFilterDocument {
+  return {
+    version: 2,
+    hiddenKinds: ALL_NOTIFICATION_KINDS.filter(kind => !prefs.categories[notificationCategoryFor(kind)]),
+    mutedDaemons: Object.entries(prefs.machines)
+      .filter(([daemon, on]) => !on && daemon.length > 0 && daemon.length <= MUTED_DAEMON_ID_MAX)
+      .map(([daemon]) => daemon),
+    quietHours: { ...prefs.quietHours },
+  };
 }
 
 export interface NotificationFilterEvent {
@@ -181,16 +187,15 @@ export interface NotificationFilterEvent {
 
 /**
  * THE decision: given one event, this device's preferences, and the instant it arrived, show it or
- * not. Total and pure — no storage, no browser global, no daemon.
+ * not. Total and pure — no storage, no browser global, no daemon. It is the kernel's `shouldShowPush` over
+ * {@link filterDocumentOf}, the very function the worker calls, so the page and the closed app cannot disagree.
  */
 export function shouldShowNotification(
   event: NotificationFilterEvent,
   prefs: DeviceNotificationFilterPreferences,
   now: Date,
 ): boolean {
-  if (event.kind !== null && !prefs.categories[notificationCategoryFor(event.kind)]) return false;
-  if (event.daemonId !== null && prefs.machines[event.daemonId] === false) return false;
-  return !isWithinQuietHours(prefs.quietHours, now);
+  return shouldShowPush(filterDocumentOf(prefs), { kind: event.kind, daemon: event.daemonId }, now);
 }
 
 /* ---------- persistence: one device-wide record, never per-daemon -------------------------------- */
@@ -324,9 +329,17 @@ export class DeviceNotificationFilterStore {
     this.#persist(next);
     // Fire-and-forget: the worker reads whatever the mirror last held, and `localStorage` above is
     // already the correct, durable answer for this page regardless of whether this write lands.
-    void this.#mirror?.write(next).catch(() => undefined);
+    this.mirrorNow();
     for (const listener of [...this.#listeners]) listener();
     return next;
+  }
+
+  /**
+   * Writes the CURRENT preferences to the worker's document (S6). Called at app boot — the closed-app worker would show
+   * everything until the first change — and by every {@link set}. Best effort: the worker keeps whatever it last saw.
+   */
+  mirrorNow(): void {
+    void this.#mirror?.write(filterDocumentOf(this.#snapshot)).catch(() => undefined);
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {

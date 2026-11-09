@@ -89,7 +89,11 @@ export interface DaemonScopedCache {
 export interface DaemonListOptions {
   readonly storage: KeyValueStore | null;
   readonly now: () => number;
-  readonly forget?: (daemon: string) => void;
+  /**
+   * Deletes what this device holds for a daemon it stopped being paired to (Access: the device key pair). It may be
+   * asynchronous; the {@link DaemonList.onUnpaired} listeners run after it has settled (S12).
+   */
+  readonly forget?: (daemon: string) => void | Promise<void>;
 }
 
 /** A display name: the owner's label, else the machine name. */
@@ -143,8 +147,9 @@ export interface PairingInput {
 export class DaemonList {
   readonly #storage: KeyValueStore | null;
   readonly #now: () => number;
-  readonly #forget: (daemon: string) => void;
+  readonly #forget: (daemon: string) => void | Promise<void>;
   readonly #listeners = new Set<() => void>();
+  readonly #unpaired = new Set<(daemon: string) => void>();
   readonly #caches = new Set<DaemonScopedCache>();
   #snapshot: DaemonListSnapshot;
 
@@ -161,6 +166,17 @@ export class DaemonList {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   };
+
+  /**
+   * S12: calls `listener` ONCE with the daemon's id when this browser stops being paired to it — a removal, an eviction
+   * past the limit, or a revocation the daemon answered. NOT on a re-pair (that replaces the pairing, it does not end it).
+   * Runs after the device key pair is deleted (`forget`) and the paired record is gone, so a listener never sees a
+   * daemon it could still reach. A listener that throws costs only itself.
+   */
+  onUnpaired(listener: (daemon: string) => void): () => void {
+    this.#unpaired.add(listener);
+    return () => this.#unpaired.delete(listener);
+  }
 
   registerCache(cache: DaemonScopedCache): () => void {
     this.#caches.add(cache);
@@ -245,7 +261,24 @@ export class DaemonList {
 
   #gone(daemon: string): void {
     for (const cache of this.#caches) cache.clearDaemon(daemon);
-    this.#forget(daemon);
+    let forgotten: void | Promise<void>;
+    try {
+      forgotten = this.#forget(daemon);
+    } catch {
+      forgotten = undefined;
+    }
+    // The record is committed right after this call returns, so by the time the continuation runs it is gone too.
+    void Promise.resolve(forgotten)
+      .catch(() => undefined)
+      .then(() => {
+        for (const listener of [...this.#unpaired]) {
+          try {
+            listener(daemon);
+          } catch {
+            // one plugin's failure never stops the next
+          }
+        }
+      });
   }
 
   #commit(next: DaemonListSnapshot): void {
