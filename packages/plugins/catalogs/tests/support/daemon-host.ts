@@ -217,6 +217,8 @@ export interface CatalogsFixtureOptions {
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** MCP servers the MCP item provider lists; absent = MCP is off. */
   readonly mcp?: McpSourceServer[];
+  /** Parts of the MCP item provider the test supplies itself (project roots, file access, the runtime installer). */
+  readonly mcpProvider?: Partial<CatalogMcpProvider>;
   /** The sealed-documents port Catalogs is given; absent = Vault's fake. */
   readonly sealed?: SealedDocumentsApi;
   /** The effective contract hash the host answers each package; absent = `unhashed`. */
@@ -227,7 +229,7 @@ export interface CatalogsFixtureOptions {
  * The MCP plugin as Catalogs meets it: one `catalog.items:mcp` provider over servers the test edits. Reading the
  * inventory is all an item needs to be frozen; installing into a runtime or a project is refused here.
  */
-function mcpItems(servers: McpSourceServer[]) {
+function mcpItems(servers: McpSourceServer[], overrides: Partial<CatalogMcpProvider> = {}) {
   const refuse = async (): Promise<never> => {
     throw new Error('the test MCP provider installs nothing');
   };
@@ -245,6 +247,7 @@ function mcpItems(servers: McpSourceServer[]) {
       installCatalogItem: refuse,
     },
   };
+  Object.assign(provider, overrides);
   const manifest = definePlugin({
     id: 'mcp',
     title: 'MCP',
@@ -358,7 +361,10 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
     },
   };
   const host = await testHost({
-    plugins: [...(options.mcp === undefined ? [] : [mcpItems(options.mcp) as never]), composed as never],
+    plugins: [
+      ...(options.mcp === undefined ? [] : [mcpItems(options.mcp, options.mcpProvider) as never]),
+      composed as never,
+    ],
     fakes: { access, gate, vault, sealed: options.sealed ?? new FakeSealedDocuments() },
     uses: { connections },
     gate: admission,

@@ -3,11 +3,6 @@
 # entry whose row passes (or is unticked) fails, so the list can only shrink, and the two sets must stay equal. Fix a row, then delete it from both.
 F-0305	no live test(), it() or describe() title in packages/core/ferrets/tests/unit/parity/storage.test.ts names F-0305 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
 F-0422	no live test(), it() or describe() title in packages/core/ferrets/tests/unit/parity/storage.test.ts names F-0422 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
-S-0010	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
-S-0255	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
-S-0262	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
-S-0304	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
-S-0388	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
 T-0003	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0003 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
 T-0004	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0004 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
 T-0005	no live test(), it() or describe() title in packages/plugins/browsers/tests/unit/parity/agent-tools.test.ts names T-0005 (a comment, a string elsewhere, or a skipped, todo or only title does not count)

@@ -35,11 +35,6 @@ export const KNOWN = 'scripts/validate/parity-ticks-known.tsv';
 export const FROZEN_IDS: ReadonlySet<string> = new Set([
   'F-0305',
   'F-0422',
-  'S-0010',
-  'S-0255',
-  'S-0262',
-  'S-0304',
-  'S-0388',
   'T-0003',
   'T-0004',
   'T-0005',
