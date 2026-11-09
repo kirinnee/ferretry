@@ -168,6 +168,23 @@ describe('the fence (§7.7, §9.3), unit tier', () => {
     expect(await readFile(`${home}/state/gate/probe`, 'utf8')).toBe(SECRET);
   });
 
+  test('S44 removing a name that is a link to a folder unlinks the link and leaves the folder it points at', async () => {
+    const { home, work } = await layout();
+    await mkdir(`${work}/kept`, { recursive: true });
+    await writeFile(`${work}/kept/SKILL.md`, 'kept');
+    await symlink(`${work}/kept`, `${work}/to-folder`);
+    await symlink(`${home}/state/gate`, `${work}/to-outside`);
+    const root = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { work });
+    for (const name of ['to-folder', 'to-outside']) {
+      const at = root.resolve(name);
+      if (!at.ok) throw new Error('resolve');
+      await root.remove(at.value);
+    }
+    expect((await readdir(work)).toSorted()).toEqual(['kept', 'notes.md']);
+    expect(await readFile(`${work}/kept/SKILL.md`, 'utf8')).toBe('kept');
+    expect(await readFile(`${home}/state/gate/probe`, 'utf8')).toBe(SECRET);
+  });
+
   test('S46 a read takes only a regular file, never blocks on a pipe, and reads no more than its limit', async () => {
     const { home, work } = await layout();
     execFileSync('mkfifo', [`${work}/pipe`]);
