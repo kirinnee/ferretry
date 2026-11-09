@@ -32,6 +32,22 @@ const mib = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 /** The staging folder is a private copy; it sits beside the preview home, never inside v4's. */
 export const stagingFor = (target: string) => `${target}.staging`;
 
+/** The conversion report, beside the preview home (a v5 home holds only declared files). */
+export const reportPathFor = (target: string) => `${target}.conversion-report.json`;
+
+/**
+ * What the preview held out because it is a Codex (or not provably Claude Code) runtime: each entry by NAME with its
+ * sentence, from every step of the report. Names only.
+ */
+export function heldSection(report: ConversionReport): string {
+  const held = report.steps.flatMap(step =>
+    step.notCarried.filter(item => item.why === CODEX_HELD_SENTENCE).map(item => `  - ${item.what}: ${item.why}`),
+  );
+  return held.length === 0
+    ? 'HELD OUT OF THE PREVIEW: nothing (no Codex runtime, ferret or route was found)'
+    : `HELD OUT OF THE PREVIEW (${held.length}):\n${held.join('\n')}`;
+}
+
 export async function dryRun(
   v4Home: string,
   target: string,
@@ -74,7 +90,7 @@ export async function dryRun(
     '',
     'IN THE PREVIEW HOME EVERY FERRET IS STOPPED: no launch command, no terminal handle, no transcript pointer, no',
     'credential hash, no token ledger, no worktree ownership. The runtimes config says autoResume: false.',
-    'LOGINS ARE LEFT OUT ENTIRELY (config/logins is not copied): you add logins fresh in the preview.',
+    'LOGINS ARE LEFT OUT ENTIRELY (config/logins is not copied): you add logins fresh in the preview. Do not add a Codex login or runtime to the preview yet.',
     'LAST GATE: only fields that are EXECUTED or RESOLVED AS PATHS are checked (a ferret command, agent, folder, env and flags; every',
     'command, argument, env value, home and path of a runtime, profile, component, preset or MCP server). Free text (messages, events,',
     'prompts, notes) is neither gated nor redacted. A hit refuses the whole home, naming file and field, never the value. Spellings',
@@ -85,7 +101,7 @@ export async function dryRun(
     ...forecast.map(line => `  ${line}`),
     `FOLDERS: a ferret whose folder is inside v4's home or its worktree folder, inside a worktree v4's ledger lists, or under a .worktrees folder gets ${join(target, PREVIEW_WORKSPACE)} instead (it lost its folder). A ferret in a primary checkout keeps it, and shares that checkout with v4's agents.`,
     `RESOURCE LIMITS: limits.yaml is NOT read for launches in 5.0. The preview daemon starts with XDG_RUNTIME_DIR set to ${join(target, PREVIEW.xdgRunFolder)} (private) and no DBUS_SESSION_BUS_ADDRESS. The kernel runs 5.0's systemd probe with only {PATH, HOME} (no bus at all), and the private folder is the second layer, so the daemon reaches no user systemd manager: launches run directly, with no slice, scope or set-property. \`preview.sh start\` asks the probe both ways and refuses to start if either reaches your manager.`,
-    `LOGIN SHELLS: preview ferrets get __ETC_PROFILE_NIX_SOURCED=1, FY_HOME, FY_PORT and FY_URL: for Claude Code ferrets, through settings.env. CODEX RUNTIMES ARE LEFT OUT of the preview (each is listed by name in the conversion report): ${CODEX_HELD_SENTENCE}. \`preview.sh start\` refuses to start unless bash -l and zsh -li with that environment find the preview's fy. In a preview terminal you open yourself, \`fy\` may be v4's: type \`~/.ferretry-v5/bin/fy\` or use \`fy5\`.`,
+    `LOGIN SHELLS: preview ferrets get __ETC_PROFILE_NIX_SOURCED=1, FY_HOME, FY_PORT and FY_URL: for Claude Code ferrets, through settings.env. CODEX RUNTIMES ARE LEFT OUT of the preview (each is listed by name in the conversion report): ${CODEX_HELD_SENTENCE}. Codex ferrets and the pack routes that name a held runtime are held too: do not add a Codex login or runtime to the preview yet. \`preview.sh start\` refuses to start unless bash -l, bash -i and zsh -li with that environment find the preview's fy. Terminals opened in the preview, by you or by a ferret, carry the preview environment (Terminals' \`environment\` setting, owner-only), and \`preview.sh start\` proves it on every start by opening a terminal through the daemon and requiring the preview's fy and FY_HOME.`,
     '',
     '',
     'KNOWN GAPS:',
@@ -200,9 +216,12 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   // outside every v4 path.
   await writeProof(home, target, v4Home, before);
   await writeFile(join(target, PREVIEW_MARKER), PREVIEW_MARKER_TEXT, { mode: 0o600 });
+  // The report sits BESIDE the preview home (as `src/main.ts` writes it), never inside it: names and counts only.
+  const reportPath = reportPathFor(target);
+  await writeFile(reportPath, `${JSON.stringify(result.report, null, 2)}\n`, { mode: 0o600 });
   return {
     report: result.report,
-    summary: summarise(result.report),
+    summary: `${summarise(result.report)}\n${heldSection(result.report)}\nreport: ${reportPath}`,
     proof,
     changedWhileCopying: staged.changed,
     gate,
@@ -233,8 +252,9 @@ export async function cleanPreview(v4Home: string, target: string, home: string 
     );
   await rm(guarded.target, { recursive: true, force: true });
   await rm(guarded.staging, { recursive: true, force: true });
+  await rm(reportPathFor(guarded.target), { force: true });
   await removeProof(home, guarded.target);
-  return `removed ${guarded.target}, its staging copy and its proof`;
+  return `removed ${guarded.target}, its staging copy, its conversion report and its proof`;
 }
 
 /** Names the wrapper passes through from the caller's environment (and `LC_*`): nothing else reaches the binary. */

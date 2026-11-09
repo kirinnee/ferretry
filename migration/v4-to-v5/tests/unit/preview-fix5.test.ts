@@ -66,8 +66,11 @@ describe('MAJOR-1 Codex runtimes are held out of the preview', () => {
       expect(existsSync(join(f.to, 'config/profiles/codexp.yaml'))).toBe(false);
       expect(existsSync(join(f.to, `config/codex/settings/${PREVIEW_SETTINGS_ITEM}.yaml`))).toBe(false);
       // The default runtime named the held one: it is dropped, not left dangling.
-      expect(await readFile(join(f.to, 'config/runtimes.yaml'), 'utf8').catch(() => '')).not.toContain('codex-work');
+      // runtimes.yaml must exist (it carries autoResume: false), so the not-contain below is not vacuous.
+      expect(existsSync(join(f.to, 'config/runtimes.yaml'))).toBe(true);
+      expect(await readFile(join(f.to, 'config/runtimes.yaml'), 'utf8')).not.toContain('defaultRuntime');
       const report = JSON.stringify(done.report);
+      expect(report).toContain('defaultRuntime codex-work');
       expect(report).toContain('runtime codex-work (Codex)');
       expect(report).toContain('profile codexp');
       expect(report).toContain('runtime silent');

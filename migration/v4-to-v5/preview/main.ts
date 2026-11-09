@@ -1,5 +1,5 @@
 /**
- * bun migration/v4-to-v5/preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|proof|clean|stop> [--v4 <home>] [--target <home>]
+ * bun migration/v4-to-v5/preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|terminal-check|proof|clean|stop> [--v4 <home>] [--target <home>]
  *
  * `guard` prints the resolved preview home after refusing one that could reach v4. `dry-run` touches nothing.
  * `start-checks` asks the host two read-only questions with the preview's exact environments and exits non-zero when either
@@ -16,11 +16,11 @@ import { cleanPreview, dryRun, PREVIEW_PROGRAMS, prepare, proofNow, shimText, wr
 import { guardTarget } from './paths.ts';
 import { PREVIEW } from './plan.ts';
 import { realRun } from './real-run.ts';
-import { startChecks } from './start-checks.ts';
+import { startChecks, terminalCheck } from './start-checks.ts';
 import { pidsHolding, stopPreview } from './stop.ts';
 
 const USAGE =
-  'usage: bun preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|proof|clean|stop> [--v4 <v4 home>] [--target <preview home>]';
+  'usage: bun preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|terminal-check|proof|clean|stop> [--v4 <v4 home>] [--target <preview home>]';
 
 async function main(argv: readonly string[]): Promise<number> {
   let parsed: ReturnType<
@@ -97,6 +97,18 @@ async function main(argv: readonly string[]): Promise<number> {
     }
     case 'start-checks': {
       const done = await startChecks({ target, v4Home, callerEnv: process.env, run: realRun });
+      for (const line of done.passed) console.log(`ok: ${line}`);
+      for (const line of done.problems) console.error(line);
+      return done.ok ? 0 : 1;
+    }
+    case 'terminal-check': {
+      const done = await terminalCheck({
+        target,
+        v4Home,
+        callerEnv: process.env,
+        run: realRun,
+        sleep: ms => Bun.sleep(ms),
+      });
       for (const line of done.passed) console.log(`ok: ${line}`);
       for (const line of done.problems) console.error(line);
       return done.ok ? 0 : 1;

@@ -48,6 +48,8 @@ export interface StartChecks {
 export const LOGIN_SHELLS: readonly { readonly shell: string; readonly flags: string }[] = [
   { shell: 'bash', flags: '-lc' },
   { shell: 'zsh', flags: '-lic' },
+  // Claude's Bash tool sources the rc file, which `bash -lc` reads only when `.profile` does.
+  { shell: 'bash', flags: '-ic' },
 ];
 
 /** PATH as `fy5` builds it: the preview's own `bin` first, nothing under v4's home or its worktree folder. */
@@ -135,4 +137,78 @@ export async function startChecks(input: StartChecksInput): Promise<StartChecks>
   }
   if (probed === 0) problems.push('refusing to start: neither bash nor zsh could be probed for the preview fy.');
   return { ok: problems.length === 0, problems, passed };
+}
+
+/** The name of the terminal the check opens, and the word it prints last so a wait cannot match the typed line. */
+export const CHECK_TERMINAL = 'fycheck';
+const DONE_WORD = 'FYCHECK-DONE';
+
+/** What the terminal is told to run: `command -v fy` and `$FY_HOME`, each on its own labelled line, then the done word. */
+export const CHECK_COMMAND = `printf 'fy=%s\\nhome=%s\\n' "$(command -v fy)" "$FY_HOME"; printf '%s%s\\n' FYCHECK- DONE`;
+
+export interface TerminalCheckInput extends StartChecksInput {
+  /** Waits between tries while the daemon is still coming up; absent, the daemon is asked once. */
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+const COMING_UP_TRIES = 15;
+
+/**
+ * 3. A TERMINAL THE PREVIEW DAEMON OPENS carries the preview environment (MAJOR-1). Run AFTER the daemon is up and only
+ * inside the owner's real preview: it opens a terminal through the daemon's own route (`fy5 terminal open --ferret`, the
+ * route the owner's web terminal uses; a ferret's tool opens it the same way), has it print `command -v fy` and
+ * `$FY_HOME`, and requires the preview's shim and the preview home. A miss says so, and the terminal is closed either way.
+ */
+export async function terminalCheck(input: TerminalCheckInput): Promise<StartChecks> {
+  const { target, callerEnv, run } = input;
+  const fy5 = join(target, 'bin', PREVIEW.wrapper);
+  const asCaller = pick(callerEnv, ['HOME', 'USER', 'PATH']);
+  const problems: string[] = [];
+  const passed: string[] = [];
+  const refuse = (sentence: string): StartChecks => ({ ok: false, problems: [...problems, sentence], passed });
+
+  let ferret: string | undefined;
+  for (let attempt = 0; attempt < COMING_UP_TRIES && ferret === undefined; attempt++) {
+    const listed = await run([fy5, 'ps', '--json'], asCaller);
+    if (listed.code === 0) {
+      try {
+        const rows: unknown = JSON.parse(listed.stdout);
+        const first = Array.isArray(rows) ? (rows[0] as { id?: unknown } | undefined) : undefined;
+        if (typeof first?.id === 'string') ferret = first.id;
+      } catch {
+        // an answer that is not JSON is read as no ferret below
+      }
+      break;
+    }
+    if (input.sleep !== undefined && attempt < COMING_UP_TRIES - 1) await input.sleep(1_000);
+    else break;
+  }
+  if (ferret === undefined)
+    return refuse(
+      `could not prove the terminal environment: ${fy5} ps --json gave no ferret to open a terminal under (the preview daemon is not answering, or the preview has no ferret yet). Start a Claude ferret with ${fy5} start, then run preview.sh terminal-check.`,
+    );
+
+  const opened = await run([fy5, 'terminal', 'open', CHECK_TERMINAL, '--ferret', ferret, CHECK_COMMAND], asCaller);
+  try {
+    if (opened.code !== 0)
+      return refuse(
+        `could not prove the terminal environment: the preview daemon refused to open a terminal (${fy5} terminal open answered ${String(opened.code)}).`,
+      );
+    await run(
+      [fy5, 'terminal', 'wait', CHECK_TERMINAL, '--ferret', ferret, '--text', DONE_WORD, '--timeout', '20000'],
+      asCaller,
+    );
+    const read = await run([fy5, 'terminal', 'read', CHECK_TERMINAL, '--ferret', ferret, '--lines', '40'], asCaller);
+    const found = /^fy=(.*)$/mu.exec(read.stdout)?.[1]?.trim() ?? '';
+    const home = /^home=(.*)$/mu.exec(read.stdout)?.[1]?.trim() ?? '';
+    const shim = join(target, 'bin', 'fy');
+    if (read.code !== 0 || found !== shim || home !== target)
+      return refuse(
+        `refusing to go on: a terminal the preview daemon opened found fy at ${found === '' ? 'nowhere' : found} and FY_HOME ${home === '' ? 'unset' : home}, not ${shim} and ${target}. A terminal you or a ferret opens would run v4's fy against v4's home. The terminal was closed. Check \`environment\` in ${join(target, 'config', 'terminals.yaml')}, then run preview.sh terminal-check.`,
+      );
+    passed.push(`a terminal the preview daemon opened finds the preview's fy (${shim}) and FY_HOME ${target}`);
+    return { ok: true, problems, passed };
+  } finally {
+    await run([fy5, 'terminal', 'close', CHECK_TERMINAL, '--ferret', ferret], asCaller);
+  }
 }

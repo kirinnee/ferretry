@@ -69,6 +69,7 @@ import {
 } from '../v4/packs.ts';
 import { v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
+import { CODEX_HELD_SENTENCE, heldRuntimeNames } from './preview-hold.ts';
 
 const PACKS_TARGET = PACKS_CONFIG as V5ConfigTarget;
 const STATE = 'state/packs';
@@ -87,6 +88,8 @@ interface Plan {
   readonly notes: string[];
   /** What to write, in order, once everything is planned and checked. */
   readonly writes: (() => Promise<void>)[];
+  /** Preview only: the runtimes held out of the preview (empty otherwise); nothing that names one is carried. */
+  readonly held: ReadonlySet<string>;
   /** Run folders that held a builder's draft.json, and runs v4 still showed as running. */
   drafts: number;
   running: number;
@@ -189,6 +192,13 @@ async function planConfig(
         });
       const via = pairOf(suggested, 'via')?.value;
       if (isScalar(via) && typeof via.value === 'string') via.value = resolve(via.value);
+      if (isScalar(via) && typeof via.value === 'string' && plan.held.has(via.value)) {
+        takeKey(routing, 'suggested');
+        plan.dropped.push({
+          what: `${V4_MODELS_GUIDE_YAML} suggested (routes to the held runtime ${via.value})`,
+          why: CODEX_HELD_SENTENCE,
+        });
+      }
     }
     appended = appendExcluded(routing, excluded);
     if (appended) count(plan, EXCLUDED_LINE_KEPT);
@@ -366,6 +376,14 @@ async function planRun(ctx: StepContext, plan: Plan, id: string, resolve: Resolv
     return;
   }
   const { session, ...job } = v4.data.job;
+  const via = isRecord(v4.data.suggestion?.suggested) ? v4.data.suggestion.suggested.via : undefined;
+  const heldName = [job.runtime, via]
+    .map(name => (typeof name === 'string' ? resolve(name) : undefined))
+    .find(name => name !== undefined && plan.held.has(name));
+  if (heldName !== undefined) {
+    plan.dropped.push({ what: `${label} (names the held runtime ${heldName})`, why: CODEX_HELD_SENTENCE });
+    return;
+  }
   const suggestion =
     v4.data.suggestion !== undefined && isRecord(v4.data.suggestion.suggested)
       ? {
@@ -573,7 +591,15 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
       ? name
       : (runtimes.find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
   const names = new Map(runtimes.map(([name, entry]) => [entry.id, name]));
-  const plan: Plan = { kept: new Map(), dropped: [], notes: [], writes: [], drafts: 0, running: 0 };
+  const plan: Plan = {
+    kept: new Map(),
+    dropped: [],
+    notes: [],
+    writes: [],
+    held: await heldRuntimeNames(ctx),
+    drafts: 0,
+    running: 0,
+  };
   const routing = await readRouting(ctx, names);
   const appended = await planConfig(ctx, plan, resolve, routing?.excluded ?? []);
   await planReplaced(ctx, plan);

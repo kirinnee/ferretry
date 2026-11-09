@@ -208,7 +208,7 @@ describe('MAJOR-B login shells find the preview fy', () => {
         : { code: 0, stdout: `${join(home, PREVIEW.xdgRunFolder)}|unset` };
     };
     await startChecks({ target: home, v4Home: V4, callerEnv, run });
-    expect(seen.length).toBe(2);
+    expect(seen.length).toBe(3);
     for (const e of seen) {
       expect(e.__ETC_PROFILE_NIX_SOURCED).toBe('1');
       expect(e.PATH?.startsWith(`${join(home, 'bin')}:`)).toBe(true);

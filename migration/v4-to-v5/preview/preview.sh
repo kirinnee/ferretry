@@ -15,8 +15,10 @@ set -euo pipefail
 #   start     two read-only checks, then fy5 daemon start (port 7458, own home, own terminal socket, no service unit).
 #             The daemon runs with NO reachable user systemd manager (a private XDG_RUNTIME_DIR, no session bus), so 5.0 runs
 #             launches directly and never reconfigures v4's slices; start REFUSES if a manager is still reachable, or if a
-#             login shell with the guard environment finds a `fy` other than the preview's. In a preview terminal you open
-#             yourself, `fy` may be v4's: type ~/.ferretry-v5/bin/fy or use fy5.
+#             login shell with the guard environment finds a `fy` other than the preview's. Once the daemon is up, start
+#             opens a terminal through the daemon's own route and requires the preview's `fy` and FY_HOME in it (terminals
+#             carry Terminals' `environment` setting); a miss stops start and closes that terminal.
+#   terminal-check  repeat that terminal proof against the running preview daemon (needs a ferret in the preview)
 #   stop      SIGTERM the process proven to hold the preview home's own daemon lock (never v4's, never a unit)
 #   status    fy5 daemon status
 #   proof     compare v4 now with the snapshot `prepare` took (kept in ~/.ferretry-v5-proof/, outside the preview home);
@@ -129,14 +131,17 @@ build)
 start)
   # Two read-only checks first, with the preview's exact environments; a failure refuses to start (nothing is started).
   #   1. the daemon's environment reaches NO user systemd manager (else it would reset v4's slices);
-  #   2. bash -lc and zsh -lic with the guard environment find the preview's own fy (else a login shell finds v4's).
+  #   2. bash -lc, bash -ic and zsh -lic with the guard environment find the preview's own fy (else a login shell finds v4's).
   [ -x "${target}/bin/fy5" ] || {
     echo "refusing to start: ${target}/bin/fy5 is missing; run '$0 prepare' first" >&2
     exit 1
   }
   run_tool start-checks
   fy5 daemon start
+  # 3. A terminal the daemon opens carries the preview environment: proved through the daemon's own route.
+  run_tool terminal-check
   ;;
+terminal-check) run_tool terminal-check ;;
 stop) run_tool stop ;;
 status) fy5 daemon status ;;
 proof) run_tool proof ;;
@@ -150,7 +155,7 @@ clean)
   run_tool clean
   ;;
 *)
-  echo "usage: $0 <dry-run|prepare|build|start|stop|status|proof|clean> [--v4 <home>] [--target <home>] [--source <5.0 checkout>]" >&2
+  echo "usage: $0 <dry-run|prepare|build|start|terminal-check|stop|status|proof|clean> [--v4 <home>] [--target <home>] [--source <5.0 checkout>]" >&2
   exit 64
   ;;
 esac

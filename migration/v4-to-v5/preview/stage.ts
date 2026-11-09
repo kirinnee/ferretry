@@ -78,7 +78,11 @@ const plainFile = async (path: string): Promise<boolean> => {
 export async function copySqlite(
   from: string,
   to: string,
-  options: { readonly onAttempt?: (attempt: number) => void } = {},
+  options: {
+    readonly onAttempt?: (attempt: number) => void;
+    /** How a sidecar is copied; a test stands in for a v4 write that deletes its journal mid-copy. */
+    readonly copySidecar?: (from: string, to: string) => Promise<void>;
+  } = {},
 ): Promise<void> {
   const scratch = await mkdtemp(join(tmpdir(), 'fy-preview-sqlite-'));
   try {
@@ -94,8 +98,19 @@ export async function copySqlite(
       await rm(copy, { force: true });
       for (const suffix of SQLITE_SIDECARS) await rm(`${copy}${suffix}`, { force: true });
       await copyFile(from, copy);
-      for (const suffix of SQLITE_SIDECARS)
-        if (await plainFile(`${from}${suffix}`)) await copyFile(`${from}${suffix}`, `${copy}${suffix}`);
+      // A rollback journal is made and deleted on every v4 write: one that vanishes between the check and the copy is a
+      // torn try (the main file still exists), retried inside the same budget, never "the database vanished".
+      let torn = false;
+      for (const suffix of SQLITE_SIDECARS) {
+        if (!(await plainFile(`${from}${suffix}`))) continue;
+        try {
+          await (options.copySidecar ?? copyFile)(`${from}${suffix}`, `${copy}${suffix}`);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          torn = true;
+        }
+      }
+      if (torn) continue;
       let source: Database | undefined;
       try {
         // Not read-only: a hot journal in the COPY is rolled back (a WAL replayed) there, on first read.
@@ -124,7 +139,7 @@ export async function copySqlite(
   }
 }
 
-async function copyOne(home: string, staging: string, path: string): Promise<void> {
+export async function copyOne(home: string, staging: string, path: string): Promise<void> {
   // A path can be swapped for a link, or hard-linked to a file elsewhere, after the walk: look again, right before the
   // copy, and copy only a plain file with one name.
   const info = await lstat(join(home, path));

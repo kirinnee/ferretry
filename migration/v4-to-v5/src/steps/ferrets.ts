@@ -6,7 +6,8 @@ import {
   FerretTokensSchema,
 } from '@ferretry/core-ferrets/contract';
 import { join } from 'node:path';
-import type { StepReport } from '../report.ts';
+import type { NotCarried, StepReport } from '../report.ts';
+import { CODEX_HELD_SENTENCE, heldRuntimeNames, holdsCodex } from './preview-hold.ts';
 import { previewFolder, rewriteTranscript } from '../v5/harness-paths.ts';
 import { configs, json, paneFor, runtimeIds, runtimeName, State } from '../v4/ferrets.ts';
 import type { Step } from './index.ts';
@@ -90,7 +91,28 @@ export const ferretsStep: Step = {
     try {
       const records = [];
       const ids = await runtimeIds(ctx.v4.fleet);
-      const sourceRecords = await configs(ctx.v4.sessions);
+      const runtimeOf = (config: { readonly agent: string }): string => {
+        const name = runtimeName(config.agent);
+        return (
+          Object.entries(ids?.runtimes ?? {}).find(
+            ([current, value]) => current === name || value.formerNames.includes(name),
+          )?.[0] ?? name
+        );
+      };
+      // The preview holds every ferret that is not a Claude Code one (or sits on a held runtime): no record, details
+      // or token row. It would be a Codex ferret again the day a Codex login is added.
+      const heldRuntimes = await heldRuntimeNames(ctx);
+      const held: NotCarried[] = [];
+      const sourceRecords = (await configs(ctx.v4.sessions)).filter(config => {
+        if (!holdsCodex(ctx)) return true;
+        const isCodex = config.harness !== 'claude';
+        if (!isCodex && !heldRuntimes.has(runtimeOf(config))) return true;
+        held.push({
+          what: `ferret ${config.id} (${isCodex ? 'Codex' : `on the held runtime ${runtimeOf(config)}`})`,
+          why: CODEX_HELD_SENTENCE,
+        });
+        return false;
+      });
       const ledgers = await prepareLedgers(ctx, sourceRecords);
       const details: DetailsSource[] = [];
       const tokens: { ferret: string; digest: string; issuedAt: string; revoked?: true; cutOff?: true }[] = [];
@@ -101,11 +123,7 @@ export const ferretsStep: Step = {
         const status = state?.status;
         const stopped =
           status === undefined || ['completed', 'failed', 'stalled', 'stopped', 'interrupted'].includes(status);
-        const name = runtimeName(config.agent);
-        const runtime =
-          Object.entries(ids?.runtimes ?? {}).find(
-            ([current, value]) => current === name || value.formerNames.includes(name),
-          )?.[0] ?? name;
+        const runtime = runtimeOf(config);
         const preview = ctx.preview === true;
         const record = FerretRecordSchema.parse({
           format: 1,
@@ -175,7 +193,7 @@ export const ferretsStep: Step = {
       return {
         ...base,
         status: 'converted',
-        notCarried: [...this.notCarried, ...documents.notCarried],
+        notCarried: [...this.notCarried, ...held, ...documents.notCarried],
         kept: [
           { what: 'ferret records (including archived sessions)', count: records.length },
           { what: 'ferret credential hashes', count: tokens.length },

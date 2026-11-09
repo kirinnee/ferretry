@@ -395,6 +395,7 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
   test('MAJOR-3 free text that names a v4 path does not refuse the home, and is not redacted', async () => {
     await liveFerretWithV4Paths();
     await fixtureOf.session('talk1', {
+      harness: 'claude',
       prompt: `read ${v4}/fleet/notes.md and ${join(root, 'home')}/.claude/settings.json`,
     });
     const target = fixtureOf.to;
@@ -407,8 +408,11 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
 
   test('MAJOR-3 a ferret env, folder or flag, or an MCP or runtime command, that names v4 or a harness home is refused by file and field', async () => {
     await liveFerretWithV4Paths();
-    await fixtureOf.session('hit1', { harnessFlags: ['--settings', '/home/example/.claude/settings.json'] });
-    await fixtureOf.session('hit2', { harnessFlags: [`--add-dir=${v4}/fleet`] });
+    await fixtureOf.session('hit1', {
+      harness: 'claude',
+      harnessFlags: ['--settings', '/home/example/.claude/settings.json'],
+    });
+    await fixtureOf.session('hit2', { harness: 'claude', harnessFlags: [`--add-dir=${v4}/fleet`] });
     const target = fixtureOf.to;
     const done = await prepare({ v4Home: v4, target, lock, now, home: '/home/example' });
     expect(done.gate).toEqual([
@@ -500,8 +504,8 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
 
   test('m3 a ferret whose folder is inside v4 or its worktree folder gets the preview workspace; others keep theirs', async () => {
     await liveFerretWithV4Paths();
-    await fixtureOf.session('wt1', { cwd: `${v4}-worktrees/job` });
-    await fixtureOf.session('elsewhere1', { cwd: '/srv/project' });
+    await fixtureOf.session('wt1', { harness: 'claude', cwd: `${v4}-worktrees/job` });
+    await fixtureOf.session('elsewhere1', { harness: 'claude', cwd: '/srv/project' });
     const target = fixtureOf.to;
     const done = await prepare({ v4Home: v4, target, lock, now, home: join(root, 'home') });
     expect(done.gate).toEqual([]);

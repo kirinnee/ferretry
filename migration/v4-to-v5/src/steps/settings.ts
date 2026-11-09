@@ -41,6 +41,7 @@ import { ENDPOINTS_CONFIG, LOGINS_CONFIG, MODELS_CONFIG } from '@ferretry/plugin
 import { MCP_CONFIG } from '@ferretry/plugin-mcp/contract';
 import { MODEL_SET_ITEMS, PROFILE_ITEMS, RUNTIME_ITEMS, RUNTIMES_CONFIG } from '@ferretry/plugin-runtimes/contract';
 import { SKILLS_CONFIG } from '@ferretry/plugin-skills/contract';
+import { TerminalsConfigSchema } from '@ferretry/plugin-terminals/contract';
 import { USAGE_CONFIG } from '@ferretry/plugin-usage/contract';
 import { WardenFileSchema } from '@ferretry/plugin-warden/contract';
 import { lstat, readFile } from 'node:fs/promises';
@@ -66,6 +67,7 @@ import type { Step, StepContext } from './index.ts';
 const WARDEN_CONFIG: V5ConfigTarget = { shape: 'file', file: 'warden.yaml', schema: WardenFileSchema };
 const ACCOUNTS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'accounts.yaml', schema: AccountsConfigSchema };
 const BROWSERS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'browsers.yaml', schema: BrowsersConfigSchema };
+const TERMINALS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'terminals.yaml', schema: TerminalsConfigSchema };
 
 /** v4's `LEGACY_TRIAGE_LAYERS` and `DEFAULT_WARDEN_JEV_ACTS` (`packages/protocol/src/lib/warden.ts`). */
 const LEGACY_TRIAGE_LAYERS: Readonly<Record<string, { jev: boolean; llm: boolean }>> = {
@@ -436,7 +438,11 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
   }
 }
 
-async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: readonly string[] }> {
+/** `codexRuntimes` is {@link PREVIEW_CODEX_RUNTIMES}; a test injects the switch on to see the Codex settings item. */
+export async function buildPlan(
+  ctx: StepContext,
+  codexRuntimes: boolean = PREVIEW_CODEX_RUNTIMES,
+): Promise<Plan & { readonly ignored: readonly string[] }> {
   let ids: Awaited<ReturnType<typeof runtimeIds>>;
   try {
     ids = await runtimeIds(ctx.v4.fleet);
@@ -476,8 +482,18 @@ async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: r
         new Document({ description: describe, settings: { env: { ...ctx.previewShellEnv } } }, YAML_OPTIONS),
       );
       count(plan, 'preview shell environment (settings item)');
+      // Terminals the daemon opens (the owner's web terminal and a ferret's) are not a harness child: they get only the
+      // kernel's {PATH, HOME}, so the same environment is Terminals' own `environment`, passed to every terminal.
+      place(
+        plan,
+        TERMINALS_CONFIG,
+        undefined,
+        'the preview',
+        new Document({ environment: { ...ctx.previewShellEnv } }, YAML_OPTIONS),
+      );
+      count(plan, 'preview terminal environment (terminals.yaml)');
       // What Codex ferrets will need once 5.0 applies Codex settings items; written only with the switch on.
-      if (PREVIEW_CODEX_RUNTIMES) {
+      if (codexRuntimes) {
         place(
           plan,
           CODEX_SETTINGS,
@@ -491,7 +507,7 @@ async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: r
         count(plan, 'preview shell environment (settings item)');
       }
     }
-    if (!PREVIEW_CODEX_RUNTIMES) holdCodexRuntimes(plan);
+    if (!codexRuntimes) holdCodexRuntimes(plan);
   }
   return { ...plan, ignored: listing.ignored };
 }
