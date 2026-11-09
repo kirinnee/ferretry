@@ -86,15 +86,30 @@ describe('a registered project’s skills over the real imports root', () => {
     expect(await files.read(`${w.skills}/soft/SKILL.md`, 1000)).toBeUndefined();
   });
 
-  test('R-0198 a skills folder that is itself a link, or sits under one, answers nothing', async () => {
+  // The kernel follows a link in the scoped folder's own path (probed on this very root with the adapter check removed:
+  // it lists and reads the outside tree), so these two tests are the only proof of the adapter's `realPath` guard. Each
+  // link points at a REAL skills tree (`<name>/SKILL.md`), so with the guard gone the stolen skill is listed and read.
+  test('R-0198 a skills folder that is itself a link to a real skills tree answers nothing', async () => {
     const w = await world();
+    await mkdir(join(w.parent, 'outside', 'skills', 'stolen'), { recursive: true });
+    await writeFile(join(w.parent, 'outside', 'skills', 'stolen', 'SKILL.md'), doc('stolen'));
     await rm(join(w.project, '.claude'), { recursive: true });
-    await mkdir(join(w.parent, 'outside', 'claude'), { recursive: true });
-    await symlink(join(w.parent, 'outside', 'steal'), join(w.parent, 'outside', 'claude', 'skills'));
+    await mkdir(join(w.project, '.claude'));
+    await symlink(join(w.parent, 'outside', 'skills'), w.skills);
+    const files = w.files();
+    expect(await files.list(w.skills, 10)).toEqual([]);
+    expect(await files.read(`${w.skills}/stolen/SKILL.md`, 1000)).toBeUndefined();
+  });
+
+  test('R-0198 a skills folder that sits under a link to a real skills tree answers nothing', async () => {
+    const w = await world();
+    await mkdir(join(w.parent, 'outside', 'claude', 'skills', 'stolen'), { recursive: true });
+    await writeFile(join(w.parent, 'outside', 'claude', 'skills', 'stolen', 'SKILL.md'), doc('stolen'));
+    await rm(join(w.project, '.claude'), { recursive: true });
     await symlink(join(w.parent, 'outside', 'claude'), join(w.project, '.claude'));
     const files = w.files();
     expect(await files.list(w.skills, 10)).toEqual([]);
-    expect(await files.read(`${w.skills}/SKILL.md`, 1000)).toBeUndefined();
+    expect(await files.read(`${w.skills}/stolen/SKILL.md`, 1000)).toBeUndefined();
   });
 
   test('R-0198 a root nobody registered, and a project with no skills folder, read nothing', async () => {

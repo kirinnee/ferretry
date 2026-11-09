@@ -19,7 +19,13 @@ const withoutTrailingSlash = (path: string): string => path.replace(/(?<=.)\/+$/
  * - the folder must be exactly `<a registered root>/.claude/skills` or `.agents/skills`; any other folder, a folder of
  *   a root nobody registered, and a path that is not `<that folder>/<name>/SKILL.md` answer nothing;
  * - a skills folder that is a link, or sits under one, answers nothing: its real path must be the folder as named.
- *   The kernel's own scoping then keeps every listed folder and file inside it (`link_escape`).
+ *   The kernel keeps every listed folder and file INSIDE the scoped folder (`link_escape`, `hard_link`), but it FOLLOWS a
+ *   link in the scoped folder's own path (probed on the real `imports` root), so this `realPath` check is the one guard
+ *   for the folder itself. The real-disk test is its proof.
+ *
+ * Residual: the check runs in `#files()` and the read follows through the same lexical handle, so a skills folder swapped
+ * for a link between the two lets one bounded `SKILL.md` read (at most the caller's `maxBytes`) go through the link. The
+ * listed-only rule and the fence still apply, and whoever can swap the folder already writes the project on this host.
  */
 export class ProjectSkillFiles implements SkillFilesPort {
   constructor(
