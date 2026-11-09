@@ -715,7 +715,7 @@ describe('a change to one login', () => {
     // The login change is saved; the republish's own "nothing was changed" is about the republish and sits in its own
     // sentence, never after a "the login changed, but …" that it would contradict.
     should((failure as Error).message).match(
-      /^the login change is saved\. Republishing the runtimes was refused: nothing was changed: no id could be minted$/u,
+      /^the login change is saved\. Republishing the runtimes was refused: nothing was changed: no id could be minted\. Fix that, then apply any change to publish the runtimes again\.$/u,
     );
     should((failure as Error).message).not.match(/changed, but/u);
   });

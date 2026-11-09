@@ -1192,7 +1192,7 @@ export class FleetCatalogService {
       const refused = error instanceof FleetCatalogRefusal && error.code === 'fleet_change_refused';
       throw new FleetCatalogRefusal(
         'fleet_change_failed',
-        `the login change is saved. Republishing the runtimes ${refused ? 'was refused' : 'failed'}: ${errorMessage(error)}`,
+        `the login change is saved. Republishing the runtimes ${refused ? 'was refused' : 'failed'}: ${errorMessage(error).replace(/[.\s]+$/u, '')}. Fix that, then apply any change to publish the runtimes again.`,
       );
     }
     return { outcome: 'login-changed', result: 'applied', ...summary, ...moved };

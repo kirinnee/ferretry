@@ -234,6 +234,36 @@ describe('renderChangeOutcome', () => {
       .and.match(/\/q: gone$/m);
   });
 
+  it('BG-031 should not open a list of paths that is empty after an incomplete rollback that only moved things aside', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [],
+        configurationLanded: ['runtimes/work.yaml'],
+      },
+    });
+    should(rendered.text).not.containEql('could not be put back');
+    should(rendered.text).startWith('link failed (denied).');
+  });
+
+  it('BG-031 OM7 should name the landed configuration file after an incomplete rollback, and say what to do', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'link',
+        reason: 'denied',
+        unrestored: [{ path: '/p', reason: 'gone' }],
+        configurationLanded: ['runtimes/work.yaml'],
+      },
+    });
+    should(rendered.text).containEql('The configuration runtimes/work.yaml was written first and is NOT rolled back');
+    should(rendered.text).containEql('Fix the cause and apply again, or remove it to undo the change.');
+  });
+
   it('should report a sign-out', () => {
     should(renderChangeOutcome({ outcome: 'signed-out', credential: { id: 'claude-you' } })).eql({
       ok: true,

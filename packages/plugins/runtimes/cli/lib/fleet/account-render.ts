@@ -182,7 +182,9 @@ function renderApply(apply: ApplyOutcome): RenderedOutcome {
       return {
         ok: false,
         text: [
-          `${apply.failedOperation} failed (${apply.reason}) and these could not be put back:`,
+          apply.unrestored.length === 0
+            ? `${apply.failedOperation} failed (${apply.reason}).`
+            : `${apply.failedOperation} failed (${apply.reason}) and these could not be put back:`,
           ...indent(
             apply.unrestored.map(
               path => `${path.path}: ${path.reason}${path.backup ? ` (the original is at ${path.backup})` : ''}`,
