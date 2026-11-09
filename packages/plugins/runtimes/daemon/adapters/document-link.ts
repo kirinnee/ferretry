@@ -6,8 +6,11 @@
  *
  * WHAT MAKES THE FOLLOW SAFE, each a sentence and each tested:
  *
- *  - the target is judged by its REAL path: a sign-in file's name (any case) is refused, and a target in the daemon's home
- *    or any private place is refused by the kernel's fence (this root is an owner's root, so the fence applies);
+ *  - the target is judged by its REAL path: a target whose real basename (after every link) is a sign-in file's name (any
+ *    case) is refused; a target in the daemon's home or any private place is refused by the kernel's fence (this root is an
+ *    owner's root, so the fence applies). Only the real basename is judged, so a SECOND name of a sign-in file with another
+ *    basename is no sign-in name to this check: inside a proven-immutable store (root-owned and world-readable, so nothing a
+ *    local user cannot read) it is read by S49, and outside the store every hard link is refused by S49;
  *  - the target must be a REGULAR FILE (never a folder, a pipe, a socket or a device), and no larger than the caller's bound
  *    or the 16 MiB cap below, whichever is smaller; a file with a second name is read only where the kernel's own hard-link
  *    rule (S49) allows it, which is a proven-immutable store (an optimised `/nix/store` shares names) and nowhere else, so
@@ -26,8 +29,8 @@
  * Declared residual: a link to a valid JSON or TOML file anywhere the owner's own user can read (outside the daemon's
  * private places) is read and returned as that document, as the reader of today did; the caller reads it as settings.
  * Inside that window a folder ABOVE the target swapped for a link to another folder after the judge can make the read
- * return a same-named file there: a regular file of one name that parses, outside the daemon's private places, never a
- * sign-in file's name. A link to a name that does not exist inside the daemon's home answers absent like any link to
+ * return a same-named file there: a regular file that parses (with a second name only inside a proven-immutable store),
+ * outside the daemon's private places, never one whose own name is a sign-in file's. A link to a name that does not exist inside the daemon's home answers absent like any link to
  * nothing, so whoever owns the link can tell whether that name exists there (never a byte of it; the reader of today
  * answered the same).
  */

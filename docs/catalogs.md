@@ -1414,24 +1414,35 @@ Against the readers of the same homes before, reader by reader:
   link inside the home only, and a walk or a file read follows none.
 - **The three documents.** They follow a link out of the home, as the MCP document reader did, but under bounds that
   reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file outside a proven-immutable store, the daemon's
-  home, a sign-in file, or something that does not parse as the document is refused, and the refusal names only the link.
+  home, a target whose real name is a sign-in file's, or something that does not parse as the document is refused, and the
+  refusal names only the link. A sign-in file's second name under another basename is refused outside the store (it is a
+  hard link) and read inside it (see below).
 
 A hard-linked `SKILL.md` is not listed. A file read is checked after it was read: if the name no longer reaches the file
 that was judged, the bytes are dropped, and a followed document that grew after it was judged is refused rather than
 returned cut short. A second name on a followed document is the kernel's own hard-link rule (S49): allowed only inside a
 proven-immutable store such as `/nix/store`, so a home-manager link into an optimised store keeps working, and refused
-everywhere else.
+everywhere else. What is refused: a target whose real basename is a sign-in file's (any letter case, after every link),
+and any hard link that is not store-shaped. What is allowed: a store-shaped hard link (a file owned by root, in a closed
+folder chain under the store), whatever its basename. So a second name of a sign-in file under another basename inside the
+store is read; that exposes nothing, because the store is root-owned and world-readable and only root can add a name there.
+The refusal of a hard link costs about 200 ms (the kernel retries the check about twenty times, five milliseconds apart,
+before it gives up, which is meant for a publish leftover); that retry is the kernel's and is left as it is, so up to
+three refused documents cost about 0.6 s.
 
 Three things the document follow still leaves, declared:
 
 - **A swap of a folder above the target.** A folder above the target swapped for a link to another folder after the
-  judge can make the read return that folder's same-named file: a regular file of one name that parses, outside the
-  daemon's private places, and never one with a sign-in file's name.
+  judge can make the read return that folder's same-named file: a regular file that parses (with a second name only
+  inside a proven-immutable store), outside the daemon's private places, and never one whose own name is a sign-in file's.
 - **A link to nothing in the daemon's home.** It answers absent, like any link to nothing, so whoever owns the link can
   tell whether a name exists there, never a byte of it; the MCP document reader answered the same.
-- **A target under `/proc`, `/sys` or `/etc`.** It reads as a regular file of size 0, so it is read into memory (at
-  most 16 MiB) and then dropped because it does not parse as the document; nothing of it is returned, as the MCP
-  document reader also read it.
+- **A target under `/proc`, `/sys` or `/etc`.** What happens differs per case, and nothing of the content is returned.
+  A `/proc` file reports size 0, so one byte is asked for and read, and the read is refused as grown. A `/sys` file is
+  read up to the size it reports (often 4096 bytes) and dropped because it does not parse as the document. An `/etc` file
+  has its real size and is read up to it, then dropped for the same reason. The MCP document reader read all of these
+  too. A `/proc` file that reads EMPTY answers `''`, exactly as an empty file inside the home does (declared, not
+  refused; the test of an empty linked document pins that answer).
 
 ## Links (catalogs 3f)
 
