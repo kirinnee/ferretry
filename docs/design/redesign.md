@@ -2469,7 +2469,7 @@ The rules:
 | `events`    | publish its declared types                                                                                                                                               | string event names                   |
 | `jobs`      | interval, cron or once-after-start; main or worker lane                                                                                                                  | hand arming                          |
 | `workers`   | a Bun worker from its own package                                                                                                                                        | per-worker wiring in `fyd.ts`        |
-| `spawn`     | a child process from its declared programs, inside a ferret's limits when acting for one                                                                                 | `Bun.spawn` everywhere               |
+| `spawn`     | a child process from its declared programs (literal, its items' commands, or its resolver's answers, §7.7), inside a ferret's limits when acting for one                 | `Bun.spawn` everywhere               |
 | `fetch`     | HTTP to its declared hosts                                                                                                                                               | free `fetch`                         |
 | `act`       | the act runner: `act(target, op, fn)` asks `InputHolds.decide(target, op, actor)` inside the target's queue right before `fn`; the actor is stamped from the call (§4.7) | the hold check passed by hand        |
 | `redaction` | the bound `Redaction` (§7.3)                                                                                                                                             | the redactor passed by hand          |
@@ -2555,6 +2555,20 @@ scoped handle:
     Its folder is never listable. The leaf is never a link, never a second hard link, never a device, and the name
     is checked again after the open. A hard link (`GuardedFolder.link`) stays refused: copy, or `linkTo`.
 - `remove(path)` on a root: Remove of a folder needs descriptor reach; refused without it (macOS until the descriptor bracket lands), [own] BEFORE-GREEN(runtimes) closed by the bracket unit. An owner root already refused every remove (S44); an internal root (`fleet`, `agent-homes`) now refuses a FOLDER too, because a by-path remove after one re-proof of the parent deletes an outside tree if the parent is swapped for a link in between. The code is `no_descriptor_reach`. A file or link leaf of an internal root is still removed on such a host (the sessions root's markers and author records, tidy's reclaim): the leaf is looked at without following it and unlinked by path after one re-proof of its folder. GAP: a parent swapped in between can delete ONE same-named file outside the root, never a tree; closed by the descriptor bracket unit.
+- **Reach of a declared program or host** (`permissions.spawn`, `permissions.network`). An entry is a literal name,
+  `{ items: kind }` or `{ resolver: name }`; `'*'` is a core piece's alone.
+  - `{ items: kind }` is what the kind's items name, read when the call is made. It is the union of the installed data
+    plugins' items (fixed at boot: an install is pinned) and the items of the config collection named for the kind,
+    owned by the plugin whose manifest `kinds` includes `'item'` (MCP's `config/mcp/<name>.yaml`). The config side is
+    **live**: it is read again whenever that collection moves (`config.watch`, a held edit is not in effect), so an
+    edit that drops an item takes its reach away at once. Only `command` (a program) and `url` (a host) are read, and
+    one with `*` in it names nothing. `plugin-graph` fails a plugin other than the collection's owner that declares
+    `{ items: kind }` for a config-backed kind: an item's reach is its owner's act to grant.
+  - `{ resolver: name }` works in `spawn` as it does in `network`: the plugin's own daemon half answers, called with
+    nothing about the request, and the call is allowed only when an answer equals the program exactly (an absolute
+    answer allows only that path, a bare name allows that basename). An answer with `*` in it allows nothing, and a
+    missing, throwing or malformed resolver refuses. One `resolvers` section serves both fields. The testing host
+    refuses alike (one rule, `host/permissions.ts`).
 - A plugin that must know whether a command is installed asks `kernel.paths.which(name, { directories? })`
   (`permissions.which`): one plain command name, the caller's absolute folders then the daemon's `PATH`, empty and
   relative entries dropped, at most 64 folders, the first regular executable file wins. No shell, nothing executed;
