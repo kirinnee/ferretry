@@ -9,6 +9,8 @@ import {
   type CatalogInstallChange,
   ProposalApplyRequestSchema,
   type ResolveResult,
+  type RuntimeHome,
+  type RuntimeHomeReader,
   type RuntimeId,
   RuntimeIdSchema,
   type RuntimesApi,
@@ -18,6 +20,8 @@ import {
 
 export interface FakeRuntimes extends RuntimesApi {
   setRuntimes(runtimes: readonly RuntimeSummary[], defaultRuntime?: RuntimeId): void;
+  /** The homes `homes()` answers, and the reader `home(id)` hands out for each id (an id with no reader gets none). */
+  setHomes(homes: readonly RuntimeHome[], readers?: Readonly<Record<string, RuntimeHomeReader>>): void;
   readonly installed: readonly CatalogInstallChange[];
 }
 
@@ -25,6 +29,8 @@ export interface FakeRuntimes extends RuntimesApi {
 export function fakeRuntimes(): FakeRuntimes {
   let runtimes: readonly RuntimeSummary[] = [];
   let defaultRuntime: RuntimeId | undefined;
+  let homes: readonly RuntimeHome[] = [];
+  let readers: Readonly<Record<string, RuntimeHomeReader>> = {};
   const installed: CatalogInstallChange[] = [];
   const get = async (id: RuntimeId): Promise<RuntimeSummary | undefined> => runtimes.find(runtime => runtime.id === id);
   return {
@@ -40,9 +46,9 @@ export function fakeRuntimes(): FakeRuntimes {
       if (!found.launch.available) return { ok: false, refusal: 'not_signed_in', sentence: found.launch.reason };
       return { ok: true, runtime: found };
     },
-    // No fleet is published in memory: there are no homes, and so no reader.
-    homes: async () => [],
-    home: () => undefined,
+    // No fleet is published in memory: there are no homes until a test sets them, and a reader only for a listed id.
+    homes: async () => homes,
+    home: id => (homes.some(home => home.id === id) ? readers[id] : undefined),
     installCatalogItem: async change => {
       installed.push(change);
       return {
@@ -53,6 +59,10 @@ export function fakeRuntimes(): FakeRuntimes {
     setRuntimes: (next, nextDefault) => {
       runtimes = next;
       defaultRuntime = nextDefault;
+    },
+    setHomes: (next, nextReaders = {}) => {
+      homes = next;
+      readers = nextReaders;
     },
     get installed() {
       return installed;
@@ -73,6 +83,10 @@ export async function runtimesConformance(make: () => RuntimesApi): Promise<Resu
   const chosen = await api.default();
   if (chosen !== undefined && (await api.get(chosen)) === undefined)
     failures.push('default() names a runtime that exists');
+  // The homes: each id once, and a reader only for an id `homes()` lists.
+  const homes = await api.homes();
+  if (new Set(homes.map(home => home.id)).size !== homes.length) failures.push('homes() lists each id once');
+  if (api.home('no-such-home') !== undefined) failures.push('home() is undefined for an id homes() does not list');
   // A change names one intent and never carries a configuration document.
   if (AccountChangeRequestSchema.safeParse({ change: { kind: 'runtime.remove', name: 'x', document: {} } }).success)
     failures.push('a change is strict: it carries no document');

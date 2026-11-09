@@ -5,8 +5,11 @@
  * would not change a test's answer.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmod, link, mkdir, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { RootHandle, RootsPort } from '@ferretry/kernel/contract';
+import { nodeFs } from '../../../../../core/kernel/host/adapters/node-fs.ts';
+import { rootsPortFor } from '../../../../../core/kernel/host/roots.ts';
 import { RuntimeHomeUnreadable } from '../../../contract/index.ts';
 import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
@@ -54,15 +57,21 @@ const runtime = (world: FleetWorld, id: string, name: string, wrapper: string, h
 /** Publishes a manifest naming the homes the options list. */
 async function publish(
   world: FleetWorld,
-  options: { readonly second?: boolean; readonly outside?: boolean; readonly work?: boolean } = {},
+  options: {
+    readonly second?: boolean;
+    readonly outside?: boolean;
+    readonly work?: boolean;
+    readonly extra?: readonly ReturnType<typeof account>[];
+  } = {},
 ): Promise<void> {
   const accounts = [
     ...(options.work === false ? [] : [account(world, WORK, 'claude-work', `${world.fleet}/homes/${WORK}`)]),
     ...(options.second === true
       ? [account(world, SECOND, 'codex-home', `${world.fleet}/homes/${SECOND}`, 'codex')]
       : []),
-    // An operator's own folder is not a fleet home: it is not listed, and nothing reaches it.
+    // An operator's own folder is served read-only through the `harness-home` root.
     ...(options.outside === true ? [account(world, OUTSIDE, 'claude-away', `${world.person}/.claude-away`)] : []),
+    ...(options.extra ?? []),
   ];
   const manifest = buildFleetManifest({
     generatedAt: '2027-01-15T08:00:00.000Z',
@@ -116,9 +125,38 @@ describe('R1 homes() reads fleet/manifest.json', () => {
     expect(homes[1]?.runtimes.map(String)).toEqual(['codex-home']);
   });
 
-  it('does not list a home an operator placed outside fleet/homes (nothing reaches it)', async () => {
-    const { api } = await seed({ outside: true });
+  it('lists a home an operator placed outside fleet/homes, under its account id, and none that is not a plain folder away from the fleet', async () => {
+    const { world, api } = await seed({ outside: true });
+    expect((await api.homes()).map(home => [home.id, home.home])).toEqual([
+      [WORK, `${world.fleet}/homes/${WORK}`],
+      [OUTSIDE, `${world.person}/.claude-away`],
+    ]);
+    const homes = [
+      'relative/home',
+      `${world.person}/../escape`,
+      `${world.fleet}/setup`,
+      world.fleet,
+      `${world.person}/a\\b`,
+    ];
+    await publish(world, {
+      extra: homes.map((home, index) =>
+        account(world, `00000000-0000-4000-8000-00000000009${index}`, `claude-bad${index}`, home),
+      ),
+    });
     expect((await api.homes()).map(home => home.id)).toEqual([WORK]);
+  });
+
+  it('serves an id one folder only: an outside account whose id is a fleet home folder name is not listed', async () => {
+    const { world, api } = await seed();
+    // The first account's home folder is `homes/<SECOND>`; the second account's ID is <SECOND> but its folder is elsewhere.
+    await publish(world, {
+      work: false,
+      extra: [
+        account(world, WORK, 'claude-first', `${world.fleet}/homes/${SECOND}`),
+        account(world, SECOND, 'claude-dup', `${world.person}/.claude-dup`),
+      ],
+    });
+    expect((await api.homes()).map(home => [home.id, home.home])).toEqual([[SECOND, `${world.fleet}/homes/${SECOND}`]]);
   });
 });
 
@@ -357,9 +395,15 @@ describe('R1 the skill reads cover listed folders only', () => {
   it('never follows a link inside a skill folder, a hard link, a folder as a file, or a file as a folder', async () => {
     const { home, world, skills } = await withSkills();
     const unreadable = { ok: false, reason: 'unreadable' } as const;
-    await symlink(join(homeFolder(world), 'private.txt'), join(skills, 'plain', 'leak.md'));
+    // `leak.md` links to a file with ONE name in the same folder: the kernel would follow it, so only the reader refuses.
+    await writeFile(join(skills, 'plain', 'other.txt'), SECRET);
+    await symlink(join(skills, 'plain', 'other.txt'), join(skills, 'plain', 'leak.md'));
     await symlink(join(world.fleet), join(skills, 'plain', 'linked-dir'));
     await link(join(homeFolder(world), 'private.txt'), join(skills, 'plain', 'hard.md'));
+    expect(await home.skillFile('plain', 'other.txt', 100)).toEqual({
+      ok: true,
+      bytes: new TextEncoder().encode(SECRET),
+    });
     expect(await home.skillFile('plain', 'leak.md', 100)).toEqual(unreadable);
     expect(await home.skillFile('plain', 'linked-dir/ids.json', 100)).toEqual(unreadable);
     expect(await home.skillFile('plain', 'hard.md', 100)).toEqual(unreadable);
@@ -433,5 +477,322 @@ describe('R1 the skill reads cover listed folders only', () => {
     } finally {
       server.close();
     }
+  });
+
+  it('refuses a leaf link inside a managed asset folder (to fleet/ids.json) and lists it as a link', async () => {
+    const { home, world } = await withSkills();
+    await symlink(join(world.fleet, 'ids.json'), join(world.fleet, 'assets', 'skills', 'managed-skill', 'leak.md'));
+    expect(await home.skillFile('managed-skill', 'leak.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+    expect((await home.skillTree('managed-skill', { entries: 10, depth: 3 }))?.entries).toContainEqual({
+      path: 'leak.md',
+      type: 'symlink',
+      size: 0,
+    });
+  });
+
+  it('opens no root at all for a path the reader refuses itself (an empty, ., .. or backslash segment)', async () => {
+    const { world } = await seed();
+    await mkdir(join(homeFolder(world), 'skills', 'plain'), { recursive: true });
+    await writeFile(join(homeFolder(world), 'skills', 'plain', 'SKILL.md'), '# plain\n');
+    const opened: string[] = [];
+    const watching: Pick<RootsPort, 'root'> = {
+      root: (name, scope) => {
+        opened.push(`${name}:${scope?.subfolder ?? ''}`);
+        return world.roots.root(name, scope);
+      },
+    };
+    const api = fleetHomes(watching, new FleetPublication());
+    await api.homes();
+    const home = api.home(WORK);
+    opened.length = 0;
+    for (const bad of ['../x', 'a/../x', './x', 'a//x', '', 'a\\x', '..'])
+      expect(await home?.skillFile('plain', bad, 100)).toEqual({ ok: false, reason: 'unreadable' });
+    expect(opened).toEqual([]);
+    expect((await home?.skillFile('plain', 'SKILL.md', 100))?.ok).toBe(true);
+    expect(opened.length).toBeGreaterThan(0);
+  });
+});
+
+/** Roots whose handles swap `victim` for a link to `target` just before the first readBytes (a link swapped in after the listing). */
+function racing(roots: RootsPort, victim: string, target: string): Pick<RootsPort, 'root'> {
+  let swapped = false;
+  return {
+    root: (name, scope) => {
+      const real = roots.root(name, scope);
+      return new Proxy(real, {
+        get(on, key) {
+          const value = Reflect.get(on, key) as unknown;
+          if (key !== 'readBytes') return typeof value === 'function' ? value.bind(on) : value;
+          return async (...args: Parameters<RootHandle['readBytes']>) => {
+            if (!swapped) {
+              swapped = true;
+              await rm(victim);
+              await symlink(target, victim);
+            }
+            return await on.readBytes(...args);
+          };
+        },
+      });
+    },
+  };
+}
+
+describe('R1 M1 a link swapped in between the listing and the read is refused and no byte leaves', () => {
+  const OTHER_CLAUDE = 'OTHER-HOME-CLAUDE-JSON';
+
+  async function racingWorld() {
+    const { world } = await seed({ second: true });
+    const skills = join(homeFolder(world), 'skills');
+    const asset = join(world.fleet, 'assets', 'skills', 'managed-skill');
+    await mkdir(join(skills, 'plain'), { recursive: true });
+    await writeFile(join(skills, 'plain', 'SKILL.md'), 'y'.repeat(64));
+    await symlink(asset, join(skills, 'managed-skill'));
+    await writeFile(join(asset, 'SKILL.md'), 'x'.repeat(64));
+    await mkdir(homeFolder(world, SECOND), { recursive: true });
+    await writeFile(join(homeFolder(world, SECOND), '.claude.json'), OTHER_CLAUDE);
+    await writeFile(join(homeFolder(world), '.claude.json'), 'SAME-HOME-CLAUDE-JSON');
+    return { world, skills, asset };
+  }
+
+  async function raced(world: FleetWorld, victim: string, target: string, name: string) {
+    const api = fleetHomes(racing(world.roots, victim, target), new FleetPublication());
+    await api.homes();
+    return await api.home(WORK)?.skillFile(name, 'SKILL.md', 100);
+  }
+
+  it('a managed skill file swapped for a link to another home is unreadable', async () => {
+    const { world, asset } = await racingWorld();
+    const read = await raced(
+      world,
+      join(asset, 'SKILL.md'),
+      join(homeFolder(world, SECOND), '.claude.json'),
+      'managed-skill',
+    );
+    expect(read).toEqual({ ok: false, reason: 'unreadable' });
+  });
+
+  it('a managed skill file swapped for a link to fleet/ids.json is unreadable', async () => {
+    const { world, asset } = await racingWorld();
+    await writeFile(join(world.fleet, 'ids.json'), SECRET);
+    expect(await raced(world, join(asset, 'SKILL.md'), join(world.fleet, 'ids.json'), 'managed-skill')).toEqual({
+      ok: false,
+      reason: 'unreadable',
+    });
+  });
+
+  it("a plain skill file swapped for a link to another home's file, or to its own home's .claude.json, is unreadable", async () => {
+    const { world, skills } = await racingWorld();
+    const victim = join(skills, 'plain', 'SKILL.md');
+    expect(await raced(world, victim, join(homeFolder(world, SECOND), '.claude.json'), 'plain')).toEqual({
+      ok: false,
+      reason: 'unreadable',
+    });
+    await rm(victim);
+    await writeFile(victim, 'y'.repeat(64));
+    expect(await raced(world, victim, join(homeFolder(world), '.claude.json'), 'plain')).toEqual({
+      ok: false,
+      reason: 'unreadable',
+    });
+  });
+});
+
+describe('R1 m2 a FY_HOME reached through a link still shows its managed skills', () => {
+  it('compares the resolved link target with the RESOLVED fleet folder', async () => {
+    const world = await fleetWorld();
+    const through = join(world.parent, 'linked-home');
+    await symlink(world.home, through);
+    const roots = rootsPortFor(
+      nodeFs(() => crypto.randomUUID()),
+      { home: through, plugin: 'runtimes', worktrees: join(world.parent, 'worktrees') },
+      ['fleet', 'harness-home'],
+      () => undefined,
+      { harnessFiles: ['.claude.json'], setMode: true },
+    );
+    const base = roots.root('fleet').resolve('.');
+    if (!base.ok) throw new Error('the fleet root did not open');
+    const named = base.value.endsWith('/.') ? base.value.slice(0, -2) : base.value;
+    // The root names the fleet folder through the link, not by its real path: that is the case this proves.
+    expect(named.startsWith(through)).toBe(true);
+    const asset = join(world.fleet, 'assets', 'skills', 'managed-skill');
+    await mkdir(asset, { recursive: true });
+    await writeFile(join(asset, 'SKILL.md'), '# managed\n');
+    await mkdir(join(world.fleet, 'homes', WORK, 'skills'), { recursive: true });
+    await symlink(asset, join(world.fleet, 'homes', WORK, 'skills', 'managed-skill'));
+    await writeFile(
+      join(world.fleet, 'manifest.json'),
+      JSON.stringify(
+        buildFleetManifest({
+          generatedAt: '2027-01-15T08:00:00.000Z',
+          accounts: [account(world, WORK, 'claude-work', `${named}/homes/${WORK}`)],
+          runtimes: [],
+        }),
+      ),
+    );
+    const api = fleetHomes(roots, new FleetPublication());
+    await api.homes();
+    const home = api.home(WORK);
+    expect((await home?.skills(10))?.map(entry => [entry.name, entry.managed])).toEqual([['managed-skill', true]]);
+    expect(await home?.skillManifest('managed-skill', 100)).toBe('# managed\n');
+  });
+});
+
+describe('R1 m3 every read runs whole inside ONE publication.reading, the manifest read ungated inside it', () => {
+  it('waits for an apply in flight, then answers', async () => {
+    const { world } = await seed();
+    await writeFile(join(homeFolder(world), 'settings.json'), '{}');
+    const publication = new FleetPublication();
+    const api = fleetHomes(world.roots, publication);
+    await api.homes();
+    let release: () => void = () => undefined;
+    const apply = publication.publishing(
+      async () =>
+        await new Promise<void>(resolve => {
+          release = resolve;
+        }),
+    );
+    let answered = false;
+    const read = api
+      .home(WORK)
+      ?.document('settings.json', 100)
+      .then(text => {
+        answered = true;
+        return text;
+      });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(answered).toBe(false);
+    release();
+    await apply;
+    expect(await read).toBe('{}');
+  });
+
+  it('takes the gate once per call and never nests it', async () => {
+    const { world } = await seed();
+    await writeFile(join(homeFolder(world), 'settings.json'), '{}');
+    await mkdir(join(homeFolder(world), 'skills', 'plain'), { recursive: true });
+    await writeFile(join(homeFolder(world), 'skills', 'plain', 'SKILL.md'), '# plain\n');
+    const inner = new FleetPublication();
+    let depth = 0;
+    let deepest = 0;
+    let taken = 0;
+    const publication: Pick<FleetPublication, 'reading'> = {
+      reading: async read => {
+        taken += 1;
+        depth += 1;
+        deepest = Math.max(deepest, depth);
+        try {
+          return await inner.reading(read);
+        } finally {
+          depth -= 1;
+        }
+      },
+    };
+    const api = fleetHomes(world.roots, publication);
+    await api.homes();
+    const home = api.home(WORK);
+    const calls: readonly (() => Promise<unknown> | undefined)[] = [
+      () => api.homes(),
+      () => home?.document('settings.json', 100),
+      () => home?.skills(5),
+      () => home?.skillManifest('plain', 100),
+      () => home?.skillFile('plain', 'SKILL.md', 100),
+      () => home?.skillTree('plain', { entries: 5, depth: 2 }),
+    ];
+    for (const call of calls) {
+      taken = 0;
+      await call();
+      expect(taken).toBe(1);
+    }
+    expect(deepest).toBe(1);
+  });
+});
+
+describe('R1 m5 every escape is typed', () => {
+  it('names the manifest path, and no content, when the manifest is damaged', async () => {
+    const { world, api } = await seed();
+    const home = await reader(world, api);
+    await mkdir(join(homeFolder(world), 'skills', 'plain'), { recursive: true });
+    await writeFile(join(world.fleet, 'manifest.json'), `{"not":"a manifest ${SECRET}`);
+    const path = `${world.fleet}/manifest.json`;
+    const failures = await Promise.all(
+      [
+        () => api.homes(),
+        () => home.document('settings.json', 100),
+        () => home.skills(5),
+        () => home.skillTree('plain', { entries: 5, depth: 2 }),
+      ].map(call =>
+        call().then(
+          () => undefined,
+          (error: unknown) => error as Error,
+        ),
+      ),
+    );
+    for (const failure of failures) {
+      expect(failure).toBeInstanceOf(RuntimeHomeUnreadable);
+      expect(failure?.message).toBe(`The fleet manifest at ${path} could not be read.`);
+    }
+    expect(await home.skillManifest('plain', 100)).toBeUndefined();
+    expect(await home.skillFile('plain', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+  });
+
+  it('maps a kernel refusal while skillTree lists skills/ to RuntimeHomeUnreadable', async () => {
+    const { world, api } = await seed();
+    const home = await reader(world, api);
+    await mkdir(join(homeFolder(world), 'skills', 'plain'), { recursive: true });
+    await chmod(join(homeFolder(world), 'skills'), 0);
+    const failure = await home.skillTree('plain', { entries: 5, depth: 2 }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await chmod(join(homeFolder(world), 'skills'), 0o700);
+    expect(failure).toBeInstanceOf(RuntimeHomeUnreadable);
+    expect((failure as Error).message).toContain('That skill folder could not be listed (');
+  });
+});
+
+describe('R1 m4 a home the manifest places outside fleet/homes is served read-only through harness-home', () => {
+  async function away() {
+    const { world, api } = await seed({ outside: true });
+    const folder = join(world.person, '.claude-away');
+    await mkdir(join(folder, 'skills', 'plain'), { recursive: true });
+    await writeFile(join(folder, 'skills', 'plain', 'SKILL.md'), '# away\n');
+    await writeFile(join(folder, 'settings.json'), '{"away":true}');
+    await api.homes();
+    const home = api.home(OUTSIDE);
+    if (home === undefined) throw new Error('the outside home is not published');
+    return { world, folder, home };
+  }
+
+  it('lists it, reads its three documents and its skills, and bounds them like a fleet home', async () => {
+    const { world, folder, home } = await away();
+    expect(await home.document('settings.json', 100)).toBe('{"away":true}');
+    expect(await home.document('config.toml', 100)).toBeNull();
+    await expect(home.document('settings.json', 3)).rejects.toThrow('is larger than the 3 bytes');
+    expect(await home.skills(10)).toEqual([
+      { name: 'plain', manifest: `${world.person}/.claude-away/skills/plain/SKILL.md`, managed: false },
+    ]);
+    expect(await home.skillManifest('plain', 100)).toBe('# away\n');
+    expect((await home.skillTree('plain', { entries: 10, depth: 2 }))?.entries).toEqual([
+      { path: 'SKILL.md', type: 'file', size: 7 },
+    ]);
+    expect(await home.skillManifest('plain', 3)).toBeUndefined();
+    await writeFile(join(folder, 'skills', 'plain', 'a.md'), 'aa');
+    expect(await home.skillFile('plain', 'a.md', 100)).toEqual({ ok: true, bytes: new TextEncoder().encode('aa') });
+  });
+
+  it('refuses a link out of it (a document, a skill folder, and a file inside a skill) and skips every link in skills/', async () => {
+    const { world, folder, home } = await away();
+    await writeFile(join(world.parent, 'elsewhere.json'), SECRET);
+    await symlink(join(world.parent, 'elsewhere.json'), join(folder, '.claude.json'));
+    await expect(home.document('.claude.json', 100)).rejects.toThrow('.claude.json is a link, which is never read.');
+    await mkdir(join(world.parent, 'outside-skill'), { recursive: true });
+    await writeFile(join(world.parent, 'outside-skill', 'SKILL.md'), SECRET);
+    await symlink(join(world.parent, 'outside-skill'), join(folder, 'skills', 'leaves'));
+    // Even a link into the fleet's assets is not followed out of an operator's folder.
+    await symlink(join(world.fleet, 'assets', 'skills', 'managed-skill'), join(folder, 'skills', 'managed-skill'));
+    await symlink(join(world.parent, 'elsewhere.json'), join(folder, 'skills', 'plain', 'leak.md'));
+    expect((await home.skills(10)).map(entry => entry.name)).toEqual(['plain']);
+    expect(await home.skillFile('leaves', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+    expect(await home.skillFile('managed-skill', 'SKILL.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
+    expect(await home.skillFile('plain', 'leak.md', 100)).toEqual({ ok: false, reason: 'unreadable' });
   });
 });

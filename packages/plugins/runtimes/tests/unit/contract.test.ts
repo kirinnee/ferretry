@@ -6,6 +6,7 @@ import {
   AccountChangeRequestSchema,
   CloneBundleSchema,
   ModelSetFileSchema,
+  type RuntimeHomeReader,
   ProfileFileSchema,
   RuntimeFileSchema,
   RuntimeIdSchema,
@@ -28,6 +29,34 @@ describe('runtimes contract', () => {
   test('the fake passes the conformance suite', async () => {
     const result = await runtimesConformance(fakeRuntimes);
     expect(result.ok).toBe(true);
+  });
+
+  test('the fake answers the homes a test sets, and a reader only for a listed id', async () => {
+    const fake = fakeRuntimes();
+    const home = {
+      id: 'h1',
+      harness: 'claude-code',
+      runtimes: [],
+      home: '/fleet/homes/h1',
+      wrapper: '/fleet/bin/w',
+    } as const;
+    const reader = {} as RuntimeHomeReader;
+    expect(await fake.homes()).toEqual([]);
+    expect(fake.home('h1')).toBeUndefined();
+    fake.setHomes([home], { h1: reader, h2: reader });
+    expect(await fake.homes()).toEqual([home]);
+    expect(fake.home('h1')).toBe(reader);
+    expect(fake.home('h2')).toBeUndefined();
+    fake.setHomes([home]);
+    expect(fake.home('h1')).toBeUndefined();
+    expect((await runtimesConformance(() => fake)).ok).toBe(true);
+    fake.setHomes([home, home]);
+    expect((await runtimesConformance(() => fake)).ok).toBe(false);
+  });
+
+  test('the conformance suite fails an implementation that answers a reader for an unlisted id', async () => {
+    const result = await runtimesConformance(() => ({ ...fakeRuntimes(), home: () => ({}) as RuntimeHomeReader }));
+    expect(result.ok).toBe(false);
   });
 
   test('the manifest owns sixteen routes and requires Logins', () => {

@@ -8,12 +8,15 @@ import type { RuntimeId } from './index.ts';
 
 /** One harness home the fleet catalogue published: the runtimes that launch into it. */
 export interface RuntimeHome {
-  /** The folder under `fleet/homes/`, a plain name. */
+  /**
+   * The folder under `fleet/homes/`, a plain name; for a home the fleet placed elsewhere (an operator's own folder,
+   * served read-only), the id of its account.
+   */
   readonly id: string;
   readonly harness: HarnessKey;
   /** Wrapper names that launch into it, deduped, in manifest order. */
   readonly runtimes: readonly RuntimeId[];
-  /** Absolute, for display and for an inventory row's `source`. NEVER a read root. */
+  /** Absolute, for display and for an inventory row's `source`. A consumer never opens it: only the reader reads a home. */
   readonly home: string;
   /** The absolute wrapper path, display only. */
   readonly wrapper: string;
@@ -46,7 +49,10 @@ export type RuntimeHomeFileRead =
   | { readonly ok: true; readonly bytes: Uint8Array }
   | { readonly ok: false; readonly reason: 'too_big' | 'unreadable' };
 
-/** A document or home that cannot be served: a link, not a regular file, over the bound, or no longer published. The message names no value. */
+/**
+ * A document or home that cannot be served: a link, not a regular file, over the bound, no longer published, or a
+ * manifest that cannot be read (the message then names the manifest's path). The message names no value.
+ */
 export class RuntimeHomeUnreadable extends Error {
   constructor(message: string) {
     super(message);
@@ -77,7 +83,10 @@ export interface RuntimeHomeReader {
 /** The homes half of `RuntimesApi`. */
 export interface RuntimeHomesApi {
   homes(): Promise<readonly RuntimeHome[]>;
-  /** `undefined` for an id `homes()` does not answer now. Every reader call re-checks that. */
+  /**
+   * `undefined` for an id `homes()` does not answer. Call `homes()` first: this answers from the last read of the
+   * manifest in this daemon, so it is `undefined` until `homes()` has been read. Every reader call re-checks that.
+   */
   home(id: string): RuntimeHomeReader | undefined;
 }
 
