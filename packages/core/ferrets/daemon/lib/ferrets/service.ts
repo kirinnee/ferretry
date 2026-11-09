@@ -20,7 +20,11 @@ import type {
   HarnessQueueOptions,
   HarnessRefusal,
   RunnerDeliveryFailure,
+  RunnerComposerCleared,
+  RunnerComposerSubmitted,
+  RunnerHeldAt,
   RunnerLook,
+  RunnerPaneObservation,
   MoveFailure,
   MoveOptions,
   ResumeOptions,
@@ -1130,8 +1134,12 @@ export class FerretsService implements FerretsApi {
         if (!found.ok) return found;
         // Ruling #45: one look first. A ferret visibly at work is answered busy NOW, nothing typed, rather than after
         // the delivery's readiness wait gives up on a prompt that will not come until the turn ends.
-        if (midTurn(await found.value.runner.look?.(found.value.handle).catch(() => undefined)))
-          return err({ refused: 'not_ready', why: 'busy' });
+        const look = await found.value.runner.look?.(found.value.handle).catch(() => undefined);
+        if (midTurn(look)) return err({ refused: 'not_ready', why: 'busy' });
+        // A pane parked on a tool permission waits for a person, so the readiness wait would only run out its ~27 s while
+        // holding the ferret's one send lane (an interrupt and every later send queue behind it): answered at once.
+        // Startup dialogs (`prompt`, `dialog`) are NOT answered here: the delivery's own wait answers them.
+        if (look?.permission === true) return err({ refused: 'not_ready', why: 'dialog' });
         // The runner guards each write with kernel.act on this pane itself; a hold it meets types nothing.
         const delivered = await written(async () => await found.value.runner.deliver(found.value.handle, delivery));
         if (delivered.ok) this.ports.delivered?.(ferret);
@@ -1176,6 +1184,65 @@ export class FerretsService implements FerretsApi {
         try {
           // As `deliver`: the runner acts on this pane for its one keystroke, so it is NOT wrapped in a second act here.
           return ok(await stopTurn(handle, { key: stop.key, whenIdle }));
+        } catch (error) {
+          const failure = runnerDeliveryFailure(error);
+          if (failure?.kind === 'held') return err({ refused: failure.code });
+          if (failure?.kind === 'not_ready' && failure.why === 'exited') return err({ refused: 'no_pane' });
+          throw error;
+        }
+      },
+      // ── the send path's pane look and composer acts (additive). None is wrapped in a second act here: the runner acts
+      // on the pane for each write it makes, and the reads write nothing.
+      observe: async (): Promise<Result<RunnerPaneObservation, HarnessRefusal>> => {
+        const found = pane();
+        if (!found.ok) return found;
+        const { handle, runner } = found.value;
+        const observe = runner.observe?.bind(runner);
+        if (observe === undefined) return err({ refused: 'plugin_unavailable' });
+        const seen = await observe(handle).catch(() => undefined);
+        return seen === undefined ? err({ refused: 'no_pane' }) : ok(seen);
+      },
+      heldAt: async (text: string): Promise<Result<RunnerHeldAt | undefined, HarnessRefusal>> => {
+        const found = pane();
+        if (!found.ok) return found;
+        const { handle, runner } = found.value;
+        const heldAt = runner.heldAt?.bind(runner);
+        if (heldAt === undefined) return err({ refused: 'plugin_unavailable' });
+        // A pane that cannot be read REJECTS (it is not "not held"): the caller decides what an unread pane allows.
+        return ok(await heldAt(handle, text));
+      },
+      clearComposer: async (text: string): Promise<Result<RunnerComposerCleared, HarnessDeliveryFailure>> => {
+        const found = pane();
+        if (!found.ok) return found;
+        const { handle, runner } = found.value;
+        const clear = runner.clearComposer?.bind(runner);
+        if (clear === undefined) return err({ refused: 'plugin_unavailable' });
+        return await written(async () => await clear(handle, text));
+      },
+      submitComposer: async (
+        text: string,
+        strict?: boolean,
+      ): Promise<Result<RunnerComposerSubmitted, HarnessDeliveryFailure>> => {
+        const found = pane();
+        if (!found.ok) return found;
+        const { handle, runner } = found.value;
+        const submit = runner.submitComposer?.bind(runner);
+        if (submit === undefined) return err({ refused: 'plugin_unavailable' });
+        return await written(async () => await submit(handle, text, strict));
+      },
+      stopActive: async (): Promise<Result<RunnerPaneObservation | undefined, HarnessRefusal>> => {
+        const found = pane();
+        if (!found.ok) return found;
+        const { handle, runner } = found.value;
+        const record = this.registry.get(ferret);
+        const stop = record === undefined ? undefined : this.ports.harness(record.harness)?.turnStop;
+        const stopActive = runner.stopActiveTurn?.bind(runner);
+        if (stop === undefined || stopActive === undefined) return err({ refused: 'plugin_unavailable' });
+        // NEVER pressed idle (unlike `interrupt`, whose idle rule is the person's own Stop): a send-now's stop is for an
+        // ACTIVE turn only. An idle press would answer a permission prompt or dismiss a question the person has not
+        // decided; the runner presses only while the pane it reads shows work (`shouldPressStopKey`).
+        try {
+          return ok(await stopActive(handle, { key: stop.key, whenIdle: false }));
         } catch (error) {
           const failure = runnerDeliveryFailure(error);
           if (failure?.kind === 'held') return err({ refused: failure.code });

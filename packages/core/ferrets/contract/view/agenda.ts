@@ -7,7 +7,7 @@ import { InstantSchema, PositiveIntegerSchema } from './common.ts';
  * the schemas it embeds.
  */
 
-/** @pending ferrets: Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported */
+/** @pending ferrets: Info tabs Agenda, Tasks, Context, Surfaces and Warden are not ported */
 export const MAX_AGENDA_SUBJECT_LENGTH = 240;
 
 const singleLine = (maximum: number) =>
@@ -46,5 +46,5 @@ export const SessionAgendaSummarySchema = z.object({
   /** The ferret is STOPPED on the owner: idle, with at least one item on the owner's turn. */
   stopped: z.literal(true).optional(),
 });
-/** @pending ferrets: Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported */
+/** @pending ferrets: Info tabs Agenda, Tasks, Context, Surfaces and Warden are not ported */
 export type SessionAgendaSummary = z.infer<typeof SessionAgendaSummarySchema>;

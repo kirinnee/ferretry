@@ -199,7 +199,7 @@ describe('the fence (§7.7, §9.3)', () => {
     expect(await readFile(`${work}/sub-moved/out.txt`, 'utf8')).toBe('written');
   });
 
-  test('S44 without descriptor reach nothing outside the daemon folders is removed', async () => {
+  test('S44 without descriptor reach an owner root removes nothing and an internal root removes a file, never a folder', async () => {
     const { home, work } = await layout();
     const blind = nodeFs(() => 'r', { descriptorFolder: `${work}/no-such-descriptor-folder` });
     const owner = rootOf(home, 'work', { ferret: 'F1' as FerretId }, { fs: blind, work });
@@ -212,6 +212,11 @@ describe('the fence (§7.7, §9.3)', () => {
     if (!own.ok) throw new Error('resolve');
     await internal.remove(own.value);
     expect(await readdir(`${home}/state/codex/agent-homes/F1`)).toEqual([]);
+    await mkdir(`${home}/state/codex/agent-homes/F1/tree`);
+    const tree = internal.resolve('tree');
+    if (!tree.ok) throw new Error('resolve');
+    await expect(internal.remove(tree.value)).rejects.toMatchObject({ refusal: 'no_descriptor_reach' });
+    expect(await readdir(`${home}/state/codex/agent-homes/F1`)).toEqual(['tree']);
   });
 
   test('S44 a folder tree is removed one name at a time through descriptors, never following a link out', async () => {
