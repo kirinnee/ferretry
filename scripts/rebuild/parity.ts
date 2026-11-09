@@ -353,15 +353,16 @@ const REOWNED: Readonly<Record<string, string>> = {
   'J-0008': 'browsers',
   'J-0097': 'browsers',
   'J-0126': 'browsers',
-  // Auto-resume, the session attachments (the PDF unlock worker and the unlocked copy's eviction), the inline observer,
-  // the fleet event socket's timer, the send pause and the write-behind session index: Ferrets'.
+  // Auto-resume, the inline observer, the fleet event socket's timer and the write-behind session index: Ferrets'.
   'J-0016': 'ferrets',
-  'J-0062': 'ferrets',
-  'J-0193': 'ferrets',
   'J-0106': 'ferrets',
   'J-0137': 'ferrets',
-  'J-0140': 'ferrets',
   'J-0159': 'ferrets',
+  // The session attachments (the PDF unlock worker and the unlocked copy's eviction) and the send pause are
+  // Conversation's (conversation/daemon/attachments, conversation/daemon/delivery).
+  'J-0062': 'conversation',
+  'J-0193': 'conversation',
+  'J-0140': 'conversation',
   // The board sweeps and the GitHub watcher are Board's.
   'J-0019': 'board',
   'J-0025': 'board',
