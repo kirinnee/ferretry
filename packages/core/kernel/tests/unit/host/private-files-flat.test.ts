@@ -442,6 +442,26 @@ describe('PF-budget the real bound of a `*` collection (65,536 places: the folde
     const fence = await fenceOf(fs, l.home, LIST);
     expect(fence.closed.has(file)).toBe(true);
   }, 60_000);
+
+  test('PF-budget on a disk that gives a file a device of its own a bind alias of the unindexed 65,536th holder, on a device that is not its root’s, is refused', async () => {
+    const l = await home();
+    const decoy = `${l.agentHome}/${ENV}`;
+    await writeFile(decoy, 'rotated-secret-alias');
+    const sessions = overlayDisk(longLived(REAL, l, { holders: 65_536 }));
+    const file = (await sessions.identity(`${l.agentHome}/own.txt`))?.device as bigint;
+    const folder = (await sessions.identity(l.agentHome))?.device as bigint;
+    // The device of the root's own folder is not the device of the file: the alias keeps the source FILE's device.
+    expect(file).not.toBe(folder);
+    const unindexed = (await sessions.identity(`${l.sessions}/h65535/${ENV}`)) as FileIdentity;
+    const fs: HostFs = {
+      ...sessions,
+      identity: async path =>
+        path === decoy ? { ...unindexed, links: 1, inode: 9_000_000_000n } : await sessions.identity(path),
+    };
+    const root = agentHomeRoot(fs, l.home);
+    expect(await refusal(() => root.readText(named(root, ENV)))).toBe('refused:fenced');
+    expect(await refusal(() => root.readText(named(root, 'own.txt')))).toBe('refused:fenced');
+  }, 60_000);
 });
 
 describe('PF-loud a place past its budget is announced once per change, never silent', () => {
