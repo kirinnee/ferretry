@@ -3,8 +3,12 @@ import {
   draftRequest,
   EMPTY_MCP_DRAFT,
   parseEnvLines,
+  FALLBACK_FERRET_NAME,
+  othersOutcome,
+  otherLiveFerrets,
   projectFolderName,
   reloadOutcome,
+  reloadReport,
   splitCommandLine,
 } from '../../../app/lib/add-model.ts';
 
@@ -115,7 +119,7 @@ describe('mcp#1 Reload reads Ferrets’ RestartResult for this ferret', () => {
       reloadOutcome({ ...none, failed: [{ id: 'f1', reason: 'the pane did not answer' }] }, 'f1', 'Marin'),
     ).toEqual({
       kind: 'failed',
-      sentence: 'Marin could not be reloaded: the pane did not answer',
+      sentence: 'Marin could not be reloaded: the pane did not answer.',
     });
   });
 
@@ -125,6 +129,114 @@ describe('mcp#1 Reload reads Ferrets’ RestartResult for this ferret', () => {
       sentence: 'Ferretry did not say whether Marin reloaded.',
     });
     expect(reloadOutcome({ ...none, restarted: [{ id: 'other' }] }, 'f1', 'Marin').kind).toBe('failed');
+  });
+});
+
+describe('mcp#1 Reload — the words', () => {
+  const none = { restarted: [], queued: [], skipped: [], failed: [] };
+
+  it('an empty detail from the daemon falls back to the reason, never to ()', () => {
+    expect(reloadOutcome({ ...none, queued: [{ id: 'f1', reason: 'mid-turn', detail: '  ' }] }, 'f1', 'Marin')).toEqual(
+      {
+        kind: 'queued',
+        sentence: 'Marin reloads at its next idle moment (it is working on a turn).',
+      },
+    );
+  });
+
+  it('a reason that already ends a sentence is not given a second full stop, and one that does not gets it', () => {
+    expect(reloadOutcome({ ...none, failed: [{ id: 'f1', reason: 'No pane.' }] }, 'f1', 'Marin')).toEqual({
+      kind: 'failed',
+      sentence: 'Marin could not be reloaded: No pane.',
+    });
+  });
+
+  it('the placeholder name reads lower-case mid-sentence, a real name keeps its own', () => {
+    expect(reloadOutcome(none, 'f1', FALLBACK_FERRET_NAME).kind === 'failed').toBe(true);
+    expect(reloadOutcome(none, 'f1', FALLBACK_FERRET_NAME)).toEqual({
+      kind: 'failed',
+      sentence: 'Ferretry did not say whether this ferret reloaded.',
+    });
+    expect(reloadOutcome(none, 'f1', 'Marin')).toEqual({
+      kind: 'failed',
+      sentence: 'Ferretry did not say whether Marin reloaded.',
+    });
+  });
+});
+
+describe('mcp#1 the other ferrets on this login', () => {
+  const ferret = (id: string, runtime: string | undefined, state: 'starting' | 'working' | 'idle' | 'stopped') => ({
+    id,
+    name: `name-${id}`,
+    runtime,
+    state,
+  });
+  const all = [
+    ferret('f1', 'marin', 'idle'),
+    ferret('f2', 'marin', 'working'),
+    ferret('f3', 'marin', 'starting'),
+    ferret('f4', 'marin', 'stopped'),
+    ferret('f5', 'other', 'idle'),
+    ferret('f6', undefined, 'idle'),
+  ];
+
+  it('are the live ferrets on the same runtime, never this one, a stopped one or another runtime', () => {
+    expect(otherLiveFerrets('marin', 'f1', all).map(row => row.id)).toEqual(['f2', 'f3']);
+    expect(otherLiveFerrets('marin', 'f1', [])).toEqual([]);
+  });
+
+  it('are counted per outcome, and a ferret the answer does not name is not counted as reloaded', () => {
+    const result = {
+      restarted: [{ id: 'f2' }],
+      queued: [{ id: 'f3', reason: 'mid-turn' as const }],
+      skipped: [{ id: 'f4', reason: 'not-running' as const }],
+      failed: [{ id: 'f5', name: 'Five', reason: 'the pane did not answer' }],
+    };
+    expect(othersOutcome(result, ['f2', 'f3', 'f4', 'f5', 'f6', 'f7'])).toEqual({
+      sentence:
+        'Other ferrets: 1 reloaded, 1 waits for its next idle moment, 1 not reloaded (not running), 1 could not be reloaded: Five: the pane did not answer, Ferretry did not say whether 2 reloaded.',
+      allRestarted: false,
+    });
+    expect(othersOutcome({ ...result, restarted: [{ id: 'f2' }, { id: 'f3' }], queued: [] }, ['f2', 'f3'])).toEqual({
+      sentence: 'Other ferrets: 2 reloaded.',
+      allRestarted: true,
+    });
+    expect(
+      othersOutcome(
+        {
+          restarted: [],
+          queued: [
+            { id: 'f2', reason: 'mid-turn' },
+            { id: 'f3', reason: 'mid-turn' },
+          ],
+          skipped: [],
+          failed: [{ id: 'f4', reason: 'x' }],
+        },
+        ['f2', 'f3', 'f4'],
+      ).sentence,
+    ).toBe('Other ferrets: 2 wait for their next idle moment, 1 could not be reloaded: f4: x.');
+  });
+
+  it('close the dialog only when this ferret and every other one restarted', () => {
+    const none = { restarted: [], queued: [], skipped: [], failed: [] };
+    expect(reloadReport({ ...none, restarted: [{ id: 'f1' }] }, 'f1', 'Marin', [])).toEqual({
+      closes: true,
+      retry: false,
+      sentence: '',
+    });
+    expect(reloadReport({ ...none, restarted: [{ id: 'f1' }, { id: 'f2' }] }, 'f1', 'Marin', ['f2']).closes).toBe(true);
+    expect(reloadReport({ ...none, restarted: [{ id: 'f1' }] }, 'f1', 'Marin', ['f2'])).toEqual({
+      closes: false,
+      retry: false,
+      sentence: 'Marin reloaded. Other ferrets: Ferretry did not say whether 1 reloaded.',
+    });
+    expect(
+      reloadReport({ ...none, failed: [{ id: 'f1', reason: 'no' }], restarted: [{ id: 'f2' }] }, 'f1', 'Marin', ['f2']),
+    ).toEqual({
+      closes: false,
+      retry: true,
+      sentence: 'Marin could not be reloaded: no. Other ferrets: 1 reloaded.',
+    });
   });
 });
 

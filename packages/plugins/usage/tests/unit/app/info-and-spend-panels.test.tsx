@@ -111,12 +111,12 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
     }
   });
 
-  it('usage#0 says a priced cost is this ferret’s, and links to its insights', async () => {
+  it('usage#0 says a priced cost is this ferret’s, and links to the machine’s Insights', async () => {
     const view = await panel([rawRow({ id: 'f1', equivalentApiCostUsdMicros: 2_000_000 })], feedOf());
     try {
       expect(text(view.container)).toContain('$2.00this ferret');
       const link = view.container.querySelector('[data-info-open-insights]');
-      expect(link?.textContent).toBe('Open this ferret’s insights');
+      expect(link?.textContent).toBe('Open Insights');
       expect(link?.getAttribute('href') ?? '').toContain('insights');
     } finally {
       await view.unmount();

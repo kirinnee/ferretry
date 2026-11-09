@@ -151,7 +151,7 @@ export function FerretUsageInfoPanel({
               to={daemonInsightsPath(connection.daemonId)}
               {...(router ? { onNavigate: router.navigate } : {})}
             >
-              Open this ferret’s insights
+              Open Insights
             </RouteLink>
           </Row>
           <h3 className="m-0 mt-2 text-meta font-semibold text-muted">Login quota · {row.agent ?? 'unknown login'}</h3>

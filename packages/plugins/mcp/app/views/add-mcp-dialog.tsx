@@ -1,8 +1,9 @@
 /** The Add MCP server form in a dialog: Escape and a click outside close it; focus stays inside while it is open. */
 import { useDialogFocus } from '@ferretry/app/ui';
 import { X } from 'lucide-react';
-import { useId, useRef } from 'react';
-import type { McpClient } from '../lib/client.ts';
+import { useEffect, useId, useRef, useState } from 'react';
+import { FALLBACK_FERRET_NAME } from '../lib/add-model.ts';
+import { type FerretRow, type McpClient, readFerret } from '../lib/client.ts';
 import { AddMcpForm } from './add-mcp-form.tsx';
 
 export function AddMcpDialog({
@@ -13,11 +14,23 @@ export function AddMcpDialog({
 }: {
   readonly client: McpClient;
   readonly ferretId: string;
-  /** The ferret's display name, for the words. */
-  readonly name: string;
+  /** The ferret's display name, when the surface already has it; otherwise it is read from Ferrets. */
+  readonly name?: string;
   readonly onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const [ferret, setFerret] = useState<FerretRow | null>(null);
+  // This ferret's name and runtime come from Ferrets' own route; a refused read leaves the words general, never blocks the form.
+  useEffect(() => {
+    let live = true;
+    readFerret(client, ferretId).then(
+      row => live && setFerret(row),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [client, ferretId]);
   const titleId = useId();
   const { onKeyDown } = useDialogFocus(true, ref, onClose);
   return (
@@ -43,7 +56,13 @@ export function AddMcpDialog({
             <X aria-hidden="true" size={15} />
           </button>
         </header>
-        <AddMcpForm agentName={name} client={client} ferretId={ferretId} host={{ close: onClose }} />
+        <AddMcpForm
+          agentName={name ?? ferret?.name ?? FALLBACK_FERRET_NAME}
+          client={client}
+          ferretId={ferretId}
+          host={{ close: onClose }}
+          {...(ferret?.runtime === undefined ? {} : { login: ferret.runtime })}
+        />
       </div>
     </div>
   );

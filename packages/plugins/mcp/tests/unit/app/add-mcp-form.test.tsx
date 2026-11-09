@@ -322,3 +322,123 @@ describe('mcp#1 Reload this ferret says what the restart did', () => {
     );
   });
 });
+
+describe('mcp#1 Also reload the other ferrets on this login', () => {
+  const FERRETS = 'GET /v1/ferrets';
+  const row = (id: string, runtime: string | undefined, state: string) => ({
+    id,
+    name: `Ferret ${id}`,
+    runtime,
+    state,
+    harness: 'claude-code',
+    folder: '/w',
+  });
+  const everyone = [
+    row('f1', 'marin', 'idle'),
+    row('f2', 'marin', 'working'),
+    row('f3', 'marin', 'starting'),
+    row('f4', 'marin', 'stopped'),
+    row('f5', 'other', 'idle'),
+    row('f6', undefined, 'idle'),
+  ];
+  const none = { restarted: [], queued: [], skipped: [], failed: [] };
+
+  const addedOnLogin = async (
+    restart: unknown,
+    ferrets: unknown = everyone,
+    preview = loginPreview({ ferrets: 4 }),
+  ) => {
+    const made = await open(
+      {
+        [LISTING]: { project: null },
+        [PREVIEW_LOGIN]: preview,
+        [ADD_LOGIN]: loginAdded,
+        [FERRETS]: ferrets,
+        [RESTART]: restart,
+      },
+      { login: 'marin' },
+    );
+    await fillCommand(made.root);
+    await submit(made.root);
+    return made;
+  };
+  const label = (root: HTMLElement): string | null => root.querySelector('.fy-action-form__check')?.textContent ?? null;
+
+  it('mcp#1 offers the live ferrets on the same runtime, not this one, not a stopped one, not another runtime', async () => {
+    const { root } = await addedOnLogin(none);
+    expect(label(root)).toBe('Also reload the other 2 ferrets on this login now');
+  });
+
+  it('mcp#1 says “ferret” for one other, and offers nothing when the preview says only this ferret runs there', async () => {
+    const one = await addedOnLogin(none, [row('f1', 'marin', 'idle'), row('f2', 'marin', 'idle')]);
+    expect(label(one.root)).toBe('Also reload the other 1 ferret on this login now');
+    await mounted?.unmount();
+    mounted = undefined;
+    const alone = await addedOnLogin(none, everyone, loginPreview({ ferrets: 1 }));
+    expect(label(alone.root)).toBeNull();
+    expect(alone.calls.some(call => call.route === FERRETS)).toBe(false);
+  });
+
+  it('mcp#1 offers nothing for a project add, and nothing when the list cannot be read', async () => {
+    const project = await open({
+      [PREVIEW_PROJECT]: projectPreview(),
+      [ADD_PROJECT]: projectAdded,
+    });
+    await fillCommand(project.root);
+    await submit(project.root);
+    expect(label(project.root)).toBeNull();
+    expect(project.calls.some(call => call.route === FERRETS)).toBe(false);
+    await mounted?.unmount();
+    mounted = undefined;
+    const unreadable = await addedOnLogin(none, new Error('down'));
+    expect(label(unreadable.root)).toBeNull();
+  });
+
+  it('mcp#1 reloads only this ferret until the box is ticked, then sends this ferret and the others by id', async () => {
+    const restart = { ...none, restarted: [{ id: 'f1' }, { id: 'f2' }, { id: 'f3' }] };
+    const plain = await addedOnLogin(restart);
+    await click(plain.root, '[data-add-mcp-reload]');
+    expect(plain.calls.find(call => call.route === RESTART)?.body).toEqual({ scope: 'ids', ids: ['f1'] });
+    await mounted?.unmount();
+    mounted = undefined;
+
+    const all = await addedOnLogin(restart);
+    await click(all.root, '.fy-action-form__check input');
+    await click(all.root, '[data-add-mcp-reload]');
+    expect(all.calls.find(call => call.route === RESTART)?.body).toEqual({ scope: 'ids', ids: ['f1', 'f2', 'f3'] });
+    expect(all.closed).toEqual(['closed']);
+  });
+
+  it('mcp#1 never claims more than restarted holds: waiting and failed ferrets are counted and the dialog stays', async () => {
+    const { root, closed } = await addedOnLogin({
+      restarted: [{ id: 'f1' }, { id: 'f2' }],
+      queued: [{ id: 'f3', reason: 'mid-turn' }],
+      skipped: [],
+      failed: [],
+    });
+    await click(root, '.fy-action-form__check input');
+    await click(root, '[data-add-mcp-reload]');
+    expect(closed).toEqual([]);
+    expect(text(root, '[data-add-mcp-queued]')).toBe(
+      'Marin reloaded. Other ferrets: 1 reloaded, 1 waits for its next idle moment.',
+    );
+    expect(root.querySelector('[data-add-mcp-reload]')).toBeNull();
+    expect(root.querySelector('.fy-action-form__check')).toBeNull();
+  });
+
+  it('mcp#1 when this ferret fails the others are still reported, and Reload stays for another try', async () => {
+    const { root, closed } = await addedOnLogin({
+      restarted: [{ id: 'f2' }, { id: 'f3' }],
+      queued: [],
+      skipped: [],
+      failed: [{ id: 'f1', reason: 'the pane did not answer' }],
+    });
+    await click(root, '.fy-action-form__check input');
+    await click(root, '[data-add-mcp-reload]');
+    expect(closed).toEqual([]);
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
+      'could not be reloaded: the pane did not answer. Other ferrets: 2 reloaded.',
+    );
+    expect(root.querySelector('[data-add-mcp-reload]')).not.toBeNull();
+  });
+});

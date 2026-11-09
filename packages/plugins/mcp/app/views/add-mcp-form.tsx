@@ -9,7 +9,8 @@
  *   3. The daemon's preview — the diff for a project, the profile it lands in for a login — appears under the form as soon
  *      as the draft is complete, and Add sends exactly what was previewed (a project add carries the previewed etag, so a
  *      file that changed meanwhile is refused).
- *   4. Added: Reload this ferret (its CLI restarts with its conversation and picks the server up), and for a URL server
+ *   4. Added: Reload this ferret (its CLI restarts with its conversation and picks the server up), for a login add also
+ *      the other live ferrets on that runtime (one POST /v1/restarts by id, answered per ferret), and for a URL server
  *      on a login, Sign in through the daemon's MCP OAuth.
  *
  * Nothing here decides what is allowed: the contract's refusal rule runs as the person types, and the daemon runs it again.
@@ -25,12 +26,21 @@ import type {
   SessionMcpPreview,
   SessionMcpScope,
 } from '../../contract/index.ts';
-import { draftRequest, EMPTY_MCP_DRAFT, type McpDraft, projectFolderName, reloadOutcome } from '../lib/add-model.ts';
+import {
+  draftRequest,
+  EMPTY_MCP_DRAFT,
+  type McpDraft,
+  otherLiveFerrets,
+  projectFolderName,
+  reloadReport,
+} from '../lib/add-model.ts';
 import {
   addFerretMcp,
+  type FerretRow,
   type McpClient,
   previewFerretMcp,
   readFerretMcpListing,
+  readFerrets,
   restartFerrets,
   startMcpSignIn,
 } from '../lib/client.ts';
@@ -41,6 +51,8 @@ import { type McpSignInChannelFactory, McpSignInSheet } from './sign-in-sheet.ts
 
 /** A half talks to ONE daemon and does not know its label. */
 const MACHINE_NAME = 'This machine';
+
+type OtherFerret = Pick<FerretRow, 'id' | 'name'>;
 
 /** What the form may ask of the surface around it. */
 interface AddMcpHost {
@@ -170,6 +182,7 @@ export function AddMcpForm({
         client={client}
         ferretId={ferretId}
         host={host}
+        loginFerrets={fresh?.scope === 'login' ? fresh.ferrets : 0}
         oauth={draft.transport === 'url' && draft.oauth}
         origin={origin}
         {...(channel === undefined ? {} : { channel })}
@@ -411,6 +424,7 @@ function AddedStep({
   agentName,
   client,
   ferretId,
+  loginFerrets,
   oauth,
   origin,
   channel,
@@ -420,6 +434,8 @@ function AddedStep({
   readonly agentName: string;
   readonly client: McpClient;
   readonly ferretId: string;
+  /** How many ferrets the preview said run on the login the server went to. */
+  readonly loginFerrets: number;
   readonly oauth: boolean;
   readonly origin: string;
   readonly channel?: McpSignInChannelFactory;
@@ -430,16 +446,33 @@ function AddedStep({
   const [flow, setFlow] = useState<McpOAuthFlow | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [queued, setQueued] = useState<string | null>(null);
+  const [others, setOthers] = useState<readonly OtherFerret[]>([]);
+  const [reloadAll, setReloadAll] = useState(false);
   const redirectUri = useMemo(() => mcpRedirectUri(origin), [origin]);
+
+  // A login add reaches every ferret on that runtime: read who else is alive on it, once, when more than this one run there.
+  const runtime = added.scope === 'login' ? added.runtime : null;
+  useEffect(() => {
+    if (runtime === null || loginFerrets <= 1) return;
+    let live = true;
+    readFerrets(client).then(
+      rows => live && setOthers(otherLiveFerrets(runtime, ferretId, rows)),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [client, ferretId, loginFerrets, runtime]);
 
   const reload = async (): Promise<void> => {
     setBusy('reload');
     setFailure(null);
     try {
-      const outcome = reloadOutcome(await restartFerrets(client, [ferretId]), ferretId, agentName);
-      if (outcome.kind === 'restarted') host.close();
-      else if (outcome.kind === 'queued') setQueued(outcome.sentence);
-      else setFailure(outcome.sentence);
+      const otherIds = reloadAll ? others.map(other => other.id) : [];
+      const report = reloadReport(await restartFerrets(client, [ferretId, ...otherIds]), ferretId, agentName, otherIds);
+      if (report.closes) host.close();
+      else if (report.retry) setFailure(report.sentence);
+      else setQueued(report.sentence);
     } catch (reason) {
       setFailure(changeRefusalSentence(reason));
     } finally {
@@ -498,6 +531,14 @@ function AddedStep({
             </Button>
           )}
         </div>
+      ) : null}
+      {added.scope === 'login' && others.length > 0 && queued === null ? (
+        <label className="fy-action-form__check">
+          <input checked={reloadAll} onChange={event => setReloadAll(event.target.checked)} type="checkbox" />
+          <span>
+            Also reload the other {others.length} ferret{others.length === 1 ? '' : 's'} on this login now
+          </span>
+        </label>
       ) : null}
       {queued === null ? null : (
         <p className="fy-action-form__note" data-add-mcp-queued="" role="status">

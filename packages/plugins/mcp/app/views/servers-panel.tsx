@@ -130,7 +130,6 @@ export function McpServersPanel({ client, ferretId, now = Date.now, searchDeboun
         <AddMcpDialog
           client={client}
           ferretId={ferretId}
-          name="This ferret"
           onClose={() => {
             setAdding(false);
             reload();

@@ -123,6 +123,15 @@ export type ReloadOutcome =
   | { readonly kind: 'queued'; readonly sentence: string }
   | { readonly kind: 'failed'; readonly sentence: string };
 
+/** The name the words use until Ferrets has answered with the real one. */
+export const FALLBACK_FERRET_NAME = 'This ferret';
+
+/** A name as it reads inside a sentence: the placeholder loses its capital, a real name keeps its own. */
+const inSentence = (name: string): string => (name === FALLBACK_FERRET_NAME ? 'this ferret' : name);
+
+/** A reason as a sentence ends: the daemon's words, with a full stop when they bring none. */
+const closed = (reason: string): string => (/[.!?]$/u.test(reason.trim()) ? reason.trim() : `${reason.trim()}.`);
+
 const QUEUED_WHY = {
   'mid-turn': 'it is working on a turn',
   'in-flight': 'it has work a restart would lose',
@@ -146,14 +155,110 @@ export function reloadOutcome(result: RestartResult, ferretId: string, name: str
   if (queued !== undefined)
     return {
       kind: 'queued',
-      sentence: `${name} reloads at its next idle moment (${queued.detail ?? QUEUED_WHY[queued.reason]}).`,
+      sentence: `${name} reloads at its next idle moment (${queued.detail?.trim() || QUEUED_WHY[queued.reason]}).`,
     };
   const skipped = result.skipped.find(row => row.id === ferretId);
   if (skipped !== undefined)
     return { kind: 'failed', sentence: `${name} was not reloaded: it ${SKIPPED_WHY[skipped.reason]}.` };
   const failed = result.failed.find(row => row.id === ferretId);
-  if (failed !== undefined) return { kind: 'failed', sentence: `${name} could not be reloaded: ${failed.reason}` };
-  return { kind: 'failed', sentence: `Ferretry did not say whether ${name} reloaded.` };
+  if (failed !== undefined)
+    return { kind: 'failed', sentence: `${name} could not be reloaded: ${closed(failed.reason)}` };
+  return { kind: 'failed', sentence: `Ferretry did not say whether ${inSentence(name)} reloaded.` };
+}
+
+/** A ferret as the "other ferrets" choice needs it: who it is, the runtime it runs as, and whether it is alive. */
+interface OtherCandidate {
+  readonly id: string;
+  readonly name: string;
+  readonly runtime?: string | undefined;
+  readonly state: 'starting' | 'working' | 'idle' | 'stopped';
+}
+
+/**
+ * The ferrets a login-scope add also reaches that are alive now: the same runtime the server was written to, not this
+ * ferret, and starting, working or idle (a stopped one picks the server up when it next starts, so there is nothing to
+ * reload).
+ */
+export function otherLiveFerrets<Ferret extends OtherCandidate>(
+  runtime: string,
+  ferretId: string,
+  ferrets: readonly Ferret[],
+): readonly Ferret[] {
+  return ferrets.filter(ferret => ferret.runtime === runtime && ferret.id !== ferretId && ferret.state !== 'stopped');
+}
+
+const SKIPPED_SHORT = {
+  'not-running': 'not running',
+  'not-found': 'not found',
+  'not-outdated': 'already up to date',
+} as const;
+
+/** What a reload of several ferrets did, in words: one clause per kind that happened, and whether ALL of them restarted. */
+export interface OthersOutcome {
+  readonly sentence: string;
+  readonly allRestarted: boolean;
+}
+
+/**
+ * Reads Ferrets' answer for the OTHER ferrets as a count per outcome, never claiming more than `restarted` holds:
+ * a ferret the answer names in none of the four lists is counted as not reported.
+ */
+export function othersOutcome(result: RestartResult, ids: readonly string[]): OthersOutcome {
+  const among = <Row extends { readonly id: string }>(rows: readonly Row[]): readonly Row[] =>
+    rows.filter(row => ids.includes(row.id));
+  const restarted = among(result.restarted);
+  const queued = among(result.queued);
+  const skipped = among(result.skipped);
+  const failed = among(result.failed);
+  const reported = restarted.length + queued.length + skipped.length + failed.length;
+  const unreported = Math.max(0, ids.length - reported);
+  const clauses: string[] = [];
+  if (restarted.length > 0) clauses.push(`${restarted.length} reloaded`);
+  if (queued.length > 0)
+    clauses.push(`${queued.length} ${queued.length === 1 ? 'waits for its' : 'wait for their'} next idle moment`);
+  if (skipped.length > 0)
+    clauses.push(
+      `${skipped.length} not reloaded (${[...new Set(skipped.map(row => SKIPPED_SHORT[row.reason]))].join(', ')})`,
+    );
+  if (failed.length > 0)
+    clauses.push(
+      `${failed.length} could not be reloaded: ${failed.map(row => `${row.name ?? row.id}: ${row.reason}`).join('; ')}`,
+    );
+  if (unreported > 0) clauses.push(`Ferretry did not say whether ${unreported} reloaded`);
+  return {
+    sentence: `${closed(`Other ferrets: ${clauses.join(', ')}`)}`,
+    allRestarted: restarted.length === ids.length,
+  };
+}
+
+/** What a Reload press settled: whether the dialog may close, whether the person can try again, and what to say. */
+export interface ReloadReport {
+  readonly closes: boolean;
+  /** This ferret did not reload and nothing is waiting for it: the Reload button stays. */
+  readonly retry: boolean;
+  readonly sentence: string;
+}
+
+/**
+ * This ferret's outcome and the others' together. The dialog closes only when every ferret asked for restarted; a
+ * reload that is waiting or partly done says so and stays.
+ */
+export function reloadReport(
+  result: RestartResult,
+  ferretId: string,
+  name: string,
+  otherIds: readonly string[],
+): ReloadReport {
+  const own = reloadOutcome(result, ferretId, name);
+  const others = otherIds.length === 0 ? null : othersOutcome(result, otherIds);
+  if (own.kind === 'restarted' && (others === null || others.allRestarted))
+    return { closes: true, retry: false, sentence: '' };
+  const ownSentence = own.kind === 'restarted' ? `${name} reloaded.` : own.sentence;
+  return {
+    closes: false,
+    retry: own.kind === 'failed',
+    sentence: others === null ? ownSentence : `${ownSentence} ${others.sentence}`,
+  };
 }
 
 /** The folder a project's `.mcp.json` sits in, by name (`/work/ferretry/.mcp.json` → `ferretry`); null when the path names none. */

@@ -9,8 +9,14 @@
  * nothing that repeats it, and the caller drops it before the promise settles. The contract has no field that could carry
  * a token either way.
  */
-import { type RestartResult, RestartRequestSchema, RestartResultSchema } from '@ferretry/core-ferrets/contract';
+import {
+  FerretSummarySchema,
+  type RestartResult,
+  RestartRequestSchema,
+  RestartResultSchema,
+} from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { z } from 'zod';
 import {
   McpCheckRequestSchema,
   type McpCheckResult,
@@ -170,3 +176,23 @@ export const restartFerrets = async (client: McpClient, ids: readonly string[]):
       headers: { 'x-fy-request-id': crypto.randomUUID() },
     }),
   );
+
+const FERRET_ROUTE = 'GET /v1/ferrets/:ferretId' as const;
+const FERRETS_ROUTE = 'GET /v1/ferrets' as const;
+
+/**
+ * What MCP reads of a ferret: who it is, the runtime it runs as (the login a login-scope add writes to) and whether it
+ * is alive. The fields are Ferrets' own (`FerretSummarySchema`); the rest of the summary is not MCP's to depend on.
+ */
+const FerretRowSchema = z.looseObject(
+  FerretSummarySchema.pick({ id: true, name: true, runtime: true, state: true }).shape,
+);
+export type FerretRow = z.infer<typeof FerretRowSchema>;
+
+/** One ferret, from Ferrets' own route. */
+export const readFerret = async (client: McpClient, ferretId: string): Promise<FerretRow> =>
+  FerretRowSchema.parse(await client.call(FERRET_ROUTE, { params: { ferretId } }));
+
+/** Every ferret on this machine, from Ferrets' own route. */
+export const readFerrets = async (client: McpClient): Promise<readonly FerretRow[]> =>
+  z.array(FerretRowSchema).parse(await client.call(FERRETS_ROUTE));
