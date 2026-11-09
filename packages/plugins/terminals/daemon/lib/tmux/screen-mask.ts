@@ -11,6 +11,14 @@ import type { RedactionScope } from '@ferretry/kernel/contract';
  */
 const GUTTER = /[\s─-▟⎿⏺•›❯>]/u;
 
+/**
+ * The most characters of one screen the masker takes. A screen is masked WHOLE or not at all (a value cut by a limit
+ * would escape the mask), and the masking reads the screen several times over (a measured eight screens' worth: 500
+ * dense values on a 200×2000 screen took 1.6 s of the main thread), so a screen past this is refused. A real pane is
+ * far under it (400 columns by 200 rows is 80,000).
+ */
+const MAX_SCREEN_CHARS = 262_144;
+
 /** How the visible pieces of a wrapped value meet once their gutters are gone. */
 const JOINS = ['', ' ', '\n'] as const;
 
@@ -86,8 +94,15 @@ function cover(
  * whose continuation starts or ends with a character the UI draws that {@link GUTTER} does not name; a value in a table
  * column that is not the last (the next column's border and cells stand between its pieces); a value broken
  * over three or more rows where the breaks meet in different ways (one with a space, one without).
+ *
+ * A screen over {@link MAX_SCREEN_CHARS} is REFUSED (a `RangeError` that says only the two sizes, never a character of
+ * the screen), before the scope is asked anything: it is never cut and then masked, and never handed on unmasked.
  */
 export function maskedScreen(scope: RedactionScope, screen: string): string {
+  if (screen.length > MAX_SCREEN_CHARS)
+    throw new RangeError(
+      `the screen is too large to mask (${screen.length} characters; the most is ${MAX_SCREEN_CHARS})`,
+    );
   const rows = screen.split('\n');
   const hidden = rows.map(row => Array.from({ length: row.length }, () => false));
   const whole = rows.map((row, index) => ({ row: index, start: 0, end: row.length }));
