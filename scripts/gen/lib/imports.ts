@@ -76,6 +76,9 @@ function areaOfSubpath(pkg: WorkspacePackage, subpath: string): Area {
       'contract/push-envelope': 'kernel-contract',
       // This device's notification filter document, for the same worker: its graph is this file, the envelope and zod.
       'contract/notification-filter': 'kernel-contract',
+      // The hosted app origin alone, for the app's build config: Node's type stripping loads it, and the barrel
+      // carries syntax it refuses.
+      'contract/hosted-app': 'kernel-contract',
       // The pure wire and the browser-safe session codec: no IO, so another package may import them as it imports
       // the contract (the files themselves sit outside contract/ because they re-export the host's session wire).
       wire: 'kernel-contract',

@@ -9,6 +9,6 @@
       "@ferretry/plugin-*/contract": ["../../packages/plugins/*/contract/index.ts"]
     }
   },
-  "include": ["src", "tests", "scripts"],
+  "include": ["src", "tests", "scripts", "preview"],
   "exclude": ["node_modules", "fixtures/out"]
 }

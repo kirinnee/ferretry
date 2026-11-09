@@ -34,7 +34,6 @@ import {
   GLOBAL_FILE,
   GLOBAL_LESSONS_DOCUMENT,
   GlobalDocumentSchema,
-  LESSONS_CONFIG,
   LessonsStateFileSchema,
   OBSERVATIONS_FILE,
   ObservationSchema,
@@ -54,7 +53,8 @@ import { isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { isMap, isScalar, type Pair, type YAMLMap } from 'yaml';
 import { z } from 'zod';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
-import { rawSecretPaths, readV4Yaml } from '../v4/config.ts';
+import { rawSecretPaths, readV4Yaml, v4ConfigFile, v4ConfigOverride } from '../v4/config.ts';
+import type { V4Paths } from '../v4/layout.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
 import {
@@ -81,7 +81,10 @@ import {
   type V4RunManifest as V4RunManifestValue,
   type V4StoredProposal as V4StoredProposalValue,
 } from '../v4/lessons.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem } from '../v5/write.ts';
+
+const LESSONS_CONFIG = CONFIG_TARGETS.LESSONS;
 import { dropModeline } from '../v4/config.ts';
 import { instructionsSource } from './settings.ts';
 import type { Step, StepContext } from './index.ts';
@@ -149,6 +152,12 @@ async function v4Text(home: string, path: string): Promise<string | undefined> {
   } catch {
     throw new V4InputError(`${path}: cannot be read`);
   }
+}
+
+/** Whether a v4 config file exists as this run reads it: an override (the enforced pass) says so, else the disk does. */
+async function configPresent(v4: V4Paths, label: string): Promise<boolean> {
+  const override = v4ConfigOverride(v4, label);
+  return override !== undefined ? override !== null : (await v4Text(v4.home, label)) !== undefined;
 }
 
 /** A v4 learning document as `decodeJson` read it: absent, unparsable (`damaged`), or the parsed value. */
@@ -447,12 +456,10 @@ const keyOf = (pair: Pair): unknown => (isScalar(pair.key) ? pair.key.value : pa
 async function globalSource(ctx: StepContext): Promise<string | undefined> {
   const home = ctx.v4.home;
   let file: unknown = V4_GLOBAL_LESSONS_FILE;
-  if ((await v4Text(home, V4_LESSONS_COMPONENT)) !== undefined) {
-    const document = await readV4Yaml({
-      address: { kind: 'component', componentKind: 'instructions', name: 'lessons' },
-      label: V4_LESSONS_COMPONENT,
-      path: join(home, V4_LESSONS_COMPONENT),
-    });
+  if (await configPresent(ctx.v4, V4_LESSONS_COMPONENT)) {
+    const document = await readV4Yaml(
+      v4ConfigFile(ctx.v4, { kind: 'component', componentKind: 'instructions', name: 'lessons' }, V4_LESSONS_COMPONENT),
+    );
     const pair = (document.contents as YAMLMap).items.find(item => keyOf(item) === 'file');
     file = isScalar(pair?.value) ? pair.value.value : undefined;
   }
@@ -491,10 +498,8 @@ async function convertGlobal(ctx: StepContext, tally: Tally): Promise<void> {
 }
 
 async function convertConfig(ctx: StepContext, tally: Tally): Promise<void> {
-  const home = ctx.v4.home;
-  const path = join(home, V4_LEARNING_CONFIG);
-  if ((await v4Text(home, V4_LEARNING_CONFIG)) === undefined) return;
-  const document = await readV4Yaml({ address: { kind: 'learning' }, label: V4_LEARNING_CONFIG, path });
+  if (!(await configPresent(ctx.v4, V4_LEARNING_CONFIG))) return;
+  const document = await readV4Yaml(v4ConfigFile(ctx.v4, { kind: 'learning' }, V4_LEARNING_CONFIG));
   const secrets = rawSecretPaths(document.toJS());
   if (secrets.length > 0)
     throw new V4InputError(`${V4_LEARNING_CONFIG}: the value at ${secrets.join(', ')} looks like a raw secret`);
