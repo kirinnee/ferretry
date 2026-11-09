@@ -47,6 +47,7 @@ export class FakeAsks implements AsksApi {
   readonly #next = new Map<string, number>();
   #nextAnswer = 0;
   readonly #drafts = new Map<string, AskDraft>();
+  readonly #standing = new Set<string>();
   readonly #parked = new Map<string, string>();
   readonly #notes = new Map<string, string | undefined>();
 
@@ -116,10 +117,17 @@ export class FakeAsks implements AsksApi {
 
   async raise(ask: AskDraft): Promise<AskRef> {
     const draft = AskDraftSchema.parse(ask);
-    const ferret = boardOf(draft);
     for (const existing of this.#asks.values())
-      if (existing.source === draft.source && existing.entry === draft.entry)
+      if (
+        existing.source === draft.source &&
+        existing.entry === draft.entry &&
+        !this.#standing.has(keyOf({ ferret: existing.ferret, id: existing.id }))
+      )
         return { ferret: existing.ferret, id: existing.id };
+    return await this.#raiseNew(draft);
+  }
+  async #raiseNew(draft: ReturnType<typeof AskDraftSchema.parse>): Promise<AskRef> {
+    const ferret = boardOf(draft);
     const next = (this.#next.get(ferret) ?? 0) + 1;
     this.#next.set(ferret, next);
     const id = `A${next}` as AskId;
@@ -146,6 +154,27 @@ export class FakeAsks implements AsksApi {
   }
   async notify(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskRef> {
     return await this.raise({ ...notice, kind: 'notice' });
+  }
+  /** A standing notice: an open one with the key is restated in place, none open raises a new ask. */
+  async standing(notice: Omit<AskDraft, 'kind' | 'options'>): Promise<AskRef> {
+    const draft = AskDraftSchema.parse({ ...notice, kind: 'notice' });
+    const open = [...this.#asks.values()].find(
+      ask =>
+        ask.state === 'open' &&
+        ask.kind === 'notice' &&
+        ask.source === draft.source &&
+        ask.entry === draft.entry &&
+        this.#standing.has(keyOf({ ferret: ask.ferret, id: ask.id })),
+    );
+    if (open === undefined) {
+      const ref = await this.#raiseNew(draft);
+      this.#standing.add(keyOf(ref));
+      return ref;
+    }
+    const ref = { ferret: open.ferret, id: open.id };
+    this.#drafts.set(keyOf(ref), draft);
+    this.#asks.set(keyOf(ref), { ...open, subject: draft.subject });
+    return ref;
   }
   /** TEST ONLY: the owner answers. */
   answerAs(
@@ -258,6 +287,66 @@ export function asksConformance(name: string, make: () => AsksSubject | Promise<
     test('a draft that breaks the envelope is refused', async () => {
       const { asks } = await make();
       await expect(asks.raise({ ...draft('e9'), kind: 'choice' })).rejects.toThrow();
+    });
+  });
+}
+
+const standingDraft = (subject: string, ferret = 'machine-agenda'): Omit<AskDraft, 'kind' | 'options'> => ({
+  source: sourceKey('daemon'),
+  ref: {},
+  entry: entryId('warden.orphans'),
+  subject,
+  why: 'Nobody is on these cards.',
+  raisedBy: { kind: 'daemon' },
+  ferret,
+});
+
+/**
+ * The standing-notice suite: the SAME cases run on the in-memory fake and on the real port over the engine, so the
+ * two cannot disagree on what "keep one notice current" means.
+ */
+export function standingConformance(name: string, make: () => AsksApi | Promise<AsksApi>): void {
+  const openSubjects = async (asks: AsksApi): Promise<string[]> =>
+    (await asks.snapshots({ ferret: 'machine-agenda' }))[0]?.items.map(item => item.subject) ?? [];
+  describe(`standing notice conformance: ${name}`, () => {
+    test('the first call raises one open notice', async () => {
+      const asks = await make();
+      const ref = await asks.standing(standingDraft('2 cards have no ferret'));
+      expect(ref.ferret).toBe('machine-agenda');
+      expect(await openSubjects(asks)).toEqual(['2 cards have no ferret']);
+    });
+    test('a changed wording rewrites the open notice in place: same ref, still one', async () => {
+      const asks = await make();
+      const first = await asks.standing(standingDraft('2 cards have no ferret'));
+      const second = await asks.standing(standingDraft('3 cards have no ferret'));
+      expect(second).toEqual(first);
+      expect(await openSubjects(asks)).toEqual(['3 cards have no ferret']);
+    });
+    test('the same wording is the same notice: same ref, still one', async () => {
+      const asks = await make();
+      const first = await asks.standing(standingDraft('2 cards have no ferret'));
+      expect(await asks.standing(standingDraft('2 cards have no ferret'))).toEqual(first);
+      expect(await openSubjects(asks)).toEqual(['2 cards have no ferret']);
+    });
+    test('open finds it by source and entry, and close clears it', async () => {
+      const asks = await make();
+      const ref = await asks.standing(standingDraft('2 cards have no ferret'));
+      const found = await asks.open({ source: sourceKey('daemon'), entry: entryId('warden.orphans') });
+      expect(found.map(ask => ask.id)).toEqual([ref.id]);
+      await asks.close(ref, 'source-gone');
+      expect(await openSubjects(asks)).toEqual([]);
+    });
+    test('after it was closed, the cause coming back raises a NEW ask under the same key', async () => {
+      const asks = await make();
+      const first = await asks.standing(standingDraft('2 cards have no ferret'));
+      await asks.close(first, 'source-gone');
+      const again = await asks.standing(standingDraft('1 card has no ferret'));
+      expect(again.id).not.toBe(first.id);
+      expect(await openSubjects(asks)).toEqual(['1 card has no ferret']);
+    });
+    test('a draft that breaks the envelope is refused', async () => {
+      const asks = await make();
+      await expect(asks.standing({ ...standingDraft(''), subject: '' })).rejects.toThrow();
     });
   });
 }

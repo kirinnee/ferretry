@@ -51,6 +51,22 @@ export function parseObligation(sourceRef: string | null): { source: SourceKey; 
   return { source: rest.slice(0, at) as SourceKey, entry: rest.slice(at + 1) as EntryId };
 }
 
+/**
+ * A standing notice rides `standing:<source>:<entry>`. Unlike `ask:`, the engine does not remember it for life
+ * (`raisedObligations` holds `ask:` refs only): an open one is refreshed in place, a closed one is raised afresh.
+ */
+const STANDING_PREFIX = 'standing:';
+const standingOf = (source: string, entry: string): string => `${STANDING_PREFIX}${source}:${entry}`;
+
+/** The source and entry a standing notice carries, or `undefined` for any other item. */
+function parseStanding(sourceRef: string | null): { source: SourceKey; entry: EntryId } | undefined {
+  if (sourceRef === null || !sourceRef.startsWith(STANDING_PREFIX)) return undefined;
+  const rest = sourceRef.slice(STANDING_PREFIX.length);
+  const at = rest.indexOf(':');
+  if (at <= 0) return undefined;
+  return { source: rest.slice(0, at) as SourceKey, entry: rest.slice(at + 1) as EntryId };
+}
+
 /** Thrown when a raise names a source no plugin registers under `ask.sources` (and Asks does not own). */
 class UnknownAskSourceError extends Error {
   override readonly name = 'UnknownAskSourceError';
@@ -193,7 +209,7 @@ function summaryOf(
   state: AskSummary['state'],
   sources: (key: SourceKey) => AskSourceSpec | 'unavailable',
 ): AskSummary {
-  const obligation = parseObligation(item.sourceRef);
+  const obligation = parseObligation(item.sourceRef) ?? parseStanding(item.sourceRef);
   const source = obligation?.source ?? ('ferret' as SourceKey);
   const unavailable = !(BUILT_IN_SOURCES as readonly string[]).includes(source) && sources(source) === 'unavailable';
   return {
@@ -333,6 +349,34 @@ export function asksPort(
     ...(tell === undefined ? {} : { tell }),
     raise: async draft => await raises.run(() => raise(draft, false)),
     notify: async notice => await raises.run(() => raise({ ...notice, kind: 'notice' }, true)),
+    standing: async notice =>
+      await raises.run(async () => {
+        const parsed = AskDraftSchema.parse({ ...notice, kind: 'notice' });
+        const ferret = boardOf(parsed);
+        checkSource(parsed);
+        const sourceRef = standingOf(parsed.source, parsed.entry);
+        // The engine refreshes the open item with this ref in place, writes nothing when the wording is the same,
+        // and (the ref is not an `ask:` obligation) raises afresh when none is open.
+        const mutation = await agenda.raise(
+          ferret,
+          {
+            source: 'question',
+            sourceRef,
+            subject: parsed.subject,
+            why: parsed.why,
+            howToResolve: parsed.howToResolve ?? parsed.why,
+            kind: 'info',
+            ...(parsed.context === undefined ? {} : { context: parsed.context }),
+            notice: true as const,
+            ...(parsed.blocking === true ? { ping: true as const } : {}),
+          },
+          PORT_ACTOR,
+        );
+        if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
+        const id = mutation.item?.id ?? (await snapshot(ferret))?.items.find(item => item.sourceRef === sourceRef)?.id;
+        if (id === undefined) throw new AskRefusedError('the board took the notice but named no item for it');
+        return { ferret, id: id as AskId };
+      }),
     answers: async (filter, since) =>
       (
         await everyBoard((ferret, board) =>
