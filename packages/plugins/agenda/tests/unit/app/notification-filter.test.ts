@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  type NotificationFilterDocument,
+  readNotificationFilterDocument,
+  shouldShowPush,
+} from '@ferretry/kernel/contract/notification-filter';
+import {
   ALL_NOTIFICATION_KINDS,
   DEFAULT_NOTIFICATION_FILTER_PREFERENCES,
   DEFAULT_QUIET_HOURS,
   type DeviceNotificationFilterPreferences,
   DeviceNotificationFilterStore,
+  filterDocumentOf,
   formatTimeOfDay,
-  isWithinQuietHours,
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_FILTER_PREFERENCES_KEY,
   notificationCategoryFor,
@@ -72,7 +77,12 @@ describe('parseTimeOfDay / formatTimeOfDay', () => {
   });
 });
 
-describe('isWithinQuietHours', () => {
+describe('quiet hours, as the kernel decides them over the document', () => {
+  const isWithinQuietHours = (
+    quiet: { enabled: boolean; startMinute: number; endMinute: number },
+    now: Date,
+  ): boolean => !shouldShowNotification({ kind: null, daemonId: null }, prefs({ quietHours: quiet }), now);
+
   it('is never quiet while disabled', () => {
     expect(isWithinQuietHours({ enabled: false, startMinute: 0, endMinute: 1 }, at(0, 30))).toBe(false);
   });
@@ -194,6 +204,58 @@ describe('parseNotificationFilterPreferences', () => {
   });
 });
 
+describe('filterDocumentOf', () => {
+  it('hides every kind of a switched-off category, and only those', () => {
+    const off = (category: keyof typeof DEFAULT_NOTIFICATION_FILTER_PREFERENCES.categories) =>
+      filterDocumentOf(
+        prefs({ categories: { ...DEFAULT_NOTIFICATION_FILTER_PREFERENCES.categories, [category]: false } }),
+      ).hiddenKinds;
+    expect([...off('needs-you')].sort()).toEqual(['agenda', 'attention', 'question']);
+    expect(off('finished')).toEqual(['completed']);
+    expect(off('failed')).toEqual(['failed']);
+    expect(off('new-device')).toEqual(['device-paired']);
+    expect(filterDocumentOf(prefs()).hiddenKinds).toEqual([]);
+  });
+
+  it('mutes only machines set to false, and drops an id the document cannot hold', () => {
+    const doc = filterDocumentOf(
+      prefs({ machines: { a: false, b: true, ['x'.repeat(201)]: false, ['y'.repeat(200)]: false } }),
+    );
+    expect(doc.mutedDaemons).toEqual(['a', 'y'.repeat(200)]);
+  });
+
+  it('carries the quiet hours and always reads back through the kernel parser (never resets to default)', () => {
+    const doc = filterDocumentOf(
+      prefs({
+        categories: { 'needs-you': false, finished: false, failed: false, 'new-device': false },
+        quietHours: { enabled: true, startMinute: 60, endMinute: 120 },
+        machines: { a: false },
+      }),
+    );
+    expect(doc.quietHours).toEqual({ enabled: true, startMinute: 60, endMinute: 120 });
+    expect(readNotificationFilterDocument(JSON.stringify(doc))).toEqual(doc);
+    expect(doc.version).toBe(2);
+  });
+
+  it('page and worker agree: shouldShowNotification is the kernel decision over the same document', () => {
+    const p = prefs({
+      categories: { ...DEFAULT_NOTIFICATION_FILTER_PREFERENCES.categories, failed: false },
+      machines: { a: false },
+      quietHours: { enabled: true, startMinute: 22 * 60, endMinute: 7 * 60 },
+    });
+    const doc = filterDocumentOf(p);
+    for (const kind of [null, ...ALL_NOTIFICATION_KINDS]) {
+      for (const daemonId of [null, 'a', 'b']) {
+        for (const now of [at(3, 0), at(12, 0)]) {
+          expect(shouldShowNotification({ kind, daemonId }, p, now)).toBe(
+            shouldShowPush(doc, { kind, daemon: daemonId }, now),
+          );
+        }
+      }
+    }
+  });
+});
+
 describe('DeviceNotificationFilterStore', () => {
   const memoryStorage = () => {
     const values = new Map<string, string>();
@@ -276,16 +338,37 @@ describe('DeviceNotificationFilterStore', () => {
     expect(store.set({ categories: { failed: false } }).categories.failed).toBe(false);
   });
 
-  it('mirrors every change for the service worker, fire-and-forget', async () => {
-    const written: DeviceNotificationFilterPreferences[] = [];
-    const mirror = { write: async (value: DeviceNotificationFilterPreferences) => void written.push(value) };
+  it('mirrors every change for the service worker as the v2 document, fire-and-forget', async () => {
+    const written: NotificationFilterDocument[] = [];
+    const mirror = { write: async (value: NotificationFilterDocument) => void written.push(value) };
     const store = new DeviceNotificationFilterStore(null, mirror);
 
     const next = store.set({ categories: { failed: false } });
     // `set` returns before the mirror write settles — it is explicitly fire-and-forget.
     await Promise.resolve();
 
-    expect(written).toEqual([next]);
+    expect(written).toEqual([filterDocumentOf(next)]);
+    expect(written[0]?.hiddenKinds).toEqual(['failed']);
+  });
+
+  it('mirrors the stored preferences at boot, before any change (mirrorNow)', async () => {
+    const written: NotificationFilterDocument[] = [];
+    const storage = {
+      getItem: () =>
+        JSON.stringify({
+          version: 1,
+          ...prefs({ categories: { ...DEFAULT_NOTIFICATION_FILTER_PREFERENCES.categories, finished: false } }),
+        }),
+      setItem: () => {},
+    };
+    const store = new DeviceNotificationFilterStore(storage, { write: async value => void written.push(value) });
+
+    store.mirrorNow();
+    await Promise.resolve();
+
+    expect(written).toEqual([filterDocumentOf(store.get())]);
+    expect(written[0]?.hiddenKinds).toEqual(['completed']);
+    expect(() => new DeviceNotificationFilterStore().mirrorNow()).not.toThrow();
   });
 
   it('never lets a rejected mirror write escape set() or break the localStorage-backed answer', async () => {

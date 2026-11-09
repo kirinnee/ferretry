@@ -40,7 +40,7 @@ export const NOTIFICATION_ICON = '/icons/icon-any-192.png';
 export const NOTIFICATION_BADGE = '/icons/badge-96.png';
 
 /** The mark, as notification options. */
-export const notificationBrand = (): { readonly icon: string; readonly badge: string } => ({
+const notificationBrand = (): { readonly icon: string; readonly badge: string } => ({
   icon: NOTIFICATION_ICON,
   badge: NOTIFICATION_BADGE,
 });

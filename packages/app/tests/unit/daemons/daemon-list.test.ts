@@ -48,7 +48,7 @@ describe('DaemonList', () => {
 
   test('removing a pairing forgets its device key and moves the selection', () => {
     const forgotten: string[] = [];
-    const list = new DaemonList({ storage: memoryStore(), now: clock(), forget: d => forgotten.push(d) });
+    const list = new DaemonList({ storage: memoryStore(), now: clock(), forget: d => void forgotten.push(d) });
     list.add(pairing('d1'));
     list.add(pairing('d2'));
     list.remove('d2');
@@ -58,7 +58,7 @@ describe('DaemonList', () => {
 
   test('the oldest pairing past the maximum is evicted and forgotten', () => {
     const forgotten: string[] = [];
-    const list = new DaemonList({ storage: memoryStore(), now: clock(), forget: d => forgotten.push(d) });
+    const list = new DaemonList({ storage: memoryStore(), now: clock(), forget: d => void forgotten.push(d) });
     for (let i = 0; i <= MAX_DAEMONS; i += 1) list.add(pairing(`d${i}`));
     expect(list.snapshot().daemons).toHaveLength(MAX_DAEMONS);
     expect(forgotten).toEqual(['d0']);
