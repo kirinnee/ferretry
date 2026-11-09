@@ -25,7 +25,7 @@ import { milliseconds } from '@ferretry/std';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import { PROFILE_COMPONENTS_KEY } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
-import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
+import { configDirectoryOf, documentRevision, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
@@ -210,7 +210,10 @@ export function fileAssembly(
     readonly uses?: { readonly usage: { current(): Pick<UsageApi, 'pauses'> | undefined } };
   },
   publication: FleetPublication,
-): Pick<ReturnType<typeof assembleServices>, 'catalog' | 'setup'> {
+): Pick<ReturnType<typeof assembleServices>, 'catalog' | 'setup'> & {
+  /** The etag of one profile file right now: the revision a change to it is pinned to. */
+  readonly profileEtag: (profile: string) => Promise<string>;
+} {
   const commands = new CommandCache({ which: async name => await ctx.kernel.paths.which(name) }, () =>
     ctx.kernel.clock.nowMs(),
   );
@@ -277,7 +280,7 @@ export function fileAssembly(
     install: async (request, governance) =>
       await installer.install({ harnesses: request.harnesses.map(harnessKindOfKey) }, governance),
   };
-  return assembleServices(catalog, base =>
+  const services = assembleServices(catalog, base =>
     fileFleetSetupDeps({
       host,
       catalog: base,
@@ -287,4 +290,10 @@ export function fileAssembly(
       secrets: { list: refusing.secrets.held, put: refusing.secrets.put },
     }),
   );
+  return {
+    catalog: services.catalog,
+    setup: services.setup,
+    // The profile's file as the apply pins it: the sha256 of its bytes, or the absent sentinel. Read when asked.
+    profileEtag: async profile => await documentRevision(host.files, `${configDirectory}/profiles/${profile}.yaml`),
+  };
 }

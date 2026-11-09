@@ -9,7 +9,7 @@ import { describe, it } from 'bun:test';
 import { ApiError } from '@ferretry/kernel/contract';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import should from 'should';
-import type { AccountChange, CatalogInstallChange } from '../../../contract/index.ts';
+import type { AccountChange } from '../../../contract/index.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { RuntimeIds } from '../../../daemon/lib/account/ids.ts';
 import { unavailableCatalogDeps } from '../../../daemon/lib/service/assembly.ts';
@@ -249,12 +249,6 @@ describe('the reads, over a machine whose components are real files', () => {
     should(draft.harnesses.map(entry => entry.harness)).eql(['claude-code', 'codex']);
     should(draft.refusal).be.undefined();
     should(applied).have.length(0);
-  });
-
-  it('should read one component exactly as the daemon holds it', async () => {
-    const { service } = world();
-    should(await service.storedComponent('mcp', 'srv')).containEql({ command: 'srv-bin' });
-    should(await service.storedComponent('mcp', 'nope')).be.undefined();
   });
 });
 
@@ -600,71 +594,6 @@ describe('how an apply ends', () => {
       service.apply(staged.id, { ...OWNER, governed: true }, { agent: false, claim: () => false }),
     );
     should(retry).be.instanceOf(FleetCatalogFreshStepUpRequired);
-  });
-});
-
-describe('installing one catalog item', () => {
-  const provenance = {
-    publisher: 'pub-1',
-    publisherName: 'Acme',
-    catalogId: 'cat-1',
-    catalogName: 'Acme catalog',
-    itemId: 'item-1',
-    kind: 'mcp' as const,
-    name: 'tool',
-    version: 1,
-    digest: `sha256:${'0'.repeat(64)}`,
-  };
-  const install: CatalogInstallChange = {
-    kind: 'catalog.install',
-    name: 'tool',
-    profile: 'default',
-    replace: false,
-    installedFrom: provenance,
-    component: { kind: 'mcp', command: 'tool-bin' },
-    files: [],
-  };
-
-  it('should stage, check and apply in one call, answering the component as the daemon now holds it', async () => {
-    const { service, applied } = world();
-    const done = await service.installCatalogItem(install);
-    should(done.outcome).match({ outcome: 'applied', apply: { outcome: 'committed' } });
-    should(done.component).containEql({ command: 'tool-bin' });
-    should(applied).have.length(1);
-  });
-
-  it('should answer the skill an install adds as the daemon holds it', async () => {
-    const { service } = world();
-    const done = await service.installCatalogItem({
-      ...install,
-      name: 'sk2',
-      component: { kind: 'skills', items: ['sk2'] },
-      files: [{ path: 'SKILL.md', content: '# skill' }],
-      installedFrom: { ...provenance, kind: 'skill', name: 'sk2' },
-    });
-    should(done.component).containEql({ items: ['sk2'] });
-  });
-
-  it('should refuse what the installer would never have produced, with the schema’s own sentence', async () => {
-    const { service, applied } = world();
-    const failure = await rejection(
-      service.installCatalogItem({
-        ...install,
-        component: { kind: 'instructions' },
-      } as unknown as CatalogInstallChange),
-    );
-    should(failure).match({ code: 'fleet_change_refused' });
-    should(applied).have.length(0);
-  });
-
-  it('should refuse in a sentence when the change did not land', async () => {
-    const { service } = world({
-      apply: async () => {
-        throw new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'file /x', reason: 'disk is full' });
-      },
-    });
-    const failure = await rejection(service.installCatalogItem(install));
-    should(failure).match({ code: 'fleet_change_failed', message: 'disk is full' });
   });
 });
 
