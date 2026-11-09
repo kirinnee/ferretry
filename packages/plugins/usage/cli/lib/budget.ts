@@ -6,7 +6,7 @@
  * Pure: text in, text out.
  */
 import { type Budget, type BudgetLimit, BudgetSchema, usdWords } from '../../contract/index.ts';
-import { readConfigValue, setConfigKey } from './config-text.ts';
+import { readConfigText, setConfigKey } from '@ferretry/std/yaml';
 
 /** One level as typed: dollars, `off` to remove it, or not given. */
 type LevelInput = number | 'off' | undefined;
@@ -73,7 +73,8 @@ export const sameBudget = (left: Budget | undefined, right: Budget | undefined):
 
 /** The budget `usage.yaml` holds for `login`, or `undefined`; `null` when the file does not parse. */
 export function budgetInFile(text: string, login: string): Budget | undefined | null {
-  const value = readConfigValue(text);
+  const read = readConfigText(text);
+  const value = read.ok ? read.read.value : null;
   if (value === null || typeof value !== 'object') return null;
   const budgets = (value as { readonly budgets?: unknown }).budgets;
   if (typeof budgets !== 'object' || budgets === null) return undefined;
@@ -85,7 +86,8 @@ export function budgetInFile(text: string, login: string): Budget | undefined | 
 
 /** `usage.yaml` with `login`'s entry in `budgets` made `budget` (or removed when `undefined`). Throws when it cannot be edited. */
 export function withLoginBudget(text: string, login: string, budget: Budget | undefined): string {
-  const value = readConfigValue(text);
+  const read = readConfigText(text);
+  const value = read.ok ? read.read.value : null;
   if (value === null || typeof value !== 'object')
     throw new BudgetEditError('usage.yaml does not parse; fix it first.');
   const current = (value as { readonly budgets?: unknown }).budgets;

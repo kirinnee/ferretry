@@ -33,7 +33,7 @@ import vercelAiGateway from '../../data/models/vercel-ai-gateway.yaml' with { ty
 import zai from '../../data/models/zai.yaml' with { type: 'text' };
 import type { LocalModels } from '../../../contract/index.ts';
 import type { Credential } from '../shared/credential.ts';
-import { readConfigText } from '../shared/yaml-text.ts';
+import { readConfigText } from '@ferretry/std/yaml';
 import type { HarnessKind } from '../shared/harness.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 import { type CatalogHalf, type ModelCatalog, type ModelCatalogFile, ModelCatalogFileSchema } from './schema.ts';

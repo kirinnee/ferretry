@@ -27,7 +27,9 @@ import {
   type YAMLMap,
   type YAMLSeq,
 } from 'yaml';
-import { SCHEMA_FOLDER } from './claims.ts';
+
+/** The folder the generated JSON Schemas go in (`config/.schema/`); never a config path. The kernel's claims re-export it. */
+export const SCHEMA_FOLDER = '.schema';
 
 /**
  * The most a configuration file may hold, in UTF-8 bytes (today's `CONFIG_FILE_MAX_BYTES`). It is checked BEFORE

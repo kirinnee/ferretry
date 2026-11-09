@@ -14,6 +14,7 @@ import type {
   StateFileDef,
 } from '@ferretry/kernel/contract';
 import { config as kernelConfig, state as kernelState } from '@ferretry/kernel/host';
+import { readConfigText } from '@ferretry/std/yaml';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { ok } from '@ferretry/std';
 import {
@@ -114,7 +115,7 @@ function boot(options: FakeKernelOptions = {}) {
   let live = options.config;
   const absent: ConfigFileStatus = { state: 'absent', inEffect: false, sentences: [] };
   const writtenOf = (text: string | undefined): unknown => {
-    const read = text === undefined ? undefined : kernelConfig.readConfigText(text);
+    const read = text === undefined ? undefined : readConfigText(text);
     return read?.ok === true ? read.read.value : undefined;
   };
   const configFiles = options.writer ?? {
