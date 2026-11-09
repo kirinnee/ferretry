@@ -51,7 +51,7 @@ export function DefaultRuntimeControl({
   const save = (): void => {
     if (picked === null) return;
     void changes.apply(machineSettings(machine, { defaultRuntime: picked })).then(result => {
-      if (result.kind === 'refused') return;
+      if (result.kind !== 'applied') return;
       onPick(null);
       onSaved();
     });
