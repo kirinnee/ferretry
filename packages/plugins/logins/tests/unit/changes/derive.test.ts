@@ -461,3 +461,114 @@ describe('deriveLoginChange: every shipped preset', () => {
     should(edit.writes).have.length(1);
   });
 });
+
+describe('R5: a key in a header, a query string, punctuation or braces', () => {
+  const rawKey = (): string => 'q7Zk'.repeat(10);
+  const stage = (env: Record<string, string>): unknown =>
+    deriveLoginChange(
+      FILES,
+      { kind: 'login.add', id: 'r5', harness: 'claude-code', store: 'environment', env },
+      facts(),
+    );
+  const refusedBy = (name: string, value: string, start: string): void => {
+    const message = refusal(() => stage({ [name]: value }));
+
+    should(message).startWith(`${name} in login r5 ${start}`);
+    should(message).not.containEql(rawKey());
+  };
+
+  it('M1 should refuse a key inside a credential-named header whatever the variable is called', () => {
+    for (const value of [
+      `Authorization: Bearer ${rawKey()}`,
+      `X-Api-Key: ${rawKey()}`,
+      `Authorization: Basic ${'dXNlcjpwYXNz'.repeat(3)}`,
+      `X-Org: acme\nx-portkey-api-key: ${rawKey()}`,
+      `x-auth-token: \${secret:K} ${rawKey()}`,
+    ]) {
+      refusedBy('ANTHROPIC_CUSTOM_HEADERS', value, 'looks like a secret');
+    }
+  });
+
+  it('M1 should accept a header whose value is a reference, or one that is not credential-named', () => {
+    for (const value of [
+      'x-portkey-api-key: ${secret:K}',
+      'X-Org: acme',
+      'X-Org: acme\nAuthorization: Bearer ${secret:K}',
+    ]) {
+      should(stage({ ANTHROPIC_CUSTOM_HEADERS: value })).be.an.Object();
+    }
+  });
+
+  it('M2 should refuse a key in the query string of an address, naming the variable and never the value', () => {
+    for (const [name, value] of [
+      ['ANTHROPIC_BASE_URL', `https://gw.example/v1?key=${rawKey()}`],
+      ['ANTHROPIC_BASE_URL', `https://gw.example/v1?api_key=${rawKey()}`],
+      ['GATEWAY_URL', `https://gw.example/v1?x=1&token=${rawKey()}`],
+    ] as const) {
+      refusedBy(name, value, 'is an address that carries a key in its query string');
+    }
+  });
+
+  it('M2 should accept an api-version query and a query key that is a reference', () => {
+    for (const value of ['https://gw.example/v1?api-version=2024-10-21', 'https://gw.example/v1?key=${secret:K}']) {
+      should(stage({ ANTHROPIC_BASE_URL: value })).be.an.Object();
+    }
+  });
+
+  it('m1 should refuse a password broken by punctuation or spaces beside a reference', () => {
+    for (const [name, value] of [
+      ['GATEWAY_PASSWORD', '${secret:X} P@ssw0rd!Wint#er-2024%zz'],
+      ['GATEWAY_TOKEN', '${secret:X} ab%cdefg%hijklmn%opq'],
+      ['GATEWAY_TOKEN', '${secret:X} ab:cdefg:hijklmn:opq'],
+      ['GATEWAY_TOKEN', '${secret:X} q7Zk!q7Zk@q7Zk#q7Zk'],
+      ['GATEWAY_TOKEN', '${secret:X} abcdefg hijklmn opqrstu vwxyz12'],
+    ] as const) {
+      const message = refusal(() => stage({ [name]: value }));
+
+      should(message).startWith(`${name} in login r5 looks like a secret`);
+      should(message).not.containEql('Wint#er');
+    }
+  });
+
+  it('n1 should accept a credential-named header name before a reference under a credential-named variable', () => {
+    for (const name of ['GATEWAY_TOKEN', 'GATEWAY_AUTH_HEADER']) {
+      should(stage({ [name]: 'x-api-key: ${secret:K}' })).be.an.Object();
+    }
+  });
+
+  it('m2 should refuse a key wrapped in braces, and accept a bare reference name', () => {
+    refusedBy('GATEWAY_TOKEN', `\${secret:${rawKey().toLowerCase()}}`, 'looks like a secret');
+    refusedBy('GATEWAY_NOTE', `\${hf_${'x1'.repeat(10)}}`, 'looks like a secret');
+    for (const value of ['${GATEWAY_TOKEN}', '$GATEWAY_TOKEN', '${secret:K}']) {
+      should(stage({ GATEWAY_TOKEN: value })).be.an.Object();
+    }
+  });
+
+  it('m3 should accept a password that is a reference in an address, and still refuse a raw one', () => {
+    for (const [name, value] of [
+      ['HTTPS_PROXY', 'http://alice:${secret:PW}@proxy.example:3128'],
+      ['ANTHROPIC_BASE_URL', 'https://alice:${secret:PW}@gw.example/v1'],
+    ] as const) {
+      should(stage({ [name]: value })).be.an.Object();
+    }
+    refusedBy(
+      'ANTHROPIC_BASE_URL',
+      `https://alice:${rawKey()}@gw.example/v1`,
+      'is an address with a user and password',
+    );
+  });
+
+  it('should keep every earlier accepted case', () => {
+    should(
+      stage({
+        CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1',
+        CLAUDE_CODE_API_KEY_HELPER_TTL_MS: '3600000',
+        MAX_THINKING_TOKENS: '31999',
+        AUTH_MODE: 'oauth',
+        OPENAI_API_KEY: 'ollama',
+        A_TOKEN: 'Token ${secret:K}',
+        B_TOKEN: '${secret:A}${secret:B}',
+      }),
+    ).be.an.Object();
+  });
+});

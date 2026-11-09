@@ -13,7 +13,7 @@ import { LOGIN_NAME, LoginFileSchema, type LoginChange, type LoginFile } from '.
 import { credentialIssues, credentialOf, type Credential } from '../shared/credential.ts';
 import { credentialHarnesses, credentialVariables, hasHalves } from '../shared/halves.ts';
 import { type HarnessKind, harnessKey } from '../shared/harness.ts';
-import { looksLikeRawSecret, looksSecret, plainPaste, urlCarries } from '../../../contract/secret-shape.ts';
+import { storedEnvironmentIssue } from '../../../contract/secret-shape.ts';
 import { credentialFromPreset, presetLoginRefusal } from '../presets/login.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 
@@ -82,18 +82,21 @@ const freeName = (name: string, taken: (candidate: string) => boolean): string =
 
 function assertNoRawSecrets(env: Readonly<Record<string, string>>, owner: string): void {
   for (const [name, value] of Object.entries(env)) {
-    // The browser's rule (one helper), a token-shaped value anywhere in it at any length, a credential-named variable holding 8 characters or more outside its references.
-    const plain = plainPaste(name, value, false, 'stored');
-    const secretShaped =
-      plain.kind === 'withheld' && (plain.reason === 'credential-name' || plain.reason === 'token-shape');
-    if (secretShaped || looksSecret(name, value) || looksLikeRawSecret(name, value)) {
+    // THE stored rule (one helper, also applied to a login FILE by its schema): a secret by name, shape or entropy, or an address holding one.
+    const issue = storedEnvironmentIssue(name, value);
+    if (issue === 'secret') {
       refuse(
         `${name} in ${owner} looks like a secret, and a secret never sits in a login file. Save it in this machine's secret store and write \${secret:NAME} here instead.`,
       );
     }
-    if (urlCarries(value) === 'userinfo') {
+    if (issue === 'userinfo') {
       refuse(
         `${name} in ${owner} is an address with a user and password in it, and a secret never sits in a login file. Write the address without them and keep the password in this machine's secret store.`,
+      );
+    }
+    if (issue === 'query') {
+      refuse(
+        `${name} in ${owner} is an address that carries a key in its query string, and a secret never sits in a login file. Write the address without it and keep the key in this machine's secret store.`,
       );
     }
   }

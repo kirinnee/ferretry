@@ -45,8 +45,15 @@ const KNOWN_SHAPES: readonly RegExp[] = [
 /** A key whose value is a credential by its name. */
 const CREDENTIAL_KEY = /(?:(?:key|token|secret|password|passwd)s?|credentials?)$/iu;
 
-/** A value that names a secret rather than holding one: `${secret:NAME}`, `${NAME}` or `$NAME`. */
-const REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
+/**
+ * A value that only points somewhere else: `$NAME`, `${NAME}` or `${secret:NAME}`. The braces take a NAME and nothing else,
+ * so a key wrapped in braces (`${q7Zk…}` with a symbol, `${secret:lower-case-key}`) is not an indirection.
+ */
+const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}|\{secret:[A-Z][A-Z0-9_]{0,63}\})$/u;
+const REFERENCE = INDIRECT_VALUE;
+
+/** A whole value that is exactly one valid `${secret:NAME}` reference. */
+const WHOLE_SECRET_REFERENCE = /^\$\{secret:[A-Z][A-Z0-9_]{0,63}\}$/u;
 
 /** The shortest value the entropy test considers; shorter strings are words, not keys. */
 const MIN_SECRET_LENGTH = 16;
@@ -177,9 +184,6 @@ const TOKEN_ANYWHERE = new RegExp(
   'u',
 );
 
-/** A value that only points somewhere else: `$NAME`, `${NAME}`, `${secret:NAME}`. */
-const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
-
 /**
  * Whether one environment entry looks like a secret (E7).
  *
@@ -188,7 +192,8 @@ const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
  * shorter than the secret store accepts is a flag rather than a credential (`AUTH=1`).
  */
 export function looksSecret(name: string, value: string): boolean {
-  if (value.length < MIN_SECRET_VALUE_LENGTH || INDIRECT_VALUE.test(value)) return false;
+  if (value.length < MIN_SECRET_VALUE_LENGTH) return false;
+  if (INDIRECT_VALUE.test(value)) return hasTokenShape(value);
   if (secretReferencesIn(value).length > 0) return false;
   return SECRET_VALUE_PREFIX.test(value) || namesACredential(name);
 }
@@ -208,13 +213,55 @@ export function hasTokenShape(value: string): boolean {
   return SECRET_VALUE_PREFIX.test(value) || TOKEN_ANYWHERE.test(value) || KNOWN_SHAPES.some(shape => shape.test(value));
 }
 
-/** What is wrong with a URL held as a plain value: a user and password in it, or a query string. */
+/** Query parameter names that carry a credential without ending in a credential word. */
+const SIGNING_PARAMETERS: ReadonlySet<string> = new Set(['sig', 'signature', 'auth', 'authorization', 'apikey']);
+
+/** Whether a query parameter's NAME says it carries a credential (`key`, `api_key`, `access_token`, `sig`, `password`). */
+function parameterNamesACredential(name: string): boolean {
+  const read = name.toLowerCase().replaceAll('-', '_');
+  return SIGNING_PARAMETERS.has(read) || CREDENTIAL_KEY.test(read) || namesACredential(read);
+}
+
+/** Whether a query string carries a credential-named parameter whose value holds a key. */
+function queryCarriesKey(query: string): boolean {
+  return query.split(/[&;]/u).some(pair => {
+    const at = pair.indexOf('=');
+    if (at < 1) return false;
+    let value = pair.slice(at + 1);
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // an undecodable value is judged as written
+    }
+    return parameterNamesACredential(pair.slice(0, at)) && holdsAKey(value);
+  });
+}
+
+/** Whether the user and password part of an address holds a password, or a key as the user alone. A `${secret:NAME}` password is a reference. */
+function userinfoHoldsSecret(userinfo: string): boolean {
+  const bare = userinfo.replace(secretReferencePattern(), '');
+  const colon = bare.indexOf(':');
+  if (colon >= 0) return bare.slice(colon + 1) !== '';
+  return holdsAKey(userinfo);
+}
+
+/**
+ * What is wrong with a URL held as a plain value: a user and password in it (a password that is a `${secret:NAME}` reference is
+ * not one), or a query string whose credential-named parameter (`key`, `token`, `sig`…) holds a key. `?api-version=…` is neither.
+ */
 export function urlCarries(value: string): 'userinfo' | 'query' | undefined {
   const trimmed = value.trim();
   const rest = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^#]*)/iu.exec(trimmed);
-  if (rest === null) return /^[^/\s]+:[^/\s]*@/u.test(trimmed) ? 'userinfo' : undefined;
-  if ((rest[1] ?? '').includes('@')) return 'userinfo';
-  return (rest[2] ?? '').includes('?') ? 'query' : undefined;
+  if (rest === null) {
+    const bare = /^([^/\s]+:[^/\s]*)@/u.exec(trimmed);
+    return bare !== null && userinfoHoldsSecret(bare[1] ?? '') ? 'userinfo' : undefined;
+  }
+  const authority = rest[1] ?? '';
+  const at = authority.lastIndexOf('@');
+  if (at >= 0 && userinfoHoldsSecret(authority.slice(0, at))) return 'userinfo';
+  const target = rest[2] ?? '';
+  const mark = target.indexOf('?');
+  return mark >= 0 && queryCarriesKey(target.slice(mark + 1)) ? 'query' : undefined;
 }
 
 /** Why a pasted value was not put in a plain field. */
@@ -252,35 +299,56 @@ function namesACredentialAtEnd(name: string): boolean {
   return FINAL_CREDENTIAL_WORDS.has(last) || SECRET_NAME_PAIRS.has(`${words.at(-2) ?? ''}_${last}`);
 }
 
-/** A run of characters a key is made of, as long as the secret store accepts. */
-const KEY_RUN = new RegExp(`[A-Za-z0-9._~+/=-]{${String(MIN_SECRET_VALUE_LENGTH)},}`, 'u');
+/** One header line: its name, then its value. */
+const HEADER_LINE = /^\s*([A-Za-z][A-Za-z0-9-]{0,39})\s*:\s*(.*)$/u;
 
-/** What a header leaves once its `${secret:NAME}` references, one `Authorization:` and one scheme word are taken away. */
+/** A scheme word that may open a header's value. */
+const SCHEME_WORD = /^(?:bearer|basic|token)\b\s*/iu;
+
+/** Whether a HEADER's name says its value is a credential: `Authorization`, `Proxy-Authorization`, `x-api-key`, `x-auth-token`, `cookie`. */
+function headerNamesACredential(name: string): boolean {
+  const read = name.replaceAll('-', '_');
+  return /^(?:proxy_)?authorization$/iu.test(read) || namesACredential(read) || CREDENTIAL_KEY.test(read);
+}
+
+/** What a value leaves once its `${secret:NAME}` references, one credential `Header-Name:`, one scheme word and separators are taken away. */
 function outsideReferences(value: string): string {
-  return value
-    .replace(secretReferencePattern(), ' ')
-    .trim()
-    .replace(/^(?:authorization\s*:\s*)?(?:(?:bearer|basic|token)\b\s*)?/iu, '');
+  const bare = value.replace(secretReferencePattern(), ' ').trim();
+  const header = HEADER_LINE.exec(bare);
+  const unheaded = header !== null && headerNamesACredential(header[1] ?? '') ? (header[2] ?? '') : bare;
+  return unheaded.replace(SCHEME_WORD, '').replace(/[\s"',;:]/gu, '');
 }
 
 /**
  * Whether a value holds something key-like. With no reference it is any value of 8 characters or more (the secret store's
- * floor, so a shorter one is a placeholder such as `ollama`). With a `${secret:NAME}` in it, only what is LEFT counts: a
- * scheme word and header punctuation may surround the reference, but a run of 8 key characters beside it is a raw key.
+ * floor, so a shorter one is a placeholder such as `ollama`). With a `${secret:NAME}` in it, only what is LEFT counts: one
+ * header name, one scheme word and separators may surround the reference, but 8 other characters beside it are a raw key.
  */
 function holdsAKey(value: string): boolean {
   if (secretReferencesIn(value).length === 0) return value.length >= MIN_SECRET_VALUE_LENGTH;
-  return KEY_RUN.test(outsideReferences(value));
+  return outsideReferences(value).length >= MIN_SECRET_VALUE_LENGTH;
+}
+
+/** Whether any LINE of a value is a credential-named header (`Authorization`, `x-api-key`…) whose value holds a key. */
+function holdsAHeaderKey(value: string): boolean {
+  return value.split(/\r?\n/u).some(line => {
+    const header = HEADER_LINE.exec(line);
+    return (
+      header !== null &&
+      headerNamesACredential(header[1] ?? '') &&
+      holdsAKey((header[2] ?? '').replace(SCHEME_WORD, ''))
+    );
+  });
 }
 
 /**
  * THE rule for a value headed for a PLAIN field (one owner, shared by this browser's paste and the daemon's
- * backstop `assertNoRawSecrets`, which refuses `credential-name`, `token-shape` and `url-userinfo`): a variable the
+ * backstop `assertNoRawSecrets`, which refuses `credential-name`, `token-shape`, `url-userinfo` and `url-query`): a variable the
  * preset deliberately leaves empty keeps its `''`; a value with a token shape is never taken, at any length. In
  * `'prefill'` (the browser's paste) a variable whose name ENDS in a credential word is never taken either, however
  * short, and the person types a placeholder themselves. In both modes a credential-named variable (a credential word in
  * any position) is refused when its value holds 8 or more characters outside any `${secret:NAME}` reference, so only a
- * scheme word (`Bearer`, `Basic`, `Token`) and header punctuation (`Authorization:`) may surround a reference. A URL with a user or a query string is not taken. It returns
+ * scheme word (`Bearer`, `Basic`, `Token`) and header punctuation (`Authorization:`) may surround a reference. A credential-named HEADER line (`Authorization: Bearer …`, `x-api-key: …`) is judged the same way, whatever the variable is called. A URL with a user and password (not a `${secret:NAME}` one), or a credential-named query parameter holding a key, is not taken. A whole `${…}` or `$NAME` that is not a valid `${secret:NAME}` is not taken under a credential-named variable in `'prefill'`. It returns
  * the verdict, never the value in a sentence.
  */
 export function plainPaste(
@@ -289,9 +357,13 @@ export function plainPaste(
   allowEmpty: boolean,
   mode: 'prefill' | 'stored' = 'prefill',
 ): PlainPaste {
-  if (value !== '' && !INDIRECT_VALUE.test(value.trim())) {
+  if (value !== '') {
+    const indirect = INDIRECT_VALUE.test(value.trim());
     const namesOne = namesACredential(name) && holdsAKey(value);
-    if (namesOne || (mode === 'prefill' && namesACredentialAtEnd(name))) {
+    const atEnd = mode === 'prefill' && namesACredentialAtEnd(name);
+    const wrongIndirect =
+      indirect && mode === 'prefill' && namesACredential(name) && !WHOLE_SECRET_REFERENCE.test(value.trim());
+    if ((!indirect && (namesOne || atEnd || holdsAHeaderKey(value))) || wrongIndirect) {
       return { kind: 'withheld', reason: 'credential-name' };
     }
     if (hasTokenShape(value)) return { kind: 'withheld', reason: 'token-shape' };
@@ -300,4 +372,13 @@ export function plainPaste(
   if (carried === 'userinfo') return { kind: 'withheld', reason: 'url-userinfo' };
   if (carried === 'query') return { kind: 'withheld', reason: 'url-query' };
   return allowEmpty ? { kind: 'withheld', reason: 'allow-empty' } : { kind: 'take', value };
+}
+
+/** What a value in a stored login's environment may NOT be: a secret (by name, shape or entropy), or an address holding one. */
+export function storedEnvironmentIssue(name: string, value: string): 'secret' | 'userinfo' | 'query' | undefined {
+  const plain = plainPaste(name, value, false, 'stored');
+  const secretShaped =
+    plain.kind === 'withheld' && (plain.reason === 'credential-name' || plain.reason === 'token-shape');
+  if (secretShaped || looksSecret(name, value) || looksLikeRawSecret(name, value)) return 'secret';
+  return urlCarries(value);
 }

@@ -25,7 +25,8 @@ describe('hasTokenShape', () => {
 describe('urlCarries', () => {
   it('says a user and password, a query string, or nothing', () => {
     expect(urlCarries('https://bob:pw@host.example/v1')).toBe('userinfo');
-    expect(urlCarries('https://host.example/v1?api-version=2024')).toBe('query');
+    expect(urlCarries('https://host.example/v1?api-version=2024')).toBeUndefined();
+    expect(urlCarries('https://host.example/v1?key=abcdefgh12')).toBe('query');
     expect(urlCarries('https://host.example:8443/v1')).toBeUndefined();
     expect(urlCarries('not a url')).toBeUndefined();
     expect(urlCarries('bob:pw@llm.corp.example')).toBe('userinfo');
@@ -98,7 +99,7 @@ describe('plainPaste', () => {
       kind: 'withheld',
       reason: 'url-userinfo',
     });
-    expect(plainPaste('ANTHROPIC_BASE_URL', 'https://h.example/?k=1', false)).toEqual({
+    expect(plainPaste('ANTHROPIC_BASE_URL', 'https://h.example/?key=abcdefgh12', false)).toEqual({
       kind: 'withheld',
       reason: 'url-query',
     });

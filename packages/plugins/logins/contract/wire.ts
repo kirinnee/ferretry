@@ -17,6 +17,7 @@ import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSche
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { malformedSecretReference } from '@ferretry/core-vault/contract';
+import { storedEnvironmentIssue } from './secret-shape.ts';
 
 const HarnessKindSchema = HarnessKeySchema;
 const NonEmpty = z.string().min(1);
@@ -503,8 +504,33 @@ const refuseUnsafeEnvironment = (ctx: {
 const loginEnvironment = <V extends z.ZodType>(value: V) =>
   z.record(z.string().max(128), value).check(refuseUnsafeEnvironment);
 
-/** A login's environment: POSIX names, plain values or `${secret:NAME}` references, no reserved variable. */
-export const LoginEnvSchema = loginEnvironment(z.string());
+/**
+ * What a login FILE's environment may not hold: a secret value, or an address carrying one. The same rule the staging route
+ * applies ({@link storedEnvironmentIssue}), so a file written by the config editor or `config_write` is judged as a login
+ * add is. A refusal names the VARIABLE only, never the value. A file that fails is reported invalid and its last good
+ * version stays in effect (the kernel's rule for every file), exactly as a file holding a raw key already is.
+ */
+const refuseStoredSecrets = (ctx: {
+  readonly value: Readonly<Record<string, unknown>>;
+  readonly issues: z.core.$ZodRawIssue[];
+}): void => {
+  for (const [name, value] of Object.entries(ctx.value)) {
+    const issue = typeof value === 'string' ? storedEnvironmentIssue(name, value) : undefined;
+    if (issue === undefined) continue;
+    ctx.issues.push({
+      code: 'custom',
+      message:
+        issue === 'secret'
+          ? `"${name}" holds a secret: save it in the secret store and write \${secret:NAME} here instead`
+          : `"${name}" is an address holding a ${issue === 'userinfo' ? 'password' : 'key in its query string'}: write the address without it and keep it in the secret store`,
+      input: name,
+      path: [name],
+    });
+  }
+};
+
+/** A login's environment: POSIX names, plain values or `${secret:NAME}` references, no reserved variable, no secret value. */
+export const LoginEnvSchema = loginEnvironment(z.string()).check(refuseStoredSecrets);
 
 const ChangeLabelSchema = NonEmptyStringSchema.max(200);
 

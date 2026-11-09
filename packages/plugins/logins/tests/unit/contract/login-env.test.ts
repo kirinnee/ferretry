@@ -103,3 +103,32 @@ describe('a login environment', () => {
     ).be.true();
   });
 });
+
+describe('m4: a login FILE is judged by the stored rule too (config editor, config_write)', () => {
+  const key = 'q7Zk'.repeat(10);
+  const file = (env: Record<string, string>) => ({ harness: 'claude-code', store: 'environment', env });
+
+  it('should refuse each value the staging route refuses, naming the variable only', () => {
+    const cases: Record<string, string>[] = [
+      { ANTHROPIC_API_KEY: `Bearer ${key} \${secret:X}` },
+      { OPENAI_API_KEY: 'hunter22x' },
+      { ANTHROPIC_BASE_URL: `https://gw.example/v1?key=${key}` },
+      { ANTHROPIC_CUSTOM_HEADERS: `x-api-key: ${key}` },
+    ];
+    for (const env of cases) {
+      const issues = refusal(LoginFileSchema.safeParse(file(env)));
+      const name = Object.keys(env)[0] ?? '';
+
+      should(issues.some(issue => issue.message.startsWith(`"${name}"`) && issue.path[0] === 'env')).be.true();
+      should(JSON.stringify(issues)).not.containEql(key);
+      should(JSON.stringify(issues)).not.containEql('hunter22x');
+    }
+  });
+
+  it('should refuse it in a harness half as well, and accept references and placeholders', () => {
+    should(LoginHalfSchema.safeParse({ env: { OPENAI_API_KEY: 'hunter22x' } }).success).be.false();
+    should(
+      LoginFileSchema.safeParse(file({ OPENAI_API_KEY: 'ollama', GATEWAY_TOKEN: 'Bearer ${secret:K}' })).success,
+    ).be.true();
+  });
+});

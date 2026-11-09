@@ -155,7 +155,7 @@ describe('prefillFrom — a pasted key never lands in a plain field', () => {
     expect(userinfo.values).toEqual({});
     expect(userinfo.withheld).toEqual([{ name: 'ANTHROPIC_BASE_URL', reason: 'url-userinfo' }]);
     expect(JSON.stringify(userinfo)).not.toContain('hunter2pass');
-    const query = prefillFrom(REAL_GATEWAY, { ANTHROPIC_BASE_URL: 'https://llm.corp.example/v1?token=abc' });
+    const query = prefillFrom(REAL_GATEWAY, { ANTHROPIC_BASE_URL: 'https://llm.corp.example/v1?token=abcdefgh12' });
     expect(query.withheld).toEqual([{ name: 'ANTHROPIC_BASE_URL', reason: 'url-query' }]);
   });
 
@@ -272,5 +272,39 @@ describe('pasteTarget', () => {
   it('offers nothing to continue to when no preset is offered', () => {
     const { detection } = readPaste([], 'A=1');
     expect(pasteTarget([], detection)).toBeUndefined();
+  });
+});
+
+describe('prefillFrom — R5: one rule with the daemon', () => {
+  const key = 'q7Zk'.repeat(10);
+  const plain = (name: string) =>
+    preset({
+      id: 'x',
+      variables: [{ name, kind: 'plain', required: false, allowEmpty: false, harnesses: ['claude-code'] }],
+    });
+
+  it('withholds a key in a credential-named header, a query parameter and a braced value', () => {
+    expect(
+      prefillFrom(plain('ANTHROPIC_CUSTOM_HEADERS'), { ANTHROPIC_CUSTOM_HEADERS: `x-api-key: ${key}` }).values,
+    ).toEqual({});
+    const query = prefillFrom(plain('ANTHROPIC_BASE_URL'), { ANTHROPIC_BASE_URL: `https://gw.example/v1?key=${key}` });
+    expect(query.withheld).toEqual([{ name: 'ANTHROPIC_BASE_URL', reason: 'url-query' }]);
+    const braced = prefillFrom(plain('GATEWAY_TOKEN'), { GATEWAY_TOKEN: `\${${key}}` });
+    expect(braced.values).toEqual({});
+    expect(braced.withheld).toEqual([{ name: 'GATEWAY_TOKEN', reason: 'credential-name' }]);
+    const wrapped = prefillFrom(plain('GATEWAY_TOKEN'), { GATEWAY_TOKEN: `\${secret:${key.toLowerCase()}}` });
+    expect(wrapped.values).toEqual({});
+    const token = prefillFrom(plain('GATEWAY_NOTE'), { GATEWAY_NOTE: `\${hf_${'x1'.repeat(10)}}` });
+    expect(token.withheld).toEqual([{ name: 'GATEWAY_NOTE', reason: 'token-shape' }]);
+    expect(JSON.stringify([query, braced, wrapped, token])).not.toContain(key);
+  });
+
+  it('takes an api-version address and an address whose password is a reference', () => {
+    const version = prefillFrom(plain('ANTHROPIC_BASE_URL'), {
+      ANTHROPIC_BASE_URL: 'https://gw.example/v1?api-version=2024-10-21',
+    });
+    expect(version.values).toEqual({ ANTHROPIC_BASE_URL: 'https://gw.example/v1?api-version=2024-10-21' });
+    const proxy = prefillFrom(plain('HTTPS_PROXY'), { HTTPS_PROXY: 'http://alice:${secret:PW}@proxy.example:3128' });
+    expect(proxy.withheld).toEqual([]);
   });
 });
