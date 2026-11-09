@@ -118,7 +118,7 @@ interface EnvironmentStoreResolution {
 }
 
 /** A `host` or `ferretry` login with no store to read: a Codex home that cannot be named, or a build that cannot reach the stores. */
-export interface UnavailableStoreResolution {
+interface UnavailableStoreResolution {
   readonly harness: HarnessKind;
   readonly store: 'host' | 'ferretry';
   readonly unavailable: string;
