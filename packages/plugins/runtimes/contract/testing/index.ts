@@ -4,11 +4,13 @@
  */
 import { err, ok, type Result } from '@ferretry/std';
 import {
-  type CatalogInstallChange,
+  type ProfileLayerChange,
+  type ProfileSummary,
   type ResolveResult,
   type RuntimeHome,
   type RuntimeHomeReader,
   type RuntimeId,
+  type RuntimeLayers,
   RuntimeIdSchema,
   type RuntimesApi,
   type RuntimeSummary,
@@ -19,7 +21,10 @@ export interface FakeRuntimes extends RuntimesApi {
   setRuntimes(runtimes: readonly RuntimeSummary[], defaultRuntime?: RuntimeId): void;
   /** The homes `homes()` answers, and the reader `home(id)` hands out for each id (an id with no reader gets none). */
   setHomes(homes: readonly RuntimeHome[], readers?: Readonly<Record<string, RuntimeHomeReader>>): void;
-  readonly installed: readonly CatalogInstallChange[];
+  /** The profiles `profiles()` answers, and the layers `layers(id)` answers for each runtime. */
+  setProfiles(profiles: readonly ProfileSummary[], layers?: readonly RuntimeLayers[]): void;
+  /** Every `changeProfileLayers` call, in order. The fake writes nothing. */
+  readonly changes: readonly ProfileLayerChange[];
 }
 
 /** An in-memory Runtimes: the machine's runtimes are whatever the test set. */
@@ -28,7 +33,9 @@ export function fakeRuntimes(): FakeRuntimes {
   let defaultRuntime: RuntimeId | undefined;
   let homes: readonly RuntimeHome[] = [];
   let readers: Readonly<Record<string, RuntimeHomeReader>> = {};
-  const installed: CatalogInstallChange[] = [];
+  let profiles: readonly ProfileSummary[] = [];
+  let layerSets: ReadonlyMap<RuntimeId, RuntimeLayers> = new Map();
+  const changes: ProfileLayerChange[] = [];
   const get = async (id: RuntimeId): Promise<RuntimeSummary | undefined> => runtimes.find(runtime => runtime.id === id);
   return {
     list: async () => runtimes,
@@ -46,12 +53,11 @@ export function fakeRuntimes(): FakeRuntimes {
     // No fleet is published in memory: there are no homes until a test sets them, and a reader only for a listed id.
     homes: async () => homes,
     home: id => (homes.some(home => home.id === id) ? readers[id] : undefined),
-    installCatalogItem: async change => {
-      installed.push(change);
-      return {
-        outcome: 'committed',
-        result: { accountCount: 0, operationCount: 0, manifestPath: '/fake', prunedWrappers: [], sharedHistory: [] },
-      };
+    profiles: async () => profiles,
+    layers: async id => layerSets.get(id),
+    changeProfileLayers: async change => {
+      changes.push(change);
+      return { kind: 'written', profiles: change.kind === 'add' ? [change.profile] : [] };
     },
     setRuntimes: (next, nextDefault) => {
       runtimes = next;
@@ -61,8 +67,12 @@ export function fakeRuntimes(): FakeRuntimes {
       homes = next;
       readers = nextReaders;
     },
-    get installed() {
-      return installed;
+    setProfiles: (next, nextLayers = []) => {
+      profiles = next;
+      layerSets = new Map(nextLayers.map(set => [set.runtime, set]));
+    },
+    get changes() {
+      return changes;
     },
   };
 }
@@ -84,5 +94,11 @@ export async function runtimesConformance(make: () => RuntimesApi): Promise<Resu
   const homes = await api.homes();
   if (new Set(homes.map(home => home.id)).size !== homes.length) failures.push('homes() lists each id once');
   if (api.home('no-such-home') !== undefined) failures.push('home() is undefined for an id homes() does not list');
+  // The layers: each profile once, and nothing for a runtime that does not exist.
+  const profiles = await api.profiles();
+  if (new Set(profiles.map(profile => profile.name)).size !== profiles.length)
+    failures.push('profiles() lists each name once');
+  if ((await api.layers(RuntimeIdSchema.parse('no-such-runtime'))) !== undefined)
+    failures.push('layers() is undefined for a runtime that does not exist');
   return failures.length === 0 ? ok(true) : err(failures);
 }

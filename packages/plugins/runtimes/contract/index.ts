@@ -17,11 +17,12 @@ import {
   runtimeFileLoosens,
 } from './config.ts';
 import { RUNTIME_HOME_READ_MODELS, type RuntimeHomesApi } from './homes.ts';
-import type { ApplyOutcomeSchema, CatalogInstallChangeSchema } from './wire/index.ts';
+import { RUNTIME_LAYER_READ_MODELS, type RuntimeLayersApi } from './layers.ts';
 
 export * from './codex-launch.ts';
 export * from './component-source.ts';
 export * from './homes.ts';
+export * from './layers.ts';
 export * from './config.ts';
 export * from './wire/index.ts';
 
@@ -78,7 +79,7 @@ export type ResolveResult =
   | { readonly ok: true; readonly runtime: RuntimeSummary }
   | { readonly ok: false; readonly refusal: ResolveRefusal; readonly sentence: string };
 
-export interface RuntimesApi extends RuntimeHomesApi {
+export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
   /** Every runtime on this machine, in name order. */
   list(): Promise<readonly RuntimeSummary[]>;
   get(id: RuntimeId): Promise<RuntimeSummary | undefined>;
@@ -86,17 +87,19 @@ export interface RuntimesApi extends RuntimeHomesApi {
   default(): Promise<RuntimeId | undefined>;
   /** What a start on this runtime (or the default, when `id` is omitted) would use, or why it cannot start. */
   resolve(id?: RuntimeId): Promise<ResolveResult>;
-  /**
-   * Put a catalog-published MCP server or skill into this machine's setup and add it to one profile, in ONE change.
-   * The signature, digest, passkey and refusal of a ferret are the installer's to have checked first (docs/catalogs.md).
-   */
-  installCatalogItem(change: z.infer<typeof CatalogInstallChangeSchema>): Promise<z.infer<typeof ApplyOutcomeSchema>>;
 }
 export const RuntimesPort = definePort<RuntimesApi>('runtimes');
 export { FerretsPort };
 
 /** Read models others and the app may call through `RuntimesPort` (`manifest.data.readModels`). */
-export const RUNTIMES_READ_MODELS = ['list', 'get', 'default', 'resolve', ...RUNTIME_HOME_READ_MODELS] as const;
+export const RUNTIMES_READ_MODELS = [
+  'list',
+  'get',
+  'default',
+  'resolve',
+  ...RUNTIME_HOME_READ_MODELS,
+  ...RUNTIME_LAYER_READ_MODELS,
+] as const;
 
 // ─── events ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
