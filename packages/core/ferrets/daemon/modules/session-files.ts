@@ -332,6 +332,18 @@ export class SessionFiles {
     return new FileSessionEnvironmentStore(this.root(id), id);
   }
 
+  /**
+   * Deletes an ended ferret's `environment.json` (its credential is dead once it has ended), on the ferret's own queue
+   * and only while `stillEnded` still says it has: a resume that began first has a new credential to keep. Never
+   * follows a link, a missing file is fine, and the ferret's folder is not made for it. Throws a real fault for the
+   * caller to log.
+   */
+  async removeEnvironment(id: SessionId, stillEnded: () => boolean): Promise<void> {
+    await this.serial.run(id, async () => {
+      if (stillEnded()) await this.environmentStore(id).remove(id);
+    });
+  }
+
   taskStore(id: SessionId): FileSessionTaskStore {
     return new FileSessionTaskStore(this.root(id), id);
   }
