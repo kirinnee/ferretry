@@ -9,7 +9,6 @@ import type { KernelPorts } from '@ferretry/kernel/contract';
 import { configThenFleet } from '../../../daemon/adapters/account-model-files.ts';
 import { readTextFolder } from '../../../daemon/adapters/setup-files.ts';
 import { fileAssembly, fleetHost } from '../../../daemon/host-assembly.ts';
-import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
 import { FleetApplyAfterConfigError, type FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
@@ -32,9 +31,13 @@ const kernelOver = (world: FleetWorld) => {
       },
     },
     log: { warn: (message: string) => warned.push(message) },
-    config: { writeAll: async () => ({ kind: 'written' as const }) },
+    config: {
+      writeAll: async () => ({ kind: 'written' as const }),
+      collection: () => new Map(),
+      file: () => undefined,
+    },
   } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
-    config: Pick<KernelPorts['config'], 'writeAll'>;
+    config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file'>;
   };
   return { kernel, warned };
 };
@@ -107,14 +110,19 @@ describe('S43 the host reads of the fleet folder serve assets/ through a fence o
 });
 
 describe('the composed catalogue and setup', () => {
-  it('still answers the plain sentence for a read of the model, because the evaluator is not ported', async () => {
+  it('answers a read of the model with real data (not the plain sentence) now the evaluator reads the files', async () => {
     const world = await fleetWorld();
     const { kernel } = kernelOver(world);
-    const needs = { logins: { list: async () => ({ logins: [] }) }, loginChanges: {} } as never;
+    const needs = {
+      logins: { list: async () => ({ logins: [] }) },
+      loginChanges: {},
+      ferrets: { list: async () => [] },
+    } as never;
 
     const services = fileAssembly({ kernel, needs }, new FleetPublication());
 
-    await expect(services.catalog.machine(undefined)).rejects.toThrow(UNAVAILABLE);
+    const machine = await services.catalog.machine(undefined);
+    expect(machine).toMatchObject({ format: 'none' });
   });
 });
 

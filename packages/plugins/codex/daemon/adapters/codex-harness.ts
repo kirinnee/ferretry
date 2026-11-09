@@ -23,8 +23,9 @@ import type {
 } from '@ferretry/core-ferrets/contract';
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
-import { buildCodexLaunchArgv, tomlTables } from '../lib/index.ts';
-import { CODEX_LAUNCH_SETTINGS, type HarnessConfig } from '../../contract/index.ts';
+import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
+import { settingsDocument } from '../lib/settings.ts';
+import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS, type HarnessConfig, type SettingsItem } from '../../contract/index.ts';
 import { codexFixedArguments } from '../lib/fixed-layer.ts';
 import { compareCodexLaunchSettings, codexLaunchSettingsRecord } from '../lib/launch-settings.ts';
 import { codexCorrelationArguments } from '../lib/transcript/rollout.ts';
@@ -40,7 +41,8 @@ import {
 type ChildEnvironment = RunSpec['env'];
 
 export interface CodexHarnessOptions {
-  readonly kernel: Pick<KernelPorts, 'roots' | 'log' | 'clock' | 'redaction' | 'state'>;
+  readonly kernel: Pick<KernelPorts, 'roots' | 'log' | 'clock' | 'redaction' | 'state'> &
+    Partial<{ readonly config: Pick<KernelPorts['config'], 'collection'> }>;
   readonly permissionMode?: () => HarnessConfig['permissionMode'];
   readonly historyDirectory?: () => Promise<string | undefined>;
   readonly locate: () => Promise<HarnessLocation>;
@@ -64,15 +66,29 @@ function agentsDocument(spec: LaunchSpec): string {
   return sections.length === 0 ? '' : `${sections.join('\n\n')}\n`;
 }
 
-/** Codex's `config.toml`: one `[mcp_servers.<name>]` table per MCP server the launch adds. */
-function configDocument(spec: LaunchSpec): string {
+/**
+ * Codex's `config.toml`: the settings items on this machine merged in name order (what Claude's home does with its own,
+ * so `shell_environment_policy.set` and every other Codex setting reaches the harness), then one `[mcp_servers.<name>]`
+ * table per MCP server the launch adds. A server the launch adds replaces a settings item's server of the same name.
+ */
+function configDocument(spec: LaunchSpec, items: ReadonlyMap<string, SettingsItem>): string {
+  const { mcp_servers: declared, ...settings } = settingsDocument(items);
   const servers: Record<string, Record<string, unknown>> = {};
+  if (typeof declared === 'object' && declared !== null && !Array.isArray(declared)) {
+    for (const [name, config] of Object.entries(declared))
+      if (typeof config === 'object' && config !== null && !Array.isArray(config))
+        servers[name] = config as Record<string, unknown>;
+  }
   for (const part of spec.parts) {
     if (part.kind !== 'mcp') continue;
     const config = part.config;
     servers[part.name] = typeof config === 'object' && config !== null && !Array.isArray(config) ? config : {};
   }
-  return Object.keys(servers).length === 0 ? '' : `${tomlTables('mcp_servers', servers)}\n`;
+  const blocks = [
+    tomlDocument(settings),
+    Object.keys(servers).length === 0 ? '' : tomlTables('mcp_servers', servers),
+  ].filter(block => block !== '');
+  return blocks.length === 0 ? '' : `${blocks.join('\n\n')}\n`;
 }
 
 export function codexHarness(options: CodexHarnessOptions): Harness {
@@ -215,9 +231,11 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
       const root = await ensureHome(spec);
       const files: FencedPath[] = [];
+      // ONE read of this plugin's own settings items per home written (`config/codex/settings/`).
+      const items = kernel.config?.collection(CODEX_SETTINGS as never) as ReadonlyMap<string, SettingsItem> | undefined;
       for (const [name, text] of [
         ['AGENTS.md', agentsDocument(spec)],
-        ['config.toml', configDocument(spec)],
+        ['config.toml', configDocument(spec, items ?? new Map())],
       ] as const) {
         if (text === '') continue;
         const target = root.resolve(name);

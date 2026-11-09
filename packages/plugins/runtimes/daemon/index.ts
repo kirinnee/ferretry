@@ -8,17 +8,11 @@
  * `runtimes.default-changed` so a view wakes without polling.
  *
  * What the services stand on is `RuntimesAssembly`. {@link runtimesDaemon} takes a function that builds it from the
- * kernel's ports; the default builds the one that refuses in a sentence, because host collaborators are not yet reachable
- * from a plugin:
+ * kernel's ports; the default is {@link hostAssembly}, the real one over the files (`host-assembly.ts`).
+ * {@link unavailableAssembly} is the one that refuses every read and change in a sentence: it is what a daemon whose host
+ * seams cannot be reached falls back to, and what the tests of that sentence build.
  *
- *  - GAP(kernel): an all-or-none write of a change's several configuration documents. The kernel's config write port
- *    (`ConfigPort.write`) writes one declared file per call; the apply pipeline writes through
- *    {@link RuntimeConfigWriter} (`lib/service/ports.ts`), which stays `refusingConfigWriter` until the catalogue is
- *    composed over the host (below) and the documents can land together.
- *  - GAP(kernel): `permissions.roots` is empty and `RootName` is a fixed set, so the state home's `fleet/` folder and
- *    the harnesses' own homes are out of reach; the adapters (`daemon/adapters`) are written against narrow host ports
- *    and take their real answers from the kernel when it opens those.
- * LoginsPort is required and supplies safe sign-in facts independently of the pending host assembly.
+ * LoginsPort is required and supplies safe sign-in facts: they are also what the model's logins are read from.
  */
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
@@ -117,7 +111,20 @@ function changedNames<Shape>(before: ReadonlyMap<string, Shape>, after: Readonly
     .toSorted((left, right) => left.localeCompare(right));
 }
 
-export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly) {
+/**
+ * The assembly of this build, and the daemon's default: the catalogue and the setup over the files (the model in effect
+ * from Runtimes' own files and Logins' facts, the provisioner on the `fleet` root, the all-or-none config writer), the
+ * published fleet and an ended Codex ferret's follow-up through the kernel's roots and processes. What the kernel does
+ * not open (another plugin's components, the tool installer, the secret store) stays unavailable and says so.
+ */
+export const hostAssembly: RuntimesAssembler = ctx => {
+  // ONE publication gate: every apply (the catalogue's and the setup's share one provisioner) runs exclusively under
+  // it, and every read of the published fleet (the ended-runtime seams, the manifest the republish compares) waits (S67).
+  const publication = new FleetPublication();
+  return { ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) };
+};
+
+export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
   return implementDaemon(manifest, {
     build(ctx) {
       const { config, events, clock } = ctx.kernel;
@@ -264,12 +271,4 @@ export function runtimesDaemon(assemble: RuntimesAssembler = unavailableAssembly
   });
 }
 
-/** The assembly of this build: the services stay unwired where the kernel offers no way yet, the rest is the host's. */
-const hostAssembly: RuntimesAssembler = ctx => {
-  // ONE publication gate: every apply (the catalogue's and the setup's share one provisioner) runs exclusively under
-  // it, and every read of the published fleet (the ended-runtime seams, the manifest the republish compares) waits (S67).
-  const publication = new FleetPublication();
-  return { ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) };
-};
-
-export default runtimesDaemon(hostAssembly);
+export default runtimesDaemon();

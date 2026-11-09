@@ -752,6 +752,8 @@ const RuntimeSchema = z.strictObject({
   credential: CredentialIdSchema,
   profile: ComponentNameSchema,
   harness: HarnessKindSchema.optional(),
+  /** The shell item this runtime enters (Q18), carried so a runtime file's `shell` survives a change that rewrites it. */
+  shell: NonEmptyString.optional(),
   /** "Ferretry launches this as an agent" (R3): only these get the fixed layer and start unattended. */
   agent: z.boolean().default(false),
   /** Switched off without deleting it (`./disabled.ts`). */

@@ -8,31 +8,52 @@
  *  - the machine's "Auto-resume after restart" switch, from Runtimes' own `runtimes.yaml`;
  *  - the catalogue and the setup over the files ({@link fileAssembly}): the file provisioner on the fleet root (its
  *    apply claim, its journal, the publication gate), the all-or-none config writer on `ConfigPort.writeAll`, and the
- *    first-run scan over the harness homes.
+ *    first-run scan over the harness homes;
+ *  - the account model in effect and its edit renderer, over Runtimes' own files and Logins' facts
+ *    (`adapters/runtimes-config-files.ts`), so a catalogue read answers real data;
+ *  - a command's location, looked up ahead through `kernel.paths.which` (`adapters/command-cache.ts`).
  *
- * What is NOT here is the account-model evaluator (the model in effect from the configuration files) and its edit
- * renderer: until they are ported every catalogue read still answers {@link UNAVAILABLE} in a sentence, and the
- * collaborators below it are real.
+ * What is NOT here is what another plugin owns: its components and a login's templates stand in (and an apply is refused
+ * while one does), the tool installer, the secret store's list and put, the shared-history pooling and the machine's
+ * name; each is a declared GAP in `ports-pending.json`.
  */
+import type { FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { applyClaimFor } from './adapters/apply-claim.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
+import { CommandCache } from './adapters/command-cache.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
-import type { AdapterHost, ConfigFilesPort, SharedHistoryPooling } from './adapters/ports.ts';
+import type { AdapterHost, SharedHistoryPooling } from './adapters/ports.ts';
+import { refuseWhileUnreadable, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
-import type { FleetManifest } from './lib/manifest.ts';
-import { assembleServices, UNAVAILABLE, unavailableSetupDeps } from './lib/service/assembly.ts';
+import { type FleetManifest, harnessKindOfKey } from './lib/manifest.ts';
+import { claudeStatuslineFor } from './lib/account/statusline.ts';
+import { assembleServices, unavailableSetupDeps } from './lib/service/assembly.ts';
 import { CodexAppServerSupervisor } from './lib/service/codex-runtime.ts';
 import type { FleetCatalogServiceDeps } from './lib/service/catalog-service.ts';
 import { FleetPublication } from './lib/service/publication.ts';
+import type { FleetSetupServiceDeps } from './lib/service/setup-service.ts';
+import { ToolInstallService } from './lib/service/tool-install.ts';
+import type { HarnessLocation, SessionStatus } from './lib/service/foreign.ts';
 import type { RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
 
 /** The published manifest's name in the fleet folder. */
 const MANIFEST_FILE = 'manifest.json';
+
+/** What a person types to run this binary: the wrapper's history claim and the statusLine run it. */
+const CLIENT_NAME = 'fy';
+
+/** A ferret's state as the catalogue counts a session (it counts the ones still going). */
+const SESSION_STATUS_OF: Readonly<Record<FerretState, SessionStatus>> = {
+  starting: 'starting',
+  working: 'running',
+  idle: 'waiting',
+  stopped: 'stopped',
+};
 
 /**
  * The fleet folder's absolute path, as the `fleet` root names it (the manifest's absolute paths are spelled with it).
@@ -115,20 +136,18 @@ const unavailableSharedHistory: SharedHistoryPooling = {
 const SHARED_HISTORY_UNAVAILABLE =
   'pooling conversation history across runtimes is not available from the Runtimes plugin yet, so it was skipped';
 
-/** The account model's evaluator is not ported: every read of the model in effect answers the plain sentence. */
-const unevaluatedModel: ConfigFilesPort<never> = {
-  inEffect: async () => await Promise.reject(new Error(UNAVAILABLE)),
-  load: async () => await Promise.reject(new Error(UNAVAILABLE)),
-  editsFor: () => {
-    throw new Error(UNAVAILABLE);
-  },
-  mentionsRenamed: () => {
-    throw new Error(UNAVAILABLE);
-  },
-};
+/** The harness commands every read asks about, looked up ahead (`./adapters/command-cache.ts`). */
+const HARNESS_COMMANDS = ['claude', 'codex', 'npm', 'brew', 'apt-get'] as const;
+
+/** What an install says when it is asked to run a package manager: it is not composed over the kernel yet. */
+const PACKAGE_MANAGER_NOT_COMPOSED =
+  'running a package manager is not available from the Runtimes plugin yet, so run the command yourself';
 
 /** The disk, the claim and the host the file adapters stand on, from the kernel's roots, clock and PATH lookup. */
-export function fleetHost(kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock'>): {
+export function fleetHost(
+  kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock'>,
+  commands: AdapterHost['commands'] = { which: () => undefined },
+): {
   readonly host: AdapterHost;
   readonly directory: string;
 } {
@@ -159,9 +178,9 @@ export function fleetHost(kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock'>
     host: {
       files,
       texts: fleetTexts(disk),
-      // GAP(kernel): the services ask for a command SYNCHRONOUSLY and `kernel.paths.which` answers asynchronously, so no
-      // command is found from here; the catalogue is unavailable until the evaluator lands, and nothing asks yet.
-      commands: { which: () => undefined },
+      // The services ask for a command synchronously and `kernel.paths.which` answers asynchronously: the answer is the
+      // one looked up ahead of the read (`CommandCache`), and a command never looked up is not found.
+      commands,
       disk,
       now: () => kernel.clock.nowMs(),
       claimFor: manifestPath => applyClaimFor(disk, manifestPath, { now: () => kernel.clock.nowMs(), sleep }),
@@ -172,49 +191,86 @@ export function fleetHost(kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock'>
 /**
  * The catalogue and the setup, composed over the files: the file provisioner on the `fleet` root (S67: every apply
  * runs exclusively under `publication`), the all-or-none config writer on `ConfigPort.writeAll`, and the first-run
- * scan over the harness homes. The model evaluator is not ported, so the catalogue still answers {@link UNAVAILABLE}.
+ * scan over the harness homes, and the account model read from Runtimes' own files and Logins' facts
+ * (`./adapters/runtimes-config-files.ts`). An apply is refused while a part of the model stands in for a document
+ * Runtimes cannot read (another plugin's component, a login's templates).
  */
 export function fileAssembly(
   ctx: {
     readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
-      readonly config: Pick<ConfigPort, 'writeAll'>;
+      readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file'>;
     };
     readonly needs: {
       readonly logins: FleetCatalogServiceDeps['credentials'] & Parameters<typeof fileFleetSetupDeps>[0]['logins'];
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
+      readonly ferrets: { list(): Promise<readonly { readonly state: FerretState }[]> };
     };
   },
   publication: FleetPublication,
 ): Pick<ReturnType<typeof assembleServices>, 'catalog' | 'setup'> {
-  const { host, directory } = fleetHost(ctx.kernel);
+  const commands = new CommandCache({ which: async name => await ctx.kernel.paths.which(name) }, () =>
+    ctx.kernel.clock.nowMs(),
+  );
+  const { host, directory } = fleetHost(ctx.kernel, commands);
   const home = directory.slice(0, directory.lastIndexOf('/'));
   const configDirectory = configDirectoryOf(home);
-  const catalog = fileFleetCatalogDeps({
+  const config = runtimesConfigFiles({
+    config: ctx.kernel.config,
+    logins: ctx.needs.logins,
+    prime: async model => {
+      const wanted = new Set<string>(HARNESS_COMMANDS);
+      for (const component of Object.values(model?.components.mcp ?? {}))
+        if (component.command !== undefined) wanted.add(component.command);
+      await commands.prime(wanted);
+    },
+  });
+  const unguarded = fileFleetCatalogDeps({
     host,
     paths: { home, fleet: directory, fleetManifest: `${directory}/${MANIFEST_FILE}` },
     userHome: ctx.kernel.paths.home(),
-    sessionStatuses: async () => [],
+    sessionStatuses: async () => (await ctx.needs.ferrets.list()).map(ferret => SESSION_STATUS_OF[ferret.state]),
     credentials: ctx.needs.logins,
     loginChanges: ctx.needs.loginChanges,
     configWriter: writeAllConfigWriter(ctx.kernel.config, configDirectory),
-    locate: () => undefined,
+    locate: harness => commands.which(harness),
+    // GAP(kernel): the kernel offers no host name, so a copy's source is named "this machine".
     machineName: () => 'this machine',
-    clientName: 'fy',
-    config: unevaluatedModel,
+    clientName: CLIENT_NAME,
+    config,
     sharedHistory: unavailableSharedHistory,
-    claudeStatusline: () => {
-      throw new Error(UNAVAILABLE);
-    },
+    claudeStatusline: claudeStatuslineFor(CLIENT_NAME),
     configDirectory,
     publication,
   });
+  const catalog: FleetCatalogServiceDeps = {
+    ...unguarded,
+    provisioner: refuseWhileUnreadable(unguarded.provisioner, config),
+  };
   const refusing = unavailableSetupDeps(catalog);
+  // The tool installer's PLANS are real (what is installed, and the command a person would run); running a package
+  // manager is not composed, so an install ends in `could-not-start` with the manual command named.
+  const installer = new ToolInstallService({
+    // GAP(kernel): Runtimes declares no `hostFacts`, so the platform is not known and the plan names npm only.
+    platform: 'unknown',
+    executables: { resolve: name => commands.which(name), runnable: () => false },
+    locate: (kind): HarnessLocation => {
+      const path = commands.which(kind);
+      return path === undefined ? { kind, outcome: 'absent', searched: [] } : { kind, outcome: 'located', path };
+    },
+    run: async () => ({ kind: 'not-started', reason: PACKAGE_MANAGER_NOT_COMPOSED }),
+    environment: {},
+  });
+  const tools: FleetSetupServiceDeps['tools'] = {
+    plans: harnesses => installer.plans(harnesses),
+    install: async (request, governance) =>
+      await installer.install({ harnesses: request.harnesses.map(harnessKindOfKey) }, governance),
+  };
   return assembleServices(catalog, base =>
     fileFleetSetupDeps({
       host,
       catalog: base,
       logins: ctx.needs.logins,
-      tools: refusing.tools,
+      tools,
       daemonId: () => undefined,
       secrets: { list: refusing.secrets.held, put: refusing.secrets.put },
     }),

@@ -88,7 +88,12 @@ function toDocument(document: FleetDocumentWrite, target: OwnTarget): ConfigWrit
   return {
     def: target.def,
     ...(target.name === undefined ? {} : { name: target.name }),
-    edit: document.remove === true ? { remove: true } : document.content,
+    edit:
+      document.remove === true
+        ? { remove: true }
+        : document.patch === undefined
+          ? document.content
+          : { patch: document.patch },
     ...(document.expect === undefined ? {} : { ifMatch: document.expect }),
   };
 }

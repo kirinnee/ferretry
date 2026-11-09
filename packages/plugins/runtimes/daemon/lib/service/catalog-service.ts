@@ -576,6 +576,13 @@ export class FleetCatalogService {
         'fleet_change_refused',
         checked.error.issues[0]?.message ?? 'this is not a change the catalog installer makes',
       );
+    return await this.#exclusively(async () => await this.#install(change));
+  }
+
+  /** The catalogue's install, read and applied under the one apply section (see {@link FleetCatalogService.apply}). */
+  async #install(
+    change: CatalogInstallChange,
+  ): Promise<{ readonly outcome: AccountChangeOutcome; readonly component: unknown }> {
     const reading = await this.#read();
     const staged = await this.#stagePlan(reading, change);
     await this.#assertCurrent({ revision: reading.revision });
@@ -620,6 +627,32 @@ export class FleetCatalogService {
    * never the one a stale preview was shown against.
    */
   async apply(
+    id: string,
+    governance: CallerGovernance | undefined,
+    freshStepUp?: FreshStepUpContext,
+  ): Promise<AccountChangeOutcome> {
+    return await this.#exclusively(async () => await this.#applyReviewed(id, governance, freshStepUp));
+  }
+
+  /**
+   * Applies, catalogue installs and the rest of this service's changes run ONE AT A TIME, each judging "has the
+   * configuration moved since it was reviewed" only once the one before it has landed. The configuration is several
+   * owners' files now and a patch of keys carries no per-file etag, so the revision check is what refuses a plan made
+   * from a model an earlier apply has since changed: run beside that apply it would pass, and its plan would then
+   * prune what the first one added.
+   */
+  async #exclusively<T>(act: () => Promise<T>): Promise<T> {
+    const run = this.#applyTail.then(act, act);
+    this.#applyTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await run;
+  }
+
+  #applyTail: Promise<void> = Promise.resolve();
+
+  async #applyReviewed(
     id: string,
     governance: CallerGovernance | undefined,
     freshStepUp?: FreshStepUpContext,

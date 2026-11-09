@@ -7,6 +7,7 @@ import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/
 import type { FerretId } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
+import { CODEX_SETTINGS } from '../../contract/index.ts';
 import { realClock } from '../support/ports.ts';
 import { ensureInternalRootBases, rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
@@ -27,7 +28,7 @@ afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
 });
 
-function build() {
+function build(items: ReadonlyMap<string, unknown> = new Map()) {
   const roots = rootsPortFor(
     nodeFs(() => crypto.randomUUID()),
     { home: join(fixture, 'fy-home'), plugin: 'codex', worktrees: join(fixture, 'worktrees') },
@@ -45,6 +46,7 @@ function build() {
       log: undefined as never,
       clock: realClock(),
       redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
+      config: { collection: (definition: unknown) => (definition === CODEX_SETTINGS ? items : new Map()) } as never,
     },
     locate: async () => ({
       outcome: 'located',
@@ -133,6 +135,78 @@ describe('the Codex harness over the real kernel roots', () => {
       expect(await readFile(join(destination, 'AGENTS.md'), 'utf8')).toBe('other-home-fixture');
       expect((await lstat(linked)).isSymbolicLink()).toBe(true);
     }
+  });
+
+  test('a settings item with shell_environment_policy.set reaches the Codex config.toml, and a secret stays the reference it is written as', async () => {
+    const { harness } = build(
+      new Map([
+        [
+          'guard',
+          {
+            settings: {
+              model: 'gpt-5',
+              shell_environment_policy: { inherit: 'core', set: { LOG: '1', GUARD: '${secret:GUARD_VALUE}' } },
+            },
+          },
+        ],
+      ]),
+    );
+    const home = await harness.homeFor('f2' as FerretId);
+
+    await harness.prepareHome(spec('f2', home));
+
+    const config = await readFile(join(home, 'config.toml'), 'utf8');
+    expect(config).toBe(
+      [
+        'model = "gpt-5"',
+        '',
+        '[shell_environment_policy]',
+        'inherit = "core"',
+        '',
+        '[shell_environment_policy.set]',
+        'LOG = "1"',
+        'GUARD = "${secret:GUARD_VALUE}"',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test('settings items merge in name order (the later wins), beside the MCP servers a launch adds, and a launch server replaces a settings one', async () => {
+    const { harness } = build(
+      new Map([
+        [
+          'a-base',
+          {
+            settings: {
+              shell_environment_policy: { set: { LOG: '1', KEEP: 'yes' } },
+              mcp_servers: { docs: { command: 'old' }, kept: { command: 'k' } },
+            },
+          },
+        ],
+        ['b-over', { settings: { shell_environment_policy: { set: { LOG: '2' } } } }],
+      ]),
+    );
+    const home = await harness.homeFor('f2' as FerretId);
+
+    await harness.prepareHome({
+      ...spec('f2', home),
+      parts: [{ kind: 'mcp', name: 'docs', config: { command: 'docs-mcp' } }],
+    } as never);
+
+    const config = await readFile(join(home, 'config.toml'), 'utf8');
+    expect(config).toContain('[shell_environment_policy.set]\nLOG = "2"\nKEEP = "yes"');
+    expect(config).toContain('[mcp_servers.docs]\ncommand = "docs-mcp"');
+    expect(config).toContain('[mcp_servers.kept]\ncommand = "k"');
+    expect(config).not.toContain('"old"');
+  });
+
+  test('no settings item and no server writes no config.toml at all, as before', async () => {
+    const { harness } = build();
+    const home = await harness.homeFor('f2' as FerretId);
+
+    await harness.prepareHome(spec('f2', home));
+
+    expect(await readdir(home)).not.toContain('config.toml');
   });
 
   test('S42 first launch on a fresh FY_HOME: the kernel made the agent-homes base 0700 at boot, the launch makes the ferret home under it', async () => {

@@ -147,7 +147,6 @@
       "entry": ["app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
-        "daemon/adapters/account-model-files.ts",
         "daemon/adapters/ports.ts",
         "daemon/adapters/runtime-ids-file.ts",
         "daemon/adapters/runtime-session-records.ts",

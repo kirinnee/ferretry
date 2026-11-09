@@ -21,7 +21,7 @@ import {
   RuntimesPort,
 } from '../../../contract/index.ts';
 import { runtimesConformance } from '../../../contract/testing/index.ts';
-import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
+import { type RuntimesAssembly, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { LoginChanged, type LoginView } from '@ferretry/plugin-logins/contract';
 import { type FakeLogins, fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
@@ -127,7 +127,7 @@ async function build(
     setup: {} as RuntimesAssembly['setup'],
   });
   const daemon = (
-    options.assembled === false ? runtimesDaemon() : runtimesDaemon(assembly)
+    options.assembled === false ? runtimesDaemon(unavailableAssembly) : runtimesDaemon(assembly)
   ) as DaemonImplementation<any>;
   const host = await testHost({
     plugins: [daemon],
