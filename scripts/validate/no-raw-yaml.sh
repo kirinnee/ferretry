@@ -4,8 +4,8 @@ set -euo pipefail
 # Fails when product code gains a YAML reader of its own that the ledger does not list.
 #
 # WHY. One long string aliased many times made `Bun.YAML.parse` of a 256 KiB `gate.yaml` take 2.3 s and 5.4 GB at
-# every daemon boot, while the kernel's bounded reader refused the same file in one linear pass. Every daemon-side
-# reader of text a person or an agent can write goes through that reader, or the value the kernel already checked.
+# every daemon boot, while the shared bounded reader (@ferretry/std/yaml) refused the same file in one linear pass.
+# Every daemon-side reader of text a person or an agent can write goes through that reader, or the value it already checked.
 #
 # HOW. `no-raw-yaml.ts` WALKS THE SYNTAX TREE of every tracked product file under `packages/` and of the `testing/`
 # support product code may import (tests and `fixtures/` are out of scope) and refuses any use of Bun's `YAML` but

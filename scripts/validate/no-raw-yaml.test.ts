@@ -283,6 +283,12 @@ describe('every way past the old line matcher is found', () => {
     expect(planted('const v = Bun.YAML.parse(edit);', 'packages/app/src/testing/dom.ts')).toHaveLength(1);
   });
 
+  test('the finding sends a plugin author to the shared bounded reader, never to the kernel', () => {
+    const [message] = planted('const v = Bun.YAML.parse(text);');
+    expect(message).toContain('Read the text with the shared bounded reader (`@ferretry/std/yaml`');
+    expect(message).not.toMatch(/kernel/iu);
+  });
+
   test('uses are located by line, once per line', () => {
     const facts = scanFile(PATH, 'a;\nconst v = Bun.YAML.parse(Bun.YAML.parse(t));\nconst {\n YAML } = Bun;');
     expect(facts.uses.map(use => use.line)).toEqual([2, 4]);
@@ -352,7 +358,7 @@ describe('the ledger', () => {
     ]);
   });
 
-  test('"<- *" is the kernel reader alone', () => {
+  test('"<- *" is the shared bounded reader alone', () => {
     expect(parseLedger(`${KERNEL_READER}::readConfigText  <- *  # the door\n`).problems).toEqual([]);
     expect(parseLedger('packages/plugins/x/daemon/r.ts::read  <- *  # open\n').problems).toEqual([
       expect.stringContaining('only packages/std/src/yaml-text.ts is open to every caller'),
@@ -455,7 +461,7 @@ describe('laundering through a ledgered parser', () => {
     );
   });
 
-  test("the kernel's bounded reader is open to every caller; a file that is not it cannot be", () => {
+  test('the shared bounded reader is open to every caller; a file that is not it cannot be', () => {
     const kernel = reader('export function readConfigText(t: string) { return parseDocument(t); }');
     const door = `${KERNEL_READER}  # the reader\n${KERNEL_READER}::readConfigText  <- *  # the door`;
     const call = {
@@ -481,5 +487,11 @@ describe('laundering through a ledgered parser', () => {
       ledger,
     );
     expect(found).toEqual([expect.stringContaining(`${second}:1: loads ${READER}::readIt`)]);
+  });
+
+  test('the caller finding names the shared bounded reader, never the kernel', () => {
+    const [message] = run("import { readIt } from './reader.ts';\nreadIt('x');");
+    expect(message).toContain('Read the text with the shared bounded reader (`@ferretry/std/yaml`)');
+    expect(message).not.toMatch(/kernel/iu);
   });
 });

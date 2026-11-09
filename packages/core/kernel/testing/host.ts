@@ -833,7 +833,7 @@ async function start(world: World): Promise<TestHost> {
       const before = def.shape === 'file' ? all : name === undefined ? undefined : all?.[name];
       let next: unknown;
       if (typeof edit === 'string') {
-        // The kernel's bounded reader, as the real writer reads an edit: never a raw parse of a text a test hands in.
+        // The shared bounded reader, as the real writer reads an edit: never a raw parse of a text a test hands in.
         const read = readConfigText(edit);
         if (!read.ok) return { kind: 'refused', reason: 'yaml', issues: [{ path: key, message: 'this is not YAML' }] };
         next = read.read.value ?? {};

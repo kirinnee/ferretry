@@ -45,7 +45,7 @@
  * - `path  # reason`: the FILE may parse YAML itself;
  * - `path::name  <- caller.ts, other.ts  # reason`: an EXPORT of that file reaches a parse (its body calls one, or a
  *   function of the file that does). The callers are the only files that may import it — laundering a ledgered parser
- *   through a new importer is a use too. `<- *` (open to every caller) is the kernel's bounded reader alone: that
+ *   through a new importer is a use too. `<- *` (open to every caller) is the shared bounded reader (`@ferretry/std/yaml`) alone: that
  *   file is the sanctioned door, and everybody else's parser is reached only by name;
  * - EXACT BOTH WAYS: a file that parses and is not listed fails; a listed file that no longer parses fails; an exported
  *   parser without a line fails; a line whose export, or whose listed caller, is gone fails; a line without a reason
@@ -1035,8 +1035,8 @@ function resolveSpecifier(from: string, specifier: string, known: ReadonlySet<st
 }
 
 const useMessage = (path: string, use: RawYamlUse): string =>
-  `${path}:${String(use.line)}: a YAML reader of its own (${use.text}). Read the text with the kernel's ` +
-  'bounded reader (or the value the kernel checked), or list the file in the ledger with why it is safe';
+  `${path}:${String(use.line)}: a YAML reader of its own (${use.text}). Read the text with the shared ` +
+  'bounded reader (`@ferretry/std/yaml`, or a value it already checked), or list the file in the ledger with why it is safe';
 
 /** Every finding over the given files and ledger. Pure: the tests drive it with planted files. */
 export function findings(
@@ -1096,7 +1096,7 @@ export function findings(
         if (!entry.callers.includes(caller))
           found.push(
             `${caller}:${String(edge.line)}: loads ${key}, a raw YAML parser the ledger does not open to it. ` +
-              "Read the text with the kernel's bounded reader, or add the caller to that ledger line",
+              'Read the text with the shared bounded reader (`@ferretry/std/yaml`), or add the caller to that ledger line',
           );
       }
     }
