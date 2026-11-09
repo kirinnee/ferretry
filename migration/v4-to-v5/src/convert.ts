@@ -48,6 +48,28 @@ export type ConvertResult =
 /** `packages/core/kernel/host/home.ts` `openHome`: the folders a new v5 home starts with, each `0700`. */
 export const V5_HOME_TREE = ['config', 'state', 'state/kernel', 'run', 'logs'] as const;
 
+/** The accepted-record step reads what the others wrote; it is the one step the plain pass leaves out. */
+const ACCEPTED_STEP = 'accepted-config';
+
+/** What the plain (non-preview) conversion of the same v4 home would write under `config/`, from a dry run. */
+async function plainConfigs(options: ConvertOptions, steps: readonly Step[]): Promise<ReadonlyMap<string, string>> {
+  const plain = {
+    v4: v4Paths(options.from),
+    v5: v5Writer(options.to, { dryRun: true }),
+    dryRun: true,
+    ...(options.host === undefined ? {} : { host: options.host }),
+  };
+  for (const step of steps) {
+    if (step.id === ACCEPTED_STEP) continue;
+    try {
+      await step.run(plain);
+    } catch {
+      // A step that fails here leaves its files out: they then count as preview-authored (fail closed).
+    }
+  }
+  return plain.v5.writtenConfigs();
+}
+
 export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   const checked = await preflight(options.from, options.to, options.lock);
   if (!checked.ok) return { kind: 'refused', problems: checked.problems };
@@ -68,10 +90,16 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     ...(options.host === undefined ? {} : { host: options.host }),
   };
 
+  const steps = options.steps ?? STEPS;
+  // A preview's authored files are found by comparison: a config file the preview wrote or changed differs from what the
+  // plain conversion of the same v4 home writes. The plain pass is a dry run (nothing written) of every step that
+  // writes config; a step that fails there leaves its files out, so they count as authored (fail closed).
+  const withPlain = options.preview === true ? { ...ctx, plainConfigs: await plainConfigs(options, steps) } : ctx;
+
   const reports: StepReport[] = [];
-  for (const step of options.steps ?? STEPS) {
+  for (const step of steps) {
     try {
-      reports.push(await step.run(ctx));
+      reports.push(await step.run(withPlain));
     } catch (error) {
       // The message is the tool's own; a step never puts file content into an error.
       reports.push({

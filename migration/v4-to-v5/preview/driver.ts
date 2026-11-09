@@ -14,7 +14,6 @@ import { CODEX_HELD_SENTENCE, previewShellEnv } from '../src/v5/preview-env.ts';
 import { gateFiles, gateForecast, type Spellings } from './gate.ts';
 import { ALLOWED, GAPS, LEFT_BEHIND, PREVIEW, SESSION_FILES, stepPlan } from './plan.ts';
 import { guardTarget, hasMarker, PREVIEW_MARKER, PREVIEW_MARKER_TEXT } from './paths.ts';
-import { CONFIRM_IN_APP } from './start-checks.ts';
 import {
   compare,
   parseSnapshot,
@@ -152,8 +151,8 @@ export interface PrepareInputs {
 /** What `prepare` prints about the preview's own two files: accepted by the owner's flag, or what to do without it. */
 export function ownerNote(owner: boolean): string {
   return owner
-    ? "the preview's own config/terminals.yaml and config/claude-code/settings/fy-preview.yaml were recorded as accepted (--owner)."
-    : `NOT ACCEPTED (no --owner): config/terminals.yaml and config/claude-code/settings/fy-preview.yaml are held like any other unconfirmed file, so terminals cannot carry the preview environment and \`preview.sh start\` will stop the daemon. ${CONFIRM_IN_APP} \`preview.sh start\` stops the daemon on this miss, so the owner's remedy is preview.sh clean, then preview.sh prepare --owner.`;
+    ? 'every config file the preview wrote or changed (config/terminals.yaml, config/claude-code/settings/fy-preview.yaml, the forced config/limits.yaml) was recorded as accepted (--owner).'
+    : `NOT ACCEPTED (no --owner): the config files the preview wrote or changed (config/terminals.yaml, config/claude-code/settings/fy-preview.yaml, the forced config/limits.yaml) are held like any other unconfirmed file, so terminals cannot carry the preview environment and \`preview.sh start\` will stop the daemon. The owner's remedy is preview.sh clean, then preview.sh prepare --owner (--owner accepts them).`;
 }
 
 export interface Prepared {

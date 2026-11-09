@@ -56,6 +56,12 @@ export interface StepContext {
    * (the owner's act). Absent: nothing of the preview's own is accepted.
    */
   readonly previewOwner?: boolean;
+  /**
+   * With `preview`: every config file (`config/…` path to text) the PLAIN, non-preview conversion of the same v4 home
+   * writes. A config file whose text the preview wrote or changed differs from it (or is absent from it), and is
+   * "preview-authored". Absent in a preview run: nothing is known to be unchanged, so every file counts as authored.
+   */
+  readonly plainConfigs?: ReadonlyMap<string, string>;
   /** Absent in tests that do not read the host: a step needing it then reads nothing and says so. */
   readonly host?: HostFacts;
 }

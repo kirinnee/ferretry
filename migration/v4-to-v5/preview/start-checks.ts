@@ -169,13 +169,6 @@ type TerminalsFileState =
   | { readonly state: 'missing' | 'invalid' | 'held' | 'wrong'; readonly sentence: string };
 
 /**
- * 5.0 has no `fy config` verb: the only door for a held edit is `POST /v1/config/confirm`, reached from the app's
- * Settings, so it needs a running daemon. Said where it applies; never a command that does not exist.
- */
-export const CONFIRM_IN_APP =
-  'A held file can also be confirmed in the app (Settings, configuration file, Confirm), which needs the daemon running.';
-
-/**
  * The state of the preview's terminal environment as the runtime reads it: the file parses, the kernel has it ACCEPTED
  * for Terminals (a file with no matching record is held, and nothing of it is in effect), and its `environment` is the
  * preview's. A sentence for each miss that names the state and the remedy.
@@ -217,7 +210,7 @@ export async function terminalsFileState(
   )
     return {
       state: 'held',
-      sentence: `${file} is held, not in effect: the daemon has not accepted this text, so terminals open with only PATH and HOME and would find v4's fy. ${CONFIRM_IN_APP} start stops the daemon on this miss (terminals would reach v4's fy), so the remedy is: the OWNER runs preview.sh clean, then preview.sh prepare --owner (that flag records it as accepted). No agent does this.`,
+      sentence: `${file} is held, not in effect: the daemon has not accepted this text, so terminals open with only PATH and HOME and would find v4's fy. start stops the daemon on this miss (terminals would reach v4's fy), so the remedy is: the OWNER runs preview.sh clean, then preview.sh prepare --owner (that flag records it as accepted). No agent does this.`,
     };
   const wanted = previewShellEnv(target, PREVIEW.port);
   const have = parsed.data.environment ?? {};

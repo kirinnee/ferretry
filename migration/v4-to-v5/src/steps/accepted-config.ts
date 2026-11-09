@@ -15,8 +15,9 @@
  * file was not (a held edit, an invalid file, a file v4 never accepted, a deletion still held), nothing is recorded and
  * the report names those files: v5 judges every file against its defaults and holds any loosening until the owner
  * confirms it again — the safe direction to be wrong in, never wider than v4. The one exception is the files the
- * PREVIEW itself authors (`terminals.yaml`, the `fy-preview` settings item): they are recorded either way, but ONLY when
- * the owner ran `prepare --owner` (the flag is the owner's act of accepting them; without it nothing of theirs is recorded).
+ * PREVIEW itself wrote or changed (its text differs from the plain conversion's, e.g. `terminals.yaml`, the `fy-preview`
+ * settings item, the forced `limits.yaml`): they are recorded either way, but ONLY when the owner ran `prepare --owner`
+ * (the flag is the owner's act of accepting them; without it nothing of theirs is recorded).
  *
  * Runs LAST, after every step that writes config. Texts are hashed and written, never reported.
  */
@@ -27,7 +28,6 @@ import { join, relative } from 'node:path';
 import { z } from 'zod';
 import type { StepReport } from '../report.ts';
 import { readV4Json } from '../v4/documents.ts';
-import { PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
 import { configOwner } from '../v5/targets.ts';
 import type { Step, StepContext } from './index.ts';
 
@@ -41,13 +41,13 @@ if (ACCEPTED_BODY === undefined) throw new Error('the kernel declares accepted-c
 const V4AcceptedRecord = z.record(z.string(), z.strictObject({ etag: z.string().min(1), text: z.string() }));
 
 /**
- * A file only the preview itself writes (Terminals' `terminals.yaml`, Claude Code's `fy-preview` settings item). The
- * kernel reads an accepted record only for the plugin that owns the path ({@link configOwner}, built from the v5 defs),
- * and these are recorded only when the owner ran `prepare --owner`, in every case.
+ * A file whose text the PREVIEW wrote or changed: in a preview run, its text differs from what the plain, non-preview
+ * conversion of the same v4 home writes (or the plain conversion writes no such file). Derived from the two
+ * conversions ({@link StepContext.plainConfigs}), never from a list. Without that comparison (absent) every file counts
+ * as authored, the safe direction. A preview-authored file is recorded only when the owner ran `prepare --owner`.
  */
-const isPreviewAuthored = (path: string): boolean =>
-  path === join('config', 'terminals.yaml') ||
-  path === join('config', 'claude-code', 'settings', `${PREVIEW_SETTINGS_ITEM}.yaml`);
+const isPreviewAuthored = (ctx: StepContext, path: string, text: string): boolean =>
+  ctx.preview === true && ctx.plainConfigs?.get(path) !== text;
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -110,7 +110,7 @@ export const acceptedConfigStep: Step = {
         let recorded = 0;
         const unowned: string[] = [];
         for (const [path, text] of entries) {
-          if (isPreviewAuthored(path) && !ownerRan) continue;
+          if (isPreviewAuthored(ctx, path, text) && !ownerRan) continue;
           const plugin = configOwner(path);
           if (plugin === undefined) {
             unowned.push(path);
@@ -129,7 +129,7 @@ export const acceptedConfigStep: Step = {
       if (held.paths.length > 0) {
         // The preview's own authored files are the owner's act (the owner runs `prepare`), so they are recorded as accepted
         // whatever v4's record says: a held terminals.yaml would open every terminal with only {PATH, HOME} and reach v4's `fy`.
-        const own = await record(configs.filter(([path]) => isPreviewAuthored(path)));
+        const own = await record(configs.filter(([path, text]) => isPreviewAuthored(ctx, path, text)));
         return {
           ...base,
           status: 'converted',

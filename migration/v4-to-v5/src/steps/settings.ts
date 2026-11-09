@@ -192,9 +192,12 @@ const contents = (document: Document): YAMLMap => document.contents as YAMLMap;
 
 // ── the plan ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** The `from` of a file the preview itself creates (its header says so instead of "Carried from v4"). */
+const PREVIEW_AUTHOR = 'the preview';
+
 /** Writes `key: value` into a planned file (made if absent), replacing whatever v4 said for that key. */
 function forceFlag(plan: Plan, target: V5ConfigTarget, key: string, value: boolean): void {
-  const planned = place(plan, target, undefined, 'the preview');
+  const planned = place(plan, target, undefined, PREVIEW_AUTHOR);
   if (!isMap(planned.document.contents)) planned.document.contents = planned.document.createNode({}) as YAMLMap;
   const map = contents(planned.document);
   take(map, key);
@@ -215,7 +218,10 @@ function place(plan: Plan, target: V5ConfigTarget, name: string | undefined, fro
     document:
       document ??
       Object.assign(new Document({}, YAML_OPTIONS), {
-        commentBefore: ` Carried from v4 ${from} by the v4 → v5 converter.`,
+        commentBefore:
+          from === PREVIEW_AUTHOR
+            ? ' Written by the 5.0 preview (not carried from v4).'
+            : ` Carried from v4 ${from} by the v4 → v5 converter.`,
       }),
     from: new Set([from]),
   };
@@ -485,7 +491,7 @@ export async function buildPlan(
         plan,
         CLAUDE_CODE_SETTINGS,
         PREVIEW_SETTINGS_ITEM,
-        'the preview',
+        PREVIEW_AUTHOR,
         new Document({ description: describe, settings: { env: { ...ctx.previewShellEnv } } }, YAML_OPTIONS),
       );
       count(plan, 'preview shell environment (settings item)');
@@ -495,7 +501,7 @@ export async function buildPlan(
         plan,
         TERMINALS_CONFIG,
         undefined,
-        'the preview',
+        PREVIEW_AUTHOR,
         new Document({ environment: { ...ctx.previewShellEnv } }, YAML_OPTIONS),
       );
       count(plan, 'preview terminal environment (terminals.yaml)');
@@ -505,7 +511,7 @@ export async function buildPlan(
           plan,
           CODEX_SETTINGS,
           PREVIEW_SETTINGS_ITEM,
-          'the preview',
+          PREVIEW_AUTHOR,
           new Document(
             { description: describe, settings: { shell_environment_policy: { set: { ...ctx.previewShellEnv } } } },
             YAML_OPTIONS,

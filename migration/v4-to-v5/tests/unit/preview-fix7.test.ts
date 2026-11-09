@@ -86,8 +86,9 @@ describe('MAJOR-1 the terminal check against a fresh preview', () => {
         ' ',
       );
     expect(await miss(files({ accepted: null }))).toContain('is held');
-    // 5.0 has no `fy config` verb: the sentence names the app's Confirm, never a command that does not exist.
-    expect(await miss(files({ accepted: null }))).toContain('Settings, configuration file, Confirm');
+    // Only remedies that exist: clean, then prepare --owner. No app Confirm, no `fy5 config confirm`.
+    expect(await miss(files({ accepted: null }))).toContain('preview.sh prepare --owner');
+    expect(await miss(files({ accepted: null }))).not.toContain('Confirm');
     expect(await miss(files({ accepted: null }))).not.toContain('config confirm');
     expect(await miss(files({ yaml: 'environment:\n  PATH: /evil\n' }))).toContain('is invalid');
     expect(await miss(files({ yaml: 'environment:\n  A: "1"\n' }))).toContain('not the preview');
@@ -144,8 +145,15 @@ describe('MAJOR-1 the terminal check against a fresh preview', () => {
 });
 
 describe('MAJOR-2 the preview records its own files as accepted', () => {
-  const previewCtx = (f: Awaited<ReturnType<typeof fixture>>, owner = true) => ({
+  /** What the plain (non-preview) conversion writes: a dry run of the settings step (the only one these tests run). */
+  const plainOf = async (f: Awaited<ReturnType<typeof fixture>>): Promise<ReadonlyMap<string, string>> => {
+    const plain = f.ctx(true);
+    await settingsStep.run(plain);
+    return plain.v5.writtenConfigs();
+  };
+  const previewCtx = async (f: Awaited<ReturnType<typeof fixture>>, owner = true) => ({
     ...f.ctx(),
+    plainConfigs: await plainOf(f),
     preview: true,
     ...(owner ? { previewOwner: true } : {}),
     previewV4Home: f.from,
@@ -156,19 +164,22 @@ describe('MAJOR-2 the preview records its own files as accepted', () => {
     const f = await fixture();
     try {
       await write(f.from, 'config/limits.yaml', 'enabled: true\n');
-      const ctx = previewCtx(f);
+      const ctx = await previewCtx(f);
       expect((await settingsStep.run(ctx)).status).toBe('converted');
       const report = await acceptedConfigStep.run(ctx);
       expect(report.notCarried.map(item => item.what).join('\n')).toContain('limits.yaml');
-      expect(JSON.stringify(report.kept)).toContain('"count":2');
+      // terminals.yaml, the settings item, and the forced limits.yaml and runtimes.yaml: all the preview's own.
+      expect(JSON.stringify(report.kept)).toContain('"count":4');
 
       const dir = join(f.to, 'state/kernel/accepted-config');
       const recordPath = join(dir, `${acceptedName('terminals.yaml')}.json`);
       const record = JSON.parse(await readFile(recordPath, 'utf8')) as { text: string; plugin: string };
       expect(record.plugin).toBe('terminals');
       expect(record.text).toBe(await readFile(join(f.to, 'config/terminals.yaml'), 'utf8'));
-      // limits.yaml, which v4 had not accepted, stays unrecorded; the preview's Claude settings item is recorded.
-      await expect(stat(join(dir, `${acceptedName('limits.yaml')}.json`))).rejects.toThrow();
+      // limits.yaml (v4 had not accepted it) is the preview's own text now (forced off), so the owner's flag records it.
+      expect(JSON.parse(await readFile(join(dir, `${acceptedName('limits.yaml')}.json`), 'utf8')).text).toBe(
+        await readFile(join(f.to, 'config/limits.yaml'), 'utf8'),
+      );
       const settings = acceptedName('claude-code/settings/fy-preview.yaml');
       expect(JSON.parse(await readFile(join(dir, `${settings}.json`), 'utf8')).plugin).toBe('claude-code');
 
@@ -207,7 +218,7 @@ console.log(JSON.stringify({ state: port.fileState(def).state, environment: port
     const f = await fixture();
     try {
       await write(f.from, 'config/limits.yaml', 'enabled: true\n');
-      const ctx = previewCtx(f, false);
+      const ctx = await previewCtx(f, false);
       expect((await settingsStep.run(ctx)).status).toBe('converted');
       await acceptedConfigStep.run(ctx);
       await expect(stat(join(f.to, 'state/kernel/accepted-config'))).rejects.toThrow();
@@ -215,7 +226,9 @@ console.log(JSON.stringify({ state: port.fileState(def).state, environment: port
       const note = ownerNote(false);
       expect(note).toContain('config/terminals.yaml');
       expect(note).toContain('config/claude-code/settings/fy-preview.yaml');
-      expect(note).toContain('Settings, configuration file, Confirm');
+      expect(note).toContain('config/limits.yaml');
+      expect(note).toContain('preview.sh prepare --owner');
+      expect(note).not.toContain('Confirm');
       expect(note).not.toContain('config confirm');
       expect(note).toContain('--owner');
       expect(ownerNote(true)).toContain('recorded as accepted');
@@ -289,7 +302,7 @@ console.log(JSON.stringify({ state: port.fileState(def).state, environment: port
         'state/config-accepted.json',
         JSON.stringify({ 'limits.yaml': { etag: sha256(text), text } }),
       );
-      const ctx = previewCtx(f, false);
+      const ctx = await previewCtx(f, false);
       expect((await settingsStep.run(ctx)).status).toBe('converted');
       const report = await acceptedConfigStep.run(ctx);
       expect(JSON.stringify(report.kept)).toContain('v4 config files in effect as written');
@@ -303,15 +316,14 @@ console.log(JSON.stringify({ state: port.fileState(def).state, environment: port
     for (const owner of [false, true]) {
       const f = await fixture();
       try {
-        const ctx = previewCtx(f, owner);
+        const ctx = await previewCtx(f, owner);
         expect((await settingsStep.run(ctx)).status).toBe('converted');
         const report = await acceptedConfigStep.run(ctx);
         expect(await previewRecords(f)).toEqual({ terminals: owner, settings: owner });
         // The report counts only the files actually recorded.
         const recorded = report.kept.find(item => item.what === 'v5 config files recorded as accepted')?.count;
-        // The two files the preview forces tight (limits.yaml, runtimes.yaml) are recorded either way; the preview's two
-        // are the flag's.
-        expect(recorded).toBe(owner ? 4 : 2);
+        // Every file here is the preview's own (nothing from v4): all are the flag's.
+        expect(recorded).toBe(owner ? 4 : 0);
       } finally {
         await f.clean();
       }
