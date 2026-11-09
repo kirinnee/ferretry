@@ -133,7 +133,8 @@ export const conversationDaemon = (gate: HarnessGate) =>
             },
           ],
           // The files a start was given (`fy start -f`): decoded, bounded and worded here, written and appended by Ferrets.
-          'opening.attachments': () => [{ id: 'conversation-opening-attachments', item: openingAttachmentsSource() }],
+          // The one provider of this security-path hook (`takers: ['conversation']`), under its one key.
+          'opening.attachments:opening': openingAttachmentsSource(),
           'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
           // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
           'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),

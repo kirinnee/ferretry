@@ -11,6 +11,9 @@ import {
   type FerretId,
   type FerretRecord,
   Harnesses,
+  OPENING_ATTACHMENTS_KEY,
+  OpeningAttachments,
+  type OpeningAttachmentsSource,
   Runners,
   StartDecide,
   type StartDecideInput,
@@ -66,6 +69,24 @@ const runnerPlugin = (runner: FakeRunner) =>
       hooks: { takes: [{ hook: Runners, key: 'tmux' }] },
     }),
     { build: () => ({ hooks: { 'runners:tmux': runner } }) },
+  );
+
+/**
+ * A stand-in for the owner of attachments on `opening.attachments` (a security-path provide hook): a plugin with an id
+ * `id` (Conversation's real id by default, the only taker the hook names) that provides `source` under the hook's one key.
+ */
+export const fakeAttachmentsOwner = (source: OpeningAttachmentsSource, id = 'conversation') =>
+  implementDaemon(
+    definePlugin({
+      id,
+      title: 'Attachments owner (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: OpeningAttachments, key: OPENING_ATTACHMENTS_KEY }] },
+    }),
+    { build: () => ({ hooks: { 'opening.attachments:opening': source } }) },
   );
 
 /**

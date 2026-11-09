@@ -78,7 +78,11 @@ const IMAGE_TYPES: Readonly<Record<string, string>> = {
   heic: 'image/heic',
 };
 
-/** The paths `-f/--file` names, in the order typed (`-f a -f b`, or `--file a`); a bare flag with no path is refused. */
+/**
+ * The paths `-f/--file` names (`-f a -f b`, or `--file a`); a bare flag with no path is refused. Each spelling keeps the
+ * order it was typed in, but the shell's parser hands the two spellings over under separate keys, so a mix
+ * (`-f a --file b`) lists the `--file` paths first. Only the order of the section's lines follows from it.
+ */
 export function attachmentPaths(invocation: VerbInvocation): readonly string[] {
   if (!typed(invocation, 'file', 'f')) return [];
   const paths = [...list(invocation, 'file'), ...list(invocation, 'f')].map(path => path.trim());

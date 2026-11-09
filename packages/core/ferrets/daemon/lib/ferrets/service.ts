@@ -143,8 +143,8 @@ export interface FerretsPorts {
   runner(): Runner | undefined;
   decide(input: StartDecideInput): Promise<HookDecision>;
   launchParts(): readonly LaunchPartSource[];
-  /** Who plans the files a start was given (`start -f`); unbound or empty: a start that carries attachments is refused. */
-  openingAttachments?(): readonly OpeningAttachmentsSource[];
+  /** The ONE provider that plans the files a start was given (`start -f`); unbound or none: a start that carries attachments is refused. */
+  openingAttachments?(): OpeningAttachmentsSource | undefined;
   sitrepSources(): readonly SitrepLineSource[];
   instructions(): readonly InstructionEntry[];
   /** The folder fenced by the kernel's `work` root, or why not. */
@@ -661,7 +661,7 @@ export class FerretsService implements FerretsApi {
         'refused',
         'attachments belong to an opening message: start with a prompt, or start bare without files',
       );
-    const source = this.ports.openingAttachments?.()[0];
+    const source = this.ports.openingAttachments?.();
     const session = this.ports.session;
     if (source === undefined || session?.attachmentsFolder === undefined || session.attach === undefined)
       return failed('refused', 'this daemon cannot take attachments with a start: the plugin that owns them is off');

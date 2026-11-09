@@ -43,13 +43,20 @@ export const Logins = defineHook('logins', {
 /** Lessons, MCP, Skills, Shells add to every launch. Any plugin may take it. */
 export const LaunchParts = defineHook('launch.parts', { mode: 'contribute', item: z.custom<LaunchPartSource>() });
 
+/** The one key `opening.attachments` is provided under: a start's attachments have exactly one owner. */
+export const OPENING_ATTACHMENTS_KEY = 'opening';
+
 /**
- * Whoever owns attachments plans the files a start was given (`fy start -f`). The first contribution answers; with none a
- * start that carries attachments is refused rather than started without them.
+ * The owner of attachments plans the files a start was given (`fy start -f`). On the security path: its answer decides
+ * the bytes written into the agent-readable `attachments/` folder and the words of turn-001, so ONE named plugin provides
+ * it and a second taker refuses the build. With no provider a start that carries attachments is refused rather than
+ * started without them.
  */
 export const OpeningAttachments = defineHook('opening.attachments', {
-  mode: 'contribute',
-  item: z.custom<OpeningAttachmentsSource>(),
+  mode: 'provide',
+  key: z.literal(OPENING_ATTACHMENTS_KEY),
+  value: z.custom<OpeningAttachmentsSource>(),
+  takers: ['conversation'],
 });
 
 /** What `start.decide` takers are asked: a ferret is about to start. The first no wins, with its reason. */

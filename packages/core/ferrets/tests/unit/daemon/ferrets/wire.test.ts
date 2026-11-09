@@ -88,6 +88,32 @@ test('V-0443 a start body carries initialAttachments into the request options ex
   }
 });
 
+test('V-0443 a malformed attachment is refused with a sentence naming the field and why, never the submitted bytes', () => {
+  for (const base64 of ['not base64!', 'QUJ', 'QU=D', '====', 'A===']) {
+    const error = refused(() =>
+      parseStartBody({ folder: '/work', initialAttachments: [{ filename: 'a.png', base64 }] }),
+    );
+    expect(error.status).toBe(400);
+    expect(error.message).toBe(
+      'the request body is not valid — initialAttachments.0.base64: an attachment must be padded standard base64 (A-Z, a-z, 0-9, +, /, =)',
+    );
+  }
+});
+
+test('V-0443 an attachment AT the 32 MiB bound passes the start schema (the base64 check is linear, so a file over ~5 MiB is no longer refused as malformed)', () => {
+  // A real payload, not a stand-in: today's backtracking pattern answered false here, for valid base64.
+  const bound = 32 * 1024 * 1024;
+  for (const size of [8 * 1024 * 1024, bound - 1, bound]) {
+    const base64 = Buffer.alloc(size, size % 251).toString('base64');
+    const parsed = parseStartBody({
+      folder: '/work',
+      prompt: 'go',
+      initialAttachments: [{ filename: 'big.pdf', base64 }],
+    });
+    expect(parsed.options?.initialAttachments?.[0]?.base64.length).toBe(base64.length);
+  }
+});
+
 test('stop and resume bodies parse strictly: an empty reason or message is refused, empty bodies pass', () => {
   expect(parseStopBody({})).toEqual({});
   expect(parseStopBody({ reason: 'done' })).toEqual({ reason: 'done' });

@@ -497,11 +497,21 @@ describe('commands parity', () => {
       });
     });
 
-    test('V-0334 fy new takes no attachments: --file is refused by name and unsent', async () => {
-      const refused = run({ answers: startAnswers });
-      expect(await refused.verb('new [words...]', ['x'], { runtime: 'codex-beta', file: 'a.png' })).toBe(2);
-      expect(refused.err.join('\n')).toContain('--file');
-      expect(refused.calls).toEqual([]);
+    test('V-0334 fy new takes no attachments: --file and its short spelling -f are both refused by name, as -f/--file, and unsent', async () => {
+      // The shell's parser hands `-f a.png` over under the key `f`: accepted-and-dropped would start a helper without it.
+      const spellings: readonly Readonly<Record<string, string>>[] = [
+        { file: 'a.png' },
+        { f: 'a.png' },
+        { f: 'a.png', file: 'b.png' },
+      ];
+      for (const options of spellings) {
+        const refused = run({ answers: startAnswers });
+        expect(await refused.verb('new [words...]', ['x'], { runtime: 'codex-beta', ...options })).toBe(2);
+        expect(refused.err.join('\n')).toContain(
+          '-f/--file: not taken by `fy new` in this version of Ferretry (another plugin decides it now)',
+        );
+        expect(refused.calls).toEqual([]);
+      }
     });
 
     test('V-0443 fy start --request-id sends the caller’s key as the start’s request id, so a retry with it answers the same ferret; a blank key is refused', async () => {

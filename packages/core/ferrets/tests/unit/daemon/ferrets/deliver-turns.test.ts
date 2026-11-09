@@ -86,7 +86,7 @@ async function world(
     readonly folders: Readonly<Record<string, string>>;
   },
   backfill = true,
-  openingSources: readonly OpeningAttachmentsSource[] = [],
+  openingSource?: OpeningAttachmentsSource,
 ): Promise<World & { readonly reuse: NonNullable<typeof reuse> }> {
   let handles = reuse?.handles;
   let folders = reuse?.folders;
@@ -153,7 +153,7 @@ async function world(
     // Packs' admission stands in here: this fixture lets a helper start, so the stamp's ancestry is what decides.
     decide: async () => ({ allow: true }),
     launchParts: () => [],
-    openingAttachments: () => openingSources,
+    openingAttachments: () => openingSource,
     sitrepSources: () => [],
     instructions: () => [],
     folder: path => ok(fenced(path)),
@@ -1044,7 +1044,7 @@ describe('V-0443 a start carries its attachments with the opening message', () =
 
   test('V-0443 the planned files are written 0600 into the ferret’s own attachments folder BEFORE the task that names them, and the opening turn carries the section', async () => {
     const asked: string[] = [];
-    const w = await world([], undefined, true, [owner(asked)]);
+    const w = await world([], undefined, true, owner(asked));
     const id = await started(w, 'Fix the layout shown in the screenshot.', options(attached));
     expect(asked).toEqual([`${w.folderOf(id)}/attachments`]);
     const written = `${w.folderOf(id)}/attachments/shot.png`;
@@ -1059,7 +1059,7 @@ describe('V-0443 a start carries its attachments with the opening message', () =
   });
 
   test('V-0443 the attachments are this start’s request alone: their bytes are never written into the ferret’s details', async () => {
-    const w = await world([], undefined, true, [owner()]);
+    const w = await world([], undefined, true, owner());
     const id = await started(w, 'Fix it.', options({ ...attached, label: 'batch' }));
     const details = JSON.stringify(w.registry.detailsOf(id as never) ?? {});
     expect(details).toContain('batch');
@@ -1078,15 +1078,15 @@ describe('V-0443 a start carries its attachments with the opening message', () =
     const nested: OpeningAttachmentsSource = {
       plan: ({ directory }) => ok({ section: '', files: [{ file: `${directory}/deep/shot.png`, contents: 'x' }] }),
     };
-    const cases: readonly [string, readonly OpeningAttachmentsSource[], string | undefined, string][] = [
-      ['no prompt', [owner()], undefined, 'attachments belong to an opening message'],
-      ['no owner', [], 'Fix it.', 'the plugin that owns them is off'],
-      ['the owner refuses', [refusing], 'Fix it.', 'at most 16 attachments'],
-      ['a file leaves the folder', [escaping], 'Fix it.', 'outside the ferret'],
-      ['a file goes into a sub-folder', [nested], 'Fix it.', 'outside the ferret'],
+    const cases: readonly [string, OpeningAttachmentsSource | undefined, string | undefined, string][] = [
+      ['no prompt', owner(), undefined, 'attachments belong to an opening message'],
+      ['no owner', undefined, 'Fix it.', 'the plugin that owns them is off'],
+      ['the owner refuses', refusing, 'Fix it.', 'at most 16 attachments'],
+      ['a file leaves the folder', escaping, 'Fix it.', 'outside the ferret'],
+      ['a file goes into a sub-folder', nested, 'Fix it.', 'outside the ferret'],
     ];
-    for (const [, sources, prompt, reason] of cases) {
-      const w = await world([], undefined, true, sources);
+    for (const [, source, prompt, reason] of cases) {
+      const w = await world([], undefined, true, source);
       const result = await w.service.start({
         folder: '/work',
         by: 'owner',
@@ -1106,7 +1106,7 @@ describe('V-0443 a start carries its attachments with the opening message', () =
 
   test('V-0443 a start without attachments is unchanged: the task is its prompt alone and no attachments folder is made', async () => {
     const asked: string[] = [];
-    const w = await world([], undefined, true, [owner(asked)]);
+    const w = await world([], undefined, true, owner(asked));
     const id = await started(w, 'Build the thing.');
     expect(asked).toEqual([]);
     expect(await readFile(turnFile(w, id, 1), 'utf8')).toBe('# Assigned task\n\nBuild the thing.\n');

@@ -52,10 +52,20 @@ const NonNegativeIntegerSchema = z.number().int().nonnegative();
 const PositiveIntegerSchema = z.number().int().positive();
 
 /**
+ * Padded standard base64, checked in LINEAR time: whole four-character groups of the base64 alphabet, with at most two
+ * `=` and only at the very end. Today's protocol used one backtracking pattern
+ * (`^(?:[A-Za-z0-9+/]{4})*(?:…==|…=)?$`) that answers false for VALID base64 once the text passes about 6.9 M characters
+ * on Bun (a file of about 5 MiB), so a start under the stated 32 MiB bound was refused as malformed. This check holds
+ * for any length the transport lets through.
+ */
+const isPaddedBase64 = (text: string): boolean => text.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(text);
+
+/**
  * One file attached to a start's opening message (today's `fy start -f`, `protocol/src/lib/session.ts`
- * `StartSessionBaseSchema.initialAttachments`, unchanged): the bytes travel INLINE as base64 in the start body, read by the
- * CLI on the caller's machine. The count and size bounds are the receiving Conversation's (its `decodeInitialAttachments`:
- * sixteen files, 32 MiB decoded in all), as today's daemon's were; the schema states the shape only.
+ * `StartSessionBaseSchema.initialAttachments`): the bytes travel INLINE as base64 in the start body, read by the CLI on
+ * the caller's machine. The count and size bounds are the receiving Conversation's (its `decodeInitialAttachments`:
+ * sixteen files, 32 MiB decoded in all), as today's daemon's were, and their refusal is a sentence naming the limit; the
+ * transport's body cap sits just above one 32 MiB file. The schema states the shape only.
  */
 export const InitialAttachmentSchema = z.strictObject({
   filename: z.string().min(1),
@@ -63,7 +73,7 @@ export const InitialAttachmentSchema = z.strictObject({
   base64: z
     .string()
     .min(1)
-    .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u),
+    .refine(isPaddedBase64, { message: 'an attachment must be padded standard base64 (A-Z, a-z, 0-9, +, /, =)' }),
 });
 export type InitialAttachment = z.infer<typeof InitialAttachmentSchema>;
 

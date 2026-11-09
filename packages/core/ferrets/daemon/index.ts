@@ -32,6 +32,7 @@ import {
   FerretLaunchSectionsFiles,
   Harnesses,
   LaunchParts,
+  OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
   Runners,
   SitrepLines,
@@ -446,7 +447,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return decision;
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
-    openingAttachments: () => hooks.contributions(OpeningAttachments).map(contribution => contribution.item),
+    openingAttachments: () => {
+      const found = hooks.provider(OpeningAttachments, OPENING_ATTACHMENTS_KEY);
+      return found === 'unavailable' ? undefined : found;
+    },
     sitrepSources: () => hooks.contributions(SitrepLines).map(contribution => contribution.item),
     instructions: () => kernel.snapshot.current().instructions,
     folder: path => {

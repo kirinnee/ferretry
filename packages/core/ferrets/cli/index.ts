@@ -74,14 +74,23 @@ const SESSION_USAGE = [
  * and where it compacts are the Conversation's, a scratch-folder override is not a field of the start, and a start's idempotency key and attachments are `fy start`'s alone. The model routing (`--model`, `--effort`, `--auto`), `--card` and
  * `--name <title>` are sent with the start.
  */
-const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id', 'file'];
+const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id', 'file', 'f'];
+
+/**
+ * How a refused flag is named back to the caller: a flag with a short spelling is named by both (`-f/--file`), whichever
+ * the caller typed (the shell's parser hands `-f` over under the key `f`, so both keys must be refused, or `new -f a.png`
+ * would be accepted and the file silently dropped); any other by its long spelling.
+ */
+const REFUSED_SPELLING: Readonly<Record<string, string>> = { file: '-f/--file', f: '-f/--file' };
 
 /** Refuses, by name, a typed flag whose value has no field in Ferrets' routes. */
 function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], verb: string): void {
-  const found = names.filter(name => typed(invocation, name));
+  const found = [
+    ...new Set(names.filter(name => typed(invocation, name)).map(name => REFUSED_SPELLING[name] ?? `--${name}`)),
+  ];
   if (found.length > 0)
     throw new SessionCommandError(
-      `${found.map(name => `--${name}`).join(', ')}: not taken by \`${BINARY} ${verb}\` in this version of Ferretry (another plugin decides it now)`,
+      `${found.join(', ')}: not taken by \`${BINARY} ${verb}\` in this version of Ferretry (another plugin decides it now)`,
     );
 }
 
