@@ -114,3 +114,35 @@ export function unlinkNameRefusal(name: string): 'outside' | undefined {
     ? 'outside'
     : undefined;
 }
+
+/**
+ * The roots that take an ABSOLUTE folder the caller names and so may also take `within`, the anchor above it
+ * (`RootsPort.root(name, { subfolder, within })`). Any other root given a `within` resolves nothing.
+ */
+const ANCHORED_ROOTS: ReadonlySet<RootName> = new Set(['imports', 'harness-history', 'harness-home', 'project-files']);
+
+/** Whether this root may be scoped with a `within` anchor. */
+export function takesAnchor(name: RootName): boolean {
+  return ANCHORED_ROOTS.has(name);
+}
+
+/**
+ * The folders, from the anchor `within` down to the scoped `folder` (both ends included), that the kernel must find to
+ * be no link; `undefined` when `within` is not `folder` itself or one of its ancestors, or is not a plain absolute
+ * folder (no NUL, no `.`, `..` or empty segment, never the filesystem root). Compared COMPONENT by component: `/p/.claud`
+ * and `/p/.claude2` are not ancestors of `/p/.claude/skills`, whatever their spelling shares. The anchor's own
+ * ancestors are never listed, so a project under a linked workspace folder is judged by what is below the anchor only.
+ * One fact, read by the real roots port and by the testing host.
+ */
+export function anchorWalk(folder: string, within: string): readonly string[] | undefined {
+  const plain = (path: string): readonly string[] | undefined => {
+    if (typeof path !== 'string' || path === '/' || !path.startsWith('/') || path.includes('\0')) return undefined;
+    const parts = path.slice(1).split('/');
+    return parts.some(part => part === '' || part === '.' || part === '..') ? undefined : parts;
+  };
+  const below = plain(folder);
+  const anchor = plain(within);
+  if (below === undefined || anchor === undefined || anchor.length > below.length) return undefined;
+  if (anchor.some((part, index) => part !== below[index])) return undefined;
+  return below.slice(anchor.length - 1).map((_, index) => `/${below.slice(0, anchor.length + index).join('/')}`);
+}

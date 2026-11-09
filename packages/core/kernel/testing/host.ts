@@ -11,9 +11,11 @@ import {
   scopedSubfolder,
 } from '../host/roots.ts';
 import {
+  anchorWalk,
   harnessFileRefusal,
   permittedMode,
   renameNamesRefusal,
+  takesAnchor,
   takesLinks,
   takesRenames,
   takesUnlinks,
@@ -1249,12 +1251,20 @@ async function start(world: World): Promise<TestHost> {
           if (name === 'project-files') throw new RootError('not_declared');
           throw new Error(`${manifest.id}: root ${name} is not declared`);
         }
+        // A `within` anchor is judged by the one rule production reads (`anchorWalk`): the folder itself or an ancestor of
+        // it, compared by component, on a root that takes an absolute folder. Anything else names no folder here either.
+        // The world holds no real disk folders for an absolute scope, so the lstat walk itself is production's alone.
+        const anchoredFolder = (folder: string | undefined): string | undefined =>
+          scope?.within === undefined ||
+          (folder !== undefined && takesAnchor(name) && anchorWalk(folder, scope.within) !== undefined)
+            ? folder
+            : undefined;
         if (name === 'project-files') {
           // The real host's rules over the flat world (`testing/project-files.ts`), with the same refusals.
           const project = projectFilesHandle({
             plugin: manifest.id,
             patterns: manifest.permissions?.projectFiles,
-            folder: projectFilesScope(scope?.subfolder),
+            folder: anchoredFolder(projectFilesScope(scope?.subfolder)),
             fenceHome: options.fenceHome ?? '/test-home',
             setModeDeclared: manifest.permissions?.setMode === true,
             noDescriptorReach: options.noDescriptorReach === true,
@@ -1278,7 +1288,9 @@ async function start(world: World): Promise<TestHost> {
         // The same scope rule as production (`scopedSubfolder`): a `sessions` handle is one minted ferret folder, an
         // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
         // see each other; a refused scope resolves nothing.
-        const below = scopedSubfolder(name, scope?.subfolder);
+        const scoped = scopedSubfolder(name, scope?.subfolder);
+        const named = scope?.subfolder?.startsWith('/') === true ? scope.subfolder : undefined;
+        const below = anchoredFolder(named) === undefined && scope?.within !== undefined ? undefined : scoped;
         const prefix = below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`;
         const fileStat = (path: string) => ({
           kind: 'file' as const,

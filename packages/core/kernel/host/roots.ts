@@ -57,9 +57,11 @@ import { holdsPrivate, ownStateTree, receivingRoot, refuseShared, SharedTrees } 
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
 import { type ProjectUse, projectFilesScope, projectPathRefusal } from '../manifest/project-files.ts';
 import {
+  anchorWalk,
   harnessFileRefusal,
   permittedMode,
   renameNamesRefusal,
+  takesAnchor,
   takesLinks,
   takesRenames,
   takesUnlinks,
@@ -1065,6 +1067,11 @@ interface HandleSetup {
   readonly name: RootName;
   readonly plugin: string;
   readonly base: () => string | undefined;
+  /**
+   * The folders from the caller's `within` anchor down to the scoped folder (`anchorWalk`), each of which must be no
+   * link; `undefined` when the scope names no anchor (every call is then judged exactly as before).
+   */
+  readonly linkFreeFolders: () => readonly string[] | undefined;
   readonly anchor: string | undefined;
   readonly scopedParent: string | undefined;
   readonly check: (path: string) => Result<FencedPath, FolderRefusal> | undefined;
@@ -1567,6 +1574,19 @@ function harnessFileHandle(setup: HarnessFileSetup): RootFileHandle {
 
 function rootHandle(setup: HandleSetup): RootHandle {
   const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins, privateFiles } = setup;
+  /**
+   * A scope that names an anchor (`within`): every folder from the anchor down to the scoped folder is looked at
+   * WITHOUT following it, and a link at any of them is refused `link_escape`, the anchor included. The anchor's own
+   * ancestors are not looked at (a project under a linked workspace folder is fine). A folder that is not there yet is
+   * no link, and nothing below it exists either.
+   */
+  const anchoredFolders = async (): Promise<void> => {
+    for (const folder of setup.linkFreeFolders() ?? []) {
+      const found = await fs.lstat(folder);
+      if (found === undefined) return;
+      if (found.kind === 'link') refuse('link_escape');
+    }
+  };
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
   const projectRoot = name === 'project-files';
@@ -1667,6 +1687,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
   const real = async (path: FencedPath, create = false): Promise<Checked> => {
     const root = base();
     if (root === undefined) refuse(name === 'work' ? 'unknown_ferret' : 'outside');
+    await anchoredFolders();
     if (create && scopedParent !== undefined) {
       // A forged path outside this scope must not create even an empty directory.
       const lexical = lexicalInRoot(home, root as string, ownerRoot, path);
@@ -2339,7 +2360,17 @@ export function rootsPortFor(
         if (internal !== undefined) return home;
         return name === 'worktrees' ? dirname(absolute(layout.worktrees, 'the worktrees folder')) : undefined;
       })();
-      const base = (): string | undefined => {
+      const within = scope?.within;
+      /**
+       * A `within` anchor is judged BEFORE the folder is named: it must be the scoped folder itself or an ancestor of it,
+       * component by component, on a root that takes an absolute folder at all. Anything else names no folder, so every
+       * call on the handle is refused `outside`, as for any scope the kernel does not accept.
+       */
+      const anchored = (folder: string | undefined): string | undefined =>
+        within === undefined || (folder !== undefined && takesAnchor(name) && anchorWalk(folder, within) !== undefined)
+          ? folder
+          : undefined;
+      const unanchoredBase = (): string | undefined => {
         switch (name) {
           case 'agent-homes':
           case 'fleet': {
@@ -2375,6 +2406,12 @@ export function rootsPortFor(
               : undefined;
         }
       };
+      const base = (): string | undefined => anchored(unanchoredBase());
+      /** The folders from the anchor down to the scoped folder, each to be no link; none without an anchor. */
+      const linkFreeFolders = (): readonly string[] | undefined => {
+        const folder = base();
+        return within === undefined || folder === undefined ? undefined : anchorWalk(folder, within);
+      };
       const check = (path: string): Result<FencedPath, FolderRefusal> | undefined => {
         if (name !== 'work' || scope?.ferret === undefined) return undefined;
         return workFolders()?.check(scope.ferret, path) ?? err('unknown_ferret');
@@ -2391,6 +2428,7 @@ export function rootsPortFor(
         name,
         plugin: layout.plugin,
         base,
+        linkFreeFolders,
         anchor,
         scopedParent,
         check,

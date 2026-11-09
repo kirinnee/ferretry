@@ -879,7 +879,27 @@ export interface RootHandle {
 
 export interface RootsPort {
   /** Only roots the manifest declared in `permissions.roots`; anything else throws at build. */
-  root(name: RootName, scope?: { readonly ferret?: FerretId; readonly subfolder?: string }): RootHandle;
+  root(
+    name: RootName,
+    scope?: {
+      readonly ferret?: FerretId;
+      readonly subfolder?: string;
+      /**
+       * Optional ANCHOR, for the roots scoped to an absolute folder the caller names (`imports`, `harness-history`,
+       * `harness-home`, `project-files`): the folder itself or one of its ancestors (compared component by component,
+       * never by string prefix; plain, absolute, never `/`). With one, every folder from the anchor down to
+       * `subfolder`, both included, is looked at without being followed, and a link at any of them (a project's
+       * `.claude -> elsewhere`, a `skills -> elsewhere`, or the folder itself) is refused `link_escape` by every call
+       * on the handle. The anchor's own ancestors are not looked at: a project under a linked workspace folder is
+       * fine, only what lies from the anchor down is. An anchor that is not the folder or its ancestor, or is given
+       * to a root that takes no absolute folder, names no folder: every call is refused `outside`. Without one the
+       * handle is exactly what it was (a link in the folder's path is resolved, and the walk below it never leaves it).
+       * The check is made at each call, then the walk proceeds, so a folder swapped for a link in between is the same
+       * declared window as any base the kernel judges by path.
+       */
+      readonly within?: string;
+    },
+  ): RootHandle;
   /**
    * A read-only handle on exactly ONE file beside a harness home (`~/.claude.json`, which sits BESIDE `~/.claude`, so
    * no `harness-home` scope reaches it): only for a plugin that may hold `harness-home` (Runtimes) and declared it in
