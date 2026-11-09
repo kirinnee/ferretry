@@ -141,6 +141,11 @@ const refusedCases: readonly (readonly [string, () => Promise<void>])[] = [
     async () => put(`fleet/assets/${BEFORE}`, `proxy-authorization: Basic ${FAKE_MIXED}\n`),
   ],
   [
+    // Only the header branch catches this: the value is letters only, so it is not credential-shaped on its own.
+    'a file with an Authorization header whose value is letters only',
+    async () => put(`fleet/assets/${BEFORE}`, 'curl -H "Authorization: Bearer abcdefghijklmnopqrstuvwx" x\n'),
+  ],
+  [
     'a file with a token followed by a credential-shaped value',
     async () => put(`fleet/assets/${BEFORE}`, `token ${FAKE_MIXED}\n`),
   ],
