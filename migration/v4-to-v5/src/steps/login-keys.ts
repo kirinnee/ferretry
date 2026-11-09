@@ -13,8 +13,8 @@
  *    `home.json`: a key is never left plain.
  *
  * THE RULE is `storedEnvironmentIssue` in `packages/plugins/logins/contract/secret-shape.ts`: the very check a v5 login
- * file's schema applies, so what this moves is exactly what v5 would otherwise refuse. It is not exported through the
- * logins contract's index, so it is imported by path (a pure file, no IO); there is no second copy of it here.
+ * file's schema applies, so what this moves is exactly what v5 would otherwise refuse. It is exported from the logins
+ * contract; there is no second copy of it here.
  *
  * THE SEAL is the vault's documented format (`packages/core/vault/contract/store.ts`): AES-256-GCM under `vault.key`,
  * a random 96-bit IV per entry, the secret's NAME as additional authenticated data, `iv` and `ciphertext` base64. The
@@ -43,7 +43,7 @@ import { constants } from 'node:fs';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { isMap, isScalar, type Document } from 'yaml';
-import { storedEnvironmentIssue } from '../../../../packages/plugins/logins/contract/secret-shape.ts';
+import { storedEnvironmentIssue } from '@ferretry/plugin-logins/contract';
 import type { KeptItem, StepReport } from '../report.ts';
 import { V4InputError } from '../v4/documents.ts';
 import { V5_VAULT_FILE, V5_VAULT_KEY_FILE } from './secrets.ts';
