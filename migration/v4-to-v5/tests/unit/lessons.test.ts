@@ -438,6 +438,9 @@ describe('damage is read the way v4 read it, counted and never quoted', () => {
     expect(report.status).toBe('failed');
     expect(report.note).toContain('a hard link (v4 refused it)');
     expect(JSON.stringify(report)).not.toContain('sk-FAKE');
+    // m3: the file that is the hard link is the one the component names, never the default document.
+    expect(report.note).toContain('make the file it names (under fleet/assets) a plain file');
+    expect(report.note).not.toContain('instructions/lessons.md');
   });
 
   test('an unknown learning.yaml key fails by key, never by value', async () => {

@@ -21,6 +21,8 @@ const AFTER = 'components/hooks/compact-after.sh';
 const FAKE_KEY = 'sk-ant-FAKEFAKEFAKEFAKEFAKE0123';
 // 24 characters from the token alphabet, a letter and a digit, no known prefix: FAKE.
 const FAKE_MIXED = 'Zx9qLm2Pw8Rt5Vb7Nc4Kabcd';
+// A standard base64 body (40 characters, no known prefix) that is put after a `/`: FAKE.
+const FAKE_B64 = 'Zx9qLm2Pw8Rt5Vb7Nc4Kabcd+EfGh3Jk6Mn9Pq2R';
 // The owner's script reaches its home through $FY_HOME, never a literal v4 path: that must carry.
 const SCRIPT = '#!/bin/sh\necho compacted\ncat "$FY_HOME/state/compact-notes.txt"\n';
 
@@ -157,6 +159,69 @@ const refusedCases: readonly (readonly [string, () => Promise<void>])[] = [
   [
     'a file with an Authorization header whose value only contains a dollar',
     async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Bearer ${FAKE_MIXED}$x" x\n`),
+  ],
+  // M1: `/` is in the base64 alphabet, so a real key can start with it; only a PATH-shaped value is exempt.
+  [
+    'a file with a token followed by a base64 key that starts with a slash',
+    async () => put(`fleet/assets/${BEFORE}`, `token /${FAKE_B64}\n`),
+  ],
+  [
+    'a file with a Bearer word followed by a base64 key that starts with a slash',
+    async () => put(`fleet/assets/${BEFORE}`, `Bearer /${FAKE_B64}\n`),
+  ],
+  [
+    'a file with an X-Api line naming a Bearer base64 key that starts with a slash',
+    async () => put(`fleet/assets/${BEFORE}`, `X-Api: Bearer /${FAKE_B64}=\n`),
+  ],
+  [
+    'a file with a token followed by a base64 key with slashes inside it',
+    async () => put(`fleet/assets/${BEFORE}`, 'token /Zx9qLm2P/w8Rt5Vb7/Nc4Kabcd\n'),
+  ],
+  [
+    'a file with a token followed by a key that starts with a tilde',
+    async () => put(`fleet/assets/${BEFORE}`, `token ~${FAKE_MIXED}\n`),
+  ],
+  [
+    'a file with a token followed by a key that starts with a dot',
+    async () => put(`fleet/assets/${BEFORE}`, `token .${FAKE_MIXED}\n`),
+  ],
+  [
+    'a file with a token followed by a key under a path-looking prefix',
+    async () => put(`fleet/assets/${BEFORE}`, `token /home/x/${FAKE_MIXED}\n`),
+  ],
+  // m1: only a real variable reference is exempt in a header, never a value that merely starts with a dollar.
+  [
+    'a file with an Authorization header whose value is a dollar then a key',
+    async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Bearer $${FAKE_MIXED}" x\n`),
+  ],
+  [
+    'a file with an Authorization header whose variable has a literal default',
+    async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Bearer \${API_TOKEN:-${FAKE_MIXED}}" x\n`),
+  ],
+  [
+    'a file with an Authorization header whose reference is followed by more text',
+    async () => put(`fleet/assets/${BEFORE}`, `curl -H "Authorization: Bearer \${PREFIX}${FAKE_MIXED}" x\n`),
+  ],
+  [
+    'a file with a reference header and then a literal header',
+    async () =>
+      put(
+        `fleet/assets/${BEFORE}`,
+        `curl -H "Authorization: Bearer $FROM_THE_ENVIRONMENT" -H "Authorization: Bearer ${FAKE_MIXED}" x\n`,
+      ),
+  ],
+  // m2: the version exemption has a bounded suffix; a key behind a version-looking prefix is still a key.
+  [
+    'a file with a token followed by a version then a key',
+    async () => put(`fleet/assets/${BEFORE}`, `token 1.2.3-${FAKE_MIXED}\n`),
+  ],
+  [
+    'a file with a token followed by a v-version then a key after a plus',
+    async () => put(`fleet/assets/${BEFORE}`, `token v1.0.0+${FAKE_MIXED}\n`),
+  ],
+  [
+    'a file with a token followed by a version then a key split by dashes',
+    async () => put(`fleet/assets/${BEFORE}`, 'token 1.2.3-Zx9qLm2P-w8Rt5Vb7-Nc4Kabcd\n'),
   ],
   // M2: the content is held to the same homes the last gate refuses in an inline command.
   [
@@ -339,6 +404,16 @@ describe('prose in a carried file is not a credential (m1)', () => {
     ['token before a dot-relative dated path', 'the token ./docs/2026-11-09/summary-final.md\n'],
     ['token before a version', 'token v4.291.5-rc.1+build.20261109 is the one to use\n'],
     ['Bearer before a dated path', 'Bearer /var/log/2026-11-09/session-0001.log\n'],
+    // M1 keeps these: a path is a path, whatever digits it holds.
+    ['token before a path with a log name', 'see the token /var/log/app/2026-11-09/worker-3.log for details\n'],
+    ['token before a mixed-case but short path', 'the token /home/User/Docs/notes.md\n'],
+    // m2: a version with a short build suffix is still a version.
+    ['token before a release-candidate version', 'the token 1.2.3-rc.1+build.20261109 is current\n'],
+    // m1: a reference in quotes is still a reference.
+    [
+      'an Authorization header with a quoted variable reference',
+      `curl -H 'Authorization: Bearer "\${LONG_VARIABLE_NAME_HERE}"' x\n`,
+    ],
     // n2: a real header whose value is an environment reference, not a value.
     [
       'an Authorization header that reads its token from the environment',

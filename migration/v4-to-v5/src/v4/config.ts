@@ -11,7 +11,7 @@ import { constants } from 'node:fs';
 import { lstat, open, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { type Document, isMap, isScalar, LineCounter, parseDocument, type YAMLMap } from 'yaml';
-import { pathSegment } from '../key-path.ts';
+import { looksLikeKey, pathSegment } from '../key-path.ts';
 import { V4InputError } from './documents.ts';
 import type { V4ConfigOverrides, V4Paths } from './layout.ts';
 
@@ -324,7 +324,7 @@ function looksLikeRawSecret(key: string | number | undefined, value: string): bo
   if (typeof key !== 'string' || !CREDENTIAL_KEY.test(key)) return false;
   const trimmed = value.trim();
   if (REFERENCE.test(trimmed) || trimmed.length < 16 || /\s/u.test(trimmed)) return false;
-  if (/^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu.test(trimmed)) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed) || isPathShaped(trimmed)) return false;
   return entropy(trimmed) >= 3.5;
 }
 
@@ -352,23 +352,66 @@ export function rawSecretPaths(value: unknown): readonly string[] {
 
 const AUTH_SHAPE = String.raw`(?:Bearer|Basic|token)\s+\S{16,}`;
 const AUTH_AT_START = new RegExp(`^${AUTH_SHAPE}`, 'iu');
-/** In free text: a real header (`Authorization:` / `Proxy-Authorization:` then a scheme and a value). */
-const AUTH_HEADER =
-  /(?<![A-Za-z0-9])(?:Proxy-)?Authorization["']?\s*[:=]\s*["']?(?:Bearer|Basic|token)\s+(?!\$)\S{16,}/iu;
+/** In free text: a real header (`Authorization:` / `Proxy-Authorization:` then a scheme and a value); the value is judged by {@link isVariableReference}. */
+const AUTH_HEADER = /(?<![A-Za-z0-9])(?:Proxy-)?Authorization["']?\s*[:=]\s*["']?(?:Bearer|Basic|token)\s+(\S{16,})/giu;
 /** In free text: a scheme word followed by a value (judged by {@link looksLikeTokenValue}). */
 const SCHEME_VALUE = /(?<![A-Za-z0-9])(?:Bearer|Basic|token)\s+(\S+)/giu;
+
+/** A shell variable reference and nothing after it but a closing quote: `$NAME` or `${NAME}` (never `${NAME:-default}`). */
+const VARIABLE_REFERENCE = /^["']?\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))["']*$/u;
+
+/**
+ * Whether a header value is an environment REFERENCE (the value stays in the environment) and not a value. The name
+ * must read as a name: a key written as `$<key>` is a literal that happens to be spellable as a variable.
+ */
+const isVariableReference = (value: string): boolean => {
+  const name = VARIABLE_REFERENCE.exec(value);
+  const variable = name?.[1] ?? name?.[2];
+  if (variable === undefined) return false;
+  const bare = variable.replaceAll('_', '');
+  return !looksLikeKey(variable) && !(looksLikeKey(bare) && /[a-z]/u.test(bare) && /[A-Z]/u.test(bare));
+};
+
+/** A run that mixes upper case, lower case and a digit: random text, never a word or a date. */
+const mixedRandom = (piece: string): boolean =>
+  piece.length >= 8 && /[A-Z]/u.test(piece) && /[a-z]/u.test(piece) && /\d/u.test(piece);
+
+/**
+ * A value that is a PATH: every `/`-separated segment is neither key-shaped nor a random mixed-case run. `/` is in the
+ * base64 alphabet, so a key can start with it (an AWS secret access key can): its long segment, or its mixed-case
+ * pieces, are what tell it from `/home/x/notes/2026-11-09/summary.md`.
+ */
+const isPathShaped = (value: string): boolean =>
+  /^[/~.]/u.test(value) && value.split('/').every(segment => !looksLikeKey(segment) && !mixedRandom(segment));
+
+/**
+ * A version number (`1.2.3`, `v4.291.5-rc.1+build.20261109`). The suffix after the numbers is bounded: no `.`, `+` or
+ * `-` separated piece of it may look like a key, nor the suffix with its separators taken out (a key written with
+ * `-` or `+` in it would otherwise split into short pieces).
+ */
+const isVersionNumber = (value: string): boolean => {
+  const match = /^v?\d+(?:\.\d+){2,}(?:[-+]([A-Za-z0-9.+-]*))?$/u.exec(value);
+  if (match === null) return false;
+  const suffix = match[1] ?? '';
+  const pieces = suffix.split(/[.+-]/u);
+  return !pieces.some(piece => looksLikeKey(piece) || mixedRandom(piece)) && !looksLikeKey(pieces.join(''));
+};
 
 /**
  * A value that itself looks like a credential: 20+ token-alphabet characters, no spaces, a letter and a digit. Prose
  * names paths and versions right after the word "token" ("the token /home/x/notes/2026-11-09.md", "token
- * v4.291.5-rc.1+build.20261109"): a value that starts with `/`, `~` or `.` (as {@link looksLikeRawSecret} also reads it)
- * or reads as a version number is not one. A hex or UUID value still is (an old API key can look exactly like that).
+ * v4.291.5-rc.1+build.20261109"): a value that is path-shaped ({@link isPathShaped}) or reads as a version number
+ * ({@link isVersionNumber}) is not one. A hex or UUID value still is (an old API key can look exactly like that).
  */
 const looksLikeTokenValue = (raw: string): boolean => {
   const value = raw.replace(/^["'`(]+|["'`),;.]+$/gu, '');
-  if (/^[/~.]/u.test(value) || /^v?\d+(?:\.\d+){2,}(?:[-+][A-Za-z0-9.+-]*)?$/u.test(value)) return false;
+  if (isPathShaped(value) || isVersionNumber(value)) return false;
   return value.length >= 20 && /^[A-Za-z0-9._~+/=-]+$/u.test(value) && /[A-Za-z]/u.test(value) && /\d/u.test(value);
 };
+
+/** Whether the text holds an `Authorization:` header whose value is a value and not an environment reference. */
+const hasAuthorizationValue = (text: string): boolean =>
+  [...text.matchAll(AUTH_HEADER)].some(match => !isVariableReference(match[1] as string));
 
 /** The key paths of a value that looks like an Authorization header: a header-named key, or `Bearer|Basic|token <16+>`. */
 export function credentialShaped(value: unknown): string[] {
@@ -404,7 +447,7 @@ export const documentCredentialPaths = (value: unknown): readonly string[] => [
  * value itself looks like a credential. Prose that merely uses the words ("Basic troubleshooting", "token budget") carries.
  */
 export function textLooksLikeCredential(text: string): boolean {
-  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(text) || AUTH_HEADER.test(text)) return true;
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(text) || hasAuthorizationValue(text)) return true;
   for (const match of text.matchAll(SCHEME_VALUE)) if (looksLikeTokenValue(match[1] as string)) return true;
   const words = text.split(/\s+/u).filter(word => word !== '');
   const assigned = [...text.matchAll(/([A-Za-z0-9_.-]+)["']?\s*[=:]\s*["']?([^\s"']+)/gu)].map(match => ({

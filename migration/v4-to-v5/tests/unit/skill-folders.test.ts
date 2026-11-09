@@ -89,6 +89,55 @@ test('n3 a skill whose SKILL.md is a hard link is refused whole by name; its oth
   expect(dry.notCarried.map(entry => entry.what)).toContain('skills/broken');
 });
 
+test('n4 a skill whose SKILL.md is a symbolic link is refused whole by name, like the hard-link case; no husk is carried', async () => {
+  await writeFile(join(f.from, 'outside.md'), 'FAKE outside\n', { mode: 0o600 });
+  await v4('linked/scripts/run.sh', '#!/bin/sh\necho FAKE\n', 0o700);
+  await v4('linked/notes.md', 'FAKE notes\n');
+  await symlink(join(f.from, 'outside.md'), join(f.from, 'fleet/assets/skills/linked/SKILL.md'));
+  await v4('fine/SKILL.md', 'FAKE fine\n');
+
+  const report = await skillFoldersStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(await stat(v5('linked')).catch(() => undefined)).toBeUndefined();
+  expect(await readFile(v5('fine/SKILL.md'), 'utf8')).toBe('FAKE fine\n');
+  const row = report.notCarried.find(entry => entry.what === 'skills/linked');
+  expect(row?.why).toContain('SKILL.md is a symbolic link');
+  expect(row?.why).toContain('not carried at all');
+  expect(report.kept).toContainEqual({ what: 'skill folders', count: 1 });
+  expect(JSON.stringify(report)).not.toContain('FAKE');
+  expect(skillFoldersStep.notCarried.map(entry => entry.what).join('|')).toContain('SKILL.md is a symbolic link');
+  // A dry run names the same skill.
+  const dry = await skillFoldersStep.run(f.ctx(true));
+  expect(dry.notCarried.map(entry => entry.what)).toContain('skills/linked');
+});
+
+test('n5 a skill folder and a hard-linked file named like keys are said as <key>, never printed', async () => {
+  const KEYNAME = 'AKIAFAKEFAKEFAKE0123';
+  await writeFile(join(f.from, 'outside.md'), 'FAKE outside\n', { mode: 0o600 });
+  await v4(`${KEYNAME}/notes.md`, 'FAKE notes\n');
+  await link(join(f.from, 'outside.md'), join(f.from, `fleet/assets/skills/${KEYNAME}/SKILL.md`));
+  await v4('fine/SKILL.md', 'FAKE fine\n');
+  await link(join(f.from, 'outside.md'), join(f.from, `fleet/assets/skills/fine/${KEYNAME}.md`));
+
+  const report = await skillFoldersStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  const whats = report.notCarried.map(entry => entry.what);
+  expect(whats).toContain('skills/<key>');
+  expect(whats).toContain('skills/fine/<key>');
+  expect(JSON.stringify(report)).not.toContain('AKIAFAKE');
+});
+
+test('n5 an unreadable file named like a key fails by <key>, never by the name', async () => {
+  const KEYNAME = 'AKIAFAKEFAKEFAKE0123';
+  await v4('review/SKILL.md', 'FAKE\n');
+  await v4(`review/${KEYNAME}.md`, 'FAKE\n');
+  await chmod(join(f.from, `fleet/assets/skills/review/${KEYNAME}.md`), 0o000);
+  const report = await skillFoldersStep.run(f.ctx());
+  expect(report.status).toBe('failed');
+  expect(report.note).toContain('fleet/assets/skills/review/<key>');
+  expect(report.note).not.toContain('AKIAFAKE');
+});
+
 test('no asset tree converts to nothing; a dry run writes nothing', async () => {
   expect((await skillFoldersStep.run(f.ctx())).status).toBe('converted');
   await v4('review/SKILL.md', 'FAKE\n');

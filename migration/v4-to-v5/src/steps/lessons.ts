@@ -481,7 +481,11 @@ async function globalSource(ctx: StepContext): Promise<string | undefined> {
       /^[A-Za-z0-9_./-]{1,100}$/u.test(file) &&
       !isAbsolute(file) &&
       file.split('/').every(part => !looksLikeKey(part));
-    const target = `fleet/assets/${named ? file : V4_GLOBAL_LESSONS_FILE}`;
+    // A component whose `file` is not echoed still names ITS file, never the default one: say "the file it names".
+    const target =
+      hasComponent && !named
+        ? 'the file it names (under fleet/assets)'
+        : `fleet/assets/${named ? file : V4_GLOBAL_LESSONS_FILE}`;
     throw new V4InputError(
       `${hasComponent ? `${V4_LESSONS_COMPONENT}: the Global lessons document it names` : 'the default Global lessons document'} is a hard link (v4 refused it), so it was never read; make ${target} a plain file and run the conversion again`,
     );
