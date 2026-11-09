@@ -2747,8 +2747,10 @@ scoped handle:
   after the replace — the index holds the new inode, and the old one is no longer in it — so it reads the old
   credential until it is removed (a hard link needs the same user, who can read the file directly anyway; a bind
   mount needs privilege); the same-millisecond and 4096-place misses of earlier rounds are closed, this one is not;
-  (7) a RESTING session folder (unchanged for a minute) is looked at only when its slice comes round, so a file
-  replaced in one is not recognised under a second name until then — at 512 folders a look and 250 ms a look, 5,000
+  (7) every ferret relaunch rotates its credential; it bites only with a PRIVILEGED bind of one RESTING session folder
+  (unchanged for a minute), whose rotated live `fys_` credential can then be read through the alias until that folder
+  comes round in the slice window (about 270 reads over 7 s at 20,000 sessions), closed by a follow-up unit that pins
+  each star-member folder by identity. A RESTING folder is looked at only when its slice comes round — at 512 folders a look and 250 ms a look, 5,000
   sessions are all looked at in 2.5 s and 20,000 in 10 s, and it grows with the count (65,000: 32 s); a NEW session,
   and any folder that changed within the minute, is looked at by the next look; an alias of the replaced file needs the
   same user or privilege, as (6); (8) a filesystem whose clock steps by more than two seconds can still miss a member
