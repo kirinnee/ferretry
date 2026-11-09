@@ -5,7 +5,11 @@
  */
 import { CORE_IDS, KERNEL_BOUND_PORTS, KERNEL_ONLY_PORTS } from '../../../packages/core/kernel/contract/index.ts';
 import type { HookDef, PortToken } from '../../../packages/core/kernel/contract/index.ts';
-import { projectFilesPatternRefusal, type Manifest } from '../../../packages/core/kernel/manifest/index.ts';
+import {
+  projectFilesAllowListRefusal,
+  projectFilesPatternRefusal,
+  type Manifest,
+} from '../../../packages/core/kernel/manifest/index.ts';
 import type { LoadedSubsystem } from './workspace.ts';
 
 const CORE = new Set<string>(CORE_IDS);
@@ -169,7 +173,7 @@ export function pluginGraphFindings(graph: StartGraph): Finding[] {
     if (holdsProjectFiles && (projectFiles === undefined || projectFiles.length === 0))
       findings.push({ check, where: id, message: "declares root 'project-files' without permissions.projectFiles" });
     for (const pattern of projectFiles ?? []) {
-      const why = projectFilesPatternRefusal(pattern);
+      const why = projectFilesPatternRefusal(pattern) ?? projectFilesAllowListRefusal(pattern);
       if (why !== undefined)
         findings.push({ check, where: id, message: `permissions.projectFiles ${JSON.stringify(pattern)}: ${why}` });
     }

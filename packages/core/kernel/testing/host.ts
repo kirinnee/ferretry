@@ -6,7 +6,7 @@ import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, take
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
-import { projectFileKey, projectFilesHandle } from './project-files.ts';
+import { PROJECT_SOURCES, projectFileKey, projectFilesHandle } from './project-files.ts';
 import { failureResponse } from '../host/responses.ts';
 import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
@@ -1281,11 +1281,16 @@ async function start(world: World): Promise<TestHost> {
             for (const [key, value] of files) world.roots.set(`${to}/${key}`, value);
             return copyOptions?.link === true ? 'linked' : 'copied';
           },
-          copyTree: async (_source, from, to, copyOptions) => {
+          copyTree: async (source, from, to, copyOptions) => {
+            // A SOURCE that is a project folder is gated by its own handle (the declared set, no link on the way), and no
+            // link is ever made from one into another root: the same two refusals as production (`HANDLES.real`, `linkTarget`).
+            const projectSource = PROJECT_SOURCES.get(source);
+            projectSource?.(from);
+            if (projectSource !== undefined && copyOptions?.link === true) throw new RootError('not_declared');
             // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
+            const fromKey = projectSource === undefined ? from : projectFileKey(from);
             for (const [key, text] of [...world.roots])
-              if (key.startsWith(`${from}/`)) world.roots.set(`${to}${key.slice(from.length)}`, text);
-            void copyOptions;
+              if (key.startsWith(`${fromKey}/`)) world.roots.set(`${to}${key.slice(fromKey.length)}`, text);
           },
           ensurePrivateDirectory: async () => {},
           lstat: async path => {

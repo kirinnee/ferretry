@@ -19,6 +19,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
+import { renameSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { FencedPath } from '../../../contract/bound.ts';
 import type { RootHandle, RootName, RootsPort } from '../../../contract/ports.ts';
@@ -270,10 +271,16 @@ describe('S179 links and hard links', () => {
     await mkdir(`${f.proj}/.claude/skills`, { recursive: true });
     await symlink(`${f.proj}/src`, `${f.proj}/.claude/skills/x`);
     expect(await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'no'))).toBe('link_escape');
-    expect(await refusalOf(() => f.root.remove(at(f.root, '.claude/skills/x')))).toBe('link_escape');
+    // a name BELOW the link is refused the same way, remove included
+    expect(await refusalOf(() => f.root.remove(at(f.root, '.claude/skills/x/a.md')))).toBe('link_escape');
     expect(await readdir(`${f.proj}/src`)).toEqual([]);
+    // the link ITSELF is a name of the set: remove never follows the leaf, so it is unlinked as a link and what it
+    // pointed at is untouched (rule of the remove-realparent unit, M1 of the K3 review)
+    await writeFile(`${f.proj}/src/keep.md`, 'keep');
+    expect(await refusalOf(() => f.root.remove(at(f.root, '.claude/skills/x')))).toBeUndefined();
+    expect(await exists(`${f.proj}/.claude/skills/x`)).toBe(false);
+    expect(await readFile(`${f.proj}/src/keep.md`, 'utf8')).toBe('keep');
     // a link in the middle of a deeper name
-    await rm(`${f.proj}/.claude/skills/x`);
     await mkdir(`${f.proj}/.claude/skills/y`);
     await symlink(f.outside, `${f.proj}/.claude/skills/y/deep`);
     expect(await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/y/deep/a.md'), 'no'))).toBe('link_escape');
@@ -441,5 +448,282 @@ describe('S179 descriptor reach, links, moves and held folders', () => {
     expect(await refusalOf(() => target.copyTree(source, at(source, 'src/pack'), at(target, 'other')))).toBe(
       'not_declared',
     );
+  });
+});
+
+describe('S179 copyTree is not a second door for a link (H1)', () => {
+  /** The project folder and an internal root of the same plugin, with one folder to copy from the internal root. */
+  async function withDownloads() {
+    const f = await fresh();
+    const roots = f.port(DECLARED, ['project-files', 'downloads']);
+    const downloads = roots.root('downloads');
+    const project = roots.root('project-files', { subfolder: f.proj });
+    await mkdir(`${f.home}/state/mcp/downloads/pack`, { recursive: true });
+    await writeFile(`${f.home}/state/mcp/downloads/pack/SKILL.md`, '# pack');
+    return { f, downloads, project };
+  }
+
+  test('S179 copyTree {link:true} INTO a project folder is refused read_only: nothing is planted, so no write reaches the state home', async () => {
+    const { f, downloads, project } = await withDownloads();
+    await mkdir(`${f.proj}/.claude/skills`, { recursive: true });
+    expect(
+      await refusalOf(() =>
+        project.copyTree(downloads, at(downloads, 'pack'), at(project, '.claude/skills/pack'), { link: true }),
+      ),
+    ).toBe('read_only');
+    expect(await exists(`${f.proj}/.claude/skills/pack`)).toBe(false);
+    // the set is judged first, as for a copy: a name above a grant is not_declared whatever the options
+    expect(
+      await refusalOf(() =>
+        project.copyTree(downloads, at(downloads, 'pack'), at(project, '.claude/skills'), { link: true }),
+      ),
+    ).toBe('not_declared');
+    // the one door left is a COPY, which makes real files in a new folder
+    await project.copyTree(downloads, at(downloads, 'pack'), at(project, '.claude/skills/pack'));
+    expect((await lstat(`${f.proj}/.claude/skills/pack`)).isSymbolicLink()).toBe(false);
+    expect(await readFile(`${f.proj}/.claude/skills/pack/SKILL.md`, 'utf8')).toBe('# pack');
+    expect(await readdir(`${f.home}/state/mcp/downloads/pack`)).toEqual(['SKILL.md']);
+  });
+
+  test('S179 copyTree {link:true} FROM a project folder into an internal root is refused not_declared: no link outlives the declared set', async () => {
+    const { f, downloads, project } = await withDownloads();
+    await project.writeText(at(project, '.claude/skills/x/SKILL.md'), '# x');
+    expect(
+      await refusalOf(() =>
+        downloads.copyTree(project, at(project, '.claude/skills/x'), at(downloads, 'linked'), { link: true }),
+      ),
+    ).toBe('not_declared');
+    expect(await exists(`${f.home}/state/mcp/downloads/linked`)).toBe(false);
+    // a COPY out of the set still works
+    await downloads.copyTree(project, at(project, '.claude/skills/x'), at(downloads, 'copied'));
+    expect(await readFile(`${f.home}/state/mcp/downloads/copied/SKILL.md`, 'utf8')).toBe('# x');
+  });
+
+  test('S179 a copy out of a project folder is gated by the folder own set: a name above a grant is refused', async () => {
+    const { f, downloads, project } = await withDownloads();
+    await project.writeText(at(project, '.claude/skills/x/SKILL.md'), '# x');
+    await writeFile(`${f.proj}/.claude/settings.json`, 'private-ish');
+    expect(await refusalOf(() => downloads.copyTree(project, at(project, '.claude'), at(downloads, 'got')))).toBe(
+      'not_declared',
+    );
+    expect(
+      await refusalOf(() => downloads.copyTree(project, at(project, '.claude/skills'), at(downloads, 'got'))),
+    ).toBe('not_declared');
+    expect(await exists(`${f.home}/state/mcp/downloads/got`)).toBe(false);
+  });
+});
+
+describe('S179 a link swapped in after the judge (Md1) and the writes without descriptor reach (H2)', () => {
+  /** A disk that runs `before` the `skip`+1th time `which` is called with a path `match` accepts, and `after` once it returns. */
+  function hooked(
+    base: HostFs,
+    which: 'realpath' | 'writeNew' | 'rename',
+    match: (path: string) => boolean,
+    hooks: {
+      readonly before: () => void;
+      readonly after?: () => void;
+      readonly skip?: number;
+      readonly times?: number;
+    },
+  ): HostFs {
+    let skip = hooks.skip ?? 0;
+    let times = hooks.times ?? 1;
+    const original = base[which] as (...args: never[]) => Promise<unknown>;
+    const wrapped = async (...args: never[]): Promise<unknown> => {
+      if (times > 0 && match(args[0] as unknown as string)) {
+        if (skip > 0) skip -= 1;
+        else {
+          times -= 1;
+          hooks.before();
+          try {
+            return await original.apply(base, args);
+          } finally {
+            hooks.after?.();
+          }
+        }
+      }
+      return await original.apply(base, args);
+    };
+    return { ...base, [which]: wrapped } as HostFs;
+  }
+
+  test('S179 an in-folder swap of a grant folder for a link to another place in the project is refused at EVERY walk, never followed', async () => {
+    // the swap lands at the first, the second and the third look the write's walk takes at the folder
+    for (const skip of [0, 1, 2]) {
+      const where = { proj: '' };
+      const x = (): string => `${where.proj}/.claude/skills/x`;
+      const disk = hooked(
+        nodeFs(() => crypto.randomUUID()),
+        'realpath',
+        path => path === x(),
+        {
+          skip,
+          before: () => {
+            renameSync(x(), `${x()}.aside`);
+            symlinkSync(`${where.proj}/.claude/other`, x());
+          },
+        },
+      );
+      const f = await fresh({ disk });
+      where.proj = f.proj;
+      await mkdir(x(), { recursive: true });
+      await mkdir(`${f.proj}/.claude/other`, { recursive: true });
+      const refusal = await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'plugin'));
+      // the first look refuses it as a link; a later look (the folder was already held) finds the folder is no longer the
+      // one it proved: either way it is refused, never followed
+      expect(['link_escape', 'changed']).toContain(refusal as string);
+      if (skip === 0) expect(refusal).toBe('link_escape');
+      // a name OUTSIDE the declared set never receives the write
+      expect(await exists(`${f.proj}/.claude/other/a.md`)).toBe(false);
+    }
+  });
+
+  test('S179 the same swap is refused for a read, a listing and a stat of the folder: a name outside the set is never reached', async () => {
+    const where = { proj: '' };
+    const x = (): string => `${where.proj}/.claude/skills/x`;
+    const swap = (): void => {
+      renameSync(x(), `${x()}.aside`);
+      symlinkSync(`${where.proj}/.claude/other`, x());
+    };
+    const probes: readonly (readonly [string, (root: RootHandle) => Promise<unknown>])[] = [
+      ['read', async root => await root.readText(at(root, '.claude/skills/x/a.md'))],
+      ['list', async root => await root.list(at(root, '.claude/skills/x'))],
+      ['stat', async root => await root.stat(at(root, '.claude/skills/x/a.md'))],
+    ];
+    for (const [label, call] of probes) {
+      const disk = hooked(
+        nodeFs(() => crypto.randomUUID()),
+        'realpath',
+        path => path === x() || path === `${x()}/a.md`,
+        { before: swap },
+      );
+      const f = await fresh({ disk });
+      where.proj = f.proj;
+      await mkdir(x(), { recursive: true });
+      await writeFile(`${x()}/a.md`, 'declared');
+      await mkdir(`${f.proj}/.claude/other`, { recursive: true });
+      await writeFile(`${f.proj}/.claude/other/a.md`, 'NOT in the set');
+      expect([label, await refusalOf(() => call(f.root))]).toEqual([label, 'link_escape']);
+    }
+  });
+
+  test('S179 a swap for a link OUT of the folder or into the state home is refused and nothing lands (still true)', async () => {
+    for (const target of ['outside', 'home/config'] as const) {
+      const where = { parent: '', proj: '' };
+      const x = (): string => `${where.proj}/.claude/skills/x`;
+      const disk = hooked(
+        nodeFs(() => crypto.randomUUID()),
+        'realpath',
+        path => path === x(),
+        {
+          before: () => {
+            renameSync(x(), `${x()}.aside`);
+            symlinkSync(`${where.parent}/${target}`, x());
+          },
+        },
+      );
+      const f = await fresh({ disk });
+      where.parent = f.parent;
+      where.proj = f.proj;
+      await mkdir(x(), { recursive: true });
+      expect(await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'plugin'))).toBe(
+        'link_escape',
+      );
+      expect(await exists(`${f.parent}/${target}/a.md`)).toBe(false);
+    }
+  });
+
+  /** The two-swap race: the folder is a link to the state home's `config` for the instant of the temp create and of the rename. */
+  function twoSwap(disk: HostFs, where: { parent: string; proj: string }): HostFs {
+    const x = (): string => `${where.proj}/.claude/skills/x`;
+    const toLink = (): void => {
+      renameSync(x(), `${x()}.aside`);
+      symlinkSync(`${where.parent}/home/config`, x());
+    };
+    const back = (): void => {
+      unlinkSync(x());
+      renameSync(`${x()}.aside`, x());
+    };
+    const temp = (path: string): boolean => path.includes('.a.md.rnd.tmp');
+    return hooked(hooked(disk, 'writeNew', temp, { before: toLink, after: back }), 'rename', temp, {
+      before: toLink,
+      after: back,
+    });
+  }
+
+  test('S179 with descriptor reach the two-swap race cannot overwrite a same-named file inside the state home', async () => {
+    const where = { parent: '', proj: '' };
+    const f = await fresh({
+      disk: twoSwap(
+        nodeFs(() => crypto.randomUUID()),
+        where,
+      ),
+    });
+    where.parent = f.parent;
+    where.proj = f.proj;
+    await mkdir(`${f.proj}/.claude/skills/x`, { recursive: true });
+    await writeFile(`${f.home}/config/a.md`, 'victim');
+    await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'plugin'));
+    expect(await readFile(`${f.home}/config/a.md`, 'utf8')).toBe('victim');
+  });
+
+  test('S179 GAP (BEFORE-GREEN, ports-pending writeChecked): without descriptor reach a write is by path, so the two-swap race still lands; this flips when the macOS FFI unit closes it', async () => {
+    const where = { parent: '', proj: '' };
+    const noReach = nodeFs(() => crypto.randomUUID(), { descriptorFolder: '/nonexistent-descriptor-folder' });
+    const f = await fresh({ disk: twoSwap(noReach, where) });
+    where.parent = f.parent;
+    where.proj = f.proj;
+    await mkdir(`${f.proj}/.claude/skills/x`, { recursive: true });
+    await writeFile(`${f.home}/config/a.md`, 'victim');
+    expect(await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'plugin'))).toBeUndefined();
+    // the declared residual, stated exactly: a same-named file is overwritten. Nothing else is reached (the name and the
+    // content are the plugin's own), and the registered unit closes it for `work`, MCP and Skills at once.
+    expect(await readFile(`${f.home}/config/a.md`, 'utf8')).toBe('plugin');
+  });
+
+  test('S179 a write without descriptor reach is NOT refused: MCP and Skills keep writing on a host that has none', async () => {
+    const f = await fresh({
+      disk: nodeFs(() => crypto.randomUUID(), { descriptorFolder: '/nonexistent-descriptor-folder' }),
+    });
+    await f.root.writeText(at(f.root, '.mcp.json'), 'x');
+    await f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'y');
+    expect(await readFile(`${f.proj}/.mcp.json`, 'utf8')).toBe('x');
+    expect(await readFile(`${f.proj}/.claude/skills/x/a.md`, 'utf8')).toBe('y');
+  });
+});
+
+describe('S179 review minors: links to a same-named place, remove of a link, folders above a grant', () => {
+  test('S179 a skill folder that is a link to a SAME-NAMED place inside the folder is refused, not followed', async () => {
+    const f = await fresh();
+    await mkdir(`${f.proj}/.claude/skills/other/x`, { recursive: true });
+    await symlink(`${f.proj}/.claude/skills/other/x`, `${f.proj}/.claude/skills/x`);
+    expect(await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'no'))).toBe('link_escape');
+    expect(await refusalOf(() => f.root.readText(at(f.root, '.claude/skills/x/a.md')))).toBe('link_escape');
+    expect(await readdir(`${f.proj}/.claude/skills/other/x`)).toEqual([]);
+  });
+
+  test('S179 remove of a link at a grant unlinks the link and never the tree it points at', async () => {
+    const f = await fresh();
+    await writeFile(`${f.outside}/precious.md`, 'precious');
+    await mkdir(`${f.proj}/.claude/skills`, { recursive: true });
+    await symlink(f.outside, `${f.proj}/.claude/skills/x`);
+    await f.root.remove(at(f.root, '.claude/skills/x'));
+    expect(await exists(`${f.proj}/.claude/skills/x`)).toBe(false);
+    expect(await readFile(`${f.outside}/precious.md`, 'utf8')).toBe('precious');
+    // and a link on the way to the name stays refused
+    await symlink(f.outside, `${f.proj}/.agents`);
+    expect(await refusalOf(() => f.root.remove(at(f.root, '.agents/skills/x')))).toBe('link_escape');
+    expect(await readFile(`${f.outside}/precious.md`, 'utf8')).toBe('precious');
+  });
+
+  test('S179 ensurePrivateDirectory above a grant makes a folder (0700) and never changes the mode of one that exists', async () => {
+    const f = await fresh();
+    await mkdir(`${f.proj}/.claude`, { mode: 0o775 });
+    await chmod(`${f.proj}/.claude`, 0o775);
+    await f.root.ensurePrivateDirectory(at(f.root, '.claude'));
+    expect((await stat(`${f.proj}/.claude`)).mode & 0o777).toBe(0o775);
+    await f.root.ensurePrivateDirectory(at(f.root, '.claude/skills/fresh'));
+    expect((await stat(`${f.proj}/.claude/skills/fresh`)).mode & 0o777).toBe(0o700);
+    expect((await stat(`${f.proj}/.claude`)).mode & 0o777).toBe(0o775);
   });
 });

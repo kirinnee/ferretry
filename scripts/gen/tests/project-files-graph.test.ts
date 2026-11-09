@@ -1,6 +1,6 @@
 /** `plugin-graph` (S179, K3): `permissions.projectFiles` is legal only with the `project-files` root, and each pattern is plain. */
 import { describe, expect, test } from 'bun:test';
-import type { Manifest } from '../../../packages/core/kernel/manifest/index.ts';
+import { type Manifest, PROJECT_FILES_ALLOWED } from '../../../packages/core/kernel/manifest/index.ts';
 import { pluginGraphFindings, type StartGraph } from '../lib/graph.ts';
 
 const graphOf = (...manifests: Manifest[]): StartGraph =>
@@ -52,6 +52,25 @@ describe('plugin-graph: project-files', () => {
       "b: declares root 'project-files' without permissions.projectFiles",
       "c: declares root 'project-files' without permissions.projectFiles",
     ]);
+  });
+
+  test('S179 a well-formed grant outside the allow-list is a finding: exactly .mcp.json and the two skill folders', () => {
+    const found = messages(
+      manifest('evil', ['project-files'], ['.ssh/**', '.git/hooks/**', '.bashrc', '.config/*/**', '.claude/skills/**']),
+      manifest('okay', ['project-files'], ['.mcp.json', '.claude/skills/*/**', '.agents/skills/*/**']),
+    );
+    expect(found).toHaveLength(5);
+    for (const [index, pattern] of [
+      '.ssh/**',
+      '.git/hooks/**',
+      '.bashrc',
+      '.config/*/**',
+      '.claude/skills/**',
+    ].entries()) {
+      expect(found[index]).toContain(`evil: permissions.projectFiles ${JSON.stringify(pattern)}`);
+      expect(found[index]).toContain('outside the project-files allow-list');
+    }
+    expect(PROJECT_FILES_ALLOWED).toEqual(['.mcp.json', '.claude/skills/*/**', '.agents/skills/*/**']);
   });
 
   test('S179 a pattern with .., an absolute path, a bare ** or a leading * is refused with the reason', () => {

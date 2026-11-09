@@ -288,6 +288,18 @@ interface Scope {
   readonly base: CheckedBase;
   readonly ownerRoot: boolean;
   readonly immutable: () => Promise<readonly string[]>;
+  /**
+   * `project-files` only (K3): every name the walk reaches is spelled exactly as the disk resolves it. The judge already
+   * proved that; this makes each later `realpath` of the walk prove it AGAIN, so a link swapped into the folder after the
+   * judge (to another place inside it, which the declared set never reached) is refused instead of followed.
+   */
+  readonly literal?: true;
+}
+
+/** `real` is what the disk resolved `path` to: a literal scope refuses a name that resolved elsewhere (a link swapped in). */
+function literalReal(scope: Scope, path: string, real: string): string {
+  if (scope.literal === true && real !== path) refuse('link_escape');
+  return real;
 }
 
 /**
@@ -345,7 +357,7 @@ async function fileProblem(scope: Scope, real: string, opened: FileIdentity): Pr
  * whole, up to a limit, a window or a tail: every read of a root goes through here.
  */
 async function withCheckedFile<T>(scope: Scope, full: string, use: (file: OpenedFile) => Promise<T>): Promise<T> {
-  const real = await scope.fs.realpath(full);
+  const real = literalReal(scope, full, await scope.fs.realpath(full));
   const before = await scope.fs.identity(real);
   if (before === undefined) return refuse('changed');
   const judged = await fileProblem(scope, real, before);
@@ -441,6 +453,7 @@ async function openFolderMaking(
     parent = await scope.fs.realpath(existing).catch(() => undefined);
   }
   if (parent === undefined || (!make && missing.length > 0)) return refuse('outside');
+  literalReal(scope, existing, parent);
   if (!within(scope.base.real, join(parent, ...missing))) refuse('link_escape');
   let folder = await openCheckedFolder(scope, parent);
   try {
@@ -745,8 +758,9 @@ async function entriesChecked(
   scope: Scope,
   full: string,
 ): Promise<readonly { readonly name: string; readonly identity: FileIdentity | undefined }[]> {
-  const real = await scope.fs.realpath(full).catch(() => undefined);
-  if (real === undefined) return [];
+  const resolved = await scope.fs.realpath(full).catch(() => undefined);
+  if (resolved === undefined) return [];
+  const real = literalReal(scope, full, resolved);
   const folder = await openCheckedFolder(scope, real);
   try {
     const names = await scope.fs.list(await entry(scope, folder, real, ''));
@@ -760,8 +774,9 @@ async function entriesChecked(
 }
 
 async function listChecked(scope: Scope, full: string): Promise<readonly string[]> {
-  const real = await scope.fs.realpath(full).catch(() => undefined);
-  if (real === undefined) return [];
+  const resolved = await scope.fs.realpath(full).catch(() => undefined);
+  if (resolved === undefined) return [];
+  const real = literalReal(scope, full, resolved);
   const folder = await openCheckedFolder(scope, real);
   try {
     return await scope.fs.list(await entry(scope, folder, real, ''));
@@ -773,8 +788,9 @@ async function listChecked(scope: Scope, full: string): Promise<readonly string[
 /** The leaf at `full` itself (never followed), reached through its checked folder. */
 async function leafIdentity(scope: Scope, full: string): Promise<FileIdentity | undefined> {
   if (full === scope.base.real) return await scope.fs.identity(full);
-  const parent = await scope.fs.realpath(dirname(full)).catch(() => undefined);
-  if (parent === undefined) return undefined;
+  const resolved = await scope.fs.realpath(dirname(full)).catch(() => undefined);
+  if (resolved === undefined) return undefined;
+  const parent = literalReal(scope, dirname(full), resolved);
   const folder = await openCheckedFolder(scope, parent);
   try {
     return await scope.fs.identity(await entry(scope, folder, parent, basename(full)));
@@ -1360,7 +1376,16 @@ function rootHandle(setup: HandleSetup): RootHandle {
     const resolved = await resolveChecked(fs, home, root as string, ownerRoot, path, anchor);
     if (!resolved.ok) return refuse(resolved.error);
     linkFree(root as string, path, resolved.value);
-    return { full: resolved.value.full, scope: { fs, base: resolved.value.base, ownerRoot, immutable } };
+    return {
+      full: resolved.value.full,
+      scope: {
+        fs,
+        base: resolved.value.base,
+        ownerRoot,
+        immutable,
+        ...(projectRoot ? { literal: true as const } : {}),
+      },
+    };
   };
   /**
    * The leaf NOT followed: its parent resolved and checked, the leaf's own name appended and judged by name. What sits
@@ -1524,6 +1549,11 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const known = HANDLES.get(source);
       if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
       const sourceFolder = await known.real(from);
+      // A link is never made INTO a project folder (`linkTo` refuses it: it would carry a write to a name the declared
+      // set never reached) nor FROM one into another root (`linkTarget`: the link would outlive the declared set). A copy
+      // is the only door; this is the same two refusals the link door gives, so `copyTree` is not a second way round them.
+      if (options?.link === true && projectRoot) return refuse('read_only');
+      if (options?.link === true && known.root === 'project-files') return refuse('not_declared');
       const checkedSource = await openCheckedFolder(sourceFolder.scope, sourceFolder.full).catch((error: unknown) => {
         if (error instanceof RootError && error.refusal === 'not_a_file') refuse('outside');
         throw error;
@@ -1598,7 +1628,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
         try {
           const problem = await folderProblem(scope, join(made.real, basename(full)), folder.identity);
           if (problem !== undefined) refuse(problem);
-          await folder.chmod(0o700);
+          // A project folder is the owner's: one this call makes is created `0700`, one that is already there (`.claude`
+          // above a grant) keeps its mode. Making is the most this root does to a folder above a grant (§7.7).
+          if (!projectRoot) await folder.chmod(0o700);
         } finally {
           await folder.close();
         }

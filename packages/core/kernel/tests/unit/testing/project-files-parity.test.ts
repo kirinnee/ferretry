@@ -38,7 +38,7 @@ const halves = (seen: Seen) => [
       api: 5,
       core: false,
       kinds: [],
-      permissions: { roots: ['project-files'], projectFiles: DECLARED, setMode: true },
+      permissions: { roots: ['project-files', 'downloads'], projectFiles: DECLARED, setMode: true },
     }),
     {
       build: ({ kernel }) => {
@@ -84,6 +84,8 @@ interface Places {
   readonly plantLink: (relative: string) => Promise<void>;
   /** A file with a second name at `proj/<relative>`. */
   readonly plantHardLink: (relative: string, text: string) => Promise<void>;
+  /** The plugin's own `downloads` folder `pack` holding `SKILL.md`: the source of a copy. */
+  readonly plantSource: () => Promise<void>;
 }
 
 async function cases(seen: Seen, places: Places): Promise<readonly (readonly [string, Answer])[]> {
@@ -106,6 +108,80 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     const out: (readonly [string, Answer])[] = [];
     for (const name of names)
       out.push([`write ${name}`, await answer(() => root.writeText(at(root, name), 'text'))] as const);
+    return out;
+  };
+  const downloads = mcp.roots.root('downloads');
+  /**
+   * `copyTree` in both directions and with the `link` option (H1, Md2): a copy lands at a grant, a copy aimed above one or
+   * outside the set is refused, a source above a grant is refused by ITS handle, and no link is made into a project folder
+   * nor from one.
+   */
+  const copyCases = async (): Promise<readonly (readonly [string, Answer])[]> => {
+    await places.plantSource();
+    const pack = at(downloads, 'pack');
+    const out = [] as (readonly [string, Answer])[];
+    const copy = async (label: string, call: () => Promise<unknown>) => out.push([label, await answer(call)]);
+    await copy('copy a downloads folder into a grant', () =>
+      project.copyTree(downloads, pack, at(project, '.claude/skills/c1')),
+    );
+    await copy('the copy landed', () => project.readText(at(project, '.claude/skills/c1/SKILL.md')));
+    await copy('copy into a folder above a grant', () =>
+      project.copyTree(downloads, pack, at(project, '.claude/skills')),
+    );
+    await copy('copy into a name outside the set', () => project.copyTree(downloads, pack, at(project, 'other')));
+    await copy('copyTree link into a grant', () =>
+      project.copyTree(downloads, pack, at(project, '.claude/skills/c2'), { link: true }),
+    );
+    await copy('copyTree link above a grant', () =>
+      project.copyTree(downloads, pack, at(project, '.claude/skills'), { link: true }),
+    );
+    await copy('copyTree link from a project folder into a project folder', () =>
+      project.copyTree(project, at(project, '.claude/skills/c1'), at(project, '.claude/skills/c3'), { link: true }),
+    );
+    await copy('copy a project folder into downloads', () =>
+      downloads.copyTree(project, at(project, '.claude/skills/c1'), at(downloads, 'got')),
+    );
+    await copy('the project copy landed', () => downloads.readText(at(downloads, 'got/SKILL.md')));
+    await copy('copy FROM a folder above a grant', () =>
+      downloads.copyTree(project, at(project, '.claude'), at(downloads, 'got2')),
+    );
+    await copy('copy FROM the skills folder above a grant', () =>
+      downloads.copyTree(project, at(project, '.claude/skills'), at(downloads, 'got3')),
+    );
+    await copy('copy FROM a name outside the set', () =>
+      downloads.copyTree(project, at(project, 'src'), at(downloads, 'got4')),
+    );
+    await copy('copyTree link FROM a project folder into downloads', () =>
+      downloads.copyTree(project, at(project, '.claude/skills/c1'), at(downloads, 'linked'), { link: true }),
+    );
+    await copy('copyTree link FROM a folder above a grant', () =>
+      downloads.copyTree(project, at(project, '.claude'), at(downloads, 'linked2'), { link: true }),
+    );
+    await copy('a stranger handle as the source', () =>
+      project.copyTree(
+        stranger.roots.root('downloads'),
+        at(stranger.roots.root('downloads'), 'pack'),
+        at(project, '.claude/skills/c4'),
+      ),
+    );
+    return out;
+  };
+  /** A write with a mode, then replaceExisting over it: the kept mode is read back (m1: the twin must keep it too). */
+  const modeCases = async (): Promise<readonly (readonly [string, Answer])[]> => {
+    const file = at(project, '.claude/skills/md/a.md');
+    const out = [] as (readonly [string, Answer])[];
+    out.push(['write with mode 0755', await answer(() => project.writeText(file, 'one', { mode: 0o755 }))]);
+    out.push(['mode after the write', await answer(async () => (await project.stat(file))?.mode)]);
+    out.push([
+      'replaceExisting without a mode',
+      await answer(() => project.writeText(file, 'two', { replaceExisting: true })),
+    ]);
+    out.push(['mode kept by replaceExisting', await answer(async () => (await project.stat(file))?.mode)]);
+    out.push([
+      'replaceExisting with a mode',
+      await answer(() => project.writeText(file, 'three', { replaceExisting: true, mode: 0o640 })),
+    ]);
+    out.push(['mode set by replaceExisting', await answer(async () => (await project.stat(file))?.mode)]);
     return out;
   };
   /** The cases that plant a link or a hard link first: they run LAST, so what they plant never changes an earlier answer. */
@@ -158,6 +234,22 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     planted.push([
       'setMode a hard-linked file',
       await answer(() => project.setMode(at(project, '.agents/skills/h/SKILL.md'), 0o644)),
+    ]);
+    // remove never follows the leaf: a link at a grant is unlinked as a link; a link ABOVE the name stays refused (M1)
+    await places.plantLink('.agents/skills/rl');
+    planted.push(['remove a link at a grant', await answer(() => project.remove(at(project, '.agents/skills/rl')))]);
+    planted.push([
+      'the removed link is gone',
+      await answer(async () => (await project.lstat(at(project, '.agents/skills/rl')))?.kind ?? 'none'),
+    ]);
+    await places.plantLink('.agents/skills/rm');
+    planted.push([
+      'remove below a link at a folder level',
+      await answer(() => project.remove(at(project, '.agents/skills/rm/a.md'))),
+    ]);
+    planted.push([
+      'remove a link at the leaf of a file name',
+      await answer(() => project.remove(at(project, '.mcp.json'))),
     ]);
     return planted;
   };
@@ -239,6 +331,10 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     ['pin a project folder', await answer(() => project.pin(at(project, '.claude/skills/x')))],
     ['remove outside the set', await answer(() => project.remove(at(project, 'package.json')))],
     ['remove above a grant', await answer(() => project.remove(at(project, '.claude/skills')))],
+    [
+      'remove a non-empty grant folder onlyIfEmpty',
+      await answer(() => project.remove(at(project, '.claude/skills/x'), { onlyIfEmpty: true })),
+    ],
     ['remove a grant folder', await answer(() => project.remove(at(project, '.claude/skills/m')))],
     [
       'the removed folder is gone',
@@ -272,6 +368,8 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
       await answer(() => fenced.writeText(`${places.home}/state/proj/.mcp.json` as FencedPath, 'x')),
     ],
     ['inside the fence: resolve', { ...resolveAnswer(fenced, '.mcp.json') }],
+    ...(await modeCases()),
+    ...(await copyCases()),
     ...(await plantedCases()),
     ['an invalid scope: relative', await scopeAnswer(mcp, 'proj')],
     ['an invalid scope: the root', await scopeAnswer(mcp, '/')],
@@ -302,6 +400,7 @@ async function onTestingHost() {
       home: `${owner}/.test-home`,
       plantLink: async relative => host.putRootLink('project-files', `${owner}/proj/${relative}`),
       plantHardLink: async (relative, text) => host.putRootHardLink('project-files', `${owner}/proj/${relative}`, text),
+      plantSource: async () => host.putRoot('downloads', 'pack/SKILL.md', '# pack'),
     });
   } finally {
     await host.stop();
@@ -344,6 +443,10 @@ async function onRealHost() {
         await writeFile(elsewhere, text);
         await link(elsewhere, `${proj}/${relative}`);
       },
+      plantSource: async () => {
+        await mkdir(`${home}/state/mcp/downloads/pack`, { recursive: true });
+        await writeFile(`${home}/state/mcp/downloads/pack/SKILL.md`, '# pack');
+      },
     });
   } finally {
     await outcome.host.stop();
@@ -375,4 +478,30 @@ test('S179 project-files parity: every case is answered alike on the testing hos
   expect(byCase['pin a project folder']).toEqual({ refused: 'not_declared' });
   expect(byCase['a plugin without the root']).toEqual({ refused: 'not_declared' });
   expect(byCase['kind of the handle']).toEqual({ ok: ['project-files', false] });
+  expect(byCase['remove a non-empty grant folder onlyIfEmpty']).toEqual({ refused: 'not_empty' });
+  // replaceExisting keeps the mode of the file it replaces, and a given mode wins (m1)
+  expect(byCase['mode after the write']).toEqual({ ok: 0o755 });
+  expect(byCase['mode kept by replaceExisting']).toEqual({ ok: 0o755 });
+  expect(byCase['mode set by replaceExisting']).toEqual({ ok: 0o640 });
+  // copyTree: a copy lands, and no link is made into a project folder or from one (H1), the source is gated too (Md2)
+  expect(byCase['copy a downloads folder into a grant']).toEqual({ ok: null });
+  expect(byCase['the copy landed']).toEqual({ ok: '# pack' });
+  expect(byCase['copy into a folder above a grant']).toEqual({ refused: 'not_declared' });
+  expect(byCase['copy into a name outside the set']).toEqual({ refused: 'not_declared' });
+  expect(byCase['copyTree link into a grant']).toEqual({ refused: 'read_only' });
+  expect(byCase['copyTree link above a grant']).toEqual({ refused: 'not_declared' });
+  expect(byCase['copyTree link from a project folder into a project folder']).toEqual({ refused: 'read_only' });
+  expect(byCase['copy a project folder into downloads']).toEqual({ ok: null });
+  expect(byCase['the project copy landed']).toEqual({ ok: '# pack' });
+  expect(byCase['copy FROM a folder above a grant']).toEqual({ refused: 'not_declared' });
+  expect(byCase['copy FROM the skills folder above a grant']).toEqual({ refused: 'not_declared' });
+  expect(byCase['copy FROM a name outside the set']).toEqual({ refused: 'not_declared' });
+  expect(byCase['copyTree link FROM a project folder into downloads']).toEqual({ refused: 'not_declared' });
+  expect(byCase['copyTree link FROM a folder above a grant']).toEqual({ refused: 'not_declared' });
+  expect(byCase['a stranger handle as the source']).toEqual({ refused: 'not_declared' });
+  // remove never follows the leaf: a link at a grant is unlinked, a link above the name is refused (M1)
+  expect(byCase['remove a link at a grant']).toEqual({ ok: null });
+  expect(byCase['the removed link is gone']).toEqual({ ok: 'none' });
+  expect(byCase['remove below a link at a folder level']).toEqual({ refused: 'link_escape' });
+  expect(byCase['remove a link at the leaf of a file name']).toEqual({ ok: null });
 });

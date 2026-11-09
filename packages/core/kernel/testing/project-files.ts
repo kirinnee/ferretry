@@ -55,6 +55,13 @@ export interface ProjectFilesTwin {
 const KEY_PREFIX = '/project-files';
 export const projectFileKey = (path: string): string => `${KEY_PREFIX}${path}`;
 
+/**
+ * Every `project-files` handle the twin made, with the check it makes of a folder asked of it AS A COPY SOURCE (the real
+ * host's `HANDLES.real`: the declared set for a tree, and no link on the way). The other roots' twins read it, so a copy
+ * out of a project folder is gated by the folder's own handle exactly as production gates it.
+ */
+export const PROJECT_SOURCES = new WeakMap<object, (path: string) => void>();
+
 export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
   const { folder, files, links, hardLinks, modes, inodes } = twin;
   const key = projectFileKey;
@@ -174,10 +181,14 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
       const name = key(reach(path, 'file', 'keep'));
       return files.has(name) ? { device: 1n, inode: inodes.get(name) ?? 0n } : undefined;
     },
-    copyTree: async (source, from, to) => {
+    copyTree: async (source, from, to, options) => {
       const known = twin.known(source);
       reach(to, 'tree', 'follow');
       if (known === undefined || known.plugin !== twin.plugin) throw new RootError('not_declared');
+      // The source is gated by ITS handle (a project folder: the declared set, no link on the way), as production does.
+      PROJECT_SOURCES.get(source)?.(from);
+      // No link is made into a project folder (`linkTo`'s refusal): a copy is the only door.
+      if (options?.link === true) throw new RootError('read_only');
       const fromKey = known.keyOf?.(from) ?? from;
       const toKey = key(lexical(to));
       for (const [name, text] of [...files])
@@ -235,11 +246,16 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
         ? { kind: 'directory', size: 0, modified: twin.now(), mode: 0o700, links: 1 }
         : undefined;
     },
-    remove: async path => {
-      const full = reach(path, 'remove', 'follow');
+    remove: async (path, removeOptions) => {
+      // The leaf is never followed: a link at the name is unlinked as a link, as production does (a name above it is
+      // still judged, so a link at any folder level on the way stays `link_escape`).
+      const full = reach(path, 'remove', 'keep');
       // An owner's root removes nothing without descriptor reach (S44): refused after the name passed every check.
       if (twin.noDescriptorReach) throw new RootError('no_descriptor_reach');
       const name = key(full);
+      // `onlyIfEmpty` is `rmdir`: a folder that holds anything is refused `not_empty`, and nothing is removed.
+      if (removeOptions?.onlyIfEmpty === true && !files.has(name) && !links.has(name) && folderExists(full))
+        throw new RootError('not_empty');
       for (const map of [files, links] as const)
         for (const each of [...map.keys()]) if (each === name || each.startsWith(`${name}/`)) map.delete(each);
     },
@@ -265,5 +281,8 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
       throw new RootError('not_declared');
     },
   };
+  PROJECT_SOURCES.set(handle, path => {
+    reach(path, 'tree', 'follow');
+  });
   return handle;
 }

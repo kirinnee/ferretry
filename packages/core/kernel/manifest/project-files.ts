@@ -37,6 +37,21 @@ export function projectFilesPatternRefusal(pattern: unknown): string | undefined
   return undefined;
 }
 
+/**
+ * The ONLY patterns a plugin's manifest may grant itself in a project folder (K3, §7.7): MCP's one file, and the two skill
+ * folders. The kernel accepts any well-formed pattern (the grammar above), so WHICH names a plugin may write is this
+ * list's job, not the grammar's: `plugin-graph` finds a manifest whose grant is outside it. It is extended only by a kernel
+ * change, reviewed as one, never by a manifest.
+ */
+export const PROJECT_FILES_ALLOWED: readonly string[] = ['.mcp.json', '.claude/skills/*/**', '.agents/skills/*/**'];
+
+/** Why a WELL-FORMED pattern is not one a manifest may declare, or `undefined` when it is on the allow-list. */
+export function projectFilesAllowListRefusal(pattern: string): string | undefined {
+  return PROJECT_FILES_ALLOWED.includes(pattern)
+    ? undefined
+    : `is outside the project-files allow-list (${PROJECT_FILES_ALLOWED.join(', ')})`;
+}
+
 /** What a `project-files` call does to a name, which decides how much of the declared set may reach it. */
 export type ProjectUse =
   /** Read, write, publish or set the mode of a FILE. */
