@@ -38,6 +38,13 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 - Sealed and secret files (vault, its key, the identity key, push keys, harness sign-ins, the message-token key) are
   moved with `copyFile` + mode + times (`src/sealed.ts`): their bytes never become a value in this program, and the
   report names a file and its size, never content.
+- One exception, and only to ADD: a key v4 saved in plain text in a login file's `env` is sealed into the v5 vault
+  (`src/steps/login-keys.ts`) and the login file names it `${secret:LOGIN_<ID>_<VAR>}`. For that the tool holds the
+  vault key in memory only long enough to import it (one Buffer, zeroed at once and again on any exit), seals each new
+  value exactly as the vault does, and writes the vault with a temp file + rename. Existing vault entries are still
+  copied byte for byte and never decrypted. The report names login, variable and secret name, never a value; if a key
+  cannot be sealed the step fails and the run has no `home.json`, so a key is never left plain. The v4 login file in
+  the backup still holds the key in plain text.
 - The live tmux socket is given a second name in the new home with `link(2)`, so v5 reaches the same running server.
 
 ## State (Phase B)
