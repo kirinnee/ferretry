@@ -26,7 +26,11 @@ import {
 import { foreignComponentChanges, ownedFileEdits, unownedChanges } from '../lib/account/runtimes-edits.ts';
 import { assembleRuntimesModel, type RuntimesModel } from '../lib/account/runtimes-model.ts';
 import type { AccountModel } from '../lib/account/schema.ts';
-import { FleetCatalogRefusal, type FleetCatalogServiceDeps } from '../lib/service/catalog-service.ts';
+import {
+  FleetCatalogRefusal,
+  type FleetCatalogServiceDeps,
+  unreadableSentence,
+} from '../lib/service/catalog-service.ts';
 import { ownInstructionsSource } from './own-instructions-source.ts';
 import { type ComponentSourceLookup, readProfileComponents } from './profile-components.ts';
 import type { ConfigFilesPort } from './ports.ts';
@@ -50,11 +54,11 @@ export interface RuntimesConfigSources {
   readonly prime?: (model: AccountModel | undefined) => Promise<void>;
 }
 
-/** The evaluator, with what it had to stand in for. */
-export interface RuntimesConfigFiles extends ConfigFilesPort<AccountModel> {
-  /** What stands in for something it could not read at the last load; empty when every part was read. */
-  unreadable(): readonly string[];
-}
+/**
+ * The evaluator. What stood in for a part it could not read is part of EACH load it answers (`ConfigLoad.unreadable`),
+ * never a field shared between loads: a decision about a plan asks the load the plan came from.
+ */
+export type RuntimesConfigFiles = ConfigFilesPort<AccountModel>;
 
 /** The sentence a set of files that do not hold together is refused with. Names and rules only, never a value. */
 function inconsistent(error: unknown): Error {
@@ -79,12 +83,13 @@ async function loginTemplates(
 }
 
 export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesConfigFiles {
-  let last: Awaited<ReturnType<ConfigFilesPort<AccountModel>['load']>> | undefined;
   let lastLogins: Awaited<ReturnType<LoginsApi['list']>>['logins'] | undefined;
 
   // EVERY evaluation reads the owners' components and the login templates again: nothing of them is kept between reads
   // (a cache refreshed by a watch showed a removed item for the length of the reload window).
-  const evaluate = async (logins: NonNullable<typeof lastLogins>): Promise<NonNullable<typeof last>> => {
+  const evaluate = async (
+    logins: NonNullable<typeof lastLogins>,
+  ): Promise<Awaited<ReturnType<ConfigFilesPort<AccountModel>['load']>>> => {
     let assembled: RuntimesModel;
     const [components, templates] = await Promise.all([
       readProfileComponents(sources.components, ownInstructionsSource(sources.config)),
@@ -103,18 +108,18 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     } catch (error) {
       throw inconsistent(error);
     }
-    last = {
+    return {
       evaluation: {
         fleetFiles: assembled.sources,
         fleetRevision: assembled.revision,
         effective: { model: assembled.model },
       },
       files: assembled,
+      unreadable: assembled.unreadable,
     };
-    return last;
   };
 
-  const load = async (): Promise<NonNullable<typeof last>> => {
+  const load = async (): Promise<Awaited<ReturnType<ConfigFilesPort<AccountModel>['load']>>> => {
     lastLogins = (await sources.logins.list()).logins;
     const loaded = await evaluate(lastLogins);
     await sources.prime?.(loaded.evaluation.effective.model);
@@ -128,8 +133,8 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     // Every refusal here is made while the change is PROPOSED, before any document is written, so each sentence's
     // "nothing was changed" is true and the owner is never shown a plan that can only be refused at apply.
     editsFor: (loaded, next) => {
-      const standingIn = (loaded.files as RuntimesModel).unreadable;
-      if (standingIn.length > 0) throw new FleetCatalogRefusal('fleet_change_refused', unreadableRefusal(standingIn));
+      if (loaded.unreadable.length > 0)
+        throw new FleetCatalogRefusal('fleet_change_refused', unreadableSentence(loaded.unreadable));
       const unowned = unownedChanges(loaded.evaluation.effective.model, next);
       if (unowned.length > 0)
         throw new FleetCatalogRefusal(
@@ -151,52 +156,20 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     // GAP(runtimes): Warden's accounts and Lessons' agent live in those plugins' own files, which Runtimes cannot
     // write (a change that spans owners is not one set, #52 Q3), so a renamed runtime is not re-pointed there.
     mentionsRenamed: () => [],
-    // Fails closed: before the first load nothing is known to have been read, so nothing may be applied from it.
-    unreadable: () => (last === undefined ? [NOT_READ_YET] : (last.files as RuntimesModel).unreadable),
   };
 }
 
-/** What stands in before any file has been read: an apply is refused rather than built from nothing. */
-const NOT_READ_YET = 'the files of this machine have not been read yet';
-
-/** The sentence an apply is refused with while something stands in for a document it could not read. */
-const unreadableRefusal = (unreadable: readonly string[]): string =>
-  `nothing was changed: ${unreadable.length === 1 ? 'a part of this machine' : `${String(unreadable.length)} parts of this machine`} could not be read from the Runtimes plugin, and a home written without ${unreadable.length === 1 ? 'it' : 'them'} would replace what is there (${unreadable.join('; ')})`;
-
 /**
- * The check that runs BEFORE any configuration document is written (`FleetCatalogServiceDeps.preflight`): the model is
- * read again and the change is refused while it holds a stand-in. A refusal at the provisioner alone comes too late, because
- * the documents of a change land first and are not rolled back with the fleet.
+ * The check that runs BEFORE any configuration document is written by a path that has no plan of its own to ask (a setup
+ * or a clone: `FleetCatalogServiceDeps.preflight`): the model is read again and the change is refused while THAT reading
+ * holds a stand-in. A catalogue apply additionally asks the plan itself (`FleetCatalogService`), and no check is made
+ * against a list that other reads can overwrite.
  */
 export function refuseBeforeWriting(
-  files: Pick<RuntimesConfigFiles, 'inEffect' | 'unreadable'>,
+  files: Pick<RuntimesConfigFiles, 'inEffect'>,
 ): NonNullable<FleetCatalogServiceDeps['preflight']> {
   return async () => {
-    await files.inEffect();
-    const unreadable = files.unreadable();
-    if (unreadable.length > 0) throw new Error(unreadableRefusal(unreadable));
-  };
-}
-
-/**
- * The provisioner as the catalogue uses it, refusing an apply while the model holds a stand-in: the homes the plan would
- * write are built from documents Runtimes could not read, and an apply replaces every home. A preview passes through (it
- * writes nothing); a change that cannot be applied is refused earlier, when it is proposed (`editsFor`) and again before
- * its documents are written ({@link refuseBeforeWriting}).
- */
-export function refuseWhileUnreadable(
-  inner: FleetCatalogServiceDeps['provisioner'],
-  files: Pick<RuntimesConfigFiles, 'unreadable'>,
-): FleetCatalogServiceDeps['provisioner'] {
-  const refuse = (): void => {
-    const unreadable = files.unreadable();
-    if (unreadable.length > 0) throw new Error(unreadableRefusal(unreadable));
-  };
-  return {
-    preview: async plan => await inner.preview(plan),
-    apply: async (plan, documents) => {
-      refuse();
-      return await inner.apply(plan, documents);
-    },
+    const { unreadable } = await files.inEffect();
+    if (unreadable.length > 0) throw new Error(unreadableSentence(unreadable));
   };
 }

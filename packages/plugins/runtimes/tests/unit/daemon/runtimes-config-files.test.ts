@@ -1,16 +1,12 @@
 /**
  * The model-in-effect adapter: what it refuses when a change is PROPOSED (a stand-in, a part no file of Runtimes holds, a
- * component another plugin owns), that it answers "unread" before anything was read (fail closed), and the two guards
- * an apply stands behind (the check before a write, the provisioner that will not forward an apply).
+ * component another plugin owns), that every load carries its OWN stand-ins (no list shared between reads), and the check
+ * a setup or a clone makes before it writes.
  */
 import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
-import {
-  refuseBeforeWriting,
-  refuseWhileUnreadable,
-  runtimesConfigFiles,
-} from '../../../daemon/adapters/runtimes-config-files.ts';
+import { refuseBeforeWriting, runtimesConfigFiles } from '../../../daemon/adapters/runtimes-config-files.ts';
 import type { ComponentSourceLookup } from '../../../daemon/adapters/profile-components.ts';
 import type { AccountModel } from '../../../daemon/lib/account/schema.ts';
 
@@ -53,16 +49,26 @@ const NO_MOVES = new Map<string, string>();
 const modelOf = (loaded: { evaluation: { effective: { model: AccountModel } } }) => loaded.evaluation.effective.model;
 
 describe('the model-in-effect adapter', () => {
-  it('m3 answers "unread" before anything was read, so nothing is applied from nothing', () => {
-    expect(adapter().unreadable()).not.toEqual([]);
-  });
-
   it('reads nothing as standing in when every part was read', async () => {
     const files = adapter();
 
-    await files.load();
+    expect((await files.load()).unreadable).toEqual([]);
+  });
 
-    expect(files.unreadable()).toEqual([]);
+  it('C1 each load carries its OWN stand-ins: a later read that finds none does not clear an earlier one', async () => {
+    const values: { current: Values } = {
+      current: { ...BASE, profiles: { default: { contents: ['modelSets/heavy', 'mcp/github'] } } },
+    };
+    const files = adapter(values);
+    const standingIn = await files.load();
+
+    values.current = BASE;
+    const clean = await files.load();
+
+    expect(standingIn.unreadable.join(' ')).toContain('github');
+    expect(clean.unreadable).toEqual([]);
+    // The plan made from the first load still cannot be turned into edits: it answers for itself.
+    expect(() => files.editsFor(standingIn, modelOf(standingIn), NO_MOVES)).toThrow(/nothing was changed.*github/su);
   });
 
   it('C2 refuses a change when it is proposed while a part stands in, naming it and saying nothing was changed', async () => {
@@ -108,7 +114,7 @@ describe('the model-in-effect adapter', () => {
   });
 });
 
-describe('the two guards an apply stands behind', () => {
+describe('the check made before a setup or a clone writes', () => {
   it('C2 the check before a write refuses while a part stands in and passes when none does', async () => {
     const values = { current: BASE };
     const files = adapter(values);
@@ -119,28 +125,5 @@ describe('the two guards an apply stands behind', () => {
 
     values.current = { ...BASE, profiles: { default: { contents: ['modelSets/heavy', 'skills/tidy'] } } };
     await expect(preflight()).rejects.toThrow(/nothing was changed.*tidy/su);
-  });
-
-  it('R2 the provisioner forwards a preview but never an apply while a part stands in', async () => {
-    const calls: string[] = [];
-    const inner = {
-      preview: async () => {
-        calls.push('preview');
-        return {} as never;
-      },
-      apply: async () => {
-        calls.push('apply');
-        return {} as never;
-      },
-    };
-    let standing: readonly string[] = ['the mcp component "github" belongs to another part of Ferretry'];
-    const guarded = refuseWhileUnreadable(inner, { unreadable: () => standing });
-
-    await guarded.preview({} as never);
-    await expect(guarded.apply({} as never, [])).rejects.toThrow(/nothing was changed.*github/su);
-    standing = [];
-    await guarded.apply({} as never, []);
-
-    expect(calls).toEqual(['preview', 'apply']);
   });
 });

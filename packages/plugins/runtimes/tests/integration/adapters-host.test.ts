@@ -290,6 +290,7 @@ describe('the account model files', () => {
     const load = {
       evaluation: { fleetFiles, fleetRevision: 'rev-1', effective: { model: { marker: 'now' } } },
       files: {},
+      unreadable: [],
     };
     return {
       inEffect: async () => load,

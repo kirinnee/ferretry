@@ -33,6 +33,7 @@ export function configReading(
     format,
     model,
     revision,
+    unreadable: [],
     documents: (next: AccountModel): readonly FleetDocumentWrite[] =>
       Object.entries(filesOf(next))
         .filter(([path, content]) => before[path as keyof typeof before] !== content)

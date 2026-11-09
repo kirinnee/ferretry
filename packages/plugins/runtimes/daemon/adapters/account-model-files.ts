@@ -72,6 +72,7 @@ export async function readConfigAccountDocument(
     format: evaluation.fleetFiles === 0 ? 'none' : 'present',
     model,
     revision: evaluation.fleetRevision,
+    unreadable: loaded.unreadable,
     documents: (next: AccountModel, rename?: RuntimeRename): readonly FleetDocumentWrite[] =>
       [
         ...config.editsFor(loaded, next, runtimeFileMoves(rename)),

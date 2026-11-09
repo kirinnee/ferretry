@@ -86,6 +86,11 @@ interface ConfigLoad<Model, Files = unknown> {
     readonly effective: { readonly model: Model };
   };
   readonly files: Files;
+  /**
+   * What stands in, in THIS load, for a part that could not be read (empty when every part was read). It belongs to the
+   * load and is never a field shared between loads, so a decision about a plan asks the load the plan was made from.
+   */
+  readonly unreadable: readonly string[];
 }
 
 export interface ConfigFilesPort<Model> {

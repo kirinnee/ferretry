@@ -31,7 +31,7 @@ import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { readFleetManifest } from './adapters/manifest-file.ts';
 import type { AdapterHost } from './adapters/ports.ts';
-import { refuseBeforeWriting, refuseWhileUnreadable, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
+import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
 import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
@@ -253,8 +253,8 @@ export function fileAssembly(
       Object.fromEntries(
         (ctx.uses?.usage.current()?.pauses() ?? []).map(held => [held.login as string, held.pause] as const),
       ),
+    // The setup's and the clone's own writes ask this; a catalogue apply asks the PLAN it applies (catalog-service.ts).
     preflight: refuseBeforeWriting(config),
-    provisioner: refuseWhileUnreadable(unguarded.provisioner, config),
   };
   const refusing = unavailableSetupDeps(catalog);
   // The tool installer's PLANS are real (what is installed, and the command a person would run); running a package
