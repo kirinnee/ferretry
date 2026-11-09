@@ -19,14 +19,16 @@
  * SAME home (the three-name menu and the home's own folder bound it, and no link out of the home is ever followed);
  * a file inside a skill folder swapped for a link can reach another file of the same skill folder.
  *
- * A home the manifest places outside `fleet/homes` (an operator's own folder) is served read-only through Runtimes' own
- * `harness-home` root scoped to that absolute folder, with the same menu and bounds. A link in such a home is skipped:
- * the root cannot follow it out of the folder, so none can reach the fleet's `assets/`. That costs nothing v5 can make:
- * v4 listed a link there into the fleet, but v5's apply never writes outside the fleet folder, so it never makes one.
+ * A home the manifest places outside `fleet/homes` (an operator's own folder, a home-manager home) is served read-only
+ * through `following-handle.ts` with the same menu and bounds, and its links are FOLLOWED: such a home is made of links
+ * (`skills/`, `settings.json` into `/nix/store`) and its catalogs read the same through them as through plain files. The
+ * follow is bounded (at most `MAX_LINK_HOPS` links on the way down, a link back to a folder above it is a loop, a dangling
+ * link or a link the kernel refuses is left as a link and named as one), it never reaches the daemon's own home or a
+ * sign-in file, and nothing here writes. A fleet home is unchanged: a link there is read only when it resolves into the
+ * fleet's own `assets/`.
  *
- * A WIDENING from v4, said plainly: v4 listed only linked skills in an account home outside the fleet; v5 lists its plain
- * folders and skips its links, because following a link there needs a kernel readLink. It is read-only and bounded, and
- * the owner publishes from those folders (publishing is an owner act).
+ * A link in a skill's own tree (`skillTree`) is followed the same way, so a skill folder made of links into a store lists
+ * and reads as the same folder made of files.
  *
  * Each method runs whole inside ONE `publication.reading(...)` (the manifest is read inside it, ungated, never nested),
  * so an apply that moves a home's documents aside is never observed half-done (S67).
@@ -45,6 +47,7 @@ import {
 } from '../../contract/index.ts';
 import { homesOf } from '../lib/service/runtime-homes.ts';
 import type { FleetPublication } from '../lib/service/publication.ts';
+import { followingHandle, type ReadHandle } from './following-handle.ts';
 import { readFleetManifest } from './manifest-file.ts';
 
 const MANIFEST_FILE = 'manifest.json';
@@ -62,7 +65,7 @@ const unreadable = (message: string): RuntimeHomeUnreadable => new RuntimeHomeUn
 const refusal = (error: unknown): string => (error as { refusal?: string }).refusal ?? 'unreadable';
 
 /** `path` below a folder, fenced, or a refusal. */
-function fenced(root: RootHandle, relative: string): FencedPath {
+function fenced(root: ReadHandle, relative: string): FencedPath {
   const resolved = root.resolve(relative);
   if (!resolved.ok) throw unreadable(`That runtime home could not be opened (${resolved.error}).`);
   return resolved.value;
@@ -80,11 +83,11 @@ interface Deps {
 }
 
 /** A handle scoped to `home` (or to `inside`, a folder below it): the `fleet` root for a fleet home, `harness-home` for any other. */
-function scoped(deps: Deps, home: RuntimeHome, inside?: string): RootHandle {
+function scoped(deps: Deps, home: RuntimeHome, inside?: string): ReadHandle {
   const folder = inside === undefined ? home.home : `${home.home}/${inside}`;
   return home.home.startsWith(`${deps.directory}/homes/`)
     ? deps.roots.root('fleet', { subfolder: folder.slice(deps.directory.length + 1) })
-    : deps.roots.root('harness-home', { subfolder: folder });
+    : followingHandle(deps.roots, home.home, folder);
 }
 
 /**
@@ -112,7 +115,7 @@ function managedResolver(deps: Deps, home: RuntimeHome): ManagedResolver {
   };
 }
 
-async function listing(root: RootHandle, relative: string): Promise<readonly RootEntry[]> {
+async function listing(root: ReadHandle, relative: string): Promise<readonly RootEntry[]> {
   return (await root.entries(fenced(root, relative))).toSorted((left, right) =>
     left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
   );
@@ -146,7 +149,12 @@ class FleetHomeReader implements RuntimeHomeReader {
         const root = scoped(this.#deps, home);
         const entry = (await listing(root, '.')).find(candidate => candidate.name === file);
         if (entry === undefined) return null;
-        if (entry.kind === 'symlink') throw unreadable(`${file} is a link, which is never read.`);
+        if (entry.kind === 'symlink')
+          throw unreadable(
+            home.home.startsWith(`${this.#deps.directory}/homes/`)
+              ? `${file} is a link, which is never read.`
+              : `${file} is a link that is not followed (it leads nowhere, loops, is nested too deep, or leads to a place that is never read).`,
+          );
         if (entry.kind !== 'file') throw unreadable(`${file} is not a regular file.`);
         if (entry.links > 1) throw unreadable(`${file} has another name on this machine, so it is not read.`);
         if (entry.size > limitBytes)
@@ -183,7 +191,7 @@ class FleetHomeReader implements RuntimeHomeReader {
   }
 
   /** A handle scoped to the folder of a skill `skills()` lists right now, or `undefined`. */
-  async #folder(home: RuntimeHome, name: string): Promise<RootHandle | undefined> {
+  async #folder(home: RuntimeHome, name: string): Promise<ReadHandle | undefined> {
     if (!SKILL_NAME.test(name)) return undefined;
     const root = scoped(this.#deps, home);
     if ((await listing(root, '.')).find(entry => entry.name === 'skills')?.kind !== 'directory') return undefined;
@@ -196,7 +204,7 @@ class FleetHomeReader implements RuntimeHomeReader {
 
   /** What is at `segments` below a skill folder, each hop a real folder (never a link), or `undefined`. */
   async #lookup(
-    folder: RootHandle,
+    folder: ReadHandle,
     segments: readonly string[],
   ): Promise<{ entry: RootEntry; path: string } | undefined> {
     let path = '.';
@@ -237,7 +245,7 @@ class FleetHomeReader implements RuntimeHomeReader {
   }
 
   async #walk(
-    folder: RootHandle,
+    folder: ReadHandle,
     limits: { readonly entries: number; readonly depth: number },
   ): Promise<RuntimeHomeSkillTree | undefined> {
     const entries: RuntimeHomeSkillTree['entries'][number][] = [];
