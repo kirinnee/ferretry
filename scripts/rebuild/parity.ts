@@ -272,11 +272,6 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
     return 'removed by design (duplicate of F-0377: machine.yaml is split key by key over its owners’ files, proved there)';
   if (kind === 'J' && /new RoutingMigration\(/.test(what))
     return "removed by design (§9.1, §9.2: removed from the daemon; the v4-to-v5 converter's packs step renders the old models-guide.yaml keys and pack.yaml routingPreferences into the one routing prompt as v4 did; a home with routing prose and no use cases carries the prose alone, and the report names that v4’s default prompt prefix was not added; proved by its tests J-0052)";
-  // britnee ruling on J-0096: v4's watched read was cached until the file-event hub said it changed; Logins keeps no read
-  // cache, so there is nothing to clear. The condition of the ruling is its test: a login file changed on disk is seen
-  // by the very next read, with no restart and no watch callback.
-  if (kind === 'J' && /fleet-reading\/watched-document\.ts$/.test(file))
-    return 'removed by design (no read cache, nothing to clear), proved by its tests J-0096';
   if (/legacy|migration/.test(file) && !/session-migrate|session\/migrat|lib\/migration\/commands/.test(file)) {
     if (kind === 'J') return 'removed by design (§9.1, §9.2: one-shot conversion/old-format work)';
   }
@@ -318,9 +313,10 @@ const REOWNED: Readonly<Record<string, string>> = {
   'J-0177': 'connections',
   // The housekeeping pass trigger: analytics ingestion's nudge plus its slow backstop is Usage's.
   'J-0227': 'usage',
-  // The credentials' usage reading, kept current by file events: Logins'. J-0096 (a watched document is read again
-  // only when it changed) is Logins' own, and `removal()` marks it removed by design: Logins keeps no read cache.
-  'J-0096': 'logins',
+  // A watched document read again only when it changed (J-0096): the behaviour is the kernel's config service, which
+  // serves the answer of the last reload and lets go of it when its file watcher reloads. Logins keeps no cache of its own.
+  'J-0096': 'kernel',
+  // The credentials' usage reading, kept current by file events: Logins'.
   'J-0232': 'logins',
   'J-0233': 'logins',
   'J-0234': 'logins',
@@ -429,12 +425,15 @@ function checkOf(kind: Kind, what: string, file: string, actualOwner: string): s
         : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
           kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
           ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
-          : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
-            kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
-            ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
-            : kind === 'R'
-              ? 'descriptor-parity'
-              : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+          : // The watched document's cache is the kernel config service's snapshot (J-0096): its watcher test proves it.
+            kind === 'J' && file.endsWith('/fleet-reading/watched-document.ts')
+            ? 'packages/core/kernel/tests/unit/host-config/service.test.ts'
+            : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
+              kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
+              ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
+              : kind === 'R'
+                ? 'descriptor-parity'
+                : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
 }
 function add(kind: Kind, what: string, file: string, line: number, descriptor = '', owner?: string) {
   let actualOwner = owner ?? ownerOf(file, what);

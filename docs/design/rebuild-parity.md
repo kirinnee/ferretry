@@ -10,7 +10,7 @@ Generator regression checks: `bun test scripts/rebuild/parity.test.ts` (first ob
 
 Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.json`, run by `scripts/validate/typecheck.sh`), with strict indexed-access checks.
 
-**2276 rows; 147 removed by design; 0 unplaced owners.**
+**2276 rows; 146 removed by design; 0 unplaced owners.**
 
 <!-- prettier-ignore -->
 | Kind | Count |
@@ -25,7 +25,7 @@ Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.j
 <!-- prettier-ignore -->
 | 5.0 owner | R | V | T | S | J | F | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| kernel | 10 | 28 | 3 | 12 | 32 | 61 | 146 |
+| kernel | 10 | 28 | 3 | 12 | 33 | 61 | 147 |
 | gate | 3 | 10 | 0 | 10 | 2 | 15 | 40 |
 | vault | 14 | 37 | 1 | 7 | 6 | 6 | 71 |
 | ferrets | 57 | 54 | 1 | 42 | 22 | 44 | 220 |
@@ -37,7 +37,7 @@ Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.j
 | browsers | 11 | 64 | 29 | 12 | 26 | 12 | 154 |
 | claude-code | 0 | 4 | 0 | 3 | 1 | 2 | 10 |
 | codex | 0 | 0 | 0 | 0 | 1 | 7 | 8 |
-| logins | 11 | 18 | 0 | 8 | 16 | 10 | 63 |
+| logins | 11 | 18 | 0 | 8 | 15 | 10 | 62 |
 | runtimes | 15 | 27 | 0 | 47 | 1 | 36 | 126 |
 | accounts | 68 | 52 | 7 | 31 | 14 | 14 | 186 |
 | conversation | 20 | 10 | 1 | 21 | 26 | 48 | 126 |
@@ -87,7 +87,7 @@ None.
 
 No unresolved Commander declarations.
 
-## kernel (146)
+## kernel (147)
 
 <!-- prettier-ignore -->
 | id | Kind | Today | Today’s source | Today’s module | 5.0 owner package | 5.0 name | Descriptor / detail | Check to add | Status |
@@ -161,6 +161,7 @@ No unresolved Commander declarations.
 | J-0066 | J | job/lifecycle arm subsystems.configFiles.arm in start | packages/daemon/bin/fyd.ts:13924 | host | packages/core/kernel | job/lifecycle arm subsystems.configFiles.arm in start | call=subsystems.configFiles.arm(); callback=; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/core/kernel/tests/unit/parity/jobs.test.ts | [x] |
 | J-0085 | J | job/lifecycle arm world.boot.ioPressure?.start in start.stopIoPressure | packages/daemon/bin/fyd.ts:12951 | host | packages/core/kernel | job/lifecycle arm world.boot.ioPressure?.start in start.stopIoPressure | call=world.boot.ioPressure?.start(); callback=; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/core/kernel/tests/unit/parity/jobs.test.ts | [ ] |
 | J-0093 | J | timer/watcher host.setTimeout in afterAsActivity.arm.handle; cadence=ms; action=asActivity(activities, name, run) | packages/daemon/src/adapters/runtime/activity-timers.ts:46 | runtime | packages/core/kernel | timer/watcher host.setTimeout in afterAsActivity.arm.handle; cadence=ms; action=asActivity(activities, name, run) | call=host.setTimeout(asActivity(activities, name, run), ms); callback=asActivity(activities, name, run); timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/core/kernel/tests/unit/parity/jobs.test.ts | [ ] |
+| J-0096 | J | timer/watcher ports.watch in module; cadence=() =&gt; { this.#generation += 1; this.#kept = undefined; }; action=path | packages/daemon/src/lib/fleet-reading/watched-document.ts:29 | fleet-reading | packages/core/kernel | timer/watcher ports.watch in module; cadence=() =&gt; { this.#generation += 1; this.#kept = undefined; }; action=path | call=ports.watch(path, () =&gt; { this.#generation += 1; this.#kept = undefined; }); callback=path; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/core/kernel/tests/unit/host-config/service.test.ts | [x] |
 | J-0109 | J | timer/watcher setInterval in createConfigFilesSubsystem.arm.timers.setInterval; cadence=ms; action=asActivity(input.activities, 'config watcher', callback) | packages/daemon/bin/fyd.ts:6277 | host | packages/core/kernel | timer/watcher setInterval in createConfigFilesSubsystem.arm.timers.setInterval; cadence=ms; action=asActivity(input.activities, 'config watcher', callback) | call=setInterval(asActivity(input.activities, 'config watcher', callback), ms); callback=asActivity(input.activities, 'config watcher', callback); timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/core/kernel/tests/unit/parity/jobs.test.ts | [x] |
 | J-0118 | J | timer/watcher setInterval in start.ticks; cadence=healthSettings.selfCheckIntervalMs; action=() =&gt; { // `tick` runs as the `self-check` activity, and skips — never overlaps — a check still running. void health.tick().catch(() =&gt; unde | packages/daemon/bin/fyd.ts:13719 | host | packages/core/kernel | timer/watcher setInterval in start.ticks; cadence=healthSettings.selfCheckIntervalMs; action=() =&gt; { // `tick` runs as the `self-check` activity, and skips — never overlaps — a check still running. void health.tick().catch(() =&gt; unde | call=setInterval(() =&gt; { // `tick` runs as the `self-check` activity, and skips — never overlaps — a check still running. void health.tick().catch(() =&gt; undefined); }, healthSettings.selfCheckIntervalMs); callback=() =&gt; { // `tick` runs as the `self-check` activity, and skips — never overlaps — a check still running. void health.tick().catch(() =&gt; undefined); }; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/core/kernel/tests/unit/parity/jobs.test.ts | [ ] |
 | J-0119 | J | timer/watcher setInterval in start.timer; cadence=this.intervalMs; action=() =&gt; void this.refresh() | packages/daemon/src/adapters/system/proc-io-pressure.ts:51 | system | packages/core/kernel | timer/watcher setInterval in start.timer; cadence=this.intervalMs; action=() =&gt; void this.refresh() | call=setInterval(() =&gt; void this.refresh(), this.intervalMs); callback=() =&gt; void this.refresh(); timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/core/kernel/tests/unit/parity/jobs.test.ts | [ ] |
@@ -1066,7 +1067,7 @@ No unresolved Commander declarations.
 | F-0161 | F | FY_HOME/config/components/settings/{name}.yaml (Codex scope) | packages/protocol/src/lib/config-files.ts:62 | config-files | packages/plugins/codex | FY_HOME/config/components/settings/{name}.yaml (Codex scope) | same current item family; harness-specific scope moves to the Codex package (§8) | packages/plugins/codex/tests/unit/parity/storage.test.ts | [x] |
 | J-0228 | J | timer/watcher this.options.watch in module; cadence=() =&gt; { watched.heard += 1; }; action=directory | packages/daemon/src/adapters/housekeeping/codex-rollout-jobs.ts:101 | housekeeping | packages/plugins/codex | timer/watcher this.options.watch in module; cadence=() =&gt; { watched.heard += 1; }; action=directory | call=this.options.watch(directory, () =&gt; { watched.heard += 1; }); callback=directory; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/plugins/codex/tests/unit/parity/jobs.test.ts | [ ] |
 
-## logins (63)
+## logins (62)
 
 <!-- prettier-ignore -->
 | id | Kind | Today | Today’s source | Today’s module | 5.0 owner package | 5.0 name | Descriptor / detail | Check to add | Status |
@@ -1085,7 +1086,6 @@ No unresolved Commander declarations.
 | J-0067 | J | job/lifecycle arm subsystems.fleetRefresh.arm in start; action=() =&gt; { lane.submit('fleet refresh', () =&gt; subsystems.fleetRefresh.run()); } | packages/daemon/bin/fyd.ts:13802 | host | packages/plugins/logins | job/lifecycle arm subsystems.fleetRefresh.arm in start; action=() =&gt; { lane.submit('fleet refresh', () =&gt; subsystems.fleetRefresh.run()); } | call=subsystems.fleetRefresh.arm(() =&gt; { lane.submit('fleet refresh', () =&gt; subsystems.fleetRefresh.run()); }); callback=() =&gt; { lane.submit('fleet refresh', () =&gt; subsystems.fleetRefresh.run()); }; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/plugins/logins/tests/unit/parity/jobs.test.ts | [ ] |
 | J-0068 | J | job/lifecycle arm subsystems.fleetRefresh.run in start | packages/daemon/bin/fyd.ts:13803 | host | packages/plugins/logins | job/lifecycle arm subsystems.fleetRefresh.run in start | call=subsystems.fleetRefresh.run(); callback=; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/plugins/logins/tests/unit/parity/jobs.test.ts | [ ] |
 | J-0087 | J | module job models.refreshLocal | packages/daemon/bin/modules/models.ts:146 | models | packages/plugins/logins | module job models.refreshLocal | refreshLocal: () =&gt; subsystem.refreshLocal() | packages/plugins/logins/tests/unit/parity/jobs.test.ts | [x] |
-| J-0096 | J | timer/watcher ports.watch in module; cadence=() =&gt; { this.#generation += 1; this.#kept = undefined; }; action=path | packages/daemon/src/lib/fleet-reading/watched-document.ts:29 | fleet-reading | packages/plugins/logins | timer/watcher ports.watch in module; cadence=() =&gt; { this.#generation += 1; this.#kept = undefined; }; action=path | call=ports.watch(path, () =&gt; { this.#generation += 1; this.#kept = undefined; }); callback=path; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/plugins/logins/tests/unit/parity/jobs.test.ts | removed by design (no read cache, nothing to clear), proved by its tests J-0096 |
 | J-0135 | J | timer/watcher setTimeout in buildWorld.createSubsystems.fleetReading.timers.setTimeout.handle; cadence=ms; action=() =&gt; activities.outside(callback) | packages/daemon/bin/fyd.ts:11066 | host | packages/plugins/logins | timer/watcher setTimeout in buildWorld.createSubsystems.fleetReading.timers.setTimeout.handle; cadence=ms; action=() =&gt; activities.outside(callback) | call=setTimeout(() =&gt; activities.outside(callback), ms); callback=() =&gt; activities.outside(callback); timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/plugins/logins/tests/unit/parity/jobs.test.ts | [ ] |
 | J-0157 | J | timer/watcher setTimeout in harnessLoginTimer.after.handle; cadence=milliseconds; action=run | packages/daemon/src/adapters/fleet-login/login-child.ts:128 | fleet-login | packages/plugins/logins | timer/watcher setTimeout in harnessLoginTimer.after.handle; cadence=milliseconds; action=run | call=setTimeout(run, milliseconds); callback=run; timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/plugins/logins/tests/unit/parity/jobs.test.ts | [x] |
 | J-0158 | J | timer/watcher setTimeout in models.deadline; cadence=timeoutMs; action=() =&gt; resolve(EXPIRED) | packages/daemon/src/adapters/session/harness/codex-app-server-catalog.ts:132 | session | packages/plugins/logins | timer/watcher setTimeout in models.deadline; cadence=timeoutMs; action=() =&gt; resolve(EXPIRED) | call=setTimeout(() =&gt; resolve(EXPIRED), timeoutMs); callback=() =&gt; resolve(EXPIRED); timer sites include one-shot/backoff/adapter schedulers, not just perpetual jobs | packages/plugins/logins/tests/unit/parity/jobs.test.ts | [ ] |

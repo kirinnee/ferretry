@@ -245,6 +245,11 @@ test('J-0052 a home with use cases renders them with the head, so the report car
   );
   const report = await packsStep.run(f.ctx());
   expect(report.note ?? '').not.toContain('routing prose carried alone');
+  // The use cases were rendered: the prompt starts with v4's head and carries the use case and the preferences.
+  const prompt = PacksFileSchema.parse(parse(await config('packs.yaml'))).routing?.prompt ?? '';
+  expect(prompt.startsWith("Pick each sub-task's model by the kind of work, best first:")).toBe(true);
+  expect(prompt).toContain('Hard planning');
+  expect(prompt).toContain('Opus for reviews.');
 });
 
 test('J-0052 a prompt the guide already has is never overwritten, a guide that only described models and a home with no old keys get no prompt, and a too-long rendering is cut with the use cases whole', async () => {
