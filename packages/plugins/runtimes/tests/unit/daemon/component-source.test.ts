@@ -12,7 +12,8 @@ import { join } from 'node:path';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { LIMITED_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
 import { deviceStanding, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
-import type { FerretId } from '@ferretry/kernel/contract';
+import type { FerretId, Log } from '@ferretry/kernel/contract';
+import { HookEngine } from '@ferretry/kernel/host';
 import type { HookTake } from '@ferretry/kernel/manifest';
 import { definePlugin, implementDaemon, type DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
@@ -34,6 +35,8 @@ import manifest from '../../../manifest.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
+
+const noop = (): void => undefined;
 
 /** What an owner holds, by component name; `throws` makes every call of its source fail. */
 class Owner {
@@ -421,6 +424,28 @@ describe('only the plugin that owns a kind can provide it', () => {
     ).rejects.toThrow(/takes a refused hook definition/u);
   });
 
+  it('m2 the production kernel rule (not the test host’s copy) refuses an intruder, naming the owner who may take it', () => {
+    const intruder = stubPlugin('lessons', [{ hook: ProfileMcpSource, key: PROFILE_COMPONENTS_KEY }], {});
+    const silent: Log = { debug: noop, info: noop, warn: noop, error: noop, child: () => silent };
+    const never = () => ({ promise: new Promise<'timeout'>(() => undefined), cancel: noop });
+
+    const { refusals } = HookEngine.plan([manifest, intruder.manifest], silent, never);
+
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]?.sentence).toContain('lessons may not take the security-path hook runtimes.components.mcp');
+    expect(refusals[0]?.sentence).toContain('only mcp may');
+  });
+
+  it('m2 the production kernel rule lets the owner take it', () => {
+    const owner = stubPlugin('mcp', [{ hook: ProfileMcpSource, key: PROFILE_COMPONENTS_KEY }], {});
+    const silent: Log = { debug: noop, info: noop, warn: noop, error: noop, child: () => silent };
+    const never = () => ({ promise: new Promise<'timeout'>(() => undefined), cancel: noop });
+
+    const { refusals } = HookEngine.plan([manifest, owner.manifest], silent, never);
+
+    expect(refusals).toEqual([]);
+  });
+
   it('each hook lists exactly its owner as its only taker', () => {
     const takers = (hook: { takers?: readonly string[] }) => hook.takers;
 
@@ -621,6 +646,28 @@ describe('M1 an instructions change is refused before anything of it is written'
     expect(host.configChanges.some(change => change.path.includes('instructions/house'))).toBe(false);
     expect(JSON.stringify((await host.request('GET', '/v1/runtimes/components')).json())).not.toContain('house');
   };
+
+  it('m6 refuses a text with a NUL or another control character, or one over the bound, at propose: nothing is written', async () => {
+    const { host } = await compose({ config: withLayers() });
+
+    for (const text of ['a\u0000b', 'a\u001bb', 'a\u007fb', 'x'.repeat(200_001)]) {
+      const staged = await host.request('POST', '/v1/runtimes/proposals', { body: putHouse(text) });
+
+      expect(staged.status).toBeGreaterThanOrEqual(400);
+    }
+    await nothingOfHouse(host);
+  });
+
+  it('m6 still takes tabs, line breaks and a text exactly at the bound', async () => {
+    const { host } = await compose({ config: withLayers() });
+
+    const tabs = await stageAndApply(host, putHouse('line one\n\tindented\r\nline three'));
+    const edge = await stageAndApply(host, {
+      change: { ...putHouse('').change, name: 'long', content: 'x'.repeat(200_000) },
+    });
+
+    expect([tabs.status, edge.status]).toEqual([200, 200]);
+  });
 
   it('M1 refused at propose while another kind stands in: the instructions file is absent', async () => {
     const owners = newOwners();
