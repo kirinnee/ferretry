@@ -27,8 +27,58 @@ function textOf(content: unknown): string | undefined {
   return parts.length === 0 ? undefined : parts.join('\n');
 }
 
-/** One transcript line as an entry, or `undefined` when it is not a conversation record. */
-export function parseEntry(line: string): TranscriptEntry | undefined {
+/**
+ * What `data` says of an entry that is NOT a message but the harness's own record of an input it held or drained
+ * (#45, the send tracker's proof; no contract change: `TranscriptEntry.data` carries it). Conversation reads these two
+ * words and the entry's masked `text` and `at`, and shows such an entry as no message at all.
+ *  - `queue-operation`: Claude's record of its input queue (`operation` `enqueue` while it HOLDS a prompt typed mid-turn,
+ *    `dequeue`/`remove` when it lets go of one);
+ *  - `queued-prompt`: the record Claude writes when it DRAINS a held prompt into the conversation (`originatedAt`: when
+ *    the person typed it).
+ */
+const QUEUE_OPERATION_PROOF = 'queue-operation';
+const QUEUED_PROMPT_PROOF = 'queued-prompt';
+
+const QUEUE_OPERATIONS: ReadonlySet<string> = new Set(['enqueue', 'dequeue', 'remove']);
+
+/** The input-proof entry a line is, or `undefined` (a prompt typed mid-turn, held or drained by Claude's own queue). */
+function proofEntry(record: Json, ordinal: number): TranscriptEntry | undefined {
+  const at = asInstant(record.timestamp);
+  if (record.type === 'queue-operation') {
+    const operation = typeof record.operation === 'string' ? record.operation : undefined;
+    const content = typeof record.content === 'string' ? record.content : undefined;
+    if (at === undefined || operation === undefined || !QUEUE_OPERATIONS.has(operation) || content === undefined)
+      return undefined;
+    return {
+      id: `${QUEUE_OPERATION_PROOF}:${ordinal}`,
+      at,
+      role: 'system',
+      text: content,
+      data: { proof: QUEUE_OPERATION_PROOF, operation },
+    };
+  }
+  if (record.type !== 'attachment') return undefined;
+  const attachment = asObject(record.attachment);
+  if (attachment?.type !== 'queued_command' || attachment.commandMode !== 'prompt') return undefined;
+  if (asObject(attachment.origin)?.kind !== 'human') return undefined;
+  const text = textOf(attachment.prompt);
+  const originatedAt = asInstant(attachment.timestamp) ?? asInstant(record.timestamp);
+  const drained = at ?? originatedAt;
+  if (text === undefined || text.trim() === '' || drained === undefined) return undefined;
+  return {
+    id: typeof record.uuid === 'string' ? record.uuid : `${QUEUED_PROMPT_PROOF}:${ordinal}`,
+    at: drained,
+    role: 'system',
+    text,
+    data: { proof: QUEUED_PROMPT_PROOF, ...(originatedAt === undefined ? {} : { originatedAt }) },
+  };
+}
+
+/**
+ * One transcript line as an entry, or `undefined` when it is not a conversation record. `ordinal` is the line's place among
+ * the transcript's lines: it names an input-proof record, which carries no id of its own (an append-only file keeps it).
+ */
+export function parseEntry(line: string, ordinal = 0): TranscriptEntry | undefined {
   let record: Json | undefined;
   try {
     record = asObject(JSON.parse(line));
@@ -36,6 +86,8 @@ export function parseEntry(line: string): TranscriptEntry | undefined {
     return undefined;
   }
   if (record === undefined) return undefined;
+  const proof = proofEntry(record, ordinal);
+  if (proof !== undefined) return proof;
   const role = record.type === 'user' || record.type === 'assistant' ? record.type : undefined;
   const id = typeof record.uuid === 'string' ? record.uuid : undefined;
   const at = asInstant(record.timestamp);
@@ -58,8 +110,8 @@ export function parseEntries(text: string): readonly TranscriptEntry[] {
   return text
     .split('\n')
     .filter(line => line.trim() !== '')
-    .flatMap(line => {
-      const entry = parseEntry(line);
+    .flatMap((line, ordinal) => {
+      const entry = parseEntry(line, ordinal);
       return entry === undefined ? [] : [entry];
     });
 }

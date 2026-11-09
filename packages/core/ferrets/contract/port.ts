@@ -332,6 +332,28 @@ export interface FerretTurnDocument {
  */
 export interface FerretTurns {
   list(options?: { readonly strict?: boolean }): Promise<readonly FerretTurnDocument[]>;
+  /**
+   * Additive (#45 BG-051, today's `writeTurn`): writes the NEXT numbered turn document `turns/turn-NNN.md` (`0600`,
+   * through a temporary name, its author beside it as `turn-NNN.by.json`), numbered after the higher of the session
+   * counter and the documents on disk, and counts it so a later revive numbers after it. Answers its number and the
+   * absolute path the agent is pointed at. The same store the revive writes.
+   */
+  write?(request: { readonly document: string; readonly by?: FerretTurnAuthor }): Promise<FerretTurnWritten>;
+  /**
+   * Additive (#45 BG-053, today's `writeQueuedPayload`): writes a message too long to type into a busy pane to
+   * `channel/queued-<send id>.md` (`0600`, through a temporary name; the same id rewrites the same file) and answers
+   * its absolute path. Rejects for an id outside `[a-z0-9_-]{1,128}`: the caller does not substitute one, because the
+   * send's row names the file.
+   */
+  writeQueued?(sendId: string, payload: string): Promise<string>;
+  /** Additive (#45 BG-051, today's `clearMarkers`): clears the completion markers a previous turn left. */
+  clearMarkers?(): Promise<void>;
+}
+
+/** A turn document Ferrets wrote: its number and the absolute file the agent is pointed at. */
+export interface FerretTurnWritten {
+  readonly turn: number;
+  readonly file: string;
 }
 
 /**

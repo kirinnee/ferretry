@@ -46,9 +46,14 @@ export class ClientConversationGateway implements SendGateway, AnswerGateway, Co
     return SendResultSchema.parse(await this.client.call(ROUTES.send, { ...at(ferret), body: request }));
   }
 
-  async sendStatus(ferret: string, sendId: string): Promise<SendRecord | undefined> {
+  async sendStatus(ferret: string, sendId: string, waitMs?: number): Promise<SendRecord | undefined> {
     try {
-      return SendRecordSchema.parse(await this.client.call(ROUTES.sendStatus, at(ferret, { sendId })));
+      return SendRecordSchema.parse(
+        await this.client.call(ROUTES.sendStatus, {
+          ...at(ferret, { sendId }),
+          ...(waitMs === undefined ? {} : { query: { waitMs: String(waitMs) } }),
+        }),
+      );
     } catch (error) {
       // A message still in Ferretry's queue has no ledger row yet: that is waiting, not a missing send.
       if ((error as { status?: unknown }).status === 404) return undefined;

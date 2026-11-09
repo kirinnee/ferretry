@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CommandError } from '../../../cli/lib/errors.ts';
-import { SendMessageController, WAIT_INTERVAL_MS } from '../../../cli/lib/send/controller.ts';
-import type { SendGateway, SendWaitClock } from '../../../cli/lib/send/ports.ts';
+import { SendMessageController, WAIT_ROUND_MS } from '../../../cli/lib/send/controller.ts';
+import type { SendGateway } from '../../../cli/lib/send/ports.ts';
 import type { SendRecord, SendRequest, SendResult } from '../../../contract/index.ts';
 import { at } from '../../support/instant.ts';
 
@@ -18,23 +18,20 @@ function parts(
   const parked: unknown[] = [];
   const lines: string[] = [];
   const statuses = [...(options.statuses ?? [])];
-  let now = 0;
+  const asked: (number | undefined)[] = [];
   const gateway: SendGateway = {
     send: async (_ferret, request) => {
       sent.push(request);
       return options.result ?? result();
     },
-    sendStatus: async () => (statuses.length > 0 ? statuses.shift() : options.after),
+    sendStatus: async (_ferret, _sendId, waitMs) => {
+      asked.push(waitMs);
+      return statuses.length > 0 ? statuses.shift() : options.after;
+    },
     upload: async () => ({ id: 'a1' }),
     parkUntilReply: async (caller, details) => {
       if (options.parkFails) throw new Error('daemon said no');
       parked.push({ caller, ...details });
-    },
-  };
-  const clock: SendWaitClock = {
-    nowMs: () => now,
-    sleep: async ms => {
-      now += ms;
     },
   };
   const controller = (env: { callerFerret?: string } = {}) =>
@@ -43,9 +40,8 @@ function parts(
       { readText: async () => 'from the file' },
       { out: line => lines.push(line), note: line => lines.push(`note: ${line}`) },
       env,
-      clock,
     );
-  return { sent, parked, lines, controller };
+  return { sent, parked, lines, controller, asked };
 }
 
 describe('SendMessageController', () => {
@@ -68,11 +64,24 @@ describe('SendMessageController', () => {
     should(lines.some(line => line.includes('do not send it again'))).be.true();
   });
 
-  it('should wait through a missing ledger row, then report the delivery', async () => {
-    const { lines, controller } = parts({ statuses: [undefined, record('queued'), record('delivered')] });
+  it('should wait through a missing ledger row, then report the delivery, each round asking the daemon to hold the read', async () => {
+    const { lines, controller, asked } = parts({ statuses: [undefined, record('queued'), record('delivered')] });
     await controller().execute('hadi', { message: 'hi', wait: true });
     should(lines.some(line => line.startsWith('note: delivered'))).be.true();
-    should(WAIT_INTERVAL_MS).equal(2000);
+    should(asked).deepEqual([WAIT_ROUND_MS, WAIT_ROUND_MS, WAIT_ROUND_MS]);
+    should(WAIT_ROUND_MS).equal(30_000);
+  });
+
+  it('should ask for at most ten rounds of waiting, however long the send takes to settle', async () => {
+    const { controller, asked } = parts({ after: record('queued') });
+    await controller().execute('hadi', { message: 'hi', wait: true });
+    should(asked).have.length(10);
+  });
+
+  it('should not ask for a wait unless --wait was given', async () => {
+    const { controller, asked } = parts();
+    await controller().execute('hadi', { message: 'hi' });
+    should(asked).deepEqual([]);
   });
 
   it('should fail a wait on a message proven not delivered, and not on an unconfirmed one', async () => {

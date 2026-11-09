@@ -13,6 +13,7 @@ import type {
   FerretHarness,
   FerretTurnAuthor,
   FerretTurnDocument,
+  FerretTurnWritten,
   FerretTurns,
   FerretPrompt,
   HarnessDeliveryFailure,
@@ -57,7 +58,7 @@ import { claimStartName, displayAgentName, type SessionNameClaims } from '../nam
 import { normalizeCallsign } from '../names/policy.ts';
 import type { NameAllocationErrorCode } from '../names/types.ts';
 import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
-import { isFileBackedQueue, queuedMessageInstruction } from '../protocol/turn-handoff.ts';
+import { isFileBackedQueue, queuedMessageInstruction, queuedPayloadFile } from '../protocol/turn-handoff.ts';
 import {
   diedParked,
   FerretDetailsSchema,
@@ -278,6 +279,13 @@ export interface FerretSessionPort {
    * transport then goes wrong. Unbound: a long queued message is refused, never typed inline.
    */
   queued?(ferret: FerretId, payload: string, sendId?: string): Promise<string>;
+  /**
+   * Additive (#45 BG-051, `FerretTurns.write`): the next numbered turn document of THIS ferret, written durably with its
+   * author beside it and counted, as a revive's turn is. Answers its number and absolute path.
+   */
+  writeTurn?(ferret: FerretId, document: string, by?: FerretTurnAuthor): Promise<FerretTurnWritten>;
+  /** Additive (#45 BG-051, `FerretTurns.clearMarkers`): clears the completion markers a previous turn left. */
+  clearMarkers?(ferret: FerretId): Promise<void>;
   /**
    * The absolute folders of THIS ferret's own session folder its agent may read without asking
    * (`FERRET_READABLE_FOLDERS`, today's `handoffFolders`), handed to the harness as `LaunchSpec.readable`. Unbound:
@@ -1267,8 +1275,29 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     if (this.registry.get(ferret) === undefined) return undefined;
     this.requireMayTouch(caller, ferret);
+    const session = this.ports.session;
+    const writeTurn = session?.writeTurn?.bind(session);
+    const queued = session?.queued?.bind(session);
+    const clearMarkers = session?.clearMarkers?.bind(session);
     return {
-      list: async options => (await this.ports.session?.turns?.(ferret, { strict: options?.strict === true })) ?? [],
+      list: async options => (await session?.turns?.(ferret, { strict: options?.strict === true })) ?? [],
+      // Unbound session files: no member, so a caller that needs one answers its own "cannot write" (never an inline paste).
+      ...(writeTurn === undefined
+        ? {}
+        : {
+            write: async (request: { readonly document: string; readonly by?: FerretTurnAuthor }) =>
+              await writeTurn(ferret, request.document, request.by),
+          }),
+      ...(queued === undefined
+        ? {}
+        : {
+            writeQueued: async (sendId: string, payload: string) => {
+              if (queuedPayloadFile(sendId) === undefined)
+                throw new Error('a send id outside the queued-message grammar names no file');
+              return await queued(ferret, payload, sendId);
+            },
+          }),
+      ...(clearMarkers === undefined ? {} : { clearMarkers: async () => await clearMarkers(ferret) }),
     };
   }
 

@@ -1,4 +1,4 @@
-import type { SendResult } from '../../../contract/index.ts';
+import type { SendRecord, SendResult } from '../../../contract/index.ts';
 import { CommandError } from '../errors.ts';
 import {
   describeFate,
@@ -8,7 +8,7 @@ import {
   SETTLED_SEND_FATES,
   type SendFlags,
 } from './plan.ts';
-import type { ConversationOutput, SendEnvironment, SendFiles, SendGateway, SendWaitClock } from './ports.ts';
+import type { ConversationOutput, SendEnvironment, SendFiles, SendGateway } from './ports.ts';
 
 export interface SendCommandFlags extends Omit<SendFlags, 'fileMessage'> {
   /** Path to a file holding the message; its contents follow the typed message. */
@@ -18,9 +18,10 @@ export interface SendCommandFlags extends Omit<SendFlags, 'fileMessage'> {
   readonly wait?: boolean;
 }
 
-/** How long a `send --wait` waits, and how often it asks. A send to a busy agent may wait longer. */
-const WAIT_LIMIT_MS = 5 * 60_000;
-export const WAIT_INTERVAL_MS = 2_000;
+/** How a `send --wait` waits: rounds of a status read the daemon holds open, ten at most (5 minutes). */
+export const WAIT_ROUND_MS = 30_000;
+const WAIT_ROUNDS = 10;
+const WAIT_LIMIT_MS = WAIT_ROUND_MS * WAIT_ROUNDS;
 
 /** Sends a message to a ferret: `fy send` (and its peer-reply spelling, `fy reply`). */
 export class SendMessageController {
@@ -29,7 +30,6 @@ export class SendMessageController {
     private readonly files: SendFiles,
     private readonly output: ConversationOutput,
     private readonly environment: SendEnvironment,
-    private readonly clock: SendWaitClock,
   ) {}
 
   async execute(ferret: string, flags: SendCommandFlags): Promise<void> {
@@ -67,33 +67,27 @@ export class SendMessageController {
       this.output.note('this send has no id, so it cannot be waited on');
       return;
     }
-    const deadline = this.clock.nowMs() + WAIT_LIMIT_MS;
-    for (;;) {
-      const record = await this.gateway.sendStatus(result.ferret, sendId);
-      if (record === undefined) {
-        // Still in Ferretry's queue: the ledger has no row until a key goes to the pane. That is waiting, never
-        // "no such send" — and never a failure a script would answer by sending it again.
-        if (this.clock.nowMs() >= deadline) {
-          this.output.note(
-            `still not typed into the agent after ${WAIT_LIMIT_MS / 60_000}m: it is waiting in Ferretry's queue (see \`fy queue ${reference}\`); do not resend`,
-          );
-          return;
-        }
-        await this.clock.sleep(WAIT_INTERVAL_MS);
-        continue;
-      }
-      if (SETTLED_SEND_FATES.has(record.fate)) {
+    // The DAEMON waits (the shell gives a plugin no clock): each round holds the status read open for up to
+    // WAIT_ROUND_MS, and returns the moment the fate settles. At most WAIT_ROUNDS rounds, so a wait is bounded by count.
+    let record: SendRecord | undefined;
+    for (let round = 0; round < WAIT_ROUNDS; round += 1) {
+      record = await this.gateway.sendStatus(result.ferret, sendId, WAIT_ROUND_MS);
+      if (record !== undefined && SETTLED_SEND_FATES.has(record.fate)) {
         // A cancelled message was not delivered either; it fails the wait as a proven absence does.
         if (record.fate === 'timed_out' || record.fate === 'cancelled') throw new CommandError(describeFate(record));
         this.output.note(describeFate(record));
         return;
       }
-      if (this.clock.nowMs() >= deadline) {
-        this.output.note(`still ${describeFate(record)} after ${WAIT_LIMIT_MS / 60_000}m of waiting`);
-        return;
-      }
-      await this.clock.sleep(WAIT_INTERVAL_MS);
     }
+    if (record === undefined) {
+      // Still in Ferretry's queue: the ledger has no row until a key goes to the pane. That is waiting, never
+      // "no such send" — and never a failure a script would answer by sending it again.
+      this.output.note(
+        `still not typed into the agent after ${WAIT_LIMIT_MS / 60_000}m: it is waiting in Ferretry's queue (see \`fy queue ${reference}\`); do not resend`,
+      );
+      return;
+    }
+    this.output.note(`still ${describeFate(record)} after ${WAIT_LIMIT_MS / 60_000}m of waiting`);
   }
 
   /**

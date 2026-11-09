@@ -1018,3 +1018,97 @@ describe('ruling #31b: the start writes the session document, and strict ancestr
     }
   });
 });
+
+describe('ruling #45 BG-051 / BG-053: Conversation writes a send’s turn document and queued file through FerretTurns', () => {
+  const channelFile = (w: World, id: string, sendId: string) => `${w.folderOf(id)}/channel/queued-${sendId}.md`;
+
+  test('BG-051 FerretTurns.write numbers a send’s turn after the start’s and the revive’s, writes it 0600 and counts it', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    const turns = (await w.service.turns(id as never))!;
+
+    const first = await turns.write!({ document: 'FIXTURE first send\n' });
+
+    // The start's prompt is turn one, so a send is turn two; the answer names the very file the agent is pointed at.
+    expect(first).toEqual({ turn: 2, file: turnFile(w, id, 2) });
+    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe('FIXTURE first send\n');
+    expect((await stat(turnFile(w, id, 2))).mode & 0o777).toBe(0o600);
+    // Counted, so a revive after it numbers past it and never rewrites it.
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(2);
+    expect((await turns.write!({ document: 'FIXTURE second send\n' })).turn).toBe(3);
+    await w.service.stop(id as never, 'now');
+    expect((await revive(w, id, 'Carry on.')).ok).toBe(true);
+    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe('FIXTURE first send\n');
+    expect((await turns.list()).map(document => document.turn)).toEqual([1, 2, 3, 4]);
+  });
+
+  test('BG-051 FerretTurns.write keeps its author beside the document, and none at all when it names none', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    const turns = (await w.service.turns(id as never))!;
+
+    await turns.write!({ document: 'FIXTURE from a peer\n', by: { kind: 'ferret', name: 'wren' } });
+    await turns.write!({ document: 'FIXTURE from the owner\n' });
+
+    const names = await readdir(`${w.folderOf(id)}/turns`);
+    expect(names).toContain('turn-002.by.json');
+    expect(names).not.toContain('turn-003.by.json');
+    expect((await turns.list()).map(document => document.by?.kind)).toEqual([undefined, 'ferret', undefined]);
+  });
+
+  test('BG-051 FerretTurns.clearMarkers removes the markers a previous turn left, and only those', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+    for (const name of ['done.marker', 'needs-help.marker', 'process-exit.marker', 'summary.md'])
+      await writeFile(`${w.folderOf(id)}/${name}`, 'x');
+
+    await turns.clearMarkers!();
+
+    const left = await readdir(w.folderOf(id));
+    for (const marker of ['done.marker', 'needs-help.marker', 'process-exit.marker'])
+      expect(left).not.toContain(marker);
+    expect(left).toContain('summary.md');
+  });
+
+  test('BG-053 FerretTurns.writeQueued writes channel/queued-<send id>.md 0600, rewrites the same id, and answers the path', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+
+    const file = await turns.writeQueued!('send-mw7a-0007', `${'x'.repeat(1_200)}`);
+
+    expect(file).toBe(channelFile(w, id, 'send-mw7a-0007'));
+    expect(await readFile(file, 'utf8')).toBe(`${'x'.repeat(1_200)}\n`);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(await turns.writeQueued!('send-mw7a-0007', 'FIXTURE again')).toBe(file);
+    expect(await readFile(file, 'utf8')).toBe('FIXTURE again\n');
+    expect(await readdir(`${w.folderOf(id)}/channel`)).toEqual(['queued-send-mw7a-0007.md']);
+  });
+
+  test('BG-053 FerretTurns.writeQueued refuses an id outside the grammar and writes nothing (the row names the file; none is invented)', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+
+    for (const sendId of ['../../escape', 'Send-Upper', '', 'a'.repeat(129)])
+      await expect(turns.writeQueued!(sendId, 'FIXTURE words')).rejects.toThrow('queued-message grammar');
+
+    await expect(readdir(`${w.folderOf(id)}/channel`)).rejects.toThrow();
+  });
+
+  test('BG-051 a daemon whose session files are unbound offers no writer, so a caller types the message as it is', async () => {
+    const w = await world();
+    const id = await started(w);
+    const bare = new FerretsService(w.registry, w.tokens, {
+      ...(w.service as unknown as { ports: FerretsPorts }).ports,
+      session: undefined,
+    });
+
+    const turns = (await bare.turns(id as never))!;
+
+    expect(turns.write).toBeUndefined();
+    expect(turns.writeQueued).toBeUndefined();
+    expect(turns.clearMarkers).toBeUndefined();
+  });
+});
