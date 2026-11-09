@@ -87,6 +87,8 @@ export interface ChangeRecord {
   readonly to?: string | undefined;
 }
 
+const CHANGE_KINDS: readonly string[] = ['removed', 'moved', 'added', 'changed', 'moved-changed'];
+
 const methodOf = (key: string): string => /^([A-Z]+) /.exec(key)?.[1] ?? '';
 
 /**
@@ -198,7 +200,8 @@ export function readChanges(text: string): Map<string, ChangeRecord> {
       kind === undefined ||
       reason === undefined ||
       reason.trim() === '' ||
-      (explicit && (to === undefined || to.trim() === ''))
+      !CHANGE_KINDS.includes(kind) ||
+      (explicit && (to === undefined || to.trim() === '' || table === 'tool'))
     )
       throw new Error(
         `${PARITY_CHANGES}: "${line}" is not table<TAB>key<TAB>change<TAB>reason (or table<TAB>old<TAB>moved<TAB>new<TAB>reason)`,

@@ -372,14 +372,19 @@ describe('descriptor-parity: moved pairs', () => {
       );
       const pairs = movedPairs(rows(SHAPE), rows(NEW, 'GET /v1/ferrets/:f/q'), changes).pairs;
       expect(pairs.map(p => p.now.key)).toEqual([NEW]);
-      const bad = readChanges(`route\t${SHAPE}\tmoved\tGET /v1/nowhere\twhy\nroute\tGET /v1/ferrets/:f/q\tadded\twhy\n`);
+      const bad = readChanges(
+        `route\t${SHAPE}\tmoved\tGET /v1/nowhere\twhy\nroute\tGET /v1/ferrets/:f/q\tadded\twhy\n`,
+      );
       expect(movedPairs(rows(SHAPE), rows('GET /v1/ferrets/:f/q'), bad).pairs).toEqual([]);
     });
 
     test('a ledger row ticks through an explicit pair; a broken record says why', () => {
       const r = routeRow('R-0002', OLD);
       const named = fixture({ [TEST]: "test('R-0002 m', () => {})" });
-      const world = (next: DescriptorRow[], changes = moved(OLD, NEW)) => () => routeWorld(rows(OLD), next, changes);
+      const world =
+        (next: DescriptorRow[], changes = moved(OLD, NEW)) =>
+        () =>
+          routeWorld(rows(OLD), next, changes);
       expect(run([r], ctx(named, world(rows(NEW))))).toEqual([]);
       expect(run([r], ctx(named, world([])))[0]).toContain('declares no route GET /v1/runtimes/machine');
     });
@@ -392,6 +397,39 @@ describe('descriptor-parity: moved pairs', () => {
         reason: 'why',
         to: NEW,
       });
+    });
+
+    test('a record with an unknown change kind, or a moved tool, is refused naming the line', () => {
+      expect(() => readChanges(`route\t${OLD}\tmovedGET /v1/x\twhy\n`)).toThrow('is not table');
+      expect(() => readChanges(`route\t${OLD}\tmovedGET /v1/x\twhy\n`)).toThrow('movedGET /v1/x');
+      expect(() => readChanges('tool\told_tool\tmoved\tnew_tool\twhy\n')).toThrow('is not table');
+    });
+
+    test('a new key that exists only in another table is a finding', () => {
+      const member: DescriptorRow = { ...todayRow(NEW), table: 'member' };
+      const changes = readChanges(`route\t${OLD}\tmoved\t${NEW}\twhy\nmember\t${NEW}\tadded\twhy\n`);
+      expect(movedFindings(rows(OLD), [member], changes).map(f => f.message)).toEqual([
+        expect.stringContaining('declares no route GET /v1/runtimes/machine'),
+      ]);
+    });
+
+    test('an explicit pair and a shape-derived one onto the same new key are both claimed', () => {
+      const SHAPE = 'GET /v1/sessions/:s/q';
+      const TARGET = 'GET /v1/ferrets/:f/q';
+      const changes = readChanges(
+        `route\t${OLD}\tmoved\t${TARGET}\twhy\nroute\t${SHAPE}\tremoved\twhy\nroute\t${TARGET}\tadded\twhy\n`,
+      );
+      expect(movedFindings(rows(OLD, SHAPE), rows(TARGET), changes).map(f => f.message)).toEqual([
+        expect.stringContaining('claimed by 2'),
+      ]);
+      const r = routeRow('R-0004', OLD);
+      const named = fixture({ [TEST]: "test('R-0004 m', () => {})" });
+      expect(
+        run(
+          [r],
+          ctx(named, () => routeWorld(rows(OLD, SHAPE), rows(TARGET), changes)),
+        )[0],
+      ).toContain('claimed by more than one');
     });
   });
 

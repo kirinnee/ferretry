@@ -1,7 +1,7 @@
 # One record per line: table<TAB>key<TAB>change<TAB>reason. A route that moved to a path the shape rule cannot derive is
 # table<TAB>old key<TAB>moved<TAB>new key<TAB>reason: the new key must exist with the same method and be recorded
 # added or moved-changed, one old key per new key; the pair is judged like a derived one (a record never blesses a loosening).
-route	DELETE /v1/fleet/login/:flowId	movedDELETE /v1/logins/sign-in/:flowId	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+route	DELETE /v1/fleet/login/:flowId	moved	DELETE /v1/logins/sign-in/:flowId	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/:component	moved	DELETE /v1/mcp/auth/:component	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/fleet/mcp-auth/flows/:flowId	moved	DELETE /v1/mcp/auth/flows/:flowId	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	DELETE /v1/secrets/logins/:id	removed	today's one-release shim over the account store; 5.0 counterpart DELETE /v1/accounts/:id; zero backward compatibility, S84, ruling #33

@@ -25,7 +25,14 @@ import {
   rowsOf,
 } from '../../packages/core/kernel/testing/parity.ts';
 import { type AstNode, type Check, type Finding, parseFile, runMain, walk } from '../gen/lib/check.ts';
-import { type ChangeRecord, PARITY_CHANGES, TODAY_ROUTES, isTightening, movedPairs, readChanges } from './descriptor-parity.ts';
+import {
+  type ChangeRecord,
+  PARITY_CHANGES,
+  TODAY_ROUTES,
+  isTightening,
+  movedPairs,
+  readChanges,
+} from './descriptor-parity.ts';
 import { type JunitCase, inTier, junitCases, resultFiles } from './guarantees.ts';
 
 export const LEDGER = 'docs/design/rebuild-parity.tsv';
