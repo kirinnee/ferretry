@@ -390,7 +390,9 @@ export class ClaudeHarness implements Harness {
   private async tmux(args: readonly string[]): Promise<Result<true, string>> {
     try {
       const result = await this.deps.spawn.run('tmux', args, { timeout: milliseconds(TMUX_TIMEOUT_MS) });
-      return result.exitCode === 0 ? ok(true) : err(result.stderr.trim() || `tmux exited ${String(result.exitCode)}`);
+      return result.exitCode === 0
+        ? ok(true)
+        : err(result.stderr.trim() || `tmux exited ${String(result.exitCode ?? result.signal)}`);
     } catch (error) {
       return err(error instanceof Error ? error.message : String(error));
     }

@@ -1625,7 +1625,9 @@ async function start(world: World): Promise<TestHost> {
             stderr: result.stderr,
             stdoutTruncated: all.byteLength > cap,
             stderrTruncated: false,
-            timedOut: false,
+            // The real `runBytes` kills at its timeout and answers `timedOut`, `-1`; a fake `run` that answers the
+            // signal shape (`exitCode: null`) under a timeout the caller set is that same event.
+            timedOut: result.exitCode === null && spawnOptions?.timeout !== undefined,
           };
         },
         start(program, args, spawnOptions): ChildHandle {
