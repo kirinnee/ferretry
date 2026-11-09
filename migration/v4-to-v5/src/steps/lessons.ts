@@ -86,7 +86,7 @@ import { configPath, v5ConfigProblem } from '../v5/write.ts';
 
 const LESSONS_CONFIG = CONFIG_TARGETS.LESSONS;
 import { dropModeline } from '../v4/config.ts';
-import { instructionsSource } from './settings.ts';
+import { instructionsSource } from './component-files.ts';
 import type { Step, StepContext } from './index.ts';
 
 const V5_DIR = 'state/lessons';
@@ -259,14 +259,15 @@ async function convertState(ctx: StepContext, tally: Tally): Promise<void> {
   if (sessions.kind === 'damaged' || (sessions.kind === 'read' && !Array.isArray(sessions.value)))
     tally.notes.push(`${V4_LEARNING_SESSIONS} is damaged: v4 read it as no per-ferret switches`);
   dropped(tally, V4_LEARNING_SESSIONS, switches.dropped, 'switch record(s)');
-  const ferrets = switches.records.map(({ sessionId, ...rest }) => ({ ferretId: sessionId, ...rest }));
-  for (const [index, record] of ferrets.entries()) {
-    const parsed = StoredFerretLessonsSchema.safeParse(record);
-    if (!parsed.success)
-      throw new V4InputError(`${V4_LEARNING_SESSIONS}: entry ${String(index)} has no v5 form (${where(parsed.error)})`);
-  }
+  const all = switches.records.map(({ sessionId, ...rest }) => ({ ferretId: sessionId, ...rest }));
+  // One switch v5 would not store is one damaged record: counted, not carried.
+  const ferrets = all.filter(record => StoredFerretLessonsSchema.safeParse(record).success);
+  dropped(tally, V4_LEARNING_SESSIONS, all.length - ferrets.length, 'switch record(s) with no v5 form');
   const document = LessonsStateFileSchema.safeParse({ ...body, ferrets });
-  if (!document.success) throw new V4InputError(`${V4_LEARNING_STATE}: has no v5 form at ${where(document.error)}`);
+  if (!document.success) {
+    tally.notes.push(`${V4_LEARNING_STATE} has no v5 form (${where(document.error)}): not carried`);
+    return;
+  }
   await ctx.v5.stamped(
     { path: V5_LESSONS_STATE, format: STATE_FILE.format, schema: LessonsStateFileSchema },
     document.data,
@@ -280,7 +281,7 @@ async function convertObservations(ctx: StepContext, tally: Tally): Promise<void
   if (text === undefined) return;
   const lines: z.infer<typeof V5ObservationLineSchema>[] = [];
   let skipped = 0;
-  for (const [index, raw] of text.split('\n').entries()) {
+  for (const raw of text.split('\n')) {
     const value = raw.trim();
     if (value.length === 0) continue;
     let decoded: unknown;
@@ -297,9 +298,10 @@ async function convertObservations(ctx: StepContext, tally: Tally): Promise<void
     }
     const { sessionId, ...rest } = parsed.data;
     const line = V5ObservationLineSchema.safeParse({ format: 1, ...rest, ferretId: sessionId });
-    if (!line.success) throw new V4InputError(`${V4_LEARNING_OBSERVATIONS}: line ${String(index + 1)} has no v5 form`);
-    if (Buffer.byteLength(JSON.stringify(line.data), 'utf8') > V5_MAX_JSONL_LINE_BYTES)
-      throw new V4InputError(`${V4_LEARNING_OBSERVATIONS}: line ${String(index + 1)} is longer than a v5 line may be`);
+    if (!line.success || Buffer.byteLength(JSON.stringify(line.data), 'utf8') > V5_MAX_JSONL_LINE_BYTES) {
+      skipped++; // line ${index + 1}: counted, never quoted
+      continue;
+    }
     lines.push(line.data);
   }
   dropped(tally, V4_LEARNING_OBSERVATIONS, skipped, 'evidence line(s)');
@@ -319,13 +321,13 @@ async function convertBoard(ctx: StepContext, tally: Tally): Promise<void> {
       tally.notes.push(`${V4_LEARNING_PROPOSALS} is damaged: v4 read it as no lessons`);
     const read = each(proposals.kind === 'read' ? proposals.value : undefined, V4StoredProposal);
     dropped(tally, V4_LEARNING_PROPOSALS, read.dropped, 'lesson(s)');
-    const v5 = read.records.map(proposal => {
+    const v5 = read.records.flatMap(proposal => {
       const parsed = StoredProposalSchema.safeParse(proposalToV5(proposal));
-      if (!parsed.success)
-        throw new V4InputError(
-          `${V4_LEARNING_PROPOSALS}: lesson ${proposal.id} has no v5 form (${where(parsed.error)})`,
-        );
-      return parsed.data;
+      if (parsed.success) return [parsed.data];
+      tally.notes.push(
+        `${V4_LEARNING_PROPOSALS}: lesson ${proposal.id} has no v5 form (${where(parsed.error)}): not carried`,
+      );
+      return [];
     });
     await ctx.v5.stamped(
       { path: V5_LESSONS_SUGGESTED, format: SUGGESTED_FILE.format, schema: SuggestedFileSchema },
@@ -340,10 +342,11 @@ async function convertBoard(ctx: StepContext, tally: Tally): Promise<void> {
       tally.notes.push(`${V4_LEARNING_TOMBSTONES} is damaged: v4 read it as no dismissed lessons`);
     const read = each(tombstones.kind === 'read' ? tombstones.value : undefined, V4Tombstone);
     dropped(tally, V4_LEARNING_TOMBSTONES, read.dropped, 'dismissed lesson(s)');
-    const v5 = read.records.map((tombstone, index) => {
+    const v5 = read.records.flatMap((tombstone, index) => {
       const parsed = TombstoneSchema.safeParse(tombstone);
-      if (!parsed.success) throw new V4InputError(`${V4_LEARNING_TOMBSTONES}: entry ${String(index)} has no v5 form`);
-      return parsed.data;
+      if (parsed.success) return [parsed.data];
+      tally.notes.push(`${V4_LEARNING_TOMBSTONES}: entry ${String(index)} has no v5 form: not carried`);
+      return [];
     });
     await ctx.v5.stamped(
       { path: V5_LESSONS_DISMISSED, format: DISMISSED_FILE.format, schema: DismissedFileSchema },
@@ -389,8 +392,10 @@ async function convertRuns(ctx: StepContext, tally: Tally): Promise<void> {
       continue;
     }
     const manifest = RunManifestSchema.safeParse(manifestToV5(v4.data));
-    if (!manifest.success)
-      throw new V4InputError(`${at}/manifest.json: run ${run} has no v5 form (${where(manifest.error)})`);
+    if (!manifest.success) {
+      damaged++;
+      continue;
+    }
     await ctx.v5.stamped(
       { path: v5LessonsRun(run), format: RUN_FILE.format, schema: RunManifestSchema },
       manifest.data,
@@ -412,8 +417,10 @@ async function convertRuns(ctx: StepContext, tally: Tally): Promise<void> {
     const document = DigestsFileSchema.safeParse({
       digests: records.records.map(({ sessionId, ...rest }) => ({ ferretId: sessionId, ...rest })),
     });
-    if (!document.success)
-      throw new V4InputError(`${at}/digests.json: run ${run} has no v5 form (${where(document.error)})`);
+    if (!document.success) {
+      damaged++;
+      continue;
+    }
     await ctx.v5.stamped(
       { path: v5LessonsDigests(run), format: DIGESTS_FILE.format, schema: DigestsFileSchema },
       document.data,
@@ -464,6 +471,10 @@ async function globalSource(ctx: StepContext): Promise<string | undefined> {
     file = isScalar(pair?.value) ? pair.value.value : undefined;
   }
   const source = await instructionsSource(home, file);
+  if (source === 'hard-link')
+    throw new V4InputError(
+      `${V4_LESSONS_COMPONENT}: the Global lessons document it names is a hard link (v4 refused it), so it was never read; make it a plain file at fleet/assets/${V4_GLOBAL_LESSONS_FILE} and run the conversion again`,
+    );
   if (source !== undefined) return source;
   // Not found as a plain file inside the assets: absent is no document (v4 read it as empty); anything else is refused.
   const assets = join(home, 'fleet', 'assets');
