@@ -271,7 +271,7 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   if (kind === 'F' && what === 'FY_HOME/config/machine.yaml')
     return 'removed by design (duplicate of F-0377: machine.yaml is split key by key over its owners’ files, proved there)';
   if (kind === 'J' && /new RoutingMigration\(/.test(what))
-    return "removed by design (§9.1, §9.2: removed from the daemon; the v4-to-v5 converter's packs step carries models-guide.yaml and pack.yaml, proved by its test J-0052)";
+    return "removed by design (§9.1, §9.2: removed from the daemon; the v4-to-v5 converter's packs step renders the old models-guide.yaml keys and pack.yaml routingPreferences into the one routing prompt as v4 did, proved by its tests J-0052)";
   if (/legacy|migration/.test(file) && !/session-migrate|session\/migrat|lib\/migration\/commands/.test(file)) {
     if (kind === 'J') return 'removed by design (§9.1, §9.2: one-shot conversion/old-format work)';
   }
@@ -293,11 +293,12 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
  * Rows the word rules above place with Runtimes ("runtime", "fleet", "component" in a name) but whose code is another
  * owner's in 5.0 (britnee ruling, parity-runtimes round 1: re-owned, none removed). Keyed by ROW ID, so a later row from
  * the same source file keeps the owner the rules gave it; `applyReowned` refuses an id the inventory does not hold.
- * J-0052 (the boot-time routing conversion) is no longer a REOWNED row at all in effect: `removal()` marks it removed
- * from the daemon, the v4-to-v5 converter's packs step doing that job (britnee ruling #6).
+ * J-0052 (the boot-time routing conversion) is placed with Packs here, and `removal()` marks it removed from the daemon,
+ * the v4-to-v5 converter's packs step doing that job (britnee ruling #6).
  */
 const REOWNED: Readonly<Record<string, string>> = {
-  // Pack routing conversion at boot (the v4-to-v5 converter's packs step is the nearest owner).
+  // Pack routing conversion at boot: Packs' row; `removal()` marks it removed from the daemon (the converter's packs step
+  // renders the old guide into the one prompt, britnee ruling #6 and her later ruling on J-0052), so this only places it.
   'J-0052': 'packs',
   // Activity timers, the ordered log writer and the bundled worker host and probe: the kernel's clock, jobs and workers.
   'J-0093': 'kernel',

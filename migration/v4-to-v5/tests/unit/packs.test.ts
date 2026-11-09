@@ -121,29 +121,163 @@ test('only a routing prompt: packs.yaml holds routing alone; a home with neither
   });
 });
 
-test('J-0052 the one-time routing conversion v4 ran at boot is this step: the old guide keys are named and not carried, the prompt a home already has is', async () => {
-  // A home v4 had not yet folded: the old use-case guide and the old builder's preferences, and no prompt.
-  await raw('config/pack.yaml', ['enabled: true', 'routingPreferences: FAKE-OLD-PREFERENCES', ''].join('\n'));
-  await raw(
-    'config/models-guide.yaml',
-    ['useCases:', '  - FAKE-USE-CASE', 'routing: FAKE-OLD-ROUTING', 'models: [FAKE-MODEL]', ''].join('\n'),
-  );
-  let report = await packsStep.run(f.ctx());
+// The v4 home v4's own migrate test builds (packages/daemon/tests/unit/pack/migrate.test.ts at 4.291.5): the old
+// use-case guide with a routing prompt, and the old builder's preferences, and no prompt.
+const OLD_GUIDE = [
+  '# yaml-language-server: $schema=.schema/modelsGuide.json',
+  '# my guide',
+  'useCases:',
+  '  - id: plan-review',
+  '    title: Hard planning',
+  '    description: Plans.',
+  '    candidates:',
+  '      - provider: anthropic',
+  '        model: claude-opus-5-5',
+  '        effort: max',
+  '        why: Strongest.',
+  '      - provider: openai',
+  '        model: gpt-6-astra',
+  '        harness: codex',
+  '        why: Second family.',
+  '  - id: bulk',
+  '    title: Bulk edits',
+  '    description: Chores.',
+  '    candidates:',
+  '      - provider: anthropic',
+  '        model: claude-haiku-5-5',
+  '        effort: low',
+  '        why: Cheap.',
+  'routing:',
+  '  prompt: Keep Opus for reviews.',
+  '  short: "Routing: plan-review → claude-opus-5-5 max."',
+  'models:',
+  '  - provider: zai',
+  '    model: glm-5.3',
+  '    description: Cheap and fast.',
+  'suggested:',
+  '  by: gpt-oss-120b',
+  '  via: claude-work',
+  '  at: 2026-10-22T00:00:00.000Z',
+  '  acceptedAt: 2026-10-22T01:00:00.000Z',
+  '  partial: true',
+  '',
+].join('\n');
+const OLD_PACK = [
+  '# yaml-language-server: $schema=.schema/pack.json',
+  'enabled: true',
+  'decision: jev',
+  'routingPreferences: GLM for bulk work.',
+  '',
+].join('\n');
+const FOLDED = [
+  "Pick each sub-task's model by the kind of work, best first:",
+  '- Hard planning: claude-opus-5-5 at max, then gpt-6-astra (codex).',
+  '- Bulk edits: claude-haiku-5-5 at low.',
+  'Keep Opus for reviews.',
+  'Preferences: GLM for bulk work.',
+].join('\n');
+
+test('J-0052 a home v4 had not yet folded: the use cases, the routing prose and the preferences render into the ONE prompt exactly as v4 did, then the old keys go', async () => {
+  await ids();
+  await raw('config/pack.yaml', OLD_PACK);
+  await raw('config/models-guide.yaml', OLD_GUIDE);
+  const report = await packsStep.run(f.ctx());
   expect(report.status).toBe('converted');
+  const text = await config('packs.yaml');
+  const file: unknown = PacksFileSchema.parse(parse(text));
+  // The prompt is v4's rendering byte for byte (v4's own fixture, v4's own expected text); nothing else of the old guide.
+  expect(file).toEqual({ enabled: true, decision: 'jev', routing: { prompt: FOLDED } });
+  for (const old of ['useCases', 'candidates', 'Cheap and fast', 'routingPreferences', 'suggested', 'gpt-oss-120b'])
+    expect(text).not.toContain(old);
+  // What was folded in is named, the keys that went are named, and no value is in the report but the one prompt's source names.
+  expect(report.note).toContain(
+    'rendered from config/models-guide.yaml useCases, config/models-guide.yaml routing, config/pack.yaml routingPreferences into one prompt exactly as v4 does once at boot',
+  );
   expect(whats(report)).toEqual(
     expect.arrayContaining([
       'config/pack.yaml routingPreferences',
       'config/models-guide.yaml useCases, routing, models',
+      'config/models-guide.yaml suggested',
     ]),
   );
-  const unfolded = await config('packs.yaml');
-  for (const old of ['FAKE-USE-CASE', 'FAKE-OLD-ROUTING', 'FAKE-MODEL', 'FAKE-OLD-PREFERENCES', 'useCases'])
-    expect(unfolded).not.toContain(old);
-  expect(JSON.stringify(report)).not.toContain('FAKE-');
-  expect(PacksFileSchema.parse(parse(unfolded))).toEqual({ enabled: true });
-  // A home v4 had already folded holds the one prompt in models-guide.yaml: that prompt is carried, whole.
-  await raw('config/models-guide.yaml', 'prompt: the folded routing prompt\n');
+  expect(report.kept).toEqual(
+    expect.arrayContaining([{ what: 'routing prompt rendered from the old guide', count: 1 }]),
+  );
+  expect(JSON.stringify(report)).not.toContain('Hard planning');
+  expect(JSON.stringify(report)).not.toContain('GLM for bulk work');
+});
+
+test('J-0052 a home with preferences and no guide file, or a guide of prose alone, carries those words as the prompt (the default prompt v4 put in front is not rendered here)', async () => {
+  await raw('config/pack.yaml', 'routingPreferences: Opus for reviews.\n');
+  let report = await packsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(PacksFileSchema.parse(parse(await config('packs.yaml')))).toEqual({
+    routing: { prompt: 'Preferences: Opus for reviews.' },
+  });
+  expect(report.note).toContain('v4’s default prompt in front of that text is not added');
+  await raw('config/pack.yaml', 'enabled: true\n');
+  await raw('config/models-guide.yaml', 'routing:\n  prompt: Keep Opus for reviews.\nmodels:\n  - FAKE-MODEL\n');
   report = await packsStep.run(f.ctx());
+  expect(PacksFileSchema.parse(parse(await config('packs.yaml')))).toEqual({
+    enabled: true,
+    routing: { prompt: 'Keep Opus for reviews.' },
+  });
+});
+
+test('J-0052 a prompt the guide already has is never overwritten, a guide that only described models and a home with no old keys get no prompt, and a too-long rendering is cut with the use cases whole', async () => {
+  await raw('config/pack.yaml', 'routingPreferences: FAKE-OLD-PREFERENCES\n');
+  await raw(
+    'config/models-guide.yaml',
+    [
+      'prompt: Mine.',
+      'useCases:',
+      '  - title: Hard planning',
+      '    candidates:',
+      '      - model: claude-opus-5-5',
+      '',
+    ].join('\n'),
+  );
+  let report = await packsStep.run(f.ctx());
+  expect(PacksFileSchema.parse(parse(await config('packs.yaml')))).toEqual({ routing: { prompt: 'Mine.' } });
+  expect(whats(report)).toEqual(
+    expect.arrayContaining(['config/pack.yaml routingPreferences', 'config/models-guide.yaml useCases']),
+  );
+  expect(JSON.stringify(report)).not.toContain('FAKE-OLD-PREFERENCES');
+  expect(report.note ?? '').not.toContain('rendered from');
+  // Only model descriptions: nothing a prompt can carry, so v5 renders its own default.
+  await raw('config/pack.yaml', 'enabled: true\n');
+  await raw('config/models-guide.yaml', 'models:\n  - FAKE-MODEL\n');
+  report = await packsStep.run(f.ctx());
+  expect(await config('packs.yaml')).not.toContain('prompt');
+  expect(await config('packs.yaml')).not.toContain('FAKE-MODEL');
+  // No old key at all: no prompt is invented, v5 renders the default itself.
+  await raw(
+    'config/models-guide.yaml',
+    'suggested:\n  by: m\n  via: claude-work\n  at: 2026-10-22T00:00:00.000Z\n  acceptedAt: 2026-10-22T01:00:00.000Z\n',
+  );
+  await packsStep.run(f.ctx());
+  expect(parse(await config('packs.yaml'))).not.toHaveProperty('routing.prompt');
+  // Too long: the use cases stay whole, the prose is cut at a sentence, and the report says so.
+  await raw(
+    'config/pack.yaml',
+    `routingPreferences: ${'Prefer the strongest model for anything risky. '.repeat(40)}\n`,
+  );
+  await raw(
+    'config/models-guide.yaml',
+    'useCases:\n  - title: Hard planning\n    candidates:\n      - model: claude-opus-5-5\n',
+  );
+  report = await packsStep.run(f.ctx());
+  const prompt = PacksFileSchema.parse(parse(await config('packs.yaml'))).routing?.prompt ?? '';
+  expect(prompt.length).toBeLessThanOrEqual(1_200);
+  expect(prompt).toStartWith(
+    "Pick each sub-task's model by the kind of work, best first:\n- Hard planning: claude-opus-5-5.\n",
+  );
+  expect(report.note).toContain('cut to fit the prompt limit');
+});
+
+test('J-0052 a home v4 had already folded holds the one prompt in models-guide.yaml: that prompt is carried whole', async () => {
+  await raw('config/models-guide.yaml', 'prompt: the folded routing prompt\n');
+  const report = await packsStep.run(f.ctx());
   expect(report.status).toBe('converted');
   expect(PacksFileSchema.parse(parse(await config('packs.yaml')))).toMatchObject({
     routing: { prompt: 'the folded routing prompt' },
