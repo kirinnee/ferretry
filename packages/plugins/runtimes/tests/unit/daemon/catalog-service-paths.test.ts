@@ -569,7 +569,10 @@ describe('how an apply ends', () => {
     });
     const staged = await service.propose(REMOVE);
     const failure = await rejection(service.apply(staged.id, OWNER));
-    should(failure).match({ code: 'fleet_change_failed', message: 'the kernel went away' });
+    // C2: the documents landed before the plan failed, so the sentence says they stay written (not only the cause).
+    should(failure).match({ code: 'fleet_change_failed' });
+    should((failure as Error).message).startWith('the kernel went away; the configuration ');
+    should((failure as Error).message).endWith('was written first and is NOT rolled back with the fleet');
   });
 
   it('should refuse a ferret that widens what ferrets may drive, and keep the change to try again', async () => {

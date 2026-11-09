@@ -230,6 +230,17 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),
       });
       void expiry.rearm();
+      // A republish that cannot run (the model is not readable yet) is said once and never fails the event.
+      const republishForBudget = async (): Promise<void> => {
+        await assembly.catalog.republish?.().then(
+          () => undefined,
+          (error: unknown) => {
+            ctx.kernel.log.warn(
+              `a login's budget hold moved, but the fleet could not be published again: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        );
+      };
       const unwatchExpiry = config.watch(RUNTIME_ITEMS, () => void expiry.rearm());
       ctx.kernel.lifecycle.onStop(() => {
         unwatchExpiry();
@@ -265,6 +276,9 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           'ferrets.changed': async change => await ending.onChanged(change),
           // A login switched off or on, or its `until` moved: the expiry timer reads the logins again.
           'logins.changed': async () => await expiry.rearm(),
+          // A login its budget starts or stops holding: the fleet is published again so its wrappers follow (docs/budgets.md).
+          'usage.login-paused': async () => await republishForBudget(),
+          'usage.login-resumed': async () => await republishForBudget(),
         },
       };
     },
