@@ -148,9 +148,9 @@ export interface BoardWorld {
   readonly liveness: FerretsLiveness;
   readonly parents: FerretsParents;
   readonly watchEnabled: () => boolean;
-  readonly gateReconcile: () => Promise<void>;
+  readonly gateReconcile: (signal?: AbortSignal) => Promise<void>;
   readonly applyAnswer: (answer: AskAnswer) => Promise<'applied' | { readonly refused: string }>;
-  readonly sweepTick: () => Promise<void>;
+  readonly sweepTick: (signal?: AbortSignal) => Promise<void>;
   readonly lines: (ferret: string) => Promise<readonly SitrepLine[]>;
   readonly heldBy: (ferret: string) => Promise<readonly CardView[]>;
   /** The lane set of every project that has a card (`BoardApi.laneSets`). */
@@ -637,13 +637,13 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     liveness,
     parents,
     watchEnabled: () => kernel.config.file(defs.config)?.github.watch ?? true,
-    gateReconcile: async () => {
-      await gates.backfill();
+    gateReconcile: async signal => {
+      await gates.backfill(signal);
     },
     applyAnswer,
-    sweepTick: async () => {
-      await sweep.tick();
-      await gates.sweep();
+    sweepTick: async signal => {
+      await sweep.tick(signal);
+      await gates.sweep(signal);
     },
     lines: async ferret =>
       (await heldBy(ferret)).map(card => ({

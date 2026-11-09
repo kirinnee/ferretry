@@ -155,7 +155,11 @@ export interface CardAsks {
 /** Asks' link to cards: which open asks name each card. A card only DERIVES from it; the card holds no copy. */
 export interface CardAskLinkSource {
   /** The asks on `cards`, read from the asks of `board`'s ferrets (`cards` when absent). */
-  asksFor(cards: readonly Card[], board?: readonly Card[]): Promise<ReadonlyMap<CardId, CardAsks>>;
+  asksFor(
+    cards: readonly Card[],
+    board?: readonly Card[],
+    signal?: AbortSignal,
+  ): Promise<ReadonlyMap<CardId, CardAsks>>;
 }
 
 // ---------------------------------------------------------------------------------------------------

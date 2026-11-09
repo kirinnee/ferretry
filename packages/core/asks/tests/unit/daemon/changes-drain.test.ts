@@ -9,11 +9,11 @@ function world(pending: string[]) {
   const inner = new FakeLedgerRepository();
   const counts = { reads: 0, flushed: [] as string[] };
   const repository: AgendaLedgerRepository = {
-    read: async id => {
+    read: async () => {
       counts.reads += 1;
-      return await inner.read(id);
+      return await inner.read();
     },
-    transact: async (id, apply, by, provenance) => await inner.transact(id, apply, by, provenance),
+    transact: async (id, apply) => await inner.transact(id, apply),
     changeOutbox: {
       flush: async id => {
         counts.flushed.push(id);

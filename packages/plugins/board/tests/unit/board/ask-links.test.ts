@@ -103,4 +103,27 @@ describe("Asks' link to cards", () => {
   it('should read the ledgers in batches', () => {
     should(ASK_READ_CONCURRENCY).be.above(0);
   });
+
+  it('should stop at the next batch once its signal aborts, reading no more ledgers', async () => {
+    const owners = Array.from({ length: ASK_READ_CONCURRENCY * 4 }, (_, i) => `owner${String(i)}`);
+    const ledgers = new FakeLedgers({});
+    const controller = new AbortController();
+    const cards = owners.map((owner, i) => card({ id: `F${String(i + 1)}`, owner, assignee: owner }));
+    const seen = new FakeLedgers({});
+    const stopping: FerretAsksReader = {
+      open: async ferret => {
+        const read = await seen.open(ferret);
+        controller.abort();
+        return read;
+      },
+    };
+
+    await new CardAskLinks(stopping, { warn: () => undefined }).asksFor(cards, cards, controller.signal).then(
+      () => should.fail(undefined, undefined, 'a stopped read must not complete'),
+      (error: unknown) => should((error as Error).name).equal('AbortError'),
+    );
+
+    should(seen.reads.length).be.belowOrEqual(ASK_READ_CONCURRENCY);
+    should(ledgers.reads).eql([]);
+  });
 });

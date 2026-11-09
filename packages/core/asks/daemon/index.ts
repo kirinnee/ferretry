@@ -99,7 +99,7 @@ export default implementDaemon(manifest, {
 
     const sources = (key: SourceKey) => hooks.provider(AskSources, key);
     const boards = { ferrets: async () => await state.list(AgendaLedgerFiles) };
-    const recover = async () => {
+    const recover = async (signal: AbortSignal) => {
       const ferrets = [
         ...new Set(
           (
@@ -111,7 +111,10 @@ export default implementDaemon(manifest, {
           ).flat(),
         ),
       ];
-      for (const ferret of ferrets) await agenda.list(ferret).catch(error => warn(String(error)));
+      for (const ferret of ferrets) {
+        signal.throwIfAborted();
+        await agenda.list(ferret).catch(error => warn(String(error)));
+      }
       await replies.resume(ferrets);
     };
     kernel.jobs.add({ id: 'recover', schedule: { onceAfterStart: true }, run: recover });

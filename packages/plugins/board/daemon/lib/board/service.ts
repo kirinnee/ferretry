@@ -400,11 +400,13 @@ export class BoardService {
   }
 
   /** Every card's view, closed and dropped included, with every board's lanes: the board sweep's one read. */
-  async sweepBoard(): Promise<{ readonly views: readonly CardView[]; readonly laneSets: LaneSets }> {
+  async sweepBoard(
+    signal?: AbortSignal,
+  ): Promise<{ readonly views: readonly CardView[]; readonly laneSets: LaneSets }> {
     const snapshot = await this.ports.store.read();
     const laneSets = await this.laneSetsOf(snapshot.cards.map(card => card.projectId));
     const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
-    const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports);
+    const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports, snapshot.cards, signal);
     return { views: snapshot.cards.map(card => deriveView(card, derivation)), laneSets };
   }
 

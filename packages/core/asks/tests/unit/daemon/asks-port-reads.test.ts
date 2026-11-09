@@ -1,4 +1,5 @@
 import { expect, it } from 'bun:test';
+import type { FerretId } from '@ferretry/kernel/contract';
 import type { AskDraft } from '../../../contract/index.ts';
 import { asksPort } from '../../../daemon/adapters/asks-port.ts';
 import { agendaService } from './routes/support.ts';
@@ -47,7 +48,7 @@ const draft = (entry: string): AskDraft => ({
 it('open({ ferret }) reads only the named ferret board, not all 300', async () => {
   const { agenda, reads } = counted();
   const api = asksPort(agenda, boards, () => 'unavailable');
-  await api.open({ ferret: 'b7' });
+  await api.open({ ferret: 'b7' as FerretId });
   expect(reads.list).toBe(1);
 });
 

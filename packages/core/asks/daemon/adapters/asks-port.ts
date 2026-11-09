@@ -246,6 +246,8 @@ export function asksPort(
   const held = new Map<string, AskRef>();
   let indexed: Promise<void> | undefined;
   const heldOn = async (ferret: string, sourceRef: string): Promise<AskRef | undefined> => {
+    const known = held.get(sourceRef);
+    if (known !== undefined) return known;
     const direct = await agenda.raisedObligation(ferret, sourceRef);
     if (direct !== undefined) return { ferret, id: direct as AskId };
     indexed ??= (async () => {
