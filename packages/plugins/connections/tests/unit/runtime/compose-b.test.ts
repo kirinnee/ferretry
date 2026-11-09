@@ -9,7 +9,6 @@ import { anonymous, device, owner } from '../../../../../core/kernel/testing/adm
 import { carrierListenerPort } from '../../../../../core/kernel/host/carrier-listener.ts';
 import { createConfigFiles } from '../../../../../core/kernel/host/config/service.ts';
 import { createMemoryHostFs } from '../../../../../core/kernel/host/state/memory-fs.ts';
-import { captureLog, manualClock } from '../../../../../core/kernel/tests/unit/host-config/support.ts';
 import { testHost } from '../../../../../core/kernel/testing/host.ts';
 import { HOSTED_APP_ORIGIN, TUNNEL_OFF_SENTENCE, TunnelStatusViewSchema } from '../../../contract/index.ts';
 import { composeOtherConnections, kernelTunnelHost } from '../../../daemon/compose-b.ts';
@@ -124,11 +123,12 @@ describe('connections daemon half: tunnel and WebRTC composed', () => {
     const memory = createMemoryHostFs();
     const latin1 = new Uint8Array([...new TextEncoder().encode('# caf'), 0xe9, ...new TextEncoder().encode('\n')]);
     memory.seed('/home/fy/config/connections.yaml', latin1);
+    const cancel = () => undefined;
     const real = createConfigFiles({
       home: '/home/fy',
       fs: memory,
-      clock: manualClock(),
-      log: captureLog(),
+      clock: { nowMs: () => 0, after: () => cancel, every: () => cancel },
+      log: { debug() {}, info() {}, warn() {}, error() {}, child: () => undefined } as never,
       binary: 'fy',
       defs: [{ plugin: 'connections', def: manifest.data.config[0] as never }],
     });
