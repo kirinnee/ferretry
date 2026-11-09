@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { convert } from '../../src/convert.ts';
@@ -56,8 +56,8 @@ const build = async () => {
   await f.put(`state/attachments/daemon1/f1/${lost.id}/manifest.json`, lost.manifest);
 
   const outsidePath = join(outside, 'settings.json');
-  await writeFile(outsidePath, JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o000 });
-  await chmod(outsidePath, 0o000);
+  // Readable on purpose: if the converter ever opened it, the marker would land in a v5 file and fail the test.
+  await writeFile(outsidePath, JSON.stringify({ marker: OUTSIDE_MARKER }), { mode: 0o600 });
   // (a) flags + env, (b) a file inside the home, (c) a file outside the home.
   await text(
     'config/components/settings/claude-settings.yaml',
