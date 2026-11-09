@@ -89,6 +89,14 @@ describe('PasteRuleStages', () => {
     should(stages.view(PHONE, staged.stage)).match({ state: 'approved', rule: EXISTING.id });
   });
 
+  it('should hand back the rule request a waiting stage holds, to the device that staged it only', async () => {
+    const { stages } = world();
+    const staged = await stages.stage(PHONE, RULE);
+
+    should(stages.requestOf(PHONE, staged.stage)).eql(RULE);
+    should(() => stages.requestOf(LAPTOP, staged.stage)).throw(PasteRuleStageGone);
+  });
+
   it('should say who staged it and when, in the daemon rows', async () => {
     const { stages } = world();
 

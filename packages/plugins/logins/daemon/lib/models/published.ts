@@ -95,14 +95,15 @@ const fromBase64 = (text: string): Bytes => Uint8Array.from(atob(text), characte
 const base64Url = (bytes: Bytes): string =>
   toBase64(bytes).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
 
+/**
+ * Base64url text decoded, or `undefined` when it is not base64url. A text one character past a whole group is never
+ * valid, so it is refused here rather than left to `atob` — whether `atob` throws on it depends on the DOM in play.
+ * Every other text that passes the alphabet check decodes.
+ */
 const fromBase64Url = (text: string): Bytes | undefined => {
-  if (!/^[A-Za-z0-9_-]+$/u.test(text)) return undefined;
+  if (!/^[A-Za-z0-9_-]+$/u.test(text) || text.length % 4 === 1) return undefined;
   const padded = text.replaceAll('-', '+').replaceAll('_', '/');
-  try {
-    return fromBase64(padded + '='.repeat((4 - (padded.length % 4)) % 4));
-  } catch {
-    return undefined;
-  }
+  return fromBase64(padded + '='.repeat((4 - (padded.length % 4)) % 4));
 };
 
 const sha256 = async (bytes: Bytes): Promise<string> =>
