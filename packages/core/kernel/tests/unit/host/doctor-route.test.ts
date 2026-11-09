@@ -21,7 +21,7 @@ const plugin = definePlugin({
 });
 
 test('G158 a declared doctor check with no run still boots, and fy doctor names it as a failure', async () => {
-  const root = await mkdtemp(`${tmpdir()}/doctor-unimplemented-`);
+  const root = await mkdtemp(`${tmpdir()}/doctor-route-`);
   const home = `${root}/home`;
   const adapters: HostOptions['adapters'] = {
     ...realAdapters(home, () => {}, { binary: 'fy' }),
