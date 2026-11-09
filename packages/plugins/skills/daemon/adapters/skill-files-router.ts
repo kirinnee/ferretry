@@ -36,16 +36,18 @@ export class SkillFilesRouter implements SkillFilesPort {
   constructor(private readonly routing: SkillFilesRouting) {}
 
   async list(directory: string, limit: number): Promise<readonly SkillDirectoryEntry[]> {
-    const { work } = this.routing;
-    if (work !== undefined && insideFolder(work.base, directory)) return await work.files.list(directory, limit);
+    // A published home's folder is an exact claim, so it goes first: a ferret working in a folder that CONTAINS the
+    // Ferretry home (the kernel allows one) must still see its home's skills, which its `work` root would answer fenced.
     const home = (await this.routing.homes()).find(candidate => `${candidate.home}/skills` === directory);
     if (home !== undefined) return await this.#homeList(home, limit);
+    const { work } = this.routing;
+    if (work !== undefined && insideFolder(work.base, directory)) return await work.files.list(directory, limit);
     return await this.routing.projects.list(directory, limit);
   }
 
   async read(path: string, maxBytes: number): Promise<string | undefined> {
-    const { work } = this.routing;
-    if (work !== undefined && insideFolder(work.base, path)) return await work.files.read(path, maxBytes);
+    // The exact claims first (installed store, a published home, a listed asset), then the ferret's own folder, then a
+    // registered project: same reason as `list`.
     if (this.routing.installed.claims(path)) return await this.routing.installed.read(path, maxBytes);
     const match = SKILL_MANIFEST.exec(path);
     if (match !== null) {
@@ -55,6 +57,8 @@ export class SkillFilesRouter implements SkillFilesPort {
       const asset = await this.#assetManifest(path, name, maxBytes);
       if (asset !== undefined) return asset;
     }
+    const { work } = this.routing;
+    if (work !== undefined && insideFolder(work.base, path)) return await work.files.read(path, maxBytes);
     return await this.routing.projects.read(path, maxBytes);
   }
 

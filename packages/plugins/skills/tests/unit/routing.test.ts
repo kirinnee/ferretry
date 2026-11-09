@@ -127,7 +127,23 @@ describe('the skill file router', () => {
     expect(await router.list('/etc', 10)).toEqual([]);
   });
 
-  test('a ferret’s own folder is read through its work files, before anything else', async () => {
+  test('R-0197 a ferret working in a folder that holds the Ferretry home still sees its home, asset and installed skills', async () => {
+    // The kernel allows a work folder that CONTAINS the home; its `work` root answers those paths fenced (nothing).
+    const fenced: SkillFilesPort = { list: async () => [], read: async () => undefined };
+    const router = new SkillFilesRouter(routing({ work: { files: fenced, base: '/' } }));
+    expect((await router.list(`${HOME.home}/skills`, 10)).map(entry => entry.manifest)).toEqual([
+      `${HOME.home}/skills/mine/SKILL.md`,
+      `${HOME.home}/skills/ours/SKILL.md`,
+    ]);
+    expect(await router.read(`${HOME.home}/skills/mine/SKILL.md`, 100)).toBe('home text of mine');
+    expect(await router.read(`${ASSETS}/tool/SKILL.md`, 100)).toBe('asset text of tool');
+    expect(await router.read('/state/skills/installed/inst/SKILL.md', 100)).toBe('installed text');
+    // every other path of that folder still goes to the work root
+    expect(await router.list('/work/p/.claude/skills', 10)).toEqual([]);
+    expect(await router.read('/work/p/.claude/skills/pp/SKILL.md', 100)).toBeUndefined();
+  });
+
+  test('a ferret’s own folder is read through its work files, before a registered project’s folder', async () => {
     const work = { files: listed('/work/f/.claude/skills/w/SKILL.md'), base: '/work/f' };
     const router = new SkillFilesRouter(routing({ work }));
     expect((await router.list('/work/f/.claude/skills', 10)).map(entry => entry.manifest)).toEqual([
