@@ -16,6 +16,7 @@ import type {
 } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
 import { ChatScreen } from './chat/chat-screen.tsx';
+import { MessageMarksLegend } from './chat/message-marks-legend.tsx';
 import { ChatWidthPanel } from './chat-width-control.tsx';
 import { ConversationClientProvider } from './client.ts';
 import { ComposerAttachPanel } from './composer/composer-attach.tsx';
@@ -45,7 +46,6 @@ export interface ConversationSurfaces {
     readonly queue: AppComponent<PanelProps>;
     readonly 'compact-at': AppComponent<PanelProps>;
     readonly hypermedia: AppComponent<PanelProps>;
-    readonly 'chat-width': AppComponent<PanelProps>;
     readonly 'files-search': AppComponent<PanelProps>;
     readonly 'interrupt-row': AppComponent<PanelProps>;
     readonly 'agenda-conversation': AppComponent<PanelProps>;
@@ -53,6 +53,20 @@ export interface ConversationSurfaces {
   readonly settings: { readonly conversation: AppComponent<SettingsProps> };
   readonly renderers: { readonly 'ask:question': AppComponent<RendererProps> };
 }
+
+/**
+ * The `device.settings` panels (Settings › Appearance), drawn with NO daemon and NO client (shell contract S4): both read
+ * and write only this device's controls, so they need none. They show with no machine paired, offline or locked.
+ */
+export const deviceSettingsPanels = {
+  'chat-width': ChatWidthPanel,
+  'message-marks': () => (
+    <section>
+      <h3>Message marks</h3>
+      <MessageMarksLegend />
+    </section>
+  ),
+} as const;
 
 export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
   screens: {
@@ -64,7 +78,6 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     queue: scoped<PanelProps>(client, QueuePanel),
     'compact-at': scoped<PanelProps>(client, CompactAtPanel),
     hypermedia: scoped<PanelProps>(client, HypermediaPanel),
-    'chat-width': scoped<PanelProps>(client, ChatWidthPanel),
     'files-search': scoped<PanelProps>(client, FilesSearchPanel),
     'interrupt-row': scoped<PanelProps>(client, InterruptRowPanel),
     'agenda-conversation': scoped<PanelProps>(client, AgendaConversationPanel),

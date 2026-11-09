@@ -20,6 +20,7 @@ export {
   type DaemonlessScreenProps,
   type DaemonlessViews,
   type DeviceClaims,
+  type BackgroundViewProps,
   type DeviceViewProps,
   type DirectoryFetch,
   type PairedOver,
@@ -200,6 +201,12 @@ export type { NoReach } from './shell/plugin-identity.tsx';
 // ─── declared fragments, device views and the in-memory hand-off (shell contract S3) ─────────────────────────────
 export { type FragmentDecl, FRAGMENT_KEY } from './router/address.ts';
 export { type FragmentArrival, useFragment } from './shell/use-fragment.ts';
+export {
+  type InstallOutcome,
+  type InstallPlatform,
+  type InstallPrompt,
+  useInstallPrompt,
+} from './shell/install-prompt.ts';
 export { handOff, type OwnScreenRef, useHandOff, useOwnScreen } from './shell/hand-off.ts';
 
 export {

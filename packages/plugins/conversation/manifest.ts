@@ -313,6 +313,8 @@ export default definePlugin({
       panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
       // This device's conversation width (lead decision Q11).
       panel('device.settings', { id: 'chat-width', order: 20 }),
+      // Settings › Appearance › Message marks: the key to the clock, ticks and ! under a message (S-0509).
+      panel('device.settings', { id: 'message-marks', order: 10 }),
       // Contributions to other plugins' slots (§5.2), each by the offerer's slot name: Ferrets' file browser gets the
       // current-ferret search, its Actions ▾ menu gets Interrupt, and Agenda's ask page gets the ferret's conversation.
       panel(FILES_SEARCH_SLOT, { id: 'files-search', order: 10 }),

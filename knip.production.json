@@ -206,7 +206,6 @@
         "daemon/reader/lib/session/reader.ts",
         "daemon/reader/lib/session/tail-cache.ts",
         "daemon/reader/lib/session/log-page.ts",
-        "app/chat/message-marks-legend.tsx",
         "daemon/attachments/adapters/raw-deflate.ts"
       ]
     },

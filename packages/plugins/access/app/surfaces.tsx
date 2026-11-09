@@ -1,3 +1,4 @@
+import { controlState, useEveryDaemon } from '@ferretry/app';
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { AddDeviceSurface } from './features/settings/add-device-settings.tsx';
@@ -44,19 +45,28 @@ export function UnlockPanel({ subject }: PanelProps) {
 }
 
 /**
- * `device.settings` › notifications: this browser's own permissions (notifications among them), and beneath them this
- * machine's Web Push — the permission, the switch that enrols this browser with it, and its registered devices.
- * Built per machine: the half's client reaches that machine only.
+ * `device.settings` › notifications: this browser's own permissions (notifications among them), and beneath them each
+ * machine's Web Push — the permission, the switch that enrols this browser with it, and its registered devices, one
+ * section per machine, each naming it. Drawn with NO machine and no client (shell contract S4): the machines come from
+ * `useEveryDaemon`, each section writes only through its own row's client, and a machine this device may not use
+ * (`not-granted`) is not listed.
  */
-export function notificationsPanel(client: PluginClient) {
-  return function NotificationsPanel() {
-    return (
-      <>
-        <DevicePermissionsSetting />
-        <MachineNotificationsSettings client={client} />
-      </>
-    );
-  };
+export function NotificationsDevicePanel() {
+  const rows = useEveryDaemon();
+  return (
+    <>
+      <DevicePermissionsSetting />
+      {rows.map(row => {
+        const state = controlState(row.authorityOf('POST /v1/push/subscriptions'));
+        return state.shown ? (
+          <section key={row.daemon} data-machine={row.daemon}>
+            <h3>{row.machine}</h3>
+            <MachineNotificationsSettings client={row.client} label={row.machine} />
+          </section>
+        ) : null;
+      })}
+    </>
+  );
 }
 
 /** `daemon.status` › notifications-off: one line when this machine has no device enrolled anywhere to push to. */

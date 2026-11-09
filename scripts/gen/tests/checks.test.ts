@@ -1378,6 +1378,69 @@ describe('shell-provides', () => {
       'declares a fragment in no known form: null',
     ]);
   });
+  test('the frame sections (S4, S5, S7): real shapes pass', () => {
+    expect(
+      found(
+        half('agenda', {
+          screens: [{ id: 'inbox', nav: { label: 'Inbox' } }],
+          panels: [{ id: 'needs-you', slot: 'nav' }],
+          navPanels: ['needs-you'],
+          navBadges: ['inbox'],
+          background: ['watch'],
+        }),
+        half('updates', {
+          panels: [{ id: 'install', slot: 'device.settings' }],
+          deviceSettings: ['install'],
+        }),
+        half('browsers', { links: true }),
+        // A panel in another slot needs no device view, and a skeleton half's panels are not asked for.
+        half('conversation', { panels: [{ id: 'queue', slot: 'ferret.side' }] }),
+        half('late', { skeleton: true, panels: [{ id: 'x', slot: 'nav' }] }),
+      ),
+    ).toEqual([]);
+  });
+  test('planted: a links provider outside the taker list is found', () => {
+    expect(found(half('conversation', { links: true }))).toEqual([
+      expect.stringContaining('provides `shell.links`, but only browsers may'),
+    ]);
+  });
+  test('planted: a navBadges key that is not an own screen with a nav entry is found', () => {
+    expect(found(half('agenda', { navBadges: ['inbox'] }))).toEqual([
+      'has a `shell.navBadges` key "inbox", which is not one of its own screens',
+    ]);
+    expect(found(half('agenda', { screens: [{ id: 'inbox' }], navBadges: ['inbox'] }))).toEqual([
+      expect.stringContaining('whose screen declares no `nav` entry'),
+    ]);
+  });
+  test('planted: a device.settings or nav view that is no declared panel, and a declared panel with no view, are found', () => {
+    expect(found(half('updates', { deviceSettings: ['install'] }))).toEqual([
+      'has a `shell.deviceSettings` view "install", which is not a panel it declares in `device.settings`',
+    ]);
+    expect(
+      found(half('agenda', { navPanels: ['needs-you'], panels: [{ id: 'needs-you', slot: 'device.settings' }] })),
+    ).toEqual([
+      expect.stringContaining('declares the `device.settings` panel "needs-you" with no `shell.deviceSettings` view'),
+      'has a `shell.navPanels` view "needs-you", which is not a panel it declares in `nav`',
+    ]);
+    expect(found(half('agenda', { panels: [{ id: 'needs-you', slot: 'nav' }] }))).toEqual([
+      expect.stringContaining('declares the `nav` panel "needs-you" with no `shell.navPanels` view'),
+    ]);
+  });
+  test('planted: background and navBadges on a skeleton half are found', () => {
+    expect(
+      found(
+        half('agenda', {
+          skeleton: true,
+          background: ['watch'],
+          navBadges: ['inbox'],
+          screens: [{ id: 'inbox', nav: {} }],
+        }),
+      ),
+    ).toEqual([
+      'is a skeleton half with `shell.background` views (watch): nothing mounts them',
+      'is a skeleton half with `shell.navBadges` (inbox): nothing draws them',
+    ]);
+  });
   test('over a workspace: a half that declares a key with no taker fails, and a half that fails to load is said', async () => {
     const fx = fixture([
       {

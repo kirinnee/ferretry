@@ -12,11 +12,13 @@ import { browserPushHost, type PushHost } from '../../lib/push-host.ts';
 import { MachineNotificationList, NotificationsOffBanner } from './notification-machines.tsx';
 import { NotificationSettingsView } from './notification-settings.tsx';
 
-/** The shell hands a half no machine name, so a machine is "This machine" on its own screens. */
+/** On a machine's own screens it is just "This machine"; the device-level list names each machine (`label`). */
 export const THIS_MACHINE = 'This machine';
 
 export interface MachineNotificationsProps {
   readonly client: PluginClient;
+  /** What the machine is called in the rows and the banner; "This machine" when absent. */
+  readonly label?: string;
   /** The browser's push facilities; the page's own unless a suite hands one in. */
   readonly host?: PushHost;
 }
@@ -24,6 +26,7 @@ export interface MachineNotificationsProps {
 function Bound({
   client,
   host,
+  label,
   daemon,
   children,
 }: MachineNotificationsProps & {
@@ -32,19 +35,25 @@ function Bound({
 }) {
   const service = useMemo(() => clientPushService(client), [client]);
   const pushHost = useMemo(() => host ?? browserPushHost(), [host]);
-  return <>{children(useMachineNotification({ daemon, label: THIS_MACHINE, service, host: pushHost }))}</>;
+  return <>{children(useMachineNotification({ daemon, label: label ?? THIS_MACHINE, service, host: pushHost }))}</>;
 }
 
 /** The notifications of the machine `client` talks to; nothing for a client the shell did not make. */
 function ForMachine({
   client,
   host,
+  label,
   children,
 }: MachineNotificationsProps & { readonly children: (notification: MachineNotification) => ReactNode }) {
   const daemon = daemonOfClient(client);
   if (daemon === undefined) return null;
   return (
-    <Bound client={client} {...(host === undefined ? {} : { host })} daemon={daemon}>
+    <Bound
+      client={client}
+      {...(host === undefined ? {} : { host })}
+      {...(label === undefined ? {} : { label })}
+      daemon={daemon}
+    >
       {children}
     </Bound>
   );
