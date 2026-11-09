@@ -138,6 +138,9 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     await copy('copyTree link from a project folder into a project folder', () =>
       project.copyTree(project, at(project, '.claude/skills/c1'), at(project, '.claude/skills/c3'), { link: true }),
     );
+    await copy('copy FROM a folder above a grant into a project folder', () =>
+      project.copyTree(project, at(project, '.claude'), at(project, '.claude/skills/c5')),
+    );
     await copy('copy a project folder into downloads', () =>
       downloads.copyTree(project, at(project, '.claude/skills/c1'), at(downloads, 'got')),
     );
@@ -491,6 +494,7 @@ test('S179 project-files parity: every case is answered alike on the testing hos
   expect(byCase['copyTree link into a grant']).toEqual({ refused: 'read_only' });
   expect(byCase['copyTree link above a grant']).toEqual({ refused: 'not_declared' });
   expect(byCase['copyTree link from a project folder into a project folder']).toEqual({ refused: 'read_only' });
+  expect(byCase['copy FROM a folder above a grant into a project folder']).toEqual({ refused: 'not_declared' });
   expect(byCase['copy a project folder into downloads']).toEqual({ ok: null });
   expect(byCase['the project copy landed']).toEqual({ ok: '# pack' });
   expect(byCase['copy FROM a folder above a grant']).toEqual({ refused: 'not_declared' });
