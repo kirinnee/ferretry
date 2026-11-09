@@ -242,8 +242,41 @@ describe('PF-budget a `*` collection spends its budget only on a member that hol
     const snapshot = await privateIndexOf(REAL, real, INPUT, { wall: LATER, bounds: small }).snapshot();
     expect(snapshot.truncated).toEqual([`${real}/state/ferrets/sessions`]);
     expect(snapshot.closed.map(tree => tree.path)).toEqual([`${real}/state/ferrets/sessions`]);
-    expect(snapshot.closed[0]?.device).toBe((await REAL.identity(l.sessions))?.device as bigint);
+    const folder = (await REAL.identity(l.sessions))?.device as bigint;
+    const file = (await REAL.identity(`${l.sessions}/s0/${ENV}`))?.device as bigint;
+    expect(snapshot.closed[0]?.devices).toEqual(new Set([folder, file]));
     expect(snapshot.budgets).toEqual([{ path: `${real}/state/ferrets/sessions`, limit: 3, indexed: 3 }]);
+  });
+
+  test('PF-budget the first holder past the budget moves to a device of its own while every indexed place stays: the tree is closed on the new device at the next look, never answered from the snapshot before', async () => {
+    const l = await home();
+    await fill(l.sessions, 3, n => `s${n}/${ENV}`);
+    const real = await realpath(l.home);
+    const folder = (await REAL.identity(l.sessions))?.device as bigint;
+    const file = (await REAL.identity(`${l.sessions}/s0/${ENV}`))?.device as bigint;
+    // A device that is neither the folder's nor the file's, whatever disk the test runs on.
+    const mounted = (folder > file ? folder : file) + 9n;
+    // The third holder (s2) is the first one past the budget; a mount appears on its file after the first look.
+    let moved = false;
+    const disk: HostFs = {
+      ...REAL,
+      identity: async path => {
+        const found = await REAL.identity(path);
+        return moved && found !== undefined && path === `${l.sessions}/s2/${ENV}`
+          ? { ...found, device: mounted }
+          : found;
+      },
+    };
+    const index = privateIndexOf(disk, real, INPUT, { bounds: small });
+    const first = await index.snapshot();
+    expect(first.closed[0]?.devices).toEqual(new Set([folder, file]));
+    moved = true;
+    // Writing into the folder stands in for the folder being looked at again; no indexed place, key or count differs.
+    await writeFile(`${l.sessions}/s2/touched.md`, 'x');
+    const after = await index.snapshot();
+    expect(after.places.map(place => place.key)).toEqual(first.places.map(place => place.key));
+    expect(after.closed[0]?.devices).toEqual(new Set([folder, file, mounted]));
+    expect(after).not.toBe(first);
   });
 });
 
@@ -784,6 +817,54 @@ describe('PF-flat every session folder is pinned by its own identity, holder or 
     expect(now).toBe(fresh);
     const places = (await index.snapshot()).places;
     expect(places.some(place => place.key === old)).toBe(false);
+  });
+
+  test('private-files a pinned member folder on a device of its own closes that device: an alias on it is refused, holder or not', async () => {
+    const l = await home();
+    await mkdir(`${l.sessions}/e0`, { recursive: true });
+    await writeFile(`${l.sessions}/e0/notes.md`, 'x');
+    await fill(l.sessions, 4, n => `s${n}/${ENV}`);
+    await mkdir(`${l.parent}/work`, { recursive: true });
+    await writeFile(`${l.parent}/work/plain.txt`, 'hello');
+    const real = await realpath(l.home);
+    const here = ((await REAL.identity(real)) as FileIdentity).device;
+    // The folder that holds nothing (e0) and a folder that holds the file (s0) each answer a device of their own, and
+    // neither is a device an indexed file or the head answers with; s2 and s3 are past the budget of 3.
+    const nonHolder = here + 5001n;
+    const holder = here + 5002n;
+    const alias = (device: bigint, inode: bigint): FileIdentity => ({ ...made('file', inode, device), size: 1 });
+    const fs: HostFs = {
+      ...REAL,
+      identity: async path => {
+        const found = await REAL.identity(path);
+        if (found === undefined) return found;
+        // The head and the indexed files answer devices that are not the work folder's: the control stays open.
+        if (path === l.sessions) return { ...found, device: here + 5000n };
+        if (path.startsWith(`${l.sessions}/`) && path.endsWith(`/${ENV}`)) return { ...found, device: here + 5003n };
+        if (path === `${l.sessions}/e0`) return { ...found, device: nonHolder };
+        if (path === `${l.sessions}/s0`) return { ...found, device: holder };
+        if (path.startsWith(`${l.sessions}/`) && /^s\d+$/.test(path.slice(l.sessions.length + 1)))
+          return { ...found, device: here + 5004n };
+        if (path === `${l.parent}/work/on-empty.txt`) return alias(nonHolder, 7_000_000_001n);
+        if (path === `${l.parent}/work/on-holder.txt`) return alias(holder, 7_000_000_002n);
+        return found;
+      },
+    };
+    await writeFile(`${l.parent}/work/on-empty.txt`, 'a');
+    await writeFile(`${l.parent}/work/on-holder.txt`, 'b');
+    const bounds = { depth: 3, limit: 4096, patternLimit: 3 } as const;
+    const snapshot = await privateIndexOf(fs, real, INPUT, { wall: LATER, bounds }).snapshot();
+    expect(snapshot.truncated).toEqual([`${real}/state/ferrets/sessions`]);
+    expect(snapshot.closed[0]?.devices.has(nonHolder)).toBe(true);
+    expect(snapshot.closed[0]?.devices.has(holder)).toBe(true);
+    // The fence a root holds is built from this snapshot's closed devices (the default bounds would not truncate here).
+    const fence = {
+      ...(await fenceOf(fs, l.home, LIST)),
+      closed: new Set(snapshot.closed.flatMap(t => [...t.devices])),
+    };
+    expect(await fencedReal(fs, fence, `${l.parent}/work/plain.txt`)).toBe(false);
+    expect(await fencedReal(fs, fence, `${l.parent}/work/on-empty.txt`)).toBe(true);
+    expect(await fencedReal(fs, fence, `${l.parent}/work/on-holder.txt`)).toBe(true);
   });
 
   test('PF-flat a session folder that left is no longer pinned: the pin goes with the folder, holder or not', async () => {

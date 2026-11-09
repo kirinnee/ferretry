@@ -109,8 +109,6 @@ interface IndexedPlace {
  */
 interface ClosedTree {
   readonly path: string;
-  /** The device of the tree's head folder. */
-  readonly device: bigint;
   /** Every device the head and the places indexed in the tree answer with (the head's included). */
   readonly devices: ReadonlySet<bigint>;
 }
@@ -412,7 +410,7 @@ async function build(
     const identity = await pick(headPath);
     add(headPath, identity);
     if (identity?.kind !== 'directory') continue;
-    const tree: GrowingTree = { path: headPath, device: identity.device, devices: new Set([identity.device]) };
+    const tree: GrowingTree = { path: headPath, devices: new Set([identity.device]) };
     const limit = each ? (bounds.patternLimit ?? PATTERN_LIMIT) : bounds.limit;
     // The head is one of the place's own: its budget is what is left for what the head holds.
     const budget: Budget = { left: limit - 1 };
@@ -448,6 +446,8 @@ async function build(
       if (folder?.identity !== undefined) {
         folder.folderPlace ??= placeOf(member, folder.identity);
         places.push(folder.folderPlace);
+        // A pinned member folder answers its own device: an alias of a file on it is closed like an indexed place's.
+        tree.devices.add(folder.identity.device);
       }
       if (found === undefined) continue;
       tree.devices.add(found.device);

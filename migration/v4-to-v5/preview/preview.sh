@@ -20,6 +20,12 @@ set -euo pipefail
 #             hooks folder, a secret-shaped value...) leaves the Settings step PENDING by default, because a profile still
 #             layers it. With this flag its layer is removed from every profile that names it (each profile is named in the
 #             report) so the preview can start, and the ferrets on those profiles may be LESS restricted than in v4.
+#             A carried settings or hooks string that names a file under <v4 home>/fleet/assets/ (absolute, or ~/ $HOME/
+#             ${HOME}/ spellings that resolve to it, as a whole path token) has that FILE carried to the same path under
+#             the preview home's fleet/assets/ and only the token rewritten to it (mode 0600, or 0700 when the source is
+#             owner-executable; refused for a link, hard link, over 1 MiB, a credential, or content that names v4's
+#             home or worktree folder or a ~/.claude* or ~/.codex* home). Any other string naming the
+#             v4 home leaves the component NOT CARRIED: copy the file under fleet/assets in v4, or remove the hook.
 #   build     compile fy, fyd and the browser worker from a CLEAN rebuild/5.0 checkout with the preview app origin, prove
 #             the compiled binaries name that origin, and only then install them into <target>/libexec (bin holds shims
 #             that pin the preview). Refuses unless the preview signing key is committed on that checkout

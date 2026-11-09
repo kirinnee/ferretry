@@ -39,7 +39,10 @@ const folder = (path: string, why: string): Allowed => ({ path, kind: 'folder', 
 export const ALLOWED: readonly Allowed[] = [
   file('layout-version', 'the converter refuses a folder without the v4 layout marker'),
   file('fleet/ids.json', 'ferret and runtime ids (ferrets, settings, packs, lessons read it)'),
-  folder('fleet/assets', 'instruction documents and skill folders the settings and skill-folders steps carry'),
+  folder(
+    'fleet/assets',
+    'instruction documents, files a carried hook or setting names, and skill folders the settings and skill-folders steps carry',
+  ),
   file('config/machine.yaml', 'settings'),
   file('config/warden.yaml', 'settings'),
   file('config/limits.yaml', 'settings'),

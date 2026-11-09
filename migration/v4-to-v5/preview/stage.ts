@@ -168,7 +168,8 @@ export async function copyOne(home: string, staging: string, path: string): Prom
       );
     });
   } else await copyFile(join(home, path), target);
-  await chmod(target, 0o600);
+  // The owner-execute bit survives (a carried hook script stays runnable); group and other bits never do.
+  await chmod(target, (info.mode & 0o100) === 0 ? 0o600 : 0o700);
 }
 
 export interface StageReport {

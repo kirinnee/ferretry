@@ -408,8 +408,7 @@ async function heldPlace(scope: Scope, path: string): Promise<boolean> {
  */
 async function heldMember(scope: Scope, identity: FileIdentity): Promise<boolean> {
   // A tree that was not indexed whole holds its whole device unproven: an owner's root refuses a member there too.
-  if (scope.base.fence !== undefined)
-    return scope.base.fence.keys.has(identityKey(identity)) || scope.base.fence.closed.has(identity.device);
+  if (scope.base.fence !== undefined) return heldByIdentity(scope.base.fence, identity);
   return scope.base.guard !== undefined && (await scope.base.guard.heldIdentity(identity));
 }
 
@@ -996,8 +995,28 @@ const fenceNow = async (setup: PinFenceSetup): Promise<Fence | undefined> =>
     setup.privateFiles.watch,
   ).catch(() => undefined);
 
-const heldByFence = (fence: Fence, identities: readonly ComponentIdentity[]): boolean =>
-  identities.some(entry => fence.keys.has(identityKey({ device: entry.dev, inode: entry.ino })));
+/**
+ * Whether an entry whose identity is in hand is one of the fence's places, or sits on a device the fence holds unproven
+ * (a private tree that was not indexed whole: an entry there cannot be proven not to be an alias of an unindexed
+ * member, and an alias keeps its source's device). THE rule, asked by every door of an owner's root — the unpinned
+ * root's members and the held (pinned) root's walk alike — so the two can never disagree about a closed device.
+ */
+const heldByIdentity = (fence: Fence, identity: { readonly device: bigint; readonly inode: bigint }): boolean =>
+  fence.keys.has(identityKey(identity)) || fence.closed.has(identity.device);
+
+/**
+ * Whether a walk's components reach the fence: every component by device and inode (the home, its `-before-` folders,
+ * its key files and folders), and the entry the walk ended on — its LAST component — also by the closed devices, as the
+ * unpinned root judges the entry itself. A folder above it is the walk's way there, not an entry: it is judged when a
+ * walk ends on it, so a root on a closed device is refused at the pin and an entry beneath one by its own device.
+ */
+const heldByFence = (fence: Fence, identities: readonly ComponentIdentity[]): boolean => {
+  const entry = identities.at(-1);
+  return (
+    identities.some(component => fence.keys.has(identityKey({ device: component.dev, inode: component.ino }))) ||
+    (entry !== undefined && heldByIdentity(fence, { device: entry.dev, inode: entry.ino }))
+  );
+};
 
 /**
  * Whether each root-relative FOLDER is in the fence by identity, walked through the held descriptor once and
