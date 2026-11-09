@@ -199,6 +199,7 @@ export default definePlugin({
       route('POST /v1/ferrets', {
         minimum: 'operator',
         caller: 'any',
+        noStore: true,
         audit: { record: AUDIT_KINDS['session.opened'] },
         guard: { none: 'answers the new ferret id only' },
       }),
@@ -243,6 +244,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/stop', {
         minimum: 'operator',
         caller: 'any',
+        noStore: true,
         audit: { skip: 'a stop is recorded in the ferret history, as today' },
         guard: { none: 'answers the new state only' },
       }),
@@ -250,6 +252,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/resume', {
         minimum: 'operator',
         caller: 'any',
+        noStore: true,
         consultsGrants: true,
         audit: { skip: 'a resume is recorded in the ferret history, as today' },
         guard: { none: 'answers the ferret id only' },
@@ -258,6 +261,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/rename', {
         minimum: 'operator',
         caller: 'any',
+        noStore: true,
         audit: { skip: 'a rename records nothing, as today' },
         guard: { none: 'one ferret identity record' },
       }),
@@ -265,6 +269,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/revoke-credential', {
         minimum: 'operator',
         caller: 'person',
+        noStore: true,
         audit: { record: AUDIT_KINDS['ferret.credential-revoked'] },
         guard: { none: 'answers whether a token was live, never a token or digest' },
       }),

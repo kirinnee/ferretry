@@ -31,7 +31,7 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   It is spent only once the owner wrote `jev.key: ${secret:JEV_API_KEY}` into warden.yaml (an agent's write that
  *   adds it is held) and the Vault holds the key; until then it answers `not_set` and no request leaves the machine.
  *   The layer switch, the caps, pacing and per-day rules still gate every call in the sweep.
- * - A nudge, once Conversation can type, is sent as the owner until it has a `warden` caller; a standing notice cannot be refreshed in
+ * - A nudge is typed through Conversation as its `warden` caller (never as the owner or a ferret); a standing notice cannot be refreshed in
  *   place (Asks has no update); unattended is the ferret's own start mode, as today.
  * - Board is an optional use: on, a card Board calls orphaned is flagged `orphaned_card` (read through Board's
  *   contract, every page of them, with each lane named from Board's lane sets); off, that flag does not run. A

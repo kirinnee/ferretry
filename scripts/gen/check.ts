@@ -31,6 +31,7 @@ import { check as hostFiles } from '../validate/host-files.ts';
 import { check as manifestMatch } from '../validate/manifest-match.ts';
 import { check as noCompat } from '../validate/no-compat.ts';
 import { check as oneFormat } from '../validate/one-format.ts';
+import { check as parityTicks } from '../validate/parity-ticks.ts';
 import { check as pins } from '../validate/pins.ts';
 import { check as privateFiles } from '../validate/private-files.ts';
 import { check as pluginGraph } from '../validate/plugin-graph.ts';
@@ -56,6 +57,7 @@ export const CHECKS: readonly Check[] = [
   screenPaths,
   portsPending,
   descriptorParity,
+  parityTicks,
   readScoped,
   actRunner,
   bannedGlobals,

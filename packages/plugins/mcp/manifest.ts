@@ -1,6 +1,6 @@
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { audit, cap } from '@ferretry/core-gate/contract';
-import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
+import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
@@ -182,7 +182,11 @@ export default definePlugin({
 
   ui: {
     // Info › Folder › MCP and the Tools row of a ferret (docs/mcp-scopes.md).
-    panels: [panel('ferret.side', { id: 'mcp-servers', order: 40 })],
+    panels: [
+      panel('ferret.side', { id: 'mcp-servers', order: 40 }),
+      // Ferrets' Actions ▾ menu: MCP's own row, "Add MCP server…".
+      panel(ACTIONS_ROW_SLOT, { id: 'add-mcp-row', order: 10 }),
+    ],
     settings: [settingsTab('mcp', { label: 'MCP servers', order: 50 })],
   },
 
