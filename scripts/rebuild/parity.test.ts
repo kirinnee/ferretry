@@ -241,3 +241,43 @@ test("regeneration keeps a ticked route row's test path, and gives a reverted ro
   expect(f.rows().find(row => row.what === what)).toMatchObject({ check: 'descriptor-parity', status: '[ ]' });
   expect(f.run('--check').exitCode).toBe(0);
 });
+
+test('BG-060 a ticked route row that REOWNED moves keeps its test path on regeneration, and an open one gets the default', () => {
+  const f = fixture();
+  expect(f.run().exitCode).toBe(0);
+  const what = 'GET /v1/sessions/:id/files';
+  const tsvPath = join(f.output, 'rebuild-parity.tsv');
+  // R-0424 is a REOWNED id (the fleet event socket, re-owned to Ferrets): give the fixture route that id.
+  const rewrite = (check: string, status: string) =>
+    writeFileSync(
+      tsvPath,
+      readFileSync(tsvPath, 'utf8')
+        .split('\n')
+        .map(line => {
+          const cells = line.split('\t');
+          if (cells[2] !== what) return line;
+          cells[0] = 'R-0424';
+          cells[8] = check;
+          cells[9] = status;
+          return cells.join('\t');
+        })
+        .join('\n'),
+    );
+  const testPath = 'packages/core/ferrets/tests/unit/routes/events.test.ts';
+  rewrite(testPath, '[x]');
+  expect(f.run().exitCode).toBe(0);
+  expect(f.rows().find(row => row.what === what)).toMatchObject({
+    id: 'R-0424',
+    owner: 'ferrets',
+    check: testPath,
+    status: '[x]',
+  });
+  expect(f.run('--check').exitCode).toBe(0);
+  rewrite(testPath, '[ ]');
+  expect(f.run().exitCode).toBe(0);
+  expect(f.rows().find(row => row.what === what)).toMatchObject({
+    owner: 'ferrets',
+    check: 'descriptor-parity',
+    status: '[ ]',
+  });
+});

@@ -29,6 +29,7 @@ import {
   type ModelSetFile,
   type ProfileFile,
   type RuntimeFile,
+  RuntimeHomeUnreadable,
   type RuntimeHomesApi,
   type RuntimesFile,
 } from '../contract/index.ts';
@@ -150,8 +151,24 @@ function deferred<Target extends object>(make: () => Target): Target {
 function onceHomes(make: () => RuntimeHomesApi): RuntimeHomesApi {
   const built = once(make);
   return {
-    homes: async () => await built().homes(),
-    home: id => built().home(id),
+    // A fleet folder that cannot be opened is the typed refusal the contract names, not whatever the build threw.
+    homes: async () => {
+      let service: RuntimeHomesApi;
+      try {
+        service = built();
+      } catch {
+        throw new RuntimeHomeUnreadable('The fleet folder could not be opened.');
+      }
+      return await service.homes();
+    },
+    // `home()` is `RuntimeHomeReader | undefined`: it never throws, and a fleet that cannot be opened names no home.
+    home: id => {
+      try {
+        return built().home(id);
+      } catch {
+        return undefined;
+      }
+    },
     // The asset tree answers through the same built service; a fleet that cannot be opened lists and reads nothing.
     assetSkills: () => ({
       skills: async limit => {

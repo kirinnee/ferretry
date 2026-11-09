@@ -27,7 +27,9 @@ wire).
 
 Every file Ferretry writes starts with `# yaml-language-server: $schema=…`, pointing at
 `config/.schema/<kind>.json`, which the daemon writes from the same zod schemas it checks with
-(`fy config schema <kind>` prints one). `config/daemon.json` and `config/routing.json` live in the same
+(`fy config schema <kind>` prints one). A file keeps its stem (`runtimes.yaml` is `runtimes.json`); a folder's schema
+describes one item, so it ends `--item` (`runtimes/` is `runtimes--item.json`). Two declarations that would publish one
+name are refused at start, in a sentence. `config/daemon.json` and `config/routing.json` live in the same
 directory and are not configuration files in this sense: they are the daemon's own documents. The shell
 terminals open is one of them (`terminals.shell`, [terminals.md](terminals.md)).
 
@@ -141,6 +143,13 @@ file's text to a caller off the machine, so a link planted in the directory woul
 the user can. A link, or a file over 256 KiB, is reported as unreadable and keeps its last good version; a
 text over 256 KiB from an agent (`config_validate`, `config_write`) is refused in one fixed sentence before any
 of it is read.
+
+A file that is not UTF-8 still reads and keeps its last good version, but every write over it (single, owner,
+held, set) is refused (re-save it as UTF-8): saving would replace the bytes nobody edited with U+FFFD. A set
+refuses it even when the set only removes it, because the set's intent record keeps each file as decoded text, so
+a roll-back would put U+FFFD back; the removal of the whole file by itself is not refused, as it journals
+nothing. Discarding a held edit over such a file is the owner's own act and is not refused: it restores the
+version in effect as UTF-8, and the held bytes go.
 
 ## Secrets never go in a file
 

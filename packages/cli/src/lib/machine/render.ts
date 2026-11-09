@@ -122,9 +122,14 @@ const landed = (files: readonly string[] | undefined): string | undefined => {
   if (files === undefined || files.length === 0) return undefined;
   const named =
     files.length === 1
-      ? `The configuration ${files[0]} was written first and is`
-      : `The configuration files ${files.join(', ')} were written first and are`;
-  return `${named} NOT rolled back; the next apply publishes ${files.length === 1 ? 'it' : 'them'}.`;
+      ? `The change to the configuration ${files[0]} was made first and is`
+      : `The changes to the configuration files ${files.join(', ')} were made first and are`;
+  const them = files.length === 1 ? 'it' : 'them';
+  const back =
+    files.length === 1
+      ? 'put that file back as it was, or delete it if it did not exist before'
+      : 'put those files back as they were, or delete any that did not exist before';
+  return `${named} NOT rolled back; the next apply publishes ${them}. Fix the cause and apply again; to undo the change instead, ${back}.`;
 };
 const landedLines = (files: readonly string[] | undefined): string[] => {
   const line = landed(files);
@@ -162,18 +167,28 @@ function renderApply(apply: ApplyOutcome): RenderedOutcome {
           ...landedLines(apply.configurationLanded),
         ].join('\n'),
       };
-    case 'rollback-incomplete':
+    case 'rollback-incomplete': {
+      const displaced = (apply.displaced ?? []).map(state => `${state.path} (moved to ${state.movedTo})`);
+      const header =
+        apply.unrestored.length > 0
+          ? `${apply.failedOperation} failed (${apply.reason}) and these could not be put back:`
+          : displaced.length > 0
+            ? `${apply.failedOperation} failed (${apply.reason}), and the fleet could not be fully put back:`
+            : `${apply.failedOperation} failed (${apply.reason}).`;
       return {
         ok: false,
         text: [
-          `${apply.failedOperation} failed (${apply.reason}) and these could not be put back:`,
+          header,
           ...indent(
             apply.unrestored.map(
               path => `${path.path}: ${path.reason}${path.backup ? ` (the original is at ${path.backup})` : ''}`,
             ),
           ),
+          ...(apply.unrestored.length > 0 && displaced.length > 0 ? ['Moved aside:'] : []),
+          ...indent(displaced),
           ...landedLines(apply.configurationLanded),
         ].join('\n'),
       };
+    }
   }
 }

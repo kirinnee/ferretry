@@ -1,6 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type FactCommand, type FactCommandResult, HostInstallFacts } from '../../daemon/adapters/install-facts.ts';
+import type { SpawnResult } from '@ferretry/kernel/contract';
+import {
+  type FactCommand,
+  type FactCommandResult,
+  factCommand,
+  HostInstallFacts,
+} from '../../daemon/adapters/install-facts.ts';
 import { classifyInstallMethod } from '../../contract/index.ts';
 import { fakeHost, HOME, STORE } from './host.ts';
 
@@ -100,6 +106,26 @@ describe('the host install facts', () => {
       runner({}),
     ).facts();
     should(dotted.launchedPath).equal('/work/a/fyd');
+  });
+
+  it('answers no fact for a command killed at its timeout, and the code of one that exited by itself', async () => {
+    const over = (answer: SpawnResult) =>
+      factCommand({
+        run: async () => answer,
+        runBytes: async () => {
+          throw new Error('not used here');
+        },
+        start: () => {
+          throw new Error('not used here');
+        },
+      });
+    should(
+      await over({ exitCode: null, signal: 'SIGTERM', stdout: 'late', stderr: '' })(['nix', 'profile']),
+    ).be.undefined();
+    should(await over({ exitCode: 3, signal: null, stdout: 'out', stderr: '' })(['nix', 'profile'])).eql({
+      code: 3,
+      stdout: 'out',
+    });
   });
 
   it('calls a source run a development build', async () => {

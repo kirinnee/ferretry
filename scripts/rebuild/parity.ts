@@ -264,6 +264,14 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
     )
   )
     return 'removed by design (§9.2: old files/markers; feature moves to its owner)';
+  // britnee ruling #6: v4's boot-time routing conversion is the home converter's packs step (proved by the converter's
+  // test J-0052); the daemon runs no conversion.
+  // britnee ruling #4: F-0168 is a duplicate of F-0377 (config/machine.yaml is no file in 5.0: the converter splits it
+  // key by key over its owners' files, and F-0377's test proves each key has a schema there). F-0377 stays ticked.
+  if (kind === 'F' && what === 'FY_HOME/config/machine.yaml')
+    return 'removed by design (duplicate of F-0377: machine.yaml is split key by key over its owners’ files, proved there)';
+  if (kind === 'J' && /new RoutingMigration\(/.test(what))
+    return "removed by design (§9.1, §9.2: removed from the daemon; the v4-to-v5 converter's packs step renders the old models-guide.yaml keys and pack.yaml routingPreferences into the one routing prompt as v4 did; a home with routing prose and no use cases carries the prose alone, and the report names that v4’s default prompt prefix was not added; proved by its tests J-0052)";
   if (/legacy|migration/.test(file) && !/session-migrate|session\/migrat|lib\/migration\/commands/.test(file)) {
     if (kind === 'J') return 'removed by design (§9.1, §9.2: one-shot conversion/old-format work)';
   }
@@ -285,11 +293,12 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
  * Rows the word rules above place with Runtimes ("runtime", "fleet", "component" in a name) but whose code is another
  * owner's in 5.0 (britnee ruling, parity-runtimes round 1: re-owned, none removed). Keyed by ROW ID, so a later row from
  * the same source file keeps the owner the rules gave it; `applyReowned` refuses an id the inventory does not hold.
- * J-0052 and J-0096 have no 5.0 plugin that really does the job; they stay `[ ]` under the nearest name, and the
- * owner decides each (a "removed by design" status needs her per-row yes).
+ * J-0052 (the boot-time routing conversion) is placed with Packs here, and `removal()` marks it removed from the daemon,
+ * the v4-to-v5 converter's packs step doing that job (britnee ruling #6).
  */
 const REOWNED: Readonly<Record<string, string>> = {
-  // Pack routing conversion at boot (the v4-to-v5 converter's packs step is the nearest owner).
+  // Pack routing conversion at boot: Packs' row; `removal()` marks it removed from the daemon (the converter's packs step
+  // renders the old guide into the one prompt, britnee ruling #6 and her later ruling on J-0052), so this only places it.
   'J-0052': 'packs',
   // Activity timers, the ordered log writer and the bundled worker host and probe: the kernel's clock, jobs and workers.
   'J-0093': 'kernel',
@@ -304,8 +313,10 @@ const REOWNED: Readonly<Record<string, string>> = {
   'J-0177': 'connections',
   // The housekeeping pass trigger: analytics ingestion's nudge plus its slow backstop is Usage's.
   'J-0227': 'usage',
-  // The credentials' usage reading, kept current by file events: Logins'. (J-0096 has no real 5.0 owner.)
-  'J-0096': 'logins',
+  // A watched document read again only when it changed (J-0096): the behaviour is the kernel's config service, which
+  // serves the answer of the last reload and lets go of it when its file watcher reloads. Logins keeps no cache of its own.
+  'J-0096': 'kernel',
+  // The credentials' usage reading, kept current by file events: Logins'.
   'J-0232': 'logins',
   'J-0233': 'logins',
   'J-0234': 'logins',
@@ -338,6 +349,51 @@ const REOWNED: Readonly<Record<string, string>> = {
   'R-0424': 'ferrets',
   // The open-url route is served by Browsers (daemon/open-url/routes.ts).
   'R-0401': 'browsers',
+  // britnee ruling D6 (2026-11-09): the kernel-filed rows whose behaviour another plugin owns in 5.0 are RE-OWNED, not
+  // removed; each stays `[ ]` until its owner ticks it with a test. None of them is "removed by design".
+  // The staged-file sweep is the agent browser's own upload copies (browsers/daemon/tools/adapters/staged-files.ts).
+  'J-0008': 'browsers',
+  'J-0097': 'browsers',
+  'J-0126': 'browsers',
+  // Auto-resume, the inline observer, the fleet event socket's timer and the write-behind session index: Ferrets'.
+  'J-0016': 'ferrets',
+  'J-0106': 'ferrets',
+  'J-0137': 'ferrets',
+  'J-0159': 'ferrets',
+  // The session attachments (the PDF unlock worker and the unlocked copy's eviction) and the send pause are
+  // Conversation's (conversation/daemon/attachments, conversation/daemon/delivery).
+  'J-0062': 'conversation',
+  'J-0193': 'conversation',
+  'J-0140': 'conversation',
+  // The board sweeps and the GitHub watcher are Board's.
+  'J-0019': 'board',
+  'J-0025': 'board',
+  'J-0065': 'board',
+  // The catalog members' sweep and the member join gate's timer are Catalogs'.
+  'J-0022': 'catalogs',
+  'J-0136': 'catalogs',
+  // The agent clearer's sweep and the agenda's nudge timer are Agenda's.
+  'J-0009': 'agenda',
+  'J-0134': 'agenda',
+  // The fleet refresh pass and the fleet reading's timer keep a credential's usage current: Logins' (as J-0232 to J-0234).
+  'J-0067': 'logins',
+  'J-0068': 'logins',
+  'J-0135': 'logins',
+  // The cgroup read is Terminals' user-slice check; the package install is Runtimes' tool install.
+  'J-0168': 'terminals',
+  'J-0125': 'runtimes',
+  // The Codex runtime's credential link inside its home, and the no-questions import verb: Runtimes'.
+  'F-0079': 'runtimes',
+  'V-0232': 'runtimes',
+  // The machine screens the kernel has no app half for: each drawn by the plugin or shell that owns it.
+  'S-0107': 'access',
+  'S-0223': 'accounts',
+  'S-0370': 'app',
+  'S-0381': 'app',
+  'S-0371': 'conversation',
+  'S-0382': 'catalogs',
+  'S-0373': 'onboarding',
+  'V-0241': 'onboarding',
 };
 
 const SHELL_DAEMON_VERBS: ReadonlySet<string> = new Set([
@@ -369,12 +425,15 @@ function checkOf(kind: Kind, what: string, file: string, actualOwner: string): s
         : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
           kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
           ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
-          : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
-            kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
-            ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
-            : kind === 'R'
-              ? 'descriptor-parity'
-              : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+          : // The watched document's cache is the kernel config service's snapshot (J-0096): its watcher test proves it.
+            kind === 'J' && file.endsWith('/fleet-reading/watched-document.ts')
+            ? 'packages/core/kernel/tests/unit/host-config/service.test.ts'
+            : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
+              kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
+              ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
+              : kind === 'R'
+                ? 'descriptor-parity'
+                : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
 }
 function add(kind: Kind, what: string, file: string, line: number, descriptor = '', owner?: string) {
   let actualOwner = owner ?? ownerOf(file, what);
@@ -1754,7 +1813,10 @@ function applyReowned(all: ReadonlyMap<string, Row>) {
       throw new Error(`REOWNED names ${id}, which is not in the inventory`);
     }
     row.owner = owner;
-    row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
+    // A ticked route row already names the test that proves it (kept from the registry above); moving the row to its
+    // real owner must not put the default check back, or the owner's tick loses its test path on the next regeneration.
+    const provenRoute = row.kind === 'R' && row.status.startsWith('[x]') && row.check !== 'descriptor-parity';
+    if (!provenRoute) row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
   }
 }
 applyReowned(unique);

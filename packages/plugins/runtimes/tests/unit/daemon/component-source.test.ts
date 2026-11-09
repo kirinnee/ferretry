@@ -769,6 +769,126 @@ describe('M1-R2 a change that would write a login that stands in is refused, and
   });
 });
 
+const GLM_TEMPLATE = {
+  kind: 'templates',
+  id: 'glm',
+  harness: 'claude-code',
+  env: { ANTHROPIC_BASE_URL: 'https://api.example.test', ANTHROPIC_AUTH_TOKEN: '${secret:GLM_KEY}' },
+} as EnvironmentLoginTemplate;
+const GLM_WITHHELD = {
+  kind: 'withheld',
+  id: 'glm',
+  harness: 'claude-code',
+  variables: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'],
+} as EnvironmentLoginTemplate;
+const ONE_PLAIN_VARIABLE = [{ name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.example.test' }];
+
+/** A healthy environment login `glm` (its templates read), optionally already used by a runtime. */
+async function composeWithHealthyLogin(
+  variables: readonly unknown[],
+  runtimes: Record<string, unknown> = {},
+): Promise<Composed> {
+  const glm = sampleLogin('glm', {
+    store: 'environment',
+    environment: {
+      variables,
+      quotaSource: 'none',
+      missingSecrets: [],
+      test: { available: false, reason: 'x' },
+    } as never,
+  });
+  const composed = await compose({
+    logins: [sampleLogin('claude-you', { store: 'ferretry' }), glm],
+    config: { ...BASE, runtimes: { ...BASE.runtimes, ...runtimes } },
+  });
+  composed.logins.setTemplates([GLM_TEMPLATE]);
+  return composed;
+}
+
+describe('BG-029 a login that starts standing in after a change was previewed changes the revision, so the apply is refused as stale', () => {
+  it('BG-029 R3-P3a a login withheld between propose and apply: refused as stale, homes and wrapper byte-identical', async () => {
+    const composed = await composeWithHealthyLogin(ONE_PLAIN_VARIABLE, {
+      'glm-work': { login: 'glm', profile: 'default', agent: false },
+    });
+    expect((await stageAndApply(composed.host, put('claude-first'))).status).toBe(200);
+    const homes = JSON.stringify(await homesSnapshot(composed.world));
+    const wrapper = await readFile(join(composed.world.fleet, 'bin', 'glm-work'), 'utf8');
+    const staged = await composed.host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+    expect(staged.status).toBe(200);
+
+    composed.logins.setTemplates([GLM_WITHHELD]);
+    const written = composed.host.configChanges.length;
+    const applied = await composed.host.request(
+      'POST',
+      `/v1/runtimes/proposals/${staged.json<{ id: string }>().id}/apply`,
+      { body: {} },
+    );
+
+    expect(applied.status).toBe(409);
+    expect(composed.host.configChanges.length).toBe(written);
+    expect(JSON.stringify(await homesSnapshot(composed.world))).toBe(homes);
+    expect(await readFile(join(composed.world.fleet, 'bin', 'glm-work'), 'utf8')).toBe(wrapper);
+  });
+
+  it('BG-029 R3-P4 a new runtime proposed on a healthy login that is withheld before the apply: refused, no wrapper', async () => {
+    const composed = await composeWithHealthyLogin(ONE_PLAIN_VARIABLE);
+    expect((await stageAndApply(composed.host, put('claude-first'))).status).toBe(200);
+    const staged = await composed.host.request('POST', '/v1/runtimes/proposals', { body: putOnGlm(true, 'glm-new') });
+    expect(staged.status).toBe(200);
+
+    composed.logins.setTemplates([GLM_WITHHELD]);
+    const written = composed.host.configChanges.length;
+    const applied = await composed.host.request(
+      'POST',
+      `/v1/runtimes/proposals/${staged.json<{ id: string }>().id}/apply`,
+      { body: {} },
+    );
+
+    expect(applied.status).toBe(409);
+    expect(composed.host.configChanges.length).toBe(written);
+    expect(await readdir(join(composed.world.fleet, 'bin'))).not.toContain('glm-new');
+  });
+
+  it('BG-029 R3-P1 a rename of a runtime on a withheld login is refused at propose, naming only the login', async () => {
+    const composed = await composeWithHealthyLogin([], {
+      'glm-work': { login: 'glm', profile: 'default', agent: false },
+    });
+    expect((await stageAndApply(composed.host, put('claude-first'))).status).toBe(200);
+    composed.logins.setTemplates([GLM_WITHHELD]);
+    const written = composed.host.configChanges.length;
+
+    const staged = await composed.host.request('POST', '/v1/runtimes/proposals', {
+      body: { change: { kind: 'runtime.rename', name: 'glm-work', to: 'glm-renamed' } },
+    });
+
+    expect(staged.status).toBe(409);
+    expect(staged.json<{ error: string }>().error).toContain('login "glm"');
+    expect(composed.host.configChanges.length).toBe(written);
+    expect(await readdir(join(composed.world.fleet, 'bin'))).not.toContain('glm-renamed');
+  });
+
+  it('BG-029 m3 the export route refuses a machine whose used login stands in, naming only the login: no value, no path', async () => {
+    const composed = await composeWithWithheldLogin(
+      [{ kind: 'plain', name: 'BASE_URL', value: 'https://fake.invalid' }],
+      {
+        used: true,
+      },
+    );
+
+    const exported = await composed.host.request('GET', '/v1/runtimes/export');
+
+    expect(exported.status).toBe(409);
+    const answer = exported.json<{ code?: string; error: string }>();
+    expect(answer.code).toBe('fleet_setup_refused');
+    expect(answer.error).toContain('login "glm"');
+    expect(answer.error).toContain('Fix the login in Logins first, then copy again.');
+    const whole = JSON.stringify(answer);
+    expect(whole).not.toContain('https://fake.invalid');
+    expect(whole).not.toContain(composed.world.person);
+    expect(whole).not.toContain(composed.world.fleet);
+  });
+});
+
 describe('M1 an instructions change is refused before anything of it is written', () => {
   const putHouse = (content: string) => ({
     change: { kind: 'component.put', name: 'house', component: { kind: 'instructions' }, content, create: true },

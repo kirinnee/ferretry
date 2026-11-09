@@ -128,6 +128,12 @@ describe('F-0184 a skill that cannot be one folder is refused before anything is
       'ok',
       [...SKILL, { path: 'a/b', content: 'y' }, { path: 'A', content: 'x' }],
     ],
+    // The folder side is the one in upper case: the check must split the folded key, not the path as given.
+    [
+      'a file and a folder that differ in case, the folder in upper case',
+      'ok',
+      [...SKILL, { path: 'A/b', content: 'y' }, { path: 'a', content: 'x' }],
+    ],
     ['no SKILL.md', 'ok', [{ path: 'README.md', content: 'x' }]],
     ['no files', 'ok', []],
     ['a file over the bound', 'ok', [...SKILL, { path: 'big.txt', content: 'x'.repeat(MAX_INSTALLED_FILE_BYTES + 1) }]],

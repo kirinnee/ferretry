@@ -402,6 +402,56 @@ describe('Runtime actions: Rename', () => {
   });
 });
 
+describe('Runtime actions: Remove after a rolled-back apply', () => {
+  it('BG-028 a retry after a rolled-back removal stages the removal afresh instead of re-sending the spent proposal', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const view = await page('codex-default', {
+      calls,
+      routes: { [PROPOSE]: removalStaged([]), [APPLY]: ROLLED_BACK },
+    });
+    await click(view.container, '[data-runtime-page] [data-runtime-remove]');
+    await interact(() => submit(view.container).click());
+    await settle();
+    expect(proposed(calls)).toHaveLength(1);
+
+    // Act: the owner clicks Remove again, as the alert says
+    await interact(() => submit(view.container).click());
+    await settle();
+
+    // Assert
+    expect(proposed(calls)).toHaveLength(2);
+    expect(calls.filter(call => call.route === APPLY_CALL)).toHaveLength(2);
+    expect(view.container.querySelector('[data-runtime-dialog] [data-change-refusal]')).not.toBeNull();
+  });
+
+  it('BG-028 a removal that rolled back after its ferrets were moved keeps the dialog open and names the file that stayed', async () => {
+    // Arrange
+    const moves: MoveCall[] = [];
+    const view = await open({
+      moves,
+      move: () => ({}),
+      routes: { [PROPOSE]: removalStaged(), [APPLY]: ROLLED_BACK },
+    });
+    await chooseRuntimeAction(view.container, 'claude-work', 'remove');
+    await choose(
+      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target'),
+      'codex-default',
+    );
+
+    // Act
+    await interact(() => submit(view.container).click());
+    await settle();
+
+    // Assert
+    expect(moves).toHaveLength(2);
+    const alert = must(view.container.querySelector('[data-runtime-dialog] [data-change-refusal]'), 'alert');
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-runtime-dialog="remove"]')).not.toBeNull();
+  });
+});
+
 describe('Runtime actions: Remove', () => {
   it('shows the impact from a dry run first: who is running on it, and that they keep running', async () => {
     // Arrange

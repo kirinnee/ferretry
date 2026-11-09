@@ -449,7 +449,7 @@ describe('FleetCredentialsService — the usage pass and Check now', () => {
 });
 
 describe('FleetCredentialsService — signing out', () => {
-  const afterLogout = (word: 'ready' | 'needs_sign_in', code = 0) => {
+  const afterLogout = (word: 'ready' | 'needs_sign_in', code: number | string = 0) => {
     let signedOut = false;
     const ran: { command: readonly string[]; environment: Readonly<Record<string, string | undefined>> }[] = [];
     const world = serviceOf({
@@ -495,6 +495,11 @@ describe('FleetCredentialsService — signing out', () => {
     should(await failing.service.signOut('claude-work')).match({
       outcome: 'failed',
       reason: 'the harness could not sign out (it exited with code 3)',
+    });
+    const killed = afterLogout('ready', 'SIGTERM');
+    should(await killed.service.signOut('claude-work')).match({
+      outcome: 'failed',
+      reason: 'the harness could not sign out (it was ended by SIGTERM)',
     });
   });
 
