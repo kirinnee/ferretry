@@ -266,6 +266,10 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
     return 'removed by design (§9.2: old files/markers; feature moves to its owner)';
   // britnee ruling #6: v4's boot-time routing conversion is the home converter's packs step (proved by the converter's
   // test J-0052); the daemon runs no conversion.
+  // britnee ruling #4: F-0168 is a duplicate of F-0377 (config/machine.yaml is no file in 5.0: the converter splits it
+  // key by key over its owners' files, and F-0377's test proves each key has a schema there). F-0377 stays ticked.
+  if (kind === 'F' && what === 'FY_HOME/config/machine.yaml')
+    return 'removed by design (duplicate of F-0377: machine.yaml is split key by key over its owners’ files, proved there)';
   if (kind === 'J' && /new RoutingMigration\(/.test(what))
     return "removed by design (§9.1, §9.2: removed from the daemon; the v4-to-v5 converter's packs step carries models-guide.yaml and pack.yaml, proved by its test J-0052)";
   if (/legacy|migration/.test(file) && !/session-migrate|session\/migrat|lib\/migration\/commands/.test(file)) {

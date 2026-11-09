@@ -10,7 +10,7 @@ Generator regression checks: `bun test scripts/rebuild/parity.test.ts` (first ob
 
 Generator typecheck: it is part of the repository typecheck (`scripts/tsconfig.json`, run by `scripts/validate/typecheck.sh`), with strict indexed-access checks.
 
-**2276 rows; 145 removed by design; 0 unplaced owners.**
+**2276 rows; 146 removed by design; 0 unplaced owners.**
 
 <!-- prettier-ignore -->
 | Kind | Count |
@@ -1169,7 +1169,7 @@ No unresolved Commander declarations.
 | F-0053 | F | {this.lockPath}/{name} | packages/fleet/src/adapters/apply-lock.ts:365 | apply-lock | packages/plugins/runtimes | {this.lockPath}/{name} | owner module=apply-lock; relative/path family: root supplied by composition; verify confinement when porting; readClaim; expression=path.join(this.lockPath, name) | packages/plugins/runtimes/tests/unit/parity/storage.test.ts | [ ] |
 | F-0054 | F | {this.lockPath}/claim-{token}.json | packages/fleet/src/adapters/apply-lock.ts:181 | apply-lock | packages/plugins/runtimes | {this.lockPath}/claim-{token}.json | owner module=apply-lock; relative/path family: root supplied by composition; verify confinement when porting; tokenPath; expression=path.join(this.lockPath, `${CLAIM_PREFIX}${token}.json`) | packages/plugins/runtimes/tests/unit/parity/storage.test.ts | [ ] |
 | F-0159 | F | FY_HOME/config/components/modelSets/{name}.yaml | packages/protocol/src/lib/config-files.ts:62 | config-files | packages/plugins/runtimes | FY_HOME/config/components/modelSets/{name}.yaml | component config family; kind=modelSets | packages/plugins/runtimes/tests/unit/parity/storage.test.ts | [x] |
-| F-0168 | F | FY_HOME/config/machine.yaml | packages/protocol/src/lib/config-files.ts:103 | config-files | packages/plugins/runtimes | FY_HOME/config/machine.yaml | config singleton; kind=machine; generated from SINGLETON_FILES | packages/plugins/runtimes/tests/unit/parity/storage.test.ts | [ ] |
+| F-0168 | F | FY_HOME/config/machine.yaml | packages/protocol/src/lib/config-files.ts:103 | config-files | packages/plugins/runtimes | FY_HOME/config/machine.yaml | config singleton; kind=machine; generated from SINGLETON_FILES | packages/plugins/runtimes/tests/unit/parity/storage.test.ts | removed by design (duplicate of F-0377: machine.yaml is split key by key over its owners’ files, proved there) |
 | F-0173 | F | FY_HOME/config/profiles/{name}.yaml | packages/protocol/src/lib/config-files.ts:114 | config-files | packages/plugins/runtimes | FY_HOME/config/profiles/{name}.yaml | named config family; kind=profile | packages/plugins/runtimes/tests/unit/parity/storage.test.ts | [x] |
 | F-0174 | F | FY_HOME/config/routing.json | packages/daemon/src/lib/paths.ts:144 | paths | packages/plugins/runtimes | FY_HOME/config/routing.json | owner module=paths; FY_HOME anchored; createFoundationPaths.routingCatalog; expression=join(config, 'routing.json') | packages/plugins/runtimes/tests/unit/parity/storage.test.ts | removed by design (§9.2: old files/markers; feature moves to its owner) |
 | F-0175 | F | FY_HOME/config/runtimes/{name}.yaml | packages/protocol/src/lib/config-files.ts:114 | config-files | packages/plugins/runtimes | FY_HOME/config/runtimes/{name}.yaml | named config family; kind=runtime | packages/plugins/runtimes/tests/unit/parity/storage.test.ts | [x] |
