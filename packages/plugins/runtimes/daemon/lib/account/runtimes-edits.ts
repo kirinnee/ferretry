@@ -53,6 +53,17 @@ export function ownedFileBodies(model: AccountModel): ReadonlyMap<string, Body> 
       ...(profile.clonedFromKey === undefined ? {} : { clonedFromKey: profile.clonedFromKey }),
     });
   }
+  // Instructions are Runtimes' own kind: the text lives in the item itself (`config/instructions/<name>.yaml`).
+  for (const [name, instructions] of Object.entries(model.components.instructions)) {
+    if (instructions.text === undefined) continue;
+    files.set(`instructions/${name}.yaml`, {
+      text: instructions.text,
+      ...(instructions.harness === undefined ? {} : { harness: harnessKeyOfKind(instructions.harness) }),
+      ...(instructions.clonedFrom === undefined ? {} : { clonedFrom: instructions.clonedFrom }),
+      ...(instructions.clonedFromDaemon === undefined ? {} : { clonedFromDaemon: instructions.clonedFromDaemon }),
+      ...(instructions.clonedFromKey === undefined ? {} : { clonedFromKey: instructions.clonedFromKey }),
+    });
+  }
   for (const [name, set] of Object.entries(model.components.modelSets)) {
     files.set(`model-sets/${name}.yaml`, {
       models: [...set.models],
@@ -65,8 +76,8 @@ export function ownedFileBodies(model: AccountModel): ReadonlyMap<string, Body> 
   return files;
 }
 
-/** The kinds whose components another plugin owns and Runtimes cannot write. */
-const FOREIGN_COMPONENT_KINDS = ['instructions', 'mcp', 'skills', 'settings', 'hooks'] as const;
+/** The kinds whose components another plugin owns and Runtimes cannot write (`instructions` are Runtimes' own). */
+const FOREIGN_COMPONENT_KINDS = ['mcp', 'skills', 'settings', 'hooks'] as const;
 
 /**
  * The components of a kind another plugin owns that `next` adds, changes or drops against `before`, as `kind "name"`.

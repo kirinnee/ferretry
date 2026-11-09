@@ -317,9 +317,12 @@ function componentBody(
   const existingEnv = existing?.env as Readonly<Record<string, string>> | undefined;
   const harness = 'harness' in input && input.harness !== undefined ? { harness: input.harness } : {};
   switch (input.kind) {
-    case 'instructions':
-      if (file === undefined) refuse(`${owner} needs its text`);
-      return { component: { file, ...harness }, ...(written === undefined ? {} : { file: written }) };
+    case 'instructions': {
+      // Runtimes' own kind: the text is kept in the item itself, so an edit writes no document beside it.
+      const text = given ?? (typeof existing?.text === 'string' ? existing.text : undefined);
+      if (text === undefined) refuse(`${owner} needs its text`);
+      return { component: { text, ...harness } };
+    }
     case 'mcp': {
       const env = resolvedEnv(input.env, existingEnv, owner);
       return {
