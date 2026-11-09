@@ -185,6 +185,12 @@ export interface HostConfig {
   credentialRecordReferences?(plugin: string): ReadonlySet<string>;
 }
 
+/**
+ * How often the kept index of the home's private places is looked at again (§7.7, `host/fence-index.ts`): a private file
+ * created or replaced is pinned within this long, which is also the longest one can be reached under a second name.
+ */
+const PRIVATE_RECHECK_MS = 250;
+
 /** The kernel's own `GET /v1/config/file` declaration: what a `kernel.config-changed` frame is asked about as. */
 const CONFIG_FILE_READ = (() => {
   const found = kernelManifest.actions?.routes?.find(declared => declared.key === 'GET /v1/config/file');
@@ -734,6 +740,7 @@ async function bootLocked(
       {
         random: adapters.random,
         privateFiles,
+        privateRecheckMs: PRIVATE_RECHECK_MS,
         ...(pins === undefined ? {} : { pins }),
         ...(manifest.permissions?.harnessFiles === undefined
           ? {}

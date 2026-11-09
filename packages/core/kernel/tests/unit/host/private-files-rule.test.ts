@@ -34,7 +34,18 @@ const plugin = (extra: Partial<Manifest> & { readonly files?: readonly string[] 
 };
 
 describe('PF-rule a secret-named state file must be declared one way or the other', () => {
-  for (const word of ['key', 'secret', 'token', 'passkey', 'credential', 'oauth']) {
+  for (const word of [
+    'key',
+    'secret',
+    'token',
+    'passkey',
+    'password',
+    'passwd',
+    'credential',
+    'oauth',
+    'auth',
+    'cookie',
+  ]) {
     test(`PF-rule the word "${word}" in a name is a secret name, in any case`, () => {
       expect(namesASecret(`my-${word}.json`)).toBe(true);
       expect(namesASecret(`My-${word.toUpperCase()}.json`)).toBe(true);
@@ -44,6 +55,25 @@ describe('PF-rule a secret-named state file must be declared one way or the othe
   test('PF-rule a plain name is not a secret name', () => {
     for (const name of ['cards.json', 'index.sqlite', 'tmux.sock', 'x11', 'agent-homes'])
       expect(namesASecret(name)).toBe(false);
+  });
+
+  test('PF-rule a Codex sign-in, a password and a cookie jar are secret names whatever their case', () => {
+    for (const name of ['auth.json', 'Password.txt', 'passwd', 'Cookies', 'cookie-jar.sqlite'])
+      expect(namesASecret(name)).toBe(true);
+  });
+
+  test('PF-rule a document the plugin seals (store: secret) must be declared even when its name says nothing', () => {
+    const sealed = (privacy?: Manifest['privacy']): Manifest =>
+      plugin({
+        data: { state: [defineState({ name: 'vault', path: 'vault.json', store: 'secret', format: 1 })] },
+        ...(privacy === undefined ? {} : { privacy }),
+      });
+    expect(privacyProblems(sealed())).toHaveLength(1);
+    expect(privacyProblems(sealed())[0]).toContain('vault.json');
+    expect(privacyProblems(sealed({ private: ['vault.json'] }))).toEqual([]);
+    expect(
+      privacyProblems(sealed({ public: [{ path: 'vault.json', reason: 'holds only the sealed envelope, no key' }] })),
+    ).toEqual([]);
   });
 
   test('PF-rule a new secret-named file with no declaration is refused, naming the file and both ways out', () => {
@@ -177,6 +207,17 @@ describe('PF-compose the kernel composes every plugin list into the one the fenc
       plugin({ id: 'none' }),
     ]);
     expect(list).toEqual(['state/alpha/a.key', 'state/alpha/creds', 'state/zeta/a.key', 'state/zeta/b.key']);
+  });
+
+  test('PF-compose a pattern with a file after the "*" is kept whole (the one file in each member); a trailing "*" pins the folder', () => {
+    expect(
+      composePrivateFiles([
+        plugin({
+          id: 'ferrets',
+          privacy: { private: ['sessions/*/environment.json', 'credentials/*', 'tokens.json'] },
+        }),
+      ]),
+    ).toEqual(['state/ferrets/credentials', 'state/ferrets/sessions/*/environment.json', 'state/ferrets/tokens.json']);
   });
 
   test('PF-compose a plugin cannot pin outside its own state folder', () => {

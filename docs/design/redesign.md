@@ -2596,8 +2596,10 @@ scoped handle:
   minter stopping, or `shareTrees` leaving the manifest) stops new materializations only, and a link already in
   `agent-homes` stays until the harness removes it (a declared GAP).
 - **Private files (`privacy`).** A plugin declares the files of its own `state/<id>/` a ferret must never reach —
-  `privacy.private`, paths relative to that folder (a folder pins the folder and one level of what it holds; a
-  `credentials/*` collection pins `credentials`). The kernel COMPOSES every manifest's list into the one list its fence
+  `privacy.private`, paths relative to that folder (a folder pins the folder and what it holds, to three levels — a
+  login's `credentials/<id>/auth.json`, a browser profile's `data/<profile>/Default/Cookies`; a `credentials/*`
+  collection pins `credentials`; `sessions/*/environment.json` pins that one file in each member of `sessions`, Ferrets'
+  per-ferret plaintext `fys_` credential). The kernel COMPOSES every manifest's list into the one list its fence
   reads (no kernel → plugin import) and pins each place by **identity** (device and inode), beside the home's key
   paths and every other plugin's internal root folders, for EVERY root: an owner's, an internal one (`agent-homes`,
   `fleet`, `sessions`, `credentials`, `downloads`), a harness file, a pinned read, a shared tree and a copy's source.
@@ -2605,12 +2607,29 @@ scoped handle:
   a private place is refused `fenced` for read, stat, write, rename-over (as target), `publish`, link (as target and
   as the link's place), delete, mode change and copy, whatever its spelling: the verdict is the inode's, so a case
   variant, a double slash or a `.` segment changes nothing, and a bind mount (one link, the same device and inode —
-  which the hard-link rule cannot see) is refused as a hard link is. **Fail closed:** a state file whose name says key,
-  secret, token, passkey, credential or oauth (case-insensitive substrings) must be declared `private` or
+  which the hard-link rule cannot see) is refused as a hard link is; `entries()` leaves such a name out. **The index.**
+  The places are indexed ONCE (`host/fence-index.ts`, one per home and list, shared by every root) and kept: each
+  check first looks at the folders the index was built from (one identity per folder, never a file) and rescans only
+  when one changed, and the host looks at most every 250 ms (a private file created or replaced is pinned within
+  that, which is also the longest it can be reached under a second name). A recursive remove asks only each member's
+  own identity, its folders already judged. **The bound:** at most three levels below a private folder and 4096
+  places in all, breadth first; a folder met at the depth limit is itself pinned (a bind mount of it is held, and so
+  is everything walked through it), and a check that cannot look at a place **refuses**, never allows. **Fail closed:**
+  a state file whose name says key, secret, token, passkey, password, credential, oauth, auth or cookie
+  (case-insensitive substrings), or that the plugin seals itself (`store: 'secret'`), must be declared `private` or
   `public` with a written reason (`privacy.public: [{ path, reason }]`), or `definePlugin`, both hosts at load and
-  the `private-files` check refuse the manifest; an entry that names no declared file is a finding. Declared GAP:
-  a file buried more than one level inside a private folder (a browser profile) is held by the folder's identity
-  only; a name that no manifest declares is not private to the fence.
+  the `private-files` check refuse the manifest; an entry that names no declared file is a finding. Declared GAPs:
+  (1) a single FILE deeper than the bound (a cache file inside a browser profile) or past the 4096 places is not
+  indexed, so a bind mount of exactly that file under another name is not recognised (its folders are held); (2) the
+  names INSIDE a `*` collection (`cache/*`) are not judged by the secret-name rule, only the folder's; (3) a FUSE or
+  overlay re-export of a private file shows a different device, and often a different inode, so identity cannot see
+  it — same-user ferrets can read such a file directly anyway ([secrets](../secrets.md)); (4) a ferret's own agent
+  home is that root's own place, so another ferret's harness sign-in files inside `agent-homes/<ferret>/` are held by
+  their folder only; (5) a name that no manifest declares is not private to the fence.
+  Residuals the secret-name rule cannot see, none named like a secret and none changed here: MCP's `inventory.json`
+  keeps a server's address with its path (a key embedded in a path segment would be stored), Shells' `cache/*` keeps a
+  devShell's exported variables verbatim, Warden's `state.json` is a loose object, and the kernel's `accepted-config/*`
+  and `config-write-set.json` rely on the raw-secret heuristic (a low-entropy password under an odd key name passes).
 - An owner's root refuses everything inside **the fence**: the live `FY_HOME`, every `<FY_HOME>-before-*` folder and
   every `state/<id>-before-*` folder (§9.3), for every caller including the owner's own `fy` imports. An internal
   root reaches its own subtree only.

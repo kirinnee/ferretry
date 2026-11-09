@@ -11,7 +11,18 @@
 import type { Manifest } from './types.ts';
 
 /** The words a file name must not say without a declaration, matched as case-insensitive substrings. */
-export const SECRET_NAME_WORDS: readonly string[] = ['key', 'secret', 'token', 'passkey', 'credential', 'oauth'];
+export const SECRET_NAME_WORDS: readonly string[] = [
+  'key',
+  'secret',
+  'token',
+  'passkey',
+  'password',
+  'passwd',
+  'credential',
+  'oauth',
+  'auth',
+  'cookie',
+];
 
 /** Whether one path segment says it holds something secret (`vault.key`, `Tokens.json`, `OAUTH-secrets`). */
 export function namesASecret(segment: string): boolean {
@@ -48,7 +59,11 @@ export function covers(declared: string, path: string): boolean {
  * `identity.json` (the daemon's signing key, written by the host's identity module, not the state port). Judged by the
  * same rule as a declared file, and an entry for one is not a typo.
  */
-export const UNDECLARED_FILES: ReadonlyMap<string, readonly string[]> = new Map([['kernel', ['identity.json']]]);
+export const UNDECLARED_FILES: ReadonlyMap<string, readonly string[]> = new Map([
+  ['kernel', ['identity.json']],
+  // Each ferret's session folder (the kernel's `sessions` root of Ferrets) holds its plaintext `fys_` credential.
+  ['ferrets', ['sessions/*/environment.json']],
+]);
 
 /** The state paths a manifest declares, plain strings (the `*` kept). */
 export const stateFilePaths = (manifest: Pick<Manifest, 'data'>): readonly string[] =>
@@ -79,13 +94,15 @@ export function privacyProblems(
     if (privatePaths.some(declared => covers(declared, entry.path) || covers(entry.path, declared)))
       problems.push(`${manifest.id} (privacy): "${entry.path}" is declared both private and public`);
   }
+  // A document the plugin itself seals (`store: 'secret'`) holds secrets whatever its name says.
+  const sealed = new Set((manifest.data?.state ?? []).filter(def => def.store === 'secret').map(def => def.path));
   for (const path of [...stateFilePaths(manifest), ...extra]) {
-    if (!segmentsOf(path).some(namesASecret)) continue;
+    if (!segmentsOf(path).some(namesASecret) && !sealed.has(path)) continue;
     const isPrivate = privatePaths.some(declared => covers(declared, path));
     const isPublic = publicFiles.some(entry => entry.path === path || covers(entry.path, path));
     if (!isPrivate && !isPublic)
       problems.push(
-        `${manifest.id} (privacy): state file "${path}" is named like a secret (key, secret, token, passkey, credential or oauth) ` +
+        `${manifest.id} (privacy): state file "${path}" is named like a secret or sealed (key, secret, token, passkey, password, credential, oauth, auth, cookie or store: secret) ` +
           'but is declared neither in privacy.private nor in privacy.public with a reason',
       );
   }
@@ -101,8 +118,10 @@ export const privacyRefusals = (manifests: readonly Pick<Manifest, 'id' | 'data'
   manifests.flatMap(manifest => privacyProblems(manifest, UNDECLARED_FILES.get(manifest.id) ?? []));
 
 /**
- * The home-relative places the fence pins for one plugin: `state/<id>/<path>`, a pattern cut at its first `*` segment so
- * the FOLDER is what is pinned (`credentials/*` pins `state/<id>/credentials`; every name below it is held by it).
+ * The home-relative places the fence pins for one plugin: `state/<id>/<path>`. A pattern ending in `*` is cut there so the
+ * FOLDER is what is pinned (`credentials/*` pins `state/<id>/credentials`; a walk through it is held, and what it holds is
+ * indexed to a bounded depth by the fence itself, `host/fence-index.ts`). A pattern with something after the `*`
+ * (`sessions/*\/environment.json`) is kept whole: the fence pins that one path inside each member of the folder.
  */
 export function privatePlaces(manifest: Pick<Manifest, 'id' | 'privacy'>): readonly string[] {
   return (manifest.privacy?.private ?? []).flatMap(path => {
@@ -112,7 +131,11 @@ export function privatePlaces(manifest: Pick<Manifest, 'id' | 'privacy'>): reado
       if (segment.includes('*')) break;
       kept.push(segment);
     }
-    return kept.length === 0 ? [] : [`state/${manifest.id}/${kept.join('/')}`];
+    if (kept.length === 0) return [];
+    const folder = `state/${manifest.id}/${kept.join('/')}`;
+    // Something after the `*` names ONE file inside each member: kept whole, so the fence pins that file and not the
+    // (busy) members around it. Nothing after it is the folder itself, pinned with what it holds.
+    return segmentsOf(path).length - kept.length > 1 ? [`state/${manifest.id}/${path}`] : [folder];
   });
 }
 

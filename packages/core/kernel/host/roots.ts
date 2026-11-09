@@ -49,6 +49,7 @@ import {
   same,
   within,
 } from './fence-guard.ts';
+import { identityKey } from './fence-index.ts';
 import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
@@ -172,6 +173,14 @@ export function lexicalInRoot(
   return ok(candidate as FencedPath);
 }
 
+/** The home's private places as every root is told them: the composed list, and how often the kept index is looked at. */
+interface PrivatePlaces {
+  readonly files: readonly string[];
+  readonly recheckMs: number;
+}
+
+const NO_PRIVATE: PrivatePlaces = { files: [], recheckMs: 0 };
+
 /** A root's base once checked: its real path and, for an owner's root, the fence it is judged against. */
 interface CheckedBase {
   readonly real: string;
@@ -185,20 +194,25 @@ interface CheckedBase {
 
 interface PrivateCheck {
   readonly held: (real: string) => Promise<boolean>;
+  /** Whether an entry already looked at (its identity in hand) is one of them: no path is walked. */
+  readonly heldIdentity: (identity: { readonly device: bigint; readonly inode: bigint }) => Promise<boolean>;
 }
 
 /** The guard of an internal root at `real`: the places are looked at once per base check, and a doubt refuses. */
-function privateCheckOf(fs: HostFs, home: string, real: string, privateFiles: readonly string[]): PrivateCheck {
+function privateCheckOf(fs: HostFs, home: string, real: string, privateFiles: PrivatePlaces): PrivateCheck {
   let guard: Promise<PrivateGuard> | undefined;
+  // One place for the doubt: a guard that cannot be built, or a place that cannot be looked at, answers "held".
+  const answer = async (ask: (kept: PrivateGuard) => Promise<boolean> | boolean): Promise<boolean> => {
+    try {
+      guard ??= privateGuardOf(fs, home, real, privateFiles.files, privateFiles.recheckMs);
+      return await ask(await guard);
+    } catch {
+      return true;
+    }
+  };
   return {
-    held: async path => {
-      try {
-        guard ??= privateGuardOf(fs, home, real, privateFiles);
-        return await privatelyHeld(fs, await guard, path, real);
-      } catch {
-        return true;
-      }
-    },
+    held: async path => await answer(kept => privatelyHeld(fs, kept, path, real)),
+    heldIdentity: async identity => await answer(kept => kept.keys.has(identityKey(identity))),
   };
 }
 
@@ -213,7 +227,7 @@ async function checkBase(
   base: string,
   ownerRoot: boolean,
   anchor: string | undefined,
-  privateFiles: readonly string[] = [],
+  privateFiles: PrivatePlaces = NO_PRIVATE,
 ): Promise<Result<CheckedBase, FolderRefusal>> {
   let real: string;
   try {
@@ -223,7 +237,7 @@ async function checkBase(
   }
   if (ownerRoot) {
     // A home that cannot be identified fails closed: nothing in an owner's root is reached until it can.
-    const fence = await fenceOf(fs, home, privateFiles).catch(() => undefined);
+    const fence = await fenceOf(fs, home, privateFiles.files, privateFiles.recheckMs).catch(() => undefined);
     if (fence === undefined || (await fencedReal(fs, fence, real))) return err('fenced');
     return ok({ real, fence, guard: undefined });
   }
@@ -250,7 +264,7 @@ export async function resolveInRoot(
   ownerRoot: boolean,
   relativePath: string,
   anchor?: string,
-  privateFiles: readonly string[] = [],
+  privateFiles: PrivatePlaces = NO_PRIVATE,
 ): Promise<Result<FencedPath, FolderRefusal>> {
   const resolved = await resolveChecked(fs, home, base, ownerRoot, relativePath, anchor, privateFiles);
   return resolved.ok ? ok(resolved.value.full) : resolved;
@@ -263,7 +277,7 @@ async function resolveChecked(
   ownerRoot: boolean,
   relativePath: string,
   anchor: string | undefined,
-  privateFiles: readonly string[] = [],
+  privateFiles: PrivatePlaces = NO_PRIVATE,
 ): Promise<Result<{ readonly full: FencedPath; readonly base: CheckedBase }, FolderRefusal>> {
   const lexical = lexicalInRoot(home, base, ownerRoot, relativePath);
   if (!lexical.ok) return lexical;
@@ -360,6 +374,15 @@ async function folderProblem(scope: Scope, real: string, opened: FileIdentity): 
 async function heldPlace(scope: Scope, path: string): Promise<boolean> {
   if (scope.base.fence !== undefined) return await fencedReal(scope.fs, scope.base.fence, path);
   return scope.base.guard !== undefined && (await scope.base.guard.held(path));
+}
+
+/**
+ * Whether an entry whose identity is in hand is a private place or the fence's. Used for the members of a folder the walk
+ * has already opened and judged (a recursive remove): their folders were checked, so only the entry itself is asked.
+ */
+async function heldMember(scope: Scope, identity: FileIdentity): Promise<boolean> {
+  if (scope.base.fence !== undefined) return scope.base.fence.keys.has(identityKey(identity));
+  return scope.base.guard !== undefined && (await scope.base.guard.heldIdentity(identity));
 }
 
 /**
@@ -718,8 +741,8 @@ async function adoptLeftoverName(scope: Scope, full: string, random: () => strin
 }
 
 /** Today's `removeEntryWithin`: one name at a time, each folder opened without following a link and proven. */
-async function removeWithin(scope: Scope, through: string, expected: FileIdentity, named: string): Promise<void> {
-  await refuseHeldName(scope, named);
+async function removeWithin(scope: Scope, through: string, expected: FileIdentity): Promise<void> {
+  if (await heldMember(scope, expected)) refuse('fenced');
   if (expected.kind !== 'directory') {
     await scope.fs.unlink(through);
     return;
@@ -732,7 +755,7 @@ async function removeWithin(scope: Scope, through: string, expected: FileIdentit
     for (const name of await scope.fs.list(self)) {
       const child = folder.entryPath(name) as string;
       const identity = await scope.fs.identity(child);
-      if (identity !== undefined) await removeWithin(scope, child, identity, join(named, name));
+      if (identity !== undefined) await removeWithin(scope, child, identity);
     }
   } finally {
     await folder.close();
@@ -767,7 +790,7 @@ async function removeChecked(scope: Scope, full: string): Promise<void> {
     }
     const identity = await scope.fs.identity(through);
     if (identity === undefined) return;
-    await removeWithin(scope, through, identity, full);
+    await removeWithin(scope, through, identity);
   } finally {
     await folder.close();
   }
@@ -886,7 +909,7 @@ interface HandleSetup {
   readonly random: () => string;
   readonly pins: PinRegistry | undefined;
   /** The composed private places of every plugin (`privacy.private`), home-relative. */
-  readonly privateFiles: readonly string[];
+  readonly privateFiles: PrivatePlaces;
   /** Whether the plugin declared `permissions.setMode`. */
   readonly setMode?: boolean;
 }
@@ -896,7 +919,7 @@ interface PinFenceSetup {
   readonly fs: HostFs;
   readonly home: string;
   readonly immutable: () => Promise<readonly string[]>;
-  readonly privateFiles: readonly string[];
+  readonly privateFiles: PrivatePlaces;
 }
 
 /** A walk refusal about the path's KIND or absence: the verdict looks one folder up. Any other refusal is a doubt. */
@@ -910,10 +933,10 @@ const NOT_THERE: ReadonlySet<FsErrorCode> = new Set([
 
 /** The fence now: recomputed on every ask, so a home that cannot be identified refuses (`undefined` answers fenced). */
 const fenceNow = async (setup: PinFenceSetup): Promise<Fence | undefined> =>
-  await fenceOf(setup.fs, setup.home, setup.privateFiles).catch(() => undefined);
+  await fenceOf(setup.fs, setup.home, setup.privateFiles.files, setup.privateFiles.recheckMs).catch(() => undefined);
 
 const heldByFence = (fence: Fence, identities: readonly ComponentIdentity[]): boolean =>
-  identities.some(entry => fence.identities.some(held => held.device === entry.dev && held.inode === entry.ino));
+  identities.some(entry => fence.keys.has(identityKey({ device: entry.dev, inode: entry.ino })));
 
 /**
  * Whether each root-relative FOLDER is in the fence by identity, walked through the held descriptor once and
@@ -1217,7 +1240,7 @@ interface HarnessFileSetup {
   readonly fs: HostFs;
   readonly home: string;
   readonly absolutePath: string;
-  readonly privateFiles: readonly string[];
+  readonly privateFiles: PrivatePlaces;
 }
 
 /**
@@ -1639,8 +1662,10 @@ function rootHandle(setup: HandleSetup): RootHandle {
     entries: async path => {
       const { full, scope } = await real(path);
       const out: RootEntry[] = [];
+      // A private place's size, mode and times are facts about it too (`stat` refuses them): its entry is left out.
       for (const found of await entriesChecked(scope, full))
-        if (found.identity !== undefined) out.push({ name: found.name, ...leafOf(found.identity) });
+        if (found.identity !== undefined && !(await heldMember(scope, found.identity)))
+          out.push({ name: found.name, ...leafOf(found.identity) });
       return out;
     },
     stat: async path => {
@@ -1877,6 +1902,12 @@ export interface RootsOptions {
    * beside the home's key paths for EVERY root. Absent, only the home's own key paths and internal root folders are.
    */
   readonly privateFiles?: readonly string[];
+  /**
+   * The most milliseconds that pass between two looks at the folders the private places were indexed from (absent: every
+   * check looks). A place created or replaced inside that time is indexed at the next look, so it is also the longest one
+   * stays unrecognised under a second name.
+   */
+  readonly privateRecheckMs?: number;
   /** Told the plugin's stop: every tree it minted is revoked then. Absent, its trees live as long as the port. */
   readonly onStop?: (fn: () => void) => void;
 }
@@ -1895,7 +1926,7 @@ export function rootsPortFor(
   const immutable = (): Promise<readonly string[]> =>
     (proven ??= resolveImmutableRoots(fs, options.hardLinkRoots ?? HARD_LINK_ROOTS).catch(() => []));
   const home = absolute(layout.home, 'the home');
-  const privateFiles = options.privateFiles ?? [];
+  const privateFiles: PrivatePlaces = { files: options.privateFiles ?? [], recheckMs: options.privateRecheckMs ?? 0 };
   // Every tree this plugin mints lives until it stops.
   const life = { live: true };
   options.onStop?.(() => {
@@ -2015,7 +2046,7 @@ function stateTreeAccess(
   plugin: string,
   base: string,
   immutable: () => Promise<readonly string[]>,
-  privateFiles: readonly string[],
+  privateFiles: PrivatePlaces,
 ): SourceAccess {
   const real = async (path: FencedPath): Promise<Checked> => {
     const resolved = await resolveChecked(fs, home, base, false, path, home, privateFiles);

@@ -384,8 +384,12 @@ describe('PF-pin a pinned root judges every component the walk opens against the
     );
     const pinned = await root.pin(named(root, '.'));
     try {
-      const target = pinned.open('notes.md');
-      expect(new TextDecoder().decode(await (await target).read(64))).toBe('hello');
+      const target = await pinned.open('notes.md');
+      try {
+        expect(new TextDecoder().decode(await target.read(64))).toBe('hello');
+      } finally {
+        await target.close();
+      }
       await expect(pinned.open(DECOY)).rejects.toMatchObject({ refusal: 'fenced' });
     } finally {
       await pinned.close();

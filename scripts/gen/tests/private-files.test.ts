@@ -148,6 +148,14 @@ const workspace = loadWorkspace(join(import.meta.dir, '..', '..', '..'));
 const { loaded, failures } = await loadManifests(workspace);
 const manifests = loaded.map(item => item.manifest);
 
+/** Where each private FOLDER really keeps the file that matters, below the folder (a deep fixture, not a depth-1 stand-in). */
+const FOLDER_MEMBERS: Readonly<Record<string, string>> = {
+  'logins/credentials': 'L1/auth.json',
+  'browsers/data': 'P1/Default/Cookies',
+  'browsers/x11': 'D99/Xauthority',
+  'access/pairing-redirects': 'redirect.json',
+};
+
 /** One private entry: the plugin that declares it, and whether it is a folder (it covers a declared file below it). */
 interface Entry {
   readonly plugin: string;
@@ -167,6 +175,7 @@ const SWEEP: readonly Entry[] = [
   ['gate', 'admin-token', false],
   ['gate', 'warden-token', false],
   ['ferrets', 'tokens.json', false],
+  ['ferrets', 'sessions/*/environment.json', false],
   ['access', 'passkeys.json', false],
   ['access', 'push-keys.json', false],
   ['access', 'devices.json', false],
@@ -206,8 +215,14 @@ describe('PF-real the real workspace', () => {
     const composed = composePrivateFiles(manifests);
     expect(entries.length).toBeGreaterThan(10);
     for (const entry of entries) {
-      const folder = entry.path.split('*')[0]?.replace(/\/$/u, '') ?? entry.path;
-      expect(composed).toContain(`state/${entry.plugin}/${folder}`);
+      // A trailing `*` pins the folder; a file after the `*` is kept whole (the fence pins it inside each member).
+      const segments = entry.path.split('/');
+      const star = segments.findIndex(segment => segment.includes('*'));
+      const expected =
+        star === -1 || star === segments.length - 1
+          ? segments.slice(0, star === -1 ? undefined : star).join('/')
+          : entry.path;
+      expect(composed).toContain(`state/${entry.plugin}/${expected}`);
     }
     expect(new Set(composed).size).toBe(composed.length);
   });
@@ -235,9 +250,10 @@ async function homeFor(entry: Entry) {
   const home = join(parent, 'home');
   const work = join(parent, 'work');
   const agentHome = join(home, 'state', 'codex', 'agent-homes', 'F1');
-  const place = join(home, 'state', entry.plugin, entry.path.split('*')[0]?.replace(/\/$/u, '') ?? entry.path);
-  // A file entry is the file; a folder entry is a folder holding one member (one level of a folder is pinned too).
-  const member = entry.folder ? join(place, 'member.json') : place;
+  const place = join(home, 'state', entry.plugin, entry.path.replace('*', 'S2'));
+  // A file entry is the file; a folder entry holds ONE member at the depth the plugin really keeps it (a login's sign-in
+  // file is two levels down, a browser profile's cookies three), the file the fence must hold and a folder's own name never is.
+  const member = entry.folder ? join(place, FOLDER_MEMBERS[`${entry.plugin}/${entry.path}`] ?? 'member.json') : place;
   await mkdir(join(member, '..'), { recursive: true });
   await writeFile(member, 'private-fixture');
   await mkdir(agentHome, { recursive: true });
