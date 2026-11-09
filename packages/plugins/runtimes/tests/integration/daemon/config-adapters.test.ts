@@ -32,6 +32,7 @@ import {
   withinMs,
 } from '../../../daemon/adapters/profile-components.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from '../../../daemon/adapters/runtimes-config-files.ts';
+import type { KindReading } from '../../../daemon/lib/account/runtimes-model.ts';
 import type { AccountModel } from '../../../daemon/lib/account/schema.ts';
 import { ConfigWriteConflict, ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
 
@@ -234,6 +235,8 @@ describe('the components other plugins provide', () => {
     return () => clearTimeout(timer);
   }, 30);
   const own = provider({});
+  const componentsOf = (reading: KindReading): ReadonlyMap<string, unknown> =>
+    reading.state === 'read' ? reading.components : new Map();
 
   it('reads what every owner gave, skips one removed between listing and reading, and says which kind stands partly', async () => {
     const { port } = await world();
@@ -254,14 +257,12 @@ describe('the components other plugins provide', () => {
     const reading = await readProfileComponents(lookup, ownInstructionsSource(port), within);
 
     expect(reading.mcp).toMatchObject({ state: 'read' });
-    expect([...(reading.mcp as { components: Map<string, unknown> }).components.keys()]).toEqual(['github']);
+    expect([...componentsOf(reading.mcp).keys()]).toEqual(['github']);
     expect(reading.settings).toMatchObject({
       state: 'read',
       partial: 'the part of Ferretry that owns them is not running',
     });
-    expect((reading.settings as { components: Map<string, unknown> }).components.get('base')).toMatchObject({
-      harness: 'claude',
-    });
+    expect(componentsOf(reading.settings).get('base')).toMatchObject({ harness: 'claude' });
     expect(reading.skills).toEqual({ state: 'unread', reason: 'the part of Ferretry that owns them is not running' });
   });
 
