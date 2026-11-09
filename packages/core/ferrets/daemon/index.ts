@@ -375,6 +375,22 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       );
   };
 
+  // An ended ferret's `environment.json` (its plaintext `fys_` credential, dead now) is deleted: on every edge to
+  // `stopped` (a normal end, a failed launch, a kill: each writes that edge) and, at arm, for every ferret already
+  // stopped (a crash, or an end this code did not yet delete). Best effort and logged: a failure never fails the end.
+  const removeEnvironment = (ferret: FerretId): void => {
+    const id = tryParseSessionId(ferret);
+    if (id === undefined) return;
+    void sessionFiles
+      .removeEnvironment(id, () => registry.get(ferret)?.state === 'stopped')
+      .catch((error: unknown) =>
+        log.warn("an ended ferret's environment file could not be removed", {
+          ferret,
+          ...turnWatchFailureFields(error),
+        }),
+      );
+  };
+
   // The ferret's last screen, kept as it stops (F-0326): one `Runner.look` (an act on the pane, masked by the runner),
   // masked again here, written 0600 to its own folder on the sessions root, bounded by the kernel clock.
   const lastSnapshots = new LastSnapshotCapture({
@@ -438,7 +454,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     delivered: ferret => wakeTurnWatch?.(ferret),
     changed: payload => {
       followStatus(payload.ferret, payload.state, 'lifecycle');
-      if (payload.state === 'stopped') forgetTranscript?.(payload.ferret);
+      if (payload.state === 'stopped') {
+        forgetTranscript?.(payload.ferret);
+        removeEnvironment(payload.ferret);
+      }
       hooks.observe(FerretChanged, payload);
     },
     stopping: ferret => {
@@ -537,6 +556,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       // turn, and no registry change would come to repair it. The same lane and rule as every later edge.
       // A registry read at arm may be stale, so it is no proof of a new run: it never revives an ended document.
       for (const record of registry.list()) followStatus(record.id, record.state, 'reconcile');
+      // The boot sweep: an ended ferret's environment file a crash (or an older daemon) left behind goes now.
+      for (const record of registry.list()) if (record.state === 'stopped') removeEnvironment(record.id);
       turnWatch.host.arm();
       kernel.lifecycle.onStop(async () => await turnWatch.host.close());
     },
