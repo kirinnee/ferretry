@@ -290,6 +290,10 @@ interface ConfigBase<Shape> {
    * The files of this def are CREDENTIAL RECORDS: each one names the secrets a credential it describes is made from
    * (Logins' login records). Only the `${secret:NAME}` references in effect in a def marked so count as the owning plugin's
    * own secrets for a provider that acts for it (the Vault's spend rule); a reference in any other file counts for nothing.
+   * It also means the file's TEXT is never shown by `config_read` when the file fails its check, whatever the reason
+   * (it does not parse, an unknown key, a key outside `env`, a schema that throws): the located issues stay. This
+   * covers every def marked so, Logins' `logins/<id>.yaml` and MCP's `mcp/<name>.yaml` alike, and costs a file whose
+   * only fault is a typo key its text too.
    */
   readonly credentialRecords?: true;
 }

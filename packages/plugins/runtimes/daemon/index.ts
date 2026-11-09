@@ -111,6 +111,27 @@ function changedNames<Shape>(before: ReadonlyMap<string, Shape>, after: Readonly
     .toSorted((left, right) => left.localeCompare(right));
 }
 
+/** `make` run at most once, on the first call. */
+function once<Value>(make: () => Value): () => Value {
+  let made: { readonly value: Value } | undefined;
+  return () => {
+    made ??= { value: make() };
+    return made.value;
+  };
+}
+
+/** An object that stands for `make()` and builds it on the first property read; methods run on the real object. */
+function deferred<Target extends object>(make: () => Target): Target {
+  return new Proxy({} as Target, {
+    get(_stand, property) {
+      const target = make();
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    has: (_stand, property) => property in make(),
+  });
+}
+
 /**
  * The assembly of this build, and the daemon's default: the catalogue and the setup over the files (the model in effect
  * from Runtimes' own files and Logins' facts, the provisioner on the `fleet` root, the all-or-none config writer), the
@@ -121,7 +142,14 @@ export const hostAssembly: RuntimesAssembler = ctx => {
   // ONE publication gate: every apply (the catalogue's and the setup's share one provisioner) runs exclusively under
   // it, and every read of the published fleet (the ended-runtime seams, the manifest the republish compares) waits (S67).
   const publication = new FleetPublication();
-  return { ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) };
+  // `build` touches nothing (it is also run against an inert kernel to compare it with the manifest): the fleet folder
+  // is opened and its paths spelled on the first use of a service, never while the half is built.
+  const assembled = once(() => ({ ...fileAssembly(ctx, publication), ended: endedSeams(ctx.kernel, publication) }));
+  return {
+    catalog: deferred(() => assembled().catalog),
+    setup: deferred(() => assembled().setup),
+    ended: deferred(() => assembled().ended),
+  };
 };
 
 export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {

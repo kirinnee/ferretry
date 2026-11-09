@@ -124,16 +124,13 @@ describe('the Runtimes config writer over ConfigPort.writeAll', () => {
     );
   });
 
-  it('should hold the WHOLE set, writing nothing, when one document is a removal the judge would hold', async () => {
-    // Arrange — removing a runtime file is judged like a loosening; the new profile beside it must not land alone.
+  it('should hold the WHOLE set, writing nothing, when one document is a loosening the judge would hold', async () => {
+    // Arrange — moving a runtime off its login is judged a loosening; the new profile beside it must not land alone.
     const { kernel, writer } = await world({ runtimes: { r: { login: 'claude-you', profile: 'p' } } });
 
     // Act
     const refusal = await writer
-      .write([
-        doc('profiles/p.yaml', PROFILE),
-        { path: `${CONFIG}/runtimes/r.yaml`, content: '', mode: 0o600, remove: true },
-      ])
+      .write([doc('profiles/p.yaml', PROFILE), doc('runtimes/r.yaml', 'login: claude-other\nprofile: p\n')])
       .then(
         () => undefined,
         (error: unknown) => error,

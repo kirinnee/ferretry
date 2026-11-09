@@ -58,7 +58,7 @@ const BUILT_IN_PRESET_TEXTS: Readonly<Record<string, string>> = Object.freeze({
 });
 
 /** A built-in preset that does not check: a defect in this repository, never a person's mistake. */
-class BuiltInPresetError extends Error {
+export class BuiltInPresetError extends Error {
   constructor(id: string, problem: string) {
     super(`built-in preset ${id} does not check: ${problem}`);
     this.name = 'BuiltInPresetError';
@@ -66,7 +66,7 @@ class BuiltInPresetError extends Error {
 }
 
 /** One preset file's text, checked: the preset, or every problem in one sentence. */
-function parsePresetText(
+export function parsePresetText(
   id: string,
   text: string,
   origin: ProviderPreset['origin'],

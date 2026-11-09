@@ -19,7 +19,7 @@ import { milliseconds } from '@ferretry/std';
 import type { LOGIN_KINDS, LoginFile, LoginView } from '../../contract/index.ts';
 import type { HarnessLoginFlow } from '../../contract/index.ts';
 import { harnessKey } from './shared/harness.ts';
-import { looksLikeRawSecret } from './shared/secret-shape.ts';
+import { looksLikeRawSecret } from '../../contract/secret-shape.ts';
 
 type KindKey = (typeof LOGIN_KINDS)[number];
 
