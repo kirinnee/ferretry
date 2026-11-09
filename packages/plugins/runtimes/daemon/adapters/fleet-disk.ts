@@ -22,7 +22,7 @@
  * No text read here is ever put in a sentence, and no call returns a secret value (use, never read).
  */
 import { isAbsolute, join, relative, sep } from 'node:path';
-import type { FencedPath, RootEntry, RootHandle, RootLstat, RootStat, RootsPort } from '@ferretry/kernel/contract';
+import type { FencedPath, RootEntry, RootHandle, RootLstat, RootsPort } from '@ferretry/kernel/contract';
 import { harnessMounts, type HostMounts } from './root-host-files.ts';
 
 /** The names a sign-in lives in; never read, never copied, never listed as a source. */
@@ -218,12 +218,6 @@ export class FleetDisk {
     const mounted = this.#sources(path);
     if (mounted === undefined || mounted.kind !== 'root') throw refusedSource(path);
     if (namesSignIn(mounted.inside)) throw refusedSignIn(path);
-  }
-
-  /** What is at a source path (a link not followed), or `undefined`. Throws the refusal sentence for an unserved path. */
-  async sourceKind(path: string): Promise<RootLstat | undefined> {
-    const { root, at, inside } = this.#source(path);
-    return inside === '' ? asLstat(await root.stat(at)) : await root.lstat(at);
   }
 
   /**
@@ -465,8 +459,6 @@ class SourceChangedError extends Error {
     this.name = 'SourceChangedError';
   }
 }
-
-const asLstat = (stat: RootStat | undefined): RootLstat | undefined => stat;
 
 const refusedSource = (path: string): Error =>
   new Error(

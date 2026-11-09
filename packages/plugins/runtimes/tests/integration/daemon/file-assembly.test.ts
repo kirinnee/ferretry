@@ -5,43 +5,16 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { KernelPorts } from '@ferretry/kernel/contract';
 import { configThenFleet, fileFleetCatalogDeps } from '../../../daemon/adapters/account-model-files.ts';
 import { readTextFolder } from '../../../daemon/adapters/setup-files.ts';
 import { fileAssembly, fleetHost } from '../../../daemon/host-assembly.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
 import { FleetApplyAfterConfigError, type FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
-import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
+import { kernelOver } from '../support/kernel-over.ts';
 
 afterEach(cleanupWorlds);
-
-const kernelOver = (world: FleetWorld) => {
-  let now = 1_000;
-  const warned: string[] = [];
-  const kernel = {
-    roots: world.roots,
-    paths: { home: () => world.person },
-    clock: {
-      nowMs: () => now,
-      after: (_duration: unknown, run: () => void) => {
-        now += 25;
-        queueMicrotask(run);
-        return () => undefined;
-      },
-    },
-    log: { warn: (message: string) => warned.push(message) },
-    config: {
-      writeAll: async () => ({ kind: 'written' as const }),
-      collection: () => new Map(),
-      file: () => undefined,
-      etag: async () => 'absent',
-    },
-  } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
-    config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file' | 'etag'>;
-  };
-  return { kernel, warned };
-};
 
 describe('the host the file adapters stand on', () => {
   it('names the fleet folder, claims on the kernel clock and keeps its records inside the fleet folder', async () => {
