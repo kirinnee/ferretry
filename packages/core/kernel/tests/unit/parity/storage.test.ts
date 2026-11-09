@@ -168,25 +168,26 @@ describe('the configuration folder: FY_HOME/config, one YAML file per building b
 
 /**
  * Today's generated editor schemas, config/.schema/<id>.json, one per file kind. 5.0 generates one per declared file or
- * folder, named by its claim (`logins/` is `logins.json`, `claude-code/hooks/` is `claude-code--hooks.json`), from the
- * same zod schema the daemon checks the file with. `witness` is a property of today's kind that the schema still has.
+ * folder, named by its claim (a file `warden.yaml` is `warden.json`; a folder's schema describes one item, so `logins/`
+ * is `logins--item.json` and `claude-code/hooks/` is `claude-code--hooks--item.json`), from the same zod schema the
+ * daemon checks the file with. `witness` is a property of today's kind that the schema still has.
  */
 const SCHEMA_ROWS: readonly (readonly [ids: string, v4: string, now: string, witness: string])[] = [
   ['F-0132', 'accountDefaults.json', 'accounts.json', 'sites'],
-  ['F-0133', 'component-hooks.json', 'claude-code--hooks.json', 'hooks'],
-  ['F-0135', 'component-mcp.json', 'mcp.json', 'command'],
-  ['F-0136', 'component-modelSets.json', 'model-sets.json', 'models'],
-  ['F-0137', 'component-settings.json', 'claude-code--settings.json', 'settings'],
-  ['F-0138', 'component-skills.json', 'skills.json', 'items'],
+  ['F-0133', 'component-hooks.json', 'claude-code--hooks--item.json', 'hooks'],
+  ['F-0135', 'component-mcp.json', 'mcp--item.json', 'command'],
+  ['F-0136', 'component-modelSets.json', 'model-sets--item.json', 'models'],
+  ['F-0137', 'component-settings.json', 'claude-code--settings--item.json', 'settings'],
+  ['F-0138', 'component-skills.json', 'skills--item.json', 'items'],
   ['F-0139', 'learning.json', 'lessons.json', 'passiveDefault'],
   ['F-0140', 'limits.json', 'limits.json', 'perFerret'],
-  ['F-0141', 'login.json', 'logins.json', 'store'],
-  ['F-0143', 'models.json', 'models.json', 'detect'],
+  ['F-0141', 'login.json', 'logins--item.json', 'store'],
+  ['F-0143', 'models.json', 'models--item.json', 'detect'],
   ['F-0144', 'modelsGuide.json', 'packs.json', 'routing'],
   ['F-0145', 'pack.json', 'packs.json', 'enabled'],
-  ['F-0146', 'preset.json', 'endpoints.json', 'verified'],
-  ['F-0147', 'profile.json', 'profiles.json', 'contents'],
-  ['F-0148', 'runtime.json', 'runtimes.json', 'login'],
+  ['F-0146', 'preset.json', 'endpoints--item.json', 'verified'],
+  ['F-0147', 'profile.json', 'profiles--item.json', 'contents'],
+  ['F-0148', 'runtime.json', 'runtimes--item.json', 'login'],
   ['F-0149', 'voice.json', 'voice.json', 'defaultEngine'],
   ['F-0150', 'warden.json', 'warden.json', 'mayActAlone'],
 ];
@@ -215,20 +216,25 @@ describe('F-0132 F-0133 F-0135 F-0136 F-0137 F-0138 F-0139 F-0140 F-0141 F-0143 
     }
     expect(
       schemaFileName(declaredKinds().find(kind => kind.path === 'claude-code/hooks/sweep.yaml')?.def as never),
-    ).toBe('claude-code--hooks.json');
+    ).toBe('claude-code--hooks--item.json');
   });
 
-  test('F-0151 the one name two declared files share is .schema/runtimes.json (runtimes.yaml and the runtimes/ folder)', () => {
+  test('F-0142 F-0151 no two declared files share a schema name: runtimes.yaml and the runtimes/ folder each keep theirs', async () => {
     const owners = new Map<string, string[]>();
     for (const kind of declaredKinds()) {
       const name = schemaFileName(kind.def);
       owners.set(name, [...(owners.get(name) ?? []), `${kind.plugin}:${kind.path}`]);
     }
-    const shared = [...owners].filter(([, paths]) => paths.length > 1);
-    // Pinned as it stands (ports-pending `[kernel: schema file name collision]`): it goes red the day the collision is
-    // fixed, or when a second one appears, and whoever does either updates this and the row.
-    expect(shared.map(([name]) => name)).toEqual(['runtimes.json']);
-    expect(shared[0]?.[1].length).toBe(2);
+    expect([...owners].filter(([, paths]) => paths.length > 1)).toEqual([]);
+    const memory = await published();
+    const schemaOf = (name: string) =>
+      JSON.parse(memory.snapshot().get(`${HOME}/config/.schema/${name}`) ?? '{}') as {
+        properties?: Record<string, unknown>;
+      };
+    expect(Object.keys(schemaOf('runtimes.json').properties ?? {})).toEqual(
+      expect.arrayContaining(['defaultRuntime', 'autoResume']),
+    );
+    expect(Object.keys(schemaOf('runtimes--item.json').properties ?? {})).toContain('login');
   });
 
   test.each(SCHEMA_ROWS)(

@@ -72,7 +72,7 @@ import {
   defaultsOf,
   evaluateConfig,
 } from './evaluate.ts';
-import { configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
+import { assertDistinctSchemaNames, configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
 import { readConfigDisk } from './disk.ts';
 import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigTextToEdit } from './yaml-text.ts';
@@ -86,6 +86,7 @@ import {
   judgeSet,
   refusedDocument,
   repeatedDocument,
+  NOT_UTF8_ISSUE,
   UNREADABLE_ISSUE,
 } from './write-all.ts';
 import { configWriteSetFile, type WriteSetJournal } from './write-set-journal.ts';
@@ -366,6 +367,7 @@ const duration = (ms: number): Duration => milliseconds(ms);
 export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   const { home, fs, log, binary } = options;
   assertNoSharedPaths(options.defs);
+  assertDistinctSchemaNames(options.defs);
   const root = `${home}/config`;
   const state: StatePort =
     options.state ?? createStatePort({ home, pluginId: 'kernel', files: [acceptedConfigFile], fs });
@@ -667,7 +669,17 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     // Only the files that are there keep their checks: one removed (or never written) is forgotten.
     checks.keepOnly(next);
     const held = heldOf(next);
-    issues = [...[...next.values()].flatMap(item => item.evaluated.issues), ...extra, ...(await strayFiles())];
+    // A folder that cannot be listed is a warning, not a failed load: the settled files above are already in effect, and
+    // the listeners (the Gate's `policyChanged` among them) must still hear what moved.
+    const strays = await strayFiles().catch((error: unknown): readonly ConfigIssue[] => [
+      {
+        path: '.',
+        severity: 'warning',
+        message: `the config folder could not be listed for files no plugin reads: ${error instanceof Error ? error.message : String(error)}`,
+        fix: 'check that the config folder can be read',
+      },
+    ]);
+    issues = [...[...next.values()].flatMap(item => item.evaluated.issues), ...extra, ...strays];
     report(issues, held);
     if (wasLoaded) announce(previous, next);
   };
@@ -883,6 +895,20 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return [{ path: slot.path, severity: 'error', message, fix: fix ?? '' }];
   };
 
+  /**
+   * Why a WRITE over this disk is refused, or `undefined` when it may go ahead: the target cannot be read, or it is not
+   * UTF-8 and the write would replace bytes it did not edit. Both say the `unreadable` reason; the sentence says which.
+   * The single `remove` does not ask: it journals nothing, so it has nothing to put back. A set asks for every file it
+   * touches, a removal included, because its journal holds the prior as decoded text and a roll-back would write U+FFFD
+   * over the owner's bytes.
+   */
+  const unwritableIssues = (slot: Slot, disk: DiskState): readonly ConfigIssue[] | undefined => {
+    if (disk.kind === 'unreadable') return unreadableIssues(slot);
+    if (disk.kind !== 'text' || disk.lossy !== true) return undefined;
+    const { message, fix } = NOT_UTF8_ISSUE(slot.path);
+    return [{ path: slot.path, severity: 'error', message, fix: fix ?? '' }];
+  };
+
   const conflictOf = (slot: Slot, found: string, ifMatch: string | undefined): ConfigWriteResult | undefined => {
     // The file moved since the editor read it, or since the last reload: nothing the readers (and so the editor) saw
     // describes the disk any more, so an edit made from it is never applied.
@@ -916,7 +942,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   ): Promise<ConfigWriteResult> => {
     const absolute = `${root}/${slot.path}`;
     const disk = await readDisk(slot.path);
-    if (disk.kind === 'unreadable') return { kind: 'refused', reason: 'unreadable', issues: unreadableIssues(slot) };
+    const unwritable = unwritableIssues(slot, disk);
+    if (unwritable !== undefined) return { kind: 'refused', reason: 'unreadable', issues: unwritable };
     const existing = disk.kind === 'text' ? disk.text : undefined;
     const found = existing === undefined ? ABSENT_CONFIG_ETAG : digest(existing);
     const moved = conflictOf(slot, found, writeOptions.ifMatch);
@@ -976,7 +1003,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     const slot = slotFor(declaration, name);
     if (slot === undefined) return { kind: 'refused', reason: 'bad_name', issues: [] };
     // Never guessed at: a `within` that is not a list would otherwise replace a section the caller meant to merge.
-    if (!isWithinList(edit.within))
+    const within = edit.within;
+    if (!isWithinList(within))
       return {
         kind: 'refused',
         reason: 'schema',
@@ -993,22 +1021,23 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       const entry = settled.get(slot.path);
       const heldNow = entry?.evaluated.held;
       if (heldNow === undefined || entry === undefined)
-        return await writeLocked(slot, def, { patch: edit.patch }, writeOptions, edit.within);
+        return await writeLocked(slot, def, { patch: edit.patch }, writeOptions, within);
       const absolute = `${root}/${slot.path}`;
       const disk = await readDisk(slot.path);
-      if (disk.kind === 'unreadable') return { kind: 'refused', reason: 'unreadable', issues: unreadableIssues(slot) };
+      const unwritable = unwritableIssues(slot, disk);
+      if (unwritable !== undefined) return { kind: 'refused', reason: 'unreadable', issues: unwritable };
       const existing = disk.kind === 'text' ? disk.text : undefined;
       const found = existing === undefined ? ABSENT_CONFIG_ETAG : digest(existing);
       const moved = conflictOf(slot, found, writeOptions.ifMatch);
       if (moved !== undefined) return moved;
       const inEffect = entry.evaluated.inEffect;
       // The version in effect, patched: what the owner's act means today.
-      const effectiveText = patched(slot, inEffect?.text, edit.patch, edit.within);
+      const effectiveText = patched(slot, inEffect?.text, edit.patch, within);
       if (effectiveText === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
       const effective = check(def, slot.path, effectiveText);
       if (!effective.ok) return { kind: 'refused', reason: effective.reason, issues: effective.issues };
       // The held version (the file on disk), patched. A held REMOVAL has no text to carry the patch.
-      const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch, edit.within);
+      const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch, within);
       if (existing !== undefined && heldText === undefined)
         return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
       const checkedHeld = heldText === undefined ? undefined : check(def, slot.path, heldText);
@@ -1142,9 +1171,10 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (entry?.evaluated.held !== undefined)
       return { verdict: refusedDocument('already_held', ref, [ALREADY_HELD_ISSUE(slot.path)]) };
     const disk = await readDisk(slot.path);
-    // What cannot be read could not be put back by a roll-back, so the set does not touch it.
-    if (disk.kind === 'unreadable')
-      return { verdict: refusedDocument('unreadable', ref, writeIssues(unreadableIssues(slot))) };
+    // What cannot be read, or read only lossily, could not be put back byte for byte by a roll-back, so the set does not
+    // touch it, whatever it does to it (a removal included).
+    const unwritable = unwritableIssues(slot, disk);
+    if (unwritable !== undefined) return { verdict: refusedDocument('unreadable', ref, writeIssues(unwritable)) };
     const prior = disk.kind === 'text' ? disk.text : undefined;
     const found = prior === undefined ? ABSENT_CONFIG_ETAG : digest(prior);
     if (conflictOf(slot, found, document.ifMatch) !== undefined) return { verdict: { kind: 'conflict', ...ref } };

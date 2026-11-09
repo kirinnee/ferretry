@@ -34,6 +34,22 @@ const wardenDef = defineConfig({
   },
 });
 
+/** A folder of items beside the file: a bad item name is answered before a bad `within` is. */
+const itemsDef = defineConfig({
+  collection: 'items',
+  name: /^[a-z]+$/,
+  schema: z.strictObject({ size: z.number().default(1) }),
+  axis: 'configure',
+  loosens: () => [],
+});
+/** Declared by nobody: the plugin's port answers `not_declared` for it. */
+const strangerDef = defineConfig({
+  file: 'stranger.yaml',
+  schema: z.strictObject({ size: z.number().default(1) }),
+  axis: 'configure',
+  loosens: () => [],
+});
+
 const PATH = `${HOME}/config/warden.yaml`;
 /** The line every written file starts with (the kernel adds it on a patch). */
 const MODELINE = '# yaml-language-server: $schema=.schema/warden.json\n\n';
@@ -51,7 +67,10 @@ function harness(verdict = true) {
     clock: manualClock(),
     log,
     binary: 'fy',
-    defs: [{ plugin: 'warden', def: wardenDef }],
+    defs: [
+      { plugin: 'warden', def: wardenDef },
+      { plugin: 'warden', def: itemsDef },
+    ],
     judge: input => (asked.push(input), verdict),
   });
   const port = files.port('warden');
@@ -350,6 +369,99 @@ describe('writeAsOwner within: a `within` that is not a list is refused whole, n
       expect(h.port.file(wardenDef)).toEqual(before.inEffect);
       expect(h.files.held()).toEqual(before.held);
     }
+  });
+});
+
+describe('writeAsOwner within: a refusal says what is wrong and carries no value; the order is declared, name, within', () => {
+  const SENTINEL = 'sentinel-7f3a91-not-a-list';
+
+  test('N7 a `within` that is not a list refuses without carrying the value, in the answer or the log', async () => {
+    const h = harness();
+    await h.start();
+    const outcome = await h.port.writeAsOwner(wardenDef, undefined, {
+      patch: { caps: { daily: 3 } },
+      within: SENTINEL as unknown as readonly string[],
+    });
+    expect(outcome).toMatchObject({ kind: 'refused', reason: 'schema' });
+    expect(JSON.stringify(outcome)).not.toContain(SENTINEL);
+    expect(JSON.stringify(h.log.lines)).not.toContain(SENTINEL);
+    expect(h.disk()).toBe(IN_EFFECT);
+  });
+
+  test('an undeclared def is answered not_declared, and a bad item name bad_name, before a bad `within` is looked at', async () => {
+    const h = harness();
+    await h.start();
+    const bad = SENTINEL as unknown as readonly string[];
+    expect(await h.port.writeAsOwner(strangerDef, undefined, { patch: { size: 2 }, within: bad })).toEqual({
+      kind: 'refused',
+      reason: 'not_declared',
+      issues: [],
+    });
+    expect(await h.port.writeAsOwner(itemsDef, 'Bad_Name', { patch: { size: 2 }, within: bad })).toEqual({
+      kind: 'refused',
+      reason: 'bad_name',
+      issues: [],
+    });
+    expect(await h.port.writeAsOwner(itemsDef, undefined, { patch: { size: 2 }, within: bad })).toEqual({
+      kind: 'refused',
+      reason: 'bad_name',
+      issues: [],
+    });
+  });
+
+  test('`within` is read once: a value that changes between reads is the one value the whole write uses', async () => {
+    const h = harness();
+    await h.start();
+    await h.holdPrice();
+    let reads = 0;
+    const edit = {
+      patch: { caps: { daily: 3 } },
+      get within(): readonly string[] {
+        reads += 1;
+        return reads === 1 ? ['caps'] : (SENTINEL as unknown as readonly string[]);
+      },
+    };
+    const outcome = await h.port.writeAsOwner(wardenDef, undefined, edit);
+    expect(outcome.kind).toBe('written');
+    expect(reads).toBe(1);
+    // merged: the held version kept its own price
+    expect(h.disk()).toContain('price: 0.042');
+  });
+});
+
+describe('writeAsOwner within: a section the file lacks is merged from nothing, not from the schema’s default for the section', () => {
+  // The section's own default (daily 20) differs from its sub-key's (daily 10). A save of one sub-key into a file that
+  // lacks the section writes that sub-key alone, so the unnamed `daily` reads as ITS default (10), not the section's
+  // (20). No declared schema has this shape; the behaviour is pinned so the day one does, it is chosen, not found.
+  const sectionDef = defineConfig({
+    file: 'section.yaml',
+    schema: z.strictObject({
+      caps: z
+        .strictObject({ daily: z.number().default(10), price: z.number().default(2) })
+        .default({ daily: 20, price: 2 }),
+    }),
+    axis: 'configure',
+    loosens: () => [],
+  });
+
+  test('a within save into a file lacking the section writes only the named sub-key', async () => {
+    const fs = createMemoryHostFs();
+    const files = createConfigFiles({
+      home: HOME,
+      fs,
+      clock: manualClock(),
+      log: captureLog(),
+      binary: 'fy',
+      defs: [{ plugin: 'section', def: sectionDef }],
+      judge: () => true,
+    });
+    await files.reload();
+    const port = files.port('section');
+    const outcome = await port.writeAsOwner(sectionDef, undefined, { patch: { caps: { price: 3 } }, within: ['caps'] });
+    expect(outcome.kind).toBe('written');
+    expect(String(fs.snapshot().get(`${HOME}/config/section.yaml`))).not.toContain('daily');
+    // the unnamed sub-key's meaning moved from the section's default to its own
+    expect(port.file(sectionDef)?.caps).toEqual({ daily: 10, price: 3 });
   });
 });
 
