@@ -668,7 +668,17 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     // Only the files that are there keep their checks: one removed (or never written) is forgotten.
     checks.keepOnly(next);
     const held = heldOf(next);
-    issues = [...[...next.values()].flatMap(item => item.evaluated.issues), ...extra, ...(await strayFiles())];
+    // A folder that cannot be listed is a warning, not a failed load: the settled files above are already in effect, and
+    // the listeners (the Gate's `policyChanged` among them) must still hear what moved.
+    const strays = await strayFiles().catch((error: unknown): readonly ConfigIssue[] => [
+      {
+        path: '.',
+        severity: 'warning',
+        message: `the config folder could not be listed for files no plugin reads: ${error instanceof Error ? error.message : String(error)}`,
+        fix: 'check that the config folder can be read',
+      },
+    ]);
+    issues = [...[...next.values()].flatMap(item => item.evaluated.issues), ...extra, ...strays];
     report(issues, held);
     if (wasLoaded) announce(previous, next);
   };

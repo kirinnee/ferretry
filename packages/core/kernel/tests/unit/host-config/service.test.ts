@@ -425,6 +425,37 @@ describe('config files: collections, claims and refusals', () => {
 });
 
 describe('config files: live reading and watching', () => {
+  test('a listener still hears a reload whose folder could not be listed for stray files (BG-010)', async () => {
+    const memory = createMemoryHostFs();
+    let listing = 'works';
+    const fs = new Proxy(memory, {
+      get(target, key) {
+        if (key === 'list')
+          return async (path: string) => {
+            if (listing === 'fails' && path === `${HOME}/config`) throw new Error('EACCES: permission denied');
+            return await target.list(path);
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const h = configHarness(fs);
+    h.fs.seed(h.path('updates.yaml'), 'limit: 5\n');
+    let heard = 0;
+    h.files.port('updates').watch(updatesDef as never, () => {
+      heard += 1;
+    });
+    await h.files.reload();
+    listing = 'fails';
+    h.fs.seed(h.path('updates.yaml'), 'limit: 4\n');
+    await h.files.reload();
+    expect(heard).toBe(1);
+    expect(limitOf(h)).toBe(4);
+    const said = h.files.status().issues.find(issue => issue.message.includes('could not be listed'));
+    expect(said?.severity).toBe('warning');
+    expect(said?.message).toContain('EACCES');
+  });
+
   test('a listener hears a reload that moved its file, and not the first reload', async () => {
     const h = configHarness();
     h.fs.seed(h.path('updates.yaml'), 'limit: 5\n');
