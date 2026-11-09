@@ -117,7 +117,9 @@ describe('MCP sign-in discovery', () => {
 
     it('should judge a host spelled with a trailing dot as the host without it', () => {
       should(endpointAllowed('https://localhost./token', SERVER)).be.false();
-      should(endpointAllowed('https://127.0.0.1./token', SERVER)).be.false();
+      // (`127.0.0.1.` is no case: the URL parser already turns it into `127.0.0.1`.)
+      should(endpointAllowed('https://LOCALHOST./token', SERVER)).be.false();
+      should(endpointAllowed('https://app.localhost./token', SERVER)).be.false();
       should(endpointAllowed('https://auth.example.com./token', SERVER)).be.true();
       should(endpointAllowed('https://localhost./token', 'https://localhost./mcp')).be.true();
       should(endpointAllowed('http://localhost./token', 'http://localhost./mcp')).be.true();

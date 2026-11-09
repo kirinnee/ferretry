@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
+import type { SealedDocumentDef, SealedDocumentHandle, SealedDocumentsApi } from '@ferretry/core-vault/contract';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
+import type { StatePort } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
 import mcp from '../../daemon/index.ts';
-import { MCP_OAUTH_FLOW_TTL_MS } from '../../daemon/lib/oauth/service.ts';
+import { MAX_PENDING_FLOWS, MCP_OAUTH_FLOW_TTL_MS } from '../../daemon/lib/oauth/service.ts';
 import manifest from '../../manifest.ts';
 import { PWA_REDIRECT } from '../unit/oauth/support.ts';
 
@@ -90,20 +92,104 @@ function network(scenario: Scenario = {}) {
   return { handle, seen, revoked, hosts, broken };
 }
 
-async function host(fake: ReturnType<typeof network>) {
+/**
+ * Sealed documents in memory keyed by the document's path ALONE, not by the state port object, so a restarted host
+ * (a new state port) still opens the same document. The refresh token a sign-in sealed survives the restart.
+ */
+class PersistentSealedDocuments implements SealedDocumentsApi {
+  readonly #documents = new Map<string, Map<string, string>>();
+
+  open(_own: StatePort, document: SealedDocumentDef): SealedDocumentHandle {
+    const entries = (): Map<string, string> => {
+      let held = this.#documents.get(document.state.path);
+      if (held === undefined) {
+        held = new Map();
+        this.#documents.set(document.state.path, held);
+      }
+      return held;
+    };
+    return {
+      names: async () => [...entries().keys()],
+      put: async (name, value) => {
+        entries().set(name, typeof value === 'string' ? value : new TextDecoder().decode(value));
+      },
+      get: async name => entries().get(name),
+      getBytes: async name => {
+        const held = entries().get(name);
+        return held === undefined ? undefined : new TextEncoder().encode(held);
+      },
+      delete: async name => entries().delete(name),
+    };
+  }
+}
+
+async function host(
+  fake: { readonly handle: (url: URL, init?: RequestInit) => Promise<Response> },
+  options: { readonly config?: Record<string, { url: string; auth: 'oauth' }> } = {},
+) {
   const ferrets = new FakeFerrets();
   ferrets.add({ id: ferretId('f1'), folder: '/work/app' });
   return await testHost({
     plugins: [mcp],
-    fakes: { ferrets, vault: new FakeVault(), sealed: new FakeSealedDocuments() },
+    fakes: { ferrets, vault: new FakeVault(), sealed: new PersistentSealedDocuments() },
     config: {
-      mcp: {
+      mcp: options.config ?? {
         linear: { url: `${MCP}/mcp`, auth: 'oauth' },
         probe: { url: `${OTHER}/mcp`, auth: 'oauth' },
       },
     },
     fetch: fake.handle,
   });
+}
+
+const manyConfig = (count: number): Record<string, { url: string; auth: 'oauth' }> =>
+  Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [
+      `s${String(index)}`,
+      { url: `https://mcp${String(index)}.example.test/mcp`, auth: 'oauth' as const },
+    ]),
+  );
+
+/**
+ * `count` servers, each on its own hosts (`mcpN`, `authN`, `tokN`), so one flow's hosts are never another's. Records
+ * the token requests it answered.
+ */
+function manyNetwork() {
+  const tokens: string[] = [];
+  const handle = async (url: URL, init?: RequestInit): Promise<Response> => {
+    const method = init?.method ?? 'GET';
+    const match = /^(mcp|auth|tok)(\d+)\.example\.test$/u.exec(url.hostname);
+    if (match === null) return new Response('not found', { status: 404 });
+    const [, kind, n] = match as unknown as [string, string, string];
+    const mcpHost = `https://mcp${n}.example.test`;
+    const authHost = `https://auth${n}.example.test`;
+    const tokHost = `https://tok${n}.example.test`;
+    const at = `${method} ${url.pathname}`;
+    if (kind === 'mcp' && at === 'POST /mcp')
+      return new Response(null, {
+        status: 401,
+        headers: {
+          'www-authenticate': `Bearer resource_metadata="${mcpHost}/.well-known/oauth-protected-resource/mcp"`,
+        },
+      });
+    if (kind === 'mcp' && at === 'GET /.well-known/oauth-protected-resource/mcp')
+      return json(200, { resource: `${mcpHost}/mcp`, authorization_servers: [authHost] });
+    if (kind === 'auth' && at === 'GET /.well-known/oauth-authorization-server')
+      return json(200, {
+        issuer: authHost,
+        authorization_endpoint: `${authHost}/authorize`,
+        token_endpoint: `${tokHost}/token`,
+        registration_endpoint: `${authHost}/register`,
+        code_challenge_methods_supported: ['S256'],
+      });
+    if (kind === 'auth' && at === 'POST /register') return json(201, { client_id: `client-${n}` });
+    if (kind === 'tok' && at === 'POST /token') {
+      tokens.push(n);
+      return json(200, { access_token: ACCESS, refresh_token: REFRESH, token_type: 'Bearer', expires_in: 3600 });
+    }
+    return new Response('not found', { status: 404 });
+  };
+  return { handle, tokens };
 }
 
 type Host = Awaited<ReturnType<typeof host>>;
@@ -211,11 +297,9 @@ describe('the MCP sign-in network', () => {
     });
   });
 
-  test('R-0019 cancelling a sign-in, and letting one expire, takes the hosts its discovery named away', async () => {
+  test('R-0019 cancelling a sign-in answers cancelled and releases its hosts, and a cancelled or expired flow finishes nothing', async () => {
     const fake = network();
     const h = await host(fake);
-    // (The hosts' release itself is proved per flow in tests/unit/reach.test.ts and tests/unit/oauth/service.test.ts;
-    // here, what a person sees: a cancelled or expired flow finishes nothing and never reaches the token host.)
     const tokenRequests = (): number => fake.seen.filter(line => line === `POST ${TOKEN}/token`).length;
     const flow = (await start(h)).json<Flow>();
     const cancelled = await h.request('DELETE', `/v1/mcp/auth/flows/${flow.flowId}`, { as: CONFIGURE });
@@ -247,6 +331,47 @@ describe('the MCP sign-in network', () => {
     clean(gone);
   });
 
+  test('R-0019 a cancelled flow releases its hosts, so cancelled starts never crowd out a pending flow’s', async () => {
+    // One pending flow, then more cancelled starts than the reach holds. A cancel that kept its hosts would fill the
+    // reach and push the pending flow's hosts out, and finishing it would fail at the token host.
+    const count = 2 * MAX_PENDING_FLOWS + 1;
+    const fake = manyNetwork();
+    const h = await host(fake, { config: manyConfig(count) });
+    const pending = (await start(h, 's0')).json<Flow>();
+    for (let index = 1; index < count; index += 1) {
+      const flow = (await start(h, `s${String(index)}`)).json<Flow>();
+      const cancelled = await h.request('DELETE', `/v1/mcp/auth/flows/${flow.flowId}`, { as: CONFIGURE });
+      expect(cancelled.json()).toEqual({ flowId: flow.flowId, cancelled: true });
+    }
+    const done = await h.request('POST', `/v1/mcp/auth/flows/${pending.flowId}`, {
+      body: { callback: callbackFor(pending) },
+      as: CONFIGURE,
+    });
+    expect(done.status).toBe(200);
+    clean(done);
+    expect(fake.tokens).toEqual(['0']);
+  });
+
+  test('R-0292 restarting one of the 16 pending sign-ins leaves the oldest flow able to finish', async () => {
+    const fake = manyNetwork();
+    const h = await host(fake, { config: manyConfig(MAX_PENDING_FLOWS) });
+    const flows: Flow[] = [];
+    for (let index = 0; index < MAX_PENDING_FLOWS; index += 1)
+      flows.push((await start(h, `s${String(index)}`)).json<Flow>());
+    // Restart the sixth server's sign-in: it takes a new flow and ends its old one.
+    const restarted = await start(h, 's5');
+    expect(restarted.status).toBe(200);
+    clean(restarted);
+    const oldest = flows[0] as Flow;
+    const done = await h.request('POST', `/v1/mcp/auth/flows/${oldest.flowId}`, {
+      body: { callback: callbackFor(oldest) },
+      as: CONFIGURE,
+    });
+    expect(done.status).toBe(200);
+    clean(done);
+    expect(fake.tokens).toEqual(['0']);
+  });
+
   test('R-0291 a loopback address a challenge names for its metadata is never fetched, and the server’s own is used', async () => {
     const fake = network({ resourceMetadata: 'https://127.0.0.1/prm' });
     const h = await host(fake);
@@ -257,13 +382,14 @@ describe('the MCP sign-in network', () => {
   });
 
   test('R-0291 a trailing dot does not turn a loopback name into a public one', async () => {
-    for (const named of ['https://localhost./prm', 'https://127.0.0.1./prm']) {
+    // (`127.0.0.1.` is no case: the URL parser already turns it into `127.0.0.1`. Names it keeps are the ones below.)
+    for (const named of ['https://localhost./prm', 'https://LOCALHOST./prm', 'https://app.localhost./prm']) {
       const fake = network({ resourceMetadata: named });
       const h = await host(fake);
       const response = await start(h);
       expect(response.status).toBe(200);
       clean(response);
-      expect(fake.hosts().filter(name => name.startsWith('localhost') || name.startsWith('127.'))).toEqual([]);
+      expect(fake.hosts().filter(name => name.includes('localhost'))).toEqual([]);
     }
   });
 
@@ -331,10 +457,8 @@ describe('the MCP sign-in network', () => {
       body: { callback: callbackFor(flow) },
       as: CONFIGURE,
     });
-    // A new daemon: no flow, no discovered host, only oauth.json on file. (The revocation request itself is not
-    // observable here: the fake sealed store is keyed by the state port, which a restart replaces, so the refresh
-    // token is gone. That the recorded revocation host is answered once the document is READ is pinned in
-    // tests/unit/reach.test.ts, and the revocation after a flow ended is R-0018 above.)
+    // A new daemon: no flow, no discovered host, only oauth.json on file (and the sealed refresh token, which the
+    // test-local store keeps by document path across the restart).
     const again = await h.restart();
     const listed = await again.request('GET', '/v1/mcp/auth', { as: USE });
     expect(listed.status).toBe(200);
@@ -346,7 +470,9 @@ describe('the MCP sign-in network', () => {
     const out = await again.request('DELETE', '/v1/mcp/auth/linear', { as: CONFIGURE });
     expect(out.status).toBe(200);
     clean(out);
-    expect(out.json()).toMatchObject({ component: 'linear', removed: true });
+    expect(out.json()).toEqual({ component: 'linear', removed: true, revoked: true });
+    // The revocation went to the host the record kept, after the restart.
+    expect(fake.revoked).toEqual([REFRESH]);
   });
 
   test('R-0291 a public server that names a loopback authorization server is refused before anything is sent there', async () => {

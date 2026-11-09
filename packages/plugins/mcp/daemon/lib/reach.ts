@@ -31,9 +31,14 @@
  * Nothing here holds a token, a code or a verifier: only host names.
  */
 import type { McpOAuthServers, McpOAuthStateDocument, McpOAuthStateStore } from './oauth/ports.ts';
+import { MAX_PENDING_FLOWS } from './oauth/service.ts';
 
-/** At most this many sign-ins discovering at once, and this many hosts each: a hostile server cannot grow the set. */
-const MAX_DISCOVERING = 16;
+/**
+ * At most this many sign-ins discovering at once, and this many hosts each: a hostile server cannot grow the set.
+ * Twice the service's pending-flow limit, so the service's `admit` stays the one place that evicts a live flow: the
+ * extra entries are only starts still in flight, and this bound never strips another pending flow's hosts.
+ */
+const MAX_DISCOVERING = 2 * MAX_PENDING_FLOWS;
 const MAX_HOSTS_PER_FLOW = 8;
 
 /** The service's side of the reach: it names what discovery found, and ends a flow's hosts. */

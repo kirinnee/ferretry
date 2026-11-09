@@ -96,7 +96,7 @@ export const MCP_OAUTH_FLOW_TTL_MS = 10 * 60 * 1000;
 const MCP_OAUTH_REFRESH_MARGIN_MS = 60 * 1000;
 
 /** At most this many sign-ins in flight; the oldest is dropped to make room. */
-const MAX_PENDING_FLOWS = 16;
+export const MAX_PENDING_FLOWS = 16;
 
 /** At most this many client registrations kept per component; the oldest is forgotten. */
 export const MAX_REGISTRATIONS_PER_COMPONENT = 4;
