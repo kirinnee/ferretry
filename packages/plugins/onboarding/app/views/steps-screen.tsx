@@ -88,7 +88,8 @@ function RouterLink({
   );
 }
 
-const stepsHref = (daemon: string): string => `${daemonHomeHref(daemon)}/onboarding/steps`;
+/** Where a machine's steps page is. */
+export const stepsHref = (daemon: string): string => `${daemonHomeHref(daemon)}/onboarding/steps`;
 
 /** `/d/<machine>/onboarding/steps`: every declared step, with the panels the plugins contributed to it. */
 export function createStepsScreen(client: PluginClient) {

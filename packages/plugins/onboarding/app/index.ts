@@ -1,4 +1,11 @@
-import { type DaemonlessPorts, type DaemonlessScreenProps, type DaemonlessViews, provideToShell } from '@ferretry/app';
+import {
+  type DaemonlessPorts,
+  type DaemonlessScreenProps,
+  type DaemonlessViews,
+  type DeviceViewProps,
+  provideToShell,
+  type ShellProvides,
+} from '@ferretry/app';
 import type { AppComponent, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
@@ -39,6 +46,12 @@ export default provideToShell(
     }),
   }),
   {
+    // A just-paired machine with steps not looked at yet opens its steps page by itself (shell contract S3 device view).
+    device: {
+      'steps-opener': lazyComponent<DeviceViewProps>(async () =>
+        ((await loadViews()).createStepsOpener as () => AppComponent<DeviceViewProps>)(),
+      ) as NonNullable<ShellProvides['device']>[string],
+    },
     daemonless: ports => ({
       onboarding: lazyComponent<DaemonlessScreenProps>(async () =>
         ((await loadViews()).createOnboardingRoute as (ports: DaemonlessPorts) => AppComponent<DaemonlessScreenProps>)(

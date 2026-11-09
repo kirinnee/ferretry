@@ -5,9 +5,10 @@
  * tab that opens it). The shell draws neither: it only sends a device with no daemon here.
  */
 
+export { createStepsOpener } from './steps-opener.tsx';
 export { createSetupTab, createStepsScreen } from './steps-screen.tsx';
 
-import { daemonHomeHref, type DaemonlessPorts, type DaemonlessScreenProps } from '@ferretry/app';
+import { type DaemonlessPorts, type DaemonlessScreenProps } from '@ferretry/app';
 import { browserClipboardWriter, Button } from '@ferretry/app/ui';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { detectDeviceKind } from '../device-kind.ts';
@@ -17,6 +18,7 @@ import { OnboardingProgressStore } from '../onboarding-progress.ts';
 import { CHECKING_HOSTED_RELAY } from '../pending-connections.ts';
 import { setupHandoffFromHref } from '../setup-handoff.ts';
 import type { SetupSharePort } from '../setup-handoff-panel.tsx';
+import { stepsHref } from './steps-screen.tsx';
 
 /** Where Access draws its pairing screen: first contact with a daemon is Access's, never Onboarding's. */
 export const PAIR_PATH = '/pair';
@@ -122,7 +124,7 @@ export function createOnboardingRoute(ports: DaemonlessPorts) {
     const share = useMemo(() => browserSetupShare(), []);
     const selected = paired.selected;
     const openFleet = useCallback(() => {
-      if (selected !== null) navigate(`${daemonHomeHref(selected)}/onboarding/steps`);
+      if (selected !== null) navigate(stepsHref(selected));
     }, [navigate, selected]);
     return (
       <OnboardingPage
