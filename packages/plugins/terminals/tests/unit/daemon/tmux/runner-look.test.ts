@@ -230,6 +230,18 @@ describe('TmuxRunner.look (U4, the turn watch read)', () => {
     should(pane.acts.map(act => act.outcome)).deepEqual([{ refused: 'input_pending' }]);
   });
 
+  it('BG-046 look answers nothing for a screen too large to mask, and nothing of it leaves unmasked', async () => {
+    // Arrange: a pane whose screen is far past what the masker takes, with a value the Vault knows in it.
+    const pane = subject({ screen: `${SECRET}\n${'a'.repeat(300_000)}` });
+
+    // Act
+    const look = await pane.runner.look(pane.handle);
+
+    // Assert: no look (no evidence), and the scope was never handed a cut piece of the screen to mask.
+    should(look).be.undefined();
+    should(pane.masked).deepEqual([]);
+  });
+
   it('should ask one question and capture nothing again while the frame is unchanged, and capture when it moved', async () => {
     // Arrange
     const pane = subject();

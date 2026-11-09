@@ -74,22 +74,54 @@ const QUESTIONS_NOT_MOUNTED = new Proxy({} as QuestionStepPolicy, {
 });
 
 /**
- * What a turn watch failure may say in the log: a damaged state document by its FILE only (never its text, nor the
- * parser's account of it, which can quote it), anything else by its kind.
+ * What a turn watch failure may say in the log: a refused state document by its FILE and its KIND (a fixed word; never
+ * its text, nor the parser's account of it, which can quote it), anything else by its kind.
  */
 export function turnWatchFailureFields(error: unknown): Readonly<Record<string, string>> {
-  if (error instanceof InvalidStateDocumentError) return { file: error.file };
+  if (error instanceof InvalidStateDocumentError) return { file: error.file, why: error.damage };
   return { error: error instanceof Error ? error.name : 'unknown' };
 }
 
+/** What each kind of damage says, in words that carry nothing of the file (the kinds are a fixed vocabulary). */
+const DAMAGE_SENTENCE: Readonly<Record<Exclude<InvalidStateDocumentError['damage'], 'refused_write'>, string>> = {
+  unparsable: 'it is not JSON',
+  no_format: 'it has no format number',
+  lower_format: 'it is in an older format than this daemon reads',
+  higher_format: 'it is in a newer format than this daemon reads',
+  schema: 'it does not match the state document it should be',
+  missing: 'it is missing',
+  io: 'it could not be read',
+};
+
 /**
- * What makes one damaged state document the SAME damage: its file and a digest of what the parser said is wrong with it
- * (the account can quote the document, so only its digest is kept, and it is never logged). Any other failure has no
- * key, so it is told every time.
+ * What a failed look says in the log, for one ferret: WHICH ferret and WHY, and nothing of the document (never its bytes,
+ * nor the parser's account of it, which can quote them).
  */
-function turnWatchFailureKey(error: unknown): string | undefined {
+export function turnWatchFailureSentence(ferret: string, error: unknown): string {
+  // The daemon's own value was refused before it reached the disk: the file on disk is not what is wrong, so it is not
+  // told as damage there.
+  if (error instanceof InvalidStateDocumentError) {
+    const kind = error.damage;
+    if (kind === 'refused_write')
+      return `ferret ${ferret}'s turn could not be recorded: the state document the daemon built for it does not match the state document it should be (nothing was written, and the state.json on disk is as it was)`;
+    return `ferret ${ferret}'s turn cannot be watched until its state.json is mended: ${DAMAGE_SENTENCE[kind]}`;
+  }
+  return `ferret ${ferret}'s turn could not be watched this time`;
+}
+
+/**
+ * What makes one refused state document the SAME report: its file, its kind and a digest of the file as last written
+ * (the port's version etag: inode, size and modification time, so a rewrite is a new report even of identical bytes; the
+ * port's account stands in where it gave no etag, and that account can quote the document, so only its digest is kept
+ * and it is never logged). A fixed file clears it by recording a turn again. Any other failure has no key, so it is told
+ * every time.
+ */
+export function turnWatchFailureKey(error: unknown): string | undefined {
   if (!(error instanceof InvalidStateDocumentError)) return undefined;
-  return `${error.file}\u0000${createHash('sha256').update(error.reason, 'utf8').digest('hex')}`;
+  const digest = createHash('sha256')
+    .update(error.etag ?? error.reason, 'utf8')
+    .digest('hex');
+  return `${error.file}\u0000${error.damage}\u0000${digest}`;
 }
 
 /** The inline host over the turn part, unarmed: `arm()` starts the 2 s tick, `close()` stops it. */
@@ -182,7 +214,7 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
           // A damaged document is said ONCE, not on every look that meets it again (until its damage changes).
           failureKey: turnWatchFailureKey,
           failed: (id, error) =>
-            deps.log.warn("a ferret's turn could not be watched this time", {
+            deps.log.warn(turnWatchFailureSentence(id, error), {
               ferret: id,
               ...turnWatchFailureFields(error),
             }),
