@@ -13,8 +13,8 @@
  *
  * WHAT THIS FILE ADDS, each a sentence:
  *
- *  - a sign-in file (`.credentials.json`, `auth.json`) is never listed or read, whatever name a link gives it and
- *    wherever inside the home the link leads (its real path is judged, case-insensitively), the same list
+ *  - a sign-in file (`.credentials.json`, `auth.json`) is never listed, and a read refuses one, whatever name a link gives
+ *    it and wherever inside the home the link leads (its real path's name is judged, case-insensitively), the same list
  *    `host-harness-scan.ts` keeps;
  *  - a link whose real path is the folder it is found in, or a folder above it (`skills/self -> skills`, `dir/up -> ..`),
  *    is a loop and is left as a link;
@@ -23,12 +23,18 @@
  *
  * HOW FAR A LINK IS FOLLOWED is bounded by construction, not by a count: `follow` is on only for the listing of the home and
  * of its `skills/` folder (what the inventory of today did), and the folder a link leads to is then read with `follow` off,
- * where every link is reported as a link and none is opened (today's skill-folder reader). So a followed link is at most the
- * `skills` link and one entry link, whatever chain of links each is made of, and the chain itself is resolved by the kernel.
+ * where every link is reported as a link and none is opened (today's skill-folder reader). So a chain of followed links is
+ * at most three: the `skills` link, the entry link, and the `SKILL.md` link (`skillManifest` only), plus the link a document
+ * is; whatever chain of links each is made of, the chain itself is resolved by the kernel.
  *
- * Declared residual: a name swapped for a link between the listing and the read can reach any file inside the SAME home
- * that the kernel would have let a followed link reach (never the daemon's home, never a sign-in file), read once and
- * bounded by the caller's limit.
+ * WHAT A READ RETURNS. A read judges the REAL path of the name (inside the home, and its own name is not a sign-in file's,
+ * any case), reads the real path through the kernel's held descriptor, and hands the bytes back only when the NAME of that
+ * real path still reaches the very file that was opened (`stillNames`, by device and inode); anything else is refused and
+ * the bytes are dropped. With `follow` off the real path must also be the lexical path (no link anywhere in it), as the
+ * inventory of today opened a skill file (`O_NOFOLLOW` leaf, parent checked). So a name swapped for a link between the
+ * judgement and the read, to a sign-in file or to anything else, is refused, never returned. What is not covered: a folder
+ * ABOVE the file swapped for a link to another folder inside the same home can make the read return a file of the SAME
+ * name there (never a sign-in file's name, never outside the home, never the daemon's home).
  */
 import { basename, join, relative, sep } from 'node:path';
 import type { FencedPath, RootEntry, RootHandle, RootsPort } from '@ferretry/kernel/contract';
@@ -39,9 +45,14 @@ const SIGN_IN_FILES = new Set(['.credentials.json', 'auth.json']);
 const isSignIn = (name: string): boolean => SIGN_IN_FILES.has(name.toLowerCase());
 
 /** The members of a root the reader uses: none of them writes, and the type names no other. */
-export type ReadHandle = Pick<RootHandle, 'resolve' | 'entries' | 'readText' | 'readBytes'>;
+export interface ReadHandle {
+  resolve: RootHandle['resolve'];
+  entries(path: FencedPath): Promise<readonly RootEntry[]>;
+  readText(path: FencedPath, limitBytes?: number): Promise<string>;
+  readBytes(path: FencedPath, limitBytes?: number): Promise<Uint8Array>;
+}
 
-const refused = (): Error => new Error('a sign-in file is never read');
+const refused = (): Error => new Error('the file is not read (a sign-in file, or not the file that was judged)');
 
 /** A name that tries to leave the folder the handle is for. */
 const outside = { ok: false, error: 'outside' } as const;
@@ -86,9 +97,24 @@ export function followingHandle(
     };
   };
 
-  const judged = async (path: FencedPath): Promise<void> => {
+  /**
+   * The bytes of `path`: judged by real path, read through the real path, kept only when the real path's name still reaches
+   * the file that was opened. With `follow` off no link may be anywhere in the path.
+   */
+  const checked = async (path: FencedPath, limitBytes?: number): Promise<Uint8Array> => {
     const target = await real(path);
     if (target === undefined || isSignIn(basename(target))) throw refused();
+    if (!follow) {
+      const here = await real(folder);
+      if (here === undefined || target !== join(here, relative(folder, path))) throw refused();
+    }
+    const placed = at(target);
+    if (!placed.ok) throw refused();
+    const bytes = await reach.readDurable(placed.value, limitBytes, async held =>
+      (await held.stillNames()) ? held.bytes : undefined,
+    );
+    if (bytes === undefined) throw refused();
+    return bytes;
   };
 
   return Object.freeze({
@@ -105,16 +131,8 @@ export function followingHandle(
         listed.map(async entry => (entry.kind === 'symlink' ? await followed(path, entry) : entry)),
       );
     },
-    readText: async (path: FencedPath, limitBytes?: number) => {
-      await judged(path);
-      return await reach.readText(path, limitBytes);
-    },
-    readBytes: async (
-      path: FencedPath,
-      limitOrWindow?: number | { readonly offset: number; readonly length: number },
-    ) => {
-      await judged(path);
-      return await reach.readBytes(path, limitOrWindow);
-    },
+    readText: async (path: FencedPath, limitBytes?: number) =>
+      new TextDecoder().decode(await checked(path, limitBytes)),
+    readBytes: async (path: FencedPath, limitBytes?: number) => await checked(path, limitBytes),
   });
 }
