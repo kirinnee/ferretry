@@ -7,7 +7,7 @@
  * stands in for it. Nothing here is kept offline.
  */
 
-import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
+import { type FormEvent, useCallback, useContext, useEffect, useId, useState } from 'react';
 import type { SharedCatalogManifestEntry } from '../../../contract/wire/index.ts';
 import type { MemberSubscription } from '../../lib/member-keys.ts';
 import { Button } from '@ferretry/app/ui';
@@ -59,7 +59,13 @@ import {
 import { InstalledControls } from './store-row-actions.tsx';
 import { offeredText } from './store-row-model.ts';
 import { Fingerprint, SharedPage } from './shared-parts.tsx';
-import { type InstallMachine, type OpenedSharedItem, SharedItemSheet } from './shared-item-sheet.tsx';
+import {
+  type ChooseInstall,
+  ChooseInstallContext,
+  type InstallMachine,
+  type OpenedSharedItem,
+  SharedItemSheet,
+} from './shared-item-sheet.tsx';
 
 type SharedPort = Pick<
   SharedController,
@@ -74,9 +80,18 @@ interface SharedWithMeProps {
   readonly onHome?: () => void;
   /** One tab of the Sharing page: no page frame, no way back to the machine list. */
   readonly embedded?: boolean;
+  /** With no machine listed, Install asks the person for one (the daemon-less /shared). */
+  readonly chooseInstall?: ChooseInstall;
 }
 
-export function SharedWithMe({ members, machines, installHost, onHome, embedded = false }: SharedWithMeProps) {
+export function SharedWithMe({
+  members,
+  machines,
+  installHost,
+  onHome,
+  embedded = false,
+  chooseInstall,
+}: SharedWithMeProps) {
   const [subs, setSubs] = useState<readonly MemberSubscription[] | null>(null);
   const [left, setLeft] = useState(false);
   const reload = useCallback(async (): Promise<void> => {
@@ -87,47 +102,49 @@ export function SharedWithMe({ members, machines, installHost, onHome, embedded 
   }, [reload]);
 
   return (
-    <SharedPage title={SHARED_WITH_ME} embedded={embedded}>
-      {left ? (
-        <p className="m-0 text-cell text-ok" role="status" data-shared-left="">
-          {LEFT_SENTENCE}
-        </p>
-      ) : null}
-      {subs === null ? (
-        <p className="m-0 text-cell text-muted" role="status">
-          {LOADING_CATALOGS}
-        </p>
-      ) : subs.length === 0 ? (
-        <p className="m-0 text-cell text-muted" data-shared-empty="">
-          {NOTHING_SHARED}
-        </p>
-      ) : (
-        <ul className="m-0 flex list-none flex-col gap-sm p-0" aria-label="Publishers">
-          {subs.map(sub => (
-            <li key={sub.daemonId} className="min-w-0">
-              <PublisherCard
-                sub={sub}
-                members={members}
-                machines={machines}
-                {...(installHost === undefined ? {} : { installHost })}
-                onChanged={() => void reload()}
-                onLeft={() => {
-                  setLeft(true);
-                  void reload();
-                }}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-      {embedded || onHome === undefined ? null : (
-        <div>
-          <Button type="button" variant="ghost" className="kt-btn--flush-start" onClick={onHome} data-shared-home="">
-            {BACK_TO_MACHINES}
-          </Button>
-        </div>
-      )}
-    </SharedPage>
+    <ChooseInstallContext.Provider value={chooseInstall}>
+      <SharedPage title={SHARED_WITH_ME} embedded={embedded}>
+        {left ? (
+          <p className="m-0 text-cell text-ok" role="status" data-shared-left="">
+            {LEFT_SENTENCE}
+          </p>
+        ) : null}
+        {subs === null ? (
+          <p className="m-0 text-cell text-muted" role="status">
+            {LOADING_CATALOGS}
+          </p>
+        ) : subs.length === 0 ? (
+          <p className="m-0 text-cell text-muted" data-shared-empty="">
+            {NOTHING_SHARED}
+          </p>
+        ) : (
+          <ul className="m-0 flex list-none flex-col gap-sm p-0" aria-label="Publishers">
+            {subs.map(sub => (
+              <li key={sub.daemonId} className="min-w-0">
+                <PublisherCard
+                  sub={sub}
+                  members={members}
+                  machines={machines}
+                  {...(installHost === undefined ? {} : { installHost })}
+                  onChanged={() => void reload()}
+                  onLeft={() => {
+                    setLeft(true);
+                    void reload();
+                  }}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+        {embedded || onHome === undefined ? null : (
+          <div>
+            <Button type="button" variant="ghost" className="kt-btn--flush-start" onClick={onHome} data-shared-home="">
+              {BACK_TO_MACHINES}
+            </Button>
+          </div>
+        )}
+      </SharedPage>
+    </ChooseInstallContext.Provider>
   );
 }
 
@@ -506,6 +523,7 @@ function StoreItemRow({
   /** The machines' install records changed: read them again. */
   readonly onChanged: () => void;
 }) {
+  const choose = useContext(ChooseInstallContext);
   const [opening, setOpening] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [shown, setShown] = useState<OpenedSharedItem | null>(null);
@@ -550,7 +568,7 @@ function StoreItemRow({
             <span className="shrink-0 text-meta text-muted" data-shared-item-version="">
               {offeredText(entry.version)}
             </span>
-            {machines.length === 0 ? null : (
+            {machines.length === 0 && choose === undefined ? null : (
               <Button
                 type="button"
                 size="sm"

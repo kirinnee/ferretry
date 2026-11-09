@@ -43,9 +43,16 @@ describe('fy onboard: find before asking', () => {
     expect(result.questions).toEqual([]);
     expect(daemon.recorded).toEqual([
       { plugin: 'claude-code', id: 'harness', state: 'found' },
-      { plugin: 'logins', id: 'login', state: 'found' },
+      // The check that saw the terminal's own (host) sign-in says so, and only that one.
+      { plugin: 'logins', id: 'login', state: 'found', linked: true },
     ]);
     expect(printed(result.recorded)).toContain('Ferretry is set up.');
+  });
+
+  test('n1 a login Ferretry holds itself is recorded found without the linked mark', async () => {
+    const daemon = new FakeDaemon([login()], { [LOGINS_ROUTE]: signedInLogin('ferretry') });
+    await run(daemon);
+    expect(daemon.recorded).toEqual([{ plugin: 'logins', id: 'login', state: 'found' }]);
   });
 
   test('the linked sign-in says its costs in ONE line, and offers a separate login later', async () => {
