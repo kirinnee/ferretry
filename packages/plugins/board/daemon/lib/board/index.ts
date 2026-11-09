@@ -8,6 +8,7 @@ export * from './derive.ts';
 export * from './done-delivery.ts';
 export * from './duplicate-sweep.ts';
 export * from './errors.ts';
+export * from './gate-cards.ts';
 export * from './gate-check.ts';
 export * from './gate-items.ts';
 export * from './gate-policy.ts';

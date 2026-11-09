@@ -101,6 +101,8 @@ export interface FerretFocus {
    */
   setFocus(ferret: string, task: CardRef, title?: string, options?: { readonly anchor?: boolean }): Promise<boolean>;
   focusOf(ferret: string): Promise<CardRef | null>;
+  /** Every ferret's focused card from ONE read of the store (a roster of N ferrets reads it once, not N times). */
+  focusOfAll(): Promise<ReadonlyMap<string, CardRef | null>>;
   /**
    * The card the session's own delegations go under (`config.focusAnchor`): set only on purpose (`fy task
    * focus`, creating a card, the card a start gave it), never by a plain touch like `focusCard` is.
@@ -153,7 +155,11 @@ export interface CardAsks {
 /** Asks' link to cards: which open asks name each card. A card only DERIVES from it; the card holds no copy. */
 export interface CardAskLinkSource {
   /** The asks on `cards`, read from the asks of `board`'s ferrets (`cards` when absent). */
-  asksFor(cards: readonly Card[], board?: readonly Card[]): Promise<ReadonlyMap<CardId, CardAsks>>;
+  asksFor(
+    cards: readonly Card[],
+    board?: readonly Card[],
+    signal?: AbortSignal,
+  ): Promise<ReadonlyMap<CardId, CardAsks>>;
 }
 
 // ---------------------------------------------------------------------------------------------------

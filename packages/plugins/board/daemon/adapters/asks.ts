@@ -50,8 +50,23 @@ export class AsksCardObligations implements CardObligations {
   }
 
   async answered(card: CardId): Promise<ReadonlySet<string>> {
-    const answers = await this.asks.answers({ source: CARD_SOURCE });
-    return new Set(answers.filter(answer => cardOf(answer.entry) === card).map(answer => answer.entry));
+    return (await this.answeredAll()).get(card) ?? new Set();
+  }
+
+  async openAll(): Promise<ReadonlyMap<CardId, readonly OpenCardAskEntry[]>> {
+    const byCard = new Map<CardId, OpenCardAskEntry[]>();
+    for (const entry of await this.open()) byCard.set(entry.cardId, [...(byCard.get(entry.cardId) ?? []), entry]);
+    return byCard;
+  }
+
+  async answeredAll(): Promise<ReadonlyMap<CardId, ReadonlySet<string>>> {
+    const byCard = new Map<CardId, Set<string>>();
+    for (const answer of await this.asks.answers({ source: CARD_SOURCE })) {
+      const cardId = cardOf(answer.entry);
+      if (cardId === undefined) continue;
+      byCard.set(cardId, (byCard.get(cardId) ?? new Set<string>()).add(answer.entry));
+    }
+    return byCard;
   }
 }
 

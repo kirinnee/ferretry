@@ -172,4 +172,35 @@ describe('the agenda change outbox', () => {
     should(deliveredAfter).deepEqual(['Other']);
     should((await w.stored()).map(each => each.id)).deepEqual(['e1', 'e2']);
   });
+
+  it('should name a ferret for the periodic drain only while an event is waiting, and a fresh outbox names none', async () => {
+    // Arrange
+    const w = await world();
+    const { watcher } = observer(() => false);
+    should(w.outbox.pendingFerrets()).deepEqual([]);
+
+    // Act / Assert: appended, so named; delivered, so not
+    await w.outbox.append(SESSION, w.effect('e1', 'First'));
+    should(w.outbox.pendingFerrets()).deepEqual([SESSION]);
+    await w.outbox.flush(SESSION, watcher);
+    should(w.outbox.pendingFerrets()).deepEqual([]);
+  });
+
+  it('should keep naming a ferret whose event is backing off, and stop once it is parked', async () => {
+    // Arrange
+    const w = await world();
+    let failing = true;
+    const { watcher } = observer(() => failing);
+    await w.outbox.append(SESSION, w.effect('e1', 'First'));
+
+    // Act / Assert
+    await w.outbox.flush(SESSION, watcher);
+    should(w.outbox.pendingFerrets()).deepEqual([SESSION]);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      w.advance(60_000);
+      await w.outbox.flush(SESSION, watcher);
+    }
+    failing = false;
+    should(w.outbox.pendingFerrets()).deepEqual([]);
+  });
 });

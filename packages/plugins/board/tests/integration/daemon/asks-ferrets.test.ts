@@ -259,10 +259,7 @@ describe('the ferrets as the board’s one liveness read', () => {
   test('the roster carries each ferret’s state, lead and focus card, and a focus that cannot be read is no card', async () => {
     const ferrets = world();
     ferrets.setState(ferretId('helper'), 'working');
-    const focus = {
-      focusOf: async (ferret: string) =>
-        ferret === 'lead' ? ({ id: 'F1' } as never) : Promise.reject(new Error('damaged')),
-    };
+    const focus = { focusOfAll: async () => new Map([['lead', { id: 'F1' } as never]]) };
     const liveness = new FerretsLiveness(ferrets, focus, new KeyedSerial());
 
     const roster = await liveness.roster();
@@ -271,11 +268,19 @@ describe('the ferrets as the board’s one liveness read', () => {
     expect(roster.sessions.get('lead')).toMatchObject({ id: 'lead', status: 'idle', focusCard: { id: 'F1' } });
     expect(roster.sessions.get('lead')).not.toHaveProperty('lead');
     expect(roster.sessions.get('helper')).toMatchObject({ status: 'working', focusCard: null, lead: 'lead' });
+
+    // A focus file that cannot be read at all is no card for anyone, and the roster still stands.
+    const damaged = new FerretsLiveness(
+      ferrets,
+      { focusOfAll: async () => Promise.reject(new Error('damaged')) },
+      new KeyedSerial(),
+    );
+    expect((await damaged.roster()).sessions.get('lead')).toMatchObject({ focusCard: null });
   });
 
   test('settled reads the named ferrets fresh inside one section, skipping those that cannot be read', async () => {
     const ferrets = world();
-    const liveness = new FerretsLiveness(ferrets, { focusOf: async () => null }, new KeyedSerial());
+    const liveness = new FerretsLiveness(ferrets, { focusOfAll: async () => new Map() }, new KeyedSerial());
 
     const seen = await liveness.settled(['lead', 'ghost'], async fresh => [...fresh.held]);
 
@@ -287,7 +292,7 @@ describe('the ferrets as the board’s one liveness read', () => {
           throw new Error('ferrets are down');
         },
       },
-      { focusOf: async () => null },
+      { focusOfAll: async () => new Map() },
       new KeyedSerial(),
     );
     expect(await throwing.settled(['lead'], async fresh => fresh.held.size)).toBe(0);
