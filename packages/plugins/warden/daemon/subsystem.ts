@@ -219,7 +219,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
         // An orphaned card's notice stands on one ferret's board as an ask, exactly as the revive breaker's does. An
         // Agenda that refuses it (a board holds at most 20 unresolved items) makes the sweep journal
         // `fleet.warden_orphan_failed` once, with the reason, and try again after a growing wait (`orphan-retry.ts`).
-        // GAP(warden orphan list): today listed every orphaned card on ONE machine item; here each card is its own ask.
+        // Today listed every orphaned card on ONE machine item; here each card is its own ask (see ports-pending, warden).
         add: async (sessionId, notice) => {
           const written = await agenda.noticeOutcome(sessionId, {
             sourceRef: notice.sourceRef,
