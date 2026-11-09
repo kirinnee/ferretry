@@ -27,6 +27,7 @@ import {
   type YAMLMap,
   type YAMLSeq,
 } from 'yaml';
+import { SCHEMA_FOLDER } from './claims.ts';
 
 /**
  * The most a configuration file may hold, in UTF-8 bytes (today's `CONFIG_FILE_MAX_BYTES`). It is checked BEFORE
@@ -527,6 +528,11 @@ function editValue(document: Document, path: readonly (string | number)[], targe
 
 /** The modeline every file starts with, and how to tell one is already there. */
 const MODELINE_MARK = 'yaml-language-server:';
+/** A modeline of the exact shape the kernel writes: a schema under `.schema/` reached by `../` steps. */
+const KERNEL_MODELINE = new RegExp(
+  `^# yaml-language-server: \\$schema=(?:\\.\\./)*${SCHEMA_FOLDER.replace('.', '\\.')}/[A-Za-z0-9._-]+\\.json[ \\t]*$`,
+  'u',
+);
 
 /**
  * The text of a file after it is made to mean `target`.
@@ -535,7 +541,8 @@ const MODELINE_MARK = 'yaml-language-server:';
  *   replaced whole: there is no structure left to keep.
  * - `current` — what `existing` means now (for a new file: what an EMPTY file means), defaults filled
  *   in, so unchanged defaults stay unwritten.
- * - `modeline` — the `# yaml-language-server: $schema=…` line a file starts with; added when missing, and left
+ * - `modeline` — the `# yaml-language-server: $schema=…` line a file starts with; added when missing, refreshed when it
+ *   is one the kernel wrote (`../.schema/<name>.json`) naming another schema, kept when it is the owner's own, and left
  *   out when `undefined`.
  */
 export function editConfigText(
@@ -554,7 +561,16 @@ export function editConfigText(
   // the text itself is what says whether the file starts with a modeline — the EDITED text, because
   // an edit that removes that first key removes the comment with it.
   const edited = document.toString({ lineWidth: 0 });
-  if (modeline === undefined || edited.split('\n', 5).some(line => line.includes(MODELINE_MARK))) return edited;
+  if (modeline === undefined) return edited;
+  const lines = edited.split('\n');
+  const at = lines.slice(0, 5).findIndex(line => line.includes(MODELINE_MARK));
+  if (at >= 0) {
+    // A pointer the kernel itself wrote to a schema name it now publishes for another file or for none (a home from
+    // before collections published `<name>--item.json`) is refreshed on this write; any other pointer is the owner's.
+    if (lines[at] === modeline || !KERNEL_MODELINE.test(lines[at] ?? '')) return edited;
+    lines[at] = modeline;
+    return lines.join('\n');
+  }
   const header = document.commentBefore ?? '';
   const line = modeline.replace(/^#/u, '');
   document.commentBefore = header === '' ? line : `${line}\n${header}`;
