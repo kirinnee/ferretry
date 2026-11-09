@@ -68,6 +68,12 @@ export interface AgendaChangeOutboxRuntime {
 /** Original events survive a recovered commit. Only file operations use the repository queue; observers may reenter it. */
 export class FileAgendaChangeOutbox {
   private readonly flushing = new Set<string>();
+  /**
+   * The ferrets whose outbox may still hold an event to deliver: marked when an event is appended or a flush leaves one
+   * behind, cleared when a flush finds nothing left to deliver. The periodic drain walks only these, so an idle daemon
+   * lists and reads no ledger at all (the outboxes on disk at boot are picked up by the recovery pass).
+   */
+  private readonly dirty = new Set<string>();
 
   constructor(
     private readonly files: AgendaFileStore,
@@ -75,8 +81,14 @@ export class FileAgendaChangeOutbox {
     private readonly runtime: AgendaChangeOutboxRuntime,
   ) {}
 
+  /** The ferrets with an event still to deliver (see {@link dirty}). */
+  pendingFerrets(): readonly string[] {
+    return [...this.dirty];
+  }
+
   /** Called under the ledger queue after hot commit, before retiring its durable intent. Idempotent on recovery. */
   async append(sessionId: string, effect: AgendaChangeEffect): Promise<void> {
+    this.dirty.add(sessionId);
     const effects = await this.load(sessionId);
     if (effects.some(each => each.id === effect.id)) return;
     await this.files.writeAtomic(sessionId, AGENDA_CHANGE_OUTBOX, JSON.stringify([...effects, effect]));
@@ -90,9 +102,17 @@ export class FileAgendaChangeOutbox {
       const attempted = new Set<string>();
       const warned = new Set<string>();
       for (;;) {
-        const effect = await this.serial(sessionId, async () =>
-          this.next(sessionId, await this.load(sessionId), attempted, warned),
-        );
+        const effect = await this.serial(sessionId, async () => {
+          const effects = await this.load(sessionId);
+          const next = this.next(sessionId, effects, attempted, warned);
+          // Anything not parked is still to be delivered (now, or after its backoff); the rest is nobody's to retry.
+          const open = effects.some(
+            each => each.retry === undefined || each.retry.attempts < AGENDA_CHANGE_MAX_ATTEMPTS,
+          );
+          if (open) this.dirty.add(sessionId);
+          else this.dirty.delete(sessionId);
+          return next;
+        });
         if (effect === undefined) return;
         attempted.add(effect.id);
         try {

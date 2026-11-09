@@ -64,6 +64,7 @@ import {
   DoneDeliveryLadder,
   type FerretRoster,
   GateItems,
+  gateCardsOf,
   LivenessActivityDeriver,
   ReopenDeliveryLadder,
   type ReopenNotifier,
@@ -321,13 +322,20 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
       const stored = (await service.snapshot()).cards.find(card => card.id === id);
       return stored === undefined ? undefined : await gateCard(stored);
     },
+    // One sweep and one snapshot for the whole board; every card is built from them (v4's one-sweep shape), with no
+    // per-card derivation.
     cards: async () => {
-      const { views } = await service.sweepBoard();
+      const { views, laneSets } = await service.sweepBoard();
       const snapshot = await service.snapshot();
-      const byId = new Map(views.map(view => [view.id, view] as const));
-      const out: GateCard[] = [];
-      for (const stored of snapshot.cards) out.push(await gateCard(stored, byId.get(stored.id)));
-      return out;
+      return await gateCardsOf({
+        views,
+        cards: snapshot.cards,
+        laneSets: snapshot.laneSets.size >= laneSets.size ? snapshot.laneSets : laneSets,
+        machineId: machineId() ?? '',
+        projectName: async project => (await lanes.project(project))?.name,
+        audienceOf: async card => await service.audienceOf(card),
+        blockedByOf: async card => (await service.card(card.id)).card.blockedBy,
+      });
     },
     act: async (id, request, caller, expect) => {
       await service.act(id, request, caller, expect);

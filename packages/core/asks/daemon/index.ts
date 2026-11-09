@@ -41,6 +41,9 @@ import { AgendaWaker, WAKE_SWEEP_MS } from './lib/agenda/waker.ts';
 import { AgendaResurfacer, RESURFACE_SWEEP_MS } from './lib/agenda/resurfacer.ts';
 import { AgendaLedgerFiles } from './lib/state.ts';
 
+/** How often the outboxes that hold a change event are drained. */
+const CHANGES_SWEEP_MS = 5_000;
+
 /** The one plugin whose Asks view can tell a ferret something. */
 const TELLING_PLUGIN = 'vault';
 
@@ -114,9 +117,10 @@ export default implementDaemon(manifest, {
     kernel.jobs.add({ id: 'recover', schedule: { onceAfterStart: true }, run: recover });
     kernel.jobs.add({
       id: 'changes',
-      schedule: { every: milliseconds(1_000) },
-      run: async () => {
-        for (const ferret of await boards.ferrets()) await agenda.list(ferret).catch(error => warn(String(error)));
+      // Only the outboxes that hold an event (the outbox knows them): no ledger is listed or read on an idle tick.
+      schedule: { every: milliseconds(CHANGES_SWEEP_MS) },
+      run: async signal => {
+        await agenda.flushPending(error => warn(String(error)), signal);
       },
     });
     const waker = new AgendaWaker(repository, agenda, boards.ferrets, now);
