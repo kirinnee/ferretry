@@ -53,9 +53,9 @@ import type { Step, StepContext } from './index.ts';
 const KEY_COUNT_LIMIT = MAX_SECRETS_PER_DAEMON;
 
 /**
- * The key every fingerprint digest is keyed under: random per run, memory only, never written or logged. Every
- * {@link LoginKeyHold} of one run shares it, because the live and the enforced pass compare their digests; a digest
- * from another run means nothing.
+ * The key every fingerprint digest is keyed under: random per process (fixed at module load), memory only, never
+ * written or logged. Every {@link LoginKeyHold} of one process shares it, because the live and the enforced pass
+ * compare their digests; a digest from another process means nothing, so never compare one across processes.
  */
 const RUN_KEY = randomBytes(32);
 
