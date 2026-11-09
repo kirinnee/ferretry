@@ -46,7 +46,7 @@ test('M3 through the port, the callbacks a resume may carry reach the service, a
     onCarried,
     confirmRestore: () => undefined,
   });
-  await port.resume('f1', 'hi');
+  await port.resume('f1' as never, 'hi');
 
   expect(seen).toEqual([{ decided, onCarried }, undefined]);
 });

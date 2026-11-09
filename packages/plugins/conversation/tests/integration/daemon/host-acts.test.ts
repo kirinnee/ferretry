@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
-import type { FerretTurns } from '@ferretry/core-ferrets/contract';
+import type { FerretId, FerretTurns } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
@@ -26,6 +26,21 @@ const F1 = ferretId('f1');
 const AT = '2026-11-08T09:00:00.000Z' as Instant;
 const fixture = await fixtureTexts(join(import.meta.dir, '../../fixtures/question-asked'));
 
+/** A Ferrets whose turn documents can be made unreadable: the read a strict owner's-words question rejects on. */
+class TurnsFerrets extends FakeFerrets {
+  unreadableTurns = false;
+
+  async turns(ferret: FerretId): Promise<FerretTurns | undefined> {
+    if ((await this.get(ferret)) === undefined) return undefined;
+    return {
+      list: async () => {
+        if (this.unreadableTurns) throw new Error('FIXTURE_SECRET a turn document vanished');
+        return [];
+      },
+    };
+  }
+}
+
 /** A state that fails every call while it is told to: the one way a store answers an error nobody worded. */
 function breakable(state: StatePort) {
   const broken = { on: false };
@@ -42,8 +57,8 @@ function breakable(state: StatePort) {
   return { port, broken };
 }
 
-async function world(setup: (ferrets: FakeFerrets) => void = () => undefined) {
-  const ferrets = new FakeFerrets();
+async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
+  const ferrets = new TurnsFerrets();
   ferrets.add({ id: F1, state: 'idle' });
   setup(ferrets);
   const inner = memoryStatePort(CONVERSATION_STATE);
@@ -66,7 +81,7 @@ async function world(setup: (ferrets: FakeFerrets) => void = () => undefined) {
   });
   const api = () => host.provided(ConversationPort);
   const waiting = async (id: string, state: 'queued' | 'typing' = 'queued') =>
-    await new StateQueueStore(state === 'queued' ? inner : inner).append(parseSessionId('f1'), {
+    await new StateQueueStore(inner).append(parseSessionId('f1'), {
       v: 1,
       kind: 'enqueued',
       at: AT,
@@ -216,7 +231,7 @@ describe('what needs the ferret’s terminal and has none says so', () => {
       senderKind: 'human',
     });
 
-    const refused = await api().resubmitStuck(F1, { kind: 'warden' }, 's-stuck');
+    const refused = await api().resubmitStuck?.(F1, { kind: 'warden' }, 's-stuck');
 
     expect(refused).toMatchObject({ ok: false, error: { code: 'plugin_unavailable' } });
     await host.stop();
@@ -225,8 +240,8 @@ describe('what needs the ferret’s terminal and has none says so', () => {
   test('the Warden’s re-submit for a send nobody made answers refused, and no other caller may press it', async () => {
     const { host, api } = await world();
 
-    expect(await api().resubmitStuck(F1, { kind: 'warden' }, 's-none')).toEqual({ ok: true, value: 'refused' });
-    expect(await api().resubmitStuck(F1, { kind: 'owner' }, 's-none')).toMatchObject({
+    expect(await api().resubmitStuck?.(F1, { kind: 'warden' }, 's-none')).toEqual({ ok: true, value: 'refused' });
+    expect(await api().resubmitStuck?.(F1, { kind: 'owner' }, 's-none')).toMatchObject({
       ok: false,
       error: { code: 'forbidden' },
     });
@@ -246,11 +261,7 @@ describe('what needs the ferret’s terminal and has none says so', () => {
 describe('the owner’s words, the draft, the question and the sitrep', () => {
   test('a strict read of the owner’s words that cannot be read is said as unreadable, in no secret’s words', async () => {
     const { host, api, ferrets } = await world();
-    ferrets.turns = async (): Promise<FerretTurns> => ({
-      list: async () => {
-        throw new Error('FIXTURE_SECRET a turn document vanished');
-      },
-    });
+    ferrets.unreadableTurns = true;
 
     const words = await api().ownerWords(F1, { strict: true });
 
@@ -284,7 +295,7 @@ describe('the owner’s words, the draft, the question and the sitrep', () => {
     const { host, built, state, waiting } = await world();
     const lines = async (): Promise<readonly { text: string }[]> => {
       const hook = built.half?.hooks['sitrep.lines'];
-      const source = (await hook?.({} as never)) as readonly { item: { lines(ferret: string): Promise<unknown> } }[];
+      const source = (await hook?.()) as readonly { item: { lines(ferret: string): Promise<unknown> } }[];
       return (await source[0]?.item.lines('f1')) as readonly { text: string }[];
     };
     expect(await lines()).toEqual([]);

@@ -848,7 +848,7 @@ describe('M1 the Enter that starts a turn clears the markers, through Ferrets', 
     ferrets.draft = turnInstruction(ferrets.turnFileOf(2));
     const before = ferrets.markersCleared;
 
-    const pressed = await api().resubmitStuck(F1, { kind: 'warden' }, 's-stuck');
+    const pressed = await api().resubmitStuck?.(F1, { kind: 'warden' }, 's-stuck');
 
     expect(pressed).toEqual({ ok: true, value: 'submitted' });
     expect(ferrets.markersCleared).toBe(before + 1);
@@ -859,7 +859,7 @@ describe('M1 the Enter that starts a turn clears the markers, through Ferrets', 
     const { host, ferrets, api } = await conversation();
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE stuck', sendId: 's-not-yours' });
 
-    const refused = await api().resubmitStuck(F1, { kind: 'owner' }, 's-not-yours');
+    const refused = await api().resubmitStuck?.(F1, { kind: 'owner' }, 's-not-yours');
 
     expect(refused).toMatchObject({ ok: false, error: { code: 'forbidden' } });
     expect(ferrets.submitted).toEqual([]);
@@ -1095,7 +1095,7 @@ describe('m2 a turn document is written once and says whose it is', () => {
 describe('m3 a harness this build does not know is trusted with nothing', () => {
   test('m3 a multi-line message is not pasted whole into an unknown harness: it goes by file', async () => {
     const { host, ferrets, api } = await conversation(f =>
-      f.add({ id: F1, state: 'idle', mode: 'interactive', harness: 'mystery' }),
+      f.add({ id: F1, state: 'idle', mode: 'interactive', harness: 'mystery' as never }),
     );
 
     await api().send(F1, { kind: 'owner' }, { message: `${long(700)}\n${long(700)}`, sendId: 's-mystery' });
@@ -1106,7 +1106,7 @@ describe('m3 a harness this build does not know is trusted with nothing', () => 
 
   test('m3 an unknown harness has no transcript reading: the send is unconfirmed and never typed again', async () => {
     const { host, ferrets, api, stored, advance } = await conversation(f =>
-      f.add({ id: F1, state: 'idle', harness: 'mystery' }),
+      f.add({ id: F1, state: 'idle', harness: 'mystery' as never }),
     );
     ferrets.transcript = [otherEntry];
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE mystery', sendId: 's-mystery-2' });
