@@ -128,6 +128,7 @@ import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
 import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
+import { reachFaults } from '../manifest/reach.ts';
 import type { HookTake, Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
 import { type TestCaller, owner, standInAdmission, testArrival, testPrincipal } from './admission.ts';
@@ -411,6 +412,9 @@ export async function testHost(options: TestHostOptions): Promise<TestHost> {
 async function start(world: World): Promise<TestHost> {
   const { options, clock, identity, identitySigner } = world;
   const manifests: readonly Manifest[] = options.plugins.map(plugin => plugin.manifest);
+  // The real host refuses a plugin whose reach declarations it does not honour; a suite learns it the same way.
+  const fault = reachFaults(manifests)[0];
+  if (fault !== undefined) throw new Error(`testHost: ${fault.plugin} ${fault.sentence}`);
   const hookOffers = new Map(
     manifests.flatMap(manifest => (manifest.hooks?.offers ?? []).map(offer => [offer.hook.name, offer.hook] as const)),
   );
@@ -1362,9 +1366,9 @@ async function start(world: World): Promise<TestHost> {
   };
 
   // What an item names, by the real host's rule (`host/items.ts`): the installed items `options.items` names, united with
-  // the owner's config collection of each kind, read from the world and re-read whenever it moves. Built on first use,
-  // when every plugin's config is declared.
-  let liveItems: ReturnType<typeof itemReach> | undefined;
+  // the owner's config collection of each kind, read from the world at every check. Built on first use, when every
+  // plugin's config is declared.
+  let liveItems: ItemReachOf | undefined;
   const itemsOf: ItemReachOf = kind => {
     liveItems ??= itemReach({
       installed: options.items ?? NO_ITEMS,
@@ -1373,9 +1377,8 @@ async function start(world: World): Promise<TestHost> {
         id => configPort(options.plugins.find(plugin => plugin.manifest.id === id)?.manifest as Manifest),
       ),
     });
-    return liveItems.of(kind);
+    return liveItems(kind);
   };
-  stopHandlers.push(() => liveItems?.stop());
   /** A plugin's own declared resolvers, asked at each call, as the real host asks them. */
   const resolversOf =
     (id: string): ResolverOf =>

@@ -15,7 +15,7 @@ const graphOf = (...manifests: Manifest[]): StartGraph =>
   }) as unknown as StartGraph;
 
 /** A declared collection as the graph reads it: only its shape and name matter here, never its schema. */
-const MCP_ITEMS = { kind: 'config', shape: 'collection', collection: 'mcp' };
+const MCP_ITEMS = { kind: 'config', shape: 'collection', collection: 'mcp', itemKind: 'mcp' };
 
 const manifest = (id: string, permissions: Record<string, unknown>, extra: Record<string, unknown> = {}): Manifest =>
   ({ id, title: id, version: '5.0.0', api: 5, core: false, kinds: [], permissions, ...extra }) as unknown as Manifest;
@@ -49,8 +49,42 @@ describe('plugin-graph: item reach is the config collection owner’s alone', ()
     expect(itemFindings(owner({}), manifest('shells', { spawn: [{ items: 'shell' }] }))).toEqual([]);
   });
 
-  test('a plugin that declares the same-named collection without being an item plugin does not own the kind', () => {
+  test('a collection merely named for the kind, without itemKind, owns nothing', () => {
+    const named = manifest(
+      'named',
+      {},
+      { kinds: ['item'], data: { config: [{ kind: 'config', shape: 'collection', collection: 'mcp' }] } },
+    );
+    expect(itemFindings(named, manifest('user', { spawn: [{ items: 'mcp' }] }))).toEqual([]);
+  });
+
+  test('itemKind on a plugin that is not an item plugin fails the graph', () => {
     const notAnItemPlugin = manifest('other', {}, { data: { config: [MCP_ITEMS] } });
-    expect(itemFindings(notAnItemPlugin, manifest('user', { spawn: [{ items: 'mcp' }] }))).toEqual([]);
+    expect(allFindings(notAnItemPlugin)).toEqual([
+      "other: declares collection mcp with itemKind 'mcp' but is not an item plugin",
+    ]);
+  });
+});
+
+const allFindings = (...manifests: Manifest[]): string[] =>
+  pluginGraphFindings(graphOf(...manifests))
+    .filter(finding => !finding.message.includes('kernel-bound port'))
+    .map(finding => `${finding.where}: ${finding.message}`);
+
+describe('plugin-graph: one resolver name serves one axis', () => {
+  test('the same resolver in spawn and network fails the graph, naming it', () => {
+    expect(
+      allFindings(manifest('mcp', { spawn: [{ resolver: 'mcp-check' }], network: [{ resolver: 'mcp-check' }] })),
+    ).toEqual([
+      "mcp: names resolver 'mcp-check' in both permissions.spawn and permissions.network; use one resolver for programs and another for hosts",
+    ]);
+  });
+
+  test('a program resolver and a host resolver pass', () => {
+    expect(
+      allFindings(
+        manifest('mcp', { spawn: [{ resolver: 'mcp-check-program' }], network: [{ resolver: 'mcp-check-host' }] }),
+      ),
+    ).toEqual([]);
   });
 });

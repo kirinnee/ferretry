@@ -564,13 +564,11 @@ async function bootLocked(
 
   const data = await loadDataPlugins(adapters.fs, home, new Set(manifests.map(manifest => manifest.id)));
   // What an item names: the installed data plugins' (read once, an install is pinned) united with the owner's config
-  // collection of each kind (`config/mcp/<name>.yaml`), re-read whenever it moves.
-  const liveItems = itemReach({
+  // collection of each kind (`config/mcp/<name>.yaml`), read live at every check (no cache: nothing to go stale).
+  const items = itemReach({
     installed: await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]),
     configOwned: configOwnedKinds(order, id => config.port(id)),
   });
-  own(liveItems.stop);
-  const items = liveItems.of;
 
   const records = new Map<string, PluginRecord>();
   for (const manifest of manifests) {

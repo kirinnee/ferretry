@@ -9,11 +9,11 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { z } from 'zod';
 import { defineConfig, neverLoosens } from '../../../contract/index.ts';
-import type { FetchPort, KernelPorts, SpawnPort } from '../../../contract/ports.ts';
+import type { ConfigPort, FetchPort, KernelPorts, SpawnPort } from '../../../contract/ports.ts';
 import { bootHost } from '../../../host/host.ts';
-import { type ConfigOwnedKind, itemReach } from '../../../host/items.ts';
+import { type ConfigOwnedKind, configOwnedKinds, itemReach } from '../../../host/items.ts';
 import { realAdapters } from '../../../host/wiring.ts';
-import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
+import { definePlugin, implementDaemon, type Manifest } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
 import { testHost } from '../../../testing/index.ts';
 
@@ -26,6 +26,7 @@ const ItemSchema = z.object({ command: z.string().optional(), url: z.string().op
 type Item = z.infer<typeof ItemSchema>;
 const ITEMS = defineConfig({
   collection: 'mcp',
+  itemKind: 'mcp',
   name: /^[a-z][a-z0-9-]*$/,
   schema: ItemSchema,
   axis: 'configure',
@@ -201,23 +202,10 @@ describe('K1: { items: mcp } counts the owner’s config items, live', () => {
 
 describe('itemReach: the union of installed items and the owner’s live config', () => {
   const none = (): { programs: string[]; hosts: string[] } => ({ programs: [], hosts: [] });
-  const source = (
-    kind: ConfigOwnedKind['kind'],
-    current: () => ReadonlyMap<string, unknown>,
-  ): ConfigOwnedKind & { fire: () => void } => {
-    const listeners = new Set<() => void>();
-    return {
-      kind,
-      read: current,
-      watch: listener => {
-        listeners.add(listener);
-        return () => void listeners.delete(listener);
-      },
-      fire: () => {
-        for (const listener of listeners) listener();
-      },
-    };
-  };
+  const source = (kind: ConfigOwnedKind['kind'], current: () => ReadonlyMap<string, unknown>): ConfigOwnedKind => ({
+    kind,
+    read: current,
+  });
 
   test('the installed data plugins’ items stay in the union beside the owner’s config items', () => {
     const configured = source('mcp', () => new Map([['a', { command: 'npx', url: 'https://cfg.example.test/' }]]));
@@ -225,35 +213,58 @@ describe('itemReach: the union of installed items and the owner’s live config'
       installed: kind => (kind === 'mcp' ? { programs: ['pinned', 'npx'], hosts: ['pinned.example.test'] } : none()),
       configOwned: [configured],
     });
-    expect(reach.of('mcp')).toEqual({
+    expect(reach('mcp')).toEqual({
       programs: ['pinned', 'npx'],
       hosts: ['pinned.example.test', 'cfg.example.test'],
     });
     // another kind names nothing from this owner
-    expect(reach.of('shell')).toEqual(none());
-    reach.stop();
+    expect(reach('shell')).toEqual(none());
   });
 
-  test('the config is re-read when its collection moves, not once at boot', () => {
+  test('reach follows read() at each call: nothing is captured at boot and no change notice is needed', () => {
     let items = new Map<string, unknown>([['a', { command: 'one' }]]);
-    const configured = source('mcp', () => items);
-    const reach = itemReach({ installed: none, configOwned: [configured] });
-    expect(reach.of('mcp').programs).toEqual(['one']);
+    const reach = itemReach({ installed: none, configOwned: [source('mcp', () => items)] });
+    expect(reach('mcp').programs).toEqual(['one']);
     items = new Map([['b', { command: 'two' }]]);
-    configured.fire();
-    expect(reach.of('mcp').programs).toEqual(['two']);
-    // stopping ends the watching: a later move is no longer heard
-    reach.stop();
-    items = new Map([['c', { command: 'three' }]]);
-    configured.fire();
-    expect(reach.of('mcp').programs).toEqual(['two']);
+    expect(reach('mcp').programs).toEqual(['two']);
+    items = new Map();
+    expect(reach('mcp').programs).toEqual([]);
+  });
+
+  test('a read that fails after a good read names nothing from the config; the installed items stay', () => {
+    let fail = false;
+    const reach = itemReach({
+      installed: kind => (kind === 'mcp' ? { programs: ['pinned'], hosts: [] } : none()),
+      configOwned: [
+        source('mcp', () => {
+          if (fail) throw new Error('unreadable');
+          return new Map([['a', { command: 'one', url: 'https://one.example.test/' }]]);
+        }),
+      ],
+    });
+    expect(reach('mcp')).toEqual({ programs: ['pinned', 'one'], hosts: ['one.example.test'] });
+    fail = true;
+    expect(reach('mcp')).toEqual({ programs: ['pinned'], hosts: [] });
+    fail = false;
+    expect(reach('mcp').programs).toEqual(['pinned', 'one']);
+  });
+
+  test('a read that fails halfway names none of what it had read before it failed', () => {
+    const half: ReadonlyMap<string, unknown> = {
+      size: 2,
+      values: function* () {
+        yield { command: 'first' };
+        throw new Error('torn');
+      },
+    } as unknown as ReadonlyMap<string, unknown>;
+    expect(itemReach({ installed: none, configOwned: [source('mcp', () => half)] })('mcp')).toEqual(none());
   });
 
   test('a collection that cannot be read names nothing, and only command and url are read', () => {
     const broken = source('mcp', () => {
       throw new Error('unreadable');
     });
-    expect(itemReach({ installed: none, configOwned: [broken] }).of('mcp')).toEqual(none());
+    expect(itemReach({ installed: none, configOwned: [broken] })('mcp')).toEqual(none());
     const wide = source(
       'mcp',
       () =>
@@ -264,6 +275,26 @@ describe('itemReach: the union of installed items and the owner’s live config'
           ['d', { command: 'np*', url: 'https://*.example.test/' }],
         ]),
     );
-    expect(itemReach({ installed: none, configOwned: [wide] }).of('mcp')).toEqual({ programs: ['npx'], hosts: [] });
+    expect(itemReach({ installed: none, configOwned: [wide] })('mcp')).toEqual({ programs: ['npx'], hosts: [] });
+  });
+});
+
+describe('configOwnedKinds: which collection backs a kind is declared (itemKind), never a name match', () => {
+  const port = { collection: () => new Map([['a', { command: 'npx' }]]) } as unknown as ConfigPort;
+  const manifestOf = (kinds: readonly string[], def: Record<string, unknown>): Manifest =>
+    ({ id: 'p', title: 'P', kinds, data: { config: [{ kind: 'config', shape: 'collection', ...def }] } }) as never;
+  const sources = (manifest: Manifest) => configOwnedKinds([manifest], () => port);
+
+  test('a collection that says itemKind backs that kind, whatever the collection is called', () => {
+    expect(sources(manifestOf(['item'], { collection: 'servers', itemKind: 'mcp' })).map(s => s.kind)).toEqual(['mcp']);
+  });
+
+  test('a collection named for an item kind without declaring itemKind backs nothing (a rename cannot grant reach)', () => {
+    expect(sources(manifestOf(['item'], { collection: 'mcp' }))).toEqual([]);
+    expect(sources(manifestOf(['item'], { collection: 'endpoint' }))).toEqual([]);
+  });
+
+  test('a plugin that is not an item plugin backs nothing even if its collection declares itemKind', () => {
+    expect(sources(manifestOf([], { collection: 'mcp', itemKind: 'mcp' }))).toEqual([]);
   });
 });

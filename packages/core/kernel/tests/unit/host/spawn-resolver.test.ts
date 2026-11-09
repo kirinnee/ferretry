@@ -40,6 +40,13 @@ describe('spawnPermitted: a resolver entry allows what its answer names', () => 
     expect(spawnPermitted(declared, NO_ITEMS, 'npm', resolve)).toBe(false);
   });
 
+  test('a bare-name answer is exactly a basename: a suffix, a prefix or a longer name is refused', () => {
+    const { resolve, declared } = answering('npx');
+    for (const program of ['mynpx', '/x/mynpx', 'xnpx', 'npx2', '/x/npx2', '/x/npx/other', 'npx/', '.npx', 'np', 'x'])
+      expect(spawnPermitted(declared, NO_ITEMS, program, resolve)).toBe(false);
+    expect(spawnPermitted(declared, NO_ITEMS, './npx', resolve)).toBe(true);
+  });
+
   test('a wildcard answer allows nothing, and a pattern in an answer is dropped beside its good neighbours', () => {
     const { resolve, declared } = answering('*', 'np*', '', 'npx');
     expect(spawnPermitted(declared, NO_ITEMS, 'rm', resolve)).toBe(false);
