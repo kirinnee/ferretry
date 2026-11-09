@@ -203,7 +203,7 @@ describe('lifecycleStatus (the state document follows the ferret’s lifecycle)'
           should(lifecycleStatus('kill_failed', state, cause)).be.undefined();
     });
 
-    it('should still repair a document a crash left on its way up, from a reconcile', () => {
+    it('BG-040 should still repair a document a crash left on its way up, from a reconcile', () => {
       for (const status of ['created', 'starting', 'retrying'] as const) {
         should(lifecycleStatus(status, 'working', 'reconcile')).equal('running');
         should(lifecycleStatus(status, 'idle', 'reconcile')).equal('running');

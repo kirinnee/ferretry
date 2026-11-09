@@ -192,7 +192,7 @@ describe('PacedTurnWatcher', () => {
     should(subject.watcher.delayOf(id)).equal(TURN_WATCH_INTERVAL_MS);
   });
 
-  it('should not lose a wake that lands while that pane’s look is in flight: the next tick looks again', async () => {
+  it('BG-040 should not lose a wake that lands while that pane’s look is in flight: the next tick looks again', async () => {
     // Arrange: a quiet pane, backed off to 10 s, its due look held open.
     const subject = fleet(['woken-2']);
     for (let at = 0; at < 16; at += 1) await subject.tick();
@@ -348,5 +348,80 @@ describe('PacedTurnWatcher', () => {
     // Assert
     should(subject.looked).deepEqual([]);
     should(subject.recorded.map(each => each.change.to)).deepEqual([undefined]);
+  });
+
+  describe('BG-040 a session that leaves the roster leaves nothing of itself behind', () => {
+    it('BG-040 its pace is forgotten, so it has no wait on its way back', async () => {
+      // Arrange
+      const subject = fleet(['leaves-1']);
+      const id = subject.id('leaves-1');
+      for (let at = 0; at < 3; at += 1) await subject.tick();
+      should(subject.watcher.delayOf(id)).not.be.undefined();
+
+      // Act: the ferret is no longer held by the registry (it is not in the roster for a tick).
+      subject.state.delete(id);
+      await subject.tick();
+
+      // Assert
+      should(subject.watcher.delayOf(id)).be.undefined();
+    });
+
+    it('BG-040 its told failure is forgotten, so the same damage is said again when it comes back', async () => {
+      // Arrange: told once, and not again while it stays.
+      const subject = fleet(['leaves-2'], { status: 'running', turn: 1, turnState: 'working' });
+      const id = subject.id('leaves-2');
+      const facts = subject.state.get(id) as TurnFacts;
+      subject.damaged.set(id, 'damage-a');
+      for (let at = 0; at < 6; at += 1) await subject.tick();
+      should(subject.failed).deepEqual([id]);
+
+      // Act: it leaves the roster for a tick and returns with the same damage.
+      subject.state.delete(id);
+      await subject.tick();
+      subject.state.set(id, facts);
+      for (let at = 0; at < 6; at += 1) await subject.tick();
+
+      // Assert
+      should(subject.failed).deepEqual([id, id]);
+    });
+
+    it('BG-040 its previous observation is forgotten, so an unconfirmed end of turn is confirmed afresh', async () => {
+      // Arrange: one idle-looking frame over a transcript that says it works: unconfirmed, nothing recorded.
+      const subject = fleet(['leaves-3'], { status: 'running', turn: 1, turnState: 'working' });
+      const id = subject.id('leaves-3');
+      const facts = subject.state.get(id) as TurnFacts;
+      subject.transcripts.set(id, MID_TURN);
+      await subject.tick();
+      should(subject.recorded).deepEqual([]);
+
+      // Act: it leaves and returns; the first look back is not the confirming second look of a stale first.
+      subject.state.delete(id);
+      await subject.tick();
+      subject.state.set(id, facts);
+      await subject.tick();
+      const afterReturn = subject.recorded.length;
+      await subject.tick();
+
+      // Assert: it takes its own two looks.
+      should(afterReturn).equal(0);
+      should(subject.recorded.map(each => each.change.to)).deepEqual(['your-turn']);
+    });
+
+    it('BG-040 its wake count is forgotten, so a wake for a ferret that never came back is not kept forever', async () => {
+      // Arrange
+      const subject = fleet(['leaves-4']);
+      const id = subject.id('leaves-4');
+      const wakes = (subject.watcher as unknown as { readonly wakes: ReadonlyMap<SessionId, number> }).wakes;
+      await subject.tick();
+      subject.watcher.wake(id);
+      should(wakes.has(id)).be.true();
+
+      // Act
+      subject.state.delete(id);
+      await subject.tick();
+
+      // Assert
+      should(wakes.has(id)).be.false();
+    });
   });
 });
