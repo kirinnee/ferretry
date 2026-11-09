@@ -281,6 +281,22 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
     return 'removed by design (§9.2: fleet/config.yaml)';
   return undefined;
 }
+const SHELL_DAEMON_VERBS: ReadonlySet<string> = new Set([
+  'fy daemon',
+  'fy daemon install',
+  'fy daemon logs',
+  'fy daemon reset',
+  'fy daemon restart',
+  'fy daemon start',
+  'fy daemon status',
+  'fy daemon stop',
+  'fy daemon uninstall',
+  'fy daemon which',
+]);
+const SHELL_STORAGE_FILES: ReadonlySet<string> = new Set([
+  'packages/cli/src/adapters/daemon/lifecycle-lock.ts',
+  'packages/cli/src/lib/daemon/layout.ts',
+]);
 function add(kind: Kind, what: string, file: string, line: number, descriptor = '', owner?: string) {
   let actualOwner = owner ?? ownerOf(file, what);
   if (kind === 'S' && actualOwner === 'asks') actualOwner = 'agenda';
@@ -295,15 +311,21 @@ function add(kind: Kind, what: string, file: string, line: number, descriptor = 
   const check =
     kind === 'V' && what === 'fy daemon update'
       ? 'packages/cli/tests/unit/update/shell.test.ts'
-      : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
-        kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
-        ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
-        : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
-          kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
-          ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
-          : kind === 'R'
-            ? 'descriptor-parity'
-            : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+      : // The daemon process verbs are the fy shell's, which a kernel test may not import (context-imports).
+        kind === 'V' && SHELL_DAEMON_VERBS.has(what)
+        ? 'packages/cli/tests/unit/parity/daemon-verbs.test.ts'
+        : // The lifecycle claim and the daemon lock's place in the state home are the shell's own files.
+          kind === 'F' && actualOwner === 'kernel' && SHELL_STORAGE_FILES.has(file)
+          ? 'packages/cli/tests/unit/parity/storage.test.ts'
+          : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
+            kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
+            ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
+            : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
+              kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
+              ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
+              : kind === 'R'
+                ? 'descriptor-parity'
+                : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
   rows.push({
     id: '',
     kind,
@@ -1648,6 +1670,9 @@ for (const row of rows.sort((a, b) => rowKey(a).localeCompare(rowKey(b)))) {
   row.id = old?.id ?? `${row.kind}-${String(next[row.kind]++).padStart(4, '0')}`;
   if (old && !row.status.startsWith('removed by design') && !old.status.startsWith('removed by design'))
     row.status = old.status;
+  // A route ticked `[x]` names the route test that proves it (parity-ticks); the generator's default is only the check
+  // a port must add, so a test path someone wrote survives regeneration.
+  if (old && row.kind === 'R' && old.check !== 'descriptor-parity') row.check = old.check;
   unique.set(key, row);
 }
 const inventory = [...unique.values()].sort(

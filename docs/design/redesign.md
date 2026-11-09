@@ -2545,9 +2545,11 @@ scoped handle:
     needs descriptor reach to both parents (Linux `/proc/self/fd`) and is refused `no_descriptor_reach` without it
     (macOS today): on plain paths the move would resolve the parents again and follow a link swapped in after the
     check, so nothing is claimed there. **[own] BEFORE-GREEN(runtimes):** the owner runs macOS, so the provisioner's
-    move-aside and undo fail there until a descriptor-reach move exists; this is not a plain GAP. A link moves as the text it holds: kernel-made links are absolute, so they
-    still point where they did; a RELATIVE link made by a harness and moved to a parent at another depth points
-    somewhere else afterwards, and the kernel does not follow it either way.
+    move-aside and undo fail there until a descriptor-reach move exists; this is not a plain GAP. Each end's parent
+    folder must already exist (a move makes none): a missing parent, or one that is a file, is `changed`, and a link on
+    the way to either end is `link_escape`; the testing host answers the same. A link moves as the text it holds:
+    kernel-made links are absolute, so they still point where they did; a RELATIVE link made by a harness and moved to
+    a parent at another depth points somewhere else afterwards, and the kernel does not follow it either way.
   - `kernel.roots.harnessFile(absolutePath)` (`permissions.harnessFiles`, by exact basename, Runtimes with
     `harness-home` only) reads ONE file beside a harness home (`~/.claude.json` sits beside `~/.claude`), read-only.
     Its folder is never listable. The leaf is never a link, never a second hard link, never a device, and the name

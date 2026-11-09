@@ -1,7 +1,7 @@
 /**
- * The pure rules of `RootHandle.linkTo`, `RootHandle.setMode`, `RootHandle.rename` and `RootsPort.harnessFile` (§7.7): one fact, read by
- * the real roots port (`./roots.ts`, which adds the descriptor checks) and by the testing host, so a plugin's unit test
- * meets exactly the refusals production makes.
+ * The pure rules of `RootHandle.linkTo`, `RootHandle.setMode`, `RootHandle.rename` and `RootsPort.harnessFile`
+ * (§7.7): one fact, read by the real roots port (`./roots.ts`, which adds the descriptor checks) and by the testing
+ * host, so a plugin's unit test meets exactly the refusals production makes.
  */
 import { posix } from 'node:path';
 import { insideFence } from '../contract/home.ts';

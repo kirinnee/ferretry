@@ -1239,22 +1239,34 @@ async function start(world: World): Promise<TestHost> {
           lstat: async path => {
             if (testLinks.has(path)) return { kind: 'symlink', size: 0, modified: clock.now(), mode: 0o777, links: 1 };
             if (world.roots.has(path)) return fileStat(path);
-            return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
+            return testFolderExists(path)
               ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
               : undefined;
           },
           makeDirectory: async () => {},
           realPath: async path => {
-            if (!world.roots.has(path) && ![...world.roots.keys()].some(p => p.startsWith(`${path}/`)))
-              throw new Error(`no such file ${path}`);
+            if (!world.roots.has(path) && !testFolderExists(path)) throw new Error(`no such file ${path}`);
             return path;
           },
           list: async path =>
-            [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
-          entries: async path =>
-            [...world.roots.keys()]
+            [...world.roots.keys(), ...testLinks.keys()]
+              .filter(p => p.startsWith(`${path}/`))
+              .map(p => p.slice(path.length + 1)),
+          entries: async path => [
+            ...[...world.roots.keys()]
               .filter(p => p.startsWith(`${path}/`))
               .map(p => ({ name: p.slice(path.length + 1), ...fileStat(p) })),
+            ...[...testLinks.keys()]
+              .filter(p => p.startsWith(`${path}/`))
+              .map(p => ({
+                name: p.slice(path.length + 1),
+                kind: 'symlink' as const,
+                size: 0,
+                modified: clock.now(),
+                mode: 0o777,
+                links: 1,
+              })),
+          ],
           stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
           remove: async path => {
             world.roots.delete(path);
@@ -1282,6 +1294,15 @@ async function start(world: World): Promise<TestHost> {
             if (names !== undefined) throw new RootError(names);
             const source = ownPath(from);
             const target = ownPath(to);
+            // As production, each parent is opened first (the source's, then the target's): a link anywhere on the way
+            // is `link_escape`, and a parent that is missing or is a file is `changed`. The leaf is never followed.
+            for (const end of [source, target]) {
+              const parent = end.slice(0, end.lastIndexOf('/'));
+              const steps = parent.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
+              if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+              if (parent !== prefix && (world.roots.has(parent) || !testFolderExists(parent)))
+                throw new RootError('changed');
+            }
             const isFile = world.roots.has(source);
             const isLink = testLinks.has(source);
             const isFolder = testFolderExists(source);
