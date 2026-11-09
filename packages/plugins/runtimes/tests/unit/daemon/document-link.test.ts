@@ -9,7 +9,7 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { link, mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RootsPort } from '@ferretry/kernel/contract';
 import type { RuntimeHomeReader } from '../../../contract/index.ts';
@@ -172,8 +172,13 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
     await symlink(join(store, 'folder'), join(linked, 'settings.json'));
     await symlink(join(store, 'pipe'), join(linked, '.claude.json'));
     await symlink(join(linked, 'config.toml'), join(linked, 'config.toml'));
-    for (const file of ['settings.json', '.claude.json', 'config.toml'] as const)
-      await expect(reader().document(file, 1000)).rejects.toThrow(`${file} is a link whose target is not read`);
+    for (const file of ['settings.json', '.claude.json', 'config.toml'] as const) {
+      const error = await reader()
+        .document(file, 1000)
+        .catch((failure: unknown) => failure);
+      expect((error as Error).message).toContain(`${file} is a link whose target is not read`);
+      expect(everythingOf(error)).not.toContain(store);
+    }
   });
 
   it('BG-033 a link to a sign-in file anywhere (its real name, any case) is refused, and its text is never returned', async () => {
@@ -189,6 +194,11 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
         .catch((failure: unknown) => failure);
       expect(error).toBeInstanceOf(Error);
       expect(everythingOf(error)).not.toContain('SECRET');
+      // The sentence names the link, never where it leads.
+      expect(everythingOf(error)).not.toContain(store);
+      expect(everythingOf(error)).not.toContain('auth.json');
+      expect(everythingOf(error)).not.toContain('CREDENTIALS');
+      expect((error as Error).message).toContain(file);
     }
   });
 
@@ -205,6 +215,9 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
         .catch((failure: unknown) => failure);
       expect(error).toBeInstanceOf(Error);
       expect(everythingOf(error)).not.toContain('SECRET');
+      expect(everythingOf(error)).not.toContain(world.home);
+      expect(everythingOf(error)).not.toContain('private.json');
+      expect((error as Error).message).toContain(file);
     }
   });
 
@@ -218,18 +231,42 @@ describe('BG-033 a document that is a link out of the home is followed, under ev
       .catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(Error);
     expect(everythingOf(error)).not.toContain('SECRET');
+    expect(everythingOf(error)).not.toContain(store);
+    expect(everythingOf(error)).not.toContain('two.json');
+    expect((error as Error).message).toContain('settings.json');
   });
 
   it('BG-033 a file over the bound is refused, content-free: the caller’s bound, and the 16 MiB cap whatever the caller asks', async () => {
-    const { store, linked, reader } = await seed();
+    const log: ReadLog = { reads: [], scopes: [] };
+    const { store, linked, reader } = await seed({}, log);
     await writeFile(join(store, 'big.json'), `{"k":"${'x'.repeat(5000)}"}`);
     await symlink(join(store, 'big.json'), join(linked, 'settings.json'));
+    log.reads.length = 0;
     await expect(reader().document('settings.json', 100)).rejects.toThrow('larger than the 100 bytes');
-    await writeFile(join(store, 'huge.json'), `{"k":"${'x'.repeat(17 * 1024 * 1024)}"}`);
+    // The size is judged BEFORE a byte is read: nothing was read through the kernel for it.
+    expect(log.reads).toEqual([]);
+    // A SPARSE file over the cap (it allocates nothing): refused the same way, again without a read.
+    await writeFile(join(store, 'huge.json'), '');
+    await truncate(join(store, 'huge.json'), 17 * 1024 * 1024);
     await symlink(join(store, 'huge.json'), join(linked, '.claude.json'));
     await expect(reader().document('.claude.json', 64 * 1024 * 1024)).rejects.toThrow(
       `larger than the ${16 * 1024 * 1024} bytes`,
     );
+    expect(log.reads).toEqual([]);
+  });
+
+  it('BG-033 the read root of a followed document is the TARGET’S OWN folder, never a wider one', async () => {
+    const log: ReadLog = { reads: [], scopes: [] };
+    const { store, linked, reader } = await seed({}, log);
+    await writeFile(join(store, 'real.json'), '{"a":1}');
+    await symlink(join(store, 'real.json'), join(linked, 'settings.json'));
+    log.reads.length = 0;
+    log.scopes.length = 0;
+    expect(await reader().document('settings.json', 1000)).toBe('{"a":1}');
+    expect(log.reads.map(read => read.path)).toEqual([join(store, 'real.json')]);
+    // `/` only names the link's real path (nothing is read through it); the read itself is scoped to `store`.
+    expect(log.scopes).toContain(store);
+    expect(log.scopes.filter(scope => scope === '/').length).toBe(1);
   });
 
   it('BG-033 a target swapped for a link to another file after it was judged is discarded, never returned', async () => {
