@@ -417,6 +417,26 @@ describe('config files: collections, claims and refusals', () => {
     );
   });
 
+  test('BG-007 the clash sentence names both plugins and both paths, so the owner knows which two clash (F-0142)', () => {
+    const file = (name: string) => defineConfig({ file: name, schema, axis: 'use', loosens: () => [] });
+    expect(() => build(claim('first', file('a/b.yaml')), claim('second', file('a--b.yaml')))).toThrow(
+      'first (a/b.yaml) and second (a--b.yaml) would both publish the editor schema .schema/a--b.json, so one would hide the other; rename one of them',
+    );
+  });
+
+  test('BG-007 a clash where one side is a collection is refused, whichever side comes first (F-0142)', () => {
+    const file = defineConfig({ file: 'x--item.yaml', schema, axis: 'use', loosens: () => [] });
+    const folder = defineConfig({ collection: 'x', name: /^[a-z]+$/, schema, axis: 'use', loosens: () => [] });
+    // a collection's schema is `x--item.json`, which is also the stem of the file `x--item.yaml`
+    expect(schemaFileName(file)).toBe(schemaFileName(folder));
+    const sentence =
+      'a (x--item.yaml) and b (x/) would both publish the editor schema .schema/x--item.json, so one would hide the other; rename one of them';
+    expect(() => build(claim('a', file), claim('b', folder))).toThrow(sentence);
+    expect(() => build(claim('b', folder), claim('a', file))).toThrow(
+      'b (x/) and a (x--item.yaml) would both publish the editor schema .schema/x--item.json, so one would hide the other; rename one of them',
+    );
+  });
+
   test('a path that leaves config/ or hides is refused', () => {
     const file = (name: string) => defineConfig({ file: name, schema, axis: 'use', loosens: () => [] });
     for (const bad of ['../x.yaml', '/x.yaml', '.schema/x.yaml', 'a//b.yaml', 'x.json'])
