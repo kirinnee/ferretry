@@ -117,6 +117,27 @@ function changedNames<Shape>(before: ReadonlyMap<string, Shape>, after: Readonly
     .toSorted((left, right) => left.localeCompare(right));
 }
 
+/** `make` run at most once, on the first call. */
+function once<Value>(make: () => Value): () => Value {
+  let made: { readonly value: Value } | undefined;
+  return () => {
+    made ??= { value: make() };
+    return made.value;
+  };
+}
+
+/** An object that stands for `make()` and builds it on the first property read; methods run on the real object. */
+function deferred<Target extends object>(make: () => Target): Target {
+  return new Proxy({} as Target, {
+    get(_stand, property) {
+      const target = make();
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    has: (_stand, property) => property in make(),
+  });
+}
+
 /**
  * The assembly of this build, and the daemon's default: the catalogue and the setup over the files (the model in effect
  * from Runtimes' own files and Logins' facts, the provisioner on the `fleet` root, the all-or-none config writer), the
@@ -153,27 +174,6 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     },
   };
 };
-
-/** `make` run at most once, on the first call. */
-function once<Value>(make: () => Value): () => Value {
-  let made: { readonly value: Value } | undefined;
-  return () => {
-    made ??= { value: make() };
-    return made.value;
-  };
-}
-
-/** An object that stands for `make()` and builds it on the first property read; methods run on the real object. */
-function deferred<Target extends object>(make: () => Target): Target {
-  return new Proxy({} as Target, {
-    get(_stand, property) {
-      const target = make();
-      const value: unknown = Reflect.get(target, property, target);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-    has: (_stand, property) => property in make(),
-  });
-}
 
 export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
   return implementDaemon(manifest, {

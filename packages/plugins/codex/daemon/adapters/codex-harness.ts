@@ -94,6 +94,9 @@ function configDocument(spec: LaunchSpec, items: ReadonlyMap<string, SettingsIte
 export function codexHarness(options: CodexHarnessOptions): Harness {
   const { kernel, locate, probe, update } = options;
   const permissionModeNow = (): HarnessConfig['permissionMode'] => options.permissionMode?.() ?? 'auto';
+  /** This plugin's own settings items now (`config/codex/settings/`): what a home written now would merge. */
+  const settingsNow = (): ReadonlyMap<string, SettingsItem> =>
+    (kernel.config?.collection(CODEX_SETTINGS as never) as ReadonlyMap<string, SettingsItem> | undefined) ?? new Map();
   const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
 
   /** `CODEX_HOME` is set by an `env` prefix: the Vault's environment is an opaque handle this code cannot add to. */
@@ -149,7 +152,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     permissionMode: HarnessConfig['permissionMode'],
   ): Promise<void> => {
     try {
-      await kernel.state.write(CODEX_LAUNCH_SETTINGS, codexLaunchSettingsRecord(permissionMode), ferret);
+      await kernel.state.write(CODEX_LAUNCH_SETTINGS, codexLaunchSettingsRecord(permissionMode, settingsNow()), ferret);
     } catch {
       try {
         await kernel.state.remove(CODEX_LAUNCH_SETTINGS, ferret);
@@ -235,7 +238,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       const root = await ensureHome(spec);
       const files: FencedPath[] = [];
       // ONE read of this plugin's own settings items per home written (`config/codex/settings/`).
-      const items = kernel.config?.collection(CODEX_SETTINGS as never) as ReadonlyMap<string, SettingsItem> | undefined;
+      const items = settingsNow();
       if (kernel.config === undefined && !saidNoSettings) {
         saidNoSettings = true;
         kernel.log.warn(
@@ -244,7 +247,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       }
       for (const [name, text] of [
         ['AGENTS.md', agentsDocument(spec)],
-        ['config.toml', configDocument(spec, items ?? new Map())],
+        ['config.toml', configDocument(spec, items)],
       ] as const) {
         if (text === '') continue;
         const target = root.resolve(name);
@@ -282,7 +285,10 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         if (size === undefined || size > MAX_LAUNCH_RECORD_BYTES) return UNKNOWN_LAUNCH;
         const recorded = await kernel.state.read(CODEX_LAUNCH_SETTINGS, ferret);
         if (!recorded.ok || recorded.value === undefined) return UNKNOWN_LAUNCH;
-        return compareCodexLaunchSettings(recorded.value, codexLaunchSettingsRecord(permissionModeNow()));
+        return compareCodexLaunchSettings(
+          recorded.value,
+          codexLaunchSettingsRecord(permissionModeNow(), settingsNow()),
+        );
       } catch {
         return UNKNOWN_LAUNCH;
       }
