@@ -11,8 +11,8 @@ import { AccountsConfigSchema } from '@ferretry/plugin-accounts/contract';
 import { AGENDA_CONFIG } from '@ferretry/plugin-agenda/contract';
 import { BrowsersConfigSchema } from '@ferretry/plugin-browsers/contract';
 import { CatalogsConfigFile } from '@ferretry/plugin-catalogs/contract';
-import { CLAUDE_CODE_CONFIG, CLAUDE_CODE_SETTINGS } from '@ferretry/plugin-claude-code/contract';
-import { CODEX_CONFIG, CODEX_SETTINGS } from '@ferretry/plugin-codex/contract';
+import { CLAUDE_CODE_CONFIG, CLAUDE_CODE_HOOKS, CLAUDE_CODE_SETTINGS } from '@ferretry/plugin-claude-code/contract';
+import { CODEX_CONFIG, CODEX_HOOKS, CODEX_SETTINGS } from '@ferretry/plugin-codex/contract';
 import { ConnectionsConfigSchema } from '@ferretry/plugin-connections/contract';
 import { CONVERSATION_CONFIG } from '@ferretry/plugin-conversation/contract';
 import { LESSONS_CONFIG } from '@ferretry/plugin-lessons/contract';
@@ -23,6 +23,7 @@ import { MODEL_SET_ITEMS, PROFILE_ITEMS, RUNTIME_ITEMS, RUNTIMES_CONFIG } from '
 import { SKILLS_CONFIG } from '@ferretry/plugin-skills/contract';
 import { TerminalsConfigSchema } from '@ferretry/plugin-terminals/contract';
 import { USAGE_CONFIG } from '@ferretry/plugin-usage/contract';
+import { VOICE_CONFIG } from '@ferretry/plugin-voice/contract';
 import { WardenFileSchema } from '@ferretry/plugin-warden/contract';
 import { join } from 'node:path';
 import { configPath, type V5ConfigDef, type V5ConfigTarget } from './write.ts';
@@ -49,8 +50,10 @@ export const CONFIG_TARGETS = {
   CATALOGS: owned('catalogs', CatalogsConfigFile),
   CLAUDE_CODE: owned('claude-code', CLAUDE_CODE_CONFIG),
   CLAUDE_CODE_SETTINGS: owned('claude-code', CLAUDE_CODE_SETTINGS),
+  CLAUDE_CODE_HOOKS: owned('claude-code', CLAUDE_CODE_HOOKS),
   CODEX: owned('codex', CODEX_CONFIG),
   CODEX_SETTINGS: owned('codex', CODEX_SETTINGS),
+  CODEX_HOOKS: owned('codex', CODEX_HOOKS),
   CONNECTIONS: file('connections', 'connections.yaml', ConnectionsConfigSchema),
   CONVERSATION: owned('conversation', CONVERSATION_CONFIG),
   LESSONS: owned('lessons', LESSONS_CONFIG),
@@ -66,6 +69,7 @@ export const CONFIG_TARGETS = {
   SKILLS: owned('skills', SKILLS_CONFIG),
   TERMINALS: file('terminals', 'terminals.yaml', TerminalsConfigSchema),
   USAGE: owned('usage', USAGE_CONFIG),
+  VOICE: owned('voice', VOICE_CONFIG),
   WARDEN: file('warden', 'warden.yaml', WardenFileSchema),
 } as const satisfies Record<string, V5ConfigTarget>;
 

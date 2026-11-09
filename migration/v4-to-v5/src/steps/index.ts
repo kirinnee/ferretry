@@ -69,6 +69,13 @@ export interface StepContext {
    * (the owner's act). Absent: nothing of the preview's own is accepted.
    */
   readonly previewOwner?: boolean;
+  /** With `preview`: the user's real home folder, so a component's `~/…` file is mapped into the staged copy. */
+  readonly previewUserHome?: string;
+  /**
+   * The person running the conversion chose to drop every layer that names a settings or hooks component this tool
+   * cannot carry (the ferrets may then be LESS restricted than in v4). Never the default; an agent never sets it.
+   */
+  readonly dropUncarried?: boolean;
   /**
    * With `preview`: every config file (`config/…` path to text) the PLAIN, non-preview conversion of the same v4 home
    * writes. A config file whose text the preview wrote or changed differs from it (or is absent from it), and is

@@ -118,12 +118,12 @@ test('no accepted record at all, or a held deletion of a file this run does not 
   await yaml('limits.yaml', LIMITS);
   await f.put('state/config-accepted.json', {
     'limits.yaml': { etag: sha256(LIMITS), text: LIMITS },
-    'voice.yaml': { etag: sha256('x: 1\n'), text: 'x: 1\n' },
+    'pack.yaml': { etag: sha256('x: 1\n'), text: 'x: 1\n' },
   });
   report = await convert();
-  // limits.yaml was in effect as written (recorded); the deleted voice.yaml converts to nothing here.
+  // limits.yaml was in effect as written (recorded); the deleted pack.yaml converts to nothing here.
   expect(await listAccepted()).toEqual([`${acceptedName('limits.yaml')}.json`]);
-  expect(report.notCarried.map(item => item.what).join('\n')).toContain('voice.yaml');
+  expect(report.notCarried.map(item => item.what).join('\n')).toContain('pack.yaml');
 });
 
 test('a damaged accepted record is read as nothing accepted; a dry run writes nothing', async () => {
