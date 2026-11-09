@@ -43,7 +43,9 @@ export class AutoResumeService {
     const owed = await this.ports.ledger.read();
     if (owed.length === 0) return undefined;
     // Off means off: the sessions stay as they are, and the ledger is cleared so that turning the
-    // setting on later does not revive a reboot from days ago.
+    // setting on later does not revive a reboot from days ago. A clear that FAILS (the disk is full or read-only)
+    // fails the pass, which spends nothing, and leaves the entries: the declared window is the day `maxAgeMs` keeps
+    // them (a later boot with the switch on resumes only entries younger than that), and the failure is reported.
     if (!(await this.ports.setting.enabled())) {
       await this.ports.ledger.write([]);
       return undefined;
