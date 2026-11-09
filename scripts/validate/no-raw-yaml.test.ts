@@ -2,7 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { findings, inScope, KERNEL_READER, LEDGER, parseLedger, scanFile } from './no-raw-yaml.ts';
+import {
+  findings,
+  inScope,
+  KERNEL_READER,
+  KERNEL_READER_PACKAGE,
+  LEDGER,
+  parseLedger,
+  readerDoorFindings,
+  scanFile,
+} from './no-raw-yaml.ts';
 
 const root = join(import.meta.dir, '../..');
 const PATH = 'packages/plugins/x/daemon/a.ts';
@@ -487,6 +496,50 @@ describe('laundering through a ledgered parser', () => {
       ledger,
     );
     expect(found).toEqual([expect.stringContaining(`${second}:1: loads ${READER}::readIt`)]);
+  });
+
+  describe('the shared reader imported by its package subpath', () => {
+    const body = reader('export function readConfigText(t: string) { return parseDocument(t); }');
+    // A narrowed ledger: one named caller instead of `<- *`.
+    const narrowed = `${KERNEL_READER}  # the reader\n${KERNEL_READER}::readConfigText  <- ${OK}  # one caller`;
+    const viaSubpath = "import { readConfigText } from '@ferretry/std/yaml';\nreadConfigText('');";
+    const viaRelative = "import { readConfigText } from '../../../std/src/yaml-text.ts';\nreadConfigText('');";
+    const probe = (strangerText: string): readonly string[] =>
+      findings(
+        [
+          { path: KERNEL_READER, text: body },
+          { path: NEW, text: strangerText },
+          { path: OK, text: viaSubpath },
+        ],
+        narrowed,
+      );
+
+    test('a stranger importing it by the subpath is a finding when the ledger narrows its callers', () => {
+      expect(probe(viaSubpath)).toEqual([
+        expect.stringContaining(`${NEW}:1: loads ${KERNEL_READER}::readConfigText, a raw YAML parser the ledger`),
+      ]);
+    });
+
+    test('a stranger importing it by a relative path is the same finding', () => {
+      expect(probe(viaRelative)).toEqual(probe(viaSubpath));
+    });
+
+    test('the listed caller importing it by the subpath passes', () => {
+      expect(probe('export const unrelated = 1;')).toEqual([]);
+    });
+  });
+
+  test('the std package answers the subpath with the reader file, and a finding says when it does not', () => {
+    expect(readerDoorFindings(readFileSync(join(root, KERNEL_READER_PACKAGE), 'utf8'))).toEqual([]);
+    const pointing = (target: string): string =>
+      JSON.stringify({ exports: { '.': './src/index.ts', './yaml': target } });
+    expect(readerDoorFindings(pointing('./src/yaml-text.ts'))).toEqual([]);
+    expect(readerDoorFindings(pointing('./src/other.ts'))).toEqual([
+      expect.stringContaining('must be "./src/yaml-text.ts"'),
+    ]);
+    expect(readerDoorFindings(JSON.stringify({ exports: { '.': './src/index.ts' } }))).toHaveLength(1);
+    expect(readerDoorFindings('not json')).toEqual([expect.stringContaining('is not JSON')]);
+    expect(readerDoorFindings('')).toHaveLength(1);
   });
 
   test('the caller finding names the shared bounded reader, never the kernel', () => {

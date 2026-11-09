@@ -1019,8 +1019,12 @@ export function parseLedger(text: string): {
   return { files, exports, problems };
 }
 
-/** The ledgered file a relative specifier lands on, if it lands on one. */
+/**
+ * The ledgered file a specifier lands on, if it lands on one: a relative path, or the shared reader's package subpath
+ * (the same file, so an import by the subpath is an edge to it and the ledger's caller check sees it).
+ */
 function resolveSpecifier(from: string, specifier: string, known: ReadonlySet<string>): string | undefined {
+  if (specifier === KERNEL_READER_SPECIFIER) return known.has(KERNEL_READER) ? KERNEL_READER : undefined;
   if (!specifier.startsWith('.')) return undefined;
   const base = posix.normalize(posix.join(posix.dirname(from), specifier));
   const stem = base.replace(/\.(?:[cm]?[jt]sx?)$/u, '');
@@ -1108,6 +1112,32 @@ export function findings(
   return found;
 }
 
+/** The package that owns the shared reader, and the subpath key its `exports` map must give the reader's file. */
+export const KERNEL_READER_PACKAGE = 'packages/std/package.json';
+
+/**
+ * The finding (if any) when the shared reader's package subpath does not point at {@link KERNEL_READER}: the gate
+ * trusts that specifier to be that one file, so a package that answers it with another file would be a door the ledger
+ * never saw. Pure: the text of `packages/std/package.json` in, findings out.
+ */
+export function readerDoorFindings(packageJsonText: string): readonly string[] {
+  // `@ferretry/std/yaml` is the scope, the package, then the subpath: `./yaml`.
+  const subpath = `./${KERNEL_READER_SPECIFIER.split('/').slice(2).join('/')}`;
+  let target: unknown;
+  try {
+    target = (JSON.parse(packageJsonText) as { exports?: Record<string, unknown> }).exports?.[subpath];
+  } catch {
+    return [`${KERNEL_READER_PACKAGE}: is not JSON, so the exports of ${KERNEL_READER_SPECIFIER} cannot be checked`];
+  }
+  const expected = `./${posix.relative(posix.dirname(KERNEL_READER_PACKAGE), KERNEL_READER)}`;
+  return target === expected
+    ? []
+    : [
+        `${KERNEL_READER_PACKAGE}: exports["${subpath}"] must be "${expected}" (${KERNEL_READER}), the file the ledger opens ` +
+          `to every caller as ${KERNEL_READER_SPECIFIER}`,
+      ];
+}
+
 function main(root: string): number {
   const listed = spawnSync('git', ['ls-files', '-z', '--', 'packages'], { cwd: root, encoding: 'utf8' });
   if (listed.status !== 0) {
@@ -1132,7 +1162,13 @@ function main(root: string): number {
         return [];
       }
     });
-  const found = findings(files, ledgerText);
+  let packageText = '';
+  try {
+    packageText = readFileSync(resolve(root, KERNEL_READER_PACKAGE), 'utf8');
+  } catch {
+    // Said by the door check below: an unreadable package file is not JSON.
+  }
+  const found = [...findings(files, ledgerText), ...readerDoorFindings(packageText)];
   for (const finding of found) console.error(`❌ ${finding}`);
   return found.length === 0 ? 0 : 1;
 }
