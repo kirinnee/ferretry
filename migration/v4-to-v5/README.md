@@ -263,8 +263,8 @@ step drops that component and removes the layer from every profile (lead decisio
 rules twice.
 
 Confirmed settings (`src/steps/accepted-config.ts`, last): v4's `state/config-accepted.json` holds what v4 put into
-effect per config file. When every v4 config file was in effect as written (its entry's etag is the SHA-256 of its text),
-each v5 config file this run wrote is recorded as accepted (`state/kernel/accepted-config/`, the kernel's
+effect per config file. When every v4 config file was in effect as written (its entry's etag is the SHA-256 of its
+text), each v5 config file this run wrote is recorded as accepted (`state/kernel/accepted-config/`, the kernel's
 `acceptedConfigFile`, each record naming the plugin whose def owns the path, from `src/v5/targets.ts`; a path no def
 owns is not recorded and stays held), so a loosening the owner confirmed in v4 is not asked about again. In the preview,
 a file the PREVIEW wrote or changed (its text differs from a plain, non-preview conversion of the same v4 home, or the
@@ -273,23 +273,25 @@ plain conversion writes no such file: `terminals.yaml`, the `fy-preview` setting
 
 **A v4 edit that v4 still held stays held in v5, whatever its direction relative to v5's defaults** (v4 judges an edit
 against the text it has in effect, v5 with no record would judge it against its defaults, and those differ when v4's
-enforced text was tighter than the defaults). When any v4 file was not in effect (a held edit, an invalid file, one never
-accepted, a held deletion), the v5 file carries v4's CURRENT text converted (what the owner sees and may confirm) and the
-record carries the conversion of what v4 ENFORCED: a plain dry run of the config-writing steps in which each held file
-READS as v4's accepted text for it. That is an in-memory override: no copy of any v4 file is written anywhere, every
-other file is read from v4 itself, read-only. A login file's enforced text carries `${secret:NAME}` with the SAME name
-the live file got, or, when v4 enforced a different key than the one now sealed, no record is written for it (held). If
-the enforced conversion cannot run, or a step fails in it, no record is written for any file, the `accepted-config` step
-fails and the conversion is incomplete (it never falls back to the current text). The kernel then judges the file on
-disk against the enforced record and holds a loosening, enforcing the v4-enforced version. A held DELETION leaves the v5 file absent but records the
-enforced text, and the kernel treats a missing file with a record as a deletion (held when it loosens). Where v4 enforced
-nothing for a file (never accepted) no record is carried, and if v4's record is damaged, nothing is recorded. A file with
-no held edit is unchanged. The report names the held files.
+enforced text was tighter than the defaults). When any v4 file was not in effect (a held edit, an invalid file, one
+never accepted, a held deletion), the v5 file carries v4's CURRENT text converted (what the owner sees and may confirm)
+and the record carries the conversion of what v4 ENFORCED: a plain dry run of the config-writing steps in which each
+held file READS as v4's accepted text for it. That is an in-memory override: no copy of any v4 file is written
+anywhere, every other file is read from v4 itself, read-only. A login file's enforced text carries `${secret:NAME}`
+with the SAME name the live file got, or, when v4 enforced a different key than the one now sealed, no record is
+written for it (held). If the enforced conversion cannot run, or a step fails in it, no record is written for any
+file, the `accepted-config` step fails and the conversion is incomplete (it never falls back to the current text). The
+kernel then judges the file on disk against the enforced record and holds a loosening, enforcing the v4-enforced
+version. A held DELETION leaves the v5 file absent but records the enforced text, and the kernel treats a missing file
+with a record as a deletion (held when it loosens). Where v4 enforced nothing for a file (never accepted) no record is
+carried, and if v4's record is damaged, nothing is recorded. A file with no held edit is unchanged. The report names
+the held files.
 
-`--owner` records a preview-authored file whose v4 sources (the ones the writing step names for it; a held v4 DELETION of
-any file counts as a held source of every file that has a v4 source) were all in effect, and a pure preview file (no v4
-source). A preview-authored file with a held v4 source gets NO record of the preview's text even with the flag (the
-owner's "not yet" stands): its record is what v4 enforced, so the kernel holds the preview's text where it loosens that.
+`--owner` records a preview-authored file whose v4 sources (the ones the writing step names for it; a held v4 DELETION
+of any file counts as a held source of every file that has a v4 source) were all in effect, and a pure preview file (no
+v4 source). A preview-authored file with a held v4 source gets NO record of the preview's text even with the flag (the
+owner's "not yet" stands): its record is what v4 enforced, so the kernel holds the preview's text where it loosens
+that.
 The report and the `prepare` note name every such file with its reason, and the files they recorded; the remedy is to
 confirm the edit in v4, then `preview.sh clean` and `preview.sh prepare --owner`. Texts are hashed and written, never
 reported.

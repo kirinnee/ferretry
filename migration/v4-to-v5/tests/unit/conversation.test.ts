@@ -269,12 +269,13 @@ console.log(JSON.stringify({ text }));
     expect(await exists(v5DraftsFile('gone'))).toBe(false);
   });
 
-  test('a draft that names another session fails, naming the file only', async () => {
+  test('a draft that names another session is named and not carried, naming the file only', async () => {
     await f.session('f1');
     await f.put('state/shared-drafts/f1.json', draft('other', { text: FAKE_VALUE }));
     const report = await conversationStep.run(f.ctx());
-    expect(report.status).toBe('failed');
-    expect(report.note).toBe('shared draft names another session or slot: state/shared-drafts/f1.json');
+    expect(report.status).toBe('converted');
+    expect(report.note).toContain('shared draft names another session or slot: state/shared-drafts/f1.json');
+    expect(await exists(v5DraftsFile('f1'))).toBe(false);
     expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
   });
 
@@ -406,7 +407,7 @@ console.log(JSON.stringify({ text }));
     expect(report.note).toContain('1 outbox question line(s) left to Ferrets');
   });
 
-  test('a line v5 refuses fails the step by file and line, never by value', async () => {
+  test('a line v5 refuses is named by file and line, not carried, never quoted', async () => {
     await f.session('f1');
     await raw(
       'state/sessions/f1/channel/outbox.jsonl',
@@ -416,26 +417,29 @@ console.log(JSON.stringify({ text }));
       ]),
     );
     const report = await conversationStep.run(f.ctx());
-    expect(report.status).toBe('failed');
-    expect(report.note).toBe('v4 log line 2 has no v5 form: state/sessions/f1/channel/outbox.jsonl');
+    expect(report.status).toBe('converted');
+    expect(report.note).toContain('v4 log line 2 has no v5 form: state/sessions/f1/channel/outbox.jsonl');
+    expect(report.kept).toContainEqual({ what: 'outbox lines', count: 1 });
     expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
   });
 
-  test('a line longer than the kernel’s line bound fails by file and line', async () => {
+  test('a line longer than the kernel’s line bound is named by file and line, not carried', async () => {
     await f.session('f1');
     const long = 'x'.repeat((1 << 20) + 1);
     await raw('state/sessions/f1/channel/inbox.jsonl', jsonl([{ at: AT, type: 'message', message: long }]));
     const report = await conversationStep.run(f.ctx());
-    expect(report.status).toBe('failed');
-    expect(report.note).toBe('v4 log line 1 is longer than a v5 line may be: state/sessions/f1/channel/inbox.jsonl');
+    expect(report.status).toBe('converted');
+    expect(report.note).toContain(
+      'v4 log line 1 is longer than a v5 line may be: state/sessions/f1/channel/inbox.jsonl',
+    );
   });
 
-  test('a bad line in the middle of a v4 log fails, naming the file and line, never the value', async () => {
+  test('a bad line in the middle of a v4 log is named by file and line, never the value, and the step still converts', async () => {
     await f.session('f1');
     await raw('state/sessions/f1/channel/sends.jsonl', jsonl([{ sendId: FAKE_VALUE }, send('s1', 'accepted')]));
     const report = await conversationStep.run(f.ctx());
-    expect(report.status).toBe('failed');
-    expect(report.note).toBe('v4 log line 1 does not match its v4 schema: state/sessions/f1/channel/sends.jsonl');
+    expect(report.status).toBe('converted');
+    expect(report.note).toContain('v4 log line 1 does not match its v4 schema: state/sessions/f1/channel/sends.jsonl');
     expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
   });
 
@@ -524,7 +528,7 @@ console.log(JSON.stringify({ text }));
     expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
   });
 
-  test('an attachment v5 would read as corrupt fails, naming the attachment only', async () => {
+  test('an attachment v5 would read as corrupt is named and not carried, naming the attachment only', async () => {
     await f.session('f1');
     await f.put('state/attachments/daemon1/f1/att_1/manifest.json', {
       id: 'att_1',
@@ -536,18 +540,24 @@ console.log(JSON.stringify({ text }));
     });
     await raw('state/attachments/daemon1/f1/att_1/original', Buffer.from([0, 1, 2, 3]));
     const report = await conversationStep.run(f.ctx());
-    expect(report.status).toBe('failed');
-    expect(report.note).toBe('attachment manifest has no v5 form: state/attachments/<daemonId>/f1/att_1');
+    expect(report.status).toBe('converted');
+    expect(report.note).toContain('attachment manifest has no v5 form: state/attachments/<daemonId>/f1/att_1');
     expect(JSON.stringify(report)).not.toContain(FAKE_VALUE);
   });
 
-  test('an attachment without its original fails', async () => {
+  test('an attachment without its original is counted and named, nothing is carried for it, and the good one is', async () => {
     await f.session('f1');
-    const { id, manifest } = attachment(Buffer.from('FAKE'));
-    await f.put(`state/attachments/daemon1/f1/${id}/manifest.json`, manifest);
+    const bad = attachment(Buffer.from('FAKE'));
+    await f.put(`state/attachments/daemon1/f1/${bad.id}/manifest.json`, bad.manifest);
+    const goodBytes = Buffer.from('FAKE good file');
+    await putAttachment('daemon1', 'f1', goodBytes);
     const report = await conversationStep.run(f.ctx());
-    expect(report.status).toBe('failed');
-    expect(report.note).toBe(`attachment has no original file: state/attachments/<daemonId>/f1/${id}`);
+    expect(report.status).toBe('converted');
+    expect(report.note).toContain(
+      `1 attachments with no original file (not carried; v5 keeps no manifest without its original): state/attachments/<daemonId>/f1/${bad.id}`,
+    );
+    expect(report.kept).toContainEqual({ what: 'attachments (original moved unopened)', count: 1 });
+    expect(await exists(v5AttachmentManifest('f1', bad.id))).toBe(false);
   });
 
   test('renders: the meta through StoredRenderMetaSchema with author.ferret, the payload byte for byte, unsharded', async () => {

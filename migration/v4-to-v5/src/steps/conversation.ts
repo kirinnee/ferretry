@@ -486,6 +486,23 @@ export const conversationStep: Step = {
         duplicateAttachments: 0,
         renders: 0,
         tornRenders: 0,
+        missingOriginals: [] as string[],
+        damaged: [] as string[],
+      };
+      /** One damaged v4 record: counted and named (path or `file line N`, never content), not carried. */
+      const damage = (problem: string, where: string): void => {
+        counts.damaged.push(`${problem}: ${where}`);
+      };
+      /** A record read that fails as `V4InputError` (torn, not JSON, wrong shape) is damage, not a failed step. */
+      const damagedAs = async <T>(where: string, read: () => Promise<T>): Promise<T | 'damaged'> => {
+        try {
+          return await read();
+        } catch (error) {
+          if (!(error instanceof V4InputError)) throw error;
+          // The error's own file is the real path (with the daemon id); the masked name is the one shown.
+          damage(error.message.split(': ')[0] ?? 'v4 record is damaged', where);
+          return 'damaged';
+        }
       };
 
       // The key: metadata only (lstat), then moved unopened. v4 refused a key that was not 0600, and so would v5.
@@ -516,7 +533,10 @@ export const conversationStep: Step = {
           }
           return;
         }
-        if (!source.isFile()) throw new V4InputError('turn entry is not a file or folder', label(from));
+        if (!source.isFile()) {
+          damage('turn entry is not a file or folder', label(from));
+          return;
+        }
         if (!ctx.dryRun) await moveSealed(from, ctx.v5.resolve(to));
         counts.turnFiles++;
       };
@@ -533,7 +553,9 @@ export const conversationStep: Step = {
         to: string,
         check: (line: V5) => boolean = () => true,
       ): Promise<{ v4: readonly V4[]; written: number; skipped: number }> => {
-        const lines = await readJsonlLines(reader, from, v4Schema);
+        const read = await damagedAs(label(from), () => readJsonlLines(reader, from, v4Schema));
+        // A log that cannot be read at all is one damaged record: named, nothing carried from it.
+        const lines = read === 'damaged' ? [] : read;
         const out: V5[] = [];
         let skipped = 0;
         for (const { line, value } of lines) {
@@ -543,10 +565,14 @@ export const conversationStep: Step = {
             continue;
           }
           const parsed = v5Schema.safeParse(mapped);
-          if (!parsed.success || !check(parsed.data))
-            throw new V4InputError(`v4 log line ${line} has no v5 form`, label(from));
-          if (Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > V5_MAX_JSONL_LINE_BYTES)
-            throw new V4InputError(`v4 log line ${line} is longer than a v5 line may be`, label(from));
+          if (!parsed.success || !check(parsed.data)) {
+            damage(`v4 log line ${line} has no v5 form`, label(from));
+            continue;
+          }
+          if (Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > V5_MAX_JSONL_LINE_BYTES) {
+            damage(`v4 log line ${line} is longer than a v5 line may be`, label(from));
+            continue;
+          }
           out.push(parsed.data);
         }
         if (out.length > 0) await ctx.v5.jsonl({ path: to, format: 1, schema: v5Schema }, out);
@@ -574,15 +600,20 @@ export const conversationStep: Step = {
         const turns = join(folder, 'turns');
         const turnsInfo = await entry(turns);
         if (turnsInfo !== undefined) {
-          if (!turnsInfo.isDirectory())
-            throw new V4InputError('turns is not a folder', `state/sessions/${config.id}/turns`);
-          await copyTree(turns, v5TurnsFolder(config.id));
+          if (!turnsInfo.isDirectory()) damage('turns is not a folder', `state/sessions/${config.id}/turns`);
+          else await copyTree(turns, v5TurnsFolder(config.id));
         }
 
         // The chat draft, through v5's own snapshot schema.
-        const chat = await readJson(reader, join(draftsFolder, `${config.id}.json`), V4SharedDraft);
-        if (chat !== undefined && (chat.sessionId !== config.id || chat.slot !== undefined))
-          throw new V4InputError('shared draft names another session or slot', `state/shared-drafts/${config.id}.json`);
+        const chatWhere = `state/shared-drafts/${config.id}.json`;
+        const chatRead = await damagedAs(chatWhere, () =>
+          readJson(reader, join(draftsFolder, `${config.id}.json`), V4SharedDraft),
+        );
+        let chat = chatRead === 'damaged' ? undefined : chatRead;
+        if (chat !== undefined && (chat.sessionId !== config.id || chat.slot !== undefined)) {
+          damage('shared draft names another session or slot', chatWhere);
+          chat = undefined;
+        }
         // Agenda reply drafts, keyed by the ask id. v5 Asks numbers asks per ferret exactly as v4 did (the agenda
         // files are carried with their ids), so `A<n>` on this ferret's board is the same ask in v5.
         const items: Record<string, z.input<typeof DraftSnapshotSchema>> = {};
@@ -591,13 +622,13 @@ export const conversationStep: Step = {
           if (item.folder || !item.name.endsWith('.json')) continue;
           const slot = item.name.slice(0, -'.json'.length);
           if (!V4AgendaId.safeParse(slot).success) continue;
-          const draft = await readJson(reader, join(itemsFolder, item.name), V4SharedDraft);
-          if (draft === undefined) continue;
-          if (draft.sessionId !== config.id || draft.slot !== slot)
-            throw new V4InputError(
-              'agenda draft names another session or slot',
-              `state/shared-drafts/${config.id}.items/${item.name}`,
-            );
+          const itemWhere = `state/shared-drafts/${config.id}.items/${item.name}`;
+          const draft = await damagedAs(itemWhere, () => readJson(reader, join(itemsFolder, item.name), V4SharedDraft));
+          if (draft === undefined || draft === 'damaged') continue;
+          if (draft.sessionId !== config.id || draft.slot !== slot) {
+            damage('agenda draft names another session or slot', itemWhere);
+            continue;
+          }
           const { sessionId, ...rest } = draft;
           items[slot] = DraftSnapshotSchema.parse({ ...rest, ferret: sessionId });
           counts.itemDrafts++;
@@ -680,7 +711,10 @@ export const conversationStep: Step = {
         // The open question: a live ferret's only; v4 replaced the file whole per question, so its mtime is askedAt.
         if (!ended) {
           const path = join(folder, 'question-asked.json');
-          const asked = await readJson(reader, path, V4AskedQuestion);
+          const askedRead = await damagedAs(`state/sessions/${config.id}/question-asked.json`, () =>
+            readJson(reader, path, V4AskedQuestion),
+          );
+          const asked = askedRead === 'damaged' ? undefined : askedRead;
           const askedInfo = asked === undefined ? undefined : await entry(path);
           if (asked !== undefined && askedInfo !== undefined) {
             const question = v5Question(asked, askedInfo.mtime, transcript?.file, await v5TranscriptOf(config));
@@ -715,20 +749,33 @@ export const conversationStep: Step = {
             if (!attachment.folder) continue;
             const where = join(attachments, daemon.name, session.name, attachment.name);
             const named = `state/attachments/<daemonId>/${session.name}/${attachment.name}`;
-            const manifest = await readJson(reader, join(where, 'manifest.json'), V4AttachmentManifest);
+            const manifest = await damagedAs(named, () =>
+              readJson(reader, join(where, 'manifest.json'), V4AttachmentManifest),
+            );
+            if (manifest === 'damaged') continue;
             const original = await entry(join(where, 'original'));
             if (manifest === undefined) {
               if (original !== undefined) counts.tornAttachments++;
               continue;
             }
-            if (manifest.id !== attachment.name) throw new V4InputError('attachment manifest names another id', named);
-            if (!original?.isFile()) throw new V4InputError('attachment has no original file', named);
+            // Damage in ONE record never fails the step: it is counted and named, and nothing is carried for it.
+            if (manifest.id !== attachment.name) {
+              damage('attachment manifest names another id', named);
+              continue;
+            }
+            if (!original?.isFile()) {
+              counts.missingOriginals.push(named);
+              continue;
+            }
             if (!known.has(session.name)) {
               counts.orphanAttachments++;
               continue;
             }
             const document = v5AttachmentManifestDocument(manifest, attachment.name);
-            if (document === undefined) throw new V4InputError('attachment manifest has no v5 form', named);
+            if (document === undefined) {
+              damage('attachment manifest has no v5 form', named);
+              continue;
+            }
             const name = `${session.name}~${document.id}`;
             if (carried.has(name)) {
               counts.duplicateAttachments++;
@@ -762,14 +809,24 @@ export const conversationStep: Step = {
           if (!file.name.endsWith('.json')) continue;
           const id = file.name.slice(0, -'.json'.length);
           const named = `state/renders/${shard.name}/${file.name}`;
-          const meta = await readJson(reader, join(renders, shard.name, file.name), V4RenderMeta);
-          if (meta === undefined) continue;
-          if (meta.id !== id || id.slice(0, 2) !== shard.name)
-            throw new V4InputError('render meta names another id or shard', named);
+          const meta = await damagedAs(named, () =>
+            readJson(reader, join(renders, shard.name, file.name), V4RenderMeta),
+          );
+          if (meta === undefined || meta === 'damaged') continue;
+          if (meta.id !== id || id.slice(0, 2) !== shard.name) {
+            damage('render meta names another id or shard', named);
+            continue;
+          }
           const payload = join(renders, shard.name, `${id}.payload`);
-          if (!(await entry(payload))?.isFile()) throw new V4InputError('render has no payload file', named);
+          if (!(await entry(payload))?.isFile()) {
+            damage('render has no payload file', named);
+            continue;
+          }
           const document = StoredRenderMetaSchema.safeParse(v5RenderMetaDocument(meta));
-          if (!document.success) throw new V4InputError('render meta has no v5 form', named);
+          if (!document.success) {
+            damage('render meta has no v5 form', named);
+            continue;
+          }
           if (!ctx.dryRun) await moveSealed(payload, ctx.v5.resolve(v5RenderPayload(id)));
           await ctx.v5.stamped({ path: v5RenderMeta(id), format: 1, schema: StoredRenderMetaSchema }, document.data);
           counts.renders++;
@@ -806,6 +863,12 @@ export const conversationStep: Step = {
         [counts.tornRenders, 'render payload(s) with no meta omitted'],
       ] as const;
       const notes = omitted.filter(([count]) => count > 0).map(([count, what]) => `${count} ${what}`);
+      if (counts.missingOriginals.length > 0)
+        notes.push(
+          `${counts.missingOriginals.length} attachments with no original file (not carried; v5 keeps no manifest without its original): ${counts.missingOriginals.join(', ')}`,
+        );
+      if (counts.damaged.length > 0)
+        notes.push(`${counts.damaged.length} damaged v4 record(s) not carried: ${counts.damaged.join('; ')}`);
       if (ctx.dryRun) notes.push('dry run: nothing written');
       return {
         ...base,

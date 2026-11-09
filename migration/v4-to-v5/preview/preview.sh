@@ -72,6 +72,18 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# The converter's own dependencies (yaml, zod) are installed inside migration/v4-to-v5, not by the repo's install.
+# dry-run and prepare need them: a missing node_modules is installed here (one line says so); a failure names the command.
+if [ "${command}" = "dry-run" ] || [ "${command}" = "prepare" ]; then
+  if [ ! -d "${tool_dir}/node_modules" ]; then
+    echo "installing the converter's dependencies (migration/v4-to-v5/node_modules is missing)"
+    if ! (cd "${tool_dir}" && bun install --frozen-lockfile >/dev/null); then
+      echo "could not install the converter's dependencies; run: cd '${tool_dir}' && bun install --frozen-lockfile" >&2
+      exit 1
+    fi
+  fi
+fi
+
 # One fact, one owner: the port and the app origin are read from plan.ts, never restated here.
 fact() { (cd "${tool_dir}" && bun -e "import { PREVIEW } from './preview/plan.ts'; console.log(PREVIEW.$1)"); }
 run_tool() { (cd "${tool_dir}" && bun preview/main.ts "$@" --v4 "${v4_home}" --target "${target}"); }

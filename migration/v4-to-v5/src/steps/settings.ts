@@ -60,8 +60,10 @@ const {
   TERMINALS: TERMINALS_CONFIG,
   CODEX: CODEX_CONFIG,
   CODEX_SETTINGS,
+  CODEX_HOOKS,
   CLAUDE_CODE: CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_SETTINGS,
+  CLAUDE_CODE_HOOKS,
   LIMITS: LimitsConfigFile,
   AGENDA: AGENDA_CONFIG,
   CONVERSATION: CONVERSATION_CONFIG,
@@ -365,10 +367,18 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
   const { address, label } = file;
   if (address.kind === 'learning' || address.kind === 'pack' || address.kind === 'modelsGuide') return;
   if (address.kind === 'voice') {
-    plan.waiting.push(`${label} (no Voice config schema yet)`);
+    // v5 has a Voice plugin but no config schema for it: nothing to carry into. Named, never a block.
+    plan.dropped.push({
+      what: label,
+      why: 'v5 Voice has no config schema yet, so voice.yaml cannot be carried; re-enter your voice settings in v5 Voice settings when it has them',
+    });
     return;
   }
   const document = await readV4Yaml(file);
+  if (address.kind === 'component' && (address.componentKind === 'settings' || address.componentKind === 'hooks')) {
+    await planHarnessComponent(ctx, plan, file, document, address.componentKind, address.name);
+    return;
+  }
   // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
   // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
   if (address.kind === 'login' && ctx.loginKeys !== undefined) takeLoginKeys(document, address.name, ctx.loginKeys);
@@ -450,9 +460,116 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
     }
     case 'settings':
     case 'hooks':
-      plan.waiting.push(`${label} (v5 holds ${address.componentKind} inline; v4 points at a file, flags or env)`);
-      return;
+      return; // handled above (planHarnessComponent)
   }
+}
+
+const V5_HARNESS = { claude: 'claude-code', 'claude-code': 'claude-code', codex: 'codex' } as const;
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * A v4 settings or hooks component. v5 holds these INLINE in the item (`settings:` / `hooks:`), where v4 pointed at a
+ * file, flags or env. `env` is data in the YAML itself and is written inline; a `file` that is a plain file inside the
+ * v4 home (under `fleet/assets/`, the instructions rule) is read from the snapshot and inlined; a file outside the home
+ * is NEVER opened (it is the harness's own file, not this home's), and launch flags and a hooks directory have no v5
+ * form. What is not carried is named with the remedy; nothing here is `pending`. Every inlined value goes through the
+ * raw-secret check first: a secret-shaped one holds the whole component, by name, so a plain secret is never written.
+ */
+async function planHarnessComponent(
+  ctx: StepContext,
+  plan: Plan,
+  file: V4ConfigFile,
+  document: Document,
+  kind: 'settings' | 'hooks',
+  name: string,
+): Promise<void> {
+  const { label } = file;
+  const v4 = document.toJS() as Record<string, unknown>;
+  const hold = (why: string): void => void plan.dropped.push({ what: label, why });
+  const harnessName = typeof v4.harness === 'string' ? V5_HARNESS[v4.harness as keyof typeof V5_HARNESS] : undefined;
+  if (harnessName === undefined) {
+    hold(`it names no harness v5 holds ${kind} for; re-create it in v5 Settings (v5 holds ${kind} inline)`);
+    return;
+  }
+  const target =
+    kind === 'settings'
+      ? harnessName === 'codex'
+        ? CODEX_SETTINGS
+        : CLAUDE_CODE_SETTINGS
+      : harnessName === 'codex'
+        ? CODEX_HOOKS
+        : CLAUDE_CODE_HOOKS;
+  const remedy = `re-create it in v5 Settings; v5 holds ${kind} inline`;
+
+  // The file form: only a plain file inside the v4 home snapshot is read.
+  let fromFile: Record<string, unknown> | undefined;
+  if (typeof v4.file === 'string') {
+    const source = await instructionsSource(ctx.v4.home, v4.file);
+    if (source === undefined)
+      plan.dropped.push({
+        what: `${label} file`,
+        why: `it points outside the v4 home (or at no plain file in it), so it was never read; ${remedy}`,
+      });
+    else {
+      try {
+        const text = await readFile(source, 'utf8');
+        const parsed: unknown =
+          harnessName === 'codex' && kind === 'settings' ? Bun.TOML.parse(text) : JSON.parse(text);
+        if (isRecordValue(parsed)) fromFile = parsed;
+        else throw new Error('not a table');
+      } catch {
+        plan.dropped.push({ what: `${label} file`, why: `its document could not be read as ${kind}; ${remedy}` });
+      }
+    }
+  }
+  if (typeof v4.directory === 'string')
+    plan.dropped.push({ what: `${label} directory`, why: `a folder of hook scripts has no inline v5 form; ${remedy}` });
+  if (Array.isArray(v4.flags) && v4.flags.length > 0)
+    plan.dropped.push({
+      what: `${label} flags`,
+      why: `v5 ${kind} items hold no launch flags; ${remedy.replace(`v5 holds ${kind} inline`, 'add the flags to the runtime in v5')}`,
+    });
+
+  let body: Record<string, unknown> = {};
+  if (kind === 'hooks') {
+    if (fromFile !== undefined) {
+      const events = isRecordValue(fromFile.hooks) ? fromFile.hooks : fromFile;
+      body = { hooks: events };
+    }
+  } else {
+    const settings: Record<string, unknown> = { ...fromFile };
+    if (isRecordValue(v4.env) && Object.keys(v4.env).length > 0) {
+      const env = Object.fromEntries(Object.entries(v4.env).filter(([, value]) => typeof value === 'string'));
+      if (harnessName === 'codex') {
+        const policy = isRecordValue(settings.shell_environment_policy) ? settings.shell_environment_policy : {};
+        const set = isRecordValue(policy.set) ? policy.set : {};
+        settings.shell_environment_policy = { ...policy, set: { ...set, ...env } };
+      } else settings.env = { ...(isRecordValue(settings.env) ? settings.env : {}), ...env };
+    }
+    if (Object.keys(settings).length > 0) body = { settings };
+  }
+  if (Object.keys(body).length === 0) return; // nothing carried; what was not is named above
+
+  const secrets = rawSecretPaths(body);
+  if (secrets.length > 0) {
+    hold(
+      `the value at ${secrets.join(', ')} looks like a raw secret, so it was held, not carried; store it with \`fy secret set NAME\`, then ${remedy} with \${secret:NAME}`,
+    );
+    return;
+  }
+  const item = new Document(
+    { ...(typeof v4.description === 'string' ? { description: v4.description } : {}), ...body },
+    YAML_OPTIONS,
+  );
+  item.commentBefore = ` Carried from v4 ${label} by the v4 → v5 converter.`;
+  const problem = v5ConfigProblem(target, name, item.toString({ lineWidth: 0 }));
+  if (problem !== undefined) {
+    hold(`v5 refuses it as ${kind} (${problem}), so it was not carried; ${remedy}`);
+    return;
+  }
+  place(plan, target, name, label, item);
+  count(plan, kind === 'settings' ? 'settings items' : 'hooks items');
 }
 
 /** `codexRuntimes` is {@link PREVIEW_CODEX_RUNTIMES}; a test injects the switch on to see the Codex settings item. */
