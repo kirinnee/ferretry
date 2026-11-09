@@ -8,6 +8,7 @@
  */
 
 import {
+  type DaemonlessPorts,
   type DaemonlessScreenProps,
   daemonOfClient,
   daemonTitle,
@@ -22,7 +23,7 @@ import {
   useRouter,
 } from '@ferretry/app';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   type CatalogClient,
   catalogClientOf,
@@ -172,14 +173,16 @@ export function createJoinScreen() {
  * ASKS (`chooseDaemon`), and only the machine the person picks gives this half a client, its own on that machine. The
  * choice spends no share code: the item was already opened and verified through the member transport.
  */
-export function createSharedScreen() {
+export function createSharedScreen(ports: Pick<DaemonlessPorts, 'daemons'>) {
   return function SharedRoute({ navigate, chooseDaemon }: DaemonlessScreenProps) {
     const chooseInstall = useMemo(() => installChooser(chooseDaemon), [chooseDaemon]);
+    // With no paired machine there is nothing to pick: the screen says to pair one first, instead of offering Install.
+    const paired = useSyncExternalStore(ports.daemons.subscribe, ports.daemons.snapshot, ports.daemons.snapshot);
     return (
       <SharedWithMe
         members={sharedMembers()}
         machines={[]}
-        chooseInstall={chooseInstall}
+        {...(paired.daemons.length === 0 ? {} : { chooseInstall })}
         onHome={() => navigate(HOME_HREF)}
       />
     );
