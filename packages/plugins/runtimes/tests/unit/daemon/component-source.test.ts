@@ -39,8 +39,19 @@ afterEach(cleanupWorlds);
 class Owner {
   readonly documents = new Map<string, ProfileComponentDocument>();
   throws = false;
+  /** Runs, once, when the next `list` fails: that call fails and the owner has recovered by the next one. */
+  #onNextFailure: (() => void) | undefined;
+  failNextList(then: () => void): void {
+    this.#onNextFailure = then;
+  }
   readonly source: ProfileComponentSource = {
     list: async () => {
+      if (this.#onNextFailure !== undefined) {
+        const then = this.#onNextFailure;
+        this.#onNextFailure = undefined;
+        then();
+        throw new Error('OWNER_PRIVATE_DETAIL');
+      }
       if (this.throws) throw new Error('OWNER_PRIVATE_DETAIL');
       return [...this.documents.keys()].toSorted();
     },
@@ -497,5 +508,105 @@ describe('Runtimes’ own instructions are written through a change', () => {
     expect(byFerret.status).toBeGreaterThanOrEqual(400);
     expect(byDevice.status).toBeGreaterThanOrEqual(400);
     expect(host.configChanges.some(change => change.path.includes('instructions/house'))).toBe(false);
+  });
+});
+
+/** Every file of every home, by home and relative path: what an apply must leave exactly as it found it. */
+async function homesSnapshot(world: FleetWorld): Promise<Record<string, Record<string, string>>> {
+  const homes = await readdir(join(world.fleet, 'homes')).catch(() => [] as string[]);
+  return Object.fromEntries(
+    await Promise.all(homes.map(async home => [home, await filesUnder(join(world.fleet, 'homes', home))] as const)),
+  );
+}
+
+describe('a plan carries its own reading: what stands in is never written, whichever way a provider flips', () => {
+  it('C1 a provider that answers at propose and fails at apply: refused, and nothing is written in either home', async () => {
+    const owners = newOwners();
+    owners.mcp.with('github', { command: 'github-mcp', args: ['--real'] });
+    const { host, world } = await compose({ owners, config: withLayers('mcp/github') });
+    const first = await stageAndApply(host, put('claude-first'));
+    expect(first.status).toBe(200);
+    const before = await homesSnapshot(world);
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+    expect(staged.status).toBe(200);
+    const { id } = staged.json<{ id: string }>();
+
+    owners.mcp.throws = true;
+    const applied = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+
+    expect(applied.status).toBeGreaterThanOrEqual(400);
+    expect(await homesSnapshot(world)).toEqual(before);
+    // The stand-in address (the one a stood-in MCP server is shown with) is in no home.
+    expect(JSON.stringify(await homesSnapshot(world))).not.toContain('not-read');
+  });
+
+  it('C1 a provider that fails at propose and recovers before the apply: there is no plan to apply, and nothing is written', async () => {
+    const owners = newOwners();
+    owners.mcp.with('github', { command: 'github-mcp', args: ['--real'] });
+    owners.mcp.throws = true;
+    const { host, world } = await compose({ owners, config: withLayers('mcp/github') });
+
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+    owners.mcp.throws = false;
+
+    expect(staged.status).toBeGreaterThanOrEqual(400);
+    expect(await readdir(world.fleet)).not.toContain('manifest.json');
+    expect(await homesSnapshot(world)).toEqual({});
+  });
+
+  it('C1 a provider that fails only for the read just before the write, with a recovery right after: nothing is written', async () => {
+    // The shape of the review's probe P1: the apply's own read fails, the owner recovers at once, and another read runs.
+    const owners = newOwners();
+    owners.mcp.with('github', { command: 'github-mcp', args: ['--real'] });
+    const { host, world } = await compose({ owners, config: withLayers('mcp/github') });
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+    const { id } = staged.json<{ id: string }>();
+    owners.mcp.failNextList(() => {
+      void host.request('GET', '/v1/runtimes/components');
+    });
+
+    const applied = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    await host.settle();
+
+    expect(applied.status).toBeGreaterThanOrEqual(400);
+    expect(await homesSnapshot(world)).toEqual({});
+    expect(await readdir(world.fleet)).not.toContain('manifest.json');
+  });
+});
+
+describe('M1 an instructions change is refused before anything of it is written', () => {
+  const putHouse = (content: string) => ({
+    change: { kind: 'component.put', name: 'house', component: { kind: 'instructions' }, content, create: true },
+  });
+  const nothingOfHouse = async (host: TestHost) => {
+    expect(host.configChanges.some(change => change.path.includes('instructions/house'))).toBe(false);
+    expect(JSON.stringify((await host.request('GET', '/v1/runtimes/components')).json())).not.toContain('house');
+  };
+
+  it('M1 refused at propose while another kind stands in: the instructions file is absent', async () => {
+    const owners = newOwners();
+    owners.mcp.with('github', { command: 'github-mcp' });
+    const { host } = await compose({ owners, absent: ['mcp'], config: withLayers('mcp/github') });
+
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: putHouse('Be brief.') });
+
+    expect(staged.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(staged.json())).toContain('nothing was changed');
+    await nothingOfHouse(host);
+  });
+
+  it('M1 refused at apply when a kind stood in only after the proposal: the instructions file is absent', async () => {
+    const owners = newOwners();
+    owners.mcp.with('github', { command: 'github-mcp' });
+    const { host } = await compose({ owners, config: withLayers('mcp/github') });
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: putHouse('Be brief.') });
+    expect(staged.status).toBe(200);
+    const { id } = staged.json<{ id: string }>();
+
+    owners.mcp.throws = true;
+    const applied = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+
+    expect(applied.status).toBeGreaterThanOrEqual(400);
+    await nothingOfHouse(host);
   });
 });
