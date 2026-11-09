@@ -507,8 +507,10 @@ const loginEnvironment = <V extends z.ZodType>(value: V) =>
 /**
  * What a login FILE's environment may not hold: a secret value, or an address carrying one. The same rule the staging route
  * applies ({@link storedEnvironmentIssue}), so a file written by the config editor or `config_write` is judged as a login
- * add is. A refusal names the VARIABLE only, never the value. A file that fails is reported invalid and its last good
- * version stays in effect (the kernel's rule for every file), exactly as a file holding a raw key already is.
+ * add is, and a value is at most 4096 characters, as on the wire. A refusal names the VARIABLE only, never the value, and is
+ * marked `rawSecret`, so the kernel withholds the file's text from `config_read` exactly as for a file holding a raw key. A file
+ * that fails is reported invalid: an edit keeps the last good version in effect, but a file saved before this rule is not in
+ * effect until it is fixed (the kernel re-checks the accepted text at start).
  */
 const refuseStoredSecrets = (ctx: {
   readonly value: Readonly<Record<string, unknown>>;
@@ -525,12 +527,13 @@ const refuseStoredSecrets = (ctx: {
           : `"${name}" is an address holding a ${issue === 'userinfo' ? 'password' : 'key in its query string'}: write the address without it and keep it in the secret store`,
       input: name,
       path: [name],
+      params: { rawSecret: true },
     });
   }
 };
 
 /** A login's environment: POSIX names, plain values or `${secret:NAME}` references, no reserved variable, no secret value. */
-export const LoginEnvSchema = loginEnvironment(z.string()).check(refuseStoredSecrets);
+export const LoginEnvSchema = loginEnvironment(z.string().max(4096)).check(refuseStoredSecrets);
 
 const ChangeLabelSchema = NonEmptyStringSchema.max(200);
 

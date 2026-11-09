@@ -572,3 +572,176 @@ describe('R5: a key in a header, a query string, punctuation or braces', () => {
     ).be.an.Object();
   });
 });
+
+describe('R6: under a credential name only an allowlisted shape is stored; headers and addresses are read under any name', () => {
+  const K = 'q7Zk'.repeat(10);
+  const stage = (env: Record<string, string>): unknown =>
+    deriveLoginChange(
+      FILES,
+      { kind: 'login.add', id: 'r6', harness: 'claude-code', store: 'environment', env },
+      facts(),
+    );
+  const SECRET = 'looks like a secret';
+  const USERINFO = 'is an address with a user and password';
+  const QUERY = 'is an address that carries a key in its query string';
+  /** [variable, value, start of the sentence the person reads]. */
+  const refused: readonly (readonly [string, string, string])[] = [
+    // header lists: `name=value` (OpenTelemetry), folded lines, bare CR, underscores, long names
+    ['OTEL_EXPORTER_OTLP_HEADERS', `Authorization=Bearer ${K}`, SECRET],
+    ['OTEL_EXPORTER_OTLP_HEADERS', `x-api-key=${K}`, SECRET],
+    ['OTEL_EXPORTER_OTLP_HEADERS', `api-key=${K},x=1`, SECRET],
+    ['OTEL_EXPORTER_OTLP_HEADERS', `Authorization=Basic%20${K}`, SECRET],
+    ['OTEL_EXPORTER_OTLP_METRICS_HEADERS', `Authorization=Bearer ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `X-Custom-Header-For-Our-Very-Long-Gateway-Api-Key: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `x_api_key: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `Authorization:\n Bearer ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `X-Org: acme\rx-api-key: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `X-Org: acme\r\nx-api-key: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `x-api-key:${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `authorization: bearer ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `X-Org: a\nX-Org: b\nAuthorization: Bearer ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `Cookie: a=${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `Ocp-Apim-Subscription-Key: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `X-Goog-Api-Key: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `x-portkey-virtual-key: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `apikey: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `X-Auth: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `X-Access-Token: ${K}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `x-api-key: ${K.slice(0, 20)} ${K.slice(20)}`, SECRET],
+    ['ANTHROPIC_CUSTOM_HEADERS', `x-auth-token: \${secret:K} ${K}`, SECRET],
+    // a credential name: nothing but an allowlisted shape
+    ['GATEWAY_TOKEN', `Bearer ${K} \${secret:X}`, SECRET],
+    ['GATEWAY_TOKEN', `bearer\n${K}\n\${secret:X}`, SECRET],
+    ['GATEWAY_TOKEN', `BEARER Bearer ${K} \${secret:X}`, SECRET],
+    ['GATEWAY_TOKEN', `Basic ${'dXNlcjpwYXNz'.repeat(3)} \${secret:X}`, SECRET],
+    ['GATEWAY_TOKEN', `"${K}" \${secret:X}`, SECRET],
+    ['GATEWAY_TOKEN', `\${secret:X},${K}`, SECRET],
+    ['GATEWAY_TOKEN', `Authorization: Bearer ${K} \${secret:X}`, SECRET],
+    ['GATEWAY_TOKEN', `$\${secret:X} ${K}`, SECRET],
+    ['GATEWAY_TOKEN', `\${secret:X} ${K}https://gw/`, SECRET],
+    ['GATEWAY_PASSWORD', '${secret:X} P@ssw0rd!Wint#er-2024%zz', SECRET],
+    ['GATEWAY_TOKEN', '${secret:X} ab%cdefg%hijklmn%opq', SECRET],
+    ['GATEWAY_TOKEN', '${secret:X} ab:cdefg:hijklmn:opq', SECRET],
+    ['GATEWAY_TOKEN', '${secret:X} q7Zk!q7Zk@q7Zk#q7Zk', SECRET],
+    ['GATEWAY_TOKEN', '${secret:X} abcdefg hijklmn opqrstu vwxyz12', SECRET],
+    ['GATEWAY_TOKEN', '${secret:X} abcdefg', SECRET],
+    ['GATEWAY_TOKEN', `\${${K}}`, SECRET],
+    ['GATEWAY_TOKEN', `$${K}`, SECRET],
+    ['GATEWAY_TOKEN', `\${X${K}}`, SECRET],
+    ['GATEWAY_TOKEN', `\${secret:${K.toLowerCase()}}`, SECRET],
+    ['GATEWAY_NOTE', `\${hf_${'x1'.repeat(10)}}`, SECRET],
+    ['GATEWAY_TOKEN', `${K.slice(0, 35)}-Key: \${secret:K}`, SECRET],
+    ['GATEWAY_TOKEN', `${'Q7Zk'.repeat(5)}-Key: \${secret:K} a`, SECRET],
+    ['OPENAI_API_KEY', 'hunter22x', SECRET],
+    ['GATEWAY_TOKEN', `https://alice:${K}@gw.example`, SECRET],
+    // addresses under any name: a literal password, a key as the user, a key in a query or a fragment
+    ['ANTHROPIC_BASE_URL', `https://alice:${K}@gw.example/v1`, USERINFO],
+    ['ANTHROPIC_BASE_URL', `alice:${K}@gw.example`, USERINFO],
+    ['ANTHROPIC_BASE_URL', `https://${K}:@gw/v1`, USERINFO],
+    ['HTTPS_PROXY', `http://${K}:@proxy:3128`, USERINFO],
+    ['HTTPS_PROXY', `http:/alice:${K}@proxy:3128`, USERINFO],
+    ['HTTPS_PROXY', `http://alice:\${secret:PW}x@proxy:3128`, USERINFO],
+    ['HTTPS_PROXY', `http://alice%3A${K}@proxy:3128`, USERINFO],
+    ['HTTPS_PROXY', `http://${K}@proxy:3128`, USERINFO],
+    ['ANTHROPIC_BASE_URL', `https://gw.example/v1?key=${K}`, QUERY],
+    ['ANTHROPIC_BASE_URL', `https://gw.example/v1?api_key=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?x=1&token=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?x=1;token=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?key=abc&key=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?KEY=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?Api-Key=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?x-api-key=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?sig=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?auth_token=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?access-token=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?subscription-key=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?key=abc%20${K}`, QUERY],
+    ['GATEWAY_URL', `HTTPS://gw.example/v1?key=${K}`, QUERY],
+    ['GATEWAY_URL', ` https://gw.example/v1?key=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?%6Bey=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?k%65y=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?ke%79=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?key%20=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?key[]=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?pass=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?pwd=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?X-Amz-Signature=${K}`, QUERY],
+    ['GATEWAY_URL', `gw.example/v1?key=${K}`, QUERY],
+    ['GATEWAY_URL', `//gw.example/v1?key=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1#key=${K}`, QUERY],
+    ['GATEWAY_URL', `https://gw.example/v1?x=1#token=${K}`, QUERY],
+  ];
+  it.each(refused)(
+    'should refuse %s holding a hidden key (case %#), naming the variable and never the value',
+    (name, value, start) => {
+      const message = refusal(() => stage({ [name]: value }));
+
+      should(message).startWith(`${name} in login r6 ${start}`);
+      should(message).not.containEql(K);
+      should(message).not.containEql(K.slice(0, 12));
+    },
+  );
+
+  const accepted: readonly (readonly [string, string])[] = [
+    ['CLAUDE_CODE_SKIP_BEDROCK_AUTH', '1'],
+    ['CLAUDE_CODE_SKIP_VERTEX_AUTH', '1'],
+    ['CLAUDE_CODE_SKIP_FOUNDRY_AUTH', '1'],
+    ['CLAUDE_CODE_API_KEY_HELPER_TTL_MS', '3600000'],
+    ['MAX_THINKING_TOKENS', '31999'],
+    ['AUTH_MODE', 'oauth'],
+    ['USE_AUTH', 'false'],
+    ['USE_AUTH', 'Yes'],
+    ['GATEWAY_AUTH', 'Bearer ${secret:K}'],
+    ['GATEWAY_TOKEN', 'Token ${secret:K}'],
+    ['GATEWAY_TOKEN', 'basic\t${secret:K}'],
+    ['GATEWAY_TOKEN', 'Authorization: Bearer ${secret:K}'],
+    ['GATEWAY_TOKEN', 'x-api-key: ${secret:K}'],
+    ['GATEWAY_AUTH_HEADER', 'x-api-key: ${secret:K}'],
+    ['GATEWAY_TOKEN', 'X-Org-Name: ${secret:K}'],
+    ['GATEWAY_TOKEN', 'x-api-key=${secret:K}'],
+    ['GATEWAY_TOKEN', '${secret:A}${secret:B}'],
+    ['GATEWAY_TOKEN', '${GATEWAY_TOKEN}'],
+    ['GATEWAY_TOKEN', '$GATEWAY_TOKEN'],
+    ['GATEWAY_TOKEN', '3600000000'],
+    ['GATEWAY_TOKEN', 'https://gw.example/v1'],
+    ['GATEWAY_TOKEN', 'https://gw.example/v1?key=${secret:K}'],
+    ['OPENAI_API_KEY', 'ollama'],
+    ['OPENAI_API_KEY', 'dummy'],
+    ['OPENAI_API_KEY', 'hunter2'],
+    ['ANTHROPIC_API_KEY', ''],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'Authorization: Bearer ${secret:K}'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'x-portkey-api-key: ${secret:K}'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'X-Org: acme'],
+    ['ANTHROPIC_CUSTOM_HEADERS', 'X-Org: acme\nAuthorization: Bearer ${secret:K}'],
+    ['OTEL_EXPORTER_OTLP_HEADERS', 'Authorization=Bearer ${secret:K}'],
+    ['OTEL_EXPORTER_OTLP_HEADERS', 'x-org=acme'],
+    ['OTEL_EXPORTER_OTLP_HEADERS', 'x-org=acme,api-key=${secret:K}'],
+    ['ANTHROPIC_BASE_URL', 'https://gw.example/v1?api-version=2024-10-21'],
+    ['ANTHROPIC_BASE_URL', 'https://gw.example/v1?key=${secret:K}'],
+    ['ANTHROPIC_BASE_URL', 'https://gw.example/v1?token=abc'],
+    ['ANTHROPIC_BASE_URL', 'https://gw.example/v1?%6Bey=${secret:K}'],
+    ['HTTPS_PROXY', 'http://alice:${secret:PW}@proxy.example:3128'],
+    ['HTTPS_PROXY', 'http://${secret:U}:${secret:PW}@proxy.example:3128'],
+    ['HTTPS_PROXY', '${secret:U}:${secret:PW}@proxy.example:3128'],
+    ['HTTPS_PROXY', 'http:/alice:${secret:PW}@proxy.example:3128'],
+    ['GATEWAY_NOTE', 'ada.lovelace@example.com'],
+  ];
+  it.each(accepted)('should accept %s = %s', (name, value) => {
+    should(stage({ [name]: value })).be.an.Object();
+  });
+
+  it('should keep every shipped-style variable set together', () => {
+    should(
+      stage({
+        CLAUDE_CODE_SKIP_BEDROCK_AUTH: '1',
+        CLAUDE_CODE_API_KEY_HELPER_TTL_MS: '3600000',
+        MAX_THINKING_TOKENS: '31999',
+        AUTH_MODE: 'oauth',
+        USE_AUTH: 'false',
+        A_TOKEN: 'Token ${secret:K}',
+        B_TOKEN: '${secret:A}${secret:B}',
+        C_TOKEN: 'Authorization: Bearer ${secret:K}',
+      }),
+    ).be.an.Object();
+  });
+});

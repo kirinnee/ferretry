@@ -152,6 +152,17 @@ function messageOf(issue: z.core.$ZodIssue): string {
   return issue.message;
 }
 
+/**
+ * Whether a schema refused a file ONLY because it holds a secret: every issue is a custom issue its schema marked
+ * `params: { rawSecret: true }`. Any plugin may mark an issue, so a rule that lives in a schema (a login's environment) is
+ * handled as a raw key the kernel's own scan found: its file's text is never shown to an agent.
+ */
+function markedRawSecret(error: z.ZodError): boolean {
+  return (
+    error.issues.length > 0 && error.issues.every(issue => issue.code === 'custom' && issue.params?.rawSecret === true)
+  );
+}
+
 /** The issues a failed schema parse means, the first {@link MAX_CONFIG_ISSUES} each located in the file. */
 function schemaIssues(
   path: string,
@@ -160,7 +171,7 @@ function schemaIssues(
 ): RefusedConfigText {
   return {
     ok: false,
-    reason: 'schema',
+    reason: markedRawSecret(error) ? 'raw_secret' : 'schema',
     ...cappedIssues(path, error.issues, issue => {
       const site = issue.code === 'unrecognized_keys' ? [...issue.path, ...issue.keys.slice(0, 1)] : issue.path;
       const where = describePath(issue.path);

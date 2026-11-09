@@ -308,3 +308,39 @@ describe('prefillFrom — R5: one rule with the daemon', () => {
     expect(proxy.withheld).toEqual([]);
   });
 });
+
+describe('prefillFrom — R6: headers, addresses and braces are read as the daemon reads them', () => {
+  const key = 'q7Zk'.repeat(10);
+  const plain = (name: string) =>
+    preset({
+      id: 'x',
+      variables: [{ name, kind: 'plain', required: false, allowEmpty: false, harnesses: ['claude-code'] }],
+    });
+  const withheld = (name: string, value: string) => prefillFrom(plain(name), { [name]: value });
+
+  it('withholds a key in an OpenTelemetry or folded header list, and in an unlisted or encoded query name', () => {
+    for (const [name, value] of [
+      ['OTEL_EXPORTER_OTLP_HEADERS', `Authorization=Bearer ${key}`],
+      ['OTEL_EXPORTER_OTLP_HEADERS', `api-key=${key},x=1`],
+      ['ANTHROPIC_CUSTOM_HEADERS', `Authorization:\n Bearer ${key}`],
+      ['ANTHROPIC_BASE_URL', `https://gw.example/v1?%6Bey=${key}`],
+      ['ANTHROPIC_BASE_URL', `https://gw.example/v1?pass=${key}`],
+      ['ANTHROPIC_BASE_URL', `gw.example/v1?key=${key}`],
+      ['ANTHROPIC_BASE_URL', `https://gw.example/v1#key=${key}`],
+      ['HTTPS_PROXY', `https://${key}:@gw.example`],
+      ['HTTPS_PROXY', `http:/alice:${key}@proxy.example:3128`],
+      ['GATEWAY_TOKEN', `$${key}`],
+    ] as const) {
+      const result = withheld(name, value);
+
+      expect(result.values).toEqual({});
+      expect(result.withheld).toHaveLength(1);
+      expect(JSON.stringify(result)).not.toContain(key);
+    }
+  });
+
+  it('takes a header list that names only references or ordinary headers', () => {
+    expect(withheld('OTEL_EXPORTER_OTLP_HEADERS', 'Authorization=Bearer ${secret:K}').withheld).toEqual([]);
+    expect(withheld('OTEL_EXPORTER_OTLP_HEADERS', 'x-org=acme').withheld).toEqual([]);
+  });
+});

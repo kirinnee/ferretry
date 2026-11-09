@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { hasTokenShape, namesACredential, plainPaste, urlCarries } from '../../../contract/secret-shape.ts';
+import {
+  hasTokenShape,
+  namesACredential,
+  plainPaste,
+  storedEnvironmentIssue,
+  urlCarries,
+} from '../../../contract/secret-shape.ts';
 
 describe('namesACredential', () => {
   it.each(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'GITHUB_PAT', 'DB_PASSWORD', 'OPENAI_APIKEY'])(
@@ -102,6 +108,67 @@ describe('plainPaste', () => {
     expect(plainPaste('ANTHROPIC_BASE_URL', 'https://h.example/?key=abcdefgh12', false)).toEqual({
       kind: 'withheld',
       reason: 'url-query',
+    });
+  });
+});
+
+describe('R6: the stored rule is linear and reads headers and addresses under any name', () => {
+  const key = 'q7Zk'.repeat(10);
+
+  it('should judge a 256 KiB value of one repeated character in well under 100 ms, stored and prefilled', () => {
+    for (const character of [':', '@', '=', '%', ' ', ',', '\n', '?', '#', '/', '[', '$']) {
+      const value = character.repeat(256 * 1024);
+      for (const name of ['GATEWAY_TOKEN', 'GATEWAY_NOTE', 'ANTHROPIC_CUSTOM_HEADERS']) {
+        const started = performance.now();
+        storedEnvironmentIssue(name, value);
+        plainPaste(name, value, false);
+        urlCarries(value);
+        expect(performance.now() - started).toBeLessThan(100);
+      }
+    }
+  });
+
+  it('should judge repeated JWT openings in linear time, and still find a JWT', () => {
+    const started = performance.now();
+    expect(hasTokenShape(`x ${'eyJ'.repeat(90_000)}`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(hasTokenShape(`x ${'eyJ'.repeat(5)}.`)).toBe(true);
+  });
+
+  it('should withhold, in the browser too, a key in a header list, an address and a wrapped variable', () => {
+    for (const [name, value] of [
+      ['OTEL_EXPORTER_OTLP_HEADERS', `Authorization=Bearer ${key}`],
+      ['ANTHROPIC_CUSTOM_HEADERS', `Authorization:\n Bearer ${key}`],
+      ['ANTHROPIC_CUSTOM_HEADERS', `X-Org: acme\rx_api_key: ${key}`],
+      ['GATEWAY_TOKEN', `$${key}`],
+      ['GATEWAY_TOKEN', `\${X${key}}`],
+    ] as const) {
+      expect(plainPaste(name, value, false)).toEqual({ kind: 'withheld', reason: 'credential-name' });
+    }
+    for (const value of [`https://${key}:@gw/v1`, `http:/alice:${key}@proxy:3128`, `alice:${key}@proxy`]) {
+      expect(plainPaste('HTTPS_PROXY', value, false)).toEqual({ kind: 'withheld', reason: 'url-userinfo' });
+    }
+    for (const value of [
+      `https://gw/v1?%6Bey=${key}`,
+      `https://gw/v1?pass=${key}`,
+      `gw.example/v1?key=${key}`,
+      `//gw.example/v1?key=${key}`,
+      `https://gw/v1#key=${key}`,
+      `https://gw/v1?X-Amz-Signature=${key}`,
+    ]) {
+      expect(plainPaste('ANTHROPIC_BASE_URL', value, false)).toEqual({ kind: 'withheld', reason: 'url-query' });
+    }
+  });
+
+  it('should take a reference-bearing header list and an upper-case variable reference where the daemon does', () => {
+    expect(plainPaste('OTEL_EXPORTER_OTLP_HEADERS', 'Authorization=Bearer ${secret:K}', false)).toEqual({
+      kind: 'take',
+      value: 'Authorization=Bearer ${secret:K}',
+    });
+    expect(plainPaste('GATEWAY_AUTH', '$GATEWAY_AUTH', false)).toEqual({ kind: 'take', value: '$GATEWAY_AUTH' });
+    expect(plainPaste('GATEWAY_TOKEN', '${GATEWAY_TOKEN}', false, 'stored')).toEqual({
+      kind: 'take',
+      value: '${GATEWAY_TOKEN}',
     });
   });
 });

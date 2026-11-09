@@ -1,6 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { AgentConfigCallSchema } from '@ferretry/kernel/contract';
+import { fixedClock } from '@ferretry/kernel/testing';
+import { agentConfig } from '../../../../../core/kernel/host/config/agent.ts';
+import { createConfigFiles } from '../../../../../core/kernel/host/config/service.ts';
+import { createMemoryHostFs } from '../../../../../core/kernel/host/state/memory-fs.ts';
 import {
+  LOGINS_CONFIG,
   LoginChangeSchema,
   LoginFileSchema,
   LoginHalfSchema,
@@ -8,6 +14,15 @@ import {
 } from '../../../contract/index.ts';
 
 // (no guarantees row) A login's environment may not set a variable Ferretry sets, nor hold a malformed secret reference.
+
+const HOME = '/logins-test-only';
+const SILENT = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  child: () => SILENT,
+};
 
 const SECRET_VALUE = 'sk-live-should-never-be-echoed';
 
@@ -131,4 +146,86 @@ describe('m4: a login FILE is judged by the stored rule too (config editor, conf
       LoginFileSchema.safeParse(file({ OPENAI_API_KEY: 'ollama', GATEWAY_TOKEN: 'Bearer ${secret:K}' })).success,
     ).be.true();
   });
+});
+
+describe('R6: a login file holds at most 4096 characters per variable, and is judged in linear time', () => {
+  const file = (env: Record<string, string>) => ({ harness: 'claude-code', store: 'environment', env });
+
+  it('should refuse a 4097-character value by the variable name, and accept 4096', () => {
+    const issues = refusal(LoginFileSchema.safeParse(file({ GATEWAY_NOTE: 'a'.repeat(4097) })));
+
+    should(issues.some(issue => issue.path[0] === 'env' && issue.path[1] === 'GATEWAY_NOTE')).be.true();
+    should(LoginFileSchema.safeParse(file({ GATEWAY_NOTE: 'a'.repeat(4096) })).success).be.true();
+  });
+
+  for (const character of [':', '@', '=', '%', ' ', ',', '\n', '?', '#', '/', '&', ';', '-', 'e']) {
+    it(`should judge a 256 KiB value of ${JSON.stringify(character)} in well under 100 ms, under every kind of name`, () => {
+      const value = character.repeat(256 * 1024);
+      for (const name of ['GATEWAY_TOKEN', 'GATEWAY_NOTE', 'ANTHROPIC_CUSTOM_HEADERS', 'GATEWAY_URL']) {
+        const started = performance.now();
+        LoginFileSchema.safeParse(file({ [name]: value }));
+        should(performance.now() - started).be.below(100);
+      }
+    });
+  }
+
+  it('should judge 256 KiB of repeated token and address openings in well under 100 ms', () => {
+    for (const piece of ['eyJ', 'sk-', 'a://', 'a:b@', '${secret:K}', 'x?k=', 'Bearer ']) {
+      const value = piece.repeat(Math.ceil((256 * 1024) / piece.length));
+      for (const name of ['GATEWAY_TOKEN', 'GATEWAY_NOTE', 'OTEL_EXPORTER_OTLP_HEADERS']) {
+        const started = performance.now();
+        LoginFileSchema.safeParse(file({ [name]: value }));
+        should(performance.now() - started).be.below(100);
+      }
+    }
+  });
+});
+
+describe('R6 m4: config_read of a login file refused by the stored rule shows no text', () => {
+  const key = 'q7Zk'.repeat(10);
+  const world = async (disk: string) => {
+    const fs = createMemoryHostFs();
+    const files = createConfigFiles({
+      home: HOME,
+      fs,
+      clock: fixedClock(),
+      log: SILENT,
+      binary: 'fy',
+      defs: [{ plugin: 'logins', def: LOGINS_CONFIG }],
+    });
+    const agent = agentConfig({
+      writer: () => files.writer(),
+      control: () => ({ allows: async () => true }),
+      status: () => files.status(),
+      home: HOME,
+      binary: 'fy',
+      now: () => '2026-01-01T00:00:00.000Z',
+    });
+    const path = `${HOME}/config/logins/gw.yaml`;
+    fs.seed(path, 'harness: claude-code\nstore: environment\nenv:\n  GATEWAY_NOTE: fine\n');
+    await files.reload();
+    fs.seed(path, disk);
+    await files.reload();
+    return agent;
+  };
+  const standing = { credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'wren' } };
+
+  for (const [what, line] of [
+    ['a key in a header', `ANTHROPIC_CUSTOM_HEADERS: "x-api-key: ${key}"`],
+    ['a short key under a credential name', 'OPENAI_API_KEY: hunter22x'],
+    ['a key in a query string', `ANTHROPIC_BASE_URL: "https://gw.example/v1?key=${key}"`],
+  ] as const) {
+    it(`should return no text for ${what}, and name the variable only`, async () => {
+      const agent = await world(`harness: claude-code\nstore: environment\nenv:\n  ${line}\n`);
+      const answer = await agent.run(
+        AgentConfigCallSchema.parse({ tool: 'config.read', path: 'logins/gw.yaml' }),
+        standing,
+      );
+
+      should(answer.text).equal('');
+      should(answer.summary).containEql('its text is not shown because it holds a raw secret');
+      should(JSON.stringify(answer)).not.containEql(key);
+      should(JSON.stringify(answer)).not.containEql('hunter22x');
+    });
+  }
 });
