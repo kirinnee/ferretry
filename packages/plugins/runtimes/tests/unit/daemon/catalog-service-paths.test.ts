@@ -1,6 +1,6 @@
 /**
  * `FleetCatalogService` paths the pipeline and login suites do not drive: the reads over real component files, the
- * republish, the catalog install, the executors, the runtime facts a removal reads and the ways an apply ends.
+ * republish, the executors, the runtime facts a removal reads and the ways an apply ends.
  *
  * The service is built over fakes of its ports (the document, the assets, the provisioner), so every assertion is on
  * what the service returns, throws or hands to a port.

@@ -55,7 +55,15 @@ import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import { holdsPrivate, ownStateTree, receivingRoot, refuseShared, SharedTrees } from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
 import { type ProjectUse, projectFilesScope, projectPathRefusal } from '../manifest/project-files.ts';
-import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from './root-rules.ts';
+import {
+  harnessFileRefusal,
+  permittedMode,
+  renameNamesRefusal,
+  takesLinks,
+  takesRenames,
+  takesUnlinks,
+  unlinkNameRefusal,
+} from './root-rules.ts';
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set([
@@ -408,8 +416,7 @@ async function heldPlace(scope: Scope, path: string): Promise<boolean> {
  */
 async function heldMember(scope: Scope, identity: FileIdentity): Promise<boolean> {
   // A tree that was not indexed whole holds its whole device unproven: an owner's root refuses a member there too.
-  if (scope.base.fence !== undefined)
-    return scope.base.fence.keys.has(identityKey(identity)) || scope.base.fence.closed.has(identity.device);
+  if (scope.base.fence !== undefined) return heldByIdentity(scope.base.fence, identity);
   return scope.base.guard !== undefined && (await scope.base.guard.heldIdentity(identity));
 }
 
@@ -996,8 +1003,28 @@ const fenceNow = async (setup: PinFenceSetup): Promise<Fence | undefined> =>
     setup.privateFiles.watch,
   ).catch(() => undefined);
 
-const heldByFence = (fence: Fence, identities: readonly ComponentIdentity[]): boolean =>
-  identities.some(entry => fence.keys.has(identityKey({ device: entry.dev, inode: entry.ino })));
+/**
+ * Whether an entry whose identity is in hand is one of the fence's places, or sits on a device the fence holds unproven
+ * (a private tree that was not indexed whole: an entry there cannot be proven not to be an alias of an unindexed
+ * member, and an alias keeps its source's device). THE rule, asked by every door of an owner's root — the unpinned
+ * root's members and the held (pinned) root's walk alike — so the two can never disagree about a closed device.
+ */
+const heldByIdentity = (fence: Fence, identity: { readonly device: bigint; readonly inode: bigint }): boolean =>
+  fence.keys.has(identityKey(identity)) || fence.closed.has(identity.device);
+
+/**
+ * Whether a walk's components reach the fence: every component by device and inode (the home, its `-before-` folders,
+ * its key files and folders), and the entry the walk ended on — its LAST component — also by the closed devices, as the
+ * unpinned root judges the entry itself. A folder above it is the walk's way there, not an entry: it is judged when a
+ * walk ends on it, so a root on a closed device is refused at the pin and an entry beneath one by its own device.
+ */
+const heldByFence = (fence: Fence, identities: readonly ComponentIdentity[]): boolean => {
+  const entry = identities.at(-1);
+  return (
+    identities.some(component => fence.keys.has(identityKey({ device: component.dev, inode: component.ino }))) ||
+    (entry !== undefined && heldByIdentity(fence, { device: entry.dev, inode: entry.ino }))
+  );
+};
 
 /**
  * Whether each root-relative FOLDER is in the fence by identity, walked through the held descriptor once and
@@ -1293,6 +1320,30 @@ async function renameChecked(from: Checked, to: Checked): Promise<void> {
     }
   } finally {
     await source.close();
+  }
+}
+
+/**
+ * `unlink` through the checked folder: the parent is opened without following a link and proven, the leaf is looked at
+ * WITHOUT following it, and only a link is removed (`unlink(2)` on the name: what it points at is never opened). A
+ * file, a folder or nothing there is `outside`.
+ *
+ * GAP (declared, tested): the look and the `unlink(2)` are two calls; a writer who swaps a file in for the link in
+ * that window has the file removed (a folder is never removed: `unlink` refuses it, `changed`).
+ */
+async function unlinkChecked(at: Checked): Promise<void> {
+  const parent = dirname(at.full);
+  const folder = await openCheckedFolder(at.scope, parent);
+  try {
+    const leaf = await entry(at.scope, folder, parent, basename(at.full));
+    // A name that IS a private place (a bind mount or alias kept under an innocent name, or any entry on a device the
+    // private places hold unproven) is not one `unlink` may remove, as `remove` and `rename` refuse it.
+    await refuseHeldName(at.scope, join(parent, basename(at.full)));
+    const found = await at.scope.fs.identity(leaf);
+    if (found?.kind !== 'link') return refuse('outside');
+    await at.scope.fs.unlink(leaf).catch(() => refuse('changed'));
+  } finally {
+    await folder.close();
   }
 }
 
@@ -1873,6 +1924,20 @@ function rootHandle(setup: HandleSetup): RootHandle {
           refuse('link_escape');
       }
       await renameChecked(source, target);
+    },
+    unlink: async (linkName: FencedPath) => {
+      writable();
+      if (!takesUnlinks(name)) return refuse('read_only');
+      const refused = unlinkNameRefusal(linkName);
+      if (refused !== undefined) return refuse(refused);
+      const placed = await realParent(linkName);
+      // No link on the way: the folder the name gives, as this root names it, is the very folder reached.
+      const root = base() as string;
+      const lexical = lexicalInRoot(home, root, ownerRoot, linkName);
+      if (!lexical.ok) return refuse(lexical.error);
+      if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+        refuse('link_escape');
+      await unlinkChecked(placed);
     },
     setMode: async (path: FencedPath, mode: number) => {
       if (setup.setMode !== true) return refuse('not_declared');

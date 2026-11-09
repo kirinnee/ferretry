@@ -7,6 +7,7 @@
  * pending, `home.json` is not written and v5 refuses the folder: an incomplete conversion cannot be booted.
  */
 import type { V4ConfigOverrides, V4Paths } from '../v4/layout.ts';
+import type { LoginHarness } from './preview-hold.ts';
 import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
 import { accessStep } from './access.ts';
@@ -69,6 +70,12 @@ export interface StepContext {
    * (the owner's act). Absent: nothing of the preview's own is accepted.
    */
   readonly previewOwner?: boolean;
+  /**
+   * With `preview`: login name to the ONE harness its v4 login file names (`claude` or `codex`), picked by the stage
+   * through a schema that reads only that field, plus whether it drives both CLIs (halves for both). An unreadable
+   * login is absent. Nothing else of a login file ever reaches this.
+   */
+  readonly previewLoginHarnesses?: ReadonlyMap<string, LoginHarness>;
   /** With `preview`: the user's real home folder, so a component's `~/…` file is mapped into the staged copy. */
   readonly previewUserHome?: string;
   /**

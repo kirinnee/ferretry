@@ -36,6 +36,8 @@ export function inputRequestService(
     readonly crash?: () => boolean;
     /** What the terminal shows; the default is a sudo prompt. A function is asked at every look. */
     readonly facts?: InputTargetFacts | (() => InputTargetFacts);
+    /** Whether the daemon proves a code program holds the foreground (`ObserveResult.codeProgram`); asked at every look. */
+    readonly codeProgram?: () => boolean;
     /** Every other way the terminal is known besides its key. */
     readonly names?: readonly string[];
     /** The one live session; the default is {@link SESSION}. */
@@ -62,6 +64,10 @@ export function inputRequestService(
     readonly notifier?: InputRequestServiceDependencies['notifier'];
     /** Called each time the journal is written (a request or a hold), before it answers. */
     readonly journalled?: (event: unknown) => void;
+    /** Called with the arguments of every audit record the service writes (record, saved, stored). */
+    readonly audited?: (entry: unknown) => void;
+    /** The target port itself, in place of the fake terminal: lets a test put the real adapter in front of it. */
+    readonly target?: InputRequestServiceDependencies['target'];
   } = {},
 ) {
   const live = options.session ?? SESSION;
@@ -73,12 +79,13 @@ export function inputRequestService(
   const quarantine = new QuarantineRegistry(clock);
   const values = new EphemeralValues(clock);
   const service = new InputRequestService({
-    target: {
+    target: options.target ?? {
       observe: async () => {
         if (options.crash?.() === true) throw new Error('the terminal subsystem fell over');
         return {
           ok: true,
           facts: typeof options.facts === 'function' ? options.facts() : (options.facts ?? FACTS),
+          ...(options.codeProgram?.() === true ? { codeProgram: true as const } : {}),
           ...(options.names === undefined ? {} : { names: options.names }),
         };
       },
@@ -110,7 +117,11 @@ export function inputRequestService(
       quarantine: async (_session, event) => void options.journalled?.(event),
       quarantines: async () => [],
     },
-    audit: { record: async () => undefined, saved: async () => undefined, stored: async () => undefined },
+    audit: {
+      record: async (...entry) => void options.audited?.(entry),
+      saved: async (...entry) => void options.audited?.(entry),
+      stored: async (...entry) => void options.audited?.(entry),
+    },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },
@@ -141,5 +152,5 @@ export function inputRequestService(
             },
           }),
   });
-  return { service, writes, events, quarantine };
+  return { service, writes, events, quarantine, values };
 }

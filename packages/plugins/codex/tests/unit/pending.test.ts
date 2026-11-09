@@ -3,9 +3,9 @@ import cli from '../../cli/index.ts';
 import manifest from '../../manifest.ts';
 import pending from '../../../../../ports-pending.json';
 
-test('Codex stays pending, saying why: it does not yet call copyShared for skill parts and the CLI has no config/item service', async () => {
+test('Codex stays pending, saying why: the CLI has no config/item service', async () => {
   expect(pending.pending).toContain('codex');
-  expect(pending.pendingReasons.codex.join(' ')).toContain('copyShared');
+  expect(pending.pendingReasons.codex.join(' ')).toContain('settings');
   const errors: string[] = [];
   const half = cli.build?.({
     manifest,

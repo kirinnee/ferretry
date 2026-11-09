@@ -72,7 +72,7 @@ import {
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { v5ConfigProblem } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
-import { CODEX_HELD_SENTENCE, heldRuntimeNames } from './preview-hold.ts';
+import { heldReason, heldRuntimes, type RuntimeHarness } from './preview-hold.ts';
 
 const PACKS_TARGET = CONFIG_TARGETS.PACKS;
 const STATE = 'state/packs';
@@ -92,7 +92,7 @@ interface Plan {
   /** What to write, in order, once everything is planned and checked. */
   readonly writes: (() => Promise<void>)[];
   /** Preview only: the runtimes held out of the preview (empty otherwise); nothing that names one is carried. */
-  readonly held: ReadonlySet<string>;
+  readonly held: ReadonlyMap<string, RuntimeHarness>;
   /** Run folders that held a builder's draft.json, and runs v4 still showed as running. */
   drafts: number;
   running: number;
@@ -202,7 +202,7 @@ async function planConfig(
         takeKey(routing, 'suggested');
         plan.dropped.push({
           what: `${V4_MODELS_GUIDE_YAML} suggested (routes to the held runtime ${via.value})`,
-          why: CODEX_HELD_SENTENCE,
+          why: heldReason(plan.held.get(via.value) ?? 'unknown'),
         });
       }
     }
@@ -387,7 +387,10 @@ async function planRun(ctx: StepContext, plan: Plan, id: string, resolve: Resolv
     .map(name => (typeof name === 'string' ? resolve(name) : undefined))
     .find(name => name !== undefined && plan.held.has(name));
   if (heldName !== undefined) {
-    plan.dropped.push({ what: `${label} (names the held runtime ${heldName})`, why: CODEX_HELD_SENTENCE });
+    plan.dropped.push({
+      what: `${label} (names the held runtime ${heldName})`,
+      why: heldReason(plan.held.get(heldName) ?? 'unknown'),
+    });
     return;
   }
   const suggestion =
@@ -602,7 +605,7 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
     dropped: [],
     notes: [],
     writes: [],
-    held: await heldRuntimeNames(ctx),
+    held: await heldRuntimes(ctx),
     drafts: 0,
     running: 0,
   };

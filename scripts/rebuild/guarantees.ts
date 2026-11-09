@@ -76,6 +76,7 @@ const WORDS: [RegExp, string][] = [
   [/\bSkills\b/, 'skills'],
   [/\bVoice\b/, 'voice'],
   [/\bLogins\b/, 'logins'],
+  [/\bRuntimes\b/, 'runtimes'],
   [/\bUsage\b/, 'usage'],
   [/`fy` (?:shell|CLI)/, 'fy-shell'],
   [/Repo tooling/, 'repo-tooling'],

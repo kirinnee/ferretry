@@ -7,7 +7,7 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { join } from 'node:path';
 import type { NotCarried, StepReport } from '../report.ts';
-import { CODEX_HELD_SENTENCE, heldRuntimeNames, holdsCodex } from './preview-hold.ts';
+import { CODEX_HELD_SENTENCE, heldReason, heldRuntimes, holdsCodex } from './preview-hold.ts';
 import { previewFolder, rewriteTranscript } from '../v5/harness-paths.ts';
 import { configs, json, paneFor, runtimeIds, runtimeName, State } from '../v4/ferrets.ts';
 import type { Step } from './index.ts';
@@ -101,16 +101,17 @@ export const ferretsStep: Step = {
       };
       // The preview holds every ferret that is not a Claude Code one (or sits on a held runtime): no record, details
       // or token row. It would be a Codex ferret again the day a Codex login is added.
-      const heldRuntimes = await heldRuntimeNames(ctx);
+      const heldOnes = await heldRuntimes(ctx);
       const held: NotCarried[] = [];
       const heldIds = new Set<string>();
       const sourceRecords = (await configs(ctx.v4.sessions)).filter(config => {
         if (!holdsCodex(ctx)) return true;
         const isCodex = config.harness !== 'claude';
-        if (!isCodex && !heldRuntimes.has(runtimeOf(config))) return true;
+        const onHeld = heldOnes.get(runtimeOf(config));
+        if (!isCodex && onHeld === undefined) return true;
         held.push({
           what: `ferret ${config.id} (${isCodex ? 'Codex' : `on the held runtime ${runtimeOf(config)}`})`,
-          why: CODEX_HELD_SENTENCE,
+          why: isCodex ? CODEX_HELD_SENTENCE : heldReason(onHeld ?? 'unknown'),
         });
         heldIds.add(config.id);
         return false;

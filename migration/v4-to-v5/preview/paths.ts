@@ -9,28 +9,12 @@
  */
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { resolveReal } from '../src/v4/homes.ts';
 
 export const PREVIEW_MARKER = '.fy-preview';
 export const PREVIEW_MARKER_TEXT =
   'ferretry-v5-preview: made by migration/v4-to-v5/preview; safe to remove with preview.sh clean\n';
-
-/** `path` with every existing link resolved; the part that does not exist yet is kept as written. */
-export function resolveReal(path: string): string {
-  const absolute = resolve(path);
-  let existing = absolute;
-  const rest: string[] = [];
-  for (;;) {
-    try {
-      return join(realpathSync(existing), ...rest);
-    } catch {
-      const parent = dirname(existing);
-      if (parent === existing) return absolute;
-      rest.unshift(existing.slice(parent.length + (parent.endsWith(sep) ? 0 : 1)));
-      existing = parent;
-    }
-  }
-}
 
 /**
  * Like {@link resolveReal}, but a link that does not resolve (dangling, or a loop) is REFUSED, component by component:

@@ -296,6 +296,17 @@ export interface ConfigPort {
   /** Tells an absent file from an invalid one (and a held one); `name` picks a collection item. */
   fileState(def: ConfigFileDef<any> | ConfigCollectionDef<any>, name?: string): ConfigFileStatus;
   /**
+   * The disk etag of ONE of ITS OWN declared files right now (`name` picks a collection item): the very etag
+   * {@link write}, {@link writeAsOwner}, {@link remove} and {@link writeAll} compare an `ifMatch` with, or `'absent'`
+   * when there is no file. It is the etag ONLY — never the file's text, a value or a sentence — so a plugin that must
+   * pin an edit to what a caller read (a profile's layers, say) can do it without being handed the file.
+   *
+   * Read from the disk when asked, not from the version in effect. Another plugin's def is refused (it throws, as
+   * {@link file} does); so is a name that is no file of this def (a name given for a single file, none or a name
+   * outside the collection's grammar for a collection).
+   */
+  etag(def: ConfigFileDef<any> | ConfigCollectionDef<any>, name?: string): Promise<string>;
+  /**
    * Writes one of ITS OWN declared files (`name`: the collection item, `undefined` for a file) through the one
    * kernel config writer Gate's config route also uses: only the changed keys are edited, a raw secret is refused,
    * the last good version is kept, and a loosening is put into effect only when Gate's judge
@@ -839,6 +850,15 @@ export interface RootHandle {
    * refused move (another device, a folder into itself) is `changed`, with no path or content in it.
    */
   rename(from: FencedPath, to: FencedPath): Promise<void>;
+  /**
+   * Removes the SYMLINK at `name` and nothing else: the link is never followed and what it points at (inside this root
+   * or outside it) is never touched, so a link whose target lies outside the root is still removable (`remove` follows
+   * the leaf and refuses that). Only inside an internal, writable root that takes links (`fleet`, `agent-homes`); any
+   * other root refuses `read_only`. The name is fenced and every parent is opened without following a link
+   * (`link_escape`). A name that is a file or folder, or is absent, is refused `outside` and left as it was. A refused
+   * removal is `changed`; no refusal carries a path or content.
+   */
+  unlink(name: FencedPath): Promise<void>;
 }
 
 export interface RootsPort {

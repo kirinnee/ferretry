@@ -7,12 +7,14 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'n
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { convert } from '../src/convert.ts';
-import { previewAuthoredFiles, previewHeldFiles } from '../src/steps/accepted-config.ts';
+import { previewAuthoredFiles, previewHeldFiles, v4HeldFiles } from '../src/steps/accepted-config.ts';
 import type { LockProbe } from '../src/preflight.ts';
 import { type ConversionReport, summarise } from '../src/report.ts';
 import { PREVIEW_WORKSPACE } from '../src/v5/harness-paths.ts';
 import { CODEX_HELD_SENTENCE, previewShellEnv } from '../src/v5/preview-env.ts';
-import { gateFiles, gateForecast, type Spellings } from './gate.ts';
+import { type Spellings } from '../src/v4/homes.ts';
+import { gateFiles, gateForecast } from './gate.ts';
+import { readLoginHarnesses } from './harness-map.ts';
 import { ALLOWED, GAPS, LEFT_BEHIND, PREVIEW, SESSION_FILES, stepPlan } from './plan.ts';
 import { guardTarget, hasMarker, PREVIEW_MARKER, PREVIEW_MARKER_TEXT } from './paths.ts';
 import {
@@ -107,7 +109,7 @@ export async function dryRun(
     '',
     'IN THE PREVIEW HOME EVERY FERRET IS STOPPED: no launch command, no terminal handle, no transcript pointer, no',
     'credential hash, no token ledger, no worktree ownership. The runtimes config says autoResume: false.',
-    'LOGINS ARE LEFT OUT ENTIRELY (config/logins is not copied): you add logins fresh in the preview. Do not add a Codex login or runtime to the preview yet.',
+    'LOGINS ARE LEFT OUT OF THE COPY (config/logins is not copied): you add logins fresh in the preview. `prepare` (an agent never runs it) reads each config/logins/*.yaml ONCE, for its harness field (and whether it has both claude and codex halves) and nothing else, to know which runtimes are Claude Code ones; this dry run reads no login file. Do not add a Codex login or runtime to the preview yet.',
     'LAST GATE: only fields that are EXECUTED or RESOLVED AS PATHS are checked (a ferret command, agent, folder, env and flags; every',
     'command, argument, env value, home and path of a runtime, profile, component, preset or MCP server). Free text (messages, events,',
     'prompts, notes) is neither gated nor redacted. A hit refuses the whole home, naming file and field, never the value. Spellings',
@@ -127,7 +129,7 @@ export async function dryRun(
     'THEN: fresh daemon identity and empty vault come from the 5.0 daemon at first start; nothing from v4 is reused.',
     `START (owner): ${join(target, 'bin', PREVIEW.wrapper)} daemon start   (FY_HOME, FY_PORT=${PREVIEW.port}, FY_URL pinned to it; no service unit)`,
     '',
-    `PROOF v4 was untouched: config files hashed and credential paths stat'ed (never read) before and after. Volatile, not hashed:`,
+    `PROOF v4 was untouched: config files hashed and credential paths stat'ed (never read) before and after; the one login read is the harness field above (never written). Volatile, not hashed:`,
     ...VOLATILE.map(row => `  ${row}`),
   ];
   return lines.join('\n');
@@ -160,7 +162,12 @@ export interface PrepareInputs {
  * step names, `previewAuthoredFiles`): accepted by the owner's flag (except each whose v4 source was held, which `heldFiles` names), or what to do
  * without it.
  */
-export function ownerNote(owner: boolean, files: readonly string[] = [], heldFiles: readonly string[] = []): string {
+export function ownerNote(
+  owner: boolean,
+  files: readonly string[] = [],
+  heldFiles: readonly string[] = [],
+  v4Held: readonly string[] = [],
+): string {
   const names = files.length === 0 ? 'none' : files.join(', ');
   if (!owner)
     return `NOT ACCEPTED (no --owner): the config files the preview wrote or changed (${names}) are held like any other unconfirmed file, so terminals cannot carry the preview environment and \`preview.sh start\` will stop the daemon. The owner's remedy is preview.sh clean, then preview.sh prepare --owner (--owner accepts them, except any that comes from a v4 file with an unconfirmed edit).`;
@@ -168,7 +175,7 @@ export function ownerNote(owner: boolean, files: readonly string[] = [], heldFil
   const held =
     heldFiles.length === 0
       ? ''
-      : ` NOT recorded (a v4 file each comes from has an unconfirmed edit, or a held deletion): ${heldFiles.join(', ')}. Each stays held: its record is what v4 enforced for it (the kernel judges the file against that, and against its defaults only where v4 enforced nothing), and the report names it with the reason. The remedy: confirm the edit in v4 first, then preview.sh clean and preview.sh prepare --owner.`;
+      : ` NOT recorded (a v4 file each comes from has an unconfirmed edit, or a held deletion): ${heldFiles.join(', ')}${v4Held.length === 0 ? '' : ` (the v4 files not in effect as written: ${v4Held.join(', ')})`}. Each stays held: its record is what v4 enforced for it (the kernel judges the file against that, and against its defaults only where v4 enforced nothing), and the report names it with the reason. The remedy: confirm the edit in v4 first, then preview.sh clean and preview.sh prepare --owner.`;
   return `the config files the preview wrote or changed were recorded as accepted (--owner). Recorded: ${recorded.length === 0 ? 'none' : recorded.join(', ')}.${held}`;
 }
 
@@ -199,6 +206,8 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   const staging = guarded.staging;
   await rm(staging, { recursive: true, force: true });
   const staged = await stage(v4Home, staging);
+  // The one thing read of the v4 login files: which harness each names (see `harness-map.ts`).
+  const loginHarnesses = await readLoginHarnesses(v4Home);
 
   // The converter reads the host only for the archive-setting step, which is skipped; this folder is empty on purpose.
   const emptyHost = await mkdtemp(join(tmpdir(), 'fy-preview-host-'));
@@ -216,6 +225,7 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
       previewV4Home: v4Home,
       previewShellEnv: previewShellEnv(target, PREVIEW.port),
       previewUserHome: home,
+      previewLoginHarnesses: loginHarnesses,
       ...(inputs.owner === true ? { previewOwner: true } : {}),
       ...(inputs.dropUncarried === true ? { dropUncarried: true } : {}),
     });
@@ -266,7 +276,7 @@ export async function prepare(inputs: PrepareInputs): Promise<Prepared> {
   await writeReport(reportPath, `${JSON.stringify(result.report, null, 2)}\n`);
   return {
     report: result.report,
-    summary: `${summarise(result.report)}\n${heldSection(result.report)}\n${ownerNote(inputs.owner === true, previewAuthoredFiles(result.report.steps), previewHeldFiles(result.report.steps))}\nreport: ${reportPath}`,
+    summary: `${summarise(result.report)}\n${heldSection(result.report)}\n${ownerNote(inputs.owner === true, previewAuthoredFiles(result.report.steps), previewHeldFiles(result.report.steps), v4HeldFiles(result.report.steps))}\nreport: ${reportPath}`,
     proof,
     changedWhileCopying: staged.changed,
     gate,

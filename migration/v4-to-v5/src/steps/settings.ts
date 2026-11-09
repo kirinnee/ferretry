@@ -34,10 +34,12 @@ import { INSTRUCTION_ITEMS_FOLDER } from '@ferretry/core-ferrets/contract';
 import { lstat, readFile } from 'node:fs/promises';
 import { componentFileSource, instructionsSource, MAX_COMPONENT_BYTES } from './component-files.ts';
 import { carryFlags, type FlagOutcome } from './component-flags.ts';
+import { carryAssetReferences, type CarriedAsset, v5AssetPath } from './component-assets.ts';
 import { join } from 'node:path';
 import { Document, isMap, isScalar, isSeq, Pair, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
+  documentCredentialPaths,
   dropModeline,
   listV4Config,
   rawSecretPaths,
@@ -47,7 +49,14 @@ import {
   YAML_OPTIONS,
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
-import { CODEX_HELD_SENTENCE, PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
+import { PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
+import {
+  heldReason,
+  type ProfileScopes,
+  previewProfileScopes,
+  type RuntimeHarness,
+  runtimeHarnessOf,
+} from './preview-hold.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
@@ -162,6 +171,8 @@ interface Uncarried {
 interface Plan {
   readonly files: Map<string, Planned>;
   readonly instructions: { readonly name: string; readonly source: string; readonly from: string }[];
+  /** Files under v4's `fleet/assets/` that a carried hooks or settings document points at, by path under it. */
+  readonly assets: Map<string, CarriedAsset>;
   readonly waiting: string[];
   readonly dropped: NotCarried[];
   readonly kept: Map<string, number>;
@@ -593,8 +604,18 @@ async function planHarnessComponent(
     if (Object.keys(settings).length > 0) body = { settings };
   }
 
+  // A string that names a file under v4's fleet/assets is rewritten to the v5 copy (component-assets.ts); any other
+  // string that names the v4 home holds the component.
+  let assets: readonly CarriedAsset[] = [];
   if (Object.keys(body).length > 0) {
-    const secrets = [...rawSecretPaths(body), ...credentialShaped(body)];
+    const carried = await carryAssetReferences(ctx, body);
+    body = carried.value as Record<string, unknown>;
+    assets = carried.assets;
+    entry.reasons.push(...carried.reasons);
+  }
+
+  if (Object.keys(body).length > 0) {
+    const secrets = documentCredentialPaths(body);
     if (secrets.length > 0)
       entry.reasons.push(
         `the value at ${secrets.join(', ')} looks like a credential, so it was held; store it with \`fy secret set NAME\` and write \${secret:NAME}`,
@@ -610,33 +631,17 @@ async function planHarnessComponent(
     if (problem === undefined) {
       place(plan, target, name, label, item);
       count(plan, kind === 'settings' ? 'settings items' : 'hooks items');
+      for (const asset of assets)
+        if (!plan.assets.has(asset.rel)) {
+          plan.assets.set(asset.rel, asset);
+          count(plan, `component file ${v5AssetPath(asset.rel)}`);
+        }
       return;
     }
     entry.reasons.push(`v5 refuses it as ${kind} (${problem})`);
   }
   if (entry.reasons.length === 0) plan.uncarried.push({ ...entry, empty: true });
   else plan.uncarried.push(entry);
-}
-
-/** The key paths of a value that looks like an Authorization header: a header-named key, or `Bearer|Basic|token <16+>`. */
-function credentialShaped(value: unknown): string[] {
-  const found: string[] = [];
-  const visit = (node: unknown, path: readonly string[]): void => {
-    if (typeof node === 'string') {
-      if (/^(Bearer|Basic|token)\s+\S{16,}/iu.test(node)) found.push(path.join('.'));
-      return;
-    }
-    if (Array.isArray(node)) node.forEach((item, index) => visit(item, [...path, String(index)]));
-    else if (isRecordValue(node))
-      for (const [key, item] of Object.entries(node)) {
-        const lower = key.toLowerCase();
-        if ((lower === 'authorization' || lower.includes('header')) && item !== undefined && item !== null)
-          found.push([...path, key].join('.'));
-        else visit(item, [...path, key]);
-      }
-  };
-  visit(value, []);
-  return found;
 }
 
 const withoutLayer = (map: YAMLMap, layer: string): boolean => {
@@ -715,6 +720,7 @@ export async function buildPlan(
   const plan: Plan = {
     files: new Map(),
     instructions: [],
+    assets: new Map(),
     waiting: [],
     dropped: [],
     kept: new Map(),
@@ -772,7 +778,7 @@ export async function buildPlan(
         count(plan, 'preview shell environment (settings item)');
       }
     }
-    if (!codexRuntimes) holdCodexRuntimes(plan);
+    if (!codexRuntimes) holdCodexRuntimes(plan, ctx, await previewProfileScopes(ctx));
   }
   settleUncarried(plan, ctx.dropUncarried === true);
   return { ...plan, ignored: listing.ignored };
@@ -791,33 +797,41 @@ const scalarOf = (map: YAMLMap, key: string): string | undefined => {
 
 /**
  * Preview only: leaves out every runtime that is not provably a Claude Code one, and every profile that only such
- * runtimes use. Only a runtime whose own file says `harness: claude` is kept: the preview leaves every v4 login out and
- * the owner adds logins fresh, so a runtime that does not say can become a Codex one the day its login is added.
+ * runtimes use. Only a runtime PROVEN to be a Claude Code one is kept: its own `harness`, else the harness its login
+ * names (the stage's map, `runtimeHarnessOf`; v4's own rule, never the runtime's name). The preview leaves every v4 login
+ * file out, so a login the map does not know leaves the harness unknown, and an unknown one is held, said truthfully.
  * Each held runtime is listed by NAME.
  */
-function holdCodexRuntimes(plan: Plan): void {
+function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarnesses'>, scopes: ProfileScopes): void {
   const planned = [...plan.files.entries()];
-  const held = new Set<string>();
-  const profilesOf = new Map<string, { held: number; kept: number }>();
+  const held = new Map<string, RuntimeHarness>();
+  const profilesOf = new Map<string, { held: number; kept: number; codex: number }>();
   for (const [path, file] of planned) {
     if (file.target !== RUNTIME_ITEMS || file.name === undefined || !isMap(file.document.contents)) continue;
     const map = file.document.contents;
-    const harness = scalarOf(map, 'harness');
+    const own = scalarOf(map, 'harness');
     const profile = scalarOf(map, 'profile');
+    const harness = runtimeHarnessOf(
+      ctx,
+      own,
+      scalarOf(map, 'login'),
+      profile === undefined ? undefined : scopes.get(profile),
+    );
     const isHeld = harness !== 'claude-code';
     if (profile !== undefined) {
-      const tally = profilesOf.get(profile) ?? { held: 0, kept: 0 };
+      const tally = profilesOf.get(profile) ?? { held: 0, kept: 0, codex: 0 };
       if (isHeld) tally.held++;
       else tally.kept++;
+      if (harness === 'codex') tally.codex++;
       profilesOf.set(profile, tally);
     }
     if (!isHeld) continue;
-    held.add(file.name);
+    held.set(file.name, harness);
     plan.files.delete(path);
     uncount(plan, 'runtimes');
     plan.dropped.push({
-      what: `runtime ${file.name}${harness === undefined ? ' (its file does not say which harness; the preview has no logins to tell)' : ' (Codex)'}`,
-      why: CODEX_HELD_SENTENCE,
+      what: `runtime ${file.name}${harness === 'unknown' ? ' (its harness is unknown)' : harness === 'both' ? ' (its login drives both CLIs)' : ' (Codex)'}`,
+      why: heldReason(harness),
     });
   }
   for (const [path, file] of planned) {
@@ -826,14 +840,18 @@ function holdCodexRuntimes(plan: Plan): void {
     if (tally === undefined || tally.kept > 0 || tally.held === 0) continue;
     plan.files.delete(path);
     uncount(plan, 'profiles');
-    plan.dropped.push({ what: `profile ${file.name} (used only by held runtimes)`, why: CODEX_HELD_SENTENCE });
+    plan.dropped.push({
+      what: `profile ${file.name} (used only by held runtimes)`,
+      why: heldReason(tally.codex > 0 ? 'codex' : 'unknown'),
+    });
   }
   for (const [, file] of planned) {
     if (file.target !== RUNTIMES_CONFIG || !isMap(file.document.contents)) continue;
     const chosen = scalarOf(file.document.contents, 'defaultRuntime');
-    if (chosen === undefined || !held.has(chosen)) continue;
+    const why = chosen === undefined ? undefined : held.get(chosen);
+    if (chosen === undefined || why === undefined) continue;
     take(file.document.contents, 'defaultRuntime');
-    plan.dropped.push({ what: `defaultRuntime ${chosen}`, why: CODEX_HELD_SENTENCE });
+    plan.dropped.push({ what: `defaultRuntime ${chosen}`, why: heldReason(why) });
   }
 }
 
@@ -887,6 +905,8 @@ export const settingsStep: Step = {
         await ctx.v5.opaque(join('config', INSTRUCTION_ITEMS_FOLDER, `${item.name}.md`), bytes);
         count(plan, 'instruction documents');
       }
+      // The bytes the checks read, never a second read of the path.
+      for (const asset of plan.assets.values()) await ctx.v5.opaque(v5AssetPath(asset.rel), asset.bytes, asset.mode);
     } catch (error) {
       // Nothing was finished, so no key is sealed for a file that was never written.
       ctx.loginKeys?.clear();
