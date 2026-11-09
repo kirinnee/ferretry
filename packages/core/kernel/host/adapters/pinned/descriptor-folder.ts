@@ -1,5 +1,6 @@
 import { type BigIntStats, close, constants, fchmod, fstat, fsync, write } from 'node:fs';
-import { type DescriptorCalls, O_CLOEXEC } from './descriptor-calls.ts';
+import type { DescriptorBracket } from './descriptor-bracket.ts';
+import { type DescriptorCalls, isSingleName, O_CLOEXEC } from './descriptor-calls.ts';
 
 /** What a held folder's entry is, as the host's `FileIdentity` spells it (`node-fs.ts` owns the type; this seam only fills it). */
 export interface HeldIdentity {
@@ -34,6 +35,41 @@ export interface FolderSteps {
   link(leaf: string, into: object, toLeaf: string): Promise<void>;
   /** Removes the non-folder `leaf`. */
   unlink(leaf: string): Promise<void>;
+  /**
+   * The steps a folder REMOVE needs, which only the working-directory bracket can take (a directory listing and
+   * `rmdir` have no `openat` spelling): `undefined` when the host loaded the descriptor calls but not the bracket, and a
+   * remove of a folder then refuses `no_descriptor_reach` as before.
+   */
+  readonly removal: FolderRemoval | undefined;
+}
+
+/** A child folder opened below a held one, held in its own right: its steps, what it is, and how to let go of it. */
+interface HeldChild {
+  readonly identity: HeldIdentity;
+  readonly steps: FolderSteps;
+  close(): Promise<void>;
+}
+
+/**
+ * Removal on ONE held folder, every step through its descriptor and proven first (identity at the bracket as well as by
+ * `fstat`). The recursion is by per-folder DESCRIPTORS (`openFolder`), never by a path rebuilt from names: a middle
+ * folder swapped for a link is reached as the link (refused), never followed.
+ */
+export interface FolderRemoval {
+  /** The entry at `leaf` itself (`lstat`, never followed): `undefined` when nothing is there. */
+  lstat(leaf: string): Promise<HeldIdentity | undefined>;
+  /** The names in the folder, sorted. */
+  list(): Promise<readonly string[]>;
+  /** Removes the EMPTY folder `leaf` (`rmdir`: a link there answers `ENOTDIR`, an entry inside `ENOTEMPTY`). */
+  rmdir(leaf: string): Promise<void>;
+  /** The folder `leaf`, opened without following a link (`O_DIRECTORY | O_NOFOLLOW`); throws the errno's `code` otherwise. */
+  openFolder(leaf: string): Promise<HeldChild>;
+}
+
+/** What the removal steps need besides the descriptor calls: the bracket and the reading of its `lstat` answers. */
+export interface RemovalSupport {
+  readonly bracket: DescriptorBracket;
+  readonly identityOfStats: (stats: BigIntStats) => HeldIdentity;
 }
 
 /** A folder held open by descriptor and what it was when it was opened (the seam's own view of a handle). */
@@ -115,11 +151,66 @@ export const holdFolder = (handle: object, folder: HeldFolder): void => {
   held.set(handle, folder);
 };
 
-/** The steps on `folder`, filled with `identityOf` (the host's reading of an `fstat` answer on a descriptor). */
+/** A child folder is opened with its own descriptor, never followed (a link answers `ELOOP`) and never a file (`ENOTDIR`). */
+const FOLDER_OPEN = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | O_CLOEXEC;
+
+/** A name a removal step may be given: one plain segment (a NUL would end the C string early, `..` would leave the folder). */
+const plainName = (verb: string, leaf: string): void => {
+  if (!isSingleName(leaf)) {
+    throw Object.assign(new Error(`EINVAL: refusing to ${verb}: that is not one plain name`), { code: 'EINVAL' });
+  }
+};
+
+/** The removal steps on `folder`: each proves the descriptor still names it, then takes ONE bracket (see `descriptor-bracket.ts`). */
+function removalSteps(
+  calls: DescriptorCalls,
+  folder: HeldFolder,
+  identityOf: (fd: number) => Promise<HeldIdentity>,
+  support: RemovalSupport,
+): FolderRemoval {
+  const step = async <T>(verb: string, act: Parameters<DescriptorBracket['run']>[2]): Promise<T> => {
+    await proveHeld(verb, folder);
+    return support.bracket.run(folder.fd, folder, act) as T;
+  };
+  return {
+    lstat: async leaf => {
+      plainName('look', leaf);
+      const stats = await step<BigIntStats | undefined>('look', ops => ops.lstat(leaf));
+      return stats === undefined ? undefined : support.identityOfStats(stats);
+    },
+    list: async () => await step<readonly string[]>('list', ops => ops.list()),
+    rmdir: async leaf => {
+      plainName('remove', leaf);
+      await step<void>('remove', ops => {
+        ops.rmdir(leaf);
+      });
+    },
+    openFolder: async leaf => {
+      plainName('open', leaf);
+      await proveHeld('open', folder);
+      const fd = calls.openat(folder.fd, leaf, FOLDER_OPEN, 0);
+      let identity: HeldIdentity;
+      try {
+        identity = await identityOf(fd);
+      } catch (error) {
+        await closeOf(fd).catch(() => undefined);
+        throw error;
+      }
+      const child: HeldFolder = { fd, device: identity.device, inode: identity.inode };
+      return { identity, steps: folderSteps(calls, child, identityOf, support), close: async () => await closeOf(fd) };
+    },
+  };
+}
+
+/**
+ * The steps on `folder`, filled with `identityOf` (the host's reading of an `fstat` answer on a descriptor). `support`:
+ * the working-directory bracket and what a folder REMOVE needs of it; without it `removal` is `undefined`.
+ */
 export function folderSteps(
   calls: DescriptorCalls,
   folder: HeldFolder,
   identityOf: (fd: number) => Promise<HeldIdentity>,
+  support?: RemovalSupport,
 ): FolderSteps {
   const target = (verb: string, into: object): HeldFolder => {
     const other = held.get(into);
@@ -215,6 +306,7 @@ export function folderSteps(
       await proveHeld('unlink', folder);
       calls.unlinkat(folder.fd, leaf);
     },
+    removal: support === undefined ? undefined : removalSteps(calls, folder, identityOf, support),
   };
 }
 

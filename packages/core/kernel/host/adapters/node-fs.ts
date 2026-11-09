@@ -19,6 +19,7 @@ import {
 } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { dirname } from 'node:path';
+import { type DescriptorBracket, loadProcessBracket } from './pinned/descriptor-bracket.ts';
 import { type DescriptorCalls, loadDescriptorCalls } from './pinned/descriptor-calls.ts';
 import { type FolderSteps, folderSteps, fstatOf, holdFolder } from './pinned/descriptor-folder.ts';
 
@@ -71,7 +72,8 @@ export interface OpenedDirectory {
    * and a rename need, each through THIS open folder and proven against its device and inode first. `undefined` on a
    * host with `/proc/self/fd` (it uses `entryPath`) and on one whose calls could not be loaded: there a rename and a
    * folder remove refuse `no_descriptor_reach`, while a write and a publish re-prove the folder once and go by path
-   * (as `roots.ts` says). Additive.
+   * (as `roots.ts` says). A remove goes through `at.removal` (the working-directory bracket) when it loaded too.
+   * Additive.
    */
   readonly at?: FolderSteps;
   /** Sets this folder's permission bits through the descriptor (`fchmod`), never by name. */
@@ -250,6 +252,12 @@ export function nodeFs(
      * refuse `no_descriptor_reach`; a write and a publish re-prove the folder once and go by path). Default: loaded from the platform's C library on macOS, none elsewhere.
      */
     readonly descriptorCalls?: () => DescriptorCalls;
+    /**
+     * Where a host without `descriptorFolder` gets the working-directory bracket a folder remove goes through: asked
+     * once, with the calls, and a throw means none (a folder remove then refuses `no_descriptor_reach`). Default: the
+     * process's one bracket on macOS, none elsewhere.
+     */
+    readonly bracket?: () => DescriptorBracket;
   } = {},
 ): HostFs {
   const loadCalls =
@@ -266,6 +274,20 @@ export function nodeFs(
       }
     }
     return calls;
+  };
+  const loadBracket = options.bracket ?? (process.platform === 'darwin' ? loadProcessBracket : undefined);
+  let bracket: DescriptorBracket | undefined;
+  let bracketTried = false;
+  const bracketOrNone = (): DescriptorBracket | undefined => {
+    if (!bracketTried) {
+      bracketTried = true;
+      try {
+        bracket = loadBracket?.();
+      } catch {
+        bracket = undefined;
+      }
+    }
+    return bracket;
   };
   const descriptorFolder =
     options.descriptorFolder ?? (process.platform === 'linux' ? '/proc/self/fd' : '/nonexistent-descriptor-folder');
@@ -325,6 +347,7 @@ export function nodeFs(
       const reached = await throughDescriptors();
       const [handle, identity] = await opened(path, READ_DIRECTORY);
       const descriptorCalls = reached ? undefined : callsOrNone();
+      const workingDirectory = descriptorCalls === undefined ? undefined : bracketOrNone();
       const directory: OpenedDirectory = {
         identity,
         entryPath: leaf => (reached ? `${descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined),
@@ -335,6 +358,9 @@ export function nodeFs(
                 descriptorCalls,
                 { fd: handle.fd, device: identity.device, inode: identity.inode },
                 async fd => fileIdentityOf(await fstatOf(fd)),
+                workingDirectory === undefined
+                  ? undefined
+                  : { bracket: workingDirectory, identityOfStats: fileIdentityOf },
               ),
         chmod: async mode => await handle.chmod(mode),
         sync: async () => {
