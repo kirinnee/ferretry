@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { DescriptorRow } from '../../packages/core/kernel/testing/parity.ts';
-import { movedFindings, readChanges } from './descriptor-parity.ts';
+import { movedFindings, movedPairs, readChanges } from './descriptor-parity.ts';
 import { junitCases } from './guarantees.ts';
 import { FROZEN_IDS, type LedgerRow, type TickContext, readKnown, routeWorld, tickFindings } from './parity-ticks.ts';
 
@@ -314,6 +314,123 @@ describe('descriptor-parity: moved pairs', () => {
     expect(movedFindings(today, kept, recorded).map(f => f.message)).toEqual([
       expect.stringContaining('equals its pair'),
     ]);
+  });
+
+  describe('explicit moved records', () => {
+    const rows = (...keys: string[]) => keys.map(k => todayRow(k));
+    const moved = (old: string, to: string, kind = 'added') =>
+      readChanges(`route\t${old}\tmoved\t${to}\twhy\nroute\t${to}\t${kind}\twhy\n`);
+    const OLD = 'GET /v1/fleet/machine';
+    const NEW = 'GET /v1/runtimes/machine';
+
+    test('an explicit pair no shape rule derives is proven', () => {
+      const changes = moved(OLD, NEW);
+      expect(movedPairs(rows(OLD), rows(NEW), changes).pairs).toHaveLength(1);
+      expect(movedFindings(rows(OLD), rows(NEW), changes)).toEqual([]);
+    });
+
+    test('a loosening through an explicit pair is a finding', () => {
+      const today = [todayRow(OLD, { noStore: true })];
+      expect(movedFindings(today, rows(NEW), moved(OLD, NEW)).map(f => f.message)).toEqual([
+        expect.stringContaining('noStore true → ∅'),
+      ]);
+      // a recorded difference is still judged: dropping noStore is no tightening, so the row cannot tick
+      const r = routeRow('R-0003', OLD);
+      const named = fixture({ [TEST]: "test('R-0003 m', () => {})" });
+      const loose = () => routeWorld(today, rows(NEW), moved(OLD, NEW, 'moved-changed'));
+      expect(run([r], ctx(named, loose))[0]).toContain('not a tightening');
+    });
+
+    test('two old keys naming one new key is a finding', () => {
+      const changes = readChanges(
+        `route\t${OLD}\tmoved\t${NEW}\twhy\nroute\tGET /v1/fleet/other\tmoved\t${NEW}\twhy\nroute\t${NEW}\tadded\twhy\n`,
+      );
+      expect(movedFindings(rows(OLD, 'GET /v1/fleet/other'), rows(NEW), changes).map(f => f.message)).toEqual([
+        expect.stringContaining('claimed by 2'),
+      ]);
+    });
+
+    test('a missing new key, a method change and an unrecorded target are findings', () => {
+      expect(movedFindings(rows(OLD), [], moved(OLD, NEW)).map(f => f.message)).toEqual([
+        expect.stringContaining('declares no route GET /v1/runtimes/machine'),
+      ]);
+      expect(
+        movedFindings(rows(OLD), rows('POST /v1/runtimes/machine'), moved(OLD, 'POST /v1/runtimes/machine')).map(
+          f => f.message,
+        ),
+      ).toEqual([expect.stringContaining('changes the method')]);
+      const unrecorded = readChanges(`route\t${OLD}\tmoved\t${NEW}\twhy\n`);
+      expect(movedFindings(rows(OLD), rows(NEW), unrecorded).map(f => f.message)).toEqual([
+        expect.stringContaining('not recorded added'),
+      ]);
+    });
+
+    test('an explicit record wins over shape derivation, and a bad one does not fall back', () => {
+      const SHAPE = 'GET /v1/sessions/:s/q';
+      const changes = readChanges(
+        `route\t${SHAPE}\tmoved\t${NEW}\twhy\nroute\t${NEW}\tadded\twhy\nroute\tGET /v1/ferrets/:f/q\tadded\twhy\n`,
+      );
+      const pairs = movedPairs(rows(SHAPE), rows(NEW, 'GET /v1/ferrets/:f/q'), changes).pairs;
+      expect(pairs.map(p => p.now.key)).toEqual([NEW]);
+      const bad = readChanges(
+        `route\t${SHAPE}\tmoved\tGET /v1/nowhere\twhy\nroute\tGET /v1/ferrets/:f/q\tadded\twhy\n`,
+      );
+      expect(movedPairs(rows(SHAPE), rows('GET /v1/ferrets/:f/q'), bad).pairs).toEqual([]);
+    });
+
+    test('a ledger row ticks through an explicit pair; a broken record says why', () => {
+      const r = routeRow('R-0002', OLD);
+      const named = fixture({ [TEST]: "test('R-0002 m', () => {})" });
+      const world =
+        (next: DescriptorRow[], changes = moved(OLD, NEW)) =>
+        () =>
+          routeWorld(rows(OLD), next, changes);
+      expect(run([r], ctx(named, world(rows(NEW))))).toEqual([]);
+      expect(run([r], ctx(named, world([])))[0]).toContain('declares no route GET /v1/runtimes/machine');
+    });
+
+    test('a moved record needs a new key and a reason; it reads as a removal', () => {
+      expect(() => readChanges(`route\t${OLD}\tmoved\t\twhy\n`)).toThrow('is not table');
+      expect(() => readChanges(`route\t${OLD}\tmoved\t${NEW}\n`)).toThrow('is not table');
+      expect(readChanges(`route\t${OLD}\tmoved\t${NEW}\twhy\n`).get(`route\t${OLD}`)).toEqual({
+        change: 'removed',
+        reason: 'why',
+        to: NEW,
+      });
+    });
+
+    test('a record with an unknown change kind, or a moved tool, is refused naming the line', () => {
+      expect(() => readChanges(`route\t${OLD}\tmovedGET /v1/x\twhy\n`)).toThrow('is not table');
+      expect(() => readChanges(`route\t${OLD}\tmovedGET /v1/x\twhy\n`)).toThrow('movedGET /v1/x');
+      expect(() => readChanges('tool\told_tool\tmoved\tnew_tool\twhy\n')).toThrow('is not table');
+    });
+
+    test('a new key that exists only in another table is a finding', () => {
+      const member: DescriptorRow = { ...todayRow(NEW), table: 'member' };
+      const changes = readChanges(`route\t${OLD}\tmoved\t${NEW}\twhy\nmember\t${NEW}\tadded\twhy\n`);
+      expect(movedFindings(rows(OLD), [member], changes).map(f => f.message)).toEqual([
+        expect.stringContaining('declares no route GET /v1/runtimes/machine'),
+      ]);
+    });
+
+    test('an explicit pair and a shape-derived one onto the same new key are both claimed', () => {
+      const SHAPE = 'GET /v1/sessions/:s/q';
+      const TARGET = 'GET /v1/ferrets/:f/q';
+      const changes = readChanges(
+        `route\t${OLD}\tmoved\t${TARGET}\twhy\nroute\t${SHAPE}\tremoved\twhy\nroute\t${TARGET}\tadded\twhy\n`,
+      );
+      expect(movedFindings(rows(OLD, SHAPE), rows(TARGET), changes).map(f => f.message)).toEqual([
+        expect.stringContaining('claimed by 2'),
+      ]);
+      const r = routeRow('R-0004', OLD);
+      const named = fixture({ [TEST]: "test('R-0004 m', () => {})" });
+      expect(
+        run(
+          [r],
+          ctx(named, () => routeWorld(rows(OLD, SHAPE), rows(TARGET), changes)),
+        )[0],
+      ).toContain('claimed by more than one');
+    });
   });
 
   test('two removed routes that collapse onto one 5.0 route fail', () => {
