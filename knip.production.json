@@ -250,6 +250,7 @@
       "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
+        "app/features/onboarding/device-kind.ts",
         "app/features/settings/capability-list.tsx",
         "app/features/settings/grants-settings.tsx",
         "app/features/settings/security-api.ts",

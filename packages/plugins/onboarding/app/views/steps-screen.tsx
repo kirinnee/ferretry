@@ -6,7 +6,7 @@
 
 import { daemonHomeHref, daemonOfClient, PanelSlot, useOptionalRouter } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
-import type { AppComponent, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
+import type { PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ONBOARDING_STEP_SLOT, type OnboardingView, stepSubject, type StepState } from '../../contract/index.ts';
 import { LINK_COSTS } from '../link-costs.ts';
@@ -24,7 +24,7 @@ const STATE_LABEL: Readonly<Record<StepState, string>> = {
 const SIGN_IN_PLUGINS: ReadonlySet<string> = new Set(['claude-code', 'codex', 'logins']);
 
 /** Whether to say what linking the terminal's own sign-in costs under this step. */
-export const sayLinkCosts = (step: { readonly plugin: string; readonly state: StepState }): boolean =>
+const sayLinkCosts = (step: { readonly plugin: string; readonly state: StepState }): boolean =>
   step.state === 'found' && SIGN_IN_PLUGINS.has(step.plugin);
 
 type Reading =
@@ -36,7 +36,7 @@ type Reading =
 function useOnboardingView(client: PluginClient): { readonly reading: Reading; readonly retry: () => void } {
   const screen = useMemo(() => onboardingScreen(client), [client]);
   const [reading, setReading] = useState<Reading>({ kind: 'loading' });
-  const again = useRef<() => void>(() => undefined);
+  const again = useRef<(() => void) | null>(null);
   useEffect(() => {
     let live = true;
     const load = (): void => {
@@ -61,7 +61,7 @@ function useOnboardingView(client: PluginClient): { readonly reading: Reading; r
       stop();
     };
   }, [screen]);
-  return { reading, retry: useCallback(() => again.current(), []) };
+  return { reading, retry: useCallback(() => again.current?.(), []) };
 }
 
 /** A link that moves with the router (no page load) where there is one, and is a plain link elsewhere. */
@@ -91,7 +91,7 @@ function RouterLink({
 const stepsHref = (daemon: string): string => `${daemonHomeHref(daemon)}/onboarding/steps`;
 
 /** `/d/<machine>/onboarding/steps`: every declared step, with the panels the plugins contributed to it. */
-export function createStepsScreen(client: PluginClient): AppComponent<ScreenProps> {
+export function createStepsScreen(client: PluginClient) {
   const screen = onboardingScreen(client);
   return function StepsScreen(_props: ScreenProps): ReactNode {
     const daemon = daemonOfClient(client);
@@ -206,7 +206,7 @@ export function createStepsScreen(client: PluginClient): AppComponent<ScreenProp
  * The machine's Settings › Setup tab: how many steps still wait for an answer, and the way to the steps screen. It is
  * the entry for a machine that was paired but not set up, since nothing else links to the steps.
  */
-export function createSetupTab(client: PluginClient): AppComponent<SettingsProps> {
+export function createSetupTab(client: PluginClient) {
   return function SetupTab(_props: SettingsProps): ReactNode {
     const daemon = daemonOfClient(client);
     const { reading, retry } = useOnboardingView(client);

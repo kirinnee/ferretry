@@ -144,6 +144,17 @@ describe('S14 the steps screen', () => {
     await drawn.unmount();
   });
 
+  it('says so when a machine has nothing to set up, and still links to the machine', async () => {
+    const { client } = clientOf(() => ({ steps: [], complete: true }));
+    noteClientDaemon(client, 'd1');
+    const Steps = createStepsScreen(client);
+    const view = await mount(<Steps params={{}} />);
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    expect(view.container.querySelector('[data-onboarding-no-steps]')).not.toBeNull();
+    expect(view.container.querySelector('[data-onboarding-open-machine]')?.getAttribute('href')).toBe('/d/d1');
+    await view.unmount();
+  });
+
   it('M3 says what linking the terminal’s sign-in costs under a found harness or login step, and nowhere else', async () => {
     const steps = [
       { plugin: 'claude-code', id: 'harness', title: 'Claude Code', order: 20, state: 'found' as const },

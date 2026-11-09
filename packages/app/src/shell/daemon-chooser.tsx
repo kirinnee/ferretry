@@ -24,7 +24,7 @@ import { useFrameRoot } from './frame-root.tsx';
  */
 
 /** One step above the `z-40` every plugin sheet paints at. */
-export const CHOOSER_Z_INDEX = 'z-50';
+const CHOOSER_Z_INDEX = 'z-50';
 
 interface Asking {
   readonly purpose: string;
