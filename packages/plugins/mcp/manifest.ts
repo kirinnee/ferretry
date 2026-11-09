@@ -25,10 +25,10 @@ import {
  * descriptor fields copied exactly. Paths follow §3.2/§1.4: `/v1/fleet/mcp-auth…` → `/v1/mcp/auth…`;
  * `/v1/sessions/:sessionId/…` → `/v1/ferrets/:ferretId/…`.
  *
- * GAPS (for the port / the lead): `permissions.spawn` and `permissions.network` cannot be enumerated here. A check starts
- * the owner's own stdio command (any program) and a remote server or its authorization server is any host the owner
- * names; today's code spawns and fetches freely. The kernel ports refuse what is undeclared, so the port needs a
- * decision on a data-driven allowance before `ports-pending` can drop `mcp`.
+ * GAPS (for the port / the lead): `permissions.spawn` is empty and a check's own network reach is undeclared. A check
+ * starts the owner's own stdio command (any program) and reaches the server it checks; today's code spawns and fetches
+ * freely. The kernel ports refuse what is undeclared, so the check needs the data-driven allowance (the M3 unit) before
+ * `ports-pending` can drop `mcp`. The sign-in's reach is declared (`network`, the `mcp-sign-in` resolver).
  */
 export default definePlugin({
   id: 'mcp',
@@ -209,8 +209,9 @@ export default definePlugin({
     // `work`: a ferret's own folder. `imports`: ONLY the `.mcp.json` of a registered project root or a live managed
     // worktree, read-only (lead ruling (B); `daemon/adapters/project-root-files.ts`).
     roots: ['work', 'imports'],
-    // GAP: see the note above. Declared empty rather than guessed.
-    network: [],
+    // Sign-in: the servers being signed in to, and the issuer and endpoints their metadata named, answered by the
+    // `mcp-sign-in` resolver (`daemon/lib/reach.ts`). The check's own reach is still the GAP above.
+    network: [{ resolver: 'mcp-sign-in' }],
     spawn: [],
     secrets: [],
     // The OAuth access tokens a sign-in files in the Vault (`mcpOAuthSecretNames`): today's exact names, and no others.

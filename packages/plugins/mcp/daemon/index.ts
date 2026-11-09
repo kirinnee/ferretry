@@ -21,7 +21,8 @@ import {
   mcpInventoryFolders,
 } from './lib/inventory/folders.ts';
 import { McpDocumentUnreadable, McpInventoryService } from './lib/inventory/service.ts';
-import { ProjectMcpLaunch } from './lib/inventory/project-sign-in.ts';
+import { SignInReach } from './lib/reach.ts';
+import { combinedMcpOAuthServers, ProjectMcpLaunch, ProjectMcpOAuthServers } from './lib/inventory/project-sign-in.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
 import { mcpComponentSource } from './lib/profile-component-source.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
@@ -100,18 +101,6 @@ export default implementDaemon(manifest, {
       },
       remove: async (name: SecretName): Promise<boolean> => await vault.remove(name),
     };
-    const oauth = new McpOAuthService({
-      servers: new ConfigMcpServers(items),
-      http: new FetchMcpOAuthHttp(kernel.fetch),
-      crypto: webCryptoMcpOAuth,
-      clock: { now: () => kernel.clock.nowMs() },
-      state: new StateMcpOAuthStateStore(kernel.state),
-      secrets,
-      values: { values: async () => new Map() },
-      // Refresh tokens and client secrets: MCP's own sealed document, held by nothing but this service (S8, S174).
-      internal: sealedMcpOAuthSecrets(sealed, kernel.state),
-    });
-
     // ── what a ferret's folder holds: one source for the inventory and the launch ──────────────────────────────────
     // The known roots, as today's `mcpInventoryFolders`: registered projects (Projects), then live managed worktrees
     // (Ferrets' registry), each joined to the project registered for its common directory, else its repository.
@@ -146,6 +135,25 @@ export default implementDaemon(manifest, {
     );
     const held = async (): Promise<ReadonlySet<SecretName>> =>
       new Set((await vault.names()).map(summary => summary.name));
+
+    // ── sign-in: the servers (components and projects') and the hosts it may reach ─────────────────────────────────
+    // The `mcp-sign-in` network resolver answers only the hosts of the servers listed now, those of the sign-ins on
+    // file, and the ones a flow's metadata named (`lib/reach.ts`).
+    const reach = new SignInReach({ now: () => kernel.clock.nowMs() });
+    const oauth = new McpOAuthService({
+      servers: reach.observeServers(
+        combinedMcpOAuthServers(new ConfigMcpServers(items), new ProjectMcpOAuthServers(folders, documents)),
+      ),
+      http: new FetchMcpOAuthHttp(kernel.fetch),
+      crypto: webCryptoMcpOAuth,
+      clock: { now: () => kernel.clock.nowMs() },
+      state: reach.observeState(new StateMcpOAuthStateStore(kernel.state)),
+      secrets,
+      values: { values: async () => new Map() },
+      // Refresh tokens and client secrets: MCP's own sealed document, held by nothing but this service (S8, S174).
+      internal: sealedMcpOAuthSecrets(sealed, kernel.state),
+      reach,
+    });
 
     // ── every launch: renew the sign-ins it uses, then name them (today's launch environment, `modules/mcp.ts`) ──
     const launch = new McpLaunchParts({
@@ -256,6 +264,7 @@ export default implementDaemon(manifest, {
     const signInChanged = (component: string): void => kernel.events.publish(McpSignInChanged, { component });
 
     return {
+      resolvers: { 'mcp-sign-in': (): readonly string[] => reach.hosts() },
       routes: {
         ...inventoryRoutes({
           machine: () => inventory.machine(),

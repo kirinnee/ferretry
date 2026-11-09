@@ -12,7 +12,7 @@
  * reachable through this method whatever state the file is in.
  */
 import { type EnvironmentLoginTemplate, EnvironmentLoginTemplateSchema, type LoginFile } from '../../contract/index.ts';
-import { looksLikeRawSecret, looksSecret } from './shared/secret-shape.ts';
+import { looksLikeRawSecret, looksSecret } from '../../contract/secret-shape.ts';
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 
 type FileState = 'absent' | 'valid' | 'invalid' | 'held';

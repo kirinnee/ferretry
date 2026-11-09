@@ -14,6 +14,7 @@ import type {
 } from '../../../daemon/lib/oauth/ports.ts';
 import { EMPTY_MCP_OAUTH_STATE, McpOAuthService } from '../../../daemon/lib/oauth/service.ts';
 import { McpOAuthUnreachable } from '../../../daemon/lib/oauth/ports.ts';
+import type { McpDiscoveryRecorder } from '../../../daemon/lib/reach.ts';
 import { FakeProvider, type FakeProviderOptions } from './fake-provider.ts';
 
 const ORIGIN = 'http://127.0.0.1:4100';
@@ -106,7 +107,7 @@ export interface World {
   readonly service: McpOAuthService;
 }
 
-export function world(options: FakeProviderOptions = {}): World {
+export function world(options: FakeProviderOptions = {}, reach?: McpDiscoveryRecorder): World {
   const provider = new FakeProvider(ORIGIN, options);
   const http = new InProcessHttp(provider.handle);
   const state = new MemoryState();
@@ -141,6 +142,7 @@ export function world(options: FakeProviderOptions = {}): World {
     secrets,
     values: secrets,
     internal,
+    ...(reach === undefined ? {} : { reach }),
   });
   return Object.assign(built, { service });
 }
