@@ -129,9 +129,13 @@ export const ALREADY_HELD_ISSUE = (path: string): ConfigWriteIssue => ({
   fix: 'confirm or discard the held edit first, then make the change again',
 });
 
-/** Why a set touching a file that cannot be read is refused. */
+/**
+ * Why a write, removal or set touching a file that cannot be read is refused — the one sentence every writer says
+ * (`./service.ts`): what is there is not a config file the kernel reads (a link, not a regular file, over the size
+ * cap, or not UTF-8 text), so a write over it would destroy what it holds.
+ */
 export const UNREADABLE_ISSUE = (path: string): ConfigWriteIssue => ({
   path,
-  message: `${path} cannot be read (a link, or larger than a config file may be), so the set could not put it back`,
-  fix: 'replace the file with an ordinary one, then make the change again',
+  message: `${path} cannot be read (a link, not a regular file, larger than a config file may be, or not UTF-8 text), so nothing was written over it`,
+  fix: 'replace the file with an ordinary UTF-8 one, then make the change again',
 });
