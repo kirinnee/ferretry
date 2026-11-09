@@ -198,6 +198,26 @@ describe('PF-flat a look costs what changed, not every session ever made', () =>
   });
 });
 
+describe('PF-flat a member folder that a tree walk also listed is never renewed from its pinned file alone', () => {
+  test('PF-flat a file added to a session folder that is also a listed tree is pinned at the next look', async () => {
+    const l = await home();
+    await fill(l.sessions, 3, n => `s${n}/${ENV}`);
+    const real = await realpath(l.home);
+    // Two declarations meet in the same folders: the `*` collection first, then the tree that lists them.
+    const overlap = {
+      pins: () => [],
+      private: ['state/ferrets/sessions/*/environment.json', 'state/ferrets/sessions'],
+    };
+    // Every folder is old enough to be trusted, so the only one stirred is s1: the look renews a changed member folder
+    // when it can, and it must not when that folder was listed (its names are in the snapshot).
+    const index = privateIndexOf(REAL, real, overlap, { wall: LATER });
+    const first = await index.snapshot();
+    expect(keyOf(first.places, 's1/extra.txt')).toBeUndefined();
+    await writeFile(`${l.sessions}/s1/extra.txt`, 'new');
+    expect(keyOf((await index.snapshot()).places, 's1/extra.txt')).toBeDefined();
+  });
+});
+
 describe('PF-budget a `*` collection spends its budget only on a member that holds the file', () => {
   // The folder itself is one of the collection's places, so a budget of 3 holds the folder and two members.
   const small = { depth: 3, limit: 4096, patternLimit: 3 } as const;

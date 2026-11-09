@@ -18,7 +18,8 @@ import type { FileIdentity, HostFs } from './adapters/node-fs.ts';
  *   every folder ever made. A resting folder that changed is found when its slice comes round (at 512 a slice and a
  *   250 ms look, 5,000 sessions are all looked at in 2.5 s and 20,000 in 10 s) and is then hot again. A new member, or
  *   a folder that changed lately, is always looked at by the next look. That a replaced file in a RESTING folder is
- *   recognised only when its slice comes round is the declared staleness of the tiering (§7.7, GAP 7).
+ *   recognised only when its slice comes round is the staleness of the tiering; it cannot be used through an alias of
+ *   the session FOLDER, because every holder's member folder is pinned by its own identity beside its file (§7.7).
  *
  * What bounds the SIZE, and what the bound does:
  * - every declared place has its OWN budget ({@link MEMBER_LIMIT} places for a tree, {@link PATTERN_LIMIT} for a `*`
