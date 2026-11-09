@@ -3,6 +3,9 @@
  * change is recorded with a reason. Today's table is `scripts/gen/today/routes.json`, extracted from the 4.x
  * reference checkout by `scripts/gen/today/extract.ts`. Deliberate changes are lines of
  * `scripts/validate/descriptor-parity-changes.tsv`: `table<TAB>key<TAB>change<TAB>reason`, where `change` is
+ * `moved` (a `removed` that names its 5.0 key, `table<TAB>old<TAB>moved<TAB>new<TAB>reason`: the new key must exist
+ * with the same method and be recorded `added` or `moved-changed`, one old key per new key, and the pair is judged
+ * exactly like a derived one, so a record never blesses a loosening),
  * `removed` (today has it, 5.0 does not), `added` (5.0 only), `changed` (fields differ) or `moved-changed` (a 5.0-only route
  * that replaces a removed one and differs from it as the reason says; a moved pair that differs with no such record fails).
  *
@@ -77,20 +80,57 @@ export interface MovedPair {
   readonly now: DescriptorRow;
 }
 
+/** One record of the changes file; `to` is the 5.0 key an explicit `moved` record names. */
+export interface ChangeRecord {
+  readonly change: string;
+  readonly reason: string;
+  readonly to?: string | undefined;
+}
+
+const CHANGE_KINDS: readonly string[] = ['removed', 'moved', 'added', 'changed', 'moved-changed'];
+
+const methodOf = (key: string): string => /^([A-Z]+) /.exec(key)?.[1] ?? '';
+
 /**
- * Each route recorded `removed` paired with the one recorded `added` that differs from it only by params and the words
- * design §1.4 replaced. A removed route with no single such counterpart is not paired (it moved to a plugin prefix);
- * `claimed` lists the 5.0 routes more than one removed route maps onto.
+ * Each route recorded `removed` paired with its 5.0 counterpart: the one a `moved` record names (it wins over any
+ * derivation), else the one recorded `added` that differs from it only by params and the words design §1.4 replaced.
+ * A removed route with no such counterpart is not paired; `claimed` lists the 5.0 routes more than one removed route
+ * maps onto, and `broken` maps a removed key (`table<TAB>key`) to why its explicit `moved` record names no valid route.
  */
 export function movedPairs(
   today: readonly DescriptorRow[],
   next: readonly DescriptorRow[],
-  changes: ReadonlyMap<string, { readonly change: string; readonly reason: string }>,
-): { readonly pairs: readonly MovedPair[]; readonly claimed: ReadonlyMap<string, readonly string[]> } {
+  changes: ReadonlyMap<string, ChangeRecord>,
+): {
+  readonly pairs: readonly MovedPair[];
+  readonly claimed: ReadonlyMap<string, readonly string[]>;
+  readonly broken: ReadonlyMap<string, string>;
+} {
   const pairs: MovedPair[] = [];
   const claims = new Map<string, string[]>();
+  const broken = new Map<string, string>();
+  const claim = (was: DescriptorRow, now: DescriptorRow): void => {
+    pairs.push({ was, now });
+    claims.set(`${now.table}	${now.key}`, [...(claims.get(`${now.table}	${now.key}`) ?? []), was.key]);
+  };
   for (const was of today) {
-    if (was.table === 'tool' || changes.get(`${was.table}	${was.key}`)?.change !== 'removed') continue;
+    const record = changes.get(`${was.table}	${was.key}`);
+    if (was.table === 'tool' || record?.change !== 'removed') continue;
+    if (record.to !== undefined) {
+      const target = next.find(r => r.table === was.table && r.key === record.to);
+      const kind = changes.get(`${was.table}	${record.to}`)?.change ?? '';
+      const why =
+        target === undefined
+          ? `5.0 declares no ${was.table} ${record.to}`
+          : methodOf(target.key) !== methodOf(was.key)
+            ? `${record.to} changes the method of ${was.key}`
+            : ['added', 'moved-changed'].includes(kind)
+              ? undefined
+              : `${record.to} is not recorded added or moved-changed`;
+      if (why === undefined && target !== undefined) claim(was, target);
+      else broken.set(`${was.table}	${was.key}`, `moved record names ${record.to}, but ${why}`);
+      continue;
+    }
     const wanted = shape(was.key);
     const found = next.filter(
       r =>
@@ -99,11 +139,9 @@ export function movedPairs(
         ['added', 'moved-changed'].includes(changes.get(`${r.table}	${r.key}`)?.change ?? ''),
     );
     if (found.length !== 1) continue;
-    const now = found[0] as DescriptorRow;
-    pairs.push({ was, now });
-    claims.set(`${now.table}	${now.key}`, [...(claims.get(`${now.table}	${now.key}`) ?? []), was.key]);
+    claim(was, found[0] as DescriptorRow);
   }
-  return { pairs, claimed: new Map([...claims].filter(([, keys]) => keys.length > 1)) };
+  return { pairs, claimed: new Map([...claims].filter(([, keys]) => keys.length > 1)), broken };
 }
 
 /**
@@ -114,11 +152,12 @@ export function movedPairs(
 export function movedFindings(
   today: readonly DescriptorRow[],
   next: readonly DescriptorRow[],
-  changes: ReadonlyMap<string, { readonly change: string; readonly reason: string }>,
+  changes: ReadonlyMap<string, ChangeRecord>,
 ): Finding[] {
   const check = 'descriptor-parity';
-  const { pairs, claimed } = movedPairs(today, next, changes);
+  const { pairs, claimed, broken } = movedPairs(today, next, changes);
   const out: Finding[] = [];
+  for (const [key, message] of broken) out.push({ check, where: key.replace('	', ' '), message });
   for (const { was, now } of pairs) {
     const diffs = fieldDiffs(was, now);
     const recorded = changes.get(`${now.table}	${now.key}`)?.change === 'moved-changed';
@@ -145,22 +184,31 @@ export function movedFindings(
   return out;
 }
 
-export function readChanges(text: string): Map<string, { change: string; reason: string }> {
-  const out = new Map<string, { change: string; reason: string }>();
+export function readChanges(text: string): Map<string, ChangeRecord> {
+  const out = new Map<string, ChangeRecord>();
   for (const line of text.split('\n')) {
     if (line.trim() === '' || line.startsWith('#')) continue;
-    const [table, key, change, reason] = line.split('\t');
+    const cells = line.split('\t');
+    const [table, key, kind] = cells;
+    // `moved` is a `removed` that names its 5.0 key: table<TAB>old<TAB>moved<TAB>new<TAB>reason.
+    const explicit = kind === 'moved';
+    const to = explicit ? cells[3] : undefined;
+    const reason = explicit ? cells[4] : cells[3];
     if (
       table === undefined ||
       key === undefined ||
-      change === undefined ||
+      kind === undefined ||
       reason === undefined ||
-      reason.trim() === ''
+      reason.trim() === '' ||
+      !CHANGE_KINDS.includes(kind) ||
+      (explicit && (to === undefined || to.trim() === '' || table === 'tool'))
     )
-      throw new Error(`${PARITY_CHANGES}: "${line}" is not table<TAB>key<TAB>change<TAB>reason`);
+      throw new Error(
+        `${PARITY_CHANGES}: "${line}" is not table<TAB>key<TAB>change<TAB>reason (or table<TAB>old<TAB>moved<TAB>new<TAB>reason)`,
+      );
     if (out.has(`${table}\t${key}`))
       throw new Error(`${PARITY_CHANGES}: ${table} ${key} is recorded twice (a later line would shadow the first)`);
-    out.set(`${table}\t${key}`, { change, reason });
+    out.set(`${table}\t${key}`, { change: explicit ? 'removed' : kind, reason, to });
   }
   return out;
 }
