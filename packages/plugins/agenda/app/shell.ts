@@ -166,5 +166,5 @@ export const displayCallsign = (raw: string | null | undefined): string => {
     .join('-');
 };
 
-/** A machine's own pages (`/d/<id>`) and the app's home: the notification paths' roots. */
-export { daemonHomeHref, HOME_HREF, notificationTapTarget, type PushMachine, type RouteTable } from '@ferretry/app';
+/** A machine's own pages (`/d/<id>`): the notification paths' root. */
+export { daemonHomeHref } from '@ferretry/app';
