@@ -112,6 +112,18 @@ describe('runtimes contract', () => {
     expect(runtimeFileLoosens(undefined, file('a'))).toEqual([]);
   });
 
+  test('a removed runtime file is judged by what it was and never thrown on: it loosens nothing, shell or not', () => {
+    const file = (login: string, shell?: string) =>
+      RuntimeFileSchema.parse({ login, profile: 'p', ...(shell ? { shell } : {}) });
+    expect(() => runtimeFileLoosens(file('work'), undefined)).not.toThrow();
+    expect(runtimeFileLoosens(file('work'), undefined)).toEqual([]);
+    expect(runtimeFileLoosens(file('work', 'dev'), undefined)).toEqual([]);
+    expect(runtimeFileLoosens(undefined, undefined)).toEqual([]);
+    // the same function still holds what it held: a re-point and a shell newly entered
+    expect(runtimeFileLoosens(file('work'), file('play'))).toHaveLength(1);
+    expect(runtimeFileLoosens(file('work'), file('work', 'dev'))).toHaveLength(1);
+  });
+
   test('T-0034 a shell newly entered is held, on a new file too; dropping or keeping it is not', () => {
     const file = (shell?: string) => RuntimeFileSchema.parse({ login: 'a', profile: 'p', ...(shell ? { shell } : {}) });
     const held = ['a runtime now enters the shell "dev"'];

@@ -82,6 +82,7 @@ import {
   runtimesUsingCredential,
 } from './catalog.ts';
 import type { RuntimeRename, SessionStatus } from './foreign.ts';
+import { failedApplySentence } from './failed-apply.ts';
 import { expandAssetPath, joinPath } from '../paths.ts';
 import type { ModelCatalogSources } from '../models/catalog.ts';
 import {
@@ -259,6 +260,12 @@ export interface FleetCatalogServiceDeps {
   readonly warn?: (message: string, fields: Readonly<Record<string, string>>) => void;
   /** Writes the configuration documents of a change. GAP(kernel): no plugin config write port; see `ports.ts`. */
   readonly configWriter: RuntimeConfigWriter;
+  /**
+   * Asked BEFORE any configuration document is written, by every path that writes one (an apply, an install, a setup
+   * or a clone). Throws a plain sentence when this machine cannot take the change at all, so that no document lands
+   * under a refusal that says "nothing was changed". Absent: nothing refuses ahead of a write.
+   */
+  preflight?(): Promise<void>;
   readonly provisioner: Pick<FleetProvisioner, 'preview' | 'apply'>;
   readonly layout: FleetLayout;
   /** A fresh runtime id (a UUID). */
@@ -301,6 +308,14 @@ export function budgetHoldsOf(deps: Pick<FleetCatalogServiceDeps, 'budgetHolds'>
   const holds = deps.budgetHolds?.();
   return holds === undefined || Object.keys(holds).length === 0 ? {} : { budgetHolds: holds };
 }
+
+/**
+ * The budget holds as one comparable string. A plan publishes a held login's wrappers unavailable, so a plan made under
+ * one set of holds must not be applied under another: the pause Usage reports between a preview and its apply would
+ * otherwise publish a runnable wrapper for a login its budget has stopped.
+ */
+const holdsKey = (holds: BudgetHolds | undefined): string =>
+  JSON.stringify(Object.entries(holds ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 
 // ── Running sessions ─────────────────────────────────────────────────────────────────────────────
 
@@ -361,6 +376,8 @@ type ChangePayload =
   | {
       readonly kind: 'apply';
       readonly plan: FleetModelApplyPlan;
+      /** The budget holds this plan was made under ({@link holdsKey}); an apply under other holds is refused as stale. */
+      readonly holds: string;
       readonly documents: readonly FleetDocumentWrite[];
       readonly preview: Extract<AccountChangePreview, { kind: 'apply' }>;
       readonly consequences: readonly string[];
@@ -495,8 +512,17 @@ export class FleetCatalogService {
    * whose manifest would be identical is left exactly as it is.
    *
    * Answers what it did. A machine with no fleet yet, or one wired without catalogs, has nothing to do.
+   *
+   * It runs under the same one-at-a-time section as an apply ({@link FleetCatalogService.apply}): a republish that read
+   * the model, then waited while an apply of another model committed, would otherwise land a plan made from the model
+   * BEFORE that apply and prune what the apply added.
    */
   async republish(): Promise<'applied' | 'unchanged' | 'skipped'> {
+    return await this.#exclusively(async () => await this.#republish());
+  }
+
+  /** {@link republish} for a caller that already holds the section (a login change republishes from inside its apply). */
+  async #republish(): Promise<'applied' | 'unchanged' | 'skipped'> {
     const reading = await this.#read();
     const sources = await this.#modelCatalogs();
     if (reading.format === 'none' || sources.modelCatalogs === undefined) return 'skipped';
@@ -576,6 +602,13 @@ export class FleetCatalogService {
         'fleet_change_refused',
         checked.error.issues[0]?.message ?? 'this is not a change the catalog installer makes',
       );
+    return await this.#exclusively(async () => await this.#install(change));
+  }
+
+  /** The catalogue's install, read and applied under the one apply section (see {@link FleetCatalogService.apply}). */
+  async #install(
+    change: CatalogInstallChange,
+  ): Promise<{ readonly outcome: AccountChangeOutcome; readonly component: unknown }> {
     const reading = await this.#read();
     const staged = await this.#stagePlan(reading, change);
     await this.#assertCurrent({ revision: reading.revision });
@@ -620,6 +653,32 @@ export class FleetCatalogService {
    * never the one a stale preview was shown against.
    */
   async apply(
+    id: string,
+    governance: CallerGovernance | undefined,
+    freshStepUp?: FreshStepUpContext,
+  ): Promise<AccountChangeOutcome> {
+    return await this.#exclusively(async () => await this.#applyReviewed(id, governance, freshStepUp));
+  }
+
+  /**
+   * Applies, catalogue installs and the rest of this service's changes run ONE AT A TIME, each judging "has the
+   * configuration moved since it was reviewed" only once the one before it has landed. The configuration is several
+   * owners' files now and a patch of keys carries no per-file etag, so the revision check is what refuses a plan made
+   * from a model an earlier apply has since changed: run beside that apply it would pass, and its plan would then
+   * prune what the first one added.
+   */
+  async #exclusively<T>(act: () => Promise<T>): Promise<T> {
+    const run = this.#applyTail.then(act, act);
+    this.#applyTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await run;
+  }
+
+  #applyTail: Promise<void> = Promise.resolve();
+
+  async #applyReviewed(
     id: string,
     governance: CallerGovernance | undefined,
     freshStepUp?: FreshStepUpContext,
@@ -845,6 +904,8 @@ export class FleetCatalogService {
     const { edit, ids, runtimeFacts } = await this.#derive(reading, change);
     const bodies = await this.#bodies(edit.model, edit.files);
     const layout = this.deps.layout;
+    // Read once: the plan is made under these holds and the apply refuses to run under others.
+    const held = this.#budgetHolds();
     let plan: FleetModelApplyPlan;
     let preview: FleetApplyPreview;
     try {
@@ -863,7 +924,7 @@ export class FleetCatalogService {
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         ...(await this.#modelCatalogs()),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
-        ...this.#budgetHolds(),
+        ...held,
       });
       preview = await this.deps.provisioner.preview(plan);
     } catch (error) {
@@ -886,6 +947,7 @@ export class FleetCatalogService {
       payload: {
         kind: 'apply',
         plan,
+        holds: holdsKey(held.budgetHolds),
         documents,
         consequences: edit.consequences,
         preview: {
@@ -1119,11 +1181,14 @@ export class FleetCatalogService {
       return { outcome: 'login-changed', result: 'held', sentences: result.sentences, ...summary, ...moved };
     }
     try {
-      await this.republish();
+      await this.#republish();
     } catch (error) {
+      // Two sentences, each saying one true thing: the login change is saved, and the republish (whose own reason may
+      // say "nothing was changed", which is about the republish alone) did not finish.
+      const refused = error instanceof FleetCatalogRefusal && error.code === 'fleet_change_refused';
       throw new FleetCatalogRefusal(
         'fleet_change_failed',
-        `the login changed, but the runtimes could not be republished: ${errorMessage(error)}`,
+        `the login change is saved. Republishing the runtimes ${refused ? 'was refused' : 'failed'}: ${errorMessage(error)}`,
       );
     }
     return { outcome: 'login-changed', result: 'applied', ...summary, ...moved };
@@ -1176,9 +1241,20 @@ export class FleetCatalogService {
   ): Promise<AccountChangeOutcome> {
     const payload = record.payload;
     if (payload.kind === 'apply') {
+      // Refused here, ahead of the write, so a sentence that says "nothing was changed" is true: nothing has been written.
+      await this.#preflight();
+      // Under the apply section the holds are read again: a pause that arrived since the preview is not in the plan.
+      if (holdsKey(this.deps.budgetHolds?.()) !== payload.holds) {
+        throw new FleetCatalogRefusal(
+          'fleet_change_stale',
+          'a login’s spend budget changed after this change was previewed; review it again',
+        );
+      }
+      let written = false;
       try {
         // The documents are the source of truth, so they land first; a plan that then fails is republished from them.
         await this.deps.configWriter.write(payload.documents);
+        written = payload.documents.length > 0;
         const result = await this.deps.provisioner.apply(payload.plan, []);
         this.#skipped = skippedWithinRuntimes(result.skipped, payload.plan.manifest.accounts);
         if (record.mutation.kind === 'runtime.rename') await this.#renameSessions(record.mutation);
@@ -1188,13 +1264,36 @@ export class FleetCatalogService {
           const { failure } = error;
           if (failure.kind === 'history-failed-after-commit')
             this.#skipped = skippedWithinRuntimes(failure.committed.skipped, failure.committed.manifest.accounts);
-          return { outcome: 'applied', apply: applyFailureSummary(error) };
+          // The documents landed before the plan and a rollback does not undo them: the outcome names them.
+          return {
+            outcome: 'applied',
+            apply: applyFailureSummary(error, written ? payload.documents.map(document => document.path) : []),
+          };
         }
-        throw new FleetCatalogRefusal('fleet_change_failed', errorMessage(error));
+        // A failure after the documents landed must say they are on disk: they are not rolled back with the fleet.
+        throw new FleetCatalogRefusal(
+          'fleet_change_failed',
+          written
+            ? failedApplySentence(
+                error,
+                payload.documents.map(document => document.path),
+              )
+            : errorMessage(error),
+        );
       }
     }
     if (payload.kind === 'login') return await this.#executeLogin(record, payload);
+    await this.#preflight();
     return { outcome: 'executed', executor: payload.preview.executor, summary: await payload.run(caller) };
+  }
+
+  /** The deps' preflight as a refusal in a sentence. */
+  async #preflight(): Promise<void> {
+    try {
+      await this.deps.preflight?.();
+    } catch (error) {
+      throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
+    }
   }
 
   /**

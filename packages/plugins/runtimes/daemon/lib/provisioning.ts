@@ -184,6 +184,11 @@ export interface FleetDocumentWrite {
    */
   readonly expect?: string;
   /**
+   * A configuration document written as a PATCH of top-level keys (`undefined` removes one) that the kernel's config
+   * writer applies to the file it holds, so only the keys that changed are touched; `content` is then ignored.
+   */
+  readonly patch?: Readonly<Record<string, unknown>>;
+  /**
    * Remove the document instead of writing it (`content` is then ignored): a configuration file for a
    * login, component, profile or runtime the change deletes. Removed inside the same boundary, so a
    * failed apply puts it back with everything else.

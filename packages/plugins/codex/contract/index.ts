@@ -132,7 +132,11 @@ const SectionDigestSchema = z.string().regex(/^[0-9a-f]{64}$/u);
  */
 export const CodexLaunchSettingsRecordSchema = z.strictObject({
   format: z.literal(1),
-  sections: z.strictObject({ 'permission-mode': SectionDigestSchema, 'fixed-layer': SectionDigestSchema }),
+  sections: z.strictObject({
+    'permission-mode': SectionDigestSchema,
+    'fixed-layer': SectionDigestSchema,
+    settings: SectionDigestSchema,
+  }),
 });
 export type CodexLaunchSettingsRecord = z.infer<typeof CodexLaunchSettingsRecordSchema>;
 export const CODEX_LAUNCH_SETTINGS = defineState({

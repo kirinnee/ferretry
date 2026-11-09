@@ -58,11 +58,16 @@ interface TextStore {
 
 // ─── the configuration files (kernel-owned) ──────────────────────────────────────────────────────────────────────
 
-/** One configuration file edit: its path under `config/`, the new text (`undefined` removes it) and the etag it was composed against. */
+/**
+ * One configuration file edit: its path under `config/`, and either the new text (`undefined` with no patch removes it)
+ * or a patch of top-level keys the kernel's writer applies to the file it holds (`undefined` removes a key). `expect` is
+ * the etag it was composed against, when the caller read one.
+ */
 interface ConfigFileEdit {
   readonly path: string;
-  readonly content: string | undefined;
-  readonly expect: string;
+  readonly content?: string | undefined;
+  readonly patch?: Readonly<Record<string, unknown>>;
+  readonly expect?: string;
 }
 
 /**

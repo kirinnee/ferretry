@@ -49,6 +49,29 @@ function value(input: unknown): string {
   return '""';
 }
 
+const isRecord = (input: unknown): input is Readonly<Record<string, unknown>> =>
+  typeof input === 'object' && input !== null && !Array.isArray(input);
+
+/**
+ * A whole settings document as TOML: each level's scalars and arrays first, then each nested record as its own
+ * `[a.b]` table (so `shell_environment_policy.set` is written as `[shell_environment_policy.set]`, the spelling Codex
+ * documents). `null` and `undefined` have no TOML spelling and are left out; an array of records is written inline.
+ */
+export function tomlDocument(document: Readonly<Record<string, unknown>>): string {
+  const blocks: string[] = [];
+  const write = (path: readonly string[], table: Readonly<Record<string, unknown>>): void => {
+    const entries = Object.entries(table).filter(([, item]) => item !== null && item !== undefined);
+    const own = entries.filter(([, item]) => !isRecord(item));
+    const nested = entries.filter(([, item]) => isRecord(item));
+    const lines = own.map(([name, item]) => `${key(name)} = ${value(item)}`);
+    if (path.length > 0 || lines.length > 0)
+      blocks.push([...(path.length > 0 ? [`[${path.map(key).join('.')}]`] : []), ...lines].join('\n'));
+    for (const [name, item] of nested) write([...path, name], item as Readonly<Record<string, unknown>>);
+  };
+  write([], document);
+  return blocks.join('\n\n');
+}
+
 /** `[mcp_servers.name]` tables from a record of records, one table per entry, in the order given. */
 export function tomlTables(
   table: string,
