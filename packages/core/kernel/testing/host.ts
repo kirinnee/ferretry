@@ -1,6 +1,7 @@
 import { posix } from 'node:path';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
+import { absolute } from '../host/fence-guard.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
 import {
   DEFAULT_COPY_ENTRIES,
@@ -1314,7 +1315,14 @@ async function start(world: World): Promise<TestHost> {
         // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
         // see each other; a refused scope resolves nothing.
         const scoped = scopedSubfolder(name, scope?.subfolder);
-        const named = scope?.subfolder?.startsWith('/') === true ? scope.subfolder : undefined;
+        // The folder named as production names it (`absolute()`: `./`, `//`, `x/..` and a trailing slash resolved) and
+        // only by the roots that take an absolute folder, so a spelling production accepts is accepted here too.
+        const named =
+          (name === 'imports' || name === 'harness-history' || name === 'harness-home') &&
+          scope?.subfolder?.startsWith('/') === true &&
+          !scope.subfolder.includes('\0')
+            ? absolute(scope.subfolder, 'a root')
+            : undefined;
         const below = anchoredFolder(named) === undefined && scope?.within !== undefined ? undefined : scoped;
         const prefix = below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`;
         const fileStat = (path: string) => ({
