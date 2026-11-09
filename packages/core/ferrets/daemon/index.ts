@@ -32,6 +32,7 @@ import {
   FerretLaunchSectionsFiles,
   Harnesses,
   LaunchParts,
+  OpeningAttachments,
   Runners,
   SitrepLines,
   SubtreeViewSchema,
@@ -429,6 +430,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return decision;
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
+    openingAttachments: () => hooks.contributions(OpeningAttachments).map(contribution => contribution.item),
     sitrepSources: () => hooks.contributions(SitrepLines).map(contribution => contribution.item),
     instructions: () => kernel.snapshot.current().instructions,
     folder: path => {

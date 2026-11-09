@@ -22,7 +22,7 @@ import { FileResumeTurnStore } from '../adapters/session/resume/file-resume-turn
 import { StorageResumeRepository } from '../adapters/session/resume/storage-resume-repository.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.ts';
-import type { FerretSessionPort, ReviveTurn, ReviveTurnRequest } from '../lib/ferrets/service.ts';
+import type { FerretSessionPort, OpeningFile, ReviveTurn, ReviveTurnRequest } from '../lib/ferrets/service.ts';
 import { type SessionDocumentSeed, sessionDocument, sessionStateDocument } from '../lib/ferrets/session-document.ts';
 import { assignedTaskDocument, queuedPayloadFile } from '../lib/protocol/turn-handoff.ts';
 import { firstTurnInstruction } from '../lib/session/lifecycle/policy.ts';
@@ -98,6 +98,9 @@ export interface SessionFilesDeps {
   readonly seed?: (ferret: SessionId) => Omit<SessionDocumentSeed, 'turn'> | undefined;
   readonly log: Pick<Log, 'warn'>;
 }
+
+/** The folder of a ferret's own session folder its opening attachments are written to (one of `FERRET_READABLE_FOLDERS`). */
+const ATTACHMENTS_FOLDER = 'attachments';
 
 /** The file Claude Code's question hook writes in a ferret's session folder (today's `SessionPaths.questionAsked`). */
 const QUESTION_ASKED_FILE = 'question-asked.json';
@@ -186,6 +189,12 @@ export class SessionFiles {
         return await this.turnStore(id).list(id, options);
       },
       queued: async (ferret, payload, sendId) => await this.writeQueued(parseSessionId(ferret), payload, sendId),
+      attachmentsFolder: async ferret => {
+        const named = this.root(parseSessionId(ferret)).resolve(ATTACHMENTS_FOLDER);
+        if (!named.ok) throw new Error('the attachments folder of this ferret could not be named');
+        return named.value;
+      },
+      attach: async (ferret, files) => await this.writeAttachments(parseSessionId(ferret), files),
     };
   }
 
@@ -321,6 +330,28 @@ export class SessionFiles {
     if (named === undefined || !named.ok) throw new Error('a queued message file of this ferret could not be named');
     await root.publish(named.value, new TextEncoder().encode(`${payload}\n`), { mode: 0o600 });
     return named.value;
+  }
+
+  /**
+   * The files a start was given (`start -f`) written into the ferret's own `attachments/` folder: the session folder made
+   * `0700` first, each file published durably and `0600` through a temporary name (the folder itself is made `0700` by the
+   * publish). A name that is not a bare file name writes nothing at all, before the first file is written.
+   */
+  private async writeAttachments(id: SessionId, files: readonly OpeningFile[]): Promise<void> {
+    const root = this.root(id);
+    await new OwnFolder(root).ensure();
+    const named = files.map(file => {
+      const path =
+        /^[^/\\\0]+$/u.test(file.name) && file.name !== '.' && file.name !== '..'
+          ? root.resolve(`${ATTACHMENTS_FOLDER}/${file.name}`)
+          : undefined;
+      if (path === undefined || !path.ok) throw new Error('an attachment of this ferret could not be named');
+      return { path: path.value, contents: file.contents };
+    });
+    for (const { path, contents } of named)
+      await root.publish(path, typeof contents === 'string' ? new TextEncoder().encode(contents) : contents, {
+        mode: 0o600,
+      });
   }
 
   /** The ferret's own `sessions` handle: one minted folder, internal, private. */

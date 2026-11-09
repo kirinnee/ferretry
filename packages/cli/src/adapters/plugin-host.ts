@@ -17,6 +17,8 @@ export interface PluginHostInputs {
   /** Whether an absolute path exists (default: `fs.access`, i.e. today's `existsSync`). */
   readonly pathExists?: (absolute: string) => Promise<boolean>;
   readonly readStdin?: () => Promise<string>;
+  readonly readBytes?: (path: string) => Promise<Uint8Array>;
+  readonly readStdinBytes?: () => Promise<Uint8Array>;
   readonly cwd?: () => string;
 }
 
@@ -25,6 +27,8 @@ export function createPluginHost(inputs: PluginHostInputs): PluginHost {
   const fs = inputs.fs ?? state.createNodeHostFs();
   const readFile = inputs.readFile ?? (path => Bun.file(path).text());
   const readStdin = inputs.readStdin ?? (() => Bun.stdin.text());
+  const readBytes = inputs.readBytes ?? (async path => new Uint8Array(await Bun.file(path).arrayBuffer()));
+  const readStdinBytes = inputs.readStdinBytes ?? (async () => new Uint8Array(await Bun.stdin.arrayBuffer()));
   const cwd = inputs.cwd ?? (() => process.cwd());
   const pathExists =
     inputs.pathExists ??
@@ -39,6 +43,8 @@ export function createPluginHost(inputs: PluginHostInputs): PluginHost {
     sleep: (delay, signal) => clock.sleep(delay, signal),
     // As today's `readRecipe`: no size cap; a relative path is relative to the working directory.
     readText: async path => (path === '-' ? await readStdin() : await readFile(path)),
+    // The same rules, undecoded: an attachment is bytes, and UTF-8 would corrupt an image.
+    readBytes: async path => (path === '-' ? await readStdinBytes() : await readBytes(path)),
     // As today's `existsSync(resolve(cwd, path))` (system-poller): no read, no stdin, a directory counts.
     exists: async path => await pathExists(resolve(cwd(), path)),
     ownState(manifest: Manifest) {

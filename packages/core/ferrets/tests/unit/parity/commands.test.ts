@@ -26,6 +26,7 @@ interface World {
   readonly env?: Readonly<Record<string, string>>;
   readonly exists?: NonNullable<CliContext<Manifest>['exists']>;
   readonly readText?: NonNullable<CliContext<Manifest>['readText']>;
+  readonly readBytes?: NonNullable<CliContext<Manifest>['readBytes']>;
 }
 
 /** The cli half's verbs, run against a recording API: what each asks the daemon, what it prints, how it exits. */
@@ -53,6 +54,7 @@ function run(world: World = {}) {
     ...(world.env === undefined ? {} : { env: world.env }),
     ...(world.exists === undefined ? {} : { exists: world.exists }),
     ...(world.readText === undefined ? {} : { readText: world.readText }),
+    ...(world.readBytes === undefined ? {} : { readBytes: world.readBytes }),
   });
   if (half === undefined) throw new Error('the cli half is real');
   const verbs = half.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;
@@ -356,17 +358,11 @@ describe('commands parity', () => {
       expect(negated.calls[0]?.init).toMatchObject({ body: { mode: 'interactive', fast: false, remoteControl: true } });
     });
 
-    test('V-0443 fy start refuses, by name and unsent, a flag whose job another plugin took (--compact-at, -f/--file, --detach) and a bad number or mode', async () => {
-      for (const options of [
-        { 'compact-at': '250k' },
-        { file: 'a.md' },
-        { f: 'a.md' },
-        { detach: true },
-      ] as Options[]) {
+    test('V-0443 fy start refuses, by name and unsent, a flag whose job another plugin took (--compact-at, --detach) and a bad number or mode', async () => {
+      for (const options of [{ 'compact-at': '250k' }, { detach: true }] as Options[]) {
         const refused = run({ answers: startAnswers });
         expect(await refused.verb('start [prompt...]', ['x'], options)).toBe(2);
-        const typedName = Object.keys(options)[0];
-        expect(refused.err.join('\n')).toContain(typedName === 'f' ? '--file' : `--${typedName}`);
+        expect(refused.err.join('\n')).toContain(`--${Object.keys(options)[0]}`);
         expect(refused.calls).toEqual([]);
       }
       const bad = run({ answers: startAnswers });
@@ -429,6 +425,83 @@ describe('commands parity', () => {
       expect(await noReader.verb('start [prompt...]', ['x'], { cwd: '/abs', 'prompt-file': 'brief.md' })).toBe(1);
       expect(noReader.err.join('\n')).toContain('file reader');
       for (const refused of [missing, empty, noPath, noReader]) expect(refused.calls).toEqual([]);
+    });
+
+    test('V-0443 fy start -f/--file reads each file as raw bytes on the caller’s machine and sends it inline as base64 (repeatable; a type only for an image); no path reaches the daemon', async () => {
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00]);
+      const docx = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x80]);
+      const reads: string[] = [];
+      const files: Record<string, Uint8Array> = { 'shots/Login.PNG': png, '/abs/brief.docx': docx };
+      const readBytes = async (path: string): Promise<Uint8Array> => {
+        reads.push(path);
+        const found = files[path];
+        if (found === undefined) throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+        return found;
+      };
+      const short = run({ answers: startAnswers, readBytes });
+      expect(
+        await short.verb('start [prompt...]', ['fix', 'it'], {
+          cwd: '/abs',
+          f: ['shots/Login.PNG', '/abs/brief.docx'],
+        }),
+      ).toBe(0);
+      expect(reads).toEqual(['shots/Login.PNG', '/abs/brief.docx']);
+      expect(short.calls[0]?.init).toMatchObject({
+        body: {
+          folder: '/abs',
+          prompt: 'fix it',
+          initialAttachments: [
+            { filename: 'Login.PNG', mime: 'image/png', base64: Buffer.from(png).toString('base64') },
+            { filename: 'brief.docx', base64: Buffer.from(docx).toString('base64') },
+          ],
+        },
+      });
+      expect(JSON.stringify(short.calls)).not.toContain('shots/');
+      const long = run({ answers: startAnswers, readBytes });
+      expect(await long.verb('start [prompt...]', ['x'], { cwd: '/abs', file: '/abs/brief.docx' })).toBe(0);
+      expect(long.calls[0]?.init).toMatchObject({ body: { initialAttachments: [{ filename: 'brief.docx' }] } });
+      // A start with no file sends no member at all.
+      const none = run({ answers: startAnswers, readBytes });
+      expect(await none.verb('start [prompt...]', ['x'], { cwd: '/abs' })).toBe(0);
+      expect(none.calls[0]?.init).not.toHaveProperty('body.initialAttachments');
+    });
+
+    test('V-0443 fy start -f refuses an unreadable path naming it, an empty file, two files of one name, a bare flag, a start with no opening message and a shell with no byte reader; each sends nothing', async () => {
+      const readBytes = async (path: string): Promise<Uint8Array> => {
+        if (path === 'empty.png') return new Uint8Array();
+        if (path !== 'nope.png' && path.endsWith('.png')) return new Uint8Array([1, 2, 3]);
+        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+      };
+      const refusals: readonly [string, readonly string[], Options, string][] = [
+        ['missing', ['x'], { f: 'nope.png', cwd: '/abs' }, 'cannot read attachment nope.png: ENOENT'],
+        ['empty', ['x'], { file: 'empty.png', cwd: '/abs' }, 'attachment empty.png is empty'],
+        ['same name', ['x'], { f: ['a/one.png', 'b/one.png'], cwd: '/abs' }, 'two attachments are named one.png'],
+        ['bare flag', ['x'], { f: true, cwd: '/abs' }, '-f/--file needs the path of a file to attach'],
+        ['no prompt', [], { f: 'a.png', cwd: '/abs', mode: 'interactive' }, 'attachments belong to an opening message'],
+      ];
+      for (const [, args, options, message] of refusals) {
+        const refused = run({ answers: startAnswers, readBytes });
+        expect(await refused.verb('start [prompt...]', args, options)).toBe(2);
+        expect(refused.err.join('\n')).toContain(message);
+        expect(refused.calls).toEqual([]);
+      }
+      const noReader = run({ answers: startAnswers });
+      expect(await noReader.verb('start [prompt...]', ['x'], { f: 'a.png', cwd: '/abs' })).toBe(1);
+      expect(noReader.err.join('\n')).toContain('byte reader');
+      expect(noReader.calls).toEqual([]);
+      // A prompt file is a prompt: files attach to a start whose brief came from a file.
+      const filed = run({ answers: startAnswers, readBytes, readText: async () => 'the brief' });
+      expect(await filed.verb('start [prompt...]', [], { f: 'a.png', 'prompt-file': 'b.md', cwd: '/abs' })).toBe(0);
+      expect(filed.calls[0]?.init).toMatchObject({
+        body: { prompt: 'the brief', initialAttachments: [{ filename: 'a.png' }] },
+      });
+    });
+
+    test('V-0334 fy new takes no attachments: --file is refused by name and unsent', async () => {
+      const refused = run({ answers: startAnswers });
+      expect(await refused.verb('new [words...]', ['x'], { runtime: 'codex-beta', file: 'a.png' })).toBe(2);
+      expect(refused.err.join('\n')).toContain('--file');
+      expect(refused.calls).toEqual([]);
     });
 
     test('V-0443 fy start --request-id sends the caller’s key as the start’s request id, so a retry with it answers the same ferret; a blank key is refused', async () => {

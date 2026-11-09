@@ -102,7 +102,7 @@ export const AgentPinsFile = defineState({
  * as no options and no title: it is what the summary shows, never what anything is allowed.
  */
 export const FerretDetailsSchema = z.strictObject({
-  options: StartOptionsSchema.omit({ title: true }).optional(),
+  options: StartOptionsSchema.omit({ title: true, initialAttachments: true }).optional(),
   title: FerretTitleSchema.optional(),
 });
 export type FerretDetails = z.infer<typeof FerretDetailsSchema>;

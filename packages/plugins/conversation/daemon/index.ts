@@ -3,6 +3,7 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type ConversationApi, LinkKept, QuestionSchema, ReferenceCatalog, SearchSources } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { PDF_WORKER_URL } from './attachments/adapters/decrypt-pdf.ts';
+import { openingAttachmentsSource } from './attachments/adapters/opening-attachments.ts';
 import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
 import { type HarnessGate, HARNESS_OPEN } from './harness-seam.ts';
@@ -131,6 +132,8 @@ export const conversationDaemon = (gate: HarnessGate) =>
               },
             },
           ],
+          // The files a start was given (`fy start -f`): decoded, bounded and worded here, written and appended by Ferrets.
+          'opening.attachments': () => [{ id: 'conversation-opening-attachments', item: openingAttachmentsSource() }],
           'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
           // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
           'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),

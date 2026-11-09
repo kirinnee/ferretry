@@ -1,9 +1,14 @@
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
-import { text, typed } from '../verb-io.ts';
+import { list, text, typed } from '../verb-io.ts';
+import { basename } from 'node:path';
+import type { InitialAttachment } from '../../../contract/index.ts';
 import { SessionCommandError } from './errors.ts';
 
 /** The shell's file reader (`CliContext.readText`): UTF-8 text from a path against the CLI's working directory. */
 export type ReadText = (path: string) => Promise<string>;
+
+/** The shell's byte reader (`CliContext.readBytes`): the raw bytes of a path, by the same rules as {@link ReadText}. */
+export type ReadBytes = (path: string) => Promise<Uint8Array>;
 
 /**
  * The text of a `--prompt-file`, read here on the caller's machine and sent as the prompt: a path never reaches the
@@ -55,4 +60,68 @@ export function requestIdOf(invocation: VerbInvocation): string | undefined {
   const id = text(invocation, 'request-id')?.trim();
   if (id === undefined || id === '') throw new SessionCommandError('--request-id must not be blank');
   return id;
+}
+
+/** The image types worth stating: today's CLI stated a type only for an image (a document's is the receiver's to decide). */
+const IMAGE_TYPES: Readonly<Record<string, string>> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  avif: 'image/avif',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  ico: 'image/x-icon',
+  heic: 'image/heic',
+};
+
+/** The paths `-f/--file` names, in the order typed (`-f a -f b`, or `--file a`); a bare flag with no path is refused. */
+export function attachmentPaths(invocation: VerbInvocation): readonly string[] {
+  if (!typed(invocation, 'file', 'f')) return [];
+  const paths = [...list(invocation, 'file'), ...list(invocation, 'f')].map(path => path.trim());
+  if (paths.length === 0 || paths.some(path => path === ''))
+    throw new SessionCommandError('-f/--file needs the path of a file to attach');
+  return paths;
+}
+
+/**
+ * The files attached to a start's opening message, read HERE on the caller's machine as raw bytes and sent inline as
+ * base64 (today's `SessionFiles.readAttachment`): a path never reaches the daemon. The name sent is the file's own name; an
+ * unreadable path is the caller's own mistake naming the path they typed, and an empty file is refused. Two files of one
+ * name are refused, because they would be stored under one name and the second would silently replace the first.
+ */
+export async function readAttachments(
+  paths: readonly string[],
+  read: ReadBytes | undefined,
+): Promise<readonly InitialAttachment[]> {
+  if (paths.length === 0) return [];
+  if (read === undefined)
+    throw new SessionCommandError('-f/--file needs the shell’s byte reader, which this fy does not give a verb yet', 1);
+  const names = new Set<string>();
+  const attachments: InitialAttachment[] = [];
+  for (const path of paths) {
+    let bytes: Uint8Array;
+    try {
+      bytes = await read(path);
+    } catch (error) {
+      throw new SessionCommandError(
+        `cannot read attachment ${path}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (bytes.byteLength === 0) throw new SessionCommandError(`attachment ${path} is empty`);
+    const filename = basename(path);
+    if (names.has(filename))
+      throw new SessionCommandError(`two attachments are named ${filename}: each file attached needs its own name`);
+    names.add(filename);
+    const mime = IMAGE_TYPES[filename.split('.').at(-1)?.toLowerCase() ?? ''];
+    attachments.push({
+      filename,
+      ...(mime === undefined || !filename.includes('.') ? {} : { mime }),
+      base64: Buffer.from(bytes).toString('base64'),
+    });
+  }
+  return attachments;
 }

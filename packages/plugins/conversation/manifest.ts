@@ -55,6 +55,7 @@ import {
   FerretStopping,
   FILES_SEARCH_SLOT,
   LaunchParts,
+  OpeningAttachments,
   SitrepLines,
 } from '@ferretry/core-ferrets/contract';
 
@@ -351,6 +352,8 @@ export default definePlugin({
       { hook: FerretStopping },
       // What a launch says about hypermedia: only a switch the owner set (a ferret with none keeps its mode default).
       { hook: LaunchParts },
+      // The files a start was given (`fy start -f`): this plugin owns attachments, so it plans them.
+      { hook: OpeningAttachments },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

@@ -8,7 +8,14 @@ import {
   LoginKindKeySchema,
   RunnerKeySchema,
 } from './ids.ts';
-import type { Harness, LaunchPartSource, LoginKind, Runner, SitrepLineSource } from './kinds.ts';
+import type {
+  Harness,
+  LaunchPartSource,
+  LoginKind,
+  OpeningAttachmentsSource,
+  Runner,
+  SitrepLineSource,
+} from './kinds.ts';
 
 /** The hooks Ferrets offers (§3.5 table). Taker lists on the security path are reviewed changes. */
 
@@ -35,6 +42,15 @@ export const Logins = defineHook('logins', {
 
 /** Lessons, MCP, Skills, Shells add to every launch. Any plugin may take it. */
 export const LaunchParts = defineHook('launch.parts', { mode: 'contribute', item: z.custom<LaunchPartSource>() });
+
+/**
+ * Whoever owns attachments plans the files a start was given (`fy start -f`). The first contribution answers; with none a
+ * start that carries attachments is refused rather than started without them.
+ */
+export const OpeningAttachments = defineHook('opening.attachments', {
+  mode: 'contribute',
+  item: z.custom<OpeningAttachmentsSource>(),
+});
 
 /** What `start.decide` takers are asked: a ferret is about to start. The first no wins, with its reason. */
 export const StartDecideInputSchema = z.strictObject({

@@ -52,6 +52,22 @@ const NonNegativeIntegerSchema = z.number().int().nonnegative();
 const PositiveIntegerSchema = z.number().int().positive();
 
 /**
+ * One file attached to a start's opening message (today's `fy start -f`, `protocol/src/lib/session.ts`
+ * `StartSessionBaseSchema.initialAttachments`, unchanged): the bytes travel INLINE as base64 in the start body, read by the
+ * CLI on the caller's machine. The count and size bounds are the receiving Conversation's (its `decodeInitialAttachments`:
+ * sixteen files, 32 MiB decoded in all), as today's daemon's were; the schema states the shape only.
+ */
+export const InitialAttachmentSchema = z.strictObject({
+  filename: z.string().min(1),
+  mime: z.string().min(1).optional(),
+  base64: z
+    .string()
+    .min(1)
+    .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u),
+});
+export type InitialAttachment = z.infer<typeof InitialAttachmentSchema>;
+
+/**
  * How a ferret is started beyond who and where: today's `StartSessionBaseSchema` fields (and `fy new`'s model
  * routing) that are not the ferret's identity. Every field is optional and bounded as today. Ferrets records them in
  * the ferret's `details.json` and shows `model`, `card` and `title` in its summary; the harness, runner and
@@ -91,6 +107,12 @@ export const StartOptionsSchema = z.strictObject({
   remoteControl: z.boolean().optional(),
   /** With a name: take a free callsign instead of failing when the name is held. */
   teammateFallback: z.boolean().optional(),
+  /**
+   * Files attached to the opening message (`start -f`). A start's own request only: the start hands them to the
+   * attachment owner and writes none into the ferret's `details.json` (that file omits this member), so the bytes live
+   * only in the ferret's own `attachments/` folder.
+   */
+  initialAttachments: z.array(InitialAttachmentSchema).optional(),
 });
 export type StartOptions = z.infer<typeof StartOptionsSchema>;
 

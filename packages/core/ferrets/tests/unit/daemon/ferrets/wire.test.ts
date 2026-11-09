@@ -63,6 +63,31 @@ test('a rename needs a name or a title', () => {
   expect(parseRenameBody({ title: 'Fix the thing' })).toEqual({ title: 'Fix the thing' });
 });
 
+test('V-0443 a start body carries initialAttachments into the request options exactly as v4 shaped them, and refuses a malformed one', () => {
+  const file = { filename: 'shot.png', mime: 'image/png', base64: 'iVBORw0K' };
+  expect(parseStartBody({ mode: 'auto', folder: '/work', prompt: 'go', initialAttachments: [file] }).options).toEqual({
+    mode: 'auto',
+    initialAttachments: [file],
+  });
+  // The mime is optional (the CLI states one only for an image).
+  const bare = { filename: 'brief.docx', base64: 'QUJD' };
+  expect(parseStartBody({ folder: '/work', initialAttachments: [bare] }).options?.initialAttachments).toEqual([bare]);
+  const bad: readonly unknown[] = [
+    [{ filename: '', base64: 'QUJD' }],
+    [{ filename: 'a.png', base64: '' }],
+    [{ filename: 'a.png', base64: 'not base64!' }],
+    [{ filename: 'a.png', base64: 'QUJ' }],
+    [{ filename: 'a.png', mime: '', base64: 'QUJD' }],
+    [{ filename: 'a.png', base64: 'QUJD', path: '/etc/passwd' }],
+    'shot.png',
+  ];
+  for (const initialAttachments of bad) {
+    const error = refused(() => parseStartBody({ folder: '/work', initialAttachments }));
+    expect(error.status).toBe(400);
+    expect(error.code).toBe('invalid_request');
+  }
+});
+
 test('stop and resume bodies parse strictly: an empty reason or message is refused, empty bodies pass', () => {
   expect(parseStopBody({})).toEqual({});
   expect(parseStopBody({ reason: 'done' })).toEqual({ reason: 'done' });

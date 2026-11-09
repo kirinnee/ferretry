@@ -19,7 +19,14 @@ import { RenameSessionController } from './lib/session/rename-controller.ts';
 import { RevokeCredentialController } from './lib/session/revoke-credential.ts';
 import { SignalSessionController } from './lib/session/signal-controller.ts';
 import { StartSessionController } from './lib/session/start-controller.ts';
-import { promptFilePath, promptWith, readPromptFile, requestIdOf } from './lib/session/start-inputs.ts';
+import {
+  attachmentPaths,
+  promptFilePath,
+  promptWith,
+  readAttachments,
+  readPromptFile,
+  requestIdOf,
+} from './lib/session/start-inputs.ts';
 import { START_FLAGS_ELSEWHERE } from './lib/session/start-request.ts';
 import { SessionStatusController } from './lib/session/status-controller.ts';
 import { SessionSubtreeController } from './lib/session/subtree-controller.ts';
@@ -64,17 +71,14 @@ const SESSION_USAGE = [
 
 /**
  * The flags of `fy new` that are not Ferrets' start: continuing an existing conversation (`--continue`, `--since`)
- * and where it compacts are the Conversation's, a scratch-folder override is not a field of the start, and a start's idempotency key is `fy start`'s alone. The model routing (`--model`, `--effort`, `--auto`), `--card` and
+ * and where it compacts are the Conversation's, a scratch-folder override is not a field of the start, and a start's idempotency key and attachments are `fy start`'s alone. The model routing (`--model`, `--effort`, `--auto`), `--card` and
  * `--name <title>` are sent with the start.
  */
-const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id'];
-
-/** The short spelling a refused flag is also typed under (`-f` for `--file`). */
-const SHORT_SPELLINGS: Readonly<Record<string, readonly string[]>> = { file: ['f'] };
+const NEW_FLAGS_ELSEWHERE = ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id', 'file'];
 
 /** Refuses, by name, a typed flag whose value has no field in Ferrets' routes. */
 function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], verb: string): void {
-  const found = names.filter(name => typed(invocation, name, ...(SHORT_SPELLINGS[name] ?? [])));
+  const found = names.filter(name => typed(invocation, name));
   if (found.length > 0)
     throw new SessionCommandError(
       `${found.map(name => `--${name}`).join(', ')}: not taken by \`${BINARY} ${verb}\` in this version of Ferretry (another plugin decides it now)`,
@@ -90,7 +94,7 @@ function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], v
  * folder `fy` was run in unless `--cwd` names another.
  */
 export default implementCli(manifest, {
-  build({ client, io: terminal, env, clock, sleep, exists, readText }) {
+  build({ client, io: terminal, env, clock, sleep, exists, readText, readBytes }) {
     const api = new ClientSessionApi(client);
     const environment: SessionEnvironment = { cwd: process.cwd() };
 
@@ -148,6 +152,13 @@ export default implementCli(manifest, {
           filePath === undefined
             ? joined(invocation.args)
             : promptWith(role, joined(invocation.args), await readPromptFile(filePath, readText));
+        // `-f/--file` (start only): files for the opening message, read as bytes here and sent inline.
+        const filePaths = role === 'start' ? attachmentPaths(invocation) : [];
+        if (filePaths.length > 0 && prompt === undefined)
+          throw new SessionCommandError(
+            'attachments belong to an opening message: give a prompt (arguments and/or --prompt-file), or start bare without -f',
+          );
+        const initialAttachments = await readAttachments(filePaths, readBytes);
         const auto = role === 'new' && on(invocation, 'auto');
         // Today's `fy new` refinement: a sub-ferret names its runtime, or lets Ferretry pick one.
         if (role === 'new' && auto && agent !== undefined)
@@ -191,6 +202,7 @@ export default implementCli(manifest, {
           ...(pack === undefined ? {} : { pack }),
           ...(cwd === undefined ? {} : { cwd }),
           ...(prompt === undefined ? {} : { prompt }),
+          ...(initialAttachments.length === 0 ? {} : { initialAttachments }),
           ...(requestId === undefined ? {} : { requestId }),
           ...json(invocation),
         });

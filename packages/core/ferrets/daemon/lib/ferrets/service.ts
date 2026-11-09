@@ -40,6 +40,7 @@ import type {
   HarnessKey,
   LaunchPart,
   LaunchPartSource,
+  OpeningAttachmentsSource,
   LaunchSpec,
   ManagedWorktreeSummary,
   PackId,
@@ -51,6 +52,7 @@ import type {
   SitrepLineSource,
   StartDecideInput,
   StartFailure,
+  StartOptions,
   StartRequest,
 } from '../../../contract/index.ts';
 import { claimStartName, displayAgentName, type SessionNameClaims } from '../names/session-names.ts';
@@ -141,6 +143,8 @@ export interface FerretsPorts {
   runner(): Runner | undefined;
   decide(input: StartDecideInput): Promise<HookDecision>;
   launchParts(): readonly LaunchPartSource[];
+  /** Who plans the files a start was given (`start -f`); unbound or empty: a start that carries attachments is refused. */
+  openingAttachments?(): readonly OpeningAttachmentsSource[];
   sitrepSources(): readonly SitrepLineSource[];
   instructions(): readonly InstructionEntry[];
   /** The folder fenced by the kernel's `work` root, or why not. */
@@ -250,6 +254,18 @@ export interface FerretSessionPort {
    */
   assign?(ferret: FerretId, prompt: string): Promise<string>;
   /**
+   * Additive (`start -f`, today's `initialAttachments`): the absolute path of THIS ferret's own `attachments/` folder
+   * (one of `FERRET_READABLE_FOLDERS`), where the attachment owner plans the opening message's files. Names the path only;
+   * the folder is made by {@link attach}. Unbound: a start that carries attachments is refused.
+   */
+  attachmentsFolder?(ferret: FerretId): Promise<string>;
+  /**
+   * Additive: writes the planned files into the ferret's own `attachments/` folder (made `0700`; each file `0600`, through a
+   * temporary name), after `prepare` and before `assign`, so the task document never names a file that is not there. A
+   * `name` is a bare file name; one that names a path is refused.
+   */
+  attach?(ferret: FerretId, files: readonly OpeningFile[]): Promise<void>;
+  /**
    * The effect ledger's admission of the ONE first turn a start may type (today's `turn-1` effect, keyed beneath the
    * ferret and fingerprinted by its assigned task), asked by the runner immediately before its first write into the
    * pane: `perform` types it, `settled` is a replay that types nothing, `conflict` or `unsettled` refuses. Bound
@@ -290,6 +306,12 @@ export interface FerretSessionPort {
    * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
    */
   questionFile?(ferret: FerretId): Promise<FencedPath>;
+}
+
+/** One file of a start's opening attachments, as the ferret's `attachments/` folder holds it. */
+export interface OpeningFile {
+  readonly name: string;
+  readonly contents: Uint8Array | string;
 }
 
 /** What a revive's turn is made from: the message (none: the mode's default), the ferret's mode and who asked. */
@@ -621,6 +643,47 @@ export class FerretsService implements FerretsApi {
     return ok(name);
   }
 
+  /**
+   * The opening message a start hands its ferret (today's `composeOpeningMessage`): the prompt itself, or, when the start
+   * carried files (`start -f`), the prompt followed by the section the attachment owner words, with the files to write
+   * first. Planned BEFORE the first write of a start, so a refusal (no owner for attachments, nothing to attach them to,
+   * too many files, a file too large, an unsafe name) leaves nothing behind and gives the callsign back. Attachments
+   * with no opening message are refused rather than invented into one: there would be no document for them to live in.
+   */
+  private async openingFor(
+    id: FerretId,
+    prompt: string | undefined,
+    attachments: StartOptions['initialAttachments'],
+  ): Promise<Result<{ readonly prompt: string | undefined; readonly files: readonly OpeningFile[] }, StartFailure>> {
+    if (attachments === undefined || attachments.length === 0) return ok({ prompt, files: [] });
+    if (prompt === undefined || prompt.trim() === '')
+      return failed(
+        'refused',
+        'attachments belong to an opening message: start with a prompt, or start bare without files',
+      );
+    const source = this.ports.openingAttachments?.()[0];
+    const session = this.ports.session;
+    if (source === undefined || session?.attachmentsFolder === undefined || session.attach === undefined)
+      return failed('refused', 'this daemon cannot take attachments with a start: the plugin that owns them is off');
+    let directory: string;
+    try {
+      directory = await session.attachmentsFolder(id);
+    } catch {
+      return failed('failed', "this ferret's attachments folder could not be named, so it was not started");
+    }
+    const planned = source.plan({ attachments, directory });
+    if (!planned.ok) return failed('refused', planned.error);
+    const files: OpeningFile[] = [];
+    for (const planFile of planned.value.files) {
+      // Every planned file lies DIRECTLY in the folder named: a name that climbs out of it, or into a sub-folder, is refused.
+      const name = posix.relative(directory, planFile.file);
+      if (name === '' || name === '..' || posix.isAbsolute(name) || name.includes('/'))
+        return failed('refused', "an attachment would be written outside the ferret's attachments folder");
+      files.push({ name, contents: planFile.contents });
+    }
+    return ok({ prompt: `${prompt}\n${planned.value.section}`, files });
+  }
+
   private async startNamed(id: FerretId, name: string, request: StartRequest): Promise<Result<FerretId, StartFailure>> {
     // A work folder replaces the folder the ferret works in; it is canonical and goes through the same folder check.
     const anchor = this.ports.folder(request.folder);
@@ -649,8 +712,12 @@ export class FerretsService implements FerretsApi {
     });
     // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
     if (!decision.allow) return refusedBy(decision);
+    // The opening message with its attachments planned, still before the first write: a refusal leaves nothing behind.
+    const opening = await this.openingFor(id, request.prompt, request.options?.initialAttachments);
+    if (!opening.ok) return opening;
     if (request.options !== undefined) {
-      const { title, ...options } = request.options;
+      // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
+      const { title, initialAttachments: _attached, ...options } = request.options;
       await this.saveDetails(id, {
         ...(Object.keys(options).length === 0 ? {} : { options }),
         ...(title === undefined ? {} : { title }),
@@ -689,7 +756,14 @@ export class FerretsService implements FerretsApi {
         ...(request.options?.label === undefined ? {} : { label: request.options.label }),
         ...(request.options?.card === undefined ? {} : { card: request.options.card }),
       });
-      return await this.launch(record, request.prompt, record.harnessConversation, 'start');
+      return await this.launch(
+        record,
+        opening.value.prompt,
+        record.harnessConversation,
+        'start',
+        undefined,
+        opening.value.files,
+      );
     });
   }
 
@@ -1357,13 +1431,14 @@ export class FerretsService implements FerretsApi {
     conversation: string | undefined,
     kind: 'start' | 'resume',
     revive?: ReviveTurnRequest,
+    attached: readonly OpeningFile[] = [],
   ): Promise<Result<FerretId, StartFailure>> {
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
     let turn: PendingTurn | undefined;
     try {
-      const session = await this.sessionStep(record, kind, prompt, revive);
+      const session = await this.sessionStep(record, kind, prompt, revive, attached);
       if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
       turn = session.value;
       runner = this.ports.runner();
@@ -1512,6 +1587,7 @@ export class FerretsService implements FerretsApi {
     kind: 'start' | 'resume',
     prompt: string | undefined,
     revive: ReviveTurnRequest | undefined,
+    attached: readonly OpeningFile[] = [],
   ): Promise<Result<PendingTurn | undefined, StartFailure>> {
     const session = this.ports.session;
     if (session === undefined) return ok(undefined);
@@ -1521,6 +1597,14 @@ export class FerretsService implements FerretsApi {
       return failed('failed', "the ferret's private session folder could not be made private, so it was not started");
     }
     if (kind === 'start') {
+      // The opening attachments are on disk before the task that names them (their folder is the ferret's own, `0700`).
+      if (attached.length > 0)
+        try {
+          if (session.attach === undefined) throw new Error('no attachment writer is bound');
+          await session.attach(record.id, attached);
+        } catch {
+          return failed('failed', "this ferret's attachments could not be written, so it was not started");
+        }
       // The assigned task is on disk before the stamp, so the session document counts the turn the ferret holds.
       let first: PendingTurn | undefined;
       if (prompt !== undefined && prompt.trim() !== '' && session.assign !== undefined)
