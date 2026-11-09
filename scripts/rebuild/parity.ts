@@ -1670,6 +1670,9 @@ for (const row of rows.sort((a, b) => rowKey(a).localeCompare(rowKey(b)))) {
   row.id = old?.id ?? `${row.kind}-${String(next[row.kind]++).padStart(4, '0')}`;
   if (old && !row.status.startsWith('removed by design') && !old.status.startsWith('removed by design'))
     row.status = old.status;
+  // A route ticked `[x]` names the route test that proves it (parity-ticks); the generator's default is only the check
+  // a port must add, so a test path someone wrote survives regeneration.
+  if (old && row.kind === 'R' && old.check !== 'descriptor-parity') row.check = old.check;
   unique.set(key, row);
 }
 const inventory = [...unique.values()].sort(
