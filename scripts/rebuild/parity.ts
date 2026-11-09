@@ -347,6 +347,50 @@ const REOWNED: Readonly<Record<string, string>> = {
   'R-0424': 'ferrets',
   // The open-url route is served by Browsers (daemon/open-url/routes.ts).
   'R-0401': 'browsers',
+  // britnee ruling D6 (2026-11-09): the kernel-filed rows whose behaviour another plugin owns in 5.0 are RE-OWNED, not
+  // removed; each stays `[ ]` until its owner ticks it with a test. None of them is "removed by design".
+  // The staged-file sweep is the agent browser's own upload copies (browsers/daemon/tools/adapters/staged-files.ts).
+  'J-0008': 'browsers',
+  'J-0097': 'browsers',
+  'J-0126': 'browsers',
+  // Auto-resume, the session attachments (the PDF unlock worker and the unlocked copy's eviction), the inline observer,
+  // the fleet event socket's timer, the send pause and the write-behind session index: Ferrets'.
+  'J-0016': 'ferrets',
+  'J-0062': 'ferrets',
+  'J-0193': 'ferrets',
+  'J-0106': 'ferrets',
+  'J-0137': 'ferrets',
+  'J-0140': 'ferrets',
+  'J-0159': 'ferrets',
+  // The board sweeps and the GitHub watcher are Board's.
+  'J-0019': 'board',
+  'J-0025': 'board',
+  'J-0065': 'board',
+  // The catalog members' sweep and the member join gate's timer are Catalogs'.
+  'J-0022': 'catalogs',
+  'J-0136': 'catalogs',
+  // The agent clearer's sweep and the agenda's nudge timer are Agenda's.
+  'J-0009': 'agenda',
+  'J-0134': 'agenda',
+  // The fleet refresh pass and the fleet reading's timer keep a credential's usage current: Logins' (as J-0232 to J-0234).
+  'J-0067': 'logins',
+  'J-0068': 'logins',
+  'J-0135': 'logins',
+  // The cgroup read is Terminals' user-slice check; the package install is Runtimes' tool install.
+  'J-0168': 'terminals',
+  'J-0125': 'runtimes',
+  // The Codex runtime's credential link inside its home, and the no-questions import verb: Runtimes'.
+  'F-0079': 'runtimes',
+  'V-0232': 'runtimes',
+  // The machine screens the kernel has no app half for: each drawn by the plugin or shell that owns it.
+  'S-0107': 'access',
+  'S-0223': 'accounts',
+  'S-0370': 'app',
+  'S-0381': 'app',
+  'S-0371': 'conversation',
+  'S-0382': 'catalogs',
+  'S-0373': 'onboarding',
+  'V-0241': 'onboarding',
 };
 
 const SHELL_DAEMON_VERBS: ReadonlySet<string> = new Set([
