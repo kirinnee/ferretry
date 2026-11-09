@@ -34,6 +34,7 @@ import { INSTRUCTION_ITEMS_FOLDER } from '@ferretry/core-ferrets/contract';
 import { lstat, readFile } from 'node:fs/promises';
 import { componentFileSource, instructionsSource, MAX_COMPONENT_BYTES } from './component-files.ts';
 import { carryFlags, type FlagOutcome } from './component-flags.ts';
+import { carryAssetReferences, type CarriedAsset, v5AssetPath } from './component-assets.ts';
 import { join } from 'node:path';
 import { Document, isMap, isScalar, isSeq, Pair, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
@@ -162,6 +163,8 @@ interface Uncarried {
 interface Plan {
   readonly files: Map<string, Planned>;
   readonly instructions: { readonly name: string; readonly source: string; readonly from: string }[];
+  /** Files under v4's `fleet/assets/` that a carried hooks or settings document points at, by path under it. */
+  readonly assets: Map<string, CarriedAsset>;
   readonly waiting: string[];
   readonly dropped: NotCarried[];
   readonly kept: Map<string, number>;
@@ -593,6 +596,16 @@ async function planHarnessComponent(
     if (Object.keys(settings).length > 0) body = { settings };
   }
 
+  // A string that names a file under v4's fleet/assets is rewritten to the v5 copy (component-assets.ts); any other
+  // string that names the v4 home holds the component.
+  let assets: readonly CarriedAsset[] = [];
+  if (Object.keys(body).length > 0) {
+    const carried = await carryAssetReferences(ctx, body);
+    body = carried.value as Record<string, unknown>;
+    assets = carried.assets;
+    entry.reasons.push(...carried.reasons);
+  }
+
   if (Object.keys(body).length > 0) {
     const secrets = [...rawSecretPaths(body), ...credentialShaped(body)];
     if (secrets.length > 0)
@@ -610,6 +623,11 @@ async function planHarnessComponent(
     if (problem === undefined) {
       place(plan, target, name, label, item);
       count(plan, kind === 'settings' ? 'settings items' : 'hooks items');
+      for (const asset of assets)
+        if (!plan.assets.has(asset.rel)) {
+          plan.assets.set(asset.rel, asset);
+          count(plan, `component file ${v5AssetPath(asset.rel)}`);
+        }
       return;
     }
     entry.reasons.push(`v5 refuses it as ${kind} (${problem})`);
@@ -715,6 +733,7 @@ export async function buildPlan(
   const plan: Plan = {
     files: new Map(),
     instructions: [],
+    assets: new Map(),
     waiting: [],
     dropped: [],
     kept: new Map(),
@@ -886,6 +905,12 @@ export const settingsStep: Step = {
         });
         await ctx.v5.opaque(join('config', INSTRUCTION_ITEMS_FOLDER, `${item.name}.md`), bytes);
         count(plan, 'instruction documents');
+      }
+      for (const asset of plan.assets.values()) {
+        const bytes = await readFile(asset.source).catch(() => {
+          throw new V4InputError(`fleet/assets/${asset.rel}: a file a hook points at cannot be read`);
+        });
+        await ctx.v5.opaque(v5AssetPath(asset.rel), bytes, asset.mode);
       }
     } catch (error) {
       // Nothing was finished, so no key is sealed for a file that was never written.
