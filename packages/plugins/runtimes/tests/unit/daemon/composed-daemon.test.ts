@@ -17,7 +17,7 @@ import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
-import { RuntimesPort } from '../../../contract/index.ts';
+import { RuntimeHomeUnreadable, RuntimesPort } from '../../../contract/index.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
@@ -773,5 +773,31 @@ describe('the homes the composed daemon provides', () => {
     // A second ask after the first still answers: the service is built once and keeps what it listed.
     expect(port.home(HOME_ID)).toBeDefined();
     expect(port.home('00000000-0000-4000-8000-0000000000ff')).toBeUndefined();
+  });
+
+  it('BG-033 n2 a fleet root that cannot be opened: homes() rejects with the typed refusal and home(id) answers undefined', async () => {
+    const world = await fleetWorld();
+    const host = await testHost({
+      plugins: [runtimesDaemon(brokenFleet(world.roots)) as DaemonImplementation<any>],
+      fakes: {
+        ferrets: new FakeFerrets(),
+        logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
+        loginChanges: fakeLoginChanges(),
+      },
+      gate: new StandInAdmission(() => ownerStanding()),
+      config: CONFIG,
+      ownerHome: world.person,
+    });
+    const port = host.provided(RuntimesPort);
+
+    const failure = await port.homes().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(RuntimeHomeUnreadable);
+    expect((failure as Error).message).toBe('The fleet folder could not be opened.');
+    // `home()` is `RuntimeHomeReader | undefined`: it never throws, not even on the first call.
+    expect(() => port.home(HOME_ID)).not.toThrow();
+    expect(port.home(HOME_ID)).toBeUndefined();
   });
 });
