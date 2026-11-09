@@ -10,8 +10,9 @@ import { captureLog, manualClock, updatesDef } from '../../unit/host-config/supp
  * A config file the kernel cannot read (over the 256 KiB cap, a link, a directory, a FIFO)
  * reads as `absent` to the etag and to the load. A write, an owner's write, a removal or a set pinned `ifMatch: 'absent'`
  * (or pinned to nothing) must therefore REFUSE it, in the sentence a set's refusal says, and leave it exactly as it was —
- * on a real disk, through the real service. A non-UTF-8 file is deliberately NOT here: it is still read (decoded with
- * U+FFFD) and a write over it lands; refusing it changes a valid read, so it is reported, not done.
+ * on a real disk, through the real service. A non-UTF-8 file is still READ (decoded with U+FFFD, its etag unchanged), but
+ * every WRITE over it is refused in its own sentence (BG-005), because saving would replace bytes nobody edited; a
+ * removal replaces nothing, so it is not refused.
  */
 const homes: string[] = [];
 afterEach(async () => {
@@ -95,6 +96,98 @@ async function setSentence(kase: Case): Promise<string> {
   if (outcome.kind !== 'refused' || outcome.reason !== 'unreadable') throw new Error('the set did not refuse the file');
   return outcome.issues[0]?.message ?? '';
 }
+
+/** `limit: 5`, a Latin-1 é (a lone 0xE9, not UTF-8) in a comment: it reads, and any save would turn that byte into U+FFFD. */
+const LATIN1 = Buffer.concat([Buffer.from('# caf'), Buffer.from([0xe9]), Buffer.from('\nlimit: 5\n')]);
+const NOT_UTF8 = 'updates.yaml is not UTF-8: saving would change bytes you did not edit; nothing was written';
+
+async function latin1World() {
+  const home = await mkdtemp(join(tmpdir(), 'fy-kernel-not-utf8-'));
+  homes.push(home);
+  await mkdir(join(home, 'config'), { recursive: true });
+  const path = join(home, 'config', 'updates.yaml');
+  await writeFile(path, LATIN1);
+  const files = createConfigFiles({
+    home,
+    fs: createNodeHostFs(),
+    clock: manualClock(),
+    log: captureLog(),
+    binary: 'fy',
+    defs: [{ plugin: 'updates', def: updatesDef }],
+  });
+  await files.reload();
+  const bytes = async () => (await readFile(path)).toString('hex');
+  return { files, port: files.port('updates'), path, bytes, before: LATIN1.toString('hex') };
+}
+
+const refusedAs = (outcome: { readonly kind: string }, sentence = NOT_UTF8): void => {
+  expect(outcome.kind).toBe('refused');
+  const said = outcome as { reason?: string; issues?: readonly { message: string }[] };
+  expect(said.issues?.[0]?.message).toBe(sentence);
+};
+
+describe('BG-005 a config write refuses a file that is not UTF-8, and leaves its bytes as they were', () => {
+  test('it still READS: in effect, state ok, with the etag of the decoded text', async () => {
+    const { files, port } = await latin1World();
+    expect(files.status().files).toEqual([{ path: 'updates.yaml', plugin: 'updates', state: 'ok' }]);
+    expect((port.file(updatesDef) as { limit: number }).limit).toBe(5);
+    expect(await port.etag(updatesDef, undefined)).not.toBe('absent');
+  });
+
+  for (const pin of ['etag', undefined] as const) {
+    const label = pin === undefined ? 'no ifMatch' : 'the etag it reads with';
+    test(`the plugin's write (a whole text and a patch), ${label}, is refused`, async () => {
+      const { port, bytes, before } = await latin1World();
+      const ifMatch = pin === undefined ? {} : { ifMatch: await port.etag(updatesDef, undefined) };
+      for (const edit of ['limit: 7\n', { patch: { limit: 7 } }]) {
+        refusedAs(await port.write(updatesDef, undefined, edit, ifMatch));
+      }
+      expect(await bytes()).toBe(before);
+    });
+  }
+
+  test('the owner’s write is refused, with no edit held', async () => {
+    const { files, port, bytes, before } = await latin1World();
+    refusedAs(await port.writeAsOwner(updatesDef, undefined, { patch: { limit: 7 } }));
+    const raw = await files.writeAsOwner('updates', updatesDef, undefined, { patch: { limit: 7 } });
+    expect(raw.kind === 'refused' && raw.reason).toBe('unreadable');
+    expect(await bytes()).toBe(before);
+  });
+
+  test('the service’s own write is refused with the unreadable reason', async () => {
+    const { files, bytes, before } = await latin1World();
+    const raw = await files.write('updates', updatesDef, undefined, 'limit: 7\n');
+    expect(raw.kind === 'refused' && raw.reason).toBe('unreadable');
+    expect(await bytes()).toBe(before);
+  });
+
+  test('a set that writes it is refused, and nothing in the set is written', async () => {
+    const { port, bytes, before } = await latin1World();
+    const outcome = await port.writeAll([{ def: updatesDef, edit: 'limit: 7\n' }]);
+    expect(outcome.kind === 'refused' && outcome.reason).toBe('unreadable');
+    expect(JSON.stringify(outcome)).toContain(NOT_UTF8);
+    expect(await bytes()).toBe(before);
+  });
+
+  test('the owner’s held-edit path: a held removal, the file made not UTF-8 before the next reload, then the owner writes', async () => {
+    const { files, path } = await latin1World();
+    // Make a held removal first: a readable file at the same path (limit 5 → the default 10 loosens, so it is held).
+    await writeFile(path, 'limit: 5\n');
+    await files.reload();
+    expect((await files.remove('updates', updatesDef, undefined)).kind).toBe('held');
+    await writeFile(path, LATIN1);
+    const outcome = await files.writeAsOwner('updates', updatesDef, undefined, { patch: { limit: 7 } });
+    expect(outcome.kind === 'refused' && outcome.reason).toBe('unreadable');
+    expect(outcome.kind === 'refused' && outcome.issues[0]?.message).toBe(NOT_UTF8);
+    expect((await readFile(path)).toString('hex')).toBe(LATIN1.toString('hex'));
+  });
+
+  test('a removal is not refused: it replaces no byte', async () => {
+    const { port } = await latin1World();
+    // limit 5 → the default 10 loosens, so the removal is held for the owner: judged like any removal, not refused
+    expect((await port.remove(updatesDef, undefined)).kind).toBe('held');
+  });
+});
 
 describe('BG-012 m-1: the owner’s held-edit path refuses a target that became unreadable after the edit was held', () => {
   for (const kase of CASES) {

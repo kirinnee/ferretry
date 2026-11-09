@@ -33,7 +33,12 @@ export interface AcceptedConfig {
 export const ABSENT_CONFIG_ETAG = 'absent';
 
 export type DiskState =
-  | { readonly kind: 'text'; readonly text: string }
+  | {
+      readonly kind: 'text';
+      readonly text: string;
+      /** Its bytes are not UTF-8 (read with U+FFFD for them): a write over it would change bytes nobody edited. */
+      readonly lossy?: true;
+    }
   /** A link, or larger than a configuration file may be: never read, its last good version stays. */
   | { readonly kind: 'unreadable' }
   | { readonly kind: 'absent' };
