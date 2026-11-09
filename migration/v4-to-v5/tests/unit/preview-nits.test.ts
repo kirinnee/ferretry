@@ -1,7 +1,7 @@
 /**
  * Preview nits (round 13): the Packs and Lessons steps read a held file through the in-memory override, the enforced pass
  * reads no overridden file from disk, the failure note keeps the inner cause, the login sentence is accurate, and the
- * key digest is keyed per run. Every key here is made up, in a temp folder.
+ * key digest is keyed per process. Every key here is made up, in a temp folder.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { acceptedName } from '@ferretry/kernel/contract';
@@ -126,6 +126,21 @@ test('a login held for another key says the enforced file would name a different
   const item = accepted(report)?.notCarried.find(n => n.what.includes('config/logins/work.yaml'));
   expect(item?.why).toContain('a different value, a different name, or none');
   expect(JSON.stringify(report).includes(KEY) || JSON.stringify(report).includes(OLD_KEY)).toBe(false);
+});
+
+test('the login-key digest is in no report and no written file', async () => {
+  await put('config/logins/work.yaml', login(KEY));
+  await accept({ 'logins/work.yaml': login(OLD_KEY) });
+  const report = await run();
+  // The digest has the `NAME:<64 hex>` ledger shape; neither it nor any 64-hex run follows a name in the report.
+  expect(JSON.stringify(report)).not.toMatch(/[:=][0-9a-f]{64}/u);
+  const held = new LoginKeyHold();
+  held.add({ login: 'work', variable: 'ANTHROPIC_API_KEY', name: 'LOGIN_WORK_ANTHROPIC_API_KEY' }, KEY);
+  for (const entry of await readdir(f.to, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const body = await readFile(join(entry.parentPath, entry.name), 'utf8').catch(() => '');
+    expect(body.includes(held.fingerprint('work'))).toBe(false);
+  }
 });
 
 test('the key digest is keyed: it is no plain SHA-256 of the key, and the same key digests the same within a run', () => {

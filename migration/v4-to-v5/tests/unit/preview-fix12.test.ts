@@ -93,7 +93,7 @@ const STEPS = [settingsStep, vaultStep, loginKeysStep, acceptedConfigStep];
 test('MAJOR-1 the enforced pass writes no copy of a v4 file: a plain key in a held and an unheld login is found nowhere on disk', async () => {
   await put('config/logins/work.yaml', login(KEY, "  EXTRA_FLAG: 'on'\n")); // held: v4 enforced the older text
   await put('config/logins/home.yaml', login(HOME_KEY)); // unheld
-  await put('config/voice.yaml', 'x: 2\n'); // held, never accepted
+  await put('config/pack.yaml', 'x: 2\n'); // held, never accepted
   await accept({ 'logins/work.yaml': login(KEY), 'logins/home.yaml': login(HOME_KEY) });
   const before = new Set(await readdir(tmpdir()));
   const { result: report, root } = await withUnwritableTemp(() => run(STEPS));
@@ -159,6 +159,8 @@ test('MINOR-1 a held file and the conversion not available at all: the step fail
 test('the dry pass runs exactly the steps that write config (behavioural: any writer, aliased or not)', async () => {
   // Every step runs once on a fixture that gives each config writer something to write; a spy on the writer's `config`
   // records which step called it, however the step reached the writer (an alias, a helper module).
+  // Known limits (accepted): it only sees a step whose fixture triggers a config write (a step that writes config only
+  // under a condition this fixture lacks escapes), and a step that builds its own writer instead of using `ctx.v5`.
   await put('layout-version', '2\n');
   await put('config/machine.yaml', 'timeZone: Europe/Berlin\n');
   await put('config/pack.yaml', 'enabled: true\n');
