@@ -13,8 +13,8 @@ const GUTTER = /[\s─-▟⎿⏺•›❯>]/u;
 
 /**
  * The most characters of one screen the masker takes. A screen is masked WHOLE or not at all (a value cut by a limit
- * would escape the mask), and the masking reads the screen several times over (up to six readings, then the whole
- * screen once more: 500 dense values on a 200×2000 screen took about 0.8 s of the main thread here), so a screen past
+ * would escape the mask), and the masking reads the screen several times over (up to six readings, then each marked
+ * row once more, then the whole screen once more:500 dense values on a 200×2000 screen took about 0.8 s of the main thread here), so a screen past
  * this is refused. A real pane is far under it (400 columns by 200 rows is 80,000). The cap bounds a screen's size,
  * not the time to mask it: that is the screen's size times the Vault's size, and bringing a dense look down toward the
  * ~5 ms slice would take a cap of a few thousand characters, which WOULD refuse ordinary panes.
