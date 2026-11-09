@@ -1,26 +1,145 @@
 /**
- * `parity-ticks`: a `[x]` in `docs/design/rebuild-parity.tsv` means a test (or, for a route, descriptor-parity) proves
- * the row. It fails when a ticked row
- *   - has an empty check cell, or a check path that does not exist;
- *   - (not a route) has a check FILE that never mentions the row id (`F-0019`), so the file cannot be the row's test;
- *   - (a route) is not proven by descriptor-parity: today's route exists in 5.0 with the same method and path and no
- *     unrecorded difference, or moved to another path with both halves recorded in descriptor-parity-changes.tsv and
- *     the same descriptor fields.
- * `parity-ticks-known.tsv` (`id<TAB>reason`) lists rows that fail today and are being fixed; each is skipped, and an
- * entry whose row passes (or is no longer ticked) fails so the list can only shrink.
+ * `parity-ticks`: a `[x]` in `docs/design/rebuild-parity.tsv` means a TEST proves the row, never a declaration. For every
+ * ticked row, of any kind, it fails when
+ *   - the check cell is not a regular `*.test.ts` / `*.test.tsx` file under a `tests/` folder;
+ *   - the row id is in no LIVE `test(` / `it(` / `describe(` title of that file (parsed; a comment, a string elsewhere,
+ *     or a title under `.skip` / `.todo` / `.only` / `.failing`, or inside such a describe, does not count);
+ *   - results are given (`--results <junit.xml|folder>`, as `guarantees` takes them, with `--tier unit|int`) and the
+ *     id-titled test did not PASS in them. Without results it says so and passes that part;
+ *   - (a route) descriptor-parity does not ALSO prove it: today's route is at the same path or moved (both halves
+ *     recorded) and every field that differs is a recorded tightening (minimum up, caller any → person, a capability,
+ *     `noStore`, `privilegedOnly` or a `catalog` resolver added). A record never blesses a loosening.
+ * `parity-ticks-known.tsv` (`id<TAB>reason`) lists rows that fail today. The ids it may hold are PINNED in
+ * `FROZEN_IDS` below: an id not in that set fails, so the list can only shrink; an entry whose row passes (or is no
+ * longer ticked) fails too.
  *
- *   bun scripts/validate/parity-ticks.ts
+ *   bun scripts/validate/parity-ticks.ts [--results <junit.xml|folder>] [--tier unit|int]
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { COMPARED, type DescriptorRow, parity, rowsOf } from '../../packages/core/kernel/testing/parity.ts';
-import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
-import { PARITY_CHANGES, TODAY_ROUTES, readChanges } from './descriptor-parity.ts';
-
-const same = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+import {
+  type DescriptorRow,
+  type FieldDiff,
+  fieldDiffs,
+  parity,
+  rowsOf,
+} from '../../packages/core/kernel/testing/parity.ts';
+import { type AstNode, type Check, type Finding, parseFile, runMain, walk } from '../gen/lib/check.ts';
+import { PARITY_CHANGES, TODAY_ROUTES, isTightening, movedPairs, readChanges } from './descriptor-parity.ts';
+import { type JunitCase, inTier, junitCases, resultFiles } from './guarantees.ts';
 
 export const LEDGER = 'docs/design/rebuild-parity.tsv';
 export const KNOWN = 'scripts/validate/parity-ticks-known.tsv';
+
+/** The ids `${KNOWN}` may list. It only shrinks: delete an id here when its row is fixed; never add one. */
+export const FROZEN_IDS: ReadonlySet<string> = new Set([
+  'F-0305',
+  'F-0422',
+  'R-0017',
+  'R-0024',
+  'R-0057',
+  'R-0058',
+  'R-0072',
+  'R-0079',
+  'R-0083',
+  'R-0085',
+  'R-0088',
+  'R-0093',
+  'R-0103',
+  'R-0104',
+  'R-0105',
+  'R-0106',
+  'R-0107',
+  'R-0108',
+  'R-0109',
+  'R-0113',
+  'R-0114',
+  'R-0130',
+  'R-0144',
+  'R-0169',
+  'R-0179',
+  'R-0199',
+  'R-0206',
+  'R-0207',
+  'R-0208',
+  'R-0209',
+  'R-0220',
+  'R-0222',
+  'R-0228',
+  'R-0245',
+  'R-0255',
+  'R-0256',
+  'R-0274',
+  'R-0281',
+  'R-0286',
+  'R-0287',
+  'R-0288',
+  'R-0289',
+  'R-0296',
+  'R-0299',
+  'R-0300',
+  'R-0301',
+  'R-0303',
+  'R-0304',
+  'R-0307',
+  'R-0308',
+  'R-0325',
+  'R-0326',
+  'R-0327',
+  'R-0328',
+  'R-0331',
+  'R-0338',
+  'R-0373',
+  'R-0374',
+  'R-0397',
+  'R-0400',
+  'R-0403',
+  'R-0406',
+  'R-0407',
+  'R-0408',
+  'R-0419',
+  'R-0426',
+  'S-0010',
+  'S-0255',
+  'S-0262',
+  'S-0304',
+  'S-0388',
+  'T-0003',
+  'T-0004',
+  'T-0005',
+  'T-0006',
+  'T-0007',
+  'T-0008',
+  'T-0009',
+  'T-0010',
+  'T-0011',
+  'T-0012',
+  'T-0013',
+  'T-0014',
+  'T-0015',
+  'T-0016',
+  'T-0017',
+  'T-0018',
+  'T-0019',
+  'T-0020',
+  'T-0021',
+  'T-0022',
+  'T-0023',
+  'T-0024',
+  'T-0025',
+  'T-0026',
+  'T-0027',
+  'T-0028',
+  'T-0029',
+  'T-0030',
+  'T-0031',
+  'V-0293',
+  'V-0295',
+  'V-0297',
+  'V-0301',
+  'V-0302',
+  'V-0452',
+]);
 
 export interface LedgerRow {
   readonly id: string;
@@ -75,87 +194,182 @@ export function routeWorld(
   return { today, next, changes, findings: parity(today, next, changes).findings };
 }
 
-// The words design §1.4 replaced in a path, as the descriptor-parity-changes records name them.
-const RENAMED: Readonly<Record<string, string>> = {
-  sessions: 'ferrets',
-  tasks: 'cards',
-  imports: 'links',
-  learning: 'lessons',
-};
+/** What descriptor-parity says of one route row: proven, or why not (the kind groups the reasons). */
+export interface RouteStatus {
+  readonly kind: 'proven' | 'unrecorded' | 'loosened' | 'missing' | 'unpaired' | 'claimed' | 'no-today';
+  readonly text: string;
+}
 
-const shape = (key: string): string =>
-  key
-    .split('/')
-    .map(part => (part.startsWith(':') ? ':' : (RENAMED[part] ?? part)))
-    .join('/');
+const proven: RouteStatus = { kind: 'proven', text: 'descriptor proven' };
+const showDiffs = (diffs: readonly FieldDiff[]): string =>
+  diffs.map(d => `${d.field} ${d.before} → ${d.after}`).join('; ');
 
-/** `undefined` when descriptor-parity proves the route; otherwise why it cannot. */
-export function routeProblem(row: Pick<LedgerRow, 'what' | 'name5'>, world: RouteWorld): string | undefined {
+/** Judges a differing pair: unrecorded, a recorded loosening, or a recorded tightening (proven). */
+function judge(was: DescriptorRow, now: DescriptorRow, recorded: boolean): RouteStatus {
+  const diffs = fieldDiffs(was, now);
+  if (diffs.length === 0) return proven;
+  if (!recorded) return { kind: 'unrecorded', text: `route changed with no record: ${showDiffs(diffs)}` };
+  const loose = diffs.filter(d => !isTightening(d, was, now));
+  return loose.length === 0
+    ? proven
+    : { kind: 'loosened', text: `a recorded change is not a tightening: ${showDiffs(loose)}` };
+}
+
+export function routeStatus(row: Pick<LedgerRow, 'what'>, world: RouteWorld): RouteStatus {
   const socket = row.what.startsWith('WS ');
   const key = socket ? row.what.slice(3) : row.what;
   const was = world.today.find(
     r => (socket ? r.table === 'socket' : r.table === 'route' || r.table === 'member') && r.key === key,
   );
-  if (was === undefined) return `today's table has no route ${row.what}`;
+  if (was === undefined) return { kind: 'no-today', text: `today's table has no route ${row.what}` };
   const table = was.table;
   const wasKey = `${table}\t${key}`;
   const exact = world.next.find(r => r.table === table && r.key === key);
-  if (exact !== undefined) {
-    const found = world.findings.filter(f => f.where === `${table} ${key}`);
-    return found.length === 0 ? undefined : `route changed with no record: ${found.map(f => f.message).join('; ')}`;
-  }
+  if (exact !== undefined) return judge(was, exact, world.changes.get(wasKey)?.change === 'changed');
   // Not at today's path: it must have moved, both halves recorded, to a path that differs only by params and the
-  // words design §1.4 replaced, with today's descriptor fields.
+  // words design §1.4 replaced.
   const recorded = world.changes.get(wasKey);
-  if (recorded?.change !== 'removed') return `route missing: 5.0 declares no ${table} ${key}`;
-  const wanted = new Set([shape(key), shape(socket ? row.name5.replace(/^WS /, '') : row.name5)]);
-  const moved = world.next.filter(
-    r => r.table === table && wanted.has(shape(r.key)) && world.changes.get(`${table}\t${r.key}`)?.change === 'added',
-  );
-  if (moved.length !== 1) return `route removed in 5.0 (recorded), no single counterpart derivable: ${recorded.reason}`;
-  const now = moved[0] as DescriptorRow;
-  const differs = COMPARED.filter(
-    f =>
-      !(typeof was[f] === 'string' && (was[f] as string).startsWith('unresolved:')) &&
-      !same(was[f] === false ? undefined : was[f], now[f] === false ? undefined : now[f]),
-  );
-  return differs.length === 0 ? undefined : `moved to ${now.key} with a changed descriptor: ${differs.join(', ')}`;
+  if (recorded?.change !== 'removed')
+    return { kind: 'missing', text: `route missing: 5.0 declares no ${table} ${key}` };
+  const { pairs, claimed } = movedPairs(world.today, world.next, world.changes);
+  const pair = pairs.find(p => p.was === was);
+  if (pair === undefined)
+    return {
+      kind: 'unpaired',
+      text: `route removed in 5.0 (recorded), no single counterpart derivable: ${recorded.reason}`,
+    };
+  const now = pair.now;
+  if (claimed.has(`${now.table}\t${now.key}`))
+    return { kind: 'claimed', text: `${now.key} is claimed by more than one removed route` };
+  return judge(was, now, world.changes.get(`${now.table}\t${now.key}`)?.change === 'moved-changed');
 }
 
-/** The reason one ticked row fails, or `undefined`. `world` is needed only when a route is ticked. */
-export function tickProblem(row: LedgerRow, root: string, world: () => RouteWorld): string | undefined {
-  if (row.kind === 'R') {
-    if (row.check !== 'descriptor-parity') return `route check is "${row.check}", not descriptor-parity`;
-    return routeProblem(row, world());
+/** `undefined` when descriptor-parity proves the route; otherwise why it cannot. */
+export const routeProblem = (row: Pick<LedgerRow, 'what'>, world: RouteWorld): string | undefined => {
+  const status = routeStatus(row, world);
+  return status.kind === 'proven' ? undefined : status.text;
+};
+
+// ─── the test that names a row ───────────────────────────────────────────────────────────────────────────────────
+
+const SUITE = new Set(['test', 'it', 'describe']);
+// A modifier after which the title is not a live test: skipped, todo, focused, or expected to throw.
+const DEAD = new Set(['skip', 'todo', 'only', 'failing', 'skipIf', 'todoIf']);
+
+/** `test.skip`, `describe.each(rows)`, `it.if(x)` → the base name and every modifier on the way. */
+function callee(node: unknown): { base: string; mods: string[] } | undefined {
+  const n = node as AstNode | undefined;
+  if (n === undefined) return undefined;
+  if (n.type === 'Identifier') return { base: n.name as string, mods: [] };
+  if (n.type === 'CallExpression') return callee(n.callee);
+  if (n.type === 'MemberExpression' && n.computed !== true) {
+    const inner = callee(n.object);
+    const prop = (n.property as AstNode).name;
+    return inner === undefined || typeof prop !== 'string'
+      ? undefined
+      : { base: inner.base, mods: [...inner.mods, prop] };
   }
-  if (row.check.trim() === '') return 'empty check cell';
-  const path = join(root, row.check);
-  if (!existsSync(path)) return `check path does not exist: ${row.check}`;
-  if (statSync(path).isFile() && !readFileSync(path, 'utf8').includes(row.id))
-    return `check file never mentions ${row.id}: ${row.check}`;
   return undefined;
+}
+
+const titleOf = (node: unknown): string | undefined => {
+  const n = node as AstNode | undefined;
+  if (n?.type === 'Literal' && typeof n.value === 'string') return n.value;
+  if (n?.type === 'TemplateLiteral')
+    return (n.quasis as { value: { cooked?: string; raw: string } }[]).map(q => q.value.cooked ?? q.value.raw).join('');
+  return undefined;
+};
+
+/** Every title of a LIVE `test(` / `it(` / `describe(` call in a file: none of its own or its describes' modifiers is dead. */
+export function liveTitles(file: string): string[] {
+  const out: string[] = [];
+  walk(parseFile(file).program, (node, parents) => {
+    if (node.type !== 'CallExpression') return;
+    const own = callee(node.callee);
+    if (own === undefined || !SUITE.has(own.base) || own.mods.some(m => DEAD.has(m))) return;
+    const title = titleOf((node.arguments as unknown[])[0]);
+    if (title === undefined) return;
+    const dead = parents.some(p => {
+      if (p.type !== 'CallExpression') return false;
+      const c = callee(p.callee);
+      return c !== undefined && c.base === 'describe' && c.mods.some(m => DEAD.has(m));
+    });
+    if (!dead) out.push(title);
+  });
+  return out;
+}
+
+/** The row id as a whole token (`R-0023` is not inside `R-00231`). */
+export const namesRow = (text: string, id: string): boolean =>
+  new RegExp(`(?<![A-Za-z0-9-])${id}(?![0-9A-Za-z])`).test(text);
+
+export interface TickContext {
+  readonly root: string;
+  readonly world: () => RouteWorld;
+  /** The JUnit cases of the reports given; undefined when none were. */
+  readonly results?: readonly JunitCase[];
+  readonly tier?: 'unit' | 'int';
+}
+
+/** Why the check cell is not a passing test that names the row, or `undefined`. */
+export function testProblem(row: LedgerRow, tc: TickContext): string | undefined {
+  const check = row.check.trim();
+  if (check === '') return 'empty check cell';
+  if (!/(?:^|\/)tests\//.test(check) || !/\.test\.tsx?$/.test(check))
+    return `check is not a *.test.ts(x) file under a tests/ folder: ${check}`;
+  const path = join(tc.root, check);
+  if (!existsSync(path)) return `check path does not exist: ${check}`;
+  if (!statSync(path).isFile()) return `check path is not a regular file: ${check}`;
+  if (!liveTitles(path).some(title => namesRow(title, row.id)))
+    return `no live test(), it() or describe() title in ${check} names ${row.id} (a comment, a string elsewhere, or a skipped, todo or only title does not count)`;
+  if (tc.results === undefined || (tc.tier !== undefined && inTier(check, tc.tier) === false)) return undefined;
+  const mine = tc.results.filter(
+    c => (c.file === '' || c.file === check || c.file.endsWith(`/${check}`)) && namesRow(c.fullName, row.id),
+  );
+  if (mine.some(c => c.status === 'failed')) return `the test naming ${row.id} FAILED in the results: ${check}`;
+  if (!mine.some(c => c.status === 'passed'))
+    return `no passing run of a test naming ${row.id} in the results (skipped or not run): ${check}`;
+  return undefined;
+}
+
+/** The reason one ticked row fails, or `undefined`. A route must be proven by a test AND by descriptor-parity. */
+export function tickProblem(row: LedgerRow, tc: TickContext): string | undefined {
+  const test = testProblem(row, tc);
+  const route = row.kind === 'R' ? routeProblem(row, tc.world()) : undefined;
+  if (test === undefined) return route;
+  return route === undefined ? test : `${test}; ${route}`;
 }
 
 export function tickFindings(
   rows: readonly LedgerRow[],
-  root: string,
-  world: () => RouteWorld,
+  tc: TickContext,
   known: ReadonlyMap<string, string>,
+  frozen: ReadonlySet<string> = FROZEN_IDS,
 ): Finding[] {
   const out: Finding[] = [];
   const ticked = new Set<string>();
   for (const row of rows) {
     if (!isTicked(row)) continue;
     ticked.add(row.id);
-    const problem = tickProblem(row, root, world);
+    const problem = tickProblem(row, tc);
     const listed = known.has(row.id);
-    if (problem !== undefined && !listed) out.push({ check: 'parity-ticks', where: row.id, message: problem });
+    if (listed && !frozen.has(row.id))
+      out.push({
+        check: 'parity-ticks',
+        where: row.id,
+        message: `listed in ${KNOWN} but not in FROZEN_IDS: the list may only shrink; prove the row instead`,
+      });
+    else if (problem !== undefined && !listed) out.push({ check: 'parity-ticks', where: row.id, message: problem });
     if (problem === undefined && listed)
-      out.push({ check: 'parity-ticks', where: row.id, message: `passes now; remove it from ${KNOWN}` });
+      out.push({ check: 'parity-ticks', where: row.id, message: `passes now; remove it from ${KNOWN} and FROZEN_IDS` });
   }
   for (const id of known.keys())
     if (!ticked.has(id))
-      out.push({ check: 'parity-ticks', where: id, message: `not a ticked row; remove it from ${KNOWN}` });
+      out.push({
+        check: 'parity-ticks',
+        where: id,
+        message: `not a ticked row; remove it from ${KNOWN} and FROZEN_IDS`,
+      });
   return out;
 }
 
@@ -172,7 +386,8 @@ export async function loadWorld(
 
 export const check: Check = {
   name: 'parity-ticks',
-  summary: 'every [x] in the parity ledger points at a test or descriptor-parity that proves it',
+  summary:
+    'every [x] in the parity ledger points at a passing test that names its row (and, for a route, descriptor-parity agrees)',
   async run(ctx) {
     const ledger = join(ctx.root, LEDGER);
     if (!existsSync(ledger)) return [{ check: 'parity-ticks', where: LEDGER, message: 'the parity ledger is missing' }];
@@ -180,7 +395,30 @@ export const check: Check = {
     const knownFile = join(ctx.root, KNOWN);
     const known = existsSync(knownFile) ? readKnown(readFileSync(knownFile, 'utf8')) : new Map<string, string>();
     const world = await loadWorld(ctx.root, ctx.model);
-    return tickFindings(rows, ctx.root, () => world, known);
+    const files = ctx.results === undefined ? undefined : resultFiles(ctx.root, ctx.results);
+    if (ctx.results !== undefined && files === undefined)
+      return [
+        {
+          check: 'parity-ticks',
+          where: 'results',
+          message: 'no JUnit report found at --results, so no test is proven to pass',
+        },
+      ];
+    if (files === undefined)
+      console.error(
+        'parity-ticks: not verified against results (no --results given); titles are checked, passes are not',
+      );
+    const results = files?.flatMap(file => junitCases(readFileSync(file, 'utf8')));
+    return tickFindings(
+      rows,
+      {
+        root: ctx.root,
+        world: () => world,
+        ...(results === undefined ? {} : { results }),
+        ...(ctx.tier === undefined ? {} : { tier: ctx.tier }),
+      },
+      known,
+    );
   },
 };
 

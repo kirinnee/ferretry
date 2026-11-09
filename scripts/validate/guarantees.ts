@@ -120,8 +120,45 @@ export function parseJunit(xml: string): TestResult[] {
   return out;
 }
 
+/** One test of a JUnit report, with the describe blocks around it in its full name. */
+export interface JunitCase {
+  readonly fullName: string;
+  readonly file: string;
+  readonly status: TestResult['status'];
+}
+
+/** Every test of one JUnit report (any name), its enclosing suites' names ahead of its own in `fullName`. */
+export function junitCases(xml: string): JunitCase[] {
+  const out: JunitCase[] = [];
+  const suites: { name: string; file: string }[] = [];
+  const attr = (attrs: string, key: string): string =>
+    xmlText(new RegExp(`\\b${key}="([^"]*)"`).exec(attrs)?.[1] ?? '');
+  for (const match of xml.matchAll(
+    /<testsuite\b([^>]*?)(\/?)>|<\/testsuite>|<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g,
+  )) {
+    if (match[0].startsWith('</testsuite')) suites.pop();
+    else if (match[0].startsWith('<testsuite')) {
+      if (match[2] !== '/') suites.push({ name: attr(match[1] ?? '', 'name'), file: attr(match[1] ?? '', 'file') });
+    } else {
+      const attrs = match[3] ?? '';
+      const body = match[4] ?? '';
+      const file =
+        attr(attrs, 'file') ||
+        [...suites].reverse().find(s => s.file !== '')?.file ||
+        suites.find(s => /\.test\.tsx?$/.test(s.name))?.name ||
+        '';
+      out.push({
+        fullName: [...suites.map(s => s.name), attr(attrs, 'name')].join(' '),
+        file: file.replace(/^\.\//, ''),
+        status: /<(?:failure|error)\b/.test(body) ? 'failed' : /<skipped\b/.test(body) ? 'skipped' : 'passed',
+      });
+    }
+  }
+  return out;
+}
+
 /** `--results` paths (files, or folders searched for `junit.xml` and the quarantine's `junit.rerun.xml`); default every tier's report under `coverage/`. */
-export function readResults(root: string, paths: readonly string[] | undefined): TestResult[] | undefined {
+export function resultFiles(root: string, paths: readonly string[] | undefined): string[] | undefined {
   const files = new Set<string>();
   for (const path of paths ?? ['coverage']) {
     const abs = resolve(root, path);
@@ -134,8 +171,11 @@ export function readResults(root: string, paths: readonly string[] | undefined):
       }
     } else files.add(abs);
   }
-  if (files.size === 0) return undefined;
-  return [...files].flatMap(file => parseJunit(readFileSync(file, 'utf8')));
+  return files.size === 0 ? undefined : [...files];
+}
+
+export function readResults(root: string, paths: readonly string[] | undefined): TestResult[] | undefined {
+  return resultFiles(root, paths)?.flatMap(file => parseJunit(readFileSync(file, 'utf8')));
 }
 
 /** The integration tier lives in `tests/integration/`; every other test file (unit, scripts, ...) is the unit report's. */

@@ -50,4 +50,6 @@ bun scripts/ci/unit-timings.ts || status=1
 # STRICT MODE becomes required once `ports-pending.json` is empty: add `--strict` here and in integration.sh. It also checks the rows of
 # the packages still pending, which are skipped by design until then.
 bun scripts/gen/check.ts guarantees --tier unit --results coverage/unit --results coverage/scripts || status=1
+# THE TICK PROOF: every `[x]` parity row names a test that exists AND passed in these same reports (integration.sh judges its own tier).
+bun scripts/gen/check.ts parity-ticks --tier unit --results coverage/unit --results coverage/scripts || status=1
 exit "${status}"
