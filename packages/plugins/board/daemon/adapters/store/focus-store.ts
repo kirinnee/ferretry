@@ -46,6 +46,12 @@ export class KernelFerretFocus implements FerretFocus {
     return (await this.entry(ferret)).card;
   }
 
+  async focusOfAll(): Promise<ReadonlyMap<string, CardRef | null>> {
+    const read = await this.state.read(this.file);
+    if (!read.ok) throw this.damaged('read', 'every ferret', read.error.sentence);
+    return new Map(Object.entries(read.value?.ferrets ?? {}).map(([ferret, entry]) => [ferret, entry.card] as const));
+  }
+
   async anchorOf(ferret: string): Promise<CardRef | null> {
     return (await this.entry(ferret)).anchor;
   }

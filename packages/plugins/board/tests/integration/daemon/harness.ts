@@ -40,21 +40,45 @@ export const TEST_IDENTITY = {
 
 export const as = (caller: string) => ({ 'x-test-caller': caller });
 
+/** A job the half registered with the kernel, as the kernel would run it: `run` takes the stop signal. */
+export interface TakenJob {
+  readonly id: string;
+  readonly run: (signal: AbortSignal) => Promise<void>;
+}
+
 export const boot = async (
-  options: { uses?: Record<string, unknown>; spawn?: Parameters<typeof testHost>[0]['spawn'] } = {},
+  options: {
+    uses?: Record<string, unknown>;
+    spawn?: Parameters<typeof testHost>[0]['spawn'];
+    /** An Asks the test counts through (a wrapper over a `FakeAsks`); the plain fake when omitted. */
+    asks?: FakeAsks;
+  } = {},
 ) => {
-  const asks = new FakeAsks();
+  const asks = options.asks ?? new FakeAsks();
   const ferrets = new FakeFerrets();
   ferrets.add({ id: ferretId('f1') });
   // The half is captured as it is built, so a test can call the `apply` the card source hands Asks.
   const taken: { half?: { hooks: Record<string, unknown> } } = {};
+  // The jobs the half registers, so a test can run one with a signal of its own.
+  const jobs = new Map<string, TakenJob>();
   const capturing = {
     ...daemon,
     build: (ctx: never) => {
       // The kernel's identity port (DECISIONS-1 #1) is not on the test host yet: the daemon id it will carry.
+      const kernel = (ctx as { kernel: { jobs: { add: (job: TakenJob) => void } } }).kernel;
       const withIdentity = {
         ...(ctx as object),
-        kernel: { ...(ctx as { kernel: object }).kernel, identity: TEST_IDENTITY },
+        kernel: {
+          ...kernel,
+          identity: TEST_IDENTITY,
+          jobs: {
+            ...kernel.jobs,
+            add: (job: TakenJob) => {
+              jobs.set(job.id, job);
+              kernel.jobs.add(job);
+            },
+          },
+        },
       };
       const half = (daemon.build as (ctx: never) => unknown)(withIdentity as never);
       taken.half = half as never;
@@ -77,7 +101,7 @@ export const boot = async (
     await (taken.half?.hooks[hook] as ((payload: unknown) => Promise<void>) | undefined)?.(payload);
   /** What one of the half's contribute hooks answers (`search.sources`, `sitrep.lines`). */
   const contribution = (hook: string): unknown => (taken.half?.hooks[hook] as (() => unknown) | undefined)?.();
-  return { asks, ferrets, host, apply, observe, contribution };
+  return { asks, ferrets, host, apply, observe, contribution, jobs };
 };
 
 /** Makes a card as the owner; a refusal fails the test with the daemon's own words. */

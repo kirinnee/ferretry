@@ -2,7 +2,15 @@ import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
 import { DEFAULT_COPY_ENTRIES, isReadOnlyRoot, mayHoldRoot, RootError, scopedSubfolder } from '../host/roots.ts';
-import { harnessFileRefusal, permittedMode, renameNamesRefusal, takesLinks, takesRenames } from '../host/root-rules.ts';
+import {
+  harnessFileRefusal,
+  permittedMode,
+  renameNamesRefusal,
+  takesLinks,
+  takesRenames,
+  takesUnlinks,
+  unlinkNameRefusal,
+} from '../host/root-rules.ts';
 import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
@@ -89,6 +97,7 @@ import {
   type StampedConfigFile,
 } from '../host/config/state-change.ts';
 import {
+  ALREADY_HELD_ISSUE,
   type DocumentVerdict,
   DUPLICATE_ISSUE,
   firstStop,
@@ -484,6 +493,8 @@ async function start(world: World): Promise<TestHost> {
   for (const plugin of options.plugins)
     for (const def of plugin.manifest.data?.config ?? [])
       configOwners.set(def.shape === 'file' ? def.file : def.collection, { plugin: plugin.manifest.id, def });
+  /** A file's etag in this world: its value's JSON (what its writes answer), or the absent sentinel when it is not there. */
+  const etagOfValue = (value: unknown): string => (value === undefined ? ABSENT_STAMP.etag : JSON.stringify(value));
   const configStamps = new Map<string, Map<string, StampedConfigFile>>();
   /** Where every file of one key stands in the world now: valid or invalid by its schema, absent when not there. */
   const worldStamps = (key: string): Map<string, StampedConfigFile> => {
@@ -779,6 +790,21 @@ async function start(world: World): Promise<TestHost> {
     const declared = manifest.data?.config ?? [];
     const keyOf = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): string =>
       def.shape === 'file' ? def.file : def.collection;
+    /**
+     * The etag of one file as the DISK has it, which is what `etag` answers and `ifMatch` is compared with (the real
+     * service reads both from the disk, "not from the version in effect"): the world's value, except that an edit held
+     * for the owner is on the disk while the tighter value stays in effect, so a held file answers the held edit's etag.
+     * A held REMOVAL leaves the file where it is, so it keeps the value's.
+     */
+    const diskEtagOf = (
+      def: ConfigFileDef<any> | ConfigCollectionDef<any>,
+      name: string | undefined,
+      inEffect: unknown,
+    ): string => {
+      const path = def.shape === 'file' ? def.file : `${def.collection}/${name as string}.yaml`;
+      const stamp = configStamps.get(keyOf(def))?.get(path)?.stamp;
+      return stamp?.state === 'held' && stamp.etag !== ABSENT_STAMP.etag ? stamp.etag : etagOfValue(inEffect);
+    };
     const assertDeclared = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): void => {
       if (!declared.includes(def)) throw new Error(`${manifest.id}: config ${keyOf(def)} is not declared`);
     };
@@ -809,7 +835,7 @@ async function start(world: World): Promise<TestHost> {
           issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })),
         };
       const etag = JSON.stringify(next);
-      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
+      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== diskEtagOf(def, name, before))
         return { kind: 'conflict' };
       const prior = before === undefined ? undefined : def.schema.safeParse(before);
       const priorValue = prior?.success === true ? prior.data : undefined;
@@ -873,6 +899,16 @@ async function start(world: World): Promise<TestHost> {
           ? { state: 'valid', inEffect: true, sentences: [] }
           : { state: 'invalid', inEffect: false, sentences: parsed.error.issues.map(issue => issue.message) };
       },
+      // The etag only, of an own file that exists as a slot: the world's value as JSON (what its writes answer), or the
+      // absent sentinel — the same refusals as the real port (another plugin's def, a name that is no file of the def).
+      async etag(def, name) {
+        assertDeclared(def);
+        if (def.shape === 'file' ? name !== undefined : name === undefined || !def.name.test(name))
+          throw new Error(`${manifest.id} has no config file of that name`);
+        const all = world.config.get(keyOf(def));
+        const value = def.shape === 'file' ? all : (all as Record<string, unknown> | undefined)?.[name as string];
+        return diskEtagOf(def, name, value);
+      },
       async write(def, name, edit, writeOptions = {}) {
         return await write(def, name, edit, writeOptions);
       },
@@ -895,7 +931,7 @@ async function start(world: World): Promise<TestHost> {
           return { kind: 'refused', reason: 'bad_name', issues: [] };
         const all = world.config.get(key) as Record<string, unknown> | undefined;
         const before = def.shape === 'file' ? all : all?.[name as string];
-        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
+        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== diskEtagOf(def, name, before))
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
         const defaults = def.schema.safeParse({});
@@ -920,8 +956,9 @@ async function start(world: World): Promise<TestHost> {
         return { kind: 'written', etag: 'absent', loosened: sentences };
       },
       // The real writer's set over the in-memory values: each document checked as `write` checks one, every one before
-      // any lands, and the set's answer decided by the SAME rule (`host/config/write-all.ts`). The world holds nothing
-      // held and nothing unreadable, so `already_held` and `unreadable` never arise here.
+      // any lands, and the set's answer decided by the SAME rule (`host/config/write-all.ts`). A file with an edit
+      // already held for the owner refuses the set (`already_held`), as the real writer does: a set never discards a
+      // held edit. The world holds nothing unreadable, so `unreadable` never arises here.
       async writeAll(documents) {
         const refs: ConfigDocumentRef[] = [];
         for (const document of documents) {
@@ -942,9 +979,11 @@ async function start(world: World): Promise<TestHost> {
         const verdicts: DocumentVerdict[] = documents.map((document, index): DocumentVerdict => {
           const { def, name, edit } = document;
           const ref = refs[index] as ConfigDocumentRef;
+          if (configStamps.get(keyOf(def))?.get(ref.path)?.stamp.state === 'held')
+            return refusedDocument('already_held', ref, [ALREADY_HELD_ISSUE(ref.path)]);
           const all = world.config.get(keyOf(def)) as Record<string, unknown> | undefined;
           const before = def.shape === 'file' ? all : all?.[name as string];
-          if (document.ifMatch !== undefined && document.ifMatch !== JSON.stringify(before ?? null))
+          if (document.ifMatch !== undefined && document.ifMatch !== diskEtagOf(def, name, before))
             return { kind: 'conflict', ...ref };
           const prior = before === undefined ? undefined : def.schema.safeParse(before);
           const priorValue = prior?.success === true ? prior.data : undefined;
@@ -1447,6 +1486,18 @@ async function start(world: World): Promise<TestHost> {
                 testMadeFolders.delete(key);
                 testMadeFolders.add(placed(key));
               }
+          },
+          unlink: async linkName => {
+            if (isReadOnlyRoot(name) || !takesUnlinks(name)) throw new RootError('read_only');
+            const refused = unlinkNameRefusal(linkName);
+            if (refused !== undefined) throw new RootError(refused);
+            const place = ownPath(linkName);
+            // As production, the parent is opened first: a link anywhere on the way to it is `link_escape`.
+            const parent = place.slice(0, place.lastIndexOf('/'));
+            const steps = parent.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
+            if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+            if (!testLinks.has(place)) throw new RootError('outside');
+            testLinks.delete(place);
           },
           setMode: async (path, mode) => {
             if (manifest.permissions?.setMode !== true) throw new RootError('not_declared');

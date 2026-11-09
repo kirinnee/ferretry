@@ -179,6 +179,7 @@ import { JEV_JUDGEMENT_QUESTIONS, jevFactScalars, jevFactsOf, reachableJudgement
 import { leftoverBrowserCandidates } from './leftovers.ts';
 import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
 import type { ReflexEvent } from './liveness-monitor.ts';
+import { keepOrphanRetries, type OrphanRetry, orphanTellKey, orphanTryFailed, orphanTryHeld } from './orphan-retry.ts';
 import {
   detectOrphanedCards,
   type OrphanResolution,
@@ -2698,12 +2699,20 @@ export class WardenSweepService {
         reason: 'neither the card’s owner nor its ferret is on this machine, so no board can hold a notice',
       });
     const memory: Record<string, OrphanTold> = { ...plan.memory };
-    const posted = async (sessionId: string, notice: WardenCardNotice): Promise<boolean> =>
+    // A refused try waits longer each time (`orphan-retry.ts`), and says so once per change, not once per sweep.
+    const nowMs = this.ports.nowMs();
+    const retries: Record<string, OrphanRetry> = keepOrphanRetries(
+      input.state.orphanRetries ?? {},
+      new Set(input.orphans.flatMap(anomaly => (anomaly.task === undefined ? [] : [anomaly.task.id]))),
+    );
+    const posted = async (sessionId: string, notice: WardenCardNotice): Promise<string | undefined> =>
       await this.ports.orphans.add(sessionId, notice).then(
-        () => true,
-        () => false,
+        () => undefined,
+        (error: unknown) => (error instanceof Error && error.message !== '' ? error.message : 'the Agenda refused it'),
       );
     for (const tell of plan.tell) {
+      const key = orphanTellKey(tell);
+      if (orphanTryHeld(retries[tell.taskId], key, nowMs)) continue;
       // A message that could not be typed goes on the same ferret's board, and is remembered as a notice.
       const typed =
         tell.kind === 'message' &&
@@ -2711,21 +2720,30 @@ export class WardenSweepService {
           () => true,
           () => false,
         ));
-      const landed = typed || (await posted(tell.sessionId, tell.kind === 'message' ? tell.fallback : tell.notice));
-      if (!landed) {
-        this.ports.journal.record('fleet.warden_orphan_failed', {
-          taskId: tell.taskId,
-          via: tell.kind,
-          sessionId: tell.sessionId,
-        });
+      const refusal = typed
+        ? undefined
+        : await posted(tell.sessionId, tell.kind === 'message' ? tell.fallback : tell.notice);
+      if (refusal !== undefined) {
+        const failed = orphanTryFailed(retries[tell.taskId], key, refusal, nowMs);
+        retries[tell.taskId] = failed.retry;
+        if (failed.news)
+          this.ports.journal.record('fleet.warden_orphan_failed', {
+            taskId: tell.taskId,
+            via: tell.kind,
+            sessionId: tell.sessionId,
+            reason: refusal,
+            retryAt: failed.retry.retryAt,
+          });
         continue;
       }
+      delete retries[tell.taskId];
       const via = typed ? 'owner' : 'notice';
       memory[tell.taskId] = { assignee: tell.assignee, via, to: tell.sessionId, at: input.at };
       this.ports.journal.record('fleet.warden_orphan_told', { taskId: tell.taskId, via, sessionId: tell.sessionId });
     }
-    const { orphans: _previous, ...rest } = input.state;
-    return Object.keys(memory).length === 0 ? rest : { ...rest, orphans: memory };
+    const { orphans: _previous, orphanRetries: _failing, ...rest } = input.state;
+    const kept = Object.keys(memory).length === 0 ? rest : { ...rest, orphans: memory };
+    return Object.keys(retries).length === 0 ? kept : { ...kept, orphanRetries: retries };
   }
 
   /**

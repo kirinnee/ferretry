@@ -124,6 +124,7 @@ function stub(overrides: Partial<CatalogStub> = {}): { assembly: RuntimesAssembl
       calls.applied.push({ id, governance });
       return { outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' };
     },
+    serialise: async act => await act(),
     ...overrides,
   };
   return {

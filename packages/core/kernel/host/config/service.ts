@@ -146,7 +146,13 @@ const untrustedWrite = (writeOptions: Pick<ConfigWriteOptions, 'byPlugin' | 'byA
 
 type Checked = ReturnType<typeof checkConfigText>;
 
-export type ConfigWriteRefusal = ConfigRefusal | 'not_declared' | 'bad_name' | 'conflict' | 'not_a_mapping';
+export type ConfigWriteRefusal =
+  | ConfigRefusal
+  | 'not_declared'
+  | 'bad_name'
+  | 'conflict'
+  | 'not_a_mapping'
+  | 'unreadable';
 
 export type ConfigWriteResult =
   | {
@@ -165,6 +171,7 @@ export type ConfigRemoveResult =
   | { readonly kind: 'applied'; readonly loosened: readonly string[] }
   | { readonly kind: 'held'; readonly id: string; readonly sentences: readonly string[] }
   | { readonly kind: 'refused'; readonly reason: 'not_declared' | 'bad_name' | 'conflict' }
+  | { readonly kind: 'refused'; readonly reason: 'unreadable'; readonly issues: readonly ConfigIssue[] }
   | { readonly kind: 'refused'; readonly reason: 'would_hold'; readonly sentences: readonly string[] };
 
 export interface ConfigFileView {
@@ -303,8 +310,18 @@ function writeOutcome(result: ConfigWriteResult): ConfigWriteOutcome {
     };
   if (result.kind === 'held') return { kind: 'held', etag: result.etag, id: result.id, sentences: result.sentences };
   if (result.reason === 'conflict') return { kind: 'conflict' };
-  return { kind: 'refused', reason: result.reason, issues: writeIssues(result.issues) };
+  return { kind: 'refused', reason: contractReason(result.reason), issues: writeIssues(result.issues) };
 }
+
+/**
+ * A single write's refusal reason as the contract names it. `ConfigWriteOutcome` has no `unreadable` (only a set's
+ * outcome does, and the contract is not widened here), so an unreadable target is said as `yaml` — the file is not text
+ * the kernel reads — and its sentence rides in `issues`, the same one a set's refusal carries.
+ */
+const contractReason = (
+  reason: Exclude<ConfigWriteRefusal, 'conflict'>,
+): 'yaml' | 'raw_secret' | 'schema' | 'not_declared' | 'bad_name' | 'not_a_mapping' =>
+  reason === 'unreadable' ? 'yaml' : reason;
 
 /** An entry's state as the contract names it. */
 function statusOf(evaluated: EvaluatedConfig | undefined): ConfigFileStatus {
@@ -749,6 +766,21 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         const slot = slotFor(declaration, name);
         return statusOf(slot === undefined ? undefined : settled.get(slot.path)?.evaluated);
       },
+      // The etag only (`read` below carries the text and the issues, which a plugin is never handed). Its own def, an
+      // existing slot: the same two refusals every other member makes.
+      etag: async (def, name): Promise<string> => {
+        own(def);
+        const declaration = declared(pluginId, def as ConfigDef) as ConfigDeclaration;
+        const slot = slotFor(declaration, name);
+        if (slot === undefined) throw new Error(`${pluginId} has no config file of that name`);
+        // A full reload per ask is O(every config file), so a caller that asks once per file went quadratic. The disk is
+        // read for THIS file only, and when its etag is the one the last load settled it is the answer a reload would
+        // give (the same read, the same digest); anything else — a file that moved, one never loaded — takes the reload.
+        const disk = await readDisk(slot.path);
+        const onDisk = disk.kind === 'text' ? digest(disk.text) : ABSENT_CONFIG_ETAG;
+        if (loaded && settled.get(slot.path)?.diskEtag === onDisk) return onDisk;
+        return (await read(pluginId, def as ConfigDef, name))?.etag ?? ABSENT_CONFIG_ETAG;
+      },
       // A plugin's own write takes the one writer; a loosening goes into effect only on Gate's judge, else it is held.
       write: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
         writeOutcome(
@@ -841,6 +873,16 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     (sentences: readonly string[], removal: boolean): boolean =>
       options.judge?.({ plugin, path: path(), removal, sentences }) === true;
 
+  /**
+   * The refusal of a target that cannot be read — the one check every writer makes (`writeLocked`, the owner's write
+   * over a held edit, `remove`, and a set's `planDocument`, which says the same sentence as a document verdict). Such a
+   * file reads as `absent` to the etag and the load, so without this a write pinned `ifMatch: absent` would overwrite it.
+   */
+  const unreadableIssues = (slot: Slot): readonly ConfigIssue[] => {
+    const { message, fix } = UNREADABLE_ISSUE(slot.path);
+    return [{ path: slot.path, severity: 'error', message, fix: fix ?? '' }];
+  };
+
   const conflictOf = (slot: Slot, found: string, ifMatch: string | undefined): ConfigWriteResult | undefined => {
     // The file moved since the editor read it, or since the last reload: nothing the readers (and so the editor) saw
     // describes the disk any more, so an edit made from it is never applied.
@@ -874,6 +916,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   ): Promise<ConfigWriteResult> => {
     const absolute = `${root}/${slot.path}`;
     const disk = await readDisk(slot.path);
+    if (disk.kind === 'unreadable') return { kind: 'refused', reason: 'unreadable', issues: unreadableIssues(slot) };
     const existing = disk.kind === 'text' ? disk.text : undefined;
     const found = existing === undefined ? ABSENT_CONFIG_ETAG : digest(existing);
     const moved = conflictOf(slot, found, writeOptions.ifMatch);
@@ -953,6 +996,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         return await writeLocked(slot, def, { patch: edit.patch }, writeOptions, edit.within);
       const absolute = `${root}/${slot.path}`;
       const disk = await readDisk(slot.path);
+      if (disk.kind === 'unreadable') return { kind: 'refused', reason: 'unreadable', issues: unreadableIssues(slot) };
       const existing = disk.kind === 'text' ? disk.text : undefined;
       const found = existing === undefined ? ABSENT_CONFIG_ETAG : digest(existing);
       const moved = conflictOf(slot, found, writeOptions.ifMatch);
@@ -1027,6 +1071,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     return await serial(async () => {
       await load();
       const disk = await readDisk(slot.path);
+      if (disk.kind === 'unreadable') return { kind: 'refused', reason: 'unreadable', issues: unreadableIssues(slot) };
       const etag = disk.kind === 'text' ? digest(disk.text) : ABSENT_CONFIG_ETAG;
       if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== etag)
         return { kind: 'refused', reason: 'conflict' };
@@ -1068,6 +1113,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (removed.kind === 'held')
       return { kind: 'held', etag: ABSENT_CONFIG_ETAG, id: removed.id, sentences: removed.sentences };
     if (removed.reason === 'conflict') return { kind: 'conflict' };
+    if (removed.reason === 'unreadable')
+      return { kind: 'refused', reason: contractReason('unreadable'), issues: writeIssues(removed.issues) };
     if (removed.reason === 'would_hold')
       return { kind: 'refused', reason: 'would_hold', issues: [], sentences: removed.sentences };
     return { kind: 'refused', reason: removed.reason, issues: [] };
@@ -1097,7 +1144,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     const disk = await readDisk(slot.path);
     // What cannot be read could not be put back by a roll-back, so the set does not touch it.
     if (disk.kind === 'unreadable')
-      return { verdict: refusedDocument('unreadable', ref, [UNREADABLE_ISSUE(slot.path)]) };
+      return { verdict: refusedDocument('unreadable', ref, writeIssues(unreadableIssues(slot))) };
     const prior = disk.kind === 'text' ? disk.text : undefined;
     const found = prior === undefined ? ABSENT_CONFIG_ETAG : digest(prior);
     if (conflictOf(slot, found, document.ifMatch) !== undefined) return { verdict: { kind: 'conflict', ...ref } };

@@ -106,6 +106,7 @@ export function registeredCodex() {
       remove: async path => {
         files.delete(path);
       },
+      lstat: async () => undefined,
       makeDirectory: async () => undefined,
       ensurePrivateDirectory: async path => {
         privateDirectories.push(path);

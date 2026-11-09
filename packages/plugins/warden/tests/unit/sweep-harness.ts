@@ -137,6 +137,8 @@ export interface Harness {
   readonly resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[];
   /** Every card notice the sweep attempted, in order. */
   readonly notices: { readonly sessionId: string; readonly notice: WardenCardNotice }[];
+  /** How many card notices the sweep tried to place, landed or refused. */
+  readonly noticeAttempts: { count: number };
   /** Every snapshot the Jev guard was shown, after redaction. */
   readonly guarded: readonly TriageSnapshot[];
   /** Every question set the Jev guard was asked, in order. */
@@ -198,6 +200,8 @@ export function harness(
     readonly stuckInbox?: WardenStuckInboxPort;
     /** Force every card notice to one outcome. */
     readonly noticeWrite?: WardenAgendaWrite;
+    /** Why a refused card notice was refused, as the Agenda says it; read at each refusal. */
+    readonly noticeReason?: () => string;
     /** Make the machine agenda refuse to take a card off its orphan list. */
     readonly removeFails?: boolean;
     /** Force every raise to one outcome, for the paths a real store reaches rarely. */
@@ -234,6 +238,7 @@ export function harness(
   const cards = new Map<string, WardenEscalationRaise>();
   const resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[] = [];
   const notices: { readonly sessionId: string; readonly notice: WardenCardNotice }[] = [];
+  const noticeAttempts = { count: 0 };
   let spawnCall = 0;
   let capability = 0;
   const guarded: TriageSnapshot[] = [];
@@ -359,7 +364,8 @@ export function harness(
     verdicts: { recent: async () => await (options.verdicts?.() ?? Promise.resolve([])) },
     orphans: {
       add: async (sessionId, notice) => {
-        if (options.noticeWrite === 'rejected') throw new Error('the Agenda refused');
+        noticeAttempts.count += 1;
+        if (options.noticeWrite === 'rejected') throw new Error(options.noticeReason?.() ?? 'the Agenda refused');
         if (!notices.some(each => each.notice.task.id === notice.task.id)) notices.push({ sessionId, notice });
       },
       remove: async resolution => {
@@ -425,6 +431,7 @@ export function harness(
     raises,
     resolved,
     notices,
+    noticeAttempts,
     guarded,
     judged,
     guardSettings,

@@ -8,13 +8,17 @@ import { InstantSchema, NonEmptyStringSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
+/**
+ * The name of an item in a collection: ASCII letters and digits in words joined by single dashes. It is the one rule
+ * for a profile's, a runtime's and a layer's name (MCP and Skills name their items the same way), and it allows no
+ * slash, dot, space, control character or look-alike of any of them.
+ */
+export const ITEM_NAME_PATTERN = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u;
+
 /** A runtime's name: letters, digits and dashes, none at either end (R1). It is the CLI word a person types. */
-export const RuntimeNameSchema = z
-  .string()
-  .max(64)
-  .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u, {
-    message: 'use only letters, digits and dashes, starting and ending with a letter or digit',
-  });
+export const RuntimeNameSchema = z.string().max(64).regex(ITEM_NAME_PATTERN, {
+  message: 'use only letters, digits and dashes, starting and ending with a letter or digit',
+});
 
 /** A login's id as a runtime names it (Logins owns the grammar: lowercase letters, digits, dashes). */
 export const LoginRefSchema = z

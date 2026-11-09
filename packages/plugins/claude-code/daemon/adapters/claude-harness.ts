@@ -23,6 +23,7 @@ import type {
   UpdateResult,
   UsageReader,
 } from '@ferretry/core-ferrets/contract';
+import { materializeSkills } from '@ferretry/core-ferrets/contract';
 import type {
   ChildEnvironment,
   Clock,
@@ -153,8 +154,8 @@ export class ClaudeHarness implements Harness {
   /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
   private async prepareHomeFrom(spec: LaunchSpec, inputs: LaunchSettingsInputs): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
-    // GAP (skills): `skill` parts are not materialized. `copyTree` takes only this plugin's own root handles, and no
-    // root this manifest declares reaches a skill source; it waits for the Skills plugin to hand one over.
+    // The selected skills: Skills' shared folders linked into `skills/`, the rest of that folder swept (one link rule).
+    await materializeSkills(home, spec.parts, []);
     const text = homeText({
       folder: spec.folder,
       permissionMode: inputs.permissionMode,
