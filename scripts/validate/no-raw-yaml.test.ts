@@ -391,6 +391,8 @@ describe('laundering through a ledgered parser', () => {
     'a js specifier for a ts file': "import { readIt } from './reader.js';\nreadIt('x');",
     'import.meta.require': "const r = import.meta.require('./reader.ts');",
     'module.require': "const r = module.require('./reader.ts');",
+    "module['req' + 'uire']": "const r = module['req' + 'uire']('./reader.ts');",
+    'process.mainModule.require': "const r = process.mainModule.require('./reader.ts');",
     createRequire:
       "import { createRequire } from 'node:module';\nconst r = createRequire(import.meta.url)('./reader.ts');",
     'a name for require': "const load = require;\nconst r = load('./reader.ts');",
