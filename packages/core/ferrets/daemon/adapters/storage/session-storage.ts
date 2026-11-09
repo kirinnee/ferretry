@@ -311,11 +311,8 @@ export class DaemonStorage {
     readonly problems: readonly JournalProblem[];
   } {
     const plan = planIndexRebuild([source]);
-    const session = plan.sessions[0];
-    if (session === undefined) {
-      this.index.removeSession(source.id);
-      return { eventCount: 0, problems: plan.problems };
-    }
+    // a source always plans exactly one session
+    const session = plan.sessions[0] as IndexedSession;
     this.index.replaceSession(session, plan.events);
     return { session, eventCount: plan.events.length, problems: plan.problems };
   }

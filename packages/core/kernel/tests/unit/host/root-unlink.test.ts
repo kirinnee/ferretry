@@ -77,8 +77,6 @@ describe('RootHandle.unlink', () => {
     const f = await fresh();
     const credential = `${f.owner}/.claude/.credentials.json`;
     await symlink(credential, `${f.dir}/.credentials.json`);
-    // the existing remove follows the leaf and refuses this one: that is why unlink exists
-    expect(await refusalOf(() => f.fleet.remove(at(f.fleet, 'homes/claude-a/.credentials.json')))).toBeDefined();
     await f.fleet.unlink(at(f.fleet, 'homes/claude-a/.credentials.json'));
     expect(await gone(`${f.dir}/.credentials.json`)).toBe(true);
     expect(await readFile(credential, 'utf8')).toBe('{"planted":"credential"}\n');

@@ -1,5 +1,9 @@
 /**
- * bun migration/v4-to-v5/src/main.ts --from <stopped v4 home> --to <new folder> [--report <file>] [--dry-run]
+ * bun migration/v4-to-v5/src/main.ts --from <stopped v4 home> --to <new folder> [--report <file>] [--dry-run] [--drop-uncarried]
+ *
+ * `--drop-uncarried` is the person's explicit choice (never a default, and an agent never passes it without the owner's
+ * yes): a profile layer naming a settings or hooks component this tool cannot carry is removed instead of leaving the
+ * Settings step pending, so the ferrets on those profiles may be LESS restricted than in v4. Each is named in the report.
  *
  * Exit 0: complete (home.json written). 3: ran, but some step is pending or failed (no home.json; v5 refuses the
  * folder). 2: refused before writing anything. 64: usage. A dry run writes nothing (its report says `complete: false`)
@@ -12,11 +16,13 @@ import { parseArgs } from 'node:util';
 import { convert } from './convert.ts';
 import { hostLockProbe } from './preflight.ts';
 import { summarise } from './report.ts';
+import { clearYamlLogSwitches } from './v4/config.ts';
 
-const USAGE = 'usage: bun src/main.ts --from <stopped v4 home> --to <new v5 home> [--report <file>] [--dry-run]';
+const USAGE =
+  'usage: bun src/main.ts --from <stopped v4 home> --to <new v5 home> [--report <file>] [--dry-run] [--drop-uncarried]';
 
 async function main(argv: readonly string[]): Promise<number> {
-  let values: { from?: string; to?: string; report?: string; 'dry-run'?: boolean };
+  let values: { from?: string; to?: string; report?: string; 'dry-run'?: boolean; 'drop-uncarried'?: boolean };
   try {
     ({ values } = parseArgs({
       args: [...argv],
@@ -25,6 +31,7 @@ async function main(argv: readonly string[]): Promise<number> {
         to: { type: 'string' },
         report: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
+        'drop-uncarried': { type: 'boolean', default: false },
       },
       strict: true,
     }));
@@ -45,6 +52,7 @@ async function main(argv: readonly string[]): Promise<number> {
     dryRun,
     lock: hostLockProbe(),
     now: () => new Date(),
+    ...(values['drop-uncarried'] === true ? { dropUncarried: true } : {}),
     host: {
       homeDirectory: homedir(),
       ...(process.env.XDG_CONFIG_HOME === undefined ? {} : { configHome: process.env.XDG_CONFIG_HOME }),
@@ -64,4 +72,5 @@ async function main(argv: readonly string[]): Promise<number> {
   return (dryRun ? wouldComplete : result.report.complete) ? 0 : 3;
 }
 
+clearYamlLogSwitches();
 process.exit(await main(process.argv.slice(2)));

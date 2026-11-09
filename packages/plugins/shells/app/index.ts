@@ -1,4 +1,5 @@
-import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
+import { forSubject } from '@ferretry/app';
+import type { AppComponent, PanelProps, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { lazyComponent } from './lazy.ts';
@@ -27,7 +28,8 @@ const settingsOf = (client: PluginClient): AppComponent<SettingsProps> =>
 export default implementApp(manifest, {
   build: ({ client }) => ({
     screens: {},
-    panels: {},
+    // The first-run step's body: the same view as the Settings tab, only for its own step.
+    panels: { 'onboarding-step': forSubject('shells.nix', settingsOf(client) as AppComponent<PanelProps>) },
     settings: { shells: settingsOf(client) },
     renderers: {},
   }),

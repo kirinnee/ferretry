@@ -16,6 +16,7 @@ describe('skills contract', () => {
       'launch.parts',
       'reference.catalog',
       'reference.catalog',
+      'runtimes.components.skills',
     ]);
   });
 

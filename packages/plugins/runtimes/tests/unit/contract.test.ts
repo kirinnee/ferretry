@@ -4,8 +4,12 @@ import { LoginChangesPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract
 import { AutoResumeDecide } from '@ferretry/core-ferrets/contract';
 import {
   AccountChangeRequestSchema,
+  ApplyOutcomeSchema,
   CloneBundleSchema,
   ModelSetFileSchema,
+  ProposalApplyRequestSchema,
+  type RuntimeHomeReader,
+  type RuntimeSummary,
   ProfileFileSchema,
   RuntimeFileSchema,
   RuntimeIdSchema,
@@ -28,6 +32,109 @@ describe('runtimes contract', () => {
   test('the fake passes the conformance suite', async () => {
     const result = await runtimesConformance(fakeRuntimes);
     expect(result.ok).toBe(true);
+  });
+
+  test('the fake answers the homes a test sets, and a reader only for a listed id', async () => {
+    const fake = fakeRuntimes();
+    const home = {
+      id: 'h1',
+      harness: 'claude-code',
+      runtimes: [],
+      home: '/fleet/homes/h1',
+      wrapper: '/fleet/bin/w',
+    } as const;
+    const reader = {} as RuntimeHomeReader;
+    expect(await fake.homes()).toEqual([]);
+    expect(fake.home('h1')).toBeUndefined();
+    fake.setHomes([home], { h1: reader, h2: reader });
+    expect(await fake.homes()).toEqual([home]);
+    expect(fake.home('h1')).toBe(reader);
+    expect(fake.home('h2')).toBeUndefined();
+    fake.setHomes([home]);
+    expect(fake.home('h1')).toBeUndefined();
+    expect((await runtimesConformance(() => fake)).ok).toBe(true);
+    fake.setHomes([home, home]);
+    expect((await runtimesConformance(() => fake)).ok).toBe(false);
+  });
+
+  test('the conformance suite fails an implementation that answers a reader for an unlisted id', async () => {
+    const result = await runtimesConformance(() => ({ ...fakeRuntimes(), home: () => ({}) as RuntimeHomeReader }));
+    expect(result).toEqual({ ok: false, error: ['home() is undefined for an id homes() does not list'] });
+  });
+
+  const summary = (id: string, extra: Partial<RuntimeSummary> = {}): RuntimeSummary => ({
+    id: RuntimeIdSchema.parse(id),
+    harness: 'claude-code',
+    login: 'work',
+    profile: 'default',
+    agent: true,
+    launch: { available: true },
+    ...extra,
+  });
+
+  test('the fake resolves a runtime as Runtimes does: unknown, switched off, not signed in, or ready', async () => {
+    const fake = fakeRuntimes();
+    const ready = summary('ready');
+    const off = summary('off', { disabled: { reason: 'paused' } });
+    const out = summary('out', { launch: { available: false, reason: 'Sign in first.' } });
+    fake.setRuntimes([ready, off, out], ready.id);
+    expect(await fake.resolve(RuntimeIdSchema.parse('nope'))).toMatchObject({ ok: false, refusal: 'unknown' });
+    expect(await fake.resolve(off.id)).toEqual({ ok: false, refusal: 'disabled', sentence: 'off is switched off.' });
+    expect(await fake.resolve(out.id)).toEqual({ ok: false, refusal: 'not_signed_in', sentence: 'Sign in first.' });
+    expect(await fake.resolve(ready.id)).toEqual({ ok: true, runtime: ready });
+    // no id: the default
+    expect(await fake.resolve()).toEqual({ ok: true, runtime: ready });
+    expect(await fake.default()).toBe(ready.id);
+    fake.setRuntimes([ready]);
+    expect(await fake.resolve()).toMatchObject({ ok: false, refusal: 'unknown' });
+  });
+
+  test('R2 the fake answers the profiles and layers a test set, edits the profiles it holds, and records every change', async () => {
+    const fake = fakeRuntimes();
+    const owner = { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) };
+    const layers = { runtime: RuntimeIdSchema.parse('r'), profile: 'p', mcp: ['notes'], skills: [] };
+    fake.setProfiles([{ name: 'p', layers: ['mcp/notes'], etag: 'e1' }], [layers]);
+    expect(await fake.profiles()).toEqual([{ name: 'p', layers: ['mcp/notes'], etag: 'e1' }]);
+    expect(await fake.layers(layers.runtime)).toEqual(layers);
+    expect(await fake.layers(RuntimeIdSchema.parse('nope'))).toBeUndefined();
+    const change = { kind: 'add', profile: 'p', layer: 'skills/x' } as const;
+    expect(await fake.changeProfileLayers(change, owner)).toEqual({ kind: 'written', profiles: ['p'] });
+    expect((await fake.profiles())[0]?.layers).toEqual(['mcp/notes', 'skills/x']);
+    // As the real act: a caller carrying no standing is refused, and nothing changes.
+    expect(await fake.changeProfileLayers(change)).toMatchObject({ kind: 'refused', code: 'fleet_change_refused' });
+    expect(fake.changes).toEqual([change, change]);
+  });
+
+  test('the conformance suite names each way an implementation can fail it', async () => {
+    const fake = fakeRuntimes();
+    const bad = { ...summary('bad'), harness: 'nonsense' } as unknown as RuntimeSummary;
+    fake.setRuntimes([bad], RuntimeIdSchema.parse('ghost'));
+    expect(await runtimesConformance(() => fake)).toEqual({
+      ok: false,
+      error: ['list() returns summaries (bad)', 'default() names a runtime that exists'],
+    });
+    const wrongWord = { ...fakeRuntimes(), resolve: async () => ({ ok: false, refusal: 'disabled', sentence: 's' }) };
+    expect(await runtimesConformance(() => wrongWord as never)).toEqual({
+      ok: false,
+      error: ['resolve() names an unknown runtime "unknown"'],
+    });
+    const lenient = { ...fakeRuntimes(), resolve: async () => ({ ok: true, runtime: summary('x') }) };
+    expect(await runtimesConformance(() => lenient as never)).toEqual({
+      ok: false,
+      error: ['resolve() refuses an unknown runtime'],
+    });
+    const twice = fakeRuntimes();
+    const home = { id: 'h', harness: 'claude-code', runtimes: [], home: '/f/h', wrapper: '/f/w' } as const;
+    twice.setHomes([home, home]);
+    expect(await runtimesConformance(() => twice)).toEqual({ ok: false, error: ['homes() lists each id once'] });
+  });
+
+  test('a change is strict: it carries no document; an apply body is empty; an outcome carries its result', () => {
+    expect(
+      AccountChangeRequestSchema.safeParse({ change: { kind: 'runtime.remove', name: 'x', document: {} } }).success,
+    ).toBe(false);
+    expect(ProposalApplyRequestSchema.safeParse({ approval: 'x' }).success).toBe(false);
+    expect(ApplyOutcomeSchema.safeParse({ outcome: 'committed' }).success).toBe(false);
   });
 
   test('the manifest owns sixteen routes and requires Logins', () => {
@@ -110,6 +217,18 @@ describe('runtimes contract', () => {
     expect(runtimeFileLoosens(file('a'), file('b'))).toHaveLength(1);
     expect(runtimeFileLoosens(file('a'), file('a'))).toEqual([]);
     expect(runtimeFileLoosens(undefined, file('a'))).toEqual([]);
+  });
+
+  test('a removed runtime file is judged by what it was and never thrown on: it loosens nothing, shell or not', () => {
+    const file = (login: string, shell?: string) =>
+      RuntimeFileSchema.parse({ login, profile: 'p', ...(shell ? { shell } : {}) });
+    expect(() => runtimeFileLoosens(file('work'), undefined)).not.toThrow();
+    expect(runtimeFileLoosens(file('work'), undefined)).toEqual([]);
+    expect(runtimeFileLoosens(file('work', 'dev'), undefined)).toEqual([]);
+    expect(runtimeFileLoosens(undefined, undefined)).toEqual([]);
+    // the same function still holds what it held: a re-point and a shell newly entered
+    expect(runtimeFileLoosens(file('work'), file('play'))).toHaveLength(1);
+    expect(runtimeFileLoosens(file('work'), file('work', 'dev'))).toHaveLength(1);
   });
 
   test('T-0034 a shell newly entered is held, on a new file too; dropping or keeping it is not', () => {

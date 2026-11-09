@@ -6,10 +6,15 @@ import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin } from '../passkey/passkey.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { untilAborted } from './machine-deadline.ts';
+import { DEVICE_NOT_ACCEPTED_SENTENCE } from './sentences.ts';
 import { eventOwner, type Inventory, parseInventory, type Standing, standings } from './inventory.ts';
 import {
+  CARRIER_OUTAGE_CODE,
   DaemonCallError,
   type DaemonTransport,
+  DEVICE_REFUSED_CODE,
+  isCarrierGone,
+  isDeviceRefusal,
   type SocketListeners,
   type TransportAnswer,
   type TransportSocket,
@@ -38,6 +43,38 @@ const HealthEnvelopeSchema = z.object({ protocol: z.number().int(), version: z.s
 
 export const INVENTORY_ROUTE = 'GET /v1/plugins';
 export const HEALTH_ROUTE = 'GET /v1/health';
+/** Gate's grants read (`GET /v1/grants`): authenticated, not capability-gated, behind the unlock. */
+const GRANTS_PATH = '/v1/grants';
+/** The package that owns the grants read: the shell's own read admits as it, caller and owner alike. */
+const GATE_PACKAGE = 'gate';
+
+/** Said when a call died on the carrier, before any answer. */
+const CARRIER_OUTAGE_SENTENCE = 'The connection to this machine was lost before it answered.';
+
+/**
+ * What this client tells the shell's grants cache (shell contract S1) about the answers it sees, so a stale control
+ * heals: a confirm the person gave, a machine that wants its unlock, a capability refusal. Each answer-borne signal
+ * carries the GENERATION its request was sent under; a confirm bumps the generation, so an answer to a request sent
+ * before the unlock can be told apart and ignored.
+ */
+export type AuthoritySignal =
+  | { readonly kind: 'confirmed' }
+  | { readonly kind: 'locked'; readonly generation: number }
+  | { readonly kind: 'refused'; readonly generation: number };
+
+/** The shell's own grants read: the answer (none when nothing came back), the handler's reading, its generation. */
+export interface GrantsRead {
+  readonly generation: number;
+  readonly answer: TransportAnswer | undefined;
+  readonly need: PasskeyNeed | undefined;
+}
+
+/** A capability refusal from Gate's admission (`grant_not_granted`, `grant_step_up_required`, …). */
+const isCapabilityRefusal = (answer: TransportAnswer): boolean => {
+  if (answer.status !== 403 || typeof answer.body !== 'object' || answer.body === null) return false;
+  const code = (answer.body as { readonly code?: unknown }).code;
+  return typeof code === 'string' && code.startsWith('grant_');
+};
 
 /** The agenda channel header and the one value it may carry (the Asks contract's `AGENDA_CHANNEL_HEADER` / `AGENDA_CHANNEL_VERSION`). */
 const AGENDA_CHANNEL_HEADER = 'x-fy-agenda-channel';
@@ -68,6 +105,13 @@ export interface DaemonClientOptions {
    */
   readonly passkey?: { readonly daemon: PairedDaemon; readonly handler: PasskeyHandler };
 }
+
+/**
+ * Who a package client's calls are on behalf of, for the passkey (S2): `ordinary` asks as the request's method says
+ * (a read waits for its machine to be on screen, a press asks at once); `background` makes EVERY call a background
+ * read, whatever its method, so a background view never raises a prompt for a machine that is not on screen.
+ */
+export type ClientOrigin = 'ordinary' | 'background';
 
 /** The shell's widening of the leaf's `PluginClient`: the same guard over sockets. */
 export interface ShellPluginClient extends PluginClient {
@@ -135,6 +179,11 @@ export class DaemonClient {
   readonly #liveListeners = new Set<(live: boolean) => void>();
   #stopReconnect: (() => void) | undefined;
   #stopped = false;
+  /** Bumped by every passkey confirm the shell hears of (S1, R3 m2). */
+  #generation = 0;
+  readonly #authorityListeners = new Set<(signal: AuthoritySignal) => void>();
+  readonly #refusedListeners = new Set<() => void>();
+  #refused = false;
 
   constructor(options: DaemonClientOptions) {
     this.#transport = options.transport;
@@ -191,16 +240,79 @@ export class DaemonClient {
     return this.#standings.get(id) ?? { state: 'blocked', reason: 'missing' };
   }
 
+  /** The generation requests are sent under now; bumped by every confirm (S1). */
+  get generation(): number {
+    return this.#generation;
+  }
+
+  /** Whether the daemon's event feed is live right now (the view place's `online`). */
+  get feedLive(): boolean {
+    return this.#feedLive;
+  }
+
+  /** Fires on every change of {@link feedLive}. */
+  onFeedLive(listener: (live: boolean) => void): () => void {
+    this.#liveListeners.add(listener);
+    return () => this.#liveListeners.delete(listener);
+  }
+
+  /** Fires on every {@link AuthoritySignal}: the grants cache's re-read triggers. */
+  onAuthority(listener: (signal: AuthoritySignal) => void): () => void {
+    this.#authorityListeners.add(listener);
+    return () => this.#authorityListeners.delete(listener);
+  }
+
+  /**
+   * A confirm the person gave for this machine OUTSIDE this client's own pause (the shell's explicit unlock, a
+   * press's asked step-up): the generation moves on, and the grants are re-read.
+   */
+  noteConfirmed(): void {
+    this.#generation += 1;
+    this.#signal({ kind: 'confirmed' });
+  }
+
+  /**
+   * THE SHELL'S OWN GRANTS READ (S1, R3 m3), NEVER PAUSED. A method of this class only — `forPackage` hands no plugin
+   * a way to it — so no plugin can send a request that skips the passkey's pause. It admits as Gate, caller and owner
+   * both, so a paused plugin never hides it; a `401 unlock_required` comes back at once with the handler's reading of
+   * it (the machine is `locked`), never held for a prompt. It lets nothing through: it only reads.
+   */
+  async readGrants(_options: { readonly noPause: true }): Promise<GrantsRead> {
+    await this.#admit(GATE_PACKAGE, GATE_PACKAGE);
+    const generation = this.#generation;
+    let answer: TransportAnswer | undefined;
+    try {
+      answer = await this.#transport.request({ method: 'GET', path: GRANTS_PATH });
+    } catch {
+      answer = undefined;
+    }
+    return { generation, answer, need: answer === undefined ? undefined : this.#need(answer) };
+  }
+
+  /**
+   * Fires ONCE, when a session ended with the device-refused close (`4403`) on this machine (S12). That close is a
+   * cleartext word a relay can forge (`docs/relay-protocol.md`), so it is NOT proof the pairing is gone: the shell
+   * stops dialling this machine for this page and says so, and deletes nothing. Only the person's own removal unpairs.
+   */
+  onRefused(listener: () => void): () => void {
+    this.#refusedListeners.add(listener);
+    return () => this.#refusedListeners.delete(listener);
+  }
+
   /** Fires after every inventory change; the shell re-renders from {@link standing}. */
   onChange(listener: () => void): () => void {
     this.#changeListeners.add(listener);
     return () => this.#changeListeners.delete(listener);
   }
 
-  /** The client one package's half talks through. Every call is guarded by the OWNER of the route it names. */
-  forPackage(caller: string): ShellPluginClient {
+  /**
+   * The client one package's half talks through. Every call is guarded by the OWNER of the route it names. With
+   * `origin: 'background'` every call it sends is a background read for the passkey ({@link ClientOrigin}).
+   */
+  forPackage(caller: string, options: { readonly origin?: ClientOrigin } = {}): ShellPluginClient {
+    const background = options.origin === 'background';
     return {
-      call: (route, init) => this.#call(caller, route, init),
+      call: (route, init) => this.#call(caller, route, init, background),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
       socket: (key, params, listeners, query) => this.#socket(caller, key, params, listeners, query),
       feed: {
@@ -232,7 +344,8 @@ export class DaemonClient {
     try {
       const answer = await this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path });
       inventory = answer.status === 200 ? parseInventory(answer.body) : { kind: 'unreadable' };
-    } catch {
+    } catch (error) {
+      if (isDeviceRefusal(error)) this.#refuse();
       inventory = { kind: 'unreadable' };
     }
     try {
@@ -261,7 +374,12 @@ export class DaemonClient {
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
   }
 
-  async #call<Answer>(caller: string, route: string, init: Parameters<PluginClient['call']>[1] = {}): Promise<Answer> {
+  async #call<Answer>(
+    caller: string,
+    route: string,
+    init: Parameters<PluginClient['call']>[1] = {},
+    background = false,
+  ): Promise<Answer> {
     const owner = this.#routeOwner.get(route);
     if (owner === undefined) throw new TypeError(`${caller} called ${route}, which no compiled manifest declares`);
     await this.#admit(caller, owner);
@@ -278,11 +396,11 @@ export class DaemonClient {
     };
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
     const answer = await this.#confirmed(
-      method,
-      await this.#transport.request(request),
+      background ? 'background' : requestOrigin(method),
+      await this.#sent(request),
       async () => {
         await this.#admit(caller, owner);
-        return await this.#transport.request(request);
+        return await this.#sent(request);
       },
       init.signal,
     );
@@ -297,15 +415,14 @@ export class DaemonClient {
    * be read yet); a dismissed prompt returns the refusal unchanged, and a second refusal of the same kind is the answer.
    */
   async #confirmed(
-    method: string,
+    origin: PromptOrigin,
     first: TransportAnswer,
     resend: () => Promise<TransportAnswer>,
     signal?: AbortSignal,
   ): Promise<TransportAnswer> {
     const passkey = this.#passkey;
-    if (passkey === undefined || first.status < 400) return first;
     // G95: a read is the page's own work, so its prompt waits for its machine to be on screen; a press asks at once.
-    const origin = requestOrigin(method);
+    if (passkey === undefined || first.status < 400) return first;
     let answer = first;
     let need = this.#need(answer);
     if (need?.kind === 'unlock') {
@@ -318,6 +435,52 @@ export class DaemonClient {
     // Today's step-up wait is NOT abortable (only the unlock is), so the step-up prompt takes no signal.
     if (!(await this.#confirm(need, origin))) return answer;
     return await resend();
+  }
+
+  /** One request, its answer told to the grants cache under the generation it was sent in. */
+  async #sent(request: Parameters<DaemonTransport['request']>[0]): Promise<TransportAnswer> {
+    // Once this machine has refused this device (`4403`) nothing more is dialled on this client: a call that captured
+    // the client before the refusal gets the same answer without asking the daemon again.
+    if (this.#refused) throw new DaemonCallError(0, DEVICE_REFUSED_CODE, DEVICE_NOT_ACCEPTED_SENTENCE);
+    const generation = this.#generation;
+    let answer: TransportAnswer;
+    try {
+      answer = await this.#transport.request(request);
+    } catch (error) {
+      throw this.#failed(error, request.signal);
+    }
+    if (answer.status === 401 && this.#need(answer)?.kind === 'unlock') this.#signal({ kind: 'locked', generation });
+    else if (isCapabilityRefusal(answer)) this.#signal({ kind: 'refused', generation });
+    return answer;
+  }
+
+  /**
+   * A transport failure, told apart (S12). The caller's own abort is its own. A device-refused close (`4403`) is
+   * `device_refused` (and the shell is told once, to stop dialling). A failure that says the CARRIER went away
+   * ({@link isCarrierGone}) is a CARRIER OUTAGE, marked `carrier`, so a screen keeps its last good content instead of
+   * saying the daemon refused. Every other failure (the daemon's own `4426` "update this app", a protocol error, no
+   * device key, a plain `Error`) passes through unmarked with its own words, so it is shown, never retried silently.
+   * The original is kept as `cause`.
+   */
+  #failed(error: unknown, signal: AbortSignal | undefined): unknown {
+    if (error instanceof DaemonCallError || signal?.aborted === true) return error;
+    if (isDeviceRefusal(error)) {
+      this.#refuse();
+      return new DaemonCallError(0, DEVICE_REFUSED_CODE, DEVICE_NOT_ACCEPTED_SENTENCE, undefined, undefined, error);
+    }
+    if (isCarrierGone(error))
+      return new DaemonCallError(0, CARRIER_OUTAGE_CODE, CARRIER_OUTAGE_SENTENCE, undefined, true, error);
+    return error;
+  }
+
+  #refuse(): void {
+    if (this.#refused || this.#stopped) return;
+    this.#refused = true;
+    for (const listener of [...this.#refusedListeners]) listener();
+  }
+
+  #signal(signal: AuthoritySignal): void {
+    for (const listener of [...this.#authorityListeners]) listener(signal);
   }
 
   /** The handler's reading of a refusal; a handler that throws reads it as no passkey need at all. */
@@ -339,11 +502,14 @@ export class DaemonClient {
   async #confirm(need: PasskeyNeed, origin: PromptOrigin, signal?: AbortSignal): Promise<boolean> {
     const passkey = this.#passkey;
     if (passkey === undefined || this.#stopped) return false;
+    let confirmed: boolean;
     try {
-      return (await untilAborted(passkey.handler.confirm(passkey.daemon, need, origin), signal, false)) === true;
+      confirmed = (await untilAborted(passkey.handler.confirm(passkey.daemon, need, origin), signal, false)) === true;
     } catch {
-      return false;
+      confirmed = false;
     }
+    if (confirmed) this.noteConfirmed();
+    return confirmed;
   }
 
   #subscribe<Name extends string, Payload>(

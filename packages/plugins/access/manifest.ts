@@ -207,6 +207,10 @@ export default definePlugin({
     ],
   },
 
+  /** Never reached by a ferret, through any root: passkeys, device records, unlocks, push keys and the live pairing redirect (`PrivacyDecl`). */
+  privacy: {
+    private: ['passkeys.json', 'push-keys.json', 'devices.json', 'unlocks.json', 'push.json', 'pairing-redirects'],
+  },
   data: {
     state: [
       DevicesFile,

@@ -7,7 +7,8 @@ import type {
   SettingsProps,
 } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
-import type { ShellPluginClient } from '../client/daemon-client.ts';
+import type { ClientOrigin, ShellPluginClient } from '../client/daemon-client.ts';
+import type { Standing } from '../client/inventory.ts';
 import type { SurfaceEntry } from './registry.ts';
 
 /**
@@ -57,9 +58,15 @@ function buildHalf(entry: SurfaceEntry, client: ShellPluginClient): BuiltHalf {
 }
 
 /**
- * Memoised halves per daemon, and the ONE client each was built with: a half's app hooks (`shell.hooks`) are built
- * over that same client, so what a hook reads and what the half's views read is one store. Cleared for a daemon when
- * it is unpaired or its client is replaced.
+ * THE ONE CLIENT CACHE (shell contract S2), and the halves built over it. Clients are keyed by (daemon, package,
+ * origin): `ordinary` is the client a half is built with and its views and app hooks call through, so what a hook
+ * reads and what the half's views read is one store; `background` is the same package's client whose every call is a
+ * background read for the passkey (`DaemonClient.forPackage(…, { origin })`), the one a background view is handed.
+ *
+ * A CLIENT LIVES AS LONG AS ITS CONNECTION (R3 MJ2): a transport reconnect or a `kernel.plugins-changed` rebuilds the
+ * halves ({@link clearDaemon}) but keeps every client, so a watcher holding one (Layouts) never sees it change; only an
+ * unpair drops them ({@link dropDaemon}). THE STANDING CHECK IS AT READ TIME: a blocked or paused package is answered
+ * `undefined`, and once it is allowed again the SAME cached object comes back.
  */
 export class HalfCache {
   readonly #byDaemon = new Map<string, Map<string, BuiltHalf>>();
@@ -67,20 +74,30 @@ export class HalfCache {
 
   constructor(
     private readonly surfaces: ReadonlyMap<string, SurfaceEntry>,
-    private readonly clientFor: (daemon: string, packageId: string) => ShellPluginClient | undefined,
+    private readonly clientFor: (
+      daemon: string,
+      packageId: string,
+      origin: ClientOrigin,
+    ) => ShellPluginClient | undefined,
+    private readonly standing: (daemon: string, packageId: string) => Standing,
   ) {}
 
-  /** The client a package's half on this daemon is (or will be) built with; `undefined` before the daemon answers. */
-  client(daemon: string, packageId: string): ShellPluginClient | undefined {
+  /**
+   * The client a package talks through on this daemon, for this origin: the one its half is (or will be) built with
+   * when `ordinary`. `undefined` before the daemon answers, and while the package is not allowed there.
+   */
+  client(daemon: string, packageId: string, origin: ClientOrigin = 'ordinary'): ShellPluginClient | undefined {
+    if (this.standing(daemon, packageId).state !== 'allowed') return undefined;
     let clients = this.#clients.get(daemon);
     if (clients === undefined) {
       clients = new Map();
       this.#clients.set(daemon, clients);
     }
-    const known = clients.get(packageId);
+    const key = `${packageId}\u0000${origin}`;
+    const known = clients.get(key);
     if (known !== undefined) return known;
-    const client = this.clientFor(daemon, packageId);
-    if (client !== undefined) clients.set(packageId, client);
+    const client = this.clientFor(daemon, packageId, origin);
+    if (client !== undefined) clients.set(key, client);
     return client;
   }
 
@@ -101,7 +118,13 @@ export class HalfCache {
     return built;
   }
 
+  /** The daemon's halves are rebuilt on their next draw (its inventory changed); its clients stay. */
   clearDaemon(daemon: string): void {
+    this.#byDaemon.delete(daemon);
+  }
+
+  /** The daemon was unpaired: its halves AND its clients go. A re-pair is a new connection and new clients. */
+  dropDaemon(daemon: string): void {
     this.#byDaemon.delete(daemon);
     this.#clients.delete(daemon);
   }

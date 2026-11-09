@@ -1,3 +1,4 @@
+import { relative } from 'node:path';
 import type { BinaryNames, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { decideHome } from '../contract/home.ts';
@@ -70,7 +71,7 @@ import { checkDirectory, gatedOverrides, gatedPaths, gatedWhich } from './paths.
 import { type ExecutableProbe, handleReaders, locateCommand, whichCommand, whichForCommand } from './which.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
-import { type InstalledItems, installedItemReach } from './items.ts';
+import { configOwnedKinds, type InstalledItems, installedItemReach, itemReach } from './items.ts';
 import {
   admitCall,
   Dispatcher,
@@ -82,6 +83,7 @@ import {
   type Serving,
 } from './dispatch.ts';
 import { EventBus } from './events.ts';
+import { DEFAULT_RECHECK_MS, type PlaceBudget, type TruncationWatcher } from './fence-index.ts';
 import { dependentsOf, type GraphRefusal, planGraph } from './graph.ts';
 import { type Deadline, HookEngine } from './hooks.ts';
 import {
@@ -125,6 +127,7 @@ import {
 } from './permissions.ts';
 import type { HostStatePort } from './state/state-port.ts';
 import { openHome, probeHome } from './home.ts';
+import { composePrivateFiles, privacyRefusals } from '../manifest/privacy.ts';
 import { ensureInternalRootBases, ownFolderSpellings, rootsPortFor } from './roots.ts';
 import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from './processes.ts';
 import { PinRegistry } from './pins.ts';
@@ -170,6 +173,8 @@ export interface HostConfig {
   /** What every declared file stands at (`GET /v1/config/status`, `config_read`). Absent: none can be listed. */
   status?(): ConfigStatus;
   reload(): Promise<void>;
+  /** Writes the editors' JSON Schema for every declared file under `config/.schema/`. Absent: none is written. */
+  publishSchemas?(): Promise<void>;
   startWatching?(): () => void;
   /**
    * Every declared file of every plugin that moved on disk or in state at a reload, with its plugin: what the host
@@ -181,6 +186,12 @@ export interface HostConfig {
   /** The same names, from the plugin's credential-record defs alone (what a provider counts as its own). Absent: none. */
   credentialRecordReferences?(plugin: string): ReadonlySet<string>;
 }
+
+/**
+ * How often the kept index of the home's private places is looked at again (§7.7, `host/fence-index.ts`): a private file
+ * created or replaced is pinned within this long, which is also the longest one can be reached under a second name.
+ */
+const PRIVATE_RECHECK_MS = DEFAULT_RECHECK_MS;
 
 /** The kernel's own `GET /v1/config/file` declaration: what a `kernel.config-changed` frame is asked about as. */
 const CONFIG_FILE_READ = (() => {
@@ -450,6 +461,15 @@ async function bootLocked(
   for (const implementation of options.implementations)
     if (implementation.manifest.id !== 'kernel') implementations.set(implementation.manifest.id, implementation);
   const manifests: Manifest[] = [kernelManifest, ...[...implementations.values()].map(impl => impl.manifest)];
+  const unsound = privacyRefusals(manifests);
+  if (unsound.length > 0)
+    return {
+      kind: 'refused',
+      sentence: `A plugin's private files are not declared soundly, so the daemon did not start:\n${unsound.join('\n')}`,
+      trace,
+    };
+  /** Every plugin's declared private places, composed once: the one list the fence of EVERY root reads (§7.7). */
+  const privateFiles = composePrivateFiles(manifests);
   // Config: every declared file of every known plugin, so a plugin turned on later finds its file checked.
   trace.push('config');
   // Gate's judge is read live: Admission is bound after build, and an absent or throwing one holds the edit.
@@ -471,6 +491,8 @@ async function bootLocked(
     },
   );
   await config.reload();
+  // The modeline of every file points an editor at its schema, so the schemas are there once a daemon serves.
+  await config.publishSchemas?.().catch(() => log.warn('the configuration schemas could not be written'));
   const stopWatching = config.startWatching?.();
   if (stopWatching !== undefined) own(stopWatching);
   const pluginsYaml = readPluginsYaml(config.port('kernel'));
@@ -517,6 +539,29 @@ async function bootLocked(
   let enabled = yamlEnabled;
   let plan = planWith(enabled);
   const bootNotes: DoctorLine[] = [];
+  /**
+   * The private places that are past their budget now (§7.7). Each one makes every other root on that device refuse
+   * everything, so it is never silent: one log line per change, and a standing doctor line until it fits again.
+   */
+  const pastBudget: { current: readonly PlaceBudget[] } = { current: [] };
+  const watchPrivate: TruncationWatcher = budgets => {
+    const before = pastBudget.current;
+    pastBudget.current = budgets;
+    const where = (place: PlaceBudget): string => relative(home, place.path);
+    for (const place of budgets)
+      if (!before.some(was => was.path === place.path))
+        log.warn('a private place holds more than its budget, so every read on its device is refused', {
+          place: where(place),
+          indexed: place.indexed,
+          limit: place.limit,
+        });
+    for (const place of before)
+      if (!budgets.some(now => now.path === place.path))
+        log.warn('a private place fits its budget again, so its device is no longer refused', {
+          place: where(place),
+          limit: place.limit,
+        });
+  };
   // §2.4: a hand-edited plugins.yaml that strands a plugin is refused; boot keeps the last accepted set. A caller
   // that names the enabled set itself (a suite) is not second-guessed.
   if (options.enabled === undefined) {
@@ -559,7 +604,12 @@ async function bootLocked(
   const { engine: hooks } = HookEngine.plan(order, log, deadline, manifests);
 
   const data = await loadDataPlugins(adapters.fs, home, new Set(manifests.map(manifest => manifest.id)));
-  const items = await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]);
+  // What an item names: the installed data plugins' (read once, an install is pinned) united with the owner's config
+  // collection of each kind (`config/mcp/<name>.yaml`), read live at every check (no cache: nothing to go stale).
+  const items = itemReach({
+    installed: await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]),
+    configOwned: configOwnedKinds(order, id => config.port(id)),
+  });
 
   const records = new Map<string, PluginRecord>();
   for (const manifest of manifests) {
@@ -719,6 +769,9 @@ async function bootLocked(
       () => bound.workFolders,
       {
         random: adapters.random,
+        privateFiles,
+        privateRecheckMs: PRIVATE_RECHECK_MS,
+        privateWatch: watchPrivate,
         ...(pins === undefined ? {} : { pins }),
         ...(manifest.permissions?.harnessFiles === undefined
           ? {}
@@ -727,6 +780,9 @@ async function bootLocked(
         // only state it may share; every tree it minted is revoked when it stops.
         shareTrees: manifest.permissions?.shareTrees === true,
         setMode: manifest.permissions?.setMode === true,
+        ...(manifest.permissions?.projectFiles === undefined
+          ? {}
+          : { projectFiles: manifest.permissions.projectFiles }),
         stateFiles: manifest.data?.state ?? [],
         onStop: fn => lifecycle.onStop(fn),
       },
@@ -772,11 +828,13 @@ async function bootLocked(
           openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
           items,
           pins,
+          resolversOf(manifest.id),
         ),
         adapters.spawn,
         items,
         // The program's name and pid, never its arguments: a link opener's URL may carry a query.
         (program, pid) => log.info('a detached child was started', { plugin: manifest.id, program, pid }),
+        resolversOf(manifest.id),
       ),
       scratch: adapters.scratch ?? NO_SCRATCH,
       fetch: fetchPort,
@@ -1125,7 +1183,12 @@ async function bootLocked(
         // The record is Gate's; the answer stands.
       }
     },
-    doctor: async () => doctorReport([...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))]),
+    doctor: async () =>
+      doctorReport([
+        ...bootNotes,
+        ...pastBudgetLines(home, pastBudget.current),
+        ...(await doctorLines(records, hooks, jobs, data.refused)),
+      ]),
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',
       uptimeSeconds: Math.max(0, Math.round((clock.nowMs() - startedAtMs) / 1000)),
@@ -1336,7 +1399,11 @@ async function bootLocked(
     ids,
     dispatch: request => dispatcher.dispatch(request),
     callTool,
-    doctor: async () => [...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))],
+    doctor: async () => [
+      ...bootNotes,
+      ...pastBudgetLines(home, pastBudget.current),
+      ...(await doctorLines(records, hooks, jobs, data.refused)),
+    ],
     stop: () => stopHost(),
   };
 
@@ -1434,6 +1501,24 @@ function refusalText(response: ApiResponse): string {
   } catch {
     return `Refused (${response.status}).`;
   }
+}
+
+/**
+ * One failing line per private place that is past its budget (§7.7): what it stops, and how to lift it. The place is
+ * named relative to the home (never a value), with how many places were indexed against how many are allowed.
+ */
+function pastBudgetLines(home: string, budgets: readonly PlaceBudget[]): readonly DoctorLine[] {
+  return budgets.map(place => ({
+    plugin: 'kernel',
+    state: 'fail',
+    detail:
+      `The private place ${relative(home, place.path)} holds more than its ${place.limit} places, so it is not indexed whole ` +
+      `and every file on its disk is refused (by every root but the one that owns it, and by every owner's root there): ` +
+      `agent homes, fleet files, work folders, imports and harness homes read nothing from that disk.`,
+    fix:
+      `Remove what you no longer need under ${relative(home, place.path)} — for ended ferret sessions delete the ` +
+      `environment.json in their session folder (the credential is dead then) — it is lifted at the next look.`,
+  }));
 }
 
 async function doctorLines(

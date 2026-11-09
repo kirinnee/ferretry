@@ -38,6 +38,18 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 - Sealed and secret files (vault, its key, the identity key, push keys, harness sign-ins, the message-token key) are
   moved with `copyFile` + mode + times (`src/sealed.ts`): their bytes never become a value in this program, and the
   report names a file and its size, never content.
+- One exception, and only to ADD: a key v4 saved in plain text in a login file's `env`, `claude.env` or `codex.env` is sealed into the v5 vault
+  (`src/steps/login-keys.ts`) and the login file names it `${secret:LOGIN_<ID>_<VAR>}`. For that the tool holds the
+  vault key in memory only long enough to import it (one Buffer, zeroed at once and again on any exit), seals each new
+  value exactly as the vault does, and writes the vault with a temp file + rename. Existing vault entries are still
+  copied byte for byte and never decrypted. The report names login, variable and secret name, never a value; if a key
+  cannot be sealed the step fails and the run has no `home.json`, so a key is never left plain. The v4 login file in
+  the backup still holds the key in plain text. Two more cases, both said out loud and never with the value:
+  the rule is exactly what v5's login schema refuses as a raw secret (a key, or an address with a password or a key in
+  its query), a refused value of 8 or more characters is moved, and a refused value under 8 characters (which the
+  vault cannot hold) fails the step naming the login and variable; edit or remove it in the v4 file, then run again.
+  Login keys are sealed only when the vault step converted; if it failed or did not run, the login-keys step fails
+  naming each login and variable it could not move, and mints no key and writes no `vault.json`.
 - The live tmux socket is given a second name in the new home with `link(2)`, so v5 reaches the same running server.
 
 ## State (Phase B)
@@ -142,9 +154,44 @@ Settings (`src/steps/settings.ts`) turns each v4 `config/*.yaml` into the v5 plu
 `warden.yaml` (`autoMigrate` → `autoMove`, with v4's read-time upgrades applied), `limits.yaml`, `accounts.yaml`, and
 `machine.yaml` split key by key over eight owners. Comments survive (each file is edited as a `yaml` Document) and every
 file is checked by its v5 schema before anything is written. v4 `claude` is v5 `claude-code` in every `harness:` field.
-A runtime alias in `fleet/ids.json` `formerNames` is rewritten to the current name (M7). Settings and hooks components,
-an instructions document outside `fleet/assets/`, `voice.yaml`, `pack.yaml` and `models-guide.yaml` wait for v5 schemas
-(the step reports `pending`). The full per-key table is `docs/migration/v4-formats.md` §5a.
+A runtime alias in `fleet/ids.json` `formerNames` is rewritten to the current name (M7). `voice.yaml` is carried like
+any singleton (a cloud provider v4 never confirmed stays held). `pack.yaml` and `models-guide.yaml` still wait for v5
+schemas (the step reports `pending`).
+
+Settings and hooks components are inlined. A `file:` follows v4's rule exactly: it resolves the way v4's
+`expandAssetPath` did (relative to `fleet/assets/`; `~/`, `$HOME/` and absolute paths as real paths) and is carried only
+when the resolved path lies under the home's `fleet/assets/`. There is no "beside the YAML" fallback and nothing else
+in the home is read (v4 fenced it; a stray `.toml` beside the YAMLs is ignored); such a component is NOT CARRIED. For a path inside the v4 home but outside `fleet/assets/` the report says v4 would not
+have read it either; for a path outside the v4 home (`~/`, `$HOME/`, absolute) it says v4 read the file from outside its
+home, that the preview carries only files under `fleet/assets/`, and that you can copy it there to carry it. A trailing
+`/` is never carried. Every folder from the home root down is `lstat`ed (no links), the file must be a regular file with
+ONE name (a hard link is refused as v4 refused it; the Nix-store exception is not carried), and at most 1 MiB is read. Flags: Claude `--disallowedTools` becomes `settings.permissions.deny` (merged,
+deduplicated) and Codex `-c key=value` becomes a key of the item's `settings` (secret values refused); an env value that
+is a string, number or boolean is carried as a string. **A string value in a carried settings or hooks document that
+names a file under `<v4 home>/fleet/assets/`** (a hook command such as `cat <v4 home>/fleet/assets/components/hooks/x.txt`
+or `sh ~/.ferretry/fleet/assets/…`; the absolute v4 home, or a `~/`, `$HOME/` or `${HOME}/` spelling that resolves to it;
+matched as a whole path token bounded by the value's ends, whitespace or quotes, never a piece of a longer path such as
+`<v4 home>-old/…`) is carried: the FILE is written into the v5 home at the same path under `fleet/assets/` (a place v5
+Runtimes already reads, that nothing in v5 sweeps or refuses; the skill-folders step writes there too), under the same
+rules as a component file (every folder and the file `lstat`ed, no link, one name, a regular file, 1 MiB cap, refused if
+its content looks like a credential), and only that token is rewritten to the v5 copy. A file whose own content names
+the v4 home is NOT carried (a script that reaches back into v4 is never carried silently), and neither is a file under
+`fleet/assets/skills/` (the skill-folders step owns it). The file is held to the same homes the last gate refuses in an
+inline command (v4's home and worktree folder, `~/.claude*`, `~/.codex*`; `$FY_HOME` carries) and to the one credential
+scan settings documents use over the whole content (every assignment, every word, `Authorization` headers). The file is
+written with mode 0600, or 0700 when the source has its owner-execute bit (the preview stage keeps that bit and no group
+or other bit); the bytes written are the bytes checked. The accepted record carries the rewritten text. The report names each carried
+file by its `fleet/assets/` path only. Any other string that names the v4 home (outside `fleet/assets/`, a folder, a
+missing file, a file that fails a rule) makes the component NOT CARRIED; the report names the component and the reason,
+never the command; remedy: copy the file under `fleet/assets` in v4, or remove the hook. Anything else a v5 settings item has no form for (any other flag,
+a file outside the home, a hooks `directory`, a secret-shaped or `${secret:...}` value, an oversize file, an unknown
+harness) makes the component NOT CARRIED. The report names the component, each flag by name only, and every profile that
+layers it, and says it may have restricted what the agent could do. **By default the step is then `pending` and no
+`home.json` is written**; the remedy is to fix it in v4 or to re-run with `--drop-uncarried`, which strips that layer from
+every profile that names it and says plainly the ferrets may now be LESS restricted than in v4. `--drop-uncarried` is the
+owner's choice and never a default; an agent never passes it without the owner's yes. (GAP: v5 settings items hold no
+launch flags; the Runtimes model has a `flags` field no provider fills.) The full per-key table is
+`docs/migration/v4-formats.md` §5a.
 
 Daemon settings (`src/steps/daemon-settings.ts`) splits `config/daemon.json` by owner: `grants` → `gate.yaml` with all eight
 capabilities and both axes written explicitly at v4's effective value (`configure` only where `use` is on), plus
@@ -251,11 +298,45 @@ step drops that component and removes the layer from every profile (lead decisio
 rules twice.
 
 Confirmed settings (`src/steps/accepted-config.ts`, last): v4's `state/config-accepted.json` holds what v4 put into
-effect per config file. When every v4 config file was in effect as written (its entry's etag is the SHA-256 of its text),
-each v5 config file this run wrote is recorded as accepted (`state/kernel/accepted-config/`, the kernel's
-`acceptedConfigFile`), so a loosening the owner confirmed in v4 is not asked about again. When any was not (a held
-edit, an invalid file, one never accepted, a held deletion), nothing is recorded, the report names those files, and v5
-holds any loosening until the owner confirms it again. Texts are hashed and written, never reported.
+effect per config file. When every v4 config file was in effect as written (its entry's etag is the SHA-256 of its
+text), each v5 config file this run wrote is recorded as accepted (`state/kernel/accepted-config/`, the kernel's
+`acceptedConfigFile`, each record naming the plugin whose def owns the path, from `src/v5/targets.ts`; a path no def
+owns is not recorded and stays held), so a loosening the owner confirmed in v4 is not asked about again. In the preview,
+a file the PREVIEW wrote or changed (its text differs from a plain, non-preview conversion of the same v4 home, or the
+plain conversion writes no such file: `terminals.yaml`, the `fy-preview` settings item, the forced `limits.yaml`) is
+"preview-authored" and is recorded only with `prepare --owner`, never otherwise.
+
+**A v4 edit that v4 still held stays held in v5, whatever its direction relative to v5's defaults** (v4 judges an edit
+against the text it has in effect, v5 with no record would judge it against its defaults, and those differ when v4's
+enforced text was tighter than the defaults). When any v4 file was not in effect (a held edit, an invalid file, one
+never accepted, a held deletion), the v5 file carries v4's CURRENT text converted (what the owner sees and may confirm)
+and the record carries the conversion of what v4 ENFORCED: a plain dry run of the config-writing steps in which each
+held file READS as v4's accepted text for it. That is an in-memory override: no copy of any v4 file is written
+anywhere, every other file is read from v4 itself, read-only. A login file's enforced text carries `${secret:NAME}`
+with the SAME name the live file got, or, when v4 enforced a different key than the one now sealed, no record is
+written for it (held). If the enforced conversion cannot run, or a step fails in it, no record is written for any
+file, the `accepted-config` step fails and the conversion is incomplete (it never falls back to the current text). The
+kernel then judges the file on disk against the enforced record and holds a loosening, enforcing the v4-enforced
+version. A held DELETION leaves the v5 file absent but records the enforced text, and the kernel treats a missing file
+with a record as a deletion (held when it loosens). Where v4 enforced nothing for a file (never accepted) no record is
+carried, and if v4's record is damaged, nothing is recorded. A file with no held edit is unchanged. The report names
+the held files.
+
+`--owner` records a preview-authored file whose v4 sources (the ones the writing step names for it; a held v4 DELETION
+of any file counts as a held source of every file that has a v4 source) were all in effect, and a pure preview file (no
+v4 source). A preview-authored file with a held v4 source gets NO record of the preview's text even with the flag (the
+owner's "not yet" stands): its record is what v4 enforced, so the kernel holds the preview's text where it loosens
+that.
+The report and the `prepare` note name every such file with its reason, and the files they recorded; the remedy is to
+confirm the edit in v4, then `preview.sh clean` and `preview.sh prepare --owner`. Texts are hashed and written, never
+reported.
+
+`preview.sh prepare` reads each `config/logins/*.yaml` once, for its `harness` field and whether it has both `claude:`
+and `codex:` halves, and nothing else (the file is opened without following links, YAML warnings are silenced, and no
+other key is read into a variable); an agent's `dry-run` reads no login file. A runtime on a login that drives both
+CLIs runs as v4 decides it: the CLI its profile is scoped to, else the login's own harness. It is held, with a reason
+saying so, only when its profile includes a model set without a `harness` (v4 scopes that by model ids the preview does
+not read).
 
 ## Tests
 

@@ -1,4 +1,4 @@
-import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { HoldsChanged, InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import { AgentControlPort, FerretsPort, Runners } from '@ferretry/core-ferrets/contract';
@@ -18,6 +18,7 @@ import {
   TerminalReadInputSchema,
   TerminalSendInputSchema,
   TerminalsConfigSchema,
+  terminalsLoosens,
   TerminalsPort,
   TerminalsStateSchema,
   TerminalWaitInputSchema,
@@ -291,6 +292,10 @@ export default definePlugin({
     renderers: [renderer('reference', { prefix: '%terminal' })],
   },
 
+  /** Never reached by a ferret, through any root: the tmux socket: whoever opens it drives every terminal (`PrivacyDecl`). */
+  privacy: {
+    private: ['tmux.sock'],
+  },
   data: {
     state: [
       /** tmux's own server socket: not a document, never parsed by Ferretry. */
@@ -314,7 +319,7 @@ export default definePlugin({
         file: 'terminals.yaml',
         schema: TerminalsConfigSchema,
         axis: 'configure',
-        loosens: neverLoosens,
+        loosens: terminalsLoosens,
       }) as ConfigDef,
     ],
     readModels: ['terminals', 'holders'],

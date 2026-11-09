@@ -165,6 +165,16 @@ export interface ReattemptOptions {
   readonly force?: boolean | undefined;
 }
 
+/**
+ * Why a send is PENDING (not refused) while Codex holds an earlier submission until its startup ends: nothing is typed or
+ * pressed, and the caller retries once startup has ended. The send-now's stop is held back for the same reason.
+ */
+export function startupParkedPending(id: SessionId): SendPending {
+  return new SendPending(
+    `session ${id} is still starting; its agent is holding an earlier message until startup ends, so this one is pending, not failed`,
+  );
+}
+
 /** The longest stretch of a draft quoted back in a refusal: enough to recognise, not a transcript. */
 const DRAFT_QUOTE_CHARS = 40;
 
@@ -1143,10 +1153,7 @@ export class SessionSendService {
    * as a draft nobody wrote. The caller retries once startup has ended (the queue reads this as `launching`).
    */
   private refuseWhileParked(id: SessionId, pane: SendPaneObservation): void {
-    if (pane.startupParked === true)
-      throw new SendPending(
-        `session ${id} is still starting; its agent is holding an earlier message until startup ends, so this one is pending, not failed`,
-      );
+    if (pane.startupParked === true) throw startupParkedPending(id);
   }
 
   /** A pane where Enter submits the composer: alive, not mid-turn, not parked on a dialog, and not holding a submission until startup ends. */

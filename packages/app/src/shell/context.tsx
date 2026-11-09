@@ -24,6 +24,12 @@ import type { ScrollMemory } from '../scroll/scroll-memory.ts';
 import { applyThemeItem, type ThemeItem } from '../theme/tokens.ts';
 import type { OwnerLayout } from '../layout/daemon-layout.ts';
 import type { ShellRuntime } from './runtime.ts';
+import {
+  DeviceProvider,
+  type DeviceContextValue,
+  type InstallPromptHolder,
+  NO_INSTALL_PROMPT,
+} from './device-context.tsx';
 
 /** Everything the shell's components read: the runtime, the views, the route table, the layout in force. */
 export interface ShellModel {
@@ -132,10 +138,10 @@ function applyWindowColour(
 function useAppliedTheme(
   browser: ShellWindow,
   preference: ThemePreference,
+  dark: boolean,
   density: string,
   ownerTheme: ThemeItem | undefined,
 ): void {
-  const dark = useMedia(browser, DARK_QUERY);
   useEffect(() => {
     const root = browser.document.documentElement;
     root.dataset.theme = themeAttribute(preference.family, resolveThemeMode(preference.mode, dark));
@@ -154,6 +160,8 @@ export interface ShellProviderProps {
   readonly layouts: DeviceLayoutStore;
   readonly browser: ShellWindow;
   readonly scroll: ScrollMemory;
+  /** The install-as-app prompt the browser offered (S13); none until then. */
+  readonly install?: InstallPromptHolder;
   readonly children: ReactNode;
 }
 
@@ -174,8 +182,17 @@ function useOwnerLayout(runtime: ShellRuntime): OwnerLayout | undefined {
   );
 }
 
-export function ShellProvider({ runtime, themes, layouts, browser, scroll, children }: ShellProviderProps) {
+export function ShellProvider({
+  runtime,
+  themes,
+  layouts,
+  browser,
+  scroll,
+  install = NO_INSTALL_PROMPT,
+  children,
+}: ShellProviderProps) {
   const phone = useMedia(browser, PHONE_QUERY);
+  const dark = useMedia(browser, DARK_QUERY);
   const preference = useSyncExternalStore(themes.subscribe, () => themes.snapshot());
   const overrides = useSyncExternalStore(layouts.subscribe, layouts.snapshot);
   const served = useOwnerLayout(runtime);
@@ -188,10 +205,26 @@ export function ShellProvider({ runtime, themes, layouts, browser, scroll, child
   );
   const viewport: Viewport = phone ? 'phone' : 'wide';
   const plan = useMemo(() => planFrame(resolveLayout(layout.layout, viewport), views), [layout, viewport, views]);
-  useAppliedTheme(browser, preference, plan.density, served?.theme);
+  useAppliedTheme(browser, preference, dark, plan.density, served?.theme);
+  // The device context sits ABOVE the shell context, so `WithoutShell` (which hides only the shell) never hides it.
+  const device = useMemo<DeviceContextValue>(
+    () => ({
+      theme: themes,
+      systemDark: dark,
+      install,
+      address: runtime.address,
+      handOffs: runtime.handOffs,
+      daemons: { snapshot: runtime.daemons.snapshot, subscribe: runtime.daemons.subscribe },
+    }),
+    [themes, dark, install, runtime],
+  );
   const model = useMemo<ShellModel>(
     () => ({ runtime, views, routes, layout, owner, plan, viewport, themes, layouts, scroll }),
     [runtime, views, routes, layout, owner, plan, viewport, themes, layouts, scroll],
   );
-  return <ShellContext.Provider value={model}>{children}</ShellContext.Provider>;
+  return (
+    <DeviceProvider value={device}>
+      <ShellContext.Provider value={model}>{children}</ShellContext.Provider>
+    </DeviceProvider>
+  );
 }

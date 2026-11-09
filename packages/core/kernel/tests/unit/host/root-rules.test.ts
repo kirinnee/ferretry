@@ -26,6 +26,7 @@ const ALL: readonly RootName[] = [
   'sessions',
   'fleet',
   'harness-home',
+  'project-files',
 ];
 
 describe('takesLinks', () => {
@@ -53,6 +54,14 @@ describe('renameNamesRefusal', () => {
     expect(renameNamesRefusal('', '/r/b')).toBe('outside');
     expect(renameNamesRefusal('/r/a', '')).toBe('outside');
     expect(renameNamesRefusal(undefined as unknown as string, '/r/b')).toBe('outside');
+  });
+
+  test('a . segment and an empty middle segment are refused, at either end', () => {
+    expect(renameNamesRefusal('/r/a', '/r/b/.')).toBe('outside');
+    expect(renameNamesRefusal('/r/./a', '/r/b')).toBe('outside');
+    expect(renameNamesRefusal('/r/a', '/r//b')).toBe('outside');
+    expect(renameNamesRefusal('/r//a', '/r/b')).toBe('outside');
+    expect(renameNamesRefusal('/r/a', '/r/b/')).toBe('outside');
   });
 
   test('the same name at both ends is refused: nothing would move', () => {

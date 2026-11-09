@@ -100,7 +100,11 @@ type FlattenFailure =
   | { readonly kind: 'unknown-component'; readonly reference: LayerReferenceText; readonly via: readonly string[] }
   | { readonly kind: 'invalid-layer'; readonly text: string; readonly via: readonly string[] }
   /** P3, E19. `cycle` starts and ends with the same profile: `['a', 'b', 'a']`. */
-  | { readonly kind: 'loop'; readonly cycle: readonly string[] };
+  | { readonly kind: 'loop'; readonly cycle: readonly string[] }
+  /** The stack of bases is deeper than {@link MAX_STACK_DEPTH}. */
+  | { readonly kind: 'too-deep'; readonly limit: number }
+  /** A profile expands to more than {@link MAX_STACK_LAYERS} layers. */
+  | { readonly kind: 'too-large'; readonly limit: number };
 
 export type FlattenResult =
   | { readonly ok: true; readonly layers: readonly FlatLayer[] }
@@ -116,44 +120,161 @@ type Catalogue = Pick<AccountModel, 'profiles' | 'components'>;
  * catalogue, so a caller holding one it built itself — a profile being edited — gets a value back.
  */
 export function flattenProfile(catalogue: Catalogue, name: string): FlattenResult {
-  const expanded: FlatLayer[] = [];
-  const failure = expand(catalogue, name, [], [name], expanded);
-  if (failure !== undefined) return { ok: false, failure };
-  const newest = new Map<string, number>();
-  expanded.forEach((layer, index) => {
-    newest.set(layer.reference, index);
-  });
-  return { ok: true, layers: expanded.filter((layer, index) => newest.get(layer.reference) === index) };
+  const stack = expandStack<{ readonly componentKind: ComponentKind; readonly name: string }, FlattenLayerFailure>(
+    profile => catalogue.profiles[profile]?.layers,
+    text => {
+      const reference = parseLayerReference(text);
+      if (reference === undefined) return { kind: 'fail', failure: { kind: 'invalid-layer', text } };
+      if (reference.kind === 'profile') return { kind: 'base', name: reference.name };
+      const canonical = layerReferenceText(reference);
+      if (catalogue.components[reference.componentKind][reference.name] === undefined) {
+        return { kind: 'fail', failure: { kind: 'unknown-component', reference: canonical } };
+      }
+      return { kind: 'leaf', key: canonical, item: { componentKind: reference.componentKind, name: reference.name } };
+    },
+    name,
+  );
+  if (!stack.ok) return { ok: false, failure: flattenFailureOf(stack.failure) };
+  return {
+    ok: true,
+    layers: stack.entries.map(entry => ({
+      reference: entry.key as LayerReferenceText,
+      componentKind: entry.item.componentKind,
+      name: entry.item.name,
+      origin:
+        entry.via.length === 0
+          ? (entry.key as LayerReferenceText)
+          : layerReferenceText({ kind: 'profile', name: entry.via[0] as string }),
+      via: entry.via,
+    })),
+  };
 }
 
-function expand(
-  catalogue: Catalogue,
-  name: string,
-  via: readonly string[],
-  chain: readonly string[],
-  into: FlatLayer[],
-): FlattenFailure | undefined {
-  const profile = catalogue.profiles[name];
-  if (profile === undefined) return { kind: 'unknown-profile', profile: name, via: via.slice(0, -1) };
-  for (const text of profile.layers) {
-    const reference = parseLayerReference(text);
-    if (reference === undefined) return { kind: 'invalid-layer', text, via };
-    if (reference.kind === 'profile') {
-      if (chain.includes(reference.name)) {
-        return { kind: 'loop', cycle: [...chain.slice(chain.indexOf(reference.name)), reference.name] };
-      }
-      const failure = expand(catalogue, reference.name, [...via, reference.name], [...chain, reference.name], into);
-      if (failure !== undefined) return failure;
-      continue;
-    }
-    const canonical = layerReferenceText(reference);
-    if (catalogue.components[reference.componentKind][reference.name] === undefined) {
-      return { kind: 'unknown-component', reference: canonical, via };
-    }
-    const origin = via.length === 0 ? canonical : layerReferenceText({ kind: 'profile', name: via[0] as string });
-    into.push({ reference: canonical, componentKind: reference.componentKind, name: reference.name, origin, via });
+type FlattenLayerFailure =
+  | { readonly kind: 'invalid-layer'; readonly text: string }
+  | { readonly kind: 'unknown-component'; readonly reference: LayerReferenceText };
+
+/** `chain` is the profile whose layer failed, start first: the bases it came through are everything after the start. */
+function flattenFailureOf(failure: StackFailure<FlattenLayerFailure>): FlattenFailure {
+  switch (failure.kind) {
+    case 'unknown-profile':
+      return { kind: 'unknown-profile', profile: failure.profile, via: failure.chain.slice(1, -1) };
+    case 'loop':
+      return { kind: 'loop', cycle: failure.cycle };
+    case 'layer':
+      return { ...failure.failure, via: failure.chain.slice(1) };
+    case 'too-deep':
+      return { kind: 'too-deep', limit: failure.limit };
+    case 'too-large':
+      return { kind: 'too-large', limit: failure.limit };
   }
-  return undefined;
+}
+
+// ── Expansion ────────────────────────────────────────────────────────────────────────────────────
+
+/** Deepest chain of bases a profile may sit under (the start counts as one). A second line of defence. */
+export const MAX_STACK_DEPTH = 64;
+
+/** Most layers one profile may expand to, before it is cut to one copy of each. A second line of defence. */
+export const MAX_STACK_LAYERS = 10_000;
+
+/** One component of an expanded stack: `via` is the bases it came through, relative to the profile asked about. */
+interface StackEntry<T> {
+  readonly key: string;
+  readonly item: T;
+  readonly via: readonly string[];
+}
+
+/** What one layer text of a profile is, as the caller reads it. */
+export type StackLayer<T, F> =
+  | { readonly kind: 'base'; readonly name: string }
+  | { readonly kind: 'leaf'; readonly key: string; readonly item: T }
+  | { readonly kind: 'fail'; readonly failure: F };
+
+/** Why a stack could not be expanded. `chain` runs from the profile asked about down to the profile concerned. */
+export type StackFailure<F> =
+  | { readonly kind: 'unknown-profile'; readonly profile: string; readonly chain: readonly string[] }
+  | { readonly kind: 'loop'; readonly profile: string; readonly cycle: readonly string[] }
+  | { readonly kind: 'layer'; readonly failure: F; readonly chain: readonly string[] }
+  | { readonly kind: 'too-deep'; readonly limit: number }
+  | { readonly kind: 'too-large'; readonly profile: string; readonly limit: number };
+
+export type StackExpansion<T, F> =
+  | { readonly ok: true; readonly entries: readonly StackEntry<T>[] }
+  | { readonly ok: false; readonly failure: StackFailure<F> };
+
+/**
+ * THE one place a profile's bases are expanded (P1, P2, P3): every `profile/<base>` layer is replaced where it
+ * stands, each component is kept once at its NEWEST position, and a profile that reaches itself is refused.
+ *
+ * A base is expanded ONCE, however many profiles reach it: its expansion does not depend on who reached it, so it is
+ * remembered with each `via` relative to the base and the parent prefixes it when splicing it in. Keeping only the
+ * newest copy of a component per profile before the parent concatenates gives the same list as keeping it once at the
+ * end. Only a base whose whole subtree resolved is remembered, and everything below such a base is known to be free of
+ * loops, so a remembered base can never hide one. The depth and size bounds keep the answer small however the
+ * profile files are written.
+ */
+export function expandStack<T, F>(
+  layersOf: (profile: string) => readonly string[] | undefined,
+  read: (text: string) => StackLayer<T, F>,
+  start: string,
+): StackExpansion<T, F> {
+  interface Done {
+    readonly entries: readonly StackEntry<T>[];
+    /** The profiles on the longest chain of bases below, itself included. */
+    readonly height: number;
+  }
+  type Expanded =
+    | { readonly ok: true; readonly done: Done }
+    | { readonly ok: false; readonly failure: StackFailure<F> };
+  const remembered = new Map<string, Done>();
+  const tooDeep: Expanded = { ok: false, failure: { kind: 'too-deep', limit: MAX_STACK_DEPTH } };
+
+  const expand = (name: string, chain: readonly string[]): Expanded => {
+    if (chain.length > MAX_STACK_DEPTH) return tooDeep;
+    const layers = layersOf(name);
+    if (layers === undefined) return { ok: false, failure: { kind: 'unknown-profile', profile: name, chain } };
+    const raw: StackEntry<T>[] = [];
+    let height = 1;
+    for (const text of layers) {
+      const layer = read(text);
+      if (layer.kind === 'fail') return { ok: false, failure: { kind: 'layer', failure: layer.failure, chain } };
+      if (layer.kind === 'leaf') {
+        raw.push({ key: layer.key, item: layer.item, via: [] });
+        continue;
+      }
+      const base = layer.name;
+      if (chain.includes(base)) {
+        return {
+          ok: false,
+          failure: { kind: 'loop', profile: name, cycle: [...chain.slice(chain.indexOf(base)), base] },
+        };
+      }
+      let inner = remembered.get(base);
+      if (inner === undefined) {
+        const fresh = expand(base, [...chain, base]);
+        if (!fresh.ok) return fresh;
+        inner = fresh.done;
+      } else if (chain.length + inner.height > MAX_STACK_DEPTH) {
+        return tooDeep;
+      }
+      height = Math.max(height, inner.height + 1);
+      for (const entry of inner.entries) raw.push({ key: entry.key, item: entry.item, via: [base, ...entry.via] });
+    }
+    if (raw.length > MAX_STACK_LAYERS) {
+      return { ok: false, failure: { kind: 'too-large', profile: name, limit: MAX_STACK_LAYERS } };
+    }
+    const newest = new Map<string, number>();
+    raw.forEach((entry, index) => {
+      newest.set(entry.key, index);
+    });
+    const done: Done = { entries: raw.filter((entry, index) => newest.get(entry.key) === index), height };
+    remembered.set(name, done);
+    return { ok: true, done };
+  };
+
+  const stack = expand(start, [start]);
+  return stack.ok ? { ok: true, entries: stack.done.entries } : stack;
 }
 
 // ── Applicability ────────────────────────────────────────────────────────────────────────────────
@@ -501,7 +622,7 @@ function mergeSettings(
 
   for (const layer of layers) {
     const component = componentOf(catalogue, 'settings', layer.name);
-    if (component.file !== undefined) {
+    if (component.file !== undefined || component.document !== undefined) {
       const body = bodies[layer.name];
       if (body === undefined) unread.push(layer.name);
       else {

@@ -265,12 +265,94 @@ export const TerminalAskOwnerInputSchema = z.strictObject({
 
 // ─── config/terminals.yaml ────────────────────────────────────────────────────────────────────────────────────────
 
-/** Limits the owner may lower below today's ceilings (never raise past them), so no edit loosens anything. */
+/** The most bytes one terminal environment value may hold. */
+export const TERMINAL_ENVIRONMENT_VALUE_MAX_BYTES = 4_096;
+
+/** A variable name a terminal environment may carry: capitals, digits and underscores, not starting with a digit. */
+const TERMINAL_ENVIRONMENT_NAME = /^[A-Z_][A-Z0-9_]*$/u;
+
+/**
+ * Names a terminal environment never sets: the kernel gives every child its own `PATH` and `HOME`, the login shell
+ * picks `SHELL`, and the three below are the ferret identity names the daemon forgets (a terminal must never be handed
+ * a ferret's credential). `LD_*` and `DYLD_*` (any program loaded afterwards) are refused by prefix.
+ */
+const TERMINAL_ENVIRONMENT_REFUSED: ReadonlySet<string> = new Set([
+  'PATH',
+  'HOME',
+  'SHELL',
+  'FY_SESSION_TOKEN',
+  'FY_SESSION_BOARD_CAPABILITY',
+  'FY_SESSION_ID',
+]);
+
+/** Why a terminal environment name is refused, in a sentence that names it; `undefined` when it is fine. */
+export function terminalEnvironmentNameProblem(name: string): string | undefined {
+  if (!TERMINAL_ENVIRONMENT_NAME.test(name))
+    return `"${name.slice(0, 64)}" is not a usable variable name: use capital letters, digits and underscores, and do not start with a digit`;
+  if (name.startsWith('LD_') || name.startsWith('DYLD_'))
+    return `${name} is refused: it changes which programs and libraries every command loads`;
+  if (name.startsWith('FY_SESSION_'))
+    return `${name} is refused: FY_SESSION_* names are a ferret's own identity and launch mode, so a terminal never inherits one`;
+  if (name === 'FY_TOKEN')
+    return "FY_TOKEN is refused: it would hand the admin token to every terminal, a ferret's included, and write it in plain text in a config file";
+  if (TERMINAL_ENVIRONMENT_REFUSED.has(name))
+    return `${name} is refused: the daemon, the kernel or the login shell sets it, or it names a ferret's own identity`;
+  return undefined;
+}
+
+/** Why a terminal environment value is refused, in a sentence that names its variable; `undefined` when it is fine. */
+export function terminalEnvironmentValueProblem(name: string, value: string): string | undefined {
+  if (value.includes('${secret:'))
+    return `${name} names a secret: a secret reaches a command only through the secret store, never through a terminal environment`;
+  if (value.includes('\0')) return `${name} holds a NUL character`;
+  if (value.includes('\n') || value.includes('\r')) return `${name} holds a newline or carriage return`;
+  if (new TextEncoder().encode(value).length > TERMINAL_ENVIRONMENT_VALUE_MAX_BYTES)
+    return `${name} is longer than ${String(TERMINAL_ENVIRONMENT_VALUE_MAX_BYTES)} bytes`;
+  return undefined;
+}
+
+/** `environment: { NAME: value }`: each problem is its own issue, located at the variable. */
+const TerminalEnvironmentSchema = z.record(z.string(), z.string()).superRefine((environment, context) => {
+  for (const [name, value] of Object.entries(environment)) {
+    const problem = terminalEnvironmentNameProblem(name) ?? terminalEnvironmentValueProblem(name, value);
+    if (problem !== undefined) context.addIssue({ code: 'custom', message: problem, path: [name] });
+  }
+});
+
+/**
+ * Limits the owner may lower below today's ceilings (never raise past them), and the environment every terminal is
+ * opened with (the owner's own and a ferret's alike). The environment is OWNER-ONLY: any change to it waits for the
+ * owner ({@link terminalsLoosens}).
+ */
 export const TerminalsConfigSchema = z.strictObject({
   perFerret: z.number().int().min(1).max(TERMINAL_MAX_PER_SESSION).default(TERMINAL_MAX_PER_SESSION),
   global: z.number().int().min(1).max(TERMINAL_MAX_GLOBAL).default(TERMINAL_MAX_GLOBAL),
+  environment: TerminalEnvironmentSchema.optional(),
 });
 export type TerminalsConfig = z.infer<typeof TerminalsConfigSchema>;
+
+/**
+ * An environment variable a terminal opens with is authority (it can put any program first on a command's path): any
+ * variable added, changed or removed waits for the owner, whoever wrote it. The caps and the rest loosen nothing.
+ * Judges a deletion too (`after` is `undefined` or the defaults).
+ */
+export function terminalsLoosens(
+  before: TerminalsConfig | undefined,
+  after: TerminalsConfig | undefined,
+): readonly string[] {
+  const was = before?.environment ?? {};
+  const now = after?.environment ?? {};
+  return [...new Set([...Object.keys(was), ...Object.keys(now)])]
+    .sort()
+    .filter(name => was[name] !== now[name])
+    .map(name =>
+      was[name] === undefined
+        ? `every terminal will open with ${name} set`
+        : now[name] === undefined
+          ? `terminals will stop opening with ${name} set`
+          : `every terminal will open with a different ${name}`,
+    );
+}
 
 // ─── state/terminals/terminals.json (format 1) ────────────────────────────────────────────────────────────────────
 

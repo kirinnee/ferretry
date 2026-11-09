@@ -120,5 +120,5 @@ export const SessionTranscriptMovedSchema = z.strictObject({
   /** When the daemon heard the change. */
   at: InstantSchema,
 });
-/** @pending ferrets: Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported */
+/** @pending ferrets: Info tabs Agenda, Tasks, Context, Surfaces and Warden are not ported */
 export type SessionTranscriptMoved = z.infer<typeof SessionTranscriptMovedSchema>;

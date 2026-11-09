@@ -71,6 +71,8 @@ function world(options: { readonly failPlan?: boolean; readonly applyThrows?: Er
       format: 'present',
       model: MODEL,
       revision: 'rev-1',
+      unreadable: [],
+      stoodInLogins: [],
       documents: () => [
         { path: '/fy/config/runtimes/claude-default.yaml', content: '# moved\n', mode: 0o600, expect: 'absent' },
       ],

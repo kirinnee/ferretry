@@ -142,8 +142,11 @@ export default definePlugin({
         ...PERSON,
         capability: cap('terminal', 'use'),
         audit: { record: COMPOSER_ACTED_AUDIT },
-        // The composer's draft text goes to a pane; the answer is the outcome word only.
-        guard: { none: 'answers an outcome word; no pane, page or vault text' },
+        // The composer's draft text goes to a pane; the answer is the outcome word only. A refusal can quote the pane's
+        // blocking prompt (masked), as today's refusal did; the draft itself is never in an answer.
+        guard: {
+          none: "answers an outcome word; a refusal may quote the pane's masked blocking prompt; no page or vault text",
+        },
       }),
 
       // ── reading (session-reads) ───────────────────────────────────────────────────────────────
@@ -313,6 +316,9 @@ export default definePlugin({
       panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
       // This device's conversation width (lead decision Q11).
       panel('device.settings', { id: 'chat-width', order: 20 }),
+      // Settings › Appearance › Message marks: the key to the clock, ticks and ! under a message (S-0509). Last, after
+      // the conversation width, as v4 draws it.
+      panel('device.settings', { id: 'message-marks', order: 30 }),
       // Contributions to other plugins' slots (§5.2), each by the offerer's slot name: Ferrets' file browser gets the
       // current-ferret search, its Actions ▾ menu gets Interrupt, and Agenda's ask page gets the ferret's conversation.
       panel(FILES_SEARCH_SLOT, { id: 'files-search', order: 10 }),
@@ -323,6 +329,10 @@ export default definePlugin({
     renderers: [renderer('ask', { source: 'question' })],
   },
 
+  /** Never reached by a ferret, through any root: the key that signs a message token (`PrivacyDecl`). */
+  privacy: {
+    private: ['message-token.key'],
+  },
   data: {
     state: CONVERSATION_STATE,
     config: [CONVERSATION_CONFIG],

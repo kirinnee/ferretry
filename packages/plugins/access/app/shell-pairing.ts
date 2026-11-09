@@ -304,6 +304,8 @@ export const daemonHomePath = (id: DaemonId): string => `/d/${encodeURIComponent
 
 /** The shell's route table and its tap check: `@ferretry/app`. A tap is decided by the router that draws the page. */
 export { type PushMachine, pushMachineOf } from '@ferretry/app';
+/** The page's half of a clear (the worker's is the shell's, S6): close this device's own lines for an item opened here. */
+export { type ClearRegistration, closeShownTags, type ShownNotification, shownTag } from '@ferretry/app';
 
 // ─── 7. advertisement notices (today: `protocol/src/lib/advertisement.ts`; `cli/shell.ts` holds the same copy) ──
 

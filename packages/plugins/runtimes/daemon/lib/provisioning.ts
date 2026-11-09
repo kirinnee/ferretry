@@ -184,6 +184,11 @@ export interface FleetDocumentWrite {
    */
   readonly expect?: string;
   /**
+   * A configuration document written as a PATCH of top-level keys (`undefined` removes one) that the kernel's config
+   * writer applies to the file it holds, so only the keys that changed are touched; `content` is then ignored.
+   */
+  readonly patch?: Readonly<Record<string, unknown>>;
+  /**
    * Remove the document instead of writing it (`content` is then ignored): a configuration file for a
    * login, component, profile or runtime the change deletes. Removed inside the same boundary, so a
    * failed apply puts it back with everything else.
@@ -321,6 +326,23 @@ export class FleetApplyFailureError extends Error {
         : `${describeFailure(failure)}; the exclusive apply claim at ${lockResidue} could not be cleared`,
     );
     this.name = 'FleetApplyFailureError';
+  }
+}
+
+/**
+ * An apply that failed AFTER the configuration files of its change had landed: the files are written first and are NOT
+ * rolled back with the fleet, so a caller that tells a person what a failure left behind must know they are on disk.
+ * It wraps whatever the apply threw (a rollback outcome, a refused source, a claim that could not be taken) and names
+ * only paths, never content. A failure BEFORE any file landed is never wrapped.
+ */
+export class FleetApplyAfterConfigError extends Error {
+  constructor(
+    /** The configuration files written first, as the paths the change named. */
+    readonly written: readonly string[],
+    readonly failure: unknown,
+  ) {
+    super(failure instanceof Error ? failure.message : String(failure));
+    this.name = 'FleetApplyAfterConfigError';
   }
 }
 

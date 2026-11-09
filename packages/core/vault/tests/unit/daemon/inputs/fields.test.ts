@@ -459,6 +459,20 @@ describe('a card of several fields', () => {
     should(two.request.saved?.saves).equal('password');
   });
 
+  it('I30 a saved login on offer leaves the card listing every field with its flag', async () => {
+    // Arrange / Act — the same card raised with nothing saved and with GOOGLE_COM on offer
+    const bare = await raisedLogin();
+    const offered = await raisedLogin({ listing: GOOGLE_COM });
+
+    // Assert — the account is offered, and the card still holds both fields, each with its own sensitivity and flag
+    should(offered.request.saved?.offers.map(offer => offer.id)).eql(['GOOGLE_COM']);
+    should(offered.request.fields.map(field => [field.id, field.sensitivity, field.risk?.level])).eql(
+      bare.request.fields.map(field => [field.id, field.sensitivity, field.risk?.level]),
+    );
+    should(offered.request.fields.map(field => field.id)).eql(['email', 'password']);
+    for (const field of offered.request.fields) should(field.risk?.level).be.a.String();
+  });
+
   it('I24 should refuse a terminal card of two fields and a terminal field that names an element', async () => {
     const { service } = build();
     const terminal: InputTarget = { kind: 'terminal', key: 'dev' };

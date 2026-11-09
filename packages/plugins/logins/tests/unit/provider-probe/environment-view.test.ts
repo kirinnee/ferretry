@@ -46,7 +46,11 @@ describe('credentialEnvironmentView', () => {
   it('should hide a value that looks like a key, and claim nothing when the store cannot be listed', () => {
     // Act
     const actual = credentialEnvironmentView(
-      login({ harness: 'claude', env: { ANTHROPIC_API_KEY: 'sk-ant-api03-abcdefghijklmnop', T: '${secret:T}' } }),
+      CredentialSchema.parseOnDisk({
+        store: 'environment',
+        harness: 'claude',
+        env: { ANTHROPIC_API_KEY: 'sk-ant-api03-abcdefghijklmnop', T: '${secret:T}' },
+      }),
       PRESETS,
       undefined,
     );

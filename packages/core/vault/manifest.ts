@@ -184,6 +184,10 @@ export default definePlugin({
      */
     secretResolver: SecretResolverPort,
   },
+  /** Never reached by a ferret, through any root: the sealed secrets and the key that opens them (`PrivacyDecl`). */
+  privacy: {
+    private: ['vault.key', 'vault.json'],
+  },
   data: {
     // biome-ignore lint/suspicious/noExplicitAny: the leaf cast Gate, Asks and Ferrets use for a typed config def
     config: [VaultConfigFile as ConfigDef<any>],

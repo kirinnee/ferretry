@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { ComponentCatalogSchema, type ComponentView } from '../../../../../../contract/index.ts';
 import { ModelSetsTab } from '../../../../../../app/features/fleet/components/model-sets-tab.tsx';
 import type { RuntimesClient } from '../../../../../../app/lib/client.ts';
-import { type Mounted, mount } from '../../../../support/dom.ts';
+import { type Mounted, mount, must } from '../../../../support/dom.ts';
+import { COMMITTED, LANDED_FILE, ROLLBACK_INCOMPLETE, ROLLED_BACK, UNRESTORED_PATH } from '../account-support.ts';
 import { refusal } from '../runtimes/support-b.ts';
 import { component, componentCatalog, models, notes, studioCatalog } from './catalog-fixture.ts';
 import {
@@ -217,6 +218,52 @@ describe('ModelSetsTab — delete (E21)', () => {
     await submit(root);
     expect(text(root, '[data-change-refusal]')).toContain('conflicts with the setup');
     expect(text(root, 'h3')).toBe('Spare');
+  });
+});
+
+describe('ModelSetsTab — R3-M1 a rolled-back or half-restored apply is not a save', () => {
+  for (const [what, applied, expected] of [
+    ['rolled-back', ROLLED_BACK, [LANDED_FILE, 'rolled back']],
+    ['rollback-incomplete', ROLLBACK_INCOMPLETE, [LANDED_FILE, UNRESTORED_PATH, 'needs a look']],
+  ] as const) {
+    it(`R3-M1: a ${what} delete does not say Deleted, names the files, and stays on the model set`, async () => {
+      const spare = component({ ...models, reference: 'modelSets/Spare', name: 'Spare' });
+      const machine = scriptedMachine({ catalog: withModelSets(spare), applied });
+      const root = await open(machine);
+      await toDetail(root, 'modelSets/Spare');
+      await click(root, '[data-component-delete]');
+      await submit(root);
+      const alert = must(root.querySelector('[data-catalog-note="delete"] [data-change-refusal]'), 'alert');
+      expect(alert.getAttribute('role')).toBe('alert');
+      for (const part of expected) expect(alert.textContent).toContain(part);
+      expect(root.querySelector('[data-components-saved]')).toBeNull();
+      expect(text(root, 'h3')).toBe('Spare');
+    });
+
+    it(`R3-M1: a ${what} save keeps the form open, names the files, and never says Saved`, async () => {
+      const machine = scriptedMachine({ catalog: withModelSets(models), applied });
+      const root = await open(machine);
+      await toDetail(root, 'modelSets/Claude models');
+      await click(root, '[data-component-edit]');
+      await type(root, '[data-component-field="body"]', 'claude-opus-5\nclaude-haiku-5');
+      await submit(root);
+      const alert = must(root.querySelector('[data-change-refusal]'), 'alert');
+      expect(alert.getAttribute('role')).toBe('alert');
+      for (const part of expected) expect(alert.textContent).toContain(part);
+      expect(root.querySelector('[data-components-saved]')).toBeNull();
+      expect(text(root, 'h3')).toBe('Edit Claude models');
+    });
+  }
+
+  it('R3-M1: a finished apply still closes the form as saved', async () => {
+    const machine = scriptedMachine({ catalog: withModelSets(models), applied: COMMITTED });
+    const root = await open(machine);
+    await toDetail(root, 'modelSets/Claude models');
+    await click(root, '[data-component-edit]');
+    await type(root, '[data-component-field="body"]', 'claude-opus-5\nclaude-haiku-5');
+    await submit(root);
+    expect(text(root, '[data-components-saved]')).toBe('Saved. New sessions use the new version.');
+    expect(root.querySelector('[data-change-refusal]')).toBeNull();
   });
 });
 

@@ -189,8 +189,8 @@ export class DaemonDraftStore {
 
 /**
  * The document-lifetime draft store. A daemon that is unpaired must have its drafts cleared
- * (`clearDaemon`): a later pairing that mints the same daemon id — a re-pair — would read them back.
- * GAP(app-shell): the shell's unpair does not reach this store yet; Conversation has no unpair signal.
+ * (`clearDaemon`): a later pairing that mints the same daemon id — a re-pair — would read them back. The shell's unpair
+ * reaches both document stores through this half's `forget` (`app/index.ts`, S12).
  *
  * It is a module value because the composer needs a value for its `draftStore` default at module load,
  * before any React context exists. A component may still be handed its own store — that is what the

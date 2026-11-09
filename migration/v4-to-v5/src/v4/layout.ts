@@ -11,7 +11,16 @@ export const V4_LAYOUT_VERSION = 2;
 /** The marker file at the v4 home root; its content is `"2\n"`. */
 export const V4_LAYOUT_FILE = 'layout-version';
 
+/**
+ * What a config file reads as when it is NOT what is on disk: by label (`config/<file>`, relative to the v4 home), the
+ * text to read instead, or `null` for "the file is absent". Held in memory only (the accepted-config step's view of what
+ * v4 ENFORCED); nothing of it is ever written to disk. Every other file reads the v4 copy itself, read-only.
+ */
+export type V4ConfigOverrides = ReadonlyMap<string, string | null>;
+
 export interface V4Paths {
+  /** With it, config files named in it read as given (see {@link V4ConfigOverrides}); absent, every file reads from disk. */
+  readonly configOverrides?: V4ConfigOverrides;
   readonly home: string;
   readonly layoutVersion: string;
   readonly daemonLock: string;

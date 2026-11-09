@@ -17,6 +17,8 @@ import { answeredKeys, EMPTY_PROGRESS, findEntry, joinProgress, splitStepKey, vi
 export interface OnboardingServiceDeps {
   /** The snapshot's steps, asked on every call: the snapshot is not frozen until the build ends. */
   readonly entries: () => readonly OnboardingEntry[];
+  /** Whether this machine has a runtime (Runtimes' `list` is not empty); false when Runtimes is off or unreadable. */
+  readonly setUp: () => Promise<boolean>;
   readonly state: StatePort;
   readonly clock: Clock;
   readonly events: EventsPort;
@@ -34,7 +36,7 @@ export class OnboardingService implements OnboardingApi {
   constructor(private readonly deps: OnboardingServiceDeps) {}
 
   async view(): Promise<OnboardingView> {
-    return viewOf(this.deps.entries(), await this.#progress());
+    return viewOf(this.deps.entries(), await this.#progress(), await this.deps.setUp());
   }
 
   async answer(plugin: string, step: string, answer: StepAnswerRequest): Promise<StepView | undefined> {

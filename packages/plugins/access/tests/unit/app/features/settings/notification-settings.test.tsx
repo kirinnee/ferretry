@@ -26,7 +26,7 @@ const view = (overrides: Partial<NotificationSettingsViewProps> = {}) => {
     permission: 'granted',
     devices: [],
     currentDeviceId: null,
-    onRevokeDevice: id => calls.revoked.push(id),
+    onRevokeDevice: (id: string) => calls.revoked.push(id),
     ...overrides,
   };
   return { calls, renderer: render(<NotificationSettingsView {...props} />) };
@@ -62,5 +62,10 @@ describe('NotificationSettingsView', () => {
     const revoke = renderer.root.findByProps({ 'aria-label': 'Revoke push notifications for iPhone' });
     run(() => revoke.props.onClick());
     expect(calls.revoked).toEqual([device.id]);
+  });
+
+  it('lists no devices where the caller gives no revoke (the device panel lists them machine by machine)', () => {
+    const { renderer } = view({ devices: [device], onRevokeDevice: undefined });
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Registered devices');
   });
 });

@@ -1,6 +1,6 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { LoginChanged, LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
-import { UsagePort } from '@ferretry/plugin-usage/contract';
+import { LoginPaused, LoginResumed, UsagePort } from '@ferretry/plugin-usage/contract';
 import {
   AutoResumeDecide,
   FerretsChanged,
@@ -10,8 +10,15 @@ import {
 import { audit, cap } from '@ferretry/core-gate/contract';
 import {
   FerretsPort,
+  INSTRUCTION_ITEMS,
   MODEL_SET_ITEMS,
   PROFILE_ITEMS,
+  ProfileClaudeHooksSource,
+  ProfileClaudeSettingsSource,
+  ProfileCodexHooksSource,
+  ProfileCodexSettingsSource,
+  ProfileMcpSource,
+  ProfileSkillsSource,
   RUNTIME_ITEMS,
   RUNTIMES_AUDIT,
   RUNTIMES_CONFIG,
@@ -178,6 +185,7 @@ export default definePlugin({
       }),
     ],
     cli: [
+      verb('runtimes', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
       verb('runtime ls', { summary: 'the runtimes on this machine: a sign-in plus a profile' }),
       verb('runtime add', {
         summary: 'add a runtime: which sign-in, which profile, and whether Ferretry launches it as an agent',
@@ -196,6 +204,7 @@ export default definePlugin({
       verb('runtime scan', {
         summary: 'what the first run would find: each harness, its sign-in, instructions, settings, servers and skills',
       }),
+      verb('profiles', { summary: 'the profiles on this machine: scope, layers, overrides and where each is used' }),
       verb('profile ls', { summary: 'the profiles on this machine, each with its scope' }),
       verb('profile show', { summary: 'one profile: its layers, overrides and where it is used' }),
       verb('profile build', { summary: 'build a new profile from layers' }),
@@ -235,30 +244,58 @@ export default definePlugin({
       panel('composer.tools', { id: 'runtime-picker', order: 10 }),
       panel(NEW_FERRET_ACCOUNT_SLOT, { id: 'new-ferret-account', order: 10 }),
       panel(MOVE_ACCOUNT_SLOT, { id: 'move-account', order: 10 }),
+      // The first-run step's body (Onboarding's steps screen offers this slot): the runtimes view.
+      panel('onboarding.step', { id: 'onboarding-step', order: 40 }),
     ],
   },
 
   data: {
-    config: [RUNTIMES_CONFIG, RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS],
+    config: [RUNTIMES_CONFIG, RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS, INSTRUCTION_ITEMS],
     readModels: RUNTIMES_READ_MODELS,
     publishes: [RuntimesChanged, RuntimesDefaultChanged, RuntimesLaunchFailed],
     // An ended Codex ferret's runtime has its app-server pair stopped, and a Codex that could not start offline says so.
     // A login switched off or on moves the disable-until timer (docs/disabling.md).
-    subscribes: [FerretsChanged, LoginChanged],
+    // A login its spend budget starts or stops holding is published unavailable or runnable again (docs/budgets.md).
+    subscribes: [FerretsChanged, LoginChanged, LoginPaused, LoginResumed],
     // `items` stays empty: it lists items this package SHIPS. Runtimes are items the owner (or a catalog) installs.
   },
 
   // Logins asks which runtimes use a login before it removes one; Runtimes is the only plugin that knows.
   // Ferrets asks whether an automatic resume may spend (W2-a); only this plugin's own yes resumes anything.
-  hooks: { takes: [{ hook: LoginsUsedBy, key: 'runtimes' }, { hook: AutoResumeDecide }] },
+  // Runtimes OFFERS the profile component sources (`contract/component-source.ts`): the plugin that owns a kind of
+  // component provides Runtimes' read of it, so Runtimes reads no other plugin's config. Taking a hook is an edge from the
+  // offerer, so Runtimes starts before each owner; Runtimes needs none of them, so there is no cycle.
+  hooks: {
+    takes: [{ hook: LoginsUsedBy, key: 'runtimes' }, { hook: AutoResumeDecide }],
+    offers: [
+      { hook: ProfileMcpSource },
+      { hook: ProfileSkillsSource },
+      { hook: ProfileClaudeSettingsSource },
+      { hook: ProfileCodexSettingsSource },
+      { hook: ProfileClaudeHooksSource },
+      { hook: ProfileCodexHooksSource },
+    ],
+  },
 
   onboarding: [{ id: 'runtimes', title: 'Name your runtimes', order: 40 }],
   doctor: ['runtimes-config'],
 
   permissions: {
-    roots: [],
+    // `fleet`: the wrappers, one harness home per runtime, `manifest.json`, `ids.json` (writable, Runtimes alone).
+    // `harness-home`: the machine's own Claude Code and Codex homes, READ-ONLY, for the first-run scan.
+    roots: ['fleet', 'harness-home'],
     network: [],
     spawn: ['brew', 'apt-get', 'npm'],
     secrets: [],
+    // Whether an MCP server's command and a harness are installed (`kernel.paths.which`: bounded, never executing).
+    which: true,
+    // Claude keeps its user-scope MCP servers in `~/.claude.json`, BESIDE `~/.claude`: one read-only file, no listing.
+    harnessFiles: ['.claude.json'],
+    // The provisioner keeps or narrows the mode of an entry it copied into a runtime's home (`RootHandle.setMode`, the
+    // `fleet` root only: an internal root keeps owner bits, never group or other).
+    setMode: true,
+    // An ended Codex ferret's app-server pair: pids and yes/no only, SIGTERM only, to a process running from one of
+    // Runtimes' own `fleet/homes/<id>` folders. `CODEX_HOME` is the one variable `usersOf` may match.
+    processes: { environment: ['CODEX_HOME'] },
   },
 });

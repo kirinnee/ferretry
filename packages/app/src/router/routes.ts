@@ -167,5 +167,7 @@ export const daemonHomeHref = (daemon: string): string => `/d/${encodeURICompone
 export const daemonSettingsHref = (daemon: string, plugin?: string, tab?: string): string =>
   `/d/${encodeURIComponent(daemon)}/settings${plugin === undefined ? '' : `/${encodeURIComponent(plugin)}${tab === undefined ? '' : `/${encodeURIComponent(tab)}`}`}`;
 export const DEVICE_SETTINGS_HREF = '/settings';
+/** Access's pairing page, told which machine refused this browser (a machine id is not a secret; no code rides it). */
+export const pairAgainHref = (daemon: string): string => `/pair?refused=${encodeURIComponent(daemon)}`;
 /** The app's home (the daemon list). `/` is the public landing page; the app lives under `/app/`. */
 export const HOME_HREF = '/app/';

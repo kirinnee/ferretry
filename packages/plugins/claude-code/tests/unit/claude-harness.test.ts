@@ -342,6 +342,25 @@ describe('ClaudeHarness', () => {
     expect(await readFile(join(HOME, 'CLAUDE.md'), 'utf8')).toContain('Be brief.');
   });
 
+  test('a settings item reaches the Claude home: its env rides settings.json and a secret stays the reference it is written as', async () => {
+    const { harness } = build({
+      config: {
+        file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+        collection: definition =>
+          definition === CLAUDE_CODE_SETTINGS
+            ? new Map([['guard', { settings: { env: { LOG: '1', GUARD: '${secret:GUARD_VALUE}' } } }]])
+            : new Map(),
+      },
+    });
+
+    await harness.prepareHome(spec());
+
+    const settings = JSON.parse(await readFile(join(HOME, 'settings.json'), 'utf8')) as {
+      env: Record<string, string>;
+    };
+    expect(settings.env).toEqual({ LOG: '1', GUARD: '${secret:GUARD_VALUE}' });
+  });
+
   describe(".claude.json is merged at every launch, never replaced (today's wrapper seed)", () => {
     const claudeJson = () => join(HOME, '.claude.json');
     type Document = Record<string, unknown> & { projects: Record<string, Record<string, unknown>> };

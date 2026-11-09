@@ -11,6 +11,7 @@
  * Once the daemon answered a switch, that answer is what the toggle shows, so it never flips back under the reader.
  */
 
+import { controlState, useViewPlace } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { Shapes, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -18,28 +19,45 @@ import { useConversationClient } from '../client.ts';
 import '../compact-at/compact-at.css';
 import { patchFerretHypermedia, readFerretHypermedia } from './hypermedia-api.ts';
 
+/** The route a switch sends: what this device may do with it is the panel's whole authority. */
+const HYPERMEDIA_ROUTE = 'PATCH /v1/ferrets/:ferretId/hypermedia';
+
 /**
  * The panel for one ferret; nothing without one, and nothing for a connection that cannot control it (today's
- * `if (!context.canControl) return null`). GAP(app-shell): the kernel's `PanelProps` carries only `subject`, so the shell
- * passes no `canControl` and it stays true; the daemon still refuses at `operator`.
+ * `if (!context.canControl) return null`): the view's place (shell contract S1) says what this device may do with the
+ * switch's route, and a control the daemon said it may not have is not drawn. Outside a per-daemon view (a suite)
+ * there is no place, and the daemon's own refusal is the answer.
  */
-export function HypermediaPanel({
-  subject,
-  canControl = true,
-}: {
-  readonly subject?: string;
-  readonly canControl?: boolean;
-}) {
+export function HypermediaPanel({ subject }: { readonly subject?: string }) {
   const client = useConversationClient();
-  return subject === undefined || !canControl ? null : <HypermediaSwitch client={client} ferretId={subject} />;
+  const place = useViewPlace();
+  const state = place === null ? undefined : controlState(place.authorityOf(HYPERMEDIA_ROUTE));
+  if (subject === undefined || state?.shown === false) return null;
+  return (
+    <HypermediaSwitch
+      client={client}
+      ferretId={subject}
+      enabled={state?.enabled ?? true}
+      {...(state?.note === undefined ? {} : { blocked: state.note })}
+      press={place?.press ?? (act => act())}
+    />
+  );
 }
 
 function HypermediaSwitch({
   client,
   ferretId,
+  enabled,
+  blocked,
+  press,
 }: {
   readonly client: Pick<PluginClient, 'call'>;
   readonly ferretId: string;
+  readonly enabled: boolean;
+  /** Why the switch is off for now (the first grants read, an unreadable answer); absent when it is on. */
+  readonly blocked?: string;
+  /** Runs the switch: on a locked machine the unlock is asked first. */
+  readonly press: <T>(act: () => Promise<T>) => Promise<T | undefined>;
 }) {
   const [on, setOn] = useState<boolean | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -64,7 +82,11 @@ function HypermediaSwitch({
       setNote(null);
       setBusy(true);
       try {
-        const result = await patchFerretHypermedia(client, ferretId, next);
+        const result = await press(() => patchFerretHypermedia(client, ferretId, next));
+        if (result === undefined) {
+          setNote('Hypermedia was not switched: this machine wants your passkey first.');
+          return;
+        }
         setOn(next);
         setNote(result.note);
       } catch (reason) {
@@ -73,7 +95,7 @@ function HypermediaSwitch({
         setBusy(false);
       }
     },
-    [client, ferretId],
+    [client, ferretId, press],
   );
 
   return (
@@ -82,8 +104,9 @@ function HypermediaSwitch({
         aria-pressed={on === true}
         className="kt-btn kt-btn--sm"
         data-hypermedia-switch={on === undefined ? 'unknown' : on ? 'on' : 'off'}
-        disabled={on === undefined || busy}
+        disabled={on === undefined || busy || !enabled}
         onClick={() => on !== undefined && void tap(!on)}
+        title={blocked}
         type="button"
       >
         <Shapes aria-hidden="true" size={14} />

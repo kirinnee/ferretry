@@ -436,3 +436,30 @@ describe('the Warden moves a ferret to another login (a failover, through Ferret
     should(acted).eql(['f1 failover failed']);
   });
 });
+
+describe('D2 #19 every word the Warden types is Conversation’s warden caller, never the owner or a ferret', () => {
+  const callers = (conversation: ConversationApi): { ferret: string; caller: unknown; label: unknown }[] => {
+    const seen: { ferret: string; caller: unknown; label: unknown }[] = [];
+    (conversation as { send: ConversationApi['send'] }).send = async (ferret, caller, request) => {
+      seen.push({ ferret, caller, label: request.label });
+      return { ok: true, value: { ferret, disposition: 'sent' } } as never;
+    };
+    return seen;
+  };
+
+  it('D2 #19 a nudge is sent as the warden caller', async () => {
+    const { ferrets, conversation, remedies } = subject();
+    const seen = callers(conversation);
+    ferrets.add({ id: ferretId('f1'), state: 'working' });
+    await remedies.nudge('f1', 'are you stuck?');
+    should(seen).eql([{ ferret: 'f1', caller: { kind: 'warden' }, label: 'action' }]);
+  });
+
+  it('D2 #19 the notice of a revive of a running ferret is sent as the warden caller', async () => {
+    const { ferrets, conversation, resume } = subject();
+    const seen = callers(conversation);
+    ferrets.add({ id: ferretId('f1'), state: 'working' });
+    await resume('f1', 'carry on');
+    should(seen.map(entry => entry.caller)).eql([{ kind: 'warden' }]);
+  });
+});

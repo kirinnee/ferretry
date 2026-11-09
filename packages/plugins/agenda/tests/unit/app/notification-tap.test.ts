@@ -19,7 +19,6 @@ import agendaManifest from '../../../manifest.ts';
 import type { NotificationPayload as PushNotificationPayload } from '../../../app/lib/notify.ts';
 import { inboxTargetFromSearch, inboxTargetPath } from '../../../app/lib/agenda-inbox.ts';
 import { NOTIFICATION_BADGE, NOTIFICATION_ICON, showGroupedNotification } from '../../../app/lib/notify.ts';
-import { filteredPushNotification } from '../../../app/lib/notification-tap.ts';
 import { daemonId } from '../../../app/shell.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
@@ -90,13 +89,14 @@ describe('a tap, per kind of push', () => {
 
   it('the words a daemon buzzes with open the ferret’s chat AT the ask, never the Inbox page the tap rule refuses', () => {
     // What the daemon half actually sends (buzz-policy), not only the path builder: a card's ask and a stop both tap
-    // into the chat. The Inbox page (`agendaAskPath`) is not a tap screen, so a buzz carrying it would open the app home.
+    // into the chat. The Inbox page (`agendaAskPath`) is not a tap screen, so a buzz carrying it opens the machine's home.
     const ask = { id: 'A1', subject: 'Badge colour', ferret: 'f1', state: 'open', source: 'card' } as BuzzableAsk;
     expect(notificationUrl(askBuzzWords(ask).url, ORIGIN, MACHINE)).toBe(`${HOME}/ferrets/f1/chat?ask=A1`);
     expect(notificationUrl(stopBuzzWords('f1', 'build-bot', [ask]).url, ORIGIN, MACHINE)).toBe(
       `${HOME}/ferrets/f1/chat?ask=A1`,
     );
-    expect(notificationUrl(agendaAskPath('f1', 'A1'), ORIGIN, MACHINE)).toBe(APP);
+    expect(notificationUrl(agendaAskPath('f1', 'A1'), ORIGIN, MACHINE)).toBe(HOME);
+    expect(notificationUrl(agendaAskPath('f1', 'A1'), ORIGIN, null)).toBe(APP);
   });
 
   it('NIT-1: the ask a tap may carry is exactly an Agenda id, the way Asks spells it', () => {
@@ -128,10 +128,11 @@ describe('a tap, per kind of push', () => {
     expect(named('agenda')).toBe(declared(agendaManifest, 'agenda'));
   });
 
-  it('a push that names no page it may open, or none at all, opens the app', () => {
-    expect(tapTarget(push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/' }))).toBe(APP);
-    expect(tapTarget(push({ kind: 'failed', sessionId: 's1', url: '/' }))).toBe(APP);
-    expect(tapTarget(push({ kind: 'device-paired', url: '/' }))).toBe(APP);
+  it('a push that names no page it may open, or none at all, opens its machine’s home (the app, with no machine)', () => {
+    expect(tapTarget(push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/' }))).toBe(HOME);
+    expect(tapTarget(push({ kind: 'failed', sessionId: 's1', url: '/' }))).toBe(HOME);
+    expect(tapTarget(push({ kind: 'device-paired', url: '/' }))).toBe(HOME);
+    expect(notificationUrl('/', ORIGIN, null)).toBe(APP);
   });
 
   it('a ping, a deadline and a wake-up all carry their ask, so all land on it', () => {
@@ -150,14 +151,15 @@ describe('a tap, per kind of push', () => {
     );
   });
 
-  it('a link off this site or off this machine opens the app, never the machine or the link', () => {
+  it('a link off this site or off this machine opens this machine’s home, never the other machine or the link', () => {
     for (const url of ['https://evil.test/x', '//evil.test/x', '/d/other/ferrets/s1/chat?ask=A3']) {
-      expect(tapTarget(push({ kind: 'attention', sessionId: 's1', url }))).toBe(APP);
+      expect(tapTarget(push({ kind: 'attention', sessionId: 's1', url }))).toBe(HOME);
+      expect(notificationUrl(url, ORIGIN, null)).toBe(APP);
     }
   });
 
-  it('has no /session/ alias: the old path opens the app', () => {
-    expect(tapTarget(push({ kind: 'attention', sessionId: 's1', url: '/session/s1?ask=A3' }))).toBe(APP);
+  it('has no /session/ alias: the old path opens the machine’s home', () => {
+    expect(tapTarget(push({ kind: 'attention', sessionId: 's1', url: '/session/s1?ask=A3' }))).toBe(HOME);
   });
 });
 
@@ -184,12 +186,6 @@ describe('every notification wears the Ferretry mark', () => {
       expect(shown[0]?.options.icon).toBe(NOTIFICATION_ICON);
       expect(shown[0]?.options.badge).toBe(NOTIFICATION_BADGE);
     }
-  });
-
-  it('shows it on the quiet one', () => {
-    const quiet = filteredPushNotification(MACHINE, ORIGIN);
-    expect(quiet.options.icon).toBe(NOTIFICATION_ICON);
-    expect(quiet.options.badge).toBe(NOTIFICATION_BADGE);
   });
 
   it('points at icons the manifest actually ships', () => {

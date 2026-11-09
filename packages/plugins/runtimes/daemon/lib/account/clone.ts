@@ -95,7 +95,8 @@ export function cloneSources(model: AccountModel): CloneSources {
   const note = (path: string, into: Set<string>): void => {
     (isAssetRelative(path) ? into : outside).add(path);
   };
-  for (const component of Object.values(model.components.instructions)) note(component.file, documents);
+  for (const component of Object.values(model.components.instructions))
+    if (component.file !== undefined) note(component.file, documents);
   for (const component of Object.values(model.components.settings)) {
     if (component.file !== undefined) note(component.file, documents);
   }

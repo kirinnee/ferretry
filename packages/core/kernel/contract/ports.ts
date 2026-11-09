@@ -296,6 +296,17 @@ export interface ConfigPort {
   /** Tells an absent file from an invalid one (and a held one); `name` picks a collection item. */
   fileState(def: ConfigFileDef<any> | ConfigCollectionDef<any>, name?: string): ConfigFileStatus;
   /**
+   * The disk etag of ONE of ITS OWN declared files right now (`name` picks a collection item): the very etag
+   * {@link write}, {@link writeAsOwner}, {@link remove} and {@link writeAll} compare an `ifMatch` with, or `'absent'`
+   * when there is no file. It is the etag ONLY — never the file's text, a value or a sentence — so a plugin that must
+   * pin an edit to what a caller read (a profile's layers, say) can do it without being handed the file.
+   *
+   * Read from the disk when asked, not from the version in effect. Another plugin's def is refused (it throws, as
+   * {@link file} does); so is a name that is no file of this def (a name given for a single file, none or a name
+   * outside the collection's grammar for a collection).
+   */
+  etag(def: ConfigFileDef<any> | ConfigCollectionDef<any>, name?: string): Promise<string>;
+  /**
    * Writes one of ITS OWN declared files (`name`: the collection item, `undefined` for a file) through the one
    * kernel config writer Gate's config route also uses: only the changed keys are edited, a raw secret is refused,
    * the last good version is kept, and a loosening is put into effect only when Gate's judge
@@ -551,7 +562,25 @@ export type RootName =
    * handle is scoped to the ABSOLUTE folder the caller names (`{ subfolder: '/home/me/.claude' }`, exactly as
    * `harness-history` is), refuses everything inside the fence, and never follows a link out of that folder.
    */
-  | 'harness-home';
+  | 'harness-home'
+  /**
+   * A project folder's own files the plugin writes on the owner's behalf (MCP's `<root>/.mcp.json`, Skills'
+   * `<root>/.claude/skills/<name>/**`): an owner's root, WRITABLE, and narrowed twice. The handle is scoped PER CALL to ONE
+   * absolute folder (`{ subfolder: '/home/me/project' }`, exactly as `harness-home` is) and to the relative paths the
+   * manifest declared in `permissions.projectFiles`; a name outside that set is refused `not_declared` whatever the
+   * folder holds. A write is as `work`'s is, with this root's one extra rule that a link at ANY level (inside the folder)
+   * and a file with a second hard link are refused, never followed. It refuses everything inside the fence.
+   *
+   * GAP, stated exactly (redesign §7.7, `ports-pending.json` writeChecked): the write is a checked, no-follow DESCRIPTOR
+   * write only on a host with descriptor reach (`/proc/self/fd`). On a host without it (macOS today) the temp create and
+   * the rename are by path, so a folder swapped for a link between the check and the syscall can make a write overwrite
+   * one same-named file outside the folder; writes are not refused there. Even with reach the parent is proved, not held
+   * (an ABA swap is not seen). No link is made into or out of this root, `copyTree` included.
+   *
+   * Whether the folder is one Projects or Ferrets names is the PLUGIN ADAPTER's rule, never the kernel's (declared limit,
+   * redesign §7.7, which lists what an adapter must check).
+   */
+  | 'project-files';
 
 /**
  * {@link RootHandle.linkTo}'s target: a name in one of THIS plugin's own root handles (maybe the same one). The link
@@ -776,7 +805,17 @@ export interface RootHandle {
    * `policyCwd` is the only cwd `kernel.spawn` accepts as a pin, and only from the plugin whose root minted it.
    */
   pin(path: FencedPath, options?: PinOptions): Promise<HeldRoot>;
-  remove(path: FencedPath): Promise<void>;
+  /**
+   * Removes the name, a folder one entry at a time through descriptors. The LEAF IS NEVER FOLLOWED: the folder it sits in is
+   * resolved and judged inside the root, then the entry is removed by its own name, so a link at the name goes as a link
+   * and what it points at (inside the root or outside it) is untouched. Remove of a folder needs descriptor reach; refused `no_descriptor_reach` without it (macOS until the descriptor bracket lands), and an owner root refuses every remove then. On a host without descriptor reach a file or link of an internal root is unlinked by path after one re-proof of its folder: a parent swapped in between can delete ONE same-named file outside the root, never a tree (declared GAP). [own] BEFORE-GREEN(runtimes) closed by the bracket unit.
+   *
+   * With `onlyIfEmpty` a folder is removed with `rmdir` semantics: ONE kernel call, empty-check and removal in the same
+   * syscall, so a folder that holds any entry (a link included) is refused `not_empty` and nothing is removed, never
+   * recursing. A file or link at the name behaves as without the option. A folder without descriptor reach is refused
+   * `no_descriptor_reach` exactly as above (the option never widens what a host without reach may remove).
+   */
+  remove(path: FencedPath, options?: { readonly onlyIfEmpty?: boolean }): Promise<void>;
   /**
    * A symlink at `at` (today's "stored once, never copied" link from a runtime home to the host's credential or
    * history) whose text is the REAL path of `target` in one of THIS plugin's own root handles — the rule `copyTree`'s
@@ -800,9 +839,15 @@ export interface RootHandle {
    * and moving it back to undo: a copy cannot, `copyTree` skips a link inside a home). Only into an internal, writable
    * root that takes links (`fleet`, `agent-homes`); any other root refuses `read_only`. Both ends are fenced and
    * every parent is opened without following a link (`link_escape`); the entry moves AS IS (a link stays a link and is
-   * never followed, a directory moves whole). `from` must exist and nothing may be at `to` (`outside`, never
-   * overwritten; a look then the move, a declared GAP). There is no copy fallback: a refused move (another device, a
-   * folder into itself) is `changed`, with no path or content in it.
+   * never followed, a directory moves whole; a link keeps the text it holds, so a RELATIVE link moved to a parent at
+   * another depth points elsewhere afterwards, while kernel-made links are absolute). The move runs between the two
+   * parents' descriptors, so a host that cannot reach an entry through a held folder (macOS today) refuses
+   * `no_descriptor_reach` and moves nothing ([own] BEFORE-GREEN(runtimes): the owner runs macOS, so the provisioner's
+   * move-aside and undo fail there until a descriptor-reach move exists). `from` must exist and nothing may be at `to`
+   * (`outside`, never overwritten; a look then the move, a declared GAP). Each end's parent folder must already exist
+   * (`rename` makes none, as `writeText` does): a missing parent, or one that is a file, is `changed`, and a link on
+   * the way to either end is `link_escape`, on the testing host as on the real one. There is no copy fallback: a
+   * refused move (another device, a folder into itself) is `changed`, with no path or content in it.
    */
   rename(from: FencedPath, to: FencedPath): Promise<void>;
   /**

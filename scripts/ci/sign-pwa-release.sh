@@ -26,7 +26,7 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-public_key="${script_dir}/../../packages/app/release-signing-key.pub"
+public_key="$("${script_dir}/hosted-app-origin.sh" --key-file)"
 check_args=()
 dist=""
 while [[ $# -gt 0 ]]; do

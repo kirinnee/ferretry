@@ -12,18 +12,19 @@ import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.ts';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { useAgendaLinks } from '../lib/agenda-links.ts';
+import type { AgendaFleet } from '../lib/agenda-fleet.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
 import { AgendaIdSchema } from '@ferretry/core-asks/contract';
 import { useLayoutMode, useRouter } from '../shell.ts';
 
-export function createAgendaAskScreen(runtime: AgendaRuntime) {
+export function createAgendaAskScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) {
   const daemon = runtime.connection.daemonId;
   return function AgendaAskScreen({ params }: ScreenProps) {
     const { navigate } = useRouter();
     const links = useAgendaLinks();
     // Board's hooks for this machine: Done · closes, a notice's Start and Close, Edit's lane editor and `&F12` proof.
     const board = useAgendaBoardHooks(daemon);
-    const inbox = useRuntimeInbox(runtime, laneEditorOf(board));
+    const inbox = useRuntimeInbox(runtime, laneEditorOf(board), fleet);
     const phone = useLayoutMode() === 'drawer';
     const ferret = params.ferret;
     const ask = AgendaIdSchema.safeParse(params.ask);

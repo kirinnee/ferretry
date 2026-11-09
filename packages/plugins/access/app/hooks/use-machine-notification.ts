@@ -41,7 +41,7 @@ export interface MachineNotification {
   readonly revokeDevice: (deviceId: string) => void;
 }
 
-const withDeadline = <T>(read: Promise<T>, ms: number): Promise<T> =>
+export const withDeadline = <T>(read: Promise<T>, ms: number): Promise<T> =>
   new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('the machine did not answer in time')), ms);
     read.then(

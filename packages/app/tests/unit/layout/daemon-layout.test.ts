@@ -45,7 +45,7 @@ describe('the daemon layout channel', () => {
     const fake = layoutsClient(() => current);
     const asked: string[] = [];
     const layouts = new DaemonLayouts({
-      packageClient: (daemon, id) => {
+      client: (daemon, id) => {
         asked.push(`${daemon}/${id}`);
         return fake.client;
       },
@@ -66,7 +66,7 @@ describe('the daemon layout channel', () => {
   test('sends nothing while Layouts may not run on that daemon, and drops the layout once it is blocked', async () => {
     const fake = layoutsClient(() => ({ layout: owner, theme }));
     let allowed = false;
-    const layouts = new DaemonLayouts({ packageClient: () => (allowed ? fake.client : undefined) });
+    const layouts = new DaemonLayouts({ client: () => (allowed ? fake.client : undefined) });
     layouts.watch('d1');
     await settle();
     expect(fake.calls).toEqual([]);
@@ -85,7 +85,7 @@ describe('the daemon layout channel', () => {
 
   test('an answer that does not parse is no layout (the shell keeps its default)', async () => {
     const fake = layoutsClient(() => ({ layout: { id: 'x' }, theme }));
-    const layouts = new DaemonLayouts({ packageClient: () => fake.client });
+    const layouts = new DaemonLayouts({ client: () => fake.client });
     layouts.watch('d1');
     await settle();
     expect(layouts.current('d1')).toBeUndefined();

@@ -9,10 +9,11 @@ import {
   deviceControls,
   distinctDaemonName,
   machineDisplayOrder,
+  useEveryDaemon,
   usePairedDaemons,
 } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { useMemo, useSyncExternalStore } from 'react';
+import { useMemo, useRef, useSyncExternalStore } from 'react';
 import type { WardenMachine } from '../features/warden/warden-daemon-scope.ts';
 import { type DaemonConnection, daemonConnection } from '../lib/machine.ts';
 
@@ -25,6 +26,23 @@ export function useCurrentDaemon(client: PluginClient): DaemonConnection {
   const paired = usePairedDaemons().find(daemon => daemon.daemon === id);
   const name = paired === undefined ? undefined : daemonTitle(paired);
   return useMemo(() => daemonConnection({ daemonId: id, daemonName: name }), [id, name]);
+}
+
+const NO_CLIENTS: ReadonlyMap<string, PluginClient> = new Map();
+
+const sameClients = (a: ReadonlyMap<string, PluginClient>, b: ReadonlyMap<string, PluginClient>): boolean =>
+  a.size === b.size && [...a].every(([daemon, client]) => b.get(daemon) === client);
+
+/**
+ * The Warden's own client on every paired daemon where it runs, by daemon id (`useEveryDaemon`). The same map while
+ * no client comes or goes: a machine's feed or grants answer moving re-reads nothing.
+ */
+export function useWardenClients(): ReadonlyMap<string, PluginClient> {
+  const rows = useEveryDaemon();
+  const held = useRef(NO_CLIENTS);
+  const next = new Map(rows.map(row => [row.daemon, row.client]));
+  if (!sameClients(held.current, next)) held.current = next.size === 0 ? NO_CLIENTS : next;
+  return held.current;
 }
 
 const controls = deviceControls();

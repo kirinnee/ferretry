@@ -36,14 +36,20 @@ type Reading =
   | { readonly kind: 'shown'; readonly view: BrowserStateView }
   | { readonly kind: 'unavailable' };
 
+/** What the status line says while the machine's feed is down (today's words). */
+export const BROWSER_OFFLINE_WORDS = 'Offline · the status shows once this machine answers.';
+
 /** "Status": is the shared browser running, and is it going through the proxy? */
 export function BrowserStateLine({
   client,
   savedProxy,
+  online = true,
 }: {
   readonly client: CallClient;
   /** A proxy is saved, so a stopped browser's next start uses it. */
   readonly savedProxy: boolean;
+  /** The machine answers (its feed is live): while it does not, nothing is read and the line says so. */
+  readonly online?: boolean;
 }) {
   const [reading, setReading] = useState<Reading>({ kind: 'reading' });
   const load = useCallback((): (() => void) => {
@@ -61,10 +67,11 @@ export function BrowserStateLine({
       current = false;
     };
   }, [client]);
-  useEffect(() => load(), [load]);
+  useEffect(() => (online ? load() : undefined), [online, load]);
 
-  const words =
-    reading.kind === 'reading'
+  const words = !online
+    ? BROWSER_OFFLINE_WORDS
+    : reading.kind === 'reading'
       ? 'Checking the browser…'
       : reading.kind === 'unavailable'
         ? 'This machine did not say whether its browser is running.'
@@ -79,11 +86,14 @@ export function BrowserStateLine({
         >
           {words}
         </p>
-        <Button type="button" size="sm" data-browser-state-refresh="" onClick={() => void load()}>
+        <Button type="button" size="sm" data-browser-state-refresh="" disabled={!online} onClick={() => void load()}>
           Refresh
         </Button>
       </div>
-      {reading.kind === 'shown' && reading.view.firewall !== undefined && reading.view.firewall.state !== 'applied' ? (
+      {online &&
+      reading.kind === 'shown' &&
+      reading.view.firewall !== undefined &&
+      reading.view.firewall.state !== 'applied' ? (
         <SetupNote tone="warn" name="browser-firewall" title={FIREWALL_TITLES[reading.view.firewall.state]}>
           <p className="m-0 min-w-0 break-words">{reading.view.firewall.detail}</p>
         </SetupNote>
