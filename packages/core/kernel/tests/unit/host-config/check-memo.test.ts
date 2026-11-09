@@ -14,12 +14,7 @@ import { defineConfig } from '../../../contract/index.ts';
 import { CHECKS_KEPT, type ConfigCheckMemo, createConfigCheckMemo } from '../../../host/config/check-memo.ts';
 import type { checkConfigText } from '../../../host/config/check.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
-import {
-  CONFIG_FILE_MAX_BYTES,
-  editConfigText,
-  readConfigText,
-  readConfigTextToEdit,
-} from '../../../host/config/yaml-text.ts';
+import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigText, readConfigTextToEdit } from '@ferretry/std/yaml';
 import type { HostFs } from '../../../host/state/host-fs.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { PRIVATE_WORD } from './adversarial-texts.ts';

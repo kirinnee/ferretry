@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { findRawSecrets } from '../../../contract/secret-shape.ts';
-import { readConfigText } from '../../../daemon/lib/shared/yaml-text.ts';
+import { readConfigText } from '@ferretry/std/yaml';
 import {
   BUILT_IN_MODEL_CATALOG_TEXTS,
   BuiltInModelCatalogError,

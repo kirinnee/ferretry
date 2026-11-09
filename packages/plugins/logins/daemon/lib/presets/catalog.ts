@@ -27,7 +27,7 @@ import openrouter from '../../data/endpoints/openrouter.yaml' with { type: 'text
 import qwenCodingPlan from '../../data/endpoints/qwen-coding-plan.yaml' with { type: 'text' };
 import vercelAiGateway from '../../data/endpoints/vercel-ai-gateway.yaml' with { type: 'text' };
 import zaiGlm from '../../data/endpoints/zai-glm.yaml' with { type: 'text' };
-import { readConfigText } from '../shared/yaml-text.ts';
+import { readConfigText } from '@ferretry/std/yaml';
 import { type ProviderPreset, ProviderPresetFileSchema, presetFromFile } from './schema.ts';
 
 /**

@@ -9,7 +9,7 @@
  * schema refuses a value.
  */
 
-import { parse, parseDocument } from 'yaml';
+import { readConfigText, setConfigKey } from '@ferretry/std/yaml';
 import { z } from 'zod';
 import {
   type BrowserMode,
@@ -41,8 +41,10 @@ export interface BrowsersDocument {
 /** The saved browser settings and the digest they were read at. A file that does not parse is not guessed at. */
 export async function readBrowsersConfig(client: CallClient): Promise<BrowsersDocument> {
   const file = ConfigFileViewSchema.parse(await client.call('GET /v1/config/file', { query: { path: BROWSERS_FILE } }));
-  const parsed: unknown = file.text.trim() === '' ? {} : parse(file.text);
-  return { config: BrowsersConfigSchema.parse(parsed ?? {}), text: file.text, etag: file.etag };
+  const read = readConfigText(file.text);
+  if (!read.ok)
+    throw new Error(`browsers.yaml cannot be read: ${read.errors[0]?.message ?? 'the text cannot be read as YAML'}`);
+  return { config: BrowsersConfigSchema.parse(read.read.value ?? {}), text: file.text, etag: file.etag };
 }
 
 export interface BrowsersChange {
@@ -53,11 +55,9 @@ export interface BrowsersChange {
 
 /** The document with the change made, comments and order kept. Pure. */
 function editedBrowsersText(text: string, change: BrowsersChange): string {
-  const document = parseDocument(text);
-  if (change.mode !== undefined) document.set('mode', change.mode);
-  if (change.proxy === null) document.delete('proxy');
-  else if (change.proxy !== undefined) document.set('proxy', change.proxy);
-  return String(document);
+  const withMode = change.mode === undefined ? text : setConfigKey(text, 'mode', change.mode);
+  if (change.proxy === undefined) return withMode;
+  return setConfigKey(withMode, 'proxy', change.proxy === null ? undefined : change.proxy);
 }
 
 /** Writes the change against the digest it was read at; the daemon refuses a file changed since. */

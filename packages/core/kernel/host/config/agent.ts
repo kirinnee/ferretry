@@ -26,7 +26,7 @@ import { checkConfigText, countProblems, MAX_CONFIG_ISSUES, moreIssues } from '.
 import { type ConfigDeclaration, targetOfPath } from './claims.ts';
 import { rawTextHoldsSecret } from './secrets.ts';
 import { schemaFileName, schemaModeline } from './schemas.ts';
-import { configTextTooLarge } from './yaml-text.ts';
+import { configTextTooLarge } from '@ferretry/std/yaml';
 import type { ConfigStatus } from './service.ts';
 
 /** What the agent's door reads. */

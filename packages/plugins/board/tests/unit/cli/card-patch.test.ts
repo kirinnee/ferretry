@@ -151,7 +151,7 @@ describe('card patch: a file that parses but is not a value', () => {
     // Assert
     should(result.ok).be.false();
     should(!result.ok && result.problems).deepEqual([
-      'f1.yaml could not be read as a patch: Excessive alias count indicates a resource exhaustion attack',
+      'f1.yaml cannot be read:\n  line 5, column 24: the aliases (*name) in this file expand too far to read',
     ]);
   });
 });

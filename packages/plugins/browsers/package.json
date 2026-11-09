@@ -32,8 +32,7 @@
     "@ferretry/app": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0",
-    "yaml": "2.9.0"
+    "lucide-react": "^0.468.0"
   },
   "sideEffects": false,
   "devDependencies": {

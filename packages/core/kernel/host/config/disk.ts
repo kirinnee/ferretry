@@ -1,6 +1,6 @@
 import type { HostFs } from '../state/host-fs.ts';
 import type { DiskState } from './evaluate.ts';
-import { CONFIG_FILE_MAX_BYTES, configTextTooLarge } from './yaml-text.ts';
+import { CONFIG_FILE_MAX_BYTES, configTextTooLarge } from '@ferretry/std/yaml';
 
 const isUtf8 = (bytes: Uint8Array): boolean => {
   try {

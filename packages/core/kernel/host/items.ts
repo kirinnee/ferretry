@@ -2,7 +2,7 @@ import type { ConfigPort } from '../contract/ports.ts';
 import type { ItemKind, Manifest } from '../manifest/types.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import type { ItemReach, ItemReachOf } from './permissions.ts';
-import { readConfigText } from './config/yaml-text.ts';
+import { readConfigText } from '@ferretry/std/yaml';
 
 /** One installed data plugin's items, as `loadDataPlugins` accepted them. */
 export interface InstalledItems {
@@ -72,7 +72,7 @@ export async function installedItemReach(
         if (!resolved.startsWith(`${root}/`)) continue;
         const info = await fs.lstat(path);
         if (info?.kind !== 'file' || info.size > ITEM_FILE_MAX_BYTES) continue;
-        // The kernel's own bounded reader (alias budget, no YAML 1.1 tags, duplicate keys refused): a file that does
+        // The shared bounded reader (alias budget, no YAML 1.1 tags, duplicate keys refused): a file that does
         // not read names nothing, as one that did not parse always did.
         // Read with a hard bound, at most one byte past the cap: the size above was read before the bytes, and a file
         // that grew in between is never read whole — only far enough to see it is over the cap.
