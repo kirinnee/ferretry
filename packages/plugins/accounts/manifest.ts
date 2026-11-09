@@ -665,6 +665,10 @@ export default definePlugin({
     renderers: [renderer('ask', { source: 'sign-in-approval' })],
   },
 
+  /** Never reached by a ferret, through any root: the sealed login secrets and the account records (`PrivacyDecl`). */
+  privacy: {
+    private: ['login-secrets.json', 'accounts.json'],
+  },
   data: {
     state: [
       /** The index only: every value is sealed in the Vault under its sealed name. */

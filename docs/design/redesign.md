@@ -1400,26 +1400,27 @@ export default definePlugin({
 
 **Every field:**
 
-| Section      | Field                                        | Declares                                                                                          | Code |                               Data                               |
-| ------------ | -------------------------------------------- | ------------------------------------------------------------------------------------------------- | :--: | :--------------------------------------------------------------: |
-| identity     | `id`, `title`, `version`, `api`, `core`      | §3.2                                                                                              |  ✓   |                     ✓ (`core` always false)                      |
-| identity     | `kinds`                                      | which kinds (§4) it implements; each kind brings its contract and conformance suite               |  ✓   |                            data kinds                            |
-| identity     | `words`                                      | its glossary entries (§1.3)                                                                       |  ✓   |                                ✓                                 |
-| dependencies | `needs`, `uses`, `provides`                  | required ports, optional ports, offered ports (by token)                                          |  ✓   |                                —                                 |
-| actions      | `routes`, `sockets`                          | every route and socket, each with the full security descriptor (§7.1)                             |  ✓   |                                —                                 |
-| actions      | `memberRoutes`                               | routes for catalog members, with the member descriptor (§7.1); a separate table                   |  ✓   |                                —                                 |
-| actions      | `cli`                                        | `fy` verbs (code) or aliases to existing verbs (data: `alias: { 'ship': 'card move --to done' }`) |  ✓   |                             aliases                              |
-| actions      | `agentTools`                                 | MCP tools for ferrets, same descriptor                                                            |  ✓   |                                —                                 |
-| actions      | `app`                                        | buttons and menu items on a thing (card, ferret, ask, page), each naming the route it calls       |  ✓   |                                —                                 |
-| UI           | `screens`, `panels`, `settings`, `renderers` | §5                                                                                                |  ✓   |                                —                                 |
-| UI           | `layouts`, `themes`                          | §5.3                                                                                              |  ✓   |                                ✓                                 |
-| data         | `state`, `config`                            | its folder's files with formats; its config files and collections (§7.2)                          |  ✓   |                           config only                            |
-| data         | `readModels`, `publishes`, `subscribes`      | queries others may read; wake-ups                                                                 |  ✓   |                                —                                 |
-| data         | `items`                                      | items it brings (MCP servers, skills, shells, recipes, instructions)                              |  ✓   |                                ✓                                 |
-| hooks        | `takes`, `offers`                            | §3.5                                                                                              |  ✓   | data hooks only (`launch.parts`, `sitrep.lines` from a template) |
-| order        | `order.after`, `order.before`, `priority`    | §3.5                                                                                              |  ✓   |                            `priority`                            |
-| metadata     | `instructions`, `onboarding`, `doctor`       | launch-prompt text (with `when`), first-run steps (§6.1), `fy doctor` checks                      |  ✓   |                instructions, onboarding defaults                 |
-| permissions  | `roots`, `network`, `spawn`, `secrets`       | §3.7                                                                                              |  ✓   |            what its items would run, shown at install            |
+| Section      | Field                                        | Declares                                                                                           | Code |                               Data                               |
+| ------------ | -------------------------------------------- | -------------------------------------------------------------------------------------------------- | :--: | :--------------------------------------------------------------: |
+| identity     | `id`, `title`, `version`, `api`, `core`      | §3.2                                                                                               |  ✓   |                     ✓ (`core` always false)                      |
+| identity     | `kinds`                                      | which kinds (§4) it implements; each kind brings its contract and conformance suite                |  ✓   |                            data kinds                            |
+| identity     | `words`                                      | its glossary entries (§1.3)                                                                        |  ✓   |                                ✓                                 |
+| dependencies | `needs`, `uses`, `provides`                  | required ports, optional ports, offered ports (by token)                                           |  ✓   |                                —                                 |
+| actions      | `routes`, `sockets`                          | every route and socket, each with the full security descriptor (§7.1)                              |  ✓   |                                —                                 |
+| actions      | `memberRoutes`                               | routes for catalog members, with the member descriptor (§7.1); a separate table                    |  ✓   |                                —                                 |
+| actions      | `cli`                                        | `fy` verbs (code) or aliases to existing verbs (data: `alias: { 'ship': 'card move --to done' }`)  |  ✓   |                             aliases                              |
+| actions      | `agentTools`                                 | MCP tools for ferrets, same descriptor                                                             |  ✓   |                                —                                 |
+| actions      | `app`                                        | buttons and menu items on a thing (card, ferret, ask, page), each naming the route it calls        |  ✓   |                                —                                 |
+| UI           | `screens`, `panels`, `settings`, `renderers` | §5                                                                                                 |  ✓   |                                —                                 |
+| UI           | `layouts`, `themes`                          | §5.3                                                                                               |  ✓   |                                ✓                                 |
+| data         | `state`, `config`                            | its folder's files with formats; its config files and collections (§7.2)                           |  ✓   |                           config only                            |
+| data         | `readModels`, `publishes`, `subscribes`      | queries others may read; wake-ups                                                                  |  ✓   |                                —                                 |
+| data         | `items`                                      | items it brings (MCP servers, skills, shells, recipes, instructions)                               |  ✓   |                                ✓                                 |
+| hooks        | `takes`, `offers`                            | §3.5                                                                                               |  ✓   | data hooks only (`launch.parts`, `sitrep.lines` from a template) |
+| order        | `order.after`, `order.before`, `priority`    | §3.5                                                                                               |  ✓   |                            `priority`                            |
+| metadata     | `instructions`, `onboarding`, `doctor`       | launch-prompt text (with `when`), first-run steps (§6.1), `fy doctor` checks                       |  ✓   |                instructions, onboarding defaults                 |
+| permissions  | `roots`, `network`, `spawn`, `secrets`       | §3.7                                                                                               |  ✓   |            what its items would run, shown at install            |
+| privacy      | `privacy.private`, `privacy.public`          | which of its state files a ferret must never reach (§7.7), and the secret-named ones that are safe |  ✓   |                                —                                 |
 
 ### 3.4 Lifecycle
 
@@ -2581,6 +2582,22 @@ scoped handle:
   folder, so "read-only" holds for a copy only (a declared GAP). A link made also outlives the tree: revoking a tree (its
   minter stopping, or `shareTrees` leaving the manifest) stops new materializations only, and a link already in
   `agent-homes` stays until the harness removes it (a declared GAP).
+- **Private files (`privacy`).** A plugin declares the files of its own `state/<id>/` a ferret must never reach —
+  `privacy.private`, paths relative to that folder (a folder pins the folder and one level of what it holds; a
+  `credentials/*` collection pins `credentials`). The kernel COMPOSES every manifest's list into the one list its fence
+  reads (no kernel → plugin import) and pins each place by **identity** (device and inode), beside the home's key
+  paths and every other plugin's internal root folders, for EVERY root: an owner's, an internal one (`agent-homes`,
+  `fleet`, `sessions`, `credentials`, `downloads`), a harness file, a pinned read, a shared tree and a copy's source.
+  A place the root itself holds (its base, a folder above it, anything below) is its own and is left out. A name that IS
+  a private place is refused `fenced` for read, stat, write, rename-over (as target), `publish`, link (as target and
+  as the link's place), delete, mode change and copy, whatever its spelling: the verdict is the inode's, so a case
+  variant, a double slash or a `.` segment changes nothing, and a bind mount (one link, the same device and inode —
+  which the hard-link rule cannot see) is refused as a hard link is. **Fail closed:** a state file whose name says key,
+  secret, token, passkey, credential or oauth (case-insensitive substrings) must be declared `private` or
+  `public` with a written reason (`privacy.public: [{ path, reason }]`), or `definePlugin`, both hosts at load and
+  the `private-files` check refuse the manifest; an entry that names no declared file is a finding. Declared GAP:
+  a file buried more than one level inside a private folder (a browser profile) is held by the folder's identity
+  only; a name that no manifest declares is not private to the fence.
 - An owner's root refuses everything inside **the fence**: the live `FY_HOME`, every `<FY_HOME>-before-*` folder and
   every `state/<id>-before-*` folder (§9.3), for every caller including the owner's own `fy` imports. An internal
   root reaches its own subtree only.

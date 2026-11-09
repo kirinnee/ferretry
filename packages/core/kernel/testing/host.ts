@@ -126,6 +126,7 @@ import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
 import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
+import { privacyRefusals } from '../manifest/privacy.ts';
 import type { HookTake, Manifest, Needer, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
 import { type TestCaller, owner, standInAdmission, testArrival, testPrincipal } from './admission.ts';
@@ -407,6 +408,10 @@ export async function testHost(options: TestHostOptions): Promise<TestHost> {
 async function start(world: World): Promise<TestHost> {
   const { options, clock, identity, identitySigner } = world;
   const manifests: readonly Manifest[] = options.plugins.map(plugin => plugin.manifest);
+  // As the real host: a plugin's private files must be declared soundly, so a unit test cannot hold a manifest that
+  // production refuses at boot.
+  const unsound = privacyRefusals(manifests);
+  if (unsound.length > 0) throw new TypeError(unsound.join('\n'));
   const hookOffers = new Map(
     manifests.flatMap(manifest => (manifest.hooks?.offers ?? []).map(offer => [offer.hook.name, offer.hook] as const)),
   );

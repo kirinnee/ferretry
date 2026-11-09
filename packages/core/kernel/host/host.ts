@@ -125,6 +125,7 @@ import {
 } from './permissions.ts';
 import type { HostStatePort } from './state/state-port.ts';
 import { openHome, probeHome } from './home.ts';
+import { composePrivateFiles, privacyRefusals } from '../manifest/privacy.ts';
 import { ensureInternalRootBases, ownFolderSpellings, rootsPortFor } from './roots.ts';
 import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from './processes.ts';
 import { PinRegistry } from './pins.ts';
@@ -450,6 +451,15 @@ async function bootLocked(
   for (const implementation of options.implementations)
     if (implementation.manifest.id !== 'kernel') implementations.set(implementation.manifest.id, implementation);
   const manifests: Manifest[] = [kernelManifest, ...[...implementations.values()].map(impl => impl.manifest)];
+  const unsound = privacyRefusals(manifests);
+  if (unsound.length > 0)
+    return {
+      kind: 'refused',
+      sentence: `A plugin's private files are not declared soundly, so the daemon did not start:\n${unsound.join('\n')}`,
+      trace,
+    };
+  /** Every plugin's declared private places, composed once: the one list the fence of EVERY root reads (§7.7). */
+  const privateFiles = composePrivateFiles(manifests);
   // Config: every declared file of every known plugin, so a plugin turned on later finds its file checked.
   trace.push('config');
   // Gate's judge is read live: Admission is bound after build, and an absent or throwing one holds the edit.
@@ -719,6 +729,7 @@ async function bootLocked(
       () => bound.workFolders,
       {
         random: adapters.random,
+        privateFiles,
         ...(pins === undefined ? {} : { pins }),
         ...(manifest.permissions?.harnessFiles === undefined
           ? {}

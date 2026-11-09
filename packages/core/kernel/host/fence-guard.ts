@@ -75,6 +75,22 @@ export function internalRootPins(stateEntries: readonly string[]): readonly stri
     .flatMap(plugin => INTERNAL_ROOT_FOLDERS.map(root => internalRootFolder(plugin, root)));
 }
 
+/**
+ * The places the plugins declared private, each with its direct children when it is a folder: a folder is pinned by its
+ * own identity (a walk THROUGH it is held), and one level of what it holds is pinned too, so a member of a private
+ * folder (a login's sign-in folder, a pairing redirect) bind mounted or linked out under another name is held as well.
+ * Deeper than that is the folder owner's own business (a declared GAP: a file buried in a browser profile).
+ */
+async function privatePlacesOf(fs: HostFs, real: string, privateFiles: readonly string[]): Promise<readonly string[]> {
+  const out: string[] = [];
+  for (const place of privateFiles) {
+    out.push(place);
+    if ((await fs.identity(join(real, place)))?.kind !== 'directory') continue;
+    for (const child of await fs.list(join(real, place))) out.push(`${place}/${child}`);
+  }
+  return out;
+}
+
 /** The folders of the home that today's fence holds beside the home itself (`NodeStateHomes([home, state, config])`). */
 const HOME_FOLDERS: readonly string[] = ['state', 'config'];
 
@@ -88,12 +104,13 @@ const isAbsent = (error: unknown): boolean => {
  * The fence of `home`: its real path, the real path and identity of its `state` and `config` folders (today's homes
  * `[home, state, config]`, each resolved to where it really is, so one linked or bind-mounted out of the home is held
  * wherever it lives), and the identity of the home, of every `<home>-before-*` and `state/<id>-before-*` folder, and of
- * each pinned key file and folder ({@link PINNED_KEY_PATHS}) that is there — the entry itself, never followed, as
+ * each pinned key file and folder ({@link PINNED_KEY_PATHS}) and each private place the plugins declared
+ * (`privateFiles`, the composed list of every manifest's `privacy.private`) that is there — the entry itself, never followed, as
  * today's `resolveStateHomes` takes it. A home that cannot be resolved, a `state` or `config` that is there but cannot
  * be resolved or is not a folder, or a key path that cannot be looked at, fails closed (throws); one that is absent is
  * left out.
  */
-export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
+export async function fenceOf(fs: HostFs, home: string, privateFiles: readonly string[] = []): Promise<Fence> {
   const named = absolute(home, 'the home');
   const real = await fs.realpath(named);
   const folders = [real];
@@ -122,7 +139,11 @@ export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
     places.push(place);
     identities.push(identity);
   }
-  for (const key of [...PINNED_KEY_PATHS, ...internalRootPins(stateEntries)]) {
+  for (const key of [
+    ...PINNED_KEY_PATHS,
+    ...(await privatePlacesOf(fs, real, privateFiles)),
+    ...internalRootPins(stateEntries),
+  ]) {
     const identity = await fs.identity(join(real, key));
     if (identity !== undefined) identities.push(identity);
   }
@@ -153,6 +174,58 @@ export async function fencedReal(fs: HostFs, fence: Fence, real: string): Promis
     if (entry === undefined) return true;
     if (fence.identities.some(identity => same(identity, entry))) return true;
     if (dirname(current) === current) return false;
+  }
+}
+
+/**
+ * What a root that is NOT an owner's must still refuse (§7.7): the home's private places — the key paths, every plugin's
+ * declared private files and every other plugin's internal root folders — by name and by IDENTITY, so a file bind
+ * mounted or hard linked into a plugin's own folder under any name is refused (the hard link is already refused by
+ * link count; a bind mount keeps one link, so identity is the only thing that sees it). A place the root itself holds
+ * (its base, a folder above it, or anything below it) is the root's own and is left out.
+ */
+export interface PrivateGuard {
+  readonly identities: readonly { readonly device: bigint; readonly inode: bigint }[];
+}
+
+/** Two places are nested when either holds the other, by name: the root's own folder and what lives in it. */
+const nested = (a: string, b: string): boolean => within(a, b) || within(b, a);
+
+/**
+ * The guard for a root whose real base is `base`: the identity of each private place that is there, except the
+ * places that are the root's own. Recomputed on every ask (a file replaced by a rename has a new inode). A place that
+ * cannot be looked at fails closed (throws), as the fence does.
+ */
+export async function privateGuardOf(
+  fs: HostFs,
+  home: string,
+  base: string,
+  privateFiles: readonly string[],
+): Promise<PrivateGuard> {
+  const real = await fs.realpath(absolute(home, 'the home'));
+  const stateEntries = await fs.list(join(real, 'state'));
+  const places = [
+    ...PINNED_KEY_PATHS,
+    ...(await privatePlacesOf(fs, real, privateFiles)),
+    ...internalRootPins(stateEntries),
+  ]
+    .map(place => join(real, place))
+    .filter(place => !nested(place, base));
+  const found = await Promise.all(places.map(async place => await fs.identity(place)));
+  return { identities: found.flatMap(identity => (identity === undefined ? [] : [identity])) };
+}
+
+/**
+ * Whether `real` is a private place or inside one, by identity: the entry itself first, then every folder up to and
+ * including the root's `base`, as {@link fencedReal} walks. A path that cannot be looked at is refused.
+ */
+export async function privatelyHeld(fs: HostFs, guard: PrivateGuard, real: string, base: string): Promise<boolean> {
+  if (guard.identities.length === 0) return false;
+  for (let current = absolute(real, 'the path'); ; current = dirname(current)) {
+    const entry = await fs.identity(current).catch(() => undefined);
+    if (entry === undefined) return true;
+    if (guard.identities.some(identity => same(identity, entry))) return true;
+    if (current === base || dirname(current) === current || !within(base, dirname(current))) return false;
   }
 }
 

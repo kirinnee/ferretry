@@ -186,6 +186,17 @@ export default definePlugin({
     settings: [settingsTab('mcp', { label: 'MCP servers', order: 50 })],
   },
 
+  /** Never reached by a ferret, through any root: the sealed OAuth refresh tokens and client secrets (`PrivacyDecl`). */
+  privacy: {
+    private: ['oauth-secrets.json'],
+    public: [
+      {
+        path: 'oauth.json',
+        reason:
+          'Sign-in facts that are not secret: issuer, endpoints, client id and expiry, never a token; the refresh tokens are sealed in oauth-secrets.json.',
+      },
+    ],
+  },
   data: {
     state: [MCP_INVENTORY_STATE, MCP_OAUTH_STATE, MCP_OAUTH_SECRETS.state, MCP_PAYLOADS_STATE],
     config: [MCP_CONFIG],

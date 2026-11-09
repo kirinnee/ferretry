@@ -467,6 +467,10 @@ export default definePlugin({
     ],
   },
 
+  /** Never reached by a ferret, through any root: the digests of every ferret token (`PrivacyDecl`). */
+  privacy: {
+    private: ['tokens.json'],
+  },
   data: {
     state: [
       FerretFiles,
