@@ -75,9 +75,11 @@ async function world(files: Record<string, unknown> = FILES, options: WorldOptio
           : {
               ...assembly,
               profileEtag: async name => {
-                const etag = JSON.stringify(
-                  ctx.kernel.config.collection(PROFILE_ITEMS as unknown as ConfigCollectionDef<unknown>).get(name),
-                );
+                // A profile with no file is `'absent'`, as the port's contract says (`ProfileLayerDeps.etag`).
+                const etag =
+                  JSON.stringify(
+                    ctx.kernel.config.collection(PROFILE_ITEMS as unknown as ConfigCollectionDef<unknown>).get(name),
+                  ) ?? 'absent';
                 await options.afterEtag?.(name, ctx.kernel);
                 return etag;
               },
