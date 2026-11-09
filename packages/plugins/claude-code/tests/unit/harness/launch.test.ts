@@ -289,6 +289,11 @@ describe('transcript', () => {
     should(parseEntry('{"type":"user","uuid":"u","timestamp":"soon"}')).be.undefined();
   });
 
+  it('skips a line that is not JSON when it reads what the turns spent, and keeps the turns on either side', () => {
+    const lines = [user, 'not json {', '', assistant].join('\n');
+    should(parseUsage(lines).map(turn => [turn.turn, turn.model])).eql([[1, 'claude-opus-5-5']]);
+  });
+
   it('reads what each assistant turn spent', () => {
     should(parseUsage([user, assistant].join('\n'))).eql([
       {

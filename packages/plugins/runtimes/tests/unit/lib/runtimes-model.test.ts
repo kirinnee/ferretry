@@ -69,6 +69,42 @@ describe('the model Runtimes assembles from its own files', () => {
     ]);
   });
 
+  it('stands in for an instructions component another plugin owns, with a word that is no file', () => {
+    const assembled = assembleRuntimesModel(
+      files({ profiles: new Map([['default', profile(['modelSets/heavy', 'instructions/notes'])]]) }),
+    );
+
+    expect(assembled.model.components.instructions.notes).toEqual({ file: 'not-read' });
+    expect(assembled.unreadable).toEqual([
+      'the instructions component "notes" could not be read from the part of Ferretry that owns it: no part of Ferretry provides these components yet',
+    ]);
+  });
+
+  it('keeps a disabled login’s reason and its expiry, but not a disable that came from a runtime', () => {
+    const disabled = (until?: string, source: 'login' | 'runtime' = 'login', reason?: string) =>
+      assembleRuntimesModel(
+        files({
+          logins: [
+            sampleLogin('claude-you', {
+              store: 'ferretry',
+              disabled: {
+                source,
+                ...(reason === undefined ? {} : { reason }),
+                ...(until === undefined ? {} : { until }),
+              } as never,
+            }),
+          ],
+        }),
+      ).model.credentials['claude-you']?.disabled;
+
+    expect(disabled('2030-01-01T00:00:00.000Z', 'login', 'billing')).toEqual({
+      reason: 'billing',
+      until: '2030-01-01T00:00:00.000Z',
+    });
+    expect(disabled(undefined, 'login', undefined)).toEqual({});
+    expect(disabled(undefined, 'runtime', 'paused')).toBeUndefined();
+  });
+
   it('stands in for an environment login, whose templates Logins does not show, and names it without a value', () => {
     const view = sampleLogin('glm', {
       store: 'environment',

@@ -15,6 +15,7 @@ import {
   PAIRING_MAX_DEVICES,
   PairingRateLimiter,
   PairingService,
+  PushNewDeviceAlert,
 } from '../../../../daemon/lib/pairing/index.ts';
 import { toBase64Url } from '../../../../daemon/lib/proof/binary.ts';
 import {
@@ -1991,5 +1992,112 @@ describe('PairingService rows the cases above do not name', () => {
       should(said).not.containEql(DEVICE_KEY);
     }
     should(JSON.stringify(right)).not.containEql('Secret Phone');
+  });
+
+  it('R590 a new-device alert that cannot be sent is reported to the operator and never undoes the pairing', async () => {
+    // Arrange
+    const reported: string[] = [];
+    const service = new AuditedPairingService(
+      {
+        daemonId: DAEMON_ID,
+        daemonName: 'workstation',
+        advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        carriers: { current: () => CARRIERS },
+        clock: new FakeClock(),
+        cryptography: new FakeCryptography(),
+        devices: new RecordingDevices(),
+        credentials: new PairingDeviceRegistry(DAEMON_ID),
+      },
+      {
+        log: async () => undefined,
+        alert: {
+          newDevicePaired: async () => {
+            throw new Error('the push service is down');
+          },
+        },
+        failures: sentence => reported.push(sentence),
+      },
+    );
+    service.mint();
+
+    // Act
+    const redemption = await redeemRelayed(service, { code: CODE, deviceName: 'Phone' });
+    await Bun.sleep(0);
+
+    // Assert
+    should(redemption.kind).equal('paired');
+    should(reported).eql(['the other devices could not be told that a device was paired: the push service is down']);
+  });
+});
+
+describe('PushNewDeviceAlert (every other enrolled browser hears of a new device)', () => {
+  const grant = (carrier: 'direct' | 'relay'): PairingGrant => ({
+    deviceId: FIRST_DEVICE_ID,
+    deviceName: 'Secret Phone',
+    carrier,
+    createdAt: '2026-08-03T12:00:00.000Z',
+  });
+  const alertWith = (
+    enrolled: readonly string[],
+    notify: (dispatch: { readonly payload: unknown }, to?: readonly string[]) => Promise<unknown>,
+    reported: string[] = [],
+  ) =>
+    new PushNewDeviceAlert({ list: async () => enrolled.map(id => ({ id })), notify }, 'workstation', sentence =>
+      reported.push(sentence),
+    );
+
+  it('sends every enrolled browser a quoted name beside the facts nobody chose, and says how the device arrived', async () => {
+    // Arrange
+    const sent: Array<{ payload: Record<string, unknown>; to: readonly string[] | undefined }> = [];
+    const alert = alertWith(['push-a', 'push-b'], async (dispatch, to) => {
+      sent.push({ payload: dispatch.payload as Record<string, unknown>, to });
+    });
+
+    // Act
+    await alert.newDevicePaired(grant('relay'));
+    await alert.newDevicePaired(grant('direct'));
+
+    // Assert
+    should(sent.map(each => each.to)).eql([
+      ['push-a', 'push-b'],
+      ['push-a', 'push-b'],
+    ]);
+    const [relayed, local] = sent.map(each => each.payload);
+    should(relayed).containEql({ kind: 'device-paired', title: 'A new device was paired', url: '/', count: 1 });
+    should(String(relayed?.body)).containEql('“Secret Phone”');
+    should(String(relayed?.body)).containEql('with workstation over the relay at 2026-08-03T12:00:00.000Z');
+    should(String(local?.body)).containEql('with workstation on the local network at');
+    should(relayed?.eventKey).equal(`device-paired:${FIRST_DEVICE_ID}`);
+  });
+
+  it('sends nothing when no browser is enrolled, and says nothing about it', async () => {
+    const reported: string[] = [];
+    let sends = 0;
+    const alert = alertWith(
+      [],
+      async () => {
+        sends += 1;
+      },
+      reported,
+    );
+    await alert.newDevicePaired(grant('direct'));
+    should(sends).equal(0);
+    should(reported).eql([]);
+  });
+
+  it('reports a push that fails to the operator, naming the device by its short id, and never throws', async () => {
+    const reported: string[] = [];
+    const alert = alertWith(
+      ['push-a'],
+      async () => {
+        throw new Error('the push service refused');
+      },
+      reported,
+    );
+    await alert.newDevicePaired(grant('direct'));
+    should(reported).have.length(1);
+    should(reported[0]).containEql('could not be told that device');
+    should(reported[0]).containEql('the push service refused');
+    should(reported[0]).not.containEql('Secret Phone');
   });
 });

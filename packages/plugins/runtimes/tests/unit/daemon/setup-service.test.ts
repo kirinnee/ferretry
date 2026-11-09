@@ -2433,6 +2433,58 @@ intervalMinutes: 5
     should(own.writes[0]).containEql({ path: 'voice.yaml', ifMatch: 'absent', text: settings[0]?.text });
   });
 
+  it('should say the first settings file is on disk when a later one is refused, and not roll it back', async () => {
+    const own = files({});
+    const write = own.port.write;
+    let calls = 0;
+    own.port.write = async (path, body, ifMatch, mayLoosen) => {
+      calls += 1;
+      if (calls === 2) throw new ConfigWriteConflict(path);
+      return await write(path, body, ifMatch, mayLoosen);
+    };
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [
+      { path: 'learning.yaml' as const, text: 'enabled: false\n' },
+      { path: 'voice.yaml' as const, text: 'postProcessing:\n  provider: off\n' },
+    ];
+
+    const refusal = await catalogRefusal(
+      apply(w, bundle, settings, undefined, callerFor(REMOTE)),
+      'fleet_change_stale',
+    );
+
+    should(refusal.message).containEql('changed on this machine after it was reviewed');
+    should(refusal.message).containEql('was written first and is NOT rolled back with the fleet');
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should materialise a component that carries its own text or document, without reading a file for it', async () => {
+    const own = files({});
+    const w = await copied(own);
+    const base = SET_UP_MODEL();
+    w.state.reading = configReading(
+      parseAccountModel({
+        ...base,
+        components: {
+          ...base.components,
+          instructions: { ...base.components.instructions, note: { text: 'Inline note.' } },
+          settings: { guard: { harness: 'claude', document: { permissions: { allow: ['Read'] } } } },
+          hooks: { audit: { harness: 'claude', document: { hooks: {} } } },
+        },
+        profiles: { default: { layers: ['instructions/main', 'instructions/note', 'settings/guard', 'hooks/audit'] } },
+      } as never),
+      'r',
+    );
+    const bundle = await sourceAt();
+
+    await apply(w, bundle, [], undefined, callerFor(REMOTE));
+
+    const written = JSON.stringify(w.applied[0]?.plan);
+    should(written).containEql('Inline note.');
+    should(written).containEql('permissions');
+  });
+
   it('should refuse a settings file when this machine cannot merge settings, naming the file', async () => {
     const w = world();
     w.state.reading = configReading(SET_UP_MODEL(), 'r');

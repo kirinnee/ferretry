@@ -307,10 +307,6 @@ export class HarnessUpdateService implements HarnessUpdateSubsystem {
       return undefined;
     };
     switch (command.program) {
-      case 'harness': {
-        const located = await this.#options.locate();
-        return located.outcome === 'located' ? located.path : undefined;
-      }
       case 'npm': {
         // The npm of the prefix Codex lives in, so an nvm node's global is updated by THAT node's npm.
         const prefix = method.kind === 'npm-global' ? method.prefix : undefined;
