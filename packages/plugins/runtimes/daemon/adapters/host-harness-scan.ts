@@ -26,7 +26,7 @@
  * A home the person moved with `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is reachable only if the caller names it (GAP(kernel): the person's shell variables are not readable by a plugin).
  */
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
-import { hostCodexHome } from '../lib/account/credentials.ts';
+import { hostCodexHome, isSignInName } from '../lib/account/credentials.ts';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import {
   type HostDocumentRead,
@@ -61,10 +61,6 @@ export interface HostHarnessScanDeps {
   /** Limit for skill hashing once checked host traversal is available. */
   readonly maxSkillFiles?: number;
 }
-
-// Logins and the harness contracts expose no sign-in filename list. These are the Claude/Codex
-// filenames also named by account/credentials.ts; refuse them in every component, before any host call.
-const SIGN_IN_FILES = new Set(['.credentials.json', 'auth.json']);
 
 const DEFAULT_MAX_SKILL_FILES = 2_000;
 
@@ -200,7 +196,7 @@ export class HostHarnessScanner {
       throw new Error('the path is outside its harness home');
     }
     const components = inside === '' ? [] : inside.split(sep);
-    if ([basename(home), ...components].some(name => SIGN_IN_FILES.has(name.toLowerCase()))) {
+    if ([basename(home), ...components].some(isSignInName)) {
       throw new Error('sign-in files are not readable setup documents');
     }
     let current = home;
@@ -240,8 +236,7 @@ export class HostHarnessScanner {
 
   /** The one file beside a home: never a link, never a sign-in file. */
   async #inspectFile(path: string): Promise<HostEntry | undefined> {
-    if (SIGN_IN_FILES.has(basename(path).toLowerCase()))
-      throw new Error('sign-in files are not readable setup documents');
+    if (isSignInName(basename(path))) throw new Error('sign-in files are not readable setup documents');
     const info = await this.deps.files.lstat(path);
     if (info?.kind === 'link') throw new Error('symbolic links are not readable setup paths');
     return info;

@@ -79,6 +79,9 @@ export function startDetached(
   return detachedHandle(child.pid);
 }
 
+/** Bun's `signalCode` as text: its name (`'SIGTERM'`), and `null` for a child no signal ended. */
+const signalName = (code: string | number | null): string | null => (code === null ? null : String(code));
+
 /** The most extra pipes one child may have (Chrome's DevTools pipe needs two). */
 const MAX_EXTRA_PIPES = 4;
 
@@ -136,8 +139,16 @@ export function bunSpawn(
 ): SpawnPort {
   const env = (program: string, options?: SpawnOptions): Record<string, string> =>
     childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()));
-  const start = (program: string, args: readonly string[], options?: SpawnOptions): ChildHandle => {
-    if (detachedAsked(options)) return startDetached(program, args, options, env);
+  /**
+   * One piped child. `signalCode` is read from the Bun subprocess after `exited` settles: a killed child (Bun's
+   * `timeout`, an abort `signal`, `kill`) resolves `exited` with `128 + n` while `signalCode` names the signal, and
+   * `run` answers that as `exitCode: null` plus the signal. The handle is the frozen `ChildHandle`, which has no such member.
+   */
+  const spawnChild = (
+    program: string,
+    args: readonly string[],
+    options?: SpawnOptions,
+  ): { readonly handle: ChildHandle; readonly signalCode: () => string | null } => {
     const cwd = options?.cwd;
     // A pin is installed for exactly the one spawn statement, no await inside the bracket, and the child is given
     // `.`: it inherits the held directory and resolves `.` against it, never a name re-resolved after the fact.
@@ -166,7 +177,7 @@ export function bunSpawn(
     // Reading `stdio` hands the daemon's ends over; Bun made them close-on-exec.
     const pipes = extra === 0 ? [] : (child.stdio as unknown as readonly (number | null)[]).slice(3, 3 + extra);
     let pipesOpen = pipes.length > 0;
-    return {
+    const handle: ChildHandle = {
       pid: child.pid,
       pipes: pipes.filter((fd): fd is number => typeof fd === 'number'),
       closePipes: () => {
@@ -182,6 +193,11 @@ export function bunSpawn(
       kill: signal => child.kill((signal ?? 'SIGTERM') as NodeJS.Signals),
       exited: child.exited.then(code => code),
     };
+    return { handle, signalCode: () => signalName(child.signalCode) };
+  };
+  const start = (program: string, args: readonly string[], options?: SpawnOptions): ChildHandle => {
+    if (detachedAsked(options)) return startDetached(program, args, options, env);
+    return spawnChild(program, args, options).handle;
   };
   return {
     start,
@@ -222,13 +238,18 @@ export function bunSpawn(
     },
     run: async (program, args, options): Promise<SpawnResult> => {
       if (detachedAsked(options)) throw new Error('A detached child is started with start, never run.');
-      const child = start(program, args, options);
-      const [stdout, stderr, exitCode] = await Promise.all([
+      const { handle: child, signalCode } = spawnChild(program, args, options);
+      const [stdout, stderr, exited] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
         child.exited,
       ]);
-      return { exitCode, signal: null, stdout, stderr };
+      // A child ended by a signal (a timeout, an abort, a kill) has NO exit code: Bun's `exited` says 128 + n, which a
+      // caller would read as the program's own verdict.
+      const signal = signalCode();
+      return signal === null
+        ? { exitCode: exited, signal: null, stdout, stderr }
+        : { exitCode: null, signal, stdout, stderr };
     },
   };
 }

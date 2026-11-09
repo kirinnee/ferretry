@@ -78,15 +78,15 @@ describe('jobs parity', () => {
     const { GhSpawnRunner } = await import('../../../daemon/adapters/github.ts');
     const clock = fixedClock();
     let asked: SpawnOptions | undefined;
-    // What the kernel's spawn really returns for a child killed by its signal: an ordinary exit, 143 (SIGTERM), with
-    // `signal: null` and whatever the child had printed so far.
+    // What the kernel's spawn really returns for a child killed by its signal: no exit code and the
+    // signal's name (`exitCode: null`, `signal: 'SIGTERM'`) and whatever the child had printed so far.
     const runner = new GhSpawnRunner(
       {
         run: async (_program: string, _args: readonly string[], options?: SpawnOptions) => {
           asked = options;
           return await new Promise<SpawnResult>(resolve => {
             options?.signal?.addEventListener('abort', () => {
-              resolve({ exitCode: 143, signal: null, stdout: '{"data":{"repository":', stderr: '' });
+              resolve({ exitCode: null, signal: 'SIGTERM', stdout: '{"data":{"repository":', stderr: '' });
             });
           });
         },

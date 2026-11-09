@@ -19,6 +19,9 @@ import {
 } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { dirname } from 'node:path';
+import { type DescriptorBracket, loadProcessBracket } from './pinned/descriptor-bracket.ts';
+import { type DescriptorCalls, loadDescriptorCalls } from './pinned/descriptor-calls.ts';
+import { type FolderSteps, folderSteps, fstatOf, holdFolder } from './pinned/descriptor-folder.ts';
 
 /**
  * Which entry a path names: what kind, and the device and inode that name it whatever path reached it (copied from
@@ -64,6 +67,15 @@ export interface OpenedDirectory {
   readonly identity: FileIdentity;
   /** A path that reaches `leaf` in this open folder (Linux `/proc/self/fd/N/leaf`), or `undefined` where there is none. */
   entryPath(leaf: string): string | undefined;
+  /**
+   * Where `entryPath` has no path (macOS) but the host loaded the C library's descriptor calls: the steps a write
+   * and a rename need, each through THIS open folder and proven against its device and inode first. `undefined` on a
+   * host with `/proc/self/fd` (it uses `entryPath`) and on one whose calls could not be loaded: there a rename and a
+   * folder remove refuse `no_descriptor_reach`, while a write and a publish re-prove the folder once and go by path
+   * (as `roots.ts` says). A remove goes through `at.removal` (the working-directory bracket) when it loaded too.
+   * Additive.
+   */
+  readonly at?: FolderSteps;
   /** Sets this folder's permission bits through the descriptor (`fchmod`), never by name. */
   chmod(mode: number): Promise<void>;
   /**
@@ -231,8 +243,52 @@ async function listedGroups(database: string, user: string): Promise<readonly nu
  */
 export function nodeFs(
   randomSuffix: () => string,
-  options: { readonly descriptorFolder?: string; readonly groupDatabase?: string } = {},
+  options: {
+    readonly descriptorFolder?: string;
+    readonly groupDatabase?: string;
+    /**
+     * Where a host without `descriptorFolder` gets the C library's descriptor calls (`openat`, `renameat`, `linkat`,
+     * `unlinkat`): asked once, on the first folder opened, and a throw means none (a rename and a folder remove then
+     * refuse `no_descriptor_reach`; a write and a publish re-prove the folder once and go by path). Default: loaded from the platform's C library on macOS, none elsewhere.
+     */
+    readonly descriptorCalls?: () => DescriptorCalls;
+    /**
+     * Where a host without `descriptorFolder` gets the working-directory bracket a folder remove goes through: asked
+     * once, with the calls, and a throw means none (a folder remove then refuses `no_descriptor_reach`). Default: the
+     * process's one bracket on macOS, none elsewhere.
+     */
+    readonly bracket?: () => DescriptorBracket;
+  } = {},
 ): HostFs {
+  const loadCalls =
+    options.descriptorCalls ?? (process.platform === 'darwin' ? () => loadDescriptorCalls() : undefined);
+  let calls: DescriptorCalls | undefined;
+  let tried = false;
+  const callsOrNone = (): DescriptorCalls | undefined => {
+    if (!tried) {
+      tried = true;
+      try {
+        calls = loadCalls?.();
+      } catch {
+        calls = undefined;
+      }
+    }
+    return calls;
+  };
+  const loadBracket = options.bracket ?? (process.platform === 'darwin' ? loadProcessBracket : undefined);
+  let bracket: DescriptorBracket | undefined;
+  let bracketTried = false;
+  const bracketOrNone = (): DescriptorBracket | undefined => {
+    if (!bracketTried) {
+      bracketTried = true;
+      try {
+        bracket = loadBracket?.();
+      } catch {
+        bracket = undefined;
+      }
+    }
+    return bracket;
+  };
   const descriptorFolder =
     options.descriptorFolder ?? (process.platform === 'linux' ? '/proc/self/fd' : '/nonexistent-descriptor-folder');
   // Asked once, without blocking: whether this host reaches an open descriptor by number.
@@ -290,9 +346,22 @@ export function nodeFs(
     openDirectory: async path => {
       const reached = await throughDescriptors();
       const [handle, identity] = await opened(path, READ_DIRECTORY);
-      return {
+      const descriptorCalls = reached ? undefined : callsOrNone();
+      const workingDirectory = descriptorCalls === undefined ? undefined : bracketOrNone();
+      const directory: OpenedDirectory = {
         identity,
         entryPath: leaf => (reached ? `${descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined),
+        at:
+          descriptorCalls === undefined
+            ? undefined
+            : folderSteps(
+                descriptorCalls,
+                { fd: handle.fd, device: identity.device, inode: identity.inode },
+                async fd => fileIdentityOf(await fstatOf(fd)),
+                workingDirectory === undefined
+                  ? undefined
+                  : { bracket: workingDirectory, identityOfStats: fileIdentityOf },
+              ),
         chmod: async mode => await handle.chmod(mode),
         sync: async () => {
           try {
@@ -303,6 +372,8 @@ export function nodeFs(
         },
         close: async () => await handle.close(),
       };
+      holdFolder(directory, { fd: handle.fd, device: identity.device, inode: identity.inode });
+      return directory;
     },
     writeNew: async (path, data, mode) => {
       const [handle, identity] = await opened(path, NEW_FILE, mode);

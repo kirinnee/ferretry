@@ -266,6 +266,7 @@ describe('the switch on a login', () => {
 
     // Assert
     expect(view.container.querySelector('[data-disable-error]')?.textContent).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-disable-error]')?.getAttribute('role')).toBe('alert');
     expect(reads.count).toBe(0);
   });
 

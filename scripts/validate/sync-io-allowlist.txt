@@ -30,6 +30,7 @@
 4 packages/core/kernel/host/state/sqlite-store.ts  # boot: opens a plugin's database (directory, mode, existence, removal of a refused file) while plugins start, before the daemon serves; bun:sqlite itself is synchronous
 9 packages/core/kernel/host/adapters/pinned/posix-session-root-pinner.ts  # bracket: pins a session root by descriptor
 2 packages/core/kernel/host/adapters/pinned/working-directory.ts  # bracket: the descriptor of / the bracket falls back to
+5 packages/core/kernel/host/adapters/pinned/descriptor-bracket.ts  # bracket: a folder remove looks (lstat), lists (readdir), removes (rmdir) and holds the process's own folder (open) while a held folder is the working directory; none may yield
 2 packages/core/kernel/host/adapters/update-host.ts  # gap: the update child's log file, when an update is applied
 3 packages/core/ferrets/daemon/adapters/session/observer/worker-children.ts  # worker: a session worker replaces its own Bun.spawnSync to count children
 1 packages/plugins/browsers/daemon/worker/control/adapters/login-runtime.ts  # gap: the sign-in window finds Chrome with existsSync when it opens (today's), on a request; move to an async look

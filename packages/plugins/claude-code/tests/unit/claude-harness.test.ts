@@ -645,6 +645,49 @@ describe('ClaudeHarness', () => {
     expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
   });
 
+  test('BG-041 a cut record followed by a bookkeeping line or an unfinished one still reads as a turn at work', async () => {
+    const { harness, writeHome } = build();
+    await harness.start(spec(), runner({}), {} as never);
+    const bigResult = JSON.stringify({
+      type: 'user',
+      uuid: 'u9',
+      timestamp: T,
+      message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x'.repeat(600 * 1024) }] },
+    });
+    const bookkeeping = JSON.stringify({ type: 'system', subtype: 'turn_duration', uuid: 's1', timestamp: T });
+    const finished = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: T,
+      message: { id: 'm1', content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+    });
+
+    // A system line after the cut record: nothing in the window says where the turn stands.
+    await writeHome('projects/-work/conv-1.jsonl', `${bigResult}\n${bookkeeping}\n`);
+    expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
+
+    // A bookkeeping line the tail DOES read (a compaction boundary) is kept, and the turn is still at work.
+    const compacted = JSON.stringify({
+      type: 'system',
+      subtype: 'compact_boundary',
+      timestamp: T,
+      compactMetadata: { trigger: 'auto', preTokens: 100, postTokens: 10 },
+    });
+    await writeHome('projects/-work/conv-1.jsonl', `${bigResult}\n${compacted}\n`);
+    const kept = await harness.transcriptTail(FERRET, 10);
+    expect(kept.kind === 'read' && kept.records.map(record => record.kind)).toEqual(['compaction', 'work']);
+
+    // An unfinished line (being written right now) after it: the same.
+    await writeHome('projects/-work/conv-1.jsonl', `${bigResult}\n${bookkeeping}\n{"type":"assistant","uu`);
+    expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'read', records: [{ kind: 'work' }] });
+
+    // A whole message after the cut record decides the turn itself: no mark is added.
+    await writeHome('projects/-work/conv-1.jsonl', `${bigResult}\n${bookkeeping}\n${finished}\n`);
+    const decided = await harness.transcriptTail(FERRET, 10);
+    expect(decided.kind === 'read' && decided.records.some(record => record.kind === 'turn')).toBe(true);
+    expect(decided.kind === 'read' && decided.records.every(record => record.kind !== 'work')).toBe(true);
+  });
+
   test('dialogs.current finds nothing on an empty pane and answer refuses a prompt that is gone', async () => {
     const { harness, panes } = build();
     panes.remember(FERRET, '%7');
@@ -747,9 +790,53 @@ describe('F-0422 one bad launch-settings record is that ferret’s nothing-to-sa
       expect(started.ok).toBe(true);
       expect(port.damaged()).toEqual([]);
       expect(changed).toEqual([]);
-      expect(await memory.readText('/fy/state/claude-code/launch-settings/f1.json')).toBeUndefined();
+      // BG-045: the bad record is removed AND this launch is recorded afresh (not left empty until the next launch).
+      const rewritten = await memory.readText('/fy/state/claude-code/launch-settings/f1.json');
+      expect(JSON.parse(rewritten ?? 'null')).toMatchObject({ format: 1 });
+      expect(rewritten).not.toBe(damagedShapes[shape]);
     });
   }
+
+  test('BG-045 F-0422 a REAL symlink at the record: a read is unknown, the launch removes the link and never follows it, and records afresh so the answer is current at once', async () => {
+    // Arrange: a real tmp dir, the record a symlink to a file outside the plugin's state holding a fake secret.
+    const home = join(fixture, 'link-home');
+    const base = join(home, 'state/claude-code/launch-settings');
+    await mkdir(base, { recursive: true, mode: 0o700 });
+    const target = join(fixture, 'outside-target.json');
+    await writeFile(target, 'FAKE-SECRET-FIXTURE');
+    await symlink(target, join(base, 'f1.json'));
+    const fs = kernelState.createNodeHostFs();
+    const options = {
+      home,
+      pluginId: 'claude-code',
+      files: [CLAUDE_CODE_LAUNCH_SETTINGS],
+      fs,
+      clock: { now: () => 0 as never },
+    };
+    const opening = await kernelState.openPluginState({ ...options, kind: 'plugin', liveTargets: true });
+    const changed: unknown[] = [];
+    const port = kernelState.createStatePort({
+      ...options,
+      initialDamage: opening.damaged,
+      initialNarrowed: opening.narrowed,
+      changed: damage => changed.push(damage),
+    });
+    const { harness } = build({ state: port });
+
+    // Act
+    const before = await harness.launchSettings(FERRET);
+    const started = await harness.start(spec(), runner({}), {} as never);
+    const after = await harness.launchSettings(FERRET);
+
+    // Assert
+    expect(before).toEqual({ kind: 'unknown' });
+    expect(started.ok).toBe(true);
+    expect((await lstat(join(base, 'f1.json'))).isSymbolicLink()).toBe(false);
+    expect(await readFile(target, 'utf8')).toBe('FAKE-SECRET-FIXTURE');
+    expect(after.kind).not.toBe('unknown');
+    expect(port.damaged()).toEqual([]);
+    expect(changed).toEqual([]);
+  });
 });
 
 describe('F-0422 Claude Code records what a launch ran under and compares it with its settings now', () => {

@@ -1,4 +1,4 @@
-import type { Log, StateFileDef, StatePort } from '@ferretry/kernel/contract';
+import type { Log, StateDamage, StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import {
   canonicalJsonValue,
   deepFreezeJson,
@@ -62,10 +62,25 @@ import { StateSqliteIndex } from './sqlite-index.ts';
  * registration inside it), which `StatePort.update`'s synchronous function cannot host.
  */
 
+/**
+ * The kinds of a refused document, a fixed vocabulary: the port's damage kinds for a file it could not read, and
+ * `refused_write` for a value THIS daemon computed and the declared schema refused before it reached the disk (the file
+ * on disk is then not what is wrong).
+ */
+export type InvalidDocumentKind = StateDamage['reason'] | 'refused_write';
+
 export class InvalidStateDocumentError extends Error {
   constructor(
     readonly file: string,
     readonly reason: string,
+    /** The kind, from a fixed vocabulary ({@link InvalidDocumentKind}): safe to log, never a quote of the file. */
+    readonly damage: InvalidDocumentKind = 'schema',
+    /**
+     * The file as last written: the state port's version etag (inode, size and modification time), so the same damage
+     * is the same report until the file is written again (any rewrite is a new etag, even of identical bytes; it is a
+     * write identity, not a digest of the bytes). `undefined` when the port could not say.
+     */
+    readonly etag?: string,
   ) {
     super(`invalid JSON document ${file}: ${reason}`);
     this.name = 'InvalidStateDocumentError';
@@ -702,6 +717,7 @@ export class DaemonStorage {
       throw new InvalidStateDocumentError(
         fileOf(file, id),
         checked.error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; '),
+        'refused_write',
       );
     if (kind === 'config') await this.state.write(FerretConfigFile, value as never, id);
     else await this.state.write(FerretStateFile, value as never, id);
@@ -711,7 +727,12 @@ export class DaemonStorage {
     const file = kind === 'config' ? FerretConfigFile : FerretStateFile;
     const read =
       kind === 'config' ? await this.state.read(FerretConfigFile, id) : await this.state.read(FerretStateFile, id);
-    if (!read.ok) throw new InvalidStateDocumentError(fileOf(file, id), read.error.sentence);
+    if (!read.ok) {
+      // Which write: the port's version etag of the file as it is now (best effort; one that cannot be had is no key). A
+      // write that lands between the failed read and this reading keys the report on the newer file.
+      const version = await this.state.version(file, id).catch(() => undefined);
+      throw new InvalidStateDocumentError(fileOf(file, id), read.error.sentence, read.error.reason, version?.etag);
+    }
     if (read.value === undefined) return undefined;
     return deepFreezeJson(canonicalJsonValue(read.value));
   }
@@ -749,7 +770,7 @@ export class DaemonStorage {
         const file = kind === 'config' ? FerretConfigFile : FerretStateFile;
         const current = await this.readDocument(id, kind);
         const compute = current === undefined ? create : () => transform(current);
-        if (compute === undefined) throw new InvalidStateDocumentError(fileOf(file, id), 'file is missing');
+        if (compute === undefined) throw new InvalidStateDocumentError(fileOf(file, id), 'file is missing', 'missing');
         // Checked under the same lineage gate and session lane as archive publication: maintenance
         // never revives a session that left the live set while its caller was reading the transcript.
         if (unlessArchived && this.archived.has(id)) return canonicalJsonValue(current);

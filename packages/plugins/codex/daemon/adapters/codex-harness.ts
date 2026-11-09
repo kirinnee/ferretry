@@ -155,11 +155,15 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     ferret: FerretId,
     permissionMode: HarnessConfig['permissionMode'],
   ): Promise<void> => {
+    const record = codexLaunchSettingsRecord(permissionMode, settingsNow());
     try {
-      await kernel.state.write(CODEX_LAUNCH_SETTINGS, codexLaunchSettingsRecord(permissionMode, settingsNow()), ferret);
+      await kernel.state.write(CODEX_LAUNCH_SETTINGS, record, ferret);
     } catch {
       try {
         await kernel.state.remove(CODEX_LAUNCH_SETTINGS, ferret);
+        // A damaged record fails the write above (the kernel guard refuses to write over it) and the remove clears it:
+        // write once more, so this launch is recorded and the answer is current now, not unknown until the next launch.
+        await kernel.state.write(CODEX_LAUNCH_SETTINGS, record, ferret).catch(() => undefined);
       } catch {
         // Nothing more can be done: the read then finds whatever is left, and a damaged record reads as unknown.
       }
@@ -267,8 +271,14 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     start: async (spec, runner, env) => await launch(spec, runner, env),
     resume: async (spec, runner, env, harnessConversation) => await launch(spec, runner, env, harnessConversation),
 
-    async stop(_ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
-      await runner.stop(handle, how);
+    async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
+      try {
+        await runner.stop(handle, how);
+      } finally {
+        // What was proved about this ferret's rollout is only a cache: a stopped ferret keeps none, and a read that
+        // comes later proves it afresh.
+        rollouts.forget(ferret);
+      }
     },
 
     async deliver(_ferret, _handle, message): Promise<Delivery> {

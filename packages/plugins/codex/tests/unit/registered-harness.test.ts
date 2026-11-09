@@ -265,6 +265,98 @@ describe('the registered Codex harness', () => {
     expect(after.records).not.toEqual([{ kind: 'work' }]);
   });
 
+  test('BG-041 a cut record followed by a token_count line or an unfinished one still reads as a turn at work', async () => {
+    const box = fixture();
+    const harness = box.build();
+    const spec = box.spec();
+    await harness.start(spec, box.runner, ENV);
+    const file = `${spec.home}/sessions/2026/10/20/rollout-native.jsonl`;
+    const big = line('response_item', { type: 'function_call_output', call_id: 'c1', output: 'x'.repeat(600 * 1024) });
+    const tokens = line('event_msg', {
+      type: 'token_count',
+      info: { last_token_usage: { input_tokens: 20, output_tokens: 5 }, total_token_usage: { total_tokens: 25 } },
+    });
+
+    // The bookkeeping line after the cut record says nothing of the turn: the usage is kept and the turn is at work.
+    box.files.set(file, header('native-id', spec.home) + message('done') + big + tokens);
+    const afterTokens = await harness.transcriptTail?.(spec.ferret, 50);
+    if (afterTokens?.kind !== 'read') throw new Error('the tail reads');
+    expect(afterTokens.records.map(record => record.kind)).toEqual(['usage', 'work']);
+
+    // An unfinished line (being written right now) after it: the same.
+    box.files.set(file, `${box.files.get(file)}{"timestamp":"2026-10-20T09:00:00.000Z","type":"resp`);
+    const afterUnfinished = await harness.transcriptTail?.(spec.ferret, 50);
+    if (afterUnfinished?.kind !== 'read') throw new Error('the tail reads');
+    expect(afterUnfinished.records.at(-1)).toEqual({ kind: 'work' });
+
+    // A whole message after the cut record decides the turn itself: no mark is added.
+    box.files.set(file, header('native-id', spec.home) + message('done') + big + tokens + message('next'));
+    const decided = await harness.transcriptTail?.(spec.ferret, 50);
+    if (decided?.kind !== 'read') throw new Error('the tail reads');
+    expect(decided.records.map(record => record.kind)).toEqual(['usage', 'message']);
+  });
+
+  test('BG-041 a developer note after the cut record is not a record that says where the turn stands, so the turn still reads as at work', async () => {
+    const box = fixture();
+    const harness = box.build();
+    const spec = box.spec();
+    await harness.start(spec, box.runner, ENV);
+    const file = `${spec.home}/sessions/2026/10/20/rollout-native.jsonl`;
+    const big = line('response_item', { type: 'function_call_output', call_id: 'c1', output: 'x'.repeat(600 * 1024) });
+    const note = line('response_item', {
+      type: 'message',
+      role: 'developer',
+      content: [{ type: 'input_text', text: 'a note' }],
+    });
+
+    // The note is kept (it is a record), and the window is marked: the fold skips the note, so alone it reads no phase.
+    box.files.set(file, header('native-id', spec.home) + message('done') + big + note);
+    const afterNote = await harness.transcriptTail?.(spec.ferret, 50);
+    if (afterNote?.kind !== 'read') throw new Error('the tail reads');
+    expect(afterNote.records).toMatchObject([{ kind: 'message', role: 'developer' }, { kind: 'work' }]);
+    expect(afterNote.records).toHaveLength(2);
+
+    // A final message after the note still ends the turn: it decides, and no mark is added.
+    box.files.set(file, header('native-id', spec.home) + message('done') + big + note + message('next'));
+    const decided = await harness.transcriptTail?.(spec.ferret, 50);
+    if (decided?.kind !== 'read') throw new Error('the tail reads');
+    expect(decided.records.map(record => record.kind)).toEqual(['message', 'message']);
+  });
+
+  test('BG-042 a stop forgets what was proved about the ferret’s rollout, so the next read proves it afresh', async () => {
+    const box = fixture();
+    const harness = box.build();
+    const spec = box.spec();
+    await harness.start(spec, box.runner, ENV);
+    const file = `${spec.home}/sessions/2026/10/20/rollout-native.jsonl`;
+    box.files.set(file, header('native-id', spec.home) + message('done'));
+    const stopped: string[] = [];
+    const stopper = {
+      stop: async (_handle: unknown, how: string) => void stopped.push(how),
+    } as unknown as Parameters<NonNullable<typeof harness.stop>>[2];
+
+    // Proved once, then remembered: the second tail walks no rollout head.
+    await harness.transcriptTail?.(spec.ferret, 50);
+    const proving = box.windows.length;
+    await harness.transcriptTail?.(spec.ferret, 50);
+    expect(box.windows.length).toBe(proving);
+
+    // A stop (even one whose runner throws) drops the proof: the next tail proves it afresh.
+    await harness.stop(spec.ferret, '%1' as never, stopper, 'now');
+    expect(stopped).toEqual(['now']);
+    await harness.transcriptTail?.(spec.ferret, 50);
+    expect(box.windows.length).toBeGreaterThan(proving);
+    const proved = box.windows.length;
+    const failing = {
+      stop: async () => {
+        throw new Error('the pane would not stop');
+      },
+    } as unknown as Parameters<NonNullable<typeof harness.stop>>[2];
+    await expect(harness.stop(spec.ferret, '%1' as never, failing, 'now')).rejects.toThrow('would not stop');
+    await harness.transcriptTail?.(spec.ferret, 50);
+    expect(box.windows.length).toBeGreaterThan(proved);
+  });
+
   test('refuses the baseline, same-folder strangers and ambiguous ownership; resumes only the native id after restart', async () => {
     const box = fixture();
     const harness = box.build();

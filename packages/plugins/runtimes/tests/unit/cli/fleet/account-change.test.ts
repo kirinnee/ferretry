@@ -201,9 +201,33 @@ describe('runChange', () => {
 
     const text = world.out.text('error');
     should(text).containEql(
-      'The configuration files runtimes/work.yaml, profiles/main.yaml were written first and are NOT rolled back',
+      'The changes to the configuration files runtimes/work.yaml, profiles/main.yaml were made first and are NOT rolled back',
     );
     should(text).containEql('the next apply publishes them.');
+    should(text).containEql('put those files back as they were, or delete any that did not exist before.');
+    should(text).not.containEql('written first');
+  });
+
+  it('BG-027 should give the owner a remedy after a rolled-back change that left files on disk', async () => {
+    const world = fakeWorld({
+      gateway: {
+        apply: () => ({
+          outcome: 'applied',
+          apply: {
+            outcome: 'rolled-back',
+            failedOperation: 'directory fleet/bin',
+            reason: 'root refused: changed',
+            configurationLanded: ['runtimes/work.yaml'],
+          },
+        }),
+      },
+    });
+
+    await runChange(world.deps, { change: removeRuntime, destructive: false, options: {} });
+
+    should(world.out.text('error')).containEql(
+      'Fix the cause and apply again; to undo the change instead, put that file back as it was, or delete it if it did not exist before.',
+    );
   });
 
   it('should describe a sign-out and an executor preview in words', async () => {

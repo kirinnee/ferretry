@@ -1,8 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { MAX_AGENDA_DETAIL_LENGTH } from '../../daemon/lib/protocol.ts';
 import {
+  MAX_LISTED_ORPHANS,
   type OrphanMemory,
-  orphanRetryDelayMs,
   type WardenBoardPort,
   type WardenBoardRead,
   type WardenFocusCard,
@@ -57,6 +58,7 @@ describe('an orphaned card', () => {
     should(subject.remedies[0]?.detail).containEql('Your card &F1 "Board store" has no ferret working on it');
     should(subject.state().orphans).eql({ F1: { assignee: 'worker', via: 'owner', to: 'lead', at: iso(NOW) } });
     should(journalTypes(subject).filter(type => type === 'fleet.warden_orphan_told')).have.length(1);
+    should(subject.orphanItem.current).be.undefined();
   });
 
   it('should never be put to Jev or an investigation, nor hold the ferrets’ fingerprint', async () => {
@@ -77,36 +79,24 @@ describe('an orphaned card', () => {
     should(subject.state().lastFingerprint).equal('');
   });
 
-  it('should notify the owner, tied to the card, when no owner ferret is alive — and clear it once a ferret is back', async () => {
+  it('should be listed on the machine item when no owner ferret is alive — and the item closes once a ferret is back', async () => {
     // Arrange
     const board = boardPort(boardOf(orphanView()));
     const subject = harness({ config: enabled(), fleet: [worker], board });
 
     // Act
     await subject.service.run({ force: false });
+    const listed = subject.orphanItem.current;
     board.set(boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })));
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.notices).have.length(1);
-    should(subject.notices[0]).containDeep({ sessionId: 'worker', notice: { task: { id: 'F1' } } });
-    should(subject.resolved.map(entry => [entry.sessionId, entry.sourceRef])).eql([['worker', 'warden-orphan:F1']]);
+    should(listed?.subject).equal('A card has nobody working on it');
+    should(listed?.context).containEql('&F1 Board store is waiting in Implement');
+    should(subject.orphanItem.current).be.undefined();
+    should(subject.orphanItem.writes).equal(2);
     should(subject.state()).not.have.property('orphans');
-    should(journalTypes(subject)).containEql('fleet.warden_orphan_cleared');
-  });
-
-  it('should say nothing cleared, and keep the card remembered, when the Agenda refuses to take it off', async () => {
-    // Arrange
-    const board = boardPort(boardOf(orphanView()));
-    const subject = harness({ config: enabled(), fleet: [worker], board, removeFails: true });
-
-    // Act
-    await subject.service.run({ force: false });
-    board.set(boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })));
-    await subject.service.run({ force: false });
-
-    // Assert
-    should(journalTypes(subject)).not.containEql('fleet.warden_orphan_cleared');
+    should(subject.resolved).be.empty();
   });
 
   it('should be shown but told to nobody while the Warden is off', async () => {
@@ -123,12 +113,12 @@ describe('an orphaned card', () => {
     // Assert
     should(run.anomalies.map(anomaly => anomaly.kind)).eql(['orphaned_card']);
     should(subject.remedies).be.empty();
-    should(subject.notices).be.empty();
+    should(subject.orphanItem.current).be.undefined();
   });
 
-  it('should keep what it told and clear nothing while the board cannot be read, saying so', async () => {
+  it('should keep what it told and touch no item while the board cannot be read, saying so', async () => {
     // Arrange
-    const told: OrphanMemory = { F1: { assignee: 'worker', via: 'notice', to: 'worker', at: iso(NOW - MINUTE) } };
+    const told: OrphanMemory = { F1: { assignee: 'worker', via: 'list', to: 'machine-agenda', at: iso(NOW - MINUTE) } };
     const subject = harness({
       config: enabled(),
       fleet: [worker],
@@ -142,13 +132,14 @@ describe('an orphaned card', () => {
     // Assert
     should(run.anomalies).be.empty();
     should(subject.resolved).be.empty();
+    should(subject.orphanItem.syncs).equal(0);
     should(subject.state().orphans).eql(told);
     should(journalTypes(subject)).containEql('fleet.warden_board_blind');
   });
 
-  it('should put a message it could not type on the owner ferret’s board instead, and not type it again', async () => {
+  it('should put a message it could not type on the list instead, and not type it again', async () => {
     // Arrange — the message was refused by a composer the reader could not place. Not remembered, it was
-    // typed again every sweep: nine notices every two minutes, crowding out the owner's own message.
+    // typed again every sweep: nine messages every two minutes, crowding out the owner's own message.
     const subject = harness({
       config: enabled(),
       fleet: [worker, lead],
@@ -161,40 +152,13 @@ describe('an orphaned card', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.notices).have.length(1);
-    should(subject.notices[0]).containDeep({ sessionId: 'lead', notice: { task: { id: 'F1' } } });
-    should(subject.state().orphans?.F1).containEql({ via: 'notice', to: 'lead' });
+    should(subject.orphanItem.current?.subject).equal('A card has nobody working on it');
+    should(subject.orphanItem.opened).equal(1);
+    should(subject.state().orphans?.F1).containEql({ via: 'list', to: 'machine-agenda' });
     should(journalTypes(subject)).not.containEql('fleet.warden_orphan_failed');
   });
 
-  it('should try again next sweep when neither the message nor the notice landed', async () => {
-    // Arrange
-    const message = harness({
-      config: enabled(),
-      fleet: [worker, lead],
-      board: boardPort(boardOf(orphanView())),
-      remedyFails: 'nudge',
-      noticeWrite: 'rejected',
-    });
-    const notice = harness({
-      config: enabled(),
-      fleet: [worker],
-      board: boardPort(boardOf(orphanView())),
-      noticeWrite: 'rejected',
-    });
-
-    // Act
-    await message.service.run({ force: false });
-    await notice.service.run({ force: false });
-
-    // Assert
-    for (const subject of [message, notice]) {
-      should(subject.state()).not.have.property('orphans');
-      should(journalTypes(subject)).containEql('fleet.warden_orphan_failed');
-    }
-  });
-
-  it('should never type into an interactive owner’s chat: the notice goes on its board', async () => {
+  it('should never type into an interactive owner’s chat: the card is listed', async () => {
     // Arrange
     const chat = session({ id: 'lead', status: 'running', mode: 'interactive' });
     const subject = harness({ config: enabled(), fleet: [worker, chat], board: boardPort(boardOf(orphanView())) });
@@ -204,12 +168,11 @@ describe('an orphaned card', () => {
 
     // Assert
     should(subject.remedies).be.empty();
-    should(subject.notices).have.length(1);
-    should(subject.notices[0]).containDeep({ sessionId: 'lead', notice: { task: { id: 'F1' } } });
-    should(subject.state().orphans?.F1).containEql({ via: 'notice', to: 'lead' });
+    should(subject.orphanItem.current?.context).containEql('&F1');
+    should(subject.state().orphans?.F1).containEql({ via: 'list' });
   });
 
-  it('should say so when nobody on this machine can be told', async () => {
+  it('should list a card even when no ferret on this machine can be told', async () => {
     // Arrange
     const subject = harness({ config: enabled(), fleet: [], board: boardPort(boardOf(orphanView())) });
 
@@ -217,210 +180,239 @@ describe('an orphaned card', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.notices).be.empty();
-    should(journalTypes(subject)).containEql('fleet.warden_orphan_unreported');
-  });
-
-  it('should name the machine in the notice when it has a name', async () => {
-    // Arrange
-    const subject = harness({
-      config: enabled(),
-      fleet: [worker],
-      board: boardPort(boardOf(orphanView())),
-      settings: { machineName: () => 'mac' },
-    });
-
-    // Act
-    await subject.service.run({ force: false });
-
-    // Assert
-    should(subject.notices[0]?.notice.premise).containEql(' on mac, waiting in Implement');
+    should(subject.orphanItem.current?.context).containEql('&F1');
   });
 });
 
-/** A Warden whose notices the Agenda always refuses, and a clock the test moves. */
-const refused = (reason: () => string = () => 'this session already has 20 unresolved items') => {
-  let clock = NOW;
-  const board = boardPort(boardOf(orphanView(), orphanView({ id: 'F2' })));
-  const subject = harness({
-    config: enabled(),
-    fleet: [worker],
-    board,
-    noticeWrite: 'rejected',
-    noticeReason: reason,
-    now: () => clock,
-  });
-  return {
-    subject,
-    board,
-    at: (minutes: number): void => {
-      clock = NOW + minutes * MINUTE;
-    },
-  };
-};
+/** `count` cards, each left by a ferret of its own among `ferrets`, none with a live owner: a roster of finished ferrets. */
+const orphans = (count: number, ferrets: number, from = 1): WardenBoardRead =>
+  boardOf(
+    ...Array.from({ length: count }, (_, index) =>
+      orphanView({ id: `F${String(from + index)}`, owner: 'gone', assignee: `w${String(index % ferrets)}` }),
+    ),
+  );
 
-const failures = (subject: ReturnType<typeof harness>) =>
-  subject.journal.filter(entry => entry.type === 'fleet.warden_orphan_failed');
+const finished = (ferrets: number) =>
+  Array.from({ length: ferrets }, (_, index) => session({ id: `w${String(index)}`, status: 'stopped' }));
 
-describe('an orphaned card whose notice the Agenda refuses', () => {
-  it('should be sent once however many sweeps see it, and be logged once', async () => {
-    // Arrange — two cards of one finished ferret, every notice refused: 2 sends and 2 lines the first sweep, then silence.
-    const { subject, at } = refused();
+describe('orphaned cards on the one machine item', () => {
+  it('should be ONE item for 31 cards of several ferrets and sessions, showing the first dozen and "+M more"', async () => {
+    // Arrange — the 31 cards that were all refused as one board's twenty-first item.
+    const subject = harness({ config: enabled(), fleet: finished(4), board: boardPort(orphans(31, 4)) });
 
     // Act
-    for (const minute of [0, 1, 2, 3, 4]) {
-      at(minute);
-      await subject.service.run({ force: false });
-    }
+    await subject.service.run({ force: false });
 
     // Assert
-    should(subject.noticeAttempts.count).equal(2);
-    should(failures(subject)).have.length(2);
-    should(failures(subject)[0]?.data).containEql({
-      taskId: 'F1',
-      via: 'notice',
-      sessionId: 'worker',
-      reason: 'this session already has 20 unresolved items',
-    });
+    should(subject.orphanItem.opened).equal(1);
+    should(subject.orphanItem.current?.subject).equal('31 cards have nobody working on them');
+    const rows = subject.orphanItem.current?.context.split('\n') ?? [];
+    should(rows).have.length(MAX_LISTED_ORPHANS + 1);
+    should(rows.at(-1)).equal('…and 19 more.');
+    should(Object.keys(subject.state().orphans ?? {})).have.length(31);
+    should(subject.raises).be.empty();
+    should(journalTypes(subject)).not.containEql('fleet.warden_orphan_failed');
   });
 
-  it('should wait twice as long after each failure of the same notice', async () => {
-    // Arrange — one card, so each attempt is one send: 5 minutes, then 10, then 20.
-    const { subject, board, at } = refused();
-    board.set(boardOf(orphanView()));
-    const attemptsAt: number[] = [];
-
-    // Act
-    for (const minute of [0, 4, 5, 14, 15, 34, 35]) {
-      at(minute);
-      await subject.service.run({ force: false });
-      attemptsAt.push(subject.noticeAttempts.count);
-    }
-
-    // Assert
-    should(attemptsAt).eql([1, 1, 2, 2, 3, 3, 4]);
-    should(subject.state().orphanRetries?.F1).containEql({ failures: 4 });
-  });
-
-  it('should be logged again only when the reason changes, not when the same refusal repeats', async () => {
+  it('should say the same list on every sweep without writing the board again', async () => {
     // Arrange
-    let reason = 'this session already has 20 unresolved items';
-    const { subject, board, at } = refused(() => reason);
-    board.set(boardOf(orphanView()));
+    const subject = harness({ config: enabled(), fleet: finished(3), board: boardPort(orphans(31, 3)) });
+
+    // Act
+    for (let sweep = 0; sweep < 6; sweep += 1) await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.orphanItem.syncs).equal(6);
+    should(subject.orphanItem.writes).equal(1);
+    should(subject.orphanItem.opened).equal(1);
+  });
+
+  it('should update the SAME item when the list changes: one card added, one recovered', async () => {
+    // Arrange
+    const board = boardPort(orphans(3, 3));
+    const subject = harness({ config: enabled(), fleet: finished(4), board });
+    await subject.service.run({ force: false });
+    const before = subject.orphanItem.current;
+
+    // Act — F1 recovers, F4 is orphaned.
+    board.set(
+      boardOf(
+        cardView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }),
+        ...orphans(3, 3).views.slice(1),
+        orphanView({ id: 'F4', owner: 'gone', assignee: 'w3' }),
+      ),
+    );
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.orphanItem.opened).equal(1);
+    should(subject.orphanItem.writes).equal(2);
+    should(before?.context).containEql('&F1');
+    should(subject.orphanItem.current?.subject).equal('3 cards have nobody working on them');
+    should(subject.orphanItem.current?.context).not.containEql('&F1 ');
+    should(subject.orphanItem.current?.context).containEql('&F4');
+  });
+
+  it('should CLEAR the item when every card recovered, and open a NEW one when cards are orphaned again', async () => {
+    // Arrange
+    const board = boardPort(orphans(2, 2));
+    const subject = harness({ config: enabled(), fleet: finished(2), board });
+    await subject.service.run({ force: false });
+
+    // Act
+    board.set(boardOf(cardView({ id: 'F1', assignee: 'w0' }, { activity: 'active' })));
+    await subject.service.run({ force: false });
+    const cleared = subject.orphanItem.current;
+    board.set(orphans(1, 2, 7));
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(cleared).be.undefined();
+    should(subject.orphanItem.opened).equal(2);
+    should(subject.orphanItem.current?.subject).equal('A card has nobody working on it');
+    should(subject.orphanItem.current?.context).containEql('&F7');
+  });
+
+  it('should stay closed once the owner closed it ("Got it"), until a card joins the list', async () => {
+    // Arrange
+    const board = boardPort(orphans(3, 3));
+    const subject = harness({ config: enabled(), fleet: finished(4), board });
+    await subject.service.run({ force: false });
+
+    // Act — the owner closes the item; the same three cards stay orphaned for many sweeps.
+    const subjectNow = (): string | undefined => subject.orphanItem.current?.subject;
+    subject.orphanItem.current = undefined;
+    for (let sweep = 0; sweep < 4; sweep += 1) await subject.service.run({ force: false });
+    const quiet = { opened: subject.orphanItem.opened, current: subject.orphanItem.current };
+    board.set(boardOf(...orphans(3, 3).views, orphanView({ id: 'F4', owner: 'gone', assignee: 'w3' })));
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(quiet).eql({ opened: 1, current: undefined });
+    should(subject.orphanItem.opened).equal(2);
+    should(subjectNow()).equal('4 cards have nobody working on them');
+    // The sweep wrote the item twice: when it first opened, and when a card joined after the owner closed it.
+    should(subject.orphanItem.writes).equal(2);
+  });
+
+  it('should keep the body bounded for 10,000 orphans', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: finished(5), board: boardPort(orphans(10_000, 5)) });
 
     // Act
     await subject.service.run({ force: false });
-    at(5);
+
+    // Assert
+    const body = subject.orphanItem.current?.context ?? '';
+    should(subject.orphanItem.current?.subject).equal('10000 cards have nobody working on them');
+    should(body.split('\n')).have.length(MAX_LISTED_ORPHANS + 1);
+    should(body.endsWith('…and 9988 more.')).be.true();
+    should(body.length <= MAX_AGENDA_DETAIL_LENGTH).be.true();
+  });
+
+  it('should close the per-card asks an earlier Warden left on ferret boards, once, on the first sweep', async () => {
+    // Arrange — F1 and F2 were told by an ask each, on the boards of `w0` and `w1`.
+    const earlier: OrphanMemory = {
+      F1: { assignee: 'w0', via: 'notice', to: 'w0', at: iso(NOW - 10 * MINUTE) },
+      F2: { assignee: 'w1', via: 'notice', to: 'w1', at: iso(NOW - 10 * MINUTE) },
+    };
+    const subject = harness({
+      config: enabled(),
+      fleet: finished(2),
+      state: { orphans: earlier },
+      board: boardPort(orphans(2, 2)),
+    });
+
+    // Act
     await subject.service.run({ force: false });
-    at(15);
+    const closed = subject.resolved.map(entry => [entry.sessionId, entry.sourceRef]);
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(closed).eql([
+      ['w0', 'warden-orphan:F1'],
+      ['w1', 'warden-orphan:F2'],
+    ]);
+    should(subject.resolved).have.length(2);
+    should(journalTypes(subject).filter(type => type === 'fleet.warden_orphan_cleared')).have.length(2);
+    should(subject.orphanItem.current?.subject).equal('2 cards have nobody working on them');
+    should(subject.state().orphans?.F1).containEql({ via: 'list', to: 'machine-agenda' });
+    should(subject.state().orphans?.F2).containEql({ via: 'list', to: 'machine-agenda' });
+  });
+
+  it('should say nothing cleared, and still list the card, when the Agenda refuses to close the earlier ask', async () => {
+    // Arrange
+    const earlier: OrphanMemory = { F1: { assignee: 'w0', via: 'notice', to: 'w0', at: iso(NOW - 10 * MINUTE) } };
+    const subject = harness({
+      config: enabled(),
+      fleet: finished(1),
+      state: { orphans: earlier },
+      board: boardPort(orphans(1, 1)),
+      removeFails: true,
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).not.containEql('fleet.warden_orphan_cleared');
+    should(subject.orphanItem.current?.context).containEql('&F1');
+  });
+
+  it('should drop a recovered card’s earlier per-card ask with it', async () => {
+    // Arrange
+    const earlier: OrphanMemory = { F1: { assignee: 'w0', via: 'notice', to: 'w0', at: iso(NOW - 10 * MINUTE) } };
+    const subject = harness({
+      config: enabled(),
+      fleet: finished(1),
+      state: { orphans: earlier },
+      board: boardPort(boardOf(cardView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }))),
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved.map(entry => [entry.sessionId, entry.sourceRef])).eql([['w0', 'warden-orphan:F1']]);
+    should(subject.state()).not.have.property('orphans');
+    should(subject.orphanItem.current).be.undefined();
+  });
+});
+
+describe('the orphaned cards item the Agenda refuses', () => {
+  it('should be tried again next sweep — one attempt of one item, never one per card — and said once per reason', async () => {
+    // Arrange — 31 cards, the machine board refuses the one item.
+    let reason: string | undefined = 'this session already has 20 unresolved items';
+    const subject = harness({
+      config: enabled(),
+      fleet: finished(3),
+      board: boardPort(orphans(31, 3)),
+      itemRefusal: () => reason,
+    });
+
+    // Act
+    for (let sweep = 0; sweep < 4; sweep += 1) await subject.service.run({ force: false });
     reason = 'the Agenda could not be written';
     await subject.service.run({ force: false });
+    const refused = subject.journal.filter(entry => entry.type === 'fleet.warden_orphan_failed');
+    // Not remembered as told while the item has not landed: every card is still news when it does.
+    const rememberedWhileRefused = subject.state().orphans;
+    reason = undefined;
+    await subject.service.run({ force: false });
+    await subject.service.run({ force: false });
 
     // Assert
-    should(subject.noticeAttempts.count).equal(3);
-    should(failures(subject).map(entry => entry.data.reason)).eql([
+    should(subject.orphanItem.syncs).equal(7);
+    should(refused.map(entry => entry.data.reason)).eql([
       'this session already has 20 unresolved items',
       'the Agenda could not be written',
     ]);
-    should(failures(subject)[1]?.data.retryAt).equal(iso(NOW + 15 * MINUTE + 20 * MINUTE));
-  });
-
-  it('should be sent at once when what it is about changes: its owner ferret is alive to be told', async () => {
-    // Arrange
-    const { subject, board, at } = refused();
-    board.set(boardOf(orphanView()));
-    await subject.service.run({ force: false });
-
-    // Act — one minute on, well inside the wait, the card's owner ferret is running.
-    at(1);
-    subject.setFleet([worker, lead]);
-    await subject.service.run({ force: false });
-
-    // Assert
-    should(subject.noticeAttempts.count).equal(1);
-    should(subject.remedies.map(remedy => [remedy.action, remedy.sessionId])).eql([['nudge', 'lead']]);
-    should(subject.state().orphans?.F1).containEql({ via: 'owner', to: 'lead' });
-    should(subject.state()).not.have.property('orphanRetries');
-  });
-
-  it('should be sent at once to the new ferret when the card changes hands', async () => {
-    // Arrange
-    const { subject, board, at } = refused();
-    board.set(boardOf(orphanView()));
-    await subject.service.run({ force: false });
-
-    // Act
-    at(1);
-    subject.setFleet([worker, session({ id: 'second', status: 'stopped' })]);
-    board.set(boardOf(orphanView({ assignee: 'second' })));
-    await subject.service.run({ force: false });
-
-    // Assert
-    should(subject.noticeAttempts.count).equal(2);
-    should(failures(subject).map(entry => entry.data.sessionId)).eql(['worker', 'second']);
-  });
-
-  it('should stop being sent once a ferret is back on the card, and be news again if it is orphaned again', async () => {
-    // Arrange
-    const { subject, board, at } = refused();
-    board.set(boardOf(orphanView()));
-    await subject.service.run({ force: false });
-
-    // Act
-    at(1);
-    board.set(boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })));
-    await subject.service.run({ force: false });
-    const recovered = { attempts: subject.noticeAttempts.count, state: subject.state() };
-    at(2);
-    board.set(boardOf(orphanView()));
-    await subject.service.run({ force: false });
-
-    // Assert
-    should(recovered.attempts).equal(1);
-    should(recovered.state).not.have.property('orphanRetries');
-    should(subject.noticeAttempts.count).equal(2);
-    should(failures(subject)).have.length(2);
-  });
-
-  it('should be told as before once a notice lands, and forget the failures', async () => {
-    // Arrange — a failure remembered from an earlier sweep (and an earlier run of the daemon): wait until its time.
-    const failed = { F1: { key: 'notice|worker|worker', failures: 1, retryAt: iso(NOW + 5 * MINUTE), reason: 'full' } };
-    const early = harness({
-      config: enabled(),
-      fleet: [worker],
-      board: boardPort(boardOf(orphanView())),
-      state: { orphanRetries: failed },
-      now: () => NOW + 4 * MINUTE,
-    });
-    const due = harness({
-      config: enabled(),
-      fleet: [worker],
-      board: boardPort(boardOf(orphanView())),
-      state: { orphanRetries: failed },
-      now: () => NOW + 5 * MINUTE,
-    });
-
-    // Act
-    await early.service.run({ force: false });
-    await due.service.run({ force: false });
-
-    // Assert
-    should(early.noticeAttempts.count).equal(0);
-    should(early.state().orphanRetries).eql(failed);
-    should(due.notices).have.length(1);
-    should(due.state().orphans?.F1).containEql({ via: 'notice', to: 'worker' });
-    should(due.state()).not.have.property('orphanRetries');
-  });
-});
-
-describe('the wait between two sends of one orphan notice', () => {
-  it('should double from five minutes and stop at six hours', () => {
-    // Arrange
-    const waits = [1, 2, 3, 4, 5, 6, 7, 8, 9, 40].map(orphanRetryDelayMs);
-
-    // Assert
-    should(waits.map(wait => wait / MINUTE)).eql([5, 10, 20, 40, 80, 160, 320, 360, 360, 360]);
-    should(orphanRetryDelayMs(0)).equal(0);
+    should(refused[0]?.data.cards).equal(31);
+    should(subject.journal.filter(entry => entry.type === 'fleet.warden_orphan_failed')).have.length(2);
+    should(subject.orphanItem.current?.subject).equal('31 cards have nobody working on them');
+    should(subject.orphanItem.opened).equal(1);
+    should(rememberedWhileRefused).be.undefined();
+    should(Object.keys(subject.state().orphans ?? {})).have.length(31);
   });
 });
 

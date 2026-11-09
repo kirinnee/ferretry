@@ -159,7 +159,7 @@
     "packages/plugins/warden": {
       "entry": ["app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/lib/auto-move-failures.ts", "daemon/lib/orphan-list.ts"]
+      "ignore": ["daemon/lib/auto-move-failures.ts"]
     },
     "packages/plugins/connections": {
       "entry": ["worker/src/adapters/worker.ts"],

@@ -130,6 +130,16 @@ export const ALREADY_HELD_ISSUE = (path: string): ConfigWriteIssue => ({
 });
 
 /**
+ * Why a write over a file that is not UTF-8 is refused: it reads (invalid bytes as U+FFFD), but saving would put U+FFFD
+ * where those bytes were, changing bytes the writer did not edit. The same refusal reason as an unreadable file.
+ */
+export const NOT_UTF8_ISSUE = (path: string): ConfigWriteIssue => ({
+  path,
+  message: `${path} is not UTF-8: saving would change bytes you did not edit; nothing was written`,
+  fix: 'save the file as UTF-8 (a text editor can re-save it), then make the change again',
+});
+
+/**
  * Why a write, removal or set touching a file that cannot be read is refused — the one sentence every writer says
  * (`./service.ts`): what is there is not a config file the kernel reads (a link, not a regular file, or over the size
  * cap), so a write over it would destroy what it holds.

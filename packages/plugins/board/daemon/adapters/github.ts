@@ -31,8 +31,9 @@ const GH_ENVIRONMENT = { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO
  * `gh` finds its credentials itself. It never prompts, and a call that runs past {@link GH_TIMEOUT_MS} is killed.
  *
  * The deadline is this runner's own, on the kernel clock, and it kills the child through the spawn's abort signal: the
- * kernel's spawn reports a killed child as an ordinary exit (143 for SIGTERM, `signal: null`), so the exit code alone
- * cannot tell a timeout from `gh` failing. A timed-out call passes none of what `gh` printed on.
+ * kernel's spawn reports a killed child as `exitCode: null` with the signal's name, which is also what a `gh` that was
+ * killed by something else looks like, so this runner keeps its own flag for a timeout. A timed-out call passes none of
+ * what `gh` printed on.
  */
 export class GhSpawnRunner implements GhRunner {
   constructor(
