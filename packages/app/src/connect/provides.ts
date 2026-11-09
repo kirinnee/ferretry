@@ -324,6 +324,23 @@ export interface ShellProvides {
    * own, under `WithoutShell`; it may list machines (`useEveryDaemon`) and take its keyed fragments (`useFragment`).
    */
   readonly device?: Readonly<Record<string, View<DeviceViewProps>>>;
+  /**
+   * Any plugin: told when the person TAPPED a notification of a machine and the shell routed them there (S6), with that
+   * machine's guarded client for this plugin (as a hook's) and the routed address plus the daemon's own tag of the line
+   * tapped. It gets the routed URL and the tag — NEVER the push body, which the page never sees. Called only for a machine
+   * this browser has paired and where this plugin is allowed; a throw or a rejection costs only this plugin.
+   */
+  readonly notificationOpened?: (
+    context: AppHookContext,
+    tap: { readonly url: string; readonly tag?: string },
+  ) => void | Promise<void>;
+  /**
+   * Any plugin: called ONCE, with the daemon's id only, when this browser stops being paired to that daemon (S12) — a
+   * removal, an eviction, or a revocation the daemon answered; never on a re-pair. Before it runs the shell has deleted
+   * this device's key pair for the daemon and its paired record; the plugin's own device state (drafts, marks, queued
+   * sends) is the plugin's to drop here. A throw or a rejection costs only this plugin.
+   */
+  readonly forget?: (daemon: string) => void | Promise<void>;
 }
 
 /** An app half with its `shell` section. */
@@ -480,6 +497,26 @@ export function registeredFragments(
       return screen === undefined ? { plugin: entry.id, decl } : { plugin: entry.id, decl, screen };
     }),
   );
+}
+
+/** Every plugin's `notificationOpened` (S6), in registry order; a skeleton half provides none. */
+export function registeredNotificationOpened(
+  surfaces: readonly SurfaceEntry[],
+): readonly { readonly plugin: string; readonly opened: NonNullable<ShellProvides['notificationOpened']> }[] {
+  return surfaces.flatMap(entry => {
+    const opened = shellProvidesOf(entry)?.notificationOpened;
+    return opened === undefined ? [] : [{ plugin: entry.id, opened }];
+  });
+}
+
+/** Every plugin's `forget` hook (S12), in registry order; a skeleton half provides none. */
+export function registeredForgets(
+  surfaces: readonly SurfaceEntry[],
+): readonly { readonly plugin: string; readonly forget: (daemon: string) => void | Promise<void> }[] {
+  return surfaces.flatMap(entry => {
+    const forget = shellProvidesOf(entry)?.forget;
+    return forget === undefined ? [] : [{ plugin: entry.id, forget }];
+  });
 }
 
 /** One plugin's device view, as the host mounts it. */

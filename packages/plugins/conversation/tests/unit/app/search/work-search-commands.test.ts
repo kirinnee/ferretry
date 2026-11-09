@@ -55,6 +55,8 @@ const answer = (...hits: WorkHit[]): WorkSearchResponse => ({
   indexed: { cards: hits.length, asks: hits.length },
 });
 
+const RESTING = { kind: 'all', state: 'everything' } as const;
+
 interface Pending {
   readonly request: WorkSearchRequest;
   readonly signal: AbortSignal | undefined;
@@ -94,13 +96,19 @@ const harness = (screenHref: PluginCommandContext['screenHref'] = testHref) => {
       changes += 1;
     },
   };
-  const source = workSearchCommandSource(context, { port, schedule, debounceMs: 7 });
+  const built = workSearchCommandSource(context, { port, schedule, debounceMs: 7 });
+  /** The entries the source lists for the words, with the chips at `filters` (resting: everything). */
+  const source = (query: string, filters: Readonly<Record<string, string>> = RESTING) => {
+    return built.list(query, filters).entries;
+  };
+  /** The whole answer, the pending line included. */
+  const answered = (query: string, filters: Readonly<Record<string, string>> = RESTING) => built.list(query, filters);
   /** Lets a resolved answer's `then` run. */
   const land = async () => {
     await Promise.resolve();
     await Promise.resolve();
   };
-  return { source, pending, timers, pause, navigated, context, land, changes: () => changes };
+  return { source, answered, built, pending, timers, pause, navigated, context, land, changes: () => changes };
 };
 
 describe('the work search command source', () => {
@@ -114,7 +122,9 @@ describe('the work search command source', () => {
     expect(timers.map(timer => timer.delayMs)).toEqual([7]);
     expect(pending).toEqual([]);
     pause();
-    expect(pending.map(each => each.request)).toEqual([{ q: 'relay', all: true, limit: WORK_SEARCH_LIMIT }]);
+    expect(pending.map(each => each.request)).toEqual([
+      { q: 'relay', all: true, open: false, limit: WORK_SEARCH_LIMIT },
+    ]);
   });
 
   it('asks once per pause in typing, for the words last typed, and not again for the same words', () => {
@@ -200,7 +210,8 @@ describe('the work search command source', () => {
     pause();
     pending[1]?.reject(new Error('offline'));
     await land();
-    expect(changes()).toBe(1);
+    // the failure also asks the bar to list again, so the "Searching…" line goes
+    expect(changes()).toBe(2);
     expect(source('relay handshake').map(entry => entry.id)).toEqual(['work-card:F10']);
   });
 
@@ -233,11 +244,15 @@ describe('the work search command source', () => {
     pending[0]?.resolve(answer(card('F11', { project: 'unfiled' }), card('F12', { title: 'Orphan relay card' })));
     await land();
     const [unfiled, orphan] = source('relay');
-    expect(unfiled?.description).toBe('Doing · brief: the relay handshake drops · Unfiled');
+    // The project is the row's second line (S11), not part of its description.
+    expect(unfiled?.description).toBe('Doing · brief: the relay handshake drops');
+    expect(unfiled?.detail).toBe('Unfiled');
     expect(orphan?.description).toBe('Doing · brief: the relay handshake drops');
+    expect(orphan?.detail).toBeUndefined();
     for (const entry of [unfiled, orphan]) {
       expect(entry?.description).not.toContain(RELAY_PROJECT);
-      expect(entry?.description).not.toContain('unfiled');
+      expect(entry?.detail ?? '').not.toContain(RELAY_PROJECT);
+      expect(entry?.detail ?? '').not.toContain('unfiled');
     }
   });
 
@@ -280,5 +295,83 @@ describe('where a hit opens', () => {
   it('says only its standing when the hit matched by title', () => {
     const entry = workHitEntry(card('F10', { match: { field: 'title', line: 'Card F10' } }), 'card', context);
     expect(entry?.description).toBe('Doing');
+  });
+});
+
+describe('S11 the work search chips, pending line and muted rows', () => {
+  it('S11 offers the Cards/Agenda and Everything/Open chips, everything first', () => {
+    const { built } = harness();
+    expect(built.filters?.map(filter => [filter.id, filter.options.map(option => option.label)])).toEqual([
+      ['kind', ['All', 'Cards', 'Agenda']],
+      ['state', ['Everything', 'Open']],
+    ]);
+  });
+
+  it('S11 chips change what the daemon is asked: a kind, and open work only without the 30-day lift', () => {
+    const { source, pending, pause } = harness();
+    source('relay');
+    pause();
+    source('relay', { kind: 'card', state: 'everything' });
+    pause();
+    source('relay', { kind: 'ask', state: 'open' });
+    pause();
+    expect(pending.map(each => each.request)).toEqual([
+      { q: 'relay', open: false, all: true, limit: WORK_SEARCH_LIMIT },
+      { q: 'relay', kind: 'card', open: false, all: true, limit: WORK_SEARCH_LIMIT },
+      { q: 'relay', kind: 'ask', open: true, all: false, limit: WORK_SEARCH_LIMIT },
+    ]);
+    expect(pending[0]?.signal?.aborted).toBe(true);
+    expect(pending[1]?.signal?.aborted).toBe(true);
+  });
+
+  it('S11 says "Searching cards and agenda…" until the answer for these words and chips lands, then not', async () => {
+    const { answered, pending, pause, land } = harness();
+    expect(answered('relay')).toEqual({ entries: [], pending: 'Searching cards and agenda…' });
+    pause();
+    pending[0]?.resolve(answer(card('F10')));
+    await land();
+    expect('pending' in (answered('relay') as object)).toBe(false);
+    // a chip is a new question: the rows stay, the line is back
+    const again = answered('relay', { kind: 'card', state: 'everything' }) as { entries: unknown[]; pending?: string };
+    expect(again.pending).toBe('Searching cards and agenda…');
+    expect(again.entries).toHaveLength(1);
+    // nothing asked below two characters: no line
+    expect(answered('r')).toEqual({ entries: [] });
+  });
+
+  it('S11 a search that fails is no longer "searching": the line goes and the last rows stay', async () => {
+    const { answered, pending, pause, land } = harness();
+    answered('relay');
+    pause();
+    pending[0]?.reject(new Error('offline'));
+    await land();
+    expect(answered('relay')).toEqual({ entries: [] });
+  });
+
+  it('S11 closed and dropped work is muted, not hidden; open work is not', async () => {
+    const { source, pending, pause, land } = harness();
+    source('relay');
+    pause();
+    pending[0]?.resolve(
+      answer(card('F1'), card('F2', { state: 'closed' }), ask('A1', { state: 'dropped' }), ask('A2')),
+    );
+    await land();
+    expect(source('relay').map(entry => [entry.id, entry.muted === true])).toEqual([
+      ['work-card:F1', false],
+      ['work-card:F2', true],
+      ['work-ask:f1:A1', true],
+      ['work-ask:f1:A2', false],
+    ]);
+  });
+
+  it('S11 one kind alone shows everything the daemon returned; both kinds together are capped at six each', async () => {
+    const { source, pending, pause, land } = harness();
+    const cards = Array.from({ length: 9 }, (_, index) => card(`F${index + 1}`));
+    source('relay', { kind: 'card', state: 'everything' });
+    pause();
+    pending[0]?.resolve(answer(...cards));
+    await land();
+    expect(source('relay', { kind: 'card', state: 'everything' })).toHaveLength(9);
+    expect(source('relay', RESTING)).toHaveLength(6);
   });
 });
