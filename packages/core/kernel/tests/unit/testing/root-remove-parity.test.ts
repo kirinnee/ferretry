@@ -170,6 +170,19 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     ['remove under a folder that is not there', await answer(() => fleet.remove(dir('nope/x.txt')))],
     ['remove with ..', await answer(() => fleet.remove(`${dir('nested')}/../x` as FencedPath))],
     ['remove a path of another root', await answer(() => fleet.remove(at(downloads, 'a.txt')))],
+    // BG-015 m3: a link on the way that LEAVES the root is judged link_escape, and what it points at is untouched
+    ['BG-015 a folder outside the fleet', await answer(() => downloads.makeDirectory(at(downloads, 'away')))],
+    ['BG-015 its file', await answer(() => downloads.writeText(at(downloads, 'away/keep.txt'), 'KEPT'))],
+    [
+      'BG-015 link to the outside folder',
+      await answer(() => fleet.linkTo(dir('esc'), { root: downloads, path: at(downloads, 'away') })),
+    ],
+    ['BG-015 remove through a link that leaves the root', await answer(() => fleet.remove(dir('esc/keep.txt')))],
+    [
+      'BG-015 onlyIfEmpty through a link that leaves the root',
+      await answer(() => fleet.remove(dir('esc/keep.txt'), { onlyIfEmpty: true })),
+    ],
+    ['BG-015 the outside file survived', await answer(() => downloads.readText(at(downloads, 'away/keep.txt')))],
 
     // BG-006: a forged spelling names the same leaf as its plain form; a NUL is outside, on both hosts
     [
@@ -202,6 +215,14 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
       await answer(() => fleet.remove(`${at(fleet, 'homes/claude-a')}/nes\0ted/deep.txt` as FencedPath)),
     ],
     ['BG-006 the file survived the NUL asks', await answer(() => fleet.readText(dir('nested/deep.txt')))],
+
+    // BG-015 m4: the root itself is a folder like any other (LAST: it takes the whole root with it)
+    [
+      'BG-015 onlyIfEmpty on a root that holds entries',
+      await answer(() => fleet.remove(at(fleet, '.'), { onlyIfEmpty: true })),
+    ],
+    ['BG-015 the root kept its file', await answer(() => fleet.readText(dir('nested/deep.txt')))],
+    ['BG-015 remove the root itself', await answer(() => fleet.remove(at(fleet, '.')))],
   ];
 }
 
@@ -302,5 +323,34 @@ test.skipIf(process.platform !== 'linux')(
     expect(byCase['BG-006 remove with a NUL in the leaf']).toEqual({ refused: 'outside' });
     expect(byCase['BG-006 remove with a NUL in the parent']).toEqual({ refused: 'outside' });
     expect(byCase['BG-006 the file survived the NUL asks']).toEqual({ ok: 'deep' });
+    // BG-015: a link that leaves the root is judged on the way, and the root itself is a folder like any other
+    expect(byCase['BG-015 remove through a link that leaves the root']).toEqual({ refused: 'link_escape' });
+    expect(byCase['BG-015 onlyIfEmpty through a link that leaves the root']).toEqual({ refused: 'link_escape' });
+    expect(byCase['BG-015 the outside file survived']).toEqual({ ok: 'KEPT' });
+    expect(byCase['BG-015 onlyIfEmpty on a root that holds entries']).toEqual({ refused: 'not_empty' });
+    expect(byCase['BG-015 the root kept its file']).toEqual({ ok: 'deep' });
+    expect(byCase['BG-015 remove the root itself']).toEqual({ ok: null });
   },
 );
+
+// the flat test world has no base folder to be left missing, so what is left after the root went is only seen here
+test('remove: the testing host takes every entry of the root with the root itself', async () => {
+  const seen: Seen = {};
+  const host = await testHost({ plugins: halves(seen), ownerHome: '/home/owner', fenceHome: '/home/owner/.test-home' });
+  try {
+    const fleet = (seen.runtimes as KernelPorts).roots.root('fleet');
+    const named = (path: string): FencedPath => {
+      const resolved = fleet.resolve(path);
+      if (!resolved.ok) throw new Error(resolved.error);
+      return resolved.value;
+    };
+    await fleet.writeText(named('homes/a/one.txt'), 'one');
+    await fleet.makeDirectory(named('homes/empty'));
+    await fleet.remove(named('.'));
+    expect(await fleet.list(named('homes'))).toEqual([]);
+    expect(await fleet.lstat(named('homes/a/one.txt'))).toBeUndefined();
+    expect(await fleet.lstat(named('homes/empty'))).toBeUndefined();
+  } finally {
+    await host.stop();
+  }
+});

@@ -64,7 +64,7 @@ import type {
   RedactionScope,
   WorkFolders,
 } from '../contract/bound.ts';
-import { ChildEnvironmentPort, KERNEL_ONLY_PORTS, WITHHELD_SENTENCE } from '../contract/bound.ts';
+import { ChildEnvironmentPort, type FencedPath, KERNEL_ONLY_PORTS, WITHHELD_SENTENCE } from '../contract/bound.ts';
 import type {
   ConfigCollectionDef,
   ConfigFileDef,
@@ -1438,6 +1438,37 @@ async function start(world: World): Promise<TestHost> {
           mode: testModes.get(path) ?? 0o600,
           links: 1,
         });
+        /** `path` with every link on the way (the leaf's too) replaced by what it points at; one that leaves this root is `link_escape`. */
+        const followLinks = (path: string): string => {
+          let current = path;
+          for (let hops = 0; hops <= 40; hops += 1) {
+            const parts = current.split('/');
+            const linked = parts.findIndex((_, index) => testLinks.has(parts.slice(0, index + 1).join('/')));
+            if (linked < 0) return current;
+            const pointsAt = testLinks.get(parts.slice(0, linked + 1).join('/')) as string;
+            if (prefix === undefined || (pointsAt !== prefix && !pointsAt.startsWith(`${prefix}/`)))
+              throw new RootError('link_escape');
+            current = [pointsAt, ...parts.slice(linked + 1)].join('/');
+          }
+          throw new RootError('link_escape');
+        };
+        /** The names directly inside a folder of the flat test world, sorted, each with the kind it is (a deeper key is a folder). */
+        const childrenOf = (folder: string): ReadonlyMap<string, 'file' | 'symlink' | 'directory'> => {
+          const found = new Map<string, 'file' | 'symlink' | 'directory'>();
+          const note = (keys: Iterable<string>, kind: 'file' | 'symlink' | 'directory'): void => {
+            for (const key of keys) {
+              if (!key.startsWith(`${folder}/`)) continue;
+              const rest = key.slice(folder.length + 1);
+              const slash = rest.indexOf('/');
+              if (slash < 0) found.set(rest, kind);
+              else if (!found.has(rest.slice(0, slash))) found.set(rest.slice(0, slash), 'directory');
+            }
+          };
+          note(testMadeFolders, 'directory');
+          note(testLinks.keys(), 'symlink');
+          note(world.roots.keys(), 'file');
+          return new Map([...found].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+        };
         /**
          * A path of THIS handle's scope, or the refusal production makes for one outside it: no NUL, no `..`, NORMALIZED
          * (`.` segments, doubled and trailing slashes gone) and a relative name read from the scope's root, as
@@ -1565,29 +1596,29 @@ async function start(world: World): Promise<TestHost> {
           makeDirectory: async path => {
             testMadeFolders.add(ownPath(path));
           },
+          // As production: every link on the way (the leaf's too) is resolved, and what it reaches must lie inside this
+          // root (`link_escape`) and exist (a link that reaches nothing is no real path: a plain error).
           realPath: async path => {
-            if (!world.roots.has(path) && !testFolderExists(path)) throw new Error(`no such file ${path}`);
-            return path;
+            const reached = followLinks(path);
+            if (!world.roots.has(reached) && !testFolderExists(reached)) throw new Error(`no such file ${path}`);
+            return reached as FencedPath;
           },
-          list: async path =>
-            [...world.roots.keys(), ...testLinks.keys()]
-              .filter(p => p.startsWith(`${path}/`))
-              .map(p => p.slice(path.length + 1)),
-          entries: async path => [
-            ...[...world.roots.keys()]
-              .filter(p => p.startsWith(`${path}/`))
-              .map(p => ({ name: p.slice(path.length + 1), ...fileStat(p) })),
-            ...[...testLinks.keys()]
-              .filter(p => p.startsWith(`${path}/`))
-              .map(p => ({
-                name: p.slice(path.length + 1),
-                kind: 'symlink' as const,
+          // A folder's DIRECT children (a made empty folder too, a link by its own name), sorted, as the real host lists
+          // them; a link to a folder is listed as the folder it reaches.
+          list: async path => [...childrenOf(followLinks(path)).keys()],
+          entries: async path =>
+            [...childrenOf(followLinks(path))].map(([childName, kind]) => {
+              const child = `${followLinks(path)}/${childName}`;
+              if (kind === 'file') return { name: childName, ...fileStat(child) };
+              return {
+                name: childName,
+                kind,
                 size: 0,
                 modified: clock.now(),
-                mode: 0o777,
+                mode: kind === 'symlink' ? 0o777 : 0o700,
                 links: 1,
-              })),
-          ],
+              };
+            }),
           stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
           // The real host's rules over the flat test world, with the same refusals: the LEAF IS NEVER FOLLOWED (the parent
           // is opened first, then the entry goes by its own name; a link goes as a link and its target stays), and
@@ -1595,6 +1626,18 @@ async function start(world: World): Promise<TestHost> {
           remove: async (path, removeOptions) => {
             if (isReadOnlyRoot(name)) throw new RootError('read_only');
             const named = ownPath(path);
+            // The root itself (`resolve('.')`) is a folder like any other: `onlyIfEmpty` refuses it while anything is in
+            // it, and without the option everything goes with it (the flat world has no base folder to be left missing).
+            if (named === `${prefix}/.`) {
+              const inside = (key: string): boolean => key.startsWith(`${prefix}/`);
+              const holds = [...world.roots.keys(), ...testLinks.keys(), ...testMadeFolders].some(inside);
+              if (removeOptions?.onlyIfEmpty === true && holds) throw new RootError('not_empty');
+              for (const key of [...world.roots.keys()]) if (inside(key)) world.roots.delete(key);
+              for (const key of [...testLinks.keys()]) if (inside(key)) testLinks.delete(key);
+              for (const key of [...testModes.keys()]) if (inside(key)) testModes.delete(key);
+              for (const key of [...testMadeFolders]) if (inside(key)) testMadeFolders.delete(key);
+              return;
+            }
             // The PARENT is resolved (a link on the way is followed, and judged: one that leaves this root is
             // `link_escape`); the leaf's own name is appended as it is.
             let parent = named.slice(0, named.lastIndexOf('/'));
@@ -1658,12 +1701,25 @@ async function start(world: World): Promise<TestHost> {
             if (names !== undefined) throw new RootError(names);
             const source = ownPath(from);
             const target = ownPath(to);
-            // As production, each parent is opened first (the source's, then the target's): a link anywhere on the way
-            // is `link_escape`, and a parent that is missing or is a file is `changed`. The leaf is never followed.
-            for (const end of [source, target]) {
-              const parent = end.slice(0, end.lastIndexOf('/'));
-              const steps = parent.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
-              if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+            // As production, the links on the way to BOTH ends are judged first (a link that reaches something is
+            // `link_escape`, whichever end it lies at), and then each parent is opened (the source's, then the target's):
+            // one that is missing, is a file, or lies behind a link that reaches nothing is `changed`. The leaf is never
+            // followed.
+            const parents = [source, target].map(end => end.slice(0, end.lastIndexOf('/')));
+            const stepsOf = (parent: string): readonly string[] =>
+              parent
+                .split('/')
+                .map((_, index, parts) => parts.slice(0, index + 1).join('/'))
+                .filter(step => step !== '' && testLinks.has(step));
+            const reaches = (step: string): boolean => {
+              // a link to a link is followed to its end, as `realpath` does; a chain that ends nowhere reaches nothing
+              let end = testLinks.get(step) as string;
+              for (let hops = 0; hops < 40 && testLinks.has(end); hops += 1) end = testLinks.get(end) as string;
+              return !testLinks.has(end) && (world.roots.has(end) || testFolderExists(end));
+            };
+            for (const parent of parents) if (stepsOf(parent).some(reaches)) throw new RootError('link_escape');
+            for (const parent of parents) {
+              if (stepsOf(parent).length > 0) throw new RootError('changed');
               if (parent !== prefix && (world.roots.has(parent) || !testFolderExists(parent)))
                 throw new RootError('changed');
             }

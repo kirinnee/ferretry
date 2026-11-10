@@ -276,6 +276,32 @@ describe.skipIf(!onLinux)('RootHandle.remove with onlyIfEmpty is rmdir', () => {
     expect(calls.filter(call => (call.startsWith('list') || call.startsWith('remove')) && named(call))).toEqual([]);
     expect(calls.filter(call => call === 'rmdir')).toEqual(['rmdir']);
   });
+
+  test('BG-015 a folder swapped for a link between the look and the rmdir is refused changed: the link stays and so does what it points at', async () => {
+    let swapInto: string | undefined;
+    let target: string | undefined;
+    const base = withReach();
+    const spy: HostFs = {
+      ...base,
+      rmdir: async path => {
+        // The window between the look (a folder) and the `rmdir(2)`: the empty folder becomes a link to an outside folder.
+        if (swapInto !== undefined && target !== undefined) {
+          await rm(swapInto, { recursive: true });
+          await symlink(target, swapInto);
+        }
+        await base.rmdir(path);
+      },
+    };
+    const f = await fresh(spy);
+    await mkdir(`${f.dir}/empty`);
+    swapInto = `${f.dir}/empty`;
+    target = `${f.parent}/outside/folder`;
+    const refusal = await refusalOf(() => f.fleet.remove(at(f.fleet, 'homes/claude-a/empty'), { onlyIfEmpty: true }));
+    expect(refusal).toBe('changed');
+    // `rmdir` reported "not a directory" (ENOTDIR) and nothing was swallowed: the link is still there, its target too.
+    expect(await readlink(`${f.dir}/empty`)).toBe(`${f.parent}/outside/folder`);
+    expect(await readFile(`${f.parent}/outside/folder/keep.txt`, 'utf8')).toBe('OUTSIDE-KEEP');
+  });
 });
 
 describe('RootHandle.remove with onlyIfEmpty without descriptor reach follows the remove-refuse rules (S44)', () => {

@@ -144,7 +144,19 @@ async function testing(): Promise<Side> {
   return {
     skills,
     claude,
-    files: async (home, to) => (await home.list(to)).toSorted(),
+    // `list` gives a folder's direct children, as the real host's does: the files of the tree are walked down
+    files: async (home, to) => {
+      const out: string[] = [];
+      const down = async (folder: string, prefix: string): Promise<void> => {
+        for (const entry of await home.entries(folder as FencedPath)) {
+          const name = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+          if (entry.kind === 'directory') await down(`${folder}/${entry.name}`, name);
+          else out.push(name);
+        }
+      };
+      await down(to, '');
+      return out.toSorted();
+    },
     stop: () => host.stop(),
   };
 }
