@@ -88,11 +88,13 @@ const made = (kind: 'directory' | 'file', inode: bigint, device: bigint): FileId
  * The disk of a machine with 65,536 sessions that hold the file (so the sessions tree is closed on `devices`), where the
  * work folder's `mounted.txt` and `mountdir` are bind mounts that keep the closed device.
  */
-function closedDisk(l: Layout, devices: Devices): HostFs {
-  const holders = Array.from({ length: 65_536 }, (_, n) => `h${n}`);
+function closedDisk(l: Layout, devices: Devices, count: () => number = () => 65_536): HostFs {
   return {
     ...REAL,
-    list: async path => (path === l.sessions ? [...(await REAL.list(path)), ...holders] : await REAL.list(path)),
+    list: async path =>
+      path === l.sessions
+        ? [...(await REAL.list(path)), ...Array.from({ length: count() }, (_, n) => `h${n}`)]
+        : await REAL.list(path),
     identity: async path => {
       if (path === l.sessions) {
         const found = await REAL.identity(path);
@@ -308,6 +310,50 @@ describe.each(DISKS)('PF-budget a closed tree is closed against every root of an
     expect(await Bun.file(`${l.work}/mounted.txt`).exists()).toBe(true);
     expect(await Bun.file(`${l.work}/mountdir/in.txt`).exists()).toBe(true);
     expect(await Bun.file(`${l.work}/plain.txt`).exists()).toBe(false);
+  }, 120_000);
+});
+
+describe('PF-budget the pinned root judges the descriptors it holds, against a fence it asks for again', () => {
+  const split: (here: bigint) => Devices = here => ({ folder: here + 4242n, file: here + 4249n });
+
+  test('PF-budget a name the look answered on the open device, that the walk reports on the closed one (a mount made after the look), is refused', async () => {
+    const l = await layout();
+    const devices = split(((await REAL.identity(l.work)) as FileIdentity).device);
+    const closed = closedDisk(l, devices);
+    // The look (`identity` by path) shows every work name as it is on the disk; only the walk's descriptor shows the mount.
+    const fs: HostFs = {
+      ...closed,
+      identity: async path => (path.startsWith(`${l.work}/`) ? await REAL.identity(path) : await closed.identity(path)),
+    };
+    const root = workRoot(l, fs, devices);
+    const pinned = await root.pin(named(root, '.'));
+    try {
+      expect(await outcome(async () => (await pinned.open('mounted.txt')).close())).toBe('refused:fenced');
+      expect(await outcome(async () => (await pinned.open('plain.txt')).close())).toBe('allowed');
+    } finally {
+      await pinned.close();
+    }
+  }, 120_000);
+
+  test('PF-budget the fence is asked for on every open of a pin: sessions that grow past the budget AFTER the pin close their device against it', async () => {
+    const l = await layout();
+    const devices = split(((await REAL.identity(l.work)) as FileIdentity).device);
+    let holders = 2;
+    const root = workRoot(
+      l,
+      closedDisk(l, devices, () => holders),
+      devices,
+    );
+    const pinned = await root.pin(named(root, '.'));
+    try {
+      // The control: with the sessions inside the budget their device is not closed, so the mount is an ordinary name.
+      expect(await outcome(async () => (await pinned.open('mounted.txt')).close())).toBe('allowed');
+      holders = 65_536;
+      expect(await outcome(async () => (await pinned.open('mounted.txt')).close())).toBe('refused:fenced');
+      expect(await outcome(async () => (await pinned.open('plain.txt')).close())).toBe('allowed');
+    } finally {
+      await pinned.close();
+    }
   }, 120_000);
 });
 

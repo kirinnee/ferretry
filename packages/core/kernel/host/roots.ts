@@ -244,8 +244,7 @@ function privateCheckOf(fs: HostFs, home: string, real: string, privateFiles: Pr
   };
   return {
     held: async path => await answer(kept => privatelyHeld(fs, kept, path, real)),
-    heldIdentity: async identity =>
-      await answer(kept => kept.keys.has(identityKey(identity)) || kept.closed.has(identity.device)),
+    heldIdentity: async identity => await answer(kept => heldByIdentity(kept, identity)),
   };
 }
 
@@ -1309,10 +1308,15 @@ const fenceNow = async (setup: PinFenceSetup): Promise<Fence | undefined> =>
  * Whether an entry whose identity is in hand is one of the fence's places, or sits on a device the fence holds unproven
  * (a private tree that was not indexed whole: an entry there cannot be proven not to be an alias of an unindexed
  * member, and an alias keeps its source's device). THE rule, asked by every door of an owner's root — the unpinned
- * root's members and the held (pinned) root's walk alike — so the two can never disagree about a closed device.
+ * root's members and the held (pinned) root's walk alike, and an internal root's guard ({@link PrivateCheck}), which has
+ * the same `keys` and `closed` — so no two doors can disagree about a closed device.
  */
-const heldByIdentity = (fence: Fence, identity: { readonly device: bigint; readonly inode: bigint }): boolean =>
-  fence.keys.has(identityKey(identity)) || fence.closed.has(identity.device);
+function heldByIdentity(
+  places: Pick<Fence, 'keys' | 'closed'>,
+  identity: { readonly device: bigint; readonly inode: bigint },
+): boolean {
+  return places.keys.has(identityKey(identity)) || places.closed.has(identity.device);
+}
 
 /**
  * Whether a walk's components reach the fence: every component by device and inode (the home, its `-before-` folders,
@@ -1456,7 +1460,10 @@ function fencedPin(pinned: UnjudgedRoot, setup: PinFenceSetup): HeldRoot {
       // Each folder is walked once for the probe's life, as today's `fencedRoot` remembered it.
       let folders: { readonly fence: Fence; readonly ask: (folder: string) => Promise<boolean> } | undefined;
       return {
-        // A verdict on names: one in the fence is `unsupported` (nothing a read would serve) without being walked.
+        // A verdict on names: one in the fence is `unsupported` (nothing a read would serve) without being walked. It
+        // is judged by the FOLDER a name sits in, not the leaf: a leaf that is an alias on a closed device answers its
+        // kind (`file`), as every regular file on that device does, so it names nothing a name did not (no bytes, size,
+        // time or mode); `fenced` (which looks at the leaf) and every read refuse it.
         classify: async (rels, budget) => {
           const fence = (await fenceNow(setup)) ?? refuse('fenced');
           if (folders?.fence.real !== fence.real) folders = { fence, ask: folderVerdict(pinned, fence) };
