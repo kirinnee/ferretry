@@ -13,6 +13,7 @@ import {
   TunnelProvisioningClient,
 } from '../../../daemon/lib/tunnel/provisioning.ts';
 import { FakeProvisioner, newDaemonIdentity, provisionOf } from './support.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const ORIGIN = 'https://ferretry-hosted-relay.example.workers.dev';
 
@@ -159,8 +160,3 @@ describe('tunnel provisioning', () => {
     should(provisionRetryDelayMs(30, () => 1)).equal(PROVISION_RETRY_BACKOFF.capMs);
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

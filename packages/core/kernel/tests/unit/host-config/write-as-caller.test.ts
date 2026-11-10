@@ -286,15 +286,17 @@ describe('writeAsCaller C1: the owner question covers only what the caller’s e
   const HELD = 'env:\n  EVIL: ${secret:GITHUB_TOKEN}\n';
   const ownerLines = (lines: readonly string[]) => lines.filter(line => line.includes('the owner put a secret'));
 
-  test('writeAsCaller C1 a patch of one field over a held secret reference keeps the whole write held, whatever the owner would say', async () => {
+  test('writeAsCaller C1 a patch of one field beside a held secret reference never puts the reference into effect, whatever the owner would say', async () => {
     const h = harness({ owner: true, other: true });
     await h.files.reload();
     const port = h.files.port('mcp');
     expect((await port.write(mcpDef, 'acme', HELD)).kind).toBe('held');
     h.asked.length = 0;
     const outcome = await port.writeAsCaller(mcpDef, 'acme', { patch: { note: 'owner renamed it' } });
-    expect(outcome.kind).toBe('held');
-    expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+    // the owner's one field is made to both versions: in effect now, with the reference still held beside it
+    expect(outcome.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toEqual({ env: {}, note: 'owner renamed it', limit: 10 });
+    expect(port.fileState(mcpDef, 'acme').state).toBe('held');
     // the owner was never asked about a reference the caller did not add
     expect(h.asked.filter(input => input.secretAdd === true)).toEqual([]);
     expect(ownerLines(h.log.lines)).toEqual([]);
@@ -326,8 +328,16 @@ describe('writeAsCaller C1: the owner question covers only what the caller’s e
     expect(staged.asked.filter(input => input.secretAdd === true).map(input => input.sentences)).toEqual([
       ['names the secret OWN_TOKEN, which only the owner may add to a configuration'],
     ]);
-    expect(outcome.kind).toBe('held');
-    expect(ownerLines(staged.log.lines)).toEqual([]);
+    // in effect on its own: the held limit is NOT written with it, and stays held
+    expect(outcome.kind).toBe('written');
+    expect(staged.files.port('mcp').collection(mcpDef).get('acme')).toEqual({
+      env: { OWN: '${secret:OWN_TOKEN}' },
+      limit: 10,
+    });
+    expect(staged.files.held().map(edit => edit.path)).toEqual(['mcp/acme.yaml']);
+    expect(ownerLines(staged.log.lines)).toEqual([
+      'info config mcp/acme.yaml: the owner put a secret reference into effect (OWN_TOKEN)',
+    ]);
   });
 
   test('writeAsCaller C1 the owner adds its own reference on a clean file: asked, written and credited', async () => {

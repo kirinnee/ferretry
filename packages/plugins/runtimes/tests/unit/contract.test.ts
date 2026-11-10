@@ -2,7 +2,13 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { LoginChangesPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
 import { AutoResumeDecide } from '@ferretry/core-ferrets/contract';
+import { ITEM_NAME_PATTERN as StdItemNamePattern } from '@ferretry/std';
 import {
+  INSTRUCTION_ITEMS,
+  ITEM_NAME_PATTERN,
+  MODEL_SET_ITEMS,
+  PROFILE_ITEMS,
+  RUNTIME_ITEMS,
   AccountChangeRequestSchema,
   ApplyOutcomeSchema,
   CloneBundleSchema,
@@ -27,6 +33,13 @@ describe('runtimes contract', () => {
     ).pending;
     expect(pending).toContain('runtimes');
     expect(pending).toContain('onboarding');
+  });
+
+  test('every Runtimes collection names its items by the one shared item-name pattern, never a copy of it', () => {
+    for (const def of [RUNTIME_ITEMS, PROFILE_ITEMS, INSTRUCTION_ITEMS, MODEL_SET_ITEMS]) {
+      expect((def as unknown as { name: RegExp }).name).toBe(ITEM_NAME_PATTERN);
+    }
+    expect(ITEM_NAME_PATTERN).toBe(StdItemNamePattern);
   });
 
   test('the fake passes the conformance suite', async () => {

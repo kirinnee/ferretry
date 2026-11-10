@@ -3,14 +3,14 @@ import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
-import type { ApiRequest, ApiResponse, CallContext, FerretId } from '@ferretry/kernel/contract';
+import type { ApiRequest, ApiResponse, CallContext, CallStanding, FerretId } from '@ferretry/kernel/contract';
 import { device, ferret, owner, testArrival, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
-import { addTwoFactorKeySubject, padInputValue } from '../../../contract/routes/index.ts';
+import { addTwoFactorKeySubject, padInputValue, TotpParametersSchema } from '../../../contract/routes/index.ts';
 import { AccountsPort } from '../../../contract/index.ts';
 import accounts from '../../../daemon/index.ts';
 import { accountRoutes } from '../../../daemon/routes/accounts.ts';
-import { TwoFactorSeedStages } from './lib.ts';
+import { totpCode, TwoFactorSeedStages } from './lib.ts';
 import { CountingSealed, daemonOver, FakeSecretCipher, MemoryLoginIndex, SEED } from './support.ts';
 
 /**
@@ -323,6 +323,113 @@ describe('saving a 2FA seed', () => {
     }
     const view = await w.call('GET /v1/accounts/seed-stages/:stage', '', { stage });
     should(String(view.body)).not.containEql(SEED);
+  });
+
+  it('S91 should take no other proof for a seed save: not the machine, an unlock, another act’s or another stage’s proof', async () => {
+    const w = await seedWorld();
+    const stage = await w.stage();
+    const other = await w.stage();
+    const key = w.index.accounts.accounts.GITHUB?.key ?? '';
+    const claimed: string[] = [];
+    const standing = (allows: (act: string, subject: string) => boolean): CallStanding => ({
+      ...ownerStanding(),
+      // An unlocked, step-up-window caller: everything that is NOT the proof for this one save.
+      presentation: { ...ownerStanding().presentation, stepUp: true } as CallStanding['presentation'],
+      claimFreshStepUp: ((act: string, subject: string) => {
+        claimed.push(act);
+        return allows(act, subject);
+      }) as ReturnType<typeof ownerStanding>['claimFreshStepUp'],
+    });
+    const commit = async (id: string, given: CallStanding) =>
+      await w.call('POST /v1/accounts/:id/factors/seed/:stage/commit', '', { id: 'GITHUB', stage: id }, given);
+    // Direction one: the machine's own token, an unlock/window, another act's proof and another stage's proof all fail.
+    for (const given of [
+      ownerStanding(),
+      standing(() => false),
+      standing(act => act !== 'add-2fa-key'),
+      standing((_act, subject) => subject === addTwoFactorKeySubject(key, other)),
+    ]) {
+      const refused = await commit(stage, given);
+      should(refused.status).equal(403);
+      should(bodyOf(refused)).match({ code: STEP_UP_REQUIRED_CODE, demand: { act: 'add-2fa-key' } });
+    }
+    should((await w.directory.list()).accounts[0]?.factors ?? []).have.length(0);
+    // Direction two: the proof for this exact save saves it, and the only act ever claimed is the seed's own.
+    claimed.length = 0;
+    const saved = await commit(
+      stage,
+      standing((act, subject) => act === 'add-2fa-key' && subject === addTwoFactorKeySubject(key, stage)),
+    );
+    should(saved.status).equal(200);
+    should(new Set(claimed)).eql(new Set(['add-2fa-key']));
+  });
+
+  it('S98 should return no seed, and no code made from it, from any route that touches it', async () => {
+    const w = await seedWorld();
+    const stage = await w.stage();
+    const key = w.index.accounts.accounts.GITHUB?.key ?? '';
+    const proving = {
+      ...ownerStanding(),
+      claimFreshStepUp: ((act: string, given: string) =>
+        act === 'add-2fa-key' && given === addTwoFactorKeySubject(key, stage)) as ReturnType<
+        typeof ownerStanding
+      >['claimFreshStepUp'],
+    };
+    const bodies: string[] = [];
+    const seen = async (answer: Promise<ApiResponse>) => {
+      bodies.push(String((await answer).body));
+    };
+    await seen(w.call('GET /v1/accounts/seed-stages/:stage', '', { stage }));
+    await seen(w.call('GET /v1/accounts/:id/factors/seed/:stage', '', { id: 'GITHUB', stage }));
+    await seen(w.call('POST /v1/accounts/:id/factors/seed/:stage/commit', '', { id: 'GITHUB', stage }, proving));
+    await seen(w.call('GET /v1/accounts', '', {}));
+    await seen(w.call('GET /v1/accounts/seed-stages/:stage', '', { stage }).catch(() => ({ body: '' }) as ApiResponse));
+    const code = totpCode(SEED, TotpParametersSchema.parse({}), Date.now()) ?? 'no-code';
+    const text = bodies.join('\n');
+    should(text).not.containEql(SEED);
+    should(text).not.containEql(code);
+    should(text).not.containEql([...SEED].reverse().join(''));
+  });
+
+  it('S109 should spend nothing on a refusal before the claim, spend the stage after it, and never let the machine token commit', async () => {
+    const w = await seedWorld();
+    const stage = await w.stage();
+    const key = w.index.accounts.accounts.GITHUB?.key ?? '';
+    let claims = 0;
+    const proving = (given: `st_${string}`) => ({
+      ...ownerStanding(),
+      claimFreshStepUp: ((act: string, subject: string) => {
+        claims += 1;
+        return act === 'add-2fa-key' && subject === addTwoFactorKeySubject(key, given);
+      }) as ReturnType<typeof ownerStanding>['claimFreshStepUp'],
+    });
+    const path = 'POST /v1/accounts/:id/factors/seed/:stage/commit' as const;
+    // Refused before the claim: a ferret, and a stage nothing holds. No proof was asked for or spent.
+    const ferretRefused = await w
+      .call(
+        path,
+        '',
+        { id: 'GITHUB', stage },
+        { ...ferretStanding(F1), claimFreshStepUp: proving(stage).claimFreshStepUp },
+      )
+      .catch((error: unknown) => error as { status: number });
+    should(ferretRefused).match({ status: 403 });
+    const unknown = await w
+      .call(path, '', { id: 'GITHUB', stage: 'st_000000000000000000000000' }, proving(stage))
+      .catch((error: unknown) => error as { status: number });
+    should(unknown).match({ status: 404 });
+    should(claims).equal(0);
+    // The machine's own token has no proof: it never commits, and the stage keeps waiting.
+    should((await w.call(path, '', { id: 'GITHUB', stage })).status).equal(403);
+    should(await w.call('GET /v1/accounts/seed-stages/:stage', '', { stage })).match({ status: 200 });
+    // After the claim the stage is spent: saved once, then gone.
+    should((await w.call(path, '', { id: 'GITHUB', stage }, proving(stage))).status).equal(200);
+    should(claims).equal(1);
+    const again = await w
+      .call(path, '', { id: 'GITHUB', stage }, proving(stage))
+      .catch((error: unknown) => error as { status: number });
+    should(again).match({ status: 404 });
+    should(claims).equal(1);
   });
 
   it('S82 should refuse a ferret the look-alike groups, and give the owner handles only', async () => {

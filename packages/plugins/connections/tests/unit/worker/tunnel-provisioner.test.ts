@@ -21,6 +21,7 @@ import should from 'should';
 import { FAKE_CONNECTOR_TOKEN_PREFIX, FakeCloudflare } from '../../support/worker/fake-cloudflare.ts';
 import { newDaemonIdentity, relayCrypto } from '../../support/worker/identities.ts';
 import { MemoryTunnelStore } from '../../support/worker/memory-tunnel-store.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const HOST = 'tunnels.example.test';
 const MINUTE = 60_000;
@@ -649,8 +650,3 @@ describe('damaged tunnel state', () => {
     should(error.message).equal('tunnel service state is damaged: the active row for one daemon');
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

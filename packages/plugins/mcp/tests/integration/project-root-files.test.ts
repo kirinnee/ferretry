@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { symlinkSync, unlinkSync } from 'node:fs';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FencedPath, RootHandle, SharedTree } from '@ferretry/kernel/contract';
@@ -7,7 +8,7 @@ import { type Instant, ok } from '@ferretry/std';
 import { RootMcpHarnessDocuments } from '../../daemon/adapters/harness-documents.ts';
 import { mcpFileOnly, projectRootMcpFile } from '../../daemon/adapters/project-root-files.ts';
 import { McpDocumentUnreadable } from '../../daemon/lib/inventory/service.ts';
-import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
+import { type HostFs, nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
 import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 
 /**
@@ -132,16 +133,10 @@ describe('mcpFileOnly: a kernel root narrowed to the one .mcp.json', () => {
       root.resolve(name),
     );
 
-    // Assert — the read checks the leaf and the root's real path first, then reads that one file.
+    // Assert — the read checks the leaf first, then reads that one file; the kernel's own link rule runs inside each call.
     expect(allowed.ok && (await root.readText(allowed.value))).toBe(FILES['.mcp.json']);
     expect(others.every(result => !result.ok)).toBe(true);
-    expect(calls).toEqual([
-      'resolve:.mcp.json',
-      `lstat:${REPO}/.mcp.json`,
-      'resolve:',
-      `realPath:${REPO}`,
-      `read:${REPO}/.mcp.json`,
-    ]);
+    expect(calls).toEqual(['resolve:.mcp.json', `lstat:${REPO}/.mcp.json`, `read:${REPO}/.mcp.json`]);
   });
 
   test('a path it did not answer (a forged FencedPath) is refused for read, bytes, tail, stat and lstat', async () => {
@@ -236,10 +231,19 @@ describe('projectRootMcpFile: which reads go to a known root', () => {
     expect(calls.filter(call => call.startsWith('read:'))).toEqual([]);
   });
 
+  test('a project root that is a link to another folder is the anchor: its .mcp.json still reads', async () => {
+    // Arrange
+    const calls: string[] = [];
+    const documents = documentsOver(kernelRoot(REPO, FILES, calls, { realRoot: '/elsewhere/repo' }));
+
+    // Act / Assert
+    expect(await documents.read(`${REPO}/.mcp.json`, 'json')).toEqual(JSON.parse(FILES['.mcp.json']));
+    expect(calls.filter(call => call.startsWith('realPath:'))).toEqual([]);
+  });
+
   test.each<[string, FakeDisk]>([
     ['a .mcp.json the kernel refuses (a link out of the root)', { refused: ['.mcp.json'] }],
     ['a .mcp.json that is a link to a file inside the root', { links: ['.mcp.json'] }],
-    ['a project root that is a link to another folder', { realRoot: '/elsewhere/repo' }],
   ])('%s is unreadable: never read, and nothing quoted', async (_what, disk) => {
     // Arrange
     const calls: string[] = [];
@@ -252,6 +256,31 @@ describe('projectRootMcpFile: which reads go to a known root', () => {
     await expect(read).rejects.toBeInstanceOf(McpDocumentUnreadable);
     await expect(read).rejects.not.toThrow(/docs\.example/u);
     expect(calls.filter(call => call.startsWith('read:'))).toEqual([]);
+  });
+
+  test('a link the kernel refuses is said as a link, naming the file and nothing it points at', async () => {
+    // Arrange
+    const documents = documentsOver(kernelRoot(REPO, FILES, [], { refused: ['.mcp.json'] }));
+
+    // Act / Assert
+    await expect(documents.read(`${REPO}/.mcp.json`, 'json')).rejects.toThrow(
+      new RegExp(`^${REPO}/\\.mcp\\.json is a link, or sits under one, that leaves the project`, 'u'),
+    );
+  });
+
+  test('the reader asks the kernel for the project folder as both the scoped folder and the anchor', () => {
+    // Arrange
+    const asked: [string, string][] = [];
+    const pick = projectRootMcpFile((folder, within) => {
+      asked.push([folder, within]);
+      return kernelRoot(folder, FILES, []);
+    });
+
+    // Act
+    pick(`${REPO}/.mcp.json`, [`${REPO}/`]);
+
+    // Assert
+    expect(asked).toEqual([[REPO, REPO]]);
   });
 });
 
@@ -289,5 +318,135 @@ describe('GAP (declared): the imports narrowing is MCP-adapter-enforced, not ker
     } finally {
       await rm(disk, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the narrowed root hands the one .mcp.json out as bytes and as a tail, and nothing else', () => {
+  test('on a temp disk readBytes and readTail answer the file it resolved, and refuse a forged path', async () => {
+    // Arrange — fake JSON on a temp disk; no real home.
+    const disk = await mkdtemp(join(tmpdir(), 'mcp-bytes-tail-'));
+    try {
+      const project = join(disk, 'work/repo');
+      await mkdir(project, { recursive: true });
+      await mkdir(join(disk, 'fy-home'), { recursive: true });
+      await writeFile(join(project, '.mcp.json'), FILES['.mcp.json'] ?? '{}');
+      await writeFile(join(project, 'other.json'), '{"fake":"not-for-mcp"}');
+      const roots = rootsPortFor(
+        nodeFs(() => crypto.randomUUID()),
+        { home: join(disk, 'fy-home'), plugin: 'mcp', worktrees: join(disk, 'worktrees') },
+        ['imports'],
+        () => undefined,
+      );
+      const narrowed = mcpFileOnly(roots.root('imports', { subfolder: project, within: project }));
+      const raw = roots.root('imports', { subfolder: project, within: project });
+      const allowed = narrowed.resolve('.mcp.json');
+      const otherPath = raw.resolve('other.json');
+      if (!allowed.ok || !otherPath.ok) throw new Error('setup');
+
+      // Act
+      const bytes = await narrowed.readBytes(allowed.value);
+      const tail = await narrowed.readTail(allowed.value, 1024);
+
+      // Assert
+      expect(new TextDecoder().decode(bytes)).toBe(FILES['.mcp.json']);
+      expect(new TextDecoder().decode(tail.bytes)).toBe(FILES['.mcp.json']);
+      expect(tail.size).toBe(FILES['.mcp.json'].length);
+      await expect(narrowed.readBytes(otherPath.value)).rejects.toThrow(/reads only \.mcp\.json/u);
+      await expect(narrowed.readTail(otherPath.value, 1024)).rejects.toThrow(/reads only \.mcp\.json/u);
+    } finally {
+      await rm(disk, { recursive: true, force: true });
+    }
+  });
+
+  test('a missing .mcp.json is not there for readBytes and readTail either', async () => {
+    // Arrange
+    const narrowed = mcpFileOnly(kernelRoot(REPO, {}, []));
+    const allowed = narrowed.resolve('.mcp.json');
+    if (!allowed.ok) throw new Error('setup');
+
+    // Act / Assert
+    await expect(narrowed.readBytes(allowed.value)).rejects.toBeInstanceOf(McpDocumentUnreadable);
+    await expect(narrowed.readTail(allowed.value, 10)).rejects.toBeInstanceOf(McpDocumentUnreadable);
+  });
+});
+
+describe('R-B1 the project .mcp.json over the kernel’s real imports root on a temp disk, anchored at the project folder', () => {
+  const OUTSIDE_TEXT = JSON.stringify({
+    mcpServers: { stolen: { type: 'http', url: 'https://stolen.example.invalid' } },
+  });
+  const disks: string[] = [];
+  afterEach(async () => {
+    for (const disk of disks.splice(0)) await rm(disk, { recursive: true, force: true });
+  });
+
+  async function world(fs: (inner: HostFs) => HostFs = inner => inner) {
+    const disk = await realpath(await mkdtemp(join(tmpdir(), 'mcp-anchor-')));
+    disks.push(disk);
+    const project = join(disk, 'work', 'repo');
+    await mkdir(project, { recursive: true });
+    await mkdir(join(disk, 'fy-home'), { recursive: true });
+    await mkdir(join(disk, 'outside'), { recursive: true });
+    await writeFile(join(disk, 'outside', 'mcp.json'), OUTSIDE_TEXT);
+    const roots = rootsPortFor(
+      fs(nodeFs(() => crypto.randomUUID())),
+      { home: join(disk, 'fy-home'), plugin: 'mcp', worktrees: join(disk, 'worktrees') },
+      ['imports'],
+      () => undefined,
+    );
+    const documents = new RootMcpHarnessDocuments(
+      async path =>
+        projectRootMcpFile((folder, within) => roots.root('imports', { subfolder: folder, within }))(path, [
+          join(disk, 'work', 'repo'),
+          join(disk, 'linked-repo'),
+          join(disk, 'linked-work', 'repo'),
+        ]) ?? Promise.reject(new McpDocumentUnreadable(`${path} is outside every ferret folder.`)),
+      text => JSON.parse(text) as unknown,
+    );
+    return { disk, project, documents };
+  }
+
+  test('a project folder that is a link, or sits under a linked parent, still reads its .mcp.json', async () => {
+    const w = await world();
+    await writeFile(join(w.project, '.mcp.json'), FILES['.mcp.json']!);
+    await symlink(w.project, join(w.disk, 'linked-repo'));
+    await symlink(join(w.disk, 'work'), join(w.disk, 'linked-work'));
+    for (const root of [w.project, join(w.disk, 'linked-repo'), join(w.disk, 'linked-work', 'repo')])
+      expect(await w.documents.read(`${root}/.mcp.json`, 'json')).toEqual(JSON.parse(FILES['.mcp.json']!));
+  });
+
+  test('a .mcp.json that is a link to a file outside the project is unreadable, and its text is never returned', async () => {
+    const w = await world();
+    await symlink(join(w.disk, 'outside', 'mcp.json'), join(w.project, '.mcp.json'));
+    const read = w.documents.read(`${w.project}/.mcp.json`, 'json');
+    await expect(read).rejects.toBeInstanceOf(McpDocumentUnreadable);
+    await expect(read).rejects.not.toThrow(/stolen/u);
+  });
+
+  test('a dangling .mcp.json link is unreadable', async () => {
+    const w = await world();
+    await symlink(join(w.disk, 'nowhere.json'), join(w.project, '.mcp.json'));
+    await expect(w.documents.read(`${w.project}/.mcp.json`, 'json')).rejects.toBeInstanceOf(McpDocumentUnreadable);
+  });
+
+  test('a .mcp.json swapped for a link to an outside file right after the adapter looked at it reads no outside text', async () => {
+    let project = '';
+    let swapped = false;
+    const w = await world(inner => ({
+      ...inner,
+      lstat: async (path: string) => {
+        const found = await inner.lstat(path);
+        if (!swapped && path === `${project}/.mcp.json`) {
+          swapped = true;
+          unlinkSync(path);
+          symlinkSync(join(project, '..', '..', 'outside', 'mcp.json'), path);
+        }
+        return found;
+      },
+    }));
+    project = w.project;
+    await writeFile(join(w.project, '.mcp.json'), FILES['.mcp.json']!);
+    const read = await w.documents.read(`${w.project}/.mcp.json`, 'json').catch((error: unknown) => error);
+    expect(swapped).toBe(true);
+    expect(read).not.toEqual(JSON.parse(OUTSIDE_TEXT));
   });
 });

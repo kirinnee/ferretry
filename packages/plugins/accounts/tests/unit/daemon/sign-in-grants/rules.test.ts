@@ -128,6 +128,33 @@ describe('RuleSignInGrants: the synchronous last check before typing', () => {
     }
   });
 
+  it('I214 should stop a fill in flight: the line is read again, in the same turn, and a revoke since the grant was read refuses it', async () => {
+    const w = await world();
+    const { view } = await approved(w);
+    const { source } = grants(w);
+    const [grant] = source.of(SESSION);
+    if (grant === undefined) throw new Error('no grant');
+    // The check is synchronous: an answer, never a promise to await, so nothing can change between it and the write.
+    const held = source.holds(grant, LOGIN);
+    should(held).be.a.Boolean().and.equal(true);
+    await w.service.revoke(deviceOwner(), view.id);
+    should(source.holds(grant, LOGIN)).equal(false);
+    // A rule that was never there is held for nobody.
+    should(source.of(SESSION)).eql([]);
+  });
+
+  it('I225 should suspend the rule for a field left filled, or a clear that is unknown or uncertain', async () => {
+    const w = await world();
+    await approved(w);
+    const { source } = grants(w);
+    const [grant] = source.of(SESSION);
+    if (grant === undefined) throw new Error('no grant');
+    await source.stopped(grant, 'did-not-move-on');
+    should(w.store.document?.rules[0]?.suspended?.because).equal('did-not-move-on');
+    should(source.of(SESSION)[0]).match({ state: 'stopped' });
+    should(source.holds(grant, LOGIN)).be.false();
+  });
+
   it('should refuse a rule whose proof is no longer verified (a passkey removed), with no I/O at the check', async () => {
     const w = await world();
     await approved(w);

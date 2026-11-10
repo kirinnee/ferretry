@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { AgentConfigCallSchema } from '@ferretry/kernel/contract';
 import { fixedClock } from '@ferretry/kernel/testing';
+import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import { agentConfig } from '../../../../core/kernel/host/config/agent.ts';
 import { createConfigFiles } from '../../../../core/kernel/host/config/service.ts';
 import { createMemoryHostFs } from '../../../../core/kernel/host/state/memory-fs.ts';
@@ -59,6 +60,10 @@ describe('mcp contract', () => {
     expect(McpItemSchema.safeParse({ command: 'x', env: { A: '${secret:UPPER_1}' } }).success).toBe(true);
     expect(McpItemSchema.safeParse({ url: 'http://a.example', auth: 'oauth' }).success).toBe(false);
     expect(MCP_CONFIG.axis).toBe('configure');
+  });
+
+  test('the mcp collection names its items by the one shared item-name pattern, never a copy of it', () => {
+    expect((MCP_CONFIG as unknown as { name: RegExp }).name).toBe(ITEM_NAME_PATTERN);
   });
 
   test('R9 M1 a failing mcp/<name>.yaml is withheld whole by config_read, its issues kept', async () => {

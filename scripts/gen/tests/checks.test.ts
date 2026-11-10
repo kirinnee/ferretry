@@ -473,7 +473,7 @@ describe('source scans', () => {
       {
         id: 'browsers',
         files: {
-          'daemon/worker/adapters/main.ts': 'const endpoint = process.argv[2]; setTimeout(() => {}, 1);',
+          'daemon/worker/main.ts': 'const endpoint = process.argv[2]; setTimeout(() => {}, 1);',
           'daemon/worker/launcher.ts': 'await fetch("http://127.0.0.1:9222/json/version");',
         },
       },
@@ -483,7 +483,7 @@ describe('source scans', () => {
     expect(found).toHaveLength(4);
     expect(messages(found)).toContain('connections/daemon/worker.ts');
     expect(messages(found)).toContain('browsers/daemon/worker/launcher.ts');
-    expect(messages(found)).not.toContain('browsers/daemon/worker/adapters/');
+    expect(messages(found)).not.toContain('browsers/daemon/worker/main.ts');
     expect(messages(found)).toContain('connections/daemon/adapters/webrtc/other.ts');
     expect(messages(found)).toContain('other/worker/src/worker.ts');
   });
@@ -873,6 +873,63 @@ describe('guarantees', () => {
     expect(found).not.toContain('G4');
     expect(messages(guaranteeFindings(rows, tests, new Set(['board']), undefined, true))).toContain('G2');
     expect(enforcerSymbols('`decideCapability`, `packages/x.ts`, `GET /v1/x`, `fys_`')).toEqual(['decideCapability']);
+  });
+});
+
+describe('guarantees: the one helper and multi-id titles (test-titles.ts)', () => {
+  const rowFor = (id: string): string => `${id}\tkept\talpha\t-\t-\tgrants\t${id}\n`;
+  const SUPPORT = 'packages/plugins/alpha/tests/support/guarantee.ts';
+  const A = 'packages/plugins/alpha/tests/unit/a.test.ts';
+  const SUPPORT_BODY =
+    "import { it } from 'bun:test';\nexport function guarantee(ids: readonly string[], name: string, run: () => void): void {\n  for (const id of ids) it(id + ' ' + name, run);\n}\n";
+  const IMPORT = "import { guarantee } from '../support/guarantee.ts';\n";
+  // The titles are spliced in, so this file holds no literal test title that starts with a real row id.
+  const titled = (...names: string[]): string =>
+    `import { test } from 'bun:test';\n${names.map(name => `test('${name}', () => {});`).join('\n')}\n`;
+  /** Which of the rows have no test, with `source` as the one test file (and the support module when `support`). */
+  const missing = async (ids: readonly string[], source: string, support = true): Promise<string> => {
+    const f = ws([{ id: 'alpha' }]);
+    f.write('docs/rebuild/guarantees.tsv', `id\tstatus\towner\twith\tenforcer\tdoc\ttest\n${ids.map(rowFor).join('')}`);
+    if (support) f.write(SUPPORT, SUPPORT_BODY);
+    f.write(A, source);
+    const found = await run(guarantees, f, { existenceOnly: true, strict: true });
+    // the owner check reads the same ids: a row the existence half sees must not be flagged as tested nowhere
+    const owner = await run(guaranteeOwner, f, { strict: true });
+    expect(messages(owner)).not.toContain('tested only outside');
+    return found.map(x => x.where).join(',');
+  };
+
+  test('planted: a call of the imported helper names every id in its list', async () => {
+    const source = `${IMPORT}guarantee(['G1', 'G2'], 'holds', () => {});\nguarantee(['G3'], 'also holds', () => {});\n`;
+    expect(await missing(['G1', 'G2', 'G3', 'G4'], source)).toBe('G4');
+  });
+
+  test('planted: a literal title names every id that leads its own word, and no later id', async () => {
+    expect(await missing(['G1', 'G2', 'G3', 'G4'], titled('G1 G2 both', 'G3 then G4 later'))).toBe('G4');
+    expect(await missing(['G1', 'G2'], titled('see G1 and G2'))).toBe('G1,G2');
+  });
+
+  test('planted: a stray call, a local re-declaration, a foreign import or an alias counts as nothing', async () => {
+    const strays: Record<string, string> = {
+      'a different function name': `${IMPORT}function proof(ids: string[], name: string): void {}\nproof(['G1'], 'x');\n`,
+      'a same-named local declaration, not imported':
+        "function guarantee(ids: string[], name: string, run: () => void): void {}\nguarantee(['G1'], 'x', () => {});\n",
+      'the name imported from another module':
+        "import { guarantee } from '../support/other.ts';\nguarantee(['G1'], 'x', () => {});\n",
+      'the helper under an alias':
+        "import { guarantee as holds } from '../support/guarantee.ts';\nholds(['G1'], 'x', () => {});\n",
+      'ids that are not literal strings': `${IMPORT}const ids = ['G1'];\nguarantee(ids, 'x', () => {});\n`,
+      'a type-only import':
+        "import type { guarantee } from '../support/guarantee.ts';\nguarantee(['G1'], 'x', () => {});\n",
+    };
+    for (const [why, source] of Object.entries(strays))
+      expect([why, await missing(['G1'], source)]).toEqual([why, 'G1']);
+  });
+
+  test('planted: an import of a support module that does not exist counts as nothing', async () => {
+    const source = `${IMPORT}guarantee(['G1'], 'holds', () => {});\n`;
+    expect(await missing(['G1'], source, false)).toBe('G1');
+    expect(await missing(['G1'], source, true)).toBe('');
   });
 });
 

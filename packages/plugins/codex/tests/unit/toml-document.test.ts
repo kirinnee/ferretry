@@ -75,6 +75,27 @@ describe('the values that need care', () => {
     expect(parse(text)).toEqual(document);
   });
 
+  test('NaN and both infinities are written as the TOML floats nan, inf and -inf, never as 0', () => {
+    const document = { notANumber: Number.NaN, up: Number.POSITIVE_INFINITY, down: Number.NEGATIVE_INFINITY };
+
+    const text = tomlDocument(document);
+
+    expect(text).toBe('notANumber = nan\nup = inf\ndown = -inf');
+    expect(parse(text)).toEqual(document);
+  });
+
+  test('a non-finite number inside an array, an inline table and a table row keeps its own value', () => {
+    expect(tomlDocument({ list: [Number.POSITIVE_INFINITY, Number.NaN] })).toBe('list = [inf, nan]');
+    expect(tomlDocument({ list: [{ timeout: Number.NEGATIVE_INFINITY }] })).toBe('list = [{ timeout = -inf }]');
+    expect(tomlTables('mcp_servers', { s: { timeout: Number.POSITIVE_INFINITY } })).toBe(
+      '[mcp_servers.s]\ntimeout = inf',
+    );
+  });
+
+  test('a finite number is written as it always was', () => {
+    expect(tomlDocument({ a: 0, b: -3, c: 1.5 })).toBe('a = 0\nb = -3\nc = 1.5');
+  });
+
   test('an empty record inside an array is an empty inline table', () => {
     expect(parse(tomlDocument({ list: [{}] }))).toEqual({ list: [{}] });
   });

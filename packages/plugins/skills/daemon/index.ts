@@ -58,8 +58,8 @@ export default implementDaemon(manifest, {
       ((await projects.current()?.list()) ?? []).map(project => project.path);
     const store = new SkillStore(kernel.state, kernel.roots);
     const installed = new InstalledSkillFiles(kernel.state);
-    const projectFiles = new ProjectSkillFiles(registeredRoots, folder =>
-      kernel.roots.root('imports', { subfolder: folder }),
+    const projectFiles = new ProjectSkillFiles(registeredRoots, (folder, within) =>
+      kernel.roots.root('imports', { subfolder: folder, within }),
     );
     const routing = (work?: { readonly files: RootSkillFiles; readonly base: string }) =>
       new SkillFilesRouter({

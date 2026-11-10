@@ -55,9 +55,10 @@ const NOT_YET = (what: string): never => {
  *   (`<home>-worktrees`), so a subfolder of a registered project, a worktree kept inside it, and a managed worktree
  *   of it are that project, under its root's subject digest, as today. Projects off: a managed worktree belongs to
  *   the repository it was forked from, and every other folder is its own project. The `.mcp.json` at each of those
- *   known roots — that one file, read-only — is read through the kernel's `imports` root scoped to the root
- *   (`adapters/project-root-files.ts`), so a ferret in a subfolder reads it with no ferret in the project root. A
- *   `.mcp.json` that is a link, and a root that is (or sits under) a link, are refused.
+ *   known roots — that one file, read-only — is read through the kernel's `imports` root scoped to the root and
+ *   anchored at it (`adapters/project-root-files.ts`), so a ferret in a subfolder reads it with no ferret in the
+ *   project root. A `.mcp.json` that is a link is refused; a root that is (or sits under) a link is read as the
+ *   folder it names.
  * - The Vault has no value getter (use, never read). Sign-in writes the ACCESS token by name through `VaultApi.put`;
  *   the refresh token and a registered client secret (the "internal" store) rest in MCP's own sealed document,
  *   `state/mcp/oauth-secrets.json` (today's `mcp-oauth-secrets.json`), opened through the Vault's sealed-document
@@ -127,10 +128,7 @@ export default implementDaemon(manifest, {
     // A known root's `.mcp.json` — and nothing else there — is read through the kernel's `imports` root scoped to that
     // folder (lead ruling (B)), so a ferret in a subfolder reads it with no ferret in the project root. Every other
     // document is read through the ferret folder that holds it, as before.
-    // `within` anchors the scope at the project itself: the kernel then looks at every folder from the anchor down (none
-    // here, the scope is the anchor) and refuses a spelling that does not hold. The adapter's own `realPath` guard
-    // (`adapters/project-root-files.ts`) stays as the second layer: the anchor itself MAY be a link to the kernel.
-    const projectFile = projectRootMcpFile(root => kernel.roots.root('imports', { subfolder: root, within: root }));
+    const projectFile = projectRootMcpFile((root, within) => kernel.roots.root('imports', { subfolder: root, within }));
     // A runtime home Runtimes published is read through its bounded reader, by exact document name; the rest as before.
     const rootDocuments = new RootMcpHarnessDocuments(async path => {
       if (path.endsWith(`/${PROJECT_MCP_FILE}`)) {

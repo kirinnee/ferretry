@@ -141,7 +141,7 @@ describe('R-0161 a project whose .mcp.json is a link is refused, on a real disk'
     expect(text).toBe(INSIDE);
   });
 
-  test('a project registered THROUGH a link reads nothing: the kernel lets an anchor be a link, so the adapter guard is what refuses', async () => {
+  test('a project registered THROUGH a link is read (v4 parity): only what lies BELOW the root is fenced', async () => {
     // Arrange
     const w = await world();
     await writeFile(w.mcpJson, INSIDE);
@@ -155,9 +155,7 @@ describe('R-0161 a project whose .mcp.json is a link is refused, on a real disk'
 
     // Assert
     expect(read).toBeDefined();
-    const refusal = await read?.catch((error: unknown) => error);
-    expect(refusal).toBeInstanceOf(McpDocumentUnreadable);
-    expect((refusal as Error).message).not.toContain(INSIDE_MARK);
+    expect(await read).toBe(INSIDE);
   });
 
   test('the inventory reader (imports root) reads nothing through a link out of the project or inside it', async () => {

@@ -8,6 +8,7 @@ import {
   StageTwoFactorSeedRequestSchema,
   TWO_FACTOR_STAGE_TTL_SECONDS,
   TwoFactorSeedStagedSchema,
+  TwoFactorKeySummarySchema,
   TwoFactorSeedStageViewSchema,
 } from '../../../contract/routes/index.ts';
 
@@ -38,6 +39,28 @@ describe('the 2FA key route shapes', () => {
       ...keys(TwoFactorSeedStagedSchema.shape.parsed),
       ...keys(TwoFactorSeedStageViewSchema),
     ])
+      should(key).not.match(/seed|secret|value|code|seal|padded|uri/iu);
+  });
+
+  it('I175 should never let a seed leave the use boundary: no answer holds one, and staging needs the warning ticked', () => {
+    // Off by default and explicit: the stage request is refused unless the warning is ticked, and the tick is `true`.
+    for (const tick of [undefined, false, 'true', 1])
+      should(StageTwoFactorSeedRequestSchema.safeParse({ padded: 'x', totpAcknowledged: tick }).success).be.false();
+    should(StageTwoFactorSeedRequestSchema.safeParse({ padded: 'x', totpAcknowledged: true }).success).be.true();
+    // What the owner reads of a key, and what any answer about a stage says, names no seed, seal or code.
+    const summary = TwoFactorKeySummarySchema.parse({
+      id: 'tf_0123456789ab',
+      kind: 'totp',
+      label: 'Authenticator app',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      addedBy: 'owner',
+      automatic: true,
+      params: { algorithm: 'SHA1', digits: 6, period: 30 },
+    });
+    for (const key of Object.keys(summary)) should(key).not.match(/seed|secret|seal|code|padded|uri/iu);
+    should(TwoFactorKeySummarySchema.safeParse({ ...summary, seal: 'L0_TOTP_00000000' }).success).be.false();
+    should(TwoFactorKeySummarySchema.safeParse({ ...summary, seed: 'JBSWY3DPEHPK3PXP' }).success).be.false();
+    for (const key of Object.keys(TwoFactorSeedStageViewSchema.shape))
       should(key).not.match(/seed|secret|value|code|seal|padded|uri/iu);
   });
 

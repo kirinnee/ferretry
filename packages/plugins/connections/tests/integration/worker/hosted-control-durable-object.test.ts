@@ -21,6 +21,7 @@ import {
   SUPERSEDED_HOSTED_RELAY_LIMITS,
 } from '../../../worker/src/lib/index.ts';
 import { FakeHostedRelayControlStorage } from '../../support/worker/hosted-control-fakes.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const otherDaemonId = `fy_daemon_${'b'.repeat(43)}`;
@@ -1083,8 +1084,3 @@ describe('hosted relay reservations heal themselves', () => {
     }
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

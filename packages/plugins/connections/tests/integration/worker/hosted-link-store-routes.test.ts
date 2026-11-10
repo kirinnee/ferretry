@@ -13,6 +13,7 @@ import {
   linkFetchPath,
   linkPeekPath,
 } from '../../../worker/src/lib/index.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const HOST = 'https://relay.example';
 const bundleId = `lnk_${'A'.repeat(22)}`;
@@ -284,7 +285,3 @@ describe('a relay that is not hosted', () => {
     should(response.status).equal(503);
   });
 });
-
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

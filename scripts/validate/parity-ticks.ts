@@ -37,6 +37,7 @@ import {
   readChanges,
 } from './descriptor-parity.ts';
 import { type JunitCase, inTier, junitCases, resultFiles } from './guarantees.ts';
+import { helperBinding, helperCallTitles } from './test-titles.ts';
 
 export const LEDGER = 'docs/design/rebuild-parity.tsv';
 export const KNOWN = 'scripts/validate/parity-ticks-known.tsv';
@@ -254,20 +255,30 @@ const CASE = new Set(['test', 'it']);
 export function liveTitles(file: string, cases = true): string[] {
   const out: string[] = [];
   const suites = cases ? CASE : SUITE;
-  walk(parseFile(file).program, (node, parents) => {
+  const { program } = parseFile(file);
+  // The one helper (`test-titles.ts`): a call of it runs one case per id, live unless a describe around it is dead.
+  const binding = cases ? helperBinding(program, file) : undefined;
+  walk(program, (node, parents) => {
     if (node.type !== 'CallExpression') return;
+    const helped = helperCallTitles(node, binding);
+    if (helped !== undefined) {
+      if (!parents.some(deadDescribe)) out.push(...helped);
+      return;
+    }
     const own = callee(node.callee);
     if (own === undefined || !suites.has(own.base) || own.mods.some(m => DEAD.has(m)) || isOff(node.callee)) return;
     const title = titleOf((node.arguments as unknown[])[0]);
     if (title === undefined) return;
-    const dead = parents.some(p => {
-      if (p.type !== 'CallExpression') return false;
-      const c = callee(p.callee);
-      return c !== undefined && c.base === 'describe' && (c.mods.some(m => DEAD.has(m)) || isOff(p.callee));
-    });
-    if (!dead) out.push(title);
+    if (!parents.some(deadDescribe)) out.push(title);
   });
   return out;
+}
+
+/** A `describe.skip(...)` / `describe.todo(...)` / `describe.if(false)` around a call: nothing inside it runs. */
+function deadDescribe(p: AstNode): boolean {
+  if (p.type !== 'CallExpression') return false;
+  const c = callee(p.callee);
+  return c !== undefined && c.base === 'describe' && (c.mods.some(m => DEAD.has(m)) || isOff(p.callee));
 }
 
 /** The row id as a whole token (`R-0023` is not inside `R-00231`). */
