@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { LoginEntryError } from '../../../../daemon/lib/inputs/borrowed.ts';
+import { LOGIN_PASSWORD_MIN_LENGTH, LoginEntryError } from '../../../../daemon/lib/inputs/borrowed.ts';
 import { identityOf } from '../../../../daemon/lib/inputs/login-observer.ts';
 import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import { account, page, pageField, ruleGrant, SESSION, SIGN_IN, site, terminal } from './grant-fixtures.ts';
-import { OWNER, PAGE_LOGIN, PASSWORD, planLine, refusal, SUDO_RAISE, world } from './world.ts';
+import { AGENT, OWNER, PAGE_LOGIN, PASSWORD, planLine, refusal, SUDO_RAISE, USERNAME, world } from './world.ts';
 
 /**
  * The corners of the input service that the big flows do not reach: a sign-in on a terminal, a write that may be partial
@@ -284,7 +284,7 @@ describe('what a card says about itself', () => {
     should(w.cards[0]?.title.endsWith('…')).be.true();
   });
 
-  it('should keep who a page is signing in only when the redactor leaves it as typed', async () => {
+  it('I156 should keep who a page is signing in only when the redactor leaves it as typed', async () => {
     const w = world({ facts: page(), accounts: github() });
     w.state.typedUsername = 'someone-else@example.com';
     const masked = world({ facts: page(), accounts: github() });
@@ -458,7 +458,7 @@ describe('a saved value that is typed or kept', () => {
     should(w.writes).eql([]);
   });
 
-  it('should say the value was typed but not kept when the store changed first, or could not be written', async () => {
+  it('I149 should say the value was typed but not kept when the store changed first, or could not be written', async () => {
     const raced = await raised();
     raced.w.state.saveFails = new LoginEntryError('login_exists', 'NEW_ACCOUNT already exists');
     const broken = await raised();
@@ -474,6 +474,9 @@ describe('a saved value that is typed or kept', () => {
     const racedResult = await send(raced);
     const brokenResult = await send(broken);
 
+    // The failure to keep never undoes the delivery: the value was typed once, and the request stands delivered.
+    should([racedResult.state, brokenResult.state]).eql(['delivered', 'delivered']);
+    should([raced.w.writes.length, broken.w.writes.length]).eql([1, 1]);
     should(racedResult.saved).match({ entry: 'NEW_ACCOUNT', ok: false });
     should(racedResult.saved?.problem).containEql('The value was typed, but not saved: NEW_ACCOUNT already exists');
     should(brokenResult.saved?.problem).equal(
@@ -696,6 +699,106 @@ describe('a grant that is revoked, a store that fails, and a card that is kept',
 
     should(result.saved).match({ entry: 'GITHUB', ok: true });
     should((w.saves[0] as unknown[])[4]).equal('update');
+  });
+});
+
+describe('the rows of a saved fill and of a save', () => {
+  const bothFields = (user: string, pass: string) => [
+    { field: 'user', padded: padInputValue(user) },
+    { field: 'pass', padded: padInputValue(pass) },
+  ];
+  const raised = async (over: Parameters<typeof world>[0] = {}) => {
+    const w = world({ facts: page(), accounts: github(), ...over });
+    await w.service.raise(SESSION, PAGE_LOGIN);
+    return { w, request: await w.pending() };
+  };
+  const keep = (over: Record<string, unknown> = {}) => ({ entry: 'NEW_ACCOUNT', label: 'GitHub', ...over });
+
+  it('I148 should refuse a password under the minimum on every way into a save, typing and keeping nothing', async () => {
+    const short = 'x'.repeat(LOGIN_PASSWORD_MIN_LENGTH - 1);
+    const fine = 'x'.repeat(LOGIN_PASSWORD_MIN_LENGTH);
+    // A page login saved as a NEW account, and as an Update of the account the card offers to update.
+    for (const choice of [keep(), keep({ entry: 'GITHUB', mode: 'update' })]) {
+      const { w, request } = await raised();
+      const error = await refusal(
+        w.service.deliver(
+          SESSION,
+          request.id,
+          w.send(request, { fields: bothFields('kirinnee', short), save: choice }),
+          OWNER,
+        ),
+      );
+      should(error.code).equal('bad_request');
+      should(error.message).containEql(`a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters`);
+      should([w.writes, w.saves]).eql([[], []]);
+    }
+    // A terminal's one password saved beside the username it names.
+    const prompt = world({ facts: terminal() });
+    await prompt.service.raise(SESSION, SUDO_RAISE);
+    const card = await prompt.pending();
+    const terminalError = await refusal(
+      prompt.service.deliver(
+        SESSION,
+        card.id,
+        prompt.send(card, {
+          padded: padInputValue(short),
+          save: { entry: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box', username: 'kirin' },
+        }),
+        OWNER,
+      ),
+    );
+    should(terminalError.message).containEql('a saved password is at least');
+    should([prompt.writes, prompt.saves]).eql([[], []]);
+    // The line is the minimum itself: a password of exactly that length is kept.
+    const { w, request } = await raised();
+    const kept = await w.service.deliver(
+      SESSION,
+      request.id,
+      w.send(request, { fields: bothFields('kirinnee', fine), save: keep() }),
+      OWNER,
+    );
+    should(kept.saved).match({ ok: true });
+    should(w.saves).have.length(1);
+  });
+
+  it('I160 should type nothing until the owner taps, open the value only after every refusing check, and put it into that write alone', async () => {
+    const { w, request } = await raised();
+    // Raised and listed: nothing opened, nothing typed.
+    should([w.fills, w.writes]).eql([[], []]);
+    // Every refusal comes BEFORE the value is opened: a stale look, an account the card does not offer, a caller who is not the owner.
+    const stale = await refusal(
+      w.service.deliver(
+        SESSION,
+        request.id,
+        w.send(request, { observedDigest: 'f'.repeat(64), entry: 'GITHUB' }),
+        OWNER,
+      ),
+    );
+    const unoffered = await refusal(
+      w.service.deliver(SESSION, request.id, w.send(request, { entry: 'NOBODY' }), OWNER),
+    );
+    const agent = await refusal(w.service.deliver(SESSION, request.id, w.send(request, { entry: 'GITHUB' }), AGENT));
+    should([stale, unoffered, agent].map(error => error instanceof Error)).eql([true, true, true]);
+    should([w.fills, w.writes]).eql([[], []]);
+    // The tap: the password is opened once and goes into the one write, and into nothing the daemon keeps or says.
+    const result = await w.service.deliver(SESSION, request.id, w.send(request, { entry: 'GITHUB' }), OWNER);
+    should(result.state).equal('delivered');
+    should(w.fills.map(fill => fill.role)).eql(['username', 'password']);
+    should(w.writes.map(write => write.values)).eql([[USERNAME, PASSWORD]]);
+    const kept = JSON.stringify([result, w.events, w.audits, w.cards, w.told, w.notes, w.saves]);
+    should(kept).not.containEql(PASSWORD);
+  });
+
+  it('I166 should tell the agent that a saved fill was saved and whether it was sent, and nothing about the account', async () => {
+    const { w, request } = await raised();
+
+    await w.service.deliver(SESSION, request.id, w.send(request, { entry: 'GITHUB' }), OWNER);
+    const view = await w.service.agentView(SESSION, request.agendaItemId, 0);
+
+    should(view).match({ state: 'delivered', submitted: true, source: 'saved' });
+    const said = JSON.stringify([view, w.told, w.notes]);
+    for (const secret of [PASSWORD, USERNAME, 'GITHUB']) should(said).not.containEql(secret);
+    should(Object.keys(view).sort()).eql(['id', 'lockSeconds', 'source', 'state', 'submitted']);
   });
 });
 
