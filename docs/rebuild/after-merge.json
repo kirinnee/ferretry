@@ -48,6 +48,16 @@
       "owner": "gustavo"
     },
     {
+      "id": "kernel-roots-int-coverage",
+      "what": "kernel/host/roots.ts reads about 70% lines in the integration union (it is not in the 100% adapters/ ledger); raise it with integration tests of the uncovered branches, run per file with --coverage under bunfig.int.toml, and move any line that turns out unreachable out (deleted, not ignored); also pin the real-process wiring of stopOnSignalReporting (the unref of the limit timer survives as a mutation) (britnee 2026-11-10: \"Put the roots.ts ~70% gap in followups as after-merge.\")",
+      "owner": "gustavo"
+    },
+    {
+      "id": "followups-sweep-after-merge",
+      "what": "the non-security follow-ups of the core lane, kept in the Follow-ups list, are swept after the merge: fresh Sonnet units, Opus review READY, Haiku merge, 5.0 CI on the merge sha; ports-pending closed/added reported per unit (britnee 2026-11-10: \"The rest of the followups sweep moves to after merge, so add it to docs/rebuild/after-merge.json with you as owner.\")",
+      "owner": "gustavo"
+    },
+    {
       "id": "ffi-descriptor-verify",
       "what": "the FFI descriptor verify line, which needs the darwin run",
       "owner": "gustavo"
