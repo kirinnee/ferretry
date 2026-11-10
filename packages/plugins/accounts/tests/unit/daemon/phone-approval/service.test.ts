@@ -504,3 +504,94 @@ describe('a refused or expired approval can never be approved afterwards, and a 
     should(w.seen(view.id).state).equal('timed-out');
   });
 });
+
+describe('waiting on an approval, and a watch that cannot look', () => {
+  it('should hold the ferret’s wait until the approval ends, and end it the moment it does', async () => {
+    const w = await phoneWorld();
+    const view = await w.raiseBrowser();
+
+    const waiting = w.service.agentView(FERRET, view.id, 60_000);
+    await w.time.settle();
+    await w.service.refuse(OWNER, FERRET, view.id);
+
+    should((await waiting).state).equal('refused');
+  });
+
+  it('should answer a wait that runs out with where the approval stands, and a settled one at once', async () => {
+    const w = await phoneWorld();
+    const view = await w.raiseBrowser(FERRET, { waitSeconds: 30 });
+
+    const waiting = w.service.agentView(FERRET, view.id, 10_000);
+    await w.time.advance(10_000);
+    const patient = w.service.agentView(FERRET, view.id, 3_600_000);
+    await w.time.advance(21_000);
+
+    should((await waiting).state).equal('waiting');
+    should((await patient).state).equal('timed-out');
+    should((await w.service.agentView(FERRET, view.id, 3_600_000)).state).equal('timed-out');
+  });
+
+  it('should end a page approval whose page cannot be looked at, as the page being gone', async () => {
+    const w = await phoneWorld();
+    const view = await w.raiseBrowser();
+    w.state.lookFails = true;
+
+    await w.time.advance(1_000);
+
+    should(w.seen(view.id).state).equal('gone');
+    should(w.clears).eql([{ ferret: FERRET, id: view.id }]);
+  });
+
+  it('should keep watching after a check that throws, one second later, and still read the new document', async () => {
+    const w = await phoneWorld();
+    const view = await w.raiseBrowser();
+    let broken = true;
+    w.state.steered = () => {
+      if (broken) throw new Error('the observer is restarting');
+      return false;
+    };
+    w.state.page = { pageId: 'p1', read: oktaRead('77', 'doc-2') };
+
+    await w.time.advance(1_000);
+    should(w.seen(view.id).number?.value).equal('42');
+    broken = false;
+    await w.time.advance(2_000);
+
+    should(w.seen(view.id).state).equal('waiting');
+    should(w.seen(view.id).number?.value).equal('77');
+  });
+
+  it('should keep watching through a terminal look that fails and still see the sign-in move on', async () => {
+    const w = await phoneWorld();
+    const view = await w.raiseTerminal();
+    w.state.observeFails = true;
+
+    await w.time.advance(3_000);
+    should(w.seen(view.id).state).equal('waiting');
+    w.state.observeFails = false;
+    w.state.terminal = terminalSeen('b'.repeat(64));
+    await w.time.advance(2_000);
+
+    should(w.seen(view.id).state).equal('moved-on');
+  });
+
+  it('should end a terminal approval when its pane closes or is another pane, and keep waiting where it cannot tell', async () => {
+    const closed = await phoneWorld();
+    const first = await closed.raiseTerminal();
+    closed.state.terminal = { ok: false, reason: 'target_gone' };
+    await closed.time.advance(1_000);
+    should(closed.seen(first.id).state).equal('gone');
+
+    const renamed = await phoneWorld();
+    const second = await renamed.raiseTerminal();
+    renamed.state.terminal = { ...terminalSeen(), names: ['%9'] } as never;
+    await renamed.time.advance(1_000);
+    should(renamed.seen(second.id).state).equal('gone');
+
+    const unsure = await phoneWorld();
+    const third = await unsure.raiseTerminal();
+    unsure.state.terminal = { ok: false, reason: 'unsupported' };
+    await unsure.time.advance(3_000);
+    should(unsure.seen(third.id).state).equal('waiting');
+  });
+});

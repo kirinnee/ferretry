@@ -113,6 +113,8 @@ export async function phoneWorld(options: WorldOptions = {}) {
     pushFails: false,
     clearFails: false,
     auditFails: false,
+    lookFails: false,
+    observeFails: false,
   };
   const looked: unknown[][] = [];
   const cards: { ferret: string; card: Record<string, string> }[] = [];
@@ -127,10 +129,16 @@ export async function phoneWorld(options: WorldOptions = {}) {
     pages: {
       look: async (...args) => {
         looked.push(args);
+        if (state.lookFails && looked.length > 1) throw new Error('the browser is busy');
         return state.page;
       },
     },
-    terminals: { observe: async () => state.terminal },
+    terminals: {
+      observe: async () => {
+        if (state.observeFails) throw new Error('tmux is busy');
+        return state.terminal;
+      },
+    },
     asks: {
       raise: async (ferret, card) => {
         if (state.cardFails !== undefined) return { ok: false, message: state.cardFails };
