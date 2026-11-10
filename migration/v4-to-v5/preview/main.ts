@@ -1,5 +1,5 @@
 /**
- * bun migration/v4-to-v5/preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|wait-serving|booting|terminal-check|proof|clean|stop> [--v4 <home>] [--target <home>]
+ * bun migration/v4-to-v5/preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|wait-serving|booting|terminal-check|credential-check|proof|clean|stop> [--v4 <home>] [--target <home>]
  *
  * `guard` prints the resolved preview home after refusing one that could reach v4. `dry-run` touches nothing.
  * `start-checks` asks the host two read-only questions with the preview's exact environments and exits non-zero when either
@@ -8,7 +8,7 @@
  * marked preview home. `stop` SIGTERMs the process that holds the preview home's daemon lock. Nothing here starts a
  * daemon, a service or a terminal.
  */
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -18,12 +18,13 @@ import { cleanPreview, dryRun, PREVIEW_PROGRAMS, prepare, proofNow, shimText, wr
 import { guardTarget } from './paths.ts';
 import { PREVIEW } from './plan.ts';
 import { realRun } from './real-run.ts';
+import { credentialCheck, readDaemonEnviron, type Inspected } from './credential-check.ts';
 import { startChecks, terminalCheck } from './start-checks.ts';
 import { lockFileOf, pidsHolding, stopPreview } from './stop.ts';
 import { previewBooting, waitServing } from './wait-serving.ts';
 
 const USAGE =
-  'usage: bun preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|wait-serving|booting|terminal-check|proof|clean|stop> [--v4 <v4 home>] [--target <preview home>]';
+  'usage: bun preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|wait-serving|booting|terminal-check|credential-check|proof|clean|stop> [--v4 <v4 home>] [--target <preview home>]';
 
 async function main(argv: readonly string[]): Promise<number> {
   let parsed: ReturnType<
@@ -152,6 +153,42 @@ async function main(argv: readonly string[]): Promise<number> {
       for (const line of done.problems) console.error(line);
       return done.ok ? 0 : 1;
     }
+    case 'credential-check': {
+      // The kernel's own rule for what a child of the daemon gets (it is not exported from the package).
+      const kernelProcess = new URL('../../../packages/core/kernel/host/adapters/process.ts', import.meta.url).pathname;
+      const { childEnvironment } = (await import(kernelProcess)) as {
+        childEnvironment: (
+          program: string,
+          base: Record<string, string>,
+          tools: Record<string, string>,
+          extra: Record<string, string>,
+        ) => Record<string, string>;
+      };
+      const done = await credentialCheck({
+        target,
+        childEnvironment: (program, base) => childEnvironment(program, { ...base }, {}, {}),
+        callerEnv: process.env,
+        run: realRun,
+        daemonEnviron: () =>
+          readDaemonEnviron(lockFileOf(target), {
+            holders: pidsHolding,
+            environOf: pid => readFile(`/proc/${String(pid)}/environ`, 'utf8').catch(() => undefined),
+          }),
+        inspect: async (path): Promise<Inspected | undefined> => {
+          const seen = await stat(path).catch(() => undefined);
+          if (seen === undefined) return undefined;
+          return {
+            kind: seen.isDirectory() ? 'dir' : seen.isFile() ? 'file' : 'other',
+            mode: seen.mode & 0o777,
+            size: seen.size,
+            entries: seen.isDirectory() ? (await readdir(path)).length : 0,
+          };
+        },
+      });
+      for (const line of done.passed) console.log(`ok: ${line}`);
+      for (const line of done.problems) console.error(line);
+      return done.ok ? 0 : 1;
+    }
     case 'proof':
       try {
         const verdict = await proofNow(v4Home, target);
@@ -182,6 +219,7 @@ async function main(argv: readonly string[]): Promise<number> {
         holders: pidsHolding,
         kill: (pid, signal) => process.kill(pid, signal),
         sleep: ms => Bun.sleep(ms),
+        remove: path => rm(path, { recursive: true, force: true }),
       });
       console.log(done.said);
       return done.stopped ? 0 : 1;

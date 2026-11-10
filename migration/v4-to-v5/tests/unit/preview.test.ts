@@ -827,7 +827,8 @@ describe('the fy5 wrapper (M1, M4)', () => {
     await writeFile(probe, '#!/bin/sh\nprintf "path:%s\\n" "$PATH"\ncommand -v fy\n', { mode: 0o755 });
     const out = run(['x'], { PATH: `${v4Bin}:/usr/bin:${wt}/sub:/bin`, HOME: '/h' }).stdout.toString();
     const path = /^path:(.*)$/mu.exec(out)?.[1] ?? '';
-    expect(path.split(':')[0]).toBe(`${home}/bin`);
+    // The ssh shim folder is first of all, then the preview's own bin.
+    expect(path.split(':').slice(0, 2)).toEqual([`${home}/${PREVIEW.noCredsFolder}/bin`, `${home}/bin`]);
     expect(path).not.toContain(v4Bin);
     expect(path).not.toContain(wt);
     expect(path).toContain('/usr/bin');
@@ -866,6 +867,7 @@ describe('stopping the preview by pid proven to hold its lock (M4)', () => {
         held = [];
       },
       sleep: async () => {},
+      remove: async () => {},
     });
     expect(sent).toEqual([321]);
     expect(done.stopped).toBe(true);
@@ -878,6 +880,7 @@ describe('stopping the preview by pid proven to hold its lock (M4)', () => {
       holders: async () => [],
       kill: pid => void sent.push(pid),
       sleep: async () => {},
+      remove: async () => {},
     });
     expect(sent).toEqual([]);
     expect(done.said).toContain('not running');
@@ -889,6 +892,7 @@ describe('stopping the preview by pid proven to hold its lock (M4)', () => {
       holders: async () => [9],
       kill: (pid, signal) => void sent.push(`${signal}:${pid}`),
       sleep: async () => {},
+      remove: async () => {},
       attempts: 2,
     });
     expect(sent).toEqual(['SIGTERM:9']);
