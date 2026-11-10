@@ -395,6 +395,12 @@ export class WebRtcDialer {
     return await this.#carriers.get(daemonId)?.rttMs();
   }
 
+  /** Close this daemon's connection: it was unpaired or re-paired, or the person chose a carrier without WebRTC. */
+  release(daemonId: string): void {
+    const carrier = this.#carriers.get(daemonId);
+    if (carrier !== undefined) this.#forget(daemonId, carrier);
+  }
+
   /** Drop every connection: the network changed, and a path found on the old one is not worth trusting. */
   networkChanged(): void {
     for (const [daemonId, carrier] of [...this.#carriers]) this.#forget(daemonId, carrier);

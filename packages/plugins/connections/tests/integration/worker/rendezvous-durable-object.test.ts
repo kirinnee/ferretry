@@ -202,7 +202,7 @@ describe('rendezvous durable object', () => {
     should(sessionId.text).not.equal(RENDEZVOUS_SESSION_ID.text);
   });
 
-  it('should carry a record between two sockets without decoding it', async () => {
+  guarantee(['R120'], 'should carry a record between two sockets without decoding it', async () => {
     const harness = makeObject();
     const { identity, daemonSocket } = await claimRendezvous(harness);
     daemonSocket.drain();
@@ -329,7 +329,7 @@ describe('rendezvous durable object', () => {
     should(daemonSocket.closed).be.null();
   });
 
-  it('should refuse to mint a session identifier of the wrong width', async () => {
+  guarantee(['R61'], 'should refuse to mint a session identifier of the wrong width', async () => {
     const harness = makeObject({
       crypto: stubbedCrypto({ randomBytes: length => new Uint8Array(length === 16 ? 15 : length) }),
     });
@@ -407,7 +407,7 @@ describe('hosted rendezvous enforcement', () => {
     should(harness.objectState.sockets).deepEqual([]);
   });
 
-  it('should meter only opaque bytes the state machine will actually forward', async () => {
+  guarantee(['R120'], 'should meter only opaque bytes the state machine will actually forward', async () => {
     const hosted = hostedEnvironment();
     const harness = makeObject({}, hosted.environment);
     const { identity, daemonSocket } = await claimRendezvous(harness, 'daemon_reservation');
@@ -574,9 +574,12 @@ describe('hosted rendezvous enforcement', () => {
   guarantee(['R55'], 'should answer a claim probe without reporting it to the hosted meter', async () => {
     const hosted = hostedEnvironment();
     const harness = makeObject({}, hosted.environment);
-    const { daemonSocket } = await claimRendezvous(harness, 'daemon_reservation', '?features=claim-probe');
+    const { identity, daemonSocket } = await claimRendezvous(harness, 'daemon_reservation', '?features=claim-probe');
+    // A phone is already joined: a probe is hop-by-hop, so it must never reach it.
+    const { clientSocket } = await joinClient(harness, identity.daemonId, 'client_reservation');
     await harness.object.metered();
     daemonSocket.drain();
+    clientSocket.drain();
     hosted.calls.length = 0;
 
     await harness.object.webSocketMessage(
@@ -590,7 +593,9 @@ describe('hosted rendezvous enforcement', () => {
     );
     await harness.object.metered();
 
+    // Answered on the same hop it came from, forwarded nowhere, metered never.
     should(daemonSocket.drain().map(controlOf)).deepEqual([{ t: 'held' }]);
+    should(clientSocket.drain()).deepEqual([]);
     should(hosted.calls.filter(call => call.path === '/internal/meter')).be.empty();
   });
 
@@ -1098,21 +1103,25 @@ describe('rendezvous durable object: a claim the stored state lost', () => {
     should(second.daemonSocket.deserializeAttachment()).match({ claim: { handover: claimed.handover } });
   });
 
-  it('should refuse a claim with no token or a wrong one with 4409 and leave the holder alone', async () => {
-    const harness = makeObject();
-    const first = await claimRendezvous(harness, undefined, handing);
-    first.daemonSocket.drain();
+  guarantee(
+    ['R98'],
+    'should refuse a claim with no token or a wrong one with 4409 and leave the holder alone',
+    async () => {
+      const harness = makeObject();
+      const first = await claimRendezvous(harness, undefined, handing);
+      first.daemonSocket.drain();
 
-    for (const replaces of [undefined, 'Z'.repeat(43)]) {
-      const rival = await claimRendezvous(harness, undefined, handing, {
-        identity: first.identity,
-        ...(replaces === undefined ? {} : { replaces }),
-      });
-      should(rival.daemonSocket.closed?.code).equal(SESSION_CLOSE_CODES.rendezvousClaimed);
-    }
-    should(first.daemonSocket.closed).be.null();
-    should(first.daemonSocket.deserializeAttachment()).match({ claim: {} });
-  });
+      for (const replaces of [undefined, 'Z'.repeat(43)]) {
+        const rival = await claimRendezvous(harness, undefined, handing, {
+          identity: first.identity,
+          ...(replaces === undefined ? {} : { replaces }),
+        });
+        should(rival.daemonSocket.closed?.code).equal(SESSION_CLOSE_CODES.rendezvousClaimed);
+      }
+      should(first.daemonSocket.closed).be.null();
+      should(first.daemonSocket.deserializeAttachment()).match({ claim: {} });
+    },
+  );
 
   it('should keep the token across a forgotten claim, so the restored holder can still be superseded', async () => {
     const harness = makeObject();
@@ -1151,32 +1160,36 @@ describe('rendezvous durable object: a claim the stored state lost', () => {
     },
   );
 
-  it('should serve the phone without a daemon restart when the claim is lost but the socket is not', async () => {
-    // 2026-10-19: daemon connected at 02:30:38, fy-pong kept arriving, and every phone from 02:38 to the
-    // restart at 02:46 was told 4404 — the stored state had stopped naming a socket the runtime still held.
-    const harness = makeObject();
-    const { identity, daemonSocket } = await claimRendezvous(harness, undefined, probing);
-    daemonSocket.drain();
-    forgetTheClaim(harness);
-    const warned: unknown[] = [];
-    const warn = console.warn;
-    console.warn = (...line: unknown[]) => warned.push(line);
-    let joined: Awaited<ReturnType<typeof joinClient>>;
-    try {
-      joined = await joinClient(evict(harness), identity.daemonId);
-    } finally {
-      console.warn = warn;
-    }
+  guarantee(
+    ['R105'],
+    'should serve the phone without a daemon restart when the claim is lost but the socket is not',
+    async () => {
+      // 2026-10-19: daemon connected at 02:30:38, fy-pong kept arriving, and every phone from 02:38 to the
+      // restart at 02:46 was told 4404 — the stored state had stopped naming a socket the runtime still held.
+      const harness = makeObject();
+      const { identity, daemonSocket } = await claimRendezvous(harness, undefined, probing);
+      daemonSocket.drain();
+      forgetTheClaim(harness);
+      const warned: unknown[] = [];
+      const warn = console.warn;
+      console.warn = (...line: unknown[]) => warned.push(line);
+      let joined: Awaited<ReturnType<typeof joinClient>>;
+      try {
+        joined = await joinClient(evict(harness), identity.daemonId);
+      } finally {
+        console.warn = warn;
+      }
 
-    should(joined.ready).match({ t: 'ready' });
-    should(joined.clientSocket.closed).be.null();
-    should(controlOf(daemonSocket.drain()[0])).match({ t: 'open' });
-    should(daemonSocket.closed).be.null();
-    should(harness.objectState.storage.values.get('rendezvous')).match({
-      daemon: { socketId: (daemonSocket.deserializeAttachment() as { socketId: string }).socketId, restored: true },
-    });
-    should(warned).have.length(1);
-  });
+      should(joined.ready).match({ t: 'ready' });
+      should(joined.clientSocket.closed).be.null();
+      should(controlOf(daemonSocket.drain()[0])).match({ t: 'open' });
+      should(daemonSocket.closed).be.null();
+      should(harness.objectState.storage.values.get('rendezvous')).match({
+        daemon: { socketId: (daemonSocket.deserializeAttachment() as { socketId: string }).socketId, restored: true },
+      });
+      should(warned).have.length(1);
+    },
+  );
 
   it('should answer the holder probe from its own state, after an eviction too', async () => {
     const harness = makeObject();
@@ -1202,25 +1215,29 @@ describe('rendezvous durable object: a claim the stored state lost', () => {
     should(daemonSocket.closed?.code).equal(SESSION_CLOSE_CODES.claimLost);
   });
 
-  it('should refuse a claimed socket the slot does not name with 4410, and never restore it after', async () => {
-    const harness = makeObject();
-    const { identity, daemonSocket } = await claimRendezvous(harness, undefined, probing);
-    daemonSocket.drain();
-    const other = new FakeSocket();
-    other.serializeAttachment({ socketId: 'other', claim: {} });
-    harness.objectState.sockets.push(other);
-    const stored = harness.objectState.storage.values.get('rendezvous') as RendezvousState;
-    harness.objectState.storage.values.set('rendezvous', { ...stored, daemon: { socketId: 'other', since: 1 } });
+  guarantee(
+    ['R106'],
+    'should refuse a claimed socket the slot does not name with 4410, and never restore it after',
+    async () => {
+      const harness = makeObject();
+      const { identity, daemonSocket } = await claimRendezvous(harness, undefined, probing);
+      daemonSocket.drain();
+      const other = new FakeSocket();
+      other.serializeAttachment({ socketId: 'other', claim: {} });
+      harness.objectState.sockets.push(other);
+      const stored = harness.objectState.storage.values.get('rendezvous') as RendezvousState;
+      harness.objectState.storage.values.set('rendezvous', { ...stored, daemon: { socketId: 'other', since: 1 } });
 
-    await harness.object.alarm();
-    should(daemonSocket.closed?.code).equal(SESSION_CLOSE_CODES.claimLost);
-    should(daemonSocket.deserializeAttachment()).not.have.property('claim');
+      await harness.object.alarm();
+      should(daemonSocket.closed?.code).equal(SESSION_CLOSE_CODES.claimLost);
+      should(daemonSocket.deserializeAttachment()).not.have.property('claim');
 
-    // The slot's holder goes too. The refused socket is still listed, but it carries no claim any more.
-    harness.objectState.sockets.splice(harness.objectState.sockets.indexOf(other), 1);
-    await harness.object.fetch(socketRequest(identity.daemonId, 'client'));
-    should(harness.objectState.sockets.at(-1)?.closed?.code).equal(SESSION_CLOSE_CODES.daemonAbsent);
-  });
+      // The slot's holder goes too. The refused socket is still listed, but it carries no claim any more.
+      harness.objectState.sockets.splice(harness.objectState.sockets.indexOf(other), 1);
+      await harness.object.fetch(socketRequest(identity.daemonId, 'client'));
+      should(harness.objectState.sockets.at(-1)?.closed?.code).equal(SESSION_CLOSE_CODES.daemonAbsent);
+    },
+  );
 
   it('should not restore a daemon whose socket reported an error or that the sweep evicted', async () => {
     const errored = makeObject();

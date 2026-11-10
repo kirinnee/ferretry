@@ -58,6 +58,10 @@ const hid = (shown: string): CommandWord => ({ shown, hidden: true });
 const asShown = (words: readonly CommandWord[]) =>
   words.map(word => (typeof word === 'string' ? { value: word } : { value: word.shown, hidden: true as const }));
 
+// Every generated shape, not a timing claim: CI measured 5.19 s (run 42805644732) for the generated-shape case and 4.13 s
+// for the Resolved view case, under --coverage, against bun's 5 s default. 30 s leaves room; the work is linear.
+const EXHAUSTIVE_MS = 30_000;
+
 describe('componentDetail — a credential in a launch flag or MCP argument (R-0082, ruling #39)', () => {
   it('R-0082 should hide the value of a secret-named flag in every #37 form and keep the flag: --flag=v, --flag v, -k=v', () => {
     // Act
@@ -169,18 +173,22 @@ describe('componentDetail — a credential nested inside a value (R-0082, ruling
 
   const cases = nestedFamily();
 
-  it(`R-0082 should hide every nested secret of every generated shape (${String(cases.length)} shapes) in flags and arguments, and touch no control`, () => {
-    // Act
-    const breaches = cases.flatMap(family => {
-      const flag = nestedBreach(family, asShown(flagsOf(family.words)));
-      const arg = nestedBreach(family, asShown(argsOf(family.words)));
-      return [flag, arg].filter(breach => breach !== undefined);
-    });
+  it(
+    `R-0082 should hide every nested secret of every generated shape (${String(cases.length)} shapes) in flags and arguments, and touch no control`,
+    () => {
+      // Act
+      const breaches = cases.flatMap(family => {
+        const flag = nestedBreach(family, asShown(flagsOf(family.words)));
+        const arg = nestedBreach(family, asShown(argsOf(family.words)));
+        return [flag, arg].filter(breach => breach !== undefined);
+      });
 
-    // Assert
-    should(cases.filter(family => family.secret).length).be.above(1000);
-    should(breaches).deepEqual([]);
-  });
+      // Assert
+      should(cases.filter(family => family.secret).length).be.above(1000);
+      should(breaches).deepEqual([]);
+    },
+    EXHAUSTIVE_MS,
+  );
 });
 
 describe('componentDetail — the #40 rule after review r1 (R-0082, F2, F3)', () => {
@@ -322,30 +330,34 @@ describe('componentDetail — the #40 rule after review r3 (R-0082, N1)', () => 
 });
 
 describe('componentDetail — one rule with the Resolved view (rulings #39, #40)', () => {
-  it('R-0082 should show every launch flag word for word as the Resolved view does (the #37 and #40 families)', () => {
-    // Arrange
-    const lines = [
-      ...nestedFamily().map(family => family.words),
-      ['--token', FAKE_SECRET, `--header=Bearer ${FAKE_GH}`, `-H${FAKE_TOKEN}`, '--model', 'x'],
-    ];
+  it(
+    'R-0082 should show every launch flag word for word as the Resolved view does (the #37 and #40 families)',
+    () => {
+      // Arrange
+      const lines = [
+        ...nestedFamily().map(family => family.words),
+        ['--token', FAKE_SECRET, `--header=Bearer ${FAKE_GH}`, `-H${FAKE_TOKEN}`, '--model', 'x'],
+      ];
 
-    // Act
-    const differs = lines.filter(words => {
-      const model = parseAccountModel({
-        version: 1,
-        components: { settings: { base: { harness: 'claude', flags: [...words] } } },
-        profiles: { p: { layers: ['settings/base'] } },
+      // Act
+      const differs = lines.filter(words => {
+        const model = parseAccountModel({
+          version: 1,
+          components: { settings: { base: { harness: 'claude', flags: [...words] } } },
+          profiles: { p: { layers: ['settings/base'] } },
+        });
+        const result = resolveProfile({ model, profile: 'p', harness: 'claude' });
+        if (!result.ok) throw new Error('expected a resolution');
+        const preview = resolvedEntries(result.resolved)
+          .filter(entry => entry.field === 'flags')
+          .map(entry => (entry.hidden === true ? { value: entry.value, hidden: true } : { value: entry.value }));
+        return JSON.stringify(preview) !== JSON.stringify(asShown(flagsOf(words)));
       });
-      const result = resolveProfile({ model, profile: 'p', harness: 'claude' });
-      if (!result.ok) throw new Error('expected a resolution');
-      const preview = resolvedEntries(result.resolved)
-        .filter(entry => entry.field === 'flags')
-        .map(entry => (entry.hidden === true ? { value: entry.value, hidden: true } : { value: entry.value }));
-      return JSON.stringify(preview) !== JSON.stringify(asShown(flagsOf(words)));
-    });
 
-    // Assert
-    should(lines.length).be.above(1000);
-    should(differs.slice(0, 5)).deepEqual([]);
-  });
+      // Assert
+      should(lines.length).be.above(1000);
+      should(differs.slice(0, 5)).deepEqual([]);
+    },
+    EXHAUSTIVE_MS,
+  );
 });
