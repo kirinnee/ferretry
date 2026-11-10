@@ -1,11 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import type { FerretHarness, FerretsApi } from '@ferretry/core-ferrets/contract';
+import type { FerretHarness, FerretsApi, HarnessDeliveryFailure } from '@ferretry/core-ferrets/contract';
 import { ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { ApiError } from '@ferretry/kernel/contract';
 import { err, ok } from '@ferretry/std';
 import { Unconfirmed } from '../../../daemon/harness-seam.ts';
 import { harnessSendTerminal } from '../../../daemon/send-terminal.ts';
 import { SessionSendError } from '../../../daemon/delivery/lib/mounts/session-send.ts';
+import {
+  SendComposerOccupied,
+  SendComposerUnreadable,
+  SendLandingUnconfirmed,
+  SendPaneNotReady,
+} from '../../../daemon/delivery/lib/types.ts';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
 
 const ID = parseSessionId(ferretId('f1'));
@@ -114,10 +120,62 @@ describe('send path: the send terminal over the harness seam', () => {
       expect(await rejection(call())).toMatchObject({ status: 503, code: 'plugin_unavailable' });
   });
 
-  test('typing is not carried here: deliver and queue refuse before any key', async () => {
-    const terminal = harnessSendTerminal(seamOf({}));
-    expect(await rejection(terminal.deliver(ID, 'x'))).toMatchObject({ code: 'conversation_terminal_unavailable' });
-    expect(await rejection(terminal.queue(ID, 'x'))).toMatchObject({ code: 'conversation_terminal_unavailable' });
+  test('BG-052 the tracker’s retype: deliver types through the harness, and queue answers what the pane proved', async () => {
+    const typed: string[] = [];
+    const queued: string[] = [];
+    const outcome: { value: 'held' | 'left' | 'typed' } = { value: 'held' };
+    const terminal = harnessSendTerminal(
+      seamOf({
+        deliver: async delivery => {
+          typed.push(delivery.text);
+          return ok('turn-started');
+        },
+        queue: async text => {
+          queued.push(text);
+          return ok(outcome.value);
+        },
+      }),
+    );
+
+    await terminal.deliver(ID, 'FIXTURE again');
+    expect(typed).toEqual(['FIXTURE again']);
+    expect(await terminal.queue(ID, 'FIXTURE held')).toBe('held');
+    outcome.value = 'left';
+    expect(await terminal.queue(ID, 'FIXTURE left')).toBe('unproven');
+    outcome.value = 'typed';
+    expect(await rejection(terminal.queue(ID, 'FIXTURE stuck'))).toBeInstanceOf(SendLandingUnconfirmed);
+    expect(queued).toEqual(['FIXTURE held', 'FIXTURE left', 'FIXTURE stuck']);
+  });
+
+  test('BG-052 a retype that fails says what the send service reads: nothing typed (a refusal) or typed and not proven', async () => {
+    const failing = (failure: HarnessDeliveryFailure) =>
+      harnessSendTerminal(seamOf({ deliver: async () => err(failure), queue: async () => err(failure) }));
+    const cases: readonly [HarnessDeliveryFailure, new (...args: never[]) => Error][] = [
+      [{ unconfirmed: true, stranded: false }, SendLandingUnconfirmed],
+      [{ unconfirmed: true, stranded: true }, SendLandingUnconfirmed],
+      [{ refused: 'composer_occupied', draft: 'FIXTURE draft' }, SendComposerOccupied],
+      [{ refused: 'composer_unreadable' }, SendComposerUnreadable],
+      [{ refused: 'not_ready', why: 'busy' }, SendPaneNotReady],
+    ];
+    for (const [failure, kind] of cases) {
+      expect(await rejection(failing(failure).deliver(ID, 'x'))).toBeInstanceOf(kind);
+      expect(await rejection(failing(failure).queue(ID, 'x'))).toBeInstanceOf(kind);
+    }
+    expect(
+      await rejection(failing({ refused: 'composer_occupied', draft: 'FIXTURE draft' }).deliver(ID, 'x')),
+    ).toMatchObject({ draft: 'FIXTURE draft' });
+    expect(await rejection(failing({ refused: 'not_ready', why: 'dialog' }).deliver(ID, 'x'))).toMatchObject({
+      why: 'dialog',
+    });
+    // Any other refusal is the seam's own answer (a hold, a runner that is off).
+    expect(await rejection(failing({ refused: 'input_pending' }).deliver(ID, 'x'))).toMatchObject({
+      status: 409,
+      code: 'input_pending',
+    });
+    expect(await rejection(failing({ refused: 'plugin_unavailable' }).queue(ID, 'x'))).toMatchObject({
+      status: 503,
+      code: 'plugin_unavailable',
+    });
   });
 
   test('an unknown ferret is 404 and a Ferrets with no seam is plugin_unavailable', async () => {

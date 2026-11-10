@@ -1,20 +1,25 @@
-import type { FerretHarness, FerretsApi, RunnerPaneObservation } from '@ferretry/core-ferrets/contract';
+import type {
+  FerretHarness,
+  FerretsApi,
+  HarnessDeliveryFailure,
+  RunnerPaneObservation,
+} from '@ferretry/core-ferrets/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { SessionSendError } from './delivery/lib/mounts/session-send.ts';
-import type {
-  ComposerClearOutcome,
-  ComposerSubmitOutcome,
-  SendHeldAt,
-  SendPaneObservation,
-  SendQueueOutcome,
-  SendTerminal,
+import {
+  type ComposerClearOutcome,
+  type ComposerSubmitOutcome,
+  SendComposerOccupied,
+  SendComposerUnreadable,
+  type SendHeldAt,
+  SendLandingUnconfirmed,
+  SendPaneNotReady,
+  type SendPaneObservation,
+  type SendQueueOutcome,
+  type SendTerminal,
 } from './delivery/lib/types.ts';
-import { deliveryAnswer, refusalAnswer } from './harness-seam.ts';
+import { deliveryAnswer, refusalAnswer, STRANDED_SENTENCE, UNCONFIRMED_SENTENCE } from './harness-seam.ts';
 import { tryParseSessionId } from './seams/ferret-id.ts';
-
-/** Said by the send path's typing members, which the host's own typing still carries. */
-const TYPING_NOT_HERE =
-  "Typing a message is carried by Conversation's send, not by this look at the ferret's terminal, so it was not typed here.";
 
 /** Said when the ferret's terminal cannot be read at all. */
 const NO_PANE_TO_READ = (ferret: string): string =>
@@ -52,8 +57,20 @@ export function harnessSendTerminal(ferrets: Pick<FerretsApi, 'harness'>): SendT
   const off = (): never => {
     throw new ApiError(503, "the runner that owns this ferret's terminal cannot do that", 'plugin_unavailable');
   };
-  const unwired = (): never => {
-    throw new ApiError(503, TYPING_NOT_HERE, 'conversation_terminal_unavailable');
+  /** A failed typing, as the send service reads it: nothing typed (a refusal) or typed and not proven. */
+  const typingFailure = (ferret: string, failure: HarnessDeliveryFailure): Error => {
+    if ('unconfirmed' in failure)
+      return new SendLandingUnconfirmed(failure.stranded ? STRANDED_SENTENCE : UNCONFIRMED_SENTENCE);
+    switch (failure.refused) {
+      case 'composer_occupied':
+        return new SendComposerOccupied(failure.draft);
+      case 'composer_unreadable':
+        return new SendComposerUnreadable();
+      case 'not_ready':
+        return new SendPaneNotReady(`the agent never came to a prompt (${failure.why})`, failure.why);
+      default:
+        return deliveryAnswer(ferret, failure);
+    }
   };
   return {
     observe: async ferret => {
@@ -65,8 +82,20 @@ export function harnessSendTerminal(ferrets: Pick<FerretsApi, 'harness'>): SendT
       if (seen.error.refused === 'no_pane') return ABSENT;
       throw refusalAnswer(seen.error, NO_PANE_TO_READ(ferret));
     },
-    deliver: async () => unwired(),
-    queue: async (): Promise<SendQueueOutcome> => unwired(),
+    // THE TRACKER'S RETYPE (a send proven absent is typed again under its own id): the same two harness acts a first send
+    // makes, with the failures the send service reads (`SendPaneNotReady`, `SendComposerOccupied`, …). A first send is
+    // `typeMessage`'s, with its own answers; these two are reached only through `SessionSendService.reattempt`.
+    deliver: async (ferret, text) => {
+      const delivered = await (await open(ferret)).deliver({ text });
+      if (!delivered.ok) throw typingFailure(ferret, delivered.error);
+    },
+    queue: async (ferret, text): Promise<SendQueueOutcome> => {
+      const queued = await (await open(ferret)).queue(text);
+      if (!queued.ok) throw typingFailure(ferret, queued.error);
+      // Still in the composer after the submit and queue keys: the TUI will not send it at the turn's end by itself.
+      if (queued.value === 'typed') throw new SendLandingUnconfirmed(STRANDED_SENTENCE);
+      return queued.value === 'held' ? 'held' : 'unproven';
+    },
     stopActiveTurn: async ferret => {
       const stopped = await (await open(ferret)).stopActive?.();
       if (stopped === undefined) return off();
