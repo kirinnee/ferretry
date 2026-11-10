@@ -6,7 +6,7 @@ import type { SecretPutGateway } from './secret-controller.ts';
 export type SecretApiClient = Pick<PluginClient, 'call'>;
 
 /** The manifest's route key for storing or replacing a secret. */
-export const PUT_SECRET_ROUTE = 'POST /v1/secrets';
+const PUT_SECRET_ROUTE = 'POST /v1/secrets';
 
 /**
  * Speaks the one secret route `fy secret set` needs, through the plugin client. Both directions are parsed rather than

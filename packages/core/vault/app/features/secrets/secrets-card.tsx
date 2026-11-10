@@ -28,7 +28,7 @@ export interface SecretsCardProps {
 
 /** Why a draft cannot be saved yet, or nothing. Kept beside the form so the button's disabled state and the message a
  *  person reads can never disagree. */
-export function secretDraftProblem(name: string, value: string, held: readonly string[]): string | undefined {
+function secretDraftProblem(name: string, value: string, held: readonly string[]): string | undefined {
   const trimmed = name.trim();
   if (trimmed === '' || value === '') return undefined;
   if (!SecretNameSchema.safeParse(trimmed).success)

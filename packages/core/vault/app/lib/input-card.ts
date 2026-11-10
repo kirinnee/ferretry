@@ -60,7 +60,7 @@ export const targetRef = (request: InputRequestView): string =>
     ? `the secret ${request.target.key}`
     : `%${request.target.kind === 'page' ? 'browser' : 'terminal'}:${request.target.key}`;
 
-export const REOBSERVING = 'Ferretry is looking at the target again';
+const REOBSERVING = 'Ferretry is looking at the target again';
 
 /** Why Send is off right now, or `undefined`. The RISK never appears here: it flags, it does not refuse. */
 export const sendBlock = (request: InputRequestView, now: number): string | undefined => {
@@ -112,7 +112,7 @@ export const fieldAttributes = (sensitivity: Sensitivity, revealed: boolean): Fi
 /** Whether a field hides what is typed behind a Show toggle: not a plain value, and not a one-time code. */
 export const revealable = (sensitivity: Sensitivity): boolean => sensitivity === 'secret' || sensitivity === 'private';
 
-export const PLAIN_NOTICE = 'Not secret: the ferret can see this value.';
+const PLAIN_NOTICE = 'Not secret: the ferret can see this value.';
 
 /** The red flag drawn beside a PLAIN field: the daemon's own sentence when it gave one. */
 export const plainFlagWords = (field: InputCardField): string => field.risk?.reason ?? PLAIN_NOTICE;

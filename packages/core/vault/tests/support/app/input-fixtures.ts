@@ -3,7 +3,6 @@ import type { InputRequestView } from '../../../app/lib/input-wire.ts';
 
 /** Obvious fakes: the only secret-shaped strings any test here uses. */
 export const FAKE_VALUE = 'fake-secret-000';
-export const FAKE_OTHER = 'fake-secret-111';
 
 export const REQUEST_ID = 'a'.repeat(32);
 const DIGEST = 'b'.repeat(64);

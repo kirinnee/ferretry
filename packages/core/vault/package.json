@@ -23,11 +23,11 @@
     "@ferretry/core-asks": "workspace:*",
     "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
-    "react": "^19.0.0",
-    "@ferretry/app": "workspace:*"
+    "react": "^19.0.0"
   },
   "sideEffects": false,
   "devDependencies": {
-    "@types/react": "^19.0.0"
+    "@types/react": "^19.0.0",
+    "@ferretry/app": "workspace:*"
   }
 }
