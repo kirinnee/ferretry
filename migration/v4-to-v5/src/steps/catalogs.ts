@@ -187,6 +187,10 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
     why: 'v5 Catalogs declares no file for them; they only changed what a reader said, never acted, and an install stays at its pin either way (a skipped version is offered again)',
   },
   {
+    what: 'local skill copies (state/local-skill-installs.json)',
+    why: 'v5 has no local skill copy (owner decision !A466); the file is not carried and never read',
+  },
+  {
     what: 'the link store’s copy of each public link',
     why: 'remote (the Cloudflare link-store Worker), not in the home; the daemon identity is carried, so the store still knows its owner',
   },
