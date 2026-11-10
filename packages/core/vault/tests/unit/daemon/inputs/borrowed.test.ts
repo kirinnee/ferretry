@@ -32,7 +32,7 @@ const KEY = (id: string, over: Record<string, unknown> = {}): TwoFactorKeySummar
   }) as TwoFactorKeySummary;
 
 describe('the order a code card offers its keys in', () => {
-  it('should offer a key that worked first, then one never tried, then one that failed, newest first within each', () => {
+  it('I171 should offer a key that worked first, then one never tried, then one that failed, newest first within each', () => {
     const keys = [
       KEY('tf_0000000000f1', { verified: { worked: false, at: '2026-10-02T00:00:00.000Z' } }),
       KEY('tf_0000000000n1', { addedAt: '2026-10-01T00:00:00.000Z' }),
