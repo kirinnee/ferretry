@@ -17,7 +17,9 @@
  *   (`API_KEY=${secret:X} CLIENT_SECRET=v`), and so is a piece of it set apart from the pointer
  *   (`Authorization: v LOG_LEVEL=${secret:X}`, `KEY=v ${secret:X}`), and so is every part of it before the pointer
  *   that a space or `#` sets apart, however many `=` or `:` it holds (review r3 N1: `Basic <b64>== X=${secret:X}`,
- *   `user:<v> ${secret:X}`);
+ *   `user:<v> ${secret:X}`), and so is what follows the pointer, base64 padding included (review r4 B2:
+ *   `API_KEY=${secret:X} <b64>==`), and a secret-named FLAG's value is read the same way, a pointer on either side of
+ *   it (review r4 B1: `--token <v> ${secret:X}`, `--token` then `${secret:X} <v>`);
  * - the password of a URL's user (`scheme://user:PASS@host`), up to the LAST `@` before the host.
  *
  * Only the VALUE is replaced: the flag's own spelling, a nested key's name, a URL's user and host and every other
@@ -31,7 +33,10 @@
  * NOT handled (declared GAPs): a JSON document inside a flag (`--settings '{"env":{"API_KEY":"v"}}'`, its keys are
  * quoted), a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name), and a
  * value glued to a pointer with no space or `#` between them (`API_KEY=v${secret:X}`: it IS that pointer, as
- * `prefix${secret:X}` is).
+ * `prefix${secret:X}` is). Also GAPs, each the same text as a harmless one (review r4): `user:pass` AFTER a pointer
+ * (`API_KEY=${secret:X} person:<v>`, as `MODEL=gpt-4o-mini` is its own key, G5b); a quoted value of short words before
+ * a pointer (`API_KEY="my pass phrase" ${secret:X}`, G6); and text under a harmless bare key before a pointer
+ * (`Authorization: Basic X-Trace: <v> ${secret:X}`, G7: that key's own value).
  *
  * LINEAR in the word, however many keys share one value: where a value ends, whether it holds a pointer, and which of
  * its parts look like credentials, are read from tables built once per text ({@link valueEnds}).
@@ -45,6 +50,9 @@ import { sha256Hex } from '../foreign.ts';
 
 /** A word that is a flag on its own: one or two dashes and a name, with no value in it. */
 const FLAG_WORD = /^-{1,2}[A-Za-z0-9][^=\s]*$/u;
+
+/** A flag that is only a name: dashes, then letters, digits, `_`, `.` and `-`, with no separator in it. */
+const PLAIN_FLAG = /^-{1,2}[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
 
 /** A flag and its value in one word, glued by `=` or by spaces: `--token=v`, `-k=v`, `--token v`. */
 const GLUED_VALUE = /^(-{1,2}[A-Za-z0-9][^=\s]*)(=|\s+)([\s\S]*)$/u;
@@ -135,6 +143,11 @@ interface ValueEnds {
   readonly value: Int32Array;
   /** The same, or the start of the next key not between a pair of quotes, if that comes first: a value's first piece. */
   readonly piece: Int32Array;
+  /**
+   * The same as {@link piece}, but a key with no value of its own (`<b64>=` of `<b64>==`: its `=` is followed by a
+   * `=`, a part break or the end) ends nothing: the piece after a pointer (review r4 B2).
+   */
+  readonly tail: Int32Array;
   /** The end of the first well-formed pointer (`${secret:NAME}`) that starts at or after it; past the end when none. */
   readonly pointer: Int32Array;
   /** The start of that pointer; the text's end when none. */
@@ -160,12 +173,13 @@ interface ValueEnds {
 /**
  * {@link ValueEnds} of a text whose keys start at the keys of `keyStarts` (each with the place of its separator), built
  * right to left in one pass (shown ends, part starts and the parts that look like credentials left to right, and the
- * bare keys right to left again).
+ * bare keys right to left again). `emptyKeys` are the keys of `keyStarts` that have no value of their own.
  */
-function valueEnds(text: string, keyStarts: ReadonlyMap<number, number>): ValueEnds {
+function valueEnds(text: string, keyStarts: ReadonlyMap<number, number>, emptyKeys: ReadonlySet<number>): ValueEnds {
   const length = text.length;
   const value = new Int32Array(length + 1).fill(length);
   const piece = new Int32Array(length + 1).fill(length);
+  const tail = new Int32Array(length + 1).fill(length);
   const pointer = new Int32Array(length + 1).fill(length + 1);
   const pointerStart = new Int32Array(length + 1).fill(length);
   const close = new Int32Array(length + 3).fill(length);
@@ -192,21 +206,24 @@ function valueEnds(text: string, keyStarts: ReadonlyMap<number, number>): ValueE
     if (NESTED_VALUE_END.has(char)) {
       value[at] = at;
       piece[at] = at;
+      tail[at] = at;
     } else if (char === '"' || char === "'") {
       const match = char === '"' ? nextDouble : nextSingle;
       value[at] = match >= length ? length : (value[match + 1] as number);
       piece[at] = match >= length ? length : (piece[match + 1] as number);
+      tail[at] = match >= length ? length : (tail[match + 1] as number);
       if (char === '"') nextDouble = at;
       else nextSingle = at;
     } else {
       value[at] = value[at + 1] as number;
       piece[at] = keyStarts.has(at) ? at : (piece[at + 1] as number);
+      tail[at] = keyStarts.has(at) && !emptyKeys.has(at) ? at : (tail[at + 1] as number);
     }
   }
   for (let at = 0; at < length; at++)
     shownEnd[at + 1] = /\s/u.test(text[at] as string) ? (shownEnd[at] as number) : at + 1;
   const ends = {
-    ...{ value, piece, pointer, pointerStart, close, shownEnd },
+    ...{ value, piece, tail, pointer, pointerStart, close, shownEnd },
     ...{ partEnd, partStart, nameEnd, heldStart, heldEnd, bareKey },
   };
   let held: Cut | undefined;
@@ -261,6 +278,20 @@ function heldBeforePointer(text: string, ends: ValueEnds, start: number, end: nu
 }
 
 /**
+ * Where the cut of a secret-named key's value `[start, end)` with a pointer in it must reach for the parts AFTER the
+ * first pointer (review r4 B2): to the end of the text after it, up to the next key that has a value of its own
+ * ({@link ValueEnds.tail}), when any part of it looks like a credential. It is the piece {@link heldInPiece} judges,
+ * except that a key with no value (`<b64>=` of `<b64>==`) does not end it, so padding after a pointer is cut with the
+ * rest. A text with no such key has the same piece as the one `heldInPiece` already judged. `start` when none does.
+ */
+function heldAfterPointer(text: string, ends: ValueEnds, name: string, start: number, end: number): number {
+  const pointerEnd = ends.pointer[start] as number;
+  if (pointerEnd > end) return start;
+  const after = text.slice(pointerEnd, ends.tail[pointerEnd]).trimEnd();
+  return heldParts(name, after) ? pointerEnd + after.length : start;
+}
+
+/**
  * Whether a secret-named key's value `[start, end)` looks like a credential: `looksSecret` of it trimmed and unquoted,
  * as always. The answers a value many keys share would make slow are read from the tables first, and are the ones
  * `looksSecret` gives: a pointer in it, too short, or one `${…}` pointer and nothing else.
@@ -279,8 +310,31 @@ function heldAt(text: string, ends: ValueEnds, name: string, start: number, end:
  * `prefix${secret:X}`), and one too short to be a secret is none.
  */
 function heldInPiece(name: string, piece: string): boolean {
+  return looksSecret(name, unquoted(piece.trim())) || heldParts(name, piece);
+}
+
+/** Whether any part of a text that a space or `#` sets apart looks like a credential, each judged on its own. */
+const heldParts = (name: string, text: string): boolean =>
+  text.split(PART_BREAK).some(part => looksSecret(name, unquoted(part)));
+
+/** A quote mark: a closing one right after a padded `=` ends the value (`"Basic <b64>="`). */
+const QUOTE_MARKS = new Set(['"', "'", '`']);
+
+/**
+ * Whether a key's separator is followed by nothing that is a value: a `=` after a `=`, a part break, a value end
+ * (`,`, `;`, `&`) or the end of the text, or a quote mark that itself ends there. `<b64>==` reads as a key `<b64>=`
+ * and a stray `=`, and `FOO= bar` as an empty `FOO` (review r4 B2); `FOO="bar baz"` is a value.
+ */
+function emptyValueKey(text: string, key: RegExpExecArray): boolean {
+  const separator = key.index + key[0].search(/[:=]/u);
+  const endsAt = (at: number): boolean => {
+    const char = text[at];
+    return char === undefined || PART_BREAK_CHAR.test(char) || NESTED_VALUE_END.has(char);
+  };
+  const next = text[separator + 1];
   return (
-    looksSecret(name, unquoted(piece.trim())) || piece.split(PART_BREAK).some(part => looksSecret(name, unquoted(part)))
+    text[separator] === '=' &&
+    (endsAt(separator + 1) || next === '=' || (QUOTE_MARKS.has(next ?? '') && endsAt(separator + 2)))
   );
 }
 
@@ -296,7 +350,8 @@ function heldInPiece(name: string, piece: string): boolean {
 function nestedValueCuts(text: string): readonly Cut[] {
   const keys = matchesOf(NESTED_NAME, text);
   if (keys.length === 0) return [];
-  const ends = valueEnds(text, new Map(keys.map(key => [key.index, key.index + key[0].search(/[:=]/u)])));
+  const emptyKeys = new Set(keys.filter(key => emptyValueKey(text, key)).map(key => key.index));
+  const ends = valueEnds(text, new Map(keys.map(key => [key.index, key.index + key[0].search(/[:=]/u)])), emptyKeys);
   const cuts: Cut[] = [];
   let covered = 0;
   for (const key of keys) {
@@ -312,7 +367,11 @@ function nestedValueCuts(text: string): readonly Cut[] {
     }
     const piece = text.slice(start, ends.piece[start]).trimEnd();
     const pieceEnd = heldInPiece(name, piece) ? start + piece.length : start;
-    const to = Math.max(pieceEnd, heldBeforePointer(text, ends, start, end));
+    const to = Math.max(
+      pieceEnd,
+      heldBeforePointer(text, ends, start, end),
+      heldAfterPointer(text, ends, name, start, end),
+    );
     if (to === start) continue;
     cuts.push([start, to]);
     covered = Math.max(covered, to);
@@ -392,6 +451,22 @@ export interface ShownWord {
 const cutsAt = (offset: number, part: string): readonly Cut[] =>
   nestedCuts(part).map(([from, to]) => [from + offset, to + offset] as const);
 
+/**
+ * The cuts of a secret-named flag's value that starts `offset` characters into a word, when the value is no
+ * credential as a whole because a pointer is in it (review r4 B1: `--token <v> ${secret:X}`, `--token` then
+ * `Basic <v>#${secret:X}`): the flag is read as the key of its value, `flag=value`, so the rule a nested key's value
+ * follows hides the flag's, whichever side of the pointer the credential is on. Nothing for a flag that names no
+ * secret, so a harmless flag's value stays exactly as written; nor for a "flag" that holds a separator
+ * (`-Hclient.secret:v`), which is a nested key of its own and is read as one.
+ */
+function flagValueCuts(flag: string, value: string, offset: number): readonly Cut[] {
+  if (!PLAIN_FLAG.test(flag) || !secretNamed(flag)) return [];
+  const head = `${flag}=`;
+  return nestedCuts(`${head}${value}`).map(
+    ([from, to]) => [from - head.length + offset, to - head.length + offset] as const,
+  );
+}
+
 /** One command-line word as it may be shown, judged with the word before it. */
 export function shownWord(word: string, before: string | undefined): ShownWord {
   const hidden = (text: string): ShownWord => ({ text, hidden: true });
@@ -424,7 +499,14 @@ export function shownWord(word: string, before: string | undefined): ShownWord {
   // seen (`-eAPI_KEY=v,token=w`); and the whole word, when it is no flag with a value, or when its flag part holds a
   // secret-named key whose value runs on past the glued separator (`--hdr,api_key=v;token=w`).
   const cuts = [
-    ...(glued === null ? [] : [...cutsAt(0, gluedFlag), ...cutsAt(gluedFlag.length + separator.length, gluedValue)]),
+    ...(glued === null
+      ? []
+      : [
+          ...cutsAt(0, gluedFlag),
+          ...cutsAt(gluedFlag.length + separator.length, gluedValue),
+          ...flagValueCuts(gluedFlag, gluedValue, gluedFlag.length + separator.length),
+        ]),
+    ...(name === '' ? [] : flagValueCuts(name, word, 0)),
     ...(stuck === null ? [] : cutsAt(stuckFlag.length, stuckValue)),
     ...((glued === null && stuck === null) || keyStartsBefore(word, gluedFlag.length) ? cutsAt(0, word) : []),
   ];

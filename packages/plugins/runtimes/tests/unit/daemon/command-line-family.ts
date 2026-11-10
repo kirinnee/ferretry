@@ -395,6 +395,168 @@ function paddedCases(): NestedCase[] {
   return cases;
 }
 
+/**
+ * A secret-named flag's value, with a pointer on either side (review r4 B1): the flag in each form it is written in
+ * (`--flag v` as two argv words or one, `--flag=v`), the value with base64 padding, `user:pass` and `Basic` before it,
+ * the pointer before it, after it, between two parts of it or as a harmless key's value. The flag is read like a
+ * secret-named key; a harmless flag, a one-letter one (the declared `-p<password>` GAP) and a value composed with
+ * its pointer stay as written.
+ */
+const SECRET_FLAGS = ['--token', '--client-secret', '--api-key', '--x-api-key', '--password', '--access-token'];
+const PLAIN_FLAGS = ['--model', '--verbose', '-k'];
+const HARMLESS = 'harmless-value-0000';
+const FLAG_VALUES = [
+  FAKE,
+  `${FAKE}=`,
+  `${FAKE}==`,
+  `Basic ${FAKE}`,
+  `Basic ${FAKE}==`,
+  `person:${FAKE}`,
+  `Basic person:${FAKE}`,
+  `${FAKE}:${FAKE}==`,
+];
+
+/** Where the pointer stands in a flag's value `v`: after it, before it, between its parts, or in a harmless key's. */
+const FLAG_POINTERS: readonly ((value: string) => { text: string; kept: string[] })[] = [
+  value => ({ text: `${value} ${POINTER}`, kept: [] }),
+  value => ({ text: `${value}  ${POINTER}`, kept: [] }),
+  value => ({ text: `${value}#${POINTER}`, kept: [] }),
+  value => ({ text: `short ${value} ${POINTER}`, kept: [] }),
+  value => ({ text: `${value} ${POINTER} short`, kept: [] }),
+  value => ({ text: `${value} LOG_LEVEL=${POINTER}`, kept: [` LOG_LEVEL=${POINTER}`] }),
+  value => ({ text: `${value} X-Trace: ${POINTER}`, kept: [` X-Trace: ${POINTER}`] }),
+  // A value with a `:` or a key-shaped `=` after the pointer reads as the pointer's harmless key (declared G5b).
+  value =>
+    /[:=]/u.test(value.replace(/=+$/u, ''))
+      ? { text: `${value} ${POINTER}`, kept: [] }
+      : { text: `${POINTER} ${value}`, kept: [] },
+  value =>
+    /[:=]/u.test(value.replace(/=+$/u, ''))
+      ? { text: `${value}#${POINTER}`, kept: [] }
+      : { text: `${POINTER}#${value}`, kept: [] },
+];
+
+/** What a flag's value is when it IS no secret: composed with its pointer, too short, or only a pointer. */
+const FLAG_CONTROLS: readonly string[] = [
+  `Bearer ${POINTER}`,
+  `prefix${POINTER}`,
+  `${POINTER} short`,
+  `short ${POINTER}`,
+  POINTER,
+  `$LONG_POINTER_NAME ${POINTER}`,
+];
+
+/** The flag family (review r4 B1): flag × form × value × pointer position, and the controls. */
+function flagPointerCases(): NestedCase[] {
+  const cases: NestedCase[] = [];
+  const forms: readonly {
+    readonly words: (flag: string, text: string) => string[];
+    readonly at: number;
+    readonly kept: (flag: string) => string[];
+  }[] = [
+    { words: (flag, text) => [flag, text], at: 2, kept: () => [] },
+    { words: (flag, text) => [`${flag} ${text}`], at: 1, kept: flag => [`${flag} `] },
+    { words: (flag, text) => [`${flag}=${text}`], at: 1, kept: flag => [`${flag}=`] },
+  ];
+  const add = (flag: string, form: (typeof forms)[number], text: string, secret: boolean, kept: readonly string[]) => {
+    for (const last of [true, false]) {
+      const words = [BEFORE, ...form.words(flag, text), ...(last ? [] : [AFTER])];
+      cases.push({
+        label: JSON.stringify(words),
+        words,
+        at: form.at,
+        secret,
+        body: FAKE,
+        kept: [...form.kept(flag), ...kept],
+      });
+    }
+  };
+  for (const form of forms) {
+    for (const flag of SECRET_FLAGS) {
+      for (const value of FLAG_VALUES) {
+        for (const arrange of FLAG_POINTERS) {
+          const { text, kept } = arrange(value);
+          add(flag, form, text, true, kept);
+        }
+      }
+      for (const control of FLAG_CONTROLS) add(flag, form, control, false, []);
+    }
+    for (const flag of PLAIN_FLAGS) {
+      // The same shapes with a value that holds no secret-named key (`<FAKE>:` names a secret), so a harmless flag
+      // has nothing to cut.
+      for (const value of FLAG_VALUES)
+        for (const arrange of FLAG_POINTERS) add(flag, form, arrange(value.replaceAll(FAKE, HARMLESS)).text, false, []);
+    }
+  }
+  return cases;
+}
+
+/**
+ * A secret with base64 padding, or a base64 body of its own with separators in it: what stands after a pointer. Each
+ * ends in a name that is no secret's (`Zm9v=`): `<FAKE>=` is itself a secret-named key and takes what follows it.
+ */
+const AFTER_VALUES = [
+  `${FAKE}/Zm9v=`,
+  `${FAKE}/Zm9v==`,
+  `Basic ${FAKE}/Zm9v=`,
+  `Basic ${FAKE}/Zm9v==`,
+  `dXNlcjpw/${FAKE}+YmFy==`,
+];
+
+/** What stands around a padded value after a pointer: set apart by a space, two or `#`, with a part before, a pointer after. */
+const AFTER_ARRANGEMENTS: readonly ((value: string) => { text: string; kept: string[] })[] = [
+  value => ({ text: `${POINTER} ${value}`, kept: [] }),
+  value => ({ text: `${POINTER}  ${value}`, kept: [] }),
+  value => ({ text: `${POINTER}#${value}`, kept: [] }),
+  value => ({ text: `${POINTER} short ${value}`, kept: [] }),
+  value => ({ text: `${POINTER} ${value} ${POINTER}`, kept: [] }),
+  value => ({ text: `${POINTER} ${value} MODEL=gpt-4o-mini`, kept: [' MODEL=gpt-4o-mini'] }),
+  value => ({ text: `${POINTER} ${value}#LOG_LEVEL=${POINTER}`, kept: [`LOG_LEVEL=${POINTER}`] }),
+];
+
+/** After a pointer, a part that is no padding: a harmless key and its value, an empty key, or one too short. */
+const AFTER_CONTROLS: readonly ((key: string) => string)[] = [
+  key => `${key}${POINTER} MODEL=gpt-4o-mini`,
+  key => `${key}${POINTER} FOO= bar`,
+  key => `${key}${POINTER} FOO==`,
+  key => `${key}${POINTER} short==`,
+  key => `${key}${POINTER} x= y`,
+  () => `LOG_LEVEL=${POINTER} ${FAKE}==`,
+];
+
+/** The padding-after-a-pointer family (review r4 B2): key × separator × position × padded value × arrangement. */
+function afterPointerCases(): NestedCase[] {
+  const cases: NestedCase[] = [];
+  const add = (text: string, position: Position, secret: boolean, kept: readonly string[], last: boolean) => {
+    const shape = placed(text, position);
+    const words = [BEFORE, ...shape.words, ...(last ? [] : [AFTER])];
+    cases.push({
+      label: JSON.stringify(words),
+      words,
+      at: shape.at,
+      secret,
+      body: FAKE,
+      kept: [...shape.kept, ...kept],
+    });
+  };
+  for (const key of POINTER_KEYS) {
+    for (const separator of ['=', ': ']) {
+      for (const position of POINTER_POSITIONS) {
+        for (const last of [true, false]) {
+          for (const value of AFTER_VALUES) {
+            for (const arrange of AFTER_ARRANGEMENTS) {
+              const { text, kept } = arrange(value);
+              add(`${key}${separator}${text}`, position, true, [`${key}${separator.trimEnd()}`, ...kept], last);
+            }
+          }
+          for (const control of AFTER_CONTROLS) add(control(`${key}${separator}`), position, false, [], last);
+        }
+      }
+    }
+  }
+  return cases;
+}
+
 /** Every generated case of ruling #40. */
 export const nestedFamily = (): readonly NestedCase[] => [
   ...nestedKeyCases(),
@@ -403,6 +565,8 @@ export const nestedFamily = (): readonly NestedCase[] => [
   ...pointerCases(),
   ...secondCutCases(),
   ...paddedCases(),
+  ...flagPointerCases(),
+  ...afterPointerCases(),
 ];
 
 /** What is wrong with what was shown, word by word, for one case; or nothing. */

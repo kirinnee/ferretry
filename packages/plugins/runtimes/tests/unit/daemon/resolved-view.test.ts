@@ -1037,3 +1037,163 @@ describe('resolvedEntries — the #40 rule after review r3 (N1, L1)', () => {
     should(actual).deepEqual([hid(`API_KEY=${HIDDEN}`), hid(`--env=API_KEY=${HIDDEN}`)]);
   });
 });
+
+describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
+  const V = 'nested-fake-value-0000';
+  const B64 = 'bm90LWEtcmVhbC0wMDAw';
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
+  const P = '${secret:OTHER_TOKEN}';
+
+  it('#40 B1 should hide a secret-named flag’s value whatever pointer follows it: the word after the flag', () => {
+    // Act — the value of each, set apart from a pointer by a space or `#`, on either side of it.
+    const actual = shownFlags([
+      '--token',
+      `${V} ${P}`,
+      '--token',
+      `${P} ${V}`,
+      '--client-secret',
+      `Basic ${V}#${P}`,
+      '--api-key',
+      `short ${V}== ${P}`,
+      '--password',
+      `${B64}== ${P}`,
+      '--token',
+      `${V}  ${P}`,
+    ]);
+
+    // Assert — the flag stays, the pointer stays when it stands apart from a padded value.
+    should(actual).deepEqual([
+      as('--token'),
+      hid(HIDDEN),
+      as('--token'),
+      hid(HIDDEN),
+      as('--client-secret'),
+      hid(HIDDEN),
+      as('--api-key'),
+      hid(`${HIDDEN} ${P}`),
+      as('--password'),
+      hid(`${HIDDEN} ${P}`),
+      as('--token'),
+      hid(HIDDEN),
+    ]);
+  });
+
+  it('#40 B1 should hide a secret-named flag’s value whatever pointer follows it: the value glued by a space or =', () => {
+    // Act
+    const actual = shownFlags([
+      `--token ${V} ${P}`,
+      `--token=${V} ${P}`,
+      `--client-secret Basic ${V}#${P}`,
+      `--password ${B64}== ${P}`,
+      `--api-key ${P} ${V}`,
+      `--token\t${V} ${P}`,
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      hid(`--token ${HIDDEN}`),
+      hid(`--token=${HIDDEN}`),
+      hid(`--client-secret ${HIDDEN}`),
+      hid(`--password ${HIDDEN} ${P}`),
+      hid(`--api-key ${HIDDEN}`),
+      hid(`--token\t${HIDDEN}`),
+    ]);
+  });
+
+  it("#40 B1 should hide the same shapes in an MCP server's arguments", () => {
+    // Act
+    const actual = shownServer(['--token', `${V} ${P}`, `--password ${V} ${P}`]);
+
+    // Assert
+    should(actual).equal(`run-server --token ${HIDDEN} --password ${HIDDEN}`);
+  });
+
+  it('#40 B1 should keep a flag value that is composed with the pointer, too short, or under a flag that names no secret (control)', () => {
+    // Arrange — `-k` is a one-letter name (the declared `-p<password>` GAP), `--model` a harmless one.
+    const words = [
+      '--token',
+      `Bearer ${P}`,
+      '--token',
+      `prefix${P}`,
+      '--token',
+      `${P} short`,
+      '--token',
+      `${P}`,
+      '--model',
+      `${V} ${P}`,
+      '-k',
+      `${V} ${P}`,
+      `--model ${V} ${P}`,
+      `--verbose=${V} ${P}`,
+      `--token Bearer ${P}`,
+      `--token ${P}`,
+    ];
+
+    // Act
+    const actual = shownFlags(words);
+
+    // Assert
+    should(actual).deepEqual(words.map(as));
+  });
+
+  it('#40 B2 should hide base64 padding after a pointer, in a secret-named key’s value', () => {
+    // Act
+    const actual = shownFlags([
+      `API_KEY=${P} ${B64}==`,
+      `API_KEY=${P} ${B64}=`,
+      `API_KEY=${P} Basic ${B64}==`,
+      `Authorization: ${P} ${B64}==`,
+      `API_KEY=${P} ${V} ${B64}== ${P}`,
+      `API_KEY=${P} dXNlcjpw/Zm9v+YmFyYmF6==`,
+      `--env=API_KEY=${P} ${B64}== MODEL=gpt-4o-mini`,
+      `--header=Authorization: ${P} ${B64}= LOG_LEVEL=${P}`,
+    ]);
+
+    // Assert — the key and a harmless key after the value stay.
+    should(actual).deepEqual([
+      hid(`API_KEY=${HIDDEN}`),
+      hid(`API_KEY=${HIDDEN}`),
+      hid(`API_KEY=${HIDDEN}`),
+      hid(`Authorization: ${HIDDEN}`),
+      hid(`API_KEY=${HIDDEN}`),
+      hid(`API_KEY=${HIDDEN}`),
+      hid(`--env=API_KEY=${HIDDEN} MODEL=gpt-4o-mini`),
+      hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${P}`),
+    ]);
+  });
+
+  it('#40 B2 should hide padding after a pointer in an MCP server’s arguments and after a secret-named flag', () => {
+    // Act
+    const actual = shownServer([`API_KEY=${P} ${B64}==`, '--token', `${P} ${B64}==`]);
+
+    // Assert
+    should(actual).equal(`run-server API_KEY=${HIDDEN} --token ${HIDDEN}`);
+  });
+
+  it('#40 B2 should keep a harmless key after a pointer, and a part too short to be a secret, exactly (control)', () => {
+    // Arrange — `MODEL=gpt-4o-mini` is its own key and `FOO= bar` an empty one with a short part after it: neither is
+    // padding.
+    const words = [
+      `API_KEY=${P} MODEL=gpt-4o-mini`,
+      `API_KEY=${P} FOO= bar`,
+      `API_KEY=${P} FOO==`,
+      `API_KEY=${P} short==`,
+      `LOG_LEVEL=${P} ${B64}==`,
+      `API_KEY=${P} x= y`,
+    ];
+
+    // Act
+    const actual = shownFlags(words);
+
+    // Assert
+    should(actual).deepEqual(words.map(as));
+  });
+
+  it('#40 B2 should still show a value with a pointer after it exactly as r4 did where nothing is padded (control)', () => {
+    // Act — the pointer stays when it stands apart from a padded secret before it (N1), and goes with a plain one.
+    const actual = shownFlags([`API_KEY=${B64}== ${P}`, `API_KEY=${P} ${B64}`, `API_KEY=${V} ${P}`]);
+
+    // Assert
+    should(actual).deepEqual([hid(`API_KEY=${HIDDEN} ${P}`), hid(`API_KEY=${HIDDEN}`), hid(`API_KEY=${HIDDEN}`)]);
+  });
+});

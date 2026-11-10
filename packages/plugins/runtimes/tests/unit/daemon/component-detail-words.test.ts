@@ -290,6 +290,34 @@ describe('componentDetail — the #40 rule after review r3 (R-0082, N1)', () => 
     should(flagsOf(words)).deepEqual(expected);
     should(argsOf(words)).deepEqual(expected);
   });
+
+  it("R-0082 #40 B1 should hide a secret-named flag's value whatever pointer follows it, and padding after a pointer (B2), in flags and arguments", () => {
+    // Arrange
+    const words = [
+      '--token',
+      `${NESTED} ${POINTER}`,
+      '--client-secret',
+      `Basic ${NESTED}#${POINTER}`,
+      `--password ${NESTED} ${POINTER}`,
+      `API_KEY=${POINTER} ${NESTED}==`,
+      '--model',
+      `${NESTED} ${POINTER}`,
+    ];
+    const expected = [
+      '--token',
+      hid(HIDDEN),
+      '--client-secret',
+      hid(HIDDEN),
+      hid(`--password ${HIDDEN}`),
+      hid(`API_KEY=${HIDDEN}`),
+      '--model',
+      `${NESTED} ${POINTER}`,
+    ];
+
+    // Assert
+    should(flagsOf(words)).deepEqual(expected);
+    should(argsOf(words)).deepEqual(expected);
+  });
 });
 
 describe('componentDetail — one rule with the Resolved view (rulings #39, #40)', () => {
