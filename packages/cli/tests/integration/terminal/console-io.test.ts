@@ -1,12 +1,22 @@
-import { afterEach, describe, it, spyOn } from 'bun:test';
+import { afterAll, afterEach, describe, it, spyOn } from 'bun:test';
 import should from 'should';
 import { ConsoleIo } from '../../../src/adapters/terminal/console-io.ts';
 
 /** The real terminal port, against the process's own streams: stdout is the answer, stderr everything else. */
 describe('ConsoleIo', () => {
+  // Every integration file shares this process, so the streams must be left exactly as they were found.
+  const original = {
+    stdin: Object.getOwnPropertyDescriptor(process.stdin, 'isTTY'),
+    stdout: Object.getOwnPropertyDescriptor(process.stdout, 'isTTY'),
+  };
   const restores: (() => void)[] = [];
   afterEach(() => {
-    for (const restore of restores.splice(0)) restore();
+    // Last in, first out: a property stubbed twice must end on the descriptor it had before the first stub.
+    for (const restore of restores.splice(0).reverse()) restore();
+  });
+  afterAll(() => {
+    should(Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')).eql(original.stdin);
+    should(Object.getOwnPropertyDescriptor(process.stdout, 'isTTY')).eql(original.stdout);
   });
 
   /** Replaces one stream property for this test only, and restores the exact descriptor afterwards. */
