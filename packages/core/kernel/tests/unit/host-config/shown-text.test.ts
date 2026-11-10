@@ -8,7 +8,19 @@
 import { describe, expect, test } from 'bun:test';
 import { CONFIG_FILE_MAX_BYTES } from '@ferretry/std/yaml';
 import { shownConfigText, type ShownConfigText } from '../../../host/config/shown-text.ts';
-import { anyDef, fileDef, HIDDEN, OTHER_VALUE, openDef, recordsDef, SHORT_PASSWORD, VALUE } from './masked-support.ts';
+import {
+  anyDef,
+  fileDef,
+  flagForms,
+  GLUED_POINTER_LINES,
+  HIDDEN,
+  OTHER_VALUE,
+  openDef,
+  recordsDef,
+  SHORT_PASSWORD,
+  TAIL_NAMES,
+  VALUE,
+} from './masked-support.ts';
 
 /** Fake only: shaped like a provider key, never one. */
 const FAKE_KEY = `sk-ant-api03-${'A'.repeat(90)}`;
@@ -247,5 +259,53 @@ describe('when the text is not shown at all', () => {
   test('CFG-LEAK-R a file that fails its schema is still shown, with the same mask', () => {
     const result = shownOf(`args:\n  - --token\n  - ${VALUE}\nnot_a_key: 1\n`);
     expect(result.text).toBe(`args:\n  - --token\n  - ${HIDDEN}\nnot_a_key: 1\n`);
+  });
+});
+
+const listOf = (words: readonly string[]): string =>
+  `args:\n${words.map(word => `  - ${JSON.stringify(word)}\n`).join('')}`;
+
+describe('what the write rule refuses is never shown (CFG-LEAK-R, the mask reads names as W does)', () => {
+  test('S6 CFG-LEAK-R a value under every name W reads as a credential by its tail is cut: --key, --keys, --tokens, --apitoken, --ssh-key, -e SSH_KEY=v …', () => {
+    for (const name of TAIL_NAMES) {
+      for (const words of flagForms(name, VALUE)) {
+        const result = read(listOf(words));
+        const shown = result.kind === 'shown' ? result.text : '';
+        expect([words, shown.includes(VALUE)]).toEqual([words, false]);
+        expect([words, result.kind === 'shown' && shown.includes(HIDDEN)]).toEqual([words, true]);
+      }
+    }
+  });
+
+  test('S6 CFG-LEAK-R a short value under a map key W reads by its tail is cut the same: env.SIGNING_KEY, env.api_tokens', () => {
+    const result = shownOf(
+      `env:\n  SIGNING_KEY: ${SHORT_PASSWORD}\n  api_tokens: hunter2025\n  LOG_LEVEL: debuglevel\n`,
+    );
+    expect(result.text).toBe(`env:\n  SIGNING_KEY: ${HIDDEN}\n  api_tokens: ${HIDDEN}\n  LOG_LEVEL: debuglevel\n`);
+  });
+
+  test('S6 CFG-LEAK-R a word that glues raw text to a ${secret:…} pointer is cut; the pointer alone stays shown', () => {
+    for (const words of GLUED_POINTER_LINES) {
+      const result = read(listOf(words));
+      const shown = result.kind === 'shown' ? result.text : '';
+      expect([words, shown.includes(HIDDEN)]).toEqual([words, true]);
+      expect([words, /prefix|short|Bearer v/u.test(shown.replaceAll('--header=Authorization: ', ''))]).toEqual([
+        words,
+        false,
+      ]);
+    }
+    const alone = listOf([
+      '--token',
+      '${secret:X}',
+      '-e',
+      'API_KEY=${secret:X}',
+      '--header=Authorization: Bearer ${secret:X}',
+    ]);
+    expect(shownOf(alone).text).toBe(alone);
+  });
+
+  test('CFG-LEAK-R a name W does not read as a credential stays: --model, --signing, --level', () => {
+    const text = listOf(['--model', VALUE, '--signing', VALUE, '--level', VALUE]);
+    expect(shownOf(text).text).toBe(text);
   });
 });

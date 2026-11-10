@@ -16,7 +16,8 @@
  * value of a key before or after it, and glued in front of the key (M1); a key stuck straight to a one-letter flag with
  * a second cut after it (`-eAPI_KEY=v,token=v`, M2); and a key in a glued flag's own part whose value has a pointer and
  * a second cut (`--hdr,api_key=v;y=${secret:Z};token=v`, M3). Their controls (a value composed with a pointer,
- * `Bearer ${secret:X}`, `prefix${secret:X}`) must be exact.
+ * `Bearer ${secret:X}`) must be exact. (`prefix${secret:X}` and `${secret:X}?model=short` were controls too; CFG-LEAK-R
+ * (ii) cuts text glued to a pointer, so they are cases that hide now, and `tokens` is a secret name, not a harmless key.)
  *
  * Review r3 (r4 round) added a value that holds `=` or `:` itself (N1): base64 padded by 0, 1 or 2 `=`, `Basic`
  * before it, a `user:pass` and a `user=pass`, with a pointer later in the same value, set apart by a space or `#`,
@@ -57,8 +58,10 @@ const SECRET_KEYS = [
   'ACCESS_TOKEN',
   'password',
   'client.secret',
+  // CFG-LEAK-R (i): `tokens` was a ruling #40 control; the read mask now reads names as the write rule does, by their tail.
+  'tokens',
 ];
-const HARMLESS_KEYS = ['model', 'X-Request-Id', 'mcp_servers.x.env.LOG_LEVEL', 'tokens', 'keyring'];
+const HARMLESS_KEYS = ['model', 'X-Request-Id', 'mcp_servers.x.env.LOG_LEVEL', 'keyring'];
 const SEPARATORS = ['=', ':', ': ', ' = '];
 const VALUES: readonly { readonly value: string; readonly secret: boolean; readonly body: string }[] = [
   { value: FAKE, secret: true, body: FAKE },
@@ -243,29 +246,51 @@ const POINTER_POSITIONS: readonly Position[] = ['next word', 'glued =', 'stuck',
  * A pointer in the same value as a secret-named key's secret (review r2 M1): each arrangement, and what of it must
  * stay. The pointer hides nothing that is set apart from it, and the key and every pointer stay.
  */
-const POINTER_ARRANGEMENTS: readonly ((key: string, value: string) => { text: string; kept: string[] })[] = [
+const POINTER_ARRANGEMENTS: readonly ((
+  key: string,
+  value: string,
+) => { text: string; kept: string[]; glued?: true })[] = [
   (key, value) => ({ text: `${key}${value} ${POINTER}`, kept: [] }),
   (key, value) => ({ text: `${key}${value}#${POINTER}`, kept: [] }),
   (key, value) => ({ text: `${key}${POINTER} ${value}`, kept: [] }),
   (key, value) => ({ text: `LOG_LEVEL=${POINTER} ${key}${value}`, kept: [`LOG_LEVEL=${POINTER} `] }),
   (key, value) => ({ text: `OTHER_TOKEN=${POINTER} ${key}${value}`, kept: [`OTHER_TOKEN=${POINTER} `] }),
   (key, value) => ({ text: `${key}${value} LOG_LEVEL=${POINTER}`, kept: [` LOG_LEVEL=${POINTER}`] }),
-  (key, value) => ({ text: `password=${POINTER}?${key}${value}`, kept: [`password=${POINTER}?`] }),
+  // The query is glued to the pointer, so the whole value of `password=` is cut, its `?KEY=` too (CFG-LEAK-R ii).
+  (key, value) => ({ text: `password=${POINTER}?${key}${value}`, kept: ['password='], glued: true }),
 ];
 
 /** Values composed with a pointer, or set apart from one by a harmless key: each IS no secret, and is shown exactly. */
 const POINTER_CONTROLS: readonly ((key: string) => string)[] = [
   key => `${key}Bearer ${POINTER}`,
-  key => `${key}prefix${POINTER}`,
-  key => `${key}${POINTER}?model=short`,
   key => `${key}${POINTER} ${POINTER}`,
+  key => `${key}"${POINTER}"`,
   () => `LOG_LEVEL=${POINTER} model=${FAKE}`,
+];
+
+/**
+ * Text glued to a pointer (CFG-LEAK-R ii): once ruling #40 controls shown as written, now each is cut from the start of
+ * its value, and `body` is the raw text that must not be shown.
+ */
+const GLUED_POINTERS: readonly { readonly text: (key: string) => string; readonly body: string }[] = [
+  { text: key => `${key}prefix${POINTER}`, body: 'prefix' },
+  { text: key => `${key}${POINTER}?model=short`, body: 'model=short' },
+  { text: key => `${key}Bearer v${POINTER}`, body: 'Bearer v' },
+  // Two pointers run together are not ONE pointer: W refuses them, so the mask cuts them.
+  { text: key => `${key}${POINTER}${POINTER}`, body: `${POINTER}${POINTER}` },
 ];
 
 /** The pointer family (review r2 M1). */
 function pointerCases(): NestedCase[] {
   const cases: NestedCase[] = [];
-  const add = (text: string, position: Position, secret: boolean, kept: readonly string[], last: boolean) => {
+  const add = (
+    text: string,
+    position: Position,
+    secret: boolean,
+    kept: readonly string[],
+    last: boolean,
+    body = FAKE,
+  ) => {
     const shape = placed(text, position);
     const words = [BEFORE, ...shape.words, ...(last ? [] : [AFTER])];
     cases.push({
@@ -273,7 +298,7 @@ function pointerCases(): NestedCase[] {
       words,
       at: shape.at,
       secret,
-      body: FAKE,
+      body,
       kept: [...shape.kept, ...kept],
     });
   };
@@ -283,11 +308,14 @@ function pointerCases(): NestedCase[] {
         for (const last of [true, false]) {
           for (const value of POINTER_VALUES) {
             for (const arrange of POINTER_ARRANGEMENTS) {
-              const { text, kept } = arrange(`${key}${separator}`, value);
-              add(text, position, true, [`${key}${separator.trimEnd()}`, ...kept], last);
+              const { text, kept, glued } = arrange(`${key}${separator}`, value);
+              // A secret key glued behind a pointer (`password=${P}?KEY=v`) is cut with that value (CFG-LEAK-R ii).
+              add(text, position, true, [...(glued === true ? [] : [`${key}${separator.trimEnd()}`]), ...kept], last);
             }
           }
           for (const control of POINTER_CONTROLS) add(control(`${key}${separator}`), position, false, [], last);
+          for (const glued of GLUED_POINTERS)
+            add(glued.text(`${key}${separator}`), position, true, [`${key}${separator.trimEnd()}`], last, glued.body);
         }
       }
     }
@@ -439,7 +467,6 @@ const FLAG_POINTERS: readonly ((value: string) => { text: string; kept: string[]
 /** What a flag's value is when it IS no secret: composed with its pointer, too short, or only a pointer. */
 const FLAG_CONTROLS: readonly string[] = [
   `Bearer ${POINTER}`,
-  `prefix${POINTER}`,
   `${POINTER} short`,
   `short ${POINTER}`,
   POINTER,
@@ -458,7 +485,14 @@ function flagPointerCases(): NestedCase[] {
     { words: (flag, text) => [`${flag} ${text}`], at: 1, kept: flag => [`${flag} `] },
     { words: (flag, text) => [`${flag}=${text}`], at: 1, kept: flag => [`${flag}=`] },
   ];
-  const add = (flag: string, form: (typeof forms)[number], text: string, secret: boolean, kept: readonly string[]) => {
+  const add = (
+    flag: string,
+    form: (typeof forms)[number],
+    text: string,
+    secret: boolean,
+    kept: readonly string[],
+    body = FAKE,
+  ) => {
     for (const last of [true, false]) {
       const words = [BEFORE, ...form.words(flag, text), ...(last ? [] : [AFTER])];
       cases.push({
@@ -466,7 +500,7 @@ function flagPointerCases(): NestedCase[] {
         words,
         at: form.at,
         secret,
-        body: FAKE,
+        body,
         kept: [...form.kept(flag), ...kept],
       });
     }
@@ -480,6 +514,9 @@ function flagPointerCases(): NestedCase[] {
         }
       }
       for (const control of FLAG_CONTROLS) add(flag, form, control, false, []);
+      // CFG-LEAK-R (ii): text glued to a flag's pointer was a control; it is cut now, whole.
+      for (const glued of [`prefix${POINTER}`, `${POINTER}?model=short`, `${POINTER}${POINTER}`])
+        add(flag, form, glued, true, [], glued);
     }
     for (const flag of PLAIN_FLAGS) {
       // The same shapes with a value that holds no secret-named key (`<FAKE>:` names a secret), so a harmless flag

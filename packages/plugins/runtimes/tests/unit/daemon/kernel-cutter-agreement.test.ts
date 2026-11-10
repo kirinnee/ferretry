@@ -8,7 +8,9 @@
  * It reaches the kernel by relative path: `shownWords` and `findFlagSecrets` are not on `@ferretry/kernel/host`'s
  * export list, and a TEST may import both sides where the kernel's own code may not import a plugin.
  *
- * T-B2 also holds the write rule (W, `findFlagSecrets`) under the read mask: a word W refuses must be one the mask cuts.
+ * T-B2 holds the write rule (W, `findFlagSecrets`) under BOTH cutters, strictly: EVERY word W refuses is cut by the
+ * kernel's mask and by runtimes' copy, residual 0. Its corpus comes from W's own name tail, not from the mask's name
+ * list: a candidate name is in it exactly when W refuses it, so a name only W knows (or one W is widened to) is in it.
  *
  * Pin to the vault contract's cutter once it lands on 5.0 (`rebuild/fix-catalogs-one-rule`, #41): this file has no
  * vault import until then.
@@ -70,6 +72,21 @@ const OWN_LINES: readonly (readonly string[])[] = [
   [`--hdr,api_key:${VALUE} more`],
   [`-cAPI_KEY:${VALUE},PASSWORD=${VALUE}x`],
   [`API_KEY=${POINTER}`, 'API_KEY=$HOME_KEY', 'API_KEY=${HOME_KEY}', 'AUTH=1', 'password=short'],
+  // PIECE_BREAK gaps (a `;` and a `,` set a token apart from the text before it).
+  ['--x=foo;ghp_AbCdEfGh12345678'],
+  ['--x=foo,ghp_AbCdEfGh12345678'],
+  // A token in a secret-named flag's own part.
+  [`--verbose;AKIAABCDEFGHIJKLMNOP,tokens ${VALUE}`, `--x;ghp_AbCdEfGh12345678,token=${VALUE}`],
+  // Text glued to a pointer (CFG-LEAK-R ii): cut; a pointer alone stays shown.
+  ['API_KEY=prefix${secret:X}', '--token', 'prefix${secret:X}', 'API_KEY=${secret:X}?model=short'],
+  ['--header=Authorization: Bearer v${secret:X}', '--token=prefix${secret:X}', `API_KEY=${VALUE}${POINTER}`],
+  [
+    'API_KEY="${secret:X}"',
+    '--token',
+    '${secret:X}${secret:Y}',
+    'API_KEY=a:${secret:X}',
+    'Authorization: Bearer ${secret:X}',
+  ],
 ];
 
 /** A word with blanks that does not START with a flag: both cutters show it, and W reads its blank-split words. */
@@ -129,13 +146,88 @@ const GENERATED_LINES: readonly (readonly string[])[] = [
   ...TOKEN_VALUES.flatMap(token => [[token], ['--anything', token], [`--x=${token}`], [`pre ${token} post`]]),
 ];
 
+/**
+ * Names to ask W about: every one W's tail test refuses becomes lines in the corpus (all three forms, a fake value), and
+ * the ones it does not are here to catch W being widened onto them (`model`, `signing`, `level` …).
+ */
+const CANDIDATE_NAMES = [
+  'key',
+  'keys',
+  'token',
+  'tokens',
+  'secret',
+  'secrets',
+  'password',
+  'passwords',
+  'passwd',
+  'passwds',
+  'credential',
+  'credentials',
+  'apitoken',
+  'authtoken',
+  'sessiontoken',
+  'clientsecret',
+  'client-secret',
+  'ssh-key',
+  'signing-key',
+  'encryption-key',
+  'license-key',
+  'master-key',
+  'api-key',
+  'public-key',
+  'access-keys',
+  'db_password',
+  'auth',
+  'model',
+  'signing',
+  'level',
+  'name',
+  'mode',
+  'token-file',
+  'auth-mode',
+  'keyboard',
+  'monkey',
+  'secretary',
+  'keyring',
+  'tokenizer',
+  'passwordless',
+  'host',
+  'x',
+];
+
+/** The three forms a flag takes with a value: after a space, glued by `=`, and `-e NAME=v`. */
+const formsOf = (name: string): readonly (readonly string[])[] => [
+  [`--${name}`, VALUE],
+  [`--${name}=${VALUE}`],
+  ['-e', `${name.toUpperCase().replaceAll('-', '_')}=${VALUE}`],
+];
+
+/** The lines of every candidate name W (`findFlagSecrets`) refuses: W's own name tail, read off W itself. */
+const writeRuleLines = (): readonly (readonly string[])[] =>
+  CANDIDATE_NAMES.flatMap(formsOf).filter(words => findFlagSecrets({ args: words }).length > 0);
+
 /** The ONE corpus both copies are run over. */
 const corpus = (): readonly (readonly string[])[] => [
   ...nestedFamily().map(item => item.words),
   ...OWN_LINES,
   ...BLANK_WORD_LINES,
   ...GENERATED_LINES,
+  ...writeRuleLines(),
 ];
+
+/** Every word of `lines` W refuses, and whether each cutter cut it: `[words, index, kernel cut it, runtimes cut it]`. */
+function refusedWords(
+  lines: readonly (readonly string[])[],
+): readonly (readonly [words: readonly string[], at: number, kernel: boolean, runtimes: boolean])[] {
+  return lines.flatMap(words => {
+    const kernel = kernelShownWords(words);
+    const runtimes = runtimesShownWords(words);
+    return findFlagSecrets({ args: words }).map(finding => {
+      const at = finding.path[1] as number;
+      return [words, at, kernel[at]?.hidden === true, runtimes[at]?.hidden === true] as const;
+    });
+  });
+}
 
 describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => {
   it('CFG-LEAK-R the kernel and runtimes cut every corpus word identically', () => {
@@ -158,41 +250,41 @@ describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => 
     }
   });
 
-  it('S6 CFG-LEAK-W every word W refuses is also cut by the read mask', () => {
-    let refused = 0;
-    for (const words of [...OWN_LINES, ...GENERATED_LINES]) {
-      const shown = kernelShownWords(words);
-      for (const finding of findFlagSecrets({ args: words })) {
-        refused += 1;
-        const at = finding.path[1];
-        should(typeof at).equal('number');
-        should([words, at, shown[at as number]?.hidden]).eql([words, at, true]);
-      }
-    }
-    // W refuses a good share of the corpus, so the check above is not over nothing.
-    should(refused).be.above(50);
+  it('S6 CFG-LEAK-W every word W refuses is cut by the kernel mask AND by the runtimes copy: residual 0', () => {
+    // One word with blanks that does not start with a flag (`srv --token v`) is read as a command line by the kernel's
+    // `shownItem`, not by `shownWord`, so it is T-B1's (both cutters show it alike), not this test's.
+    const lines = [...nestedFamily().map(item => item.words), ...OWN_LINES, ...GENERATED_LINES, ...writeRuleLines()];
+    const refused = refusedWords(lines);
+    // W refuses a good share of the corpus, and the names only W's tail knows are in it (--key, --ssh-key, --tokens …).
+    should(refused.length).be.above(1000);
+    const names = new Set(writeRuleLines().map(words => words.join(' ')));
+    should(names.size).be.above(60);
+    const missed = refused
+      .filter(([, , kernel, runtimes]) => !kernel || !runtimes)
+      .map(([words, at, kernel, runtimes]) => [words, at, { kernel, runtimes }]);
+    should(missed).eql([]);
   });
 
-  it('S6 CFG-LEAK-W the ruling #40 family: W refuses words the mask shows only under two harmless shapes (DESIGN-QUESTION)', () => {
-    // KNOWN GAP, pinned so it cannot grow unseen: over the ruling #40 family W (`findFlagSecrets`) refuses some words the
-    // read mask leaves whole — (a) the harmless key `tokens` (the mask's name test is stricter than W's tail test) and
-    // (b) a secret-named key whose value glues a `${secret:…}` pointer to other text. Both are W refusing MORE than the
-    // mask hides: a file already holding such a word is read with that word shown, though W would refuse to add it.
-    // So "every word W refuses is cut" is false here; closing it is a kernel change (DESIGN-QUESTION, not made here).
-    const gap = new Set<string>();
-    for (const words of nestedFamily().map(item => item.words)) {
-      const shown = kernelShownWords(words);
-      for (const finding of findFlagSecrets({ args: words })) {
-        const at = finding.path[1] as number;
-        if (shown[at]?.hidden !== true) gap.add(words[at] ?? '');
-      }
-    }
-    should(gap.size).be.above(0);
-    for (const word of gap) should(word.includes('tokens') || word.includes('${secret:')).equal(true);
-    // (c) one word that holds blanks and does not start with a flag (`srv --token v`): shown by both cutters.
-    const [blank = []] = BLANK_WORD_LINES;
-    should(findFlagSecrets({ args: blank }).length).be.above(0);
-    should(kernelShownWords(blank).some(word => word.hidden)).equal(false);
+  it('S6 CFG-LEAK-W W’s own name tail is in the corpus: every name it refuses is, and the ones it does not are not', () => {
+    const refusedNames = new Set(
+      writeRuleLines()
+        .filter(words => words[0]?.startsWith('--') === true && words.length === 2)
+        .map(words => (words[0] as string).slice(2)),
+    );
+    for (const name of [
+      'key',
+      'keys',
+      'tokens',
+      'secrets',
+      'passwords',
+      'apitoken',
+      'clientsecret',
+      'ssh-key',
+      'signing-key',
+    ])
+      should([name, refusedNames.has(name)]).eql([name, true]);
+    for (const name of ['model', 'signing', 'level', 'token-file', 'host', 'x'])
+      should([name, refusedNames.has(name)]).eql([name, false]);
   });
 
   it('CFG-LEAK-R HIDDEN_VALUE_TEXT === HIDDEN_WORD_TEXT', () => {

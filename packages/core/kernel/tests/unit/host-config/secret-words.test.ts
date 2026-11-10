@@ -45,9 +45,10 @@ describe('CFG-LEAK-R the copied cutter, case by case', () => {
       [`Authorization: ${HIDDEN_VALUE_TEXT} ${POINTER}`],
     ],
     [
-      'a pointer, then a query parameter with the secret',
+      // Changed by CFG-LEAK-R (ii): text glued to a pointer cuts the whole value, the glued query included.
+      'a pointer, then a query parameter with the secret: the glued text is cut with it',
       [`PASSWORD=${POINTER}?password:${VALUE}`],
-      [`PASSWORD=${POINTER}?password:${HIDDEN_VALUE_TEXT}`],
+      [`PASSWORD=${HIDDEN_VALUE_TEXT}`],
     ],
     [
       'a variable reference that runs on into other characters',
@@ -114,6 +115,13 @@ describe('CFG-LEAK-R the copied cutter, case by case', () => {
     expect(shown(`API_KEY=${POINTER}`, 'API_KEY=$HOME_KEY', 'API_KEY=${HOME_KEY}', 'AUTH=1', 'password=short')).toEqual(
       [`API_KEY=${POINTER}`, 'API_KEY=$HOME_KEY', 'API_KEY=${HOME_KEY}', 'AUTH=1', 'password=short'],
     );
+  });
+
+  test('CFG-LEAK-R a token in a secret-named flag’s own part is cut with the word, not shown beside the cut value', () => {
+    expect(shown(`--verbose;AKIAABCDEFGHIJKLMNOP,tokens ${VALUE}`, `--x;ghp_AbCdEfGh12345678,token=${VALUE}`)).toEqual([
+      HIDDEN_VALUE_TEXT,
+      HIDDEN_VALUE_TEXT,
+    ]);
   });
 
   test('CFG-LEAK-R a word reports whether it was cut', () => {

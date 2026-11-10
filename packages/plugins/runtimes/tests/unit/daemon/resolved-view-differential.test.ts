@@ -148,8 +148,10 @@ const NESTED_SECRET_KEYS = [
   'Authorization',
   'mcp_servers.x.env.ACCESS_TOKEN',
   'password',
+  // CFG-LEAK-R (i): `tokens` was a harmless control; the read mask now reads names as the write rule does, by their tail.
+  'tokens',
 ];
-const NESTED_HARMLESS_KEYS = ['model', 'X-Request-Id', 'tokens', 'LOG_LEVEL'];
+const NESTED_HARMLESS_KEYS = ['model', 'X-Request-Id', 'LOG_LEVEL'];
 const NESTED_SEPARATORS = ['=', ':', ': ', ' = '];
 /** What may stand between the parts of a compound word: nothing, a flag's separator, or a list's. */
 const JOINS = ['', '=', ' ', ',', ';', '&', ':', '?', '  '];

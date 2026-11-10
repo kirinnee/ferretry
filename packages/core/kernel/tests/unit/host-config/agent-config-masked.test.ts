@@ -9,9 +9,10 @@ import { describe, expect, test } from 'bun:test';
 import { AgentConfigCallSchema, type AgentConfigCall } from '../../../contract/agent-config.ts';
 import { agentConfig } from '../../../host/config/agent.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
+import { WITHHELD_WORDS } from '../../../host/config/shown-text.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { captureLog, HOME, manualClock } from './support.ts';
-import { HIDDEN, mcpDef, OTHER_VALUE, VALUE } from './masked-support.ts';
+import { flagForms, GLUED_POINTER_LINES, HIDDEN, mcpDef, OTHER_VALUE, TAIL_NAMES, VALUE } from './masked-support.ts';
 
 const FILE = `${HOME}/config/mcp/srv.yaml`;
 const PATH = 'mcp/srv.yaml';
@@ -59,6 +60,19 @@ describe('config_read', () => {
     expect(answer.issues).toEqual([]);
   });
 
+  test('S6 CFG-LEAK-R config_read never shows a value under a name only the write rule reads by its tail, or one glued to a pointer', async () => {
+    const lines = [...TAIL_NAMES.flatMap(name => flagForms(name, VALUE)), ...GLUED_POINTER_LINES];
+    for (const words of lines) {
+      const w = world();
+      w.fs.seed(FILE, `args:\n${words.map(word => `  - ${JSON.stringify(word)}\n`).join('')}`);
+      await w.files.reload();
+      const answer = await w.run({ tool: 'config.read', path: PATH });
+      const text = String(answer.text);
+      expect([words, text.includes(VALUE), /prefix|=short|Bearer v\$/u.test(text)]).toEqual([words, false, false]);
+      expect([words, text.includes(HIDDEN)]).toEqual([words, true]);
+    }
+  });
+
   test('CFG-LEAK-R config_read counts the hidden values in the summary', async () => {
     const w = world();
     w.fs.seed(FILE, `args:\n  - --token\n  - ${VALUE}\n  - --api-key=${OTHER_VALUE}\n`);
@@ -97,9 +111,7 @@ describe('config_read', () => {
     const answer = await w.run({ tool: 'config.read', path: PATH });
     expect(answer.text).toBe('');
     expect(JSON.stringify(answer)).not.toContain(VALUE);
-    expect(answer.summary).toBe(
-      `${PATH} (ok); its text is not shown because a value in it could not be hidden safely.`,
-    );
+    expect(answer.summary).toBe(`${PATH} (ok); its text is not shown because ${WITHHELD_WORDS.unmaskable}.`);
   });
 
   test('R-0072 config_read of a file that is not there yet gives the starter and no hidden count', async () => {

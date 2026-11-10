@@ -236,7 +236,8 @@ describe('componentDetail — the #40 rule after review r2 (R-0082, M1, M2, M3, 
     ];
     const expected = [
       hid(`--env API_KEY=${POINTER} CLIENT_SECRET=${HIDDEN}`),
-      hid(`--x=password=${POINTER}?password:${HIDDEN}`),
+      // CFG-LEAK-R (ii): the query is glued to the pointer, so the whole value of `password=` is cut with it.
+      hid(`--x=password=${HIDDEN}`),
       hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${POINTER}`),
       hid(`-c env.API_KEY=${HIDDEN}`),
     ];
@@ -254,7 +255,8 @@ describe('componentDetail — the #40 rule after review r2 (R-0082, M1, M2, M3, 
       `--hdr,api_key=${NESTED};y=${POINTER};token=${NESTED}`,
     ];
     const expected = [
-      hid(`-eAPI_KEY=${HIDDEN},token=${HIDDEN}`),
+      // CFG-LEAK-R (i): `-eAPI_KEY` is a flag named by its tail (`KEY`), so its whole value is cut, `,token=<v>` with it.
+      hid(`-eAPI_KEY=${HIDDEN}`),
       hid(`-HAuthorization: ${HIDDEN}, X-Api-Key: ${HIDDEN}`),
       hid(`--hdr,api_key=${HIDDEN};y=${POINTER};token=${HIDDEN}`),
     ];
