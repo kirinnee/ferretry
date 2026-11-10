@@ -105,6 +105,7 @@ export interface Call {
   readonly route: string;
   readonly params: Readonly<Record<string, string>> | undefined;
   readonly body: unknown;
+  readonly headers?: Readonly<Record<string, string>> | undefined;
 }
 
 /** One answer per route key: a value, an Error to throw, or a function of the call. */
@@ -116,9 +117,13 @@ export type ScriptedClient = Pick<PluginClient, 'call'>;
 export const scriptedClient = (answers: Answers, calls: Call[] = []): ScriptedClient => ({
   call: async <Answer = unknown>(
     route: string,
-    init?: { readonly params?: Readonly<Record<string, string>>; readonly body?: unknown },
+    init?: {
+      readonly params?: Readonly<Record<string, string>>;
+      readonly body?: unknown;
+      readonly headers?: Readonly<Record<string, string>>;
+    },
   ): Promise<Answer> => {
-    const call: Call = { route, params: init?.params, body: init?.body };
+    const call: Call = { route, params: init?.params, body: init?.body, headers: init?.headers };
     calls.push(call);
     if (!(route in answers)) throw new Error(`no route ${route}`);
     const answer = answers[route];

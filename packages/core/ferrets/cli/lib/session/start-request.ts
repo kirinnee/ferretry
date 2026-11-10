@@ -1,15 +1,14 @@
 import { isAbsolute, resolve } from 'node:path';
-import { FERRET_CARD_ID_PATTERN } from '../../../contract/index.ts';
+import { FERRET_CARD_ID_PATTERN, type InitialAttachment } from '../../../contract/index.ts';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment, StartBody } from './ports.ts';
 
 /**
- * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2): where a conversation compacts and the
- * opening attachments are the Conversation's, a prompt file and a detached start are not this CLI half's to read, a
- * start's idempotency key is the shell's header. A typed one is
+ * Today's `fy start` flags whose value has no field in Ferrets' start (§2.2): where a conversation compacts is the
+ * Conversation's, and a detached start has no 5.0 meaning (a start always waits for the launch). A typed one is
  * refused by name rather than sent and dropped, because a flag that was accepted and ignored is worse than a refusal.
  */
-export const START_FLAGS_ELSEWHERE: readonly string[] = ['compact-at', 'file', 'prompt-file', 'detach', 'request-id'];
+export const START_FLAGS_ELSEWHERE: readonly string[] = ['compact-at', 'detach'];
 
 /**
  * A value at or below this many seconds looks like someone reaching for a readiness wait ("give it
@@ -58,6 +57,8 @@ export interface StartFlags extends StartNumericFlags {
   readonly login?: string;
   readonly pack?: string;
   readonly cwd?: string;
+  /** `-f/--file`: files attached to the opening message, already read (base64) by the CLI half. */
+  readonly initialAttachments?: readonly InitialAttachment[];
 }
 
 const NUMERIC_FLAG_NAMES: ReadonlyArray<[keyof StartNumericFlags, string, boolean]> = [
@@ -119,7 +120,9 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
   assertNumericFlags(flags);
   const prompt = flags.prompt?.trim() ?? '';
   if (prompt === '' && flags.mode !== 'interactive')
-    throw new SessionCommandError('provide a prompt, or use --mode interactive to start bare');
+    throw new SessionCommandError(
+      'provide a prompt (arguments and/or --prompt-file), or use --mode interactive to start bare',
+    );
   const base = environment.cwd;
   const typed = flags.cwd?.trim();
   const folder =
@@ -140,6 +143,9 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(flags.login === undefined ? {} : { login: flags.login }),
     ...(flags.pack === undefined ? {} : { pack: flags.pack }),
     ...(prompt === '' ? {} : { prompt }),
+    ...(flags.initialAttachments === undefined || flags.initialAttachments.length === 0
+      ? {}
+      : { initialAttachments: flags.initialAttachments.map(attachment => ({ ...attachment })) }),
     mode: flags.mode,
     ...(flags.teammateFallback === true ? { teammateFallback: true } : {}),
     ...(flags.title === undefined ? {} : { title: flags.title }),

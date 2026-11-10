@@ -10,8 +10,8 @@ import { nixModuleUpdate, type UpdateStep } from './install-method.ts';
 import type { HarnessUpdatePlan } from './types.ts';
 import { CODEX_LABEL, CODEX_PACKAGES } from './version.ts';
 
-/** The programs an update runs. `harness` is Codex's own binary. */
-type HarnessUpdateProgram = 'npm' | 'pnpm' | 'bun' | 'volta' | 'brew' | 'nix' | 'harness';
+/** The programs an update runs. */
+type HarnessUpdateProgram = 'npm' | 'pnpm' | 'bun' | 'volta' | 'brew' | 'nix';
 
 /** One command an update runs: a program and its arguments, never a shell string. */
 export interface HarnessCommand {
@@ -21,7 +21,7 @@ export interface HarnessCommand {
 
 /** A command as a person types it. */
 export function harnessCommandLine(command: HarnessCommand): string {
-  return [command.program === 'harness' ? 'codex' : command.program, ...command.args].join(' ');
+  return [command.program, ...command.args].join(' ');
 }
 
 /** What updating takes for one install method. */

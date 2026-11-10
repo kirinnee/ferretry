@@ -3,7 +3,9 @@
  * C2 and the round-2 reach table), and no more. Today's door took a path only if `classifyConfigPath` knew it: 8 single
  * files, 5 named-file folders and `components/<kind>/`, 14 entries. Each is mapped here to the file that holds the same
  * content in 5.0, ONLY where that file's `loosens` is at least as strict as today's rule for the same content (an
- * agent's loosening must be HELD, never applied), and ONLY where the file holds nothing today's agent could not reach.
+ * agent's loosening must be HELD, never applied), and ONLY where the file holds nothing today's agent could not reach
+ * — with one accepted exception: `agenda.yaml` also holds `deadlineWarnHours` (today in `daemon.json`), which moves
+ * only when a deadline warning buzzes, no spend and no authority (docs/config-files.md, the agent's tools).
  * Never `gate.yaml`, `plugins.yaml` or any file the 5.0 plugins added with no today equivalent: widening that is the
  * owner's decision, not a side effect of the declared-file reader.
  *
@@ -15,7 +17,10 @@
  * - `harness-claude-code.yaml`, `harness-codex.yaml` (today machine.yaml's agent permissions): each also holds the
  *   harness `binary` and `searchPaths`, which today lived in `daemon.json` where no agent reached, and its `loosens`
  *   judges only the permission mode. Mapping it would let an agent choose the program every new ferret launches.
- * - `components/instructions/<n>`: now `config/instructions/<n>.md`, which no plugin declares as a config file.
+ * - `components/instructions/<n>` and `components/hooks/<n>` of Codex: now `config/instructions/<n>.yaml` (Runtimes) and
+ *   `config/codex/hooks/<n>.yaml` (Codex), which plugins DO declare, but are left out on purpose. Their `neverLoosens` holds
+ *   nothing (as in v4), so mapping them would let an agent add agent instructions and shell hook commands with no owner
+ *   hold. Today's `claude-code/hooks` is mapped (above); mapping these two is the owner's decision, not a side effect.
  * - `presets/<n>.yaml`: no declared successor (Logins to rule whether `endpoints/` is one).
  *
  * Pure and total over every string.

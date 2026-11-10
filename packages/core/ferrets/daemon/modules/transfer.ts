@@ -5,6 +5,8 @@ import {
   FileSessionTransferTargetPlanStore,
 } from '../adapters/transfer/index.ts';
 import type { TransferAttachmentStore } from '../lib/transfer/ports.ts';
+import type { BriefRoot } from '../adapters/transfer/brief-writer.ts';
+import type { SessionId } from '../lib/session-id.ts';
 
 /**
  * The three ports a fork needs to leave a transferred session behind: the target's plan, its first-turn brief and
@@ -13,7 +15,8 @@ import type { TransferAttachmentStore } from '../lib/transfer/ports.ts';
  * See `./session-fork.ts` for the composition that calls {@link transferPorts}. This file has no module of its own any
  * more: the attachment store, its originals adapter and the four attachment routes are Conversation's, not a
  * transfer's, so they are no longer built here. What stays is the construction of the three transfer-only ports, all
- * of which need nothing but the state port (the plan and the brief live under the target ferret's own folder) and
+ * of which need nothing but the state port (the plan lives under the target ferret's own folder), the target's own
+ * `sessions` folder (the brief is its turn one) and
  * the attachment owner's store (a port: the originals are Conversation's, GAP "unbound: TransferAttachmentStore —
  * owner Conversation").
  *
@@ -24,8 +27,13 @@ import type { TransferAttachmentStore } from '../lib/transfer/ports.ts';
 
 /** What {@link TransferProvides.transferPorts} is built from. */
 export interface TransferPortsParts {
-  /** Ferrets' own state: the target plan (`transfer-plan.json`) and the brief (`turns/turn-001.md`) live under it. */
+  /** Ferrets' own state: the target plan (`transfer-plan.json`) lives under it. */
   readonly state: StatePort;
+  /**
+   * A target's own private `sessions` handle: the brief IS the target's `turns/turn-001.md`, the file every turn reader
+   * reads (the contract's `FERRET_SESSIONS_FOLDER`), never a second copy on the state port.
+   */
+  readonly briefs: (id: SessionId) => BriefRoot;
   /** The attachment owner's store: the source originals are read from it and the target's are written into it. */
   readonly attachments: TransferAttachmentStore;
 }
@@ -56,7 +64,7 @@ export interface TransferProvides {
 export function transferPorts(parts: TransferPortsParts): TransferPorts {
   return {
     planStore: new FileSessionTransferTargetPlanStore(parts.state),
-    briefWriter: new FileSessionTransferBriefWriter(parts.state),
+    briefWriter: new FileSessionTransferBriefWriter(parts.briefs),
     attachmentCopier: new FileSessionAttachmentCopier(parts.attachments),
   };
 }

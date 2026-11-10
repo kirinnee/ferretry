@@ -467,6 +467,37 @@ export function agendaVersionRecoveryContract() {
       await w.files.writeAtomic(SESSION, 'agenda.json', JSON.stringify(document));
     };
 
+    it('keeps the versions and the change event of a change that committed when another daemon wrote afterwards', async () => {
+      const w = await world();
+      try {
+        await w.raise();
+        const write = w.files.writeAtomic.bind(w.files);
+        w.files.writeAtomic = async (session, name, text) => {
+          if (name === AGENDA_VERSION_PENDING && text.includes('"committed"')) throw new Error('marker failed');
+          await write(session, name, text);
+        };
+        await should(
+          w.save({ action: 'edit', actor: ACTOR, id: 'A1', patch: { subject: 'Intermediate' } }),
+        ).be.rejectedWith('marker failed');
+        w.files.writeAtomic = write;
+        should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.a.String();
+        await olderDaemonAdds(w, 'From the older daemon');
+        w.restart();
+
+        const read = await w.repo.read(SESSION);
+
+        should(read?.entries.map(entry => entry.item.subject)).deepEqual(['Intermediate', 'From the older daemon']);
+        should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.undefined();
+        should(await w.files.read(SESSION, `${AGENDA_VERSION_PENDING}.stale`)).be.undefined();
+        should(await w.backing.list(SESSION, 'A1')).have.length(2);
+        should(w.warnings).deepEqual([
+          `agenda ${SESSION}: an unfinished change had committed before the agenda file was written by another daemon, so its versions and change event were kept`,
+        ]);
+      } finally {
+        await w.close();
+      }
+    });
+
     it('voids the versions of a set-aside intent, so an item that took its id never resumes from them', async () => {
       const w = await world();
       try {

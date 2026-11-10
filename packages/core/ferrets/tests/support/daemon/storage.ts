@@ -3,7 +3,8 @@
  * contract's journal, index and archive registry, and nothing on disk. The folder outlives the storage, so a test can
  * open a second storage on the same files (a restart), plant a damaged file, or read what was written.
  */
-import type { Log, LogFields } from '@ferretry/kernel/contract';
+import type { Log, LogFields, StatePort } from '@ferretry/kernel/contract';
+import { state as hostState } from '@ferretry/kernel/host';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import {
   ArchiveFile,
@@ -13,7 +14,9 @@ import {
   FerretStateFile,
 } from '../../../contract/index.ts';
 import type { SessionProtocolEnvelope } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import { ListedSessionIndex } from '../../../daemon/adapters/storage/listed-session-index.ts';
 import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
+import { StateSqliteIndex } from '../../../daemon/adapters/storage/sqlite-index.ts';
 import type { ClockPort, SessionIndex, YieldingSerialExecutor } from '../../../daemon/lib/ports.ts';
 
 /** Every file the session store reads or writes. */
@@ -53,6 +56,8 @@ export interface MemoryStorageOptions {
   readonly log?: Log;
   readonly index?: (folder: MemoryStateFolder) => SessionIndex;
   readonly serial?: YieldingSerialExecutor;
+  /** Wraps the state port the storage reads and writes through (a read that fails on cue). */
+  readonly wrapState?: (port: StatePort) => StatePort;
 }
 
 export interface MemoryStorage {
@@ -65,9 +70,9 @@ export interface MemoryStorage {
 export async function memoryStorage(options: MemoryStorageOptions = {}): Promise<MemoryStorage> {
   const folder = options.folder ?? new MemoryStateFolder();
   const log = options.log ?? new RecordingLog();
-  const state = folder.port(SESSION_STORE_FILES);
+  const port = folder.port(SESSION_STORE_FILES);
   const storage = new DaemonStorage(
-    state,
+    options.wrapState?.(port) ?? port,
     options.clock ?? { now: () => T0 },
     log,
     options.index?.(folder),
@@ -75,6 +80,38 @@ export async function memoryStorage(options: MemoryStorageOptions = {}): Promise
   );
   await storage.loadArchive();
   return { storage, folder, log };
+}
+
+export interface RealPortStorage {
+  readonly storage: DaemonStorage;
+  /** Put a session's `state.json` there as it would be on disk, bytes as given (a damaged file, a hand edit). */
+  readonly plant: (id: string, text: string) => void;
+  /** The bytes of a session's `state.json` as they are now. */
+  readonly raw: (id: string) => Promise<string | undefined>;
+}
+
+/**
+ * A storage over the kernel's REAL state port (`createStatePort`, the one the daemon hands every plugin) on an in-memory
+ * disk. Unlike the `MemoryStateFolder` fake, its refusal sentences are the real ones: they carry the parser's own
+ * account of a damaged file, which quotes what it was handed (`Unexpected identifier "<value>"`). Its version etag is
+ * the real `inode:size:mtime`, so a rewrite is a new etag whatever the bytes.
+ */
+export async function realPortStorage(clock: ClockPort = { now: () => T0 }): Promise<RealPortStorage> {
+  const fs = hostState.createMemoryHostFs();
+  const home = '/home/real-port';
+  const state = hostState.createStatePort({ home, pluginId: 'ferrets', files: SESSION_STORE_FILES, fs });
+  // Only the session index (a sqlite file) is the fake's: the real port would open a database on the real disk.
+  const index = new ListedSessionIndex(
+    new StateSqliteIndex(new MemoryStateFolder().port(SESSION_STORE_FILES).sqlite(FerretIndexFile)),
+  );
+  const storage = new DaemonStorage(state, clock, new RecordingLog(), index);
+  await storage.loadArchive();
+  const path = (id: string): string => `${hostState.pluginStateRoot(home, 'ferrets')}/${id}/state.json`;
+  return {
+    storage,
+    plant: (id, text) => fs.seed(path(id), text),
+    raw: async id => await fs.readText(path(id)),
+  };
 }
 
 /** Everything `SessionConfigSchema` demands, so a written config passes its declared schema. */

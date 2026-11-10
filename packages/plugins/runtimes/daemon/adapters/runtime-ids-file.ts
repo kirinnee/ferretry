@@ -33,7 +33,7 @@ export class RuntimeIdsFile implements RuntimeNamesPort {
  * The fleet's account inventory with its runtime names beside it: the ONE inventory a daemon shares,
  * so every start resolves an old wrapper name without any call site passing a second thing.
  *
- * @pending runtimes: has no apply to guard until the config write port exists
+ * @pending runtimes: the start path's account inventory with runtime names is not wired to Ferrets' start resolution
  */
 export class RuntimeAwareAccountInventory<Account> implements AccountInventoryPort<Account>, RuntimeNamesPort {
   constructor(

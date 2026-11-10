@@ -11,6 +11,7 @@
  * - EVERY READ OF PANE TEXT IS MASKED INSIDE ONE `kernel.redaction.read` (§7.3) — the wait predicate included (I103).
  * - `terminal_ask_owner` and `terminal_request_input` are not acts: they raise through the control store and Vault.
  */
+import { createHash } from 'node:crypto';
 import { ferretOf } from '@ferretry/core-gate/contract';
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import {
@@ -23,6 +24,7 @@ import {
   targetRef,
 } from '@ferretry/core-vault/contract';
 import {
+  agentControlRefusal,
   ApiError,
   type CallContext,
   decodeParameter,
@@ -71,7 +73,8 @@ import { ControlModeTmuxProcess, type ControlChild } from './adapters/tmux/contr
 import { KernelTmuxProcess, TMUX_PROGRAM } from './adapters/tmux/kernel-tmux-process.ts';
 import { TmuxRunner, ferretTmuxSession } from './adapters/tmux/tmux-runner.ts';
 import { RealHarnessLaunchGuard } from './adapters/tmux/harness-launch-guard.ts';
-import { forgetFerretIdentity } from './adapters/tmux/forget-ferret-identity.ts';
+import { boundedSpawn } from './adapters/tmux/bounded.ts';
+import { IDENTITY_SCRUB_TIMEOUT_MS, forgetFerretIdentity } from './adapters/tmux/forget-ferret-identity.ts';
 import {
   releaseReader,
   tmuxReleaseDoctor,
@@ -167,6 +170,19 @@ function terminalsConfig(kernel: KernelPorts): TerminalsConfig {
   const [def] = manifest.data.config;
   const file = def === undefined ? undefined : (kernel.config.file(def as never) as TerminalsConfig | undefined);
   return file ?? { perFerret: TERMINAL_MAX_PER_SESSION, global: TERMINAL_MAX_GLOBAL };
+}
+
+/**
+ * The configured terminal environment as it is NOW (no cached copy). The kernel keeps the LAST GOOD file in effect when a
+ * later one is invalid, so that environment stays; only a file never accepted (or one that cannot be read) gives none,
+ * and terminals still open, with no extra environment.
+ */
+function liveTerminalEnvironment(kernel: KernelPorts): Readonly<Record<string, string>> {
+  try {
+    return terminalsConfig(kernel).environment ?? {};
+  } catch {
+    return {};
+  }
 }
 
 /** Who took a terminal over, from Gate's standing: a paired device by its holder, else somebody at this machine. */
@@ -313,7 +329,8 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   );
   const config = terminalsConfig(kernel);
   const runtime: TerminalRuntimePort =
-    overrides.runtime ?? new TmuxTerminalRuntime(tmux, nowMs, loginShell, processes.limits);
+    overrides.runtime ??
+    new TmuxTerminalRuntime(tmux, nowMs, loginShell, processes.limits, () => liveTerminalEnvironment(kernel));
   const service = new ManagedTerminalService(
     runtime,
     {
@@ -441,12 +458,28 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     const name = (await ferrets.get(ferret).catch(() => undefined))?.name;
     return { kind: 'agent', sessionId: ferret, ...(name === undefined ? {} : { name }) };
   };
+  /**
+   * "What agents may control › Terminals", asked of core's `AgentControlPort` for the calling ferret on every terminal tool
+   * (today's `switchOf`: every `terminal.*` tool). Fails closed: unbound (Ferrets not serving), a lookup or reader that
+   * throws, or any answer but a plain `true` refuses. A person's route is not asked, as today.
+   */
+  const terminalsOn = async (ferret: FerretId): Promise<boolean> => {
+    try {
+      const reader = ctx.uses.agentControl.current();
+      return reader !== undefined && (await reader.allows(ferret, 'terminal')) === true;
+    } catch {
+      return false;
+    }
+  };
   const tool =
     (name: string) =>
     async (call: CallContext, input: unknown): Promise<ToolResult> => {
       const caller = await callerOf(call);
       if (caller === undefined)
         return { text: "Terminal tools are a ferret's: no ferret made this call.", isError: true };
+      // Today's `forbidden` and `controlRefusal('terminal')` (rebuild-ref agent-tools/service.ts:436-437, policy.ts:96-101).
+      if (!(await terminalsOn(caller.sessionId as FerretId)))
+        return { text: agentControlRefusal('terminal'), isError: true };
       const parsed = parseToolCall(name, input);
       if (typeof parsed === 'string') return { text: parsed, isError: true };
       try {
@@ -536,6 +569,13 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       act: kernel.act.bind(kernel),
       sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
     },
+    // Ferrets' turn watch (U4): every look an act on the pane, its screen masked before it is parsed; only a digest of
+    // the masked frame is handed back as the frame's identity.
+    look: {
+      act: kernel.act.bind(kernel),
+      redaction: kernel.redaction,
+      digest: text => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16),
+    },
   });
 
   // ─── jobs ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -624,10 +664,21 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     },
     provides: { terminals: provided },
     // At boot, before listeners: a tmux server an earlier daemon started inside a ferret's pane may still hold that
-    // ferret's identity. Best effort — a failure is never a boot failure, and no value is read or logged.
+    // ferret's identity. Best effort — a failure is never a boot failure, and no value is read or logged. Each client is
+    // killed at its bound, and a server that does not answer one is asked nothing more (one line says so).
     beforeListen: async () => {
       try {
-        const cleared = await forgetFerretIdentity(new KernelTmuxProcess(kernel.spawn, socketPath));
+        const cleared = await forgetFerretIdentity(
+          new KernelTmuxProcess(boundedSpawn(kernel.spawn, IDENTITY_SCRUB_TIMEOUT_MS), socketPath),
+          {
+            after: releaseAfter,
+            timeoutMs: IDENTITY_SCRUB_TIMEOUT_MS,
+            stalled: () =>
+              log.warn('the tmux server did not answer the identity scrub in time; its client was stopped', {
+                timeoutMs: IDENTITY_SCRUB_TIMEOUT_MS,
+              }),
+          },
+        );
         if (cleared.length > 0) log.info('cleared ferret identity from the tmux server', { count: cleared.length });
       } catch {
         log.warn('the tmux server identity scrub did not run');

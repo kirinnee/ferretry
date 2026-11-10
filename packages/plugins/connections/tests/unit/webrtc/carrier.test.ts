@@ -42,6 +42,7 @@ import {
   webrtcArrival,
   webrtcRateLimitIdentity,
 } from '../../../daemon/lib/webrtc/index.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const SESSION_ID = sessionIdFromBytes(new Uint8Array(16).fill(7)) as SessionId;
 
@@ -818,8 +819,3 @@ describe('the WebRTC carrier', () => {
     should(webrtcArrival(peerId)).deepEqual({ kind: 'carried', carrier: 'webrtc', address: expected });
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

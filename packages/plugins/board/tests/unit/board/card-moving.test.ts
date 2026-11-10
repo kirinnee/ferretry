@@ -90,3 +90,35 @@ describe('an answer to a `card` entry that is not a gate’s', () => {
     should(outcome).match({ refused: /not a card’s gate/u });
   });
 });
+
+describe('a move that cannot be announced or no longer matches what an answer expected', () => {
+  it('should keep the move and warn when board.card-moved throws', async () => {
+    const store = new MemoryBoardStore([card({ laneId: 'implement' })]);
+    const ports = world({
+      store,
+      moved: () => {
+        throw new Error('the listener is gone');
+      },
+    });
+    const service = new BoardService(ports);
+
+    await service.act('F1', { action: 'move', to: 'review', reason: 'ready' }, { kind: 'owner' });
+
+    should(store.cards.get('F1')?.laneId).equal('review');
+    should(ports.warnings.some(warning => warning.includes('could not be announced'))).be.true();
+  });
+
+  it('should refuse a move whose card is no longer at the gate the answer was about', async () => {
+    const store = new MemoryBoardStore([card({ laneId: 'implement' })]);
+    const service = new BoardService(world({ store }));
+
+    await service
+      .act('F1', { action: 'move', to: 'review', reason: 'ready' }, { kind: 'owner' }, { laneId: 'tested', entry: 1 })
+      .then(
+        () => should.fail(undefined, undefined, 'a stale answer was written'),
+        (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'invalid' }),
+      );
+
+    should(store.cards.get('F1')?.laneId).equal('implement');
+  });
+});

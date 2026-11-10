@@ -8,7 +8,7 @@
  * here can switch it off.
  */
 
-import { editConfigText, readConfigText } from '../config-text.ts';
+import { editConfigText, readConfigText } from '@ferretry/std/yaml';
 import {
   DEFAULT_VOICE_CLEANUP_PROMPTS,
   MAX_VOICE_PROMPT_CHARS,

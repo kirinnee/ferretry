@@ -1,4 +1,4 @@
-import { defineConfig, defineState } from '@ferretry/kernel/contract';
+import { defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { JsonValueSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { FerretIdSchema, FerretRecordSchema } from './ids.ts';
@@ -168,7 +168,18 @@ export const ArchiveFile = defineState({
   format: 1,
   schema: ArchiveDocumentSchema,
 });
+/**
+ * `auto-resume.json` (F-0109, today's `FY_HOME/auto-resume.json`): the ferrets a host restart took down that are still
+ * owed an auto-resume, written BEFORE any is attempted. `auto-resume-summary.json` (F-0108): what the last pass did.
+ * Each adapter parses its own body and reads an unreadable one as empty (the safe direction: nobody is resumed).
+ */
 export const AutoResumeFile = defineState({ name: 'auto-resume', path: 'auto-resume.json', store: 'json', format: 1 });
+export const AutoResumeSummaryFile = defineState({
+  name: 'auto-resume-summary',
+  path: 'auto-resume-summary.json',
+  store: 'json',
+  format: 1,
+});
 export const RestartsFile = defineState({ name: 'restarts', path: 'restarts.json', store: 'json', format: 1 });
 // ─── worktrees.json (today's managed worktree registry, `lib/worktrees/registry.ts`) ────────────────────────────
 
@@ -544,3 +555,25 @@ export const LimitsConfigFile = defineConfig({
 
 /** `config/instructions/<name>.md` are instruction items (§4.2), read as text; listed here for ownership only. */
 export const INSTRUCTION_ITEMS_FOLDER = 'instructions' as const;
+
+// ─── archive.yaml (the session archive's one setting) ─────────────────────────────────────────────────────────────
+
+/**
+ * `archive.yaml` (docs/session-archive.md): how long a finished autonomous ferret stays live before the archive pass
+ * takes it out of the live set. ABSENT, `off` or no key is OFF: nothing more is archived (what is already archived stays
+ * readable and revivable). Today this was the `FYD_SESSION_ARCHIVE_AFTER_HOURS` variable; no plugin reads the environment.
+ * Archiving only hides a session from the live list, and only a write brings it back, so no edit of this file widens
+ * authority or spend.
+ */
+/** The longest age `archive.yaml` holds: a year of hours (the one owner of the bound; the v4 converter reads it too). */
+export const ARCHIVE_MAX_HOURS = 24 * 365;
+export const ArchiveSettingsSchema = z.strictObject({
+  afterHours: z.union([z.literal('off'), z.number().int().min(1).max(ARCHIVE_MAX_HOURS)]).optional(),
+});
+export type ArchiveSettings = z.infer<typeof ArchiveSettingsSchema>;
+export const ArchiveConfigFile = defineConfig({
+  file: 'archive.yaml',
+  schema: ArchiveSettingsSchema,
+  axis: 'configure',
+  loosens: neverLoosens,
+});

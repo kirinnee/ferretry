@@ -288,6 +288,15 @@ export type ApplyCommittedState = z.infer<typeof ApplyCommittedStateSchema>;
  * unrestored **and** that nothing of anybody else's had to be moved aside. Anything less is
  * `rollback-incomplete`, however cleanly the fleet itself reverted.
  */
+const configurationLandedShape = {
+  /**
+   * Configuration files the change created, edited or removed BEFORE the fleet plan ran. A rollback undoes the plan,
+   * not these: each change stays and the next apply publishes it, so a failure that says "nothing changed" must not
+   * hide them.
+   */
+  configurationLanded: z.array(z.string().min(1)).readonly().optional(),
+};
+
 export const ApplyOutcomeSchema = z.discriminatedUnion('outcome', [
   z.strictObject({ outcome: z.literal('committed'), result: ApplyResultSchema }),
   z.strictObject({
@@ -302,6 +311,7 @@ export const ApplyOutcomeSchema = z.discriminatedUnion('outcome', [
     failedOperation: z.string().min(1),
     reason: z.string().min(1),
     lockResidue: z.string().min(1).optional(),
+    ...configurationLandedShape,
   }),
   z.strictObject({
     outcome: z.literal('rollback-incomplete'),
@@ -310,6 +320,7 @@ export const ApplyOutcomeSchema = z.discriminatedUnion('outcome', [
     unrestored: z.array(UnrestoredPathSchema),
     displaced: z.array(DisplacedStateSchema).optional(),
     lockResidue: z.string().min(1).optional(),
+    ...configurationLandedShape,
   }),
 ]);
 export type ApplyOutcome = z.infer<typeof ApplyOutcomeSchema>;

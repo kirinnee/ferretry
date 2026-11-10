@@ -30,7 +30,7 @@ import { ExternalLink, Share2 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { CommandBlock } from './command-block.tsx';
-import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
+import { type ClipboardWriter, CopyButton } from '@ferretry/app/ui';
 import type { CarrierDisclosure } from './connection-disclosure.ts';
 import {
   AGENT_HARNESSES,

@@ -37,7 +37,7 @@ const Base64UrlSchema = (max: number) =>
 export const PairedDeviceIdSchema = z.string().regex(/^fy_device_id_[A-Za-z0-9_-]{22}$/u, 'invalid device id');
 
 /** A daemon id is the SHA-256 fingerprint of its persisted Ed25519 public key. */
-const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u, 'invalid daemon id');
+export const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u, 'invalid daemon id');
 export type DaemonId = z.infer<typeof DaemonIdSchema>;
 
 /**

@@ -34,8 +34,6 @@ export type DeviceKind = 'mobile' | 'desktop';
  * A record rather than a `Navigator`, because two of the three fields are needed
  * only to catch iPadOS and neither suite nor harness should have to forge a
  * whole navigator to say "this is an iPad".
- *
- * @pending onboarding: the app half waits on the shell
  */
 export interface DeviceEvidence {
   readonly userAgent?: string | undefined;
@@ -79,12 +77,21 @@ const isDesktopClassIpad = (agent: string, platform: string, maxTouchPoints: num
   maxTouchPoints > 1 && (platform === 'macintel' || agent.includes('macintosh'));
 
 /**
+ * What the first run says about the device it is on, in one sentence: observed, never asked. It is drawn on the
+ * daemon-less first run only, never as a step of a machine (a device is not a fact about any machine).
+ */
+export const DEVICE_SENTENCES: Readonly<Record<DeviceKind, string>> = Object.freeze({
+  mobile:
+    'This is a phone or tablet. It watches a machine and cannot run one: a daemon needs a terminal, so pair this device with a computer that runs it.',
+  desktop:
+    'This is a computer. It can watch a machine from the browser, and it can also run the daemon itself if you want to host your ferrets here.',
+});
+
+/**
  * The device kind, from what the browser will admit to.
  *
  * Total: no input can fail, and the absent-evidence answer is `desktop` for the
  * reason the module comment gives.
- *
- * @pending onboarding: the app half waits on the shell
  */
 export const detectDeviceKind = (evidence: DeviceEvidence = {}): DeviceKind => {
   const agent = (evidence.userAgent ?? '').toLowerCase();

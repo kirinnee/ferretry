@@ -1,8 +1,10 @@
-import { implementDaemon } from '@ferretry/kernel/manifest';
+import { CORE_IDS } from '@ferretry/kernel/contract';
+import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { HOSTED_APP_ORIGIN, StepUpStages } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { type AccessHost, AccessRuntime } from './runtime.ts';
 import { pairingRedirectBoot } from './adapters/pairing/boot-redirect-sweep.ts';
+import { accessPortFor } from './lib/push/reach.ts';
 
 /**
  * The facts no port gives Access yet (see {@link AccessHost}): the app origins a passkey may answer for, and the
@@ -62,7 +64,12 @@ export default implementDaemon(manifest, {
         'POST /v1/unlock': route('POST /v1/unlock'),
         'POST /v1/unlock/options': route('POST /v1/unlock/options'),
       },
-      provides: { access: access.port },
+      provides: {
+        // Each plugin is handed its own port: `clear` is narrowed to the lines of its own namespace (docs/notifications.md).
+        access: perNeeder(needer =>
+          accessPortFor(access.port, needer.id, (CORE_IDS as readonly string[]).includes(needer.id)),
+        ),
+      },
       hooks: {
         'credentials:device': access.credentials,
         'step-up:device': access.witness,

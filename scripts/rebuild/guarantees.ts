@@ -76,6 +76,7 @@ const WORDS: [RegExp, string][] = [
   [/\bSkills\b/, 'skills'],
   [/\bVoice\b/, 'voice'],
   [/\bLogins\b/, 'logins'],
+  [/\bRuntimes\b/, 'runtimes'],
   [/\bUsage\b/, 'usage'],
   [/`fy` (?:shell|CLI)/, 'fy-shell'],
   [/Repo tooling/, 'repo-tooling'],
@@ -104,12 +105,16 @@ export function normaliseOwner(raw: string): { owner: string; with: string[]; wo
 
 /** REMOVED rows name no owner. Assigned by hand from the row text (documented in docs/rebuild/ports/README.md). */
 export const REMOVED_OWNER: Record<string, string> = {
+  R68: 'connections',
   G69: 'access',
   G70: 'access',
   G71: 'access',
   G72: 'access',
   G104: 'gate',
   G142: 'access',
+  G172: 'skills',
+  G173: 'skills',
+  G174: 'skills',
   G168: 'access',
   P67: 'gate',
   P129: 'access',
@@ -345,7 +350,7 @@ export const OPEN_CLAUSES: Record<string, string> = {
 /**
  * Appendix D rows the ledger splits into one row per ROUTE (lead ruling guarantees-reown: each route is owned by the
  * plugin that serves it, and each has its own test named with its id). The appendix keeps its one row; the ledger
- * (`guarantees.tsv`) carries these instead, so the appendix totals (1,215 = 1,158 + 26 + 31) still hold.
+ * (`guarantees.tsv`) carries these instead, so the appendix totals (1,215 = 1,155 + 26 + 34) still hold.
  */
 export const ROW_SPLITS: Record<string, readonly { id: string; owner: string; route: string; what: string }[]> = {
   G128: [
@@ -400,7 +405,7 @@ export function parseAppendixD(markdown: string): { rows: Row[]; gaps: number; s
   const start = markdown.indexOf('## Appendix D.');
   const d2 = markdown.indexOf('#### D.2');
   const body = markdown.slice(start, d2);
-  const stated = { total: 1215, kept: 1158, split: 26, removed: 31 };
+  const stated = { total: 1215, kept: 1155, split: 26, removed: 34 };
   let doc = '';
   const rows: Row[] = [];
   for (const line of body.split('\n')) {
@@ -508,7 +513,7 @@ if (import.meta.main) {
   const st = { kept: 0, split: 0, removed: 0 };
   for (const r of parsed.rows) st[r.status]++;
   console.log(
-    `appendix rows ${parsed.rows.length} (stated 1215); kept ${st.kept}/1158 split ${st.split}/26 removed ${st.removed}/31; declared gaps ${gaps} (stated 161); ledger rows ${rows.length} (${rows.length - parsed.rows.length} more from ROW_SPLITS)`,
+    `appendix rows ${parsed.rows.length} (stated 1215); kept ${st.kept}/1155 split ${st.split}/26 removed ${st.removed}/34; declared gaps ${gaps} (stated 161); ledger rows ${rows.length} (${rows.length - parsed.rows.length} more from ROW_SPLITS)`,
   );
   console.log('ids unique:', new Set(rows.map(r => r.id)).size === rows.length);
   console.log(

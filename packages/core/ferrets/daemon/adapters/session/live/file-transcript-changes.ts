@@ -55,11 +55,16 @@ export class FileTranscriptChanges implements TranscriptChangeSource {
 
     const subscribe = async (file: string): Promise<{ readonly file: string; readonly close: () => void }> => {
       let stamp = await this.ports.stat(file).catch(() => undefined);
+      // One stat in flight: a stalled disk must not stack a pending stat for every tick.
+      let statting = false;
       const subscription = this.ports.files.subscribe(file, () => {
+        if (statting) return;
+        statting = true;
         void this.ports
           .stat(file)
           .catch(() => undefined)
           .then(now => {
+            statting = false;
             if (closed || followed?.file !== file || sameStamp(now, stamp)) return;
             stamp = now;
             heard();

@@ -5,8 +5,12 @@ import type { ConfigDef } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { definePlugin, panel, route, screen, socket, tool, verb } from '@ferretry/kernel/manifest';
 import {
+  ArchiveConfigFile,
   ArchiveFile,
+  ArchiveKeeps,
+  AutoResumeDecide,
   AutoResumeFile,
+  AutoResumeSummaryFile,
   FerretChanged,
   FerretStopping,
   FerretStarted,
@@ -19,10 +23,10 @@ import {
   ForkFiles,
   HandoverFiles,
   MoveInflightFiles,
-  TransferBriefFiles,
   TransferPlanFiles,
   Harnesses,
   LaunchParts,
+  OpeningAttachments,
   LimitsAppliedFile,
   LimitsConfigFile,
   Logins,
@@ -40,6 +44,7 @@ import {
   FerretConfigFile,
   FerretDetailsFile,
   FerretLaunchEnvironmentFiles,
+  FerretLaunchSectionsFiles,
   FerretPinsFile,
   FerretStateFile,
   StartRequestsFile,
@@ -195,6 +200,7 @@ export default definePlugin({
       route('POST /v1/ferrets', {
         minimum: 'operator',
         caller: 'any',
+        noStore: true,
         audit: { record: AUDIT_KINDS['session.opened'] },
         guard: { none: 'answers the new ferret id only' },
       }),
@@ -239,6 +245,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/stop', {
         minimum: 'operator',
         caller: 'any',
+        noStore: true,
         audit: { skip: 'a stop is recorded in the ferret history, as today' },
         guard: { none: 'answers the new state only' },
       }),
@@ -246,6 +253,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/resume', {
         minimum: 'operator',
         caller: 'any',
+        noStore: true,
         consultsGrants: true,
         audit: { skip: 'a resume is recorded in the ferret history, as today' },
         guard: { none: 'answers the ferret id only' },
@@ -254,6 +262,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/rename', {
         minimum: 'operator',
         caller: 'any',
+        noStore: true,
         audit: { skip: 'a rename records nothing, as today' },
         guard: { none: 'one ferret identity record' },
       }),
@@ -261,6 +270,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/revoke-credential', {
         minimum: 'operator',
         caller: 'person',
+        noStore: true,
         audit: { record: AUDIT_KINDS['ferret.credential-revoked'] },
         guard: { none: 'answers whether a token was live, never a token or digest' },
       }),
@@ -351,7 +361,7 @@ export default definePlugin({
         audit: { skip: 'clearing the restart queue records nothing, as today' },
         guard: { none: 'how many waiting restarts were cleared' },
       }),
-      // R-0047 (today's mounts/session-archive.ts, path unchanged). 503 until the session services are bound.
+      // R-0047 (today's mounts/session-archive.ts, path unchanged): how many are archived and the newest, read-only.
       route('GET /v1/archived-sessions', {
         minimum: 'operator',
         caller: 'any',
@@ -463,6 +473,11 @@ export default definePlugin({
     ],
   },
 
+  /** Never reached by a ferret, through any root: the digests of every ferret token (`PrivacyDecl`). */
+  privacy: {
+    // `sessions/*/environment.json` is each ferret's plaintext `fys_` credential (the kernel's own `sessions` root).
+    private: ['tokens.json', 'sessions/*/environment.json'],
+  },
   data: {
     state: [
       FerretFiles,
@@ -472,6 +487,7 @@ export default definePlugin({
       SystemCallsignsFile,
       ArchiveFile,
       AutoResumeFile,
+      AutoResumeSummaryFile,
       RestartsFile,
       WorktreesFile,
       ForkFiles,
@@ -487,14 +503,14 @@ export default definePlugin({
       FerretSummaryFiles,
       HandoverFiles,
       TransferPlanFiles,
-      TransferBriefFiles,
       MoveInflightFiles,
       FerretWaitFiles,
       FerretLaunchEnvironmentFiles,
+      FerretLaunchSectionsFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     // biome-ignore lint/suspicious/noExplicitAny: the leaf cast named above
-    config: [LimitsConfigFile as ConfigDef<any>],
+    config: [LimitsConfigFile as ConfigDef<any>, ArchiveConfigFile as ConfigDef<any>],
     publishes: [FerretsChanged],
   },
   hooks: {
@@ -503,7 +519,10 @@ export default definePlugin({
       { hook: Runners },
       { hook: Logins },
       { hook: LaunchParts },
+      { hook: OpeningAttachments },
       { hook: StartDecide },
+      { hook: ArchiveKeeps },
+      { hook: AutoResumeDecide },
       { hook: SitrepLines },
       { hook: FerretChanged },
       { hook: FerretStopping },

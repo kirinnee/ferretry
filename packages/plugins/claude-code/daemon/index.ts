@@ -1,13 +1,17 @@
-import type { ConfigFileDef } from '@ferretry/kernel/contract';
+import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import {
   CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_DISCOVERY,
+  CLAUDE_CODE_HOOKS,
+  CLAUDE_CODE_SETTINGS,
   ClaudeCodeUpdateFinished,
   type Discovery,
   type HarnessConfig,
   type HarnessCliView,
+  type HooksItem,
+  type SettingsItem,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { ClaudeHarness } from './adapters/claude-harness.ts';
@@ -17,6 +21,7 @@ import { DialogAnswerService } from './lib/dialog/service.ts';
 import { PermissionAnswerService } from './lib/permission/service.ts';
 import { isConversationId } from './lib/harness/claude-path.ts';
 import { fastStartDecision } from './lib/harness/fast-mode.ts';
+import { claudeHooksSource, claudeSettingsSource } from './lib/profile-components.ts';
 import { ClaudeProjectApprovals } from './lib/project-approvals.ts';
 import { dialogRoute, permissionRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
 import { HarnessUpdateService } from './lib/update/service.ts';
@@ -93,6 +98,7 @@ export default implementDaemon(manifest, {
     const harness = new ClaudeHarness({
       roots: kernel.roots,
       config: kernel.config,
+      state: kernel.state,
       spawn: kernel.spawn,
       clock: kernel.clock,
       redaction: kernel.redaction,
@@ -132,6 +138,14 @@ export default implementDaemon(manifest, {
       },
       hooks: {
         'harnesses:claude-code': harness,
+        // Runtimes' read of the `settings` and `hooks` components a profile names for Claude: this plugin's own items,
+        // live, no cache.
+        'runtimes.components.settings.claude:components': claudeSettingsSource(() =>
+          kernel.config.collection(CLAUDE_CODE_SETTINGS as ConfigCollectionDef<SettingsItem>),
+        ),
+        'runtimes.components.hooks.claude:components': claudeHooksSource(() =>
+          kernel.config.collection(CLAUDE_CODE_HOOKS as ConfigCollectionDef<HooksItem>),
+        ),
         // A fast start on a model without fast mode is refused before anything is written (today's fyd start refusal).
         'start.decide': fastStartDecision,
       },

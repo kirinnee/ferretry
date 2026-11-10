@@ -13,6 +13,7 @@
  * reads the same in every capture. These are the same frozen values the settings gallery uses.
  */
 
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
 import { CAPABILITY_NAMES, type CapabilityGrants } from '@ferretry/core-gate/contract';
 import { InstantSchema } from '@ferretry/std';
 import { useState } from 'react';
@@ -45,7 +46,7 @@ export const HARNESS_INVITE: PairingCodeMintResponse = {
   daemonId: DAEMON_ID,
   daemonName: MACHINE,
   daemonUrl: 'https://workstation.example.test',
-  pairUrl: `https://ferretry.pages.dev/pair#v1;url=${encodeURIComponent('https://workstation.example.test')};code=7F3K-Q2ND;fp=${encodeURIComponent(DAEMON_ID)}`,
+  pairUrl: `${HOSTED_APP_ORIGIN}/pair#v1;url=${encodeURIComponent('https://workstation.example.test')};code=7F3K-Q2ND;fp=${encodeURIComponent(DAEMON_ID)}`,
   reach: 'any-device',
   grants: 'full',
 };

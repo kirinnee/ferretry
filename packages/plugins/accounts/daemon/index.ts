@@ -47,6 +47,7 @@ export default implementDaemon(manifest, {
       // proposal, a staged 2FA seed. Its refs name an id only; Asks' generic answer creates nothing.
       hooks: {
         [SIGN_IN_APPROVAL_HOOK]: b.hooks['ask.sources:sign-in-approval'],
+        'input.phone-approval:phone': b.hooks['input.phone-approval:phone'],
         'redaction.sources:source': a.masks,
       } as Half['hooks'],
     } satisfies Half;

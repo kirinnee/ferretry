@@ -5,15 +5,18 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { contextFor, parseArgs } from '../lib/check.ts';
+import { strictFindings } from '../../ci/strict-guarantees.ts';
 import type { Finding } from '../lib/graph.ts';
 import { check as actRunner } from '../../validate/act-runner.ts';
 import { appHookFindings } from '../../validate/app-hooks.ts';
+import { check as shellProvides, shellProvidesFindings } from '../../validate/shell-provides.ts';
 import { bannedIn, check as bannedGlobals } from '../../validate/banned-globals.ts';
 import { check as contextImports } from '../../validate/context-imports.ts';
 import { check as contractConsumes } from '../../validate/contract-consumes.ts';
 import { check as contractGraph } from '../../validate/contract-graph.ts';
 import { check as coreClosed } from '../../validate/core-closed.ts';
-import { parity, readChanges } from '../../validate/descriptor-parity.ts';
+import { parity } from '../../../packages/core/kernel/testing/parity.ts';
+import { readChanges } from '../../validate/descriptor-parity.ts';
 import { check as glossary, glossaryFindings } from '../../validate/glossary.ts';
 import {
   check as guarantees,
@@ -471,7 +474,7 @@ describe('source scans', () => {
       {
         id: 'browsers',
         files: {
-          'daemon/worker/adapters/main.ts': 'const endpoint = process.argv[2]; setTimeout(() => {}, 1);',
+          'daemon/worker/main.ts': 'const endpoint = process.argv[2]; setTimeout(() => {}, 1);',
           'daemon/worker/launcher.ts': 'await fetch("http://127.0.0.1:9222/json/version");',
         },
       },
@@ -481,7 +484,7 @@ describe('source scans', () => {
     expect(found).toHaveLength(4);
     expect(messages(found)).toContain('connections/daemon/worker.ts');
     expect(messages(found)).toContain('browsers/daemon/worker/launcher.ts');
-    expect(messages(found)).not.toContain('browsers/daemon/worker/adapters/');
+    expect(messages(found)).not.toContain('browsers/daemon/worker/main.ts');
     expect(messages(found)).toContain('connections/daemon/adapters/webrtc/other.ts');
     expect(messages(found)).toContain('other/worker/src/worker.ts');
   });
@@ -874,6 +877,63 @@ describe('guarantees', () => {
   });
 });
 
+describe('guarantees: the one helper and multi-id titles (test-titles.ts)', () => {
+  const rowFor = (id: string): string => `${id}\tkept\talpha\t-\t-\tgrants\t${id}\n`;
+  const SUPPORT = 'packages/plugins/alpha/tests/support/guarantee.ts';
+  const A = 'packages/plugins/alpha/tests/unit/a.test.ts';
+  const SUPPORT_BODY =
+    "import { it } from 'bun:test';\nexport function guarantee(ids: readonly string[], name: string, run: () => void): void {\n  for (const id of ids) it(id + ' ' + name, run);\n}\n";
+  const IMPORT = "import { guarantee } from '../support/guarantee.ts';\n";
+  // The titles are spliced in, so this file holds no literal test title that starts with a real row id.
+  const titled = (...names: string[]): string =>
+    `import { test } from 'bun:test';\n${names.map(name => `test('${name}', () => {});`).join('\n')}\n`;
+  /** Which of the rows have no test, with `source` as the one test file (and the support module when `support`). */
+  const missing = async (ids: readonly string[], source: string, support = true): Promise<string> => {
+    const f = ws([{ id: 'alpha' }]);
+    f.write('docs/rebuild/guarantees.tsv', `id\tstatus\towner\twith\tenforcer\tdoc\ttest\n${ids.map(rowFor).join('')}`);
+    if (support) f.write(SUPPORT, SUPPORT_BODY);
+    f.write(A, source);
+    const found = await run(guarantees, f, { existenceOnly: true, strict: true });
+    // the owner check reads the same ids: a row the existence half sees must not be flagged as tested nowhere
+    const owner = await run(guaranteeOwner, f, { strict: true });
+    expect(messages(owner)).not.toContain('tested only outside');
+    return found.map(x => x.where).join(',');
+  };
+
+  test('planted: a call of the imported helper names every id in its list', async () => {
+    const source = `${IMPORT}guarantee(['G1', 'G2'], 'holds', () => {});\nguarantee(['G3'], 'also holds', () => {});\n`;
+    expect(await missing(['G1', 'G2', 'G3', 'G4'], source)).toBe('G4');
+  });
+
+  test('planted: a literal title names every id that leads its own word, and no later id', async () => {
+    expect(await missing(['G1', 'G2', 'G3', 'G4'], titled('G1 G2 both', 'G3 then G4 later'))).toBe('G4');
+    expect(await missing(['G1', 'G2'], titled('see G1 and G2'))).toBe('G1,G2');
+  });
+
+  test('planted: a stray call, a local re-declaration, a foreign import or an alias counts as nothing', async () => {
+    const strays: Record<string, string> = {
+      'a different function name': `${IMPORT}function proof(ids: string[], name: string): void {}\nproof(['G1'], 'x');\n`,
+      'a same-named local declaration, not imported':
+        "function guarantee(ids: string[], name: string, run: () => void): void {}\nguarantee(['G1'], 'x', () => {});\n",
+      'the name imported from another module':
+        "import { guarantee } from '../support/other.ts';\nguarantee(['G1'], 'x', () => {});\n",
+      'the helper under an alias':
+        "import { guarantee as holds } from '../support/guarantee.ts';\nholds(['G1'], 'x', () => {});\n",
+      'ids that are not literal strings': `${IMPORT}const ids = ['G1'];\nguarantee(ids, 'x', () => {});\n`,
+      'a type-only import':
+        "import type { guarantee } from '../support/guarantee.ts';\nguarantee(['G1'], 'x', () => {});\n",
+    };
+    for (const [why, source] of Object.entries(strays))
+      expect([why, await missing(['G1'], source)]).toEqual([why, 'G1']);
+  });
+
+  test('planted: an import of a support module that does not exist counts as nothing', async () => {
+    const source = `${IMPORT}guarantee(['G1'], 'holds', () => {});\n`;
+    expect(await missing(['G1'], source, false)).toBe('G1');
+    expect(await missing(['G1'], source, true)).toBe('');
+  });
+});
+
 describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', () => {
   const TSV_HEAD = 'id\tstatus\towner\twith\tenforcer\tdoc\ttest\n';
   const row = (id: string, status: 'kept' | 'split' | 'removed', owner = 'alpha'): string =>
@@ -928,6 +988,7 @@ describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', ()
       'G5:passed:p/a.test.ts',
     ]);
     expect(parseJunit(xml)[1]?.name).toBe('G2 fails & says so');
+    expect(parseJunit('<testcase name="P23 P53 two ids" file="p/b.test.ts" />').map(r => r.id)).toEqual(['P23', 'P53']);
   });
 
   test('a kept row whose id-named test passes is quiet; with no test at all it fails', async () => {
@@ -1131,6 +1192,102 @@ describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', ()
     });
   });
 
+  // The strict report (scripts/ci/strict-guarantees.ts): every tier's reports at once, --strict, no --tier.
+  describe('--strict over the unit, scripts and integration reports together', () => {
+    const I = 'packages/plugins/alpha/tests/integration/i.test.ts';
+    const S = 'scripts/x.test.ts';
+    const all = { strict: true, results: ['coverage/unit', 'coverage/scripts', 'coverage/int'] };
+    const combined = (reports: Record<string, string>) => {
+      const f = ws([{ id: 'alpha' }], { pending: ['alpha'] });
+      f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept') + row('G2', 'kept'));
+      f.write(A, titled('G1 holds'));
+      f.write(I, titled('G2 holds'));
+      for (const [path, xml] of Object.entries(reports)) f.write(path, xml);
+      return f;
+    };
+
+    test('a row proven by a passing test in EITHER tier is not a miss', async () => {
+      const f = combined({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I }),
+      });
+      expect(messages(await run(guarantees, f, all))).toBe('');
+      // Each alone leaves the other tier's row unproven: the reason the per-tier checks cannot give the count.
+      expect(messages(await run(guarantees, f, { strict: true, results: ['coverage/unit'] }))).toContain('G2');
+      expect(messages(await run(guarantees, f, { strict: true, results: ['coverage/int'] }))).toContain('G1');
+    });
+
+    test('a SKIPPED id test is a miss (the placeholder case)', async () => {
+      const f = combined({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'skipped' }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I }),
+      });
+      const found = await run(guarantees, f, all);
+      expect(found.map(x => x.where)).toEqual(['G1']);
+      expect(messages(found)).toContain('no passing run');
+    });
+
+    test('a FAILED id test is a miss, even when the other tier passes a different row', async () => {
+      const f = combined({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I, status: 'failure' }),
+      });
+      const found = await run(guarantees, f, all);
+      expect(found.map(x => x.where)).toEqual(['G2']);
+      expect(messages(found)).toContain('FAILING test');
+    });
+
+    test('a row in a pending package counts under --strict and not without it', async () => {
+      const f = combined({ 'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'skipped' }) });
+      expect((await run(guarantees, f, all)).map(x => x.where)).toEqual(['G1', 'G2']);
+      expect(messages(await run(guarantees, f, { results: all.results }))).toBe('');
+    });
+
+    test('a kept row whose only id test is in another package is a miss (it is neither proven nor missing per tier)', async () => {
+      const B = 'packages/plugins/beta/tests/unit/b.test.ts';
+      const f = ws([{ id: 'alpha' }, { id: 'beta' }]);
+      f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept') + row('G2', 'kept'));
+      f.write(A, titled('G2 holds'));
+      f.write(B, titled('G1 holds'));
+      f.write('coverage/unit/junit.xml', junit({ name: 'G2 holds', file: A }, { name: 'G1 holds', file: B }));
+      // The pass proof alone counts nothing: G1's only test is outside alpha's suite, so it is not alpha's to prove.
+      expect(await run(guarantees, f, all)).toEqual([]);
+      const strictCtx = contextFor(f.root, all);
+      const found = await strictFindings(strictCtx);
+      expect(found.map(x => x.where)).toEqual(['G1']);
+      expect(messages(found)).toContain('owned by alpha is tested only outside its owner');
+      // Non-strict (the per-tier checks today) still ignores nothing it ignored before: pending rows stay skipped.
+      const pending = ws([{ id: 'alpha' }, { id: 'beta' }], { pending: ['alpha'] });
+      pending.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept'));
+      pending.write(B, titled('G1 holds'));
+      pending.write('coverage/unit/junit.xml', junit({ name: 'G1 holds', file: B }));
+      expect(await strictFindings(contextFor(pending.root, { results: all.results }))).toEqual([]);
+      expect((await strictFindings(contextFor(pending.root, all))).map(x => x.where)).toEqual(['G1']);
+    });
+
+    test('a multi-id title proves every id in it, in source and in the report', async () => {
+      const f = ws([{ id: 'alpha' }]);
+      f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept') + row('G2', 'kept') + row('G3', 'kept'));
+      f.write(A, titled('G1 G2 holds'));
+      const I3 = 'packages/plugins/alpha/tests/integration/i3.test.ts';
+      f.write(I3, titled('G3 holds'));
+      f.write('coverage/unit/junit.xml', junit({ name: 'G1 G2 holds', file: A }));
+      f.write('coverage/int/junit.xml', junit({ name: 'G3 holds', file: I3 }));
+      expect(await run(guarantees, f, all)).toEqual([]);
+      // Skipped: both ids are misses, so the second id is judged too, not only the first.
+      f.write('coverage/unit/junit.xml', junit({ name: 'G1 G2 holds', file: A, status: 'skipped' }));
+      expect((await run(guarantees, f, all)).map(x => x.where)).toEqual(['G1', 'G2']);
+    });
+
+    test('the scripts report is read like the others (a repo-tooling row)', async () => {
+      const f = ws([{ id: 'alpha' }]);
+      f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept', 'repo-tooling'));
+      f.write(S, titled('G1 holds'));
+      f.write('coverage/scripts/junit.xml', junit({ name: 'G1 holds', file: S }));
+      expect(messages(await run(guarantees, f, all))).toBe('');
+    });
+  });
+
   test("the quarantine's junit.rerun.xml counts: a flake rescued by the rerun does not fail the proof", async () => {
     const f = planted(row('G1', 'kept'), titled('G1 holds'), {
       'coverage/unit/groups/x/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }),
@@ -1304,5 +1461,225 @@ describe('app-hooks', () => {
     expect(found([{ plugin: 'agenda', hooks: { 'board.thing': fn } }], [gives('board', 'board.thing')])).toEqual([
       'offers app hook "board.thing", which is not named "agenda.<name>"',
     ]);
+  });
+});
+
+describe('app-hooks: a shared action is one provider, many callers (S15)', () => {
+  const add = (value: unknown) => typeof value === 'object' && value !== null && 'add' in value;
+  const declared = [{ plugin: 'conversation', hooks: { 'conversation.add-to-chat': add } }];
+  const gives = (plugin: string, name: string, value: unknown = { add: () => undefined }) => ({
+    plugin,
+    hooks: { [name]: () => value },
+  });
+  const found = (...args: Parameters<typeof appHookFindings>) => appHookFindings(...args).map(x => x.message);
+
+  test('S15 a provider-named hook its own plugin gives, with the shape, passes without any offerer', () => {
+    expect(found([], [gives('conversation', 'conversation.add-to-chat')], declared)).toEqual([]);
+  });
+  test('S15 a provider-named hook is not mistaken for an offerer-named one (no "no provider"/"which nobody offers")', () => {
+    const offers = [{ plugin: 'agenda', hooks: { 'agenda.card-answer': add } }];
+    expect(
+      found(
+        offers,
+        [gives('board', 'agenda.card-answer'), gives('conversation', 'conversation.add-to-chat')],
+        declared,
+      ),
+    ).toEqual([]);
+  });
+  test('planted: a wrong prefix is found (the name is not the declaring plugin’s own id)', () => {
+    expect(
+      found(
+        [],
+        [gives('conversation', 'board.add-to-chat')],
+        [{ plugin: 'conversation', hooks: { 'board.add-to-chat': add } }],
+      ),
+    ).toEqual([
+      'provides shared action "board.add-to-chat", whose prefix is not "conversation" (the provider\'s own id)',
+    ]);
+  });
+  test('planted: another plugin giving the shared action is found', () => {
+    expect(
+      found(
+        [],
+        [gives('conversation', 'conversation.add-to-chat'), gives('board', 'conversation.add-to-chat')],
+        declared,
+      ),
+    ).toEqual(['provides "conversation.add-to-chat", the shared action of conversation; only conversation may']);
+  });
+  test('planted: a declared shared action its half does not give is found', () => {
+    expect(found([], [], declared)).toEqual([
+      expect.stringContaining('"conversation.add-to-chat" is declared but its half does not give'),
+    ]);
+  });
+  test('planted: a shared action that fails to build or has the wrong shape is found', () => {
+    const throws = {
+      plugin: 'conversation',
+      hooks: {
+        'conversation.add-to-chat': () => {
+          throw new Error('boom');
+        },
+      },
+    };
+    expect(found([], [throws], declared)).toEqual(['shared action "conversation.add-to-chat" failed to build: boom']);
+    expect(found([], [gives('conversation', 'conversation.add-to-chat', {})], declared)).toEqual([
+      'shared action "conversation.add-to-chat" builds a value without the shape its contract declares',
+    ]);
+  });
+});
+
+// ─── shell-provides (S3: declared fragments and device views) ────────────────────────────────────────────────────
+
+describe('shell-provides', () => {
+  const half = (plugin: string, extra: Partial<Parameters<typeof shellProvidesFindings>[0][number]> = {}) => ({
+    plugin,
+    skeleton: false,
+    screens: [{ id: 'join', daemonless: true }, { id: 'main' }],
+    fragments: [],
+    device: [],
+    ...extra,
+  });
+  const found = (...halves: Parameters<typeof shellProvidesFindings>[0]) =>
+    shellProvidesFindings(halves).map(x => x.message);
+
+  test('the real shapes pass: a taken keyed key, a kept one, and a path on an own daemon-less screen', () => {
+    expect(
+      found(
+        half('agenda', { fragments: [{ form: 'keyed', key: 'agenda' }], device: ['deep-link'] }),
+        half('runtimes', { fragments: [{ form: 'keyed', key: 'machines', strip: false }] }),
+        half('catalogs', { fragments: [{ form: 'path', screen: 'join' }] }),
+      ),
+    ).toEqual([]);
+  });
+  test('planted: one key claimed twice is found, strip: false claims included', () => {
+    expect(
+      found(
+        half('runtimes', { fragments: [{ form: 'keyed', key: 'machines', strip: false }] }),
+        half('other', { fragments: [{ form: 'keyed', key: 'machines', strip: false }] }),
+      ),
+    ).toEqual([expect.stringContaining('"machines" is claimed 2 times (runtimes, other)')]);
+    expect(
+      found(
+        half('agenda', {
+          fragments: [
+            { form: 'keyed', key: 'agenda' },
+            { form: 'keyed', key: 'agenda' },
+          ],
+          device: ['d'],
+        }),
+      ),
+    ).toEqual([expect.stringContaining('"agenda" is claimed 2 times (agenda, agenda)')]);
+  });
+  test('planted: a key outside the grammar is found', () => {
+    for (const key of ['Rules', '1rules', 'r'.repeat(33), 'rules/x', ''])
+      expect(found(half('accounts', { fragments: [{ form: 'keyed', key, strip: false }] }))).toEqual([
+        expect.stringContaining(`declares fragment key "${key}", which is not`),
+      ]);
+  });
+  test('planted: a path on a screen the plugin does not declare, or one that is not daemon-less, is found', () => {
+    expect(found(half('catalogs', { fragments: [{ form: 'path', screen: 'pair' }] }))).toEqual([
+      'declares a path fragment on screen "pair", which its manifest does not declare',
+    ]);
+    expect(found(half('catalogs', { fragments: [{ form: 'path', screen: 'main' }] }))).toEqual([
+      'declares a path fragment on screen "main", which is not daemon-less',
+    ]);
+  });
+  test('planted: a stripping key with no device view is found; a kept one needs none', () => {
+    expect(found(half('agenda', { fragments: [{ form: 'keyed', key: 'agenda' }] }))).toEqual([
+      expect.stringContaining('stripping fragment key "agenda" with no `shell.device` view'),
+    ]);
+  });
+  test('planted: a device view on a skeleton half, and a declaration in no known form, are found', () => {
+    expect(found(half('agenda', { skeleton: true, device: ['deep-link'] }))).toEqual([
+      'is a skeleton half with `shell.device` views (deep-link): nothing mounts them',
+    ]);
+    expect(found(half('agenda', { fragments: [{ form: 'query', key: 'x' }, null] }))).toEqual([
+      'declares a fragment in no known form: {"form":"query","key":"x"}',
+      'declares a fragment in no known form: null',
+    ]);
+  });
+  test('the frame sections (S4, S5, S7): real shapes pass', () => {
+    expect(
+      found(
+        half('agenda', {
+          screens: [{ id: 'inbox', nav: { label: 'Inbox' } }],
+          panels: [{ id: 'needs-you', slot: 'nav' }],
+          navPanels: ['needs-you'],
+          navBadges: ['inbox'],
+          background: ['watch'],
+        }),
+        half('updates', {
+          panels: [{ id: 'install', slot: 'device.settings' }],
+          deviceSettings: ['install'],
+        }),
+        half('browsers', { links: true }),
+        // A panel in another slot needs no device view, and a skeleton half's panels are not asked for.
+        half('conversation', { panels: [{ id: 'queue', slot: 'ferret.side' }] }),
+        half('late', { skeleton: true, panels: [{ id: 'x', slot: 'nav' }] }),
+      ),
+    ).toEqual([]);
+  });
+  test('planted: a links provider outside the taker list is found', () => {
+    expect(found(half('conversation', { links: true }))).toEqual([
+      expect.stringContaining('provides `shell.links`, but only browsers may'),
+    ]);
+  });
+  test('planted: a navBadges key that is not an own screen with a nav entry is found', () => {
+    expect(found(half('agenda', { navBadges: ['inbox'] }))).toEqual([
+      'has a `shell.navBadges` key "inbox", which is not one of its own screens',
+    ]);
+    expect(found(half('agenda', { screens: [{ id: 'inbox' }], navBadges: ['inbox'] }))).toEqual([
+      expect.stringContaining('whose screen declares no `nav` entry'),
+    ]);
+  });
+  test('planted: a device.settings or nav view that is no declared panel, and a declared panel with no view, are found', () => {
+    expect(found(half('updates', { deviceSettings: ['install'] }))).toEqual([
+      'has a `shell.deviceSettings` view "install", which is not a panel it declares in `device.settings`',
+    ]);
+    expect(
+      found(half('agenda', { navPanels: ['needs-you'], panels: [{ id: 'needs-you', slot: 'device.settings' }] })),
+    ).toEqual([
+      expect.stringContaining('declares the `device.settings` panel "needs-you" with no `shell.deviceSettings` view'),
+      'has a `shell.navPanels` view "needs-you", which is not a panel it declares in `nav`',
+    ]);
+    expect(found(half('agenda', { panels: [{ id: 'needs-you', slot: 'nav' }] }))).toEqual([
+      expect.stringContaining('declares the `nav` panel "needs-you" with no `shell.navPanels` view'),
+    ]);
+  });
+  test('planted: background and navBadges on a skeleton half are found', () => {
+    expect(
+      found(
+        half('agenda', {
+          skeleton: true,
+          background: ['watch'],
+          navBadges: ['inbox'],
+          screens: [{ id: 'inbox', nav: {} }],
+        }),
+      ),
+    ).toEqual([
+      'is a skeleton half with `shell.background` views (watch): nothing mounts them',
+      'is a skeleton half with `shell.navBadges` (inbox): nothing draws them',
+    ]);
+  });
+  test('over a workspace: a half that declares a key with no taker fails, and a half that fails to load is said', async () => {
+    const fx = fixture([
+      {
+        id: 'alpha',
+        kinds: ['view'],
+        manifest: '  ui: { screens: [] },',
+        app: `import { implementApp } from '${SDK}';\nimport manifest from '../manifest.ts';\nconst half = implementApp(manifest, { build: () => ({}) });\nexport default { ...half, shell: { fragments: [{ form: 'keyed', key: 'alpha' }] } };\n`,
+      },
+      { id: 'beta', app: 'throw new Error("boom");\n' },
+    ]);
+    try {
+      const all = (await shellProvides.run(contextFor(fx.root, NO_BASE))).map(x => `${x.where}: ${x.message}`);
+      expect(all).toContain(
+        'alpha: declares the stripping fragment key "alpha" with no `shell.device` view: the shell would strip a link nothing takes',
+      );
+      expect(all).toContain('beta: app half failed to load: boom');
+      const scoped = await shellProvides.run(contextFor(fx.root, { ...NO_BASE, packageId: 'beta' }));
+      expect(scoped.map(x => x.where)).toEqual(['beta']);
+    } finally {
+      fx.dispose();
+    }
   });
 });

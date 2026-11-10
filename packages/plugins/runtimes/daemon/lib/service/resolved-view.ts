@@ -85,7 +85,7 @@ export function resolvedEntries(resolved: ResolvedProfile): readonly ResolvedEnt
 
   return [
     ...resolved.instructions.map(({ layer, component }) =>
-      entry('instructions', layer.name, { value: component.file }, layer),
+      entry('instructions', layer.name, { value: component.file ?? `instructions/${layer.name}` }, layer),
     ),
     ...resolved.mcp.map(({ layer, component }) => entry('mcp', layer.name, { value: serverLine(component) }, layer)),
     ...resolved.skills.map(({ item, layer }) => entry('skills', item, { value: 'included' }, layer)),
@@ -100,7 +100,7 @@ export function resolvedEntries(resolved: ResolvedProfile): readonly ResolvedEnt
       entry('flags', 'flag', flagValue(flag, resolved.flags[index - 1]?.flag), layer),
     ),
     ...resolved.hooks.map(({ layer, component }) =>
-      entry('hooks', layer.name, { value: (component.file ?? component.directory) as string }, layer),
+      entry('hooks', layer.name, { value: component.file ?? component.directory ?? 'a hooks document' }, layer),
     ),
     ...(resolved.modelSet.source === 'model-set'
       ? [

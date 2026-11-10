@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { device, ferret, testHost } from '@ferretry/kernel/testing';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import type { LaunchPartSource } from '@ferretry/core-ferrets/contract';
-import { NixFactsSchema, ShellsPort, ShellListSchema } from '../../contract/index.ts';
+import { NixFactsSchema, SHELL_CODES, ShellsPort, ShellListSchema } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
 import { shellsRoutes } from '../../daemon/lib/routes.ts';
 import manifest from '../../manifest.ts';
@@ -187,4 +187,11 @@ test('relock refuses a direct request with no preview hash or a malformed hash',
     await expect(routes['POST /v1/shells/:name/relock'](call(body, { name: 'web' }))).rejects.toMatchObject({
       status: 422,
     });
+});
+
+test('a refusal from the service comes back as its status and code, not as a thrown error', async () => {
+  const routes = shellsRoutes(shellsHarness().service);
+  const response = await routes['POST /v1/shells/:name/build'](call(undefined, { name: 'web' }));
+  expect(response.status).toBe(404);
+  expect(json(response).code).toBe(SHELL_CODES.unknown);
 });

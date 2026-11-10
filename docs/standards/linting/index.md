@@ -27,35 +27,38 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 
 ## Hook inventory
 
-| Hook                        | What it enforces                                                                                                                              |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `treefmt`                   | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt                                                  |
-| `a-biome`                   | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)                                                    |
-| `typecheck`                 | `tsc --noEmit` across the workspace, one run per machine at a time (see below)                                                                |
-| `a-deadcode`                | Knip, repository view (`knip.json`) — includes tests                                                                                          |
-| `a-deadcode-production`     | Knip, production view (`knip.production.json`) — from the bin entry                                                                           |
-| `a-shellcheck`              | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`                                                                      |
-| `a-enforce-exec`            | tracked shell scripts are executable                                                                                                          |
-| `a-action-pins-trusted`     | trusted GitHub Actions pin a major tag                                                                                                        |
-| `a-action-pins-non-trusted` | everything else pins a 40-char SHA plus its tag in a comment                                                                                  |
-| `a-cli-contracts`           | the release/architecture invariants in [Contracts](../contracts/README.md)                                                                    |
-| `a-conflict-markers`        | marker shapes appear only in declared teaching documents                                                                                      |
-| `a-contract-registry`       | executable, documented and wired contract inventories agree                                                                                   |
-| `a-fetch-binding`           | the PWA never stores a `fetch` builtin or calls the network past the carrier                                                                  |
-| `a-git-hooks-worktree`      | commit linting works from a linked worktree, concurrently and repeatedly                                                                      |
-| `a-macos-policy`            | the darwin smoke is advisory on PRs, required and retried on main and a tag; free `macos-15` only                                             |
-| `a-migration-isolated`      | the v4 -> v5 converter stays outside the product (workspaces, imports, release paths)                                                         |
-| `a-no-fy-render-in-docs`    | `fy-render` fence openers appear only in their three teaching files                                                                           |
-| `a-no-legacy-state`         | package code cannot reference predecessor state or identifiers                                                                                |
-| `a-no-pattern-kill`         | test code never kills processes by pattern (`pkill`, `killall`)                                                                               |
-| `a-no-sync-io`              | daemon code declares every synchronous file call in `scripts/validate/sync-io-allowlist.txt`                                                  |
-| `a-pending-tags`            | every `@pending`/`@public`, knip `ignore` and other keep-alive knip key is tied to an open gap, a kept row, a surface or an allow-list reason |
-| `a-pages-config`            | the PWA build and the Pages deployment publish the same directory                                                                             |
-| `a-relay-config`            | relay code, bindings, discovery and deployment configuration agree                                                                            |
-| `a-rebuild-checks`          | the Ferretry 5.0 checks (redesign §7.9) through their one entry, `scripts/gen/check.ts`                                                       |
-| `a-test-tiers`              | tier placement and budgets; complete groups; Quick/Full event, verdict and run-all contracts                                                  |
-| `a-job-ceilings`            | every workflow job states `timeout-minutes`, so a wedged job fails in minutes                                                                 |
-| `a-commit-msg`              | conventional commit subject (`commit-msg` stage)                                                                                              |
+| Hook                        | What it enforces                                                                                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `treefmt`                   | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt                                                                      |
+| `a-biome`                   | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)                                                                        |
+| `typecheck`                 | `tsc --noEmit` across the workspace, one run per machine at a time (see below)                                                                                    |
+| `a-deadcode`                | Knip, repository view (`knip.json`) — includes tests                                                                                                              |
+| `a-deadcode-production`     | Knip, production view (`knip.production.json`) — from the bin entry                                                                                               |
+| `a-shellcheck`              | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`                                                                                          |
+| `a-enforce-exec`            | tracked shell scripts are executable                                                                                                                              |
+| `a-action-pins-trusted`     | trusted GitHub Actions pin a major tag                                                                                                                            |
+| `a-action-pins-non-trusted` | everything else pins a 40-char SHA plus its tag in a comment                                                                                                      |
+| `a-cli-contracts`           | the release/architecture invariants in [Contracts](../contracts/README.md)                                                                                        |
+| `a-conflict-markers`        | marker shapes appear only in declared teaching documents                                                                                                          |
+| `a-contract-registry`       | executable, documented and wired contract inventories agree                                                                                                       |
+| `a-fetch-binding`           | the PWA never stores a `fetch` builtin or calls the network past the carrier                                                                                      |
+| `a-git-hooks-worktree`      | commit linting works from a linked worktree, concurrently and repeatedly                                                                                          |
+| `a-macos-policy`            | the darwin smoke is advisory on PRs, required and retried on main and a tag; free `macos-15` only                                                                 |
+| `a-migration-isolated`      | the v4 -> v5 converter stays outside the product (workspaces, imports, release paths)                                                                             |
+| `a-no-fy-render-in-docs`    | `fy-render` fence openers appear only in their three teaching files                                                                                               |
+| `a-no-legacy-state`         | package code cannot reference predecessor state or identifiers                                                                                                    |
+| `a-no-pattern-kill`         | test code never kills processes by pattern (`pkill`, `killall`)                                                                                                   |
+| `a-no-sync-io`              | daemon code declares every synchronous file call in `scripts/validate/sync-io-allowlist.txt`                                                                      |
+| `a-no-raw-yaml`             | product code parses YAML only through the shared bounded reader (`@ferretry/std/yaml`), or a file `scripts/validate/raw-yaml-allowlist.txt` names with its reason |
+| `a-pending-tags`            | every `@pending`/`@public`, knip `ignore` and other keep-alive knip key is tied to an open gap, a kept row, a surface or an allow-list reason                     |
+| `a-hosted-app-origin`       | the hosted app's origin has one owner and every build route asks one script for it                                                                                |
+| `a-release-guards`          | only main can tag, publish a release, touch Casks/ or run semantic-release; the preview deploys from rebuild/5.0 alone                                            |
+| `a-pages-config`            | the PWA build and the Pages deployment publish the same directory                                                                                                 |
+| `a-relay-config`            | relay code, bindings, discovery and deployment configuration agree                                                                                                |
+| `a-rebuild-checks`          | the Ferretry 5.0 checks (redesign §7.9) through their one entry, `scripts/gen/check.ts`                                                                           |
+| `a-test-tiers`              | tier placement and budgets; complete groups; Quick/Full event, verdict and run-all contracts                                                                      |
+| `a-job-ceilings`            | every workflow job states `timeout-minutes`, so a wedged job fails in minutes                                                                                     |
+| `a-commit-msg`              | conventional commit subject (`commit-msg` stage)                                                                                                                  |
 
 The root `typecheck` project does not include `scripts/test/**`, and the E2E harness project does,
 under the same strictness plus `strict`. `task test:e2e` typechecks that project before running any

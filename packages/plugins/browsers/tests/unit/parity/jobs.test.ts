@@ -2,7 +2,7 @@
  * Parity rows J-0014, J-0059, J-0063, J-0064, J-0105, J-0130, J-0152, J-0155, J-0162, J-0164, J-0166, J-0180, J-0189,
  * J-0192, J-0196, J-0199, J-0200, J-0208, J-0209, J-0271 (docs/design/rebuild-parity.tsv): today's browser timers and
  * watchers. A daemon-side wait runs on the kernel clock; a wait inside the browser worker runs in the worker's own
- * process (the `daemon/worker/adapters/` exemption), or on the wait its caller hands in.
+ * process (the `daemon/worker/adapters/` and `daemon/worker/main.ts` exemptions), or on the wait its caller hands in.
  *
  * Not here, and why:
  * - J-0170 (the proxy probe's deadline) needs a real socket, which the unit tier refuses;
@@ -57,11 +57,11 @@ describe('where the browser’s waits run', () => {
     // Assert — the screencast start, page open, title wait, socket watch, script deadline and lifecycle pauses all
     // run in the worker's own process; the download stage and the input fields wait on what their caller hands in.
     expect(arming.length).toBeGreaterThan(0);
-    for (const file of arming) expect(file.startsWith('worker/adapters/')).toBe(true);
+    for (const file of arming) expect(file.startsWith('worker/adapters/') || file === 'worker/main.ts').toBe(true);
   });
 
   test('J-0059 importing the worker entry starts nothing; only running it as its own process does', async () => {
-    const entry = await import('../../../daemon/worker/adapters/main.ts');
+    const entry = await import('../../../daemon/worker/main.ts');
     expect(typeof entry.startBrowserWorker).toBe('function');
   });
 });
@@ -236,7 +236,10 @@ describe('the daemon’s waits on the kernel clock', () => {
       );
       host = await testHost({
         plugins: [half],
-        uses: { ferrets: { get: async (id: string) => (id === 'f1' ? { name: id } : undefined) } },
+        uses: {
+          ferrets: { get: async (id: string) => (id === 'f1' ? { name: id } : undefined) },
+          agentControl: { allows: async () => true },
+        },
         fakes: { vault: new FakeVault(), gate: new FakeGate() },
         gate,
         clock,

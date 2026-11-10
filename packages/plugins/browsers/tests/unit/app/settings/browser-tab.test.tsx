@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { interact, mount, must } from '@ferretry/app/testing';
+import type { ViewPlace } from '@ferretry/app';
+import { interact, mount, must, WithViewPlace } from '@ferretry/app/testing';
+import browsersManifest from '../../../../manifest.ts';
 import { BROWSER_USER_AGENT_WORDS, BrowserTab } from '../../../../app/features/settings/browser-tab.tsx';
 import { PROXY_ERROR_WORDS } from '../../../../app/features/settings/browser-proxy-test-result.tsx';
-import { browserStateSentence } from '../../../../app/features/settings/browser-state-line.tsx';
+import { BROWSER_OFFLINE_WORDS, browserStateSentence } from '../../../../app/features/settings/browser-state-line.tsx';
 import type { RecordedCall } from '../../../support/app/client.ts';
 import { recordingClient } from '../../../support/app/client.ts';
 
@@ -51,7 +53,7 @@ interface Script {
   readonly grants?: unknown;
 }
 
-const tab = async (script: Script = {}) => {
+const tab = async (script: Script = {}, place?: ViewPlace) => {
   const text = script.text ?? 'mode: headless\n';
   const recorded = recordingClient(route => {
     if (route === CONFIG_GET) return file(text);
@@ -62,7 +64,8 @@ const tab = async (script: Script = {}) => {
     if (route === PROXY_TEST) return script.test ?? new Error('no test scripted');
     return new Error(`no route ${route}`);
   });
-  const view = await mount(<BrowserTab client={recorded.client} />);
+  const drawn = <BrowserTab client={recorded.client} />;
+  const view = await mount(place === undefined ? drawn : <WithViewPlace place={place}>{drawn}</WithViewPlace>);
   await settle();
   return { ...recorded, view };
 };
@@ -73,6 +76,15 @@ const body = (calls: readonly RecordedCall[], route: string): unknown =>
 const text = (container: HTMLElement, selector: string): string => container.querySelector(selector)?.textContent ?? '';
 
 describe('the Browser tab', () => {
+  it('D2 #3 reads and writes browsers.yaml over the kernel’s config routes, declaring the file and none of the routes', () => {
+    // Browsers declares the FILE the kernel resolves the path to, and none of the kernel's routes itself.
+    expect((browsersManifest.actions?.routes ?? []).map(route => route.key)).not.toContain(CONFIG_GET);
+    expect((browsersManifest.actions?.routes ?? []).map(route => route.key)).not.toContain(CONFIG_PUT);
+    expect((browsersManifest.data?.config ?? []).map(def => ('file' in def ? def.file : undefined))).toContain(
+      'browsers.yaml',
+    );
+  });
+
   it('reads browsers.yaml and the browser state through its own client, by route key', async () => {
     const { calls, view } = await tab({ state: { state: 'running' } });
     expect(calls.map(call => call.route).sort()).toEqual([CONFIG_GET, STATE, GRANTS, 'GET /v1/secrets'].sort());
@@ -265,5 +277,28 @@ describe('the Browser tab', () => {
     expect(browserStateSentence({ state: 'stopped' }, true)).toContain('via the saved proxy');
     expect(browserStateSentence({ state: 'stopped' }, false)).toContain('direct');
     expect(browserStateSentence({ state: 'starting' }, false)).toBe('Starting…');
+  });
+
+  it('names its machine, and while it is offline says so and reads no status (shell contract S1)', async () => {
+    const place = (online: boolean): ViewPlace => ({
+      daemon: 'd1',
+      machine: 'studio-mac',
+      online,
+      authority: () => ({ kind: 'open' }),
+      authorityOf: () => ({ kind: 'open' }),
+      press: act => act(),
+    });
+    const offline = await tab({}, place(false));
+    const container = offline.view.container;
+    expect(text(container, '[data-browser-state]')).toBe(BROWSER_OFFLINE_WORDS);
+    expect(offline.calls.map(call => call.route)).not.toContain(STATE);
+    expect((container.querySelector('[data-browser-state-refresh]') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.textContent).toContain('the browser on studio-mac starts');
+    expect(container.textContent).not.toContain('on this machine');
+    await offline.view.unmount();
+    const online = await tab({}, place(true));
+    expect(online.calls.map(call => call.route)).toContain(STATE);
+    expect(text(online.view.container, '[data-browser-state]')).toContain('Stopped');
+    await online.view.unmount();
   });
 });

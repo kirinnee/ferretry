@@ -294,29 +294,6 @@ export function sendPayload(message: string): string {
   return trimmed;
 }
 
-/** The harness whose TUI treats the stop key as harmless at an idle prompt. */
-const STOP_KEY_SAFE_WHEN_IDLE = 'claude';
-
-/**
- * Whether an interrupt may actually press the stop key.
- *
- * IT IS SUPPRESSED WHEN NOTHING IS RUNNING, and that is a safety rule rather than an optimisation:
- * the stop key at an idle Codex prompt is one of the ways that TUI QUITS, so an interrupt sent to a
- * session the daemon merely believed was working would kill the agent it was asked to pause.
- *
- * The exception is an interactive Claude pane, where the stop key is exactly what the human at the
- * keyboard would press: it clears a half-typed composer or closes a menu, which is what "stop" means
- * to the person pressing it. Refusing to send it there made the control feel dead whenever the
- * daemon's view of the pane lagged by a tick.
- *
- * Either way the daemon still records the interrupt — the state edge is what the operator asked for,
- * and it does not depend on a keystroke that would have done nothing.
- */
-export function shouldPressStopKey(target: SendTarget, pane: SendPaneObservation): boolean {
-  if (pane.activeWork) return true;
-  return target.mode === 'interactive' && target.harness === STOP_KEY_SAFE_WHEN_IDLE;
-}
-
 /** Whether this send is the reply the recipient's declared wait was parked on. */
 export function endsPeerWait(recipient: SendTarget, senderId: string): boolean {
   return recipient.waiting?.peer === senderId;

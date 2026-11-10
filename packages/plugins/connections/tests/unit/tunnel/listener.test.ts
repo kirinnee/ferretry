@@ -8,6 +8,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { headersFrom } from '@ferretry/kernel/contract';
 import { TUNNEL_PEER_HEADER, TUNNEL_SHARED_PEER, tunnelPeer } from '../../../daemon/lib/tunnel/listener.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 describe('the tunnel listener’s peer key', () => {
   it('should key a peer by CF-Connecting-IP, and share one bucket when it is absent or not an address', () => {
@@ -44,8 +45,3 @@ describe('the tunnel listener’s peer key', () => {
       should(peer(garbled)).equal(TUNNEL_SHARED_PEER);
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

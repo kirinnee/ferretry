@@ -20,10 +20,16 @@ import {
   managedWorktreeRows,
   mcpInventoryFolders,
 } from './lib/inventory/folders.ts';
-import { McpDocumentUnreadable, McpInventoryService } from './lib/inventory/service.ts';
-import { ProjectMcpLaunch } from './lib/inventory/project-sign-in.ts';
+import { McpDocumentUnreadable, type McpInventoryAccount, McpInventoryService } from './lib/inventory/service.ts';
+import { SignInReach } from './lib/reach.ts';
+import { combinedMcpOAuthServers, ProjectMcpLaunch, ProjectMcpOAuthServers } from './lib/inventory/project-sign-in.ts';
+import { PublishedHomeDocuments, type PublishedHomes } from './lib/inventory/home-documents.ts';
+import { parseHarnessDocument } from './lib/inventory/parse-document.ts';
+import { accountsOf, componentsOf, layeredMcp } from './lib/inventory/runtime-wiring.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
+import { mcpComponentSource } from './lib/profile-component-source.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
+import { runtimesLoginTarget } from './lib/session/login-target.ts';
 import { SessionMcpService } from './lib/session/service.ts';
 import { inventoryRoutes, oauthRoutes, sessionRoutes } from './routes.ts';
 
@@ -36,16 +42,23 @@ const NOT_YET = (what: string): never => {
  * MCP (§2.3): MCP servers as items, their sign-ins, and the per-ferret wiring.
  *
  * SEAMS NOT BOUND HERE (declared GAPS; each refuses in words rather than guess):
- * - Runtimes (accounts, profiles, the login scope's write) and Catalogs belong to neighbours whose contracts MCP may
- *   not import yet. The inventory lists the user, project and local servers a ferret's own folder holds; a login add
- *   answers `mcp_runtime_unknown`.
+ * - Runtimes (an optional `uses`) answers the accounts (one per runtime a published home lists), which MCP items each
+ *   runtime's profile stack carries, and the bounded read of a home's `.claude.json`, `settings.json` and
+ *   `config.toml` (`lib/inventory/home-documents.ts`: exactly those three names, nothing else of a home). A launch
+ *   carries only the items its runtime's profile names. Runtimes off: no accounts and no item on any launch, and a
+ *   login add answers `mcp_runtime_unknown`. A login add reads the ferret's runtime and profile from it, writes the
+ *   item to this plugin's own `config/mcp/<name>.yaml`, and Runtimes adds the one `mcp/<name>` layer under the
+ *   caller's own standing; Catalogs belongs to a later unit. A project add lands only at a known root (below),
+ *   through the ferret's own `work` root, so a ferret in a SUBFOLDER of a registered project is told in words that the
+ *   root's file is outside its folder (declared GAP: it needs the kernel's `project-files` root, the M5 unit).
  * - Projects (an optional `uses`) gives the registered roots and Ferrets' `managedWorktrees()` the managed worktrees
  *   (`<home>-worktrees`), so a subfolder of a registered project, a worktree kept inside it, and a managed worktree
  *   of it are that project, under its root's subject digest, as today. Projects off: a managed worktree belongs to
  *   the repository it was forked from, and every other folder is its own project. The `.mcp.json` at each of those
- *   known roots — that one file, read-only — is read through the kernel's `imports` root scoped to the root
- *   (`adapters/project-root-files.ts`), so a ferret in a subfolder reads it with no ferret in the project root. A
- *   `.mcp.json` that is a link, and a root that is (or sits under) a link, are refused.
+ *   known roots — that one file, read-only — is read through the kernel's `imports` root scoped to the root and
+ *   anchored at it (`adapters/project-root-files.ts`), so a ferret in a subfolder reads it with no ferret in the
+ *   project root. A `.mcp.json` that is a link is refused; a root that is (or sits under) a link is read as the
+ *   folder it names.
  * - The Vault has no value getter (use, never read). Sign-in writes the ACCESS token by name through `VaultApi.put`;
  *   the refresh token and a registered client secret (the "internal" store) rest in MCP's own sealed document,
  *   `state/mcp/oauth-secrets.json` (today's `mcp-oauth-secrets.json`), opened through the Vault's sealed-document
@@ -67,7 +80,8 @@ export default implementDaemon(manifest, {
   build(ctx) {
     const { kernel } = ctx;
     const { ferrets, vault, sealed } = ctx.needs;
-    const { claudeCode, projects } = ctx.uses;
+    const { claudeCode, projects, runtimes } = ctx.uses;
+    const published = (): PublishedHomes | undefined => runtimes.current();
 
     // ── what a ferret's folder is: these folders are inventory read roots, never project registrations ────────────
     const owners = new Map<string, FerretId>();
@@ -99,18 +113,6 @@ export default implementDaemon(manifest, {
       },
       remove: async (name: SecretName): Promise<boolean> => await vault.remove(name),
     };
-    const oauth = new McpOAuthService({
-      servers: new ConfigMcpServers(items),
-      http: new FetchMcpOAuthHttp(kernel.fetch),
-      crypto: webCryptoMcpOAuth,
-      clock: { now: () => kernel.clock.nowMs() },
-      state: new StateMcpOAuthStateStore(kernel.state),
-      secrets,
-      values: { values: async () => new Map() },
-      // Refresh tokens and client secrets: MCP's own sealed document, held by nothing but this service (S8, S174).
-      internal: sealedMcpOAuthSecrets(sealed, kernel.state),
-    });
-
     // ── what a ferret's folder holds: one source for the inventory and the launch ──────────────────────────────────
     // The known roots, as today's `mcpInventoryFolders`: registered projects (Projects), then live managed worktrees
     // (Ferrets' registry), each joined to the project registered for its common directory, else its repository.
@@ -126,39 +128,59 @@ export default implementDaemon(manifest, {
     // A known root's `.mcp.json` — and nothing else there — is read through the kernel's `imports` root scoped to that
     // folder (lead ruling (B)), so a ferret in a subfolder reads it with no ferret in the project root. Every other
     // document is read through the ferret folder that holds it, as before.
-    const projectFile = projectRootMcpFile(root => kernel.roots.root('imports', { subfolder: root }));
-    const documents = new RootMcpHarnessDocuments(
-      async path => {
-        if (path.endsWith(`/${PROJECT_MCP_FILE}`)) {
-          const held = projectFile(
-            path,
-            (await known()).map(folder => folder.root),
-          );
-          if (held !== undefined) return held;
-        }
-        return workRootFor(path);
-      },
-      (text, format) => {
-        if (format === 'json') return JSON.parse(text) as unknown;
-        return NOT_YET('Reading a Codex config.toml');
-      },
-    );
+    const projectFile = projectRootMcpFile((root, within) => kernel.roots.root('imports', { subfolder: root, within }));
+    // A runtime home Runtimes published is read through its bounded reader, by exact document name; the rest as before.
+    const rootDocuments = new RootMcpHarnessDocuments(async path => {
+      if (path.endsWith(`/${PROJECT_MCP_FILE}`)) {
+        const held = projectFile(
+          path,
+          (await known()).map(folder => folder.root),
+        );
+        if (held !== undefined) return held;
+      }
+      return workRootFor(path);
+    }, parseHarnessDocument);
+    const documents = new PublishedHomeDocuments(published, parseHarnessDocument, rootDocuments);
     const held = async (): Promise<ReadonlySet<SecretName>> =>
       new Set((await vault.names()).map(summary => summary.name));
 
+    // ── sign-in: the servers (components and projects') and the hosts it may reach ─────────────────────────────────
+    // The `mcp-sign-in` network resolver answers only the hosts of the servers listed now, those of the sign-ins on
+    // file, and the ones a flow's metadata named (`lib/reach.ts`).
+    const reach = new SignInReach({ now: () => kernel.clock.nowMs() });
+    const oauth = new McpOAuthService({
+      servers: reach.observeServers(
+        combinedMcpOAuthServers(new ConfigMcpServers(items), new ProjectMcpOAuthServers(folders, documents)),
+      ),
+      http: new FetchMcpOAuthHttp(kernel.fetch),
+      crypto: webCryptoMcpOAuth,
+      clock: { now: () => kernel.clock.nowMs() },
+      state: reach.observeState(new StateMcpOAuthStateStore(kernel.state)),
+      secrets,
+      values: { values: async () => new Map() },
+      // Refresh tokens and client secrets: MCP's own sealed document, held by nothing but this service (S8, S174).
+      internal: sealedMcpOAuthSecrets(sealed, kernel.state),
+      reach,
+    });
+
     // ── every launch: renew the sign-ins it uses, then name them (today's launch environment, `modules/mcp.ts`) ──
+    const accounts = async (): Promise<readonly McpInventoryAccount[]> =>
+      accountsOf((await runtimes.current()?.homes()) ?? []);
     const launch = new McpLaunchParts({
       items,
       held,
       renewal: oauth,
+      layered: async runtime => await layeredMcp(runtimes.current(), runtime),
       project: async spec => {
         // The ferret folders are the read roots, so they are read fresh before the launch's own folder is.
         await refreshOwners();
-        // The launch is its own account: 5.0 carries the runtime, harness and home on the spec (no Runtimes import).
-        // Whether the runtime declined a server is its harness's answer, never a read of its home here (GAP above).
+        // The launch is its runtime's account when Runtimes published one (its home, as a v4 launch read it); else its
+        // own, from the runtime, harness and home the spec carries. Whether the runtime declined a server is its
+        // harness's answer, never a read of its home here (GAP above).
         const agent = spec.runtime ?? spec.ferret;
+        const own = (await accounts()).find(account => account.runtime === spec.runtime);
         return await new ProjectMcpLaunch({
-          accounts: async () => [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }],
+          accounts: async () => [own ?? { runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }],
           folders,
           documents,
           approvals: harnessProjectApprovals({ 'claude-code': () => claudeCode.current() }, spec.harness, spec.ferret),
@@ -170,13 +192,8 @@ export default implementDaemon(manifest, {
 
     // ── inventory and check ────────────────────────────────────────────────────────────────────────────────────────
     const inventory = new McpInventoryService({
-      accounts: async () => [],
-      components: async () =>
-        [...items()].map(([name, item]) => ({
-          name,
-          runtimes: [],
-          ...(item.auth === undefined ? {} : { auth: item.auth }),
-        })),
+      accounts,
+      components: async () => await componentsOf(items(), runtimes.current()),
       folders,
       connections: async () => await oauth.connections(),
       documents,
@@ -218,21 +235,33 @@ export default implementDaemon(manifest, {
           }));
         },
       },
-      // Catalogs exposes installs only, Projects' contract is empty, and there is no managed-worktree port.
-      // G177: refuse project adds until registered projects and worktrees can supply the known-root set.
-      projectRoots: async () => [],
+      // G177: a project add lands only at a known root: a registered project or a live managed worktree.
+      projectRoots: async () => (await known()).map(folder => folder.root),
       files: new RootMcpProjectFiles(async ferret => {
         const summary = await ferrets.get(ferret as FerretId);
         if (summary === undefined) throw new McpDocumentUnreadable(`no ferret ${ferret}`);
         return { root: kernel.roots.root('work', { ferret: summary.id }), base: summary.folder };
       }),
-      login: {
-        runtime: async () => undefined,
-        profile: async () => undefined,
-        hasItem: async name => items().has(name),
-        putItem: async () => NOT_YET('A runtime profile'),
-        layerProfile: async () => NOT_YET('A runtime profile'),
-      },
+      // The login add: the item in this plugin's own file, the layer through Runtimes (R-0351, R-0352).
+      login: runtimesLoginTarget({
+        runtimes: () => runtimes.current(),
+        hasItem: name => items().has(name),
+        // The person's own Add form: a `${secret:NAME}` env goes into effect at once when the AMBIENT call is the owner
+        // (host, or a governed device holding fleet.configure); a ferret's credential never reaches this route
+        // (`caller: 'person'`), and any other caller keeps the kernel's hold. The kernel decides; nothing here can.
+        writeItem: async (name, patch, ifMatch) =>
+          await kernel.config.writeAsCaller(
+            MCP_CONFIG,
+            name,
+            { patch },
+            ifMatch === undefined ? undefined : { ifMatch },
+          ),
+        held: name => {
+          const status = kernel.config.fileState(MCP_CONFIG, name);
+          return status.state === 'held' ? status.sentences : undefined;
+        },
+        removeItem: async (name, ifMatch) => await kernel.config.remove(MCP_CONFIG, name, { ifMatch }),
+      }),
     });
     async function inventoryFerret(id: string) {
       const ferret = await ferrets.get(id as FerretId);
@@ -255,6 +284,7 @@ export default implementDaemon(manifest, {
     const signInChanged = (component: string): void => kernel.events.publish(McpSignInChanged, { component });
 
     return {
+      resolvers: { 'mcp-sign-in': (): readonly string[] => reach.hosts() },
       routes: {
         ...inventoryRoutes({
           machine: () => inventory.machine(),
@@ -285,8 +315,8 @@ export default implementDaemon(manifest, {
             kernel.events.publish(McpServerAdded, { name: request.name, scope: 'project' });
             return added;
           },
-          addLogin: async (id, request) => {
-            const added = await session.addLogin(id, request);
+          addLogin: async (id, request, governance) => {
+            const added = await session.addLogin(id, request, governance);
             kernel.events.publish(McpServerAdded, { name: request.name, scope: 'login' });
             return added;
           },
@@ -295,6 +325,8 @@ export default implementDaemon(manifest, {
       provides: { mcp: api },
       hooks: {
         'launch.parts': () => [{ id: 'mcp', item: launch }],
+        // Runtimes' read of the `mcp` components a profile names: this plugin's own items, live, no cache.
+        'runtimes.components.mcp:components': mcpComponentSource(items),
       },
     };
   },

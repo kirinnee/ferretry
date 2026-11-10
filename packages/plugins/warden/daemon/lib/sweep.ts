@@ -179,13 +179,15 @@ import { JEV_JUDGEMENT_QUESTIONS, jevFactScalars, jevFactsOf, reachableJudgement
 import { leftoverBrowserCandidates } from './leftovers.ts';
 import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
 import type { ReflexEvent } from './liveness-monitor.ts';
+import { type OrphanItem, orphanItem } from './orphan-item.ts';
 import {
   detectOrphanedCards,
+  type OrphanedCard,
+  orphanListed,
   type OrphanResolution,
   type OrphanTold,
   planOrphanEscalations,
   type WardenBoardRead,
-  type WardenCardNotice,
 } from './orphans.ts';
 import { wardenOwnerRoutes } from './owner-routes.ts';
 import {
@@ -550,9 +552,15 @@ interface WardenFeedReader {
   board(sessionId: string): Promise<AgendaBoardInput | undefined>;
 }
 
-/** Where an orphaned card's notice stands: on one ferret's board. Throws when the Agenda refuses it. */
+/** Where the owner is told about orphaned cards nobody can be messaged about. Each call throws when the Agenda refuses it. */
 interface WardenOrphanList {
-  add(sessionId: string, notice: WardenCardNotice): Promise<void>;
+  /**
+   * The ONE machine item listing every such card, kept current: the same item as the list changes, nothing written
+   * when it is the same, closed when `undefined` (no card is left). `announce`: a card joined the list since the
+   * item last landed, so an item the owner closed is raised again; without it an item that is not open stays closed.
+   */
+  sync(item: OrphanItem | undefined, announce: boolean): Promise<void>;
+  /** Close a per-card ask an earlier Warden left on a ferret's board. */
   remove(resolution: OrphanResolution): Promise<void>;
 }
 
@@ -832,6 +840,8 @@ function wireAnomaly(anomaly: WardenAnomaly): WireWardenAnomaly {
  */
 export class WardenSweepService {
   private readonly ports: WardenSweepPorts;
+  /** Why the machine item was last refused, until it lands again: said once, not on every sweep that repeats it. */
+  private orphanItemRefusal: string | undefined;
 
   constructor(
     ports: WardenSweepPorts,
@@ -2658,9 +2668,10 @@ export class WardenSweepService {
   }
 
   /**
-   * Tell somebody about each orphaned card, once per episode, and clear the notices of cards that recovered
-   * (`orphans.ts`). A message that could not be queued or a notice the agenda refused is journalled and not
-   * remembered, so the next sweep tries again. Clearing runs with the Warden off, as escalations' does.
+   * Tell somebody about each orphaned card, once per episode: a live owner ferret gets a message, every other card is
+   * a row of the ONE machine item, which a card leaves when a ferret is on it again (`orphans.ts`, `orphan-item.ts`).
+   * A message that could not be queued puts the card on the list. Per-card asks an earlier Warden left on ferret
+   * boards are closed here, once. Clearing runs with the Warden off, as escalations' does.
    */
   private async escalateOrphans(input: {
     readonly orphans: readonly WardenAnomaly[];
@@ -2671,7 +2682,6 @@ export class WardenSweepService {
     readonly at: string;
     readonly force: boolean;
   }): Promise<WardenRuntimeState> {
-    const machine = this.settings.machineName?.();
     const plan = planOrphanEscalations({
       orphans: input.orphans,
       board: input.board,
@@ -2679,7 +2689,6 @@ export class WardenSweepService {
       memory: input.state.orphans ?? {},
       enabled: input.force || input.config.enabled,
       clientName: this.settings.clientName,
-      ...(machine === undefined || machine === '' ? {} : { machine }),
     });
     for (const resolution of plan.resolve) {
       const cleared = await this.ports.orphans.remove(resolution).then(
@@ -2692,40 +2701,55 @@ export class WardenSweepService {
           sessionId: resolution.sessionId,
         });
     }
-    for (const taskId of plan.unreported)
-      this.ports.journal.record('fleet.warden_orphan_unreported', {
-        taskId,
-        reason: 'neither the card’s owner nor its ferret is on this machine, so no board can hold a notice',
-      });
     const memory: Record<string, OrphanTold> = { ...plan.memory };
-    const posted = async (sessionId: string, notice: WardenCardNotice): Promise<boolean> =>
-      await this.ports.orphans.add(sessionId, notice).then(
+    const listed: OrphanedCard[] = [...plan.list];
+    for (const tell of plan.tell) {
+      const typed = await this.ports.remedies.nudge(tell.sessionId, tell.message).then(
         () => true,
         () => false,
       );
-    for (const tell of plan.tell) {
-      // A message that could not be typed goes on the same ferret's board, and is remembered as a notice.
-      const typed =
-        tell.kind === 'message' &&
-        (await this.ports.remedies.nudge(tell.sessionId, tell.message).then(
-          () => true,
-          () => false,
-        ));
-      const landed = typed || (await posted(tell.sessionId, tell.kind === 'message' ? tell.fallback : tell.notice));
-      if (!landed) {
-        this.ports.journal.record('fleet.warden_orphan_failed', {
+      if (typed) {
+        memory[tell.taskId] = { assignee: tell.assignee, via: 'owner', to: tell.sessionId, at: input.at };
+        this.ports.journal.record('fleet.warden_orphan_told', {
           taskId: tell.taskId,
-          via: tell.kind,
+          via: 'owner',
           sessionId: tell.sessionId,
         });
         continue;
       }
-      const via = typed ? 'owner' : 'notice';
-      memory[tell.taskId] = { assignee: tell.assignee, via, to: tell.sessionId, at: input.at };
-      this.ports.journal.record('fleet.warden_orphan_told', { taskId: tell.taskId, via, sessionId: tell.sessionId });
+      // A message that could not be typed is a row of the list instead.
+      listed.push(tell.fallback);
     }
+    // The cards that JOIN the list now: news for the owner, so a closed item is raised again for them. A card the
+    // list already held is not, so an item the owner dismissed ("Got it") stays dismissed until one joins.
+    const joined = listed.filter(card => memory[card.id] === undefined);
+    const landed = await this.syncOrphanItem(listed, joined.length > 0);
+    if (landed)
+      for (const card of joined) {
+        memory[card.id] = orphanListed(card.assignee, input.at);
+        this.ports.journal.record('fleet.warden_orphan_told', { taskId: card.id, via: 'list' });
+      }
     const { orphans: _previous, ...rest } = input.state;
     return Object.keys(memory).length === 0 ? rest : { ...rest, orphans: memory };
+  }
+
+  /**
+   * Keep the ONE machine item current with the cards listed (closed when there are none), and raise it again for a
+   * card that joined. A refusal (the machine's board is full, Asks is off) is tried again next sweep, which is one
+   * attempt of one item, never one per card, and the cards stay news until it lands; it is journalled when the reason
+   * changes, not on every repeat of the same one. Says whether it landed.
+   */
+  private async syncOrphanItem(cards: readonly OrphanedCard[], announce: boolean): Promise<boolean> {
+    const reason = await this.ports.orphans.sync(orphanItem(cards), announce).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error && error.message !== '' ? error.message : 'the Agenda refused it'),
+    );
+    if (reason !== this.orphanItemRefusal) {
+      this.orphanItemRefusal = reason;
+      if (reason !== undefined)
+        this.ports.journal.record('fleet.warden_orphan_failed', { cards: cards.length, reason });
+    }
+    return reason === undefined;
   }
 
   /**

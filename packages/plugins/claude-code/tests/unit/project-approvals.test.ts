@@ -50,6 +50,7 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
     readTail: () => Promise.reject(new Error('the approval read never reads a tail')),
     writeBytes: () => Promise.reject(new Error('the approval read never writes')),
     copyTree: () => Promise.reject(new Error('the approval read never copies')),
+    copyShared: () => Promise.reject(new Error('the approval read never copies')),
     ensurePrivateDirectory: () => Promise.reject(new Error('the approval read never makes a folder')),
     entries: () => Promise.reject(new Error('the approval read never lists')),
     lstat: () => Promise.reject(new Error('the approval read never asks lstat')),
@@ -60,6 +61,10 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
     readDurable: () => Promise.reject(new Error('the fixture has no readDurable')),
     syncDirectory: () => Promise.reject(new Error('the fixture has no syncDirectory')),
     fileIdentity: () => Promise.reject(new Error('the fixture has no fileIdentity')),
+    linkTo: () => Promise.reject(new Error('the fixture has no linkTo')),
+    setMode: () => Promise.reject(new Error('the fixture has no setMode')),
+    rename: () => Promise.reject(new Error('the fixture has no rename')),
+    unlink: () => Promise.reject(new Error('the fixture has no unlink')),
   };
 }
 

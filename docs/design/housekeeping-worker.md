@@ -315,7 +315,7 @@ the kernel keeps the main end of (`rootPort(id)`, `fetchPort()` from `@ferretry/
   worker) therefore rests on those checks, not on the grant.
 - The main-thread `kernel.fetch` still forwards a `Host` header a plugin sets; only the worker channel refuses it.
 
-Declared as GAP(kernel) in `ports-pending.json`.
+This is a declared GAP(kernel) and it is BY DESIGN (owner ruling, 2026-11-09): a process sandbox for the worker is not part of 5.0; the grant is what the kernel promises, and the lints are what keep plugin code to it.
 
 ### 2.5 Crash, timeout, fallback
 

@@ -12,7 +12,7 @@ import {
   verb,
 } from '@ferretry/kernel/manifest';
 import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
-import { FerretStarted, FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
+import { ArchiveKeeps, FerretStarted, FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog, SearchSources, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import {
   BOARD_SKIPPED_AUDIT,
@@ -311,6 +311,8 @@ export default definePlugin({
       { hook: SearchSources },
       // The `&` menu of a ferret's composer: its cards (reference.catalog, lead ruling 2026-11-07). Asked only when Conversation is on.
       { hook: ReferenceCatalog, key: '&' },
+      // The session archive's keep rule (Ferrets' `session.archive-keeps`): every card, so a ferret on one in flight stays live.
+      { hook: ArchiveKeeps },
     ],
     offers: [{ hook: CardMoving, timeoutMs: 200 }],
   },

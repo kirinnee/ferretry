@@ -45,7 +45,7 @@ const plan: TidyPlan = {
 };
 
 describe('fy gc', () => {
-  test('sweeps and says what it reclaimed', async () => {
+  test('V-0271 sweeps and says what it reclaimed', async () => {
     const t = run({ 'POST /v1/gc': { ferrets: 2, bytes: 3_500_000, failures: 1 } });
     expect(await t.verb('gc')).toBe(0);
     expect(t.calls[0]?.init?.body).toEqual({ force: false });
@@ -71,7 +71,7 @@ describe('fy gc', () => {
 });
 
 describe('fy tidy', () => {
-  test('a dry run prints the plan and applies nothing', async () => {
+  test('V-0494 a dry run prints the plan and applies nothing', async () => {
     const t = run({ 'POST /v1/tidy/plan': plan });
     expect(await t.verb('tidy')).toBe(0);
     expect(t.calls.map(call => call.route)).toEqual(['POST /v1/tidy/plan']);
@@ -162,8 +162,8 @@ describe('render', () => {
   });
 });
 
-describe('parity: V-0271 fy gc, V-0494 fy tidy', () => {
-  test('both verbs are declared by the manifest and answered by the half', () => {
+describe('parity: fy gc and fy tidy', () => {
+  test('V-0271 V-0494 both verbs are declared by the manifest and answered by the half', () => {
     const t = run({});
     expect(manifest.actions.cli.map(verb => verb.verb)).toEqual(['gc', 'tidy']);
     expect(

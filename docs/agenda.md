@@ -793,13 +793,17 @@ delivery is acknowledged only after the reply queue durably accepts it. Presenta
 their failure cannot acknowledge a failed delivery or hold an accepted one. Each acknowledged event is removed
 durably. A failed delivery stays pending with its original event and a persisted retry count, deadline and error.
 Delivery is attempted at most five times, with delays of 1, 2, 4 and 8 seconds between attempts; reads and unchanged
-retries before the deadline do not attempt it again. A pending, backing-off or parked event is a FIFO barrier for
+retries before the deadline do not attempt it again. Those delays are earliest times: the periodic drain (the `changes`
+job, every 5 seconds, visiting only sessions that still hold an event) is the next look after the deadline unless a
+read or mutation of that session comes sooner, so the 1 and 2 second delays are in effect up to 5 seconds. A pending, backing-off or parked event is a FIFO barrier for
 its item: later events for that item wait until it is durably accepted. Merged items share that barrier with their
 survivor, including through successive merges; a split child is an independent item. Unrelated eligible events
 continue past a failing event. Every
 failure is logged. After the fifth failure the event stays parked in `agenda-changes.pending.json`, with a warning
 naming the session, event and file; it is never silently dropped. After repairing delivery, an operator can remove
-that event's `retry` field to rearm it. Later events remain behind a parked barrier, and each drain logs their
+that event's `retry` field to rearm it; the periodic drain no longer visits an outbox whose every event is parked, so a rearmed event there is
+tried at the next read or change of that session's agenda, or at the next restart (an outbox that still holds an
+event that is not parked stays visited every drain, and a rearmed event in it is tried at the next one). Later events remain behind a parked barrier, and each drain logs their
 session, event and blocking parked event through the same warning sink as the parking diagnostic. An operator who
 explicitly decides that the old instruction is superseded can instead remove that event from the pending array;
 the later instructions then proceed on the next drain. Stop the daemon before editing this file so the drain
@@ -1027,7 +1031,10 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
   - `warden:orphans` — one item naming the cards that have nobody working on them, titled "A card has nobody working on it"
     (or "N cards have nobody working on them"), one plain line per card: "&B1 Fix simcha Loge 502 is waiting in
     Review/CI, but no ferret is assigned, so nothing will happen to it." A card leaves it when someone takes it. The
-    nudge to a live owner ferret is unchanged. It is information, so **Got it** dismisses the whole item, and it
+    nudge to a live owner ferret is unchanged. (On 5.0 the Warden keeps it as the `daemon` + `warden.orphans` standing
+    notice, `AsksApi.standing`: the same item while the list changes, nothing written when it is unchanged, a new one if
+    it was closed and cards are orphaned again; it names the first 12 cards oldest wait first, then "…and N more.", as
+    plain lines in the context: Asks carries no `cards` rows.) It is information, so **Got it** dismisses the whole item, and it
     carries `cards` (below): each card gets its own **Open**, **Start a ferret** and **Close**, on one line (a phone's width
     holds the three; a screen reader hears "Open card &B1", "Start a ferret on &B1", "Close card &B1").
     - **`cards`** is a structured field on an `info` item (1 to 12 rows, each `{ task: { id }, line }`, strict; refused
@@ -1140,13 +1147,13 @@ fy agenda add "Allow the Jev price correction?" --title "Jev price correction" \
 
 **Who may answer.** Only the owner, enforced in the daemon, never in the app:
 
-| Caller                                                       | Allow / Discard change                                                                                                         |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `fy` at the machine (admin token, ungoverned)                | yes, as `fy config confirm` is                                                                                                 |
-| a paired device (the app), relayed or not                    | the file's grant on `configure`; Allow also a passkey proved for the act (`loosen-config`), which the app asks for and resends |
-| a ferret's own `fy agenda done --choice Allow` (its session) | refused `403`, before the file or the card is touched                                                                          |
-| an agent token (a warden, any `peer:`/`warden:` caller)      | refused `403`                                                                                                                  |
-| a caller nothing can say the grants of                       | refused `403`                                                                                                                  |
+| Caller                                                       | Allow / Discard change                                                                                                                                                     |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fy` at the machine (admin token, ungoverned)                | yes, as `fy config confirm` is                                                                                                                                             |
+| a paired device (the app), relayed or not                    | the file's grant on `configure`; Allow also a fresh passkey proof that already existed when the request was admitted (the app asks for one as `loosen-config` and resends) |
+| a ferret's own `fy agenda done --choice Allow` (its session) | refused `403`, before the file or the card is touched                                                                                                                      |
+| an agent token (a warden, any `peer:`/`warden:` caller)      | refused `403`                                                                                                                                                              |
+| a caller nothing can say the grants of                       | refused `403`                                                                                                                                                              |
 
 The rule is the config files' own (`heldEditRefusal`, shared with `POST /v1/config/confirm`): the fleet's `use`
 grant, the file's grant on `configure`, and for Allow from a governed device the passkey. Allow and Discard
@@ -1816,7 +1823,7 @@ A bare **Got it** (or Done with no words) on an `info` item is never delivered: 
    restarts the countdown, and the first one never waits more than **2 minutes**. The agenda says so:
    `replies: {pending, dueAt, heldForTurn?}` on every `GET` and `POST` of the agenda route
    (`/v1/sessions/:id/agenda`). "Send now"
-   (`POST /v1/sessions/:id/agenda/replies`, `fy agenda send-now`) skips the countdown.
+   (`POST /v1/sessions/:id/agenda/replies`, `fy agenda send-now`) skips the countdown, never the empty-composer rule (step 3): with text in the composer nothing is typed and the answers stay held.
 2. **Waiting for the turn.** A due batch waits while the ferret's `turnState` is `working`, and later
    answers join it. It is looked at again every 5 seconds and goes once the turn ends. Past 15 minutes it
    goes through the ordinary send path anyway, which queues natively. A state that cannot be read

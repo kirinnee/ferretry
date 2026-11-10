@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
-import { catalogClientOf, routeFor } from '../../../app/lib/catalog-client.ts';
+import {
+  catalogClientOf,
+  machineCatalogClient,
+  machinePluginClient,
+  NO_MACHINE_SENTENCE,
+  routeFor,
+} from '../../../app/lib/catalog-client.ts';
 import manifest from '../../../manifest.ts';
 
 const calls: { route: string; init: unknown }[] = [];
@@ -24,6 +30,11 @@ describe('the Catalogs client by route key', () => {
   it('prefers a literal segment over a placeholder (`/store` is not a link id)', () => {
     expect(routeFor('GET', '/v1/catalog-links/store')?.key).toBe('GET /v1/catalog-links/store');
     expect(routeFor('GET', '/v1/catalog-links/lnk_x')?.key).toBe('GET /v1/catalog-links/:linkId');
+  });
+
+  it('hands a placeholder the segment as written when it is not valid percent-encoding, and decodes one that is', () => {
+    expect(routeFor('GET', '/v1/catalog-links/lnk%20x')?.params).toEqual({ linkId: 'lnk x' });
+    expect(routeFor('GET', '/v1/catalog-links/lnk%E0%A4%A')?.params).toEqual({ linkId: 'lnk%E0%A4%A' });
   });
 
   it('sends params, query and a JSON body through the route key', async () => {
@@ -76,5 +87,63 @@ describe('N2 the client refuses what it cannot carry instead of dropping it', ()
       body: '{}',
     });
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('the catalog client of any paired machine', () => {
+  const own = catalogClientOf(recording({ own: true }));
+  const elsewhere = recording({ elsewhere: true }) as PluginClient;
+  const clientOf = machineCatalogClient(own, 'd1', new Map([['d2', elsewhere]]));
+
+  it('answers the half’s own client for its machine and Catalogs’ row client for another', async () => {
+    expect(await clientOf({ daemonId: 'd1' })).toBe(own);
+    calls.length = 0;
+    const other = await clientOf({ daemonId: 'd2' });
+    await other.request('/v1/catalogs', z.unknown());
+    expect(calls.map(call => call.route)).toEqual(['GET /v1/catalogs']);
+  });
+
+  it('refuses, saying so, for a machine with no Catalogs row', async () => {
+    await expect(clientOf({ daemonId: 'd3' })).rejects.toThrow(NO_MACHINE_SENTENCE);
+  });
+
+  it('m2 an install on a machine still connecting waits for its row; an off Catalogs says its own sentence', async () => {
+    const rows = new Map<string, PluginClient>();
+    const waiting = machineCatalogClient(own, 'd1', {
+      clients: () => rows,
+      whyNone: () => ({ waiting: true, line: 'Checking what this daemon offers…' }),
+    });
+    const pending = waiting({ daemonId: 'd2' });
+    setTimeout(() => rows.set('d2', elsewhere), 150);
+    await pending;
+    const off = machineCatalogClient(own, 'd1', {
+      clients: () => new Map(),
+      whyNone: () => ({ waiting: false, line: 'Catalogs is off on this daemon.' }),
+    });
+    await expect(off({ daemonId: 'd3' })).rejects.toThrow('Catalogs is off on this daemon.');
+  });
+
+  it('R2-n1 a row the shell allows before the row map has caught up is one more loop, not an end', async () => {
+    const rows = new Map<string, PluginClient>();
+    const client = machineCatalogClient(own, 'd1', { clients: () => rows, whyNone: () => undefined });
+    const pending = client({ daemonId: 'd2' });
+    setTimeout(() => rows.set('d2', elsewhere), 150);
+    await pending;
+  });
+});
+
+describe('the plugin client of any paired machine', () => {
+  const own = recording({ own: true });
+  const elsewhere = recording({ elsewhere: true }) as PluginClient;
+  const clientOf = machinePluginClient(own, 'd1', new Map([['d2', elsewhere]]));
+
+  it('answers the half’s own client for its machine and the row client for another, never the own for another', async () => {
+    expect(await clientOf({ daemonId: 'd1' })).toBe(own);
+    expect(await clientOf({ daemonId: 'd2' })).toBe(elsewhere);
+    expect(await clientOf({ daemonId: 'd2' })).not.toBe(own);
+  });
+
+  it('refuses, saying so, for a machine with no row', async () => {
+    await expect(clientOf({ daemonId: 'd3' })).rejects.toThrow(NO_MACHINE_SENTENCE);
   });
 });

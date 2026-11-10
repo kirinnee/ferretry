@@ -220,7 +220,7 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
   ] as const)
     expect((await read(path, schema)).permissionMode).toBe('skip');
   expect(await text('harness-claude-code.yaml')).toContain('# I trust my agents');
-  expect(await read('runtimes.yaml', RuntimesFileSchema)).toEqual({ defaultRuntime: 'claude-work' });
+  expect(await read('runtimes.yaml', RuntimesFileSchema)).toEqual({ defaultRuntime: 'claude-work', autoResume: false });
   expect(await read('conversation.yaml', ConversationConfigSchema)).toEqual({ keepInSync: false });
   const browsers = await read('browsers.yaml', BrowsersConfigSchema);
   expect(browsers.mode).toBe('window');
@@ -231,7 +231,8 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
 
   expect((await stat(join(f.to, 'config/runtimes/claude-work.yaml'))).mode & 0o777).toBe(0o600);
   const notCarried = report.notCarried.map(item => item.what);
-  for (const key of ['browserPorts', 'autoResume', 'advanced', 'attentionNudge'])
+  expect(notCarried).not.toContain('config/machine.yaml autoResume');
+  for (const key of ['browserPorts', 'advanced', 'attentionNudge'])
     expect(notCarried).toContain(`config/machine.yaml ${key}`);
   expect(report.kept).toContainEqual({ what: 'runtimes', count: 1 });
   expect(report.kept).toContainEqual({ what: 'instruction documents', count: 1 });
@@ -314,7 +315,7 @@ test('an unknown machine key, a syntax error and a non-mapping body each fail by
   expect((await settingsStep.run(f.ctx())).note).toBe('config/machine.yaml: is not a YAML mapping');
 });
 
-test('files with no v5 config schema yet leave the step pending, and everything else is still written', async () => {
+test('an instructions document outside the assets leaves the step pending; settings, hooks and voice never do', async () => {
   await yaml('voice.yaml', 'postProcessing:\n  provider: "off"\n');
   await yaml('pack.yaml', 'enabled: true\n');
   await yaml('components/settings/quiet.yaml', 'harness: claude\nenv:\n  DISABLE_TELEMETRY: "1"\n');
@@ -324,13 +325,14 @@ test('files with no v5 config schema yet leave the step pending, and everything 
   await yaml('learning.yaml', 'enabled: true\n');
   const report = await settingsStep.run(f.ctx());
   expect(report.status).toBe('pending');
+  expect(report.note).toContain('config/components/instructions/outside.yaml');
   for (const file of [
     'config/voice.yaml',
     'config/components/settings/quiet.yaml',
     'config/components/hooks/mine.yaml',
-    'config/components/instructions/outside.yaml',
   ])
-    expect(report.note).toContain(file);
+    expect(report.note).not.toContain(file);
+  expect(await exists('claude-code/settings/quiet.yaml')).toBe(true);
   expect(report.note).not.toContain('learning');
   // pack.yaml is the Packs step's.
   expect(report.note).not.toContain('pack.yaml');

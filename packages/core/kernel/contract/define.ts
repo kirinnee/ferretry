@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { CoreId } from './ids.ts';
+import type { CoreId, ItemKind } from './ids.ts';
 import type { CapabilityAxis } from './policy.ts';
 
 // ─── Ports ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -65,6 +65,23 @@ export type HookDecision =
   | { readonly allow: false; readonly reason: string; readonly code?: string };
 
 export const ALLOW: HookDecision = Object.freeze({ allow: true });
+
+/**
+ * How one live taker of a decide hook answered, in the order it was asked (ADDITIVE). `allowed` is its own
+ * `allow === true`; `refused` is its own `{ allow: false }`; `unanswered` is everything the kernel turned into a no for it
+ * (it failed, stopped running, timed out, threw, or answered something that is not a decision). A skeleton taker, or one
+ * the walk never reached because an earlier taker said no, is not listed.
+ */
+export interface DecideTakerAnswer {
+  readonly plugin: string;
+  readonly outcome: 'allowed' | 'refused' | 'unanswered';
+}
+
+/** A decide hook's decision (exactly what `decide` answers), and who answered what on the way to it. */
+export interface DecideAnswer {
+  readonly decision: HookDecision;
+  readonly answers: readonly DecideTakerAnswer[];
+}
 
 interface HookBase<Name extends string, Mode extends HookMode> {
   readonly kind: 'hook';
@@ -273,6 +290,10 @@ interface ConfigBase<Shape> {
    * The files of this def are CREDENTIAL RECORDS: each one names the secrets a credential it describes is made from
    * (Logins' login records). Only the `${secret:NAME}` references in effect in a def marked so count as the owning plugin's
    * own secrets for a provider that acts for it (the Vault's spend rule); a reference in any other file counts for nothing.
+   * It also means the file's TEXT is never shown by `config_read` when the file fails its check, whatever the reason
+   * (it does not parse, an unknown key, a key outside `env`, a schema that throws): the located issues stay. This
+   * covers every def marked so, Logins' `logins/<id>.yaml` and MCP's `mcp/<name>.yaml` alike, and costs a file whose
+   * only fault is a typo key its text too.
    */
   readonly credentialRecords?: true;
 }
@@ -288,6 +309,12 @@ export interface ConfigCollectionDef<Shape = unknown> extends ConfigBase<Shape> 
   readonly shape: 'collection';
   readonly collection: string;
   readonly name: RegExp;
+  /**
+   * The item kind whose items THIS collection holds (an item plugin's `itemKind: 'mcp'` on `config/mcp/`): the one
+   * declaration that makes `{ items: 'mcp' }` count these files' `command` and `url` as reach, live. A collection
+   * that does not say so is never a reach source, whatever it is called.
+   */
+  readonly itemKind?: ItemKind;
 }
 
 export type ConfigDef<Shape = unknown> = ConfigFileDef<Shape> | ConfigCollectionDef<Shape>;
@@ -308,6 +335,7 @@ export function defineConfig<Shape>(spec: {
 export function defineConfig<Shape>(spec: {
   readonly collection: string;
   readonly name: RegExp;
+  readonly itemKind?: ItemKind;
   readonly schema: z.ZodType<Shape>;
   readonly axis: CapabilityAxis;
   loosens(before: Shape | undefined, after: Shape): readonly string[];

@@ -163,6 +163,8 @@ function ownerOf(file: string, what = ''): string {
   if (/\/fleet\/setup/.test(semantic)) return 'onboarding';
   if (/\/diagnostics\/profile/.test(semantic)) return 'usage';
   if (/\/skill-installs/.test(semantic)) return 'skills';
+  // The Add skills page lists the skills of the catalogs this device subscribes to: Catalogs' page, reached from Skills' slot.
+  if (/add-skills-page\.tsx/.test(file) || what === "screen 'add-skills'") return 'catalogs';
   if (/agent-pins\.json/.test(semantic)) return 'ferrets';
   if (/\bboard(?:[ ._-]|$)|boardimporter|cardstarts|unfiledrefiler/.test(semantic)) return 'board';
   if (/sweepdeadlines/.test(semantic)) return 'asks';
@@ -246,7 +248,14 @@ function renamed(what: string): string {
     .replace(/--ping\b/g, '--buzz')
     .replace(/\btask_plan\b/g, 'card_plan');
 }
+/**
+ * Owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0, with the "from this machine" group of the Add
+ * skills page. The page itself stays, as Catalogs' (its catalogs group), so only the machine group's file is removed.
+ */
+const REMOVED_BY_OWNER = 'removed by design (owner decision !A466, 2026-11-08: the local skill copy is gone)';
+const OWNER_REMOVED = /local-skill-install|machine-skills-group\.tsx/;
 function removal(kind: Kind, what: string, file: string, detail: string): string | undefined {
+  if (OWNER_REMOVED.test(file) && !(kind === 'V' && what === 'fy skill')) return REMOVED_BY_OWNER;
   if (/\balias of\b/.test(detail)) return 'removed by design (§1.4: no aliases)';
   if (
     kind === 'F' &&
@@ -255,6 +264,14 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
     )
   )
     return 'removed by design (§9.2: old files/markers; feature moves to its owner)';
+  // britnee ruling #6: v4's boot-time routing conversion is the home converter's packs step (proved by the converter's
+  // test J-0052); the daemon runs no conversion.
+  // britnee ruling #4: F-0168 is a duplicate of F-0377 (config/machine.yaml is no file in 5.0: the converter splits it
+  // key by key over its owners' files, and F-0377's test proves each key has a schema there). F-0377 stays ticked.
+  if (kind === 'F' && what === 'FY_HOME/config/machine.yaml')
+    return 'removed by design (duplicate of F-0377: machine.yaml is split key by key over its owners’ files, proved there)';
+  if (kind === 'J' && /new RoutingMigration\(/.test(what))
+    return "removed by design (§9.1, §9.2: removed from the daemon; the v4-to-v5 converter's packs step renders the old models-guide.yaml keys and pack.yaml routingPreferences into the one routing prompt as v4 did; a home with routing prose and no use cases carries the prose alone, and the report names that v4’s default prompt prefix was not added; proved by its tests J-0052)";
   if (/legacy|migration/.test(file) && !/session-migrate|session\/migrat|lib\/migration\/commands/.test(file)) {
     if (kind === 'J') return 'removed by design (§9.1, §9.2: one-shot conversion/old-format work)';
   }
@@ -272,6 +289,166 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
     return 'removed by design (§9.2: fleet/config.yaml)';
   return undefined;
 }
+/**
+ * Rows the word rules above place with Runtimes ("runtime", "fleet", "component" in a name) but whose code is another
+ * owner's in 5.0 (britnee ruling, parity-runtimes round 1: re-owned, none removed). Keyed by ROW ID, so a later row from
+ * the same source file keeps the owner the rules gave it; `applyReowned` refuses an id the inventory does not hold.
+ * J-0052 (the boot-time routing conversion) is placed with Packs here, and `removal()` marks it removed from the daemon,
+ * the v4-to-v5 converter's packs step doing that job (britnee ruling #6).
+ */
+const REOWNED: Readonly<Record<string, string>> = {
+  // Pack routing conversion at boot: Packs' row; `removal()` marks it removed from the daemon (the converter's packs step
+  // renders the old guide into the one prompt, britnee ruling #6 and her later ruling on J-0052), so this only places it.
+  'J-0052': 'packs',
+  // Activity timers, the ordered log writer and the bundled worker host and probe: the kernel's clock, jobs and workers.
+  'J-0093': 'kernel',
+  'J-0153': 'kernel',
+  'J-0161': 'kernel',
+  'J-0165': 'kernel',
+  'J-0169': 'kernel',
+  'J-0175': 'kernel',
+  // The session worker's pacing and backstop timers: Ferrets' own worker (the kernel only supplies `after`).
+  'J-0176': 'ferrets',
+  // The relay carrier's reconnect scheduler is Connections'.
+  'J-0177': 'connections',
+  // The housekeeping pass trigger: analytics ingestion's nudge plus its slow backstop is Usage's.
+  'J-0227': 'usage',
+  // A watched document read again only when it changed (J-0096): the behaviour is the kernel's config service, which
+  // serves the answer of the last reload and lets go of it when its file watcher reloads. Logins keeps no cache of its own.
+  'J-0096': 'kernel',
+  // The credentials' usage reading, kept current by file events: Logins'.
+  'J-0232': 'logins',
+  'J-0233': 'logins',
+  'J-0234': 'logins',
+  // The transcript follower: each harness implements `TranscriptReader.follow` (Claude's is claude-code's).
+  'J-0237': 'claude-code',
+  // The send path (#45, britnee ruling in send-path-fix4): the turn files a send writes are Ferrets' session files,
+  // and the look scheduler that follows a send is Conversation's.
+  'F-0306': 'ferrets',
+  'F-0307': 'ferrets',
+  'F-0317': 'ferrets',
+  'F-0318': 'ferrets',
+  'J-0230': 'conversation',
+  'F-0006': 'skills',
+  'F-0018': 'cli',
+  // The shared-history lease lock: the lease store stays Conversation's.
+  'F-0023': 'conversation',
+  'F-0027': 'kernel',
+  'F-0029': 'kernel',
+  'F-0030': 'kernel',
+  'F-0034': 'kernel',
+  'F-0046': 'kernel',
+  'F-0096': 'kernel',
+  // Screens of the conversation, the files tab and the session pages.
+  'S-0064': 'conversation',
+  'S-0111': 'conversation',
+  'S-0115': 'conversation',
+  'S-0134': 'conversation',
+  'S-0102': 'ferrets',
+  'S-0103': 'ferrets',
+  'S-0157': 'ferrets',
+  'S-0160': 'ferrets',
+  'S-0167': 'ferrets',
+  'S-0232': 'ferrets',
+  // One machine's outage sheet: the outage and its attempt count are Connections'.
+  'S-0145': 'connections',
+  // The fleet event socket is declared by Ferrets (packages/core/ferrets/manifest.ts), not the kernel.
+  'R-0424': 'ferrets',
+  // The open-url route is served by Browsers (daemon/open-url/routes.ts).
+  'R-0401': 'browsers',
+  // britnee ruling D6 (2026-11-09): the kernel-filed rows whose behaviour another plugin owns in 5.0 are RE-OWNED, not
+  // removed; each stays `[ ]` until its owner ticks it with a test. None of them is "removed by design".
+  // The staged-file sweep is the agent browser's own upload copies (browsers/daemon/tools/adapters/staged-files.ts).
+  'J-0008': 'browsers',
+  'J-0097': 'browsers',
+  'J-0126': 'browsers',
+  // Auto-resume, the inline observer, the fleet event socket's timer and the write-behind session index: Ferrets'.
+  'J-0016': 'ferrets',
+  'J-0106': 'ferrets',
+  'J-0137': 'ferrets',
+  'J-0159': 'ferrets',
+  // The session attachments (the PDF unlock worker and the unlocked copy's eviction) and the send pause are
+  // Conversation's (conversation/daemon/attachments, conversation/daemon/delivery).
+  'J-0062': 'conversation',
+  'J-0193': 'conversation',
+  'J-0140': 'conversation',
+  // The board sweeps and the GitHub watcher are Board's.
+  'J-0019': 'board',
+  'J-0025': 'board',
+  'J-0065': 'board',
+  // The catalog members' sweep and the member join gate's timer are Catalogs'.
+  'J-0022': 'catalogs',
+  'J-0136': 'catalogs',
+  // The agent clearer's sweep and the agenda's nudge timer are Agenda's.
+  'J-0009': 'agenda',
+  'J-0134': 'agenda',
+  // The fleet refresh pass and the fleet reading's timer keep a credential's usage current: Logins' (as J-0232 to J-0234).
+  'J-0067': 'logins',
+  'J-0068': 'logins',
+  'J-0135': 'logins',
+  // The cgroup read is Terminals' user-slice check; the package install is Runtimes' tool install.
+  'J-0168': 'terminals',
+  'J-0125': 'runtimes',
+  // The Codex runtime's credential link inside its home, and the no-questions import verb: Runtimes'.
+  'F-0079': 'runtimes',
+  'V-0232': 'runtimes',
+  // The machine screens the kernel has no app half for: each drawn by the plugin or shell that owns it.
+  'S-0107': 'access',
+  'S-0223': 'accounts',
+  'S-0370': 'app',
+  'S-0381': 'app',
+  'S-0371': 'conversation',
+  'S-0382': 'catalogs',
+  'S-0373': 'onboarding',
+  'V-0241': 'onboarding',
+};
+
+const SHELL_DAEMON_VERBS: ReadonlySet<string> = new Set([
+  'fy daemon',
+  'fy daemon install',
+  'fy daemon logs',
+  'fy daemon reset',
+  'fy daemon restart',
+  'fy daemon start',
+  'fy daemon status',
+  'fy daemon stop',
+  'fy daemon uninstall',
+  'fy daemon which',
+]);
+const SHELL_STORAGE_FILES: ReadonlySet<string> = new Set([
+  'packages/cli/src/adapters/daemon/lifecycle-lock.ts',
+  'packages/cli/src/lib/daemon/layout.ts',
+]);
+/** The unit test file that proves a row: the owner's parity file for its kind, or the shell's own for what it owns. */
+function checkOf(kind: Kind, what: string, file: string, actualOwner: string): string {
+  return kind === 'V' && what === 'fy daemon update'
+    ? 'packages/cli/tests/unit/update/shell.test.ts'
+    : // The daemon process verbs are the fy shell's, which a kernel test may not import (context-imports).
+      kind === 'V' && SHELL_DAEMON_VERBS.has(what)
+      ? 'packages/cli/tests/unit/parity/daemon-verbs.test.ts'
+      : // The lifecycle claim and the daemon lock's place in the state home are the shell's own files.
+        kind === 'F' && actualOwner === 'kernel' && SHELL_STORAGE_FILES.has(file)
+        ? 'packages/cli/tests/unit/parity/storage.test.ts'
+        : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
+          kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
+          ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
+          : // The watched document's cache is the kernel config service's snapshot (J-0096): its watcher test proves it.
+            kind === 'J' && file.endsWith('/fleet-reading/watched-document.ts')
+            ? 'packages/core/kernel/tests/unit/host-config/service.test.ts'
+            : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
+              kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
+              ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
+              : kind === 'R'
+                ? 'descriptor-parity'
+                : parityFileOf(actualOwner, kind);
+}
+/** The owner's parity file for a kind: the unit tier's, unless that file lives in the integration tier (real disk). */
+function parityFileOf(actualOwner: string, kind: Exclude<Kind, 'R'>): string {
+  const name = `${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+  const unit = `${packagePath(actualOwner)}/tests/unit/parity/${name}`;
+  const integration = `${packagePath(actualOwner)}/tests/integration/parity/${name}`;
+  return !existsSync(join(root, unit)) && existsSync(join(root, integration)) ? integration : unit;
+}
 function add(kind: Kind, what: string, file: string, line: number, descriptor = '', owner?: string) {
   let actualOwner = owner ?? ownerOf(file, what);
   if (kind === 'S' && actualOwner === 'asks') actualOwner = 'agenda';
@@ -283,18 +460,7 @@ function add(kind: Kind, what: string, file: string, line: number, descriptor = 
         'per-kind command: mcp/skill/shell/instruction/profile/runtime/model-set/harness settings/hooks (§1.4)',
       )
     : renamed(what);
-  const check =
-    kind === 'V' && what === 'fy daemon update'
-      ? 'packages/cli/tests/unit/update/shell.test.ts'
-      : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
-        kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
-        ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
-        : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
-          kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
-          ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
-          : kind === 'R'
-            ? 'descriptor-parity'
-            : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+  const check = checkOf(kind, what, file, actualOwner);
   rows.push({
     id: '',
     kind,
@@ -387,18 +553,19 @@ function parse(file: string): Module {
   sources.set(ast, { text: source, lines });
   const mod: Module = { file, ast, source, declarations: new Map(), imports: new Map() };
   modules.set(file, mod);
-  const declare = (name: string, node: N) => {
+  // Bun 1.3.x erases calls to a function named declare (read as the TS modifier), so it is not called that.
+  const recordDeclaration = (name: string, node: N) => {
     const list = mod.declarations.get(name) ?? [];
     list.push(node);
     mod.declarations.set(name, list);
   };
   walk(ast, node => {
-    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') declare(node.id.name, node);
-    else if (isFunctionDeclaration(node) && node.id) declare(node.id.name, node);
+    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') recordDeclaration(node.id.name, node);
+    else if (isFunctionDeclaration(node) && node.id) recordDeclaration(node.id.name, node);
     if (isFunctionLike(node))
       for (const parameter of node.params as N[]) {
         const name = bindingTarget(parameter);
-        if (name.type === 'Identifier') declare(name.name, name);
+        if (name.type === 'Identifier') recordDeclaration(name.name, name);
       }
     if (node.type === 'ImportDeclaration' && isStringLiteral(node.source)) {
       const path = node.source.value as string;
@@ -1639,8 +1806,34 @@ for (const row of rows.sort((a, b) => rowKey(a).localeCompare(rowKey(b)))) {
   row.id = old?.id ?? `${row.kind}-${String(next[row.kind]++).padStart(4, '0')}`;
   if (old && !row.status.startsWith('removed by design') && !old.status.startsWith('removed by design'))
     row.status = old.status;
+  // A route ticked `[x]` names the route test that proves it (parity-ticks); the generator's default is only the check
+  // a port must add, so a test path someone wrote survives regeneration. Only a TICKED row keeps it: a row reverted to
+  // `[ ]` goes back to the default, so an open row never points at a test that no longer proves it.
+  if (old && row.kind === 'R' && old.status.startsWith('[x]') && old.check !== 'descriptor-parity')
+    row.check = old.check;
   unique.set(key, row);
 }
+/**
+ * Moves the rows `REOWNED` names to their 5.0 owner (and that owner's check file). The ids belong to the committed
+ * registry in docs/design, so an id it lacks is an error there; a run into another `--out-dir` (the generator's own
+ * fixture) has no such registry and skips ids it does not hold.
+ */
+function applyReowned(all: ReadonlyMap<string, Row>) {
+  const byId = new Map([...all.values()].map(row => [row.id, row]));
+  for (const [id, owner] of Object.entries(REOWNED)) {
+    const row = byId.get(id);
+    if (!row) {
+      if (outputDirectory !== resolve(join(root, 'docs/design'))) continue;
+      throw new Error(`REOWNED names ${id}, which is not in the inventory`);
+    }
+    row.owner = owner;
+    // A ticked route row already names the test that proves it (kept from the registry above); moving the row to its
+    // real owner must not put the default check back, or the owner's tick loses its test path on the next regeneration.
+    const provenRoute = row.kind === 'R' && row.status.startsWith('[x]') && row.check !== 'descriptor-parity';
+    if (!provenRoute) row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
+  }
+}
+applyReowned(unique);
 const inventory = [...unique.values()].sort(
   (a, b) =>
     owners.indexOf(a.owner) - owners.indexOf(b.owner) || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id),
@@ -1688,7 +1881,17 @@ const out: string[] = [
   '- Jobs count source sites, including adapter schedulers, one-shot/backoff timers and lifecycle arming calls. Multiple sites can participate in one runtime job.',
   '- Files are source declarations and parameterized path families, never a scan of a real home. Relative families retain their symbolic root and confinement-review note. Several modules may declare the same file.',
   '- Removed rows cite a section that explicitly deletes the old behavior/file. A rename or moved feature remains required. No converter is authorized by this list (§9.1).',
-  '- R-0150 (the session file diff) and R-0151 (the session file read) are a deliberate 5.0 hardening, not a parity break: the text a caller receives now has every vault value found whole in the text (the diff, hunk-header section heading included and joined to the hunks around it; a heading git cut to 80 bytes is a partial, the file, or the bytes of a non-UTF-8 file) masked; a value shown only in part, a non-ASCII value in bytes that are not UTF-8, or a value inside compressed bytes, is not, on top of the unchanged secrets-policy gates; an agent loses a read it had today (a file, or a diff of a file whose HEAD or working side holds a vault value, is refused with `holds_secret`), and a person is told the bytes are masked (`redacted: true`).',
+  '- R-0150 (the session file diff) and R-0151 (the session file read) are a deliberate 5.0 hardening, not a parity break: the text a caller receives now has every vault value found whole in the text (the diff, hunk-header section heading included and joined to the hunks around it; a heading git cut to 80 bytes, or stripped of its trailing spaces and tabs, is a partial, the file, or the bytes of a non-UTF-8 file) masked; a value shown only in part, a non-ASCII value in bytes that are not UTF-8, or a value inside compressed bytes, is not, on top of the unchanged secrets-policy gates; an agent loses a read it had today (a file, or a diff of a file whose HEAD or working side holds a vault value, is refused with `holds_secret`), and a person is told the bytes are masked (`redacted: true`).',
+  '- T-0032 (config_read), T-0033 (config_validate) and T-0034 (config_write) are tightened by design, not a parity break: a raw key in a YAML comment or a tag is now a raw secret like one in a value. Today the detector walked parsed values only, so such a file was accepted, its text returned by `config_read` and a write of it by an agent put in effect; in 5.0 the same check (every reload, every write, the agent door) scans the raw text line by line too, so the file is refused with a located issue that never repeats the key, its last good version stays in effect, `config_read` withholds its text, and `config_validate` / `config_write` refuse it.',
+  '- F-0324 (a ferret\u2019s `environment.json`) with the launch read allowance is tightened by design, not a parity break: today every Claude launch pre-allowed reads of the hand-off folders (`handoffFolders`, `fyd.ts:10841`; no inventory row of its own, its paths are joins over a passed folder) and never of the session folder, so `environment.json` was never readable without asking and still is not. 5.0 pre-allows the ferret\u2019s OWN `turns/`, `channel/` and `attachments/` (`LaunchSpec.readable`, Codex adds nothing, as today) and drops today\u2019s fourth, the attachment root a send\u2019s delivered copies were written to, because 5.0 writes no delivered copy to disk yet (GAP(deliver)). Pinned by `packages/plugins/claude-code/tests/unit/parity/launch-read-allow.test.ts` against today\u2019s argv.',
+  '- T-0032 (config_read), T-0033 (config_validate) and T-0034 (config_write), with boot and every reload, are also tightened by design on SIZE and SHAPE, not a parity break: today’s 256 KiB cap held at the wire and at the disk read only; in 5.0 the same cap is checked inside the one check every door uses, before anything parses or scans the text (boot, reload, an accepted record read back, a file that grew after its size was read, config_read, config_validate, config_write), so a text over it is refused in one fixed sentence that quotes nothing, config_read shows no text of it, its last good version stays in effect and boot carries on. Two shapes today read on are refused too, located: a mapping key that is a mapping or a list (or an alias to one), and aliases whose read-out value weighs more than 10 000 plus 2 per character of the file, a string weighing its length (today the library counted aliases, not what they read out to).',
+  '- AGENDA-SEND-NOW-COMPOSER (agenda "Send now" into the owner\'s composer) is tightened by design, not a parity break: today `AgendaReplyBatcher.sendNow` skipped the composer check, so a Send now typed into a draft the owner was writing and merged with it, though its doc said it never types into a non-empty composer. 5.0 types nothing into a non-empty or unreadable composer: the answers stay queued in order and are rechecked, and a Send now into an empty composer types once, with the held answers. Pinned by `packages/core/asks/tests/unit/daemon/agenda/reply-batch.test.ts` ("should never type on \\"Send now\\" into a composer that holds text, and keep the answers queued in order", with its siblings for an unreadable composer and for a composer that empties).',
+  "- R-0349 (the owner's input-request deliver) is tightened by design for a page card, not a parity break (#42 SF1): \"What agents may control › Browsers\" is read at the page target, the one gate every write into a ferret's page passes, so the owner's Send on a page card raised while Browsers was on is refused once it is off (today it typed whatever the switch said). Nothing is typed or held, the card goes back to pending and can be sent again once Browsers is on, and the owner is told \"Agents may no longer control browsers on this machine, so this card was not typed into the page. Turn on Browsers under What agents may control and try again, or dismiss the card.\" The agents' sentence (T-0024 browser_request_input, T-0042 secure_paste) is today's, unchanged. A terminal card's Send still types while Terminals is off, as today.",
+  "- Renaming a runtime is changed by design, not a parity break (ruling #52, kernel batch item 4, user-visible): today the rename rewrote every mention of the runtime in `warden.yaml` and `learning.yaml` in the same act (`renamedRuntimeMentions`, `rebuild-ref/packages/fleet/src/lib/config-files/render.ts`). In 5.0 no plugin writes another plugin's file, so Runtimes publishes `runtimes.renamed { from, to }` and Warden and Lessons each re-point their own file through `writeAsOwner` a moment later. Until a file is re-pointed (or while a re-point is held for the owner) that plugin's status says its file names a runtime that no longer exists. Pinned by a Warden and a Lessons test of the re-point when that wiring lands (GAP in ports-pending `runtimes`).",
+  '- A locked machine\'s Inbox row is worded differently, not a parity break (ruling #55, shell contract S2): the passkey lock is v4\'s own rule and asks at the same moments (background reads of a machine not on screen wait, anything pressed asks at once). In 5.0 the Inbox row of a locked machine says "Locked — unlock <machine> to see its items" with an Unlock button, where v4 showed the machine as locked in the Machines list only.',
+  '- R-0295 (applying an account-model change) is changed by design, not a parity break (#52 Q3, the cross-plugin set deferred): today\u2019s apply wrote every document a change touched as ONE set inside the provisioner\u2019s rollback, across what are now Runtimes\u2019 files (`runtimes.yaml`, `runtimes/`, `profiles/`, `model-sets/`), Logins\u2019 (`logins/<id>.yaml`) and the harness plugins\u2019 (`claude-code/settings`, `codex/settings`). In 5.0 a set is all-or-none per OWNER: Runtimes writes its own documents through `ConfigPort.writeAll` (one held document holds the set; an intent record is rolled back on load), and every other owner writes its own file when it hears `runtimes.applied`. A crash between owners can therefore leave a login naming a runtime that is not there yet; the next boot says so in a sentence ("names a runtime this machine does not have"), never fixes it silently. One set across owners would be Gate\u2019s (every owner\u2019s judge and a set-level held record) and is deferred past 5.0.',
+  "- AK-B1…AK-B13 (Board) and AK-A1…AK-A10 (Agenda) are the session archive's keep signals, today's `board: boardWorld.board.snapshot()` and `hasOpenAgendaItem` (`fyd.ts:11777-11779`; no inventory row of their own, J-0185 is the pass that reads them): archive default off today; takers answer for when it is on. Both take Ferrets' `session.archive-keeps` hook, so neither plugin reaches the other. Board answers every card (owner, assignee, dropped, lane category); Ferrets keeps today's rule over it (not dropped, lane not `closed` or `shipped`, unknown lane in flight). Agenda answers whether the ferret's own board holds an active item. A source that fails, an answer that is not the ferret's own board, and an agenda board with entries that did not parse all reject, which keeps the ferret live: the last is tightened by design (today the unparsed entries were skipped). Board answers only ferret ids (AK-B9…AK-B13; AK-B13: one odd card beside a good one, and the good card's finished ferret still archives): a stored party that is not a ferret id is left out, a card whose owner is not one answers its assignee as owner, and a card with neither is left out, so one odd card never makes the whole answer unreadable; Board checks its answer with Ferrets' contract `ArchiveCardStandingsSchema`, the schema Ferrets parses it with. A quarantined card keeps nobody, as today. NOT carried: today's revive on a card write (`fyd.ts:2087`) and on an agenda ledger write (`fyd.ts:9746`), which needs a retain or revive port in Ferrets' contract (declared in GAP(archive) and docs/session-archive.md). Pinned by `packages/plugins/board/tests/unit/board/archive-keeps.test.ts` and `packages/plugins/agenda/tests/unit/daemon/archive-keeps.test.ts`.",
+  '- The login staging route (`POST /v1/logins/changes`, `login.add` and `login.env`) and the Paste variables screen (v4 `paste-variables.tsx` with `provider-model.ts` `prefillFrom` and `one-click-login.tsx` `oneClickDraft`) are tightened by design, not a parity break: v4 copied every pasted plain value into a plain field and accepted any address, so a gateway key typed into a deliberately empty `ANTHROPIC_API_KEY` (Custom gateway, OpenRouter, Vercel AI Gateway) or a `https://user:password@…` address was shown in clear, sent, and written into `logins/<id>.yaml` when short enough to slip past the length floors. 5.0 differs in four ways, all one rule (`plainPaste` in `packages/plugins/logins/contract/secret-shape.ts`): (1) a pasted value is withheld from its plain field when the variable is credential-named, the value is token-shaped, the address carries a user and password (with or without a scheme), or a credential-named query parameter (`?key=…`, `?token=…`, `?sig=…`) holds a key (an Azure-style `…?api-version=…` base URL is still filled in), or a credential-named header line (`Authorization: Bearer …`, `x-api-key: …`, whatever the variable is called) holds a key; (2) the form says which variables were left out, by name and reason, never the value; (3) a pasted value is never copied into a variable the preset leaves empty on purpose, which keeps its `\'\'`; (4) the daemon refuses `login.add` and `login.env` for a value with a token shape, at ANY length, and, under a name with a credential word anywhere in it (`TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, `AUTH`, ...), for every value that is not exactly one allowed shape: a placeholder under 8 characters with no `$` (`OPENAI_API_KEY=ollama`, `dummy`, `hunter2`, accepted as plain by the daemon as in v4, since the secret store cannot hold one either); one `${secret:NAME}` reference, or several with nothing between them; a scheme word (one word of letters and `-`, at most 16 characters, no digit: `Bearer`, `Api-Token`, `ApiKey`) then whitespace then references; a header name, `:` or `=`, then either of those (`Authorization: Bearer ${secret:K}`); `$NAME` or `${NAME}` with an upper-case environment variable name; a number of up to 12 digits or a flag word (`true`, `false`, `yes`, `no`, `on`, `off`, `oauth`, `none`, `apikey`); or one address that passes the address check. It is an allowlist, so a key cannot hide in text a blocklist forgot. Under ANY name the daemon also refuses a header list (any value, such as `ANTHROPIC_CUSTOM_HEADERS`, `OTEL_EXPORTER_OTLP_HEADERS`, `GATEWAY_EXTRA` or a JSON `{"api_key":"…"}` body, split on line ends and commas, a folded line joined, each piece split on its first `:` or `=` and URL-decoded; in a variable named `…HEADER(S)` a header with no credential name is refused too when its value holds a token shape or a key-like run) holding a credential-named header (`Authorization`, `Cookie`, `x-api-key`...) whose value is not a placeholder or a reference, and an address, with or without a scheme, with a literal password, a key as the user (also with an empty password), or a credential-named query or fragment parameter (`key`, `token`, `sig`, `pass`, `pwd`, any `...signature`, its name decoded and trimmed) holding 8 or more characters outside a reference, where v4 refused only values of 8 or more characters (16 for a bare token) and never an address; `AUTH`-style flags (`CLAUDE_CODE_SKIP_BEDROCK_AUTH=1`) and a credential word in the middle of a name (`CLAUDE_CODE_API_KEY_HELPER_TTL_MS=3600000`) are accepted as flags and numbers. The browser still never PREFILLS a pasted value under a name that ends in a credential word into a plain field, whatever its length, except a whole `${secret:NAME}`, and the person types the placeholder themselves. A short `sk-` value is still refused, by its token shape. A `${...}` that is not an upper-case variable name or a valid `${secret:NAME}` is not an indirection. Under a credential name an address is allowed only with an `http`, `https`, `ws`, `wss`, `socks5` or `socks5h` scheme, no fragment, no bare query, short query values and no key-like run (24 or more letters, digits and `_` with a digit and entropy of 3.5 or more), and an absolute or `~/` path is allowed too; a PEM private-key header is a token shape. The rule is a declared heuristic (docs/secrets.md names its residual GAPs). It runs in time linear in the value, and a file value is at most 4096 characters, as on the wire: a longer one is refused and not scanned. The same rule is applied to a login FILE by its schema, so Edit as YAML and `config_write` refuse the same values, naming the variable and never the value, and `config_read` withholds the text of such a file exactly as for a raw key, whatever else is wrong with a file that parses (one refusal of this rule is enough; an `env` that is not a map of NAME: value strings is itself such a refusal), and withholds the text of any login file that fails its check, whatever the reason (a key outside `env`, a file that does not parse as YAML at all): a file that fails is reported invalid; an edit keeps the last good version in effect, but a file saved before this rule is not in effect until it is fixed. Pinned by `packages/plugins/logins/tests/unit/app/sign-ins-tab.test.tsx` ("keeps a pasted gateway key and a user:password address out of every field and out of the staged change") and `packages/plugins/logins/tests/unit/changes/derive.test.ts` ("should refuse a short gateway key under a credential-named variable, naming the variable and never the value").',
   '',
   '## Unplaced rows',
   '',

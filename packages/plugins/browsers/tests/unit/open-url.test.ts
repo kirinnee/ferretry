@@ -160,7 +160,7 @@ class RecordingSpawn {
 }
 
 describe('G27 the real launcher', () => {
-  test('G27 starts the opener as program plus argv with the host environment, an ended stdin and no shell', async () => {
+  test('G27 starts the opener detached, as program plus argv with the host environment, no stdin and no shell', async () => {
     const spawn = new RecordingSpawn();
     const environment = { PATH: '/bin', DISPLAY: ':0', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1/bus' };
     const launcher = new KernelDetachedLauncher(spawn, environment);
@@ -174,7 +174,8 @@ describe('G27 the real launcher', () => {
     expect(started?.args).toEqual([href]);
     expect(started?.program).not.toMatch(/^(sh|bash|cmd|powershell)/);
     expect(started?.options?.env).toEqual(environment);
-    expect(started?.options?.stdin).toEqual(new Uint8Array());
+    expect(started?.options?.stdin).toBeUndefined();
+    expect(started?.options?.detached).toBe(true);
   });
 
   test('G27 gives the opener exactly the allow-listed names, and drops a token or FY_HOME', () => {
@@ -337,7 +338,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     return { host, opener, gate };
   }
 
-  test('G27 answers the host and launches the address as one argv element, and the log keeps the host only', async () => {
+  test('R-0401 G27 answers the host and launches the address as one argv element, and the log keeps the host only', async () => {
     const { host: built, opener, gate } = await mounted();
 
     const answer = await built.request('POST', '/v1/system/open-url', {
@@ -352,7 +353,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     expect(JSON.stringify(gate.audits)).not.toContain('SECRET');
   });
 
-  test('G27 refuses credentials and a non-http(s) scheme with 400, and launches nothing', async () => {
+  test('R-0401 G27 refuses credentials and a non-http(s) scheme with 400, and launches nothing', async () => {
     const { host: built, opener } = await mounted();
 
     const credentials = await built.request('POST', '/v1/system/open-url', {
@@ -365,7 +366,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     expect(opener.launched).toEqual([]);
   });
 
-  test('G27 refuses a relayed caller with 403 and launches nothing', async () => {
+  test('R-0401 G27 refuses a relayed caller with 403 and launches nothing', async () => {
     const { host: built, opener, gate } = await mounted();
 
     const answer = await built.request('POST', '/v1/system/open-url', {
@@ -378,7 +379,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     expect(gate.audits).toEqual([]);
   });
 
-  test('G27 refuses a caller with no credential with 401 and launches nothing', async () => {
+  test('R-0401 G27 refuses a caller with no credential with 401 and launches nothing', async () => {
     const { host: built, opener } = await mounted();
 
     const answer = await built.request('POST', '/v1/system/open-url', {
@@ -402,7 +403,7 @@ describe('G27 the route, mounted by the daemon half', () => {
     expect(opener.launched).toEqual([]);
   });
 
-  test('G27 answers 429 with a retry-after on the eleventh opening in ten seconds', async () => {
+  test('R-0401 G27 answers 429 with a retry-after on the eleventh opening in ten seconds', async () => {
     const { host: built } = await mounted();
     for (let index = 0; index < OPEN_URL_LIMIT; index += 1)
       await built.request('POST', '/v1/system/open-url', { body: { url: 'https://example.com/' } });

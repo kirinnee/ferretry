@@ -120,6 +120,7 @@ function kernelRoots(
         writeText: missing('write a file'),
         writeBytes: missing('write a file'),
         copyTree: missing('copy a folder'),
+        copyShared: missing('copy a shared folder'),
         ensurePrivateDirectory: missing('make a folder'),
         makeDirectory: missing('make a folder'),
         list: missing('list a folder'),
@@ -130,6 +131,10 @@ function kernelRoots(
         syncDirectory: missing('syncDirectory'),
         fileIdentity: missing('fileIdentity'),
         remove: missing('remove a file'),
+        linkTo: missing('link'),
+        setMode: missing('change a mode'),
+        rename: missing('move an entry'),
+        unlink: missing('remove a link'),
       };
     },
   };
@@ -217,7 +222,7 @@ async function setup(
   const half = daemon.build?.({
     manifest,
     needs: { ferrets, vault, sealed },
-    uses: { claudeCode: handle(uses.claudeCode), projects: handle(uses.projects) },
+    uses: { claudeCode: handle(uses.claudeCode), projects: handle(uses.projects), runtimes: handle(undefined) },
     hooks: {} as never,
     kernel: {
       config: { collection: () => new Map() },
@@ -504,9 +509,24 @@ describe('the .mcp.json at a known root, read through the kernel (lead ruling (B
     expect(s.trace.reads).toEqual([]);
   });
 
+  test('a project root that is a link is the kernel’s anchor: its .mcp.json is read and bound as any root’s', async () => {
+    // Arrange
+    const s = await setup(
+      { claudeCode: approving(), projects: await registered() },
+      { leadAtRoot: false, linkedRoots: [REPO] },
+    );
+
+    // Act
+    const parts = await s.launch.parts(spec(SUBFOLDER));
+
+    // Assert
+    expect(s.fetched).toEqual([s.tokenEndpoint]);
+    expect(envOf(parts)).toEqual({ [s.variable]: optionalSecretReference(s.access) });
+    expect(s.trace.reads).toEqual([`imports:${REPO}/.mcp.json`]);
+  });
+
   test.each<[string, SetupOptions]>([
     ['a .mcp.json that is a link (even to a file inside the root)', { links: [`${REPO}/.mcp.json`] }],
-    ['a project root that is a link', { linkedRoots: [REPO] }],
   ])('%s is refused: nothing is read, renewed or bound', async (_what, disk) => {
     // Arrange
     const s = await setup({ claudeCode: approving(), projects: await registered() }, { leadAtRoot: false, ...disk });

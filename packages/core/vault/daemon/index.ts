@@ -50,7 +50,7 @@ import {
   UndeclaredProgramError,
   UndeclaredSecretError,
 } from './lib/secrets/reach.ts';
-import { ChildEnvironments } from './lib/secrets/child-environments.ts';
+import { ChildEnvironments, namesSecret } from './lib/secrets/child-environments.ts';
 import { type SecretCloneIdentitySource, SecretExportService, SecretImportService } from './lib/secrets/clone.ts';
 import { HoldRegistry } from './lib/secrets/output-guard.ts';
 import { launchEnvironment } from './lib/secrets/policy.ts';
@@ -67,6 +67,11 @@ import { SecretDirectory, SecretVault } from './lib/secrets/vault.ts';
  * one exists; nothing here reads `state/kernel/identity.json` around the kernel.
  */
 const IDENTITY_NOT_OFFERED: SecretCloneIdentitySource = { load: async () => undefined };
+
+/** The one plugin that looks at a page's number and a terminal's prompt for a phone approval, and may ask whether a ferret steered. */
+const PHONE_APPROVAL_LOOKER = 'accounts';
+/** The plugins whose request tools carry a ferret's `push: true` raise (Terminals' does not serve one yet). */
+const PHONE_APPROVAL_RAISERS: readonly string[] = ['browsers'];
 
 /**
  * The Vault's daemon half (§2.2): the sealed store and key (byte for byte, spine D16), `${secret:NAME}` use, the
@@ -158,16 +163,32 @@ export default implementDaemon(manifest, {
     /**
      * `${secret:NAME}` in a ferret child's environment (S62–S64): every name resolved, or the launch refused. A
      * variable whose whole value is `${secret?:NAME}` is set when held and left out when not (`launchEnvironment`).
+     *
+     * The handle records the plugin it was minted for (`requester`: the needer this port was built for) and whether its
+     * `PATH` as asked named a secret, so `searchPathOf` (Q7) answers only the kernel's readers for that plugin and
+     * never a secret-derived PATH. A call with no requester mints a handle no plugin may search.
      */
+    const mintChildEnvironment = async (
+      env: Readonly<Record<string, string>>,
+      requester: string | undefined,
+    ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> => {
+      // ONE reading of the caller's object: the PATH judged for a secret reference is the PATH that is resolved.
+      const asked: Readonly<Record<string, string>> = Object.freeze({ ...env });
+      const values = await vault.values();
+      const resolved = launchEnvironment(asked, values);
+      if (!resolved.ok) return err({ unknown: resolved.unknown });
+      return ok(
+        environments.mint(resolved.value, {
+          ...(requester === undefined ? {} : { requester }),
+          pathFromSecret: namesSecret(asked.PATH),
+        }),
+      );
+    };
     const childEnvironment = async (
       _ferret: FerretId,
       env: Readonly<Record<string, string>>,
-    ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> => {
-      const values = await vault.values();
-      const resolved = launchEnvironment(env, values);
-      if (!resolved.ok) return err({ unknown: resolved.unknown });
-      return ok(environments.mint(resolved.value));
-    };
+    ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> =>
+      await mintChildEnvironment(env, undefined);
 
     /**
      * The kernel's own `${secret:NAME}` lookup (`kernel.secrets`): the value for a NAME, as today's consumers took it
@@ -221,6 +242,12 @@ export default implementDaemon(manifest, {
           account: use.account as AccountId,
           factor: use.factor as TwoFactorId,
         }),
+      // Approve on your phone: the looks Accounts' approval makes and the raise a request tool hands on. `apiFor`
+      // narrows who is handed which; a needer outside both lists is handed none (fail closed).
+      pushNumber: async (ferret, key) => await inputs.phoneReach.pushNumber(ferret, key),
+      observeTerminal: async (ferret, key) => await inputs.phoneReach.observeTerminal(ferret, key),
+      tainted: (ferret, kind, since) => inputs.phoneReach.tainted(ferret, kind, since),
+      raisePhoneApproval: async (ferret, ask) => await inputs.phoneReach.raisePhoneApproval(ferret, ask),
     };
 
     /**
@@ -231,9 +258,18 @@ export default implementDaemon(manifest, {
      * today's Vault refuses a host, secret or program it does not allow.
      */
     const apiFor = (needer: Needer): VaultApi => {
-      if (isCoreNeeder(needer)) return full;
+      // Every needer's handles name it as their requester (`searchPathOf`), the core ones included.
+      const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env) =>
+        await mintChildEnvironment(env, needer.id);
+      if (isCoreNeeder(needer)) return { ...full, childEnvironment: ownChildEnvironment };
+      // The phone approval's reach is by name: the service that looks (Accounts) and the tool that raises (Browsers).
+      // Every other needer is handed none of it, so a plugin cannot read a page's number or the prompt of
+      // a terminal, or raise an approval, by holding the Vault port.
+      const { pushNumber, observeTerminal, tainted, raisePhoneApproval, ...rest } = full;
       return {
-        ...full,
+        ...rest,
+        ...(needer.id === PHONE_APPROVAL_LOOKER ? { pushNumber, observeTerminal, tainted } : {}),
+        ...(PHONE_APPROVAL_RAISERS.includes(needer.id) ? { raisePhoneApproval } : {}),
         // LIST reach: the secrets this needer may use or mints itself. WRITE reach is narrower: only the names it MINTS, so a
         // plugin cannot overwrite or delete a secret it merely uses (an owner's GITHUB_TOKEN named in its records), nor see
         // the owner's others (credential substitution, S12).
@@ -281,7 +317,7 @@ export default implementDaemon(manifest, {
           const env = SecretUseRequestSchema.shape.env.parse({ ...asked });
           const refused = secretsNamedBy({ secrets: [], env }).filter(name => !mayUseSecret(needer, name));
           if (refused.length > 0) return err({ unknown: refused });
-          return await full.childEnvironment(ferret, env);
+          return await ownChildEnvironment(ferret, env);
         },
       };
     };

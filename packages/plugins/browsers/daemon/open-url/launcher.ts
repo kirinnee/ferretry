@@ -31,10 +31,12 @@ export function openerEnvironment(source: Readonly<Record<string, string | undef
 
 /**
  * Starting the operating system's opener and letting go of it (today's `BunDetachedLauncher`), through `kernel.spawn`
- * under the names `permissions.spawn` declares.
+ * under the names `permissions.spawn` and `permissions.detached` declare.
  *
- * NO SHELL: the command and its arguments are a vector. NO OUTPUT KEPT: both streams are read and dropped, so a chatty
- * opener cannot fill a pipe (nor be killed by a closed one) and a page's address cannot come back out through a log.
+ * DETACHED, as today's was: its own process group, stdio ignored, unreferenced (`SpawnOptions.detached`), so stopping
+ * the daemon's process group never takes the opener, or a browser it started, down with it. NO SHELL: the command and
+ * its arguments are a vector. NO OUTPUT KEPT: every stream is ignored, so a chatty opener cannot fill a pipe and a
+ * page's address cannot come back out through a log; an opener that falls back to a text browser reads an empty stdin.
  * Nothing waits for the child. A program that cannot be started (`xdg-open` not installed) is the only failure
  * reported; whether the browser then shows the page is the opener's business.
  */
@@ -50,19 +52,7 @@ export class KernelDetachedLauncher implements DetachedLauncherPort {
   }
 
   async launch(command: OpenerCommand): Promise<void> {
-    // An empty stdin is written and ended, so an opener that falls back to a text browser never waits on a pipe.
-    const child = this.spawn.start(command.command, command.args, { env: this.environment, stdin: new Uint8Array() });
-    for (const stream of [child.stdout, child.stderr]) void drop(stream);
-    void child.exited.catch(() => undefined);
+    this.spawn.start(command.command, command.args, { env: this.environment, detached: true });
     await Promise.resolve();
-  }
-}
-
-async function drop(stream: ReadableStream<Uint8Array>): Promise<void> {
-  const reader = stream.getReader();
-  try {
-    while (!(await reader.read()).done);
-  } catch {
-    // The child is gone; nothing was wanted from it.
   }
 }

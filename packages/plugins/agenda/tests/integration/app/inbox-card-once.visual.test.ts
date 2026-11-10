@@ -83,7 +83,7 @@ describe('the Inbox shows each card once', () => {
           const titles = await tab.$$eval('.fy-parked-row', rows => rows.map(row => row.textContent ?? ''));
           expect(titles.filter(text => text.includes('Duplicate gate items on reassign'))).toHaveLength(1);
           expect(titles.filter(text => text.includes('Share links over the relay'))).toHaveLength(1);
-          expect(await tab.$('[data-to-test-snoozed]')).toHaveLength(0);
+          expect(await tab.$$('[data-to-test-snoozed]')).toHaveLength(0);
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-snoozed.png`) });
         } finally {
           await context.close();

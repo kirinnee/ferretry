@@ -11,6 +11,7 @@ import { click, settle } from '../support/dom-form.ts';
 import { interact, mount } from '@ferretry/app/testing';
 import { runAsync } from '@ferretry/app/testing';
 import { settleUntil } from '@ferretry/app/testing';
+import { watchedCrypto } from '../support/watched-crypto.ts';
 
 /** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
 beforeEach(() => {
@@ -18,6 +19,8 @@ beforeEach(() => {
 });
 
 const connection = daemonConnection({ daemonId: 'alpha' });
+/** The sheet reads files through this, so `give` can wait for the reading itself. */
+const watched = watchedCrypto(crypto);
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 const text = (): string => document.body.textContent ?? '';
 
@@ -91,20 +94,35 @@ async function open(handlers: Parameters<typeof fakeClient>[0], host: Partial<In
     <InstallFromFileSheet
       connection={connection}
       onClose={() => closed.push('closed')}
-      host={{ createClient: fake.factory, crypto, projects: PROJECTS, runtimes: BOX, ...host }}
+      host={{ createClient: fake.factory, crypto: watched.crypto, projects: PROJECTS, runtimes: BOX, ...host }}
     />,
   );
   return { fake, view, closed };
 }
 
+/** The sheet holds its file input off while it reads a file (and while it asks the daemon). */
+const reading = (): boolean => (q('[data-catalog-file-input]') as HTMLInputElement | null)?.disabled === true;
+/**
+ * Hands the sheet a file, then waits until it has finished reading it. Opening a file verifies its
+ * signature and digests with `crypto.subtle`, which finishes on a work-queue thread, so a fixed count of
+ * ticks races it and a loaded runner loses (the next `pickItem` then finds no item to tap). Each turn
+ * here first waits for every crypto answer still on the way, so only the steps between them are counted.
+ */
 const give = async (file: unknown): Promise<void> => {
   const input = q('[data-catalog-file-input]') as HTMLInputElement;
   Object.defineProperty(input, 'files', { configurable: true, value: [file] });
   await interact(() => {
     input.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  await settle();
-  await settle();
+  await settleUntil(
+    () => !reading(),
+    'the sheet to finish reading the file',
+    async turn =>
+      await runAsync(async () => {
+        await watched.answered();
+        await turn();
+      }),
+  );
 };
 const giveText = async (content: string) => await give(new File([content], 'team.catalog.json'));
 
@@ -462,13 +480,89 @@ describe('the projects the host names', () => {
       <InstallFromFileSheet
         connection={connection}
         onClose={() => undefined}
-        host={{ createClient: fake.factory, crypto, projects: [{ name: 'known', path: '/k' }] }}
+        host={{ createClient: fake.factory, crypto: watched.crypto, projects: [{ name: 'known', path: '/k' }] }}
       />,
     );
     await giveText(fileText);
     await choose('[data-catalog-scope]', 'project');
     expect(q('[data-catalog-project]')?.textContent).toContain('known');
     await view.unmount();
+  });
+});
+
+describe('catalogs#5 the projects of the machine being installed onto', () => {
+  const ALPHA = [{ name: 'alpha-proj', path: '/a' }];
+  const BETA = [{ name: 'beta-proj', path: '/b' }];
+  const read = async (target: { readonly daemonId: string }) => (target.daemonId === 'alpha' ? ALPHA : BETA);
+
+  const openOn = async (daemonId: string, host: Partial<InstallHost>) => {
+    const fake = fakeClient({ ...baseHandlers });
+    const view = await mount(
+      <InstallFromFileSheet
+        connection={daemonConnection({ daemonId })}
+        onClose={() => undefined}
+        host={{ createClient: fake.factory, crypto: watched.crypto, ...host }}
+      />,
+    );
+    await giveText(fileText);
+    await choose('[data-catalog-scope]', 'project');
+    await settle();
+    return view;
+  };
+
+  it('offers the TARGET machine’s projects, never the screen’s own, when they differ', async () => {
+    // The screen is on alpha (its own list rides `projects`); the person picked beta to install onto.
+    const view = await openOn('beta', { projects: ALPHA, readProjects: read });
+    expect(q('[data-catalog-project]')?.textContent).toContain('beta-proj');
+    expect(q('[data-catalog-project]')?.textContent).not.toContain('alpha-proj');
+    await view.unmount();
+  });
+
+  it('offers the screen’s own machine’s projects when that is the target', async () => {
+    const view = await openOn('alpha', { projects: BETA, readProjects: read });
+    expect(q('[data-catalog-project]')?.textContent).toContain('alpha-proj');
+    expect(q('[data-catalog-project]')?.textContent).not.toContain('beta-proj');
+    await view.unmount();
+  });
+
+  it('offers none, not another machine’s, when the target’s list cannot be read', async () => {
+    const view = await openOn('beta', {
+      projects: ALPHA,
+      readProjects: async () => {
+        throw new Error('This device cannot reach Catalogs on that machine yet.');
+      },
+    });
+    expect(q('[data-catalog-project]')?.textContent).not.toContain('alpha-proj');
+    await view.unmount();
+  });
+
+  it('drops an answer that lands after the sheet closed', async () => {
+    let release: (value: typeof BETA) => void = () => undefined;
+    const late = new Promise<typeof BETA>(resolve => {
+      release = resolve;
+    });
+    const fake = fakeClient({ ...baseHandlers });
+    const view = await mount(
+      <InstallFromFileSheet
+        connection={daemonConnection({ daemonId: 'beta' })}
+        onClose={() => undefined}
+        host={{ createClient: fake.factory, crypto: watched.crypto, readProjects: () => late }}
+      />,
+    );
+    await view.unmount();
+    release(BETA);
+    await late;
+    const failing = Promise.reject(new Error('late'));
+    const second = await mount(
+      <InstallFromFileSheet
+        connection={daemonConnection({ daemonId: 'beta' })}
+        onClose={() => undefined}
+        host={{ createClient: fake.factory, crypto: watched.crypto, readProjects: () => failing }}
+      />,
+    );
+    await second.unmount();
+    await failing.catch(() => undefined);
+    expect(document.body.textContent).not.toContain('beta-proj');
   });
 });
 

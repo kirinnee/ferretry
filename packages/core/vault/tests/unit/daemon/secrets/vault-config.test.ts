@@ -141,6 +141,24 @@ describe('the VaultConfigFile definition', () => {
     expect(named.ok).toBe(true);
   });
 
+  test('S29 a file holds a reference, never a value: a raw secret is refused without being repeated, a ${secret:NAME} reference is kept', () => {
+    const raw = config.checkConfigText(
+      VaultConfigFile,
+      'vault.yaml',
+      `secretEnvironment:\n  API_KEY: sk-ant-${'z9Y8x7W6'.repeat(4)}\n`,
+      'fy',
+    );
+    const reference = config.checkConfigText(
+      VaultConfigFile,
+      'vault.yaml',
+      'secretEnvironment:\n  API_KEY: ${secret:ANTHROPIC_KEY}\n',
+      'fy',
+    );
+    expect(raw.ok).toBe(false);
+    if (!raw.ok) expect(JSON.stringify(raw)).not.toContain('z9Y8x7W6');
+    expect(reference.ok).toBe(true);
+  });
+
   test('no edit of it loosens: a recipe is only ever earned, never widened', () => {
     expect(VaultConfigFile.loosens(undefined, { secretEnvironment: { AUTH: 'Bearer ${secret:TOKEN}' } })).toEqual([]);
   });

@@ -25,6 +25,13 @@ import type { SessionIndex } from '../../lib/ports.ts';
  * real index.
  *
  * The array handed out is frozen: a caller that sorted or spliced it would corrupt every later answer.
+ *
+ * REBUILT ON BOOT. The rows live in the kernel's `sqlite-cache` (`index.sqlite`), which the kernel drops on a format
+ * mismatch and which the conversion from the previous version does not carry. A cache that came back empty listed no
+ * session at all until the boot job `ferrets.index-rebuild` ran: it gives the index a row for every session its
+ * survey finds and the index lacks, ~50 sessions per slice with the loop handed back between slices, so ~2,400 rows
+ * never cost one stall (`DaemonStorage.rebuildIndexYielding`). Until it has run the list is simply short, and an empty
+ * list is a valid roster for every reader.
  */
 export class ListedSessionIndex implements SessionIndex {
   #byId: Map<string, IndexedSession> | undefined;

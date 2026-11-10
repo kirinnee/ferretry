@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { ACTIONS_ROW_SLOT, FERRET_ACCOUNT_SLOTS, FERRET_SLOTS } from '../../../../core/ferrets/contract/slots.ts';
+import {
+  ACTIONS_ROW_SLOT,
+  FERRET_ACCOUNT_SLOTS,
+  FERRET_SLOTS,
+  FILES_SEARCH_SLOT,
+} from '../../../../core/ferrets/contract/slots.ts';
+import { AGENDA_CONVERSATION_SLOT as AGENDA_OFFERS } from '../../../../plugins/agenda/contract/slots.ts';
+import { AGENDA_CONVERSATION_SLOT } from '../../../../plugins/conversation/contract/slots.ts';
 import { generated } from '../../../src/generated/surfaces.ts';
 import { viewsOf } from '../../../src/layout/engine.ts';
 import { isSlotName } from '../../../src/layout/slots.ts';
@@ -31,8 +38,10 @@ describe('the slots Ferrets offers', () => {
     const contributed = entries.flatMap(entry =>
       (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('ferrets.')),
     );
-    // Runtimes' two account pickers and the Warden's one row in the Actions ▾ menu.
-    expect([...contributed].sort()).toEqual([...FERRET_ACCOUNT_SLOTS, ACTIONS_ROW_SLOT].sort());
+    // Runtimes' two account pickers, the Warden's, Conversation's and MCP's (Add MCP server) rows in the Actions ▾ menu, and Conversation's file search.
+    expect([...contributed].sort()).toEqual(
+      [...FERRET_ACCOUNT_SLOTS, ACTIONS_ROW_SLOT, ACTIONS_ROW_SLOT, ACTIONS_ROW_SLOT, FILES_SEARCH_SLOT].sort(),
+    );
     for (const slot of contributed) expect(named).toContain(slot);
   });
 
@@ -77,5 +86,13 @@ describe('the plugin graph with Runtimes using Usage', () => {
 
   test('no plugin reaches itself (core pieces consume each other through hooks and are ordered by the kernel)', () => {
     for (const entry of entries.filter(candidate => !candidate.core)) expect(reach(entry.id)).not.toContain(entry.id);
+  });
+});
+
+describe('the slot Agenda offers and Conversation fills', () => {
+  test('Conversation writes the name Agenda owns, and contributes the ferret’s conversation to it', () => {
+    expect(AGENDA_CONVERSATION_SLOT).toBe(AGENDA_OFFERS);
+    const contributors = (viewsOf(entries).panels.get(AGENDA_OFFERS) ?? []).map(panel => `${panel.plugin}.${panel.id}`);
+    expect(contributors).toEqual(['conversation.agenda-conversation']);
   });
 });

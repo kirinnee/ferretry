@@ -25,6 +25,12 @@ import { err, ok, type Result } from '@ferretry/std';
 import type { InputRaise, InputRequestId, InputRequestState } from '../inputs.ts';
 import type { ActedPage, ChildEnvironment, PageActNote, VaultApi } from '../port.ts';
 import {
+  PHONE_APPROVAL_UNAVAILABLE,
+  type PhoneApprovalAgentView,
+  type PhoneApprovalAsk,
+  type PhoneApprovalProvider,
+} from '../phone.ts';
+import {
   type SealedDocumentDef,
   type SealedDocumentHandle,
   type SealedDocumentsApi,
@@ -46,7 +52,7 @@ import {
   secretMask,
   secretReferencesIn,
 } from '../secrets.ts';
-import type { InputTargetAdapter, InputTargetFacts } from '../targets.ts';
+import type { InputTargetAdapter, InputTargetFacts, ObserveResult, PushNumberRead } from '../targets.ts';
 import { targetRef } from '../targets.ts';
 
 const keyOf = (target: TargetRef): string => `${String(target.kind)}:${target.key}`;
@@ -416,6 +422,35 @@ export class FakeVault implements VaultApi {
   }
   scriptedOn(host: string | undefined): void {
     this.scriptedHosts.push(host);
+  }
+  /**
+   * APPROVE ON YOUR PHONE (the twin of the real Vault's members): what the fake's page and terminal show, what it
+   * says was steered, and the service it hands a raise to. All unset by default, and an unset provider refuses the
+   * way the real Vault does while nothing provides `input.phone-approval`.
+   */
+  pushNumberRead: { readonly pageId: string; readonly read: PushNumberRead } | undefined;
+  terminalObserved: ObserveResult = { ok: false, reason: 'unsupported' };
+  steered = false;
+  phoneApprovals: PhoneApprovalProvider | undefined;
+  /** Every `tainted` question asked, for a test that checks which surface and instant were named. */
+  readonly taintedAsked: { ferret: FerretId; kind: 'browser' | 'terminal'; since: number }[] = [];
+  async pushNumber(
+    _ferret: FerretId,
+    _key: string,
+  ): Promise<{ readonly pageId: string; readonly read: PushNumberRead } | undefined> {
+    return this.pushNumberRead;
+  }
+  async observeTerminal(_ferret: FerretId, _key: string): Promise<ObserveResult> {
+    return this.terminalObserved;
+  }
+  tainted(ferret: FerretId, kind: 'browser' | 'terminal', since: number): boolean {
+    this.taintedAsked.push({ ferret, kind, since });
+    return this.steered;
+  }
+  async raisePhoneApproval(ferret: FerretId, ask: PhoneApprovalAsk): Promise<Result<PhoneApprovalAgentView, string>> {
+    return this.phoneApprovals === undefined
+      ? err(PHONE_APPROVAL_UNAVAILABLE)
+      : await this.phoneApprovals.raise(ferret, ask);
   }
   async names(): Promise<readonly SecretSummary[]> {
     return [...this.#values].map(

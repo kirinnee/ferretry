@@ -17,6 +17,7 @@
 import { z } from 'zod';
 import {
   type AccountChange,
+  type ApplyOutcome,
   AccountChangeOutcomeSchema,
   AccountChangeRequestSchema,
   type AccountChangeOutcome,
@@ -76,6 +77,28 @@ export const readChangeAuthority = async (client: RuntimesClient): Promise<Fleet
   }
 };
 
+/**
+ * An apply the daemon ANSWERED (200) but that did not finish: the fleet apply failed after the change was staged.
+ *
+ * - `rolled-back`: the fleet was put back. The configuration files the change wrote first are NOT undone by that
+ *   (`landed`, each one created, edited or removed): that change stays and the next apply publishes it.
+ * - `rollback-incomplete`: the fleet could not be fully put back. `unrestored` (and `displaced`) are the paths left
+ *   partly changed; the host needs a look.
+ *
+ * Neither is a save. A caller never closes a form, or says "Saved" or "Deleted", for one; `sentence` is what the
+ * screen shows instead, paths only, never a value.
+ */
+interface UnfinishedApply {
+  readonly kind: 'rolled-back' | 'rollback-incomplete';
+  readonly staged: AccountChangeView;
+  /** One alert-sized message: the outcome first, then the files and what the owner can do. */
+  readonly sentence: string;
+  /** Configuration files the change created, edited or removed: that change stayed and is live at the next apply. */
+  readonly landed: readonly string[];
+  /** Paths left partly changed (empty for `rolled-back`). */
+  readonly unrestored: readonly string[];
+}
+
 export type ChangeResult =
   | {
       readonly kind: 'applied';
@@ -83,6 +106,7 @@ export type ChangeResult =
       readonly staged: AccountChangeView;
       readonly outcome: AccountChangeOutcome;
     }
+  | UnfinishedApply
   | {
       readonly kind: 'refused';
       /** One sentence for the screen. */
@@ -164,10 +188,99 @@ export const stageAccountChange = async (client: RuntimesClient, change: Account
   }
 };
 
+const stripStop = (text: string): string => text.trim().replace(/[.\s]+$/u, '');
+const fileWord = (count: number, one: string, many: string): string => (count === 1 ? one : many);
+
+/** The apply a change ended with, wherever the outcome carries one. */
+const applyOf = (outcome: AccountChangeOutcome): ApplyOutcome | undefined => {
+  if (outcome.outcome === 'applied') return outcome.apply;
+  if (outcome.outcome === 'login-changed') return outcome.moved;
+  return undefined;
+};
+
+const landedSentence = (landed: readonly string[], remedy: string): string =>
+  landed.length === 0
+    ? `No configuration file was left on disk. ${remedy}`.trimEnd()
+    : `${fileWord(landed.length, 'This configuration change stayed', 'These configuration changes stayed')} and ${fileWord(landed.length, 'goes', 'go')} live at the next apply: ${landed.join(', ')}. ${remedy}`.trimEnd();
+
+/**
+ * What an apply that did not finish says, in the order a person reads it: the outcome first, then what failed, then
+ * the files, then what they can do. Plain sentences, paths only.
+ */
+const unfinished = (
+  staged: AccountChangeView,
+  apply: Extract<ApplyOutcome, { outcome: 'rolled-back' | 'rollback-incomplete' }>,
+): UnfinishedApply => {
+  const landed = apply.configurationLanded ?? [];
+  const failure = `${apply.failedOperation} failed: ${stripStop(apply.reason)}.`;
+  if (apply.outcome === 'rolled-back')
+    return {
+      kind: 'rolled-back',
+      staged,
+      landed,
+      unrestored: [],
+      sentence: [
+        'This change was not applied: the fleet apply failed and was rolled back.',
+        failure,
+        landedSentence(
+          landed,
+          landed.length === 0
+            ? 'Fix the cause and apply again.'
+            : `Fix the cause and apply again. To undo the change instead, put ${fileWord(landed.length, 'that file back as it was, or delete it if it did not exist before', 'those files back as they were, or delete any that did not exist before')}.`,
+        ),
+      ].join(' '),
+    };
+  const unrestored = apply.unrestored.map(path => path.path);
+  const left = apply.unrestored.map(path =>
+    path.backup === undefined ? path.path : `${path.path} (the original is at ${path.backup})`,
+  );
+  const moved = (apply.displaced ?? []).map(state => `${state.path} (moved to ${state.movedTo})`);
+  return {
+    kind: 'rollback-incomplete',
+    staged,
+    landed,
+    unrestored,
+    sentence: [
+      'This change was not applied, and the fleet could not be fully put back, so this machine needs a look.',
+      failure,
+      ...(left.length === 0
+        ? []
+        : [`${fileWord(left.length, 'This path was', 'These paths were')} left partly changed: ${left.join(', ')}.`]),
+      ...(moved.length === 0 ? [] : [`Moved aside: ${moved.join(', ')}.`]),
+      landedSentence(landed, ''),
+      'Check these paths and files, fix the cause, then apply again.',
+    ].join(' '),
+  };
+};
+
+/**
+ * What the daemon's answer means for the person. Only a finished apply (or a change that never needed one) is
+ * `applied`; a rolled-back or rollback-incomplete apply is its own result, and an outcome this app does not know is
+ * a refusal — an answer it cannot read is never a save.
+ */
+export const settleOutcome = (staged: AccountChangeView, outcome: AccountChangeOutcome): ChangeResult => {
+  const apply = applyOf(outcome);
+  if (apply === undefined) return { kind: 'applied', staged, outcome };
+  switch (apply.outcome) {
+    case 'committed':
+    case 'committed-with-history-failure':
+      return { kind: 'applied', staged, outcome };
+    case 'rolled-back':
+    case 'rollback-incomplete':
+      return unfinished(staged, apply);
+    default:
+      return {
+        kind: 'refused',
+        sentence:
+          'This machine answered in a form this copy of the app doesn’t understand, so it can’t tell whether the change was applied. Reload the app, and check the machine before you try again.',
+      };
+  }
+};
+
 /** Apply exactly a change that was staged. */
 export const applyStagedChange = async (client: RuntimesClient, staged: AccountChangeView): Promise<ChangeResult> => {
   try {
-    return { kind: 'applied', staged, outcome: await applyChange(client, staged.id) };
+    return settleOutcome(staged, await applyChange(client, staged.id));
   } catch (error) {
     return refused(error);
   }

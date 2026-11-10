@@ -30,6 +30,7 @@ import {
   sessionIdFromBytes,
 } from '../../../worker/src/lib/index.ts';
 import should from 'should';
+import { guarantee } from '../../support/guarantee.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const host = 'relay.example';
@@ -1275,8 +1276,3 @@ describe('rendezvous: handing the claim over to the same daemon', () => {
     should(superseded.settled.state.daemon?.socketId).equal('new');
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

@@ -4,17 +4,21 @@
  * `ModelSetComponentSchema`, the machine's `defaultRuntime`), with the words of §1: a runtime names a **login**, not a
  * credential. Every file is strict; a raw secret never belongs in one (the kernel's config layer refuses it).
  */
-import { InstantSchema, NonEmptyStringSchema } from '@ferretry/std';
+import { InstantSchema, ITEM_NAME_PATTERN, NonEmptyStringSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
+/**
+ * The name of an item in a collection: ASCII letters and digits in words joined by single dashes. It is the one rule
+ * for a profile's, a runtime's and a layer's name, and MCP, Skills, Claude Code and Codex name their items by the very
+ * same value: it is declared once, in `@ferretry/std`, and Runtimes re-exports it so its own callers keep one import.
+ */
+export { ITEM_NAME_PATTERN };
+
 /** A runtime's name: letters, digits and dashes, none at either end (R1). It is the CLI word a person types. */
-export const RuntimeNameSchema = z
-  .string()
-  .max(64)
-  .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u, {
-    message: 'use only letters, digits and dashes, starting and ending with a letter or digit',
-  });
+export const RuntimeNameSchema = z.string().max(64).regex(ITEM_NAME_PATTERN, {
+  message: 'use only letters, digits and dashes, starting and ending with a letter or digit',
+});
 
 /** A login's id as a runtime names it (Logins owns the grammar: lowercase letters, digits, dashes). */
 export const LoginRefSchema = z
@@ -76,9 +80,14 @@ export const DisabledConfigSchema = z.strictObject({
 });
 export type DisabledConfig = z.infer<typeof DisabledConfigSchema>;
 
-/** `config/runtimes.yaml`: the one runtime a start uses when nobody names one. */
+/** `config/runtimes.yaml`: the one runtime a start uses when nobody names one, and the auto-resume switch. */
 export const RuntimesFileSchema = z.strictObject({
   defaultRuntime: RuntimeNameSchema.optional(),
+  /**
+   * "Auto-resume after restart" (today's machine.yaml `autoResume`): when the daemon boots it resumes the
+   * ferrets that were running when the host went down. Left out = on, as today. Not a held loosening, as today.
+   */
+  autoResume: z.boolean().optional(),
 });
 export type RuntimesFile = z.infer<typeof RuntimesFileSchema>;
 
@@ -139,6 +148,41 @@ export const ModelSetFileSchema = z
   });
 export type ModelSetFile = z.infer<typeof ModelSetFileSchema>;
 
+/**
+ * `config/instructions/<name>.yaml`: an instructions component, the text a harness reads as its system guidance
+ * (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex). No other plugin owns these files, so Runtimes does. The text is in
+ * the file (`text`), not in a document beside it, so a read is one live read of one file. `harness` narrows it to one
+ * harness (K3); absent, every harness gets it.
+ */
+export const INSTRUCTIONS_TEXT_LIMIT = 200_000;
+
+/**
+ * Whether a text holds a NUL or another control character other than tab, newline and carriage return: bytes no person
+ * types into guidance, which a harness would read as part of the instructions or choke on.
+ */
+export const holdsControlCharacter = (text: string): boolean =>
+  [...text].some(character => {
+    const code = character.codePointAt(0) ?? 0;
+    return (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f;
+  });
+
+export const InstructionsFileSchema = z.strictObject({
+  description: z.string().optional(),
+  text: z
+    .string()
+    .min(1)
+    .max(INSTRUCTIONS_TEXT_LIMIT)
+    .refine(
+      text => !holdsControlCharacter(text),
+      'the text holds a control character (NUL or another, besides tab and line breaks)',
+    ),
+  harness: HarnessKeySchema.optional(),
+  clonedFrom: NonEmptyStringSchema.optional(),
+  clonedFromDaemon: NonEmptyStringSchema.optional(),
+  clonedFromKey: NonEmptyStringSchema.optional(),
+});
+export type InstructionsFile = z.infer<typeof InstructionsFileSchema>;
+
 // ─── loosening (§7.2) ──────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -168,14 +212,23 @@ export function runtimeLoosening(
  * nothing). A shell newly entered (Q18, new in 5.0, so no rule of today's) is held too, on a new file as well: the
  * shell's build then runs with this runtime's login in its environment, which the owner approved for other runtimes
  * only. Dropping the shell, or keeping the same one, loosens nothing.
+ *
+ * A REMOVAL (`after` undefined: the kernel judges a removed file with that) is judged by `before` alone and loosens
+ * nothing here: it never throws, so the owner's removal is admitted instead of held as "could not be judged". Today
+ * held a removed runtime only when its login HAD a budget ({@link runtimeLoosening}, `before.login` only); this half
+ * cannot see budgets and a held removal could not be confirmed through the apply, so that one refinement is the
+ * daemon half's, as for a re-point.
  */
-export const runtimeFileLoosens = (before: RuntimeFile | undefined, after: RuntimeFile): readonly string[] => [
-  ...(before === undefined || before.login === after.login
+export const runtimeFileLoosens = (
+  before: RuntimeFile | undefined,
+  after: RuntimeFile | undefined,
+): readonly string[] => [
+  ...(before === undefined || after === undefined || before.login === after.login
     ? []
     : [
         `a runtime moves off login "${before.login}" to "${after.login}", which may leave a budget that counts and stops it`,
       ]),
-  ...(after.shell === undefined || after.shell === before?.shell
+  ...(after?.shell === undefined || after.shell === before?.shell
     ? []
     : [`a runtime now enters the shell "${after.shell}"`]),
 ];

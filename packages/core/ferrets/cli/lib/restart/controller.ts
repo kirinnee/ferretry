@@ -9,6 +9,8 @@ export interface RestartCommandOptions {
   readonly outdated?: boolean;
   readonly all?: boolean;
   readonly cancel?: boolean;
+  /** `--request-id`: the idempotency key of an explicit retry; the daemon answers a repeat from memory. */
+  readonly requestId?: string;
   readonly json?: boolean;
 }
 
@@ -52,7 +54,7 @@ export class RestartController {
       ...(ids.length > 0 ? { ids } : {}),
       ...(this.callerSessionId === undefined ? {} : { caller: this.callerSessionId }),
     };
-    const result = await this.gateway.restart(request);
+    const result = await this.gateway.restart(request, options.requestId);
     if (json) this.presenter.json(result);
     else this.presenter.lines(renderRestartResult(result));
     if (result.failed.length > 0) throw new SessionCommandError(`${plural(result.failed.length, 'restart')} failed`, 1);

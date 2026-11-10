@@ -3,23 +3,15 @@
  * Open for its SKILL.md, and the copies this machine made from itself with Remove (only the files that copy wrote).
  *
  * It is the machine's inventory (`GET /v1/skills`, docs/skills-inventory.md), not one ferret's: a skill another one of the
- * same name hides (`shadowedBy`) is still listed here, because a person may open or copy it on purpose.
+ * same name hides (`shadowedBy`) is still listed here, because a person may open it on purpose.
  */
 import { Button, ContextFailure, ContextNote, useContextRead } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useState } from 'react';
-import type { LocalSkillInstall, SkillEntry } from '../../contract/index.ts';
-import { listSkillInstalls, readMachineSkills, readSkillFile, removeSkillInstall } from '../lib/client.ts';
-import {
-  installLine,
-  localRefusal,
-  REMOVE_NOTE,
-  SKILL_SCOPE_LABEL,
-  skillOverride,
-  sortedSkills,
-} from '../lib/skills-model.ts';
+import type { SkillEntry } from '../../contract/index.ts';
+import { readMachineSkills, readSkillFile } from '../lib/client.ts';
+import { SKILL_SCOPE_LABEL, skillOverride, sortedSkills } from '../lib/skills-model.ts';
 import { SkillFileSheet } from './skill-file-sheet.tsx';
-import { FailureLine } from './skill-sheet.tsx';
 
 const MACHINE = 'This machine';
 
@@ -54,69 +46,6 @@ function Group({
               {skillOverride(skill) === undefined ? null : (
                 <p className="m-0 text-meta text-faint">{skillOverride(skill)}</p>
               )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function Installs({ client }: { readonly client: Pick<PluginClient, 'call'> }) {
-  const loader = useCallback((_signal: AbortSignal) => listSkillInstalls(client), [client]);
-  const read = useContextRead(loader, true);
-  const [failure, setFailure] = useState<string | null>(null);
-  const [removing, setRemoving] = useState<string | null>(null);
-  const remove = async (install: LocalSkillInstall): Promise<void> => {
-    setRemoving(install.installId);
-    setFailure(null);
-    try {
-      await removeSkillInstall(client, install.target.scope, install.installId);
-      read.reload();
-    } catch (error) {
-      setFailure(localRefusal(error).sentence);
-    } finally {
-      setRemoving(null);
-    }
-  };
-  if (read.load.kind === 'failed')
-    return (
-      <ContextFailure
-        machineName={MACHINE}
-        what="read the skills copied here"
-        reason={read.load.reason}
-        onRetry={read.reload}
-      />
-    );
-  if (read.load.kind !== 'ready') return <ContextNote>Reading the copies…</ContextNote>;
-  const { installs } = read.load.value;
-  return (
-    <section className="flex min-w-0 flex-col gap-xs" aria-label="Copied from this machine" data-skills-installs="">
-      <h3 className="m-0 text-cell font-semibold text-fg">Copied from this machine</h3>
-      <p className="m-0 text-meta text-muted">{REMOVE_NOTE}</p>
-      {failure === null ? null : <FailureLine sentence={failure} />}
-      {installs.length === 0 ? (
-        <p className="m-0 text-meta text-muted" data-skills-installs-none="">
-          Nothing has been copied here yet.
-        </p>
-      ) : (
-        <ul className="m-0 flex list-none flex-col gap-xs p-0">
-          {installs.map(install => (
-            <li
-              key={install.installId}
-              className="flex min-w-0 flex-wrap items-center gap-xs"
-              data-skills-install={install.installId}
-            >
-              <span className="min-w-0 flex-1 break-all text-cell text-fg">{installLine(install)}</span>
-              <Button
-                type="button"
-                size="sm"
-                disabled={removing !== null}
-                onClick={() => void remove(install)}
-                data-skills-install-remove=""
-              >
-                Remove<span className="sr-only"> {install.name}</span>
-              </Button>
             </li>
           ))}
         </ul>
@@ -164,7 +93,6 @@ export function createSkillsSettings(client: Pick<PluginClient, 'call'>): AppCom
             This machine has more skills than the list holds, so some are not shown.
           </p>
         ) : null}
-        <Installs client={client} />
         {opened === null ? null : (
           <SkillFileSheet skill={opened} load={loadFile} machineName={MACHINE} onClose={() => setOpened(null)} />
         )}

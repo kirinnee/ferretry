@@ -8,6 +8,7 @@
 import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { MachineView } from '../../contract/index.ts';
+import { ConfigFileEditor } from '../features/fleet/profiles/config-file-editor.tsx';
 import { readMachine, changeRefusalSentence } from '../features/fleet/shell/apply-change.ts';
 import type { MachineTabProps } from '../features/fleet/shell/machine-tab.ts';
 import { useMachineChanges } from '../hooks/use-machine-changes.ts';
@@ -68,6 +69,8 @@ export const machineSettingsView = (client: LiveRuntimesClient, Tab: MachineTab)
           checking={read.kind === 'checking'}
           onRetry={reload}
           onRefresh={reload}
+          // Edit as YAML over the kernel's `/v1/config/file` (D2 #3).
+          renderFileEditor={editor => <ConfigFileEditor client={client} {...editor} />}
         />
       </div>
     );

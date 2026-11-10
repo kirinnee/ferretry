@@ -21,7 +21,6 @@ import {
   type SendTarget,
   SendUnavailable,
   sendPayload,
-  shouldPressStopKey,
   turnInstruction,
 } from '../../../../daemon/delivery/lib/index.ts';
 
@@ -359,23 +358,6 @@ describe('endsPeerWait', () => {
     should(endsPeerWait(target({ waiting: { peer: 'session-2' } }), 'session-2')).be.true();
     should(endsPeerWait(target({ waiting: { peer: 'session-3' } }), 'session-2')).be.false();
     should(endsPeerWait(target(), 'session-2')).be.false();
-  });
-});
-
-describe('shouldPressStopKey', () => {
-  it('presses the stop key whenever the pane is visibly working', () => {
-    should(shouldPressStopKey(target(), pane({ activeWork: true }))).be.true();
-    should(shouldPressStopKey(target({ mode: 'interactive', harness: 'codex' }), pane({ activeWork: true }))).be.true();
-  });
-
-  it('suppresses it at an idle prompt, where it is one of the ways a TUI quits', () => {
-    should(shouldPressStopKey(target(), pane())).be.false();
-    should(shouldPressStopKey(target({ mode: 'interactive', harness: 'codex' }), pane())).be.false();
-    should(shouldPressStopKey(target({ mode: 'auto', harness: 'claude' }), pane())).be.false();
-  });
-
-  it("sends it at an idle interactive claude prompt, where it is the human's own stop key", () => {
-    should(shouldPressStopKey(target({ mode: 'interactive', harness: 'claude' }), pane())).be.true();
   });
 });
 

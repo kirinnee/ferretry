@@ -23,8 +23,8 @@ export interface SessionArchiveSubsystem {
   count(): number;
   /** The newest `limit` archived sessions as views, newest first; one whose documents do not parse is left out. */
   list(limit: number): Promise<readonly SessionView[]>;
-  /** One archive pass. Absent where archiving is off; `undefined` when a pass is already running. */
-  readonly run?: () => Promise<ArchivePassResult | undefined>;
+  /** One archive pass; `signal` stops it (nothing more is asked, nothing more archived). Absent where archiving is off; `undefined` when a pass is already running. */
+  readonly run?: (signal?: AbortSignal) => Promise<ArchivePassResult | undefined>;
 }
 
 export const ARCHIVED_SESSIONS_LIMIT_DEFAULT = 100;

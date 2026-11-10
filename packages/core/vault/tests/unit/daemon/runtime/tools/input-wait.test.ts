@@ -2,6 +2,12 @@ import { describe, it } from 'bun:test';
 import { ferretStanding } from '@ferretry/core-gate/contract/testing';
 import type { CallContext, FerretId } from '@ferretry/kernel/contract';
 import should from 'should';
+import { err, ok } from '@ferretry/std';
+import {
+  PHONE_APPROVAL_UNAVAILABLE,
+  type PhoneApprovalAgentView,
+  type PhoneApprovalProvider,
+} from '../../../../../contract/index.ts';
 import { InputRequestError } from '../../../../../daemon/lib/inputs/errors.ts';
 import type { InputRequestService } from '../../../../../daemon/lib/inputs/service.ts';
 import type { InputAgentView } from '../../../../../daemon/lib/inputs/wire.ts';
@@ -134,5 +140,82 @@ describe('the input_wait tool: what it asks and refuses', () => {
 
     should(answer).eql({ text: 'no such card', isError: true });
     should(thrown).equal(broken);
+  });
+});
+
+describe('the input_wait tool: a phone approval is waited on through the service that provides it', () => {
+  const PA = 'pa_0123456789abcdef01234567';
+
+  /** A provider answering `answer` (or refusing), remembering who asked and for how long. */
+  function providing(answer: PhoneApprovalAgentView | string) {
+    const asked: { ferret: string; id: string; waitMs: number }[] = [];
+    const provider: PhoneApprovalProvider = {
+      raise: async () => err('not used'),
+      agentView: async (ferret, id, waitMs) => {
+        asked.push({ ferret, id, waitMs });
+        return typeof answer === 'string' ? err(answer) : ok(answer);
+      },
+    };
+    return { provider, asked };
+  }
+  const waitOn = async (provider: PhoneApprovalProvider | undefined, input: unknown = { id: PA }) => {
+    const { service, asked } = serviceAnswering({ state: 'pending' });
+    const answer = await inputTools(service, () => provider).input_wait(callOf(), input);
+    return { answer, cardAsked: asked };
+  };
+
+  it('should hand a pa_ id to the approval service and never to an input card', async () => {
+    const { provider, asked } = providing({ id: PA, state: 'waiting' });
+
+    const { answer, cardAsked } = await waitOn(provider, { id: `!${PA}`, timeoutMs: 5_000 });
+
+    should(asked).eql([{ ferret: FERRET, id: PA, waitMs: 5_000 }]);
+    should(cardAsked).eql([]);
+    should(answer.text).equal(
+      `${PA} is still waiting for the owner to approve on their phone. Wait again with input_wait; do not act on that page or terminal meanwhile.`,
+    );
+  });
+
+  it('should say where each approval stands and carry no number, account or anything else of the card', async () => {
+    const said = async (view: PhoneApprovalAgentView) => await waitOn(providing(view).provider);
+
+    should((await said({ id: PA, state: 'moved-on', secondFactor: 'push' })).answer.text).equal(
+      `${PA}: the sign-in went through after a push. Read the page or terminal and carry on.`,
+    );
+    should((await said({ id: PA, state: 'moved-on' })).answer.text).equal(
+      `${PA}: the sign-in moved on. Read the page or terminal to see where it is.`,
+    );
+    should((await said({ id: PA, state: 'timed-out' })).answer.text).equal(
+      `${PA} ran out of time without the sign-in moving on. Ask again only if the site sent a new push.`,
+    );
+    should((await said({ id: PA, state: 'refused' })).answer.text).equal(
+      `${PA}: the owner did not expect this sign-in and said "Not me". Stop signing in there and do not ask again.`,
+    );
+    const gone = await said({ id: PA, state: 'gone' });
+    should(gone.answer.text).equal(`${PA} ended: the page or terminal closed.`);
+    should(gone.answer.data).eql({ id: PA, state: 'gone' });
+  });
+
+  it('should refuse in one fixed sentence while no service provides approvals', async () => {
+    const { answer, cardAsked } = await waitOn(undefined);
+
+    should(answer).eql({ text: PHONE_APPROVAL_UNAVAILABLE, isError: true });
+    should(cardAsked).eql([]);
+  });
+
+  it('should hand the service’s own refusal to the ferret as it is', async () => {
+    const { answer } = await waitOn(providing('no phone approval pa_x in this session').provider);
+
+    should(answer).eql({ text: 'no phone approval pa_x in this session', isError: true });
+  });
+
+  it('should refuse a pa_ id that is not 24 hex digits as it refuses any other bad id', async () => {
+    const { provider, asked } = providing({ id: PA, state: 'waiting' });
+
+    const { answer } = await waitOn(provider, { id: 'pa_short' });
+
+    should(answer.isError).be.true();
+    should(answer.text).equal('input_wait takes a card id like !A7 and an optional timeoutMs');
+    should(asked).eql([]);
   });
 });

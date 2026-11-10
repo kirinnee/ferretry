@@ -1,10 +1,19 @@
 import { ApiError, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
-import { implementDaemon } from '@ferretry/kernel/manifest';
-import { type ConversationApi, LinkKept, QuestionSchema, ReferenceCatalog, SearchSources } from '../contract/index.ts';
+import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
+import {
+  type ConversationApi,
+  conversationFor,
+  LinkKept,
+  QuestionSchema,
+  ReferenceCatalog,
+  SearchSources,
+} from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { PDF_WORKER_URL } from './attachments/adapters/decrypt-pdf.ts';
+import { openingAttachmentsSource } from './attachments/adapters/opening-attachments.ts';
 import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
+import { type HarnessGate, HARNESS_OPEN } from './harness-seam.ts';
 import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
 import { buildReading } from './reading.ts';
 import { maskedBody } from './seams/masked-body.ts';
@@ -54,101 +63,110 @@ function declared<K extends string, H>(
  * owns messages, the queue, turns, questions and drafts; part b (`./reading.ts`: reader, links, attachments, renders, search) is built over the same ports. A declared route that
  * neither part serves yet answers 503 with its sentence, never a missing route.
  */
-export default implementDaemon(manifest, {
-  // The PDF unlock thread: `fyd --check` starts and stops it, so a binary that did not carry it is seen at once.
-  workers: { 'pdf-decrypt': PDF_WORKER_URL },
-  build: ctx => {
-    const a = buildConversationA({
-      kernel: ctx.kernel,
-      ferrets: ctx.needs.ferrets,
-      asks: ctx.needs.asks,
-      hooks: ctx.hooks,
-    });
-    const b = buildReading({
-      kernel: ctx.kernel,
-      ferrets: ctx.needs.ferrets,
-      asks: ctx.needs.asks,
-      onKept: (ferret, link) => ctx.kernel.events.publish(LinkKept, { ferret, link }),
-      workSources: () => ctx.hooks.contributions(SearchSources).map(contribution => contribution.item),
-    });
-    ctx.kernel.lifecycle.onStop(() => {
-      a.stop();
-      b.stop();
-    });
-
-    const served: Readonly<Record<string, RouteHandler | undefined>> = {
-      ...a.routes,
-      ...b.routes,
-      'GET /v1/ferrets/:ferretId/references': referenceCatalogRoute({
-        providerOf: prefix => ctx.hooks.provider(ReferenceCatalog, prefix),
+export const conversationDaemon = (gate: HarnessGate) =>
+  implementDaemon(manifest, {
+    // The PDF unlock thread: `fyd --check` starts and stops it, so a binary that did not carry it is seen at once.
+    workers: { 'pdf-decrypt': PDF_WORKER_URL },
+    build: ctx => {
+      const a = buildConversationA({
+        kernel: ctx.kernel,
         ferrets: ctx.needs.ferrets,
-      }),
-    };
-    const routes = declared(
-      manifest.actions.routes.map(route => route.key),
-      Object.fromEntries(
-        manifest.actions.routes.flatMap(route => {
-          const handler = served[route.key];
-          if (handler === undefined) return [];
-          const masks = route.guard === 'secrets' && !SCRUBS_ITS_OWN_BODY.has(route.key);
-          return [[route.key, masks ? maskedBody(ctx.kernel.redaction, handler, VERBATIM_FIELDS[route.key]) : handler]];
-        }),
-      ),
-      () => unavailable('This part of Conversation is not ready yet.'),
-    );
-    const sockets = declared(
-      manifest.actions.sockets.map(socket => socket.key),
-      a.sockets,
-      (key): SocketAccept => {
-        throw new Error(`Conversation declares the socket ${key} and builds none`);
-      },
-    );
+        asks: ctx.needs.asks,
+        hooks: ctx.hooks,
+        gate,
+      });
+      const b = buildReading({
+        kernel: ctx.kernel,
+        ferrets: ctx.needs.ferrets,
+        asks: ctx.needs.asks,
+        onKept: (ferret, link) => ctx.kernel.events.publish(LinkKept, { ferret, link }),
+        workSources: () => ctx.hooks.contributions(SearchSources).map(contribution => contribution.item),
+      });
+      ctx.kernel.lifecycle.onStop(() => {
+        a.stop();
+        b.stop();
+      });
 
-    const api: ConversationApi = { ...b.api, ...a.api };
-
-    return {
-      routes,
-      sockets,
-      tools: {
-        search_work: b.tools.search_work,
-      },
-      provides: { conversation: api },
-      hooks: {
-        'ask.sources:question': { schema: QuestionSchema, title: 'Question', form: true },
-        // What a launch says about hypermedia: only a switch the owner set, so a ferret with none keeps its mode default.
-        'launch.parts': () => [
-          {
-            id: 'conversation-hypermedia',
-            item: {
-              parts: async spec => [
-                { kind: 'env' as const, env: hypermediaLaunchEnvironment(await a.hypermediaRecorded(spec.ferret)) },
-              ],
-            },
-          },
-        ],
-        'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
-        // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
-        'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),
-        // A ferret stopped or is gone: its unlocked attachments are zeroed first; every change is a turn look.
-        'ferret.changed': followFerretChanges({
-          release: ferret => b.release(ferret),
-          look: (ferret, phase) => a.turns.look(ferret, phase),
-          forget: ferret => a.turns.forget(ferret),
-          withdrawQuestion: ferret =>
-            void a
-              .withdrawQuestion(ferret)
-              .catch((error: unknown) =>
-                ctx.kernel.log.warn(`conversation could not withdraw the question of ${ferret}: ${String(error)}`),
-              ),
-          warn: message => ctx.kernel.log.warn(message),
+      const served: Readonly<Record<string, RouteHandler | undefined>> = {
+        ...a.routes,
+        ...b.routes,
+        'GET /v1/ferrets/:ferretId/references': referenceCatalogRoute({
+          providerOf: prefix => ctx.hooks.provider(ReferenceCatalog, prefix),
+          ferrets: ctx.needs.ferrets,
         }),
-      },
-      subscribers: {
-        // An ask was answered: the draft of its item goes with it (a chat reply keeps the draft).
-        'asks.answered': async payload => {
-          await a.onAskAnswered(payload);
+      };
+      const routes = declared(
+        manifest.actions.routes.map(route => route.key),
+        Object.fromEntries(
+          manifest.actions.routes.flatMap(route => {
+            const handler = served[route.key];
+            if (handler === undefined) return [];
+            const masks = route.guard === 'secrets' && !SCRUBS_ITS_OWN_BODY.has(route.key);
+            return [
+              [route.key, masks ? maskedBody(ctx.kernel.redaction, handler, VERBATIM_FIELDS[route.key]) : handler],
+            ];
+          }),
+        ),
+        () => unavailable('This part of Conversation is not ready yet.'),
+      );
+      const sockets = declared(
+        manifest.actions.sockets.map(socket => socket.key),
+        a.sockets,
+        (key): SocketAccept => {
+          throw new Error(`Conversation declares the socket ${key} and builds none`);
         },
-      },
-    };
-  },
-});
+      );
+
+      const api: ConversationApi = { ...b.api, ...a.api };
+
+      return {
+        routes,
+        sockets,
+        tools: {
+          search_work: b.tools.search_work,
+        },
+        provides: { conversation: perNeeder(needer => conversationFor(needer.id, api)) },
+        hooks: {
+          'ask.sources:question': { schema: QuestionSchema, title: 'Question', form: true },
+          // What a launch says about hypermedia: only a switch the owner set, so a ferret with none keeps its mode default.
+          'launch.parts': () => [
+            {
+              id: 'conversation-hypermedia',
+              item: {
+                parts: async spec => [
+                  { kind: 'env' as const, env: hypermediaLaunchEnvironment(await a.hypermediaRecorded(spec.ferret)) },
+                ],
+              },
+            },
+          ],
+          // The files a start was given (`fy start -f`): decoded, bounded and worded here, written and appended by Ferrets.
+          // The one provider of this security-path hook (`takers: ['conversation']`), under its one key.
+          'opening.attachments:opening': openingAttachmentsSource(),
+          'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
+          // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
+          'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),
+          // A ferret stopped or is gone: its unlocked attachments are zeroed first; every change is a turn look.
+          'ferret.changed': followFerretChanges({
+            release: ferret => b.release(ferret),
+            look: (ferret, phase) => a.turns.look(ferret, phase),
+            forget: ferret => a.turns.forget(ferret),
+            withdrawQuestion: ferret =>
+              void a
+                .withdrawQuestion(ferret)
+                .catch((error: unknown) =>
+                  ctx.kernel.log.warn(`conversation could not withdraw the question of ${ferret}: ${String(error)}`),
+                ),
+            warn: message => ctx.kernel.log.warn(message),
+          }),
+        },
+        subscribers: {
+          // An ask was answered: the draft of its item goes with it (a chat reply keeps the draft).
+          'asks.answered': async payload => {
+            await a.onAskAnswered(payload);
+          },
+        },
+      };
+    },
+  });
+
+export default conversationDaemon(HARNESS_OPEN);

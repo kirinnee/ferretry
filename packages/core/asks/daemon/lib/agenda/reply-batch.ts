@@ -385,6 +385,14 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
 
   async sendNow(sessionId: string): Promise<void> {
     this.timers.cancel(sessionId);
+    // "Send now" skips the wait, never the composer: a draft (or a screen that cannot be read) holds the answers,
+    // still queued and in order, and the recheck delivers them once the composer is empty.
+    const composer = await this.ports.composer.state(sessionId).catch(() => 'unreadable' as const);
+    if (composer !== 'empty') {
+      this.#heldForComposer.add(sessionId);
+      return this.recheck(sessionId);
+    }
+    this.#heldForComposer.delete(sessionId);
     const batch = await this.begin(sessionId);
     if (batch !== undefined) void this.deliver(sessionId, batch);
   }

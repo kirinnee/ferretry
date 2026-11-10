@@ -35,7 +35,6 @@ import {
   InterruptRequestSchema,
   type SendCancelEffectSchema,
   type SendDispositionSchema,
-  SendRequestSchema,
   REQUEST_ID_HEADER,
   type SenderKind,
   draftFrameBytes,
@@ -51,7 +50,6 @@ export type ComposerDraftRequest = z.infer<typeof ComposerRequestSchema>;
 
 export type ComposerDraftResult = z.infer<typeof ComposerResultSchema>;
 export const InterruptSessionRequestSchema = InterruptRequestSchema;
-export const SendSubmitRequestSchema = SendRequestSchema;
 
 export type SendSenderKind = SenderKind;
 

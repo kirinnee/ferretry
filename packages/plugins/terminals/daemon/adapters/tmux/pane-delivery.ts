@@ -13,6 +13,7 @@
  * again — the harness may have consumed it and performed a side effect even when no turn started.
  */
 
+import type { RunnerDeliveryFailure } from '@ferretry/core-ferrets/contract';
 import {
   classifySubmit,
   composerHoldsOtherText,
@@ -102,6 +103,8 @@ export class PaneDeliveryError extends Error {
  * known answer needed may have been pressed on the way, but never a character of the payload.
  */
 export class PaneNotReadyError extends PaneDeliveryError {
+  /** The runner contract's closed answer: nothing of the payload typed, and why. */
+  readonly deliveryFailure: RunnerDeliveryFailure;
   constructor(
     message: string,
     /** What the pane was doing instead: still at work, behind a dialog, or gone. */
@@ -109,6 +112,7 @@ export class PaneNotReadyError extends PaneDeliveryError {
   ) {
     super(message);
     this.name = 'PaneNotReadyError';
+    this.deliveryFailure = { kind: 'not_ready', why };
   }
 }
 
@@ -137,6 +141,8 @@ export class PaneStartupExitedError extends PaneDeliveryError {
  * single Enter — or a cancel that clears it — finishes the job.
  */
 export class PaneStrandedError extends PaneDeliveryError {
+  /** The runner contract's closed answer: typed, still in the composer, never to be typed again. */
+  readonly deliveryFailure: RunnerDeliveryFailure = { kind: 'unconfirmed', stranded: true };
   constructor(message: string) {
     super(message);
     this.name = 'PaneStrandedError';

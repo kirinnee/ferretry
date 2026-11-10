@@ -1,4 +1,5 @@
 /** @ferretry/plugin-conversation/contract — wire schemas, port + token, events, hook types, ids, policy refs (§2.1). */
+export * from './consumer.ts';
 export * from './events.ts';
 export * from './hooks.ts';
 export * from './lines.ts';
@@ -23,3 +24,4 @@ export * from './fy-render-caps.ts';
 export * from './fy-render.ts';
 export * from './reference-catalog.ts';
 export * from './slots.ts';
+export * from './app-hooks.ts';

@@ -18,6 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { check as actRunner } from '../validate/act-runner.ts';
+import { check as afterMerge } from '../validate/after-merge.ts';
 import { check as appHooks } from '../validate/app-hooks.ts';
 import { check as bannedGlobals } from '../validate/banned-globals.ts';
 import { check as contextImports } from '../validate/context-imports.ts';
@@ -31,12 +32,15 @@ import { check as hostFiles } from '../validate/host-files.ts';
 import { check as manifestMatch } from '../validate/manifest-match.ts';
 import { check as noCompat } from '../validate/no-compat.ts';
 import { check as oneFormat } from '../validate/one-format.ts';
+import { check as parityTicks } from '../validate/parity-ticks.ts';
 import { check as pins } from '../validate/pins.ts';
+import { check as privateFiles } from '../validate/private-files.ts';
 import { check as pluginGraph } from '../validate/plugin-graph.ts';
 import { check as portsPending } from '../validate/ports-pending.ts';
 import { check as readScoped } from '../validate/read-scoped.ts';
 import { check as registriesFresh } from '../validate/registries-fresh.ts';
 import { check as screenPaths } from '../validate/screen-paths.ts';
+import { check as shellProvides } from '../validate/shell-provides.ts';
 import { check as words } from '../validate/words.ts';
 import { type Check, type Finding, contextFor, parseArgs, report } from './lib/check.ts';
 import { generatePackage, writeFiles } from './registries.ts';
@@ -48,11 +52,14 @@ export const CHECKS: readonly Check[] = [
   contractGraph,
   pluginGraph,
   appHooks,
+  shellProvides,
   coreClosed,
   manifestMatch,
   screenPaths,
   portsPending,
+  afterMerge,
   descriptorParity,
+  parityTicks,
   readScoped,
   actRunner,
   bannedGlobals,
@@ -65,6 +72,7 @@ export const CHECKS: readonly Check[] = [
   words,
   glossary,
   pins,
+  privateFiles,
 ];
 
 /** Checks that read one package when `--package` is given; the rest are whole-graph and run unscoped. */
@@ -73,6 +81,7 @@ const SCOPED = new Set([
   'contract-consumes',
   'manifest-match',
   'app-hooks',
+  'shell-provides',
   'screen-paths',
   'read-scoped',
   'act-runner',
@@ -82,6 +91,7 @@ const SCOPED = new Set([
   'one-format',
   'no-compat',
   'glossary',
+  'private-files',
 ]);
 const GRAPH = new Set(['plugin-graph', 'core-closed', 'contract-graph']);
 

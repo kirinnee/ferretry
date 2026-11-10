@@ -84,7 +84,9 @@ export interface Admission<Standing extends object = CallStanding, Member extend
    * Told after every handler of a descriptor that has `audit: { record }`, once per call, with the final status —
    * the handler's own refusals (an `ApiError`) and failures included, as today's audited-route decorator recorded
    * every outcome of the handler. A call admission refused, or a plugin not serving, never reached a handler and is
-   * not told (today: "a request the authorization boundary refuses before the handler runs is not recorded").
+   * not told (today: "a request the authorization boundary refuses before the handler runs is not recorded"). One
+   * exception, today's too: `POST /v1/agent/config` admits its own caller inside its handler, so the kernel tells Gate
+   * of that refusal, with no standing.
    * Never changes the answer; a throw is swallowed.
    */
   recorded?(call: RecordedCall): void;
@@ -122,6 +124,15 @@ export interface ConfigWriteJudgement {
   readonly path: string;
   readonly removal: boolean;
   readonly sentences: readonly string[];
+  /**
+   * Set by the kernel ONLY for a `ConfigPort.writeAsCaller`, never by a plugin: `sentences` are then the
+   * `${secret:NAME}` references the caller's edit adds (names, never a value), and the question is whether the call in
+   * progress IS the owner as the route would have it: the host admin where it arrived on the host, or a governed device
+   * whose grants hold the file's configure capability and which holds a passkey that already existed when the call was
+   * admitted (`loosen-config`), claimed once; a passkey proved after the admission is never claimed by the call or by
+   * work it spawns. The kernel sets it alone: a plugin's input that carries it is never read. The judge is synchronous.
+   */
+  readonly secretAdd?: true;
   /** Who the call in progress runs as. */
   readonly actor: Actor;
   /**
@@ -303,6 +314,12 @@ export interface ChildEnvironment {
  */
 export interface ChildEnvironmentOpener {
   open(env: ChildEnvironment): Readonly<Record<string, string>> | undefined;
+  /**
+   * The handle's `PATH` value and NOTHING else, WITHOUT spending it (`kernel.paths.whichFor`, Q7): `undefined` when the
+   * handle is not one this Vault minted, is already spent, sets no `PATH`, was minted for a plugin not in `readers`
+   * (or for no named plugin), or its `PATH` was built from a `${secret:…}` reference. It reads exactly the `PATH` key.
+   */
+  searchPathOf(env: ChildEnvironment, readers: readonly string[]): string | undefined;
 }
 
 export const ChildEnvironmentPort = defineBoundPort<ChildEnvironmentOpener>('child-environment', 'vault');

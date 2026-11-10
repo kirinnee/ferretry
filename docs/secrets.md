@@ -105,7 +105,10 @@ and the leading context is found whole and masked in every place. The heading st
 looks like ordinary content and could be written back over the real file, so the answer is a 403 with the code
 `holds_secret` and one sentence that names the path only, whatever the count of values. A **person** keeps the masked
 text, and the file answer says `redacted: true`; the app says "private values masked — this is not the file" and offers
-no download or open of the masked bytes. Matching is whole-value only, never a prefix or a piece.
+no download or open of the masked bytes. Matching is whole-value only, never a prefix or a piece — with one fail-safe
+exception: because the heading's place in the file is not known, the joined look of a hunk can also match a value whose
+lines are all shown but are not next to each other in the file; that text is then masked, and an agent is refused
+(`holds_secret`) a diff that holds no value. It over-masks, and never under-masks.
 
 - **The whole-value oracle — GAP.** The refusal and the mask both tell a caller "this file contains a vault value", so an
   agent that writes a guess into its own worktree can confirm a WHOLE-value guess. That is negligible for a
@@ -119,8 +122,9 @@ no download or open of the masked bytes. Matching is whole-value only, never a p
   other side holds it whole — apart from an identical line, which takes the other side's mask). A section heading that
   git does not pick (a line that starts with a digit or a symbol is skipped) is not part of the diff, so a value
   split across it is the same partial.
-  Git also cuts a section heading to 80 bytes, so a value whose first line is longer than that and sits in the heading
-  is shown only in part (the same partial; an agent is still refused by the two-sides check above).
+  Git also cuts a section heading to 80 bytes and drops its trailing spaces and tabs, so a value whose line in the
+  heading (its first, middle or last) is longer than that, or ends in whitespace, is shown only in part (the same
+  partial; an agent is still refused by the two-sides check above).
   A value is found in a CRLF file whether it was stored with `\r` (a CRLF key file, `token\r`) or without (LF), and a CRLF-stored value in an LF file: all
   three looks are made and the coverage is their union; the `\r` and the line breaks are kept in the output, so a masked
   multi-line value keeps one mask per line. Positions are
@@ -352,6 +356,81 @@ so no binding, so nothing to refuse. Every apply the daemon makes is exclusive, 
 published fleet — a start's account, the launch's bindings, the runtime names — waits for one in flight
 (`packages/daemon/src/lib/fleet/publication.ts`). A second apply landing between the judgment and the
 pane's exec is still fail-closed: the new wrapper carries its own guard for every secret-backed variable.
+
+### The stored-login rule is a declared heuristic
+
+A login's `env` (a `logins/<id>.yaml` file, a `login.add` or `login.env` change, the paste screen) is judged by ONE
+rule, `plainPaste` in `packages/plugins/logins/contract/secret-shape.ts`. It is a **heuristic, not a proof**: a
+person who means to hide a key from it can. It is built to stop an accident (a key pasted into a plain field) and a
+casual agent edit. `config_read` withholds the text of ANY login file (or MCP server file: the kernel rule is for every
+config def marked `credentialRecords`) that fails its check, whatever the reason, with its located issues kept: one that
+does not parse as YAML, one with a key outside `env` or a mistyped one, one whose `env` is not a map of NAME: value
+strings, and one with a refusal of this rule. The cost: a file whose only fault is a typo key (`labl: x`) is withheld
+too. A def without the flag shows a failing file's text.
+
+- **Under a credential-named variable** (a credential word anywhere, a last word `KEY` or `KEYS`, or one glued word
+  such as `GATEWAYTOKEN`) a value must be exactly one allowed shape: a placeholder under 8 characters with no `$`; one
+  or more `${secret:NAME}`; a scheme word (letters and `-`, at most 16, no digit: `Bearer`, `Api-Token`, `ApiKey`) and references; a header name, `:` or `=` and either of those; `$NAME` or
+  `${NAME}`; a number or flag word; one `http`, `https`, `ws`, `wss`, `socks5` or `socks5h` address with no user key,
+  password, fragment or bare query, only short query values, and no key-like run; or an absolute or `~/` path with no
+  key-like run. A **key-like run** is 24 or more letters, digits and `_` with a digit in them and entropy of at least
+  3.5 bits per character, read on the text split at every character other than a letter, a digit and `_`; in the
+  path shape alone `+` and `=` also stay in a run, so a standard base64 key is one run.
+- **Under any name** a token shape (a provider prefix, a JWT, a PEM private-key header), a credential-named header or
+  JSON member (`x-api-key: …`, `"api_key":"…"`) with a literal value, and an address carrying a password, a user key or
+  a credential-named query value are refused. In a variable that IS a header list (`…HEADERS`), a header with no
+  credential name is refused when its value holds a token shape or a key-like run (`x-honeycomb-team=…`).
+- **A value over 4096 characters is refused and not scanned**, and so is a variable NAME over 128 characters.
+  Whatever else is wrong with a file, ONE failing check keeps `config_read` from showing the file's text (the kernel's
+  `credentialRecords`): a refusal of this rule, an `env` (or `claude.env` / `codex.env`) that is not a map, a value
+  under it that is not a string, a key outside `env`, a file that does not parse as YAML.
+
+Named residual heuristic GAPs (declared, not scheduled):
+
+- **GAP: a `$NAME` or `${NAME}` that is an all-upper-case base32 key** is read as a variable reference.
+- **GAP: a key cut into 7-character comma chunks** in a header value (`x-api-key: abcdefg,hijklmn,…`).
+- **GAP: a key shorter than 24 characters** in a path segment, host label or query value, and a key-like run with no
+  digit, are not seen by the run test.
+- **GAP: a header name with up to three words** may carry a key in a name word shorter than 17 characters.
+- **GAP: a header whose name has no credential word** (`x-honeycomb-team=…`) is judged by its value only in a variable
+  named `…HEADER` or `…HEADERS`; in any other variable it is not judged, so the Cloudflare AI Gateway's
+  `ANTHROPIC_BASE_URL` keeps working.
+- **GAP: a header name in the header shape** may carry key material in words of up to 16 characters: up to three words
+  when the name has no credential word, and up to 64 characters in all when it has one (`x-auth-…-token`).
+- **GAP: a variable whose name has no credential word** (`…_PASS`, `…_PWD`, `…_CRED`, a glued `…KEY`, `…_BEARER`) is
+  judged only by token shape and by entropy, and a value with whitespace in it (`Bearer <key>`) passes.
+- **GAP: an armored PGP private key** (`-----BEGIN PGP PRIVATE KEY BLOCK-----`) is not a token shape.
+- **GAP: a key cut by `-`, `.`, `&` or `/`** into pieces that are each shorter than 24 characters (or, for a query
+  value, shorter than 8), in an address or a path, is not seen; it extends the "shorter than 24" GAP above.
+- **GAP: whitespace other than tab, CR and LF inside an address** (a vertical tab, a no-break space) splits it for the
+  rule, so the part after it is not read as a password.
+- **GAP: only a login's `env` is judged by this rule.** Fields the owner fills in on purpose, such as
+  `codexProvider.baseUrl` and `queryParams`, are checked by the kernel's raw-secret scan only. A variable that slipped
+  out of `env` is not such a field: any login file that fails its check is withheld whole (see above).
+- **GAP (D11): `defaultsOf` is an unguarded `safeParse({})` on the reload path** (evaluate.ts, reached when a file that
+  was in effect is deleted; also check-config.ts). A schema that throws on `{}` would still stop a reload. No current
+  schema does.
+- **GAP (D12): the withheld summary always says the file "holds a raw secret, which the owner must move into the secret
+  store".** It says so too for a YAML-broken login or MCP file with no key in it, a blank `env:`, and an unquoted number
+  such as `API_TIMEOUT_MS: 600000` (refused as v4's string-only value was). The issues list carries the real cause, but an
+  agent may relay the wrong instruction to the owner.
+- **GAP (D13): a login's `label`** (or any other free-text field) holding `Bearer <key>` checks as `ok` and is shown.
+  An owner does not paste a key into a label by accident.
+- **GAP (D14): a variable named `__proto__` under `env`** is dropped by the parser, so the rule never sees it and the
+  file checks as `ok` with its text shown. The variable is also never exported. This is contrived.
+- **GAP (D15): the scheme word may carry up to 16 letters** (no digit) of key material before a reference
+  (`GATEWAY_TOKEN=XqvTmLpRzWkNcHbJ ${secret:K}` is accepted). It extends the header-name GAP: a scheme word up to 16
+  letters.
+- **GAP (D16): `credentialRecords` also withholds a failing MCP server file.** A broken or failing `mcp/<name>.yaml` is
+  withheld whole by `config_read`, as a login file is; it is documented here and in `define.ts`.
+- **Known refusals** (not GAPs, and they may surprise an owner): under a credential-named variable a query value of 8 or
+  more characters (`?api-version=2024-10-21`) is refused; in a header list a long hex id (`x-trace: <64 hex>`) is
+  refused; in any value a JSON member whose name ends in `tokens` with a value of 8 or more characters
+  (`"budget_tokens":1024000`) is read as a credential.
+
+**This is the last round of widening.** From here, a further finding is either a regression, a leak through
+`config_read`, `config_validate`, `config_write`, a log or a response body, or a false refusal of a real owner setting, and is fixed; anything else (a new way to hide a key from a
+heuristic) is recorded here as a named GAP and is not another round.
 
 ## Accounts and sign-ins: the store
 
@@ -1135,6 +1214,40 @@ the vault. Both routes are governed as `secrets.use`, and a Test is in the secur
 What it does NOT protect against: the provider. A key you hand Groq is a key Groq can bill, and the text
 the daemon sends (a transcript, or the Warden's redacted snapshot) is text that provider receives — the
 Speed-ups screen says what leaves the machine for each one.
+
+## A plugin's own key, placed by the kernel
+
+In 5.0 a plugin that only ever spends a key on an HTTP request asks the kernel to place it:
+`kernel.secrets.send(name, request, placement?)` (`packages/core/kernel/host/secrets.ts`). The Warden's Jev guard is
+the first caller. It is the holder above with the same rules, held by the kernel. The plugin never holds the value.
+
+- **The name passes `kernel.secrets.resolve`'s rule, in that order.** It is in the plugin's manifest `secrets`. The
+  plugin's OWN configuration in effect names it as `${secret:NAME}`. The Vault knows it. A plugin can never put another
+  plugin's secret on a request, because its config would have to name it, and adding a reference is held for the owner.
+- **Only to an exactly declared host.** The URL must be `https:`, or `http:` to this machine. Its host must be a plain
+  host entry of the plugin's `permissions.network`. A wildcard, `'*'`, an installed-item entry or a resolver entry lets
+  no key out. The request goes through the plugin's own `kernel.fetch` guard, so a redirect is answered, never followed.
+- **Read once.** The request and the placement are parsed once into plain data, and only that copy is checked and
+  sent. A getter cannot show the check one host and the send another.
+- **The plugin cannot place a credential itself.** A request that already carries the placement header is refused.
+- **Facts only come back.** The answer is a 2xx reply's parsed JSON, a status, `timeout`, `network`, `too_large`,
+  `unreadable`, `vault_damaged` or a refusal. A reply that echoes the value is `unreadable`. A thrown error becomes a
+  kind, so its message never leaves. The Vault is asked last, after every other check.
+- **Logged by name and host only.**
+
+The Warden names its key in `warden.yaml`, as the owner writes it:
+
+```yaml
+jev:
+  key: ${secret:JEV_API_KEY}
+```
+
+`jev.key` takes only that one reference. An agent's write that adds it is held for the owner, like any new secret
+reference. Without it the guard answers `not_set` and nothing leaves the machine. It is not a setting: the settings
+screen neither shows it nor saves it, and a save keeps the line as it is.
+
+GAP: a send writes no `secrets.used` entry to the security log, and the Warden's settings card still says whether the
+key is set from Speed-ups, not whether `warden.yaml` names it.
 
 ## Device-held speed-up keys
 

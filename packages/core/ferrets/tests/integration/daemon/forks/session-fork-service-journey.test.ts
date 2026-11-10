@@ -1,11 +1,13 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import type { Redaction } from '@ferretry/kernel/contract';
 import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
 import type { JsonValue } from '@ferretry/std';
 import { ForkFiles } from '../../../../contract/index.ts';
-import { TransferBriefFiles, TransferPlanFiles } from '../../../../contract/transfer-state.ts';
+import { TransferPlanFiles } from '../../../../contract/transfer-state.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import {
   forkReceiptName,
@@ -304,6 +306,15 @@ function besideTheTranscript(snapshot: Snapshot): Snapshot {
 
 const hex = (bytes: Uint8Array | string): string => Buffer.from(bytes).toString('hex');
 
+/** Every regular file under a folder, by its path relative to it, sorted; a folder that is not there holds none. */
+function filesUnder(root: string): [string, Uint8Array][] {
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter(relative => statSync(join(root, relative)).isFile())
+    .sort()
+    .map(relative => [relative.split(sep).join('/'), readFileSync(join(root, relative))]);
+}
+
 /** The one transcript path the source's provenance pins. A name, never a place on disk. */
 const TRANSCRIPT_FILE = '/fleet/homes/source/projects/source.jsonl';
 const TARGET_HARNESS_HOME = '/fleet/homes/zelda';
@@ -541,7 +552,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
 
   // ONE brief writer and ONE copier, handed to the import half as writers and to the proof half as readers: two
   // instances over one layout would be two answers to where the target's bytes are.
-  const brief = new FileSessionTransferBriefWriter(opened.state);
+  const brief = new FileSessionTransferBriefWriter(opened.briefs);
   const copier = new FileSessionAttachmentCopier(attachments);
   const plans = new FileSessionTransferTargetPlanStore(opened.state);
 
@@ -894,6 +905,14 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
         if (key.startsWith(`${SOURCE_ID}/`) || key.startsWith(`${DESCENDANT_ID}/`)) into[key] = hex(text);
       for (const [key, bytes] of folder.bytes)
         if (key.startsWith(`${SOURCE_ID}/`) || key.startsWith(`${DESCENDANT_ID}/`)) into[key] = hex(bytes);
+      // Each ferret's REAL private folder on the sessions root: the source's own first turn lives there, beside the
+      // store, so a fork that rewrote or removed it would otherwise go unseen.
+      for (const id of [SOURCE_ID, DESCENDANT_ID])
+        for (const [relative, bytes] of filesUnder(opened.sessionDirectory(id))) {
+          const at = `${id}/${relative}`;
+          if (at in into) throw new Error(`${at} is both a state file and a file in the ferret's folder`);
+          into[at] = hex(bytes);
+        }
       for (const [key, bytes] of attachments.files)
         if (key.startsWith(`${SOURCE_ID}/`)) into[`attachments/${key}`] = hex(bytes);
       return into;
@@ -918,7 +937,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
     target: async id => ({
       config: (await storage.readConfig(parseSessionId(id))) as Record<string, unknown>,
       plan: JSON.stringify(planOf(id)),
-      brief: new TextDecoder().decode(folder.rawBytes(TransferBriefFiles, id)),
+      brief: opened.briefText(id) ?? '',
     }),
   };
 }

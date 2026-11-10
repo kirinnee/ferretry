@@ -19,7 +19,6 @@ import {
   queuedPayloadInstruction,
   routeSend,
   sendPayload,
-  shouldPressStopKey,
   turnInstruction,
   typedIntoBusyPane,
 } from './policy.ts';
@@ -66,9 +65,7 @@ import {
   type SendTerminal,
   type SendTracking,
   type SendTurnStore,
-  SendUnavailable,
   SendUnconfirmed,
-  TERMINAL_SEND_STATUSES,
 } from './types.ts';
 
 export interface SessionSendPorts {
@@ -168,6 +165,16 @@ export interface ReattemptOptions {
   readonly force?: boolean | undefined;
 }
 
+/**
+ * Why a send is PENDING (not refused) while Codex holds an earlier submission until its startup ends: nothing is typed or
+ * pressed, and the caller retries once startup has ended. The send-now's stop is held back for the same reason.
+ */
+export function startupParkedPending(id: SessionId): SendPending {
+  return new SendPending(
+    `session ${id} is still starting; its agent is holding an earlier message until startup ends, so this one is pending, not failed`,
+  );
+}
+
 /** The longest stretch of a draft quoted back in a refusal: enough to recognise, not a transcript. */
 const DRAFT_QUOTE_CHARS = 40;
 
@@ -177,7 +184,7 @@ const DRAFT_QUOTE_CHARS = 40;
  * Quoted so a person can recognise it, and the remedy named, because the obvious one (send again) is
  * what made it worse. The whole draft rides along, so the app can offer to send or clear exactly it.
  */
-function composerOccupiedRefusal(draft: string): SendDraftRefused {
+export function composerOccupiedRefusal(draft: string): SendDraftRefused {
   const quoted = draft.length > DRAFT_QUOTE_CHARS ? `${draft.slice(0, DRAFT_QUOTE_CHARS)}…` : draft;
   return new SendDraftRefused(
     `the agent's composer already holds unsent text ("${quoted}"); a message typed now would be sent ` +
@@ -190,7 +197,7 @@ function composerOccupiedRefusal(draft: string): SendDraftRefused {
  * Why nothing was typed when the agent's composer could not be read: it may hold a person's draft, and
  * a message typed onto one is submitted joined to it. Usually a passing repaint, so trying again works.
  */
-function composerUnreadableRefusal(): SendScreenUnreadable {
+export function composerUnreadableRefusal(): SendScreenUnreadable {
   return new SendScreenUnreadable(
     "the agent's screen could not be read to prove its composer empty, so nothing was typed; send it again " +
       'in a moment, or check the terminal for a half-written message',
@@ -608,15 +615,6 @@ export class SessionSendService {
   }
 
   /**
-   * Stops whatever the agent is doing, and hands the terminal back.
-   *
-   * A BOUND abandon — an interrupt that names the structured question it is cancelling — is refused
-   * rather than approximated. Cancelling a rendered question means driving the harness's own form
-   * back out of the way and confirming it went, and that machinery is not in this daemon (survey
-   * section F). Pressing the generic interrupt at a form would answer it with whatever the keys land
-   * on, which is a worse outcome than a clear refusal.
-   */
-  /**
    * Every refusal a send makes before a keystroke that only a person can lift — an unconfirmed kill, a
    * quarantined harness, an unanswered structured question — without typing anything.
    *
@@ -626,46 +624,6 @@ export class SessionSendService {
    */
   async authorize(id: SessionId, attachmentIds: readonly string[]): Promise<void> {
     authorizeSend(await this.require(id), attachmentIds);
-  }
-
-  async interrupt(id: SessionId): Promise<SendTarget> {
-    return await this.ports.serial.run(id, async () => await this.interruptLocked(id));
-  }
-
-  private async interruptLocked(id: SessionId): Promise<SendTarget> {
-    const target = await this.require(id);
-    if (target.status === 'kill_failed')
-      throw new SendUnavailable(
-        `the previous terminal shutdown for ${id} was not confirmed; stop it successfully rather than interrupting it`,
-      );
-    if (target.pendingQuestion !== undefined)
-      throw new SendUnavailable(
-        `session ${id} is holding structured question ${target.pendingQuestion.toolUseId}; abandoning a ` +
-          'rendered question is not served yet, and a generic interrupt would answer it by accident',
-      );
-    if (TERMINAL_SEND_STATUSES.has(target.status))
-      throw new SendRefused(`session ${id} is ${target.status}; there is no running turn to interrupt`);
-    const before = await this.ports.terminal.observe(id);
-    if (!before.alive || before.dead)
-      throw new SendRefused(`the pane for session ${id} is gone; revive it rather than interrupting it`);
-    await this.ports.repository.journal(id, 'control.interrupt_requested', { status: target.status });
-    // The keystroke is conditional; the state edge is not. See `shouldPressStopKey` for why sending a
-    // stop key at an idle prompt is a way to KILL the very agent the caller asked to pause.
-    if (shouldPressStopKey(target, before)) await this.ports.terminal.pressStopKey(id);
-    const after = await this.ports.terminal.observe(id).catch(() => undefined);
-    // An interactive pane with no active work goes to `awaiting_user`, not `interrupted`: the human
-    // pressed stop and the terminal is theirs again. `interrupted` would also be STICKY — the status
-    // an idle session claims forever — so a person who paused their own agent would keep being shown
-    // as having interrupted it. "Idle" here is the absence of active work rather than a ready prompt,
-    // because a human with half a message typed has a busy composer and is plainly still idle.
-    const handedBack = target.mode === 'interactive' && after !== undefined && !after.activeWork;
-    return await this.ports.repository.transition(id, {
-      event: 'control.interrupted',
-      status: handedBack ? 'awaiting_user' : 'interrupted',
-      health: 'idle',
-      promptReady: true,
-      ...(handedBack ? {} : { reason: 'interrupted by client' }),
-    });
   }
 
   /** Everything that must see one consistent view of the session and its pane. */
@@ -1195,10 +1153,7 @@ export class SessionSendService {
    * as a draft nobody wrote. The caller retries once startup has ended (the queue reads this as `launching`).
    */
   private refuseWhileParked(id: SessionId, pane: SendPaneObservation): void {
-    if (pane.startupParked === true)
-      throw new SendPending(
-        `session ${id} is still starting; its agent is holding an earlier message until startup ends, so this one is pending, not failed`,
-      );
+    if (pane.startupParked === true) throw startupParkedPending(id);
   }
 
   /** A pane where Enter submits the composer: alive, not mid-turn, not parked on a dialog, and not holding a submission until startup ends. */

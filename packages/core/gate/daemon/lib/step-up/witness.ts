@@ -38,11 +38,11 @@ export class FailClosedStepUps implements StepUpWitness {
     return this.#ask(witness => witness.unlockRequired(subject) !== false, true);
   }
 
-  readonly claimFresh = ((subject: StepUpSubject, act?: never, bound?: string): boolean =>
+  readonly claimFresh = ((subject: StepUpSubject, act?: never, bound?: string, notAfterMs?: number): boolean =>
     this.#ask(
       witness =>
         (bound === undefined
-          ? witness.claimFresh(subject, act)
+          ? witness.claimFresh(subject, act, undefined, notAfterMs)
           : (witness.claimFresh as (s: StepUpSubject, a: unknown, b: string) => boolean)(subject, act, bound)) === true,
       false,
     )) as ClaimFreshWitness;

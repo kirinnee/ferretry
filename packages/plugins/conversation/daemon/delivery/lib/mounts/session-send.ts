@@ -14,14 +14,14 @@ import {
   SendRequestSchema,
   type SendResult,
   SendRetryRequestSchema,
-  SendSubmitRequestSchema,
+  SendEnterRequestSchema,
   type SessionHandoff,
   SessionHandoffNameSchema,
   type SessionView,
   type SharedDraftSent,
 } from '../../../seams/protocol.ts';
 import { DraftSentSchema } from '../../../../contract/index.ts';
-import { PEER_ACTOR_PREFIX } from '../../../seams/api.ts';
+import { ferretOf } from '@ferretry/core-gate/contract';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';
 import { type ApiResponse, decodeParameter, headerValue } from '../../../seams/api.ts';
@@ -53,8 +53,8 @@ import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '
  * declines to ABANDON a rendered question.
  *
  * WHO SENDS. The SENDER is the server-derived actor, never the body: a ferret's own session credential
- * makes it `peer:<that session>` whatever any header says (`caller: 'any'`), and the admin token plus
- * `x-ferretry-session-id` is the older honest-client form of the same. Being a ferret buys a SENDER
+ * makes it that ferret whatever any header says (`caller: 'any'`), and the admin token plus
+ * `x-ferretry-session-id` is the older honest-client form of the same (Gate stamps `ferret:<id>` for both). Being a ferret buys a SENDER
  * identity, never a different TARGET's: the path names where the message goes, as for every caller.
  */
 
@@ -101,7 +101,7 @@ export interface SessionSendSubsystem {
   /** Every send this session's ledger holds, newest first, each with the fate proven so far. */
   sends(sessionId: string): Promise<readonly SendRecord[]>;
   /** One send by its id — how a sender learns where its message settled. */
-  sendStatus(sessionId: string, sendId: string): Promise<SendRecord>;
+  sendStatus(sessionId: string, sendId: string, options?: SendStatusWait): Promise<SendRecord>;
   /** Every message the session's durable queue holds, oldest first (`lib/session/queue`). */
   queue(sessionId: string): Promise<readonly QueuedMessage[]>;
   /** New words for a queued message that is still waiting; refused once a key has gone to the pane. */
@@ -194,13 +194,14 @@ function sendId(context: RouteContext): string {
 /**
  * The session that made this call, when a teammate did rather than a person.
  *
- * Taken from the actor the authorization boundary derived, never from the body. `from` decides two
- * things that matter — how the message is attributed to the receiver, and whose declared wait it
+ * Taken from Gate's own reading of the standing (`ferretOf`, as Agenda and Tidy do), never from the body
+ * and never parsed here: a ferret's own credential names the ferret first, and only an agent admin call
+ * falls back to the `ferret:<id>` actor Gate stamped. A warden or a person is no sender. `from` decides
+ * two things that matter — how the message is attributed to the receiver, and whose declared wait it
  * ends — and a caller able to name itself could end any other session's park.
  */
 function senderSessionId(context: RouteContext): string | undefined {
-  const actor = context.actor ?? '';
-  return actor.startsWith(PEER_ACTOR_PREFIX) ? actor.slice(PEER_ACTOR_PREFIX.length) : undefined;
+  return ferretOf(context);
 }
 
 /** Hands a running session its next turn. */
@@ -319,6 +320,30 @@ function pathMessageId(context: RouteContext): string {
   return decoded;
 }
 
+/** The longest a `GET …/sends/:sendId` is held open for its fate (`fy send --wait` asks again, ten rounds at most). */
+const MAX_STATUS_WAIT_MS = 30_000;
+
+/** A send-status read that waits for the send's fate to settle: for how long, and who is waiting. */
+interface SendStatusWait {
+  readonly waitMs: number;
+  /** The waiter: the calling ferret, or the kind of caller. One waiter per caller and send. */
+  readonly caller: string;
+}
+
+/** `?waitMs=` of a send-status read: a whole number from 1 to {@link MAX_STATUS_WAIT_MS}, or none. */
+function statusWait(context: RouteContext): number | undefined {
+  const { query } = context.request;
+  for (const [name] of query) {
+    if (name !== 'waitMs') throw new ApiError(400, `unknown send parameter ${name}`, 'unknown_parameter');
+  }
+  const raw = query.get('waitMs')?.[0];
+  if (raw === undefined) return undefined;
+  const waitMs = Number(raw);
+  if (!Number.isSafeInteger(waitMs) || waitMs < 1 || waitMs > MAX_STATUS_WAIT_MS)
+    throw new ApiError(400, `waitMs must be a whole number from 1 to ${MAX_STATUS_WAIT_MS}`, 'invalid_wait');
+  return waitMs;
+}
+
 /** The page a sends or queue read asks for: `limit` (1 to {@link MAX_SEND_PAGE}) and `before`, the cursor a previous page named. */
 function pageQuery(context: RouteContext, noun: string): SendPageQuery {
   const { query } = context.request;
@@ -396,8 +421,20 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly MountRoute[
     {
       method: 'GET',
       path: '/v1/ferrets/:ferretId/sends/:sendId',
-      handle: async context =>
-        jsonResponse(await subsystem.sendStatus(pathSessionId(context), pathSendId(context)).catch(refuse)),
+      handle: async context => {
+        const waitMs = statusWait(context);
+        // One waiter per caller and send: a ferret is named by the credential it came with, anyone else by its kind.
+        const caller = senderSessionId(context) ?? context.actor ?? 'caller';
+        return jsonResponse(
+          await subsystem
+            .sendStatus(
+              pathSessionId(context),
+              pathSendId(context),
+              waitMs === undefined ? undefined : { waitMs, caller },
+            )
+            .catch(refuse),
+        );
+      },
     },
     // The message behind a pointer the transcript records. It is the same words the send row above
     // carries — the turn document is where a send writes them — so it takes the same minimum.
@@ -439,7 +476,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly MountRoute[
       handle: async context => {
         const id = pathSessionId(context);
         const sendId = pathSendId(context);
-        await parseBody(context.request, SendSubmitRequestSchema);
+        await parseBody(context.request, SendEnterRequestSchema);
         return jsonResponse(await subsystem.submit(id, sendId).catch(refuse));
       },
     },

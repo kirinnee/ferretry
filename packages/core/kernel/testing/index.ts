@@ -33,6 +33,13 @@ export {
 export { type DrivenClock, fixedClock } from './clock.ts';
 export { type TestIdentity, testIdentity } from './identity.ts';
 export {
+  TEST_PROCESS_UID,
+  type TestProcess,
+  type TestProcessTable,
+  type TestProcessTableSpec,
+  testProcessTable,
+} from './processes.ts';
+export {
   type OpenSocket,
   type RequestInit2 as TestRequestInit,
   type TestHost,
@@ -41,9 +48,25 @@ export {
   testHost,
 } from './host.ts';
 export { testPluginClient } from './plugin-client.ts';
-export { testExists, testReadText } from './read-text.ts';
-export { COMPARED, type DescriptorRow, type ParityResult, type Table, parity, rowsOf } from './parity.ts';
+export { testExists, testReadBytes, testReadText } from './read-text.ts';
+export {
+  COMPARED,
+  type DescriptorRow,
+  type FieldDiff,
+  type ParityResult,
+  type Table,
+  fieldDiffs,
+  parity,
+  rowsOf,
+} from './parity.ts';
 export { RouteTable, compareRouteSpecificity, orderRoutesBySpecificity } from './router.ts';
 export { MemoryStateFolder, SimulatedCrash, parseDocument } from './state.ts';
 export { type ToolCase, toolConformance } from './tool-suite.ts';
-export { type DiskRoot, diskPaths, diskRoot, diskSessionsRoot } from './disk-root.ts';
+export {
+  type DiskRoot,
+  type DiskSessionsRoots,
+  diskPaths,
+  diskRoot,
+  diskSessionsRoot,
+  diskSessionsRoots,
+} from './disk-root.ts';

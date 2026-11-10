@@ -3,7 +3,7 @@
  * and stands in for a person's home; every credential is a placeholder that authenticates nothing.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -67,14 +67,10 @@ const spiedFiles = (): { files: HostFiles; opened: string[] } => {
   };
 };
 
-const CHECKED_READS_TEXT =
-  'checked host reads are unavailable: the host cannot check and read through the same descriptor';
-const CHECKED_READS = /checked host reads are unavailable.*same descriptor/;
-
 describe('HostHarnessScanner — a set-up machine', () => {
-  // 5.0 (b082f7ff76) reads no setup content until the host can check and read through ONE descriptor; this pins
-  // what a real disk shows meanwhile: locations and safe sign-in facts, never contents, never a path-based read.
-  it('should locate both harnesses and read safe sign-in facts, but open no setup document until checked reads exist', async () => {
+  // The checked-read seam exists (`HostFiles` over the harness-home roots): a setup document is checked component by
+  // component (no link, no sign-in file), then read. A real disk shows the contents, and still no sign-in fact beyond Logins.
+  it('should locate both harnesses, read safe sign-in facts and read each setup document and skill', async () => {
     // Arrange
     const user = await home();
     await put(path.join(user, '.claude/CLAUDE.md'), '# Rules\n');
@@ -100,23 +96,80 @@ describe('HostHarnessScanner — a set-up machine', () => {
     should(claude?.login).deepEqual({ state: 'signed-in', email: 'person@example.test' });
     should(codex?.login).deepEqual({ state: 'refresh-due', email: 'codex@example.test' });
     should(claude?.instructions).match({
-      kind: 'unreadable',
+      kind: 'text',
       source: path.join(user, '.claude/CLAUDE.md'),
-      reason: CHECKED_READS,
+      text: '# Rules\n',
+      bytes: 8,
     });
-    should(claude?.mcp?.kind).equal('unreadable');
-    should(codex?.hooks?.kind).equal('unreadable');
-    should(claude?.skills).deepEqual([]);
-    should(codex?.skills).deepEqual([]);
-    should(claude?.problems[0]).match(/^Your skills folder .* could not be read \(checked host reads are unavailable/);
-    // No MCP server was read, so none can be reported missing, and nothing was opened or listed by path.
-    should(claude?.missingCommands).deepEqual([]);
-    should(opened).deepEqual([]);
+    should(claude?.settings).match({ kind: 'text', source: path.join(user, '.claude/settings.json') });
+    should(claude?.mcp).match({ kind: 'text', source: path.join(user, '.claude.json') });
+    should(codex?.instructions).match({ kind: 'text', source: path.join(user, '.codex/AGENTS.md'), text: '# Rules\n' });
+    should(codex?.hooks).match({ kind: 'text', source: path.join(user, '.codex/hooks.json'), text: '{}' });
+    should(claude?.skills.map(skill => skill.item)).deepEqual(['review']);
+    should(codex?.skills.map(skill => skill.item)).deepEqual(['review']);
+    should(claude?.problems).deepEqual([]);
+    should(codex?.problems).deepEqual([]);
+    // The MCP file is now read, so a server whose command is nowhere on this machine is reported missing, and `npx` (on PATH) is not.
+    should(claude?.missingCommands).deepEqual(['/nowhere/bin/tool']);
+    // It is read, so it was opened — and only ever below a harness home (or the one file beside it), never a sign-in file.
+    should(opened.some(call => call === `readText ${path.join(user, '.claude/CLAUDE.md')}`)).be.true();
+    for (const call of opened) {
+      should(call).not.match(/auth\.json|\.credentials\.json/);
+      should(call.split(' ')[1]?.startsWith(`${user}/`)).be.true();
+    }
     const plan = planImport(
       [claude, codex].filter(scan => scan !== undefined),
       { digest: text => text },
     );
-    should(plan.preview.instructionsIdentical).not.be.true();
+    // Both harnesses hold the same rules text, which is only knowable now that it is read.
+    should(plan.preview.instructionsIdentical).be.true();
+  });
+
+  // S144: a sign-in file is never a setup document, wherever a person plants it; a real disk with the real names.
+  it('S144 should refuse a CLAUDE.md that is a link to a Codex sign-in file, never reading through it', async () => {
+    // Arrange
+    const user = await home();
+    await put(path.join(user, '.codex/auth.json'), '{"placeholder":"authenticates nothing"}');
+    await mkdir(path.join(user, '.claude'), { recursive: true });
+    await symlink(path.join(user, '.codex/auth.json'), path.join(user, '.claude/CLAUDE.md'));
+    const { files, opened } = spiedFiles();
+
+    // Act
+    const [claude] = await scanner(user, { files }).scan();
+
+    // Assert
+    should(claude?.instructions).match({
+      kind: 'unreadable',
+      source: path.join(user, '.claude/CLAUDE.md'),
+      reason: /links/,
+    });
+    should(opened.filter(call => call.startsWith('read'))).deepEqual([]);
+  });
+
+  it('S144 should never open a sign-in file inside a skill, so its bytes cannot reach the skill digest', async () => {
+    // Arrange
+    const user = await home();
+    await put(path.join(user, '.codex/skills/leaky/SKILL.md'), 'leaky');
+    await put(path.join(user, '.codex/skills/leaky/auth.json'), '{"placeholder":"first"}');
+    await put(path.join(user, '.codex/skills/fine/SKILL.md'), 'fine');
+    const first = spiedFiles();
+
+    // Act
+    const [, before] = await scanner(user, { files: first.files }).scan();
+    await put(path.join(user, '.codex/skills/leaky/auth.json'), '{"placeholder":"second, different bytes"}');
+    const second = spiedFiles();
+    const [, after] = await scanner(user, { files: second.files }).scan();
+
+    // Assert
+    should(before?.skills.map(skill => skill.item)).deepEqual(['fine', 'leaky']);
+    // Changing the sign-in file's bytes leaves the digest alone: it was counted as a name, never read.
+    should(after?.skills.find(skill => skill.item === 'leaky')?.digest).equal(
+      before?.skills.find(skill => skill.item === 'leaky')?.digest,
+    );
+    should(first.opened.some(call => call.includes('auth.json'))).be.false();
+    should(second.opened.some(call => call.includes('auth.json'))).be.false();
+    // The ordinary file beside it was read.
+    should(first.opened).containEql(`readBytes ${path.join(user, '.codex/skills/leaky/SKILL.md')}`);
   });
 });
 
@@ -161,6 +214,23 @@ describe('HostHarnessScanner — logins', () => {
     const [claude] = await scanner(user, { logins }).scan();
     should(claude?.login.state).equal('unknown');
   });
+  it('should say not-signed-in for a host login that needs sign-in, and unknown for one still being checked', async () => {
+    // Arrange
+    const user = await home();
+    const row = sampleLogin('you', { email: 'person@example.test' });
+
+    // Act
+    const [needs] = await scanner(user, {
+      logins: fakeLogins([{ ...row, status: { ...row.status, word: 'needs_sign_in' } }]),
+    }).scan();
+    const [checking] = await scanner(user, {
+      logins: fakeLogins([{ ...row, status: { ...row.status, word: 'checking' } }]),
+    }).scan();
+
+    // Assert
+    should(needs?.login).deepEqual({ state: 'not-signed-in', email: 'person@example.test' });
+    should(checking?.login).match({ state: 'unknown', email: 'person@example.test' });
+  });
   it('should read email only from safe Logins facts', async () => {
     const user = await home();
     const row = sampleLogin('codex-you', { harness: 'codex', harnesses: ['codex'] });
@@ -178,14 +248,10 @@ describe('HostHarnessScanner — where the setup lives', () => {
     await put(path.join(claudeDir, '.claude.json'), JSON.stringify({ mcpServers: {} }));
     await put(path.join(codexDir, 'AGENTS.md'), 'moved');
     const [claude, codex] = await scanner(user, { claudeConfigDir: claudeDir, codexHome: codexDir }).scan();
-    // Found where they were moved to (an absent document would say so), though unreadable until checked reads exist.
-    should(claude?.instructions).match({ kind: 'unreadable', source: path.join(claudeDir, 'CLAUDE.md') });
-    should(claude?.mcp).match({ kind: 'unreadable', source: path.join(claudeDir, '.claude.json') });
-    should(codex?.instructions).match({
-      kind: 'unreadable',
-      source: path.join(codexDir, 'AGENTS.md'),
-      reason: CHECKED_READS,
-    });
+    // Found where they were moved to (an absent document would say so) and read there.
+    should(claude?.instructions).match({ kind: 'text', source: path.join(claudeDir, 'CLAUDE.md'), text: 'moved' });
+    should(claude?.mcp).match({ kind: 'text', source: path.join(claudeDir, '.claude.json') });
+    should(codex?.instructions).match({ kind: 'text', source: path.join(codexDir, 'AGENTS.md'), text: 'moved' });
   });
 
   it('should say when CLAUDE_CONFIG_DIR or CODEX_HOME is a relative path', async () => {
@@ -218,23 +284,18 @@ describe('HostHarnessScanner — where the setup lives', () => {
     should(claude?.mcp?.kind).equal(process.getuid?.() === 0 ? 'text' : 'unreadable');
   });
 
-  it('should report a skills folder as unreadable, however many files its skills hold', async () => {
+  it('should list a skills folder, and name a skill that holds more files than the limit instead of importing it', async () => {
     const user = await home();
     await mkdir(path.join(user, '.claude/skills'), { recursive: true });
     await put(path.join(user, '.codex/skills/big/a.md'), 'a');
     await put(path.join(user, '.codex/skills/big/b.md'), 'b');
-    const { files, opened } = spiedFiles();
-    const [claude, codex] = await scanner(user, { files, maxSkillFiles: 1 }).scan();
-    // The folder is never listed, so no skill is found and no per-skill problem (too many files, locked) can exist.
+    await put(path.join(user, '.codex/skills/small/a.md'), 'a');
+    const [claude, codex] = await scanner(user, { maxSkillFiles: 1 }).scan();
+    // The empty folder is no skills and no problem; the oversized skill is a named problem, the small one is found.
     should(claude?.skills).deepEqual([]);
-    should(codex?.skills).deepEqual([]);
-    should(claude?.problems).deepEqual([
-      `Your skills folder ${path.join(user, '.claude/skills')} could not be read (${CHECKED_READS_TEXT}).`,
-    ]);
-    should(codex?.problems).deepEqual([
-      `Your skills folder ${path.join(user, '.codex/skills')} could not be read (${CHECKED_READS_TEXT}).`,
-    ]);
-    should(opened).deepEqual([]);
+    should(claude?.problems).deepEqual([]);
+    should(codex?.skills.map(skill => skill.item)).deepEqual(['small']);
+    should(codex?.problems).deepEqual(['Skill "big" has more than 1 files, so it was not imported.']);
   });
 
   it('should treat a skills path that is a file as no skills', async () => {
@@ -243,6 +304,63 @@ describe('HostHarnessScanner — where the setup lives', () => {
     const [claude] = await scanner(user).scan();
     should(claude?.skills).deepEqual([]);
     should(claude?.problems).deepEqual([]);
+  });
+
+  it('should name a skill that is a link as a problem and import the others, never reading through the link', async () => {
+    // Arrange
+    const user = await home();
+    await put(path.join(user, '.claude/skills/fine/SKILL.md'), 'fine');
+    await put(path.join(user, 'elsewhere/SKILL.md'), 'elsewhere');
+    await symlink(path.join(user, 'elsewhere'), path.join(user, '.claude/skills/linked'));
+
+    // Act
+    const [claude] = await scanner(user).scan();
+
+    // Assert
+    should(claude?.skills.map(skill => skill.item)).deepEqual(['fine']);
+    should(claude?.problems).deepEqual([
+      `Skill "linked" at ${path.join(user, '.claude/skills/linked')} could not be read (symbolic links are not readable setup paths).`,
+    ]);
+  });
+
+  it('should say the skills folder could not be read when the folder itself is a link', async () => {
+    // Arrange
+    const user = await home();
+    await put(path.join(user, 'elsewhere/review/SKILL.md'), 'review');
+    await mkdir(path.join(user, '.claude'), { recursive: true });
+    await symlink(path.join(user, 'elsewhere'), path.join(user, '.claude/skills'));
+
+    // Act
+    const [claude] = await scanner(user).scan();
+
+    // Assert
+    should(claude?.skills).deepEqual([]);
+    should(claude?.problems).deepEqual([
+      `Your skills folder ${path.join(user, '.claude/skills')} could not be read (symbolic links are not readable setup paths).`,
+    ]);
+  });
+
+  it('should refuse a skill entry whose name climbs out of the harness home', async () => {
+    // Arrange
+    const user = await home();
+    await put(path.join(user, '.claude/skills/fine/SKILL.md'), 'fine');
+    await put(path.join(user, 'outside/SKILL.md'), 'outside');
+    const files: HostFiles = {
+      ...nodeHostFiles,
+      list: async directory =>
+        directory.endsWith(path.join('.claude', 'skills'))
+          ? ['fine', ['x', '..', '..', '..', 'outside'].join(path.sep)]
+          : await nodeHostFiles.list(directory),
+    };
+
+    // Act
+    const [claude] = await scanner(user, { files }).scan();
+
+    // Assert
+    should(claude?.skills.map(skill => skill.item)).deepEqual(['fine']);
+    should(claude?.problems).deepEqual([
+      `Skill "${['x', '..', '..', '..', 'outside'].join(path.sep)}" at ${path.join(user, 'outside')} could not be read (the path is outside its harness home).`,
+    ]);
   });
 
   it('should take the login only from Logins facts, whatever the settings file holds', async () => {

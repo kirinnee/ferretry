@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeGate, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import {
   ApiError,
   type ApiRequest,
@@ -17,6 +18,13 @@ import { testArrival, fixedClock, owner } from '@ferretry/kernel/testing';
 import asksDaemon from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
 import { asksStateAt } from './agenda-state.ts';
+
+/**
+ * What the kernel hands a route about its caller's grants: only what a case passes explicitly. A standing that carries
+ * its own governance keeps it, and one that names none stays ungoverned, as it always was.
+ */
+const governanceOf = (governance?: CallerGovernance): { governance?: CallerGovernance } =>
+  governance === undefined ? {} : { governance };
 
 /** What a handler answered, as a client reads it. */
 export interface Answered {
@@ -57,11 +65,15 @@ export async function asksHalf(
   const stops: (() => void | Promise<void>)[] = [];
   const stored = asksStateAt(home);
   const pending = new Set<Promise<unknown>>();
+  // Once closed, a state call never starts: work a send let go of after the drain would otherwise write into the
+  // removed home and fail the NEXT test with ENOENT.
+  let closed = false;
   const tracked = new Proxy(options.wrapState?.(stored) ?? stored, {
     get(target, key) {
       const value = Reflect.get(target, key);
       if (typeof value !== 'function') return value;
       return (...args: unknown[]) => {
+        if (closed) return new Promise<never>(() => undefined);
         const result = Reflect.apply(value, target, args);
         if (result instanceof Promise) {
           pending.add(result);
@@ -128,6 +140,7 @@ export async function asksHalf(
       params: Readonly<Record<string, string>>,
       body?: unknown,
       standing: CallStanding = ownerStanding(),
+      governance?: CallerGovernance,
     ): Promise<Answered> {
       const handler = half.routes[key];
       if (handler === undefined) throw new Error(`no handler for ${key}`);
@@ -143,7 +156,12 @@ export async function asksHalf(
       let status: number;
       let text: string;
       try {
-        const response = await handler({ request, params: new Map(Object.entries(params)), ...standing });
+        const response = await handler({
+          request,
+          params: new Map(Object.entries(params)),
+          ...standing,
+          ...governanceOf(governance),
+        });
         status = response.status;
         text = response.body;
       } catch (error) {
@@ -156,6 +174,7 @@ export async function asksHalf(
     close: async () => {
       for (const stop of stops) await stop();
       await drain();
+      closed = true;
       await rm(home, { recursive: true, force: true });
     },
   };

@@ -136,3 +136,12 @@ describe('fy agenda mode and clear', () => {
     expect(await world(answers).verb('agenda clear')).toBe(1);
   });
 });
+
+describe('composeNoticeRequest bounds', () => {
+  test('refuses a summary or a body longer than the daemon takes, saying how long it was', () => {
+    expect(() => composeNoticeRequest(['x'.repeat(241)], {})).toThrow(/the summary is 241 characters; keep it to 240/u);
+    expect(() => composeNoticeRequest(['ok'], { body: 'y'.repeat(200_001) })).toThrow(
+      /--body is 200001 characters; the most it takes is 200000/u,
+    );
+  });
+});

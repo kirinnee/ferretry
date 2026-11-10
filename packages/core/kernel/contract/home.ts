@@ -1,5 +1,6 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
+import type { RootName } from './ports.ts';
 
 /** The whole-home format. A reader accepts exactly this one (§9.3). */
 export const HOME_FORMAT = 1 as const;
@@ -106,6 +107,16 @@ export function insideFence(home: string, resolvedPath: string): boolean {
   if (!path.startsWith(parent)) return false;
   const first = path.slice(parent.length).split('/')[0] ?? '';
   return first.startsWith(`${homeName}-before-`);
+}
+
+/**
+ * The folder, relative to the home, of one plugin's internal root: `state/<plugin>/<root>` (the roots the kernel makes:
+ * `agent-homes`, `downloads`, `credentials`, `sessions`). ONE fact with three readers: the base the kernel makes
+ * and serves (`host/roots.ts`), the home fence that pins each such folder by identity (`host/fence-guard.ts`), and a
+ * plugin that must name its own folder to a program outside it (Ferrets' `FERRET_SESSIONS_FOLDER`). Pure.
+ */
+export function internalRootFolder(plugin: string, root: RootName): string {
+  return `state/${plugin}/${root}`;
 }
 
 /** The folder name a plugin's state is moved aside to. */

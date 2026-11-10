@@ -1,7 +1,15 @@
 /** @ferretry/plugin-conversation/contract/testing — the contract's fake and conformance suite (§7.8). */
 import { describe, expect, test } from 'bun:test';
 import { err, type Instant, ok } from '@ferretry/std';
-import type { ConversationApi, KeepResult, QueuedMessage, SendRecord, TranscriptEvent, WorkHit } from '../index.ts';
+import {
+  type ConversationApi,
+  conversationFor,
+  type KeepResult,
+  type QueuedMessage,
+  type SendRecord,
+  type TranscriptEvent,
+  type WorkHit,
+} from '../index.ts';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 
 const refuse = (code: string, message: string) => err({ code, message });
@@ -58,14 +66,14 @@ export function fakeConversation(options: { readonly now?: () => Instant } = {})
         path: 'direct',
         message: request.message,
         attachmentIds: request.attachmentIds ?? [],
-        senderKind: caller.kind === 'owner' ? 'human' : 'agent',
+        senderKind: caller.kind === 'owner' ? 'human' : caller.kind === 'warden' ? 'daemon' : 'agent',
         fate: busy ? 'queued' : 'delivered',
       });
       if (busy)
         queueOf(ferret).push({
           v: 1,
           id: sendId,
-          sender: caller.kind === 'owner' ? 'human' : 'agent',
+          sender: caller.kind === 'owner' ? 'human' : caller.kind === 'warden' ? 'daemon' : 'agent',
           text: request.message,
           attachmentIds: request.attachmentIds ?? [],
           enqueuedAt: now(),
@@ -173,6 +181,18 @@ export function fakeConversation(options: { readonly now?: () => Instant } = {})
     previewLink: async () => refuse('not_found', 'no such conversation'),
     keep: async () => keepNothing,
   };
+}
+
+/**
+ * The fake as ONE consumer sees it: the same facade the real provider builds per consumer ({@link conversationFor}), so
+ * a consumer's test that binds `perNeeder(needer => fakeConversationFor(needer.id, shared))` meets the Warden rule too.
+ * `shared` is the fake whose state every consumer's view reads and writes.
+ */
+export function fakeConversationFor(
+  consumer: string,
+  shared: ReturnType<typeof fakeConversation> = fakeConversation(),
+): ReturnType<typeof fakeConversation> {
+  return { ...shared, ...conversationFor(consumer, shared) };
 }
 
 /** The behaviour every `ConversationApi` (the real one and every fake) keeps. */

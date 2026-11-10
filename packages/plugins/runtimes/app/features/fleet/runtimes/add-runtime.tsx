@@ -219,7 +219,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
       create: true,
       ...(draft.addAnother ? { addAnother: true } : {}),
     });
-    if (result.kind === 'refused') return;
+    if (result.kind !== 'applied') return;
     await reload();
     setMade(name);
   };
@@ -264,10 +264,8 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
             );
           })
         )}
-        {/* GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) and the provider grid are Logins' screens
-            and are not ported into Runtimes: a new login is added from Logins' Sign-ins tab and comes back in this list,
-            and a login that "needs sign-in" is signed in there. Until Logins' app half draws that tab there is no
-            working sign-in from these screens. */}
+        {/* A login is not added or signed in here: Logins' Sign-ins tab draws both — this link lands on
+            its list, and a login that needs sign-in links straight to that login's page there. */}
         <a
           href={tabHref(currentDaemon(), machineName, 'sign-ins')}
           onClick={followInApp}
@@ -282,7 +280,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
           <p className="m-0 text-cell leading-base text-muted" data-add-runtime-needs-sign-in="">
             This login needs sign-in before you launch.{' '}
             <a
-              href={tabHref(currentDaemon(), machineName, 'sign-ins')}
+              href={tabHref(currentDaemon(), machineName, 'sign-ins', credential.id)}
               onClick={followInApp}
               className="font-semibold text-accent underline"
               data-add-runtime-sign-in=""

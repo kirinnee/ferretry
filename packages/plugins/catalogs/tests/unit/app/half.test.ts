@@ -5,9 +5,9 @@ import { JOIN_PATH } from '../../../app/lib/routes.ts';
 import manifest from '../../../manifest.ts';
 
 describe('the Catalogs app half', () => {
-  it('draws every screen the manifest declares (sharing, join, shared) and nothing it does not', () => {
+  it('draws every screen the manifest declares (sharing, add-skills, join, shared) and nothing it does not', () => {
     const built = half.build?.({ manifest: half.manifest, client: { call: async () => ({}) } as never });
-    expect(Object.keys(built?.screens ?? {}).sort()).toEqual(['join', 'shared', 'sharing']);
+    expect(Object.keys(built?.screens ?? {}).sort()).toEqual(['add-skills', 'join', 'shared', 'sharing']);
     expect(half.skeleton).toBeUndefined();
   });
 

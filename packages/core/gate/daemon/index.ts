@@ -81,7 +81,7 @@ export default implementDaemon(manifest, {
       fileState: () => kernel.config.fileState(gateFile),
     };
     const policy = (): GateConfig | undefined => policyInEffect(policySource);
-    // ─── provenance (G155): which capabilities `gate.yaml` NAMES, read from its raw text ───────────────────────
+    // ─── provenance (G155): which capabilities `gate.yaml` NAMES, as the version in effect is written ─────────────
     const configFiles = kernel.configFiles;
     const target = { plugin: manifest.id, def: gateFile };
     let namedGrants: readonly CapabilityName[] = [];
@@ -89,7 +89,9 @@ export default implementDaemon(manifest, {
       if (configFiles === undefined) return;
       try {
         const read = await configFiles.read(target);
-        namedGrants = read?.exists === true && read.text !== undefined ? grantsNamedIn(Bun.YAML.parse(read.text)) : [];
+        // The version in effect as written, read by the shared bounded reader: never a parse of the disk text here,
+        // which a hand-written file can make cost gigabytes (one long string aliased many times).
+        namedGrants = grantsNamedIn(read?.written);
       } catch {
         // An unreadable file names nothing it can prove: every capability reads as the product's answer.
         namedGrants = [];

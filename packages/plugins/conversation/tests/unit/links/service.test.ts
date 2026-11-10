@@ -251,4 +251,109 @@ describe('links', () => {
     };
     expect(entry.messages).toHaveLength(2);
   });
+
+  /** The service of `build`, with some of its ports replaced. */
+  const variant = (replace: Partial<ConstructorParameters<typeof LinkService>[0]>) => {
+    const { service } = build();
+    return new LinkService({
+      ...(service as unknown as { needs: ConstructorParameters<typeof LinkService>[0] }).needs,
+      ...replace,
+    });
+  };
+  const keepIt = (service: LinkService, copy = false) =>
+    service.keep({ harness: 'claude-code', runtime: 'default', conversations: [{ id: ID, start: false, copy }] });
+  const copier = (copy: () => Promise<never>) => ({ copy });
+
+  test('a copy asked for a conversation whose file cannot be found says so, and keeps nothing', async () => {
+    const result = await keepIt(variant({ files: files({}) }), true);
+    expect(result.refused).toEqual([{ id: ID, code: 'failed', reason: 'Its file could not be found to copy.' }]);
+  });
+
+  test('a copier that throws is reported in its own words, or in ours when it gave none', async () => {
+    const worded = await keepIt(
+      variant({
+        copier: copier(async () => {
+          throw new Error('permission denied');
+        }),
+      }),
+      true,
+    );
+    expect(worded.refused[0]).toMatchObject({ code: 'failed', reason: 'permission denied' });
+    const silent = await keepIt(
+      variant({
+        copier: copier(async () => {
+          throw new Error('');
+        }),
+      }),
+      true,
+    );
+    expect(silent.refused[0]).toMatchObject({ code: 'failed', reason: 'It could not be copied.' });
+  });
+
+  test('a keeper that refuses, or throws, keeps nothing and says why', async () => {
+    const refuses = variant({
+      keeper: { keep: async () => err({ code: 'unavailable', reason: 'No such runtime.' }) },
+    });
+    expect((await keepIt(refuses)).refused).toEqual([{ id: ID, code: 'unavailable', reason: 'No such runtime.' }]);
+    const worded = variant({
+      keeper: {
+        keep: async () => {
+          throw new Error('no room');
+        },
+      },
+    });
+    expect((await keepIt(worded)).refused).toEqual([{ id: ID, code: 'failed', reason: 'no room' }]);
+    const silent = variant({
+      keeper: {
+        keep: async () => {
+          throw new Error('');
+        },
+      },
+    });
+    expect((await keepIt(silent)).refused).toEqual([
+      { id: ID, code: 'failed', reason: 'The ferret could not be created.' },
+    ]);
+  });
+
+  test('lists Codex conversations from their rollouts, named by Codex’s own index', async () => {
+    const CODEX = '5c1e0e3a-0000-4000-8000-0000000000aa';
+    const rollout = `.codex/sessions/2026/10/10/rollout-2026-10-10T09-00-00-${CODEX}.jsonl`;
+    const lines = [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-10-10T09:00:00.000Z',
+        payload: { id: CODEX, cwd: '/work/notes' },
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-10-10T09:01:00.000Z',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'take notes' }] },
+      }),
+    ].join('\n');
+    const held = {
+      [rollout]: lines,
+      '.codex/sessions/2026/10/10/notes.txt': 'not a rollout',
+      '.codex/sessions/2026/10/10/rollout-no-id.jsonl': 'x',
+      '.codex/session_index.jsonl': JSON.stringify({ id: CODEX, thread_name: 'Meeting notes' }),
+      '.codex/sessions/a/b/c/d/e/rollout-too-deep.jsonl': 'x',
+    };
+    const fs = files(held);
+    const codex: LinkHarness = {
+      key: 'codex',
+      parser: 'codex',
+      home: '.codex',
+      list: async () => [
+        { id: CODEX, folder: '/work/notes', title: 'notes', updatedAt: '2026-10-10T09:01:00.000Z' as Instant },
+      ],
+    };
+    const { service } = build();
+    const needs = (service as unknown as { needs: ConstructorParameters<typeof LinkService>[0] }).needs;
+    const listing = await new LinkService({ ...needs, files: fs, harnesses: () => [codex] }).list({});
+    expect(listing.conversations[0]).toMatchObject({ id: CODEX, harness: 'codex', name: 'Meeting notes' });
+
+    // Without an index Codex has named nothing, and the rollout's own record stands.
+    const { '.codex/session_index.jsonl': _index, ...bare } = held;
+    const unnamed = await new LinkService({ ...needs, files: files(bare), harnesses: () => [codex] }).list({});
+    expect(unnamed.conversations[0]?.id).toBe(CODEX);
+  });
 });

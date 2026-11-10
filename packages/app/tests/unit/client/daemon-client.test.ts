@@ -259,3 +259,110 @@ describe('events', () => {
     expect(client.standing('board')).toEqual({ state: 'blocked', reason: 'unreadable' });
   });
 });
+
+describe("the shell's grants read and the generation (shell contract S1)", () => {
+  const UNLOCK = { error: 'confirm with a passkey first', code: 'unlock_required' };
+  function locking(options: { grants?: () => Promise<ReturnType<typeof json>> | ReturnType<typeof json> } = {}) {
+    let locked = true;
+    const transport = new FakeTransport(async (request: TransportRequest) => {
+      if (request.path === '/v1/plugins') return json(inventoryOf(compiled, { board: { on: false } }));
+      if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
+      if (request.path === '/v1/grants' && options.grants !== undefined) return await options.grants();
+      if (locked) return json(UNLOCK, 401);
+      if (request.path === '/v1/agenda') return json({ error: 'off', code: 'grant_not_granted' }, 403);
+      return json({ capabilities: [] });
+    });
+    const confirms: string[] = [];
+    let answer = false;
+    const client = new DaemonClient({
+      transport,
+      surfaces: compiled,
+      passkey: {
+        daemon: { daemon: 'd1', machine: 'm', deviceId: 'dev', address: 'http://127.0.0.1:1', pairedAt: 1 } as never,
+        handler: {
+          need: refusal => (refusal.status === 401 ? { kind: 'unlock' } : undefined),
+          confirm: async (_daemon, need, origin) => {
+            confirms.push(`${need.kind}/${origin}`);
+            if (answer) locked = false;
+            return answer;
+          },
+          ask: async () => false,
+          focus: () => {},
+          locked: () => [],
+          subscribe: () => () => {},
+        },
+      },
+    });
+    return {
+      transport,
+      client,
+      confirms,
+      confirmWith: (value: boolean) => {
+        answer = value;
+      },
+    };
+  }
+
+  test('readGrants admits as Gate (a paused plugin does not stop it) and answers a 401 at once, never paused', async () => {
+    const { client, confirms, transport } = locking();
+    await client.start();
+    expect(client.standing('board').state).toBe('blocked');
+    const read = await client.readGrants({ noPause: true });
+    expect(read.answer?.status).toBe(401);
+    expect(read.need).toEqual({ kind: 'unlock' });
+    expect(read.generation).toBe(0);
+    expect(confirms).toEqual([]);
+    expect(transport.paths()).toContain('GET /v1/grants');
+  });
+
+  test('a grants read that reaches nothing answers no answer, not a refusal', async () => {
+    const { client } = locking({
+      grants: () => {
+        throw new Error('carrier down');
+      },
+    });
+    await client.start();
+    expect(await client.readGrants({ noPause: true })).toEqual({ generation: 0, answer: undefined, need: undefined });
+  });
+
+  test('every answer is told under the generation it was sent in; a confirm bumps it', async () => {
+    const { client, confirmWith } = locking();
+    const heard: unknown[] = [];
+    const stop = client.onAuthority(signal => heard.push(signal));
+    await client.start();
+    await expect(client.forPackage('agenda').call('GET /v1/agenda')).rejects.toMatchObject({ code: 'unlock_required' });
+    expect(heard).toEqual([{ kind: 'locked', generation: 0 }]);
+    confirmWith(true);
+    await expect(client.forPackage('agenda').call('GET /v1/agenda')).rejects.toMatchObject({
+      code: 'grant_not_granted',
+    });
+    // The first answer under generation 0, the confirm, then the resend's capability refusal under generation 1.
+    expect(heard).toEqual([
+      { kind: 'locked', generation: 0 },
+      { kind: 'locked', generation: 0 },
+      { kind: 'confirmed' },
+      { kind: 'refused', generation: 1 },
+    ]);
+    expect(client.generation).toBe(1);
+    client.noteConfirmed();
+    expect(client.generation).toBe(2);
+    stop();
+    client.noteConfirmed();
+    expect(heard).toHaveLength(5);
+  });
+
+  test('a background-origin client asks as background even for a POST; the feed is told live and not', async () => {
+    const { client, confirms, transport } = locking();
+    const live: boolean[] = [];
+    const stop = client.onFeedLive(value => live.push(value));
+    await client.start();
+    expect(client.feedLive).toBe(false);
+    transport.openFeed();
+    expect(client.feedLive).toBe(true);
+    transport.dropFeed();
+    stop();
+    expect(live).toEqual([true, false]);
+    await expect(client.forPackage('agenda', { origin: 'background' }).call('GET /v1/agenda')).rejects.toBeDefined();
+    expect(confirms).toEqual(['unlock/background']);
+  });
+});

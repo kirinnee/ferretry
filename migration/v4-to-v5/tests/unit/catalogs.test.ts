@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { LocalSkillInstallStateSchema } from '@ferretry/plugin-skills/contract';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
@@ -12,7 +11,6 @@ import {
   V5_CATALOG_MEMBERS,
   V5_CATALOG_SHARES,
   V5_CATALOGS,
-  V5_SKILL_INSTALLS,
 } from '../../src/steps/catalogs.ts';
 import { STEPS } from '../../src/steps/index.ts';
 import { vaultStep } from '../../src/steps/secrets.ts';
@@ -40,7 +38,6 @@ const SHARE = id('shr_', 'S');
 const LINK = id('lnk_', 'L');
 const ONE_TIME = id('lnk_', 'O');
 const INSTALL = id('cin_', 'A');
-const LOCAL = id('lsi_', 'Q');
 const DAEMON = `fy_daemon_${'D'.repeat(43)}`;
 const LATER = '2026-11-02T00:00:00.000Z';
 const RUNTIME_ID = '11111111-1111-4111-8111-111111111111';
@@ -203,25 +200,6 @@ const catalogInstalls = {
   pins: { [CAT]: DAEMON },
   revisions: { [CAT]: 4 },
 };
-const localInstalls = {
-  schemaVersion: 1,
-  installs: [
-    {
-      installId: LOCAL,
-      installedAt: AT,
-      name: 'fake-skill',
-      origin: { kind: 'account', owner: 'old-name', harness: 'claude', path: '/fake/home/.claude/skills/x/SKILL.md' },
-      provenance,
-      target: { scope: 'project', projectRoot: '/work/project', harness: 'claude' },
-      destination: '/work/project/.claude/skills/fake-skill/',
-      key: 'project:/work/project/.claude/skills/fake-skill',
-      files: [{ path: 'SKILL.md', sha256: 'f'.repeat(64) }],
-      root: '/work/project',
-      folder: '.claude/skills/fake-skill',
-    },
-  ],
-};
-
 /** v4's link-key sealing (`FileLinkKeyVault.put`): AES-256-GCM, a 96-bit IV, AAD `catalog-link:<linkId>`, no instants. */
 async function sealLinkKey(key: CryptoKey, linkId: string, value: string) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -263,7 +241,6 @@ async function fullHome(): Promise<void> {
   await f.put('state/catalogs/catalogs.v2.json', { FAKE: 'backup' });
   await f.put('state/catalog-installs.json', catalogInstalls);
   await f.put('state/catalog-install-prefs.json', { schemaVersion: 1, installs: { [INSTALL]: { hold: true } } });
-  await f.put('state/local-skill-installs.json', localInstalls);
   await f.put('fleet/ids.json', {
     version: 1,
     runtimes: { 'new-name': { id: RUNTIME_ID, formerNames: ['old-name'] } },
@@ -329,29 +306,11 @@ test('every catalog file keeps every value; only the envelope changes and the bl
     { what: 'member passkeys', count: 1 },
     { what: 'catalog installs (each at its pinned version)', count: 1 },
     { what: 'catalog publisher pins', count: 1 },
-    { what: 'local skill copies', count: 1 },
   ]);
   expect(report.sealed).toEqual([
     { file: V5_CATALOG_LINK_KEYS, bytes: (await stat(join(f.to, V5_CATALOG_LINK_KEYS))).size },
   ]);
   expect(JSON.stringify(report)).not.toContain('FAKE-');
-});
-
-test('local skill copies land in Skills with v5 harness names and current runtime names', async () => {
-  await fullHome();
-  expect((await catalogsStep.run(f.ctx())).status).toBe('converted');
-  const value = LocalSkillInstallStateSchema.parse(await written(V5_SKILL_INSTALLS));
-  const [install] = localInstalls.installs;
-  expect(value).toEqual({
-    format: 1,
-    installs: [
-      {
-        ...install!,
-        origin: { ...install!.origin, owner: 'new-name', harness: 'claude-code' },
-        target: { scope: 'project', projectRoot: '/work/project', harness: 'claude-code' },
-      } as never,
-    ],
-  });
 });
 
 test('the link keys move unopened and v5’s own sealed-document reader opens them with the moved vault key', async () => {

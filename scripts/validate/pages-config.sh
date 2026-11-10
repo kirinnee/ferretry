@@ -50,17 +50,21 @@ block_of() {
   ' "${headers}"
 }
 
+# Both helpers capture the block first and match it from a here-string: `block_of | rg -q` under pipefail fails with
+# SIGPIPE when rg exits on its first match while awk is still writing, so the verdict would depend on timing.
 require_in_block() {
-  local path="$1" pattern="$2"
-  block_of "${path}" | rg -q "${pattern}" || {
+  local path="$1" pattern="$2" block
+  block="$(block_of "${path}")"
+  rg -q "${pattern}" <<<"${block}" || {
     echo "❌ ${headers}: rule ${path} is missing a line matching: ${pattern}" >&2
     exit 1
   }
 }
 
 refuse_in_block() {
-  local path="$1" pattern="$2" why="$3"
-  if block_of "${path}" | rg -q "${pattern}"; then
+  local path="$1" pattern="$2" why="$3" block
+  block="$(block_of "${path}")"
+  if rg -q "${pattern}" <<<"${block}"; then
     echo "❌ ${headers}: rule ${path} ${why}" >&2
     exit 1
   fi
@@ -133,7 +137,8 @@ rg -q '^/pair/\* /app/index\.html 200$' "${redirects}"
 rg -q '^/join /app/index\.html 200$' "${redirects}"
 rg -q '^/shared /app/index\.html 200$' "${redirects}"
 require_in_block "/join" '^  Cache-Control: no-store$'
-tail -n 1 "${redirects}" | grep -qx '/\* /index.html 200'
+last_redirect="$(tail -n 1 "${redirects}")"
+[[ ${last_redirect} == '/* /index.html 200' ]]
 
 # The pairing URL the daemon mints — and so the QR `fy pair` draws from it — addresses this Pages project by
 # hostname. In 4.x this held HOSTED_APP_ORIGIN (@ferretry/protocol) and the daemon's pairing link to the

@@ -1,6 +1,7 @@
-import type { ConfigPort } from '@ferretry/kernel/contract';
+import type { ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { DEFAULT_WARDEN_CONFIG, WARDEN_CONFIG, effectiveWardenConfig, type WardenFile } from '../../contract/index.ts';
 import type { WardenConfig, WardenConfigPatch, WardenConfigStore } from '../lib/index.ts';
+import { WARDEN_CONFIG_SECTIONS } from '../lib/protocol.ts';
 
 /** The kernel refused the edit of `warden.yaml` (its sentences never quote a value). */
 export class WardenConfigRefused extends Error {
@@ -11,13 +12,17 @@ export class WardenConfigRefused extends Error {
 }
 
 /**
- * `warden.yaml` already holds an edit waiting for the owner, so this save is refused before anything is written: the
- * held edit stays held and the settings in effect stay as they are.
+ * `warden.yaml` already holds an edit waiting for the owner, and this save names no setting, so there is nothing to make
+ * to either version: it is refused before anything is written, the held edit stays held and the settings in effect
+ * stay as they are.
  *
- * DECLARED GAP: today the owner's own save is made to BOTH versions (the one in effect and the held one), so a
- * tightening applies at once and a held edit is neither lost nor put into effect (docs/config-files.md rule 3). The
- * kernel's ConfigPort offers no owner-acknowledged write, so on 5.0:
- * - while the kernel holds an edit, the owner's save is refused (this error), never written over it;
+ * Today the owner's own save is made to BOTH versions (the one in effect and the held one), key by key inside a
+ * section, so a tightening applies at once and a held edit is neither lost nor put into effect (docs/config-files.md
+ * rule 3). On 5.0 that is the kernel's `ConfigPort.writeAsOwner`:
+ * - a save while an edit is held sends only what the owner changed: a top-level setting (`enabled`, the minutes,
+ *   `accounts`, …) whole, and of a section (`caps`, `guard`, `mayActAlone`, …) only the sub-keys it changed, with
+ *   the section named in `within` so the kernel merges them one level deep into each version. The held version keeps
+ *   its own sub-keys (the 2026-10-29 price incident) and stays held;
  * - a broken file is OVERWRITTEN with the value in effect: every setting is written from the settings in effect plus
  *   the owner's patch, so such an edit is never put into effect, but it is lost (today's fail-safe) (a file with a
  *   top-level key the schema does not know is refused instead; the owner repairs it by hand);
@@ -26,7 +31,9 @@ export class WardenConfigRefused extends Error {
  */
 export class WardenConfigHeld extends Error {
   constructor() {
-    super('warden.yaml has a change waiting for your approval; confirm or discard it first, then save again.');
+    super(
+      'this save names no setting, so nothing was changed; warden.yaml still has a change waiting for your approval (confirm or discard it, or change a setting and save again).',
+    );
     this.name = 'WardenConfigHeld';
   }
 }
@@ -39,19 +46,8 @@ export class WardenConfigMoved extends Error {
   }
 }
 
-const SECTIONS: readonly string[] = [
-  'revive',
-  'autoMove',
-  'layers',
-  'guard',
-  'caps',
-  'mayActAlone',
-  'jevActs',
-  'events',
-  'investigation',
-  'failover',
-  'providerOutage',
-];
+/** Whether a setting is a section (a mapping of sub-settings) rather than a top-level setting. */
+const isSection = (key: string): boolean => (WARDEN_CONFIG_SECTIONS as readonly string[]).includes(key);
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -80,7 +76,7 @@ function wholeSettings(next: WardenConfig, inEffect: WardenFile): Record<string,
   for (const key of Object.keys(defaults)) {
     const value = values[key];
     const fallback = defaults[key];
-    if (SECTIONS.includes(key) && isPlainObject(value) && isPlainObject(fallback)) {
+    if (isSection(key) && isPlainObject(value) && isPlainObject(fallback)) {
       const had = isPlainObject(stated[key]) ? stated[key] : {};
       const section = Object.fromEntries(
         Object.entries(value).filter(([sub, inner]) => had[sub] !== undefined || !sameValue(inner, fallback[sub])),
@@ -96,7 +92,7 @@ function wholeSettings(next: WardenConfig, inEffect: WardenFile): Record<string,
  * through the kernel's config write port, which checks the schema, refuses a raw secret, keeps the comments and HOLDS a
  * loosening for the owner unless Gate's judge lets this call put it into effect. A save writes the WHOLE settings (the
  * ones in effect plus the owner's patch), so it can loosen only what the owner asked for. A save while another edit is
- * held is refused (`WardenConfigHeld`) and writes nothing.
+ * held goes to BOTH versions through `writeAsOwner`, a section merged sub-key by sub-key (see {@link WardenConfigHeld}).
  */
 export class ConfigWardenConfigStore implements WardenConfigStore {
   constructor(private readonly config: ConfigPort) {}
@@ -105,13 +101,46 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
     return effectiveWardenConfig(this.config.file(WARDEN_CONFIG) ?? {});
   }
 
-  async write(config: WardenConfig, _patch: WardenConfigPatch): Promise<readonly string[]> {
-    if (this.config.fileState(WARDEN_CONFIG).state === 'held') throw new WardenConfigHeld();
+  async write(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
+    if (this.config.fileState(WARDEN_CONFIG).state === 'held') return await this.#writeBesideHeld(config, patch);
     const inEffect = (this.config.file(WARDEN_CONFIG) ?? {}) as WardenFile;
-    const result = await this.config.write(WARDEN_CONFIG, undefined, { patch: wholeSettings(config, inEffect) });
-    if (result.kind === 'refused')
-      throw new WardenConfigRefused(result.issues.map(issue => issue.message).join('; ') || result.reason);
-    if (result.kind === 'conflict') throw new WardenConfigMoved();
-    return result.kind === 'held' ? result.sentences : [];
+    return outcomeOf(await this.config.write(WARDEN_CONFIG, undefined, { patch: wholeSettings(config, inEffect) }));
   }
+
+  /**
+   * The owner's save while another edit of `warden.yaml` waits (docs/config-files.md rule 3): made to BOTH versions by
+   * the kernel's `writeAsOwner`, which asks Gate's judge about the owner's patch alone, never about the held edit.
+   * Only what the owner changed is sent, as `next` means it: a top-level key whole, and of a section only the sub-keys
+   * the patch names, the section named in `within` so the kernel merges them one level deep into each version and the
+   * held version keeps its own sub-keys.
+   */
+  async #writeBesideHeld(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
+    const named = patch as Record<string, unknown>;
+    const keys = Object.keys(named).filter(key => named[key] !== undefined);
+    // A save naming no key has nothing to make to either version; it is refused as before, writing nothing.
+    if (keys.length === 0) throw new WardenConfigHeld();
+    const values = config as unknown as Record<string, unknown>;
+    const within = keys.filter(key => isSection(key) && isPlainObject(named[key]) && isPlainObject(values[key]));
+    const ownerPatch = Object.fromEntries(
+      keys.map(key => {
+        if (!within.includes(key)) return [key, values[key]];
+        const section = values[key] as Record<string, unknown>;
+        return [key, Object.fromEntries(Object.keys(named[key] as object).map(sub => [sub, section[sub]]))];
+      }),
+    );
+    return outcomeOf(
+      await this.config.writeAsOwner(WARDEN_CONFIG, undefined, {
+        patch: ownerPatch,
+        ...(within.length === 0 ? {} : { within }),
+      }),
+    );
+  }
+}
+
+/** What a write came to, for the settings route: the sentences of what waits for the owner, or a refusal thrown. */
+function outcomeOf(result: ConfigWriteOutcome): readonly string[] {
+  if (result.kind === 'refused')
+    throw new WardenConfigRefused(result.issues.map(issue => issue.message).join('; ') || result.reason);
+  if (result.kind === 'conflict') throw new WardenConfigMoved();
+  return result.kind === 'held' ? result.sentences : [];
 }

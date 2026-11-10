@@ -6,9 +6,25 @@ import {
   changeRefusalSentence,
   fleetApplyAuthority,
   readChangeAuthority,
+  settleOutcome,
   stageAccountChange,
 } from '../../../../../../app/features/fleet/shell/apply-change.ts';
-import { APPLIED, CHANGE_ID, type Call, machineWith, machine, scripted, stagedFrom } from '../account-support.ts';
+import { AccountChangeViewSchema } from '../../../../../../contract/index.ts';
+import {
+  APPLIED,
+  BACKUP_PATH,
+  CHANGE_ID,
+  COMMITTED,
+  type Call,
+  LANDED_FILE,
+  machineWith,
+  machine,
+  ROLLBACK_INCOMPLETE,
+  ROLLED_BACK,
+  scripted,
+  stagedFrom,
+  UNRESTORED_PATH,
+} from '../account-support.ts';
 
 const CHANGE = {
   kind: 'machine.settings',
@@ -115,6 +131,144 @@ describe('stage then apply, separately', () => {
       kind: 'refused',
       sentence: 'This machine didn’t answer (no route POST /v1/runtimes/proposals). Check it is awake and try again.',
     });
+  });
+});
+
+describe('R3-M1: an apply that did not finish is not applied', () => {
+  const answer = (outcome: unknown) => scripted({ ...ROUTES, [APPLY]: outcome });
+
+  it('R3-M1: a rolled-back apply is its own result, with the landed files, in plain words, outcome first', async () => {
+    const result = await applyAccountChange(answer(ROLLED_BACK), CHANGE);
+    expect(result).toMatchObject({ kind: 'rolled-back', landed: [LANDED_FILE], unrestored: [] });
+    if (result.kind !== 'rolled-back') throw new Error('expected rolled-back');
+    expect(result.sentence).toBe(
+      `This change was not applied: the fleet apply failed and was rolled back. Publishing the fleet failed: fleet/bin is a file, not a directory. This configuration change stayed and goes live at the next apply: ${LANDED_FILE}. Fix the cause and apply again. To undo the change instead, put that file back as it was, or delete it if it did not exist before.`,
+    );
+    expect(result.sentence).not.toMatch(/remove (it|that file)/u);
+  });
+
+  it('BG-028 R2-M1 a rolled-back REMOVAL never says the removed file stayed on disk', async () => {
+    // The shape the composed daemon answers for `runtime.remove`: the path is the file the change just removed
+    // (its state is absent now), and the runtime is no longer listed.
+    const removal = {
+      outcome: 'applied',
+      apply: { ...ROLLED_BACK.apply, configurationLanded: ['/home/kirin/.ferretry/config/runtimes/claude-work.yaml'] },
+    };
+    const result = await applyAccountChange(answer(removal), { kind: 'runtime.remove', name: 'claude-work' });
+    if (result.kind !== 'rolled-back') throw new Error('expected rolled-back');
+    expect(result.sentence).not.toMatch(/on disk/u);
+    expect(result.sentence).not.toMatch(/file stayed/u);
+    expect(result.sentence).toContain(
+      'This configuration change stayed and goes live at the next apply: /home/kirin/.ferretry/config/runtimes/claude-work.yaml.',
+    );
+  });
+
+  it('R3-M1: a rolled-back apply with no landed file says none was left', async () => {
+    const bare = { outcome: 'applied', apply: { outcome: 'rolled-back', failedOperation: 'Publishing', reason: 'x.' } };
+    const result = await applyAccountChange(answer(bare), CHANGE);
+    if (result.kind !== 'rolled-back') throw new Error('expected rolled-back');
+    expect(result.landed).toEqual([]);
+    expect(result.sentence).toContain('No configuration file was left on disk.');
+    expect(result.sentence).toContain('Publishing failed: x.');
+  });
+
+  it('BG-028 a rolled-back apply with no landed file still says what to do', async () => {
+    const bare = { outcome: 'applied', apply: { outcome: 'rolled-back', failedOperation: 'Publishing', reason: 'x.' } };
+    const result = await applyAccountChange(answer(bare), CHANGE);
+    if (result.kind !== 'rolled-back') throw new Error('expected rolled-back');
+    expect(result.sentence).toEndWith('No configuration file was left on disk. Fix the cause and apply again.');
+  });
+
+  it('BG-028 a rollback-incomplete apply that only moved things aside has no empty "partly changed" list', async () => {
+    const displaced = {
+      outcome: 'applied',
+      apply: {
+        outcome: 'rollback-incomplete',
+        failedOperation: 'Publishing',
+        reason: 'x',
+        unrestored: [],
+        displaced: [{ path: '/h/a', movedTo: '/h/a.moved' }],
+      },
+    };
+    const result = await applyAccountChange(answer(displaced), CHANGE);
+    if (result.kind !== 'rollback-incomplete') throw new Error('expected rollback-incomplete');
+    expect(result.sentence).not.toContain('partly changed');
+    expect(result.sentence).not.toContain(': .');
+    expect(result.sentence).toContain('Moved aside: /h/a (moved to /h/a.moved).');
+    expect(result.sentence).toEndWith('Check these paths and files, fix the cause, then apply again.');
+  });
+
+  it('R3-M1: several landed files are all named', async () => {
+    const two = {
+      outcome: 'applied',
+      apply: { ...ROLLED_BACK.apply, configurationLanded: [LANDED_FILE, '/home/kirin/.ferretry/config/model.yaml'] },
+    };
+    const result = await applyAccountChange(answer(two), CHANGE);
+    if (result.kind !== 'rolled-back') throw new Error('expected rolled-back');
+    expect(result.sentence).toContain(
+      `These configuration changes stayed and go live at the next apply: ${LANDED_FILE}, /home/kirin/.ferretry/config/model.yaml.`,
+    );
+    expect(result.sentence).toContain('put those files back as they were, or delete any that did not exist before');
+    expect(result.sentence).not.toContain('remove those files');
+  });
+
+  it('R3-M1: a rollback-incomplete apply names the unrestored paths, their backups, what was moved aside, and the landed files', async () => {
+    const moved = {
+      outcome: 'applied',
+      apply: { ...ROLLBACK_INCOMPLETE.apply, displaced: [{ path: '/h/a', movedTo: '/h/a.moved' }] },
+    };
+    const result = await applyAccountChange(answer(moved), CHANGE);
+    expect(result).toMatchObject({
+      kind: 'rollback-incomplete',
+      landed: [LANDED_FILE],
+      unrestored: [UNRESTORED_PATH],
+    });
+    if (result.kind !== 'rollback-incomplete') throw new Error('expected rollback-incomplete');
+    expect(result.sentence).toStartWith(
+      'This change was not applied, and the fleet could not be fully put back, so this machine needs a look.',
+    );
+    expect(result.sentence).toContain(`${UNRESTORED_PATH} (the original is at ${BACKUP_PATH})`);
+    expect(result.sentence).toContain('Moved aside: /h/a (moved to /h/a.moved).');
+    expect(result.sentence).toContain(LANDED_FILE);
+    expect(result.sentence).toContain('This path was left partly changed:');
+    expect(result.sentence).toContain('Check these paths and files, fix the cause, then apply again.');
+  });
+
+  it('R3-M1: a login removal whose moved runtimes rolled back is not applied either', async () => {
+    const login = { outcome: 'login-changed', result: 'applied', moved: ROLLED_BACK.apply };
+    expect(await applyAccountChange(answer(login), CHANGE)).toMatchObject({ kind: 'rolled-back' });
+  });
+
+  it('R3-M1: a finished apply, a history failure and a change with no apply are still applied', async () => {
+    expect(await applyAccountChange(answer(COMMITTED), CHANGE)).toMatchObject({ kind: 'applied' });
+    const history = {
+      outcome: 'applied',
+      apply: {
+        outcome: 'committed-with-history-failure',
+        failedHarness: 'codex',
+        reason: 'x',
+        committed: {
+          ...COMMITTED.apply.result,
+          manifest: { version: 1, generatedAt: '2026-10-13T08:00:00.000Z', accounts: [] },
+        },
+      },
+    };
+    expect(await applyAccountChange(answer(history), CHANGE)).toMatchObject({ kind: 'applied' });
+    expect(await applyAccountChange(answer(APPLIED), CHANGE)).toMatchObject({ kind: 'applied' });
+  });
+
+  it('R3-M1: an outcome this app does not know is a refusal, never a save', async () => {
+    const unknown = { outcome: 'applied', apply: { outcome: 'half-done', failedOperation: 'x', reason: 'y' } };
+    const result = await applyAccountChange(answer(unknown), CHANGE);
+    expect(result.kind).toBe('refused');
+  });
+
+  it('R3-M1: settleOutcome refuses an apply outcome that got past the parser', () => {
+    const staged = stagedFrom({ body: { change: CHANGE } });
+    const strange = { outcome: 'applied', apply: { outcome: 'half-done' } } as never;
+    const result = settleOutcome(AccountChangeViewSchema.parse(staged), strange);
+    expect(result.kind).toBe('refused');
+    expect(result.kind === 'refused' ? result.sentence : '').toContain('doesn’t understand');
   });
 });
 

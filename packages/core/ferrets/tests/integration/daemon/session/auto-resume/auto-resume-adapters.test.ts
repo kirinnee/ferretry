@@ -1,110 +1,35 @@
 import { describe, it } from 'bun:test';
-import { join } from 'node:path';
+import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
+import { ok } from '@ferretry/std';
 import should from 'should';
 import { AccountAutoResumeAvailability } from '../../../../../daemon/adapters/session/auto-resume/account-auto-resume-availability.ts';
 import { BootExitRecorder } from '../../../../../daemon/adapters/session/auto-resume/boot-exit-recorder.ts';
-import { FileAutoResumeLedger } from '../../../../../daemon/adapters/session/auto-resume/file-auto-resume-ledger.ts';
-import { FileAutoResumeSummaryStore } from '../../../../../daemon/adapters/session/auto-resume/file-auto-resume-summary-store.ts';
-import { RepositoryAutoResumeRoster } from '../../../../../daemon/adapters/session/auto-resume/storage-auto-resume-roster.ts';
+import {
+  StateAutoResumeLedger,
+  StateAutoResumeSummaryStore,
+} from '../../../../../daemon/adapters/session/auto-resume/state-auto-resume-ledger.ts';
 import { StorageAutoResumeJournal } from '../../../../../daemon/adapters/session/auto-resume/storage-auto-resume-journal.ts';
-import type { AutoResumeCandidate } from '../../../../../daemon/lib/session/auto-resume/types.ts';
 import { AutoResumeService } from '../../../../../daemon/lib/session/auto-resume/service.ts';
 import type { ExitedSessionTransition, SessionExitObservation } from '../../../../../daemon/lib/session/health/exit.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
-import type { ResumeTarget } from '../../../../../daemon/lib/session/resume/types.ts';
 import type { SessionExitPort } from '../../../../../daemon/lib/session/health/service.ts';
-import { MEMORY_PATHS, MemoryFileSystem } from '../../../../support/daemon/memory-file-system.ts';
 
 const NOW = '2026-10-21T12:00:00.000Z';
 const ID = '2c8f5f2e-5b53-4a53-9a38-8f2b3d2f6a11';
 
-/**
- * The state home's files, in memory. A path outside the home is refused the way the daemon's own filesystem
- * refuses one: the read throws, which the adapters must read as nothing.
- */
-function fileSystem(): MemoryFileSystem {
-  const system = new MemoryFileSystem();
-  system.refusedOutside = MEMORY_PATHS.home;
-  return system;
+/** Ferrets' own state documents, in memory, keyed by the declared file's path: what the state adapters stand on. */
+function memoryState(): Pick<StatePort, 'read' | 'write' | 'remove'> {
+  const files = new Map<string, unknown>();
+  return {
+    read: async <Shape>(file: StateFileDef<string, Shape>) => ok(files.get(file.path) as Shape | undefined),
+    write: async (file, value) => {
+      files.set(file.path, structuredClone(value));
+    },
+    remove: async file => {
+      files.delete(file.path);
+    },
+  };
 }
-
-describe('auto-resume ledger', () => {
-  it('should round-trip candidates and remove the file when none are owed', async () => {
-    // Arrange
-    const home = MEMORY_PATHS.home;
-    const system = fileSystem();
-    const file = join(home, 'auto-resume.json');
-    const ledger = new FileAutoResumeLedger(system, file);
-    const candidates: AutoResumeCandidate[] = [{ id: 'a', status: 'running', at: NOW }];
-
-    // Act
-    await ledger.write(candidates);
-    const stored = await ledger.read();
-    await ledger.write([]);
-
-    // Assert
-    should(stored).deepEqual(candidates);
-    should(await ledger.read()).deepEqual([]);
-    should(system.text(file)).be.undefined();
-  });
-
-  it('should read an absent, torn or foreign file as nothing owed', async () => {
-    // Arrange
-    const home = MEMORY_PATHS.home;
-    const system = fileSystem();
-    const file = join(home, 'auto-resume.json');
-    const ledger = new FileAutoResumeLedger(system, file);
-
-    // Act / Assert
-    should(await ledger.read()).deepEqual([]);
-    system.plant(file, '{ torn');
-    should(await ledger.read()).deepEqual([]);
-    system.plant(file, JSON.stringify({ version: 2, candidates: [] }));
-    should(await ledger.read()).deepEqual([]);
-  });
-
-  it('should read an unreadable path as nothing owed', async () => {
-    const ledger = new FileAutoResumeLedger(fileSystem(), '/outside/the/state/home.json');
-    should(await ledger.read()).deepEqual([]);
-  });
-});
-
-describe('auto-resume summary store', () => {
-  it('should round-trip the last pass and read nothing otherwise', async () => {
-    // Arrange
-    const home = MEMORY_PATHS.home;
-    const system = fileSystem();
-    const file = join(home, 'auto-resume-summary.json');
-    const store = new FileAutoResumeSummaryStore(system, file);
-    const summary = { at: NOW, resumed: 2, skipped: [{ sessionId: 'a', reason: 'login expired' }] };
-
-    // Act / Assert
-    should(await store.read()).equal(null);
-    await store.write(summary);
-    should(await store.read()).deepEqual(summary);
-    system.plant(file, '{ torn');
-    should(await store.read()).equal(null);
-    system.plant(file, JSON.stringify({ at: 'x' }));
-    should(await store.read()).equal(null);
-  });
-
-  it('should read an unreadable path as nothing', async () => {
-    should(await new FileAutoResumeSummaryStore(fileSystem(), '/outside/the/home.json').read()).equal(null);
-  });
-});
-
-describe('auto-resume roster', () => {
-  it('should read a session through the revive repository', async () => {
-    // Arrange
-    const target = { id: ID, status: 'failed', mode: 'auto' } as ResumeTarget;
-    const roster = new RepositoryAutoResumeRoster({ read: async id => (id === ID ? target : undefined) });
-
-    // Act / Assert
-    should(await roster.subject(ID)).deepEqual({ status: 'failed', mode: 'auto' });
-    should(await roster.subject('2c8f5f2e-5b53-4a53-9a38-8f2b3d2f6a99')).equal(undefined);
-    should(await roster.subject('not a session id')).equal(undefined);
-  });
-});
 
 describe('auto-resume availability', () => {
   it('should say yes when the runtime resolves and give the refusal when it does not', async () => {
@@ -261,8 +186,6 @@ describe('a host restart, end to end', () => {
 
   it('should bring back what was running, leave stopped work stopped, and say what it could not do', async () => {
     // Arrange
-    const home = MEMORY_PATHS.home;
-    const system = fileSystem();
     const machine = new Machine();
     machine.add('mid-turn', 'tool_running');
     machine.add('idle-auto', 'awaiting_user', 'auto');
@@ -271,8 +194,9 @@ describe('a host restart, end to end', () => {
     machine.add('owner-stopped', 'stopped');
     machine.add('finished', 'completed');
     machine.loggedOut.add('codex-old');
-    const ledger = new FileAutoResumeLedger(system, join(home, 'auto-resume.json'));
-    const summaryStore = new FileAutoResumeSummaryStore(system, join(home, 'auto-resume-summary.json'));
+    const state = memoryState();
+    const ledger = new StateAutoResumeLedger(state);
+    const summaryStore = new StateAutoResumeSummaryStore(state);
     const exits = new BootExitRecorder(machine.exits(), { now: () => NOW });
     const service = new AutoResumeService(
       {

@@ -8,6 +8,7 @@
  * through the half's own client; no secret value, token or program argument ever reaches it.
  */
 import { ContextFailure, ContextFilterBar, contextEmptyCopy, ContextNote, useContextRead } from '@ferretry/app/ui';
+import { Plus } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { type McpClient, readFerretMcpServers } from '../lib/client.ts';
 import {
@@ -22,6 +23,7 @@ import {
   visibleMcpServers,
 } from '../lib/mcp-model.ts';
 import './mcp.css';
+import { AddMcpDialog } from './add-mcp-dialog.tsx';
 import { McpServerDetails } from './server-details.tsx';
 import { McpServerRow, useMcpServerActions } from './server-row.tsx';
 
@@ -43,6 +45,7 @@ export function McpServersPanel({ client, ferretId, now = Date.now, searchDeboun
   const actions = useMcpServerActions({ client, machineName: MACHINE_NAME, ferretId, now }, reload);
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState<McpChip>('all');
+  const [adding, setAdding] = useState(false);
   const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
   const toggleDetails = (id: string): void =>
     setShown(previous => {
@@ -85,6 +88,15 @@ export function McpServersPanel({ client, ferretId, now = Date.now, searchDeboun
         <span>
           {servers.length} server{servers.length === 1 ? '' : 's'} this ferret sees
         </span>
+        <button
+          className="fy-mcp-link inline-flex items-center gap-1 text-meta"
+          data-mcp-add=""
+          onClick={() => setAdding(true)}
+          type="button"
+        >
+          <Plus aria-hidden="true" size={13} />
+          Add…
+        </button>
       </div>
       {inventory.problems.map(problem => (
         <p key={problem.source} className="m-0 break-words text-meta text-warn" data-context-mcp-problem="">
@@ -114,6 +126,16 @@ export function McpServersPanel({ client, ferretId, now = Date.now, searchDeboun
         </ul>
       )}
       {actions.sheet}
+      {adding ? (
+        <AddMcpDialog
+          client={client}
+          ferretId={ferretId}
+          onClose={() => {
+            setAdding(false);
+            reload();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -10,15 +10,15 @@
  * | `components/mcp/<n>.yaml`              | `mcp/<n>.yaml`                                                      |
  * | `components/skills/<n>.yaml`           | `skills/<n>.yaml`                                                   |
  * | `components/instructions/<n>.yaml`     | `instructions/<n>.md` (the document it points at, inside the assets) |
- * | `components/settings\|hooks/<n>.yaml`  | waits: v5 holds settings/hooks inline, v4 points at files/flags/env |
+ * | `components/settings\|hooks/<n>.yaml`  | `{claude-code,codex}/{settings,hooks}/<n>.yaml` inline (file, env, -c, --disallowedTools); else NOT CARRIED, see `planHarnessComponent` |
  * | `logins/<id>.yaml`                     | `logins/<id>.yaml`                                                  |
  * | `presets/<id>.yaml`, `models/<id>.yaml`| `endpoints/<id>.yaml`, `models/<id>.yaml`                           |
  * | `warden.yaml`                          | `warden.yaml` (`autoMigrate` → `autoMove`, v4's read-time upgrades) |
  * | `limits.yaml`                          | `limits.yaml` (+ `machine.agentControl`)                            |
  * | `account-defaults.yaml`                | `accounts.yaml`                                                     |
- * | `machine.yaml`                         | split: harness-claude-code/-codex, runtimes, limits, conversation,  |
- * |                                        | browsers, agenda, usage; the rest not carried (see below)           |
- * | `voice.yaml`                           | waits: Voice declares no config file yet                            |
+ * | `machine.yaml`                         | split: harness-claude-code/-codex, runtimes (+ autoResume), limits, |
+ * |                                        | conversation, browsers, agenda, usage; the rest not carried (below) |
+ * | `voice.yaml`                           | `voice.yaml` (Voice's `VOICE_CONFIG`)                               |
  * | `pack.yaml`, `models-guide.yaml`       | the Packs step's (`packs.yaml`)                                     |
  * | `learning.yaml`                        | the Lessons step's                                                  |
  *
@@ -30,24 +30,16 @@
  * file is read back as the v5 kernel reads it and parsed with the declared schema BEFORE anything is written. A value
  * that looks like a raw secret fails the step naming the file and key; `${secret:NAME}` references are kept verbatim.
  */
-import { CODEX_CONFIG } from '@ferretry/plugin-codex/contract';
-import { CLAUDE_CODE_CONFIG } from '@ferretry/plugin-claude-code/contract';
-import { INSTRUCTION_ITEMS_FOLDER, LimitsConfigFile } from '@ferretry/core-ferrets/contract';
-import { AccountsConfigSchema } from '@ferretry/plugin-accounts/contract';
-import { AGENDA_CONFIG } from '@ferretry/plugin-agenda/contract';
-import { BrowsersConfigSchema } from '@ferretry/plugin-browsers/contract';
-import { CONVERSATION_CONFIG } from '@ferretry/plugin-conversation/contract';
-import { ENDPOINTS_CONFIG, LOGINS_CONFIG, MODELS_CONFIG } from '@ferretry/plugin-logins/contract';
-import { MCP_CONFIG } from '@ferretry/plugin-mcp/contract';
-import { MODEL_SET_ITEMS, PROFILE_ITEMS, RUNTIME_ITEMS, RUNTIMES_CONFIG } from '@ferretry/plugin-runtimes/contract';
-import { SKILLS_CONFIG } from '@ferretry/plugin-skills/contract';
-import { USAGE_CONFIG } from '@ferretry/plugin-usage/contract';
-import { WardenFileSchema } from '@ferretry/plugin-warden/contract';
+import { INSTRUCTION_ITEMS_FOLDER } from '@ferretry/core-ferrets/contract';
 import { lstat, readFile } from 'node:fs/promises';
-import { isAbsolute, join, normalize, relative, sep } from 'node:path';
-import { Document, isMap, isScalar, isSeq, type Pair, type YAMLMap } from 'yaml';
+import { componentFileSource, instructionsSource, MAX_COMPONENT_BYTES } from './component-files.ts';
+import { carryFlags, type FlagOutcome } from './component-flags.ts';
+import { carryAssetReferences, type CarriedAsset, v5AssetPath } from './component-assets.ts';
+import { join } from 'node:path';
+import { Document, isMap, isScalar, isSeq, Pair, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
+  documentCredentialPaths,
   dropModeline,
   listV4Config,
   rawSecretPaths,
@@ -57,14 +49,47 @@ import {
   YAML_OPTIONS,
 } from '../v4/config.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
+import { PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
+import {
+  heldReason,
+  type ProfileScopes,
+  previewProfileScopes,
+  type RuntimeHarness,
+  runtimeHarnessOf,
+} from './preview-hold.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath, v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
+import { takeLoginKeys, v4VaultNames } from './login-keys.ts';
 
-/** v5 files declared in a plugin MANIFEST (not its contract): restated with the file name and the contract's schema. */
-const WARDEN_CONFIG: V5ConfigTarget = { shape: 'file', file: 'warden.yaml', schema: WardenFileSchema };
-const ACCOUNTS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'accounts.yaml', schema: AccountsConfigSchema };
-const BROWSERS_CONFIG: V5ConfigTarget = { shape: 'file', file: 'browsers.yaml', schema: BrowsersConfigSchema };
+/** Every v5 file this step writes, with its owning plugin, from the one registry of targets. */
+const {
+  WARDEN: WARDEN_CONFIG,
+  ACCOUNTS: ACCOUNTS_CONFIG,
+  BROWSERS: BROWSERS_CONFIG,
+  TERMINALS: TERMINALS_CONFIG,
+  CODEX: CODEX_CONFIG,
+  CODEX_SETTINGS,
+  CODEX_HOOKS,
+  CLAUDE_CODE: CLAUDE_CODE_CONFIG,
+  CLAUDE_CODE_SETTINGS,
+  CLAUDE_CODE_HOOKS,
+  LIMITS: LimitsConfigFile,
+  AGENDA: AGENDA_CONFIG,
+  CONVERSATION: CONVERSATION_CONFIG,
+  ENDPOINTS: ENDPOINTS_CONFIG,
+  LOGINS: LOGINS_CONFIG,
+  MODELS: MODELS_CONFIG,
+  MCP: MCP_CONFIG,
+  MODEL_SET_ITEMS,
+  PROFILE_ITEMS,
+  RUNTIME_ITEMS,
+  RUNTIMES: RUNTIMES_CONFIG,
+  SKILLS: SKILLS_CONFIG,
+  USAGE: USAGE_CONFIG,
+  VOICE: VOICE_CONFIG,
+} = CONFIG_TARGETS;
 
 /** v4's `LEGACY_TRIAGE_LAYERS` and `DEFAULT_WARDEN_JEV_ACTS` (`packages/protocol/src/lib/warden.ts`). */
 const LEGACY_TRIAGE_LAYERS: Readonly<Record<string, { jev: boolean; llm: boolean }>> = {
@@ -97,8 +122,6 @@ const V4_MACHINE_KEYS = new Set([
 const MACHINE_NOT_CARRIED: Readonly<Record<string, string>> = {
   browserPorts: 'v5 browsers.yaml declares only mode and proxy; the browser picks its loopback ports',
   browserFirewallFailure: 'v5 browsers.yaml declares no firewall-failure switch',
-  autoResume:
-    'no v5 config schema declares it yet (§9.2 places auto-resume in limits.yaml; LimitsFileSchema has no key)',
   advanced: 'secretsFile, aliases, wrapper commands, usage and path.announce have no v5 config field',
   attentionNudge: 'superseded: the file also wrote agendaNudge, which v4 read instead',
 };
@@ -133,12 +156,27 @@ interface Planned {
   readonly from: Set<string>;
 }
 
+/** A settings or hooks component the converter cannot carry in full (rule 2 of the lead's ruling). */
+interface Uncarried {
+  readonly label: string;
+  /** The profile layer that names it: `settings/<name>` or `hooks/<name>`. */
+  readonly layer: string;
+  readonly reasons: string[];
+  /** Flag names only, never a value. */
+  readonly flags: string[];
+  /** Nothing in it for v5 to carry and nothing lost: its layer is always removed, never pending. */
+  readonly empty: boolean;
+}
+
 interface Plan {
   readonly files: Map<string, Planned>;
   readonly instructions: { readonly name: string; readonly source: string; readonly from: string }[];
+  /** Files under v4's `fleet/assets/` that a carried hooks or settings document points at, by path under it. */
+  readonly assets: Map<string, CarriedAsset>;
   readonly waiting: string[];
   readonly dropped: NotCarried[];
   readonly kept: Map<string, number>;
+  readonly uncarried: Uncarried[];
 }
 
 // ── yaml Document helpers ────────────────────────────────────────────────────────────────────────────────────────
@@ -184,6 +222,18 @@ const contents = (document: Document): YAMLMap => document.contents as YAMLMap;
 
 // ── the plan ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** The `from` of a file the preview itself creates (its header says so instead of "Carried from v4"). */
+export const PREVIEW_AUTHOR = 'the preview';
+
+/** Writes `key: value` into a planned file (made if absent), replacing whatever v4 said for that key. */
+function forceFlag(plan: Plan, target: V5ConfigTarget, key: string, value: boolean): void {
+  const planned = place(plan, target, undefined, PREVIEW_AUTHOR);
+  if (!isMap(planned.document.contents)) planned.document.contents = planned.document.createNode({}) as YAMLMap;
+  const map = contents(planned.document);
+  take(map, key);
+  map.items.push(new Pair(key, value));
+}
+
 function place(plan: Plan, target: V5ConfigTarget, name: string | undefined, from: string, document?: Document) {
   const path = configPath(target, name);
   const existing = plan.files.get(path);
@@ -198,7 +248,10 @@ function place(plan: Plan, target: V5ConfigTarget, name: string | undefined, fro
     document:
       document ??
       Object.assign(new Document({}, YAML_OPTIONS), {
-        commentBefore: ` Carried from v4 ${from} by the v4 → v5 converter.`,
+        commentBefore:
+          from === PREVIEW_AUTHOR
+            ? ' Written by the 5.0 preview (not carried from v4).'
+            : ` Carried from v4 ${from} by the v4 → v5 converter.`,
       }),
     from: new Set([from]),
   };
@@ -215,11 +268,7 @@ const LESSONS_WHY =
 
 /** Removes the `instructions/lessons` layer from a profile's `contents`; says whether it was there. */
 function withoutLessonsLayer(map: YAMLMap): boolean {
-  const layers = pairOf(map, 'contents')?.value;
-  if (!isSeq(layers)) return false;
-  const before = layers.items.length;
-  layers.items = layers.items.filter(item => !(isScalar(item) && item.value === LESSONS_LAYER));
-  return layers.items.length !== before;
+  return withoutLayer(map, LESSONS_LAYER);
 }
 
 const count = (plan: Plan, what: string): void => {
@@ -288,6 +337,8 @@ function splitMachine(plan: Plan, file: V4ConfigFile, document: Document, resolv
     contents(place(plan, RUNTIMES_CONFIG, undefined, from).document).items.push(copy);
     count(plan, 'machine.yaml settings split out');
   }
+  const autoResume = get('autoResume');
+  if (autoResume !== undefined) into(RUNTIMES_CONFIG, autoResume, 'autoResume');
   const control = get('agentControl');
   if (control !== undefined) into(LimitsConfigFile, control, 'agentControl');
   const conversations = get('conversations');
@@ -317,32 +368,17 @@ function splitMachine(plan: Plan, file: V4ConfigFile, document: Document, resolv
   }
 }
 
-/** The asset document an instructions component points at, when it is a plain file inside `fleet/assets/`. */
-export async function instructionsSource(home: string, value: unknown): Promise<string | undefined> {
-  if (typeof value !== 'string' || isAbsolute(value) || value.startsWith('~')) return undefined;
-  const assets = join(home, 'fleet', 'assets');
-  const path = normalize(join(assets, value));
-  const inside = relative(assets, path);
-  if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return undefined;
-  // Every folder on the way must be a real folder: a link is never followed out of the asset tree.
-  let walked = assets;
-  for (const part of inside.split(sep).slice(0, -1)) {
-    walked = join(walked, part);
-    const facts = await lstat(walked).catch(() => undefined);
-    if (facts === undefined || !facts.isDirectory()) return undefined;
-  }
-  const facts = await lstat(path).catch(() => undefined);
-  return facts?.isFile() === true ? path : undefined;
-}
-
 async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolve: Resolve): Promise<void> {
   const { address, label } = file;
   if (address.kind === 'learning' || address.kind === 'pack' || address.kind === 'modelsGuide') return;
-  if (address.kind === 'voice') {
-    plan.waiting.push(`${label} (no Voice config schema yet)`);
+  const document = await readV4Yaml(file);
+  if (address.kind === 'component' && (address.componentKind === 'settings' || address.componentKind === 'hooks')) {
+    await planHarnessComponent(ctx, plan, file, document, address.componentKind, address.name);
     return;
   }
-  const document = await readV4Yaml(file);
+  // A plain key in a login's env is parked for the vault and written here as a reference; any other secret-shaped value
+  // (and a key when no hold exists) still fails the step below, so nothing is ever left plain.
+  if (address.kind === 'login' && ctx.loginKeys !== undefined) takeLoginKeys(document, address.name, ctx.loginKeys);
   const secrets = rawSecretPaths(document.toJS());
   if (secrets.length > 0)
     throw new V4InputError(
@@ -363,6 +399,10 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
     case 'limits':
       place(plan, LimitsConfigFile, undefined, label, document);
       count(plan, 'limits.yaml');
+      return;
+    case 'voice':
+      place(plan, VOICE_CONFIG, undefined, label, document);
+      count(plan, 'voice.yaml');
       return;
     case 'accountDefaults':
       place(plan, ACCOUNTS_CONFIG, undefined, label, document);
@@ -415,18 +455,257 @@ async function planFile(ctx: StepContext, plan: Plan, file: V4ConfigFile, resolv
       }
       const file = pairOf(map, 'file')?.value;
       const source = await instructionsSource(ctx.v4.home, isScalar(file) ? file.value : undefined);
-      if (source === undefined) plan.waiting.push(`${label} (its document is not a plain file inside fleet/assets/)`);
+      if (source === 'hard-link')
+        plan.waiting.push(`${label} (its document is a hard link (v4 refused it), so it was never read)`);
+      else if (source === undefined)
+        plan.waiting.push(`${label} (its document is not a plain file inside fleet/assets/)`);
       else plan.instructions.push({ name: address.name, source, from: label });
       return;
     }
     case 'settings':
     case 'hooks':
-      plan.waiting.push(`${label} (v5 holds ${address.componentKind} inline; v4 points at a file, flags or env)`);
-      return;
+      return; // handled above (planHarnessComponent)
   }
 }
 
-async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: readonly string[] }> {
+const V5_HARNESS = { claude: 'claude-code', 'claude-code': 'claude-code', codex: 'codex' } as const;
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * A v4 settings or hooks component. v5 holds these INLINE in the item (`settings:` / `hooks:`), where v4 pointed at a
+ * file, flags or env. `env` is data in the YAML itself and is written inline; a `file` that is a plain file under
+ * `fleet/assets/` (v4's rule exactly, `component-files.ts`) is read from the snapshot and inlined; any other file is
+ * NEVER opened. Codex `-c` and Claude `--disallowedTools` flags are
+ * carried as settings keys; any other thing the converter cannot carry in full (another flag, an outside file, a hooks
+ * directory, a secret-shaped or `${secret:...}` value, an oversize file, a v5 refusal) makes the component NOT CARRIED:
+ * it is named with its flags (names only) and every profile that layers it, and `settleUncarried` decides what happens
+ * to those layers (pending by default, stripped with `--drop-uncarried`).
+ */
+async function planHarnessComponent(
+  ctx: StepContext,
+  plan: Plan,
+  file: V4ConfigFile,
+  document: Document,
+  kind: 'settings' | 'hooks',
+  name: string,
+): Promise<void> {
+  const { label } = file;
+  const v4 = document.toJS() as Record<string, unknown>;
+  const entry: Uncarried = { label, layer: `${kind}/${name}`, reasons: [], flags: [], empty: false };
+  const harnessName = typeof v4.harness === 'string' ? V5_HARNESS[v4.harness as keyof typeof V5_HARNESS] : undefined;
+  if (harnessName === undefined) {
+    entry.reasons.push(`it names no harness v5 holds ${kind} for`);
+    plan.uncarried.push(entry);
+    return;
+  }
+  const target =
+    kind === 'settings'
+      ? harnessName === 'codex'
+        ? CODEX_SETTINGS
+        : CLAUDE_CODE_SETTINGS
+      : harnessName === 'codex'
+        ? CODEX_HOOKS
+        : CLAUDE_CODE_HOOKS;
+
+  // The file form: only a plain, single-name file under fleet/assets/ of the v4 home snapshot is read (component-files.ts), up to the size cap.
+  let fromFile: Record<string, unknown> | undefined;
+  if (typeof v4.file === 'string') {
+    const found = await componentFileSource(ctx, v4.file);
+    if (!('source' in found))
+      entry.reasons.push(
+        found.refused === 'outside the v4 home'
+          ? 'v4 read this file from outside its home; the preview carries only files under fleet/assets; copy it there to carry it'
+          : found.refused === 'outside fleet/assets (inside the v4 home)'
+            ? 'its file is inside the v4 home but outside fleet/assets, so v4 would not have read it either; copy it into fleet/assets/ and point file: at it'
+            : found.refused === 'a hard link'
+              ? 'its file is a hard link (v4 refused it), so it was never read; make it a plain file in fleet/assets/'
+              : 'its file is not a plain file in fleet/assets/, so it was never read; copy it into fleet/assets/ and point file: at it',
+      );
+    else if (((await lstat(found.source).catch(() => undefined))?.size ?? 0) > MAX_COMPONENT_BYTES)
+      entry.reasons.push(`its file is over ${MAX_COMPONENT_BYTES / 1024 / 1024} MiB, so it was not read`);
+    else {
+      try {
+        const text = await readFile(found.source, 'utf8');
+        const parsed: unknown =
+          harnessName === 'codex' && kind === 'settings' ? Bun.TOML.parse(text) : JSON.parse(text);
+        if (isRecordValue(parsed)) fromFile = parsed;
+        else throw new Error('not a table');
+      } catch {
+        entry.reasons.push(`its file could not be read as ${kind}`);
+      }
+    }
+  }
+  if (typeof v4.directory === 'string') entry.reasons.push('a folder of hook scripts has no inline v5 form');
+
+  // Launch flags: `-c` and `--disallowedTools` have a v5 form; the rest are named by name and hold the component.
+  const flags: FlagOutcome = carryFlags(harnessName, Array.isArray(v4.flags) ? v4.flags : []);
+  if (flags.superseded.length > 0)
+    plan.dropped.push({
+      what: `${label} flags (superseded)`,
+      why: `${flags.superseded.join(', ')}: v4's own fixed layer discarded these (it decides the permission, sandbox and approval settings), so they never reached a v4 ferret; nothing is lost`,
+    });
+  const noForm = [...flags.uncarried];
+  if (kind === 'hooks') {
+    noForm.push(...flags.deny.map(() => '--disallowedTools'), ...flags.config.map(([key]) => `-c ${key}`));
+  }
+  if (noForm.length > 0) {
+    entry.flags.push(...new Set(noForm));
+    entry.reasons.push(`v5 ${kind} items hold no launch flags, and these have no inline form`);
+  }
+
+  let body: Record<string, unknown> = {};
+  if (kind === 'hooks') {
+    if (fromFile !== undefined) {
+      const events = isRecordValue(fromFile.hooks) ? fromFile.hooks : fromFile;
+      body = { hooks: events };
+    }
+  } else {
+    const settings: Record<string, unknown> = { ...fromFile };
+    if (isRecordValue(v4.env) && Object.keys(v4.env).length > 0) {
+      const env: Record<string, string> = {};
+      for (const [key, value] of Object.entries(v4.env)) {
+        if (typeof value === 'string' && /\$\{secret:[^}]*\}/u.test(value))
+          entry.reasons.push(
+            `env ${key} is a \${secret:...} reference, which v5 resolves only in the launch environment and never inside a settings document`,
+          );
+        else if (typeof value === 'string') env[key] = value;
+        else if (typeof value === 'number' || typeof value === 'boolean') env[key] = String(value);
+        else entry.reasons.push(`env ${key} is not text, a number or a boolean`);
+      }
+      if (Object.keys(env).length > 0) {
+        if (harnessName === 'codex') {
+          const policy = isRecordValue(settings.shell_environment_policy) ? settings.shell_environment_policy : {};
+          const set = isRecordValue(policy.set) ? policy.set : {};
+          settings.shell_environment_policy = { ...policy, set: { ...set, ...env } };
+          plan.dropped.push({
+            what: `${label} env (Codex)`,
+            why: 'carried as shell_environment_policy.set, which reaches the shell commands Codex runs, NOT the Codex process itself: a variable that governed Codex own traffic (a proxy, a CA bundle) no longer does',
+          });
+        } else settings.env = { ...(isRecordValue(settings.env) ? settings.env : {}), ...env };
+      }
+    }
+    if (harnessName === 'claude-code' && flags.deny.length > 0) {
+      const permissions = isRecordValue(settings.permissions) ? settings.permissions : {};
+      const before = Array.isArray(permissions.deny) ? (permissions.deny as unknown[]) : [];
+      settings.permissions = { ...permissions, deny: [...new Set([...before, ...flags.deny])] };
+    }
+    if (harnessName === 'codex')
+      for (const [key, value] of flags.config) {
+        const parts = key.split('.');
+        let node = settings;
+        for (const part of parts.slice(0, -1)) {
+          const next = node[part];
+          node[part] = isRecordValue(next) ? { ...next } : {};
+          node = node[part] as Record<string, unknown>;
+        }
+        node[parts[parts.length - 1] as string] = value;
+      }
+    if (Object.keys(settings).length > 0) body = { settings };
+  }
+
+  // A string that names a file under v4's fleet/assets is rewritten to the v5 copy (component-assets.ts); any other
+  // string that names the v4 home holds the component.
+  let assets: readonly CarriedAsset[] = [];
+  if (Object.keys(body).length > 0) {
+    const carried = await carryAssetReferences(ctx, body);
+    body = carried.value as Record<string, unknown>;
+    assets = carried.assets;
+    entry.reasons.push(...carried.reasons);
+  }
+
+  if (Object.keys(body).length > 0) {
+    const secrets = documentCredentialPaths(body);
+    if (secrets.length > 0)
+      entry.reasons.push(
+        `the value at ${secrets.join(', ')} looks like a credential, so it was held; store it with \`fy secret set NAME\` and write \${secret:NAME}`,
+      );
+  }
+  if (entry.reasons.length === 0 && Object.keys(body).length > 0) {
+    const item = new Document(
+      { ...(typeof v4.description === 'string' ? { description: v4.description } : {}), ...body },
+      YAML_OPTIONS,
+    );
+    item.commentBefore = ` Carried from v4 ${label} by the v4 → v5 converter.`;
+    const problem = v5ConfigProblem(target, name, item.toString({ lineWidth: 0 }));
+    if (problem === undefined) {
+      place(plan, target, name, label, item);
+      count(plan, kind === 'settings' ? 'settings items' : 'hooks items');
+      for (const asset of assets)
+        if (!plan.assets.has(asset.rel)) {
+          plan.assets.set(asset.rel, asset);
+          count(plan, `component file ${v5AssetPath(asset.rel)}`);
+        }
+      return;
+    }
+    entry.reasons.push(`v5 refuses it as ${kind} (${problem})`);
+  }
+  if (entry.reasons.length === 0) plan.uncarried.push({ ...entry, empty: true });
+  else plan.uncarried.push(entry);
+}
+
+const withoutLayer = (map: YAMLMap, layer: string): boolean => {
+  const layers = pairOf(map, 'contents')?.value;
+  if (!isSeq(layers)) return false;
+  const before = layers.items.length;
+  layers.items = layers.items.filter(item => !(isScalar(item) && item.value === layer));
+  return layers.items.length !== before;
+};
+
+/**
+ * Settles every not-carried component against the profiles that layer it (called last, after the preview's own holds).
+ * Default: a carried profile that layers one makes the step `pending` (no home.json), so a ferret is never started
+ * quietly less restricted and no layer dangles. With `--drop-uncarried` (the person running it chose it) the layer is
+ * removed from each such profile, each profile named, and the report says the ferrets may be less restricted than in v4.
+ */
+function settleUncarried(plan: Plan, drop: boolean): void {
+  for (const item of plan.uncarried) {
+    const profiles: string[] = [];
+    for (const file of plan.files.values()) {
+      if (file.target !== PROFILE_ITEMS || file.name === undefined || !isMap(file.document.contents)) continue;
+      const layers = pairOf(file.document.contents, 'contents')?.value;
+      if (isSeq(layers) && layers.items.some(layer => isScalar(layer) && layer.value === item.layer))
+        profiles.push(file.name);
+    }
+    const flagPart = item.flags.length === 0 ? '' : `; flags not carried (names only): ${[...item.flags].join(', ')}`;
+    const used =
+      profiles.length === 0 ? 'no carried profile layers it' : `layered by profile(s): ${profiles.join(', ')}`;
+    const strip = (): void => {
+      for (const file of plan.files.values())
+        if (file.target === PROFILE_ITEMS && profiles.includes(file.name ?? '') && isMap(file.document.contents))
+          withoutLayer(file.document.contents, item.layer);
+    };
+    if (item.empty) {
+      strip();
+      plan.dropped.push({
+        what: item.label,
+        why: `it holds nothing v5 can carry and nothing is lost; its layer ${item.layer} was removed from ${profiles.length === 0 ? 'no profile' : `profile(s): ${profiles.join(', ')}`}`,
+      });
+      continue;
+    }
+    const base = `NOT CARRIED: ${item.reasons.join('; ')}${flagPart}; ${used}; this may have restricted what the agent could do`;
+    if (profiles.length === 0) {
+      plan.dropped.push({ what: item.label, why: `${base}.` });
+    } else if (drop) {
+      strip();
+      plan.dropped.push({
+        what: item.label,
+        why: `${base}. You passed --drop-uncarried: its layer ${item.layer} was REMOVED from profile(s) ${profiles.join(', ')}, so the ferrets on them may now be LESS restricted than in v4.`,
+      });
+    } else {
+      plan.dropped.push({ what: item.label, why: `${base}.` });
+      plan.waiting.push(
+        `${item.label} (not carried, ${used}; fix it in v4 by copying its file into fleet/assets/ (and pointing file: at it) or removing the flag or the component, or re-run with --drop-uncarried, which removes the layer and may leave the ferrets less restricted than in v4)`,
+      );
+    }
+  }
+}
+
+/** `codexRuntimes` is {@link PREVIEW_CODEX_RUNTIMES}; a test injects the switch on to see the Codex settings item. */
+export async function buildPlan(
+  ctx: StepContext,
+  codexRuntimes: boolean = PREVIEW_CODEX_RUNTIMES,
+): Promise<Plan & { readonly ignored: readonly string[] }> {
   let ids: Awaited<ReturnType<typeof runtimeIds>>;
   try {
     ids = await runtimeIds(ctx.v4.fleet);
@@ -437,13 +716,143 @@ async function buildPlan(ctx: StepContext): Promise<Plan & { readonly ignored: r
     ids?.runtimes[name] !== undefined
       ? name
       : (Object.entries(ids?.runtimes ?? {}).find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
-  const listing = await listV4Config(ctx.v4.home);
-  const plan: Plan = { files: new Map(), instructions: [], waiting: [], dropped: [], kept: new Map() };
+  const listing = await listV4Config(ctx.v4.home, ctx.v4.configOverrides);
+  const plan: Plan = {
+    files: new Map(),
+    instructions: [],
+    assets: new Map(),
+    waiting: [],
+    dropped: [],
+    kept: new Map(),
+    uncarried: [],
+  };
   // machine.yaml last: it adds to files other v4 files may also own (limits.yaml).
   const machine = `config/${V4_SINGLETONS.machine}`;
   const ordered = [...listing.files].sort((a, b) => Number(a.label === machine) - Number(b.label === machine));
   for (const file of ordered) await planFile(ctx, plan, file, resolve);
+  if (ctx.preview === true) {
+    // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say). `limits.yaml` is
+    // written off too (5.0 reads that file for launches, so once accepted it is a third layer); what the preview
+    // relies on first is its daemon having no reachable user systemd manager (preview/driver.ts `wrapperText`, checked
+    // by `preview.sh start`).
+    forceFlag(plan, RUNTIMES_CONFIG, 'autoResume', false);
+    forceFlag(plan, LimitsConfigFile, 'enabled', false);
+    if (ctx.previewShellEnv !== undefined) {
+      // Login shells re-prepend the nix profile (v4's `fy`): every preview ferret's shell environment carries the guard.
+      // 5.0's runtime and profile files are strict and hold no `env` (RuntimeFileSchema, ProfileFileSchema), so the only
+      // places a converted home can carry an environment are the two harnesses' settings items: Claude Code's
+      // `settings.env`, and Codex's own `shell_environment_policy.set` (Codex adds those variables to every command it
+      // runs). PATH is not written: a settings environment is literal and cannot say "this first, then yours".
+      const describe =
+        'The 5.0 preview: keeps login shells on the preview fy (written by the preview, not carried from v4)';
+      place(
+        plan,
+        CLAUDE_CODE_SETTINGS,
+        PREVIEW_SETTINGS_ITEM,
+        PREVIEW_AUTHOR,
+        new Document({ description: describe, settings: { env: { ...ctx.previewShellEnv } } }, YAML_OPTIONS),
+      );
+      count(plan, 'preview shell environment (settings item)');
+      // Terminals the daemon opens (the owner's web terminal and a ferret's) are not a harness child: they get only the
+      // kernel's {PATH, HOME}, so the same environment is Terminals' own `environment`, passed to every terminal.
+      place(
+        plan,
+        TERMINALS_CONFIG,
+        undefined,
+        PREVIEW_AUTHOR,
+        new Document({ environment: { ...ctx.previewShellEnv } }, YAML_OPTIONS),
+      );
+      count(plan, 'preview terminal environment (terminals.yaml)');
+      // What Codex ferrets will need once 5.0 applies Codex settings items; written only with the switch on.
+      if (codexRuntimes) {
+        place(
+          plan,
+          CODEX_SETTINGS,
+          PREVIEW_SETTINGS_ITEM,
+          PREVIEW_AUTHOR,
+          new Document(
+            { description: describe, settings: { shell_environment_policy: { set: { ...ctx.previewShellEnv } } } },
+            YAML_OPTIONS,
+          ),
+        );
+        count(plan, 'preview shell environment (settings item)');
+      }
+    }
+    if (!codexRuntimes) holdCodexRuntimes(plan, ctx, await previewProfileScopes(ctx));
+  }
+  settleUncarried(plan, ctx.dropUncarried === true);
   return { ...plan, ignored: listing.ignored };
+}
+
+const uncount = (plan: Plan, what: string): void => {
+  const left = (plan.kept.get(what) ?? 0) - 1;
+  if (left > 0) plan.kept.set(what, left);
+  else plan.kept.delete(what);
+};
+
+const scalarOf = (map: YAMLMap, key: string): string | undefined => {
+  const value = pairOf(map, key)?.value;
+  return isScalar(value) && typeof value.value === 'string' ? value.value : undefined;
+};
+
+/**
+ * Preview only: leaves out every runtime that is not provably a Claude Code one, and every profile that only such
+ * runtimes use. Only a runtime PROVEN to be a Claude Code one is kept: its own `harness`, else the harness its login
+ * names (the stage's map, `runtimeHarnessOf`; v4's own rule, never the runtime's name). The preview leaves every v4 login
+ * file out, so a login the map does not know leaves the harness unknown, and an unknown one is held, said truthfully.
+ * Each held runtime is listed by NAME.
+ */
+function holdCodexRuntimes(plan: Plan, ctx: Pick<StepContext, 'previewLoginHarnesses'>, scopes: ProfileScopes): void {
+  const planned = [...plan.files.entries()];
+  const held = new Map<string, RuntimeHarness>();
+  const profilesOf = new Map<string, { held: number; kept: number; codex: number }>();
+  for (const [path, file] of planned) {
+    if (file.target !== RUNTIME_ITEMS || file.name === undefined || !isMap(file.document.contents)) continue;
+    const map = file.document.contents;
+    const own = scalarOf(map, 'harness');
+    const profile = scalarOf(map, 'profile');
+    const harness = runtimeHarnessOf(
+      ctx,
+      own,
+      scalarOf(map, 'login'),
+      profile === undefined ? undefined : scopes.get(profile),
+    );
+    const isHeld = harness !== 'claude-code';
+    if (profile !== undefined) {
+      const tally = profilesOf.get(profile) ?? { held: 0, kept: 0, codex: 0 };
+      if (isHeld) tally.held++;
+      else tally.kept++;
+      if (harness === 'codex') tally.codex++;
+      profilesOf.set(profile, tally);
+    }
+    if (!isHeld) continue;
+    held.set(file.name, harness);
+    plan.files.delete(path);
+    uncount(plan, 'runtimes');
+    plan.dropped.push({
+      what: `runtime ${file.name}${harness === 'unknown' ? ' (its harness is unknown)' : harness === 'both' ? ' (its login drives both CLIs)' : ' (Codex)'}`,
+      why: heldReason(harness),
+    });
+  }
+  for (const [path, file] of planned) {
+    if (file.target !== PROFILE_ITEMS || file.name === undefined) continue;
+    const tally = profilesOf.get(file.name);
+    if (tally === undefined || tally.kept > 0 || tally.held === 0) continue;
+    plan.files.delete(path);
+    uncount(plan, 'profiles');
+    plan.dropped.push({
+      what: `profile ${file.name} (used only by held runtimes)`,
+      why: heldReason(tally.codex > 0 ? 'codex' : 'unknown'),
+    });
+  }
+  for (const [, file] of planned) {
+    if (file.target !== RUNTIMES_CONFIG || !isMap(file.document.contents)) continue;
+    const chosen = scalarOf(file.document.contents, 'defaultRuntime');
+    const why = chosen === undefined ? undefined : held.get(chosen);
+    if (chosen === undefined || why === undefined) continue;
+    take(file.document.contents, 'defaultRuntime');
+    plan.dropped.push({ what: `defaultRuntime ${chosen}`, why: heldReason(why) });
+  }
 }
 
 export const settingsStep: Step = {
@@ -478,6 +887,7 @@ export const settingsStep: Step = {
     const base = { id: this.id, title: this.title, sealed: [] };
     let plan: Awaited<ReturnType<typeof buildPlan>>;
     try {
+      ctx.loginKeys?.reserve(await v4VaultNames(join(ctx.v4.state, 'secrets.json')));
       plan = await buildPlan(ctx);
       for (const [path, planned] of plan.files) {
         const problem = v5ConfigProblem(planned.target, planned.name, planned.document.toString({ lineWidth: 0 }));
@@ -485,7 +895,9 @@ export const settingsStep: Step = {
           throw new V4InputError(`${[...planned.from].join(' + ')}: v5 refuses it as ${path}: ${problem}`);
       }
       for (const planned of plan.files.values())
-        await ctx.v5.config(planned.target, planned.name, planned.document.toString({ lineWidth: 0 }));
+        await ctx.v5.config(planned.target, planned.name, planned.document.toString({ lineWidth: 0 }), [
+          ...planned.from,
+        ]);
       for (const item of plan.instructions) {
         const bytes = await readFile(item.source).catch(() => {
           throw new V4InputError(`${item.from}: its document cannot be read`);
@@ -493,7 +905,11 @@ export const settingsStep: Step = {
         await ctx.v5.opaque(join('config', INSTRUCTION_ITEMS_FOLDER, `${item.name}.md`), bytes);
         count(plan, 'instruction documents');
       }
+      // The bytes the checks read, never a second read of the path.
+      for (const asset of plan.assets.values()) await ctx.v5.opaque(v5AssetPath(asset.rel), asset.bytes, asset.mode);
     } catch (error) {
+      // Nothing was finished, so no key is sealed for a file that was never written.
+      ctx.loginKeys?.clear();
       return {
         ...base,
         status: 'failed',

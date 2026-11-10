@@ -134,12 +134,18 @@ describe('a rename takes its name through the ledger (F-0232)', () => {
   });
 });
 
+// The name GET /v1/names would suggest first at this clock reading: the route starts at the pool index of the
+// clock's whole seconds. Holding THIS name makes "never a held name" falsifiable: without the held-name filter it comes back first.
+const firstSuggestionAt = (nowMs: number): string =>
+  DEFAULT_CALLSIGN_POOL[Math.floor(nowMs / 1000) % DEFAULT_CALLSIGN_POOL.length]!;
+
 describe('GET /v1/names (R-0114)', () => {
   test('R-0114 suggests free pool names, one by default and as many as asked, never one a running ferret holds', async () => {
-    const taken = DEFAULT_CALLSIGN_POOL[0]!;
     const h = await fresh();
+    const taken = firstSuggestionAt(h.clock.nowMs());
     await running(h, taken);
     const one = await h.request('GET', '/v1/names');
+    expect(one.status).toBe(200);
     expect(one.json<string[]>()).toHaveLength(1);
     const many = (await h.request('GET', '/v1/names', { query: { count: '5' } })).json<string[]>();
     expect(many).toHaveLength(5);
@@ -175,8 +181,9 @@ describe('a name is held for the window after the STOP, as today (F-0232)', () =
   });
 
   test('R-0114 GET /v1/names does not suggest the name of a ferret stopped inside the window', async () => {
-    const taken = DEFAULT_CALLSIGN_POOL[0]!;
     const h = await fresh();
+    // The GET happens after the 6-day advance, so that is the clock reading its suggestions start from.
+    const taken = firstSuggestionAt(h.clock.nowMs() + 6 * DAY_MS);
     const id = await running(h, taken);
     await h.clock.advance(6 * DAY_MS);
     await h.request('POST', `/v1/ferrets/${id}/stop`, { body: {} });
@@ -244,7 +251,7 @@ describe('a start that throws gives its claim back (F-0232)', () => {
   test('a start whose admission throws leaves the name free for the next start', async () => {
     const h = await fresh();
     const lead = await running(h, 'lead');
-    // A helper start throws at admission (Packs admission is not bound), after the name was claimed.
+    // A helper start throws at admission (Packs did not answer for it), after the name was claimed.
     const thrown = await start(h, { name: 'wren', parent: lead });
     expect(thrown.status).toBeGreaterThanOrEqual(400);
     expect(ledger(h).claims.map(claim => claim.callsign)).not.toContain('wren');

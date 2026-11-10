@@ -1,4 +1,6 @@
+import type { ConfigFileDef } from '@ferretry/kernel/contract';
 import type { SelftestProbe } from '@ferretry/kernel/manifest';
+import type { ConnectionsConfig } from '../../../contract/wire.ts';
 import { describeWebRtcEngine } from '../../lib/webrtc/engine.ts';
 import { type NodeDataChannelLoader, NodeDataChannelEngine } from './node-datachannel-engine.ts';
 
@@ -26,3 +28,20 @@ export function webrtcSelftestProbe(load?: NodeDataChannelLoader): SelftestProbe
 }
 
 export const webrtcSelftest: SelftestProbe = webrtcSelftestProbe();
+
+/**
+ * Whether the engine selftest runs: WebRTC on in `connections.yaml` as in effect (on unless it says `enabled: false`).
+ * The kernel reads the file and calls this (`SelftestProbe.enabledBy`); the probe itself never sees the config.
+ */
+export const webrtcSwitchedOn = (value: unknown): boolean => (value as ConnectionsConfig).webrtc?.enabled !== false;
+
+/** Today's switched-off line, after `webrtc       switched off in <path>`. */
+const WEBRTC_OFF_CONSEQUENCE = 'devices reach this daemon directly or through the relay instead';
+
+/** The probe, run only when `file` (Connections' own `connections.yaml` def) has WebRTC on. */
+export function switchedWebrtcSelftest(
+  file: ConfigFileDef<ConnectionsConfig>,
+  probe = webrtcSelftestProbe(),
+): SelftestProbe {
+  return { ...probe, enabledBy: { def: file, on: webrtcSwitchedOn, consequence: WEBRTC_OFF_CONSEQUENCE } };
+}

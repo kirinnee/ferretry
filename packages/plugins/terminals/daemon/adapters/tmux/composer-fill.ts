@@ -28,6 +28,7 @@
  * else is `ComposerUnconfirmedError`: typed, not proven, and never typed again by this loop.
  */
 
+import type { RunnerDeliveryFailure } from '@ferretry/core-ferrets/contract';
 import {
   type ComposerInk,
   type ComposerState,
@@ -61,6 +62,8 @@ export type DeliverySleep = (milliseconds: number) => Promise<void>;
  * its record, and a person can be told exactly what is in the way.
  */
 export class ComposerOccupiedError extends Error {
+  /** The runner contract's closed answer (`runnerDeliveryFailure`): nothing typed, and what was in the way. */
+  readonly deliveryFailure: RunnerDeliveryFailure;
   constructor(
     message: string,
     /** What the composer was holding, so the person can recognise it. */
@@ -68,6 +71,7 @@ export class ComposerOccupiedError extends Error {
   ) {
     super(message);
     this.name = 'ComposerOccupiedError';
+    this.deliveryFailure = { kind: 'composer_occupied', draft };
   }
 }
 
@@ -78,6 +82,8 @@ export class ComposerOccupiedError extends Error {
  * was sent. The caller withdraws or restores its record exactly as for an occupied one, and says so.
  */
 export class ComposerUnreadableError extends Error {
+  /** The runner contract's closed answer: nothing typed. */
+  readonly deliveryFailure: RunnerDeliveryFailure = { kind: 'composer_unreadable' };
   constructor(message: string) {
     super(message);
     this.name = 'ComposerUnreadableError';
@@ -92,6 +98,8 @@ export class ComposerUnreadableError extends Error {
  * person — never another fill, which is how one message became three.
  */
 export class ComposerUnconfirmedError extends Error {
+  /** The runner contract's closed answer: typed, not proven, never to be typed again. */
+  readonly deliveryFailure: RunnerDeliveryFailure = { kind: 'unconfirmed', stranded: false };
   constructor(
     message: string,
     /** How many times the payload was typed, each into a composer proven empty first. */

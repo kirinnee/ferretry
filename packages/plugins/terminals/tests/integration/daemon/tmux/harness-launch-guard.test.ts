@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import should from 'should';
 import { RealHarnessLaunchGuard } from '../../../../daemon/adapters/tmux/harness-launch-guard.ts';
-import { RealHarnessRefusedError } from '../../../../daemon/lib/tmux/harness-guard.ts';
+import { RealHarnessRefusedError, UnprovableHarnessError } from '../../../../daemon/lib/tmux/harness-guard.ts';
 
 async function executable(path: string): Promise<string> {
   await mkdir(join(path, '..'), { recursive: true });
@@ -92,7 +92,7 @@ describe('RealHarnessLaunchGuard', () => {
     // Arrange
     const subject = await machine();
     await executable(join(subject.root, 'home', '.claude', 'local', 'claude'));
-    const guard = new RealHarnessLaunchGuard(() => undefined);
+    const guard = new RealHarnessLaunchGuard(() => subject.fakes);
 
     try {
       // Act
@@ -123,5 +123,35 @@ describe('RealHarnessLaunchGuard', () => {
     // Assert
     should(actual).be.instanceOf(RealHarnessRefusedError);
     should((actual as RealHarnessRefusedError).resolved).equal('/absent/home/.claude/local/codex');
+  });
+
+  it('should refuse a launch whose opaque environment names PATH, since it cannot search what it cannot read', async () => {
+    // Arrange
+    const guard = new RealHarnessLaunchGuard(() => '/anywhere');
+
+    // Act
+    const actual = await guard
+      .check({ session: 'work', cwd: '/', command: ['agent'], envNames: ['PATH', 'HOME'] })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(actual).be.instanceOf(UnprovableHarnessError);
+    should((actual as UnprovableHarnessError).why).equal('own-path');
+  });
+
+  it('should refuse a launch when neither the launch nor the daemon has a search path', async () => {
+    // Arrange
+    const missing = new RealHarnessLaunchGuard(() => undefined);
+    const empty = new RealHarnessLaunchGuard(() => '');
+    const launch = { session: 'work', cwd: '/', command: ['agent'] as [string] };
+
+    // Act
+    const absent = await missing.check(launch).catch((error: unknown) => error);
+    const blank = await empty.check(launch).catch((error: unknown) => error);
+
+    // Assert
+    should(absent).be.instanceOf(UnprovableHarnessError);
+    should((absent as UnprovableHarnessError).why).equal('no-path');
+    should(blank).be.instanceOf(UnprovableHarnessError);
   });
 });

@@ -143,6 +143,33 @@ describe('SignInRuleSuggestions — what a ferret may ask', () => {
     should(w.audits[0]).match({ action: 'sign-in-rule-suggested', by: 'agent', signIn: GITHUB });
   });
 
+  it('I230 should only suggest: nothing is created, staged or widened, and a refused card is a typed refusal', async () => {
+    // Arrange
+    const w = world();
+
+    // Act
+    await w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'daily sign-in' });
+
+    // Assert — the only effects are one card and one audit line; the card says where and why, never what to allow
+    should(w.cards).have.length(1);
+    should(Object.keys(w.cards[0]?.card ?? {}).join(' ')).not.match(
+      /allow|fields|totp|uses|scope|lifetime|stage|draft/iu,
+    );
+    should(w.audits).have.length(1);
+    // The service has no verb that creates, stages, commits or widens a rule.
+    const verbs = Object.getOwnPropertyNames(SignInRuleSuggestions.prototype).filter(name => name !== 'constructor');
+    for (const verb of verbs) should(verb).not.match(/create|stage|commit|widen|allow|grant/iu);
+    // A card the agenda refuses is a typed refusal the ferret reads, not a rule and not a failure of the whole call.
+    const refused = new SignInRuleSuggestions({
+      accounts: { listing: async () => listing() },
+      agenda: { raise: async () => ({ ok: false, message: 'agenda full' }), close: async () => undefined },
+      redact: async text => text,
+      audit: { record: async () => undefined },
+      clock: { now: () => NOW },
+    });
+    should((await refusal(refused.suggest('s-one', { signIn: GITHUB, why: 'daily' }))).code).equal('unavailable');
+  });
+
   it('should end a suggestion, with its card, after a day', async () => {
     // Arrange
     const w = world();

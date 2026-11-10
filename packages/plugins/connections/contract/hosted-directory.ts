@@ -1,5 +1,9 @@
-/** The hosted app's origin: where a pairing link, a catalog and a share link point (today's `HOSTED_APP_ORIGIN`). */
-export const HOSTED_APP_ORIGIN = 'https://ferretry.pages.dev';
+// The leaf subpath, not the barrel: the app's `vite.config.ts` imports this file, and Vite loads a workspace package
+// through Node's type stripping, which refuses the barrel's TypeScript-only syntax (parameter properties).
+import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract/hosted-app';
+
+/** The hosted app's origin: where a pairing link, a catalog and a share link point. Owned by the kernel's `hosted-app` module. */
+export { HOSTED_APP_ORIGIN };
 
 /**
  * Today's shared service origin, never a carrier or a daemon address. The no-store advertisement chooses the

@@ -53,20 +53,27 @@ test('a home with no registry converts to nothing', async () => {
   expect(await stat(join(f.to, V5_PROJECTS_FILE)).catch(() => undefined)).toBeUndefined();
 });
 
-test('a duplicated id fails naming the id, and writes nothing', async () => {
+test('a repeated id is counted and not carried: the first is kept, the registry still converts', async () => {
   await f.put('state/projects.json', [project(P1), project(P1, { path: '/work/other' })]);
   const report = await projectsStep.run(f.ctx());
-  expect(report.status).toBe('failed');
-  expect(report.note).toBe(`state/projects.json: project id ${P1} appears twice`);
-  expect(await stat(join(f.to, V5_PROJECTS_FILE)).catch(() => undefined)).toBeUndefined();
+  expect(report.status).toBe('converted');
+  expect(report.note).toBe('1 damaged or repeated project record(s) not carried');
+  expect(report.kept).toEqual([{ what: 'projects (ids unchanged)', count: 1 }]);
+  const document = ProjectsFileSchema.parse(JSON.parse(await readFile(join(f.to, V5_PROJECTS_FILE), 'utf8')));
+  expect(document.projects.map(p => ({ id: String(p.id), path: p.path }))).toEqual([
+    { id: P1, path: '/work/fake-0b6f' },
+  ]);
 });
 
-test('a damaged entry fails naming the file and the entry, never its content', async () => {
+test('a damaged entry is counted and not carried, and its content is in no report and no v5 file', async () => {
   await f.put('state/projects.json', [project(P1), project(P2, { source: 'FAKE-CONTENT-NOT-REPORTED' })]);
   const report = await projectsStep.run(f.ctx());
-  expect(report.status).toBe('failed');
-  expect(report.note).toBe('state/projects.json: entry 1 is not a v4 project record');
+  expect(report.status).toBe('converted');
+  expect(report.note).toBe('1 damaged or repeated project record(s) not carried');
   expect(JSON.stringify(report)).not.toContain('FAKE-CONTENT');
+  const written = await readFile(join(f.to, V5_PROJECTS_FILE), 'utf8');
+  expect(written).not.toContain('FAKE-CONTENT');
+  expect(ProjectsFileSchema.parse(JSON.parse(written)).projects.map(p => String(p.id))).toEqual([P1]);
 });
 
 test('a registry that is not a list, or not JSON, fails naming the file', async () => {

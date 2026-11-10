@@ -241,7 +241,7 @@ export function RenameRuntimeDialog({
 
   const rename = async (): Promise<void> => {
     const result = await changes.apply({ kind: 'runtime.rename', name: runtime.name, to: name });
-    if (result.kind === 'refused') return;
+    if (result.kind !== 'applied') return;
     onRenamed(name);
   };
 
@@ -364,6 +364,7 @@ export function RemoveRuntimeDialog({
   // so it runs once per runtime rather than once per render.
   const latest = useRef(changes);
   latest.current = changes;
+  const tried = useRef(false);
   const change: AccountChange = { kind: 'runtime.remove', name: runtime.name };
 
   // The dry run: what removing it would do, and who is running on it — read before anything is asked.
@@ -412,11 +413,19 @@ export function RemoveRuntimeDialog({
       // The moves took a while, so the removal is staged afresh rather than applying a preview that may
       // have expired; nothing runs on it any more.
       const result = await changes.apply(change);
-      if (result.kind !== 'refused') onRemoved();
+      if (result.kind === 'applied') onRemoved();
       return;
     }
+    // A preview that was already tried and did not finish is spent (a rolled-back apply keeps it consumed), so a
+    // retry stages the removal afresh instead of re-sending that proposal.
+    if (tried.current) {
+      const retried = await changes.apply(change);
+      if (retried.kind === 'applied') onRemoved();
+      return;
+    }
+    tried.current = true;
     const result = await changes.applyStaged(phase.staged);
-    if (result.kind !== 'refused') onRemoved();
+    if (result.kind === 'applied') onRemoved();
   };
 
   return (
@@ -596,7 +605,7 @@ function DefaultPicker({
   const pick = async (): Promise<void> => {
     if (machine === null || picked === '') return;
     const result = await changes.apply(machineSettings(machine, { defaultRuntime: picked }));
-    if (result.kind !== 'refused') onPicked();
+    if (result.kind === 'applied') onPicked();
   };
   return (
     <>

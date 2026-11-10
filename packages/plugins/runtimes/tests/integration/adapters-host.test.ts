@@ -8,7 +8,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import {
-  componentSourceFence,
   documentRevision,
   readConfigAccountDocument,
   readDeclaredAccountModel,
@@ -16,13 +15,8 @@ import {
   sessionStatusOf,
 } from '../../daemon/adapters/account-model-files.ts';
 import { readFleetManifest } from '../../daemon/adapters/manifest-file.ts';
-import {
-  adapterHostFrom,
-  type ConfigFilesPort,
-  refusedHostFiles,
-  refusedProvisionerKernel,
-} from '../../daemon/adapters/ports.ts';
-import { RuntimeIdsFile } from '../../daemon/adapters/runtime-ids-file.ts';
+import { type ConfigFilesPort, refusedHostFiles } from '../../daemon/adapters/ports.ts';
+import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../../daemon/adapters/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../../daemon/adapters/runtime-session-records.ts';
 import { MAX_FOLDER_FILES, readTextFolder, skillItemsIn } from '../../daemon/adapters/setup-files.ts';
 import { ABSENT_DOCUMENT_REVISION } from '../../daemon/lib/provisioning.ts';
@@ -51,22 +45,6 @@ describe('the refused seams', () => {
 
     // Assert
     await should(act).be.rejectedWith(/the host's files is not available to the Runtimes plugin yet/u);
-  });
-
-  it('should refuse the provisioner helpers rather than falling back to node:fs', () => {
-    // Act
-    const act = () => refusedProvisionerKernel.applyLockFor('/anywhere/manifest.json');
-
-    // Assert
-    should(act).throw(/not available to the Runtimes plugin yet/u);
-  });
-
-  it('should take the time from the kernel clock', () => {
-    // Arrange
-    const host = adapterHostFrom({ clock: { nowMs: () => 1234 } as never });
-
-    // Act / Assert
-    should(host.now()).equal(1234);
   });
 });
 
@@ -156,7 +134,52 @@ describe('ids.json', () => {
   });
 });
 
+describe('the runtime-aware account inventory', () => {
+  it('should answer the accounts of its inventory and the ids read from the real ids.json beside them', async () => {
+    // Arrange
+    const file = path.join(await temp(), 'ids.json');
+    await put(file, JSON.stringify({ version: 1, runtimes: {} }));
+    const inventory = new RuntimeAwareAccountInventory(
+      { accounts: async () => ['one', 'two'] },
+      new RuntimeIdsFile(nodeHostFiles, file),
+    );
+
+    // Act
+    const accounts = await inventory.accounts();
+    const ids = await inventory.ids();
+
+    // Assert
+    should(accounts).deepEqual(['one', 'two']);
+    should(ids).deepEqual({ version: 1, runtimes: {} });
+  });
+});
+
 describe('runtime session records', () => {
+  it('should skip a record that cannot be rewritten and still move the rest', async () => {
+    // Arrange
+    const written: Record<string, unknown> = {};
+    const configs: Record<string, unknown> = {
+      stuck: { agent: 'old', command: ['/old'] },
+      free: { agent: 'old', command: ['/old'] },
+    };
+    const records = new RuntimeSessionRecords({
+      listSessions: () => Object.keys(configs).map(id => ({ id })),
+      readConfig: async id => configs[id],
+      readState: async () => ({ status: 'running' }),
+      updateConfig: async (id, change) => {
+        if (id === 'stuck') throw new Error('the record is locked');
+        written[id] = change(configs[id]);
+      },
+    });
+
+    // Act
+    const moved = await records.renameSessions({ from: 'old', to: 'new', fromWrapper: '/old', toWrapper: '/new' });
+
+    // Assert
+    should(moved).equal(1);
+    should(written).deepEqual({ free: { agent: 'new', command: ['/new'] } });
+  });
+
   const storage = (configs: Record<string, unknown>, states: Record<string, unknown>) => {
     const written: Record<string, unknown> = { ...configs };
     return {
@@ -295,14 +318,6 @@ describe('the account model files', () => {
     should(await documentRevision(nodeHostFiles, path.join(root, 'none'))).equal(ABSENT_DOCUMENT_REVISION);
   });
 
-  it('should fence the daemon directories and open the asset tree', () => {
-    // Act
-    const fence = componentSourceFence({ home: '/h', state: '/h/state', config: '/h/config', fleet: '/h/fleet' });
-
-    // Assert
-    should(fence).deepEqual({ homes: ['/h', '/h/state', '/h/config'], open: ['/h/fleet/assets'] });
-  });
-
   it('should name a renamed runtime file new path to old path, under runtimes/', () => {
     // Act / Assert
     should([...runtimeFileMoves({ from: 'old', to: 'new' })]).deepEqual([['runtimes/new.yaml', 'runtimes/old.yaml']]);
@@ -320,6 +335,8 @@ describe('the account model files', () => {
     const load = {
       evaluation: { fleetFiles, fleetRevision: 'rev-1', effective: { model: { marker: 'now' } } },
       files: {},
+      unreadable: [],
+      stoodInLogins: [],
     };
     return {
       inEffect: async () => load,
@@ -333,8 +350,6 @@ describe('the account model files', () => {
         { path: 'runtimes/gone.yaml', content: undefined, expect: 'etag-2' },
       ],
       mentionsRenamed: (_load, rename) => [{ path: 'warden.yaml', content: `to: ${rename.to}\n`, expect: 'etag-3' }],
-      acknowledge: () => undefined,
-      acknowledgeRemoval: () => undefined,
     };
   };
 

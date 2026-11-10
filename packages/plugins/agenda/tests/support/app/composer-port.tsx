@@ -92,7 +92,14 @@ export function FakeComposer(props: AgendaComposerProps): ReactElement {
         value={draft}
       />
       {props.dictationSettings === undefined ? null : (
-        <button aria-label="Dictate" data-composer-mic="" type="button" />
+        // A drawn icon, as the chat composer's mic has: an empty button is a 0x0 box on a mouse (only the coarse-pointer
+        // 44px target floor gives it a size), and a real browser counts a 0x0 box as not visible.
+        <button aria-label="Dictate" data-composer-mic="" type="button">
+          <svg aria-hidden="true" fill="none" height="20" stroke="currentColor" viewBox="0 0 24 24" width="20">
+            <rect height="12" rx="3" width="6" x="9" y="3" />
+            <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+          </svg>
+        </button>
       )}
       {error === null ? null : (
         <p className="fy-composer-error" role="alert">

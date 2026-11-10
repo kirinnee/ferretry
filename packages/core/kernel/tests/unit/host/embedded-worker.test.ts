@@ -27,6 +27,14 @@ describe('embedded plugin worker programs', () => {
     expect(embeddedWorkerUrl(spelled, COMPILED).href).toBe('file:///$bunfs/root/pdf-decrypt.worker.js');
   });
 
+  test('compiled: a file name that decodes to a path (an escaped slash or backslash) is refused, never resolved', () => {
+    for (const escaped of ['..%2F..%2Fetc%2Fx.worker.ts', '..%5C..%5Cx.worker.ts', 'a%2fb.worker.ts']) {
+      const url = new URL(`file:///$bunfs/worker/${escaped}`);
+      expect(() => embeddedWorkerFile(url)).toThrow(TypeError);
+      expect(() => embeddedWorkerUrl(url, COMPILED)).toThrow(TypeError);
+    }
+  });
+
   test('compiled: a URL that is not a file URL is left alone', () => {
     const other = new URL('https://example.test/x.worker.js');
     expect(embeddedWorkerUrl(other, COMPILED)).toBe(other);

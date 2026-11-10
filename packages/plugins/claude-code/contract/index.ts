@@ -2,7 +2,7 @@
  * @ferretry/plugin-claude-code/contract — wire schemas, port + token, events, state and config declarations, words.
  * Claude Code is a harness (§4.3): it takes `harnesses:claude-code` from Ferrets and offers nothing but a read port.
  */
-import { InstantSchema } from '@ferretry/std';
+import { InstantSchema, ITEM_NAME_PATTERN } from '@ferretry/std';
 import {
   type FerretId,
   defineConfig,
@@ -107,6 +107,33 @@ export const CLAUDE_CODE_DISCOVERY = defineState({
   schema: DiscoverySchema,
 });
 
+/** One section's fingerprint: a SHA-256 in hex, never the value it was taken of. */
+const SectionDigestSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * What one ferret was last launched under (W2-c, `Harness.launchSettings`): one fingerprint per section of this
+ * plugin's own launch settings, written at every start and resume. Hashes only — no setting value, path or environment
+ * value is kept — and in the daemon's state, never in the ferret's home, where its agent could rewrite it.
+ */
+export const LaunchSettingsRecordSchema = z.strictObject({
+  format: z.literal(1),
+  sections: z.strictObject({
+    'permission-mode': SectionDigestSchema,
+    'fixed-layer': SectionDigestSchema,
+    settings: SectionDigestSchema,
+    hooks: SectionDigestSchema,
+  }),
+});
+export type LaunchSettingsRecord = z.infer<typeof LaunchSettingsRecordSchema>;
+export const CLAUDE_CODE_LAUNCH_SETTINGS = defineState({
+  name: 'launchSettings',
+  path: 'launch-settings/*.json',
+  store: 'json',
+  format: 1,
+  schema: LaunchSettingsRecordSchema,
+  onDamaged: { narrower: 'a damaged launch record reads as unknown: nothing to say until the next launch' },
+});
+
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** Today's `machineLoosening` rule for the permission mode, kept word for word. */
@@ -125,13 +152,11 @@ export const CLAUDE_CODE_CONFIG = configDef(
   }),
 );
 
-const ITEM_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
-
 /** `config/claude-code/settings/<name>.yaml`. Today a component edit changes what an agent runs with, never what it may spend. */
 export const CLAUDE_CODE_SETTINGS = configDef(
   defineConfig({
     collection: 'claude-code/settings',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: SettingsItemSchema,
     axis: 'configure',
     loosens: neverLoosens,
@@ -142,7 +167,7 @@ export const CLAUDE_CODE_SETTINGS = configDef(
 export const CLAUDE_CODE_HOOKS = configDef(
   defineConfig({
     collection: 'claude-code/hooks',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: HooksItemSchema,
     axis: 'configure',
     loosens: neverLoosens,

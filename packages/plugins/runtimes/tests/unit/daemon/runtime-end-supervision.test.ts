@@ -12,8 +12,9 @@ import { testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import should from 'should';
 import { RuntimesLaunchFailed } from '../../../contract/index.ts';
-import { type RuntimesAssembly, runtimesDaemon } from '../../../daemon/index.ts';
-import { CODEX_OFFLINE_LAUNCH_ERROR, type CodexAppServerOutcome } from '../../../daemon/lib/service/codex-runtime.ts';
+import { type RuntimesAssembly, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
+import { CODEX_OFFLINE_LAUNCH_ERROR } from '../../../contract/codex-launch.ts';
+import type { CodexAppServerOutcome } from '../../../daemon/lib/service/codex-runtime.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from '../../../daemon/lib/service/runtime-end-supervision.ts';
 
 const OFFLINE_PANE = 'Error: JSON-RPC error: workspace routing discovery failed (connect ENETUNREACH)';
@@ -239,7 +240,7 @@ describe('the Runtimes daemon, booted with Ferrets and no other plugin', () => {
     const ferrets = new FakeFerrets();
     add(ferrets, { id: 'c1', harness: 'codex', runtime: 'codex-work', state: 'stopped' });
     const host = await testHost({
-      plugins: [runtimesDaemon() as DaemonImplementation<any>],
+      plugins: [runtimesDaemon(unavailableAssembly) as DaemonImplementation<any>],
       fakes: { ferrets, logins: fakeLogins([]), loginChanges: fakeLoginChanges() },
       gate: new StandInAdmission(() => ownerStanding()),
       config: { runtimes: {}, profiles: {} },

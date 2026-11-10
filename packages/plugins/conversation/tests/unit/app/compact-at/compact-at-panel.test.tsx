@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
+import type { Authority, ViewPlace } from '@ferretry/app';
+import { interact, type Mounted, mount, must, settleUntil, WithViewPlace } from '@ferretry/app/testing';
 import { CompactAtLoader, CompactAtPanel } from '../../../../app/compact-at/compact-at-panel.tsx';
 import type { CompactAtFormHost } from '../../../../app/compact-at/compact-at-form.tsx';
 import { type CallHandler, fakeClient, refusal } from '../../../support/app/fake-client.ts';
@@ -27,29 +28,85 @@ const radio = (root: HTMLElement, value: string) =>
 const toggle = (root: HTMLElement) =>
   must(root.querySelector<HTMLButtonElement>('[data-compact-at-panel] > button'), 'the toggle');
 
+/** A per-daemon view's place (shell contract S1) whose every route reads `authority`; `press` runs `unlock` first. */
+const placeOf = (authority: Authority, unlock: () => Promise<boolean> = async () => true): ViewPlace => ({
+  daemon: 'd1',
+  machine: 'laptop',
+  online: true,
+  authority: () => authority,
+  authorityOf: () => authority,
+  press: async act => (authority.kind === 'locked' && !(await unlock()) ? undefined : await act()),
+});
+
 const openPanel = async (
   routes: Readonly<Record<string, CallHandler>>,
   subject: string | null = 'f1',
-  canControl?: boolean,
+  place?: ViewPlace,
 ) => {
   const client = fakeClient(routes);
+  const panel = <CompactAtPanel {...(subject === null ? {} : { subject })} />;
   mounted = await mount(
-    withClient(
-      client,
-      <CompactAtPanel
-        {...(subject === null ? {} : { subject })}
-        {...(canControl === undefined ? {} : { canControl })}
-      />,
-    ),
+    withClient(client, place === undefined ? panel : <WithViewPlace place={place}>{panel}</WithViewPlace>),
   );
   return { client, root: mounted.container };
 };
 
 describe('Compact memory at in the ferret toolbar', () => {
   it('is hidden from someone who cannot control the ferret, and asks the daemon nothing', async () => {
-    const { root, client } = await openPanel({ [READ_ROUTE]: () => READ }, 'f1', false);
-    expect(root.querySelector('[data-compact-at-panel]')).toBeNull();
-    expect(client.calls).toEqual([]);
+    for (const refusal of ['not-granted', 'device-not-granted'] as const) {
+      const { root, client } = await openPanel(
+        { [READ_ROUTE]: () => READ },
+        'f1',
+        placeOf({ kind: 'refused', refusal }),
+      );
+      expect(root.querySelector('[data-compact-at-panel]')).toBeNull();
+      expect(client.calls).toEqual([]);
+      await mounted?.unmount();
+      mounted = undefined;
+    }
+  });
+
+  it('is off, with the reason as its title, while this device does not know yet what it may do', async () => {
+    const { root } = await openPanel({ [READ_ROUTE]: () => READ }, 'f1', placeOf({ kind: 'unknown' }));
+    expect(toggle(root).disabled).toBe(true);
+    expect(toggle(root).title).toBe('Checking what this device may do…');
+  });
+
+  it('on a locked machine a save asks for the unlock first, and a dismissed one sends nothing', async () => {
+    let asked = 0;
+    const { client, root } = await openPanel(
+      { [READ_ROUTE]: () => DEFAULT, [PATCH_ROUTE]: () => ({ effective: 200_000, restartRequired: true, note: 'x' }) },
+      'f1',
+      placeOf({ kind: 'locked' }, async () => {
+        asked += 1;
+        return false;
+      }),
+    );
+    expect(toggle(root).disabled).toBe(false);
+    await interact(() => toggle(root).click());
+    await settle(() => radio(root, '200000') !== null, 'the form');
+    await interact(() => radio(root, '200000')?.click());
+    await interact(() =>
+      must(root.querySelector('form'), 'the form').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      ),
+    );
+    await settle(() => asked === 1, 'the unlock');
+    expect(client.callsTo(PATCH_ROUTE)).toEqual([]);
+  });
+
+  it('says Default when the toolbar read fails', async () => {
+    const { root } = await openPanel(
+      {
+        [READ_ROUTE]: () => {
+          throw refusal(503, 'down', 'down');
+        },
+      },
+      'f1',
+      placeOf({ kind: 'open' }),
+    );
+    await settle(() => toggle(root).textContent?.includes('Default') === true, 'the default label');
+    expect(toggle(root).disabled).toBe(false);
   });
 
   it('draws nothing when the toolbar names no ferret', async () => {

@@ -83,6 +83,54 @@ describe('the account store over the Vault', () => {
     should(w.vault.values.get(inUse ?? '')).equal(PASSWORD);
   });
 
+  it('S73 should keep every seal an account points at, its password and each 2FA seed, through a sweep', async () => {
+    const w = world();
+    await w.directory.putAccount('GITHUB', { label: 'GitHub', password: PASSWORD });
+    const target = await w.directory.seedTarget('GITHUB');
+    await w.directory.addSeed(target.key, 'JBSWY3DPEHPK3PXP', { params: { algorithm: 'SHA1', digits: 6, period: 30 } });
+    await w.directory.addSeed(target.key, 'GEZDGNBVGY3TQOJQ', {
+      params: { algorithm: 'SHA1', digits: 6, period: 30 },
+      label: 'Backup',
+    });
+    // An orphan the sweep may take, so a sweep really runs.
+    w.index.failNext = true;
+    await w.directory.putAccount('GITHUB', { password: 'github-UNIQUE-password-2' }).catch(() => undefined);
+    await w.directory.putAccount('GITLAB', { label: 'GitLab' });
+    const pointedAt = Object.values(w.index.accounts.accounts).flatMap(account => [
+      ...(Object.values(account.seals ?? {}) as string[]),
+      ...(account.factors ?? []).flatMap(factor =>
+        factor.kind === 'totp' && factor.seal !== undefined ? [factor.seal] : [],
+      ),
+    ]);
+    should(pointedAt).have.length(3);
+    should([...w.vault.values.keys()].sort()).eql([...pointedAt].sort());
+    should([...w.vault.values.values()])
+      .containEql(PASSWORD)
+      .and.containEql('JBSWY3DPEHPK3PXP')
+      .and.containEql('GEZDGNBVGY3TQOJQ');
+  });
+
+  it('S76 should read an index naming a value the Vault does not hold as damaged: nothing swept, every change refused', async () => {
+    const w = world();
+    await w.directory.putAccount('GITHUB', { label: 'GitHub', password: PASSWORD });
+    await w.directory.putAccount('GITLAB', { label: 'GitLab', password: 'gitlab-UNIQUE-password-3' });
+    const [missing] = sealedNames(w.index);
+    w.vault.values.delete(missing ?? '');
+    should((await w.directory.prepare()).damaged).be.a.String();
+    should(w.vault.values.size).equal(1);
+    const before = JSON.stringify(w.index.accounts);
+    for (const change of [
+      async () => await w.directory.putAccount('OTHER', { label: 'Other' }),
+      async () => await w.directory.putAccount('GITLAB', { label: 'Renamed' }),
+      async () => await w.directory.removeAccount('GITLAB'),
+    ])
+      should(await change().catch((error: unknown) => error)).match({ failure: 'unreadable' });
+    should(JSON.stringify(w.index.accounts)).equal(before);
+    should(w.vault.values.size).equal(1);
+    // Nothing is typed from the value that is gone.
+    should([...(await w.values.values()).values()]).not.containEql(PASSWORD);
+  });
+
   it('S83 should move a value on merge as one step: put under the kept name, and forget the old only after', async () => {
     const w = world();
     await w.directory.putAccount('KEEP', { label: 'Keep' });

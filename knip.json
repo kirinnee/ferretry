@@ -6,6 +6,7 @@
       "project": ["scripts/test/*.ts"]
     },
     "packages/std": {
+      "entry": ["tests/**/*.test.ts"],
       "project": ["**/*.ts"]
     },
     "packages/core/kernel": {
@@ -37,8 +38,6 @@
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"],
       "ignore": [
-        "daemon/lib/session/auto-resume/**",
-        "daemon/adapters/session/auto-resume/**",
         "daemon/lib/session/events/service.ts",
         "daemon/lib/session/peers/reads.ts",
         "daemon/lib/session/observer/facts.ts",
@@ -50,7 +49,6 @@
         "daemon/adapters/session/observer/session-worker-runtime.ts",
         "daemon/adapters/session/observer/worker-observer-host.ts",
         "daemon/adapters/session/observer/worker-supervisor.ts",
-        "daemon/workers/session-index.worker.ts",
         "daemon/lib/session/peers/turn.ts",
         "daemon/lib/session/peers/transcript.ts",
         "daemon/lib/session/peers/question.ts",
@@ -61,8 +59,7 @@
         "daemon/lib/session/directory/session-directory.ts",
         "daemon/lib/session/monitor/types.ts",
         "daemon/lib/session/runtime-control/index.ts",
-        "daemon/lib/session/runtime-control/service.ts",
-        "daemon/adapters/session/launch/index.ts"
+        "daemon/lib/session/runtime-control/service.ts"
       ]
     },
     "packages/plugins/agenda": {

@@ -37,6 +37,8 @@ import type { LaunchResult } from '../../lib/world.ts';
 export interface DaemonControlInputs {
   readonly environment: Environment;
   readonly io: TerminalIo;
+  /** The platform whose service manager is driven; the host's own unless a test names another. */
+  readonly platform?: string | undefined;
   /** The state home `FY_HOME` resolved to. */
   readonly home: string;
   readonly userHome: string;
@@ -68,7 +70,7 @@ export function buildDaemonController(
   const files = new FileServiceStore();
   const uid = process.getuid?.() ?? 0;
   const layout = resolveDaemonLayout({
-    platform: process.platform,
+    platform: inputs.platform ?? process.platform,
     homeDirectory: inputs.userHome,
     stateHome: inputs.home,
     configHome: environment.XDG_CONFIG_HOME,
@@ -122,7 +124,7 @@ export function buildDaemonController(
       facts: new HostInstallFacts({
         product: inputs.product,
         homeDirectory: inputs.userHome,
-        platform: process.platform,
+        platform: inputs.platform ?? process.platform,
       }),
       packages: new CommandPackageManagers((argv, onLine) => processes.runStreaming(argv, onLine)),
       lifecycle: { executable, versionOf },

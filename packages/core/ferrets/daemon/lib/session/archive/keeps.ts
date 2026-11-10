@@ -19,10 +19,14 @@ export interface ArchiveKeepSources {
 /** How many agenda boards are read at once: they are files, and a first pass may ask about a thousand. */
 const AGENDA_READS_AT_ONCE = 8;
 
-/** The sessions among `ids` that must stay live, each with why. */
+/**
+ * The sessions among `ids` that must stay live, each with why. Once `signal` aborts, no further question is asked and
+ * every session not yet answered for is kept.
+ */
 export async function sessionKeeps(
   sources: ArchiveKeepSources,
   ids: readonly string[],
+  signal?: AbortSignal,
 ): Promise<ReadonlyMap<string, string>> {
   const kept = new Map<string, string>();
   const [pinned, onCards] = await Promise.all([
@@ -45,6 +49,10 @@ export async function sessionKeeps(
   }
   for (let at = 0; at < pending.length; at += AGENDA_READS_AT_ONCE) {
     const batch = pending.slice(at, at + AGENDA_READS_AT_ONCE);
+    if (signal?.aborted === true) {
+      for (const id of pending.slice(at)) kept.set(id, 'agenda not answered in time');
+      break;
+    }
     const answers = await Promise.all(
       batch.map(
         async id =>

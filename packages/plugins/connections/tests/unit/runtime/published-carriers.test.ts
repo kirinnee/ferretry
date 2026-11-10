@@ -30,6 +30,18 @@ describe('the published carrier set', () => {
     should(during).not.equal(before);
   });
 
+  it('R182 should re-derive the set on every read: a tunnel change is live at once and withdrawing it restores the earlier set', () => {
+    // Arrange
+    const published = new PublishedCarrierSet('https://workstation.example', [RELAY]);
+    const base = published.current().map(carrier => `${carrier.kind} ${carrier.url}`);
+
+    // Act / Assert — the change shows on the very next read, and the withdrawal leaves nothing behind.
+    published.tunnel('https://quiet-otter.tunnels.example');
+    should(published.current().map(carrier => carrier.kind)).deepEqual(['direct', 'tunnel', 'relay']);
+    published.tunnel(undefined);
+    should(published.current().map(carrier => `${carrier.kind} ${carrier.url}`)).deepEqual(base);
+  });
+
   it('should refuse a tunnel address no device could dial, where the change is made', () => {
     // Arrange
     const published = new PublishedCarrierSet(undefined, []);

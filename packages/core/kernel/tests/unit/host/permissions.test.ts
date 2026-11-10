@@ -17,6 +17,20 @@ import {
 } from '../../../host/permissions.ts';
 import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 
+/** `openRead` over in-memory files: `read(limit)` answers at most `limit` bytes, as a descriptor does. */
+function opened(files: ReadonlyMap<string, string>, asked: number[] = []): HostFs['openRead'] {
+  return async file => {
+    const bytes = new TextEncoder().encode(files.get(file) ?? '');
+    return {
+      read: async (limit?: number) => {
+        asked.push(limit ?? -1);
+        return bytes.subarray(0, limit);
+      },
+      close: async () => undefined,
+    } as unknown as Awaited<ReturnType<HostFs['openRead']>>;
+  };
+}
+
 function recordingSockets(): WebSocketPort & { readonly dialled: string[] } {
   const dialled: string[] = [];
   return {
@@ -137,10 +151,10 @@ describe('installedItemReach: what installed data-plugin items name', () => {
         }
         const fs = nodeFs(() => 'test');
         const reads: string[] = [];
-        const readText = fs.readText;
-        fs.readText = path => {
+        const openRead = fs.openRead;
+        fs.openRead = path => {
           reads.push(path);
-          return readText(path);
+          return openRead(path);
         };
         const reach = await installedItemReach(fs, home, [
           {
@@ -178,7 +192,7 @@ describe('installedItemReach: what installed data-plugin items name', () => {
         const text = files.get(file);
         return text === undefined ? undefined : { kind: 'file' as const, size: text.length, mtimeMs: 0 };
       },
-      readText: async (file: string) => files.get(file) ?? '',
+      openRead: opened(files),
     } as unknown as HostFs;
     const reach = await installedItemReach(fs, '/home/fy', [
       {
@@ -195,6 +209,41 @@ describe('installedItemReach: what installed data-plugin items name', () => {
     expect(reach('mcp')).toEqual({ programs: ['npx'], hosts: ['mcp.acme.test'] });
     expect(reach('shell')).toEqual({ programs: ['zsh'], hosts: [] });
     expect(reach('skill')).toEqual({ programs: [], hosts: [] });
+  });
+});
+
+describe('installedItemReach: an item file is read with a hard bound', () => {
+  test('a file that grew after its size was read is read one byte past the cap and names nothing', async () => {
+    const path = '/home/fy/state/kernel/plugins/acme/items/grown.yaml';
+    const big = `command: npx\n#${'x'.repeat(256 * 1024)}\n`;
+    const files = new Map([[path, big]]);
+    const asked: number[] = [];
+    const fs = {
+      realpath: async (file: string) => file,
+      // The size said before the read is small: the file grew in between.
+      lstat: async () => ({ kind: 'file' as const, size: 10, mtimeMs: 0 }),
+      openRead: opened(files, asked),
+    } as unknown as HostFs;
+    const reach = await installedItemReach(fs, '/home/fy', [
+      { id: 'acme', items: [{ kind: 'mcp', id: 'grown', file: 'items/grown.yaml' }] },
+    ]);
+    expect(reach('mcp')).toEqual({ programs: [], hosts: [] });
+    expect(asked).toEqual([256 * 1024 + 1]);
+  });
+
+  test('a file exactly at the cap is still read', async () => {
+    const path = '/home/fy/state/kernel/plugins/acme/items/full.yaml';
+    const head = 'command: npx\n#';
+    const files = new Map([[path, `${head}${'x'.repeat(256 * 1024 - head.length)}`]]);
+    const fs = {
+      realpath: async (file: string) => file,
+      lstat: async () => ({ kind: 'file' as const, size: 256 * 1024, mtimeMs: 0 }),
+      openRead: opened(files),
+    } as unknown as HostFs;
+    const reach = await installedItemReach(fs, '/home/fy', [
+      { id: 'acme', items: [{ kind: 'mcp', id: 'full', file: 'items/full.yaml' }] },
+    ]);
+    expect(reach('mcp')).toEqual({ programs: ['npx'], hosts: [] });
   });
 });
 
@@ -266,7 +315,7 @@ describe('an installed item never grants a pattern', () => {
         const text = files.get(file);
         return text === undefined ? undefined : { kind: 'file' as const, size: text.length, mtimeMs: 0 };
       },
-      readText: async (file: string) => files.get(file) ?? '',
+      openRead: opened(files),
     } as unknown as HostFs;
     const reach = await installedItemReach(fs, '/home/fy', [
       {

@@ -33,10 +33,18 @@ export interface AgendaRuntime {
   readonly itemOpened: (ferret: string, ask: string) => Promise<void>;
 }
 
-export const createAgendaRuntime = (client: AgendaCall & Partial<Pick<PluginClient, 'subscribe'>>): AgendaRuntime => {
+export type RuntimeClient = AgendaCall & Partial<Pick<PluginClient, 'subscribe'>>;
+
+/**
+ * One machine's runtime over its client. `agenda` is the agenda client it counts and answers through: the device's
+ * fleet hands its one client shared by every machine (`agenda-fleet.ts`); alone, the runtime builds its own.
+ */
+export const createAgendaRuntime = (
+  client: RuntimeClient,
+  agenda: DaemonAgendaClient = new DaemonAgendaClient(new DaemonAgendaStore(), client),
+): AgendaRuntime => {
   const id = daemonOfClient(client);
   const connection = id === undefined ? THIS_MACHINE : daemonConnection({ daemonId: id });
-  const agenda = new DaemonAgendaClient(new DaemonAgendaStore(), client);
   const ferrets = new AgendaFerretStore(client, connection, agenda.rollup);
   client.subscribe?.(AsksChanged, payload => {
     agenda.noteEvent(connection, payload);

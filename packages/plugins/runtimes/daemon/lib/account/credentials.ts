@@ -59,6 +59,15 @@ const CLAUDE_CREDENTIAL_FILE = '.credentials.json';
 /** The file Codex keeps a credential in, inside its home. */
 export const CODEX_CREDENTIAL_FILE = 'auth.json';
 
+/**
+ * The names a harness's sign-in lives in (Claude's, Codex's): the ONE list every reader and copier of a harness home
+ * consults, so none keeps its own. A name is judged in any letter case.
+ */
+const SIGN_IN_FILES: ReadonlySet<string> = new Set([CLAUDE_CREDENTIAL_FILE, CODEX_CREDENTIAL_FILE]);
+
+/** Whether `name` (any letter case) is the name of a harness's sign-in file. */
+export const isSignInName = (name: string): boolean => SIGN_IN_FILES.has(name.toLowerCase());
+
 /** The `config.toml` key, and its value, that keep every Codex runtime's credential in a file. */
 export const CODEX_CREDENTIAL_STORE_KEY = 'cli_auth_credentials_store';
 export const CODEX_CREDENTIAL_STORE_FILE = 'file';

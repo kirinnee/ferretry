@@ -20,7 +20,13 @@ describe('app parity', () => {
   });
 
   test('G31 G32 the two answer cards draw above the composer, in this order', () => {
-    expect(manifest.ui?.panels?.map(panel => panel.id)).toEqual(['permission-request', 'harness-dialog']);
-    expect(Object.keys(half?.panels ?? {})).toEqual(['permission-request', 'harness-dialog']);
+    const above = (ids: readonly string[] | undefined) => ids?.filter(id => id !== 'onboarding-step');
+    expect(above(manifest.ui?.panels?.map(panel => panel.id))).toEqual(['permission-request', 'harness-dialog']);
+    expect(above(Object.keys(half?.panels ?? {}))).toEqual(['permission-request', 'harness-dialog']);
+  });
+
+  test('S14 the first-run step panel is contributed to the onboarding.step slot, beside the two cards', () => {
+    expect(manifest.ui?.panels?.find(panel => panel.id === 'onboarding-step')?.slot).toBe('onboarding.step');
+    expect(Object.keys(half?.panels ?? {})).toContain('onboarding-step');
   });
 });

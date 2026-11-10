@@ -133,7 +133,7 @@ const offersOf = (saved: InputSaved) =>
   saved.offers.map(offer => [offer.id, offer.matched, offer.primary === true ? offer.why : undefined]);
 
 describe('what a card offers', () => {
-  it('should offer only accounts holding the field: the primary, then matched by label, then by hand', () => {
+  it('I162 should offer only accounts holding the field: the primary, then matched by label, then by hand', () => {
     const match = tty('MATCH', 'sudo', 'box');
     const saved = savedFor(
       'secret',
@@ -359,7 +359,7 @@ describe('a site that signs in through a provider (secrev-1201 L5)', () => {
     should(saved.offers.map(offer => offer.id)).not.containEql('GOOGLE_KIRIN');
   });
 
-  it('should never offer a provider by hand anywhere it is not matched', () => {
+  it('I130 should never offer a provider by hand anywhere it is not matched', () => {
     const saved = savedFor('secret', 'example.org', listing(accounts, [google, vercel]));
     should(saved.offers.map(offer => offer.id)).deepEqual(['UNRELATED']);
   });
@@ -467,7 +467,7 @@ describe('the account a code card is titled from', () => {
   } as const;
   const theirs = { ...sms, id: 'tf_00000000000c', label: 'Theirs' } as const;
 
-  it('should take the matched account’s keys, or the one key the ferret names among them', () => {
+  it('I167 should take the matched account’s keys, or the one key the ferret names among them', () => {
     const world = listing(
       [account('GITHUB', { factors: [sms, app] }), account('GITLAB', { factors: [theirs] })],
       [site('GITHUB', ['github.com']), site('GITLAB', ['gitlab.com'])],
@@ -501,7 +501,7 @@ describe('who the page is signing in', () => {
   const kirin = () =>
     account('ACCOUNTS_GOOGLE_COM', { label: 'accounts.google.com', username: 'kirinnee97@gmail.com' });
 
-  it('should offer no one-tap of kirinnee97 to a page signing in ernest@atomi, and say so (the owner scenario)', () => {
+  it('I143 I157 should offer no one-tap of kirinnee97 to a page signing in ernest@atomi, and say so (the owner scenario)', () => {
     const saved = savedFor('secret', GOOGLE, listing([kirin()], [site('ACCOUNTS_GOOGLE_COM', [GOOGLE])]), {
       typedUsername: 'ernest@atomi.tech',
     });
@@ -529,7 +529,7 @@ describe('who the page is signing in', () => {
     should(saved.suggest).deepEqual({ id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com' });
   });
 
-  it('should take the one-tap away from an account with no username saved: nothing says it is the same person', () => {
+  it('I157 should take the one-tap away from an account with no username saved: nothing says it is the same person', () => {
     const saved = savedFor('secret', GOOGLE, listing([account('G', { label: 'google' })], [site('G', [GOOGLE])]), {
       typedUsername: 'b@gmail.com',
     });
@@ -541,7 +541,7 @@ describe('who the page is signing in', () => {
     should(saved.newAccount).deepEqual({ id: 'GOOGLE_B', label: 'Google · b@gmail.com' });
   });
 
-  it('should never PROMOTE an account by its username: two sign in here, the typed one matches one, still no one-tap', () => {
+  it('I157 should never PROMOTE an account by its username: two sign in here, the typed one matches one, still no one-tap', () => {
     const saved = savedFor(
       'secret',
       GOOGLE,
@@ -565,7 +565,7 @@ describe('who the page is signing in', () => {
     should(saved.update).be.undefined();
   });
 
-  it('should demote a ferret’s hint or a default exactly as the only one, and never move it to another account', () => {
+  it('I157 should demote a ferret’s hint or a default exactly as the only one, and never move it to another account', () => {
     const a = site('A', [GOOGLE]);
     const saved = savedFor(
       'secret',

@@ -1,7 +1,7 @@
 import { afterAll, mock } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 import type { ReactNode } from 'react';
-import { config } from '@ferretry/kernel/host';
+import { editConfigText, readConfigText } from '@ferretry/std/yaml';
 import type { ConfigFiles } from '../../../app/lib/pack-config.ts';
 import * as realUiModule from '../../../app/ui.ts';
 import { clockAt } from './timers.ts';
@@ -70,10 +70,10 @@ export const uiDoubles = {
   useConfigFiles: (): ConfigFiles => ({
     text: {
       read: text => {
-        const read = config.readConfigText(text);
+        const read = readConfigText(text);
         return read.ok ? { ok: true, value: read.read.value } : { ok: false };
       },
-      edit: config.editConfigText,
+      edit: editConfigText,
     },
     read: async () => ({ text: '', etag: 'e1' }),
     write: async () => ({ outcome: 'applied' }),

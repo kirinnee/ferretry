@@ -10,13 +10,17 @@ import {
   APPLIED,
   type Call,
   CHANGE_ID,
+  LANDED_FILE,
   machine,
   machineWith,
   NOW,
   READS,
+  ROLLBACK_INCOMPLETE,
+  ROLLED_BACK,
   RUNTIMES,
   scripted,
   stagedFrom,
+  UNRESTORED_PATH,
 } from '../account-support.ts';
 
 const PROPOSE = 'POST /v1/runtimes/proposals';
@@ -210,6 +214,60 @@ describe('the switch on a login', () => {
     // Assert
     expect(view.container.querySelector('[data-disable-form]')).toBeNull();
     expect(proposed(calls)).toEqual([]);
+  });
+
+  it('R3-M1: a rolled-back switch-off keeps the form open, names the file that stayed, and reads nothing again', async () => {
+    // Arrange
+    const { view, reads } = await openLogin(undefined, { [APPLY]: ROLLED_BACK });
+    await click(switchOf(view.container, 'codex'), 'switch');
+    await fill(
+      must(view.container.querySelector<HTMLInputElement>('[data-disable-reason]'), 'reason'),
+      'Out of credit',
+    );
+
+    // Act
+    await click(view.container.querySelector('[data-disable-form] [data-change-submit]'), 'submit');
+
+    // Assert
+    const alert = must(view.container.querySelector('[data-disable-form] [data-change-refusal]'), 'alert');
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toStartWith('This change was not applied: the fleet apply failed and was rolled back.');
+    expect(alert.textContent).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-disable-form]')).not.toBeNull();
+    expect(reads.count).toBe(0);
+  });
+
+  it('R3-M1: a rollback-incomplete switch-off keeps the form open and names the paths left partly changed', async () => {
+    // Arrange
+    const { view, reads } = await openLogin(undefined, { [APPLY]: ROLLBACK_INCOMPLETE });
+    await click(switchOf(view.container, 'codex'), 'switch');
+    await fill(
+      must(view.container.querySelector<HTMLInputElement>('[data-disable-reason]'), 'reason'),
+      'Out of credit',
+    );
+
+    // Act
+    await click(view.container.querySelector('[data-disable-form] [data-change-submit]'), 'submit');
+
+    // Assert
+    const said = must(view.container.querySelector('[data-disable-form] [data-change-refusal]'), 'alert').textContent;
+    expect(said).toContain('needs a look');
+    expect(said).toContain(UNRESTORED_PATH);
+    expect(view.container.querySelector('[data-disable-form]')).not.toBeNull();
+    expect(reads.count).toBe(0);
+  });
+
+  it('R3-M1: a rolled-back switch-on says so where a refusal shows, and reads nothing again', async () => {
+    // Arrange
+    const { view, reads } = await openLogin({ ...OFF, source: 'login' }, { [APPLY]: ROLLED_BACK });
+
+    // Act
+    await click(switchOf(view.container, 'codex'), 'switch');
+
+    // Assert
+    expect(view.container.querySelector('[data-disable-error]')?.textContent).toContain(LANDED_FILE);
+    expect(view.container.querySelector('[data-disable-error]')?.getAttribute('role')).toBe('alert');
+    expect(reads.count).toBe(0);
   });
 
   it('should show a disabled login off, with its reason and end, and switch it on with one tap', async () => {

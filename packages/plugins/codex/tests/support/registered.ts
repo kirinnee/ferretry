@@ -17,6 +17,9 @@ export function registeredCodex() {
   /** Every bounded read: `offset`/`length` windows only. */
   const windows: { path: string; offset: number; length: number }[] = [];
   const state = new Map<string, unknown>();
+  /** A single file is keyed by its name; a collection's member by its file and the member's name. */
+  const stateKey = (def: { name: string }, name?: string): string =>
+    name === undefined ? def.name : `${def.name}/${name}`;
   const rootsUsed: { name: string; subfolder?: string }[] = [];
   const commands: RunSpec[] = [];
   /** Every folder made (or narrowed) private through a root, as the kernel's ensurePrivateDirectory would. */
@@ -78,6 +81,12 @@ export function registeredCodex() {
         if (text === undefined) throw new Error('missing');
         return new TextEncoder().encode(text).slice(limit.offset, limit.offset + limit.length);
       },
+      readTail: async (path, maxBytes) => {
+        const text = files.get(path);
+        if (text === undefined) throw new Error('missing');
+        const bytes = new TextEncoder().encode(text);
+        return { bytes: bytes.slice(Math.max(0, bytes.length - maxBytes)), size: bytes.length };
+      },
       writeText: async (path, text) => {
         files.set(path, text);
       },
@@ -97,6 +106,7 @@ export function registeredCodex() {
       remove: async path => {
         files.delete(path);
       },
+      lstat: async () => undefined,
       makeDirectory: async () => undefined,
       ensurePrivateDirectory: async path => {
         privateDirectories.push(path);
@@ -110,13 +120,14 @@ export function registeredCodex() {
     roots: { root },
     jobs: { add: (job: (typeof jobs)[number]) => void jobs.push(job), kick: (id: string) => void kicks.push(id) },
     log: { warn: (message: string) => void warnings.push(message) },
+    // One entry per declared file and name, as the kernel keeps them: two files never share a name's entry.
     state: {
-      read: async (def: { name: string }, name?: string) => ok(state.get(name ?? def.name)),
+      read: async (def: { name: string }, name?: string) => ok(state.get(stateKey(def, name))),
       write: async (def: { name: string }, value: unknown, name?: string) => {
-        state.set(name ?? def.name, structuredClone(value));
+        state.set(stateKey(def, name), structuredClone(value));
       },
     },
-    config: { file: () => ({ permissionMode, searchPaths: [] }) },
+    config: { file: () => ({ permissionMode, searchPaths: [] }), collection: () => new Map() },
     spawn: {
       start: childSpawn.start,
       run: async (program: string, args: string[]) => ({

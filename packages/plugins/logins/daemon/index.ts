@@ -37,6 +37,7 @@ import { CREDENTIAL_LIST_FRESH_MS, FleetCredentialsService } from './lib/credent
 import { CredentialStatusService } from './lib/credentials/credential-status.ts';
 import { HarnessLoginService } from './lib/harness-login/service.ts';
 import { loginKinds } from './lib/kinds.ts';
+import { environmentTemplates } from './lib/profile-templates.ts';
 import { ModelCatalogService } from './lib/models/service.ts';
 import { PublishedModelCatalogService } from './lib/models/published.ts';
 import { modelCatalogsView, type PublishedCatalogState } from './lib/models/view.ts';
@@ -148,7 +149,8 @@ export function buildLoginsDaemon() {
           const [program, ...args] = spec.command as [string, ...string[]];
           const env: Record<string, string> = {};
           for (const [name, value] of Object.entries(spec.environment)) if (value !== undefined) env[name] = value;
-          return (await kernel.spawn.run(program, args, { env })).exitCode ?? 1;
+          const ended = await kernel.spawn.run(program, args, { env });
+          return ended.exitCode ?? ended.signal ?? 'a signal';
         },
         baseEnvironment: () => sanitizeHarnessEnv({}),
         environment: {
@@ -216,6 +218,9 @@ export function buildLoginsDaemon() {
 
       const api: Omit<LoginsApi, 'authorizeFetch'> = {
         list: () => credentials.list(),
+        // Read live from each login's own file, kept nowhere: Runtimes asks on every read of its model.
+        environmentTemplates: async () =>
+          environmentTemplates(files(), id => config.fileState(LOGINS_CONFIG, id).state),
         get: async id => (await credentials.list()).logins.find(login => login.id === id),
         quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
         presets: () => credentials.presets(),
@@ -277,7 +282,9 @@ export function buildLoginsDaemon() {
         },
         view: id => api.get(id as LoginId),
         signOut: id => credentials.signOut(id),
-        write: (id, patch) => config.write(LOGINS_CONFIG, id, { patch }),
+        // The owner's reviewed change: made to both versions of a login with an edit held, so it never puts another
+        // caller's held edit (a raised budget) into effect.
+        write: (id, patch) => config.writeAsOwner(LOGINS_CONFIG, id, { patch }),
         // A removal that the kernel would hold is refused instead: a held removal would leave the login in effect and be
         // put through later by a path that does not ask what uses it.
         remove: id => config.remove(LOGINS_CONFIG, id, { refuseIfHeld: true }),
@@ -286,6 +293,26 @@ export function buildLoginsDaemon() {
         },
         now: () => clock.nowMs(),
         mintId: () => String(kernel.ids.mint('change')),
+      });
+
+      // The files are the source of truth (docs/config-files.md): a login file that moved in effect by ANY editor — a
+      // hand edit, `fy config`, an agent's config tool, or this plugin's own changes — is announced, so whoever reads
+      // the logins (the views, Runtimes' disable-until timer) reads them again. A change made through the changes
+      // service is announced by it too; a second word for the same move is one more read, never a wrong one.
+      let inEffect = files();
+      const unwatchFiles = config.watch(LOGINS_CONFIG, () => {
+        const next = files();
+        for (const id of new Set([...inEffect.keys(), ...next.keys()])) {
+          const before = inEffect.get(id);
+          const after = next.get(id);
+          if (JSON.stringify(before) === JSON.stringify(after)) continue;
+          const change = before === undefined ? 'added' : after === undefined ? 'removed' : 'edited';
+          events.publish(LoginChanged, { loginId: id as LoginId, change });
+        }
+        inEffect = next;
+      });
+      lifecycle.onStop(() => {
+        unwatchFiles();
       });
 
       const kinds = loginKinds({

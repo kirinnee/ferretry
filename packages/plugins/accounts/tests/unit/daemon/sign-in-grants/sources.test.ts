@@ -115,6 +115,13 @@ describe('CombinedSignInGrants', () => {
     should(both.scriptedOrigins().hosts.get('github.com')).equal(NOW);
   });
 
+  it('should find an account’s key through the plan source, which every account is looked up by', async () => {
+    const ledger = new SignInGrantLedger();
+    const both = new CombinedSignInGrants(fake('plan', ledger, []).source, fake('rule', ledger, []).source, ledger);
+
+    should(await both.keyOf('GITHUB_WORK')).equal(KEY);
+  });
+
   it('should keep each source’s attempts and pins when the other reads its grants (no cross-wipe)', () => {
     const ledger = new SignInGrantLedger();
     const both = new CombinedSignInGrants(fake('plan', ledger, []).source, fake('rule', ledger, []).source, ledger);

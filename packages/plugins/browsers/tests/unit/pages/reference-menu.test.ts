@@ -172,7 +172,10 @@ describe('browsers with the real half', () => {
     });
     const host = await testHost({
       plugins: [half],
-      uses: { ferrets: { get: async (id: string) => (id === 'f1' || id === 'f2' ? { name: id } : undefined) } },
+      uses: {
+        ferrets: { get: async (id: string) => (id === 'f1' || id === 'f2' ? { name: id } : undefined) },
+        agentControl: { allows: async () => true },
+      },
       fakes: { vault: new FakeVault(), gate: new FakeGate() },
       gate: new StandInAdmission(request =>
         request.arrival.kind === 'local' && request.arrival.privileged ? ferretStanding(calling) : ownerStanding(),

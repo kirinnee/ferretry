@@ -12,6 +12,9 @@ import { updateHostFor } from './adapters/update-host.ts';
 import { createConfigFiles } from './config/index.ts';
 import type { ConfigJudge, HostAdapters, HostConfig, PluginStateHandle } from './host.ts';
 import { type LogSink, scopedLog } from './log.ts';
+import { nodeExecutableProbe } from './adapters/executable.ts';
+import { hostProcessTable, PS_SYSTEM_DIRECTORIES } from './adapters/process-table.ts';
+import { whichCommand } from './which.ts';
 import {
   createNodeHostFs,
   createStatePort,
@@ -20,6 +23,7 @@ import {
   moveStateAside,
   openPluginState,
 } from './state/index.ts';
+import type { PrivatePin } from './state/state-port.ts';
 import type { Clock, Log, StateDamage } from '../contract/ports.ts';
 import type { ConfigDef } from '../contract/define.ts';
 
@@ -39,14 +43,21 @@ export function stateOpener(
   fs: StateFs,
   clock: Clock,
   log: Log,
-): (manifest: Manifest) => PluginStateHandle {
-  return manifest => {
+): (manifest: Manifest, pin?: PrivatePin) => PluginStateHandle {
+  return (manifest, pin) => {
     const files = manifest.data?.state ?? [];
     const listeners = new Set<(damage: readonly StateDamage[]) => void>();
     const changed = (damage: readonly StateDamage[]): void => {
       for (const listener of listeners) listener(damage);
     };
-    let port = createStatePort({ home, pluginId: manifest.id, files, fs, clock });
+    let port = createStatePort({
+      home,
+      pluginId: manifest.id,
+      files,
+      fs,
+      clock,
+      ...(pin === undefined ? {} : { pin }),
+    });
     return {
       get port() {
         return port;
@@ -81,6 +92,7 @@ export function stateOpener(
           clock,
           initialDamage: opening.damaged,
           initialNarrowed: opening.narrowed,
+          ...(pin === undefined ? {} : { pin }),
           changed,
           report: ({ damage, policy }) =>
             log.warn('a state file cannot be read', {
@@ -125,7 +137,9 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
       writer: () => service.writer(),
       status: () => service.status(),
       reload: () => service.reload(),
+      publishSchemas: () => service.publishSchemas(),
       startWatching: () => service.startWatching(),
+      onStateChange: listener => service.onStateChange(listener),
     };
   };
 }
@@ -159,9 +173,23 @@ export function realAdapters(
     websocket: bunWebSockets(),
     hostname: () => hostname(),
     ownerHome: () => homedir(),
+    // Today's lookup: the daemon's own PATH, read at each call (`Bun.which(name, { PATH: process.env.PATH })`).
+    searchPath: () => process.env.PATH,
+    // `kernel.paths.locate`: the ONE override variable a manifest declared (`FY_CLOUDFLARED`), read at each call.
+    operatorVariable: name => process.env[name],
+    executable: nodeExecutableProbe,
     pinner: platformRootPinner(),
     scratch: scratchPort(),
     hostFacts: nodeHostFacts({ launchGuard: launchGuardFor({ home }) }),
+    // Today's Codex stopper's table: `/proc` on Linux, the kernel's own `ps` (system folders, then PATH) elsewhere.
+    processTable: hostProcessTable({
+      platform: process.platform,
+      uid: process.getuid?.() ?? -1,
+      self: process.pid,
+      parent: process.ppid,
+      locatePs: async () =>
+        await whichCommand('ps', { path: process.env.PATH, directories: PS_SYSTEM_DIRECTORIES }, nodeExecutableProbe),
+    }),
     compressor: new NodeGzip(),
     ...(options.release === undefined
       ? {}

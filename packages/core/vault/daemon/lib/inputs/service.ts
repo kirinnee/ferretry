@@ -1,3 +1,4 @@
+import { agentControlRefusal, ApiError } from '@ferretry/kernel/contract';
 import {
   type AccountId,
   type AccountKey,
@@ -1322,7 +1323,10 @@ export class InputRequestService {
         held.deliveries.delete(body.deliveryId);
         throw error;
       }
-      return await this.attempt(held, body, owner);
+      // The owner is told in the owner's words when Browsers' page target refused the Send (ruling #42 SF1).
+      return await this.attempt(held, body, owner).catch((error: unknown) => {
+        throw inOwnerWords(error, held.request.target.kind);
+      });
     });
     held.deliveries.set(body.deliveryId, attempt);
     return await attempt;
@@ -2957,6 +2961,26 @@ function requireOwner(caller: InputCaller): InputActor {
   if (caller.kind !== 'owner')
     throw new InputRequestError('forbidden', 'only the owner answers an input request; an agent cannot');
   return caller.actor;
+}
+
+/**
+ * The owner's words for a Send the page target refused because "What agents may control › Browsers" is off (ruling #42
+ * SF1, tightened by design: today the owner's Send typed whatever the switch said). Browsers' `PageInputTarget` is the
+ * ONE gate, and it refuses in the agents' sentence (`agentControlRefusal('browser')`), which tells an agent to ask the
+ * person. This only re-words that exact refusal for the person at the card, with the remedy; it checks no switch, and
+ * any other error passes through as it came. Nothing was typed or held, and the card is pending again, so it can be
+ * sent once Browsers is back on.
+ */
+const BROWSERS_OFF_FOR_OWNER =
+  'Agents may no longer control browsers on this machine, so this card was not typed into the page. Turn on Browsers under What agents may control and try again, or dismiss the card.';
+
+function inOwnerWords(error: unknown, kind: InputTarget['kind']): unknown {
+  const browsersOff =
+    kind === 'page' &&
+    error instanceof ApiError &&
+    error.code === 'forbidden' &&
+    error.message === agentControlRefusal('browser');
+  return browsersOff ? new InputRequestError('forbidden', BROWSERS_OFF_FOR_OWNER) : error;
 }
 
 function targetChanged(kind: InputTarget['kind']): InputRequestError {

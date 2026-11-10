@@ -178,9 +178,9 @@ G168	removed	access	-	-	grants	-
 G169	kept	gate	-	behaviour as written	grants	G169
 G170	kept	catalogs	gate	`STEP_UP_ACTS.catalogInstall`	grants	G170
 G171	kept	catalogs	gate	behaviour as written	grants	G171
-G172	kept	skills	gate	behaviour as written	grants	G172
-G173	kept	skills	gate	behaviour as written	grants	G173
-G174	kept	skills	gate	behaviour as written	grants	G174
+G172	removed	skills	-	-	grants	-
+G173	removed	skills	-	-	grants	-
+G174	removed	skills	-	-	grants	-
 G175	kept	skills	gate	behaviour as written	grants	G175
 G176	kept	mcp	gate	`session-mcp.ts`	grants	G176
 G177	kept	mcp	gate	behaviour as written	grants	G177
@@ -451,49 +451,49 @@ I126	kept	accounts	-	`[redacted:login:<ID>:password]`	input-requests	I126
 I127	kept	accounts	-	`via`	input-requests	I127
 I128	kept	accounts	-	`namesPasskey`	input-requests	I128
 I129	kept	accounts	-	behaviour as written	input-requests	I129
-I130	kept	accounts	-	`InputSaved.signIn`	input-requests	I130
+I130	kept	vault	-	`InputSaved.signIn`	input-requests	I130
 I131	split	accounts	vault	-	input-requests	I131
 I132	kept	accounts	-	`hidesCharacters`	input-requests	I132
 I133	kept	accounts	-	`recipe_holds_value`	input-requests	I133
 I134	kept	accounts	-	`recipeBy: ferret`	input-requests	I134
 I135	kept	accounts	-	`LoginFactSink.observeSignIn`	input-requests	I135
-I136	kept	accounts	-	behaviour as written	input-requests	I136
-I137	kept	accounts	-	`observerByOf`	input-requests	I137
+I136	kept	vault	-	behaviour as written	input-requests	I136
+I137	kept	vault	-	`observerByOf`	input-requests	I137
 I138	kept	accounts	-	behaviour as written	input-requests	I138
-I139	kept	accounts	-	`actsOn`	input-requests	I139
+I139	kept	vault	-	`tainted`	input-requests	I139
 I140	kept	accounts	-	`account_propose`, `stale_proposal`, `login-recipe-auto`	input-requests	I140
 I141	kept	accounts	-	`recipeVersion`	input-requests	I141
 I142	kept	accounts	-	behaviour as written	input-requests	I142
-I143	kept	accounts	-	behaviour as written	input-requests	I143
+I143	kept	vault	-	behaviour as written	input-requests	I143
 I144	kept	accounts	-	`InputSaved.update`	input-requests	I144
 I145	kept	accounts	-	behaviour as written	input-requests	I145
 I146	kept	accounts	-	`InputSaved.update`	input-requests	I146
 I147	kept	accounts	-	`LoginDirectory.saveFields`	input-requests	I147
 I148	kept	accounts	-	`LOGIN_PASSWORD_MIN_LENGTH`	input-requests	I148
-I149	kept	accounts	-	`saved: { ok: false }`	input-requests	I149
-I150	kept	accounts	-	`login-save`	input-requests	I150
+I149	kept	vault	-	`saved: { ok: false }`	input-requests	I149
+I150	kept	vault	-	`login-save`	input-requests	I150
 I151	kept	accounts	-	`LoginStoreLock`	input-requests	I151
 I152	kept	accounts	-	`LoginDirectory.sweepUnreferenced`	input-requests	I152
 I153	kept	accounts	-	`LoginDirectory.saveFields`	input-requests	I153
 I154	kept	browsers	accounts	`TypedIdentities`, `identifierFieldHost`, `clickedIdentityOf`	input-requests	I154
 I155	kept	browsers	accounts	`BrowserSignInWatch`	input-requests	I155
-I156	kept	accounts	-	`InputSaved.typedUsername`	input-requests	I156
-I157	kept	accounts	-	`differentFrom`	input-requests	I157
+I156	kept	vault	-	`InputSaved.typedUsername`	input-requests	I156
+I157	kept	vault	-	`differentFrom`	input-requests	I157
 I158	kept	accounts	-	`GET /v1/accounts`	input-requests	I158
 I159	kept	accounts	-	`signInMatches`, `offer.primary`	input-requests	I159
-I160	kept	accounts	-	behaviour as written	input-requests	I160
+I160	kept	vault	-	behaviour as written	input-requests	I160
 I161	kept	accounts	-	`savedForFields`, `bad_request`	input-requests	I161
-I162	kept	accounts	-	behaviour as written	input-requests	I162
+I162	kept	vault	-	behaviour as written	input-requests	I162
 I163	kept	accounts	-	behaviour as written	input-requests	I163
 I164	kept	accounts	-	`elsewhere`	input-requests	I164
 I165	kept	accounts	-	`secretHint`	input-requests	I165
-I166	kept	accounts	-	behaviour as written	input-requests	I166
-I167	kept	accounts	-	`factorAskWords`	input-requests	I167
+I166	kept	vault	-	behaviour as written	input-requests	I166
+I167	kept	vault	-	`factorAskWords`	input-requests	I167
 I168	kept	accounts	-	`codeTargetProblem`	input-requests	I168
-I169	kept	accounts	-	`bad_request`	input-requests	I169
+I169	kept	vault	-	`bad_request`	input-requests	I169
 I170	kept	accounts	-	`fill(account, 'totp', now, { factor })`, `input.delivered`	input-requests	I170
-I171	kept	accounts	-	`LoginObserver.codeTyped`, `verified`	input-requests	I171
-I172	kept	accounts	-	behaviour as written	input-requests	I172
+I171	kept	vault	-	`LoginObserver.codeTyped`, `verified`	input-requests	I171
+I172	kept	vault	-	behaviour as written	input-requests	I172
 I173	kept	accounts	-	`TwoFactorSeedSaved.typed`	input-requests	I173
 I174	kept	accounts	-	`LOGIN_TOTP_WARNING`, `add-2fa-key`	input-requests	I174
 I175	kept	accounts	-	`LOGIN_TOTP_WARNING`, `AUTOMATED_CODE_WARNING`	input-requests	I175
@@ -587,12 +587,12 @@ S17	kept	terminals	vault	behaviour as written	secrets	S17
 S18	kept	vault	-	behaviour as written	secrets	S18
 S19	kept	vault	-	behaviour as written	secrets	S19
 S20	kept	vault	-	`SecretRedactor.batch`	secrets	S20
-S21	kept	vault	-	`redactText`	secrets	S21
-S22	kept	vault	-	`redactText`	secrets	S22
-S23	kept	vault	-	`redactText`	secrets	S23
-S24	kept	vault	-	behaviour as written	secrets	S24
-S25	kept	vault	-	behaviour as written	secrets	S25
-S26	kept	vault	-	`redact-differential.test.ts`	secrets	S26
+S21	kept	runtimes	-	`redactText`	secrets	S21
+S22	kept	runtimes	-	`redactText`	secrets	S22
+S23	kept	runtimes	-	`redactText`	secrets	S23
+S24	kept	runtimes	-	behaviour as written	secrets	S24
+S25	kept	runtimes	-	behaviour as written	secrets	S25
+S26	kept	runtimes	-	`redact-differential.test.ts`	secrets	S26
 S27	kept	vault	-	behaviour as written	secrets	S27
 S28	kept	vault	-	behaviour as written	secrets	S28
 S29	kept	vault	-	behaviour as written	secrets	S29
@@ -610,7 +610,7 @@ S40	kept	kernel	-	`fenceOf`, `fencedReal`	secrets	S40
 S41	kept	kernel	-	behaviour as written	secrets	S41
 S42	kept	kernel	-	behaviour as written	secrets	S42
 S43	kept	kernel	-	provisioner; opening `<fleet>/assets`	secrets	S43
-S44	kept	kernel	-	Linux `/proc`, macOS `fchdir`	secrets	S44
+S44	kept	kernel	-	Linux `/proc`; macOS descriptor bracket not built yet	secrets	S44
 S45	kept	kernel	-	`stateHomeFence`, `fy history claim`	secrets	S45
 S46	kept	kernel	-	`stateHomeFence`	secrets	S46
 S47	kept	ferrets	-	`/v1/sessions/:id/fs/*`, opening `scope=media`	secrets	S47
@@ -652,7 +652,7 @@ S82	kept	accounts	-	`GET /v1/accounts/look-alike`	secrets	S82
 S83	kept	accounts	-	behaviour as written	secrets	S83
 S84	split	accounts	vault	-	secrets	S84
 S85	kept	accounts	-	`AccountDirectory.observeSignIn` (sole writer)	secrets	S85
-S86	kept	accounts	-	behaviour as written	secrets	S86
+S86	kept	vault	-	behaviour as written	secrets	S86
 S87	kept	accounts	-	`two-factor-seeds.ts`	secrets	S87
 S88	kept	accounts	-	behaviour as written	secrets	S88
 S89	kept	accounts	-	`POST /v1/accounts/:id/factors/seed`	secrets	S89
@@ -744,6 +744,7 @@ S174	kept	mcp	-	`MCP_<NAME>_<HASH>_ACCESS`	secrets	S174
 S175	kept	usage	logins,vault	`GET /api/oauth/usage`, `GET /backend-api/wham/usage`	secrets	S175
 S176	kept	usage	logins,vault	type test	secrets	S176
 S177	kept	usage	logins,vault	diet test	secrets	S177
+S179	kept	kernel	-	`project-files` root, `permissions.projectFiles`	secrets	S179
 S178	kept	usage	logins,vault	`FY_USAGE_PROBE_ORIGIN`	secrets	S178
 R1	kept	kernel	-	behaviour as written	relay-protocol	R1
 R2	kept	kernel	-	behaviour as written	relay-protocol	R2
@@ -812,7 +813,7 @@ R64	kept	connections	worker:relay	behaviour as written	relay-protocol	R64
 R65	kept	kernel	-	`hs1` / `hs2`	relay-protocol	R65
 R66	kept	kernel	-	behaviour as written	relay-protocol	R66
 R67	kept	kernel	-	behaviour as written	relay-protocol	R67
-R68	kept	connections	-	`sessionProtocol`	relay-protocol	R68
+R68	removed	connections	-	-	relay-protocol	-
 R69	kept	kernel	-	behaviour as written	relay-protocol	R69
 R70	kept	kernel	-	behaviour as written	relay-protocol	R70
 R71	kept	kernel	-	behaviour as written	relay-protocol	R71
@@ -926,7 +927,7 @@ R178	removed	connections	-	-	relay-protocol	-
 R179	removed	connections	-	-	relay-protocol	-
 R180	removed	connections	-	-	relay-protocol	-
 R181	removed	connections	-	-	relay-protocol	-
-R182	kept	connections	-	`bindUrl`, `publicUrl`	relay-protocol	R182
+R182	kept	connections	-	`publishedDaemonCarriers`, `PublishedCarrierSet`	relay-protocol	R182
 R183	kept	connections	-	behaviour as written	relay-protocol	R183
 R184	kept	connections	-	behaviour as written	relay-protocol	R184
 R185	kept	connections	gate	behaviour as written	relay-protocol	R185
@@ -954,7 +955,7 @@ R206	kept	connections	worker:relay	`fyd --check`	relay-protocol	R206
 R207	kept	connections	worker:relay	`packages/daemon/src/lib/relay`, `packages/daemon/src/adapters/relay`	relay-protocol	R207
 R208	kept	connections	worker:relay	`relay-session.ts`, `relay-carrier.ts`, `DaemonConnection`, `connections.ts`	relay-protocol	R208
 R209	kept	connections	worker:relay	`relay-carrier-end-to-end.test.ts`, `RendezvousDurableObject`, `RelayLink`	relay-protocol	R209
-R210	kept	connections	worker:relay	behaviour as written	relay-protocol	R210
+R210	split	connections	worker:relay	behaviour as written	relay-protocol	R210
 R211	kept	connections	-	`refusalUpgrade`	relay-protocol	R211
 R212	kept	connections	-	behaviour as written	relay-protocol	R212
 R213	kept	connections	worker:relay	`src/adapters/relay/hosted-relay-directory.ts`	relay-protocol	R213
@@ -962,12 +963,12 @@ R214	kept	connections	worker:relay	behaviour as written	relay-protocol	R214
 R215	kept	connections	worker:relay	behaviour as written	relay-protocol	R215
 R216	kept	connections	worker:relay	behaviour as written	relay-protocol	R216
 R217	kept	kernel	gate	behaviour as written	relay-protocol	R217
-R218	kept	connections	worker:relay	`PAIRING_REACH_NOTICE`, `discoverableRelayUrl`, `localOnlyNotice`	relay-protocol	R218
+R218	kept	connections	worker:relay	`PAIRING_REACH_NOTICE`, `discoveredRelayUrl`	relay-protocol	R218
 R219	kept	connections	worker:relay	`DaemonCarrierRouter.openStream`	relay-protocol	R219
 R220	kept	access	connections	`scripts/validate/cli-contracts.sh`	relay-protocol	R220
 R221	kept	connections	worker:relay	`discoveredRelayUrl`	relay-protocol	R221
 R222	kept	connections	worker:relay	behaviour as written	relay-protocol	R222
-R223	kept	connections	worker:relay	`useDaemonFetch()`	relay-protocol	R223
+R223	kept	connections	worker:relay	`CarrierDialer`	relay-protocol	R223
 R224	kept	connections	worker:relay	`ActiveCarrierCard`, `chooseConnection().reason`, `describeConnectionMethod`, `DaemonCarrierRouter.choice`, `connection-health.ts`	relay-protocol	R224
 R225	split	connections	worker:relay	-	relay-protocol	R225
 R226	kept	connections	worker:relay	behaviour as written	relay-protocol	R226
