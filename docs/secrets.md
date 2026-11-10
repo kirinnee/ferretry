@@ -499,10 +499,13 @@ per-document plan (one refused document writes nothing of the set).
   - **Arguments and launch flags**, in the detail, the Resolved view and the runtime list's overridden flags: each list is
     cut, then judged by W's flag rule AND its raw-secret rule (a token shape in a word withholds the list); a refused word
     withholds the whole list in words.
-  - **An MCP server's `command`** (`commandWithheld`) and **`url`** (`urlWithheld`: withheld whole when W refuses it or the cutter
-    would cut any part of it; the form asks for the whole line again). The command is split at its blanks, so `srv --token`
-    beside the argument `v` is one pair; the Resolved MCP line withholds when W refuses the command or the line it makes,
-    and a Resolved url whose path W refuses (`/mcp --token v`, shown %-encoded) is withheld as the detail's is.
+  - **An MCP server's `command`**, by ONE rule (`commandWithheld`) in the detail, the Resolved MCP line and the "command not found"
+    warning: withheld whole when W refuses it (as one string or as the words it splits into, so `srv --token` beside the
+    argument `v` is one pair) or when the word cutter, run on it as one string or word by word, cuts a VALUE
+    (`curl -H "Authorization: Bearer v"`, `srv -H Cookie: session=v`). A part the cutter cuts that is a pointer (`$X`,
+    `${X}`, `${secret:X}`) is no value: `env API_KEY=$API_KEY srv` is shown as written. A **`url`** (`writtenWithheld`) is withheld
+    whole when W refuses it or the cutter would cut any part of it (a `?token=v` query is W-accepted but real); a Resolved url
+    whose path W refuses (`/mcp --token v`, shown %-encoded) is withheld as the detail's is.
   - **An environment or settings value shown under its name** (hidden when W refuses it, as when the name or shape says
     credential), including a list or a nested table (`{x: ['--token', v]}`, `{servers: [{token: v}]}`), in the detail and in the
     Resolved rows, and the Resolved model row.
@@ -512,7 +515,12 @@ per-document plan (one refused document writes nothing of the set).
   - **The text of an instructions or hooks file**: cut by its own line rule (`redactText`), pinned equal to v4 outside its
     tightened lines, and then netted line by line: a line W's text test still refuses after that cut (a long bare value
     under a plain key) is withheld, replaced by one plain sentence (`WITHHELD_LINE`) while every other line and the line
-    count stay. v4 showed those lines; the S26 pin exempts exactly the lines it replaces.
+    count stay. v4 showed those lines; the S26 pin exempts exactly the lines it replaces. Netted by W's VALUE rule too:
+    instruction lines (an instruction Runtimes writes keeps its text in the component YAML, where a string with blanks is
+    read as words; a flag at the end of one line pairs with the value starting the next), and hooks by the parsed document
+    (the lines of each path W refuses are withheld; a refused list item withholds its whole list, because `--token` and its
+    value are two lines; a text that does not parse as JSON is netted by the lines alone, and a document nested past 200
+    levels is withheld whole).
   - **The "command not found" warning** names the command only when the detail shows it.
 
   The fields shown as written without a net are names and paths, not values: a component's `file` and `directory`, a skill's items,
