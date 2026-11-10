@@ -9,7 +9,7 @@ import {
   type SignInSummary,
 } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { identityOf } from '../../../../daemon/lib/vault-inputs.ts';
+import { codeTargetProblem, identityOf } from '../../../../daemon/lib/vault-inputs.ts';
 import {
   type GrantSighting,
   matchSignInGrant,
@@ -788,6 +788,35 @@ describe('Appendix D: what a grant may type, and where', () => {
       );
       should(reasonOf(wide, username)).equal('field-not-covered');
     }
+  });
+
+  it('I168 should let a code go only to an https, visible, uncovered, own-frame field, and refuse every other target', () => {
+    const otp = (over: Partial<PageField> = {}) => pageField('otp', over, { type: 'text' });
+    const problem = (facts: InputTargetFacts | undefined) => codeTargetProblem(facts, ['otp']);
+    should(problem(page({}, [otp()]))).be.undefined();
+    should(problem(page({ secure: false }, [otp()]))).equal('the page is not https');
+    should(problem(page({}, [otp({ visible: false })]))).equal('Ferretry cannot see the code field on the page');
+    should(problem(page({}, [pageField('other')]))).equal('Ferretry cannot see the code field on the page');
+    should(problem(page({}, [otp({ covered: true })]))).equal('something on the page covers the code field');
+    should(problem(page({}, [otp({ frameOrigin: 'https://evil.example' })]))).equal(
+      'the code field is inside a frame from another site',
+    );
+    should(problem(undefined)).equal('Ferretry is looking at the target again');
+    should(problem({ kind: 'secret' } as InputTargetFacts)).equal('a code Ferretry makes is typed only into a sign-in');
+    // A terminal is judged by the matcher's proof, never by a page rule: a code goes into sudo nowhere.
+    should(
+      reasonOf(
+        sudoGrant(),
+        sighting(
+          {
+            facts: terminal(),
+            matchKey: 'sudo@kirin-box',
+            fields: [{ id: 'value', label: 'Code', sensitivity: 'code' }],
+          },
+          sudoListing,
+        ),
+      ),
+    ).not.equal('filled');
   });
 
   it('I244 should give an unverified terminal no key, so a renamed shell never becomes the one-tap', () => {
