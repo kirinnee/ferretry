@@ -825,7 +825,7 @@ async function start(world: World): Promise<TestHost> {
      * The etag of one file as the DISK has it, which is what `etag` answers and `ifMatch` is compared with (the real
      * service reads both from the disk, "not from the version in effect"): the world's value, except that an edit held
      * for the owner is on the disk while the tighter value stays in effect, so a held file answers the held edit's etag.
-     * A held REMOVAL leaves the file where it is, so it keeps the value's.
+     * A held REMOVAL took the file off the disk (the value stays in effect), so it answers the absent etag.
      */
     const diskEtagOf = (
       def: ConfigFileDef<any> | ConfigCollectionDef<any>,
@@ -834,9 +834,12 @@ async function start(world: World): Promise<TestHost> {
     ): string => {
       const path = def.shape === 'file' ? def.file : `${def.collection}/${name as string}.yaml`;
       const stamp = configStamps.get(keyOf(def))?.get(path)?.stamp;
-      return stamp?.state === 'held' && stamp.etag !== ABSENT_STAMP.etag ? stamp.etag : etagOfValue(inEffect);
+      return stamp?.state === 'held' ? stamp.etag : etagOfValue(inEffect);
     };
-    /** The value of the edit held at `path`, when one is held now (its stamp is held and names that very edit). */
+    /**
+     * The value of the edit held at `path`, when one is held now (its stamp is held and names that very edit). A held
+     * REMOVAL is held with no value (`value` stays `undefined`): there is no text to carry a patch.
+     */
     const heldValueAt = (key: string, path: string): { readonly held: boolean; readonly value?: unknown } => {
       const stamp = configStamps.get(key)?.get(path)?.stamp;
       const saved = heldValues.get(path);
@@ -870,20 +873,25 @@ async function start(world: World): Promise<TestHost> {
       const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
       // As the real writer: an edit is made to the DISK text, which for a file with an edit held is the HELD one.
       const onDisk = heldValueAt(key, path);
-      // Except the owner's patch (`writeAsOwner`) and a caller's patch (`writeAsCaller`): made to BOTH versions.
+      // Except a PATCH, from any of the three writes (`write`, `writeAsCaller`, `writeAsOwner`): made to BOTH versions.
       if (bothVersions === true && typeof edit !== 'string' && onDisk.held) {
         const effectiveNext = patchedValue((before as Record<string, unknown> | undefined) ?? {}, edit.patch, within);
-        const heldNext = patchedValue((onDisk.value as Record<string, unknown> | undefined) ?? {}, edit.patch, within);
+        // A held REMOVAL has no value, so no text to carry the patch (as the real writer): only the version in effect is patched.
+        const heldNext =
+          onDisk.value === undefined
+            ? undefined
+            : patchedValue(onDisk.value as Record<string, unknown>, edit.patch, within);
         const effective = def.schema.safeParse(effectiveNext);
-        const heldChecked = def.schema.safeParse(heldNext);
+        const heldChecked = heldNext === undefined ? undefined : def.schema.safeParse(heldNext);
         for (const checked of [effective, heldChecked])
-          if (!checked.success)
+          if (checked !== undefined && !checked.success)
             return {
               kind: 'refused',
               reason: 'schema',
               issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })),
             };
-        if (!effective.success || !heldChecked.success) return { kind: 'refused', reason: 'schema', issues: [] };
+        if (!effective.success || (heldChecked !== undefined && !heldChecked.success))
+          return { kind: 'refused', reason: 'schema', issues: [] };
         if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== diskEtagOf(def, name, before))
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
@@ -902,19 +910,23 @@ async function start(world: World): Promise<TestHost> {
         const confirmed =
           (added.length === 0 || ownerAdds) && (other.length === 0 || judged(manifest.id, path, false, other));
         const subject = { path, ...(name === undefined ? {} : { name }) };
-        const heldEtag = JSON.stringify(heldNext);
+        // What waits when the patch is refused: the held version with the patch made to it, or (a held removal, which
+        // has no text) the patch itself, superseding the removal as the real writer does.
+        const waitingNext = heldNext ?? effectiveNext;
+        const waitingData = heldChecked?.data ?? effective.data;
+        const heldEtag = JSON.stringify(waitingNext);
         if (sentences.length > 0 && !confirmed) {
           // The patch itself waits: nothing in effect changes, and it rides with the held version, whose sentences are
           // what the whole held version widens beyond the version in effect (as the real load says them).
-          heldValues.set(path, { etag: heldEtag, value: heldNext });
+          heldValues.set(path, { etag: heldEtag, value: waitingNext });
           restamp(key, { ...subject, held: heldEtag });
           return {
             kind: 'held',
             etag: heldEtag,
             id: `${path}@held`,
             sentences: [
-              ...judgeLoosening(def, priorValue, heldChecked.data),
-              ...addedSecretReferenceSentences(priorValue, heldChecked.data),
+              ...judgeLoosening(def, priorValue, waitingData),
+              ...addedSecretReferenceSentences(priorValue, waitingData),
             ],
           };
         }
@@ -923,21 +935,27 @@ async function start(world: World): Promise<TestHost> {
           def.shape === 'file' ? effectiveNext : { ...(all ?? {}), [name as string]: effectiveNext },
         );
         for (const listener of configListeners.get(key) ?? []) listener();
-        // The held version stays held while it still loosens what is now in effect.
-        const still = [
-          ...judgeLoosening(def, effective.data, heldChecked.data),
-          ...addedSecretReferenceSentences(effective.data, heldChecked.data),
-        ];
+        // The held version stays held while it still loosens what is now in effect; a held removal, while removing the
+        // file would still loosen it (judged against the defaults, as `remove` judges it).
+        const defaults = def.schema.safeParse({});
+        const still =
+          heldChecked === undefined
+            ? judgeLoosening(def, effective.data, defaults.success ? defaults.data : undefined)
+            : [
+                ...judgeLoosening(def, effective.data, heldChecked.data),
+                ...addedSecretReferenceSentences(effective.data, heldChecked.data),
+              ];
         if (still.length === 0) {
           heldValues.delete(path);
           restamp(key, subject);
           return { kind: 'written', etag: JSON.stringify(effectiveNext), loosened: confirmed ? sentences : [] };
         }
-        heldValues.set(path, { etag: heldEtag, value: heldNext });
-        restamp(key, { ...subject, held: heldEtag });
+        const stillEtag = heldNext === undefined ? ABSENT_STAMP.etag : heldEtag;
+        heldValues.set(path, { etag: stillEtag, value: heldNext });
+        restamp(key, { ...subject, held: stillEtag });
         return {
           kind: 'written',
-          etag: heldEtag,
+          etag: stillEtag,
           loosened: confirmed ? sentences : [],
           stillHeld: { id: `${path}@held`, sentences: still },
         };
@@ -1040,8 +1058,18 @@ async function start(world: World): Promise<TestHost> {
           def.shape === 'file' ? keyOf(def) : `${keyOf(def)}/${name as string}.yaml`,
         );
         if (held.held) {
-          const heldChecked = def.schema.safeParse(held.value);
           const prior = parsed?.success === true ? parsed.data : undefined;
+          // A held REMOVAL has no value: it widens what removing the file does, judged against the defaults as `remove` does.
+          if (held.value === undefined) {
+            const defaults = def.schema.safeParse({});
+            return {
+              state: 'held',
+              inEffect: parsed?.success === true,
+              sentences:
+                prior === undefined ? [] : judgeLoosening(def, prior, defaults.success ? defaults.data : undefined),
+            };
+          }
+          const heldChecked = def.schema.safeParse(held.value);
           return {
             state: 'held',
             inEffect: parsed?.success === true,
@@ -1122,6 +1150,8 @@ async function start(world: World): Promise<TestHost> {
         if (sentences.length > 0 && !judged(manifest.id, path, true, sentences)) {
           if (writeOptions.refuseIfHeld === true)
             return { kind: 'refused', reason: 'would_hold', issues: [], sentences };
+          // A held REMOVAL is a held edit with no value: the entry's value is `undefined`, so `heldValueAt` says held.
+          heldValues.set(path, { etag: ABSENT_STAMP.etag, value: undefined });
           restamp(key, { ...subject, held: ABSENT_STAMP.etag });
           return { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
         }
@@ -1623,6 +1653,8 @@ async function start(world: World): Promise<TestHost> {
           // The real host's rules over the flat test world, with the same refusals: the LEAF IS NEVER FOLLOWED (the parent
           // is opened first, then the entry goes by its own name; a link goes as a link and its target stays), and
           // `onlyIfEmpty` is `rmdir` (one step: refused `not_empty` when anything is inside, never recursing).
+          // It does NOT model the private-file fence: the test world holds no private file, so a tree (or the root
+          // itself) is removed whole here, where the real host refuses `fenced` for a held member inside it.
           remove: async (path, removeOptions) => {
             if (isReadOnlyRoot(name)) throw new RootError('read_only');
             const named = ownPath(path);
