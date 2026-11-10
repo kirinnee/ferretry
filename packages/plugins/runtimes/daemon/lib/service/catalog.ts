@@ -1037,7 +1037,14 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Comp
             partial: partial
               .filter(entry => entry.reference === reference)
               .map(entry => ({ harness: harnessKey(entry.harness), reason: describePartialSupport(entry) })),
-            warnings: missing ? [`Command not found: ${command as string}`] : [],
+            // The warning names the command, so it goes through the same net as the detail's `command`.
+            warnings: missing
+              ? [
+                  command !== undefined && writtenWithheld('command', command)
+                    ? 'Command not found'
+                    : `Command not found: ${command as string}`,
+                ]
+              : [],
             usedBy: { profiles: usage.profiles, runtimes: usage.runtimes },
             editNote: editConsequence(usage) ?? 'Nothing uses it yet.',
             remove: act(

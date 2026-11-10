@@ -193,6 +193,16 @@ describe('CFG-LEAK (ii) an MCP server command and url are netted in the componen
     should(plain).eql({ form: 'text', text: '# How we work\n- Small PRs.', redacted: false });
   });
 
+  it('the "command not found" warning does not name a command the detail withholds', () => {
+    const parsed = model({
+      mcp: { held: { command: `srv --token ${V}` }, plain: { command: 'uvx' } },
+    });
+    const warnings = componentCatalog(parsed, { ...FACTS, missingCommands: new Set([`srv --token ${V}`, 'uvx']) })
+      .kinds.flatMap(group => group.components)
+      .flatMap(component => component.warnings);
+    should(warnings.toSorted()).eql(['Command not found', 'Command not found: uvx']);
+  });
+
   it('writtenWithheld judges the text alone: a refused flag, a token shape, a cut part; not a plain word', () => {
     should(writtenWithheld('command', 'srv')).be.false();
     should(writtenWithheld('command', `srv --token ${V}`)).be.true();
