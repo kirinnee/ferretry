@@ -48,17 +48,38 @@ describe('R135 the operator bearer is sha256(prefix ‖ token), installed by the
 
   it('R135 the deploy installs only the digest as RELAY_OPERATOR_TOKEN, never the raw Cloudflare token', () => {
     const workflow = workflowText();
-    const program = workflow.match(/'(\{RELAY_OPERATOR_TOKEN: \$token\}[^\n]*)'/u)?.[1];
-    if (program === undefined) throw new Error('the deploy workflow no longer builds the secrets file');
-    const result = Bun.spawnSync(['jq', '-cn', '--arg', 'token', expected, program], {
-      env: { PATH: process.env.PATH },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    expect(result.exitCode).toBe(0);
-    const secrets = result.stdout.toString();
-    expect(JSON.parse(secrets)).toEqual({ RELAY_OPERATOR_TOKEN: expected });
-    expect(secrets).not.toContain(cloudflareToken);
+    // The REAL secrets-file statement of the deploy job, run after its own derivation, so which VALUE it hands to jq
+    // (the digest, never `$CLOUDFLARE_API_TOKEN`) is what is proved, not just the jq program.
+    const writers = [...workflow.matchAll(/\(umask 077 && jq -n --arg token [\s\S]*?>"\$secrets_file"\)/gu)];
+    if (writers.length !== 1) throw new Error('the deploy workflow no longer builds the secrets file once');
+    const writer = writers[0]?.[0] ?? '';
+    const derivation = derivationBlocks(workflow)[0] ?? '';
+    const dir = mkdtempSync(join(tmpdir(), 'relay-secrets-'));
+    try {
+      const secretsFile = join(dir, 'relay-secrets.json');
+      const result = Bun.spawnSync(
+        [
+          'bash',
+          '--noprofile',
+          '--norc',
+          '-euo',
+          'pipefail',
+          '-c',
+          `${derivation}\nsecrets_file="$SECRETS_FILE"\n${writer}`,
+        ],
+        {
+          env: { PATH: process.env.PATH, CLOUDFLARE_API_TOKEN: cloudflareToken, SECRETS_FILE: secretsFile },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
+      expect(result.exitCode).toBe(0);
+      const secrets = readFileSync(secretsFile, 'utf8');
+      expect(JSON.parse(secrets)).toEqual({ RELAY_OPERATOR_TOKEN: expected });
+      expect(secrets).not.toContain(cloudflareToken);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
     // The digest is registered with GitHub's log masker the moment it exists, in both jobs.
     expect(workflow.match(/::add-mask::\$operator_token/gu)).toHaveLength(2);
     // Wrangler receives it through the secrets file, not as an argument or a separate `secret put` of the bearer.

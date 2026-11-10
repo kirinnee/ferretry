@@ -1045,7 +1045,7 @@ describe('hosted relay reservations heal themselves', () => {
     const originals = methods.map(method => console[method]);
     for (const method of methods) {
       console[method] = (...args: unknown[]) => {
-        lines.push(args.map(arg => String(arg)).join(' '));
+        lines.push(args.map(arg => (typeof arg === 'string' ? arg : Bun.inspect(arg))).join(' '));
       };
     }
     try {

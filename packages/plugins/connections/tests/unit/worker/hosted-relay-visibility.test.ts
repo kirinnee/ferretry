@@ -225,6 +225,18 @@ describe('hosted relay visibility and squatting', () => {
       should(forwarded(carried.effects)).have.length(1);
       should(asText(carried.state)).not.containEql(secret);
       should(asText(carried.state)).not.containEql('482913');
+      // NOT EVEN A FRAGMENT: the same step with different bytes of the same length leaves identical state, so no prefix,
+      // window or hash of the payload is kept (a stored prefix would differ between the two).
+      const other = new TextEncoder().encode(secret.replace(/[a-z0-9]/gu, 'x'));
+      should(other.length).equal(payload.length);
+      should(other).not.deepEqual(payload);
+      const carriedOther = reduceRendezvous(opened.state, {
+        kind: 'frame',
+        socketId: 'phone-0',
+        frame: data(sessionId(1), 1, other),
+        at: 3_000,
+      });
+      should(carriedOther.state).deepEqual(carried.state);
 
       // SESSION CAP (the 4433 family): fill the daemon's session slots, then ask for one more.
       let state = carried.state;
