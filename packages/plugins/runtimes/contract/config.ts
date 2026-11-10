@@ -4,16 +4,16 @@
  * `ModelSetComponentSchema`, the machine's `defaultRuntime`), with the words of §1: a runtime names a **login**, not a
  * credential. Every file is strict; a raw secret never belongs in one (the kernel's config layer refuses it).
  */
-import { InstantSchema, NonEmptyStringSchema } from '@ferretry/std';
+import { InstantSchema, ITEM_NAME_PATTERN, NonEmptyStringSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
 /**
  * The name of an item in a collection: ASCII letters and digits in words joined by single dashes. It is the one rule
- * for a profile's, a runtime's and a layer's name (MCP and Skills name their items the same way), and it allows no
- * slash, dot, space, control character or look-alike of any of them.
+ * for a profile's, a runtime's and a layer's name, and MCP, Skills, Claude Code and Codex name their items by the very
+ * same value: it is declared once, in `@ferretry/std`, and Runtimes re-exports it so its own callers keep one import.
  */
-export const ITEM_NAME_PATTERN = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u;
+export { ITEM_NAME_PATTERN };
 
 /** A runtime's name: letters, digits and dashes, none at either end (R1). It is the CLI word a person types. */
 export const RuntimeNameSchema = z.string().max(64).regex(ITEM_NAME_PATTERN, {
