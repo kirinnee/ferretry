@@ -112,12 +112,12 @@ that is not there). Three rules, in order:
    edit. The lessons settings and the default-account lines (`accounts.yaml`) go through `writeAsOwner` (with only
    the changed keys, or lines, beside a held edit). In every case the caller's change is judged against the version
    in effect alone, so a person changing one field never puts another caller's held edit into effect. What is asked
-   of that change differs by call. `writeAsCaller`: a loosening of its own asks Gate's judge, a `${secret:NAME}`reference it adds asks the owner question, and one that only the held version names is never the caller's to
-confirm.`write`and`writeAsOwner`: a loosening of their own asks Gate's judge, and a `${secret:NAME}`reference
-they add is always held (they ask no owner question). Gate's own`gate.yaml` saves: Gate's routes have already
-decided the caller may make the change and pass it as confirmed (`confirmedLoosening`), so the kernel asks no
-   judge. When the caller changes the very field the
-   held edit staged, the caller's value is the value in both versions.
+   of that change differs by call. `writeAsCaller`: a loosening of its own asks Gate's judge, a secret reference it
+   adds asks the owner question, and one that only the held version names is never the caller's to confirm. `write`
+   and `writeAsOwner`: a loosening of their own asks Gate's judge, and a secret reference they add is always held
+   (they ask no owner question). Gate's own `gate.yaml` saves: Gate's routes have already decided the caller may
+   make the change and pass it as confirmed (`confirmedLoosening`), so the kernel asks no judge. When the caller
+   changes the very field the held edit staged, the caller's value is the value in both versions.
 4. **A change of several files lands whole or not at all.** A change that spans files — a runtime, its profile
    and its model set — is ONE act in the kernel, `ConfigPort.writeAll`, never several writes a reader could see
    half of. Every document of the set is checked as a single write checks one (its own file, its name, YAML, a
