@@ -35,3 +35,30 @@ export async function stopOnSignal(
     proc.once('SIGINT', begin);
   });
 }
+
+/** The real process's seams; the limit timer is unref'd, so it never keeps the process alive by itself. */
+const realProcess: StopProcess = {
+  once: (signal, handler) => void process.once(signal, handler),
+  on: (signal, handler) => void process.on(signal, handler),
+  exit: code => process.exit(code),
+  after: (ms, fn) => void setTimeout(fn, ms).unref(),
+};
+
+/**
+ * The daemon's stop: `stopOnSignal` over the real process, where a `stop` that rejects first says why through `report`
+ * (`fyd: stopping failed: <message>`, one line) and then rethrows, so the process still ends with 1.
+ */
+export async function stopOnSignalReporting(
+  stop: () => Promise<void>,
+  report: (line: string) => void,
+  proc: StopProcess = realProcess,
+): Promise<void> {
+  await stopOnSignal(
+    () =>
+      stop().catch((error: unknown) => {
+        report(`fyd: stopping failed: ${error instanceof Error ? error.message : 'unknown error'}\n`);
+        throw error;
+      }),
+    proc,
+  );
+}

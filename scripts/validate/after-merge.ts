@@ -35,6 +35,14 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
     decision:
       'britnee 2026-11-10: the imports descriptor read ships with its darwin run after merge (no paid macOS run)',
   },
+  {
+    id: 'kernel-roots-int-coverage',
+    decision: 'britnee 2026-11-10: the roots.ts ~70% integration gap goes in followups as after-merge',
+  },
+  {
+    id: 'followups-sweep-after-merge',
+    decision: 'britnee 2026-11-10: the rest of the followups sweep moves to after merge, owner gustavo',
+  },
 ];
 
 export const COUNT_NAMES = ['parityOpen', 'portsPendingLines', 'guaranteesMissing'] as const;
