@@ -40,7 +40,7 @@ describe('ClientConversationGateway', () => {
     expect(calls[0]?.init).toEqual({ params: { ferretId: 'f1' }, body: { message: 'hello' } });
   });
 
-  it('reads a send’s ledger row, and calls a 404 waiting (no row yet) rather than a failure', async () => {
+  it('reads a send’s ledger row, and answers a 404 (a send the daemon does not know) as none rather than a failure', async () => {
     const missing = Object.assign(new Error('not found'), { status: 404 });
     const { gateway, calls } = build({ 'GET /v1/ferrets/:ferretId/sends/:sendId': record });
     expect((await gateway.sendStatus('f1', 's1'))?.sendId).toBe('s1');

@@ -322,6 +322,13 @@ const REOWNED: Readonly<Record<string, string>> = {
   'J-0234': 'logins',
   // The transcript follower: each harness implements `TranscriptReader.follow` (Claude's is claude-code's).
   'J-0237': 'claude-code',
+  // The send path (#45, britnee ruling in send-path-fix4): the turn files a send writes are Ferrets' session files,
+  // and the look scheduler that follows a send is Conversation's.
+  'F-0306': 'ferrets',
+  'F-0307': 'ferrets',
+  'F-0317': 'ferrets',
+  'F-0318': 'ferrets',
+  'J-0230': 'conversation',
   'F-0006': 'skills',
   'F-0018': 'cli',
   // The shared-history lease lock: the lease store stays Conversation's.

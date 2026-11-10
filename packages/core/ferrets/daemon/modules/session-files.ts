@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { ApiError, type Log, type RootHandle, type RootsPort } from '@ferretry/kernel/contract';
 import { FERRET_READABLE_FOLDERS, FERRET_SESSIONS_ROOT } from '../../contract/sessions-root.ts';
+import type { FerretTurnAuthor, FerretTurnWritten } from '../../contract/port.ts';
 import { type Duration, milliseconds } from '@ferretry/std';
 import { FileSessionEffectLedger } from '../adapters/session/effects/file-session-effect-ledger.ts';
 import {
@@ -189,6 +190,8 @@ export class SessionFiles {
         return await this.turnStore(id).list(id, options);
       },
       queued: async (ferret, payload, sendId) => await this.writeQueued(parseSessionId(ferret), payload, sendId),
+      writeTurn: async (ferret, document, by) => await this.writeSendTurn(parseSessionId(ferret), document, by),
+      clearMarkers: async ferret => await this.turnStore(parseSessionId(ferret)).clearMarkers(parseSessionId(ferret)),
       attachmentsFolder: async ferret => {
         const named = this.root(parseSessionId(ferret)).resolve(ATTACHMENTS_FOLDER);
         if (!named.ok) throw new Error('the attachments folder of this ferret could not be named');
@@ -196,6 +199,24 @@ export class SessionFiles {
       },
       attach: async (ferret, files) => await this.writeAttachments(parseSessionId(ferret), files),
     };
+  }
+
+  /**
+   * A send's turn document (today's `deliver`, `writeTurn`): the next number after the higher of the session counter and the
+   * documents on disk, written durably with its author beside it, then counted so a later revive numbers after it.
+   * A counter that cannot be saved refuses the write (the send then types nothing), as a revive's does.
+   */
+  private async writeSendTurn(
+    id: SessionId,
+    document: string,
+    by: FerretTurnAuthor | undefined,
+  ): Promise<FerretTurnWritten> {
+    await this.ensureDocument(id).catch(() => false);
+    const store = this.turnStore(id);
+    const turn = await this.nextTurn(id, store, document, by);
+    const file = await store.writeTurn(id, turn, document, by);
+    await this.count(id, turn);
+    return { turn, file };
   }
 
   /**
@@ -274,7 +295,7 @@ export class SessionFiles {
       const document = resumeTurnDocument(trimmed ?? settings.defaultResumePrompt, settings);
       const number = await this.nextTurn(id, store, document, request.by);
       const file = await store.writeTurn(id, number, document, request.by);
-      turn = { turn: number, instruction: resumeTurnInstruction(file) };
+      turn = { turn: number, file, instruction: resumeTurnInstruction(file) };
     }
     await store.clearMarkers(id);
     // Today's order: the counter is saved BEFORE the relaunch (today's `session.resuming` transition carries the
