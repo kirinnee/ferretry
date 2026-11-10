@@ -312,9 +312,13 @@ export async function cleanPreview(v4Home: string, target: string, home: string 
   return `removed ${guarded.target}, its staging copy, its conversion report and its proof`;
 }
 
-/** Names the wrapper passes through from the caller's environment (and `LC_*`): nothing else reaches the binary. */
+/**
+ * Names the wrapper passes through from the caller's environment (and `LC_*`): nothing else reaches the binary. An
+ * ALLOW-LIST, not a deny-list: a credential variable nobody thought of (a new cloud's `*_TOKEN`) is stopped because it was
+ * never named, where a deny-list would pass it. HOME and SSH_AUTH_SOCK are deliberately NOT here: the wrapper sets the
+ * preview's own empty HOME and the host's agent socket never passes.
+ */
 export const ENV_ALLOWLIST = [
-  'HOME',
   'USER',
   'LOGNAME',
   'PATH',
@@ -325,8 +329,30 @@ export const ENV_ALLOWLIST = [
   'DISPLAY',
   'WAYLAND_DISPLAY',
   'DBUS_SESSION_BUS_ADDRESS',
-  'SSH_AUTH_SOCK',
 ] as const;
+
+/**
+ * What the wrapper sets in place of every host credential: the daemon's HOME is empty, `gh` finds no login, `git` reads
+ * no global or system config (so no credential helper) and never prompts. Relative to the home's no-host-creds folder.
+ */
+export const NO_CREDS_ENV = {
+  home: 'home',
+  gh: 'gh',
+  gitConfig: 'gitconfig',
+} as const;
+
+/** The fixed variables the wrapper sets, as the `env -i` line carries them (values that are paths come from `home`). */
+export function noCredsValues(home: string): Readonly<Record<string, string>> {
+  const base = `${home}/${PREVIEW.noCredsFolder}`;
+  return {
+    HOME: `${base}/${NO_CREDS_ENV.home}`,
+    GH_CONFIG_DIR: `${base}/${NO_CREDS_ENV.gh}`,
+    GIT_CONFIG_GLOBAL: `${base}/${NO_CREDS_ENV.gitConfig}`,
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_TERMINAL_PROMPT: '0',
+  };
+}
 
 /** Daemon verbs the preview never runs through the product's lifecycle: they write claim files beside v4's unit or answer for it. */
 export const REFUSED_DAEMON_VERBS = [
@@ -454,7 +480,15 @@ export function wrapperText(home: string, v4Home: string): string {
     '  (umask 077; mkdir -p "$run"); chmod 700 "$run"',
     '  set -- "XDG_RUNTIME_DIR=$run" "$@"',
     'fi',
-    `exec env -i FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" FY_UPDATE_CHECK=off "$@"`,
+    "# No host credential: HOME, gh's config folder and git's global config are EMPTY ones under the preview home, git reads",
+    '# no system config (no credential helper) and never prompts. A daemon start makes them fresh; `preview.sh stop` removes',
+    '# them. The names the allowlist above never passes (GH_TOKEN, SSH_AUTH_SOCK, AWS_*, ...) are simply absent.',
+    `nocreds="${home}/${PREVIEW.noCredsFolder}"`,
+    'if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then rm -rf "$nocreds"; fi',
+    `(umask 077; mkdir -p "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}"; : >"$nocreds/${NO_CREDS_ENV.gitConfig}")`,
+    `exec env -i ${Object.entries(noCredsValues(home))
+      .map(([name, value]) => `${name}="${value}"`)
+      .join(' ')} FY_HOME="${home}" FY_PORT="${PREVIEW.port}" FY_URL="${url}" FY_UPDATE_CHECK=off "$@"`,
     '',
   ].join('\n');
 }

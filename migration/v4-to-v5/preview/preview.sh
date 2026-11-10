@@ -42,6 +42,7 @@ set -euo pipefail
 #             carry Terminals' `environment` setting); a miss closes that terminal, STOPS the preview daemon and exits 1.
 #             A stopped ferret record is enough; with no ferret record yet it proves what the runtime reads live instead.
 #   terminal-check  repeat that terminal proof against the running preview daemon (does not stop it on a miss)
+#   credential-check  repeat the no-host-credential proof (also run by start, after the terminal proof, stopping the daemon on a miss)
 #   stop      SIGTERM the process proven to hold the preview home's own daemon lock (never v4's, never a unit)
 #   status    fy5 daemon status
 #   proof     compare v4 now with the snapshot `prepare` took (kept in ~/.ferretry-v5-proof/, outside the preview home);
@@ -223,8 +224,19 @@ start)
     fi
     exit 1
   fi
+  # 4. The daemon reaches NO host credential (the empty HOME, gh and git config, no token or SSH agent variable, and
+  # `gh auth status` in its environment says not signed in). On ANY miss it is stopped again.
+  if ! run_tool credential-check; then
+    if run_tool stop; then
+      echo "refusing to go on: the preview daemon was stopped because it could reach a host credential (nothing is left running)." >&2
+    else
+      echo "refusing to go on: the preview daemon could reach a host credential AND could not be stopped; run '$0 stop' now." >&2
+    fi
+    exit 1
+  fi
   ;;
 terminal-check) run_tool terminal-check ;;
+credential-check) run_tool credential-check ;;
 stop) run_tool stop ;;
 status) fy5 daemon status ;;
 proof) run_tool proof ;;
@@ -238,7 +250,7 @@ clean)
   run_tool clean
   ;;
 *)
-  echo "usage: $0 <dry-run|prepare|build|start|terminal-check|stop|status|proof|clean> [--v4 <home>] [--target <home>] [--source <5.0 checkout>] [--owner (prepare, owner only)]" >&2
+  echo "usage: $0 <dry-run|prepare|build|start|terminal-check|credential-check|stop|status|proof|clean> [--v4 <home>] [--target <home>] [--source <5.0 checkout>] [--owner (prepare, owner only)]" >&2
   exit 64
   ;;
 esac

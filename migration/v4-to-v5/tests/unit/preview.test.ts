@@ -866,6 +866,7 @@ describe('stopping the preview by pid proven to hold its lock (M4)', () => {
         held = [];
       },
       sleep: async () => {},
+      remove: async () => {},
     });
     expect(sent).toEqual([321]);
     expect(done.stopped).toBe(true);
@@ -878,6 +879,7 @@ describe('stopping the preview by pid proven to hold its lock (M4)', () => {
       holders: async () => [],
       kill: pid => void sent.push(pid),
       sleep: async () => {},
+      remove: async () => {},
     });
     expect(sent).toEqual([]);
     expect(done.said).toContain('not running');
@@ -889,6 +891,7 @@ describe('stopping the preview by pid proven to hold its lock (M4)', () => {
       holders: async () => [9],
       kill: (pid, signal) => void sent.push(`${signal}:${pid}`),
       sleep: async () => {},
+      remove: async () => {},
       attempts: 2,
     });
     expect(sent).toEqual(['SIGTERM:9']);
