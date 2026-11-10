@@ -2596,7 +2596,8 @@ scoped handle:
     `no_descriptor_reach`: on plain paths the move would resolve the parents again and follow a link swapped in after
     the check, so nothing is claimed there. Each end's parent
     folder must already exist (a move makes none): a missing parent, or one that is a file, is `changed`, and a link on
-    the way to either end is `link_escape`; the testing host answers the same. A link moves as the text it holds:
+    the way to either end is `link_escape` (both ends' links are judged before either parent is opened), except a link
+    that reaches nothing, which is `changed` because its parent cannot be opened; the testing host answers the same. A link moves as the text it holds:
     kernel-made links are absolute, so they still point where they did; a RELATIVE link made by a harness and moved to
     a parent at another depth points somewhere else afterwards, and the kernel does not follow it either way.
   - `unlink(name)` removes a SYMLINK LEAF in `fleet` or `agent-homes` and nothing else: the link is never followed and its
@@ -2608,7 +2609,16 @@ scoped handle:
     `harness-home` only) reads ONE file beside a harness home (`~/.claude.json` sits beside `~/.claude`), read-only.
     Its folder is never listable. The leaf is never a link, never a second hard link, never a device, and the name
     is checked again after the open. A hard link (`GuardedFolder.link`) stays refused: copy, or `linkTo`.
-- `remove(path)` on a root: Remove of a folder needs descriptor reach; refused without it (macOS until the descriptor bracket lands), [own] BEFORE-GREEN(runtimes) closed by the bracket unit. An owner root already refused every remove (S44); an internal root (`fleet`, `agent-homes`) now refuses a FOLDER too, because a by-path remove after one re-proof of the parent deletes an outside tree if the parent is swapped for a link in between. The code is `no_descriptor_reach`. A file or link leaf of an internal root is still removed on such a host (the sessions root's markers and author records, tidy's reclaim): the leaf is looked at without following it and unlinked by path after one re-proof of its folder. GAP: a parent swapped in between can delete ONE same-named file outside the root, never a tree; closed by the descriptor bracket unit.
+- `remove(path)` on a root: **the leaf is never followed.** The folder the name sits in is resolved and judged inside the
+  root (a link on the way that leaves it is `link_escape`; a parent that is missing or is a file is `changed`), then the
+  entry goes by its own name, so a link at the name goes as a link and what it points at, inside the root or outside it,
+  is untouched; a forged spelling of the name (a trailing `/` or `/.`, a bare relative name) names the same leaf as its
+  plain form, and a NUL anywhere is `outside`. `{ onlyIfEmpty: true }` removes a folder with `rmdir(2)`: ONE kernel call
+  both looks and removes, so no entry can arrive between the two; a folder that holds any entry (a link or an empty
+  folder included) is refused `not_empty` and nothing is removed, never recursing; a file or link at the name behaves as
+  without the option, and a folder swapped for a link between the look and the `rmdir` is refused `changed`. The root
+  itself (`resolve('.')`) is a folder like any other: it is refused `not_empty` while it holds anything, and without the
+  option it goes whole. The testing host answers all of this the same. Remove of a folder needs descriptor reach; refused without it (macOS until the descriptor bracket lands), [own] BEFORE-GREEN(runtimes) closed by the bracket unit. An owner root already refused every remove (S44); an internal root (`fleet`, `agent-homes`) now refuses a FOLDER too, because a by-path remove after one re-proof of the parent deletes an outside tree if the parent is swapped for a link in between. The code is `no_descriptor_reach`. A file or link leaf of an internal root is still removed on such a host (the sessions root's markers and author records, tidy's reclaim): the leaf is looked at without following it and unlinked by path after one re-proof of its folder. GAP: a parent swapped in between can delete ONE same-named file outside the root, never a tree; closed by the descriptor bracket unit.
 - **Reach of a declared program or host** (`permissions.spawn`, `permissions.network`). An entry is a literal name,
   `{ items: kind }` or `{ resolver: name }`; `'*'` is a core piece's alone.
   - `{ items: kind }` is what the kind's items name, read when the call is made. It is the union of the installed data
