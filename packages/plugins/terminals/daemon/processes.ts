@@ -44,9 +44,9 @@ import {
   LIMITS_TICK_MS,
   LimitsService,
   probeEnforcement,
-  type SessionSpawnFacts,
   type SessionSpawnFactsPort,
 } from './lib/cgroups/index.ts';
+import { spawnFactsOf } from './spawn-facts.ts';
 import { type LimitsConfig, resolveLimits } from './lib/protocol/limits.ts';
 import { limitsHandler } from './lib/runtime/mounts/cgroups.ts';
 import { attachHandler } from './lib/runtime/mounts/session-attach.ts';
@@ -193,17 +193,7 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
   // ─── ferret limits ──────────────────────────────────────────────────────────────────────────────────────────────
   const limitsInEffect = deps.limits ?? (async (): Promise<LimitsConfig> => ({}));
   const commands = new SpawnCgroupCommands(kernel.spawn, after);
-  const spawnFacts: SessionSpawnFactsPort = deps.spawnFacts ?? {
-    facts: async id => {
-      const ferret = await deps.ferrets.get(id as FerretId);
-      if (ferret === undefined) return undefined;
-      const facts: SessionSpawnFacts = {
-        label: ferret.name,
-        ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
-      };
-      return facts;
-    },
-  };
+  const spawnFacts: SessionSpawnFactsPort = deps.spawnFacts ?? spawnFactsOf(deps.ferrets);
   /** The machine, measured ONCE: a machine does not grow CPUs while a daemon runs. */
   const measured: Promise<CgroupHostFacts> = hostCgroupFacts().catch(() => unmeasuredHostFacts());
   const built = measured.then(host => {
