@@ -273,6 +273,21 @@ describe('PUT /v1/config/file refuses what would write the mask, or a raw secret
     expect(w.disk()).toBe(`# it said ${HIDDEN} once\ncommand: srv\nlimit: 3\n`);
   });
 
+  test('S6 CFG-LEAK-W R-0419 a ‹hidden› in a comment on disk does not let the mask be written over a value: 422 config_invalid; disk untouched', async () => {
+    const w = world();
+    const start = `# keep ${HIDDEN} here\nargs: [--token, ${VALUE}]\n`;
+    w.fs.seed(FILE, start);
+    await w.files.reload();
+    const read = json(await get(w.handlers));
+    expect(String(read.text)).not.toContain(VALUE);
+    // The reader deletes the comment and saves: one mark, as many as the disk holds, yet it sits where a value was.
+    const response = await put(w.handlers, `args: [--token, ${HIDDEN}]\n`, String(read.etag));
+    expect(response.status).toBe(422);
+    expect(json(response).code).toBe('config_invalid');
+    expect(response.body).not.toContain(VALUE);
+    expect(w.disk()).toBe(start);
+  });
+
   test('S6 CFG-LEAK-W R-0419 a new --token <v> / --password=<v> / -e API_KEY=<v> is refused raw_secret; the issue never repeats the value', async () => {
     const w = world();
     await w.files.reload();

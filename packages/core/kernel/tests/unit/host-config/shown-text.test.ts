@@ -52,6 +52,28 @@ describe('what is cut, and what stays', () => {
     expect(result.hidden).toEqual([{ line: 5 }]);
   });
 
+  test('S6 CFG-LEAK-R a list item with blanks is read as words too: sh -c "srv --token v" is cut at v', () => {
+    const texts = [
+      `command: sh\nargs: [-c, "npx srv --token ${VALUE}"]\n`,
+      `args: ["npx srv --token ${VALUE} --port 80"]\n`,
+      `settings: {hooks: ["run --password ${VALUE}"]}\n`,
+    ];
+    for (const text of texts) {
+      const result = shownOf(text, openDef);
+      expect([text, result.text.includes(VALUE)]).toEqual([text, false]);
+      expect(result.text).toMatch(/--(token|password) ‹hidden›/u);
+    }
+  });
+
+  test('S6 CFG-LEAK-R a number under a secret-named key or after a secret-named flag is cut', () => {
+    const texts = [`settings: {env: {DB_PASSWORD: 93817263540}}\n`, `args: [--password, 9381726354019283]\n`];
+    for (const text of texts) {
+      const result = shownOf(text, openDef);
+      expect([text, /9381726354/u.test(result.text)]).toEqual([text, false]);
+      expect(result.text).toContain(HIDDEN);
+    }
+  });
+
   test('CFG-LEAK-R a string with blanks outside a list is read as a command line: "srv --token v" is cut at v', () => {
     const result = shownOf(`note: srv --verbose --token ${VALUE} --port 80\n`);
     expect(result.text).toBe(`note: srv --verbose --token ${HIDDEN} --port 80\n`);
@@ -198,6 +220,19 @@ describe('when the text is not shown at all', () => {
     const result = shownOf('note: [unclosed\n');
     expect(result.text).toBe('note: [unclosed\n');
     expect(result.hidden).toEqual([]);
+  });
+
+  test('S6 CFG-LEAK-R a file that does not parse is withheld when a word in it would be cut: a duplicate key, a syntax error elsewhere', () => {
+    const texts = [
+      `args: [--token, ${VALUE}]\nnote: a\nnote: b\n`,
+      `args:\n  - --token\n  - ${VALUE}\nnote: [unclosed\n`,
+    ];
+    for (const def of [fileDef, openDef]) {
+      for (const text of texts)
+        expect([text, read(text, def)]).toEqual([text, { kind: 'withheld', reason: 'unmaskable' }]);
+    }
+    // Broken YAML with nothing to cut is still shown, so a person can fix it.
+    expect(shownOf('note: [unclosed\n').text).toBe('note: [unclosed\n');
   });
 
   test('S6 R-0072 a def of credential records withholds a file that fails its check, whatever the reason', () => {
