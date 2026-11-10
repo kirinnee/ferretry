@@ -240,7 +240,7 @@ export class GateAdmission implements Admission {
   /**
    * The call's standing re-read from the providers now (devices, step-ups, the policy), keeping the claim functions the
    * admission minted so one proof is still one act. `undefined` (the judge then holds) for a device its provider no
-   * longer holds or cannot place, one that must unlock again, or a standing this admission did not mint.
+   * longer holds or cannot place, one that must unlock again, or a standing with no presentation.
    */
   #liveStanding(standing: CallStanding | undefined): CallStanding | undefined {
     const presentation = standing?.presentation;
