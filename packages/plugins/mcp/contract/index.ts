@@ -6,6 +6,7 @@
 import type { Word } from '@ferretry/kernel/contract';
 import { defineConfig, defineEvent, definePort, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { defineSealedDocument } from '@ferretry/core-vault/contract';
+import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import { z } from 'zod';
 import { configDef } from './config-def.ts';
 import { McpOAuthStateFileSchema } from './oauth-state.ts';
@@ -88,8 +89,6 @@ export const MCP_PAYLOADS_STATE = defineState({ name: 'payloads', path: 'payload
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
-const ITEM_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
-
 /**
  * `config/mcp/<name>.yaml`. Today a component edit changes what an agent RUNS WITH, which every editor may already
  * change, not what it may spend or control (`configLoosening`: "any other edit to a … component … loosens nothing").
@@ -97,7 +96,7 @@ const ITEM_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
 export const MCP_CONFIG = configDef(
   defineConfig({
     collection: 'mcp',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: McpItemSchema,
     axis: 'configure',
     loosens: neverLoosens,

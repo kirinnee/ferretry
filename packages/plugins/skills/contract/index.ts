@@ -4,6 +4,7 @@
  */
 import type { Word } from '@ferretry/kernel/contract';
 import { defineConfig, definePort, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import { configDef } from './config-def.ts';
 import {
   type FerretSkills,
@@ -48,13 +49,11 @@ export const SKILLS_INSTALLED_STATE = defineState({
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
-const ITEM_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
-
 /** `config/skills/<name>.yaml`. A component edit changes what an agent runs with, not what it may spend or control. */
 export const SKILLS_CONFIG = configDef(
   defineConfig({
     collection: 'skills',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: SkillsItemSchema,
     axis: 'configure',
     loosens: neverLoosens,

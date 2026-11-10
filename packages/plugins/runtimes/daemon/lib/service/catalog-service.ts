@@ -321,10 +321,16 @@ export function budgetHoldsOf(deps: Pick<FleetCatalogServiceDeps, 'budgetHolds'>
 /**
  * The budget holds as one comparable string. A plan publishes a held login's wrappers unavailable, so a plan made under
  * one set of holds must not be applied under another: the pause Usage reports between a preview and its apply would
- * otherwise publish a runnable wrapper for a login its budget has stopped.
+ * otherwise publish a runnable wrapper for a login its budget has stopped. Neither the order of the logins nor the
+ * order a hold's fields were built in matters: each hold is read field by field in one fixed order, so two equal holds
+ * are one key.
  */
 const holdsKey = (holds: BudgetHolds | undefined): string =>
-  JSON.stringify(Object.entries(holds ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  JSON.stringify(
+    Object.entries(holds ?? {})
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([login, hold]) => [login, hold.period, hold.level, hold.limitUsd, hold.resetsAtMs, hold.timeZone]),
+  );
 
 // ── Running sessions ─────────────────────────────────────────────────────────────────────────────
 
@@ -636,7 +642,8 @@ export class FleetCatalogService {
    * configuration moved since it was reviewed" only once the one before it has landed. The configuration is several
    * owners' files now and a patch of keys carries no per-file etag, so the revision check is what refuses a plan made
    * from a model an earlier apply has since changed: run beside that apply it would pass, and its plan would then
-   * prune what the first one added.
+   * prune what the first one added. The first-run import and the clone run here too: their executors are reached only
+   * through {@link apply}, never on their own, so a setup apply and a profile layer change take turns on the same files.
    */
   async serialise<T>(act: () => Promise<T>): Promise<T> {
     return await this.#exclusively(act);

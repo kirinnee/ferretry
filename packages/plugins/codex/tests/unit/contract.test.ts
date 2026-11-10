@@ -1,9 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import { CODEX_CONFIG, harnessConfigLoosens } from '../../contract/index.ts';
+import { ITEM_NAME_PATTERN } from '@ferretry/std';
+import { CODEX_CONFIG, CODEX_HOOKS, CODEX_SETTINGS, harnessConfigLoosens } from '../../contract/index.ts';
 import { codexConformance, fakeCodex } from '../../contract/testing/index.ts';
 import manifest from '../../manifest.ts';
 
 describe('codex contract', () => {
+  test('its settings and hooks collections name their items by the one shared item-name pattern, never a copy of it', () => {
+    for (const def of [CODEX_SETTINGS, CODEX_HOOKS]) {
+      expect((def as unknown as { name: RegExp }).name).toBe(ITEM_NAME_PATTERN);
+    }
+  });
+
   test('the fake passes the conformance suite', async () => {
     const result = await codexConformance(fakeCodex);
     expect(result.ok).toBe(true);
