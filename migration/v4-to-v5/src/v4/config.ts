@@ -182,16 +182,6 @@ export async function listV4Config(home: string, overrides?: V4ConfigOverrides):
 export const YAML_OPTIONS = { version: '1.2', uniqueKeys: true, prettyErrors: false, logLevel: 'silent' } as const;
 
 /**
- * The yaml library has two environment switches that print what it parses: `LOG_TOKENS` prints every token of a
- * parsed text and `LOG_STREAM` dumps every token the composer sees, and a config text may carry a credential. They
- * are read at parse time, so every entry point calls this before anything is parsed.
- */
-export function clearYamlLogSwitches(): void {
-  delete process.env.LOG_TOKENS;
-  delete process.env.LOG_STREAM;
-}
-
-/**
  * A YAML text as a Document that is a mapping (an empty text is an empty mapping), or `undefined` when it has ANY error
  * or warning, is not a mapping, or breaks the alias limit. Nothing is printed and no message is kept. A caller reads the
  * few nodes it needs from the Document directly; it never turns a credential-bearing document into plain data.
