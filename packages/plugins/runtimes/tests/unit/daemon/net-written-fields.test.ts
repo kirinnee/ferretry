@@ -167,6 +167,32 @@ describe('CFG-LEAK (ii) an MCP server command and url are netted in the componen
     should(env.find(entry => entry.key.endsWith('HOME'))?.hidden).be.undefined();
   });
 
+  it('hides a settings value the write rule refuses, and the text of a file whose cut text it still refuses', () => {
+    const parsed = model({
+      settings: { base: { harness: 'claude', file: 'base.json' } },
+      instructions: { notes: { text: 'x' } },
+    });
+    const shown = (facts: Partial<CatalogFacts>) =>
+      componentCatalog(parsed, { ...FACTS, ...facts }).kinds.flatMap(group => group.components);
+    const long = `${V}${V}${V}`;
+    const found = shown({
+      settingsBodies: { base: { apiUrl: `https://u:${V}@h/p`, name: 'plain' } },
+      instructionBodies: { notes: `intro\nkey: ${long}\n` },
+    });
+    const entries = found.find(component => component.kind === 'settings')?.content;
+    should(JSON.stringify(entries)).not.containEql(V);
+    should(entries?.form === 'entries' ? entries.entries.find(entry => entry.key === 'name') : undefined).eql({
+      key: 'name',
+      value: 'plain',
+    });
+    const text = found.find(component => component.kind === 'instructions')?.content;
+    should(text).eql({ form: 'text', text: '‹hidden›', redacted: true });
+    const plain = shown({ instructionBodies: { notes: '# How we work\n- Small PRs.' } }).find(
+      component => component.kind === 'instructions',
+    )?.content;
+    should(plain).eql({ form: 'text', text: '# How we work\n- Small PRs.', redacted: false });
+  });
+
   it('writtenWithheld judges the text alone: a refused flag, a token shape, a cut part; not a plain word', () => {
     should(writtenWithheld('command', 'srv')).be.false();
     should(writtenWithheld('command', `srv --token ${V}`)).be.true();
