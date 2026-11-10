@@ -76,7 +76,7 @@ describe('browsers host — the worker program beside the daemon', () => {
     const program = processHost({}).workerProgram();
 
     should(program.kind).equal('source');
-    should(program.kind === 'source' ? program.entry.endsWith('/worker/adapters/main.ts') : false).equal(true);
+    should(program.kind === 'source' ? program.entry.endsWith('/worker/main.ts') : false).equal(true);
   });
 
   it('should take the operator overrides over anything beside the daemon', async () => {

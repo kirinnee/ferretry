@@ -235,7 +235,7 @@
       "name": "@ferretry/plugin-browsers",
       "version": "5.0.0",
       "bin": {
-        "fyd-browser-worker": "daemon/worker/adapters/main.ts",
+        "fyd-browser-worker": "daemon/worker/main.ts",
       },
       "dependencies": {
         "@ferretry/app": "workspace:*",

@@ -22,6 +22,7 @@ describe('banned-globals scope: the explicit outside-the-kernel list', () => {
     expect(bannedScope(...at('catalogs', 'worker/index.ts'))).toBe(false);
     expect(bannedScope(...at('connections', 'daemon/adapters/webrtc/node-datachannel-engine.ts'))).toBe(false);
     expect(bannedScope(...at('browsers', 'daemon/worker/adapters/agent-browser.ts'))).toBe(false);
+    expect(bannedScope(...at('browsers', 'daemon/worker/main.ts'))).toBe(false);
     expect(OUTSIDE_THE_KERNEL.every(entry => entry.reason.length > 0)).toBe(true);
   });
 
