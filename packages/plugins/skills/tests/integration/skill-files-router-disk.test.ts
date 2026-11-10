@@ -62,7 +62,7 @@ async function world() {
   };
   const projects = new ProjectSkillFiles(
     async () => [project],
-    folder => roots.root('imports', { subfolder: folder }),
+    (folder, within) => roots.root('imports', { subfolder: folder, within }),
   );
   const installed = new InstalledSkillFiles(port);
   const router = (over: Record<string, unknown> = {}) =>

@@ -11,8 +11,8 @@ its project, and reaches Claude Code as a local-scope entry for that project —
 servers from and how a server is checked. A ferret in a subfolder of a registered project, in a worktree
 kept inside it, or in a managed worktree of it, uses the project's sign-in, whether or not any ferret works in
 the project's root: Ferretry reads the `.mcp.json` at each registered project root and managed worktree itself,
-read-only, and no other file there. A project registered through a link (the folder or any parent) is not
-read: register its real path. A Codex ferret is handed no project server and renews none, as today.
+read-only, and no other file there. A project registered through a link (the folder or any parent) is read
+as the folder it names; a `.mcp.json` that is itself a link is not read. A Codex ferret is handed no project server and renews none, as today.
 Whether the runtime declined the server is the harness's own answer, read from its own home; Ferretry's MCP
 code never reads that home. Claude Code answers it from the ferret's home, where a server the person disabled
 stays disabled across launches; a ferret is handed a project server's token only when Claude approved the

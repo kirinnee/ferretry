@@ -125,7 +125,7 @@ noted in step 2; `NEW` is `~/.ferretry`, the home the daemon just made (it has `
    - **Sign-ins renew at the next Claude Code launch that uses them, as today.** That covers a global server. It
      also covers a project server, once the project is registered again (main step 4), from the project's root, a
      subfolder of it, a worktree kept inside it, or a managed worktree of it (one Ferretry makes after the move).
-     A project registered through a link (the folder or any parent) is not read: register its real path.
+     A project registered through a link (the folder or any parent) is read as the folder it names; a `.mcp.json` that is itself a link is not read.
      No ferret needs to work in the project's root: Ferretry reads that root's `.mcp.json` itself, and no other
      file there. The launch spends the carried refresh token for a new access token before the ferret starts. A
      server whose provider refuses the refresh shows "needs sign-in" until the owner signs in to it again; the
