@@ -96,14 +96,14 @@ describe('browser worker bin — every release compiles it', () => {
   it('should declare the worker as the Browsers package bin, under the name the daemon searches for, at the entry it runs from source', async () => {
     // Arrange
     const manifest = (await import('../../../package.json')).default as { readonly bin?: Record<string, string> };
-    const main = fileURLToPath(new URL('../../../daemon/worker/adapters/main.ts', import.meta.url));
+    const main = fileURLToPath(new URL('../../../daemon/worker/main.ts', import.meta.url));
     const root = fileURLToPath(new URL('../../../', import.meta.url));
 
     // Act
     const bins = Object.entries(manifest.bin ?? {});
 
     // Assert: compile.sh, the GoReleaser shim and nix/ferretry.nix ship every entry of this map beside fyd.
-    should(bins).deepEqual([[BROWSER_WORKER_NAME, 'daemon/worker/adapters/main.ts']]);
+    should(bins).deepEqual([[BROWSER_WORKER_NAME, 'daemon/worker/main.ts']]);
     should(join(root, bins[0]?.[1] ?? '')).equal(main);
   });
 });

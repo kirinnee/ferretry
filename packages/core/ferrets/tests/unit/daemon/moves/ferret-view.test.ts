@@ -109,3 +109,55 @@ describe('ferretStateOf', () => {
       should(answer).equal(state);
     });
 });
+
+describe('ferretSummaryOfSessionView names and conversation', () => {
+  it('should use the session id as the name when neither the callsign nor the session name can be made into one', () => {
+    // Arrange
+    const view = sessionView('s1', { teammate: '###', name: '!!!' });
+
+    // Act
+    const summary = ferretSummaryOfSessionView(view);
+
+    // Assert
+    should(summary.name).equal('s1');
+    should(FerretSummarySchema.safeParse(summary).success).be.true();
+  });
+
+  it('should carry the conversation the harness named for the session', () => {
+    // Arrange
+    const view = sessionView('s1', {
+      transcript: {
+        v: 1,
+        home: '/harness/home',
+        identity: 'minted',
+        harnessSessionId: 'conv-1',
+        file: '/harness/home/conv-1.jsonl',
+      },
+    });
+
+    // Act
+    const summary = ferretSummaryOfSessionView(view);
+
+    // Assert
+    should(summary.harnessConversation).equal('conv-1');
+  });
+
+  it('should leave out a conversation id longer than the contract allows', () => {
+    // Arrange
+    const view = sessionView('s1', {
+      transcript: {
+        v: 1,
+        home: '/harness/home',
+        identity: 'minted',
+        harnessSessionId: 'c'.repeat(257),
+        file: '/harness/home/long.jsonl',
+      },
+    });
+
+    // Act
+    const summary = ferretSummaryOfSessionView(view);
+
+    // Assert
+    should(summary).not.have.property('harnessConversation');
+  });
+});

@@ -1,4 +1,4 @@
-import type { Log, StateFileDef, StatePort } from '@ferretry/kernel/contract';
+import type { Log, StateDamage, StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import {
   canonicalJsonValue,
   deepFreezeJson,
@@ -32,6 +32,8 @@ import type {
   EventPointer,
   IndexedSession,
   JournalFingerprint,
+  IndexRebuildOptions,
+  IndexRebuildResult,
   JournalProblem,
   RebuildResult,
   ReplayPage,
@@ -62,10 +64,25 @@ import { StateSqliteIndex } from './sqlite-index.ts';
  * registration inside it), which `StatePort.update`'s synchronous function cannot host.
  */
 
+/**
+ * The kinds of a refused document, a fixed vocabulary: the port's damage kinds for a file it could not read, and
+ * `refused_write` for a value THIS daemon computed and the declared schema refused before it reached the disk (the file
+ * on disk is then not what is wrong).
+ */
+export type InvalidDocumentKind = StateDamage['reason'] | 'refused_write';
+
 export class InvalidStateDocumentError extends Error {
   constructor(
     readonly file: string,
     readonly reason: string,
+    /** The kind, from a fixed vocabulary ({@link InvalidDocumentKind}): safe to log, never a quote of the file. */
+    readonly damage: InvalidDocumentKind = 'schema',
+    /**
+     * The file as last written: the state port's version etag (inode, size and modification time), so the same damage
+     * is the same report until the file is written again (any rewrite is a new etag, even of identical bytes; it is a
+     * write identity, not a digest of the bytes). `undefined` when the port could not say.
+     */
+    readonly etag?: string,
   ) {
     super(`invalid JSON document ${file}: ${reason}`);
     this.name = 'InvalidStateDocumentError';
@@ -311,11 +328,8 @@ export class DaemonStorage {
     readonly problems: readonly JournalProblem[];
   } {
     const plan = planIndexRebuild([source]);
-    const session = plan.sessions[0];
-    if (session === undefined) {
-      this.index.removeSession(source.id);
-      return { eventCount: 0, problems: plan.problems };
-    }
+    // a source always plans exactly one session
+    const session = plan.sessions[0] as IndexedSession;
     this.index.replaceSession(session, plan.events);
     return { session, eventCount: plan.events.length, problems: plan.problems };
   }
@@ -416,6 +430,69 @@ export class DaemonStorage {
         ...(collected.lostJournalSessionIds.length ? { lostJournalSessionIds: collected.lostJournalSessionIds } : {}),
       };
     });
+  }
+
+  /**
+   * Gives the index a row for every session it lacks, a slice at a time — the boot job's rebuild (BG-049).
+   *
+   * WHY NOT `rebuildIndex`. That is one exclusive pass over the whole fleet: ~0.13 ms of main-thread time per
+   * session, so a single gap of ~310 ms at ~2,400 sessions — over the 208/263 ms stall budget — with every writer
+   * queued behind it. This takes the sessions the index lacks (none: it returns before taking any lane, writing or
+   * yielding), `sliceSize` at a time, and hands the loop back after each slice.
+   *
+   * CONSISTENCY. No exclusive lock is held across slices. Each session is taken under its OWN lane — the lane every
+   * write to it takes — so a write is either wholly before the rebuild's read of the session (and the rebuild finds
+   * its row and leaves it) or wholly after (and updates the row the rebuild made). A reader sees a growing set of
+   * whole rows, never half a session, and a session cannot be duplicated: a row is an upsert on its id. Rows the
+   * index holds for sessions that have since left the survey are left alone: `reconcile` owns those.
+   *
+   * STOP. After `signal` aborts, no further session is taken; what was rebuilt stays, and the next boot, finding
+   * the rest missing, finishes it.
+   */
+  async rebuildIndexYielding(options: IndexRebuildOptions): Promise<IndexRebuildResult> {
+    this.assertOpen();
+    const size = Math.max(1, Math.floor(options.sliceSize));
+    const names = await this.sessionNames();
+    const surveyed: SessionId[] = [];
+    for (const name of names.all) {
+      const id = tryParseSessionId(name);
+      if (id !== undefined && !this.archived.has(id)) surveyed.push(id);
+    }
+    const held = new Set(this.index.listSessions().map(session => session.id));
+    const missing = surveyed.filter(id => !held.has(id));
+    const failedSessionIds: string[] = [];
+    let rebuilt = 0;
+    let slices = 0;
+    const stopped = (): boolean => this.closed || options.signal?.aborted === true;
+    const result = (complete: boolean): IndexRebuildResult => ({
+      surveyed: surveyed.length,
+      missing: missing.length,
+      rebuilt,
+      slices,
+      complete,
+      failedSessionIds,
+    });
+    for (let at = 0; at < missing.length; at += size) {
+      for (const id of missing.slice(at, at + size)) {
+        if (stopped()) return result(false);
+        try {
+          rebuilt += await this.serial.run(id, async () => {
+            // Written, or rebuilt by a feed, since the survey: its row is already the newer one.
+            if (this.closed || this.archived.has(id) || this.index.findSession(id) !== undefined) return 0;
+            return (await this.syncSessionUnlocked(id)).session === undefined ? 0 : 1;
+          });
+        } catch (error) {
+          failedSessionIds.push(id);
+          this.log.warn('a session could not be indexed by the rebuild', {
+            session: id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      slices += 1;
+      await options.yieldToLoop();
+    }
+    return result(!stopped());
   }
 
   /** Whether the index's last pointer for the session is still the event the journal holds at that position. */
@@ -705,6 +782,7 @@ export class DaemonStorage {
       throw new InvalidStateDocumentError(
         fileOf(file, id),
         checked.error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; '),
+        'refused_write',
       );
     if (kind === 'config') await this.state.write(FerretConfigFile, value as never, id);
     else await this.state.write(FerretStateFile, value as never, id);
@@ -714,7 +792,12 @@ export class DaemonStorage {
     const file = kind === 'config' ? FerretConfigFile : FerretStateFile;
     const read =
       kind === 'config' ? await this.state.read(FerretConfigFile, id) : await this.state.read(FerretStateFile, id);
-    if (!read.ok) throw new InvalidStateDocumentError(fileOf(file, id), read.error.sentence);
+    if (!read.ok) {
+      // Which write: the port's version etag of the file as it is now (best effort; one that cannot be had is no key). A
+      // write that lands between the failed read and this reading keys the report on the newer file.
+      const version = await this.state.version(file, id).catch(() => undefined);
+      throw new InvalidStateDocumentError(fileOf(file, id), read.error.sentence, read.error.reason, version?.etag);
+    }
     if (read.value === undefined) return undefined;
     return deepFreezeJson(canonicalJsonValue(read.value));
   }
@@ -752,7 +835,7 @@ export class DaemonStorage {
         const file = kind === 'config' ? FerretConfigFile : FerretStateFile;
         const current = await this.readDocument(id, kind);
         const compute = current === undefined ? create : () => transform(current);
-        if (compute === undefined) throw new InvalidStateDocumentError(fileOf(file, id), 'file is missing');
+        if (compute === undefined) throw new InvalidStateDocumentError(fileOf(file, id), 'file is missing', 'missing');
         // Checked under the same lineage gate and session lane as archive publication: maintenance
         // never revives a session that left the live set while its caller was reading the transcript.
         if (unlessArchived && this.archived.has(id)) return canonicalJsonValue(current);

@@ -19,6 +19,7 @@ export * from './ids.ts';
 export * from './kinds.ts';
 export * from './port.ts';
 export * from './records.ts';
+export * from './skill-home.ts';
 export * from './slots.ts';
 export * from './state.ts';
 export * from './transfer.ts';
@@ -28,6 +29,7 @@ export * from './handover.ts';
 export * from './move.ts';
 export * from './handover-state.ts';
 export * from './transfer-state.ts';
+export * from './sessions-root.ts';
 export * from './move-state.ts';
 
 /**

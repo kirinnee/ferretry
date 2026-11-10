@@ -11,6 +11,7 @@ import type {
   Delivery,
   Harness,
   HarnessInstall,
+  HarnessLaunchSettings,
   HarnessMissing,
   HomePlan,
   LaunchSpec,
@@ -20,10 +21,14 @@ import type {
   Started,
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
+import { materializeSkills } from '@ferretry/core-ferrets/contract';
+import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
-import { buildCodexLaunchArgv, tomlTables } from '../lib/index.ts';
-import type { HarnessConfig } from '../../contract/index.ts';
+import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
+import { settingsDocument } from '../lib/settings.ts';
+import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS, type HarnessConfig, type SettingsItem } from '../../contract/index.ts';
 import { codexFixedArguments } from '../lib/fixed-layer.ts';
+import { compareCodexLaunchSettings, codexLaunchSettingsRecord } from '../lib/launch-settings.ts';
 import { codexCorrelationArguments } from '../lib/transcript/rollout.ts';
 import { CodexRollouts } from './rollouts.ts';
 import {
@@ -37,7 +42,8 @@ import {
 type ChildEnvironment = RunSpec['env'];
 
 export interface CodexHarnessOptions {
-  readonly kernel: Pick<KernelPorts, 'roots' | 'log' | 'clock' | 'redaction' | 'state'>;
+  readonly kernel: Pick<KernelPorts, 'roots' | 'log' | 'clock' | 'redaction' | 'state'> &
+    Partial<{ readonly config: Pick<KernelPorts['config'], 'collection'> }>;
   readonly permissionMode?: () => HarnessConfig['permissionMode'];
   readonly historyDirectory?: () => Promise<string | undefined>;
   readonly locate: () => Promise<HarnessLocation>;
@@ -48,6 +54,13 @@ export interface CodexHarnessOptions {
 /** A ferret id is one plain name before it names a folder (the S45 grammar Claude Code's home uses too). */
 const PLAIN_FERRET = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 
+/** A launch record is two fingerprints (~180 bytes); one larger than this is not one, and is never read. */
+const MAX_LAUNCH_RECORD_BYTES = 4 * 1024;
+const UNKNOWN_LAUNCH: HarnessLaunchSettings = { kind: 'unknown' };
+
+/** What Codex itself writes into `skills/` on its first start (its bundled skills): never swept, never replaced. */
+const CODEX_OWNED_SKILLS: readonly string[] = ['.system'];
+
 /** Codex's `AGENTS.md`: the instructions every launch writes into the ferret's home. */
 function agentsDocument(spec: LaunchSpec): string {
   const sections = [
@@ -57,23 +70,45 @@ function agentsDocument(spec: LaunchSpec): string {
   return sections.length === 0 ? '' : `${sections.join('\n\n')}\n`;
 }
 
-/** Codex's `config.toml`: one `[mcp_servers.<name>]` table per MCP server the launch adds. */
-function configDocument(spec: LaunchSpec): string {
+/**
+ * Codex's `config.toml`: the settings items on this machine merged in name order (what Claude's home does with its own,
+ * so `shell_environment_policy.set` and every other Codex setting reaches the harness), then one `[mcp_servers.<name>]`
+ * table per MCP server the launch adds. A server the launch adds replaces a settings item's server of the same name.
+ */
+function configDocument(spec: LaunchSpec, items: ReadonlyMap<string, SettingsItem>): string {
+  const { mcp_servers: declared, ...settings } = settingsDocument(items);
   const servers: Record<string, Record<string, unknown>> = {};
+  if (typeof declared === 'object' && declared !== null && !Array.isArray(declared)) {
+    for (const [name, config] of Object.entries(declared))
+      if (typeof config === 'object' && config !== null && !Array.isArray(config))
+        servers[name] = config as Record<string, unknown>;
+  }
   for (const part of spec.parts) {
     if (part.kind !== 'mcp') continue;
     const config = part.config;
     servers[part.name] = typeof config === 'object' && config !== null && !Array.isArray(config) ? config : {};
   }
-  return Object.keys(servers).length === 0 ? '' : `${tomlTables('mcp_servers', servers)}\n`;
+  const blocks = [
+    tomlDocument(settings),
+    Object.keys(servers).length === 0 ? '' : tomlTables('mcp_servers', servers),
+  ].filter(block => block !== '');
+  return blocks.length === 0 ? '' : `${blocks.join('\n\n')}\n`;
 }
 
 export function codexHarness(options: CodexHarnessOptions): Harness {
   const { kernel, locate, probe, update } = options;
+  const permissionModeNow = (): HarnessConfig['permissionMode'] => options.permissionMode?.() ?? 'auto';
+  /** This plugin's own settings items now (`config/codex/settings/`): what a home written now would merge. */
+  const settingsNow = (): ReadonlyMap<string, SettingsItem> =>
+    (kernel.config?.collection(CODEX_SETTINGS as never) as ReadonlyMap<string, SettingsItem> | undefined) ?? new Map();
   const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
 
   /** `CODEX_HOME` is set by an `env` prefix: the Vault's environment is an opaque handle this code cannot add to. */
-  const command = async (spec: LaunchSpec, resume?: string): Promise<Result<readonly string[], StartRefusal>> => {
+  const command = async (
+    spec: LaunchSpec,
+    permissionMode: HarnessConfig['permissionMode'],
+    resume?: string,
+  ): Promise<Result<readonly string[], StartRefusal>> => {
     const location = await locate();
     if (location.outcome !== 'located') return err('unavailable');
     return ok([
@@ -81,14 +116,10 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       `CODEX_HOME=${spec.home}`,
       ...buildCodexLaunchArgv({
         executable: location.path,
-        harnessFlags: [
-          ...codexFixedArguments(options.permissionMode?.() ?? 'auto', spec.folder),
-          ...codexCorrelationArguments(spec.home),
-        ],
+        harnessFlags: [...codexFixedArguments(permissionMode, spec.folder), ...codexCorrelationArguments(spec.home)],
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
-        ...(spec.prompt === undefined ? {} : { prompt: spec.prompt }),
       }),
     ]);
   };
@@ -99,10 +130,13 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     env: ChildEnvironment,
     harnessConversation?: string,
   ): Promise<Result<Started, StartRefusal>> => {
-    const argv = await command(spec, harnessConversation);
+    // ONE read of the permission mode per launch: the argv and the record describe the same setting.
+    const permissionMode = permissionModeNow();
+    const argv = await command(spec, permissionMode, harnessConversation);
     if (!argv.ok) return argv;
     await ensureHome(spec);
     await rollouts.launched(spec, harnessConversation);
+    await recordLaunchSettings(spec.ferret, permissionMode);
     const running =
       harnessConversation === undefined
         ? await runner.start({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env })
@@ -112,7 +146,34 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     return ok({ running: running.value, ...(harnessConversation === undefined ? {} : { harnessConversation }) });
   };
 
+  /**
+   * Records what this launch runs under, before the process starts (W2-c). A launch never fails over it: when the record
+   * cannot be written, the one an earlier launch left is removed, so the answer for this process is `unknown` and never
+   * an older launch's.
+   */
+  const recordLaunchSettings = async (
+    ferret: FerretId,
+    permissionMode: HarnessConfig['permissionMode'],
+  ): Promise<void> => {
+    const record = codexLaunchSettingsRecord(permissionMode, settingsNow());
+    try {
+      await kernel.state.write(CODEX_LAUNCH_SETTINGS, record, ferret);
+    } catch {
+      try {
+        await kernel.state.remove(CODEX_LAUNCH_SETTINGS, ferret);
+        // A damaged record fails the write above (the kernel guard refuses to write over it) and the remove clears it:
+        // write once more, so this launch is recorded and the answer is current now, not unknown until the next launch.
+        await kernel.state.write(CODEX_LAUNCH_SETTINGS, record, ferret).catch(() => undefined);
+      } catch {
+        // Nothing more can be done: the read then finds whatever is left, and a damaged record reads as unknown.
+      }
+    }
+  };
+
   const refused = (id: string, reason: string): Delivery => ({ status: 'refused', id, reason });
+
+  /** Said once: a composition without a configuration port writes no settings item into any home. */
+  let saidNoSettings = false;
 
   /** The ferret's own home handle: `state/codex/agent-homes/<ferret>` through this plugin's own root. */
   const homeRoot = (ferret: FerretId) => {
@@ -141,6 +202,9 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
   return {
     key: 'codex',
+    // Today's stop key. NOT safe when idle: at an idle Codex prompt a stop key is one of the ways the TUI quits, so an
+    // interrupt presses it only while the pane shows active work (`shouldPressStopKey`).
+    turnStop: { key: 'Escape', safeWhenIdle: false },
 
     async discover(): Promise<HarnessInstall | HarnessMissing> {
       const location = await locate();
@@ -180,10 +244,20 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
     async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
       const root = await ensureHome(spec);
+      // The selected skills: Skills' shared folders linked into `skills/`, the rest swept; Codex's own `.system` stays.
+      await materializeSkills(root, spec.parts, CODEX_OWNED_SKILLS);
       const files: FencedPath[] = [];
+      // ONE read of this plugin's own settings items per home written (`config/codex/settings/`).
+      const items = settingsNow();
+      if (kernel.config === undefined && !saidNoSettings) {
+        saidNoSettings = true;
+        kernel.log.warn(
+          "this composition gives Codex no configuration port, so no settings item reaches a ferret's home",
+        );
+      }
       for (const [name, text] of [
         ['AGENTS.md', agentsDocument(spec)],
-        ['config.toml', configDocument(spec)],
+        ['config.toml', configDocument(spec, items)],
       ] as const) {
         if (text === '') continue;
         const target = root.resolve(name);
@@ -197,15 +271,48 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     start: async (spec, runner, env) => await launch(spec, runner, env),
     resume: async (spec, runner, env, harnessConversation) => await launch(spec, runner, env, harnessConversation),
 
-    async stop(_ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
-      await runner.stop(handle, how);
+    async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
+      try {
+        await runner.stop(handle, how);
+      } finally {
+        // What was proved about this ferret's rollout is only a cache: a stopped ferret keeps none, and a read that
+        // comes later proves it afresh.
+        rollouts.forget(ferret);
+      }
     },
 
     async deliver(_ferret, _handle, message): Promise<Delivery> {
       return refused(message.id, 'Codex messages are sent through Conversation, which owns the send path');
     },
 
+    // Today's RuntimeSupervisedLauncher: a pane that died starting because Codex could not reach the network is told
+    // so in words. The sentence is fixed text; the screen is only matched, never quoted.
+    startFailure: screen => codexLaunchFailure(screen),
+
+    /**
+     * Whether a relaunch would run this ferret on other settings of this plugin's than its last start or resume did
+     * (`Harness.launchSettings`, W2-c). Names sections only. Total: no record, a record too large to be one, a damaged
+     * one or any failure is `unknown`, and what failed is dropped unread.
+     */
+    async launchSettings(ferret: FerretId): Promise<HarnessLaunchSettings> {
+      try {
+        if (!PLAIN_FERRET.test(ferret)) return UNKNOWN_LAUNCH;
+        const size = (await kernel.state.version(CODEX_LAUNCH_SETTINGS, ferret))?.size;
+        if (size === undefined || size > MAX_LAUNCH_RECORD_BYTES) return UNKNOWN_LAUNCH;
+        const recorded = await kernel.state.read(CODEX_LAUNCH_SETTINGS, ferret);
+        if (!recorded.ok || recorded.value === undefined) return UNKNOWN_LAUNCH;
+        return compareCodexLaunchSettings(
+          recorded.value,
+          codexLaunchSettingsRecord(permissionModeNow(), settingsNow()),
+        );
+      } catch {
+        return UNKNOWN_LAUNCH;
+      }
+    },
+
     transcript: rollouts.transcript,
+    transcriptStamp: rollouts.stamp,
+    transcriptTail: rollouts.tail,
     usage: rollouts.usage,
     conversations: rollouts.conversations,
   };

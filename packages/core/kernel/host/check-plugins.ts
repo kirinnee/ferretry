@@ -2,6 +2,7 @@ import { type Duration, milliseconds } from '@ferretry/std';
 import type { Clock, SpawnOptions, SpawnPort, WorkersPort } from '../contract/ports.ts';
 import type { CheckLine, DaemonImplementation, PreflightFacts, SelftestProbe } from '../manifest/implement.ts';
 import type { TempDirs } from './adapters/temp-dir.ts';
+import type { SelftestConfigReader } from './check-config.ts';
 import { effectivePermissions, NO_ITEMS, restrictSpawn, spawnPermitted } from './permissions.ts';
 import { pluginStateFolder } from './roots.ts';
 
@@ -94,6 +95,11 @@ export interface PluginCheckDeps {
   readonly clock: Pick<Clock, 'after' | 'nowMs'>;
   /** The unrestricted spawn adapter; each selftest gets it narrowed to its own plugin's `permissions.spawn`. Absent: nothing may run. */
   readonly spawn?: SpawnPort;
+  /**
+   * Reads a plugin's own config as in effect, for `SelftestProbe.enabledBy` (`inEffectConfigReader`). Absent: every
+   * probe runs, as if each were switched on.
+   */
+  readonly config?: SelftestConfigReader;
   readonly selftestTimeoutMs?: number;
   readonly workerTimeoutMs?: number;
 }
@@ -227,8 +233,55 @@ async function runSelftests(
       );
       continue;
     }
+    const enabled = await selftestEnabled(probe, deps, implementation);
+    if (enabled.kind === 'refused') {
+      gate.say(lineOf(FAILURE_LABEL, `! ${plugin} selftest ${id} ${enabled.why}`));
+      continue;
+    }
+    if (enabled.kind === 'off') {
+      gate.say(lineOf(probe.label, enabled.text));
+      continue;
+    }
     gate.say(lineOf(probe.label, await runSelftest(probe, deps, implementation)));
   }
+}
+
+type Enabled =
+  | { readonly kind: 'run' }
+  | { readonly kind: 'off'; readonly text: string }
+  | { readonly kind: 'refused'; readonly why: string };
+
+/**
+ * `SelftestProbe.enabledBy` (kernel batch #14): whether the probe runs, judged by the KERNEL from the plugin's own file
+ * as in effect. It fails toward checking: only an exact `false` from `on` over a value in effect switches it off.
+ */
+async function selftestEnabled(
+  probe: SelftestProbe,
+  deps: PluginCheckDeps,
+  implementation: DaemonImplementation,
+): Promise<Enabled> {
+  const by = probe.enabledBy;
+  if (by === undefined) return { kind: 'run' };
+  const own = implementation.manifest.data?.config ?? [];
+  if (by.def?.shape !== 'file' || !own.includes(by.def))
+    return { kind: 'refused', why: 'is switched by a config file that is not one of its own declared files' };
+  if (deps.config === undefined) return { kind: 'run' };
+  let value: unknown;
+  try {
+    value = await deps.config.inEffect(implementation.manifest.id, by.def);
+  } catch {
+    return { kind: 'run' };
+  }
+  if (value === undefined) return { kind: 'run' };
+  let on: unknown;
+  try {
+    on = by.on(value);
+  } catch {
+    return { kind: 'run' };
+  }
+  if (on !== false) return { kind: 'run' };
+  const consequence = typeof by.consequence === 'string' && by.consequence !== '' ? ` — ${by.consequence}` : '';
+  return { kind: 'off', text: `switched off in ${deps.facts.home}/config/${by.def.file}${consequence}` };
 }
 
 /** One selftest, bounded by the kernel, in a temp directory of its own that is removed whatever happens. */
@@ -274,6 +327,8 @@ async function runSelftest(
     return `! ${firstLine(error)}`;
   } finally {
     cancel?.();
+    // Answered or not, its children end with it: a child the probe started and left running is aborted here too.
+    abort.abort();
     if (tempDir !== undefined) await deps.tempDirs.remove(tempDir).catch(() => {});
   }
 }

@@ -1,6 +1,5 @@
 /**
- * Catalogs and shares → `state/catalogs/` (`@ferretry/plugin-catalogs`), and the local skill copies → Skills'
- * `state/skills/installs.json` (`@ferretry/plugin-skills/contract` `SKILLS_INSTALLS_STATE`).
+ * Catalogs and shares → `state/catalogs/` (`/plugin-catalogs`).
  *
  * | v4 (4.291.5)                                       | v5                                                       |
  * | -------------------------------------------------- | -------------------------------------------------------- |
@@ -11,7 +10,6 @@
  * | `state/catalogs/members.json`, `shares.json`       | the same names, `{format: 1, …}`                         |
  * | `state/catalogs/member-passkeys.json`              | the same name, `{format: 1, passkeys}`                   |
  * | `state/catalog-installs.json`                      | `state/catalogs/installs.json` `{format: 1, …}`          |
- * | `state/local-skill-installs.json`                  | `state/skills/installs.json` (`LocalSkillInstallStateSchema`) |
  *
  * SIGNATURES. A catalog is signed by the publisher's daemon identity over RFC 8785 canonical JSON when it is exported
  * or served; nothing signed is stored in the home. The signed manifest is rebuilt from `catalogs.json`'s fields
@@ -50,11 +48,6 @@ import {
   SharedCatalogItemIdSchema,
 } from '@ferretry/plugin-catalogs/contract';
 import { SealedDocumentSchema } from '@ferretry/core-vault/contract';
-import {
-  type LocalSkillInstallState,
-  LocalSkillInstallStateSchema,
-  SKILLS_INSTALLS_STATE,
-} from '@ferretry/plugin-skills/contract';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -77,7 +70,6 @@ import {
   V4_CATALOG_SHARES,
   V4_CATALOGS,
   V4_CATALOGS_DIR,
-  V4_LOCAL_SKILL_INSTALLS,
   V4_VAULT_KEY,
   V4CatalogInstallPrefsDocument,
   V4CatalogInstallsDocument,
@@ -85,10 +77,10 @@ import {
   V4CatalogsDocumentV2,
   type V4InstallTarget,
   V4LinksDocument,
-  V4LocalSkillInstallsDocument,
   V4MembersDocument,
   V4SharesDocument,
 } from '../v4/catalogs.ts';
+import { keyPath } from '../key-path.ts';
 import { V4PasskeysSchema } from '../v4/access.ts';
 import { runtimeIds } from '../v4/ferrets.ts';
 import type { Step, StepContext } from './index.ts';
@@ -103,7 +95,6 @@ export const V5_CATALOG_MEMBERS = join(V5_DIR, 'members.json');
 export const V5_CATALOG_SHARES = join(V5_DIR, 'shares.json');
 export const V5_CATALOG_MEMBER_PASSKEYS = join(V5_DIR, 'member-passkeys.json');
 export const V5_CATALOG_INSTALLS = join(V5_DIR, 'installs.json');
-export const V5_SKILL_INSTALLS = join('state/skills', SKILLS_INSTALLS_STATE.path);
 /** The manifest's `format` for every Catalogs file. */
 const FORMAT = 1;
 
@@ -211,7 +202,7 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
 const where = (error: z.ZodError): string =>
   error.issues
     .slice(0, 3)
-    .map(issue => (issue.path.length === 0 ? '(top)' : issue.path.join('.')))
+    .map(issue => keyPath(issue.path))
     .join(', ');
 
 async function readDocument<Shape>(home: string, file: string, schema: z.ZodType<Shape>): Promise<Shape | undefined> {
@@ -249,8 +240,6 @@ async function runtimeResolver(ctx: StepContext): Promise<Resolve> {
       ? name
       : (Object.entries(ids?.runtimes ?? {}).find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
 }
-
-const harnessKey = (harness: 'claude' | 'codex') => (harness === 'claude' ? 'claude-code' : 'codex');
 
 /** Catalogs' own target vocabulary is still v4's (`CatalogHarnessSchema`: `claude`); only a former runtime name moves. */
 const catalogTarget = (target: V4InstallTarget, resolve: Resolve): V4InstallTarget =>
@@ -467,41 +456,6 @@ async function planInstalls(ctx: StepContext, plan: Plan, resolve: () => Promise
         : `${V4_CATALOG_INSTALL_PREFS} is damaged (v4 refused it too); not carried`,
     );
   }
-
-  const local = await readDocument(home, V4_LOCAL_SKILL_INSTALLS, V4LocalSkillInstallsDocument);
-  if (local === undefined) return;
-  const named = local.installs.some(install => install.target.scope === 'runtime' || install.origin.kind === 'account')
-    ? await resolve()
-    : (name: string) => name;
-  const state: LocalSkillInstallState = {
-    format: SKILLS_INSTALLS_STATE.format as 1,
-    installs: local.installs.map(install => {
-      const target =
-        install.target.scope === 'project'
-          ? { ...install.target, harness: harnessKey(install.target.harness) }
-          : { ...install.target, runtime: named(install.target.runtime) };
-      const origin = {
-        ...install.origin,
-        // An account copy's owner is the runtime that held it; a project's is its root folder.
-        owner: install.origin.kind === 'account' ? named(install.origin.owner) : install.origin.owner,
-        harness: harnessKey(install.origin.harness),
-      };
-      const record = { ...install, target, origin };
-      const checked = LocalSkillInstallStateSchema.shape.installs.element.safeParse(record);
-      if (!checked.success)
-        throw new V4InputError(
-          `${V4_LOCAL_SKILL_INSTALLS}: copy ${install.installId} does not fit v5 Skills at: ${where(checked.error)}`,
-        );
-      return checked.data;
-    }),
-  };
-  plan.writes.push(() =>
-    ctx.v5.json(
-      { path: V5_SKILL_INSTALLS, format: SKILLS_INSTALLS_STATE.format, schema: LocalSkillInstallStateSchema },
-      state,
-    ),
-  );
-  keep(plan, 'local skill copies', state.installs.length);
 }
 
 /** Anything in `state/catalogs/` that 4.291.5 does not write is named, never read. */
@@ -526,7 +480,7 @@ export const catalogsStep: Step = {
   id: 'catalogs',
   title: 'Catalogs and shares (published catalogs, links, members, installs)',
   owner: ['plugin-catalogs', 'plugin-skills'],
-  reads: [`${V4_CATALOGS_DIR}/**`, V4_CATALOG_INSTALLS, V4_CATALOG_INSTALL_PREFS, V4_LOCAL_SKILL_INSTALLS],
+  reads: [`${V4_CATALOGS_DIR}/**`, V4_CATALOG_INSTALLS, V4_CATALOG_INSTALL_PREFS],
   sealed: [V4_CATALOG_LINK_KEYS],
   notCarried: STATIC_NOT_CARRIED,
   async run(ctx): Promise<StepReport> {

@@ -117,7 +117,7 @@ describe('route parity', () => {
     expect(host.logs.some(entry => entry.message === 'fleet.warden_config_changed')).toBe(false);
   });
 
-  test('R-0232 GAP an owner lowering a cap while switching the warden on is held is refused 409: the old cap stays, the held edit stays held', async () => {
+  test('R-0232 an owner lowering a cap while switching the warden on is held lowers it in both versions at once, as today: the warden stays off and the held edit stays held', async () => {
     const real = realWardenConfig();
     await real.handEdit('enabled: false\ncaps:\n  investigationUsdPerDay: 2\n');
     await real.handEdit('enabled: true\ncaps:\n  investigationUsdPerDay: 2\n');
@@ -129,24 +129,20 @@ describe('route parity', () => {
       as: owner(),
     });
 
-    expect(response.status).toBe(409);
-    expect(response.json<{ code: string; error: string }>()).toMatchObject({
-      code: 'config_held',
-      error: 'warden.yaml has a change waiting for your approval; confirm or discard it first, then save again.',
-    });
+    expect(response.status).toBe(200);
     const view = (await host.request('GET', '/v1/warden/config', { as: owner() })).json<{
       config: { enabled: boolean; caps: { investigationUsdPerDay: number } };
     }>();
-    expect(view.config).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 2 } });
+    expect(view.config).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 1 } });
     expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({
       state: 'held',
       sentences: ['the warden is switched on'],
     });
-    expect(await real.text()).toBe('enabled: true\ncaps:\n  investigationUsdPerDay: 2\n');
-    expect(host.logs.some(entry => entry.message === 'fleet.warden_config_changed')).toBe(false);
+    expect(await real.text()).toContain('enabled: true');
+    expect(await real.text()).toContain('investigationUsdPerDay: 1');
   });
 
-  test('R-0232 GAP an owner saving another cap while a raised jevUsdPerDay is held is refused 409, and the held edit is NOT discarded', async () => {
+  test('R-0232 an owner saving another cap while a raised jevUsdPerDay is held saves it in both versions, and the held edit is NOT discarded or put into effect', async () => {
     const real = realWardenConfig();
     await real.handEdit('caps:\n  jevUsdPerDay: 0.5\n');
     await real.handEdit('caps:\n  jevUsdPerDay: 5\n');
@@ -158,9 +154,10 @@ describe('route parity', () => {
       as: owner(),
     });
 
-    expect(response.status).toBe(409);
-    expect(response.json<{ code: string }>().code).toBe('config_held');
-    expect(await real.text()).toBe('caps:\n  jevUsdPerDay: 5\n');
+    expect(response.status).toBe(200);
+    expect(real.port.file(WARDEN_CONFIG)).toMatchObject({ caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 1 } });
+    expect(await real.text()).toContain('jevUsdPerDay: 5');
+    expect(await real.text()).toContain('investigationUsdPerDay: 1');
     expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
   });
 
@@ -183,16 +180,18 @@ describe('route parity', () => {
     expect(host.logs.some(entry => entry.message === 'fleet.warden_config_changed')).toBe(true);
   });
 
-  test("R-0232 GAP an owner save over an edit the kernel HOLDS (one a ferret could have made) is refused 409 and never puts it into effect, even where Gate's judge would apply the owner's call", async () => {
-    // The risk: the kernel patches the DISK text, so the judge is asked about the whole patched file, held edit included.
-    const exposed = realWardenConfig({ judge: 'owner-at-machine' });
-    await exposed.handEdit('caps:\n  jevUsdPerDay: 0.5\n');
-    await exposed.handEdit('caps:\n  jevUsdPerDay: 5\n');
-    const direct = await exposed.port.write(WARDEN_CONFIG, undefined, { patch: { maxAssignedWardens: 1 } });
+  test("R-0232 an owner save beside an edit the kernel HOLDS (one a ferret could have made) is in effect at once in both versions, as today, and never puts the held edit into effect, even where Gate's judge would apply the owner's call", async () => {
+    // A plain write patch is made to both versions too: the judge is asked about the caller's patch alone, so the held
+    // edit is never confirmed with it.
+    const direct0 = realWardenConfig({ judge: 'owner-at-machine' });
+    await direct0.handEdit('caps:\n  jevUsdPerDay: 0.5\n');
+    await direct0.handEdit('caps:\n  jevUsdPerDay: 5\n');
+    const direct = await direct0.port.write(WARDEN_CONFIG, undefined, { patch: { maxAssignedWardens: 1 } });
     expect(direct.kind).toBe('written');
-    expect(exposed.port.file(WARDEN_CONFIG)).toMatchObject({ caps: { jevUsdPerDay: 5 } });
+    expect(direct0.port.file(WARDEN_CONFIG)).toMatchObject({ maxAssignedWardens: 1, caps: { jevUsdPerDay: 0.5 } });
+    expect(direct0.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
 
-    // Through Warden's route the same save is refused before the writer is asked, so nothing is put into effect.
+    // Through Warden's route the owner's save is written to both versions (writeAsOwner): only the owner's patch is judged.
     const real = realWardenConfig({ judge: 'owner-at-machine' });
     await real.handEdit('caps:\n  jevUsdPerDay: 0.5\n');
     await real.handEdit('caps:\n  jevUsdPerDay: 5\n');
@@ -200,11 +199,22 @@ describe('route parity', () => {
 
     const response = await host.request('PATCH', '/v1/warden/config', { body: { maxAssignedWardens: 1 }, as: owner() });
 
-    expect(response.status).toBe(409);
-    expect(response.json<{ code: string }>().code).toBe('config_held');
-    expect(real.port.file(WARDEN_CONFIG)).toMatchObject({ caps: { jevUsdPerDay: 0.5 } });
+    expect(response.status).toBe(200);
+    expect(real.port.file(WARDEN_CONFIG)).toMatchObject({ maxAssignedWardens: 1, caps: { jevUsdPerDay: 0.5 } });
     expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
-    expect(await real.text()).toBe('caps:\n  jevUsdPerDay: 5\n');
+    expect(await real.text()).toContain('jevUsdPerDay: 5');
+    expect(await real.text()).toContain('maxAssignedWardens: 1');
+
+    // A SECTION save merges into both versions' section: the held price stays held, the owner's sub-key is in effect.
+    const section = await host.request('PATCH', '/v1/warden/config', {
+      body: { caps: { investigationUsdPerDay: 3 } },
+      as: owner(),
+    });
+    expect(section.status).toBe(200);
+    expect(real.port.file(WARDEN_CONFIG)).toMatchObject({ caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 3 } });
+    expect(real.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
+    expect(await real.text()).toContain('jevUsdPerDay: 5');
+    expect(await real.text()).toContain('investigationUsdPerDay: 3');
   });
 
   test("R-0232 GAP an owner save over a BROKEN warden.yaml overwrites its other keys with the settings in effect, so a loosening planted beside the broken value is never put into effect, even where Gate's judge would apply the owner's call", async () => {

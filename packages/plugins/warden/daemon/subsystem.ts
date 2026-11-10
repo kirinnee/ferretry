@@ -8,12 +8,13 @@ import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import type { TerminalsApi } from '@ferretry/plugin-terminals/contract';
 import type { UsageHeadroomApi } from '../contract/others.ts';
-import { WardenActed, WardenFlagged } from '../contract/index.ts';
+import { WARDEN_CONFIG, WardenActed, WardenConfigChanged, WardenFlagged } from '../contract/index.ts';
 import { AsksWardenAgenda, NoticeEntries } from './asks.ts';
 import { boardReader } from './board.ts';
 import {
   ConfigWardenConfigStore,
   FileWardenArtifacts,
+  kernelSecretSender,
   StateWardenJevCheckLog,
   StateWardenReportFiles,
   StateWardenStateStore,
@@ -41,7 +42,6 @@ import {
 } from './lib/index.ts';
 import { parseWardenConfigPatch } from './lib/config.ts';
 import { JevTriageGuard } from './lib/jev.ts';
-import type { OutboundAuthorizerPort } from './lib/jev-ports.ts';
 import type {
   WardenAgendaView,
   WardenInvestigateView,
@@ -86,15 +86,6 @@ export interface WardenSubsystem {
   arm(): () => void;
 }
 
-/**
- * THE SEAM THAT KEEPS "NO UNATTENDED SPEND BY SURPRISE": the Jev guard is today's `JevTriageGuard`, but it spends the Jev
- * key only through an outbound authorizer. GAP(kernel): the key is read through the kernel's `secrets.resolve`
- * (OwnSecret, D2 #19), which `KernelPorts` does not carry on 5.0; the manifest already declares `secrets:
- * ['JEV_API_KEY']` and the `api.typesafe.ai` network. Until it does, every call answers `secret_missing`, which the guard
- * turns into `not_set`: no request leaves the machine and nothing is spent.
- */
-const NO_VAULT: OutboundAuthorizerPort = { send: async () => ({ kind: 'secret_missing' }) };
-
 /** A turn's wall-clock is the kernel's: monotonic time for the guard's latency. */
 const stopwatch = { monotonicMs: (): number => performance.now() };
 
@@ -118,6 +109,8 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const reader = new WardenReportReader(files, REPORTS_DIRECTORY);
   const artifacts = new FileWardenArtifacts(files, reader, REPORTS_DIRECTORY);
   const configStore = new ConfigWardenConfigStore(kernel.config);
+  // A settings screen hears warden.yaml move the moment the kernel reloads it, from any editor (not only on mount).
+  kernel.config.watch(WARDEN_CONFIG, () => kernel.events.publish(WardenConfigChanged, {}));
 
   const acted: Parameters<typeof createWardenRemedies>[0]['acted'] = (ferret, action, outcome, leftAlone) =>
     kernel.events.publish(WardenActed, {
@@ -223,23 +216,26 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const service = new WardenSweepService(
     {
       orphans: {
-        // An orphaned card's notice stands on one ferret's board as an ask, exactly as the revive breaker's does. An
-        // Agenda that refuses it makes the sweep journal `fleet.warden_orphan_failed` and try again, nothing remembered.
-        add: async (sessionId, notice) => {
-          const written = await agenda.notice(sessionId, {
-            sourceRef: notice.sourceRef,
-            subject: notice.subject,
-            why: notice.why,
-            context: `${notice.premise}\n${notice.context}`,
-            howToResolve: notice.howToResolve,
-          });
-          if (written === 'rejected') throw new Error('the Agenda refused the orphaned-card notice');
+        // Every orphaned card nobody can be messaged about is a row of ONE item on the machine board, as v4 listed
+        // them (`AsksApi.standing`): the same item while the list changes, nothing written when it is the same,
+        // closed when it is empty, and raised again after the owner closed it only when a card joins. An Agenda that
+        // refuses it makes the sweep journal `fleet.warden_orphan_failed` once per reason and try again next sweep:
+        // one attempt of one item.
+        sync: async (item, announce) => {
+          await agenda.standingOrphans(item, announce);
         },
+        // The per-card asks an earlier Warden left on ferret boards, closed once (the memory names which boards).
         remove: async resolution => {
           await agenda.resolveSource(resolution.sessionId, 'agent-raised', resolution.sourceRef, resolution.note);
         },
       },
-      guard: () => new JevTriageGuard(NO_VAULT, stopwatch),
+      // THE SEAM THAT KEEPS "NO UNATTENDED SPEND BY SURPRISE": the Jev key is spent only by the kernel
+      // (`kernel.secrets.send`, D2 #19), and only once the OWNER wrote `jev.key: ${secret:JEV_API_KEY}` into warden.yaml;
+      // until then every call is `not_set` and nothing leaves the machine. The layer and its caps still gate each call.
+      // GAP(warden): this one line is untested through a sweep (5.0 Ferrets reports no state a Jev-triaged flag comes
+      // from); the guard over `kernelSecretSender` is tested on a host with the Warden's own manifest
+      // (tests/unit/jev-kernel-secret.test.ts).
+      guard: () => new JevTriageGuard(kernelSecretSender(kernel.secrets), stopwatch),
       evidence: { evidence: async () => ({ recentTurns: [] }) },
       redactor: { batch: async work => await kernel.redaction.read(scope => work({ text: text => scope.text(text) })) },
       remedies,

@@ -31,34 +31,20 @@
  * floor on the whole text instead, over every shape of `redact-private-keys.ts` (#36, r5: escaped breaks, a body
  * line that starts the way a token does).
  *
+ * A second, older floor is held too, value by value rather than byte by byte: every secret value the text rules of
+ * 4.291.5 hid before the line-break and linearity work (`redact-reference.ts`) stays hidden ({@link referenceLeak}).
+ * Today's own S26 held today to that floor, so it follows from the superset above; it is asserted directly anyway,
+ * over the same generated texts.
+ *
  * Every secret value here is an obviously fake one.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { componentCatalog } from '../../../daemon/lib/service/catalog.ts';
-import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { looksSecret } from '../../../daemon/lib/account/import.ts';
 import { redactTodayText } from './redact-today.ts';
+import { referenceRedactText } from './redact-reference.ts';
 import { privateKeyShapes } from './redact-private-keys.ts';
-
-const HIDDEN = '‹hidden›';
-const MODEL = parseAccountModel({ version: 1, components: { instructions: { notes: { file: 'notes.md' } } } });
-
-/** What the edit screen is given for an instructions file holding `text`. */
-function shownFor(text: string): { text: string; redacted: boolean } {
-  const catalog = componentCatalog(MODEL, {
-    format: 'present',
-    machineName: 'box',
-    tools: { claude: undefined, codex: undefined },
-    runningSessions: 0,
-    userHome: '/home/person',
-    acceptsAutoPermissionMode: true,
-    instructionBodies: { notes: text },
-  });
-  const content = catalog.kinds[0]?.components[0]?.content;
-  if (content?.form !== 'text') throw new Error('expected text content');
-  return { text: content.text, redacted: content.redacted };
-}
+import { HIDDEN, shownFor } from './redact-support.ts';
 
 const SECRET_VALUES = [
   'hunter2hunter2xyz',
@@ -533,14 +519,30 @@ function breach(text: string): string | undefined {
     : 'says it hid something when it hid what today did';
 }
 
-/** The smallest text that still breaks the oracle the same way: characters taken out one at a time while it does. */
-function minimal(text: string, why: string): string {
+const occurrences = (text: string, value: string): number => text.split(value).length - 1;
+
+/**
+ * Which secret value the older rule of 4.291.5 ({@link referenceRedactText}) hid and the edit screen shows, or undefined
+ * when none. A true pointer is no value of the alphabet, so leaving one where the older rule hid it is never a leak.
+ */
+function referenceLeak(text: string): string | undefined {
+  const reference = referenceRedactText(text).text;
+  const current = shownFor(text).text;
+  for (const value of SECRET_VALUES) {
+    if (occurrences(text, value) <= occurrences(reference, value)) continue;
+    if (occurrences(current, value) > occurrences(reference, value)) return `redactText shows ${value}`;
+  }
+  return undefined;
+}
+
+/** The smallest text that still breaks `judge` the same way: characters taken out one at a time while it does. */
+function minimal(text: string, why: string, judge: (text: string) => string | undefined = breach): string {
   let smallest = text;
   for (let again = true; again; ) {
     again = false;
     for (let at = 0; at < smallest.length; at += 1) {
       const shorter = smallest.slice(0, at) + smallest.slice(at + 1);
-      if (breach(shorter) !== why) continue;
+      if (judge(shorter) !== why) continue;
       smallest = shorter;
       again = true;
       at -= 1;
@@ -573,6 +575,18 @@ function breaches(shape: (next: () => number) => string, seed: number, cases: nu
     if (why !== undefined) failures.push(`${why}: ${JSON.stringify(minimal(text, why))}`);
   }
   return { failures, tightened, differed, continued };
+}
+
+/** The first few texts of `cases` that show a value the older rule hid, each cut down to what leaks. */
+function referenceLeaks(shape: (next: () => number) => string, seed: number, cases: number): string[] {
+  const next = seeded(seed);
+  const failures: string[] = [];
+  for (let count = 0; count < cases && failures.length < 5; count += 1) {
+    const text = shape(next);
+    const why = referenceLeak(text);
+    if (why !== undefined) failures.push(`${why}: ${JSON.stringify(minimal(text, why, referenceLeak))}`);
+  }
+  return failures;
 }
 
 // A review can re-run either with another seed and a larger count: `REDACT_FUZZ_SEED=7 REDACT_FUZZ_CASES=100000`.
@@ -709,4 +723,23 @@ describe('component text redaction never hides less than today', () => {
     should(hidesAtLeast('a b', `a b${HIDDEN}`)).be.false();
     should(hidesAtLeast('ab', 'a')).be.false();
   });
+});
+
+describe('redactText never hides less than the text rules of 4.291.5', () => {
+  it(
+    'S26 should hide every secret value the reference hid, over 20,000 generated structured texts',
+    () => {
+      should(CASES).be.aboveOrEqual(20_000);
+      should(referenceLeaks(generate, SEED, CASES)).deepEqual([]);
+    },
+    FUZZ_TIMEOUT,
+  );
+
+  it(
+    'S26 should hide every secret value the reference hid, over 20,000 generated texts with no structure',
+    () => {
+      should(referenceLeaks(soup, SEED ^ 0x50f7, CASES)).deepEqual([]);
+    },
+    FUZZ_TIMEOUT,
+  );
 });

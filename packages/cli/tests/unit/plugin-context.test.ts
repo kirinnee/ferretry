@@ -50,6 +50,10 @@ function recordingProbe(): { half: ReturnType<typeof entry>; context: () => CliC
   };
 }
 
+const binaryFiles: Record<string, Uint8Array> = {
+  '/work/shot.png': new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00]),
+};
+
 function worldWithProbe(environment: Record<string, string | undefined> = {}) {
   const disk = state.createMemoryHostFs();
   const files: Record<string, string> = { '/work/recipe.txt': 'open the page' };
@@ -61,6 +65,12 @@ function worldWithProbe(environment: Record<string, string | undefined> = {}) {
       if (text === undefined) throw new Error(`no such file ${path}`);
       return text;
     },
+    readBytes: async path => {
+      const bytes = binaryFiles[path];
+      if (bytes === undefined) throw new Error(`no such file ${path}`);
+      return bytes;
+    },
+    readStdinBytes: async () => new Uint8Array([7, 8, 9]),
     readStdin: async () => 'typed on stdin',
     cwd: () => '/work',
   });
@@ -102,6 +112,7 @@ describe('the context every plugin cli half is handed', () => {
     should(ctx.clock).be.ok();
     should(ctx.sleep).be.a.Function();
     should(ctx.readText).be.a.Function();
+    should(ctx.readBytes).be.a.Function();
     should(ctx.env).be.an.Object();
     should(ctx.ownState).be.ok();
   });
@@ -140,6 +151,18 @@ describe('the context every plugin cli half is handed', () => {
     should(await readText?.('/work/recipe.txt')).equal('open the page');
     should(await readText?.('-')).equal('typed on stdin');
     await Promise.resolve(readText?.('/work/missing.txt')).then(
+      () => should.fail(undefined, undefined, 'a missing file should be refused'),
+      (reason: unknown) => should((reason as Error).message).containEql('no such file'),
+    );
+  });
+
+  it('should read the raw bytes of a file by path and of standard input for -, undecoded (an attachment is bytes)', async () => {
+    const { world, probe } = worldWithProbe();
+    await runFy(['probe'], world);
+    const { readBytes } = probe.context();
+    should([...((await readBytes?.('/work/shot.png')) ?? [])]).eql([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00]);
+    should([...((await readBytes?.('-')) ?? [])]).eql([7, 8, 9]);
+    await Promise.resolve(readBytes?.('/work/missing.png')).then(
       () => should.fail(undefined, undefined, 'a missing file should be refused'),
       (reason: unknown) => should((reason as Error).message).containEql('no such file'),
     );
@@ -196,6 +219,10 @@ describe('the context every plugin cli half is handed', () => {
     const { world } = fakeWorld();
     await world.host.readText('/etc/hostname').then(
       () => should.fail(undefined, undefined, 'the default fake must not read the disk'),
+      (reason: unknown) => should((reason as Error).message).containEql('reads no real file'),
+    );
+    await world.host.readBytes('/etc/hostname').then(
+      () => should.fail(undefined, undefined, 'the default fake must not read the disk as bytes'),
       (reason: unknown) => should((reason as Error).message).containEql('reads no real file'),
     );
     await world.host.readText('-').then(

@@ -5,15 +5,17 @@
  * into joining. Any other link is named in a sentence; nothing is sent from here and the pasted text is cleared the
  * moment it is read, because a share link holds a live code.
  *
- * GAP(shell): the shell offers no way to hand a daemon-less screen a link without writing it to the address bar, and
- * navigating to /join#<code> would push the live code into the history. Until it does, a valid share link is refused
- * with a sentence and is NEVER written to the address bar or pushed into the history. (A link that ARRIVES, from a QR
- * code or another app, lands on /join, which takes the code off the address at once.)
+ * The code is carried to /join IN MEMORY (`handOff`, shell contract S3): navigating to /join#<code> would push the live
+ * code into the history, so the link is never written to the address bar. Outside a shell there is no join screen to
+ * carry it to, and a valid link is answered with a sentence instead. (A link that ARRIVES, from a QR code or another
+ * app, lands on /join, and the shell takes its code off the address at once.)
  */
 
 import { Link2 } from 'lucide-react';
 import { type FormEvent, useId, useState } from 'react';
 import { classifyCatalogLink } from '../../lib/catalog-link.ts';
+import { JOIN_PATH, JOIN_SCREEN_ID } from '../../lib/routes.ts';
+import { handOff, useOptionalRouter, useOwnScreen } from '@ferretry/app';
 
 import { Button } from '@ferretry/app/ui';
 import { FailureLine } from './catalog-parts.tsx';
@@ -22,13 +24,15 @@ const ADD_FROM_LINK_TITLE = 'Subscribe with a link';
 const ADD_FROM_LINK_HELP =
   'Paste the invite link someone sent you. Subscribing installs nothing: you pick what to install.';
 
-/** What a valid share link is answered with while there is no history-free way to carry it to the join page. */
+/** What a valid share link is answered with where there is no join page to carry it to (outside a shell). */
 export const JOINING_FROM_A_LINK_UNAVAILABLE = "Joining from a link isn't available yet.";
 
 export function AddCatalogFromLink() {
   const inputId = useId();
   const [text, setText] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
+  const join = useOwnScreen<string>(JOIN_SCREEN_ID);
+  const navigate = useOptionalRouter()?.navigate;
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
@@ -38,7 +42,12 @@ export function AddCatalogFromLink() {
       return;
     }
     setText('');
-    setProblem(JOINING_FROM_A_LINK_UNAVAILABLE);
+    if (join === undefined || navigate === undefined) {
+      setProblem(JOINING_FROM_A_LINK_UNAVAILABLE);
+      return;
+    }
+    handOff(join, link.fragment);
+    navigate(JOIN_PATH);
   };
 
   return (

@@ -1,7 +1,8 @@
-import { parse as parseYaml } from 'yaml';
-import type { ItemKind } from '../manifest/types.ts';
+import type { ConfigPort } from '../contract/ports.ts';
+import type { ItemKind, Manifest } from '../manifest/types.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import type { ItemReach, ItemReachOf } from './permissions.ts';
+import { readConfigText } from '@ferretry/std/yaml';
 
 /** One installed data plugin's items, as `loadDataPlugins` accepted them. */
 export interface InstalledItems {
@@ -71,7 +72,21 @@ export async function installedItemReach(
         if (!resolved.startsWith(`${root}/`)) continue;
         const info = await fs.lstat(path);
         if (info?.kind !== 'file' || info.size > ITEM_FILE_MAX_BYTES) continue;
-        value = parseYaml(await fs.readText(resolved));
+        // The shared bounded reader (alias budget, no YAML 1.1 tags, duplicate keys refused): a file that does
+        // not read names nothing, as one that did not parse always did.
+        // Read with a hard bound, at most one byte past the cap: the size above was read before the bytes, and a file
+        // that grew in between is never read whole — only far enough to see it is over the cap.
+        const file = await fs.openRead(resolved);
+        let bytes: Uint8Array;
+        try {
+          bytes = await file.read(ITEM_FILE_MAX_BYTES + 1);
+        } finally {
+          await file.close();
+        }
+        if (bytes.byteLength > ITEM_FILE_MAX_BYTES) continue;
+        const read = readConfigText(new TextDecoder().decode(bytes));
+        if (!read.ok) continue;
+        value = read.read.value;
       } catch {
         continue;
       }
@@ -89,4 +104,66 @@ export async function installedItemReach(
     ]),
   );
   return (kind: ItemKind) => frozen.get(kind) ?? { programs: [], hosts: [] };
+}
+
+/**
+ * One item kind whose items live in its OWNER's config collection (`config/mcp/<name>.yaml`): the `item` plugin whose
+ * collection declares `itemKind` for it. `read` answers the collection in effect NOW (never a held edit).
+ */
+export interface ConfigOwnedKind {
+  readonly kind: ItemKind;
+  readonly read: () => ReadonlyMap<string, unknown>;
+}
+
+/**
+ * The kinds whose items a plugin owns as a config collection: an `item` plugin's collection that DECLARES `itemKind`.
+ * A collection is never a reach source because of its name.
+ */
+export function configOwnedKinds(
+  manifests: readonly Manifest[],
+  configOf: (plugin: string) => ConfigPort,
+): readonly ConfigOwnedKind[] {
+  const owned: ConfigOwnedKind[] = [];
+  for (const manifest of manifests) {
+    if (!manifest.kinds.includes('item')) continue;
+    for (const def of manifest.data?.config ?? []) {
+      if (def.shape !== 'collection' || def.itemKind === undefined) continue;
+      const port = configOf(manifest.id);
+      owned.push({ kind: def.itemKind, read: () => port.collection(def) });
+    }
+  }
+  return owned;
+}
+
+/**
+ * What the items of each kind name now: the installed data plugins' (`installed`, fixed at boot: an install is pinned)
+ * united with the items of the kind's owner config collection (`configOwned`), READ WHEN THE CALL IS MADE. Nothing is
+ * cached and nothing waits for a change notice: the collection answers the version in effect, so an edit that drops
+ * an item takes its reach away on the very next check, even while a reload is still running and even if the reload
+ * then fails. The same rules apply to both: only `command` and `url` are read, and one with `*` in it names nothing.
+ * A collection that cannot be read names nothing (fail closed).
+ */
+export function itemReach(input: {
+  readonly installed: ItemReachOf;
+  readonly configOwned: readonly ConfigOwnedKind[];
+}): ItemReachOf {
+  return (kind: ItemKind) => {
+    const fromInstall = input.installed(kind);
+    const sources = input.configOwned.filter(source => source.kind === kind);
+    if (sources.length === 0) return fromInstall;
+    const programs = new Set(fromInstall.programs);
+    const hosts = new Set(fromInstall.hosts);
+    for (const source of sources) {
+      try {
+        const named = [...source.read().values()].map(reachOf);
+        for (const reach of named) {
+          if (reach.program !== undefined) programs.add(reach.program);
+          if (reach.host !== undefined) hosts.add(reach.host);
+        }
+      } catch {
+        // an unreadable collection names nothing: the installed items above are all that count
+      }
+    }
+    return { programs: [...programs], hosts: [...hosts] };
+  };
 }

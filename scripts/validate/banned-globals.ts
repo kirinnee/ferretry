@@ -138,6 +138,11 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
     },
     {
       pkg: 'browsers',
+      folder: 'daemon/worker/main.ts',
+      reason: 'the agent-browser worker entry, run as its own Node process (lead decision, port-browsers r1)',
+    },
+    {
+      pkg: 'browsers',
       folder: 'daemon/proxy/firewall/marker-reader.ts',
       reason:
         'reads the root-owned loopback firewall marker under /etc, a host file outside every declared root (lead ruling, banned-globals r1)',

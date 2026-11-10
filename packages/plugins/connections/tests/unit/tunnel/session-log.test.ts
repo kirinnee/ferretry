@@ -10,6 +10,7 @@ import {
   describeTunnelSessionEnd,
   tunnelSessionLog,
 } from '../../../daemon/lib/tunnel/session-log.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const END: DirectSessionEnd = {
   by: 'peer',
@@ -135,8 +136,3 @@ describe('the tunnel session log', () => {
     should(steps[1]?.[1]).startWith('1001 by the browser side (going away');
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

@@ -1,22 +1,20 @@
 import { definePlugin, panel, renderer, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { audit, cap } from '@ferretry/core-gate/contract';
+import { cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { PROFILE_COMPONENTS_KEY, ProfileSkillsSource, RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import {
-  SKILLS_AUDIT,
   SKILLS_CONFIG,
   SKILLS_INSTALLED_STATE,
-  SKILLS_INSTALLS_STATE,
   SKILLS_READ_MODELS,
   SKILLS_WORDS,
-  SkillsChanged,
   SkillsPort,
 } from './contract/index.ts';
 
 /**
- * Skills (§2.3): skills as items. Routes are today's `catalogs.ts` skill routes and `local-skill-installs.ts`, descriptor
- * fields copied exactly. Paths: `/v1/skill-installs/local…` keeps today's path (no retired word);
- * `/v1/sessions/:sessionId/skills…` → `/v1/ferrets/:ferretId/skills…`. `/v1/projects` (the other two routes of today's
+ * Skills (§2.3): skills as items. Routes are today's `catalogs.ts` skill routes, descriptor fields copied
+ * exactly. Path: `/v1/sessions/:sessionId/skills…` → `/v1/ferrets/:ferretId/skills…`. `/v1/projects` (the other two routes of today's
  * `catalogs.ts` mount) is Projects', not Skills'.
  *
  * Departure: today's `GET /v1/sessions/:sessionId/skills` carries `precedence: 1` to keep a winner over
@@ -35,7 +33,9 @@ export default definePlugin({
   needs: { ferrets: FerretsPort },
   // Optional (lead ruling 2026-11-07: a reference.catalog provider takes Conversation as optional `uses`). With Conversation
   // off, Skills boots and nothing asks it for a menu.
-  uses: { conversation: ConversationPort },
+  // Runtimes gives the account homes, the Ferretry skills and the layers a runtime launches with; Projects the registered
+  // roots whose skills the machine view lists. Both optional: with either off that part of the inventory is empty.
+  uses: { conversation: ConversationPort, runtimes: RuntimesPort, projects: ProjectsPort },
   provides: { skills: SkillsPort },
 
   actions: {
@@ -45,6 +45,7 @@ export default definePlugin({
         minimum: 'operator',
         caller: 'any',
         noStore: true,
+        precedence: 1,
         audit: { skip: 'a read of names and descriptions' },
         guard: { none: 'skill names and descriptions; no pane text, no secret' },
       }),
@@ -72,71 +73,8 @@ export default definePlugin({
         audit: { skip: 'a read of a file the inventory lists; not recorded today' },
         guard: { none: 'the text of a SKILL.md the person asked to read; it is their own file' },
       }),
-
-      // ── copying one skill from this machine (G172–G175): every route a PERSON'S act ───────────────────────────────
-      route('POST /v1/skill-installs/local/project/preview', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: cap('filesystem', 'use'),
-        noStore: true,
-        audit: { skip: 'a preview writes nothing' },
-        guard: { none: 'the files of a skill folder in full, for review; no pane text' },
-      }),
-      route('POST /v1/skill-installs/local/runtime/preview', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: cap('filesystem', 'use'),
-        noStore: true,
-        audit: { skip: 'a preview writes nothing' },
-        guard: { none: 'the files of a skill folder in full, for review; no pane text' },
-      }),
-      route('POST /v1/skill-installs/local/project', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: cap('filesystem', 'configure'),
-        noStore: true,
-        audit: audit(SKILLS_AUDIT.installProject),
-        guard: { none: 'the install record: names, paths and hashes' },
-      }),
-      route('POST /v1/skill-installs/local/runtime', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: cap('fleet', 'configure'),
-        noStore: true,
-        audit: audit(SKILLS_AUDIT.installRuntime),
-        guard: { none: 'the install record: names, paths and hashes' },
-      }),
-      route('GET /v1/skill-installs/local', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: cap('fleet', 'use'),
-        noStore: true,
-        audit: { skip: 'a read of install records' },
-        guard: { none: 'install records: names, paths and hashes' },
-      }),
-      route('DELETE /v1/skill-installs/local/project/:installId', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: cap('filesystem', 'configure'),
-        noStore: true,
-        audit: audit(SKILLS_AUDIT.removeProject),
-        guard: { none: 'the removed name and destination' },
-      }),
-      route('DELETE /v1/skill-installs/local/runtime/:installId', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: cap('fleet', 'configure'),
-        noStore: true,
-        audit: audit(SKILLS_AUDIT.removeRuntime),
-        guard: { none: 'the removed name and destination' },
-      }),
     ],
     cli: [
-      verb('skill install', {
-        summary: 'copy one skill from another account or project on this machine, after you review all of it',
-      }),
-      verb('skill installs', { summary: 'list the skills copied from this machine, and where' }),
-      verb('skill uninstall', { summary: 'remove one copy, and only the files it wrote' }),
       verb('skill ls', { summary: 'the skills a ferret or this machine has' }),
       verb('skill show', { summary: 'one skill item and where it is used' }),
       verb('skill add', { summary: 'add a skills item' }),
@@ -154,20 +92,30 @@ export default definePlugin({
   },
 
   data: {
-    state: [SKILLS_INSTALLED_STATE, SKILLS_INSTALLS_STATE],
+    state: [SKILLS_INSTALLED_STATE],
     config: [SKILLS_CONFIG],
     readModels: SKILLS_READ_MODELS,
-    publishes: [SkillsChanged],
   },
 
   hooks: {
     // `/` and `$` are one skill: Claude invokes `/name`, Codex `$name`. Conversation's composer asks for the menu entries
     // of each prefix; Skills answers with the skill names the ferret can invoke.
-    takes: [{ hook: LaunchParts }, { hook: ReferenceCatalog, key: '/' }, { hook: ReferenceCatalog, key: '$' }],
+    // Runtimes reads the `skills` components a profile names through this plugin, which alone owns them.
+    takes: [
+      { hook: LaunchParts },
+      { hook: ReferenceCatalog, key: '/' },
+      { hook: ReferenceCatalog, key: '$' },
+      { hook: ProfileSkillsSource, key: PROFILE_COMPONENTS_KEY },
+    ],
   },
 
   permissions: {
+    // `work`: a ferret's own folder. `imports`: read-only, and ONLY the skills folders (`.claude/skills`,
+    // `.agents/skills`) of a registered project root, each scoped one folder at a time (`adapters/project-skill-files.ts`
+    // narrows the kernel's grant, which would take any folder outside the fence, as MCP's `.mcp.json` reader does).
     roots: ['work', 'imports'],
+    // Mints a shared folder of its own installed skills for the harness that links them into a ferret home (kernel batch #10).
+    shareTrees: true,
     network: [],
     spawn: [],
     secrets: [],

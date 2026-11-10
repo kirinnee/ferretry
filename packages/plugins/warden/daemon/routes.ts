@@ -7,7 +7,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { isFerretCall, OWNER_ONLY_CODE } from '@ferretry/core-gate/contract';
 import {
-  WardenFileSchema,
+  WardenSettingsPatchSchema,
   WardenInvestigateRequestSchema,
   WardenLeaveRequestSchema,
   WardenRunRequestSchema,
@@ -96,7 +96,7 @@ export function wardenRoutes(subsystem: WardenSubsystem) {
     'GET /v1/warden/config': guarded(async () => jsonResponse(await subsystem.config())),
     'PATCH /v1/warden/config': guarded(async call => {
       // The held sentences come back with THIS change's view, so two changes in flight never answer each other's.
-      return jsonResponse(await subsystem.updateConfig(await parseBody(call.request, WardenFileSchema)));
+      return jsonResponse(await subsystem.updateConfig(await parseBody(call.request, WardenSettingsPatchSchema)));
     }),
   };
 }

@@ -284,9 +284,102 @@ describe('transcript', () => {
     ]);
   });
 
+  describe('#45 the harness’s own input-queue records travel as input-proof entries', () => {
+    const queueOp = (operation: string, content: unknown, timestamp: unknown = '2026-11-01T10:00:02.000Z') =>
+      JSON.stringify({ type: 'queue-operation', operation, timestamp, content });
+    const drained = (extra: Record<string, unknown> = {}, attachment: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        type: 'attachment',
+        uuid: 'att-1',
+        timestamp: '2026-11-01T10:00:09.000Z',
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'prompt',
+          prompt: 'FIXTURE typed mid-turn',
+          origin: { kind: 'human' },
+          timestamp: '2026-11-01T10:00:03.000Z',
+          ...attachment,
+        },
+        ...extra,
+      });
+
+    it('should read a held and a released prompt as system entries named by their place, never as a message', () => {
+      const entries = parseEntries(
+        [user, queueOp('enqueue', 'FIXTURE held'), queueOp('remove', 'FIXTURE held')].join('\n'),
+      );
+      should(entries.map(entry => [entry.id, entry.role, entry.text, entry.data])).eql([
+        ['u1', 'user', 'hello', undefined],
+        ['queue-operation:1', 'system', 'FIXTURE held', { proof: 'queue-operation', operation: 'enqueue' }],
+        ['queue-operation:2', 'system', 'FIXTURE held', { proof: 'queue-operation', operation: 'remove' }],
+      ]);
+    });
+
+    it('should skip a queue record it cannot use: another operation, no text, or no time', () => {
+      should(parseEntry(queueOp('popAll', 'x'))).be.undefined();
+      should(parseEntry(queueOp('enqueue', 7))).be.undefined();
+      should(parseEntry(queueOp('enqueue', 'x', 'soon'))).be.undefined();
+    });
+
+    it('should read a drained human prompt as a system entry carrying when the person typed it', () => {
+      should(parseEntry(drained())).eql({
+        id: 'att-1',
+        at: '2026-11-01T10:00:09.000Z',
+        role: 'system',
+        text: 'FIXTURE typed mid-turn',
+        data: { proof: 'queued-prompt', originatedAt: '2026-11-01T10:00:03.000Z' },
+      });
+    });
+
+    it('should read a drain whose prompt is content blocks, and fall back to the record’s own time and an ordinal id', () => {
+      const entry = parseEntry(
+        JSON.stringify({
+          type: 'attachment',
+          timestamp: '2026-11-01T10:00:09.000Z',
+          attachment: {
+            type: 'queued_command',
+            commandMode: 'prompt',
+            origin: { kind: 'human' },
+            prompt: [{ type: 'text', text: 'FIXTURE one' }, { type: 'image' }, { type: 'text', text: 'FIXTURE two' }],
+          },
+        }),
+        4,
+      );
+      should(entry).eql({
+        id: 'queued-prompt:4',
+        at: '2026-11-01T10:00:09.000Z',
+        role: 'system',
+        text: 'FIXTURE one\nFIXTURE two',
+        data: { proof: 'queued-prompt', originatedAt: '2026-11-01T10:00:09.000Z' },
+      });
+    });
+
+    it('should skip a drain that is not a human prompt: another kind, mode or origin, or no text', () => {
+      should(parseEntry(drained({}, { type: 'other' }))).be.undefined();
+      should(parseEntry(drained({}, { commandMode: 'bash' }))).be.undefined();
+      should(parseEntry(drained({}, { origin: { kind: 'task-notification' } }))).be.undefined();
+      should(parseEntry(drained({}, { prompt: '   ' }))).be.undefined();
+      should(parseEntry(drained({}, { prompt: [{ type: 'image' }] }))).be.undefined();
+      should(parseEntry(JSON.stringify({ type: 'attachment', attachment: { type: 'queued_command' } }))).be.undefined();
+    });
+
+    it('should use the drain’s own time when the record carries none, and none when neither does', () => {
+      const lone = JSON.parse(drained()) as Record<string, unknown>;
+      delete lone.timestamp;
+      should(parseEntry(JSON.stringify(lone))?.at).equal('2026-11-01T10:00:03.000Z');
+      const attachment = lone.attachment as Record<string, unknown>;
+      delete attachment.timestamp;
+      should(parseEntry(JSON.stringify(lone))).be.undefined();
+    });
+  });
+
   it('refuses a record with no id or a bad time', () => {
     should(parseEntry('{"type":"user","message":{"content":"x"}}')).be.undefined();
     should(parseEntry('{"type":"user","uuid":"u","timestamp":"soon"}')).be.undefined();
+  });
+
+  it('skips a line that is not JSON when it reads what the turns spent, and keeps the turns on either side', () => {
+    const lines = [user, 'not json {', '', assistant].join('\n');
+    should(parseUsage(lines).map(turn => [turn.turn, turn.model])).eql([[1, 'claude-opus-5-5']]);
   });
 
   it('reads what each assistant turn spent', () => {

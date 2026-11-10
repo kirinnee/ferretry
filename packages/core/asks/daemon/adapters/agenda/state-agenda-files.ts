@@ -1,5 +1,4 @@
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
-import { createHash } from 'node:crypto';
 import { type AgendaFileStore, isAgendaSessionId } from '../../lib/agenda/index.ts';
 import type { AppendOnlyFiles } from '../../lib/append-only-log.ts';
 import { AGENDA_STATE_FILES, AgendaSetAsideFiles } from '../../lib/state.ts';
@@ -14,9 +13,6 @@ interface Located {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
-
-/** A file's identity is the digest of its bytes: any change to it, by anyone, is a new identity. */
-const identityOf = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
 /**
  * A ferret's agenda files over the kernel's state port (`state/asks/ferrets/<ferret>/…`), byte for byte as the engine
@@ -64,18 +60,26 @@ export class StateAgendaFiles implements AgendaFileStore, AppendOnlyFiles {
     return bytes === undefined ? undefined : decoder.decode(bytes);
   }
 
+  /** What the file is now: the kernel's version (inode, size, mtime) — a stat, not a read of the bytes (v4's identity). */
   async identity(sessionId: string, name: string): Promise<string | undefined> {
-    const bytes = await this.bytes(sessionId, name);
-    return bytes === undefined ? undefined : identityOf(bytes);
+    const at = this.locate(sessionId, name);
+    return (await this.state.version(at.def, at.name))?.etag;
   }
 
   async readIdentified(
     sessionId: string,
     name: string,
   ): Promise<{ readonly text: string; readonly identity: string } | undefined> {
-    // One read: the identity is of the very bytes the text came from.
-    const bytes = await this.bytes(sessionId, name);
-    return bytes === undefined ? undefined : { text: decoder.decode(bytes), identity: identityOf(bytes) };
+    // The version is taken before and after the read; a file that changed between them is read once more. The identity
+    // handed back is the one from BEFORE the read, so a file still moving reads as changed on the next look.
+    for (let attempt = 0; ; attempt += 1) {
+      const before = await this.identity(sessionId, name);
+      if (before === undefined) return undefined;
+      const bytes = await this.bytes(sessionId, name);
+      if (bytes === undefined) return undefined;
+      if (attempt > 0 || (await this.identity(sessionId, name)) === before)
+        return { text: decoder.decode(bytes), identity: before };
+    }
   }
 
   async writeAtomic(sessionId: string, name: string, text: string): Promise<void> {

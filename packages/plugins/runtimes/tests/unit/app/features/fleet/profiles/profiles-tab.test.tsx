@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ProfileDraftView, ResolvedEntry } from '../../../../../../contract/index.ts';
 import { ProfilesTab } from '../../../../../../app/features/fleet/profiles/profiles-tab.tsx';
+import { COMMITTED, LANDED_FILE, ROLLBACK_INCOMPLETE, ROLLED_BACK, UNRESTORED_PATH } from '../account-support.ts';
 import type { RuntimesClient } from '../../../../../../app/lib/client.ts';
 import { interact, type Mounted, mount } from '../../../../support/dom.ts';
 import {
@@ -223,6 +224,49 @@ describe('ProfilesTab — the profile page', () => {
     expect(text(root, '[data-profiles-saved]')).toBe('Saved. New sessions use the new contents.');
   });
 
+  for (const [what, applied, expected] of [
+    ['rolled-back', ROLLED_BACK, [LANDED_FILE, 'rolled back']],
+    ['rollback-incomplete', ROLLBACK_INCOMPLETE, [LANDED_FILE, UNRESTORED_PATH, 'needs a look']],
+  ] as const) {
+    it(`R3-M1: a ${what} save keeps the editor open, names the files, and never says Saved`, async () => {
+      const machine = scriptedMachine({ preview: defaultPreview(), applied });
+      const root = await open(machine);
+      await click(root, '[data-profile-row="Default"]');
+      await click(root, '[data-library-add="mcp/notes"]');
+      await submit(root);
+      const alert = q(root, '[data-change-refusal]');
+      expect(alert.getAttribute('role')).toBe('alert');
+      expect(alert.textContent).toStartWith('This change was not applied');
+      for (const part of expected) expect(alert.textContent).toContain(part);
+      expect(root.querySelector('[data-profiles-saved]')).toBeNull();
+      expect(text(root, 'h3')).toBe('Default');
+      expect(rows(root).at(-1)).toBe('mcp/notes');
+    });
+  }
+
+  it('R3-M1: a finished apply still closes the editor as saved, and an outcome this app cannot read does not', async () => {
+    const machine = scriptedMachine({ preview: defaultPreview(), applied: COMMITTED });
+    const root = await open(machine);
+    await click(root, '[data-profile-row="Default"]');
+    await click(root, '[data-library-add="mcp/notes"]');
+    await submit(root);
+    expect(text(root, '[data-profiles-saved]')).toBe('Saved. New sessions use the new contents.');
+    expect(root.querySelector('[data-change-refusal]')).toBeNull();
+
+    await mounted?.unmount();
+    const unknown = scriptedMachine({
+      preview: defaultPreview(),
+      applied: { outcome: 'applied', apply: { outcome: 'half-done', failedOperation: 'x', reason: 'y' } },
+    });
+    const again = await open(unknown);
+    await click(again, '[data-profile-row="Default"]');
+    await click(again, '[data-library-add="mcp/notes"]');
+    await submit(again);
+    expect(again.querySelector('[data-profiles-saved]')).toBeNull();
+    expect(q(again, '[data-change-refusal]').textContent).toContain('different versions');
+    expect(text(again, 'h3')).toBe('Default');
+  });
+
   it('keeps the last resolved values on screen while a second edit is still being read', async () => {
     const machine = scriptedMachine({ preview: defaultPreview() });
     const base = machineClient(machine);
@@ -429,7 +473,7 @@ describe('ProfilesTab — the profile page', () => {
     expect(text(root, '[data-profile-item="mcp/unknown"]')).toContain('MCPunknown');
   });
 
-  it('names the profile’s file, and offers no Edit as YAML while the kernel has no config file route', async () => {
+  it('names the profile’s file, and offers no Edit as YAML when its host supplies no file editor', async () => {
     const machine = scriptedMachine({ preview: defaultPreview() });
     const root = await open(machine);
     await click(root, '[data-profile-row="Default"]');
@@ -437,8 +481,6 @@ describe('ProfilesTab — the profile page', () => {
     expect(root.querySelector('[data-profile-yaml]')).toBeNull();
     expect(machine.calls.some(call => call.route.includes('/v1/config/file'))).toBe(false);
   });
-
-  it.skip('opens the profile’s file as YAML and reads the catalogue again after an edit there … pending port: kernel /v1/config/file', () => {});
 });
 
 describe('ProfilesTab — a new profile', () => {
@@ -564,6 +606,37 @@ describe('ProfilesTab — delete (E21)', () => {
     expect(stagedChanges(machine)).toEqual([{ kind: 'profile.remove', name: 'Old', switchRuntimesTo: 'Other' }]);
     expect(text(root, '[data-profiles-saved]')).toBe('Deleted profile Old.');
     expect(root.querySelector('[data-profiles-page="list"]')).not.toBeNull();
+  });
+
+  for (const [what, applied, expected] of [
+    ['rolled-back', ROLLED_BACK, [LANDED_FILE, 'rolled back']],
+    ['rollback-incomplete', ROLLBACK_INCOMPLETE, [LANDED_FILE, UNRESTORED_PATH, 'needs a look']],
+  ] as const) {
+    it(`R3-M1: a ${what} delete does not say Deleted, names the files, and stays on the profile`, async () => {
+      const catalog = studioCatalog({ profiles: profileCatalog([profile('Unused', ['mcp/github'])]) });
+      const machine = scriptedMachine({ catalog, preview: defaultPreview(), applied });
+      const root = await open(machine);
+      await click(root, '[data-profile-row="Unused"]');
+      await click(root, '[data-profile-delete]');
+      const panel = q(root, '[data-catalog-note="delete"]');
+      await click(panel, '[data-change-submit]');
+      const alert = q(panel, '[data-change-refusal]');
+      expect(alert.getAttribute('role')).toBe('alert');
+      for (const part of expected) expect(alert.textContent).toContain(part);
+      expect(root.querySelector('[data-profiles-saved]')).toBeNull();
+      expect(root.textContent).not.toContain('Deleted profile Unused.');
+      expect(text(root, 'h3')).toBe('Unused');
+    });
+  }
+
+  it('R3-M1: a finished apply still deletes the profile', async () => {
+    const catalog = studioCatalog({ profiles: profileCatalog([profile('Unused', ['mcp/github'])]) });
+    const machine = scriptedMachine({ catalog, preview: defaultPreview(), applied: COMMITTED });
+    const root = await open(machine);
+    await click(root, '[data-profile-row="Unused"]');
+    await click(root, '[data-profile-delete]');
+    await click(q(root, '[data-catalog-note="delete"]'), '[data-change-submit]');
+    expect(text(root, '[data-profiles-saved]')).toBe('Deleted profile Unused.');
   });
 
   it('confirms deleting a profile nothing uses, keeping its components, and says when it fails', async () => {

@@ -2,7 +2,7 @@
  * @ferretry/plugin-codex/contract — wire schemas, port + token, events, state and config declarations, words.
  * Codex is a harness (§4.3): it takes `harnesses:codex` from Ferrets and offers nothing but a read port.
  */
-import { InstantSchema } from '@ferretry/std';
+import { InstantSchema, ITEM_NAME_PATTERN } from '@ferretry/std';
 import {
   type FerretId,
   defineConfig,
@@ -21,6 +21,7 @@ import {
   type Discovery,
   type HarnessCliView,
   type HarnessConfig,
+  HooksItemSchema,
   SettingsItemSchema,
 } from './wire.ts';
 
@@ -122,6 +123,32 @@ export const CODEX_ROLLOUTS = defineState({
   schema: CodexRolloutBindingSchema,
 });
 
+/** One section's fingerprint: a SHA-256 in hex, never the value it was taken of. */
+const SectionDigestSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * What one ferret was last launched under (W2-c, `Harness.launchSettings`): one fingerprint per section of this
+ * plugin's own launch settings, written at every start and resume. Hashes only — no setting value, path or environment
+ * value is kept — and in the daemon's state, never in the ferret's home, where its agent could rewrite it.
+ */
+export const CodexLaunchSettingsRecordSchema = z.strictObject({
+  format: z.literal(1),
+  sections: z.strictObject({
+    'permission-mode': SectionDigestSchema,
+    'fixed-layer': SectionDigestSchema,
+    settings: SectionDigestSchema,
+  }),
+});
+export type CodexLaunchSettingsRecord = z.infer<typeof CodexLaunchSettingsRecordSchema>;
+export const CODEX_LAUNCH_SETTINGS = defineState({
+  name: 'launchSettings',
+  path: 'launch-settings/*.json',
+  store: 'json',
+  format: 1,
+  schema: CodexLaunchSettingsRecordSchema,
+  onDamaged: { narrower: 'a damaged launch record reads as unknown: nothing to say until the next launch' },
+});
+
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** Today's `machineLoosening` rule for the permission mode, kept word for word. */
@@ -140,14 +167,23 @@ export const CODEX_CONFIG = configDef(
   }),
 );
 
-const ITEM_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
-
 /** `config/codex/settings/<name>.yaml`. Today a component edit changes what an agent runs with, never what it may spend. */
 export const CODEX_SETTINGS = configDef(
   defineConfig({
     collection: 'codex/settings',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: SettingsItemSchema,
+    axis: 'configure',
+    loosens: neverLoosens,
+  }),
+);
+
+/** `config/codex/hooks/<name>.yaml`. Same shape as Claude Code's hooks items; Runtimes renders them as the runtime's `hooks.json`. */
+export const CODEX_HOOKS = configDef(
+  defineConfig({
+    collection: 'codex/hooks',
+    name: ITEM_NAME_PATTERN,
+    schema: HooksItemSchema,
     axis: 'configure',
     loosens: neverLoosens,
   }),

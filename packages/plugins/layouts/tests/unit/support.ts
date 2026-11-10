@@ -47,6 +47,8 @@ export function configTree(initial: Record<string, Record<string, unknown>> = {}
       return out;
     },
     watch: () => () => {},
+    watchState: () => () => {},
+    etag: async () => 'absent',
     fileState: () => ({ state: 'absent', inEffect: false, sentences: [] }),
     async write(def, name, edit): Promise<ConfigWriteOutcome> {
       calls.push({ op: 'write', where: keyOf(def, name), edit });
@@ -64,6 +66,13 @@ export function configTree(initial: Record<string, Record<string, unknown>> = {}
     },
     async writeAsOwner(def, name, edit, options): Promise<ConfigWriteOutcome> {
       return await this.write(def, name, edit, options);
+    },
+    async writeAsCaller(def, name, edit, options): Promise<ConfigWriteOutcome> {
+      return await this.write(def, name, edit, options);
+    },
+    // This plugin writes one file at a time; a set is not part of what these tests stand in for.
+    async writeAll() {
+      return { kind: 'refused', reason: 'not_declared', issues: [] };
     },
     async remove(def, name): Promise<ConfigWriteOutcome> {
       calls.push({ op: 'remove', where: keyOf(def, name) });

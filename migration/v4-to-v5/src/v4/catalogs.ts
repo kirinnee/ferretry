@@ -16,7 +16,6 @@
  * - `state/catalogs/member-unlocks.json`: `StateUnlockLedger` (`fyd.ts:12683`), live unlocks only.
  * - `state/catalog-installs.json`: `lib/catalog-installs/store.ts:23-68` (`CatalogInstallStateSchema`, version 1).
  * - `state/catalog-install-prefs.json`: `lib/catalog-installs/prefs.ts:12-20`.
- * - `state/local-skill-installs.json`: `lib/local-skill-installs/store.ts:18-54` (`LocalSkillInstallStateSchema`).
  */
 import { z } from 'zod';
 
@@ -31,7 +30,6 @@ export const V4_CATALOG_MEMBER_PASSKEYS = 'state/catalogs/member-passkeys.json';
 export const V4_CATALOG_MEMBER_UNLOCKS = 'state/catalogs/member-unlocks.json';
 export const V4_CATALOG_INSTALLS = 'state/catalog-installs.json';
 export const V4_CATALOG_INSTALL_PREFS = 'state/catalog-install-prefs.json';
-export const V4_LOCAL_SKILL_INSTALLS = 'state/local-skill-installs.json';
 /** The vault key `link-keys.json` is sealed under (`FileSecretKey`, `paths.secretsKey`). */
 export const V4_VAULT_KEY = 'state/secrets.key';
 

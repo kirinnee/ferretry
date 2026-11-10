@@ -151,6 +151,10 @@ export default definePlugin({
       verb('daemon security set <field> <value>', { summary: 'change one setting' }),
     ],
   },
+  /** Never reached by a ferret, through any root: the admin and warden bearers (`PrivacyDecl`). */
+  privacy: {
+    private: ['admin-token', 'warden-token'],
+  },
   data: {
     state: [
       AdminTokenFile,

@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
+import type { FerretHarness, FerretId, RunnerDelivery } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
+import { ok } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort, QUEUE_STATE, SENDS_STATE } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
@@ -15,9 +17,37 @@ const F1 = ferretId('f1');
 const AT = '2026-11-07T09:00:00.000Z' as Instant;
 const clock = { now: () => AT };
 
+/** Ferrets whose harness records what is typed, so "nothing typed" is read off the recorder, not inferred. */
+class RecordingFerrets extends FakeFerrets {
+  readonly delivered: RunnerDelivery[] = [];
+
+  async harness(ferret: FerretId): Promise<FerretHarness | undefined> {
+    if ((await this.get(ferret)) === undefined) return undefined;
+    return {
+      deliver: async delivery => {
+        this.delivered.push(delivery);
+        return ok('turn-started' as const);
+      },
+      queue: async () => {
+        throw new Error('this test did not expect a send to be queued');
+      },
+      interrupt: async () => ok({ pressed: true, working: false }),
+      transcript: {
+        read: async () => {
+          throw new Error('Conversation does not read the transcript through the terminal seam');
+        },
+        follow: () => {
+          throw new Error('unused');
+        },
+        find: async () => undefined,
+      },
+    };
+  }
+}
+
 /** The real daemon half on the test host over a given state, so a second host over the same state is "another run". */
 async function conversation(state: StatePort = memoryStatePort(CONVERSATION_STATE)) {
-  const ferrets = new FakeFerrets();
+  const ferrets = new RecordingFerrets();
   ferrets.add({ id: F1, state: 'working' });
   const implementation = {
     ...daemon,
@@ -32,7 +62,7 @@ async function conversation(state: StatePort = memoryStatePort(CONVERSATION_STAT
     fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-07T09:00:00Z'),
   });
-  return { host, state, api: () => host.provided(ConversationPort) };
+  return { host, state, ferrets, api: () => host.provided(ConversationPort) };
 }
 
 const ledgered = async (state: StatePort, sendId: string, over: Record<string, unknown> = {}) =>
@@ -48,7 +78,7 @@ const ledgered = async (state: StatePort, sendId: string, over: Record<string, u
 
 describe('the same send id twice is one message, across daemon runs', () => {
   test('a send whose id the ledger already holds is answered as that send, and nothing is typed or recorded again', async () => {
-    const { host, state, api } = await conversation();
+    const { host, state, ferrets, api } = await conversation();
     await ledgered(state, 'board-reopen-1');
 
     const again = await api().send(F1, { kind: 'owner' }, { message: 'once', sendId: 'board-reopen-1' });
@@ -58,6 +88,7 @@ describe('the same send id twice is one message, across daemon runs', () => {
       value: { ferret: F1, disposition: 'delivered', sendId: 'board-reopen-1', fate: 'delivered' },
     });
     expect((await api().sends(F1)).sends).toHaveLength(1);
+    expect(ferrets.delivered).toEqual([]);
     await host.stop();
   });
 
@@ -142,7 +173,7 @@ describe('the same send id twice is one message, across daemon runs', () => {
   });
 
   test('an id the ledger does not hold, or holds for another ferret, is a new send', async () => {
-    const { host, state, api } = await conversation();
+    const { host, state, ferrets, api } = await conversation();
     await new StateSendLedger(state, clock).accept(parseSessionId('f2'), {
       sendId: 'board-reopen-1',
       acceptedAt: AT,
@@ -154,20 +185,27 @@ describe('the same send id twice is one message, across daemon runs', () => {
 
     const result = await api().send(F1, { kind: 'owner' }, { message: 'for f1', sendId: 'board-reopen-1' });
 
-    // new: it goes to the terminal seam, which is not connected yet, so it refuses in words and records nothing
-    expect(result).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
-    expect((await api().sends(F1)).sends).toEqual([]);
+    // new: f2's row does not answer it. It is typed into f1 once, and f1's ledger records it under that id.
+    expect(result).toEqual({
+      ok: true,
+      value: { ferret: F1, disposition: 'sent', sendId: 'board-reopen-1', fate: 'accepted' },
+    });
+    expect(ferrets.delivered).toEqual([{ text: 'for f1' }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.message])).toEqual([['board-reopen-1', 'for f1']]);
     await host.stop();
   });
 
   test('a withdrawn send typed nothing: with an empty queue a retry with the same id is a new send, and it reaches deliver', async () => {
-    const { host, state, api } = await conversation();
+    const { host, state, ferrets, api } = await conversation();
     await ledgered(state, 'r-1', { fate: 'withdrawn' });
+    // The withdrawn send typed nothing: the recorder is still empty before the retry.
+    expect(ferrets.delivered).toEqual([]);
 
     const retry = await api().send(F1, { kind: 'owner' }, { message: 'again', sendId: 'r-1' });
 
-    // new: it goes to the terminal seam (not connected yet), not answered "queued" for a message that is nowhere
-    expect(retry).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    // new: it is typed (the recorder holds it), not answered "queued" for a message that is nowhere
+    expect(retry).toMatchObject({ ok: true, value: { sendId: 'r-1', disposition: 'sent' } });
+    expect(ferrets.delivered).toEqual([{ text: 'again' }]);
     expect((await api().queue(F1)).messages).toEqual([]);
     await host.stop();
   });

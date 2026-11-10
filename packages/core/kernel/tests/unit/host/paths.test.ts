@@ -78,7 +78,13 @@ describe('checkDirectory', () => {
 });
 
 describe('TT kernel.paths.checkDirectory is gated by permissions.checkDirectory', () => {
-  const base = { home: () => '/h', checkDirectory: async () => ({ ok: true as const, value: { realPath: '/x' } }) };
+  const base = {
+    home: () => '/h',
+    checkDirectory: async () => ({ ok: true as const, value: { realPath: '/x' } }),
+    which: async () => undefined,
+    locate: async () => ({ kind: 'absent' as const }),
+    whichFor: async () => ({ kind: 'unprovable' as const }),
+  };
 
   test('a declared plugin is answered; an undeclared one is refused naming the plugin', async () => {
     expect(await gatedPaths('ferrets', true, base).checkDirectory('/x')).toEqual({

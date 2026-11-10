@@ -6,16 +6,26 @@
  * THERE IS NO DEVICE TOKEN, AND NO SCHEMA FOR ONE. A paired device proves itself by signing each session's
  * transcript with a key it cannot export; the daemon holds only the public half, and no view here carries it.
  */
-import { PushEnvelopeFields } from '@ferretry/kernel/contract';
+import { PushEnvelopeFields } from '@ferretry/kernel/contract/push-envelope';
 import { z } from 'zod';
 
 /**
  * One buzz as another plugin hands it to Access (Agenda's `uses`): words only, never a secret. Its `title`, `body` and
  * `url` ARE the push envelope, with the envelope's caps (declared once in the kernel contract), so a buzz the shell worker
- * could not read is refused where it is sent.
+ * could not read is refused where it is sent. Its `tag` is NOT refused for the kernel's tag grammar: a buzz whose tag
+ * would not fit is sent untagged (`fittingPushTag`), so it still reaches the phone.
  */
 export const BuzzSchema = z.strictObject({
   tag: z.string().min(1).max(200),
   ...PushEnvelopeFields,
+  /** A push about a one-time code or a sign-in the owner approves on their phone is reached at once (`high`); absent is every other. */
+  urgency: z.literal('high').optional(),
+  /** How long a push service may hold it undelivered, when it is about something that ends sooner (an approval's seconds left; the daemon clamps it to a high push's own limit). */
+  ttlSeconds: z.number().int().min(0).max(3_600).optional(),
+  /**
+   * The ferret (session id) the buzz is about. Only the hourly cap on high-priority pushes reads it: three an hour per
+   * ferret, twelve across the daemon. A high buzz that names none counts against the daemon's twelve only.
+   */
+  ferret: z.string().min(1).max(200).optional(),
 });
 export type Buzz = z.infer<typeof BuzzSchema>;

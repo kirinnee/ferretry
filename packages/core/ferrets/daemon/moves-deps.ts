@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { dirname } from 'node:path';
 import { ApiError } from '@ferretry/kernel/contract';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
-import { TransferBriefFiles } from '../contract/index.ts';
+import { FERRET_SESSIONS_ROOT } from '../contract/index.ts';
 import type manifest from '../manifest.ts';
 import type { DaemonStorage } from './adapters/storage/session-storage.ts';
 import type { ProcessHostFacts } from './adapters/moves/process-inventory.ts';
@@ -29,7 +28,7 @@ import type { SessionId } from './lib/session-id.ts';
  *             harness — Conversation / the harness plugins; gateway — the managed worktree host (unbound in `index.ts`);
  *             accounts, planner, runtime, view, readableHandoffs — Ferrets' session services (`environment` and `createLifecycle` are bound by `index.ts` on the `sessions` root; the lifecycle's pane launcher is Terminals' and still unbound).
  *   handover: sessions, startAccount, planner — Ferrets' session services / Runtimes.
- *   move:     resume, launch, preflight, askAgent, sessions, planner — Ferrets' session services; accounts,
+ *   move:     preflight, askAgent, sessions, planner (resume and launch are bound by `index.ts`) — Ferrets' session services; accounts,
  *             accountResolver, transcripts, transcriptProvenance, codexRollouts, toolkit, conversionCheck,
  *             harnessVersion, rolloutFormat, locateHarness, fixedSettings, persistedReasoningEffort,
  *             contextWindowForSession — Runtimes / Conversation / the harness plugins; paneIdentity — Terminals;
@@ -65,6 +64,8 @@ export interface MovesOwn {
   readonly clientName: string;
   /** The move's relaunch, bound by Ferrets to its own resume; unbound, a move refuses before it writes anything. */
   readonly resume?: SessionMoveNeeds['resume'];
+  /** The relaunch-settings read, over the ferret's own harness (W2-c); unbound, the read answers 503. */
+  readonly launch?: SessionMoveNeeds['launch'];
   /** The session environment on each ferret's own folder of the `sessions` root; unbound, a fork refuses before it writes. */
   readonly environment?: SessionForkNeeds['environment'];
   /** One lifecycle for one session on its own folder; unbound, a fork refuses before it writes. */
@@ -89,13 +90,21 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       throw unavailable('Reading where a process is working');
     },
   };
-  // A target's private directory, the string its rollout is later correlated by: the ferret's own state folder.
-  const sessionDirectory = (id: SessionId): string => dirname(dirname(kernel.state.pathOf(TransferBriefFiles, id)));
+  // A target's own private folder on the internal `sessions` root (`state/ferrets/sessions/<ferret>`, today's session
+  // directory): its first-turn brief is written there as its `turns/turn-001.md`, and the folder's path is the string its
+  // rollout is later correlated by.
+  const sessionRoot = (id: SessionId) => kernel.roots.root(FERRET_SESSIONS_ROOT, { subfolder: id });
+  const sessionDirectory = (id: SessionId): string => {
+    const folder = sessionRoot(id).resolve('.');
+    if (!folder.ok) throw new Error(`ferret ${id} has no private session folder (${folder.error})`);
+    return folder.value;
+  };
   return {
     fork: {
       state: kernel.state,
       storage,
       sessionDirectory,
+      briefs: sessionRoot,
       attachmentStore: unbound('The attachment store'),
       attachments: unbound('The attachment inventory'),
       conversation: unbound('The conversation reader'),
@@ -134,7 +143,7 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       storage,
       sessions: unbound('The session directory'),
       resume: own.resume ?? unbound('Resuming a ferret'),
-      launch: unbound('Launching a ferret'),
+      launch: own.launch ?? unbound('Launching a ferret'),
       preflight: unbound('The move preflight'),
       askAgent: unboundFn('Queueing a message'),
       planner: unbound('The session planner'),

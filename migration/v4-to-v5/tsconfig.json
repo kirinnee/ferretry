@@ -4,11 +4,12 @@
     "types": ["bun"],
     "paths": {
       "@ferretry/std": ["../../packages/std/src/index.ts"],
+      "@ferretry/std/yaml": ["../../packages/std/src/yaml-text.ts"],
       "@ferretry/kernel/contract": ["../../packages/core/kernel/contract/index.ts"],
       "@ferretry/core-*/contract": ["../../packages/core/*/contract/index.ts"],
       "@ferretry/plugin-*/contract": ["../../packages/plugins/*/contract/index.ts"]
     }
   },
-  "include": ["src", "tests", "scripts"],
+  "include": ["src", "tests", "scripts", "preview"],
   "exclude": ["node_modules", "fixtures/out"]
 }

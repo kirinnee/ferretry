@@ -188,6 +188,11 @@ export function eventStreamScope(call: CallContext, exists: (id: string) => bool
 export interface FleetEventExtras {
   readonly live?: LiveActivitySource;
   readonly transcript?: TranscriptChangeSource;
+  /**
+   * G161: whether THIS caller may follow the live readout or the transcript signal of one ferret. Throws the refusal (a
+   * 403) before any frame; asked only for a stream that asked for `live` or `transcript`, so the journal stream is as it was.
+   */
+  readonly mayFollow?: (call: CallContext, sessionId: string) => void;
 }
 
 /** The accept for `GET /v1/events`. */
@@ -200,6 +205,8 @@ export function fleetEventsAccept(
   const service = new FleetEventStreamService(source, scheduler, extras.live, extras.transcript);
   return async call => {
     const scope = eventStreamScope(call, exists);
+    if (scope.kind === 'session' && (scope.live === true || scope.transcript === true))
+      extras.mayFollow?.(call, scope.sessionId);
     return async downstream => service.handler(scope, downstream);
   };
 }

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { DiskFileSystem } from '../../../../support/daemon/disk-file-system.ts';
+import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import { FileResumeTurnStore } from '../../../../../daemon/adapters/session/resume/file-resume-turn-store.ts';
 import { StorageResumeRepository } from '../../../../../daemon/adapters/session/resume/storage-resume-repository.ts';
 import type { SessionLaunchInstructions } from '../../../../../daemon/lib/protocol/session.ts';
@@ -13,6 +13,8 @@ import { FerretStateFile } from '../../../../../contract/index.ts';
 
 const homes = new Set<string>();
 const ID = parseSessionId('session-1');
+/** A ferret-id-shaped folder name, as the kernel's sessions root takes only those. */
+const FERRET = parseSessionId('mw7bp88g-50e00159');
 
 async function temporaryDirectory(): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-resume-test-'));
@@ -34,16 +36,17 @@ afterEach(async () => {
 });
 
 describe('resume turn store', () => {
-  it('should write a numbered turn document atomically inside the session directory', async () => {
+  it('should write a numbered turn document durably inside the ferret folder on the sessions root', async () => {
     // Arrange
     const home = await temporaryDirectory();
-    const store = new FileResumeTurnStore(() => join(home, 'sessions', 'session-1'), new DiskFileSystem());
+    const { root } = await diskSessionsRoot(home, FERRET);
+    const store = new FileResumeTurnStore(root, FERRET);
 
     // Act
-    const file = await store.writeTurn(ID, 4, 'Continue the assigned task.\n');
+    const file = await store.writeTurn(FERRET, 4, 'Continue the assigned task.\n');
 
     // Assert
-    should(file).endWith('turns/turn-004.md');
+    should(file).endWith(`state/ferrets/sessions/${FERRET}/turns/turn-004.md`);
     should(await readFile(file, 'utf8')).equal('Continue the assigned task.\n');
     should((await stat(file)).mode & 0o777).equal(0o600);
   });
@@ -51,17 +54,17 @@ describe('resume turn store', () => {
   it('should remove stale completion markers, and tolerate ones that were never written', async () => {
     // Arrange — a `done` marker from the previous turn would end the new turn the moment it starts.
     const home = await temporaryDirectory();
-    const directory = join(home, 'sessions', 'session-1');
-    const store = new FileResumeTurnStore(() => directory, new DiskFileSystem());
-    await store.writeTurn(ID, 4, 'anything');
-    await writeFile(join(directory, 'done.marker'), 'done', 'utf8');
+    const { root, folder } = await diskSessionsRoot(home, FERRET);
+    const store = new FileResumeTurnStore(root, FERRET);
+    await store.writeTurn(FERRET, 4, 'anything');
+    await writeFile(join(folder, 'done.marker'), 'done', 'utf8');
 
     // Act
-    await store.clearMarkers(ID);
-    await store.clearMarkers(ID);
+    await store.clearMarkers(FERRET);
+    await store.clearMarkers(FERRET);
 
     // Assert
-    await should(stat(join(directory, 'done.marker'))).be.rejected();
+    await should(stat(join(folder, 'done.marker'))).be.rejected();
   });
 });
 
@@ -266,5 +269,23 @@ describe('storage resume repository', () => {
     await should(
       new StorageResumeRepository(opened.storage).transition(ID, { event: 'session.resumed', status: 'running' }),
     ).be.rejectedWith(/unreadable after a resume transition/u);
+  });
+});
+
+describe('storage resume repository: a session whose configuration states no retry budget', () => {
+  it('should be a target without a transient retry budget, never a zero one', async () => {
+    // Arrange: documents as the store hands them over, narrowed here without trusting their shape
+    const storage = {
+      readConfig: async () => ({ mode: 'auto', cwd: '/workspace/project', retry: { transientAttempts: -1 } }),
+      readState: async () => ({ status: 'stopped', turn: 1 }),
+    };
+
+    // Act
+    const actual = await new StorageResumeRepository(storage as never).read(ID);
+
+    // Assert
+    should(actual).not.be.undefined();
+    should(actual).not.have.property('transientRetryBudget');
+    should(actual).containEql({ turn: 1, mode: 'auto', cwd: '/workspace/project' });
   });
 });

@@ -10,6 +10,7 @@ import {
   HoldsFile,
   InputAskRefSchema,
   InputHoldsPort,
+  InputPhoneApprovals,
   InputRequestFiles,
   InputTargets,
   OutputGuardPort,
@@ -165,7 +166,8 @@ export default definePlugin({
         capability: INPUT_USE_TERMINAL,
         audit: { skip: 'a wait on the ferret’s own card: it changes nothing' },
         guard: 'secrets',
-        summary: 'wait for the owner to answer your input card: where it stands, never the value',
+        summary:
+          'wait for the owner to answer your input card, or approve a sign-in on their phone (a pa_ id): where it stands, never the value or the number',
       }),
     ],
   },
@@ -184,6 +186,10 @@ export default definePlugin({
      */
     secretResolver: SecretResolverPort,
   },
+  /** Never reached by a ferret, through any root: the sealed secrets and the key that opens them (`PrivacyDecl`). */
+  privacy: {
+    private: ['vault.key', 'vault.json'],
+  },
   data: {
     // biome-ignore lint/suspicious/noExplicitAny: the leaf cast Gate, Asks and Ferrets use for a typed config def
     config: [VaultConfigFile as ConfigDef<any>],
@@ -192,7 +198,7 @@ export default definePlugin({
     subscribes: [AsksChanged, FerretsChanged],
   },
   hooks: {
-    offers: [{ hook: InputTargets }, { hook: RedactionSources }],
+    offers: [{ hook: InputTargets }, { hook: InputPhoneApprovals }, { hook: RedactionSources }],
     takes: [{ hook: AskSources, key: 'input', schema: InputAskRefSchema }],
   },
 });

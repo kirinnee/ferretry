@@ -103,6 +103,18 @@ describe('authentication', () => {
     });
   });
 
+  test('a ferret directory that fails to answer leaves the caller anonymous, never authenticated', () => {
+    const failing = {
+      ferretFor: () => {
+        throw new Error('the directory is unreadable');
+      },
+      generation: () => 0,
+    };
+    expect(authenticate({ admin: 'a' }, failing, { bearer: `fys_${'b'.repeat(43)}`, privilegedLocal: true })).toEqual({
+      kind: 'anonymous',
+    });
+  });
+
   test('actors are attributed from the token class, never a header’s class', () => {
     expect(resolveApiActor({ tokenClass: 'admin', client: 'cli' })).toBe('admin-cli');
     expect(resolveApiActor({ tokenClass: 'admin' })).toBe('admin-ui');

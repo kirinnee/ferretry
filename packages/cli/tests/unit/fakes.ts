@@ -239,6 +239,12 @@ function fakeHostInputs() {
     readStdin: async (): Promise<string> => {
       throw new Error('the fake host reads no real standard input: pass readStdin');
     },
+    readBytes: async (path: string): Promise<Uint8Array> => {
+      throw new Error(`the fake host reads no real file (${path}): pass readBytes`);
+    },
+    readStdinBytes: async (): Promise<Uint8Array> => {
+      throw new Error('the fake host reads no real standard input: pass readStdinBytes');
+    },
     pathExists: async (absolute: string): Promise<boolean> => {
       throw new Error(`the fake host probes no real path (${absolute}): pass pathExists`);
     },

@@ -13,6 +13,8 @@ import manifest from '../manifest.ts';
 import { StateBuzzLedger } from './adapters/state-buzz-ledger.ts';
 import { StateModeStore, StateSeenStore } from './adapters/state-stores.ts';
 import { AgendaModeService, adoptAgendaDefault } from './lib/agenda-mode.ts';
+import { agendaArchiveKeeps } from './lib/archive-keeps.ts';
+import { agendaLaunchPart } from './lib/launch-parts.ts';
 import {
   askBuzzKey,
   askBuzzKind,
@@ -180,6 +182,16 @@ export default implementDaemon(manifest, {
       hooks: {
         // The composer's `!` menu (reference.catalog): the ferret's open asks. Asked only while Conversation is on.
         [REFERENCE_MENU_HOOK]: new AgendaReferenceMenu(asks),
+        // The session archive (Ferrets): whether a ferret's own board holds an open item. Off until the owner names an
+        // age; a board that cannot be read keeps that ferret live.
+        'session.archive-keeps': () => [{ id: 'agenda', item: agendaArchiveKeeps(asks) }],
+        // What a launch says about agenda mode: FY_AGENDA follows the ferret's switch (or the machine default).
+        'launch.parts': () => [
+          {
+            id: 'agenda',
+            item: agendaLaunchPart(async ferret => (await modeStore.recorded(ferret)) ?? config().agendaMode),
+          },
+        ],
         'ferret.changed': ({ ferret, state: now, previous, change }) => {
           const work =
             change === 'started'

@@ -64,3 +64,71 @@ test('S54 a CLI start refusal is final and never retried or recovered', async ()
   await expect(api.start({ folder: '/work/a' })).rejects.toBe(refusal);
   expect(count).toBe(1);
 });
+
+const lostCodes = [
+  'ConnectionRefused',
+  'FailedToOpenSocket',
+  'ECONNREFUSED',
+  'ENOENT',
+  'ECONNRESET',
+  'ConnectionClosed',
+  'EPIPE',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CLOSED',
+] as const;
+
+const startsTwiceThenRecovers = async (lost: unknown): Promise<number> => {
+  let starts = 0;
+  const api = new ClientSessionApi(
+    stub(async route => {
+      if (route !== FERRET_ROUTES.start) return { id: 'recovered' };
+      starts += 1;
+      throw lost;
+    }),
+  );
+  expect(await api.start({ folder: '/work/a' })).toEqual({ id: 'recovered' });
+  return starts;
+};
+
+for (const code of lostCodes) {
+  test(`S54 a CLI start whose transport failed with ${code} is retried once and then recovered`, async () => {
+    expect(await startsTwiceThenRecovers(Object.assign(new Error('socket gone'), { code }))).toBe(2);
+  });
+}
+
+test('S54 a CLI start that timed out is a lost answer and is retried once and then recovered', async () => {
+  const timeout = Object.assign(new Error('the call timed out'), { name: 'TimeoutError' });
+  expect(await startsTwiceThenRecovers(timeout)).toBe(2);
+});
+
+test('S54 a CLI start wrapped around a lost transport cause is a lost answer', async () => {
+  const wrapped = new Error('start failed', { cause: Object.assign(new Error('reset'), { code: 'ECONNRESET' }) });
+  expect(await startsTwiceThenRecovers(wrapped)).toBe(2);
+});
+
+test('S54 a CLI start with an unknown error code and no cause is final', async () => {
+  const final = Object.assign(new Error('something else'), { code: 'EACCES' });
+  let starts = 0;
+  const api = new ClientSessionApi(
+    stub(async () => {
+      starts += 1;
+      throw final;
+    }),
+  );
+  await expect(api.start({ folder: '/work/a' })).rejects.toBe(final);
+  expect(starts).toBe(1);
+});
+
+test('S54 a CLI start whose error is its own cause is final instead of looping', async () => {
+  const looping: Error & { cause?: unknown } = new Error('start failed');
+  looping.cause = looping;
+  let starts = 0;
+  const api = new ClientSessionApi(
+    stub(async () => {
+      starts += 1;
+      throw looping;
+    }),
+  );
+  await expect(api.start({ folder: '/work/a' })).rejects.toBe(looping);
+  expect(starts).toBe(1);
+});

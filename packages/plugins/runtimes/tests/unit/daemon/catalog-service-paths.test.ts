@@ -1,6 +1,6 @@
 /**
  * `FleetCatalogService` paths the pipeline and login suites do not drive: the reads over real component files, the
- * republish, the catalog install, the executors, the runtime facts a removal reads and the ways an apply ends.
+ * republish, the executors, the runtime facts a removal reads and the ways an apply ends.
  *
  * The service is built over fakes of its ports (the document, the assets, the provisioner), so every assertion is on
  * what the service returns, throws or hands to a port.
@@ -9,7 +9,7 @@ import { describe, it } from 'bun:test';
 import { ApiError } from '@ferretry/kernel/contract';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import should from 'should';
-import type { AccountChange, CatalogInstallChange } from '../../../contract/index.ts';
+import type { AccountChange } from '../../../contract/index.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { RuntimeIds } from '../../../daemon/lib/account/ids.ts';
 import { unavailableCatalogDeps } from '../../../daemon/lib/service/assembly.ts';
@@ -123,6 +123,8 @@ function world(options: Options = {}) {
       format: options.format ?? 'present',
       model: MODEL,
       revision: 'rev-1',
+      unreadable: [],
+      stoodInLogins: [],
       documents: () => [
         { path: '/fy/config/runtimes/claude-default.yaml', content: '# moved\n', mode: 0o600, expect: 'absent' },
       ],
@@ -248,12 +250,6 @@ describe('the reads, over a machine whose components are real files', () => {
     should(draft.refusal).be.undefined();
     should(applied).have.length(0);
   });
-
-  it('should read one component exactly as the daemon holds it', async () => {
-    const { service } = world();
-    should(await service.storedComponent('mcp', 'srv')).containEql({ command: 'srv-bin' });
-    should(await service.storedComponent('mcp', 'nope')).be.undefined();
-  });
 });
 
 describe('republishing the configuration as it already is', () => {
@@ -354,9 +350,10 @@ describe('staging a change', () => {
     const again = await service.read(staged.id);
     should(again.id).equal(staged.id);
     should(again.change).not.have.property('content');
-    should((again.preview as unknown as { documents: { path: string }[] }).documents.map(file => file.path)).containEql(
-      '/fy/fleet/assets/components/instructions/fresh.md',
-    );
+    // The text lives in Runtimes' own config item, written by the config writer: no document lands in the asset tree.
+    should(
+      (again.preview as unknown as { documents: { path: string }[] }).documents.map(file => file.path),
+    ).not.containEql('/fy/fleet/assets/components/instructions/fresh.md');
   });
 
   it('should name the runtimes an edit to a used component lands on, even though no row reads differently', async () => {
@@ -529,6 +526,35 @@ describe('the sessions a runtime change reaches', () => {
   });
 });
 
+describe('a settings component whose text is saved with the change', () => {
+  it('should write the saved file with the model, against the revision it was read at', async () => {
+    const written: { path: string; content: string; expect: string }[] = [];
+    const { service } = world({
+      overrides: {
+        documentRevision: async path => `rev:${path}`,
+        configWriter: {
+          write: async documents => {
+            for (const document of documents) written.push(document as never);
+          },
+        },
+      },
+    });
+
+    const staged = await service.propose({
+      kind: 'component.put',
+      name: 'fresh',
+      component: { kind: 'settings', harness: 'claude-code' },
+      content: '{"permissions":{}}\n',
+      create: true,
+    });
+    await service.apply(staged.id, OWNER);
+
+    const file = written.find(document => document.content === '{"permissions":{}}\n');
+    should(file?.path).containEql('settings');
+    should(file?.expect).equal(`rev:${file?.path}`);
+  });
+});
+
 describe('how an apply ends', () => {
   it('should report a rolled-back apply as an outcome rather than a throw', async () => {
     const { service } = world({
@@ -569,7 +595,10 @@ describe('how an apply ends', () => {
     });
     const staged = await service.propose(REMOVE);
     const failure = await rejection(service.apply(staged.id, OWNER));
-    should(failure).match({ code: 'fleet_change_failed', message: 'the kernel went away' });
+    // C2: the documents landed before the plan failed, so the sentence says they stay written (not only the cause).
+    should(failure).match({ code: 'fleet_change_failed' });
+    should((failure as Error).message).startWith('the kernel went away; the change to the configuration ');
+    should((failure as Error).message).endWith('was made first and is NOT rolled back with the fleet');
   });
 
   it('should refuse a ferret that widens what ferrets may drive, and keep the change to try again', async () => {
@@ -594,71 +623,6 @@ describe('how an apply ends', () => {
       service.apply(staged.id, { ...OWNER, governed: true }, { agent: false, claim: () => false }),
     );
     should(retry).be.instanceOf(FleetCatalogFreshStepUpRequired);
-  });
-});
-
-describe('installing one catalog item', () => {
-  const provenance = {
-    publisher: 'pub-1',
-    publisherName: 'Acme',
-    catalogId: 'cat-1',
-    catalogName: 'Acme catalog',
-    itemId: 'item-1',
-    kind: 'mcp' as const,
-    name: 'tool',
-    version: 1,
-    digest: `sha256:${'0'.repeat(64)}`,
-  };
-  const install: CatalogInstallChange = {
-    kind: 'catalog.install',
-    name: 'tool',
-    profile: 'default',
-    replace: false,
-    installedFrom: provenance,
-    component: { kind: 'mcp', command: 'tool-bin' },
-    files: [],
-  };
-
-  it('should stage, check and apply in one call, answering the component as the daemon now holds it', async () => {
-    const { service, applied } = world();
-    const done = await service.installCatalogItem(install);
-    should(done.outcome).match({ outcome: 'applied', apply: { outcome: 'committed' } });
-    should(done.component).containEql({ command: 'tool-bin' });
-    should(applied).have.length(1);
-  });
-
-  it('should answer the skill an install adds as the daemon holds it', async () => {
-    const { service } = world();
-    const done = await service.installCatalogItem({
-      ...install,
-      name: 'sk2',
-      component: { kind: 'skills', items: ['sk2'] },
-      files: [{ path: 'SKILL.md', content: '# skill' }],
-      installedFrom: { ...provenance, kind: 'skill', name: 'sk2' },
-    });
-    should(done.component).containEql({ items: ['sk2'] });
-  });
-
-  it('should refuse what the installer would never have produced, with the schema’s own sentence', async () => {
-    const { service, applied } = world();
-    const failure = await rejection(
-      service.installCatalogItem({
-        ...install,
-        component: { kind: 'instructions' },
-      } as unknown as CatalogInstallChange),
-    );
-    should(failure).match({ code: 'fleet_change_refused' });
-    should(applied).have.length(0);
-  });
-
-  it('should refuse in a sentence when the change did not land', async () => {
-    const { service } = world({
-      apply: async () => {
-        throw new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'file /x', reason: 'disk is full' });
-      },
-    });
-    const failure = await rejection(service.installCatalogItem(install));
-    should(failure).match({ code: 'fleet_change_failed', message: 'disk is full' });
   });
 });
 
@@ -726,7 +690,37 @@ describe('a change to one login', () => {
     });
   });
 
-  it('should say the login changed but the runtimes could not be republished', async () => {
+  it('should say one true thing per sentence when a republish is refused after the login change was saved', async () => {
+    let afterApply = false;
+    const { service, changes } = world({
+      overrides: {
+        mint: () => {
+          if (afterApply) throw new Error('nothing was changed: no id could be minted');
+          return 'an-id';
+        },
+        modelCatalogs: async () => ({ catalogs: {}, presets: [] }),
+      },
+    });
+    const staged = await service.propose(relabel);
+    const apply = changes.apply;
+    changes.apply = async id => {
+      const result = await apply(id);
+      afterApply = true;
+      return result;
+    };
+
+    const failure = await rejection(service.apply(staged.id, OWNER));
+
+    should(failure).match({ code: 'fleet_change_failed' });
+    // The login change is saved; the republish's own "nothing was changed" is about the republish and sits in its own
+    // sentence, never after a "the login changed, but …" that it would contradict.
+    should((failure as Error).message).match(
+      /^the login change is saved\. Republishing the runtimes was refused: nothing was changed: no id could be minted\. Fix that, then apply any change to publish the runtimes again\.$/u,
+    );
+    should((failure as Error).message).not.match(/changed, but/u);
+  });
+
+  it('should say the login change is saved but the runtimes could not be republished', async () => {
     let afterApply = false;
     const { service, changes } = world({
       overrides: {
@@ -736,6 +730,8 @@ describe('a change to one login', () => {
             format: 'present',
             model: MODEL,
             revision: 'rev-1',
+            unreadable: [],
+            stoodInLogins: [],
             documents: () => [],
           };
         },
@@ -751,6 +747,41 @@ describe('a change to one login', () => {
     };
     const failure = await rejection(service.apply(staged.id, OWNER));
     should(failure).match({ code: 'fleet_change_failed' });
-    should((failure as Error).message).match(/^the login changed, but the runtimes could not be republished: /u);
+    should((failure as Error).message).match(/^the login change is saved\. Republishing the runtimes failed: /u);
   });
+
+  // A message with nothing but dots and blanks leaves no reason to name, so the sentence names none (never "refused: .");
+  // an empty message is the error's own name, which is a reason.
+  const REPUBLISH_REASONS: readonly (readonly [string, string])[] = [
+    ['', ': Error'],
+    ['.', ''],
+    [' ..  ', ''],
+  ];
+  for (const [said, reason] of REPUBLISH_REASONS) {
+    it(`BG-031 n3 should say the republish was refused without an empty reason when its message is ${JSON.stringify(said)}`, async () => {
+      let afterApply = false;
+      const { service, changes } = world({
+        overrides: {
+          mint: () => {
+            if (afterApply) throw new Error(said);
+            return 'an-id';
+          },
+          modelCatalogs: async () => ({ catalogs: {}, presets: [] }),
+        },
+      });
+      const staged = await service.propose(relabel);
+      const apply = changes.apply;
+      changes.apply = async id => {
+        const result = await apply(id);
+        afterApply = true;
+        return result;
+      };
+
+      const failure = await rejection(service.apply(staged.id, OWNER));
+
+      should((failure as Error).message).equal(
+        `the login change is saved. Republishing the runtimes was refused${reason}. Fix that, then apply any change to publish the runtimes again.`,
+      );
+    });
+  }
 });

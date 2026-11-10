@@ -19,7 +19,7 @@ import daemon from '../../../daemon/index.ts';
 import { LEARNING_MINER_LABEL, WARDEN_LABEL } from '../../../daemon/lib/admission.ts';
 import { NO_CLEAN_UP_FOLDER, REWRITE_UNCHECKED } from '../../../daemon/lib/cleanup/service.ts';
 import { RESULT_UNCHECKED } from '../../../daemon/lib/result.ts';
-import { launchEnvironment, startDecision } from '../../../daemon/lib/hooks.ts';
+import { launchEnvironment, limitedParent, startDecision } from '../../../daemon/lib/hooks.ts';
 import manifest from '../../../manifest.ts';
 
 let who: CallStanding = ownerStanding();
@@ -47,6 +47,52 @@ async function host(setup: (ferrets: FakeFerrets) => void = () => {}) {
 const lead = ferretId('lead');
 
 describe('the start.decide and launch.parts decisions', () => {
+  test("Packs' manifest id is 'packs': it is the id Ferrets reads a helper's admission from", () => {
+    // Ferrets admits a child only on the `start.decide` answer of the plugin with this id (`HELPER_ADMISSION_ANSWERER`).
+    // Both sides write the literal, so a rename of either one goes red here or in Ferrets' own tests, never by coincidence.
+    expect(manifest.id).toBe('packs');
+  });
+
+  test('G12 R-0332 a started child is judged against its parent, and a resume is answered without the limits (today)', () => {
+    expect(limitedParent({ parent: 'lead', by: 'owner' })).toBe('lead');
+    expect(limitedParent({ parent: 'lead', by: 'ferret' })).toBe('lead');
+    expect(limitedParent({ parent: 'lead', by: 'pack' })).toBe('lead');
+    expect(limitedParent({ by: 'owner' })).toBeUndefined();
+    // Today's pack.admit ran on the start path only (fyd.ts:2643): a resume relaunches an admitted ferret.
+    expect(limitedParent({ parent: 'lead', by: 'resume' })).toBeUndefined();
+    expect(startDecision(undefined, DEFAULT_PACK_CONFIG.limits)).toEqual({ allow: true });
+  });
+  test('G12 R-0332 the wired start.decide taker limits a start, but never a resume (a Warden revive is not Pack-limited)', async () => {
+    // Arrange: an unattended lead already running its most helpers, and one stopped child the Warden would revive.
+    const ferrets = new FakeFerrets();
+    ferrets.add({ id: lead, role: 'lead', mode: 'auto' });
+    for (let i = 0; i < DEFAULT_PACK_CONFIG.limits.autoChildren; i += 1)
+      ferrets.add({ id: ferretId(`kid-${String(i)}`), parent: lead, role: 'helper', state: 'working' });
+    ferrets.add({ id: ferretId('stopped-kid'), parent: lead, role: 'helper', state: 'stopped' });
+    const decide = builtHalf(ferrets)?.hooks?.['start.decide'];
+    if (decide === undefined) throw new Error('Packs takes start.decide');
+    const ask = async (ferret: string, by: 'owner' | 'ferret' | 'pack' | 'board' | 'resume') =>
+      await decide({
+        ferret: ferretId(ferret),
+        name: ferret,
+        role: 'helper',
+        parent: lead,
+        harness: 'claude-code',
+        folder: '/work',
+        by,
+      });
+
+    // Act
+    const revive = await ask('stopped-kid', 'resume');
+    const starts = await Promise.all((['owner', 'ferret', 'pack', 'board'] as const).map(by => ask('new-kid', by)));
+
+    // Assert: the resume is answered yes without the limits; every start is refused with Packs' own sentence.
+    expect(revive).toEqual({ allow: true });
+    for (const decision of starts) {
+      expect(decision.allow).toBe(false);
+      if (!decision.allow) expect(decision.reason).toContain('lead already has 4 running helpers');
+    }
+  });
   test('a start with no known parent is not refused', () => {
     expect(startDecision(undefined, DEFAULT_PACK_CONFIG.limits)).toEqual({ allow: true });
   });

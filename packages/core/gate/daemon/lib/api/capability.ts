@@ -7,7 +7,6 @@ import {
   type CapabilityPresentation,
   coreCapabilityName,
   describeGrantRefusal,
-  type GrantDecision,
   type GrantRefusal,
   STEP_UP_USE_CAPABILITIES,
 } from '../../../contract/index.ts';
@@ -58,12 +57,20 @@ export interface GrantEvaluation {
 }
 
 /**
+ * The contract's `GrantDecision`, said as the two shapes it comes in: an allowance is always `granted`, and a refusal never
+ * is, so a refusal always has words to say ({@link describeGrantRefusal}) and no caller has to handle one without.
+ */
+export type GuardDecision =
+  | { readonly allowed: true; readonly refusal: 'granted'; readonly steppedUp?: true }
+  | { readonly allowed: false; readonly refusal: Exclude<GrantRefusal, 'granted'> };
+
+/**
  * The one decision, and the only place authority is ever removed (today's `decideCapability`, verbatim in order).
  *
  * IT NEVER GRANTS. Every branch either keeps the answer the route's scope check already produced or removes it.
  * `configure` IMPLIES `use`.
  */
-export function decideCapability(demand: CapabilityDemand, evaluation: GrantEvaluation): GrantDecision {
+export function decideCapability(demand: CapabilityDemand, evaluation: GrantEvaluation): GuardDecision {
   if (!evaluation.governed) return { allowed: true, refusal: 'granted' };
   const grants = evaluation.grants;
   // A daemon that cannot say what it is enforcing enforces nothing. Permissive defaults settle SILENCE, never damage.
@@ -95,9 +102,9 @@ export function decideCapability(demand: CapabilityDemand, evaluation: GrantEval
 
 /** The grant layer as the boundary sees it (today's `CapabilityGuard`). Synchronous, deliberately. */
 export interface CapabilityGuard {
-  decide(demand: CapabilityDemand, presentation: CapabilityPresentation): GrantDecision;
+  decide(demand: CapabilityDemand, presentation: CapabilityPresentation): GuardDecision;
   governance(presentation: CapabilityPresentation): CallerGovernance;
-  explain(demand: CapabilityDemand, refusal: GrantRefusal): string | undefined;
+  explain(demand: CapabilityDemand, refusal: Exclude<GrantRefusal, 'granted'>): string;
 }
 
 /**

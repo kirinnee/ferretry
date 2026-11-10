@@ -18,6 +18,7 @@ import should from 'should';
 import { CloneableSecretNameSchema, SecretNameSchema } from '../../../../contract/index.ts';
 import { ChildEnvironments } from '../../../../daemon/lib/secrets/child-environments.ts';
 import { HoldRegistry } from '../../../../daemon/lib/secrets/output-guard.ts';
+import { coverageOf, type TextRange } from '../../../../daemon/lib/secrets/policy.ts';
 import { maskGrid, maskLines, VaultRedaction } from '../../../../daemon/lib/secrets/read-scope.ts';
 import { SecretDirectory } from '../../../../daemon/lib/secrets/vault.ts';
 import { SecretStoreError } from '../../../../daemon/lib/secrets/types.ts';
@@ -132,6 +133,77 @@ describe('the read-scoped redaction', () => {
   });
 });
 
+/** `ranges` behind a proxy that counts every element read, so a test can tell one pass from a pass per character. */
+function counted(ranges: readonly TextRange[]): {
+  readonly ranges: readonly TextRange[];
+  readonly reads: () => number;
+} {
+  let reads = 0;
+  const proxy = new Proxy([...ranges], {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && /^\d+$/u.test(key)) reads += 1;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  return { ranges: proxy, reads: () => reads };
+}
+
+describe('F-0326 #U4 the cost of masking a busy screen', () => {
+  // A 4-character value printed densely: one match range every 5 characters.
+  const PIN = '1234';
+  const dense = (width: number) => `${PIN} `.repeat(width / 5);
+
+  it('F-0326 #U4 lines read each match range a bounded number of times, never once per character', () => {
+    // Arrange — 50 rows of 200: 2,000 ranges over 10,000 characters.
+    const lines = Array.from({ length: 50 }, () => dense(200));
+    let probe: ReturnType<typeof counted> | undefined;
+    const cover = (text: string) => {
+      probe = counted(coverageOf(text, [PIN]));
+      return probe.ranges;
+    };
+
+    // Act
+    const masked = maskLines(lines, [PIN], cover);
+
+    // Assert — the same mask, at a cost in range reads of the ranges themselves, not of ranges × characters.
+    should(masked).deepEqual(lines.map(() => '**** '.repeat(40)));
+    should(probe?.ranges.length).equal(2000);
+    should(probe?.reads()).be.belowOrEqual(2 * 2000);
+  });
+
+  it('F-0326 #U4 cells read each match range a bounded number of times, never once per cell', () => {
+    // Arrange — 50 rows of 200 one-character cells.
+    const grid = { columns: 200, rows: Array.from({ length: 50 }, () => [...dense(200)]) };
+    let probe: ReturnType<typeof counted> | undefined;
+    const cover = (text: string) => {
+      probe = counted(coverageOf(text, [PIN]));
+      return probe.ranges;
+    };
+
+    // Act
+    const masked = maskGrid(grid, [PIN], cover);
+
+    // Assert
+    should(masked.rows.map(row => row.join(''))).deepEqual(grid.rows.map(() => '**** '.repeat(40)));
+    should(probe?.reads()).be.belowOrEqual(2 * 2000);
+  });
+
+  it('F-0326 #U4 a 200×2000 screen dense with a 4-character value masks inside the 2 s stop bound', async () => {
+    // Arrange — 80,000 matches over 400,000 characters, the size of a pane an attached client stretched.
+    const redaction = new VaultRedaction(source({ PIN }));
+    const rows = Array.from({ length: 200 }, () => dense(2000));
+
+    // Act
+    const started = performance.now();
+    const masked = await redaction.read(scope => scope.lines(rows));
+    const took = performance.now() - started;
+
+    // Assert — synchronous masking inside a read must leave the stop's 2 s bound able to fire.
+    should(masked.every(row => row === '**** '.repeat(400))).be.true();
+    should(took).be.below(2000);
+  });
+});
+
 describe('child environments (lead decision 9)', () => {
   it('S5 a handle opens once to the values it was minted with, and says only its variable names', () => {
     // Arrange
@@ -235,6 +307,59 @@ describe('the output guard', () => {
     should(guard.stillShowable(stamped)).be.false();
     should(guard.stillShowable(elsewhere)).be.true();
     should(guard.stillShowable(guard.stamp([pane]))).be.true();
+  });
+
+  it('I73 the kernel Dispatcher is the one publication gate: a screen read whose build awaited while quarantine began is discarded, a later read is shown', async () => {
+    // Arrange — a `guard: 'secrets'` route on the kernel's own dispatcher, bound to this HoldRegistry. Its handler
+    // awaits, and the hold begins on its pane during that await (the read was stamped before the hold).
+    const guard = new HoldRegistry();
+    const admitted: AdmissionDecision = { outcome: 'admitted', standing: {} as CallStanding, actor: 'owner-tools' };
+    const admission = {
+      admit: () => admitted,
+      admitMember: () => admitted,
+      readmit: () => true,
+      inventory: (_request: unknown, entries: unknown) => entries,
+    } as unknown as Admission;
+    let holdBeginsDuringBuild = true;
+    const route: MountedRoute = {
+      method: 'GET',
+      path: '/v1/screen',
+      minimum: 'authenticated',
+      caller: 'any',
+      audit: { skip: 'test' },
+      guard: 'secrets',
+      owner: { plugin: 'terminals' as PluginId, title: 'Terminals', serving: () => ({ kind: 'serving' }) },
+      handle: async () => {
+        await Promise.resolve();
+        if (holdBeginsDuringBuild) guard.moved(pane);
+        await Promise.resolve();
+        return jsonResponse({ text: 'screen of the pane the value went into' });
+      },
+    };
+    const dispatcher = new Dispatcher(
+      { admission: () => admission, outputGuard: () => guard, version: '5.0.0' },
+      { routes: [route], sockets: [], memberRoutes: [] },
+    );
+    const call = (): ApiRequest => ({
+      method: 'GET',
+      path: '/v1/screen',
+      query: queryFrom([]),
+      headers: headersFrom({}),
+      arrival: localArrival(false),
+      text: async () => '',
+    });
+
+    // Act
+    const stale = finalised(await dispatcher.dispatch(call()));
+    holdBeginsDuringBuild = false;
+    const later = finalised(await dispatcher.dispatch(call()));
+
+    // Assert — the stale read never left (the withheld sentence went instead); a read taken after the hold may
+    should(stale.status).equal(409);
+    should(stale.body).containEql(WITHHELD_SENTENCE);
+    should(stale.body).not.containEql('the value went into');
+    should(later.status).equal(200);
+    should(later.body).containEql('the value went into');
   });
 
   it('should read a stamp it cannot check as not showable', () => {

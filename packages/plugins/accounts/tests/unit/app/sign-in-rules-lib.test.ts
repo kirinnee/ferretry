@@ -15,6 +15,7 @@ import {
 import {
   checkedWords,
   codeKeyLabel,
+  deviceRevokeWarning,
   draftOf,
   initialRuleTicks,
   narrowEnd,
@@ -22,6 +23,7 @@ import {
   RULE_HONEST_LIMIT,
   ruleFailureWords,
   ruleFlags,
+  rulesApprovedWith,
   ruleWordsOf,
   runRuleApproval,
   sheetWords,
@@ -37,6 +39,7 @@ import {
   SITE_SIGN_IN,
   STAGE_ID,
   stagedRule,
+  suspendedRule,
   sitePlace,
   sudoPlace,
   terminalRule,
@@ -328,5 +331,24 @@ describe('narrowing a rule to an end the owner typed', () => {
       ['0', 'days'],
     ] as const)
       expect(narrowEnd(typed, unit, ENDS, NOW).ok).toBe(false);
+  });
+});
+
+describe('what revoking a device does to the rules its passkey approved', () => {
+  const PHONE = 'fy_device_id_AAAAAAAAAAAAAAAAAAAAAA';
+
+  it('counts the rules a device’s passkey approved, leaving out one already suspended', () => {
+    const rules = [pageRule(), codeRule(), suspendedRule()];
+    expect(rulesApprovedWith(rules, PHONE)).toBe(2);
+    expect(rulesApprovedWith(rules, 'fy_device_id_BBBBBBBBBBBBBBBBBBBBBB')).toBe(0);
+  });
+
+  it('says how many rules a revoke suspends, in the singular and the plural', () => {
+    expect(deviceRevokeWarning(1)).toBe(
+      '1 standing rule was approved with this device’s passkey; it will be suspended.',
+    );
+    expect(deviceRevokeWarning(2)).toBe(
+      '2 standing rules were approved with this device’s passkey; they will be suspended.',
+    );
   });
 });

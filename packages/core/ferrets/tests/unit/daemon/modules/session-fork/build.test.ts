@@ -50,7 +50,7 @@ describe('the session-fork module build', () => {
 
     // Assert
     expect(built.provides).toBeDefined();
-    expect(asked).toEqual([{ state: needs.state, attachments: needs.attachmentStore }]);
+    expect(asked).toEqual([{ state: needs.state, briefs: needs.briefs, attachments: needs.attachmentStore }]);
   });
 
   test('should read no late value at build: the account resolution, the lifecycle factory and the view stay unread', () => {

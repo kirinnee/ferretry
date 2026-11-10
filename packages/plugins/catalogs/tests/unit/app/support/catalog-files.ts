@@ -8,12 +8,10 @@ import {
   SharedCatalogManifestSchema,
   type SignedCatalogItemVersions,
 } from '../../../../contract/wire/index.ts';
-import {
-  catalogItemDigest,
-  signCatalogItemVersions,
-  signCatalogManifest,
-} from '../../../../daemon/lib/relay-wire/catalog-wire/catalog-signature.ts';
+import { catalogItemDigest } from '../../../../daemon/lib/relay-wire/catalog-wire/catalog-signature.ts';
 import type { DaemonIdentity } from '../../../../daemon/lib/relay-wire/kernel-wire/index.ts';
+// Signing as a daemon holding its private key is the worker copy's; the daemon signs through its signer port.
+import { signCatalogItemVersions, signCatalogManifest } from '../../../support/catalog-crypto.ts';
 import { WebCryptoRelayCrypto } from '@ferretry/app';
 
 export const crypto = new WebCryptoRelayCrypto();

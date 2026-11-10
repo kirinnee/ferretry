@@ -1,5 +1,6 @@
 import { ApiError } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
+import type { LaunchInstructionSectionId } from '../protocol/session.ts';
 import {
   type FerretId,
   type FerretState,
@@ -34,6 +35,11 @@ export interface FerretRestartHost {
     readonly stateAt: string;
   }[];
   waitingOf(ferret: FerretId): FerretWaiting | undefined;
+  /**
+   * The instruction sections a launch now would change for this ferret, read fresh: empty when it is current, when it
+   * never recorded what it was told, or when it cannot be read (a restart is advice taken on proof, never on a guess).
+   */
+  outdated(ferret: FerretId): Promise<readonly LaunchInstructionSectionId[]>;
   stop(ferret: FerretId, reason: string): Promise<void>;
   resume(ferret: FerretId): Promise<Result<FerretId, StartFailure>>;
   history(ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
@@ -62,8 +68,7 @@ function restartPorts(host: FerretRestartHost): RestartPorts {
       const found = host.ferrets().find(ferret => ferret.id === id);
       return found === undefined ? undefined : subjectOf(found);
     },
-    // Which instructions a launch would change is not read in this build; see `FerretRestarts.restart`.
-    outdated: async () => [],
+    outdated: async id => await host.outdated(id as FerretId),
     restart: async (id, requestedBy) => {
       const ferret = id as FerretId;
       await host.stop(ferret, 'restart');
@@ -96,14 +101,6 @@ export class FerretRestarts implements SessionRestartSubsystem {
   ) {}
 
   async restart(request: RestartRequest, requestId?: string, requestedBy?: string): Promise<RestartResult> {
-    // Which ferrets have out-of-date instructions is not read in this build, and a restart that matched none
-    // would say nothing was out of date. Say so instead.
-    if (request.scope === 'outdated')
-      throw new ApiError(
-        503,
-        'Finding ferrets with out-of-date instructions is not built yet in this version of Ferretry; name the ferrets or restart all of them.',
-        'plugin_unavailable',
-      );
     const caller = calledBy(requestedBy);
     if (caller === undefined) return await this.service.restart(request, requestId, requestedBy);
     // A ferret restarts itself and its helpers; the whole fleet is a person's. The ferret it says it is, is the ferret

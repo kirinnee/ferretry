@@ -63,7 +63,19 @@ const listFiles = async (directory: string): Promise<string[]> => {
     .map(entry => relative(directory, join(entry.parentPath, entry.name)).split(sep).join('/'));
 };
 
-const COMMITTED_RELEASE_KEY = join(packageRoot, 'release-signing-key.pub');
+/**
+ * Which hosted app this build belongs to is decided in ONE place, `scripts/ci/hosted-app-origin.sh`: it names the
+ * release public key (and the next-key file) to compile in, from the same `FY_HOSTED_APP_ORIGIN` switch that sets the
+ * app's and the daemon's origin. Ordinary builds get `release-signing-key.pub`.
+ */
+const hostedApp = (flag: '--key-file' | '--next-key-file'): string => {
+  const result = spawnSync(join(repositoryRoot, 'scripts/ci/hosted-app-origin.sh'), [flag], { encoding: 'utf8' });
+  if (result.status !== 0) fail(`scripts/ci/hosted-app-origin.sh ${flag} failed: ${result.stderr.trim()}`);
+  return result.stdout.trim();
+};
+
+const COMMITTED_RELEASE_KEY = hostedApp('--key-file');
+const NEXT_RELEASE_KEY = hostedApp('--next-key-file');
 
 /**
  * NO PLUGIN CODE RUNS IN THE RELEASE WORKER. Code evaluated in the worker's realm could rewrite the globals the release
@@ -103,9 +115,12 @@ export function workerInputGuard(root = packageRoot, inputs?: Set<string>): BunP
   const app = realpathSync(root);
   const zod = realpathSync(resolve(Bun.resolveSync('zod/package.json', packageRoot), '..'));
   const allowed = ['worker', 'release', 'router', 'storage'].map(directory => join(app, 'src', directory) + sep);
-  // The kernel contract's push envelope, by its own subpath: the one declaration of the three fields a push shows, shared with
-  // Access's payload. It imports zod and nothing else; the contract barrel, which does import more, is not an allowed input.
-  const envelope = realpathSync(Bun.resolveSync('@ferretry/kernel/contract/push-envelope', packageRoot));
+  // The kernel contract's push envelope and notification filter document, each by its own subpath: the one declaration of
+  // what a push says and of the device's filter, shared with the plugins that send and write them. They import zod and each
+  // other and nothing else; the contract barrel, which does import more, is not an allowed input.
+  const contracts = ['push-envelope', 'notification-filter'].map(name =>
+    realpathSync(Bun.resolveSync(`@ferretry/kernel/contract/${name}`, packageRoot)),
+  );
   return {
     name: 'shell-worker-inputs',
     setup(build) {
@@ -120,7 +135,7 @@ export function workerInputGuard(root = packageRoot, inputs?: Set<string>): BunP
         if (
           !allowed.some(directory => path.startsWith(directory)) &&
           !path.startsWith(zod + sep) &&
-          path !== envelope
+          !contracts.includes(path)
         ) {
           throw new Error(`no plugin code may run in the signed service worker: refused input ${path}`);
         }
@@ -152,8 +167,15 @@ const buildRelease = async (
   publicKeyFile = COMMITTED_RELEASE_KEY,
   identity: ReleaseIdentity,
 ): Promise<void> => {
-  const key = releaseKeyFromPem(await readFile(publicKeyFile, 'utf8'));
-  if (key === null) fail(`${publicKeyFile} is not one Ed25519 public key`);
+  const pem = await readFile(publicKeyFile, 'utf8').catch(() => null);
+  if (pem === null) {
+    return fail(
+      `${publicKeyFile} is not committed: a build for this hosted app signs with it ` +
+        '(scripts/local/setup-pwa-release-v5.sh makes the key; its public half is committed on the branch that deploys it)',
+    );
+  }
+  const key = releaseKeyFromPem(pem);
+  if (key === null) return fail(`${publicKeyFile} is not one Ed25519 public key`);
   const rewrites = parseReleaseRewrites(await readFile(join(packageRoot, 'public/_redirects'), 'utf8'));
   const headers = parseReleaseHeaders(await readFile(join(packageRoot, 'public/_headers'), 'utf8'));
   if (headers.length === 0) fail('public/_headers names no header rules');
@@ -183,9 +205,9 @@ const buildRelease = async (
     files[path] = await sha256Base64Url(new Uint8Array(await readFile(join(distDirectory, path))));
   }
 
-  const nextKeyPem = await readFile(join(packageRoot, 'release-signing-key.next.pub'), 'utf8').catch(() => null);
+  const nextKeyPem = await readFile(NEXT_RELEASE_KEY, 'utf8').catch(() => null);
   const nextKey = nextKeyPem === null ? null : releaseKeyFromPem(nextKeyPem);
-  if (nextKeyPem !== null && nextKey === null) fail('packages/app/release-signing-key.next.pub is not one Ed25519 key');
+  if (nextKeyPem !== null && nextKey === null) fail(`${NEXT_RELEASE_KEY} is not one Ed25519 key`);
 
   const manifest = ReleaseManifestSchema.parse({
     // The release this app ships from (`release.json`, §10.6): the app ships from the release, not from `main`.

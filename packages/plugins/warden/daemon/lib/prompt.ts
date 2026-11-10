@@ -260,7 +260,7 @@ export function buildAssignedWardenPrompt(
     '```',
     '',
     '## What to understand first',
-    `- The task and conversation so far: read ${session.directory}, its turns/ and its transcript.`,
+    `- The task and conversation so far: read ${session.directory}, its turn documents in ferrets/sessions/${id}/turns/ and its transcript.`,
     `- Live terminal: \`${cli} snapshot ${id}\` — take it twice, a minute apart, and compare.`,
     `- Recent events: \`${cli} events ${id} --after -50\`.`,
     ...(session.cwd === undefined

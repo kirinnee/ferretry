@@ -67,6 +67,39 @@ describe('fillComposer', () => {
     should(pane.typed).deepEqual([]);
   });
 
+  it('should take the payload newly on screen as landed when the composer line has no cursor to read it by', async () => {
+    // Arrange — the frame before is an empty prompt; the frame after shows the payload on the prompt line, but with
+    // no cursor to say whether that is typed input, so the composer reads "unreadable" and only the count proves it.
+    const pane = new ScriptedPane((_read, typings) => (typings === 0 ? 'last frame\n> ' : 'last frame\n> continue'));
+
+    // Act
+    const evidence = await fillComposer(pane.controller, noSleep, SETTINGS, SESSION, 'continue');
+
+    // Assert
+    should(evidence).equal('chars');
+    should(pane.typed).deepEqual(['continue']);
+    should(pane.pasted).deepEqual([]);
+  });
+
+  it('should say a pane that drew but never showed the payload in its composer was typed once and not retyped', async () => {
+    // Arrange — after the keys the pane repaints with no composer line at all: it drew, so this is not "stalled", and
+    // nothing in the frame proves the payload landed or that the keys were dropped.
+    const pane = new ScriptedPane((_read, typings) => (typings === 0 ? 'last frame\n> ' : 'last frame\n⎿ thinking'));
+
+    // Act
+    const refused = await fillComposer(pane.controller, noSleep, SETTINGS, SESSION, 'continue').catch(
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(refused).be.instanceOf(ComposerUnconfirmedError);
+    should((refused as ComposerUnconfirmedError).typings).equal(1);
+    should((refused as ComposerUnconfirmedError).message).match(
+      /and in [\d.]+ s its composer never showed it; it was not typed again/u,
+    );
+    should(pane.typed).deepEqual(['continue']);
+  });
+
   it('should refuse, typing nothing more, when a dropped fill finds the composer holding text', async () => {
     // Arrange — measure a pane that drew after the first fill and dropped it every time: the captures
     // taken between the two typings are the watch plus the one read that precedes the second fill.

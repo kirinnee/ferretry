@@ -21,10 +21,11 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
+import { type Check, type Finding, parseFile, runMain, walk } from '../gen/lib/check.ts';
 import type { Workspace } from '../gen/lib/workspace.ts';
 import { contractPath, loadWorkspace, sourceFiles } from '../gen/lib/workspace.ts';
 import { readPending } from './ports-pending.ts';
+import { GUARANTEE_HELPER, helperBinding, helperCallTitles, leadingIds } from './test-titles.ts';
 
 export const GUARANTEES_TSV = 'docs/rebuild/guarantees.tsv';
 const HEADER = 'id\tstatus\towner\twith\tenforcer\tdoc\ttest';
@@ -59,8 +60,10 @@ export function parseTsv(text: string): GuaranteeRow[] {
   });
 }
 
+// The ids a literal title starts with: `'R42 R43 …'` names both (`leadingIds` splits them). The helper form is read
+// from the AST (`test-titles.ts`), only in a file that imports the helper.
 const TEST_NAME =
-  /\b(?:test|it)(\.(?:only|skip|todo|failing|serial|concurrent|if\([^)]*\)))?\(\s*(['"`])([A-Z]+[0-9]+[a-z]?)(?=[\s'"`:.,])/g;
+  /\b(?:test|it)(\.(?:only|skip|todo|failing|serial|concurrent|if\([^)]*\)))?\(\s*(['"`])([A-Z]+[0-9]+[a-z]?(?: [A-Z]+[0-9]+[a-z]?)*)(?=[\s'"`:.,])/g;
 
 /** Every row id a test name starts with → the files holding such a test. */
 export function testIds(root: string, ws: Workspace): Map<string, string[]> {
@@ -76,14 +79,25 @@ export function testIds(root: string, ws: Workspace): Map<string, string[]> {
     const rel = relative(root, file).split(sep).join('/');
     if (rel.includes('node_modules/') || rel.includes('.tmp/')) continue;
     const source = readFileSync(file, 'utf8');
+    const add = (id: string): void => {
+      const list = ids.get(id) ?? [];
+      if (!list.includes(rel)) list.push(rel);
+      ids.set(id, list);
+    };
     for (const match of source.matchAll(TEST_NAME)) {
       const modifier = match[1] ?? '';
       // `.failing` passes when the body THROWS: it is a known bug, never proof that a guarantee holds.
       if (modifier.startsWith('.skip') || modifier.startsWith('.todo') || modifier.startsWith('.failing')) continue;
-      const id = match[3] as string;
-      const list = ids.get(id) ?? [];
-      if (!list.includes(rel)) list.push(rel);
-      ids.set(id, list);
+      for (const id of leadingIds(match[3] as string)) add(id);
+    }
+    // The one helper, read by the shared parser: only a call of the function this file imports from the support module.
+    if (source.includes(`${GUARANTEE_HELPER}(`) && source.includes('support/guarantee')) {
+      const { program } = parseFile(file);
+      const binding = helperBinding(program, file);
+      if (binding !== undefined)
+        walk(program, node => {
+          for (const title of helperCallTitles(node, binding) ?? []) for (const id of leadingIds(title)) add(id);
+        });
     }
   }
   return ids;
@@ -120,8 +134,45 @@ export function parseJunit(xml: string): TestResult[] {
   return out;
 }
 
+/** One test of a JUnit report, with the describe blocks around it in its full name. */
+export interface JunitCase {
+  readonly fullName: string;
+  readonly file: string;
+  readonly status: TestResult['status'];
+}
+
+/** Every test of one JUnit report (any name), its enclosing suites' names ahead of its own in `fullName`. */
+export function junitCases(xml: string): JunitCase[] {
+  const out: JunitCase[] = [];
+  const suites: { name: string; file: string }[] = [];
+  const attr = (attrs: string, key: string): string =>
+    xmlText(new RegExp(`\\b${key}="([^"]*)"`).exec(attrs)?.[1] ?? '');
+  for (const match of xml.matchAll(
+    /<testsuite\b([^>]*?)(\/?)>|<\/testsuite>|<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g,
+  )) {
+    if (match[0].startsWith('</testsuite')) suites.pop();
+    else if (match[0].startsWith('<testsuite')) {
+      if (match[2] !== '/') suites.push({ name: attr(match[1] ?? '', 'name'), file: attr(match[1] ?? '', 'file') });
+    } else {
+      const attrs = match[3] ?? '';
+      const body = match[4] ?? '';
+      const file =
+        attr(attrs, 'file') ||
+        [...suites].reverse().find(s => s.file !== '')?.file ||
+        suites.find(s => /\.test\.tsx?$/.test(s.name))?.name ||
+        '';
+      out.push({
+        fullName: [...suites.map(s => s.name), attr(attrs, 'name')].join(' '),
+        file: file.replace(/^\.\//, ''),
+        status: /<(?:failure|error)\b/.test(body) ? 'failed' : /<skipped\b/.test(body) ? 'skipped' : 'passed',
+      });
+    }
+  }
+  return out;
+}
+
 /** `--results` paths (files, or folders searched for `junit.xml` and the quarantine's `junit.rerun.xml`); default every tier's report under `coverage/`. */
-export function readResults(root: string, paths: readonly string[] | undefined): TestResult[] | undefined {
+export function resultFiles(root: string, paths: readonly string[] | undefined): string[] | undefined {
   const files = new Set<string>();
   for (const path of paths ?? ['coverage']) {
     const abs = resolve(root, path);
@@ -134,8 +185,11 @@ export function readResults(root: string, paths: readonly string[] | undefined):
       }
     } else files.add(abs);
   }
-  if (files.size === 0) return undefined;
-  return [...files].flatMap(file => parseJunit(readFileSync(file, 'utf8')));
+  return files.size === 0 ? undefined : [...files];
+}
+
+export function readResults(root: string, paths: readonly string[] | undefined): TestResult[] | undefined {
+  return resultFiles(root, paths)?.flatMap(file => parseJunit(readFileSync(file, 'utf8')));
 }
 
 /** The integration tier lives in `tests/integration/`; every other test file (unit, scripts, ...) is the unit report's. */

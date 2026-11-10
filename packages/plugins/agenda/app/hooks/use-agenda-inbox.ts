@@ -68,6 +68,9 @@ import { withMachineAgendas } from '../lib/machine-agenda.ts';
 import { daemonSessionKey, daemonSessionScope } from '../shell.ts';
 import type { DaemonFleetStore } from '../lib/ferret-store.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
+import { type AgendaFleet, mergedFleet } from '../lib/agenda-fleet.ts';
+import { daemonId as toDaemonId } from '../lib/machine.ts';
+import { useEveryDaemon } from '@ferretry/app';
 import type { AgendaLaneEditor as LaneEditor } from '../../contract/app-hooks.ts';
 import { type BoardReadFailure, InboxBoardReads } from '../lib/inbox-board-reads.ts';
 
@@ -128,7 +131,18 @@ export interface AgendaInbox {
   readonly laneEditor?: LaneEditor;
   /** Every machine's ferrets have been read and no board is on its first read: a card not listed now is not open. */
   readonly settled?: boolean;
+  /** Paired machines this device has not unlocked: their items are not read, and each says so with an Unlock. */
+  readonly locked?: readonly LockedInboxMachine[];
 }
+
+/** A paired machine whose items this device cannot read until it unlocks it. */
+interface LockedInboxMachine {
+  readonly daemonId: DaemonId;
+  readonly name: string;
+  readonly unlock: () => void;
+}
+
+const NO_LOCKED: readonly LockedInboxMachine[] = [];
 
 /** One paired machine to count Attention on: its pairing and the name the reader knows it by. */
 export interface InboxMachinePairing {
@@ -538,17 +552,54 @@ export function useAgendaInboxModel(
  * The inbox of the half's one machine, over its runtime: its ferrets (read as soon as something draws them) and the
  * model above. `laneEditor` is Board's lane editor, from its `agenda.lane-proposal` hook.
  */
-export const useRuntimeInbox = (runtime: AgendaRuntime, laneEditor?: LaneEditor): AgendaInbox => {
-  const pairings = useMemo(
-    () => [{ connection: runtime.connection, name: runtime.name }],
-    [runtime.connection, runtime.name],
+/**
+ * The Inbox a view of this half draws. With the device's `fleet` and a shell that lists the machines
+ * (`useEveryDaemon`), it is EVERY machine's: each unlocked machine's ferrets through its own runtime, counted and dealt
+ * through the fleet's one agenda client, and a locked machine as a line that says so with an Unlock (it is not read).
+ * Without them (a harness, a shell that lists none) it is this half's one machine.
+ */
+export const useRuntimeInbox = (runtime: AgendaRuntime, laneEditor?: LaneEditor, fleet?: AgendaFleet): AgendaInbox => {
+  const rows = useEveryDaemon();
+  const reach = useMemo(() => {
+    if (fleet === undefined || rows.length === 0)
+      return {
+        runtimes: [runtime],
+        pairings: [{ connection: runtime.connection, name: runtime.name }],
+        locked: NO_LOCKED,
+        agenda: runtime.agenda,
+      };
+    const open = rows.filter(row => !row.locked);
+    const runtimes = open.map(row => fleet.runtimeOf(row.client));
+    return {
+      runtimes,
+      pairings: runtimes.map((each, i) => ({ connection: each.connection, name: open[i]?.machine ?? each.name })),
+      locked: rows
+        .filter(row => row.locked)
+        .map(row => ({ daemonId: toDaemonId(row.daemon), name: row.machine, unlock: () => void row.unlock() })),
+      agenda: fleet.agenda,
+    };
+  }, [fleet, rows, runtime]);
+  const store = useMemo(
+    () =>
+      reach.runtimes.length === 1 && reach.runtimes[0] !== undefined
+        ? reach.runtimes[0].ferrets
+        : mergedFleet(reach.runtimes.map(each => each.ferrets)),
+    [reach],
   );
-  const machines = useInboxMachines(runtime.ferrets, pairings);
-  const inbox = useAgendaInboxModel(runtime.agenda, machines);
-  const settled = machines.every(machine => machine.sessions !== null) && !inbox.reading;
+  const machines = useInboxMachines(store, reach.pairings);
+  const inbox = useAgendaInboxModel(reach.agenda, machines);
+  // The machine this page is drawn for, when it is locked, is not in the Inbox (it is not read): nothing is settled
+  // until it is unlocked and read, or the reader would be sent away from a card that was never looked for.
+  const ownLocked = reach.locked.some(line => line.daemonId === runtime.connection.daemonId);
+  const settled = machines.every(machine => machine.sessions !== null) && !inbox.reading && !ownLocked;
   return useMemo(
-    () => ({ ...inbox, settled, ...(laneEditor === undefined ? {} : { laneEditor }) }),
-    [inbox, settled, laneEditor],
+    () => ({
+      ...inbox,
+      settled,
+      ...(reach.locked.length === 0 ? {} : { locked: reach.locked }),
+      ...(laneEditor === undefined ? {} : { laneEditor }),
+    }),
+    [inbox, settled, reach.locked, laneEditor],
   );
 };
 

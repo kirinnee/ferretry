@@ -145,7 +145,7 @@ describe('decision 9: a ChildEnvironment is opened by the kernel at exec time', 
     values.set(opaque, env);
     return opaque;
   };
-  const opener: ChildEnvironmentOpener = { open: env => values.get(env) };
+  const opener: ChildEnvironmentOpener = { open: env => values.get(env), searchPathOf: () => undefined };
 
   test('the child gets the values; the caller only ever holds names', async () => {
     const env = handle({ FY_TEST_SECRET: 'opened-in-the-child' });

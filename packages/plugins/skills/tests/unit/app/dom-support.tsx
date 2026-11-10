@@ -30,26 +30,6 @@ export const click = async (element: Element | null, what: string): Promise<void
   await interact(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
 };
 
-const valueSetter = () => Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-const selectSetter = () => Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-
-export const typeInto = async (input: HTMLInputElement, text: string): Promise<void> => {
-  await interact(() => {
-    valueSetter()?.call(input, text);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
-export const choose = async (select: HTMLSelectElement | null, value: string, what: string): Promise<void> => {
-  const target = must(select, what);
-  await interact(() => {
-    selectSetter()?.call(target, value);
-    target.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-};
-
-export const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-
 /** A surface the half built (`AppComponent`, which answers `unknown`) as the React component the shell mounts it as. */
 export const asView = <Props,>(component: AppComponent<Props>): FunctionComponent<Props> =>
   component as unknown as FunctionComponent<Props>;

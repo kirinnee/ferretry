@@ -251,8 +251,8 @@ export class RestartService {
         kept.push(entry);
         continue;
       }
-      if (entry.onlyIfOutdated && (await this.ports.outdated(entry.id).catch(() => ['tools' as const])).length === 0)
-        continue;
+      // Restarted only on proof: an outdated-only entry whose answer cannot be had is dropped, never restarted on a guess.
+      if (entry.onlyIfOutdated && (await this.ports.outdated(entry.id).catch(() => [])).length === 0) continue;
       try {
         await this.ports.restart(entry.id, entry.requestedBy);
         this.#retries.delete(entry.id);

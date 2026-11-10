@@ -1127,4 +1127,42 @@ describe('U1 a selftest that declares host gets its own state folder and a narro
     expect(out[0]).toContain('! it did not finish within 30 ms');
     expect(signal?.aborted).toBe(true);
   });
+
+  test('U1 a selftest that answered aborts the signal of a child it started and left running', async () => {
+    let signal: AbortSignal | undefined;
+    const left: SpawnPort = {
+      ...base,
+      start: (_program, _args, options) => {
+        signal = options?.signal;
+        return {
+          pid: 1,
+          stdout: new ReadableStream(),
+          stderr: new ReadableStream(),
+          write: () => {},
+          kill: () => {},
+          exited: new Promise(() => {}),
+          pipes: [],
+          closePipes: () => {},
+        };
+      },
+    };
+    const out = await lines(
+      deps(
+        [
+          hosted('terminals', ['tmux'], {
+            label: 'tmux',
+            host: true,
+            run: async env => {
+              env.spawn?.start('tmux', ['-V']);
+              return 'answered';
+            },
+          }),
+        ],
+        { spawn: left },
+      ),
+    );
+    expect(out[0]).toContain('answered');
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(true);
+  });
 });

@@ -21,9 +21,13 @@ export function expectedSections(manifest: Manifest, half: HalfName): Record<str
       ),
       subscribers: (manifest.data?.subscribes ?? []).map(event => event.name),
       doctor: [...(manifest.doctor ?? [])],
-      resolvers: (manifest.permissions?.network ?? []).flatMap(entry =>
-        typeof entry === 'object' && 'resolver' in entry ? [entry.resolver] : [],
-      ),
+      resolvers: [
+        ...new Set(
+          [...(manifest.permissions?.network ?? []), ...(manifest.permissions?.spawn ?? [])].flatMap(entry =>
+            typeof entry === 'object' && 'resolver' in entry ? [entry.resolver] : [],
+          ),
+        ),
+      ],
     };
   if (half === 'app')
     return {
@@ -162,6 +166,19 @@ function checkSeamFindings(where: string, manifest: Manifest, impl: AnyImplement
     for (const id of have)
       if (!declared.has(id))
         findings.push({ check, where, message: `daemon half implements undeclared ${seam} "${id}"` });
+  }
+  // A selftest's `enabledBy` names one of the manifest's OWN config file defs (kernel batch #14): the very object.
+  const own: readonly unknown[] = manifest.data?.config ?? [];
+  for (const [id, probe] of Object.entries(
+    (seams.selftest ?? {}) as Record<string, { enabledBy?: { def?: unknown } }>,
+  )) {
+    const def = probe?.enabledBy?.def as { shape?: unknown } | undefined;
+    if (probe?.enabledBy !== undefined && (def?.shape !== 'file' || !own.includes(def)))
+      findings.push({
+        check,
+        where,
+        message: `daemon half's selftest "${id}" is switched by a config file that is not one of its own declared files`,
+      });
   }
   return findings;
 }

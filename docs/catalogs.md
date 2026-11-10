@@ -739,10 +739,14 @@ Installing is two steps and every route has exactly one capability. A project wr
   says so); a bound runtime server gets `${secret:OWN}`. No secret value crosses any route.
 - **It writes only through existing paths**: the project `.mcp.json` compare-and-swap, a project skill
   folder (a new port that never follows a symbolic link and refuses one on the path), and for a runtime
-  the fleet catalogue (an INTERNAL change, `catalog.install`: the component, its skill files and the
-  profile entry are one change). That kind is not in the wire schema, so `POST /v1/fleet/proposals`
-  refuses it; only the installer produces one, after its checks. The fleet executor also resolves every
-  file path and refuses any write outside the skill's own folder in the assets directory. Anything already at the destination that B's install record did not write is
+  the plugin that owns the item's kind (MCP for a server, Skills for a skill). The installer, after its checks,
+  hands that owner an INTERNAL `catalog.install` change (the component, its skill files and the profile entry)
+  through the `catalog.items` hook's `runtime.installCatalogItem`. It is Catalogs' own shape, not a Runtimes change:
+  Runtimes' change kinds (`component.put`, `profile.put` and the rest of `POST /v1/runtimes/proposals`) do not
+  include it, so no route can submit one; only the installer produces it. The owner must resolve every
+  file path and refuse any write outside the skill's own folder in the assets directory. While no owner offers
+  that hook, an install into a runtime answers `503 catalog_kind_unavailable` and writes nothing (a declared GAP
+  in `ports-pending.json`). Anything already at the destination that B's install record did not write is
   `catalog_install_conflict`. An update replaces an install only when every file it wrote still has the
   hash B recorded (files are compared by exact relative path); a file edited by hand is refused as
   `catalog_install_edited` (see [Updating an install](#updating-an-install-catalogs-3d-3)). A runtime component is compared by a hash of what it holds, recorded at install, so a hand
@@ -865,90 +869,6 @@ together with `--yes` (a script cannot answer y/N; a person reads the review wit
 carries exactly one protocol payload: the
 applied install with its notes, the install list, or what was removed. The preview still goes out in full,
 as JSON on stderr, so a script never skips the review a person would have read.
-
-## Copying a skill from this machine
-
-A skill you already have on this machine can be copied into a project or a runtime without a catalog:
-another account's home (`~/.claude/skills`, a runtime's skills folder) or a registered project's
-`.claude/skills` / `.agents/skills`. It is the file installer's twin and keeps its rules
-(`packages/daemon/src/lib/local-skill-installs/`, wire in `packages/protocol/src/lib/local-skill-install.ts`).
-**Skills only**: an MCP server is never copied this way.
-
-| Route                                                | Capability             | What it does                                                                |
-| ---------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------- |
-| `POST /v1/skill-installs/local/project/preview`      | `filesystem.use`       | reads the source, answers the review and a `previewId`; writes nothing      |
-| `POST /v1/skill-installs/local/project`              | `filesystem.configure` | copies exactly that preview into a project folder                           |
-| `POST /v1/skill-installs/local/runtime/preview`      | `filesystem.use`       | the same, for a runtime and profile (it still reads files off this machine) |
-| `POST /v1/skill-installs/local/runtime`              | `fleet.configure`      | copies it as one fleet change                                               |
-| `GET /v1/skill-installs/local`                       | `fleet.use`            | what was copied, and where (project copies need `filesystem.use` too)       |
-| `DELETE /v1/skill-installs/local/project/:installId` | `filesystem.configure` | removes exactly the files that copy wrote                                   |
-| `DELETE /v1/skill-installs/local/runtime/:installId` | `fleet.configure`      | the same, for a runtime copy                                                |
-
-- **Person only.** Every route is `caller: 'person'`: **a ferret is refused on all seven**, previews and
-  list included (`403 forbidden`), because a copied skill is instructions a ferret will follow.
-- **The source is looked up, never opened on the caller's word.** The request names a `SKILL.md` path. The
-  daemon asks the same skills inventory as `GET /v1/skills` and re-resolves that path itself; a path the
-  inventory does not list (or no longer lists) is `local_skill_source_unknown`. Its folder is then read
-  without ever following a link, with the catalog's file-count and size caps. Links, binaries, oversized
-  and credential-named files, hard links and case collisions are **not copied and are said**
-  (`skipped`, with the reason, and the copy carries on without them); the executable bit is **not**
-  kept. A folder with no `SKILL.md` among the files it can carry, a name that is not a catalog name, or **more
-  files than a destination holds (64)** is `local_skill_source_invalid`, said at the **preview** so a copy that
-  could never be removed or updated is never made. The folder is read under the boundary the inventory listed it
-  under (the project root, or the fleet directory for an account home) and the real path of its folder is
-  checked against that boundary again when it is read, so a link swapped in since the listing is refused.
-- **The review is a catalog review.** Every file in full, hidden characters marked, the same warnings, and
-  the secret redaction the catalog review has. Where it is from is `origin` (account or project, and the
-  `SKILL.md` path), as this machine found it, never as the caller reported it.
-- **Your own files are shown whole, and a password is never copied.** The source is the person's own file on
-  this machine, shown to them and only to them (the routes are person-only), so the review draws every file
-  in full. A few shapes are certain enough to **refuse** the preview, naming the file and the line and never
-  showing the text (`local_skill_source_invalid`: "<file> line <n> holds what looks like a password or key. Remove
-  it, then copy the skill."): an address with a password in it (`scheme://user:pass@host`), a name that looks
-  like a secret given a value of 16 or more characters (`API_KEY=…`, `api_key = "…"`, YAML or JSON `token: …` /
-  `"token": "…"`; `$VAR`, `${VAR}` and `<…>` references are not values, and after `:` neither is a path or an
-  address), an `Authorization: Bearer <16+ characters>` header, `curl -u user:pass`, a credential in an address's query (`?token=…`, `&access_token=…`, `?api_key=…` with 16 or more characters), a PEM or PGP private key block (`-----BEGIN … PRIVATE KEY-----`, `-----BEGIN PGP PRIVATE KEY BLOCK-----`), and a well-known token on its own, even with a full stop right after it in prose (`ghp_…`, `github_pat_…`, `sk-…`, `xoxb-…`, `glpat-…`, `AKIA…`: the prefix list "See changes" owns, 20 or more characters with a digit in them, so `sk-learn-is-a-library` is prose). The scan is **linear** (a test feeds it 256 KiB of hostile text and holds it to well under a second). The text is read as "See
-  changes" reads it (invisible characters out, look-alike letters folded, and a name or value a line break split
-  put back together), by the same helpers (`catalog-installs/conservative-changes.ts`), so the two cannot drift. A broader test (`mayHoldSecret`, the one the "See changes" view uses) only **warns**, one
-  warning per file: "<file> mentions keys, tokens or passwords. Check it holds no secret value before you copy
-  it to <target>." Files are never rewritten.
-- **A preview writes nothing.** Previews live in memory for 600 seconds, up to 8 per caller, and are bound
-  to the caller that reviewed them. An apply writes **exactly** the bytes that were previewed (the preview
-  holds them; the source is not read a second time, so it cannot change between review and write). The
-  destination is judged again at apply, so a conflict that appeared since is still refused.
-- **A copy, never a link.** The files are written into the target and the two stay separate. A runtime copy is a
-  layer of a **profile**, so every runtime on that profile gets it (the preview's destination says so, and that it
-  replaces an earlier copy).
-- **It writes only through existing paths**: the project skill-folder port the catalog installer uses, and
-  for a runtime the fleet catalogue's `installCatalogItem` with a **synthetic provenance** (publisher
-  "This machine", catalog "Skills on this machine"; no signature exists because nobody published anything).
-  Removing a runtime copy goes through the fleet's own remove proposal.
-- **One passkey per apply.** A governed caller needs a fresh step-up for the act `catalog-install` (the
-  existing act: it is the same decision, installing instructions that will run, so no new act is minted);
-  the proof is claimed atomically and not given back. **Removing never asks.** A loopback caller is
-  ungoverned, and the CLI asks y/N.
-- **The record.** `<FY_HOME>/state/local-skill-installs.json`, mode `0600`, written by temp file and rename,
-  a sibling of the catalog install record with the same shape: each copy with the SHA-256 of every file it
-  wrote. Remove and update touch **only recorded files**, and a recorded file edited since is
-  `local_skill_conflict`. The record is a file on disk, so it is not trusted for where to act: a project copy is
-  removed or replaced only if its root is a project this machine knows and its folder is `.claude/skills/<name>`
-  or `.agents/skills/<name>` (and both agree with its key), otherwise `local_skill_target_unknown`. Anything at the destination that no record of ours wrote is a conflict, so a skill
-  you wrote by hand is never overwritten.
-- **Refusals** (`LOCAL_SKILL_REFUSALS`): `local_skill_source_unknown` (404), `local_skill_source_invalid`
-  (422), `local_skill_target_unknown` (404), `local_skill_preview_unknown` (404),
-  `local_skill_preview_expired` (410), `local_skill_conflict` (409), `local_skill_install_unknown` (404).
-  An unreadable record is `500`, never a fresh start.
-- **Audit.** `fleet.configured` with `detail.action` `local-skill-install` or `local-skill-remove` and the
-  scope: the skill's name, never a file ([audit.md](audit.md)).
-
-```
-fy skill install --from <skill folder or its SKILL.md> ( --to project --project <root> --harness claude|codex | --to runtime --runtime <r> --profile <p> ) [--yes] [--json]
-fy skill installs [--json]
-fy skill uninstall <installId> [--yes] [--json]
-```
-
-`install` previews, prints the whole review, asks y/N unless `--yes`, then applies. When the daemon wants
-a passkey it says so and changes nothing.
 
 ## Members (phase 2)
 
@@ -1425,6 +1345,11 @@ ACTIVE in this session … the add button is too overloaded").
 
 ### + Add skills, the page (&B131 A2)
 
+In 5.0 the page is Catalogs' (`plugins/catalogs/app/features/add-skills/`, screen `add-skills` at
+`/d/<daemon>/ferrets/<id>/add-skills`). Skills' panel offers the slot `skills.add` beside its "N active" line and
+Catalogs contributes the **+ Add skills** button to it; the ferret's folder, harness, runtime and where its skills come
+from ride in the query. The page below is otherwise as it was, less the "from this machine" group.
+
 The Skills tab has one **+ Add skills** button by its "N active in this session" line. It goes to a page of its own,
 **Add skills** at `/d/<daemon>/session/<id>/skills` (`features/context-rail/add-skills-page.tsx`), with **Back to the
 session** and **Refresh** at the top; the install review stays a sheet over it. The page:
@@ -1465,41 +1390,69 @@ session** and **Refresh** at the top; the install review stays a sheet over it. 
 session actually uses it_ needs a paid model run, which this slice did not make. Until it is checked the page claims
 only what is known; changing the sentence is one constant (`CODEX_NEXT`).
 
-### + Add skills, On this machine (&B131 A4)
+### An account home outside the fleet: what each reader does with a link (BG-033)
 
-The Add skills page has a second group under the subscriptions, **On this machine**
-(`features/context-rail/machine-skills-group.tsx`, `machine-skills-model.ts`,
-`local-skill-install-sheet.tsx`). It is the app for ["Copying a skill from this machine"](#copying-a-skill-from-this-machine).
+A home the fleet places outside its own folder (an operator's own folder, a home-manager home whose `skills/`,
+`settings.json` and `config.toml` link into a store) is read **read-only**, and each reader treats a link by its own rule.
+"Inside" means the link's real path is inside that account home.
 
-- **What it lists**: the machine's skills inventory (`GET /v1/skills`: every account and every registered
-  project) **minus what this session already sees**. A skill is "already seen" when the session lists the same
-  `SKILL.md` path or the same name (case-folded). A skill listed by an account and a project at the same path is
-  one row. Each row has the name, "‹runtime› account" or "project ‹name›" with the agent, the description and
-  **Install** (or **Installed**, when the copy record holds a copy made from that path). The search field above
-  narrows both groups by every word typed.
-- **When it cannot be read** the group says so in one line ("Press Refresh to try again"), and the rest of the page still works. Refresh re-reads it too; if it still fails, the "Could not reach" line names this machine. An empty list says
-  that no other account or project has a skill this session lacks; a truncated inventory says some are not shown.
-- **Install** opens a sheet in two steps. First the **place**, defaulted exactly as the catalog installs above are
-  (**This project** when the session's folder is inside a registered project, otherwise **This account**). Then
-  **Review before installing** calls the preview route, and the review shows what the machine returned:
-  - the machine's **warning** sentences, each with its severity;
-  - **From** (the account or project and the path), **Into** (the destination), and **Replaces** when an earlier
-    copy would be replaced;
-  - **Not copied** (each file left behind, with the machine's reason);
-  - **every file in full**, with hidden characters marked, never hidden.
-- **A refusal has no Install button.** A password or key in a file is the machine's own sentence, "‹file› line ‹n›
-  holds what looks like a password or key. Remove it, then copy the skill.", shown as written (the daemon never
-  returns the text it matched). A source over the file cap, a skill that is gone, a place that is unknown, a
-  conflict and an expired preview each say what happened and that **nothing was installed**; an expired or unknown
-  preview offers **Preview again**. Changing the place drops a review that was already read.
-- **Install** asks the person's passkey (the `catalog-install` step-up) and applies exactly the previewed bytes.
-  A missing passkey says so and changes nothing.
-- **After it lands** the page says "Installed", where it went, any note the machine added, and the Skills list
-  re-reads. The sentence about the session is the one A2 uses, so the two sources never word it differently:
-  Claude "It is active in this session now.", Codex "It is active from the next session.", and a place the session
-  does not read says so.
-- **Wording**: the button is **Install** and the row **Installed**; **Add** is only the "+ Add skills" button. The
-  search field is labelled "Search skills" (it covers both groups).
+| Reader                       | A link inside the home                                  | A link out of the home (a store, `~/.ssh`)                                                                                   | A link to nothing, a loop, a sign-in file                   |
+| ---------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Skills list (`skills()`)     | followed, listed (when its `SKILL.md` is a plain file)  | skipped silently                                                                                                             | skipped silently                                            |
+| A skill's `SKILL.md`         | read                                                    | not read                                                                                                                     | not read                                                    |
+| A file inside a skill folder | never followed (a link is listed as a link, unreadable) | never followed                                                                                                               | never followed                                              |
+| The three documents          | followed, read                                          | **followed**, read (a regular file, a second name only in a proven-immutable store, at most 16 MiB, parsing as the document) | refused in one sentence naming the link; to nothing: absent |
+
+Against the readers of the same homes before, reader by reader:
+
+- **Skills list.** What `skills()` lists is a **superset** of the machine skill inventory of such a home in what it lists
+  (a plain folder and an inside link are extra: that inventory listed neither), **except** where that inventory followed a
+  link into `fleet/`: a link into the fleet's `assets/` it listed as Ferretry's, and here it is skipped (waived, because
+  no root can name both the home and `assets/`). Skills closes it: it binds the homes and lists
+  `fleet/assets/skills/<name>` itself as Ferretry's, so such a link is a duplicate path to the same skill and is never
+  followed. The list is also **narrower** than the session
+  skill picker (which listed store links too). A plain folder in such a home is listed only when it holds a plain,
+  single-name, non-sign-in `SKILL.md`.
+- **A skill's `SKILL.md`, and the files inside a skill folder.** The machine inventory followed links into `fleet/`, the
+  session picker followed every link, and the skill-folder reader (tree and file) followed none; here `SKILL.md` follows a
+  link inside the home only, and a walk or a file read follows none.
+- **The three documents.** They follow a link out of the home, as the MCP document reader did, but under bounds that
+  reader did not have, so they are **narrower** than it: a link to a folder, a pipe, a second-named file outside a proven-immutable store, the daemon's
+  home, a target whose real name is a sign-in file's, or something that does not parse as the document is refused, and the
+  refusal names only the link. A sign-in file's second name under another basename is refused outside the store (it is a
+  hard link) and read inside it (see below).
+
+A hard-linked `SKILL.md` is not listed. A file read is checked after it was read: if the name no longer reaches the file
+that was judged, the bytes are dropped, and a followed document that grew after it was judged is refused rather than
+returned cut short. A second name on a followed document is the kernel's own hard-link rule (S49): allowed only inside a
+proven-immutable store such as `/nix/store`, so a home-manager link into an optimised store keeps working, and refused
+everywhere else. What is refused: a target whose real basename is a sign-in file's (any letter case, after every link),
+and any hard link that is not store-shaped. What is allowed: a store-shaped hard link (a file owned by root, in a closed
+folder chain under the store), whatever its basename, unless that basename is a sign-in file's. So a second name of a
+sign-in file under another basename inside the store is read; that exposes nothing, because the store is root-owned and
+world-readable and only root can add a name there.
+The refusal of a hard link costs about 200 ms (the kernel retries the check about twenty times, five milliseconds apart,
+before it gives up, which is meant for a publish leftover); that retry is the kernel's and is left as it is, so up to
+three refused documents cost about 0.6 s.
+
+Four things the document follow still leaves, declared:
+
+- **A swap of a folder above the target.** A folder above the target swapped for a link to another folder after the
+  judge can make the read return that folder's same-named file: a regular file that parses (with a second name only
+  inside a proven-immutable store), outside the daemon's private places, and never one whose own name is a sign-in file's.
+- **A link to nothing in the daemon's home.** It answers absent, like any link to nothing, so whoever owns the link can
+  tell whether a name exists there, never a byte of it; the MCP document reader answered the same.
+- **A target under `/proc`, `/sys` or `/etc`.** What happens differs per case. A `/proc` file is never returned: the
+  kernel syncs every file it reads durably, `/proc` refuses that sync, so a `/proc` target is refused whatever it holds,
+  an empty one included. A `/sys` file is read up to the size it reports (often 4096 bytes), and an `/etc` file up to its
+  real size; either one is returned whole when it parses as the document (a config file of comments only is valid TOML)
+  or reads blank, as a blank file inside the home is (declared, not refused; the test of an empty linked document pins
+  that answer), and dropped otherwise. That a readable file which parses is returned is the rule of
+  every followed document (the table above). None of this is new exposure: the account owner who authors the link
+  already reads these files as themselves, and the MCP document reader read all of these too.
+- **A kernel test gap, kernel-owned.** The kernel's unit tests do not pin its store-root check against a looser match (a
+  substring of the real path); the check that the file is owned by root still refuses, so nothing opens. It is left to
+  the kernel's owner and is not changed here.
 
 ## Links (catalogs 3f)
 

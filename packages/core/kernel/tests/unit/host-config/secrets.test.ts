@@ -4,7 +4,10 @@ import {
   findRawSecrets,
   looksLikeRawSecret,
   RAW_SECRET_MESSAGE,
+  RAW_TEXT_SECRET_MESSAGE,
   rawSecretFix,
+  rawTextHoldsSecret,
+  rawTextSecretLine,
   shannonEntropy,
 } from '../../../host/config/secrets.ts';
 
@@ -308,5 +311,240 @@ describe('the sentences a finding is reported with', () => {
     should(rawSecretFix('fy')).containEql('fy secret set NAME');
     should(rawSecretFix('fy')).containEql(`${DOLLAR}{secret:NAME}`);
     should(RAW_SECRET_MESSAGE).containEql('raw secret');
+  });
+});
+
+describe('rawTextSecretLine — the raw text, comments and tags included', () => {
+  it('should find a key in a comment, by its line and nothing else', () => {
+    // Arrange
+    const text = `limit: 5\n# the old key ${KNOWN_SHAPES[0]?.[1] ?? ''}\n`;
+
+    // Act / Assert
+    should(rawTextSecretLine(text)).equal(2);
+    should(rawTextHoldsSecret(text)).be.true();
+  });
+
+  it('should find a key written as a tag or after a value on the same line', () => {
+    // Act / Assert
+    should(rawTextSecretLine(`note: !${KNOWN_SHAPES[0]?.[1] ?? ''} x\n`)).equal(1);
+    should(rawTextSecretLine(`limit: 5\nnote: ok # ${KNOWN_SHAPES[6]?.[1] ?? ''}\n`)).equal(2);
+  });
+
+  it('should find nothing in a file of references, a modeline and ordinary comments', () => {
+    // Arrange
+    const text = [
+      '# yaml-language-server: $schema=../.schema/voice.json',
+      '# the key lives in the secret store',
+      `apiKey: ${DOLLAR}{secret:WORK_KEY}`,
+      'limit: 5',
+      '',
+    ].join('\n');
+
+    // Act / Assert
+    should(rawTextSecretLine(text)).be.undefined();
+    should(rawTextHoldsSecret(text)).be.false();
+  });
+
+  it('should say what was found without the value', () => {
+    // Assert
+    should(RAW_TEXT_SECRET_MESSAGE).containEql('a comment or a tag counts');
+    should(RAW_TEXT_SECRET_MESSAGE).not.containEql('sk-');
+  });
+});
+
+/**
+ * The scan reads every line by hand and shows no pattern more than a window of a line (R6 critical: the line pattern it
+ * replaced backtracked cubically on blanks). Its answers are the old pattern's, checked against that pattern as an
+ * oracle on short lines, where its backtracking costs nothing.
+ */
+describe('rawTextSecretLine — linear, and the same answers as the pattern it replaced', () => {
+  /** The line pattern the scan replaced, kept here only as the oracle. */
+  const OLD_KEY_VALUE_LINE = /^\s*(?:-\s+)?["']?([^:"'#]+?)["']?\s*:\s*["']?(.+?)["']?\s*$/u;
+  const OLD_SHAPES = [
+    /\bsk-ant-[A-Za-z0-9_-]{8,}/u,
+    /\bsk-or-[A-Za-z0-9_-]{8,}/u,
+    /\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}/u,
+    /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/u,
+    /\bgh[pousr]_[A-Za-z0-9]{20,}/u,
+    /\bgithub_pat_[A-Za-z0-9_]{20,}/u,
+    /\bxox[abprs]-[A-Za-z0-9-]{10,}/u,
+    /\bgsk_[A-Za-z0-9]{20,}/u,
+    /\bcsk-[A-Za-z0-9]{20,}/u,
+    /\bAIza[0-9A-Za-z_-]{30,}/u,
+    /\bglpat-[A-Za-z0-9_-]{16,}/u,
+  ];
+  const oldLooksLike = (key: string | undefined, value: string): boolean => {
+    if (OLD_SHAPES.some(shape => shape.test(value))) return true;
+    if (key === undefined || !/(?:(?:key|token|secret|password|passwd)s?|credentials?)$/iu.test(key)) return false;
+    const trimmed = value.trim();
+    if (/^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u.test(trimmed) || trimmed.length < 16 || /\s/u.test(trimmed))
+      return false;
+    if (/^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu.test(trimmed)) return false;
+    return shannonEntropy(trimmed) >= 3.5;
+  };
+  const oldLine = (line: string): boolean => {
+    if (oldLooksLike(undefined, line)) return true;
+    const pair = OLD_KEY_VALUE_LINE.exec(line);
+    return pair?.[1] !== undefined && pair[2] !== undefined && oldLooksLike(pair[1], pair[2]);
+  };
+
+  /** A small seeded generator, so a failure names a line that can be replayed. */
+  const random = (seed: number) => () => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return seed / 2_147_483_648;
+  };
+  const PIECES = [
+    ' ',
+    '  ',
+    '\t',
+    '-',
+    '- ',
+    '"',
+    "'",
+    ':',
+    ': ',
+    '#',
+    'a',
+    'token',
+    'API_KEY',
+    'Secrets',
+    'x y',
+    RANDOM_LOOKING,
+    `${DOLLAR}{secret:X}`,
+    `${DOLLAR}NAME`,
+    'https://',
+    '/path',
+    'sk-',
+    filler(20),
+    '.',
+    '"tok"',
+    'ghp_',
+  ];
+
+  it('should answer exactly as the old pattern on 20 000 generated lines', () => {
+    // Arrange
+    const next = random(7);
+    const disagreements: string[] = [];
+
+    // Act
+    for (let count = 0; count < 20_000; count += 1) {
+      const pieces = Math.floor(next() * 9) + 1;
+      let line = '';
+      for (let index = 0; index < pieces; index += 1) line += PIECES[Math.floor(next() * PIECES.length)] ?? '';
+      if ((rawTextSecretLine(line) === 1) !== oldLine(line)) disagreements.push(JSON.stringify(line));
+    }
+
+    // Assert
+    should(disagreements).deepEqual([]);
+  });
+
+  it.each([
+    ['a plain key', `token: ${RANDOM_LOOKING}`],
+    ['a quoted key and value', `"api_key": "${RANDOM_LOOKING}"`],
+    ['a key quoted with blanks inside', `'secret  ': ${RANDOM_LOOKING}`],
+    ['a list item', `  - password: '${RANDOM_LOOKING}'`],
+    ['blanks around the colon', `credentials   :    ${RANDOM_LOOKING}   `],
+    ['a comment', `# token: ${RANDOM_LOOKING}`],
+    ['a dash with no blank', `-token: ${RANDOM_LOOKING}`],
+    ['a reference', `token: ${DOLLAR}{secret:WORK_KEY}`],
+    ['a path', `ssh_key: ~/.ssh/${RANDOM_LOOKING}`],
+  ])('should agree with the old pattern on %s', (_label, line) => {
+    // Act / Assert
+    should(rawTextSecretLine(line) === 1).equal(oldLine(line));
+  });
+
+  /** A hard bound per call, far above one linear pass. */
+  const BOUND_MS = 1500;
+  const KIB = 1024;
+  let nested = '';
+  for (let depth = 0; nested.length < 254 * KIB; depth += 1) nested += `${' '.repeat(depth)}k:\n`;
+
+  it.each([
+    ['one 256 KiB line of spaces', ' '.repeat(256 * KIB)],
+    ['a value padded with 256 KiB of spaces', `a: x${' '.repeat(256 * KIB - 8)}y`],
+    ['a key padded with 256 KiB of spaces', `token${' '.repeat(256 * KIB - 12)}: x`],
+    ['block indentation 700 deep', nested],
+    ['256 KiB of quotes, colons and blanks', '" : \' '.repeat(43 * KIB)],
+    ['256 KiB of key prefixes', 'sk-'.repeat(85 * KIB)],
+    ['a 256 KiB credential value', `token: ${RANDOM_LOOKING.repeat(13 * KIB)}`],
+  ])('should scan %s in under 1500 ms (R6 critical)', (_label, text) => {
+    // Act
+    const started = performance.now();
+    rawTextSecretLine(text);
+
+    // Assert
+    should(performance.now() - started).be.below(BOUND_MS);
+  });
+
+  it('should find a key shape wherever a window of a long line cuts it, and nothing a cut could fake', () => {
+    // Arrange: a key, and a near-miss, placed at every offset around the first few window edges of a long line.
+    const shapes = [`sk-ant-${filler(10)}`, `AKIA${filler(16, 'A1')}`, `AIza${filler(32)}`, `ghp_${filler(24)}`];
+    const misses = [`xsk-ant-${filler(10)}`, `AKIA${filler(17, 'A1')}`, `AIza${filler(29)}`, `sk-ant-${filler(7)}`];
+    const disagreements: string[] = [];
+
+    // Act
+    for (const edge of [4032, 8064, 12_096]) {
+      for (let offset = -70; offset <= 70; offset += 1) {
+        for (const [index, word] of [...shapes, ...misses].entries()) {
+          for (const pad of ['a', ' ']) {
+            const at = edge + offset;
+            const line = `${pad.repeat(at)}${word}${pad.repeat(Math.max(0, 16_500 - at - word.length))}`;
+            if (looksLikeRawSecret(undefined, line) !== oldLooksLike(undefined, line))
+              disagreements.push(`${String(index)}@${String(at)}/${JSON.stringify(pad)}`);
+          }
+        }
+      }
+    }
+
+    // Assert
+    should(disagreements).deepEqual([]);
+  });
+
+  /**
+   * A fake match glued in front of a real key (R7): `x` + `sk-ant-AAAA-` + `sk-ant-…`. In the window that BORROWS the
+   * fake's first character, that character starts a match at index 0 which runs on through the real key; a scan that
+   * found it and only then skipped it resumed after its end, and the real key — cut by the window before — was found
+   * by neither. Every glued pair, at every offset around every window edge, padded with a word character or a blank.
+   */
+  const GLUED = [
+    [`sk-ant-${filler(4)}-`, `sk-ant-${filler(200)}`],
+    [`sk-${filler(4)}-`, `sk-${filler(200)}`],
+    [`glpat-${filler(4)}-`, `glpat-${filler(200)}`],
+    [`sk-or-${filler(4)}-`, `sk-or-${filler(200)}`],
+    [`xoxb-${filler(4)}-`, `xoxb-${filler(200)}`],
+  ] as const;
+
+  it('should find a real key glued behind a fake one at offset 4030, where the old scan did (R7 minor)', () => {
+    for (const [fake, real] of GLUED) {
+      // Arrange: `x` at 4030, so the fake's first character is the one window 2 borrows (4031).
+      const line = `${'a'.repeat(4030)}x${fake}${real}${'a'.repeat(9000)}`;
+
+      // Act / Assert
+      should(oldLooksLike(undefined, line)).be.true();
+      should(looksLikeRawSecret(undefined, line)).be.true();
+    }
+  });
+
+  it('should agree with the old scan on a glued fake and real key at every offset around every window edge', () => {
+    // Arrange
+    const disagreements: string[] = [];
+
+    // Act: windows start every 4 032 characters, each borrowing the one before (4 031, 8 063, …).
+    for (const edge of [4031, 8063, 12_095, 16_127]) {
+      for (let offset = -70; offset <= 70; offset += 1) {
+        for (const [index, [fake, real]] of GLUED.entries()) {
+          for (const pad of ['a', ' ', '-']) {
+            const at = edge + offset;
+            const word = `x${fake}${real}`;
+            const line = `${pad.repeat(at - 1)}${word}${pad.repeat(Math.max(0, 20_500 - at - word.length))}`;
+            if (looksLikeRawSecret(undefined, line) !== oldLooksLike(undefined, line))
+              disagreements.push(`${String(index)}@${String(at)}/${JSON.stringify(pad)}`);
+          }
+        }
+      }
+    }
+
+    // Assert
+    should(disagreements).deepEqual([]);
   });
 });

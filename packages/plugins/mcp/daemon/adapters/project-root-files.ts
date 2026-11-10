@@ -12,8 +12,13 @@
  *   copy, folder-make, pin and remove;
  * - a `.mcp.json` that is a LINK (wherever it points, inside the root included) is refused: the kernel's `lstat` names
  *   the leaf itself;
- * - a project root that is a link, or sits under one, is refused: its kernel `realPath` must be the root as named.
- *   So a project registered through a link (the folder or any parent) reads no `.mcp.json`: register its real path.
+ * - the kernel is asked for the root with the project folder as both the scoped folder and its `within` anchor: the
+ *   anchor itself may be a link, so a project registered through a link (the folder or any parent) reads its
+ *   `.mcp.json` as v4 did. A link the kernel refuses (`link_escape`: the `.mcp.json` leaf pointing out of the project)
+ *   is shown as an unreadable document, naming the file and never what it points at. The project folder is opened
+ *   once by its descriptor and the `.mcp.json` is opened from it (never by a path a link could redirect), so a swap
+ *   landing inside one call reads nothing outside the project; a host that reaches no open folder by descriptor keeps
+ *   the by-path read, and the daemon's doctor says so once at boot.
  *
  * GAP (declared): every narrowing above is THIS adapter's. The kernel's `imports` root takes any absolute folder
  * outside the fence, so a slip here could read any file there (a harness home's `.claude.json` beside a project
@@ -43,28 +48,40 @@ const refuse = (what: string) => async (): Promise<never> => {
   throw new McpFileOnlyRefusal(what);
 };
 
+/** A kernel refusal for a link (`RootError` with `refusal: 'link_escape'`), as the host's contract spells it. */
+const isLinkRefusal = (error: unknown): boolean =>
+  (error as { refusal?: string } | undefined)?.refusal === 'link_escape';
+
+/** Runs a kernel call; a link the kernel refuses becomes an unreadable document that names the file only. */
+const throughLinkRule = async <T>(path: FencedPath, call: () => Promise<T>): Promise<T> => {
+  try {
+    return await call();
+  } catch (error) {
+    if (!isLinkRefusal(error)) throw error;
+    throw new McpDocumentUnreadable(
+      `${path} is a link, or sits under one, that leaves the project; Ferretry reads a project's ${PROJECT_MCP_FILE} only as a file inside it.`,
+    );
+  }
+};
+
 /**
  * A kernel root handle narrowed to the one `.mcp.json` at its base: `resolve` answers only that name, the reads take
- * only the path it answered and only while that path is a regular file (not a link) under a root that is its own real
- * path, and everything else refuses.
+ * only the path it answered and only while that path is a regular file (not a link), and everything else refuses. The
+ * kernel's own link rule runs inside every call it is asked (the root is anchored at the project folder), so there is
+ * no earlier check here for a folder swap to slip past.
  */
 export function mcpFileOnly(handle: RootHandle): RootHandle {
   let allowed: FencedPath | undefined;
-  /** The leaf as it is (`undefined` when there is none), once the path, the leaf and the root have all checked. */
+  /** The leaf as it is (`undefined` when there is none), once the path and the leaf have both checked. */
   const checked = async (path: FencedPath) => {
     if (allowed === undefined || path !== allowed) throw new McpFileOnlyRefusal('read any other file');
-    const leaf = await handle.lstat(path);
+    const leaf = await throughLinkRule(path, () => handle.lstat(path));
     if (leaf === undefined) return undefined;
     if (leaf.kind === 'symlink')
       throw new McpDocumentUnreadable(
         `${path} is a link; Ferretry reads a project's ${PROJECT_MCP_FILE} only as a file.`,
       );
     if (leaf.kind !== 'file') throw new McpDocumentUnreadable(`${path} is not a regular file.`);
-    const base = handle.resolve('');
-    if (!base.ok || (await handle.realPath(base.value)) !== base.value)
-      throw new McpDocumentUnreadable(
-        `${path} is under a link; Ferretry reads a project's ${PROJECT_MCP_FILE} only at the project's real folder.`,
-      );
     return leaf;
   };
   const file = async (path: FencedPath): Promise<FencedPath> => {
@@ -80,17 +97,28 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
       if (resolved.ok) allowed = resolved.value;
       return resolved;
     },
-    stat: async path => ((await checked(path)) === undefined ? undefined : await handle.stat(path)),
+    stat: async path =>
+      (await checked(path)) === undefined ? undefined : await throughLinkRule(path, () => handle.stat(path)),
     lstat: async path => await checked(path),
-    readText: async (path, limitBytes) => await handle.readText(await file(path), limitBytes),
-    readBytes: async (path, limitOrWindow) => await handle.readBytes(await file(path), limitOrWindow),
-    readTail: async (path, maxBytes) => await handle.readTail(await file(path), maxBytes),
+    readText: async (path, limitBytes) => {
+      const named = await file(path);
+      return await throughLinkRule(named, () => handle.readText(named, limitBytes));
+    },
+    readBytes: async (path, limitOrWindow) => {
+      const named = await file(path);
+      return await throughLinkRule(named, () => handle.readBytes(named, limitOrWindow));
+    },
+    readTail: async (path, maxBytes) => {
+      const named = await file(path);
+      return await throughLinkRule(named, () => handle.readTail(named, maxBytes));
+    },
     realPath: refuse('resolve a path'),
     list: refuse('list a folder'),
     entries: refuse('list a folder'),
     writeText: refuse('write'),
     writeBytes: refuse('write'),
     copyTree: refuse('copy'),
+    copyShared: refuse('copy'),
     ensurePrivateDirectory: refuse('make a folder'),
     makeDirectory: refuse('make a folder'),
     pin: refuse('hold a folder open'),
@@ -99,6 +127,10 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
     syncDirectory: refuse('syncDirectory'),
     fileIdentity: refuse('fileIdentity'),
     remove: refuse('remove'),
+    linkTo: refuse('link'),
+    setMode: refuse('change a mode'),
+    rename: refuse('move an entry'),
+    unlink: refuse('remove a link'),
   };
 }
 
@@ -108,12 +140,12 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
  * which the caller reads (or refuses) as before.
  */
 export const projectRootMcpFile =
-  (open: (folder: string) => RootHandle) =>
+  (open: (folder: string, within: string) => RootHandle) =>
   (path: string, knownRoots: readonly string[]): FerretRoot | undefined => {
     for (const known of knownRoots) {
       const root = withoutTrailingSlash(known);
       if (!root.startsWith('/') || root === '/' || projectMcpFilePath(root) !== path) continue;
-      return { root: mcpFileOnly(open(root)), base: root };
+      return { root: mcpFileOnly(open(root, root)), base: root };
     }
     return undefined;
   };

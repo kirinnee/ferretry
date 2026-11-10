@@ -2,9 +2,10 @@ import { defineState } from '@ferretry/kernel/contract';
 import { SessionTransferPlanSchema } from './transfer.ts';
 
 /**
- * The files a transfer leaves beneath the NEW ferret (§9.2), both private to Ferrets.
+ * The file a transfer leaves beneath the NEW ferret on Ferrets' state port (§9.2), private to Ferrets. Its first-turn
+ * brief is NOT here: it is the target's own `turns/turn-001.md` on the internal `sessions` root (`./sessions-root.ts`).
  *
- * A fork's receipt is `ForkFiles` (`./state.ts`) and is the single owner of that fact; these two hold only what the
+ * A fork's receipt is `ForkFiles` (`./state.ts`) and is the single owner of that fact; this holds only what the
  * target itself carries, so the composition has no global transfer-receipt capability at all.
  */
 
@@ -22,19 +23,5 @@ export const TransferPlanFiles = defineState({
   store: 'json',
   format: 1,
   schema: SessionTransferPlanSchema,
-  mode: 0o600,
-});
-
-/**
- * `state/ferrets/<ferret>/turns/turn-001.md`: the deterministic first-turn brief of a transferred ferret.
- *
- * An opaque file read and written as bytes (a markdown document, never parsed); the port writes it atomically and
- * flushes it. Its path is handed to the new agent (`pathOf`), which is why it is opaque and not a document.
- */
-export const TransferBriefFiles = defineState<'transfer-brief', Uint8Array>({
-  name: 'transfer-brief',
-  path: '*/turns/turn-001.md',
-  store: 'opaque',
-  format: 1,
   mode: 0o600,
 });

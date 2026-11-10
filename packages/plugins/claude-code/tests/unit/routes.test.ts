@@ -164,6 +164,82 @@ describe('the permission answer route', () => {
   });
 });
 
+describe('the ferret id in the path and a pane that fails', () => {
+  test('G31 G32 a path with no usable ferret id is a 400 before the body is read or the pane touched', async () => {
+    const pane = new Pane([BASH]);
+    const permission = permissionRoute(new PermissionAnswerService(pane, sleep, TIMING));
+    const dialog = dialogRoute(new DialogAnswerService(pane, sleep, TIMING));
+    const answer = { kind: 'deny', requestId: '0123456789abcdef' };
+
+    for (const bad of ['', '..', '%2e%2e', 'a%2Fb', '%E0%A4%A']) {
+      const params = new Map([['ferretId', bad]]);
+      expect(await refused(permission(call(answer, { params })))).toMatchObject({
+        status: 400,
+        code: 'invalid_ferret_id',
+      });
+      expect(await refused(dialog(call({ kind: 'escape', dialogId: '0123456789abcdef' }, { params })))).toMatchObject({
+        status: 400,
+        code: 'invalid_ferret_id',
+      });
+    }
+    expect(await refused(permission(call(answer, { params: new Map() })))).toMatchObject({ code: 'invalid_ferret_id' });
+    expect(pane.captures).toBe(0);
+  });
+
+  test('G32 a pane that cannot be read is a 409 console_input_failed for a dialog too, and a pane gone is pane_unknown', async () => {
+    const unreadable = dialogRoute(
+      new DialogAnswerService(
+        {
+          capture: async () => {
+            throw new Error('no pane');
+          },
+          write: async () => 0,
+        },
+        sleep,
+        TIMING,
+      ),
+    );
+    const unknown = dialogRoute(
+      new DialogAnswerService(
+        {
+          capture: async () => {
+            throw Object.assign(new Error('that ferret has no pane'), { name: 'PaneUnknown' });
+          },
+          write: async () => 0,
+        },
+        sleep,
+        TIMING,
+      ),
+    );
+    const escapeInput = { kind: 'escape', dialogId: '0123456789abcdef' };
+
+    expect(await refused(unreadable(call(escapeInput)))).toMatchObject({ status: 409, code: 'console_input_failed' });
+    expect(await refused(unknown(call(escapeInput)))).toMatchObject({ status: 409, code: 'pane_unknown' });
+  });
+
+  test('G31 a failure that is not an Error is passed up as it came, not dressed as a pane refusal', async () => {
+    const route = permissionRoute(
+      new PermissionAnswerService(
+        {
+          capture: async () => {
+            throw 'the pane library threw a bare string';
+          },
+          write: async () => 0,
+        },
+        sleep,
+        TIMING,
+      ),
+    );
+
+    const thrown = await route(call({ kind: 'deny', requestId: '0123456789abcdef' })).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(thrown).toBe('the pane library threw a bare string');
+  });
+});
+
 describe('the harness-dialog answer route', () => {
   const dialogId = (frame: string): string => parseHarnessDialog(frame)?.id as string;
 

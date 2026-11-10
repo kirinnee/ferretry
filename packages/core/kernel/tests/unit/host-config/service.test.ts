@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { defineConfig } from '../../../contract/index.ts';
 import { type AnyConfigDef, ConfigPathClaimError } from '../../../host/config/claims.ts';
+import { schemaFileName } from '../../../host/config/schemas.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { configHarness, HOME, loginsDef, manualClock, captureLog, updatesDef } from './support.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
@@ -270,7 +271,7 @@ describe('config files: comment-keeping writes', () => {
     const h = configHarness();
     await h.files.write('logins', loginsDef, 'work', { patch: { model: 'fast' } });
     const text = h.fs.snapshot().get(h.path('logins/work.yaml')) ?? '';
-    expect(text.split('\n')[0]).toBe('# yaml-language-server: $schema=../.schema/logins.json');
+    expect(text.split('\n')[0]).toBe('# yaml-language-server: $schema=../.schema/logins--item.json');
     expect(text).toContain('model: fast');
   });
 
@@ -384,6 +385,58 @@ describe('config files: collections, claims and refusals', () => {
     expect(() => build(claim('a', file('x.yaml')), claim('b', file('y.yaml')), claim('c', folder('z')))).not.toThrow();
   });
 
+  test('a file and a folder of one stem publish distinct schema names (F-0142)', async () => {
+    const file = defineConfig({ file: 'runtimes.yaml', schema, axis: 'use', loosens: () => [] });
+    const folder = defineConfig({
+      collection: 'runtimes',
+      name: /^[a-z]+$/,
+      schema,
+      axis: 'use',
+      loosens: () => [],
+    });
+    expect(schemaFileName(file)).not.toBe(schemaFileName(folder));
+    const memory = createMemoryHostFs();
+    const files = createConfigFiles({
+      home: HOME,
+      fs: memory,
+      clock: manualClock(),
+      log: captureLog(),
+      binary: 'fy',
+      defs: [claim('runtimes', file), claim('runtimes', folder)],
+    });
+    await files.publishSchemas();
+    const published = [...memory.snapshot().keys()].filter(p => p.includes('/.schema/')).toSorted();
+    expect(published).toEqual([`${HOME}/config/.schema/runtimes--item.json`, `${HOME}/config/.schema/runtimes.json`]);
+  });
+
+  test('two defs that would publish one schema name are refused at declaration, in a sentence (F-0142)', () => {
+    const file = (name: string) => defineConfig({ file: name, schema, axis: 'use', loosens: () => [] });
+    // `a/b.yaml` and `a--b.yaml` are different paths, but both flatten to a--b.json
+    expect(() => build(claim('a', file('a/b.yaml')), claim('b', file('a--b.yaml')))).toThrow(
+      /would both publish the editor schema \.schema\/a--b\.json/u,
+    );
+  });
+
+  test('BG-007 the clash sentence names both plugins and both paths, so the owner knows which two clash (F-0142)', () => {
+    const file = (name: string) => defineConfig({ file: name, schema, axis: 'use', loosens: () => [] });
+    expect(() => build(claim('first', file('a/b.yaml')), claim('second', file('a--b.yaml')))).toThrow(
+      'first (a/b.yaml) and second (a--b.yaml) would both publish the editor schema .schema/a--b.json, so one would hide the other; rename one of them',
+    );
+  });
+
+  test('BG-007 a clash where one side is a collection is refused, whichever side comes first (F-0142)', () => {
+    const file = defineConfig({ file: 'x--item.yaml', schema, axis: 'use', loosens: () => [] });
+    const folder = defineConfig({ collection: 'x', name: /^[a-z]+$/, schema, axis: 'use', loosens: () => [] });
+    // a collection's schema is `x--item.json`, which is also the stem of the file `x--item.yaml`
+    expect(schemaFileName(file)).toBe(schemaFileName(folder));
+    const sentence =
+      'a (x--item.yaml) and b (x/) would both publish the editor schema .schema/x--item.json, so one would hide the other; rename one of them';
+    expect(() => build(claim('a', file), claim('b', folder))).toThrow(sentence);
+    expect(() => build(claim('b', folder), claim('a', file))).toThrow(
+      'b (x/) and a (x--item.yaml) would both publish the editor schema .schema/x--item.json, so one would hide the other; rename one of them',
+    );
+  });
+
   test('a path that leaves config/ or hides is refused', () => {
     const file = (name: string) => defineConfig({ file: name, schema, axis: 'use', loosens: () => [] });
     for (const bad of ['../x.yaml', '/x.yaml', '.schema/x.yaml', 'a//b.yaml', 'x.json'])
@@ -392,6 +445,37 @@ describe('config files: collections, claims and refusals', () => {
 });
 
 describe('config files: live reading and watching', () => {
+  test('a listener still hears a reload whose folder could not be listed for stray files (BG-010)', async () => {
+    const memory = createMemoryHostFs();
+    let listing = 'works';
+    const fs = new Proxy(memory, {
+      get(target, key) {
+        if (key === 'list')
+          return async (path: string) => {
+            if (listing === 'fails' && path === `${HOME}/config`) throw new Error('EACCES: permission denied');
+            return await target.list(path);
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const h = configHarness(fs);
+    h.fs.seed(h.path('updates.yaml'), 'limit: 5\n');
+    let heard = 0;
+    h.files.port('updates').watch(updatesDef as never, () => {
+      heard += 1;
+    });
+    await h.files.reload();
+    listing = 'fails';
+    h.fs.seed(h.path('updates.yaml'), 'limit: 4\n');
+    await h.files.reload();
+    expect(heard).toBe(1);
+    expect(limitOf(h)).toBe(4);
+    const said = h.files.status().issues.find(issue => issue.message.includes('could not be listed'));
+    expect(said?.severity).toBe('warning');
+    expect(said?.message).toContain('EACCES');
+  });
+
   test('a listener hears a reload that moved its file, and not the first reload', async () => {
     const h = configHarness();
     h.fs.seed(h.path('updates.yaml'), 'limit: 5\n');
@@ -457,11 +541,34 @@ describe('config files: live reading and watching', () => {
     stop();
   });
 
+  test('J-0096 a login file edited on disk is not seen by a read until the watcher reloads, and is seen after', async () => {
+    // v4's watched document cached its read until the file watch said it changed. In 5.0 the kernel holds that cache:
+    // readers get the answer of the LAST reload, and the watcher's reload is what lets go of it.
+    const h = configHarness();
+    await h.files.write('logins', loginsDef, 'work', 'model: a\n');
+    const idsOf = () => [...h.files.port('logins').collection(loginsDef).keys()].toSorted();
+    expect(idsOf()).toEqual(['work']);
+    const stop = h.files.startWatching();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(100);
+
+    h.fs.seed(h.path('logins/home.yaml'), 'model: b\n');
+    // Nothing has reloaded yet: the very next read still shows the last reload's snapshot.
+    expect(idsOf()).toEqual(['work']);
+
+    h.clock.advance(1_000);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    h.clock.advance(400);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(idsOf()).toEqual(['home', 'work']);
+    stop();
+  });
+
   test('publishSchemas writes one JSON Schema per def, only when it changed', async () => {
     const h = configHarness();
     await h.files.publishSchemas();
     expect([...h.fs.snapshot().keys()].filter(p => p.includes('/.schema/')).toSorted()).toEqual([
-      h.path('.schema/logins.json'),
+      h.path('.schema/logins--item.json'),
       h.path('.schema/updates.json'),
     ]);
     const before = h.fs.snapshot().get(h.path('.schema/updates.json'));

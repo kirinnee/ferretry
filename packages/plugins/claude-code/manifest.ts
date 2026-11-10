@@ -5,6 +5,7 @@ import {
   CLAUDE_CODE_AUDIT,
   CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_DISCOVERY,
+  CLAUDE_CODE_LAUNCH_SETTINGS,
   CLAUDE_CODE_HOOKS,
   CLAUDE_CODE_READ_MODELS,
   CLAUDE_CODE_SETTINGS,
@@ -14,6 +15,11 @@ import {
 } from './contract/index.ts';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
+import {
+  PROFILE_COMPONENTS_KEY,
+  ProfileClaudeHooksSource,
+  ProfileClaudeSettingsSource,
+} from '@ferretry/plugin-runtimes/contract';
 
 /**
  * Claude Code (§2.3): a harness. It takes `harnesses:claude-code` from Ferrets and needs a `runners` provider only at
@@ -109,19 +115,27 @@ export default definePlugin({
     panels: [
       panel('bottom', { id: 'permission-request', order: 20 }),
       panel('bottom', { id: 'harness-dialog', order: 30 }),
+      // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
+      panel('onboarding.step', { id: 'onboarding-step', order: 20 }),
     ],
     settings: [settingsTab('claude-code', { label: 'Claude Code', order: 20 })],
   },
 
   data: {
-    state: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_DISCOVERY],
+    state: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_DISCOVERY, CLAUDE_CODE_LAUNCH_SETTINGS],
     config: [CLAUDE_CODE_CONFIG, CLAUDE_CODE_SETTINGS, CLAUDE_CODE_HOOKS],
     readModels: CLAUDE_CODE_READ_MODELS,
     publishes: [ClaudeCodeUpdateFinished],
   },
 
   hooks: {
-    takes: [{ hook: Harnesses, key: CLAUDE_CODE }, { hook: StartDecide }],
+    // Runtimes reads the Claude `settings` and `hooks` components a profile names through this plugin, which alone owns them.
+    takes: [
+      { hook: Harnesses, key: CLAUDE_CODE },
+      { hook: StartDecide },
+      { hook: ProfileClaudeSettingsSource, key: PROFILE_COMPONENTS_KEY },
+      { hook: ProfileClaudeHooksSource, key: PROFILE_COMPONENTS_KEY },
+    ],
   },
 
   onboarding: [{ id: 'harness', title: 'Claude Code', order: 20 }],

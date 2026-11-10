@@ -54,6 +54,32 @@ test('R199 a real close wins over error and code zero is never reported', () => 
   expect(zero.ends[0]?.reason).toContain('https://relay.example');
   expect(zero.ends[0]?.reason).not.toContain('private-fingerprint');
 });
+test('R211 a socket that fails before it opens is reported 1006 with its origin — never code 0, never the fingerprint', () => {
+  // A close before onopen, a code-0 close and an error with no close all end the same way: abnormal, naming only where.
+  const closedAtZero = harness();
+  closedAtZero.socket.onclose!({ code: 0, reason: '' });
+  const closedAbnormal = harness();
+  closedAbnormal.socket.onclose!({ code: 1006, reason: '' });
+  const errored = harness();
+  errored.socket.onerror!();
+  errored.timers[0]!.run();
+  for (const run of [closedAtZero, closedAbnormal, errored]) {
+    expect(run.ends).toHaveLength(1);
+    expect(run.ends[0]?.code).toBe(1006);
+    expect(run.ends[0]?.code).not.toBe(0);
+    expect(run.ends[0]?.reason).toContain('https://relay.example');
+    expect(run.ends[0]?.reason).toContain('could not open a connection');
+    expect(run.ends[0]?.reason).not.toContain('private-fingerprint');
+    expect(run.ends[0]?.reason).not.toContain('/v1/rendezvous');
+  }
+  // A socket that HAD opened says so, and still never names its path.
+  const opened = harness();
+  opened.socket.onopen!();
+  opened.socket.onclose!({ code: 0, reason: '' });
+  expect(opened.ends[0]?.code).toBe(1006);
+  expect(opened.ends[0]?.reason).toContain('ended without a close frame');
+  expect(opened.ends[0]?.reason).not.toContain('private-fingerprint');
+});
 test('R199 an error without close ends after the copied 250 ms grace', () => {
   const h = harness();
   h.socket.onerror!();

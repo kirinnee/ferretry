@@ -1,17 +1,8 @@
 /** Fixtures and a scripted client for Skills' app half: wire-shaped values, and a client that records its calls. */
 import { DaemonCallError } from '@ferretry/app';
 import { noteClientDaemon } from '@ferretry/app/testing';
-import { instantFromEpochMs } from '@ferretry/std';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import type {
-  FerretSkillsInventory,
-  LocalSkillInstall,
-  LocalSkillPreview,
-  MachineSkillsInventory,
-  SkillEntry,
-} from '../../../contract/index.ts';
-
-const NOW = instantFromEpochMs(Date.UTC(2026, 10, 7, 10));
+import type { FerretSkillsInventory, MachineSkillsInventory, SkillEntry } from '../../../contract/index.ts';
 
 export const skill = (name: string, over: Partial<SkillEntry> = {}): SkillEntry => ({
   name,
@@ -54,53 +45,6 @@ export const machineInventory = (over: Partial<MachineSkillsInventory> = {}): Ma
     },
   ],
   truncated: false,
-  ...over,
-});
-
-const ID = (letter: string): string => `${letter.repeat(22)}`;
-
-export const installRecord = (over: Partial<LocalSkillInstall> = {}): LocalSkillInstall => ({
-  installId: `lsi_${ID('a')}`,
-  installedAt: NOW,
-  name: 'review',
-  origin: {
-    kind: 'account',
-    owner: 'claude-work',
-    harness: 'claude-code',
-    path: '/home/me/.claude-work/skills/review/SKILL.md',
-  },
-  target: { scope: 'project', projectRoot: '/work/dojo', harness: 'claude-code' },
-  destination: '/work/dojo/.claude/skills/review',
-  files: [{ path: 'SKILL.md', sha256: 'a'.repeat(64) }],
-  ...over,
-});
-
-export const previewOf = (over: Partial<LocalSkillPreview> = {}): LocalSkillPreview => ({
-  previewId: `lsp_${ID('b')}`,
-  expiresAt: NOW,
-  name: 'review',
-  origin: {
-    kind: 'account',
-    owner: 'claude-work',
-    harness: 'claude-code',
-    path: '/home/me/.claude-work/skills/review/SKILL.md',
-  },
-  provenance: {
-    publisher: `fy_daemon_${'A'.repeat(43)}`,
-    publisherName: 'This machine',
-    catalogId: `cat_${ID('c')}`,
-    catalogName: 'This machine',
-    itemId: `itm_${ID('d')}`,
-    kind: 'skill',
-    name: 'review',
-    version: 1,
-    digest: `sha256:${'e'.repeat(64)}`,
-  },
-  target: { scope: 'project', projectRoot: '/work/dojo', harness: 'claude-code' },
-  destination: '/work/dojo/.claude/skills/review',
-  review: [{ label: 'Skill file SKILL.md', text: '# review\nUse it.', document: true }],
-  skipped: [],
-  warnings: [],
   ...over,
 });
 

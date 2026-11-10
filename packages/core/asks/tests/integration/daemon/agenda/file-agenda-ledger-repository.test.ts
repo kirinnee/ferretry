@@ -318,3 +318,11 @@ describe('FileAgendaLedgerRepository', () => {
     should(next.ok).be.false();
   });
 });
+
+describe('where a ferret’s agenda file lives', () => {
+  it('should name it by its state path, and refuse an id that is not a ferret’s', async () => {
+    const { repository } = await createRepository();
+    should(repository.file('session-1')).equal('state/asks/ferrets/session-1/agenda.json');
+    should(() => repository.file('../escape')).throw('not a valid agenda session id: ../escape');
+  });
+});

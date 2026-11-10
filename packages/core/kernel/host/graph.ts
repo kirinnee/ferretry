@@ -1,6 +1,7 @@
 import type { PortToken } from '../contract/define.ts';
 import { KERNEL_ONLY_PORTS } from '../contract/bound.ts';
 import { CORE_IDS } from '../contract/ids.ts';
+import { reachFaults } from '../manifest/reach.ts';
 import type { Manifest } from '../manifest/types.ts';
 
 /** Why a plugin is not started (§3.4 checked/resolved, §2.4). Each is a plain sentence for `fy doctor`. */
@@ -14,7 +15,9 @@ export interface GraphRefusal {
     | 'duplicate'
     | 'needs-refused'
     | 'hook'
-    | 'kernel-only-port';
+    | 'kernel-only-port'
+    | 'kernel-event'
+    | 'reach';
   readonly sentence: string;
 }
 
@@ -98,6 +101,26 @@ export function planGraph(
         reason: 'kernel-only-port',
         sentence: `${manifest.title} asks for ${asked.name}, which only the kernel may hold.`,
       });
+  }
+
+  // A `kernel.*` event is the kernel's own: a plugin that declares one would forge it and move its discovery gate.
+  for (const manifest of byId.values()) {
+    if (refused.has(manifest.id) || manifest.id === 'kernel') continue;
+    const claimed = (manifest.data?.publishes ?? []).find(event => event.name.startsWith('kernel.'));
+    if (claimed !== undefined)
+      refuse({
+        plugin: manifest.id,
+        reason: 'kernel-event',
+        sentence: `${manifest.title} publishes ${claimed.name}, which only the kernel may publish.`,
+      });
+  }
+
+  // Reach the kernel does not honour (K1, K2): `{ items }` of a kind someone else owns, one resolver on both axes. The
+  // same rule as CI's `plugin-graph`, so a plugin built outside that check is refused here, and so is the testing host.
+  for (const fault of reachFaults([...byId.values()])) {
+    const manifest = byId.get(fault.plugin);
+    if (manifest === undefined || refused.has(manifest.id)) continue;
+    refuse({ plugin: manifest.id, reason: 'reach', sentence: `${manifest.title} ${fault.sentence}.` });
   }
 
   // Required providers, transitively: a plugin whose need is refused is refused too.

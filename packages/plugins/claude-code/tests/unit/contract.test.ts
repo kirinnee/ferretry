@@ -1,9 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import manifest from '../../manifest.ts';
-import { CLAUDE_CODE_CONFIG, harnessConfigLoosens } from '../../contract/index.ts';
+import { ITEM_NAME_PATTERN } from '@ferretry/std';
+import {
+  CLAUDE_CODE_CONFIG,
+  CLAUDE_CODE_HOOKS,
+  CLAUDE_CODE_SETTINGS,
+  harnessConfigLoosens,
+} from '../../contract/index.ts';
 import { claudeCodeConformance, fakeClaudeCode } from '../../contract/testing/index.ts';
 
 describe('claude-code contract', () => {
+  test('its settings and hooks collections name their items by the one shared item-name pattern, never a copy of it', () => {
+    for (const def of [CLAUDE_CODE_SETTINGS, CLAUDE_CODE_HOOKS]) {
+      expect((def as unknown as { name: RegExp }).name).toBe(ITEM_NAME_PATTERN);
+    }
+  });
+
   test('the fake passes the conformance suite', async () => {
     const result = await claudeCodeConformance(fakeClaudeCode);
     expect(result.ok).toBe(true);
@@ -16,7 +28,12 @@ describe('claude-code contract', () => {
       'POST /v1/ferrets/:ferretId/permission',
       'POST /v1/ferrets/:ferretId/dialog',
     ]);
-    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['harnesses', 'start.decide']);
+    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
+      'harnesses',
+      'start.decide',
+      'runtimes.components.settings.claude',
+      'runtimes.components.hooks.claude',
+    ]);
   });
 
   test('G31 (declaration only) the permission answer is terminal/use, a person act, audited as input and never with the choice', () => {

@@ -6,7 +6,10 @@ import type {
   Harness,
   HarnessDialog as FerretDialog,
   HarnessInstall,
+  HarnessLaunchSettings,
   HarnessMissing,
+  HarnessTranscriptStamp,
+  HarnessTranscriptTail,
   HomePlan,
   LaunchSpec,
   OutboundMessage,
@@ -20,6 +23,7 @@ import type {
   UpdateResult,
   UsageReader,
 } from '@ferretry/core-ferrets/contract';
+import { materializeSkills } from '@ferretry/core-ferrets/contract';
 import type {
   ChildEnvironment,
   Clock,
@@ -30,12 +34,15 @@ import type {
   Redaction,
   RootHandle,
   RootsPort,
+  RootStat,
   SpawnPort,
+  StatePort,
 } from '@ferretry/kernel/contract';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_HOOKS,
+  CLAUDE_CODE_LAUNCH_SETTINGS,
   CLAUDE_CODE_SETTINGS,
   type HarnessConfig,
 } from '../../contract/index.ts';
@@ -43,7 +50,12 @@ import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
 import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
-import { parseEntries, parseUsage } from '../lib/harness/transcript.ts';
+import {
+  compareLaunchSettings,
+  type LaunchSettingsInputs,
+  launchSettingsRecord,
+} from '../lib/harness/launch-settings.ts';
+import { markCutWindow, parseEntries, parseTail, parseUsage } from '../lib/harness/transcript.ts';
 import { parseHarnessDialog } from '../lib/pane/harness-dialog.ts';
 import { parsePermissionPrompt } from '../lib/pane/permission-prompt.ts';
 import type { PermissionAnswerService } from '../lib/permission/service.ts';
@@ -54,6 +66,8 @@ import type { PaneDirectory } from './tmux-pane.ts';
 export interface ClaudeHarnessDeps {
   readonly roots: RootsPort;
   readonly config: ConfigPort;
+  /** This plugin's own state: what each ferret was last launched under (`launch-settings/<ferret>.json`). */
+  readonly state: Pick<StatePort, 'read' | 'write' | 'remove' | 'version'>;
   readonly spawn: SpawnPort;
   readonly clock: Clock;
   readonly redaction: Redaction;
@@ -71,7 +85,12 @@ export interface ClaudeHarnessDeps {
 
 const TMUX_TIMEOUT_MS = 5_000;
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
+/** How much of the end of a transcript one tail read takes: a turn's records are near the end. */
+const TAIL_READ_BYTES = 512 * 1024;
 const FIRST_RECORDS_BYTES = 16 * 1024;
+/** A launch record is four fingerprints (~330 bytes); one larger than this is not one, and is never read. */
+const MAX_LAUNCH_RECORD_BYTES = 4 * 1024;
+const UNKNOWN_LAUNCH: HarnessLaunchSettings = { kind: 'unknown' };
 
 const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
 const settingsCollection = CLAUDE_CODE_SETTINGS as never;
@@ -86,6 +105,11 @@ export class ClaudeHarness implements Harness {
   readonly key = 'claude-code' as const;
   /** Claude spends an Anthropic sign-in, an API key, or a proxy or endpoint that speaks the Anthropic API. */
   readonly accepts = ['anthropic', 'api-key', 'proxy', 'endpoint'] as const;
+  /**
+   * Today's stop key, harmless at an idle prompt (today's `STOP_KEY_SAFE_WHEN_IDLE`): at an interactive pane it clears a
+   * half-typed composer or closes a menu, which is what "stop" means to the person pressing it.
+   */
+  readonly turnStop = { key: 'Escape', safeWhenIdle: true } as const;
   readonly #delivered = new Set<string>();
 
   constructor(private readonly deps: ClaudeHarnessDeps) {}
@@ -125,16 +149,21 @@ export class ClaudeHarness implements Harness {
   }
 
   async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
+    return await this.prepareHomeFrom(spec, this.launchInputs());
+  }
+
+  /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
+  private async prepareHomeFrom(spec: LaunchSpec, inputs: LaunchSettingsInputs): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
-    // GAP (skills): `skill` parts are not materialized. `copyTree` takes only this plugin's own root handles, and no
-    // root this manifest declares reaches a skill source; it waits for the Skills plugin to hand one over.
+    // The selected skills: Skills' shared folders linked into `skills/`, the rest of that folder swept (one link rule).
+    await materializeSkills(home, spec.parts, []);
     const text = homeText({
       folder: spec.folder,
-      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
+      permissionMode: inputs.permissionMode,
       instructions: spec.instructions,
       parts: spec.parts,
-      settings: this.deps.config.collection(settingsCollection) as never,
-      hooks: this.deps.config.collection(hooksCollection) as never,
+      settings: inputs.settings as never,
+      hooks: inputs.hooks as never,
       effort: spec.effort,
     });
     const files: FencedPath[] = [];
@@ -295,17 +324,21 @@ export class ClaudeHarness implements Harness {
     if (!isConversationId(conversation.id)) throw new Error('the conversation id must be one plain name (S45)');
     const found = await this.discover();
     if (!found.found) return err('unavailable');
-    await this.prepareHome(spec);
-    const config = this.deps.config.file(configFile);
+    // ONE read of the configuration per launch: the home, the argv and the record all describe the same settings, so a
+    // reload between them cannot leave a record that differs from what the process runs on.
+    const inputs = this.launchInputs();
+    await this.prepareHomeFrom(spec, inputs);
     const command = launchCommand({
       binary: found.binary,
       home: spec.home,
-      permissionMode: config?.permissionMode ?? 'auto',
+      permissionMode: inputs.permissionMode,
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
       conversation,
+      readable: spec.readable,
     });
     const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env };
+    await this.recordLaunchSettings(spec.ferret, inputs);
     // Persist only the identity and cwd we chose, so a fresh daemon reads the same exact transcript.
     const home = this.home(spec.ferret);
     await home.writeText(
@@ -358,7 +391,9 @@ export class ClaudeHarness implements Harness {
   private async tmux(args: readonly string[]): Promise<Result<true, string>> {
     try {
       const result = await this.deps.spawn.run('tmux', args, { timeout: milliseconds(TMUX_TIMEOUT_MS) });
-      return result.exitCode === 0 ? ok(true) : err(result.stderr.trim() || `tmux exited ${String(result.exitCode)}`);
+      return result.exitCode === 0
+        ? ok(true)
+        : err(result.stderr.trim() || `tmux exited ${String(result.exitCode ?? result.signal)}`);
     } catch (error) {
       return err(error instanceof Error ? error.message : String(error));
     }
@@ -376,8 +411,82 @@ export class ClaudeHarness implements Harness {
     }
   }
 
-  /** Read only the assigned id in its encoded cwd, including after a daemon restart. */
-  private async transcriptText(ferret: FerretId): Promise<string | undefined> {
+  /** One stat of the transcript this ferret's assigned conversation wrote (`Harness.transcriptStamp`). */
+  async transcriptStamp(ferret: FerretId): Promise<HarnessTranscriptStamp | undefined> {
+    const found = await this.transcriptFile(ferret);
+    if (found === undefined) return undefined;
+    return { file: found.file, size: found.stat.size, mtimeMs: Date.parse(found.stat.modified) };
+  }
+
+  /** The newest `limit` records of that transcript, without their text (`Harness.transcriptTail`). */
+  async transcriptTail(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail> {
+    const found = await this.transcriptFile(ferret);
+    if (found === undefined) return { kind: 'unresolved' };
+    const tail = await found.home.readTail(found.file, TAIL_READ_BYTES).catch(() => undefined);
+    if (tail === undefined) return { kind: 'unreadable' };
+    const text = new TextDecoder().decode(tail.bytes);
+    const partial = tail.size > tail.bytes.length;
+    // A window that reads no message, work or turn boundary whole cannot say where the turn stands: the newest record is
+    // larger than it (or only bookkeeping and an unfinished line follow the cut one), which is a turn at work (never "no
+    // transcript", so the pane alone cannot end it). The window is never widened: one wider parse is a synchronous slice
+    // on the daemon's main thread (ruling #44).
+    const records = markCutWindow(parseTail(text, partial), partial);
+    return { kind: 'read', records: records.slice(-limit) };
+  }
+
+  /**
+   * Whether a relaunch would run this ferret on other settings of this plugin's than its last start or resume did
+   * (`Harness.launchSettings`, W2-c): the fingerprints recorded then against the ones the configuration gives now. Names
+   * sections only. Total: no record, a record too large to be one, a damaged one or any failure is `unknown`, and what
+   * failed is dropped unread.
+   */
+  async launchSettings(ferret: FerretId): Promise<HarnessLaunchSettings> {
+    try {
+      if (!isConversationId(ferret)) return UNKNOWN_LAUNCH;
+      const size = (await this.deps.state.version(CLAUDE_CODE_LAUNCH_SETTINGS, ferret))?.size;
+      if (size === undefined || size > MAX_LAUNCH_RECORD_BYTES) return UNKNOWN_LAUNCH;
+      const recorded = await this.deps.state.read(CLAUDE_CODE_LAUNCH_SETTINGS, ferret);
+      if (!recorded.ok || recorded.value === undefined) return UNKNOWN_LAUNCH;
+      return compareLaunchSettings(recorded.value, launchSettingsRecord(this.launchInputs()));
+    } catch {
+      return UNKNOWN_LAUNCH;
+    }
+  }
+
+  /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
+  private launchInputs(): LaunchSettingsInputs {
+    return {
+      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
+      settings: this.deps.config.collection(settingsCollection) as never,
+      hooks: this.deps.config.collection(hooksCollection) as never,
+    };
+  }
+
+  /**
+   * Records what this launch runs under, before the process starts. A launch never fails over it: when the record
+   * cannot be written, the one an earlier launch left is removed, so the answer for this process is `unknown` and
+   * never an older launch's.
+   */
+  private async recordLaunchSettings(ferret: FerretId, inputs: LaunchSettingsInputs): Promise<void> {
+    const record = launchSettingsRecord(inputs);
+    try {
+      await this.deps.state.write(CLAUDE_CODE_LAUNCH_SETTINGS, record, ferret);
+    } catch {
+      try {
+        await this.deps.state.remove(CLAUDE_CODE_LAUNCH_SETTINGS, ferret);
+        // A damaged record fails the write above (the kernel guard refuses to write over it) and the remove clears it:
+        // write once more, so this launch is recorded and the answer is current now, not unknown until the next launch.
+        await this.deps.state.write(CLAUDE_CODE_LAUNCH_SETTINGS, record, ferret).catch(() => undefined);
+      } catch {
+        // Nothing more can be done: the read then finds whatever is left, and a damaged record reads as unknown.
+      }
+    }
+  }
+
+  /** The exact transcript of the assigned id in its encoded cwd, including after a daemon restart; never one found by guessing. */
+  private async transcriptFile(
+    ferret: FerretId,
+  ): Promise<{ readonly home: RootHandle; readonly file: FencedPath; readonly stat: RootStat } | undefined> {
     const home = this.home(ferret);
     const binding = home.resolve(HOME_FILES.conversation);
     if (!binding.ok) return undefined;
@@ -391,8 +500,16 @@ export class ClaudeHarness implements Harness {
     const { format, id, cwd } = identity as { format?: unknown; id?: unknown; cwd?: unknown };
     if (format !== 1 || !isConversationId(id) || typeof cwd !== 'string' || !cwd.startsWith('/')) return undefined;
     const file = home.resolve(claudeTranscriptPath(cwd, id));
-    if (!file.ok || (await home.stat(file.value))?.kind !== 'file') return undefined;
-    return await home.readText(file.value, MAX_TRANSCRIPT_BYTES);
+    if (!file.ok) return undefined;
+    const stat = await home.stat(file.value);
+    if (stat?.kind !== 'file') return undefined;
+    return { home, file: file.value, stat };
+  }
+
+  /** Read only the assigned id in its encoded cwd, including after a daemon restart. */
+  private async transcriptText(ferret: FerretId): Promise<string | undefined> {
+    const found = await this.transcriptFile(ferret);
+    return found === undefined ? undefined : await found.home.readText(found.file, MAX_TRANSCRIPT_BYTES);
   }
 
   /** Entries, already masked when they leave the reader. */

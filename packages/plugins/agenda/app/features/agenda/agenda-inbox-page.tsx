@@ -49,6 +49,7 @@ import {
   ChevronRight,
   CloudOff,
   Laptop,
+  Lock,
   Server,
   SkipForward,
   Undo2,
@@ -532,7 +533,7 @@ function CardTools({
  * an answer, and the upload into the item's own conversation (the daemon carries them to the card's ferret). A host
  * that can upload hands these in; absent either, the box is words alone.
  *
- * @pending agenda: answer uploads, the sign-in rule sweep and push delivery/open run through ports
+ * @pending agenda: answer uploads, the sign-in rule sweep and push delivery run through ports
  */
 export interface AnswerFilePorts {
   readonly answerFiles?: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
@@ -816,6 +817,28 @@ function UnreadableMachines({ inbox }: { readonly inbox: AgendaInbox }) {
             Couldn’t read {machine.items === 1 ? '1 item' : `${machine.items} items`} on {machine.machineName}
             {machine.why === undefined ? '' : ` — ${machine.why}`}. Trying again.
           </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * A paired machine this device has not unlocked: its items are not read (the daemon would refuse), so it is not counted
+ * and says so on its own line, with the one control that changes that.
+ */
+function LockedMachines({ inbox }: { readonly inbox: AgendaInbox }) {
+  const locked = inbox.locked ?? [];
+  if (locked.length === 0) return null;
+  return (
+    <ul className="fy-attn-inbox__unreadable" data-agenda-locked="">
+      {locked.map(machine => (
+        <li className="fy-attn-inbox__unreadable-row" data-daemon={machine.daemonId} key={machine.daemonId}>
+          <Lock aria-hidden="true" size={14} />
+          <span className="min-w-0 flex-1">Locked — unlock {machine.name} to see its items</span>
+          <button className="kt-btn min-h-[44px]" onClick={machine.unlock} type="button">
+            Unlock
+          </button>
         </li>
       ))}
     </ul>
@@ -2070,6 +2093,7 @@ export function AgendaInboxPage({
       <AgentsBulk inbox={inbox} kind={kind} machines={machines} port={clearPort} />
       <OrphanedFailures inbox={inbox} />
       {filter === 'open' ? <UnreadableMachines inbox={inbox} /> : null}
+      {filter === 'open' ? <LockedMachines inbox={inbox} /> : null}
       {finding ? (
         <InboxFindResults
           onClear={clearFilters}

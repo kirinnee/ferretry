@@ -8,6 +8,7 @@ import { beforeEach, describe, it } from 'bun:test';
 import should from 'should';
 import { CONNECTOR_RESTART_BACKOFF, ConnectorSupervisor } from '../../../daemon/lib/tunnel/supervisor.ts';
 import { FakeConnectorProcesses, ManualScheduler, registered, unregistered } from './support.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const TOKEN = 'fake-connector-token-ONE';
 const NEXT_TOKEN = 'fake-connector-token-TWO';
@@ -271,7 +272,3 @@ describe('the cloudflared supervisor', () => {
     should(notices).deepEqual([]);
   });
 });
-
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

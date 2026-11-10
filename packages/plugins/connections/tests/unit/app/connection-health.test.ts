@@ -768,3 +768,16 @@ describe('browserConnectionHealthEnvironment', () => {
     withNavigator(undefined, () => expect(environment.isOnline()).toBe(true));
   });
 });
+
+describe('dialAllowed', () => {
+  it('allows a dial until the daemon is reconnecting, and again once it is answering', () => {
+    const w = world();
+    const health = new DaemonConnectionHealth(w.environment, w.attempt);
+    expect(health.dialAllowed(laptop)).toBe(true);
+    health.outage(laptop, outage());
+    expect(health.dialAllowed(laptop)).toBe(false);
+    expect(health.dialAllowed(workstation)).toBe(true);
+    health.answered(laptop);
+    expect(health.dialAllowed(laptop)).toBe(true);
+  });
+});

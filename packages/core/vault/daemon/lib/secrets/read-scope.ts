@@ -22,7 +22,7 @@
  */
 
 import type { CellGrid, Redaction, RedactionScope } from '@ferretry/kernel/contract';
-import { coverageOf, type TextRange } from './policy.ts';
+import { coverageOf, mergeRanges, type TextRange } from './policy.ts';
 import { scrubValues, type RedactionValueSource, type Scrub } from './redaction.ts';
 
 export class VaultRedaction implements Redaction {
@@ -55,14 +55,24 @@ export class VaultRedaction implements Redaction {
   }
 }
 
-/** Every character inside `ranges` replaced by `*`, so the text keeps its length. */
-function starred(text: string, ranges: readonly TextRange[], offset: number): string {
+/**
+ * Every character of `text` inside `ranges` replaced by `*`, so the text keeps its length.
+ *
+ * LINEAR in the text and the ranges together: the ranges are merged first (sorted, disjoint), so one pass walks
+ * them in step with the text. A screen dense with matches costs no more than its length; checking every range at
+ * every character made a busy 200×2000 screen take minutes, synchronously, inside a read.
+ */
+function starred(text: string, ranges: readonly TextRange[]): string {
   let out = '';
-  for (let at = 0; at < text.length; at++) {
-    const position = offset + at;
-    out += ranges.some(range => position >= range.start && position < range.end) ? '*' : (text[at] ?? '');
+  let at = 0;
+  for (const range of mergeRanges(ranges)) {
+    const start = Math.max(range.start, at);
+    const end = Math.min(range.end, text.length);
+    if (start >= end) continue;
+    out += text.slice(at, start) + '*'.repeat(end - start);
+    at = end;
   }
-  return out;
+  return out + text.slice(at);
 }
 
 /** Lines matched as one run (a wrapped value spans the join), then cut back into lines of their own lengths. */
@@ -71,12 +81,14 @@ export function maskLines(
   needles: readonly string[],
   cover: (text: string) => readonly TextRange[] = text => coverageOf(text, needles),
 ): readonly string[] {
-  const ranges = cover(lines.join(''));
+  const joined = lines.join('');
+  const ranges = cover(joined);
   if (ranges.length === 0) return lines;
+  const masked = starred(joined, ranges);
   const out: string[] = [];
   let offset = 0;
   for (const line of lines) {
-    out.push(starred(line, ranges, offset));
+    out.push(masked.slice(offset, offset + line.length));
     offset += line.length;
   }
   return out;
@@ -98,10 +110,11 @@ export function maskGrid(
   });
   const ranges = cover(text);
   if (ranges.length === 0) return grid;
+  const all = starred(text, ranges);
   const rows = grid.rows.map(row => [...row]);
   for (const entry of flat) {
     const cell = rows[entry.row]?.[entry.cell] ?? '';
-    const masked = starred(cell, ranges, entry.start);
+    const masked = all.slice(entry.start, entry.start + cell.length);
     if (masked !== cell) (rows[entry.row] as string[])[entry.cell] = masked;
   }
   return { columns: grid.columns, rows };

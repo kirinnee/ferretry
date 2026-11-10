@@ -174,6 +174,7 @@ describe('MCP sign-in secrets: the use path', () => {
         claudeCode: { current: () => undefined },
         codex: { current: () => undefined },
         projects: { current: () => undefined },
+        runtimes: { current: () => undefined },
       },
       hooks: {} as never,
       kernel: { state: own, config: { collection: () => new Map() } } as unknown as DaemonContext<

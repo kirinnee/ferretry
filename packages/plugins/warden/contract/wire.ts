@@ -126,8 +126,20 @@ const ConfigShape = {
 /** The effective settings: every key present. */
 export const WardenConfigSchema = z.strictObject(ConfigShape);
 export type WardenConfig = z.infer<typeof WardenConfigSchema>;
+/**
+ * The ONE spelling `jev.key` takes: a reference to the secret the manifest declares, never a value (a raw key is refused
+ * by the kernel's writer, and adding the reference is the owner's alone, so an agent's write that adds it is held).
+ */
+export const WARDEN_JEV_KEY_REFERENCE = '${secret:JEV_API_KEY}';
+/**
+ * `jev` in `warden.yaml`: which secret the Jev guard spends. Unset, the kernel answers `not_configured` and the guard
+ * `not_set`, as before: nothing is sent and nothing is spent. It is the kernel's to read (`kernel.secrets`), not a
+ * setting: it is not part of {@link WardenConfig}, and a settings save never writes it.
+ */
+export const WardenJevFileSchema = z.strictObject({ key: z.literal(WARDEN_JEV_KEY_REFERENCE).optional() });
 /** `warden.yaml` as written: every setting optional, the nested sections too; what it leaves out is the default's. */
 export const WardenFileSchema = z.strictObject({
+  jev: WardenJevFileSchema.optional(),
   enabled: z.boolean().optional(),
   revive: WardenReviveConfigSchema.partial().optional(),
   autoMove: WardenAutoMoveConfigSchema.partial().optional(),
@@ -151,6 +163,12 @@ export const WardenFileSchema = z.strictObject({
   blessMinutes: NonNegative.optional(),
 });
 export type WardenFile = z.infer<typeof WardenFileSchema>;
+/**
+ * What a settings save may name: `warden.yaml` without `jev`. The key reference is written into the file by its
+ * owner, never through the settings route, so a save can neither add it nor take it away.
+ */
+export const WardenSettingsPatchSchema = WardenFileSchema.omit({ jev: true });
+export type WardenSettingsPatch = z.infer<typeof WardenSettingsPatchSchema>;
 
 /**
  * ON, AND FREE: the sweep runs every two minutes and its rules flag what they find, but both triage layers are off, so
@@ -183,7 +201,9 @@ export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
 
 /** The effective settings of a file: the default with the file's keys laid over it, one level into each section. */
 export function effectiveWardenConfig(file: WardenFile): WardenConfig {
-  const merged: Record<string, unknown> = { ...DEFAULT_WARDEN_CONFIG, ...file };
+  // `jev` names the key the kernel spends; it is no setting, so it never reaches the settings.
+  const { jev: _key, ...settings } = file;
+  const merged: Record<string, unknown> = { ...DEFAULT_WARDEN_CONFIG, ...settings };
   for (const section of [
     'revive',
     'autoMove',

@@ -27,7 +27,6 @@
 import {
   PACK_REPLACED,
   PACK_SWITCHES,
-  PACKS_CONFIG,
   PackInventorySchema,
   packConfigFromFile,
   PackRunFileSchema,
@@ -46,9 +45,13 @@ import {
   rawSecretPaths,
   readV4Yaml,
   type V4ConfigFile,
+  v4ConfigFile,
+  v4ConfigOverride,
   YAML_OPTIONS,
 } from '../v4/config.ts';
+import type { V4Paths } from '../v4/layout.ts';
 import { failureNote, isRecord, readV4Json, V4InputError } from '../v4/documents.ts';
+import { oldGuidePrompt, type RenderedPrompt } from '../v4/routing-prompt.ts';
 import { configs, directories, json, runtimeIds } from '../v4/ferrets.ts';
 import {
   V4_DEFAULT_PACK_CONFIG,
@@ -67,10 +70,13 @@ import {
   V4RoutingCatalog,
   V4SessionPack,
 } from '../v4/packs.ts';
-import { v5ConfigProblem, type V5ConfigTarget } from '../v5/write.ts';
+import { CONFIG_TARGETS } from '../v5/targets.ts';
+import { keyPath } from '../key-path.ts';
+import { v5ConfigProblem } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
+import { heldReason, heldRuntimes, type RuntimeHarness } from './preview-hold.ts';
 
-const PACKS_TARGET = PACKS_CONFIG as V5ConfigTarget;
+const PACKS_TARGET = CONFIG_TARGETS.PACKS;
 const STATE = 'state/packs';
 /** `packages/core/kernel/host/state/state-port.ts` `COLLECTION_NAME`: the names v5's `runs/*` store lists. */
 const V5_COLLECTION_NAME = /^[A-Za-z0-9_][A-Za-z0-9._%~-]{0,200}$/u;
@@ -87,6 +93,8 @@ interface Plan {
   readonly notes: string[];
   /** What to write, in order, once everything is planned and checked. */
   readonly writes: (() => Promise<void>)[];
+  /** Preview only: the runtimes held out of the preview (empty otherwise); nothing that names one is carried. */
+  readonly held: ReadonlyMap<string, RuntimeHarness>;
   /** Run folders that held a builder's draft.json, and runs v4 still showed as running. */
   drafts: number;
   running: number;
@@ -124,11 +132,15 @@ function takeKey(map: YAMLMap, key: string): boolean {
   return true;
 }
 
-const v4File = (home: string, label: string): V4ConfigFile => ({
-  address: { kind: label === V4_PACK_YAML ? 'pack' : 'modelsGuide' },
-  label,
-  path: join(home, label),
-});
+const v4File = (v4: V4Paths, label: string): V4ConfigFile =>
+  v4ConfigFile(v4, { kind: label === V4_PACK_YAML ? 'pack' : 'modelsGuide' }, label);
+
+/** `kind` for a config file the run may read as an override (the enforced pass): the override says it all. */
+async function configKind(v4: V4Paths, label: string): Promise<'absent' | 'file' | 'folder' | 'other'> {
+  const override = v4ConfigOverride(v4, label);
+  if (override !== undefined) return override === null ? 'absent' : 'file';
+  return await kind(v4.home, join(v4.home, label));
+}
 
 function refuseRawSecrets(document: Document, label: string): void {
   const secrets = rawSecretPaths(document.toJS());
@@ -140,6 +152,56 @@ function refuseRawSecrets(document: Document, label: string): void {
 
 // ── packs.yaml ───────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Why an old routing key is not carried as a key: its words are in the prompt, or there was nothing to put there. */
+const foldedWhy = (folded: boolean): string =>
+  folded
+    ? "the old guide's key, which v4 renders into the ONE routing prompt once at boot and this home had not yet: its words are rendered into routing.prompt as v4 would have, except the default prompt v4 put in front of prose alone (see the notes); v5 reads the key itself nowhere"
+    : "the old guide's key, which v4 renders into the routing prompt once at boot and this home had not yet; this home's prompt is its own (v4 never overwrote one) or the key said nothing a prompt could carry, so v5 reads it nowhere and its prompt is the file's own, else the one rendered from the model catalogs";
+
+/**
+ * The report line for a home with routing prose and no use cases (J-0052, britnee's acceptance): v4 would have put the
+ * default prompt, which it renders from the model catalogs, in front of the prose; this converter reads no catalogs, so
+ * the prose is carried ALONE and the line says so.
+ */
+const PROSE_CARRIED_ALONE =
+  'routing prose carried alone: v4 would have prefixed the default prompt, this converter reads no catalogs';
+
+const KEY_FILE = { useCases: V4_MODELS_GUIDE_YAML, routing: V4_MODELS_GUIDE_YAML, routingPreferences: V4_PACK_YAML };
+
+/**
+ * v4's one-time routing conversion on one home (v4 `lib/pack/migrate.ts`, in its order): a file with no `prompt` of its
+ * own gets the old use cases, routing prose and preferences rendered into ONE prompt, written FIRST in the file, and
+ * the old `suggested` goes with the old guide it described. A prompt the file already holds is never overwritten.
+ * The old keys themselves are taken out by the caller. Returns what was rendered, `undefined` when nothing was.
+ */
+function renderOldGuide(
+  routing: YAMLMap,
+  guideRaw: Record<string, unknown>,
+  preferences: string | undefined,
+  plan: Plan,
+): RenderedPrompt | undefined {
+  if (typeof guideRaw.prompt === 'string' || pairOf(routing, 'prompt') !== undefined) return undefined;
+  const rendered = oldGuidePrompt(
+    { useCases: Array.isArray(guideRaw.useCases) ? guideRaw.useCases : undefined, routing: guideRaw.routing },
+    preferences,
+  );
+  if (rendered === undefined) return undefined;
+  const value = new Scalar(rendered.text);
+  if (rendered.text.includes('\n')) value.type = Scalar.BLOCK_LITERAL;
+  routing.items.unshift(new Pair(new Scalar('prompt'), value));
+  if (takeKey(routing, 'suggested'))
+    plan.dropped.push({
+      what: `${V4_MODELS_GUIDE_YAML} suggested`,
+      why: 'it described the old guide, which is rendered into the prompt now (v4 removed it the same way)',
+    });
+  plan.notes.push(
+    `routing prompt: rendered from ${rendered.used.map(key => `${KEY_FILE[key]} ${key}`).join(', ')} into one prompt exactly as v4 does once at boot${rendered.cut ? ' (cut to fit the prompt limit, use cases kept whole)' : ''}`,
+  );
+  if (rendered.defaultHead) plan.notes.push(PROSE_CARRIED_ALONE);
+  count(plan, 'routing prompt rendered from the old guide');
+  return rendered;
+}
+
 /** `pack.yaml` (top level) and `models-guide.yaml` (as `routing`) → one `packs.yaml`, comments and key order kept. */
 async function planConfig(
   ctx: StepContext,
@@ -147,38 +209,54 @@ async function planConfig(
   resolve: Resolve,
   excluded: readonly string[],
 ): Promise<boolean> {
-  const home = ctx.v4.home;
-  const packKind = await kind(home, join(home, V4_PACK_YAML));
-  const guideKind = await kind(home, join(home, V4_MODELS_GUIDE_YAML));
+  const packKind = await configKind(ctx.v4, V4_PACK_YAML);
+  const guideKind = await configKind(ctx.v4, V4_MODELS_GUIDE_YAML);
   if (packKind === 'absent' && guideKind === 'absent') return false;
   let appended = false;
   const document =
-    packKind === 'absent' ? parseDocument('{}', YAML_OPTIONS) : await readV4Yaml(v4File(home, V4_PACK_YAML));
+    packKind === 'absent' ? parseDocument('{}', YAML_OPTIONS) : await readV4Yaml(v4File(ctx.v4, V4_PACK_YAML));
   if (packKind !== 'absent') {
     refuseRawSecrets(document, V4_PACK_YAML);
     dropModeline(document);
   }
   const map = document.contents as YAMLMap;
   if (packKind === 'absent') map.flow = false;
-  if (takeKey(map, 'routingPreferences'))
-    plan.dropped.push({
-      what: `${V4_PACK_YAML} routingPreferences`,
-      why: "the old guide builder's preferences, which v4 folds into the routing prompt once at boot and this home had not yet; v5 reads them nowhere (the routing prompt in effect is unchanged)",
-    });
+  const preferencesValue = pairOf(map, 'routingPreferences')?.value;
+  const preferences =
+    isScalar(preferencesValue) && typeof preferencesValue.value === 'string' ? preferencesValue.value : undefined;
+  const hasPreferences = takeKey(map, 'routingPreferences');
   if (pairOf(map, 'routing') !== undefined)
     throw new V4InputError(`${V4_PACK_YAML}: writes routing, which is not a v4 Pack setting`);
   if (packKind !== 'absent') count(plan, 'packs.yaml settings (from pack.yaml)');
 
+  // v4's one-time routing conversion, in v4's order: the old keys are rendered into the ONE prompt first, then taken
+  // out. A home with no guide file but old preferences is folded too (v4 wrote the guide file for it).
+  let guide: Document | undefined;
+  let guideRaw: Record<string, unknown> = {};
+  let oldKeys: readonly string[] = [];
+  let routing: YAMLMap | undefined;
   if (guideKind !== 'absent') {
-    const guide = await readV4Yaml(v4File(home, V4_MODELS_GUIDE_YAML));
+    guide = await readV4Yaml(v4File(ctx.v4, V4_MODELS_GUIDE_YAML));
     refuseRawSecrets(guide, V4_MODELS_GUIDE_YAML);
     dropModeline(guide);
-    const routing = guide.contents as YAMLMap;
-    const legacy = V4_LEGACY_GUIDE_KEYS.filter(key => takeKey(routing, key));
-    if (legacy.length > 0)
+    const guideMap = guide.contents as YAMLMap;
+    const parsedGuide: unknown = guide.toJS();
+    guideRaw = isRecord(parsedGuide) ? parsedGuide : {};
+    oldKeys = V4_LEGACY_GUIDE_KEYS.filter(key => key in guideRaw);
+    routing = guideMap;
+  } else if (hasPreferences) routing = new YAMLMap();
+  if (routing !== undefined) {
+    const rendered = renderOldGuide(routing, guideRaw, preferences, plan);
+    for (const key of oldKeys) takeKey(routing, key);
+    if (hasPreferences)
       plan.dropped.push({
-        what: `${V4_MODELS_GUIDE_YAML} ${legacy.join(', ')}`,
-        why: "the old guide's keys, which v4 renders into the prompt once at boot and this home had not yet; v5 reads them nowhere, so its prompt is the file's own prompt, else the one rendered from the model catalogs",
+        what: `${V4_PACK_YAML} routingPreferences`,
+        why: foldedWhy(rendered?.used.includes('routingPreferences') === true),
+      });
+    if (oldKeys.length > 0)
+      plan.dropped.push({
+        what: `${V4_MODELS_GUIDE_YAML} ${oldKeys.join(', ')}`,
+        why: foldedWhy(rendered !== undefined && rendered.used.some(used => used !== 'routingPreferences')),
       });
     const suggested = pairOf(routing, 'suggested')?.value;
     if (isMap(suggested)) {
@@ -189,12 +267,19 @@ async function planConfig(
         });
       const via = pairOf(suggested, 'via')?.value;
       if (isScalar(via) && typeof via.value === 'string') via.value = resolve(via.value);
+      if (isScalar(via) && typeof via.value === 'string' && plan.held.has(via.value)) {
+        takeKey(routing, 'suggested');
+        plan.dropped.push({
+          what: `${V4_MODELS_GUIDE_YAML} suggested (routes to the held runtime ${via.value})`,
+          why: heldReason(plan.held.get(via.value) ?? 'unknown'),
+        });
+      }
     }
     appended = appendExcluded(routing, excluded);
     if (appended) count(plan, EXCLUDED_LINE_KEPT);
     if (routing.items.length > 0) {
       const key = new Scalar('routing');
-      const comment = [guide.commentBefore, routing.commentBefore].filter(text => text != null && text !== '');
+      const comment = [guide?.commentBefore, routing.commentBefore].filter(text => text != null && text !== '');
       if (comment.length > 0) key.commentBefore = comment.join('\n');
       routing.commentBefore = null;
       map.items.push(new Pair(key, routing));
@@ -366,6 +451,17 @@ async function planRun(ctx: StepContext, plan: Plan, id: string, resolve: Resolv
     return;
   }
   const { session, ...job } = v4.data.job;
+  const via = isRecord(v4.data.suggestion?.suggested) ? v4.data.suggestion.suggested.via : undefined;
+  const heldName = [job.runtime, via]
+    .map(name => (typeof name === 'string' ? resolve(name) : undefined))
+    .find(name => name !== undefined && plan.held.has(name));
+  if (heldName !== undefined) {
+    plan.dropped.push({
+      what: `${label} (names the held runtime ${heldName})`,
+      why: heldReason(plan.held.get(heldName) ?? 'unknown'),
+    });
+    return;
+  }
   const suggestion =
     v4.data.suggestion !== undefined && isRecord(v4.data.suggestion.suggested)
       ? {
@@ -386,7 +482,7 @@ async function planRun(ctx: StepContext, plan: Plan, id: string, resolve: Resolv
   if (!run.success) {
     plan.dropped.push({
       what: label,
-      why: `v5 refuses its run.json at ${run.error.issues.map(issue => issue.path.join('.') || '(top)').join(', ')}`,
+      why: `v5 refuses its run.json at ${run.error.issues.map(issue => keyPath(issue.path)).join(', ')}`,
     });
     return;
   }
@@ -573,7 +669,15 @@ async function buildPlan(ctx: StepContext): Promise<Plan> {
       ? name
       : (runtimes.find(([, entry]) => entry.formerNames.includes(name))?.[0] ?? name);
   const names = new Map(runtimes.map(([name, entry]) => [entry.id, name]));
-  const plan: Plan = { kept: new Map(), dropped: [], notes: [], writes: [], drafts: 0, running: 0 };
+  const plan: Plan = {
+    kept: new Map(),
+    dropped: [],
+    notes: [],
+    writes: [],
+    held: await heldRuntimes(ctx),
+    drafts: 0,
+    running: 0,
+  };
   const routing = await readRouting(ctx, names);
   const appended = await planConfig(ctx, plan, resolve, routing?.excluded ?? []);
   await planReplaced(ctx, plan);

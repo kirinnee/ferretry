@@ -54,13 +54,6 @@ export class SessionTransferEnvelopeError extends Error {
   }
 }
 
-/** A JSON document as a plain field bag; anything else contributes no fields. */
-function fields(document: unknown): Readonly<Record<string, unknown>> {
-  return typeof document === 'object' && document !== null && !Array.isArray(document)
-    ? (document as Readonly<Record<string, unknown>>)
-    : {};
-}
-
 /**
  * The one spawn stamp a transferred session may carry, derived from the transfer decision alone.
  *
@@ -126,7 +119,9 @@ export class StorageTransferEnvelopeWriter implements TransferEnvelopeWriter {
 
   async apply(newSessionId: string, envelope: SessionTransferEnvelope): Promise<void> {
     const id = this.target(newSessionId, envelope.transferredFrom);
-    await this.storage.updateConfig(id, current => this.document(fields(current), envelope));
+    await this.storage.updateConfig(id, current =>
+      this.document(current as Readonly<Record<string, unknown>>, envelope),
+    );
   }
 
   /** The explicit target key, proved usable and proved not to be the source it descends from. */

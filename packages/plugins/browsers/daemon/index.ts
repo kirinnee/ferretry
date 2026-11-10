@@ -13,11 +13,13 @@ import { KernelFrameClock } from './stream/frame-clock.ts';
 import { heldViewerHost } from './stream/held-host.ts';
 import { BrowserViewerStream } from './stream/viewer-stream.ts';
 import { pageTarget, TypedIdentities } from './target/index.ts';
+import { VaultPageApprovals } from './target/tools/phone-approvals.ts';
 import { nodeStagedFiles } from './tools/adapters/staged-files.ts';
 import { SurfaceControl } from './tools/control.ts';
 import { rootFiles } from './tools/files.ts';
 import { controlRoutes, toolHandlers } from './tools/index.ts';
 import { pageToolHost } from './tools/page-host.ts';
+import { agentControlPolicy } from './tools/agent-control.ts';
 import { BrowserTools } from './tools/service.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
@@ -131,7 +133,8 @@ export function buildBrowsers(
         stageDirectory: host.stageDirectory,
         // GAP (card F1931, finding 10): no `ports`, `checkFirewall` or `limits` (today's fyd.ts 8728-8736).
         // - `ports`/`checkFirewall`: 5.0 serves Browsers no read of the machine's `browserPorts` or
-        //   `browserFirewallFailure` (Runtimes keeps them, no contract serves them), so every launch takes random
+        //   `browserFirewallFailure` (no file of Runtimes holds them in 5.0, so a machine-settings change that moves
+        //   either is refused, and no contract serves them), so every launch takes random
         //   ports. That fails safe: nothing is bound at a fixed port, so there is nothing for the loopback firewall to
         //   fence and nothing for its check to refuse.
         // - `limits`: there is no kernel ferret-limits port that wraps a program in the shared browser slice, so the
@@ -219,13 +222,14 @@ export function buildBrowsers(
     },
     { now: () => kernel.clock.nowMs() },
   );
+  // "What agents may control" is read from core's AgentControlPort on every call; unbound, or an answer that is not a
+  // plain yes, refuses (fail closed). ONE policy for the browser tools and the page target.
+  const policy = agentControlPolicy(() => ctx.uses.agentControl.current());
   const tools = new BrowserTools({
     browser: pages,
     control,
     kernel,
-    // GAP: "What agents may control" is Ferrets' machine switches and no port reads them yet. Browsers is on (an
-    // enabled Browsers plugin is the owner's yes); Files and Page scripts, off by default today, fail closed.
-    policy: { allows: async kind => kind === 'browser' },
+    policy,
     files: rootFiles(kernel.roots, nodeStagedFiles(host.uploadDirectory, kernel.clock)),
     binaryName: 'fy',
     typedIdentities: identities,
@@ -241,9 +245,14 @@ export function buildBrowsers(
   const target = pageTarget({
     kernel,
     pages,
+    // The Browsers switch, at the one boundary every write into a page on a ferret's behalf passes (S2): the same policy,
+    // which reads the port fresh per call and never captures it, because the port binds after build.
+    control: policy,
     host: pageToolHost(tools),
     identities,
     vault,
+    // Approve on your phone: the raise is the Vault's, answered by Accounts (docs/input-requests.md).
+    approvals: new VaultPageApprovals(() => vault),
     acts: { acted: (ferret, script) => vault.pageActed?.(ferret, script) },
   });
 
@@ -272,6 +281,10 @@ export function buildBrowsers(
     provides: {
       browsers: {
         state: async () => pages.overview(),
+        // Ids and names only, for any caller and whatever the switches say. NEVER add a page's address here (#42 SF2):
+        // this read asks no "What agents may control › Browsers" switch, so Accounts' `account_hint {name}` would show an
+        // agent its page's host while Browsers is off. The address waits for its own Browsers-owned read that asks
+        // `AgentControlPort` and refuses with `agentControlRefusal('browser')` (GAP in ports-pending.json, accounts).
         pagesOf: async ferret => {
           const status = await pages.status(ferret);
           return status.pages.map(page => ({

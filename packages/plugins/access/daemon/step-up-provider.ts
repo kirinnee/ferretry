@@ -12,11 +12,11 @@ export function stepUpProvider(current: () => StepUpService | undefined): StepUp
     held: subject => current()?.held(subject) ?? false,
     freshlyHeld: subject => current()?.freshlyHeld(subject) ?? false,
     unlockRequired: subject => current()?.unlockRequired(subject) ?? true,
-    claimFresh: ((subject: StepUpSubject, act?: never, bound?: string): boolean => {
+    claimFresh: ((subject: StepUpSubject, act?: never, bound?: string, notAfterMs?: number): boolean => {
       const service = current();
       if (service === undefined) return false;
       return bound === undefined
-        ? service.claimFresh(subject, act)
+        ? service.claimFresh(subject, act, undefined, notAfterMs)
         : (service.claimFresh as (s: StepUpSubject, a: unknown, b: string) => boolean).call(
             service,
             subject,

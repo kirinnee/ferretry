@@ -1,9 +1,10 @@
 import { afterEach, describe, it } from 'bun:test';
-import { access, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { err } from '@ferretry/std';
 import should from 'should';
-import { diskSessionsRoot } from '@ferretry/kernel/testing';
+import { diskRoot, diskSessionsRoot } from '@ferretry/kernel/testing';
 import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
@@ -121,6 +122,51 @@ describe('FileSessionEnvironmentStore', () => {
     should(await readdir(directory)).eql(['environment.json']);
   });
 
+  it('should refuse a damaged document without quoting it, since the file holds a credential', async () => {
+    // Arrange: the folder exists after a first read; then the file is cut off mid-secret, and then it is the wrong shape.
+    const { store, directory } = await subject();
+    await store.read(SESSION);
+    await writeFile(join(directory, 'environment.json'), '{"FY_SESSION_TOKEN":"super-secret-token');
+    const cut = await rejection(store.read(SESSION));
+    await writeFile(join(directory, 'environment.json'), '{"FY_SESSION_TOKEN":42}');
+
+    // Act
+    const wrong = await rejection(store.read(SESSION));
+
+    // Assert
+    for (const failure of [cut, wrong]) {
+      should(failure.message).equal(`the session environment of ${SESSION} is not a valid environment document`);
+      should(failure.message).not.containEql('super-secret-token');
+    }
+  });
+
+  it('should refuse to keep a session’s credential anywhere but the internal sessions root', async () => {
+    // Arrange: a person's own work folder is a real root, but never this store's.
+    const home = await mkdtemp(join(tmpdir(), 'fy-environment-store-'));
+    homes.add(home);
+    const { root } = await diskRoot(home);
+
+    // Act
+    const build = () => new FileSessionEnvironmentStore(root, SESSION);
+
+    // Assert
+    should(build).throw(/internal sessions root only/);
+  });
+
+  it('should refuse to make its folder when the root says the folder is outside it', async () => {
+    // Arrange
+    const home = await mkdtemp(join(tmpdir(), 'fy-environment-store-'));
+    homes.add(home);
+    const { root } = await diskSessionsRoot(home, SESSION);
+    const lost = { ...root, resolve: () => err('outside' as const) } as typeof root;
+
+    // Act
+    const failure = await rejection(new FileSessionEnvironmentStore(lost, SESSION).read(SESSION));
+
+    // Assert
+    should(failure.message).match(/session folder is outside its root/);
+  });
+
   it('should write and read back one environment', async () => {
     // Arrange
     const { store } = await subject();
@@ -130,5 +176,82 @@ describe('FileSessionEnvironmentStore', () => {
 
     // Assert
     should(await store.read(SESSION)).eql({ A: '1', B: '2' });
+  });
+
+  it('BG-036 should delete the environment of an ended session, and read as none afterwards', async () => {
+    // Arrange
+    const { store, directory } = await subject();
+    await store.write(SESSION, CAPABILITY);
+
+    // Act
+    await store.remove(SESSION);
+
+    // Assert
+    should(await readdir(directory)).eql([]);
+    should(await store.read(SESSION)).eql({});
+  });
+
+  it('BG-036 should treat a missing file, or a session folder that was never made, as already removed', async () => {
+    // Arrange: a folder with no file, and a store whose folder does not exist at all.
+    const { store, directory } = await subject();
+    const never = await subject();
+    await rm(never.directory, { recursive: true, force: true });
+
+    // Act + Assert: neither throws, and removing creates nothing.
+    await store.write(SESSION, CAPABILITY);
+    await store.remove(SESSION);
+    await store.remove(SESSION);
+    await never.store.remove(SESSION);
+    should(await readdir(directory)).eql([]);
+    should(
+      await access(never.directory).then(
+        () => true,
+        () => false,
+      ),
+    ).be.false();
+  });
+
+  it('BG-036 should never follow a link at the name: the link goes, what it pointed at stays', async () => {
+    // Arrange: environment.json is a link to a file outside the session's folder.
+    const { store, directory } = await subject();
+    await mkdir(directory, { recursive: true });
+    const outside = join(directory, '..', 'outside-target.txt');
+    await writeFile(outside, 'must stay');
+    await symlink(outside, join(directory, 'environment.json'));
+
+    // Act
+    await store.remove(SESSION);
+
+    // Assert
+    should(await readdir(directory)).eql([]);
+    should(await readFile(outside, 'utf8')).equal('must stay');
+  });
+
+  it('BG-036 should refuse, without saying what it held, when the name cannot be removed', async () => {
+    // Arrange: the kernel's remove fails with a real fault (not absence).
+    const home = await mkdtemp(join(tmpdir(), 'fy-environment-store-'));
+    homes.add(home);
+    const { root } = await diskSessionsRoot(home, SESSION);
+    const failing = new FileSessionEnvironmentStore(
+      {
+        ...root,
+        name: root.name,
+        internal: root.internal,
+        ensurePrivateDirectory: path => root.ensurePrivateDirectory(path),
+        resolve: path => root.resolve(path),
+        publish: (...args) => root.publish(...args),
+        readBytes: path => root.readBytes(path),
+        remove: async () => {
+          throw Object.assign(new Error('the disk failed'), { code: 'EIO' });
+        },
+      },
+      SESSION,
+    );
+
+    // Act
+    const failure = await rejection(failing.remove(SESSION));
+
+    // Assert: a real fault is thrown for the caller to log; only absence is swallowed.
+    should(failure.code).equal('EIO');
   });
 });

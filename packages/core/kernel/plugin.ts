@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { Carriers, DoctorChecks, defineConfig, PluginsChanged, policyRef, SessionModes } from './contract/index.ts';
+import {
+  Carriers,
+  ConfigChanged,
+  DoctorChecks,
+  defineConfig,
+  PluginsChanged,
+  policyRef,
+  SessionModes,
+} from './contract/index.ts';
 import { definePlugin, route, socket, tool } from './manifest/index.ts';
 import { AgentConfigCallSchemas, AGENT_CONFIG_TOOLS } from './contract/agent-config.ts';
 
@@ -58,7 +66,7 @@ export default definePlugin({
         caller: 'any',
         noStore: true,
         audit: { skip: 'a version read records nothing' },
-        guard: { none: 'the protocol number and the daemon version only' },
+        guard: { none: 'the protocol number, the daemon version and the one feature name only' },
       }),
       // Today's liveness answer, kept (parity): `fy daemon status` and supervisors wait on it.
       route('GET /healthz', {
@@ -120,6 +128,16 @@ export default definePlugin({
         minimum: 'operator',
         caller: 'person',
         ferretDoor: 'a ferret writes a config file with config_write, where the owner turned "Ferretry settings" on',
+        capability: FLEET_USE,
+        noStore: true,
+        audit: { record: FLEET_CONFIGURED },
+        guard: { none: 'the answer names the path, the etag and what waits for the owner; never the text or a value' },
+      }),
+      // Removing one declared file (kernel batch #11: the CLI's `rm` verbs over a config collection item). The same
+      // descriptor as `PUT`: Gate admits it per file, and a removal that loosens is held for the owner.
+      route('DELETE /v1/config/file', {
+        minimum: 'operator',
+        caller: 'person',
         capability: FLEET_USE,
         noStore: true,
         audit: { record: FLEET_CONFIGURED },
@@ -198,7 +216,11 @@ export default definePlugin({
       }),
     ],
   },
-  data: { publishes: [PluginsChanged], config: [PluginsConfig] },
+  /** Never reached by a ferret, through any root: the daemon's signing key (`PrivacyDecl`). */
+  privacy: {
+    private: ['identity.json'],
+  },
+  data: { publishes: [PluginsChanged, ConfigChanged], config: [PluginsConfig] },
   hooks: {
     offers: [{ hook: Carriers }, { hook: SessionModes }, { hook: DoctorChecks }],
   },

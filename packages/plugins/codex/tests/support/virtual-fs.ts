@@ -78,6 +78,8 @@ export class VirtualFs {
       links: 1,
       size: node.kind === 'file' ? node.text.length : 0,
       mtimeMs: 0,
+      mtimeNs: 0n,
+      ctimeNs: 0n,
       mode: node.kind === 'directory' ? 0o700 : 0o600,
       owner: 1000,
       group: 1000,
@@ -107,13 +109,22 @@ export class VirtualFs {
             return { bytes: bytes.slice(start, start + length), size: bytes.length };
           },
           sync: unused,
+          chmod: unused,
           close: async () => undefined,
         };
       },
       openDirectory: async path => {
         const identity = this.#identity(path);
         if (identity === undefined || identity.kind !== 'directory') throw missing(path);
-        return { identity, entryPath: () => undefined, chmod: unused, sync: unused, close: async () => undefined };
+        return {
+          identity,
+          entryPath: () => undefined,
+          openChild: unused,
+          openFile: unused,
+          chmod: unused,
+          sync: unused,
+          close: async () => undefined,
+        };
       },
       list: async path => {
         const real = this.#resolve(path, true);

@@ -358,7 +358,19 @@ describe('AccountModelSchema', () => {
 
       // Assert
       should(actual).deepEqual([
-        'components.settings.empty: a settings component needs at least one of "file", "flags" or "env"',
+        'components.settings.empty: a settings component needs at least one of "file", "document", "flags" or "env"',
+      ]);
+    });
+
+    it('should refuse a settings component that names both a file and a document', () => {
+      const actual = withComponents({
+        settings: {
+          both: { harness: 'claude', file: 'components/settings/both.json', document: { permissions: {} } },
+        },
+      });
+
+      should(actual).deepEqual([
+        'components.settings.both: a settings component has a "file" or a "document", not both',
       ]);
     });
 

@@ -10,7 +10,7 @@ import { buildTerminals } from '../../../daemon/index.ts';
 import { CgroupLaunchPlanner, EnforcementRuntime, FleetMemoryWatcher } from '../../../daemon/lib/cgroups/index.ts';
 import { GIBIBYTE, LimitsViewSchema } from '../../../daemon/lib/protocol/limits.ts';
 import manifest from '../../../manifest.ts';
-import { fakeFerrets, fakeVault, FERRET, ScriptedTmux } from '../../support/daemon/half.ts';
+import { ALL_ON, fakeFerrets, fakeVault, FERRET, ScriptedTmux } from '../../support/daemon/half.ts';
 
 afterEach(() => mock.restore());
 
@@ -36,6 +36,7 @@ async function subject(effectiveLimits?: () => Promise<LimitsFile>, platform = '
     hostFacts: unarmedHostFacts,
     plugins: [plugin],
     fakes: { ferrets, vault: fakeVault([]) },
+    uses: { agentControl: ALL_ON },
     gate: new StandInAdmission(() => (caller === 'ferret' ? ferretStanding(FERRET) : ownerStanding())),
     spawn: (program, args) => {
       commands.push({ program, args });
@@ -140,6 +141,25 @@ describe('production Terminals resource composition', () => {
     expect((await host.tool('terminal_open', { name: 'disabled' })).isError).not.toBe(true);
     expect(launched(tmux.calls)).toHaveLength(2);
     expect(execute.mock.calls.length).toBe(limitedCommands);
+    await host.stop();
+  });
+
+  it('KCB-F a launch reads perFerret from limits.yaml through Ferrets', async () => {
+    spyOn(EnforcementRuntime.prototype, 'current').mockResolvedValue({ kind: 'cgroups', ionice: false });
+    const execute = spyOn(SpawnCgroupCommands.prototype, 'execute').mockResolvedValue({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    });
+    // The Ferrets port answers limits.yaml; Terminals asks it at the launch, not at boot.
+    const read = mock(async (): Promise<LimitsFile> => ({ perFerret: { memoryHigh: '128M', memoryMax: '256M' } }));
+    const { host } = await subject(read);
+
+    expect((await host.tool('terminal_open', { name: 'dev' })).isError).not.toBe(true);
+
+    expect(read).toHaveBeenCalled();
+    expect(execute.mock.calls.some(([args]) => args.includes(`MemoryHigh=${GIBIBYTE / 8}`))).toBe(true);
+    expect(execute.mock.calls.some(([args]) => args.includes(`MemoryMax=${GIBIBYTE / 4}`))).toBe(true);
     await host.stop();
   });
 

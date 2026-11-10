@@ -262,11 +262,12 @@ function storedTranscriptProvenance(config: unknown): TranscriptProvenance | und
   return parsed.success ? parsed.data : undefined;
 }
 
-/** A JSON document as a plain field bag; anything else contributes no fields. */
+/**
+ * A stored configuration as a plain field bag. The session store holds every document to its declared schema on every
+ * read, so a document is an object or is absent: nothing else reaches here.
+ */
 function fields(document: unknown): Readonly<Record<string, unknown>> {
-  return typeof document === 'object' && document !== null && !Array.isArray(document)
-    ? (document as Readonly<Record<string, unknown>>)
-    : {};
+  return (document as Readonly<Record<string, unknown>> | undefined) ?? {};
 }
 
 /** One agreement the persisted target must satisfy, or the prose that says it does not. */
@@ -584,12 +585,10 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
       readonly states: readonly LifecycleSessionStatus[];
     },
   ): void {
-    const config = SessionConfigSchema.safeParse(document);
-    if (!config.success)
-      throw new SessionForkTargetBindingError(
-        `the configuration document of target ${id} does not satisfy the protocol, so it cannot be shown to be the ` +
-          `session plan ${plan.planId} reserved: ${config.error.issues.map(issue => issue.message).join('; ')}`,
-      );
+    // The session store already holds this document to its declared schema (a superset of the protocol's), so it
+    // satisfies the protocol here; a document the store refuses never reaches reconciliation (it is refused where
+    // the record is read).
+    const config = SessionConfigSchema.parse(document);
     const held = record.config;
     const disagreements = [
       agree('session id', held.id, id),
@@ -612,34 +611,34 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
       ),
       demand(held.parent === undefined, `it descends from ${JSON.stringify(held.parent)} rather than from nothing`),
       demand(held.capabilityHash !== undefined, 'it holds no credential of its own'),
-      agree('incarnation', config.data.incarnation, `${id}-1`),
-      agree('runtime generation', config.data.runtimeGeneration, 1),
-      agree('harness', config.data.harness, plan.target.harness),
-      agree('agent', config.data.agent, shape.account.agent),
-      agree('model', config.data.model, shape.envelope.model),
+      agree('incarnation', config.incarnation, `${id}-1`),
+      agree('runtime generation', config.runtimeGeneration, 1),
+      agree('harness', config.harness, plan.target.harness),
+      agree('agent', config.agent, shape.account.agent),
+      agree('model', config.model, shape.envelope.model),
       // The durable configuration the transfer decided, which the envelope writer makes
       // authoritative and which no later transition may drift from.
-      agree('interval', config.data.intervalSeconds, plan.durable.intervalSeconds),
-      agree('timeout', config.data.timeoutSeconds, plan.durable.timeoutSeconds),
-      agree('nudge delay', config.data.nudgeAfterSeconds, plan.durable.nudgeAfterSeconds),
-      agree('kill delay', config.data.killAfterSeconds, plan.durable.killAfterSeconds),
-      agree('direct-send ceiling', config.data.directSendMaxChars, plan.durable.directSendMaxChars),
-      agree('resume menu choice', config.data.resumeMenuChoice, plan.durable.resumeMenuChoice),
-      agree('snapshot ceiling', config.data.maxSnapshots, plan.durable.maxSnapshots),
-      agree('remote control', config.data.remoteControl, plan.durable.remoteControl),
-      agree('label', config.data.label ?? null, transferTargetLabel(plan.facets.lineage, plan.durable.label)),
-      agree('harness flags', canonical(config.data.harnessFlags), canonical(plan.durable.harnessFlags)),
-      agree('retry policy', canonical(config.data.retry), canonical(plan.durable.retry)),
+      agree('interval', config.intervalSeconds, plan.durable.intervalSeconds),
+      agree('timeout', config.timeoutSeconds, plan.durable.timeoutSeconds),
+      agree('nudge delay', config.nudgeAfterSeconds, plan.durable.nudgeAfterSeconds),
+      agree('kill delay', config.killAfterSeconds, plan.durable.killAfterSeconds),
+      agree('direct-send ceiling', config.directSendMaxChars, plan.durable.directSendMaxChars),
+      agree('resume menu choice', config.resumeMenuChoice, plan.durable.resumeMenuChoice),
+      agree('snapshot ceiling', config.maxSnapshots, plan.durable.maxSnapshots),
+      agree('remote control', config.remoteControl, plan.durable.remoteControl),
+      agree('label', config.label ?? null, transferTargetLabel(plan.facets.lineage, plan.durable.label)),
+      agree('harness flags', canonical(config.harnessFlags), canonical(plan.durable.harnessFlags)),
+      agree('retry policy', canonical(config.retry), canonical(plan.durable.retry)),
       // The edge an import wrote is part of what proves this is the same target — and from the
       // import onward its ABSENCE is itself a disagreement, because a target the receipt says was
       // imported into and that carries no lineage back to this plan is not the session that was.
-      ...(config.data.transferredFrom === undefined
+      ...(config.transferredFrom === undefined
         ? [
             options.edge === 'required'
               ? 'it carries no transfer edge back to this plan, although this fork has already imported into it'
               : undefined,
           ]
-        : this.edgeDisagreements(config.data.transferredFrom, plan)),
+        : this.edgeDisagreements(config.transferredFrom, plan)),
       // The spawn stamp the envelope writer derives from this very plan. Once the import has run it
       // must be exactly that value: a target carrying a foreign warden stamp would be shielded from
       // escalation on the strength of somebody else's ancestry.

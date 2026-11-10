@@ -6,6 +6,7 @@
 import type { AppComponent, PanelProps, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
 import { ContextNote } from '@ferretry/app/ui';
+import { createAddMcpRowPanel } from './add-mcp-row.tsx';
 import { McpServersPanel } from './servers-panel.tsx';
 import { McpSettings } from './servers-settings.tsx';
 
@@ -21,11 +22,14 @@ const mcpSettings = (client: PluginClient): AppComponent<SettingsProps> =>
   };
 
 export interface McpSurfaces {
-  readonly panels: { readonly 'mcp-servers': AppComponent<PanelProps> };
+  readonly panels: {
+    readonly 'mcp-servers': AppComponent<PanelProps>;
+    readonly 'add-mcp-row': AppComponent<PanelProps>;
+  };
   readonly settings: { readonly mcp: AppComponent<SettingsProps> };
 }
 
 export const createSurfaces = (client: PluginClient): McpSurfaces => ({
-  panels: { 'mcp-servers': mcpServersPanel(client) },
+  panels: { 'mcp-servers': mcpServersPanel(client), 'add-mcp-row': createAddMcpRowPanel(client) },
   settings: { mcp: mcpSettings(client) },
 });

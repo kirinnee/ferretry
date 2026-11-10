@@ -10,6 +10,7 @@ import {
   tmuxReleaseRow,
 } from '../../lib/tmux/version.ts';
 import type { ControlTimer } from './control-tmux-process.ts';
+import { boundedSpawn } from './bounded.ts';
 import { KernelTmuxProcess, TMUX_PROGRAM } from './kernel-tmux-process.ts';
 import { DEFAULT_RELEASE_TIMEOUT_MS, TmuxReleaseReader } from './tmux-release-reader.ts';
 
@@ -41,19 +42,6 @@ export function tmuxReleaseDoctor(read: () => Promise<TmuxReleaseReading>): Doct
   return async () => {
     const row = tmuxReleaseRow(await read());
     return row === undefined ? undefined : tmuxReleaseFinding(row);
-  };
-}
-
-/**
- * The spawn port with a kernel timeout on every child: a question to a wedged tmux is KILLED at the bound, never left
- * running behind a reader that stopped waiting.
- */
-function boundedSpawn(spawn: SpawnPort, timeoutMs: number): SpawnPort {
-  const timeout = milliseconds(timeoutMs);
-  return {
-    run: async (program, args, options) => await spawn.run(program, args, { ...options, timeout }),
-    runBytes: async (program, args, options) => await spawn.runBytes(program, args, { ...options, timeout }),
-    start: (program, args, options) => spawn.start(program, args, { ...options, timeout }),
   };
 }
 

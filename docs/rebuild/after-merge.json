@@ -1,0 +1,66 @@
+{
+  "format": 1,
+  "end": "2026-11-22",
+  "counts": {
+    "parityOpen": 1626,
+    "portsPendingLines": 243,
+    "guaranteesMissing": 213
+  },
+  "items": [
+    {
+      "id": "kernel-lane-p",
+      "what": "kernel lane P: fileEvents (inotify + Bun port), push envelope eventKey and subject {ferret}, the Warden investigator folder (stays outside FY_HOME, S40)",
+      "owner": "gustavo"
+    },
+    {
+      "id": "seam-f1-f2",
+      "what": "Ferrets/Conversation seam lanes F1 and F2, except effectiveLimits (before merge)",
+      "owner": "britnee"
+    },
+    {
+      "id": "followup-sweep",
+      "what": "the review follow-up sweep: one Sonnet sweep plus one Opus review of every open follow-up line",
+      "owner": "britnee"
+    },
+    {
+      "id": "s-render-diff",
+      "what": "(D) the S render diff of the high-fit S rows, after the (A) harness and its mutation check hold",
+      "owner": "britnee"
+    },
+    {
+      "id": "launch-renewal",
+      "what": "launch renewal (deferred by ruling)",
+      "owner": "britnee"
+    },
+    {
+      "id": "differential-harness",
+      "what": "(A)+(E) the v4-vs-5.0 differential harness: core, CI job and mutation check, then the R/V row tables and the J cadence tests, per the reviewed plan (moved after merge by the owner, !A481)",
+      "owner": "britnee"
+    },
+    {
+      "id": "darwin-smoke",
+      "what": "the darwin (macOS) smoke run; no paid macOS run was booked before merge (owner, !A480)",
+      "owner": "gustavo"
+    },
+    {
+      "id": "imports-descriptor-darwin",
+      "what": "imports descriptor read on darwin: run the imports/skills/.mcp.json read tests on a real Mac",
+      "owner": "gustavo"
+    },
+    {
+      "id": "kernel-roots-int-coverage",
+      "what": "kernel/host/roots.ts reads about 70% lines in the integration union (it is not in the 100% adapters/ ledger); raise it with integration tests of the uncovered branches, run per file with --coverage under bunfig.int.toml, and move any line that turns out unreachable out (deleted, not ignored); also pin the real-process wiring of stopOnSignalReporting (the unref of the limit timer survives as a mutation) (britnee 2026-11-10: \"Put the roots.ts ~70% gap in followups as after-merge.\")",
+      "owner": "gustavo"
+    },
+    {
+      "id": "followups-sweep-after-merge",
+      "what": "the non-security follow-ups of the core lane, kept in the Follow-ups list, are swept after the merge: fresh Sonnet units, Opus review READY, Haiku merge, 5.0 CI on the merge sha; ports-pending closed/added reported per unit (britnee 2026-11-10: \"The rest of the followups sweep moves to after merge, so add it to docs/rebuild/after-merge.json with you as owner.\")",
+      "owner": "gustavo"
+    },
+    {
+      "id": "ffi-descriptor-verify",
+      "what": "the FFI descriptor verify line, which needs the darwin run",
+      "owner": "gustavo"
+    }
+  ]
+}

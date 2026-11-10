@@ -445,6 +445,11 @@ in force, so a shorter period set meanwhile applies at once; revoking a device r
 file asks every device again, with one boot notice. A per-act step-up and a fresh "for this act" proof stay
 in memory and end with the process: they are minutes long, and an update is the moment to ask again for one.
 Writing that file needs this machine's disk, which already holds the admin token — it widens nothing.
+A call claims only a fresh passkey proof that already existed when it was admitted, and claims it once: a proof made
+after the admission is not taken by that call or by work it spawns (a config write that runs after the request
+returned is then held), even after a lock and an unlock. The admission instant and the proof's are wall-clock
+milliseconds, so a proof made in the very same millisecond as the admission, or after the system clock stepped back,
+is not told apart from an earlier one.
 **While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
 the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
 with the unlock turned off always asks per act. **Narrowing never asks again** (below). **Adding access always asks:** minting a pairing code,
@@ -922,23 +927,6 @@ needs the passkey. Removing needs only the capability. Stay / Skip (`PATCH /v1/c
 under `filesystem.use`, `…/runtime/:installId` under `fleet.use`) records a choice about future versions and touches no
 file, so it needs the capability only, no passkey. A ferret may preview and list but is refused an install or a remove, whatever its
 grants say.
-
-## Copying a skill from this machine
-
-The same split as a catalog install, with its own seven routes
-([catalogs.md](catalogs.md#copying-a-skill-from-this-machine)), except for one difference: **both previews
-are `filesystem.use`, the runtime one included**, because a preview reads files off this machine and answers their
-whole text and their hashes, whatever the destination. A governed caller with `filesystem` off and `fleet` on is
-refused on a runtime preview and sees no project copies in the list (the list answers only the runtime
-copies unless `filesystem.use` is also granted). The applies and removes stay on the capability that owns the
-place they write: a project apply or remove is `filesystem.configure`, a runtime apply or remove is
-`fleet.configure`, which carries `fleet.use`, so a runtime copy needs both axes (`filesystem.use` to preview,
-`fleet.configure` to apply). Every route is
-`caller: 'person'`, so **a ferret is refused on all of them** whatever its grants say. An apply from a
-governed caller demands a fresh step-up for the existing act `catalog-install`, claimed at admission and
-not given back: copying a skill is the same decision (instructions that will run), so no second act exists
-to loosen or forget. Removing needs only the capability. The source is never trusted from the request: it
-must be a skill the machine's inventory lists, found again by its `SKILL.md` path.
 
 ## Adding an MCP server for one ferret
 

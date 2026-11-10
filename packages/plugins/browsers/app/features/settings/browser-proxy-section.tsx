@@ -3,7 +3,7 @@ import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { BrowserProxySetting } from '../../../contract/index.ts';
 import { type CallClient, listSecretNames, putSecret, reasonOf } from '../../lib/clients.ts';
-import type { SaveOutcome } from './browser-mode-section.tsx';
+import { machineInSentence, type SaveOutcome } from './browser-mode-section.tsx';
 import { testBrowserProxy } from './browser-proxy-api.ts';
 import { type BrowserProxyDraft, draftOf, isSecretName, nameTyped, settingOf } from './browser-proxy-draft.ts';
 import { BrowserProxyCredential } from './browser-proxy-credential.tsx';
@@ -198,7 +198,7 @@ export function BrowserProxySection({
   const testHint =
     !typed && saved === null
       ? 'Type a proxy address to test it.'
-      : `Tries one request through the proxy from this machine.`;
+      : `Tries one request through the proxy from ${machineInSentence(machineName)}.`;
   const now =
     saved === null
       ? 'No proxy: the browser goes direct.'
@@ -368,7 +368,7 @@ export function BrowserProxySection({
         </div>
       ) : null}
       <p className="m-0 text-meta leading-base text-muted" data-browser-proxy-hint="">
-        Applies the next time the browser on this machine starts.
+        Applies the next time the browser on {machineInSentence(machineName)} starts.
       </p>
     </SetupSection>
   );

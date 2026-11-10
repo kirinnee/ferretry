@@ -14,7 +14,7 @@ import type { WardenAccount, WardenConfig, WardenConfigPatch, WardenConfigView }
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { daemonSettingsHref } from '@ferretry/app';
-import { useConfigChangeEffect } from '../../hooks/use-config-change-effect.ts';
+import { configChangeEffect } from '../../hooks/use-config-change-effect.ts';
 import { type PickerAccount, readAccountPickerCatalog } from '../../lib/account-picker.ts';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { readSpeedups, type SpeedupsView } from '../../lib/speedups.ts';
@@ -153,7 +153,7 @@ const useRoutedDeps = (): WardenConfigDeps => {
     () => ({
       speedups: async connection => await readSpeedups(await reach(connection)),
       catalog: async connection => await readAccountPickerCatalog(await reach(connection)),
-      useConfigChange: useConfigChangeEffect,
+      useConfigChange: configChangeEffect(reach),
     }),
     [reach],
   );

@@ -6,12 +6,15 @@ import type {
   CallContext,
   ConfigEdit,
   ConfigFileStatus,
+  ConfigFilesWriter,
   ConfigTarget,
   ConfigWriteOutcome,
   RouteHandler,
   ScopedRoute,
   StateFileDef,
 } from '@ferretry/kernel/contract';
+import { config as kernelConfig, state as kernelState } from '@ferretry/kernel/host';
+import { readConfigText } from '@ferretry/std/yaml';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { ok } from '@ferretry/std';
 import {
@@ -24,6 +27,7 @@ import {
   DEFAULT_GATE_CONFIG,
   type GateApi,
   type GateConfig,
+  GateConfigFile,
   GatePolicyChanged,
   LIMITED_DEVICE_GRANTS,
   StepUp,
@@ -42,8 +46,13 @@ interface FakeKernelOptions {
   readonly config?: GateConfig | 'throws';
   /** The kernel's `ConfigPort.fileState`; left out, an absent file. */
   readonly fileState?: ConfigFileStatus;
-  /** `gate.yaml`'s raw text as the kernel's writer reads it; left out, no file. */
+  /**
+   * `gate.yaml`'s raw text as the kernel's writer reads it, in effect (its `written` value is read by the kernel's own
+   * reader); left out, no file.
+   */
   readonly rawConfig?: string;
+  /** The kernel's REAL config writer, over a real config service; replaces the `rawConfig` stand-in. */
+  readonly writer?: ConfigFilesWriter;
   /** What the kernel's config writer answers a write; left out, `written`. */
   readonly writeOutcome?: ConfigWriteOutcome;
   /** Secret files present before boot (path → text). */
@@ -105,7 +114,11 @@ function boot(options: FakeKernelOptions = {}) {
   };
   let live = options.config;
   const absent: ConfigFileStatus = { state: 'absent', inEffect: false, sentences: [] };
-  const configFiles = {
+  const writtenOf = (text: string | undefined): unknown => {
+    const read = text === undefined ? undefined : readConfigText(text);
+    return read?.ok === true ? read.read.value : undefined;
+  };
+  const configFiles = options.writer ?? {
     declarations: () => [{ plugin: 'gate', def: manifest.data?.config?.[0] }],
     read: async () => ({
       path: 'gate.yaml',
@@ -113,6 +126,7 @@ function boot(options: FakeKernelOptions = {}) {
       text: options.rawConfig,
       etag: 'e1',
       status: options.fileState ?? absent,
+      ...(options.rawConfig === undefined ? {} : { written: writtenOf(options.rawConfig) }),
     }),
     write: async (target: ConfigTarget, edit: ConfigEdit, writeOptions: unknown): Promise<ConfigWriteOutcome> => {
       configWrites.push({ target, edit, options: writeOptions });
@@ -495,6 +509,115 @@ describe('grant provenance in the built daemon', () => {
     };
     expect(body.capabilities.find(entry => entry.capability === 'fleet')?.origin).toBe('config file');
     expect(body.capabilities.find(entry => entry.capability === 'terminal')?.origin).toBe('default');
+  });
+});
+
+// ─── provenance through the kernel's REAL config service: Gate never parses the disk text itself ─────────────────
+
+const HOME = '/home/fy';
+const GATE_YAML = `${HOME}/config/gate.yaml`;
+const GOOD = 'grants:\n  fleet:\n    use: true\n';
+const CAP = kernelConfig.CONFIG_FILE_MAX_BYTES;
+
+/** One long string, then aliased until the text is just under the cap — and it also names `terminal`. */
+function aliasBomb(): string {
+  const head = `grants:\n  terminal:\n    use: true\ns: &s ${'x'.repeat(100_000)}\nl: [`;
+  const room = CAP - head.length - 2;
+  return `${head}${'*s, '.repeat(Math.floor(room / 4)).slice(0, -2)}]\n`;
+}
+
+/** The real config service over memory, holding `gate.yaml` as GOOD, then (on disk only) `next`. */
+async function realConfig(next: string) {
+  const fs = kernelState.createMemoryHostFs();
+  const cancel = () => undefined;
+  const files = kernelConfig.createConfigFiles({
+    home: HOME,
+    fs,
+    clock: { nowMs: () => 0, after: () => cancel, every: () => cancel },
+    log: { debug() {}, info() {}, warn() {}, error() {}, child: () => undefined } as never,
+    binary: 'fy',
+    defs: [{ plugin: 'gate', def: GateConfigFile }],
+  });
+  fs.seed(GATE_YAML, GOOD);
+  await files.reload();
+  fs.seed(GATE_YAML, next);
+  await files.reload();
+  return files;
+}
+
+/** Each capability's origin, once Gate has read its provenance (it reads it in the background at build). */
+async function origins(built: ReturnType<typeof boot>, until: (found: Map<string, string>) => boolean) {
+  const deadline = performance.now() + 5_000;
+  for (;;) {
+    const body = bodyOf(await dispatch(built, 'GET /v1/grants', { bearer: ADMIN })) as {
+      capabilities: { capability: string; origin: string }[];
+    };
+    const found = new Map(body.capabilities.map(entry => [entry.capability, entry.origin]));
+    if (until(found) || performance.now() > deadline) return found;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
+
+describe('grant provenance is read by the kernel, never by a parse of its own', () => {
+  test('G155 the alias-bomb shape (one long string aliased to the cap): boot is quick, bounded, and keeps last good', async () => {
+    const bomb = aliasBomb();
+    expect(bomb.length).toBeLessThanOrEqual(CAP);
+    const files = await realConfig(bomb);
+    // The kernel refused the file: the version in effect is the last good one.
+    expect(files.status().files.find(file => file.path === 'gate.yaml')?.state).toBe('invalid');
+    const rssBefore = process.memoryUsage().rss;
+    const started = performance.now();
+    const built = boot({ secrets: seeded, config: DEFAULT_GATE_CONFIG, writer: files.writer() });
+    await built.jobs.get('gate.tokens')?.();
+    const found = await origins(built, map => map.get('fleet') === 'config file');
+    const took = performance.now() - started;
+    // `Bun.YAML.parse` of that text took 2.3 s and 5.4 GB; the kernel's read refuses it in one linear pass.
+    expect(took).toBeLessThan(1_500);
+    expect(process.memoryUsage().rss - rssBefore).toBeLessThan(1024 * 1024 * 1024);
+    expect(found.get('fleet')).toBe('config file');
+    // The refused disk text names `terminal`; what is in effect does not, so nothing was read from the disk text.
+    expect(found.get('terminal')).toBe('default');
+  });
+
+  test('G155 a gate.yaml over 256 KiB is never read: boot keeps the last good version and its provenance', async () => {
+    const over = `grants:\n  terminal:\n    use: true\nnote: ${'y'.repeat(CAP)}\n`;
+    const files = await realConfig(over);
+    const built = boot({ secrets: seeded, config: DEFAULT_GATE_CONFIG, writer: files.writer() });
+    await built.jobs.get('gate.tokens')?.();
+    const found = await origins(built, map => map.get('fleet') === 'config file');
+    expect(found.get('fleet')).toBe('config file');
+    expect(found.get('terminal')).toBe('default');
+  });
+
+  test('G155 with nothing ever in effect, a refused file names nothing: every capability is the default', async () => {
+    const fs = kernelState.createMemoryHostFs();
+    const cancel = () => undefined;
+    const files = kernelConfig.createConfigFiles({
+      home: HOME,
+      fs,
+      clock: { nowMs: () => 0, after: () => cancel, every: () => cancel },
+      log: { debug() {}, info() {}, warn() {}, error() {}, child: () => undefined } as never,
+      binary: 'fy',
+      defs: [{ plugin: 'gate', def: GateConfigFile }],
+    });
+    fs.seed(GATE_YAML, aliasBomb());
+    await files.reload();
+    const built = boot({ secrets: seeded, writer: files.writer() });
+    await built.jobs.get('gate.tokens')?.();
+    // Asked after the background read has had time to land: still nothing named.
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const found = await origins(built, () => true);
+    expect([...found.values()].every(origin => origin === 'default')).toBe(true);
+  });
+
+  test('G155 a valid file read through the real service names what it writes', async () => {
+    const files = await realConfig('grants:\n  fleet:\n    use: true\n  pairing:\n    configure: true\n');
+    const built = boot({ secrets: seeded, config: DEFAULT_GATE_CONFIG, writer: files.writer() });
+    await built.jobs.get('gate.tokens')?.();
+    const found = await origins(built, map => map.get('pairing') === 'config file');
+    expect(found.get('fleet')).toBe('config file');
+    expect(found.get('pairing')).toBe('config file');
+    expect(found.get('terminal')).toBe('default');
   });
 });
 

@@ -141,9 +141,10 @@ export class ClientSessionApi
     return Array.isArray(answer) ? answer.filter((name): name is string => typeof name === 'string') : [];
   }
 
-  async start(body: StartBody): Promise<{ readonly id: string }> {
-    // Today's protocol start: one id and one body snapshot, reused by both POSTs and the recovery read.
-    const requestId = randomUUID();
+  async start(body: StartBody, given?: string): Promise<{ readonly id: string }> {
+    // Today's protocol start: one id and one body snapshot, reused by both POSTs and the recovery read. A caller's
+    // `--request-id` is that id, so a later run with the same key answers the ferret this one started.
+    const requestId = given ?? randomUUID();
     const payload = JSON.stringify(body);
     const captured: unknown = JSON.parse(payload);
     const init = Object.freeze({ body: captured, headers: Object.freeze({ 'x-fy-request-id': requestId }) });
@@ -228,8 +229,11 @@ export class ClientSessionApi
 export class ClientRestartGateway implements IRestartGateway {
   constructor(private readonly client: PluginClient) {}
 
-  async restart(request: RestartRequest): Promise<RestartResult> {
-    return await this.client.call<RestartResult>(FERRET_ROUTES.restart, { body: request });
+  async restart(request: RestartRequest, requestId?: string): Promise<RestartResult> {
+    return await this.client.call<RestartResult>(FERRET_ROUTES.restart, {
+      body: request,
+      ...(requestId === undefined ? {} : { headers: { 'x-fy-request-id': requestId } }),
+    });
   }
 
   async restartStatus(): Promise<RestartStatus> {

@@ -58,8 +58,8 @@ const DEFAULTS = {
   queueKeySettleMs: 300,
 } as const;
 
-/** A message could not be put into the pane's queue, and the message says which half failed. @pending terminals: GAP(ferrets): the tmux adapter daemon/adapters/tmux/pane-queue.ts is ported and tested but nothing composes it until the Runner queue seam of Ferrets is wired to it (gustavo) */
-export class PaneQueueError extends Error {
+/** A message could not be put into the pane's queue, and the message says which half failed. */
+class PaneQueueError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PaneQueueError';

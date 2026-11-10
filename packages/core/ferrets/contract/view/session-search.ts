@@ -40,19 +40,16 @@ export const MAX_SESSION_SEARCH_QUERY_LENGTH = 200;
 
 /**
  * Longest root-relative path the search wire will carry. POSIX itself stops at this scale.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export const MAX_SESSION_FILE_INDEX_PATH_LENGTH = 4_096;
 
 /**
  * Longest basename the search wire will carry.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export const MAX_SESSION_FILE_INDEX_NAME_LENGTH = 255;
 
 /**
  * Largest complete candidate set one response may carry. The daemon uses this same owned fact.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export const MAX_SESSION_FILE_INDEX_FILES = 20_000;
 
@@ -81,7 +78,6 @@ export type FerretSearchQuery = z.infer<typeof FerretSearchQuerySchema>;
  *
  * Exported because a caller that wants to rank or highlight needs the same folded text the match was
  * decided on; deriving it a second time is how the two stop agreeing.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export function normalizeSessionSearchQuery(raw: string): string {
   return raw.trim().toLowerCase();
@@ -93,7 +89,6 @@ export function normalizeSessionSearchQuery(raw: string): string {
  *
  * Declared as the shape rather than as `Task` so a client holding a partial projection can still ask the
  * question, and so this module never has to import the task record to answer it.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export interface SessionSearchTask {
   readonly id: string;
@@ -109,7 +104,6 @@ export interface SessionSearchTask {
  * Newline-joined rather than space-joined so a query cannot bridge two fields: `"F12 done"` must not
  * match a task numbered `F12` whose status text merely ends in `done`, and a separator no query can
  * contain is what prevents it.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export function sessionSearchTaskHaystack(task: SessionSearchTask): string {
   return [task.id, task.title, task.description, task.ask.text, ...task.clarifications.map(entry => entry.text)].join(
@@ -167,7 +161,6 @@ export type SessionFileIndexEntry = z.infer<typeof SessionFileIndexEntrySchema>;
  *
  * `partial` is a statement about the WALK, not about policy: it means work stopped before the tree was
  * exhausted, so a name absent from `files` may still exist.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export const SessionFileIndexCoverageSchema = z.enum(['complete', 'partial']);
 export type SessionFileIndexCoverage = z.infer<typeof SessionFileIndexCoverageSchema>;
@@ -196,7 +189,6 @@ export type SessionFileIndexSkipReason = z.infer<typeof SessionFileIndexSkipReas
  * A `truncated` count is a FLOOR rather than a total, and that is not sloppiness: the daemon stopped
  * looking, so the number it did not reach cannot be known without doing the work the bound exists to
  * avoid. `coverage` is the field that says so; this number only says how much was already in hand.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export const SessionFileIndexSkipSchema = z.object({
   reason: SessionFileIndexSkipReasonSchema,
@@ -260,7 +252,6 @@ function refineSessionFileIndex(
 
 /**
  * One session's file index, as the daemon's own domain holds it.
- * @pending ferrets: Session search inside the files tab is not ported
  */
 export const SessionFileIndexSchema = z.object(SessionFileIndexShape).superRefine(refineSessionFileIndex);
 export type SessionFileIndex = z.infer<typeof SessionFileIndexSchema>;

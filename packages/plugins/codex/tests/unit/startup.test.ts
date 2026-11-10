@@ -171,7 +171,7 @@ describe('the plan for a start’s reasoning level', () => {
 });
 
 describe('the whole Codex launch argv', () => {
-  it('lists the executable, the continued conversation, model, effort, tier, trigger, flags and prompt in launch order', () => {
+  it('lists the executable, the continued conversation, model, effort, tier, trigger and flags in launch order, and no prompt', () => {
     expect(
       buildCodexLaunchArgv({
         executable: '/fleet/bin/codex-work',
@@ -181,7 +181,6 @@ describe('the whole Codex launch argv', () => {
         fast: true,
         compactAt: 200000,
         harnessFlags: ['--search'],
-        prompt: 'hello',
       }),
     ).toEqual([
       '/fleet/bin/codex-work',
@@ -196,7 +195,6 @@ describe('the whole Codex launch argv', () => {
       '-c',
       'model_auto_compact_token_limit=200000',
       '--search',
-      'hello',
     ]);
   });
 

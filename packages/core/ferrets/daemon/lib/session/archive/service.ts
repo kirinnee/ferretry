@@ -22,13 +22,13 @@ export interface SessionArchivePorts {
    * why. Asked only about sessions that already qualify by age and kind, so the reads it costs are the few that
    * matter. A session it cannot answer for is named as kept.
    */
-  kept(ids: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  kept(ids: readonly string[], signal?: AbortSignal): Promise<ReadonlyMap<string, string>>;
   /**
    * Takes these sessions out of the live set. Answers how many left. `roster` is what the decision was made from: the
    * adapter checks the lineage and the keep signals AGAIN at the commit boundary, with the sessions' lanes held,
    * because the roster is only a snapshot.
    */
-  archive(ids: readonly string[], roster: readonly ArchiveSession[]): Promise<number>;
+  archive(ids: readonly string[], roster: readonly ArchiveSession[], signal?: AbortSignal): Promise<number>;
 }
 
 export interface SessionArchiveSettings {
@@ -60,7 +60,7 @@ export class SessionArchiveService {
   ) {}
 
   /** One pass; `undefined` when one is already running. */
-  async runPass(): Promise<ArchivePassResult | undefined> {
+  async runPass(signal?: AbortSignal): Promise<ArchivePassResult | undefined> {
     if (this.running) return undefined;
     this.running = true;
     try {
@@ -73,9 +73,11 @@ export class SessionArchiveService {
         limit: Number.POSITIVE_INFINITY,
       }).archive;
       if (qualifying.length === 0) return { archived: 0, deferred: 0, live: sessions.length };
-      const kept = await this.ports.kept(qualifying);
+      const kept = await this.ports.kept(qualifying, signal);
+      // A stopped pass archives nothing: whatever the keeps answered after the stop is not to be acted on.
+      if (signal?.aborted === true) return { archived: 0, deferred: 0, live: sessions.length };
       const decision = decideArchive(sessions, { ...base, kept, limit: this.settings.passLimit });
-      const archived = decision.archive.length === 0 ? 0 : await this.ports.archive(decision.archive, sessions);
+      const archived = decision.archive.length === 0 ? 0 : await this.ports.archive(decision.archive, sessions, signal);
       return { archived, deferred: decision.deferred, live: sessions.length - archived };
     } finally {
       this.running = false;

@@ -6,7 +6,19 @@ import type { ApiRequest, CallStanding } from '@ferretry/kernel/contract';
 import { definePlugin } from '@ferretry/kernel/manifest';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import { FerretFiles, type FerretId, type FerretRecord, Harnesses, Runners } from '../../../../contract/index.ts';
+import {
+  FerretFiles,
+  FerretsPort,
+  type FerretId,
+  type FerretRecord,
+  Harnesses,
+  OPENING_ATTACHMENTS_KEY,
+  OpeningAttachments,
+  type OpeningAttachmentsSource,
+  Runners,
+  StartDecide,
+  type StartDecideInput,
+} from '../../../../contract/index.ts';
 import { type FakeHarness, type FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
 
@@ -60,13 +72,83 @@ const runnerPlugin = (runner: FakeRunner) =>
     { build: () => ({ hooks: { 'runners:tmux': runner } }) },
   );
 
+/**
+ * A stand-in for the owner of attachments on `opening.attachments` (a security-path provide hook): a plugin with an id
+ * `id` (Conversation's real id by default, the only taker the hook names) that provides `source` under the hook's one key.
+ */
+export const fakeAttachmentsOwner = (source: OpeningAttachmentsSource, id = 'conversation') =>
+  implementDaemon(
+    definePlugin({
+      id,
+      title: 'Attachments owner (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: OpeningAttachments, key: OPENING_ATTACHMENTS_KEY }] },
+    }),
+    { build: () => ({ hooks: { 'opening.attachments:opening': source } }) },
+  );
+
+/**
+ * A stand-in consumer of the Ferrets port with a real plugin id (`warden`, `packs`, `lessons`…): the kernel binds the
+ * port per consumer, so a test that acts as that plugin takes it with `host.provided(FerretsPort, id)`. It takes no hook.
+ */
+export const portConsumer = (id: string) =>
+  implementDaemon(
+    definePlugin({
+      id,
+      title: `${id} (fake consumer)`,
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      needs: { ferrets: FerretsPort },
+    }),
+    { build: () => ({}) },
+  );
+
+/**
+ * A stand-in for Packs: a plugin with Packs' real id that takes `start.decide` and answers `answer` (anything, garbage
+ * included), recording what it was asked. It also needs the Ferrets port, so a test takes the port as Packs with
+ * `host.provided(FerretsPort, 'packs')`. Its own yes on `start.decide` is what admits a child (RULING #43).
+ */
+export const fakePacks = (answer: (input: StartDecideInput) => unknown = () => ({ allow: true })) => {
+  const asked: StartDecideInput[] = [];
+  const plugin = implementDaemon(
+    definePlugin({
+      // Packs' manifest id, written out rather than read from the constant under test: a wrong answerer id goes red.
+      id: 'packs',
+      title: 'Packs (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      needs: { ferrets: FerretsPort },
+      hooks: { takes: [{ hook: StartDecide }] },
+    }),
+    {
+      build: () => ({
+        hooks: {
+          'start.decide': async (input: StartDecideInput) => {
+            asked.push(input);
+            return (await answer(input)) as never;
+          },
+        },
+      }),
+    },
+  );
+  return { asked, plugin };
+};
+
 export async function host(
   records: readonly FerretRecord[] = [],
   extra: {
     readonly harness?: FakeHarness;
     readonly runner?: FakeRunner;
     readonly config?: Readonly<Record<string, unknown>>;
-    readonly standing?: (request: ApiRequest) => CallStanding;
+    /** Who calls; `undefined` is a call with no credential. */
+    readonly standing?: (request: ApiRequest) => CallStanding | undefined;
     /** What `RootHandle.pin` answers: the kernel's descriptor walk, or a stand-in for it. */
     readonly pinner?: Parameters<typeof testHost>[0]['pinner'];
     /** Answers the Git the file browser runs. */

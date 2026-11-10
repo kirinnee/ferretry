@@ -26,7 +26,7 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-public_key="${script_dir}/../../packages/app/release-signing-key.pub"
+public_key="$("${script_dir}/hosted-app-origin.sh" --key-file)"
 check_args=()
 dist=""
 while [[ $# -gt 0 ]]; do
@@ -45,7 +45,9 @@ fail() {
 
 [[ -n ${dist} ]] || fail "usage: sign-pwa-release.sh --sequence <n> --commit <sha> [...] <dist>  (key on stdin)"
 "${script_dir}/check-pwa-release.sh" "${check_args[@]}" "${dist}"
-openssl pkey -pubin -in "${public_key}" -noout -text 2>/dev/null | grep -q '^ED25519 Public-Key' ||
+# Capture first, then match: `openssl | grep -q` under pipefail fails with SIGPIPE when grep exits on its first match.
+public_key_text="$(openssl pkey -pubin -in "${public_key}" -noout -text 2>/dev/null)" || public_key_text=''
+grep -q '^ED25519 Public-Key' <<<"${public_key_text}" ||
   fail "${public_key} is not an Ed25519 public key"
 
 key_dir="$(mktemp -d)"

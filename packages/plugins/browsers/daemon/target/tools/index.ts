@@ -95,8 +95,12 @@ interface PageIdentities {
  * A push approval (`push: true`): Accounts owns approvals; Browsers only reads the number a provider's page shows.
  * Absent: the tool says so.
  */
-interface PageApprovals {
-  raise(caller: PageCaller, page: ResolvedPage, push: BrowserPushApprovalInput): Promise<{ readonly summary: string }>;
+export interface PageApprovals {
+  raise(
+    caller: PageCaller,
+    page: ResolvedPage,
+    push: BrowserPushApprovalInput,
+  ): Promise<{ readonly ok: true; readonly summary: string } | { readonly ok: false; readonly message: string }>;
 }
 
 /** The page an act touched (today's `ActedPage`): hosts by `../../holds/site.ts` grouping on the lock's side. */
@@ -273,7 +277,10 @@ export function pageInputTools(deps: PageToolDeps): {
     if (request.push === true) {
       if (deps.approvals === undefined)
         throw new PageToolError('Phone approvals are not available on this machine: ask for the value instead.');
-      return { text: (await deps.approvals.raise(caller, page, request)).summary };
+      if (caller.kind !== 'agent') throw new PageToolError('Only an agent asks for a phone approval.');
+      const raised = await deps.approvals.raise(caller, page, request);
+      if (!raised.ok) throw new PageToolError(raised.message);
+      return { text: raised.summary };
     }
     if (caller.kind !== 'agent')
       throw new PageToolError('Only an agent asks its owner for values; you already have the page.');

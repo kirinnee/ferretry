@@ -118,14 +118,18 @@ function archiveRecords(text: string): AgendaArchiveRecord[] {
  * A PARSED COPY IS KEPT PER SESSION, against the identity of the file it was read from. A board read opens
  * the agenda of every ferret on the board — some two hundred — and checking each one's ledger entry by entry
  * was most of what it cost. The file stays the only truth: every write lands on disk first and then drops the
- * copy, every read first asks the file how it stands (the digest of its bytes, through the kernel's state port), and
- * a file changed by anyone — this daemon, a person with an editor — is a new identity, parsed again. The
+ * copy, every read first asks the file how it stands (a stat through the kernel's state port: inode, size and
+ * modified time, not a read of its bytes), and a file whose stat moved — this daemon's write, a person with an
+ * editor — is a new identity, parsed again. A rewrite that kept all three (same inode, same size, same millisecond)
+ * would not be noticed; it has no ctime or device in it. The
  * copy is frozen, because every reader of this session shares it, and lives in memory only: a restart starts
  * from the files.
  */
 export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   private readonly tails = new Map<string, Promise<void>>();
   private readonly cache = new Map<string, CachedLedger>();
+  /** Ferrets whose unfinished-change file was found absent: only this daemon writes one, so it is looked for again only after it does. */
+  private readonly noPendingVersions = new Set<string>();
   readonly changeOutbox?: FileAgendaChangeOutbox;
 
   constructor(
@@ -268,6 +272,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
         // This fsynced intent precedes archive requests and the hot commit. Recovery always replays the SAME
         // snapshots and per-item identity, including a worker commit whose acknowledgement was lost, and only
         // while the agenda file is still the one it was prepared from or the one it commits.
+        this.noPendingVersions.delete(sessionId);
         await this.files.writeAtomic(
           sessionId,
           AGENDA_VERSION_PENDING,
@@ -289,8 +294,12 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   }
 
   private async recoverVersions(sessionId: string): Promise<void> {
+    if (this.noPendingVersions.has(sessionId)) return;
     const text = await this.files.read(sessionId, AGENDA_VERSION_PENDING);
-    if (text === undefined) return;
+    if (text === undefined) {
+      this.noPendingVersions.add(sessionId);
+      return;
+    }
     if (this.versions === NO_AGENDA_VERSIONS)
       throw new Error('agenda version archive is required to recover this transaction');
     const raw: unknown = JSON.parse(text);
@@ -361,6 +370,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     await this.versions.record(sessionId, drafts);
     // The moment the agenda file lands the intent says so, ahead of the history mark and the event: from there on a
     // failure leaves a committed intent, which nothing sets aside.
+    this.noPendingVersions.delete(sessionId);
     await this.commit(sessionId, commit.document, commit.archive, commit.records, () =>
       this.files.writeAtomic(sessionId, AGENDA_VERSION_PENDING, JSON.stringify({ committed: true, effect })),
     );

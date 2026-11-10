@@ -13,7 +13,7 @@ import {
   WardenCapsSchema,
   WardenClearedBySchema,
   WardenConfigSchema,
-  WardenFileSchema,
+  WardenSettingsPatchSchema,
   WardenEventTriggersSchema,
   WardenFailoverPolicySchema,
   WardenGuardConfigSchema,
@@ -27,7 +27,7 @@ import {
   WardenTriageReasonSchema,
   WardenVerdictKindSchema,
   type WardenConfig,
-  type WardenFile,
+  type WardenSettingsPatch,
 } from '../../contract/index.ts';
 import { CardRefSchema } from '@ferretry/plugin-board/contract';
 import {
@@ -45,11 +45,18 @@ const InstantSchema = z.iso.datetime({ offset: true });
 const NonNegativeIntegerSchema = z.number().int().nonnegative();
 const PositiveIntegerSchema = z.number().int().positive();
 
-export { DEFAULT_WARDEN_REVIVE, WardenClearedBySchema, WardenConfigSchema, WardenFileSchema, WardenVerdictKindSchema };
+export {
+  DEFAULT_WARDEN_REVIVE,
+  WardenClearedBySchema,
+  WardenConfigSchema,
+  WardenSettingsPatchSchema,
+  WardenVerdictKindSchema,
+};
 export { WardenJevActsSchema };
 export type { SessionStatus, WardenConfig };
 export const WardenAutoMoveTriggerSchema = z.enum(WARDEN_AUTO_MOVE_TRIGGERS);
-const WARDEN_CONFIG_SECTIONS = [
+/** The settings that are mappings of sub-settings: the one list that decides merge-by-sub-key vs whole (Warden's adapters import it). */
+export const WARDEN_CONFIG_SECTIONS = [
   'revive',
   'autoMove',
   'layers',
@@ -93,7 +100,7 @@ export type WardenEventTriggers = z.infer<typeof WardenEventTriggersSchema>;
 export type WardenEventTrigger = keyof WardenEventTriggers;
 export type WardenReviveConfig = z.infer<typeof WardenReviveConfigSchema>;
 export type WardenAutoMoveTrigger = (typeof WARDEN_AUTO_MOVE_TRIGGERS)[number];
-export type WardenConfigPatch = WardenFile;
+export type WardenConfigPatch = WardenSettingsPatch;
 const LivenessLedgerSchema = z.object({
   lastTranscriptAt: InstantSchema.optional(),
   lastCounterAdvanceAt: InstantSchema.optional(),

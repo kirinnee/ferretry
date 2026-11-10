@@ -8,6 +8,8 @@
  * asked for by the carrier when the daemon wants it; nothing here holds or sees a credential.
  */
 
+import { useViewPlace } from '@ferretry/app';
+import { changeAuthorityFrom } from '@ferretry/app/ui';
 import type { AccountChange, AccountChangeView } from '../../../../contract/index.ts';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 import type { RuntimesClient } from '../../../lib/client.ts';
@@ -50,25 +52,32 @@ export interface UseAccountChangesOptions {
 /**
  * The change state for one machine. The client is per daemon, so another machine is another client and starts over:
  * nothing crosses machines.
+ *
+ * Drawn in the app, what this browser may change is the view's place (`useViewPlace`, the shell's one grants cache for
+ * `fleet`/`configure`); in a harness or a suite, where there is no place, it is read from the machine view as before.
  */
 export function useAccountChanges({ client }: UseAccountChangesOptions): AccountChanges {
-  const [authority, setAuthority] = useState<FleetApplyAuthority | null>(null);
+  const place = useViewPlace();
+  const [own, setOwn] = useState<FleetApplyAuthority | null>(null);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const placed = place !== null;
+  const authority = place === null ? own : changeAuthorityFrom(place.authority('fleet', 'configure'));
 
   useEffect(() => {
-    let live = true;
-    setAuthority(null);
     setRefusal(null);
+    if (placed) return;
+    let live = true;
+    setOwn(null);
     void readChangeAuthority(client)
       .catch((): FleetApplyAuthority => ({ kind: 'unreadable' }))
       .then(next => {
-        if (live) setAuthority(next);
+        if (live) setOwn(next);
       });
     return () => {
       live = false;
     };
-  }, [client]);
+  }, [client, placed]);
 
   const run = useCallback(
     async <R extends ChangeResult | StageResult>(
@@ -78,7 +87,8 @@ export function useAccountChanges({ client }: UseAccountChangesOptions): Account
       setRefusal(null);
       try {
         const result = await work(client);
-        if (result.kind === 'refused') setRefusal(result.sentence);
+        // A rolled-back or half-restored apply is not a save: it shows where a refusal shows, in the same alert.
+        if (result.kind !== 'applied' && result.kind !== 'staged') setRefusal(result.sentence);
         return result;
       } catch (error) {
         // A change's own failure is already a result, so this is only an unexpected throw, and that says why rather

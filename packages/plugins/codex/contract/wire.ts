@@ -186,6 +186,13 @@ export const SettingsItemSchema = z.strictObject({
 });
 export type SettingsItem = z.infer<typeof SettingsItemSchema>;
 
+/** A hooks component: Codex hooks keyed by event name, rendered into the runtime's `hooks.json`. */
+export const HooksItemSchema = z.strictObject({
+  description: z.string().optional(),
+  hooks: z.record(z.string(), z.array(z.unknown())),
+});
+export type HooksItem = z.infer<typeof HooksItemSchema>;
+
 // ─── state (state/codex/discovery.json) ────────────────────────────────────────────────────────────────────
 
 /** What discovery last found. Never reads the harness's sign-in files. */

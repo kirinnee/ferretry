@@ -14,7 +14,7 @@ import type {
   SetupCatalogDeps,
 } from '../lib/service/setup-service.ts';
 import { HostHarnessScanner } from './host-harness-scan.ts';
-import type { AdapterHost, ApplyLockOptions, ConfigFileService, HostFiles } from './ports.ts';
+import type { AdapterHost, ConfigFileService, HostFiles } from './ports.ts';
 
 /** The largest file a folder read carries; a larger one is skipped and named. */
 const MAX_FOLDER_FILE_BYTES = 256 * 1024;
@@ -95,7 +95,7 @@ export async function skillItemsIn(
  *
  * GAP(kernel): that service is the kernel's config layer; plugins have no config write port.
  *
- * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
+ * @pending runtimes: the settings merge of a copy needs the config layer's file service
  */
 export function cloneConfigFilesOver(service: ConfigFileService): CloneConfigFiles {
   return {
@@ -120,9 +120,7 @@ export function cloneConfigFilesOver(service: ConfigFileService): CloneConfigFil
   };
 }
 
-/** What the composition root hands the setup service: its own collaborators, never a second copy. *
- * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
- */
+/** What the composition root hands the setup service: its own collaborators, never a second copy. */
 export interface FileFleetSetupOptions {
   /** The host: its files, command lookup, record store and the provisioner's apply claim (`./ports.ts`). */
   readonly host: AdapterHost;
@@ -133,8 +131,6 @@ export interface FileFleetSetupOptions {
   readonly codexHome?: string;
   /** Safe Logins contract facts; host sign-in files stay opaque. */
   readonly logins: Pick<import('@ferretry/plugin-logins/contract').LoginsApi, 'list'>;
-  /** How long the clone record's update waits for a running fleet apply; a test shortens it. */
-  readonly lockOptions?: ApplyLockOptions;
   readonly tools: FleetSetupServiceDeps['tools'];
   /** The configuration files a copy merges settings into; absent, a copy carrying one is refused. */
   readonly configFiles?: CloneConfigFiles;
@@ -152,14 +148,12 @@ const sha256 = (text: string): string => new Bun.CryptoHasher('sha256').update(t
 /** The largest host document the import reads; anything larger is reported, never truncated. */
 const MAX_HOST_DOCUMENT_BYTES = 1024 * 1024;
 
-/** The setup service's collaborators over this machine's files. *
- * @pending runtimes: plugins have no config write port, so the fleet's catalogue and setup cannot be composed over the host
- */
+/** The setup service's collaborators over this machine's files. */
 export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupServiceDeps {
   const { catalog, host } = options;
   const keyWriter = host.texts;
   // The claim every fleet apply takes, keyed the one way the provisioner keys it (beside the manifest).
-  const applyLock = host.provisioner.kernel.applyLockFor(catalog.layout.manifestPath, options.lockOptions);
+  const applyLock = host.claimFor(catalog.layout.manifestPath);
   // One read-modify-write of the clone record while holding the fleet apply claim. An apply publishes this same
   // file inside that claim, so while it is held no apply can land between the read and the write: the change is
   // made from what the last apply left, and the next apply's own revision check refuses a plan older than it.

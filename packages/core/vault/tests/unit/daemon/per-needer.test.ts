@@ -17,6 +17,7 @@ import {
   ChildEnvironmentPort,
   type CredentialPlacement,
   type OutboundHttpRequest,
+  PHONE_APPROVAL_UNAVAILABLE,
   type SecretName,
   SecretUseRequestSchema,
   VaultPort,
@@ -607,5 +608,42 @@ describe('a caller cannot change what it passed after the check (check-then-use)
     if (opened === undefined) throw new Error('expected an opened environment');
     expect(opened.AUTH).toBe(VALUE);
     expect(Object.values(opened)).not.toContain('the-undeclared-value');
+  });
+});
+
+describe('the phone approval’s reach through the Vault is by name', () => {
+  const NONE: Permissions = {};
+  const FERRET = 'ferret_1' as never;
+
+  test('only Accounts is handed the page look, the terminal look and the steered question', async () => {
+    const { of } = await world({ accounts: NONE, browsers: NONE, tenant: NONE });
+
+    for (const id of ['browsers', 'tenant']) {
+      const api = of(id);
+      expect(api.pushNumber).toBeUndefined();
+      expect(api.observeTerminal).toBeUndefined();
+      expect(api.tainted).toBeUndefined();
+    }
+    const accounts = of('accounts');
+    expect(typeof accounts.pushNumber).toBe('function');
+    expect(typeof accounts.observeTerminal).toBe('function');
+    expect(typeof accounts.tainted).toBe('function');
+    // With no Browsers or Terminals bound, a look finds nothing, and nothing is said to be unsteered.
+    expect(await accounts.pushNumber?.(FERRET, 'login')).toBeUndefined();
+    expect(await accounts.observeTerminal?.(FERRET, 'build')).toEqual({ ok: false, reason: 'unsupported' });
+  });
+
+  test('only Browsers is handed the raise, and it is refused while no service provides approvals', async () => {
+    const { of, core } = await world({ accounts: NONE, browsers: NONE, tenant: NONE });
+
+    expect(of('accounts').raisePhoneApproval).toBeUndefined();
+    expect(of('tenant').raisePhoneApproval).toBeUndefined();
+    const ask = { target: { kind: 'browser', key: 'login' } } as const;
+    expect(await of('browsers').raisePhoneApproval?.(FERRET, ask)).toEqual({
+      ok: false,
+      error: PHONE_APPROVAL_UNAVAILABLE,
+    });
+    // A core caller keeps the whole reach.
+    expect(await core.raisePhoneApproval?.(FERRET, ask)).toEqual({ ok: false, error: PHONE_APPROVAL_UNAVAILABLE });
   });
 });

@@ -110,6 +110,23 @@ describe('GAP(composition) the environment store, task store and effect ledger a
     expect(kernel.received.every(handle => handle.internal === true && handle.name === 'sessions')).toBe(true);
   });
 
+  test('BG-036 removeEnvironment deletes an ended ferret’s file, and leaves a ferret that was resumed first (it has a new credential)', async () => {
+    // Arrange: a ferret holding an environment file.
+    const kernel = await wired();
+    const { subject } = await files(kernel.roots);
+    await subject.environmentStore(FERRET).write(FERRET, { A: 'fixture' });
+
+    // Act: the one still ended is removed; asked again while the registry no longer says ended, it stays.
+    await subject.removeEnvironment(FERRET, () => true);
+    const keptEnded = await subject.environmentStore(FERRET).read(FERRET);
+    await subject.environmentStore(FERRET).write(FERRET, { A: 'new-credential-fixture' });
+    await subject.removeEnvironment(FERRET, () => false);
+
+    // Assert
+    expect(keptEnded).toEqual({});
+    expect(await subject.environmentStore(FERRET).read(FERRET)).toEqual({ A: 'new-credential-fixture' });
+  });
+
   test('GAP(composition) 3: a work handle passed to any of the three constructors throws at construction', async () => {
     // Arrange
     const { work } = await wired();
@@ -421,6 +438,8 @@ describe('unbuilt adapters: provenance', () => {
     });
     await storage.writeConfig(OTHER, sessionConfig(OTHER, parentDocument));
     await storage.writeConfig(FERRET, sessionConfig(FERRET, childDocument));
+    // A session's state document is written with its config (a revive counts its turn there, before the relaunch).
+    await storage.upsertState(FERRET, () => ({ id: FERRET, status: 'stopped', turn: 0 }));
     const harness = new FakeHarness();
     const runner = new FakeRunner();
     const service = new FerretsService(registry, new FerretTokenDirectory(), {
@@ -536,12 +555,13 @@ describe('unbuilt adapters: provenance', () => {
 
   /**
    * GAP(provenance), pinned. Today's start always takes the spawn ancestry snapshot, so a damaged, unreadable or
-   * vanished ancestor refuses EVERY start. In 5.0 a start with no session document returns before the snapshot is
-   * taken, so the ancestry is never checked and such a start goes on unstamped. That is the declared trade (nothing
-   * is written, so no false `wardenLineage: false` lands, and taking the snapshot here would lock out every start
-   * while a journal-only ferret is indexed); the same ancestry DOES refuse once the child has a document.
+   * vanished ancestor refuses EVERY start. The session-document writer (ruling #31b) now makes a document for every
+   * ferret the registry holds before its stamp, so the daemon's starts take that snapshot as today's do
+   * (`deliver-turns.test.ts`). This pins the one branch left: a start for a ferret the registry holds NO record of
+   * (this fixture binds no `seed`) has no document to make, returns before the snapshot and records nothing; the same
+   * ancestry DOES refuse once the child has a document.
    */
-  test("GAP(provenance) a start with no session document is not refused for a damaged, unreadable or vanished ancestor, which today's start is: the ancestry is never checked", async () => {
+  test('GAP(provenance) a start the registry holds no record for has no document to make, so it records nothing and its ancestry is never checked; once it has a document the same ancestry refuses', async () => {
     for (const damage of ['damaged', 'unreadable', 'vanished'] as const) {
       // Arrange: the child (FERRET) has no document; its registered parent (OTHER) is damaged, or indexed with none
       const kernel = await wired();

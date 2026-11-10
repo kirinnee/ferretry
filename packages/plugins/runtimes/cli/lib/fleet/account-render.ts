@@ -129,6 +129,28 @@ function renderLoginChanged(outcome: Extract<AccountChangeOutcome, { outcome: 'l
 const leftAsItWas = (skipped: readonly { readonly path: string; readonly reason: string }[] | undefined): string[] =>
   (skipped ?? []).map(({ path, reason }) => `Left ${path} as it was: ${reason}`);
 
+/**
+ * The configuration files a failed change wrote first. A rollback puts the fleet back but not these, and the next
+ * apply publishes them, so the sentence names them; with none landed there is nothing to say.
+ */
+const landed = (files: readonly string[] | undefined): string | undefined => {
+  if (files === undefined || files.length === 0) return undefined;
+  const named =
+    files.length === 1
+      ? `The change to the configuration ${files[0]} was made first and is`
+      : `The changes to the configuration files ${files.join(', ')} were made first and are`;
+  const them = files.length === 1 ? 'it' : 'them';
+  const back =
+    files.length === 1
+      ? 'put that file back as it was, or delete it if it did not exist before'
+      : 'put those files back as they were, or delete any that did not exist before';
+  return `${named} NOT rolled back; the next apply publishes ${them}. Fix the cause and apply again; to undo the change instead, ${back}.`;
+};
+const landedLines = (files: readonly string[] | undefined): string[] => {
+  const line = landed(files);
+  return line === undefined ? [] : [line];
+};
+
 function renderApply(apply: ApplyOutcome): RenderedOutcome {
   switch (apply.outcome) {
     case 'committed': {
@@ -151,19 +173,38 @@ function renderApply(apply: ApplyOutcome): RenderedOutcome {
         ].join('\n'),
       };
     case 'rolled-back':
-      return { ok: false, text: `Nothing changed. ${apply.failedOperation} failed: ${apply.reason}` };
-    case 'rollback-incomplete':
       return {
         ok: false,
         text: [
-          `${apply.failedOperation} failed (${apply.reason}) and these could not be put back:`,
+          landed(apply.configurationLanded) === undefined
+            ? `Nothing changed. ${apply.failedOperation} failed: ${apply.reason}`
+            : `${apply.failedOperation} failed: ${apply.reason}. The fleet was put back.`,
+          ...landedLines(apply.configurationLanded),
+        ].join('\n'),
+      };
+    case 'rollback-incomplete': {
+      const displaced = (apply.displaced ?? []).map(state => `${state.path} (moved to ${state.movedTo})`);
+      const header =
+        apply.unrestored.length > 0
+          ? `${apply.failedOperation} failed (${apply.reason}) and these could not be put back:`
+          : displaced.length > 0
+            ? `${apply.failedOperation} failed (${apply.reason}), and the fleet could not be fully put back:`
+            : `${apply.failedOperation} failed (${apply.reason}).`;
+      return {
+        ok: false,
+        text: [
+          header,
           ...indent(
             apply.unrestored.map(
               path => `${path.path}: ${path.reason}${path.backup ? ` (the original is at ${path.backup})` : ''}`,
             ),
           ),
+          ...(apply.unrestored.length > 0 && displaced.length > 0 ? ['Moved aside:'] : []),
+          ...indent(displaced),
+          ...landedLines(apply.configurationLanded),
         ].join('\n'),
       };
+    }
   }
 }
 

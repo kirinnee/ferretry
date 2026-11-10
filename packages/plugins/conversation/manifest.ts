@@ -19,6 +19,7 @@ import {
   COMPOSER_ACTED_AUDIT,
   CONVERSATION_CONFIG,
   CONVERSATION_STATE,
+  AGENDA_CONVERSATION_SLOT,
   ConversationPort,
   DRAFT_EDITED_AUDIT,
   DraftChanged,
@@ -47,7 +48,17 @@ import {
   TurnEnded,
 } from './contract/index.ts';
 import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
-import { FerretChanged, FerretsPort, FerretStopping, LaunchParts, SitrepLines } from '@ferretry/core-ferrets/contract';
+import {
+  ACTIONS_ROW_SLOT,
+  FerretChanged,
+  FerretsPort,
+  FerretStopping,
+  FILES_SEARCH_SLOT,
+  LaunchParts,
+  OPENING_ATTACHMENTS_KEY,
+  OpeningAttachments,
+  SitrepLines,
+} from '@ferretry/core-ferrets/contract';
 
 // Shared descriptor pieces. The fields answer independent questions (§7.1); only what repeats is shared.
 const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
@@ -90,7 +101,15 @@ export default definePlugin({
   actions: {
     routes: [
       // ── send, queue, ledger (session-send) ────────────────────────────────────────────────────
-      route('POST /v1/ferrets/:ferretId/send', { ...FERRET, audit: { record: MESSAGE_SENT_AUDIT }, ...ACK }),
+      route('POST /v1/ferrets/:ferretId/send', {
+        ...FERRET,
+        audit: { record: MESSAGE_SENT_AUDIT },
+        // The one carve-out (today's): a composer_occupied refusal returns the composer's text from the pane (the person's
+        // own draft, or a peer's message a queue left stranded there).
+        guard: {
+          none: "answers an acknowledgement; no page or vault text, and no pane text except the composer's text a composer_occupied refusal returns, as today",
+        },
+      }),
       route('POST /v1/ferrets/:ferretId/interrupt', { ...FERRET, audit: { record: TURN_INTERRUPTED_AUDIT }, ...ACK }),
       route('GET /v1/ferrets/:ferretId/sends', { ...FERRET, ...READ, ...SECRETS }),
       route('GET /v1/ferrets/:ferretId/queue', { ...FERRET, ...READ, ...SECRETS }),
@@ -125,8 +144,11 @@ export default definePlugin({
         ...PERSON,
         capability: cap('terminal', 'use'),
         audit: { record: COMPOSER_ACTED_AUDIT },
-        // The composer's draft text goes to a pane; the answer is the outcome word only.
-        guard: { none: 'answers an outcome word; no pane, page or vault text' },
+        // The composer's draft text goes to a pane; the answer is the outcome word only. A refusal can quote the pane's
+        // blocking prompt (masked), as today's refusal did; the draft itself is never in an answer.
+        guard: {
+          none: "answers an outcome word; a refusal may quote the pane's masked blocking prompt; no page or vault text",
+        },
       }),
 
       // ── reading (session-reads) ───────────────────────────────────────────────────────────────
@@ -296,11 +318,23 @@ export default definePlugin({
       panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
       // This device's conversation width (lead decision Q11).
       panel('device.settings', { id: 'chat-width', order: 20 }),
+      // Settings › Appearance › Message marks: the key to the clock, ticks and ! under a message (S-0509). Last, after
+      // the conversation width, as v4 draws it.
+      panel('device.settings', { id: 'message-marks', order: 30 }),
+      // Contributions to other plugins' slots (§5.2), each by the offerer's slot name: Ferrets' file browser gets the
+      // current-ferret search, its Actions ▾ menu gets Interrupt, and Agenda's ask page gets the ferret's conversation.
+      panel(FILES_SEARCH_SLOT, { id: 'files-search', order: 10 }),
+      panel(ACTIONS_ROW_SLOT, { id: 'interrupt-row', order: 10 }),
+      panel(AGENDA_CONVERSATION_SLOT, { id: 'agenda-conversation', order: 10 }),
     ],
     settings: [settingsTab('conversation', { label: 'Conversation', order: 20 })],
     renderers: [renderer('ask', { source: 'question' })],
   },
 
+  /** Never reached by a ferret, through any root: the key that signs a message token (`PrivacyDecl`). */
+  privacy: {
+    private: ['message-token.key'],
+  },
   data: {
     state: CONVERSATION_STATE,
     config: [CONVERSATION_CONFIG],
@@ -319,6 +353,9 @@ export default definePlugin({
       { hook: FerretStopping },
       // What a launch says about hypermedia: only a switch the owner set (a ferret with none keeps its mode default).
       { hook: LaunchParts },
+      // The files a start was given (`fy start -f`): this plugin owns attachments, so it is THE one provider that plans
+      // them (a security-path provide hook naming only `conversation` as its taker).
+      { hook: OpeningAttachments, key: OPENING_ATTACHMENTS_KEY },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

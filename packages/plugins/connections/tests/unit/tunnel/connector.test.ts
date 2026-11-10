@@ -17,6 +17,7 @@ import {
   connectorEvent,
 } from '../../../daemon/lib/tunnel/connector.ts';
 import { registered, unregistered } from './support.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 describe('the cloudflared connector', () => {
   guarantee(['R659'], 'should run exactly the §15 command, which has no place for a token', () => {
@@ -83,7 +84,3 @@ describe('the cloudflared connector', () => {
     should(connectorEvent('INF Starting tunnel tunnelID=abc')).be.undefined();
   });
 });
-
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

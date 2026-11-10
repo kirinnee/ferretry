@@ -51,7 +51,14 @@ export type PaneProcessObservation =
 /** A process as one look saw it, with the start that, with its pid, is its identity. */
 type ObservedPaneProcess = PaneProcess & { readonly start: number };
 
-const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const message = (error: unknown): string => {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    // A value whose own text cannot be read (a null-prototype object) still has to be a reason, never a throw.
+    return 'an unreadable failure';
+  }
+};
 
 export class PaneLook {
   constructor(private readonly ports: PaneLookPorts) {}
@@ -70,7 +77,9 @@ export class PaneLook {
       const absent =
         error instanceof SessionAttachError &&
         (error.failure === 'missing_registration' || error.failure === 'pane_unavailable') &&
-        (await this.ports.paneAbsent(ferret).catch(() => false));
+        (await Promise.resolve()
+          .then(() => this.ports.paneAbsent(ferret))
+          .catch(() => false));
       return absent ? { kind: 'observed', processes: [] } : { kind: 'unobservable', reason: message(error) };
     }
     try {
@@ -93,12 +102,8 @@ export class PaneLook {
 
   /** One liveness look: the masked screen and the process tree, each total. Never throws. */
   async liveness(ferret: string): Promise<LivenessSample> {
-    const observed = await this.processes(ferret).catch(
-      (error): PaneProcessObservation => ({
-        kind: 'unobservable',
-        reason: message(error),
-      }),
-    );
+    // `processes` is total: every failure of its ports is already an `unobservable` observation.
+    const observed = await this.processes(ferret);
     // The SCREEN, not the scrollback: the work counters and background-terminal footer live on it, and any change to
     // the scrollback moves the screen too — at a fraction of the bytes per tick. Only a proved pane is read.
     const screen =
@@ -134,12 +139,7 @@ export class PaneLook {
    */
   async still(ferret: string, browser: PaneBrowser): Promise<PaneBrowserStill> {
     if (!Number.isSafeInteger(browser.pid) || browser.pid <= 1) return { still: false, why: 'not-proved' };
-    const observed = await this.processes(ferret).catch(
-      (error): PaneProcessObservation => ({
-        kind: 'unobservable',
-        reason: message(error),
-      }),
-    );
+    const observed = await this.processes(ferret);
     if (observed.kind === 'observed') {
       const view = classifyPaneProcesses(observed.processes);
       if (view.toolCommands.length > 0) return { still: false, why: 'tool-running' };

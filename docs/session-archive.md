@@ -1,10 +1,14 @@
 # Session archive
 
-A daemon keeps every session it ever ran, and nearly all of them are finished. Dozens of jobs walk the whole set on
-every tick — the sweeps, the watchers, the session list the app polls, the board's roster — so the cost of a finished
-session never stopped. **Automatic archiving is off by default.** When enabled with a 24-hour age, finished autonomous
-sessions older than a day leave the live set. They are archived, not deleted. Archive routes, revival, `fy` commands
-and the app's archive footer remain available while the automatic pass is off.
+A daemon keeps every session it ever ran, and nearly all of them are finished. **Automatic archiving is off by
+default.** When enabled with a 24-hour age, finished autonomous sessions older than a day leave the live set: the
+session store's index and the live ferret list (`GET /v1/ferrets`). They are archived, not deleted, and
+`GET /v1/archived-sessions` lists them while the automatic pass is off too.
+
+In 5.0 the saving is narrower than the name suggests: the ferret **registry** still holds every ferret's record, so
+whatever walks the registry (the ancestry snapshot, the restart drain, the sweeps, the roster other plugins read through
+Ferrets) still walks an archived ferret, as a stopped one. What the archive takes out is the session store's live index
+and the live list. See **Declared gaps**.
 
 ## What it does
 
@@ -32,25 +36,31 @@ and the app's archive footer remain available while the automatic pass is off.
 | An open agenda item             | the session's own agenda board                                              |
 | A live child, in any form       | the rule itself (5 above)                                                   |
 
-A session that is revived, resumed, forked from, or written to for any reason comes back (below), so none of these is
-decided once and for ever.
+A session that is revived, resumed, pinned, or written to for any reason comes back (below), so none of these is
+decided once and for ever. (One that is only **forked from** is read, not written, so it stays archived: see **Declared
+gaps**.)
 
 ## Where an archived session is
 
 **Nothing moves.** The session's directory stays under `state/sessions/<id>/` with its documents, journal, agenda,
-channel and media. The only new fact is one document, `state/archived-sessions.json`, written atomically: which ids
+channel and media. The only new fact is one document, Ferrets' `archive.json` (`{ format: 1, sessions }`), written atomically: which ids
 have left, when, the agent name each answered to, and the index row each had. Archiving in place was chosen over moving directories because every
 subsystem that writes into a session directory (the agenda, the channel, the board's stamps) keeps working with no
 second path to teach it, a crash can never strand half a move, and losing the registry only makes every session live
 again at the next boot's reconcile — the safe direction.
 
-An archived session is **out of**: the session index (memory and SQLite), `GET /v1/sessions`, the sessions-directory
-walks (reconcile, rebuild, survey, permission repair, legacy upgrade), the fleet sweeps and the board's roster.
+An archived session is **out of**: the session store's index and the live ferret list, `GET /v1/ferrets` (a stopped ferret is in
+exactly one of `GET /v1/ferrets` and `GET /v1/archived-sessions`; one whose record says it is running is listed live even
+while the archive still names it, see **Coming back**). Nothing is deleted to do it: the list leaves out what the archive
+document names for a stopped ferret, so a revival puts it back with no other write.
+
+An archived session is **still in** the ferret registry (its record is untouched) and therefore in every walk of the
+registry — see **Declared gaps**.
 
 An archived session **still answers**:
 
-- `GET /v1/sessions/:id`, its transcript, journal replay and `fy` history — lazily, from disk. A read does not bring
-  it back.
+- `GET /v1/ferrets/:id` (by id or by name), its transcript, journal replay and history — lazily, from disk. A read
+  does not bring it back.
 - Task-card links and the app's "open session": they name the id, and the id resolves.
 - `findSession`: an archived id is a session that exists, so references to it (a card's owner, an agenda owner) do not
   go stale.
@@ -66,35 +76,44 @@ Three facts were derived from the live list, and would have changed silently whe
   a second session of that name.
 - **Analytics.** Ingestion forgets a stored row whose session is not in its candidate list. Archived sessions are named to
   it, so the rows ingested when they ended stay; one that was never ingested (the store was rebuilt) is read on demand.
-- **Session credentials** stop resolving for an archived session. It ended more than a day ago, so nothing can use one
-  legitimately, and a revive launches the session afresh.
+- **Session credentials** do not resolve for an archived session, because an archived ferret is a STOPPED one and a
+  stopped ferret's token authenticates nobody (`bearers:ferret`). The archive itself cuts nothing: the token directory
+  is not touched, and a resume issues the ferret a fresh credential.
 
 ## Coming back
 
 A **write** brings an archived session back into the live set: an event appended, its state or config written or
-updated. That covers resume, revive, send and any other path that changes it — they all write through the
-same storage. The live index row is rebuilt first, then the registry entry is removed. If rebuilding any session or
+updated. That covers resume, revive, send and any other path that writes the session's own documents.
+**Adopting a live pane back into a ferret** (`attach`, the Ferrets port's way for another plugin to hand one over) is not
+one of them: it writes only the ferret's registry record (`working`), and the session's documents follow the registry
+afterwards, on their own lane. `GET /v1/ferrets` therefore does not wait for that write: it leaves out an archived ferret
+only while its record says **stopped**, so a ferret that is starting, working or idle is always listed, whatever the
+archive says. The live index row is rebuilt first, then the registry entry is removed. If rebuilding any session or
 ancestor fails, archive membership stays available for retry. Retention also repairs a missing live row when the
 session has no registry entry, so a retry can recover an incomplete restoration.
 
-**Attaching a pin, a card still in progress, or an agenda item also restores live membership**, including the
-session's ancestors. Each publisher uses the same idempotent storage revival path after its own write. The journal
-index is rebuilt, so the session returns to the default list without another session write. A keep published during
-an archive's verification or registry IO cancels that commit; one published after the commit revives it.
-If pin retention fails after the pin was saved, pinning that same session again retries retention without rewriting
-the pin document or changing its place or time.
+**Pinning an archived ferret also restores live membership** (`POST /v1/ferrets/:id/pin`), including its ancestors,
+through the same idempotent storage revival path, after the pin is saved. The journal index is rebuilt, so the ferret
+returns to `GET /v1/ferrets` without another session write. If revival fails after the pin was saved, the pin answers
+the failure, and pinning the same ferret again retries the revival without rewriting the pin document.
+
+**A card or an agenda item does NOT revive an archived ferret in 5.0**: Board and Agenda publish nothing Ferrets
+hears when one is attached. A card still in flight and an open agenda item keep a ferret from being archived in the
+first place (`session.archive-keeps`); one attached after it left the live set leaves it archived until a write or a
+pin brings it back. A keep that appears while a pass is committing is caught by the pass's own re-check of the keep
+signals (below), not by the publisher.
 
 ## When it runs
 
 The following schedule runs only after explicitly enabling the automatic pass (see **Setting**). The owner plans to
 enable it on **2026-11-07**, after a clean day; that is a rollout plan, not a scheduled or automatic activation.
 
-- **Once at boot**, as a job of the housekeeping lane, so it waits until the daemon is serving and takes its turn
-  behind the other housekeeping.
-- **Hourly after that**, as the same job. The timer is armed after a pass finishes, so a pass can never be overtaken
-  by its own next tick.
-- **Bounded**: at most 200 sessions a pass. A pass that left qualifying sessions behind is followed in a minute, not
-  an hour, so a first run over two thousand sessions finishes in a few passes without holding the event loop.
+- **One kernel job**, `ferrets.archive-pass`, ticks every 60 seconds and runs a pass only when one is **due**: at once the
+  first time, an hour after a pass that finished everything, and an hour after a pass that failed (every session it did not
+  finish stays live). There is no dynamic timer: a pass can never be overtaken by its own next tick, and a tick that is
+  not due reads nothing.
+- **Bounded**: at most 200 sessions a pass. A pass that left qualifying sessions behind is followed one tick (a minute) later, not
+  an hour later, so a first run over two thousand sessions finishes in a few passes without holding the event loop.
 - Documents are read paced (25 at a time, the loop handed back between batches) and through the storage's document
   cache. The registry is normally written once per pass; a canceled commit or late revival writes its correction.
 - Archiving holds the lineage root gates and sessions' lanes and re-reads each one as it is **now** before it goes, so a session revived
@@ -117,7 +136,7 @@ enable it on **2026-11-07**, after a clean day; that is a rollout plan, not a sc
   the stale gate and queues again. Four unsuccessful acquisitions stop with an explicit retry error; a later archive
   pass can retry, so continual reparenting cannot trap a pass in a retry loop.
 - The keep signals are also checked after the commit, with no document lanes held, to reconcile a signal that landed
-  during registry IO. Normal signal publishers revive on publication, even when no archive pass is running.
+  during registry IO. That re-check, a write and a pin are the only revivals in 5.0 (Board and Agenda publish none).
 - The registry is changed by a **read-modify-write inside its own queue**: the new map is derived from the registry as
   it is when the change's turn comes, then written durably, then published. A revival and an archive pass on different
   sessions therefore never overwrite one another's change.
@@ -129,51 +148,95 @@ enable it on **2026-11-07**, after a clean day; that is a rollout plan, not a sc
 
 ## Seeing it
 
-- `fy daemon status` — `sessions 622 live (31 running, 0 unmonitored), 1796 archived`.
-- `GET /v1/health` — `archivedSessions`.
-- The app's session list ends with "**K older finished sessions archived**" and a way to show them.
 - `GET /v1/archived-sessions?limit=N` — `{ count, sessions }`: how many, and the newest `N` (default 100, at most 500)
   as ordinary session views. `limit=0` asks only the count. It is a separate route so an archived session can never
-  slip into the hot live list.
+  slip into the hot live list. Like `GET /v1/ferrets`, it is not narrowed per caller (as today's route).
+- `fy daemon status`, `GET /v1/health` and the app's "K older finished sessions archived" footer do not show the
+  archive in 5.0 yet (declared below).
 
 ## Setting
 
-| Variable                          | Meaning                                                                                                          |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `FYD_SESSION_ARCHIVE_AFTER_HOURS` | Whole hours a finished autonomous session stays live; set `24` to enable the daily age.                          |
-|                                   | Default **off** (unset, empty or `off`): no boot pass or timer; existing archives remain readable and revivable. |
+One file, `config/archive.yaml` (the app and `fy config` edit it like any other config file):
 
-This is the existing daemon **environment** switch, not a key in `machine.yaml` or `config/daemon.json`.
-Changing it takes effect at the **next daemon start**; a release update restarts the daemon anyway.
-A malformed value stops the daemon at boot naming the variable.
-
-On Linux, create `~/.config/systemd/user/fyd.service.d/archive.conf` (or
-`$XDG_CONFIG_HOME/systemd/user/fyd.service.d/archive.conf` when set):
-
-```ini
-[Service]
-Environment="FYD_SESSION_ARCHIVE_AFTER_HOURS=24"
+```yaml
+afterHours: 24
 ```
 
-Then run `systemctl --user daemon-reload` and `fy daemon restart`. The drop-in survives `fy daemon install`.
-To disable it again, set the same variable to `off` and reload/restart.
+| Value           | Meaning                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------- |
+| `afterHours: N` | Whole hours (1 or more) a finished autonomous ferret stays live; `24` is the daily age. |
+| absent, `off`   | **Default off**: no pass runs; existing archives remain readable and revivable.         |
 
-On macOS, run `launchctl setenv FYD_SESSION_ARCHIVE_AFTER_HOURS 24`, then `fy daemon restart`.
-This lasts until logout or reboot; a login item can reapply it. Set it to `off` and restart to disable it.
-For a foreground daemon, start it with `FYD_SESSION_ARCHIVE_AFTER_HOURS=24 fyd`.
+It is read at every tick of the archive job, so an edit takes effect within a minute, and a bad value is refused by the
+config writer (the last good file stays in effect). No edit of it widens authority or spend, so none is held for the owner.
+It replaces the `FYD_SESSION_ARCHIVE_AFTER_HOURS` variable: no plugin reads the environment.
+
+**Board and Agenda must both have answered.** A pass runs only while Board (which ferrets own or hold a card still in
+flight) and Agenda (which ferrets have an open agenda item) have each contributed their half of the `session.archive-keeps`
+hook. While either is missing no pass runs, and a half that fails keeps every ferret it was asked about: an absent answer is
+"keep live", never "archive". **Every answer is parsed** at the Ferrets boundary: Board's must be a list of exactly
+`{ owner, assignee, dropped, category? }` with ferret ids (never callsigns) and a boolean `dropped`, Agenda's must be a
+boolean, and an answer of any other shape, one that throws and one that does not come within 10 seconds all read as
+"unreadable", which keeps every ferret it was asked about. The 10 seconds is one deadline for a WHOLE check (however many
+ferrets it asks about), not one per question, and it also ends when the daemon stops the job: every ferret the check had
+not yet heard about is kept, and the session lanes the commit-boundary check holds are released at that deadline. A contributed item that is not a keep source is refused by
+the hook and counts as that half not answering. A ferret the daemon still holds as running is kept too, whatever its
+state document says, and so is one whose registry record does not say `mode: auto`.
+
+Both halves are taken. **Board** answers every card as stored, closed and dropped included: its owner, its assignee,
+whether it was dropped and its lane's category as Board resolves it; Ferrets' rule keeps the owner and assignee of every
+card that is not dropped and not in a `closed` or `shipped` lane, and a lane Board cannot name counts as in flight.
+**Agenda** answers whether the ferret's own board holds an item still open (an unanswered ask, an open notice or a
+parked item). Each is read afresh on every pass. A board that cannot be read, an answer that is not that ferret's own
+board, and an agenda board with entries that did not parse all reject, which keeps the ferret live.
+
+**Board answers only ferret ids.** It stores a card's owner and assignee as plain text, and Ferrets parses its whole
+answer against `ArchiveCardStandingsSchema` (in Ferrets' contract, beside `ArchiveCardStanding`), so one standing that
+is not a ferret id would make every pass keep every ferret. Board therefore leaves out a party that is not a ferret id:
+such a string can never match a ferret the archive decides about, so nobody is kept less than before. A card whose owner
+is not a ferret id but whose assignee is answers with the assignee as its owner (the rule keeps owner and assignee
+alike); a card with neither names no ferret and is left out. Board checks its answer with the same schema before it
+leaves, so a standing Ferrets would refuse is a rejection there too (keep live).
 
 ## Declared gaps
+
+- **A ferret that stopped before it was stamped is kept.** A stop writes `finishedAt` on the ferret's state document, which
+  is what its age is measured from; a ferret stopped by an earlier build has none, so its age is not known and it stays
+  live (an ended session with no end time is always kept).
+- **Switch and account sections are not compared.** `restart --outdated` and the per-ferret `outdated` mark on
+  `GET /v1/ferrets` and `GET /v1/ferrets/:id` (`{ sections }`, kept 5 s, as today) compare the instruction entries a
+  launch tells a ferret (the words, by fingerprint); a section a switch turns on (hypermedia, Pack, Agenda, Lessons) or an
+  account's own variables are not. `GET /v1/restarts` asks afresh on every request, as today.
+- **The registry still holds an archived ferret.** Its record stays (that is what keeps it reversible), so the
+  registry-walking jobs (the ancestry snapshot, the restart drain, the sweeps) and the roster other plugins read through
+  Ferrets still see it as a stopped ferret. Only `GET /v1/ferrets` and the session store's index leave it out.
+- **Board and Agenda do not revive.** A card or an agenda item attached to an archived ferret does not bring it back
+  (above); a write or a pin does. Today a card write (`fyd.ts:2087`) and an agenda ledger write (`fyd.ts:9746`) both
+  revived the session and its leads; that is NOT carried, because it needs a retain or revive port in Ferrets' contract,
+  which only the lead can grant. Once the archive is on, a ferret archived and then handed a new card or ask stays out of
+  `GET /v1/ferrets` until something writes to it or pins it.
+- **A quarantined card keeps nobody.** A card Board cannot read is not in its snapshot, so it is not answered and keeps
+  nobody, as today. Agenda's unparsed entries, by contrast, keep their ferret (above), so the two treat damaged data
+  differently: Board's way keeps the archive working while any card is quarantined.
+- **A switched-off Board or Agenda stops the archive quietly.** `config/plugins.yaml` can turn either plugin off; no pass
+  then runs (fail safe), and only a debug log says so, so an owner who names `afterHours` sees nothing happen.
+- **Who answers is not checked.** The hook says which KIND of keep a contribution is, not which plugin sent it: the
+  kernel names no contributor, so any plugin that contributes `kind: 'board'` counts as Board for "both have answered".
+  It cannot remove the real Board's keeps (the answers are a union), but it can let passes run while the real Board is
+  absent. Plugins are installed by the owner; binding a kind to a plugin needs the kernel to name the contributor.
+- **No status surface.** `fy daemon status`, `GET /v1/health` and the app's archive footer do not count archived
+  sessions yet; `GET /v1/archived-sessions` is the only reader.
 
 - **Forking from an archived session** reads it and writes only the new one, so the source stays archived. It is
   still readable, which is all a fork needs.
 - **A direct write into an archived session's files** (a hand edit or a channel append) does not revive it: it
   changes the files, not the live set. It does no harm — the session stays readable — and a session with an open
   agenda item is kept in the first place.
-- **Opening an archived session in the app** reads its documents through `GET /v1/sessions/:id`, whose transcript
-  projection may write a document if the transcript moved; that write revives it.
-- **Scratch**: the scratch collector walks the live list, with the same 24-hour age as the archive. A session archived
-  before the collector's sweep reached it keeps its small scratch files (snapshots, turn captures) until a write revives
-  it. They are the bulk of an archived session's directory, so they are the first thing to reclaim if disk matters.
+- **Opening an archived ferret** reads it through `GET /v1/ferrets/:id`, which writes nothing, so it stays archived;
+  a resume, a message or any other write brings it back.
+- **Scratch**: archiving reclaims none of a session's scratch files (snapshots, turn captures); whatever collects them
+  does so on its own terms. They are the bulk of an archived session's directory, so they are the first thing to
+  reclaim if disk matters.
 - **No reclaim of the session's own weight**: archiving takes a session out of the live set. It does not delete
   directories, transcripts, worktrees or panes.
 - **Memory**: the registry holds one small row per archived session in memory. It is a few hundred bytes each, against
@@ -181,13 +244,17 @@ For a foreground daemon, start it with `FYD_SESSION_ARCHIVE_AFTER_HOURS=24 fyd`.
 
 ## Where it is in the code
 
-| Part                              | File                                                        |
-| --------------------------------- | ----------------------------------------------------------- |
-| The rule (pure)                   | `packages/daemon/src/lib/session/archive/policy.ts`         |
-| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-cards.ts`         |
-| The pass                          | `.../archive/service.ts`                                    |
-| The registry document             | `.../archive/registry.ts`                                   |
-| Archive, revive, fallback reads   | `packages/daemon/src/adapters/storage/session-storage.ts`   |
-| The session ports and the factory | `packages/daemon/src/adapters/session/archive/`             |
-| `GET /v1/archived-sessions`       | `packages/daemon/src/lib/runtime/mounts/session-archive.ts` |
-| The timer                         | `packages/daemon/bin/fyd.ts` (beside the housekeeping lane) |
+| Part                              | File                                                                 |
+| --------------------------------- | -------------------------------------------------------------------- |
+| The rule (pure)                   | `packages/core/ferrets/daemon/lib/session/archive/policy.ts`         |
+| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-cards.ts`                  |
+| The pass                          | `.../archive/service.ts`                                             |
+| The registry document             | `.../archive/registry.ts`                                            |
+| Archive, revive, fallback reads   | `packages/core/ferrets/daemon/adapters/storage/session-storage.ts`   |
+| The session ports and the factory | `packages/core/ferrets/daemon/adapters/session/archive/`             |
+| `GET /v1/archived-sessions`       | `packages/core/ferrets/daemon/lib/runtime/mounts/session-archive.ts` |
+| The job, the answer parsing       | `packages/core/ferrets/daemon/modules/archive.ts`                    |
+| The keep hook                     | `packages/core/ferrets/contract/hooks.ts` (`ArchiveKeeps`)           |
+| The live list and the pin revival | `packages/core/ferrets/daemon/index.ts`                              |
+| Board's half of the keep hook     | `packages/plugins/board/daemon/adapters/archive-keeps.ts`            |
+| Agenda's half of the keep hook    | `packages/plugins/agenda/daemon/lib/archive-keeps.ts`                |

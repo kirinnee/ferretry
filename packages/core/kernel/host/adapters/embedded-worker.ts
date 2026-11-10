@@ -9,15 +9,26 @@
  * Two halves agree on one convention. `scripts/release/compile-executable.ts` embeds every worker program the generated
  * registry declares, FLAT beside the entry, as `<root>/<file stem>.js`; this resolves a worker URL to that embedded
  * file when running compiled, and leaves it alone otherwise. The file stem is the whole key (the directory the
- * spelling resolved to is not recoverable once bundled), so the compile step refuses two workers with one stem.
+ * spelling resolved to is not recoverable once bundled), so the compile step refuses two workers with one stem — and, because the stem is the whole key, a plugin may start
+ * only the stems IT declares (`workersFor`): a spelling that names another file with a declared stem would otherwise
+ * start that program.
  */
 
 const SOURCE_EXTENSION = /\.[cm]?[jt]sx?$/u;
 
-/** The embedded file name of the worker program at `url`: its file stem and `.js`. */
+/**
+ * The embedded file name of the worker program at `url`: its file stem and `.js`. A name that decodes to a path
+ * (an escaped `/` or a `\`) throws: resolved beside the entry it would climb out of the binary (`..%2F..%2Fx`).
+ */
 export function embeddedWorkerFile(url: URL): string {
-  const name = url.pathname.slice(url.pathname.lastIndexOf('/') + 1);
-  return `${decodeURIComponent(name).replace(SOURCE_EXTENSION, '')}.js`;
+  const name = decodeURIComponent(url.pathname.slice(url.pathname.lastIndexOf('/') + 1));
+  if (/[/\\]/u.test(name)) throw new TypeError('a worker program is named by its file name alone, not by a path');
+  return `${name.replace(SOURCE_EXTENSION, '')}.js`;
+}
+
+/** Whether `moduleUrl` (this module's own by default) is a bundled one: a source module ends in `.ts`. */
+export function isCompiledModule(moduleUrl: string = import.meta.url): boolean {
+  return !moduleUrl.endsWith('.ts');
 }
 
 /**
@@ -28,7 +39,6 @@ export function embeddedWorkerFile(url: URL): string {
  * worker program anywhere else, so there is nothing else for the URL to mean.
  */
 export function embeddedWorkerUrl(url: URL, moduleUrl: string = import.meta.url): URL {
-  const compiled = !moduleUrl.endsWith('.ts');
-  if (!compiled || url.protocol !== 'file:') return url;
+  if (!isCompiledModule(moduleUrl) || url.protocol !== 'file:') return url;
   return new URL(`./${embeddedWorkerFile(url)}`, moduleUrl);
 }

@@ -1,5 +1,5 @@
 import { defineEvent, definePort, type FerretId, type RefusalCode } from '@ferretry/kernel/contract';
-import type { Result } from '@ferretry/std';
+import type { JsonValue, Result } from '@ferretry/std';
 import { z } from 'zod';
 import {
   FerretCardIdSchema,
@@ -11,7 +11,19 @@ import {
   type HarnessKey,
   type PackId,
 } from './ids.ts';
-import type { DeliveryOutcome, RunnerDelivery, RunnerHandle, SitrepLine, BoundTranscriptReader } from './kinds.ts';
+import type {
+  DeliveryOutcome,
+  PaneNotReadyReason,
+  QueueOutcome,
+  RunnerComposerCleared,
+  RunnerComposerSubmitted,
+  RunnerDelivery,
+  RunnerHeldAt,
+  RunnerPaneObservation,
+  RunnerHandle,
+  SitrepLine,
+  BoundTranscriptReader,
+} from './kinds.ts';
 import type { AgentControl, LimitsFile } from './state.ts';
 
 /**
@@ -38,6 +50,32 @@ export const HarnessFlagSchema = z
 
 const NonNegativeIntegerSchema = z.number().int().nonnegative();
 const PositiveIntegerSchema = z.number().int().positive();
+
+/**
+ * Padded standard base64, checked in LINEAR time: whole four-character groups of the base64 alphabet, with at most two
+ * `=` and only at the very end. Today's protocol used one backtracking pattern
+ * (`^(?:[A-Za-z0-9+/]{4})*(?:…==|…=)?$`) that answers false for VALID base64 once the text passes about 6.9 M characters
+ * on Bun (a file of about 5 MiB), so a start under the stated 32 MiB bound was refused as malformed. This check holds
+ * for any length the transport lets through.
+ */
+const isPaddedBase64 = (text: string): boolean => text.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(text);
+
+/**
+ * One file attached to a start's opening message (today's `fy start -f`, `protocol/src/lib/session.ts`
+ * `StartSessionBaseSchema.initialAttachments`): the bytes travel INLINE as base64 in the start body, read by the CLI on
+ * the caller's machine. The count and size bounds are the receiving Conversation's (its `decodeInitialAttachments`:
+ * sixteen files, 32 MiB decoded in all), as today's daemon's were, and their refusal is a sentence naming the limit; the
+ * transport's body cap sits just above one 32 MiB file. The schema states the shape only.
+ */
+export const InitialAttachmentSchema = z.strictObject({
+  filename: z.string().min(1),
+  mime: z.string().min(1).optional(),
+  base64: z
+    .string()
+    .min(1)
+    .refine(isPaddedBase64, { message: 'an attachment must be padded standard base64 (A-Z, a-z, 0-9, +, /, =)' }),
+});
+export type InitialAttachment = z.infer<typeof InitialAttachmentSchema>;
 
 /**
  * How a ferret is started beyond who and where: today's `StartSessionBaseSchema` fields (and `fy new`'s model
@@ -79,6 +117,12 @@ export const StartOptionsSchema = z.strictObject({
   remoteControl: z.boolean().optional(),
   /** With a name: take a free callsign instead of failing when the name is held. */
   teammateFallback: z.boolean().optional(),
+  /**
+   * Files attached to the opening message (`start -f`). A start's own request only: the start hands them to the
+   * attachment owner and writes none into the ferret's `details.json` (that file omits this member), so the bytes live
+   * only in the ferret's own `attachments/` folder.
+   */
+  initialAttachments: z.array(InitialAttachmentSchema).optional(),
 });
 export type StartOptions = z.infer<typeof StartOptionsSchema>;
 
@@ -102,7 +146,7 @@ export interface StartRequest {
   readonly prompt?: string;
   /** Start bound to an existing harness conversation (§6.2). */
   readonly harnessConversation?: string;
-  readonly by: 'owner' | 'ferret' | 'pack' | 'board';
+  readonly by: 'owner' | 'ferret' | 'pack' | 'board' | 'warden';
   /** How to start it beyond who and where ({@link StartOptionsSchema}). */
   readonly options?: StartOptions;
 }
@@ -146,28 +190,230 @@ export interface ResumeOptions {
    * `session.resumed` event so history tells the two apart.
    */
   readonly automatic?: boolean;
+  /**
+   * Additive (U3 fix1): who asked, for the author recorded beside the revive's turn document — the Warden's revive is
+   * Ferretry's Warden (today's `resumeTurnAuthor('warden')`), so its words are never drawn as the owner's. ATTRIBUTION
+   * only, never authority: it changes no policy, admission or refusal. `peer` is a ferret's send that revived this
+   * one (today's `resumeTurnAuthor('peer')`): the turn names a ferret as its author. Absent: the turn names no author.
+   */
+  readonly actor?: 'warden' | 'peer';
+  /**
+   * Additive (U3 fix2): told, ONCE and under the ferret's own queue, what this resume decided — `running`: the ferret
+   * was not stopped, so nothing was relaunched and a message was NOT handed over (the send shortcut); `relaunching`: it
+   * was stopped and is being relaunched, with a message as its own turn. A caller that must hand a message over itself
+   * decides from this answer, never from an earlier read of the ferret's state that a start or stop in between could
+   * make wrong (today's one resume decided send vs. relaunch under the session lock). Not called for a resume refused
+   * before it decided. Attribution of nothing: it changes no policy, admission or refusal.
+   */
+  readonly decided?: (disposition: 'running' | 'relaunching') => void;
+  /**
+   * Additive (#45 revive-on-send, today's `reviver.revive` answer): told, ONCE, what the relaunch typed into the new pane
+   * for the message — the one line pointing at the numbered turn document it was written to (`text`), that turn's number
+   * and the document's absolute path — right after it was typed. A message handed to a resume is carried as that pointer,
+   * so it is the pointer, not the message, that the transcript will record; a caller that must prove the message landed
+   * looks for exactly this text. Not called when nothing was typed (a ferret that was already running, a relaunch that
+   * failed, an interactive resume with no message). A caller's own failure here never changes the resume. Attribution of
+   * nothing: it changes no policy, admission or refusal; `resume`'s answer type is unchanged.
+   */
+  readonly onCarried?: (typed: { readonly text: string; readonly turn: number; readonly file: string }) => void;
 }
 
-/** Why a harness-seam act did not happen: a hold the act runner applied, or nothing to act on. */
+/**
+ * Why a harness-seam action did NOTHING, CLOSED: a hold the act runner applied (the kernel's `RefusalCode`: `held`,
+ * `quarantined`, `input_pending`, …), nothing to act on (`no_pane`), or no plugin able to do it (`plugin_unavailable`).
+ */
 export type HarnessRefusal = { readonly refused: RefusalCode | 'no_pane' | 'plugin_unavailable' };
+
+/**
+ * Why a delivery or queue typed NOTHING of the message, CLOSED, so the same message may go again (today's
+ * `SendPaneNotReady`, `SendComposerOccupied` and `SendComposerUnreadable`): every {@link HarnessRefusal}, a pane that never
+ * came to a prompt (`not_ready`: still at work, behind a dialog, or gone), a composer that already held the person's
+ * own text (`composer_occupied`, with that `draft`, which today's refusal shows back to the person and nothing else
+ * does), or a composer that could not be read to prove it empty (`composer_unreadable`). None quotes the screen.
+ */
+export type HarnessDeliveryRefusal =
+  | HarnessRefusal
+  | { readonly refused: 'not_ready'; readonly why: PaneNotReadyReason }
+  | { readonly refused: 'composer_occupied'; readonly draft: string }
+  | { readonly refused: 'composer_unreadable' };
+
+/**
+ * The message WAS typed and nothing proved it landed (today's `SendLandingUnconfirmed`): neither a refusal nor a loss,
+ * so it must never be typed again. `stranded`: it is still in the composer after every Enter. A DIFFERENT SHAPE from a
+ * refusal on purpose (no `refused`), so no `switch` over refusals can treat it as one.
+ */
+export interface HarnessUnconfirmed {
+  readonly unconfirmed: true;
+  readonly stranded: boolean;
+}
+
+/** Everything a delivery or queue can answer instead of an outcome. A rejection is a failure nobody could classify. */
+export type HarnessDeliveryFailure = HarnessDeliveryRefusal | HarnessUnconfirmed;
+
+/** What a queue may carry beyond its text (additive, ruling #45). */
+export interface HarnessQueueOptions {
+  /**
+   * The send this message is, so a message long enough to go by file is written to `channel/queued-<send id>.md`: the
+   * name the app reads the send back by. One outside the protocol's grammar (`[\w-]{1,128}`) is not used; a fresh id is.
+   */
+  readonly sendId?: string;
+}
+
+/**
+ * What an interrupt did (today's `interruptLocked`): whether the harness's stop key was pressed — it is NOT at a pane
+ * that shows no active work unless the key is harmless there ({@link shouldPressStopKey}) — and whether the pane
+ * still showed active work afterwards (absent when it could not be read), so the caller can tell a pane handed back
+ * to its person from a turn that was interrupted.
+ */
+export interface HarnessInterrupted {
+  readonly pressed: boolean;
+  readonly working?: boolean;
+}
 
 /**
  * The harness seam (decision #18): what Conversation needs to type into a ferret, interrupt it and read its transcript.
  * Every write goes through `kernel.act(<the ferret's terminal pane>, 'keys')`, so Vault's input holds and the guarded
- * write apply exactly as for `terminal_send`; there is no raw pane write here. `deliver` is the runner's own delivery,
- * which acts on that pane for each write it makes (a hold it meets rejects the delivery before any keys); `interrupt` is
- * acted on by this seam, because the runner's signal is a raw key. The pane is read when the write is made, so a ferret
- * that stopped since answers `no_pane`.
+ * write apply exactly as for `terminal_send`; there is no raw pane write here. `deliver`, `queue` and `interrupt` are
+ * the runner's own, which acts on that pane for each write it makes, so none of them is wrapped in a second act here
+ * (an outer act would wait on the inner one and neither would settle); a hold the runner meets types NOTHING and is
+ * answered as its `RefusalCode`. The pane is read when the write is made, so a ferret that stopped since answers
+ * `no_pane`. Every answer is a closed code or a fixed shape: none carries pane text, a credential or an environment
+ * value — only `composer_occupied` carries the person's own draft, as today's refusal does.
  */
 export interface FerretHarness {
-  deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessRefusal>>;
-  /** The harness's interrupt (the runner's `signal(handle, 'interrupt')`), as the same kind of act. */
-  interrupt(): Promise<Result<true, HarnessRefusal>>;
+  /**
+   * Types one message. Answers its outcome, a {@link HarnessDeliveryRefusal} (nothing typed), or
+   * {@link HarnessUnconfirmed} (typed, not proven); rejects only for a failure the runner could not classify.
+   *
+   * Ruling #45 (today's `routeSend` / `paneMidTurn`): ONE look at the pane first (the runner's `look`, which never
+   * writes). A pane that shows the harness at work and no prompt answers `not_ready` / `busy` AT ONCE, nothing typed,
+   * so the caller can queue the message instead of waiting out the delivery's readiness wait (about 27 s). A look that
+   * sees nothing (no `look`, a hold, an unreadable pane) decides nothing: the delivery goes on as before.
+   */
+  deliver(delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>>;
+  /**
+   * Additive (U3): puts `text` into the ferret's BUSY pane's own queue (the runner's `queue`). Exactly like `deliver`, it
+   * is NOT wrapped in a second act here: the runner acts on the pane for each write it makes, and an outer act would
+   * wait on the inner one so that neither ever settled. A runner that cannot queue answers `plugin_unavailable`; its
+   * other answers are `deliver`'s.
+   *
+   * Additive (ruling #45): a `text` over 1000 characters is never typed inline (today's `native-file` path). It is
+   * written first, durably and `0600`, to the ferret's own `channel/queued-<send id>.md` (`options.sendId`, else a
+   * fresh id), and the queue is handed the one-line pointer to it. With no session folder bound to write it to, a long
+   * `text` answers `plugin_unavailable` and nothing is typed.
+   */
+  queue(text: string, options?: HarnessQueueOptions): Promise<Result<QueueOutcome, HarnessDeliveryFailure>>;
+  /**
+   * Stops the current turn with the HARNESS's stop key (its `turnStop.key`, today's `Escape`; never the runner's raw
+   * `C-c`, which quits an idle Codex), pressed by the runner's `stopTurn` only under {@link shouldPressStopKey}: at a
+   * pane that shows active work, or an interactive ferret whose harness's key is harmless when idle. Refused
+   * `plugin_unavailable` when the harness names no stop or the runner cannot stop a turn; `no_pane` when the ferret has
+   * no live pane, or a pane that changed between the read and the press (nothing pressed); a hold as its `RefusalCode`,
+   * pressing nothing. The caller owns the refusals only it can make, and makes them BEFORE this is called (today's
+   * `interruptLocked`): a session whose last stop was never confirmed (`kill_failed`, the session layer's status), a
+   * pending structured question (a stop would answer it by accident), and a session with no running turn.
+   */
+  interrupt(): Promise<Result<HarnessInterrupted, HarnessRefusal>>;
+  /**
+   * Additive (send path): ONE read of the ferret's pane for a send (the runner's `observe`). Reads only. `no_pane` when
+   * the ferret has no live pane or nothing could be read; `plugin_unavailable` when the runner cannot observe.
+   */
+  observe?(): Promise<Result<RunnerPaneObservation, HarnessRefusal>>;
+  /**
+   * Additive (send path): where the pane still shows `text` held (the runner's `heldAt`). Rejects, as the runner does,
+   * when the pane cannot be read: that proves nothing either way.
+   */
+  heldAt?(text: string): Promise<Result<RunnerHeldAt | undefined, HarnessRefusal>>;
+  /**
+   * Additive (send path): erases `text` from the composer only when it holds exactly that (the runner's `clearComposer`).
+   * Not wrapped in a second act here, for the reason `deliver` is not. Answers as `deliver` does for a refusal.
+   */
+  clearComposer?(text: string): Promise<Result<RunnerComposerCleared, HarnessDeliveryFailure>>;
+  /**
+   * Additive (send path): one Enter for a composer holding exactly `text` (the runner's `submitComposer`). Not wrapped
+   * in a second act here. Answers as `deliver` does for a refusal.
+   */
+  submitComposer?(text: string, strict?: boolean): Promise<Result<RunnerComposerSubmitted, HarnessDeliveryFailure>>;
+  /**
+   * Additive (send path, the send-now's stop): the harness's stop key, pressed ONLY while the pane the runner reads shows
+   * active work, and NEVER at an idle pane, whichever harness or mode (unlike {@link interrupt}, whose idle rule is the
+   * person's own Stop): an idle pane may be parked on a permission prompt or a question that Escape would answer. Then the
+   * pane read once it settled (the runner's `stopActiveTurn`). `plugin_unavailable` when the harness names no stop or the
+   * runner cannot. The pane read is `undefined` when it could not be read. The caller reads the pane first and presses
+   * only for a send-now that is busy with a pane it proved free of a prompt and of a pending question.
+   */
+  stopActive?(): Promise<Result<RunnerPaneObservation | undefined, HarnessRefusal>>;
   /**
    * The seam's own ferret's transcript through its harness, already masked (rejects with 503 while the harness is off).
    * It is bound to that ferret and names no other.
    */
   readonly transcript: BoundTranscriptReader;
+}
+
+/**
+ * Who a turn document is from, as Ferretry recorded it BESIDE the document (`turn-NNN.by.json`, today's `QueueAuthor`):
+ * the owner, a ferret (by callsign) or a part of Ferretry (by feature). Metadata only; the document never carries it.
+ */
+export interface FerretTurnAuthor {
+  readonly kind: 'owner' | 'ferret' | 'ferretry';
+  readonly name?: string;
+  readonly feature?: string;
+  readonly sections?: string[];
+}
+
+/** One of a ferret's turn documents (`turns/turn-NNN.md`) and, when Ferretry wrote one beside it, who it is from. */
+export interface FerretTurnDocument {
+  readonly turn: number;
+  readonly text: string;
+  readonly by?: FerretTurnAuthor;
+}
+
+/**
+ * A ferret's turn documents, read back by the store that writes them (additive, U3; Conversation's `TurnDocuments`).
+ * Bound to the one ferret it was opened for, so it can read no other's. A STRICT read rejects anything unreadable (a
+ * document that vanished mid-read, an author record that does not parse); a best-effort one skips what it cannot read.
+ */
+export interface FerretTurns {
+  list(options?: { readonly strict?: boolean }): Promise<readonly FerretTurnDocument[]>;
+  /**
+   * Additive (#45 BG-051, today's `writeTurn`): writes the NEXT numbered turn document `turns/turn-NNN.md` (`0600`,
+   * through a temporary name, its author beside it as `turn-NNN.by.json`), numbered after the higher of the session
+   * counter and the documents on disk, and counts it so a later revive numbers after it. Answers its number and the
+   * absolute path the agent is pointed at. The same store the revive writes.
+   */
+  write?(request: { readonly document: string; readonly by?: FerretTurnAuthor }): Promise<FerretTurnWritten>;
+  /**
+   * Additive (#45 BG-053, today's `writeQueuedPayload`): writes a message too long to type into a busy pane to
+   * `channel/queued-<send id>.md` (`0600`, through a temporary name; the same id rewrites the same file) and answers
+   * its absolute path. Rejects for an id outside `[a-z0-9_-]{1,128}`: the caller does not substitute one, because the
+   * send's row names the file.
+   */
+  writeQueued?(sendId: string, payload: string): Promise<string>;
+  /** Additive (#45 BG-051, today's `clearMarkers`): clears the completion markers a previous turn left. */
+  clearMarkers?(): Promise<void>;
+}
+
+/** A turn document Ferrets wrote: its number and the absolute file the agent is pointed at. */
+export interface FerretTurnWritten {
+  readonly turn: number;
+  readonly file: string;
+}
+
+/**
+ * What a ferret's pane is asking right now (additive, U4; today's `turnPrompt`, `permissionRequest` and
+ * `harnessDialog` of its state document, `lib/protocol/session-dialog.ts` and `session-permission.ts`), for the panels
+ * that show it. Every text in it was read from a masked screen and is masked again inside one `Redaction.read` on the
+ * way out. Nothing here answers a dialog: no option is ever chosen.
+ */
+export interface FerretPrompt {
+  /** The turn the observer last recorded; absent when none is recorded. */
+  readonly turnState?: 'working' | 'your-turn' | 'needs-input';
+  /** The harness dialog's words behind a `needs-input`. */
+  readonly prompt?: string;
+  /** The tool-permission prompt behind a `needs-input`, as data. */
+  readonly permissionRequest?: JsonValue;
+  /** The harness's own dialog behind a `needs-input`, as data. */
+  readonly dialog?: JsonValue;
 }
 
 /** Why a move did not happen (today's `SessionMoveFailure` words and sentence). */
@@ -204,7 +450,7 @@ export interface Sitrep {
  * nowhere else.
  */
 export interface FerretsApi {
-  /** The effective `limits.yaml` settings, read fresh; absent until Ferrets supplies this configuration read. */
+  /** The effective `limits.yaml` settings, read fresh on every call; Ferrets serves it (a consumer may still bind it optionally). */
   effectiveLimits?(): Promise<LimitsFile>;
   get(ferret: FerretId): Promise<FerretSummary | undefined>;
   list(filter?: {
@@ -275,6 +521,19 @@ export interface FerretsApi {
    * the same `mayTouch` rule as stop and resume: anyone else is refused with a 403 `forbidden`.
    */
   harness?(ferret: FerretId, caller?: FerretId): Promise<FerretHarness | undefined>;
+  /**
+   * A ferret's turn documents (additive, U3): what a start and every revive handed it, oldest first. `undefined` for a
+   * ferret this daemon does not know. With `caller` (a ferret acting), only itself and its helpers are reachable, by the
+   * same `mayTouch` rule as `harness`: anyone else is refused with a 403 `forbidden`, so no agent reads another's turns.
+   */
+  turns?(ferret: FerretId, caller?: FerretId): Promise<FerretTurns | undefined>;
+  /**
+   * What the ferret's pane is asking right now (additive, U4): the dialog or permission prompt the turn watch recorded,
+   * masked, for Claude Code's panels. `undefined` for a ferret this daemon does not know; `{}` when nothing is asked or
+   * its state could not be read. Same `mayTouch` rule as `harness`: a `caller` reaching beyond itself and its helpers
+   * is refused with a 403 `forbidden`. Read only: it never answers the dialog.
+   */
+  prompt?(ferret: FerretId, caller?: FerretId): Promise<FerretPrompt | undefined>;
   /**
    * Moves a ferret onto another runtime (decision #19, additive; today's move of a session): the moves module's flow, whose
    * relaunch is a resume that replaces the live pane through the ordinary launch. Same `mayTouch` rule as above.

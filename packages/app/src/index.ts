@@ -9,6 +9,7 @@
 export * from './fy-render/index.ts';
 
 // ─── reaching a daemon: what Access and Connections provide (§4.8, §4.13) ─────────────────────────────────────────
+export { localQr, MAX_QR_VERSION, QrEncodeError, type QrMatrix } from './ui/local-qr.ts';
 export {
   CARRIER_TAKERS,
   CLAIM_TAKERS,
@@ -17,9 +18,12 @@ export {
   type ConnectPorts,
   type DaemonlessPorts,
   type PairedList,
+  type ChosenDaemon,
   type DaemonlessScreenProps,
   type DaemonlessViews,
   type DeviceClaims,
+  type BackgroundViewProps,
+  type DeviceViewProps,
   type DirectoryFetch,
   type PairedOver,
   type PairingAttempt,
@@ -106,7 +110,12 @@ export {
 export { fillPath, HEALTH_ROUTE, INVENTORY_ROUTE, type ShellPluginClient } from './client/daemon-client.ts';
 export type { BlockReason, InventoryEntry, Standing } from './client/inventory.ts';
 export { UPDATE_DAEMON_COMMAND } from './client/sentences.ts';
-export { DaemonCallError, type SocketListeners, type TransportSocket } from './client/transport.ts';
+export {
+  DaemonCallError,
+  isCarrierOutage,
+  type SocketListeners,
+  type TransportSocket,
+} from './client/transport.ts';
 export type { View } from './surfaces/halves.ts';
 export type { GeneratedSurfaces, SurfaceEntry } from './surfaces/registry.ts';
 
@@ -141,10 +150,29 @@ export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from '
 export { type DeviceLayout, useDeviceLayout } from './shell/use-device-layout.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
 export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
+export { forSubject } from './shell/for-subject.ts';
 /** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */
 export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 /** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */
 export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
+/** @public This device's theme, read on any screen, daemon-less ones included (§5.2: a device setting; shell contract S9). */
+export {
+  type DevicePaired,
+  type DevicePairedMachine,
+  type DeviceTheme,
+  useDevicePaired,
+  useDeviceTheme,
+} from './shell/device-context.tsx';
+/** @public Where a per-daemon view is drawn — its machine, feed and authority — and how a control shows for it (§5.2; shell contract S1). */
+export {
+  type Authority,
+  type Axis,
+  CAPABILITY_NAMES,
+  type CapabilityName,
+  controlState,
+  useViewPlace,
+  type ViewPlace,
+} from './shell/view-place.tsx';
 export {
   COLOUR_TOKENS,
   SPACING_TOKENS,
@@ -174,7 +202,21 @@ export {
   reconcileMachineOrder,
   replacedPairing,
 } from './daemons/machine-names.ts';
-export { type DaemonClientOf, useDaemonClients, usePairedDaemons } from './shell/daemon-access.ts';
+export { usePairedDaemons } from './shell/daemon-access.ts';
+/** @public The same plugin on every paired machine (§5.1; shell contract S2): each row's place and the plugin's own client. */
+export { type DaemonReach, useEveryDaemon, useNoReach, useNoReaches } from './shell/every-daemon.ts';
+export type { NoReach } from './shell/plugin-identity.tsx';
+// ─── declared fragments, device views and the in-memory hand-off (shell contract S3) ─────────────────────────────
+export { type FragmentDecl, FRAGMENT_KEY } from './router/address.ts';
+export { type FragmentArrival, useFragment } from './shell/use-fragment.ts';
+export {
+  type InstallOutcome,
+  type InstallPlatform,
+  type InstallPrompt,
+  useInstallPrompt,
+} from './shell/install-prompt.ts';
+export { type NavForm, useNavForm } from './shell/device-panels.tsx';
+export { handOff, type OwnScreenRef, useHandOff, useOwnScreen } from './shell/hand-off.ts';
 
 export {
   type AddressPlace,
@@ -191,12 +233,19 @@ export { notificationTapTarget, PUSH_TAP_SCREENS } from './router/tap-target.ts'
 export {
   notificationClickUrl,
   notificationUrl,
-  presentPush,
   PUSH_ASK_PATTERN,
   PUSH_FERRET_PATTERN,
   type PushMachine,
   pushMachineOf,
 } from './worker/notifications.ts';
+// The page's half of a notification tap (S6) and of a clear: the inbox the entry point creates before the app mounts.
+export {
+  attachNotificationOpens,
+  type NotificationOpen,
+  NotificationOpenInbox,
+  type NotificationOpenSource,
+} from './worker/notification-open.ts';
+export { type ClearRegistration, closeShownTags, type ShownNotification, shownTag } from './worker/push-clear.ts';
 
 // ─── the reference grammar (docs/reference-standard.md) ───────────────────────────────────────────────────────────
 export * from './references/grammar.ts';

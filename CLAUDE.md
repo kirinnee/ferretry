@@ -278,9 +278,11 @@ GitHub watcher that moves a card when its PR or release does, and the agenda and
 The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md); the one-time import of the
 old per-session task files is [docs/board-import.md](docs/board-import.md). Implement against those documents.
 
-**Finished autonomous sessions are archived, not kept live.** A session with `mode: auto` that ended more than a day
-ago leaves the daemon's live set — the index, `GET /v1/sessions`, the sweeps, the board's roster — while its directory
-stays where it was and every read of it still works; a write brings it back. Interactive sessions are never archived.
+**Finished autonomous sessions can be archived; the automatic pass is OFF by default** (`config/archive.yaml`
+`afterHours`), and it runs only once Board and Agenda both say what keeps a ferret live. When it runs, a session with
+`mode: auto` that ended longer ago than that leaves the session store's index and the live list (`GET /v1/ferrets`)
+while its record, its directory and every read of it stay; a write or a pin brings it back. Interactive sessions are
+never archived.
 The rule, what keeps a session live, the timer and the declared gaps are [docs/session-archive.md](docs/session-archive.md).
 
 ## Project record

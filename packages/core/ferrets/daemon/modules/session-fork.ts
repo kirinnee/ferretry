@@ -58,7 +58,7 @@ import type {
   TransferConversationReader,
   TransferConversationValidator,
 } from '../lib/transfer/types.ts';
-import type { TransferProvides } from './transfer.ts';
+import type { TransferPortsParts, TransferProvides } from './transfer.ts';
 
 /**
  * Forking a conversation from an exact message: the one route `POST /v1/ferrets/:ferretId/fork` and the whole
@@ -103,6 +103,8 @@ export interface SessionForkNeeds {
   readonly storage: DaemonStorage;
   /** A target's private directory: the string its rollout is later correlated by. */
   readonly sessionDirectory: (id: SessionId) => string;
+  /** A target's own private `sessions` handle, where its first-turn brief is written as its `turns/turn-001.md`. */
+  readonly briefs: TransferPortsParts['briefs'];
   /**
    * The attachment owner's store (owner: the conversation plugin): the source originals are read from it and the
    * target's are written into it, so a forked session shows its attachments in the manifest AND can open them. The
@@ -201,6 +203,7 @@ function createForkSubsystem(parts: SessionForkNeeds): SessionForkSubsystem {
   });
   const { planStore, briefWriter, attachmentCopier } = parts.transferPorts({
     state: parts.state,
+    briefs: parts.briefs,
     attachments: parts.attachmentStore,
   });
   /**

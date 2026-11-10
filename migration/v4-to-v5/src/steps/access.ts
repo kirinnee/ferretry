@@ -64,6 +64,7 @@ import {
   V4PasskeysSchema,
   V4PushSchema,
 } from '../v4/access.ts';
+import { keyPath } from '../key-path.ts';
 import { failureNote, isRecord, readV4Json, readV4Lines, V4InputError } from '../v4/documents.ts';
 import { jsonLine } from '../v4/gate.ts';
 import type { Step, StepContext } from './index.ts';
@@ -90,7 +91,7 @@ const ACCESS_NOT_CARRIED: readonly NotCarried[] = [
 ];
 
 /** The key paths of a zod failure: field names and indexes, never a value. */
-const where = (error: z.ZodError): string => error.issues.map(issue => issue.path.join('.') || '(top)').join(', ');
+const where = (error: z.ZodError): string => error.issues.map(issue => keyPath(issue.path)).join(', ');
 
 interface Part {
   readonly kept: KeptItem[];

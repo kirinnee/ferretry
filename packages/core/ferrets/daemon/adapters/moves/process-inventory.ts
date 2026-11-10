@@ -144,10 +144,10 @@ export class KernelProcessProbe implements ProcessProbePort {
 
   private async readTable(): Promise<ProcessTableRead> {
     try {
-      const { exitCode: code, stdout, stderr } = await this.spawn.run('ps', processTableArguments);
+      const { exitCode: code, signal, stdout, stderr } = await this.spawn.run('ps', processTableArguments);
       return code === 0
         ? { kind: 'read', stdout }
-        : { kind: 'failed', reason: `ps exited ${code}: ${stderr.trim() || 'no output'}` };
+        : { kind: 'failed', reason: `ps exited ${String(code ?? signal)}: ${stderr.trim() || 'no output'}` };
     } catch (error) {
       return { kind: 'failed', reason: `ps could not be run: ${detail(error)}` };
     }

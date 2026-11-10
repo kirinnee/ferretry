@@ -7,13 +7,14 @@ import { chmod, mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
+import { keyPath } from '../key-path.ts';
 
 /**
  * The part of a v5 `defineConfig` declaration the writer needs: one file under `config/`, or a folder of
  * `<name>.yaml` items. A contract's own `ConfigDef` fits; a def declared only in a manifest is restated with the same
  * file name and the schema its contract exports.
  */
-export type V5ConfigTarget =
+export type V5ConfigDef =
   | { readonly shape: 'file'; readonly file: string; readonly schema: z.ZodType<unknown> }
   | {
       readonly shape: 'collection';
@@ -21,6 +22,9 @@ export type V5ConfigTarget =
       readonly name: RegExp;
       readonly schema: z.ZodType<unknown>;
     };
+
+/** A {@link V5ConfigDef} with the id of the plugin that declares it (`data.config` of its manifest). */
+export type V5ConfigTarget = V5ConfigDef & { readonly plugin: string };
 
 /** Where a config file lands, relative to the v5 home: `config/<file>` or `config/<collection>/<name>.yaml`. */
 export function configPath(target: V5ConfigTarget, name?: string): string {
@@ -37,13 +41,11 @@ export function configPath(target: V5ConfigTarget, name?: string): string {
 export function v5ConfigProblem(target: V5ConfigTarget, name: string | undefined, text: string): string | undefined {
   if (target.shape === 'collection' && (name === undefined || !target.name.test(name)))
     return `the name is not a valid v5 ${target.collection} item name`;
-  const document = parseDocument(text, { version: '1.2', uniqueKeys: true, prettyErrors: false });
+  const document = parseDocument(text, { version: '1.2', uniqueKeys: true, prettyErrors: false, logLevel: 'silent' });
   if (document.errors.length > 0) return 'the written YAML does not read back';
   const parsed = target.schema.safeParse(document.toJS() ?? {});
   if (parsed.success) return undefined;
-  return parsed.error.issues
-    .map(issue => `${issue.path.length === 0 ? '(top)' : issue.path.join('.')} (${issue.code})`)
-    .join(', ');
+  return parsed.error.issues.map(issue => `${keyPath(issue.path)} (${issue.code})`).join(', ');
 }
 
 /** The part of a v5 `defineState` / `defineConfig` declaration the writer needs. */
@@ -69,12 +71,18 @@ export interface V5Writer {
    * An `opaque` file whose owner reads its own exact bytes (Asks' per-ferret agenda files): written as given, 0600.
    * The caller has already checked the bytes against what the v5 reader accepts.
    */
-  opaque(relativePath: string, bytes: string | Uint8Array): Promise<void>;
+  opaque(relativePath: string, bytes: string | Uint8Array, mode?: number): Promise<void>;
   /**
    * An owner-edited YAML config file under `config/`, 0600, written as given (comments kept). Refused unless v5
    * would accept it at that place ({@link v5ConfigProblem}); the error names the path and key paths only.
    */
-  config(target: V5ConfigTarget, name: string | undefined, text: string): Promise<void>;
+  config(target: V5ConfigTarget, name: string | undefined, text: string, from?: readonly string[]): Promise<void>;
+  /**
+   * For every config file THIS run gave {@link V5Writer.config}: the v4 sources (labels relative to the v4 home, plus
+   * the preview's own author label) its callers named, unioned over every write. A write that named none adds
+   * {@link UNKNOWN_SOURCE}: the sources are then not known, and a reader must fail closed.
+   */
+  writtenSources(): ReadonlyMap<string, ReadonlySet<string>>;
   /**
    * The text an earlier step of THIS run gave {@link V5Writer.config} for that place (also in a dry run), or
    * `undefined`. Two steps that each own keys of one v5 file (Settings and Daemon settings both write the harness
@@ -99,8 +107,12 @@ export function formatFirst(value: unknown, stamp?: number): unknown {
   return { format, ...rest };
 }
 
+/** The source of a config write whose caller named none: its v4 sources are not known. */
+export const UNKNOWN_SOURCE = '*';
+
 export function v5Writer(home: string, options: { readonly dryRun: boolean }): V5Writer {
   const configs = new Map<string, string>();
+  const sources = new Map<string, Set<string>>();
   const place = async (relativePath: string, text: string | Uint8Array, mode: number): Promise<void> => {
     if (options.dryRun) return;
     const target = join(home, relativePath);
@@ -131,14 +143,17 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
       if ('format' in parsed) throw new TypeError(`${def.path}: a stamped body names no format of its own`);
       await place(def.path, `${JSON.stringify({ format: def.format, ...parsed }, null, 2)}\n`, def.mode ?? 0o600);
     },
-    async opaque(relativePath, bytes) {
-      await place(relativePath, bytes, 0o600);
+    async opaque(relativePath, bytes, mode = 0o600) {
+      await place(relativePath, bytes, mode);
     },
-    async config(target, name, text) {
+    async config(target, name, text, from) {
       const path = configPath(target, name);
       const problem = v5ConfigProblem(target, name, text);
       if (problem !== undefined) throw new Error(`${path}: v5 refuses it: ${problem}`);
       configs.set(path, text);
+      const known = sources.get(path) ?? new Set<string>();
+      for (const source of from ?? [UNKNOWN_SOURCE]) known.add(source);
+      sources.set(path, known);
       await place(path, text, 0o600);
     },
     written(target, name) {
@@ -146,6 +161,9 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
     },
     writtenConfigs() {
       return new Map(configs);
+    },
+    writtenSources() {
+      return new Map(sources);
     },
     resolve(relativePath) {
       return join(home, relativePath);

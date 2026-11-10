@@ -26,6 +26,7 @@ import { CLONE_BASE_FILE, parseCloneBase, serializeCloneBase } from '../../../da
 import { EXPORT_KEYS_FILE, originKeyOfId, parseExportKeys } from '../../../daemon/lib/account/export-keys.ts';
 import type { HostHarnessScan } from '../../../daemon/lib/account/import.ts';
 import {
+  FleetApplyAfterConfigError,
   FleetApplyFailureError,
   type FleetDocumentWrite,
   type FleetLayout,
@@ -38,6 +39,7 @@ import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
 } from '../../../daemon/lib/service/catalog-service.ts';
+import { failedApplySentence } from '../../../daemon/lib/service/failed-apply.ts';
 import { ConfigWriteConflict, ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
 import {
   type CloneConfigFiles,
@@ -594,6 +596,35 @@ describe('exportBundle', () => {
     ]);
   });
 
+  it('BG-029 should refuse to export while a part of the machine stands in for a file that could not be read', async () => {
+    const { service, state } = world();
+    state.reading = { ...configReading(SET_UP_MODEL(), 'r'), unreadable: ['the MCP server "docs" (not read)'] };
+    const refusal = await setupRefusal(service.exportBundle(), 'fleet_setup_refused');
+    should(refusal.message).containEql("studio can't be copied yet");
+    should(refusal.message).containEql('the MCP server "docs" (not read)');
+    should(refusal.message).endWith('Fix that first, then copy again.');
+  });
+
+  it('BG-029 should refuse to export while a login a runtime uses keeps its variables as a stand-in, and name the login', async () => {
+    const { service, state } = world();
+    state.reading = {
+      ...configReading(SET_UP_MODEL(), 'r'),
+      stoodInLogins: [{ id: 'claude-you', because: 'not read' }],
+    };
+    const refusal = await setupRefusal(service.exportBundle(), 'fleet_setup_refused');
+    should(refusal.message).containEql('the login "claude-you" keeps its variables as not read');
+    should(refusal.message).endWith('Fix the login in Logins first, then copy again.');
+  });
+
+  it('BG-029 should still export while a login no runtime uses stands in', async () => {
+    const { service, state } = world();
+    state.reading = {
+      ...configReading(SET_UP_MODEL(), 'r'),
+      stoodInLogins: [{ id: 'nobody-uses-this', because: 'not read' }],
+    };
+    should((await service.exportBundle()).machine).equal('studio');
+  });
+
   it('should leave out documents past the size a bundle may carry, and the emails when the list fails', async () => {
     const { service, state } = world();
     state.reading = configReading(SET_UP_MODEL(), 'r');
@@ -1083,15 +1114,83 @@ describe('the setup.import executor', () => {
     should(refusal.message).startWith('importing would leave studio with a setup it cannot read');
   });
 
-  it('should turn a failed apply into a failure that says nothing was left half-changed', async () => {
-    const { service, state } = world();
-    state.apply = async () => {
-      throw new FleetApplyFailureError({ kind: 'rolled-back', stage: 'x', reason: 'disk full' } as never, undefined);
-    };
-    const change = IMPORT();
-    await service.executors.setup.describe(change);
-    const failure = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed');
-    should(failure.message).endWith('; nothing was left half-changed');
+  it('M2 R2-M1 should say which configuration files were written before a failed apply, whatever the apply threw', async () => {
+    const throwing =
+      (build: () => Error): (() => Promise<string>) =>
+      async () => {
+        const { service, state } = world();
+        state.apply = async () => {
+          throw build();
+        };
+        const change = IMPORT();
+        await service.executors.setup.describe(change);
+        return (await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed')).message;
+      };
+    const config = ['/state/config/model.yaml'];
+    // A plain refusal AFTER the configuration landed (a source the fence refuses, a claim another apply holds).
+    const preflight = await throwing(
+      () => new FleetApplyAfterConfigError(config, new Error('a source leads out of the folder')),
+    )();
+    should(preflight).startWith('a source leads out of the folder');
+    should(preflight).containEql('/state/config/model.yaml');
+    should(preflight).containEql('was made first and is NOT rolled back');
+    should(preflight).not.containEql('nothing was left half-changed');
+    // A rollback that landed after the configuration did: the rollback is the fleet's, the configuration stays.
+    const rolled = await throwing(
+      () =>
+        new FleetApplyAfterConfigError(
+          config,
+          new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'copy', reason: 'disk full' }),
+        ),
+    )();
+    should(rolled).containEql('/state/config/model.yaml');
+    should(rolled).containEql('NOT rolled back');
+    should(rolled).not.containEql('nothing was left half-changed');
+  });
+
+  it('R2-M1 failedApplySentence is true for every failure shape and says "nothing was left half-changed" only for a clean rollback', () => {
+    const rolledBack = new FleetApplyFailureError({
+      kind: 'rolled-back',
+      failedOperation: 'copy',
+      reason: 'disk full',
+    });
+    const incomplete = new FleetApplyFailureError({
+      kind: 'rollback-incomplete',
+      failedOperation: 'copy',
+      reason: 'x',
+      unrestored: [{ path: '/f/a', reason: 'changed' } as never],
+    });
+    const historyFailed = new FleetApplyFailureError({
+      kind: 'history-failed-after-commit',
+      failedHarness: 'claude',
+      reason: 'x',
+      committed: { manifestPath: '/f/manifest.json' } as never,
+    });
+    const config = ['/state/config/model.yaml', '/state/config/runtimes.yaml'];
+
+    // No configuration file landed: only a clean rollback may claim nothing is left.
+    should(failedApplySentence(rolledBack)).equal(`${rolledBack.message}; nothing was left half-changed`);
+    should(failedApplySentence(incomplete)).equal(incomplete.message);
+    should(failedApplySentence(incomplete)).not.containEql('half-changed');
+    should(failedApplySentence(historyFailed)).equal(historyFailed.message);
+    should(failedApplySentence(historyFailed)).not.containEql('half-changed');
+    should(failedApplySentence(new Error('the manifest could not be written'))).equal(
+      'the manifest could not be written',
+    );
+    should(failedApplySentence('plain text')).equal('plain text');
+
+    // A configuration file landed first: every shape names it and none claims nothing changed.
+    for (const failure of [rolledBack, incomplete, historyFailed, new Error('another fleet apply holds the claim')]) {
+      const sentence = failedApplySentence(new FleetApplyAfterConfigError(config, failure));
+      should(sentence).startWith(failure.message);
+      should(sentence).containEql(
+        'the changes to the configuration files /state/config/model.yaml, /state/config/runtimes.yaml were made first and are NOT rolled back with the fleet',
+      );
+      should(sentence).not.containEql('half-changed');
+    }
+    should(failedApplySentence(new FleetApplyAfterConfigError(config.slice(0, 1), new Error('x')))).equal(
+      'x; the change to the configuration /state/config/model.yaml was made first and is NOT rolled back with the fleet',
+    );
   });
 
   it('should read settings, hooks and skill bodies the model names, ignoring one that does not parse', async () => {
@@ -2319,6 +2418,38 @@ intervalMinutes: 5
     should(settingsOf(w, 'warden.yaml').intervalMinutes).equal(sha256Hex('10'));
   });
 
+  it('R2-M1 says a settings file that landed is on disk when the fleet then fails, and claims none that was held', async () => {
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const take = { 'warden.yaml': { intervalMinutes: 'take' as const } };
+
+    const own = files({ 'warden.yaml': WARDEN });
+    const landed = await copied(own);
+    const bundle = await sourceAt();
+    landed.state.apply = async () => {
+      throw new Error('another fleet apply holds the claim');
+    };
+    const refusal = await catalogRefusal(
+      apply(landed, bundle, settings, take, callerFor(REMOTE)),
+      'fleet_change_failed',
+    );
+    should(refusal.message).startWith('another fleet apply holds the claim');
+    should(refusal.message).containEql('warden.yaml was made first and is NOT rolled back with the fleet');
+    should(refusal.message).not.containEql('half-changed');
+
+    // A write the owner's judge HELD did not land: the sentence claims nothing about it.
+    const ownHeld = files({ 'warden.yaml': WARDEN });
+    ownHeld.state.pending = true;
+    const held = await copied(ownHeld);
+    held.state.apply = async () => {
+      throw new Error('another fleet apply holds the claim');
+    };
+    const heldRefusal = await catalogRefusal(
+      apply(held, bundle, settings, take, callerFor(REMOTE)),
+      'fleet_change_failed',
+    );
+    should(heldRefusal.message).equal('another fleet apply holds the claim');
+  });
+
   it('should add a file this machine does not have as the source wrote it', async () => {
     const own = files({});
     const w = await copied(own);
@@ -2329,6 +2460,58 @@ intervalMinutes: 5
     await apply(w, bundle, settings, undefined, callerFor(REMOTE));
     should(own.writes).have.length(1);
     should(own.writes[0]).containEql({ path: 'voice.yaml', ifMatch: 'absent', text: settings[0]?.text });
+  });
+
+  it('should say the first settings file is on disk when a later one is refused, and not roll it back', async () => {
+    const own = files({});
+    const write = own.port.write;
+    let calls = 0;
+    own.port.write = async (path, body, ifMatch, mayLoosen) => {
+      calls += 1;
+      if (calls === 2) throw new ConfigWriteConflict(path);
+      return await write(path, body, ifMatch, mayLoosen);
+    };
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [
+      { path: 'learning.yaml' as const, text: 'enabled: false\n' },
+      { path: 'voice.yaml' as const, text: 'postProcessing:\n  provider: off\n' },
+    ];
+
+    const refusal = await catalogRefusal(
+      apply(w, bundle, settings, undefined, callerFor(REMOTE)),
+      'fleet_change_stale',
+    );
+
+    should(refusal.message).containEql('changed on this machine after it was reviewed');
+    should(refusal.message).containEql('was made first and is NOT rolled back with the fleet');
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should materialise a component that carries its own text or document, without reading a file for it', async () => {
+    const own = files({});
+    const w = await copied(own);
+    const base = SET_UP_MODEL();
+    w.state.reading = configReading(
+      parseAccountModel({
+        ...base,
+        components: {
+          ...base.components,
+          instructions: { ...base.components.instructions, note: { text: 'Inline note.' } },
+          settings: { guard: { harness: 'claude', document: { permissions: { allow: ['Read'] } } } },
+          hooks: { audit: { harness: 'claude', document: { hooks: {} } } },
+        },
+        profiles: { default: { layers: ['instructions/main', 'instructions/note', 'settings/guard', 'hooks/audit'] } },
+      } as never),
+      'r',
+    );
+    const bundle = await sourceAt();
+
+    await apply(w, bundle, [], undefined, callerFor(REMOTE));
+
+    const written = JSON.stringify(w.applied[0]?.plan);
+    should(written).containEql('Inline note.');
+    should(written).containEql('permissions');
   });
 
   it('should refuse a settings file when this machine cannot merge settings, naming the file', async () => {

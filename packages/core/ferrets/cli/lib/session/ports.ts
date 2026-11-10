@@ -73,7 +73,8 @@ export interface ISessionApi {
   /** One ferret, by id or name; the daemon resolves the name. */
   get(reference: string): Promise<FerretSummary>;
   suggestNames(count: number): Promise<string[]>;
-  start(body: StartBody): Promise<{ readonly id: string }>;
+  /** `requestId` is the caller's idempotency key (`--request-id`); omitted, the start mints its own. */
+  start(body: StartBody, requestId?: string): Promise<{ readonly id: string }>;
   /** Stops one ferret; `reason` is recorded in its history. */
   stop(
     reference: string,

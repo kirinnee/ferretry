@@ -58,7 +58,7 @@ export function processWorkers(entry: URL, runtime: readonly string[] = [process
 
 /** The real worker entry under Node, as a source checkout runs it. */
 export const REAL_WORKER = (): ProcessWorkers =>
-  processWorkers(new URL('../../daemon/worker/adapters/main.ts', import.meta.url), [
+  processWorkers(new URL('../../daemon/worker/main.ts', import.meta.url), [
     Bun.which('node') ?? 'node',
     ...NODE_WORKER_FLAGS,
   ]);

@@ -27,7 +27,7 @@ import openrouter from '../../data/endpoints/openrouter.yaml' with { type: 'text
 import qwenCodingPlan from '../../data/endpoints/qwen-coding-plan.yaml' with { type: 'text' };
 import vercelAiGateway from '../../data/endpoints/vercel-ai-gateway.yaml' with { type: 'text' };
 import zaiGlm from '../../data/endpoints/zai-glm.yaml' with { type: 'text' };
-import { readConfigText } from '../shared/yaml-text.ts';
+import { readConfigText } from '@ferretry/std/yaml';
 import { type ProviderPreset, ProviderPresetFileSchema, presetFromFile } from './schema.ts';
 
 /**
@@ -58,7 +58,7 @@ const BUILT_IN_PRESET_TEXTS: Readonly<Record<string, string>> = Object.freeze({
 });
 
 /** A built-in preset that does not check: a defect in this repository, never a person's mistake. */
-class BuiltInPresetError extends Error {
+export class BuiltInPresetError extends Error {
   constructor(id: string, problem: string) {
     super(`built-in preset ${id} does not check: ${problem}`);
     this.name = 'BuiltInPresetError';
@@ -66,7 +66,7 @@ class BuiltInPresetError extends Error {
 }
 
 /** One preset file's text, checked: the preset, or every problem in one sentence. */
-function parsePresetText(
+export function parsePresetText(
   id: string,
   text: string,
   origin: ProviderPreset['origin'],

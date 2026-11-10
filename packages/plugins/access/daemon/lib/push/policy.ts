@@ -1,4 +1,10 @@
 import {
+  type Buzz,
+  PUSH_CLEAR_MAX_TAGS,
+  type PushClearPayload,
+  PushClearPayloadSchema,
+  fittingPushCount,
+  fittingPushTag,
   type PushDeviceView,
   PushDeviceViewSchema,
   type PushNotificationPayload,
@@ -59,6 +65,48 @@ export function enrolmentConfirmation(deviceName: string): PushNotificationPaylo
     body: `${deviceName} will be told when this machine needs you.`,
     tag: 'push-enrolment',
     url: '/',
-    count: 1,
+    count: fittingPushCount(1),
+  });
+}
+
+/**
+ * The push one buzz goes out as (another plugin's words, handed to Access's `buzz` port).
+ *
+ * PARSED HERE, NOT TRUSTED: an over-cap title, body or url throws at the sender instead of reaching a phone as an
+ * unreadable push. A TAG IS NEVER A REASON TO REFUSE: one the worker could not read (`fittingPushTag`) is left off,
+ * so the buzz is shown untagged — not replaced or cleared by tag — rather than lost. The tag still names the event.
+ */
+export function buzzPayload(message: Buzz): PushNotificationPayload {
+  const tag = fittingPushTag(message.tag);
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: message.tag,
+    title: message.title,
+    body: message.body,
+    ...(tag === undefined ? {} : { tag }),
+    url: message.url,
+    count: fittingPushCount(1),
+  });
+}
+
+/**
+ * The clear that takes down the lines named by `tags` on every device (docs/notifications.md § When an alert is
+ * cleared). IT CARRIES NO CONTENT: only which of this machine's own tags to take down. A tag that would not fit the
+ * kernel's grammar names no line the worker could find, so it is left out; with none left there is nothing to send.
+ */
+export function clearPayload(tags: readonly string[], ferret?: string): PushClearPayload | undefined {
+  const fitting = tags
+    .flatMap(tag => {
+      const fits = fittingPushTag(tag);
+      return fits === undefined ? [] : [fits];
+    })
+    .slice(0, PUSH_CLEAR_MAX_TAGS);
+  if (fitting.length === 0) return undefined;
+  return PushClearPayloadSchema.parse({
+    version: 1,
+    kind: 'clear',
+    eventKey: `clear:${fitting.join(',')}`.slice(0, 400),
+    sessionId: ferret ?? 'machine',
+    tags: fitting,
   });
 }

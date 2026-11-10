@@ -539,17 +539,28 @@ describe('what a ferret may control (limits.yaml agentControl)', () => {
   });
 });
 
-describe('session routes whose services are not bound in this build', () => {
-  test('the archive list and an out-of-date restart answer 503 not built yet rather than a missing route', async () => {
+describe('session routes the archive mount builds', () => {
+  test('the archive list and an out-of-date restart are mounted and built, not 503 or a missing route', async () => {
     const h = await host([record('lead')]);
     const answers = [
       await h.request('POST', '/v1/restarts', { body: { scope: 'outdated' } }),
       await h.request('GET', '/v1/archived-sessions'),
     ];
     for (const answer of answers) {
-      expect(answer.status).toBe(503);
-      expect(answer.json<{ code: string }>().code).toBe('plugin_unavailable');
+      expect(answer.status).not.toBe(503);
+      expect(answer.status).not.toBe(404);
     }
+  });
+
+  test('the archive list answers 200 with its count and sessions, and a restart answers a 2xx JSON object', async () => {
+    const h = await host([record('lead')]);
+    const archived = await h.request('GET', '/v1/archived-sessions');
+    expect(archived.status).toBe(200);
+    expect(archived.json<{ count: number; sessions: unknown[] }>()).toEqual({ count: 0, sessions: [] });
+    const restart = await h.request('POST', '/v1/restarts', { body: { scope: 'outdated' } });
+    expect(restart.status).toBeGreaterThanOrEqual(200);
+    expect(restart.status).toBeLessThan(300);
+    expect(typeof restart.json<Record<string, unknown>>()).toBe('object');
   });
 });
 

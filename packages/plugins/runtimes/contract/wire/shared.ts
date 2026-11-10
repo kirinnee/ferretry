@@ -157,17 +157,3 @@ export const CloneableSecretNameSchema = z
 
 /** The longest configuration document a copy carries (the config files' limit). */
 export const CONFIG_FILE_MAX_BYTES = 256 * 1024;
-
-/**
- * PLACEHOLDER (path rules loosened to length and no `..`). One file of a catalog skill, relative to the skill's own
- * folder. Catalogs owns the real rule (canonical relative path, depth, per-segment checks).
- */
-export const CATALOG_SKILL_MAX_FILES = 200;
-export const CatalogSkillFileSchema = z.strictObject({
-  path: z
-    .string()
-    .max(512)
-    .refine(path => !path.startsWith('/') && !path.split('/').includes('..'), 'a plain relative path inside the skill'),
-  content: z.string().max(256 * 1024),
-});
-export type CatalogSkillFile = z.infer<typeof CatalogSkillFileSchema>;

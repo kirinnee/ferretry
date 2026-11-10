@@ -6,7 +6,7 @@
  * the folder, a device file, and anything inside the fence. COMPARE, THEN SWAP: a write re-reads the file and refuses
  * unless it still hashes to the etag the person's preview showed. The write is the root's atomic temp-and-rename.
  */
-import type { RootHandle } from '@ferretry/kernel/contract';
+import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
 import { McpProjectFileError } from '../lib/session/project-file.ts';
 import { McpProjectFileChanged, type McpProjectFileReading, type McpProjectFiles } from '../lib/session/service.ts';
 
@@ -39,31 +39,40 @@ export class RootMcpProjectFiles implements McpProjectFiles {
   ) {}
 
   async read(ferret: string, path: string): Promise<McpProjectFileReading> {
-    const text = await this.#text(ferret, path);
+    const place = await this.#place(ferret, path);
+    const text = await this.#text(place.held.root, place.resolved, path);
     return text === null ? { text: null, etag: null } : { text, etag: await this.sha256(text) };
   }
 
   async replace(ferret: string, path: string, text: string, expected: string | null): Promise<string> {
-    const current = await this.#text(ferret, path);
+    // One root and one resolution for the compare AND the swap: the write goes where the comparison looked.
+    const { held, resolved } = await this.#place(ferret, path);
+    const current = await this.#text(held.root, resolved, path);
     if ((current === null ? null : await this.sha256(current)) !== expected) throw new McpProjectFileChanged();
-    const held = await this.workRoot(ferret);
-    const resolved = fenced(held, path);
-    if (resolved === undefined)
-      throw new McpProjectFileError(`${path} is outside the ferret's folder, so Ferretry will not write it.`);
     await held.root.writeText(resolved, text);
     return await this.sha256(text);
   }
 
-  async #text(ferret: string, path: string): Promise<string | null> {
+  /** The ferret's root and the name inside it that `path` is, or a refusal when `path` is not inside the folder. */
+  async #place(ferret: string, path: string) {
     const held = await this.workRoot(ferret);
-    const root = held.root;
     const resolved = fenced(held, path);
     if (resolved === undefined)
       throw new McpProjectFileError(`${path} is outside the ferret's folder, so Ferretry will not read or replace it.`);
+    return { held, resolved };
+  }
+
+  async #text(root: RootHandle, resolved: FencedPath, path: string): Promise<string | null> {
     let info: Awaited<ReturnType<RootHandle['stat']>>;
     try {
+      // The leaf ITSELF first: `stat` follows a link that stays inside the folder, and the atomic replace would then
+      // swap the link for a file. A link is refused wherever it points (as v4 did).
+      const leaf = await root.lstat(resolved);
+      if (leaf?.kind === 'symlink')
+        throw new McpProjectFileError(`${path} is a link, so Ferretry will not read or replace it.`);
       info = await root.stat(resolved);
-    } catch {
+    } catch (error) {
+      if (error instanceof McpProjectFileError) throw error;
       throw new McpProjectFileError(`${path} is not a regular file, so Ferretry will not read or replace it.`);
     }
     if (info === undefined) return null;

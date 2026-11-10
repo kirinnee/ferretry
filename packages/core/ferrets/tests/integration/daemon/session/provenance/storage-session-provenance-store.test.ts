@@ -212,3 +212,23 @@ describe('spawn provenance storage', () => {
     await storage.close();
   });
 });
+
+describe('spawn provenance storage for a session with no configuration yet', () => {
+  it('should refuse to invent a configuration around the stamp and leave no session behind', async () => {
+    // Arrange: nothing is stored, so the merge starts from no document at all.
+    const storage = await openTemporaryStorage();
+    const id = parseSessionId('20260806-no-config');
+    const store = new StorageSessionProvenanceStore(storage);
+
+    // Act
+    const refused = await store
+      .write(id, { provenance: shielded, label: 'fleet-warden' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(refused).be.instanceOf(InvalidStateDocumentError);
+    should((await store.read(id)).provenance).be.undefined();
+    should(storage.listSessions()).be.empty();
+    await storage.close();
+  });
+});

@@ -3,7 +3,10 @@ import { copiedClock } from './adapters/clock.ts';
 import { nodeFs } from './adapters/node-fs.ts';
 import { bunSpawn, bunWorkers } from './adapters/process.ts';
 import { nodeTempDirs } from './adapters/temp-dir.ts';
+import { createNodeHostFs } from './state/host-fs.ts';
+import { PRODUCT_BINARIES } from './binaries.ts';
 import { checkHost, processAlive, tcpProbe } from './check.ts';
+import { inEffectConfigReader } from './check-config.ts';
 import { checkDeadlineMs, loadRegistry, runPluginChecks } from './check-plugins.ts';
 
 export interface CheckRun {
@@ -22,6 +25,14 @@ const REGISTRY_LOAD_DEADLINE_MS = 30_000;
 const LINGER_MS = 3000;
 /** How long the removal of leftover temp directories may take once the exit has started. */
 const REMOVAL_BACKSTOP_MS = 1000;
+
+/**
+ * The base environment of every child the check starts: its PATH and nothing else of the daemon's environment, so a
+ * selftest's child never inherits a token, an API key or a session credential.
+ */
+export function checkChildEnvironment(env: Readonly<Record<string, string | undefined>>): { readonly PATH: string } {
+  return { PATH: env.PATH ?? '/usr/bin:/bin' };
+}
 
 /** `fyd --check` with the real adapters: prints to stdout and returns the exit code. */
 export async function runCheck(run: CheckRun): Promise<number> {
@@ -74,8 +85,9 @@ export async function runCheck(run: CheckRun): Promise<number> {
           implementations,
           facts: { home, host, port, version: run.version, platform: process.platform, arch: process.arch },
           workers: bunWorkers(),
-          // The check's children see its PATH and nothing else of the daemon's environment.
-          spawn: bunSpawn({ PATH: process.env.PATH ?? '/usr/bin:/bin' }),
+          spawn: bunSpawn(checkChildEnvironment(process.env)),
+          // Read-only: a probe's `enabledBy` reads its plugin's own file as boot would put it into effect.
+          config: inEffectConfigReader({ home, fs: createNodeHostFs(), binary: PRODUCT_BINARIES.client }),
           tempDirs,
           clock: copiedClock(arm, disarm, nowMs),
         },

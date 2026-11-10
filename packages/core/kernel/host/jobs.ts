@@ -52,7 +52,12 @@ export function parseBackgroundDelay(raw: string | undefined): number {
   return Number(text) * 1_000;
 }
 
+/** How long stopping waits for running jobs to honour their abort signal before it names the ones that did not. */
+export const DEFAULT_STOP_DEADLINE_MS = 10_000;
+
 export interface JobRunnerOptions {
+  /** How long `stop` waits for running jobs. Default {@link DEFAULT_STOP_DEADLINE_MS}. */
+  readonly stopDeadlineMs?: number;
   /** How long after `start` the background (`worker`) lane opens. Default {@link DEFAULT_BACKGROUND_DELAY_MS}. */
   readonly backgroundDelayMs?: number;
   /** Hands the event loop back between lane jobs, so whatever waits on it runs first. Default: one `setImmediate`. */
@@ -219,6 +224,8 @@ export class JobRunner {
         job.runs += 1;
         job.consecutive = 0;
       } catch (error) {
+        // A job that answers its own abort by throwing (`throwIfAborted`) is the stop working, not a failure.
+        if (job.controller.signal.aborted) return;
         job.failures += 1;
         job.consecutive += 1;
         job.lastError = error instanceof Error ? error.message.slice(0, 200) : 'failed';
@@ -247,7 +254,37 @@ export class JobRunner {
       job?.cancel?.();
       job?.retry?.();
     }
-    for (const key of [...this.startOrder].reverse()) await this.jobs.get(key)?.running?.catch(() => undefined);
+    await this.waitForRunning();
+  }
+
+  /**
+   * Waits for the jobs still running, but only for {@link JobRunnerOptions.stopDeadlineMs}: a job that ignores its abort
+   * signal is named in the log and left behind, so stopping the daemon (and releasing its home) never waits on it.
+   */
+  private async waitForRunning(): Promise<void> {
+    const running = [...this.startOrder].reverse().flatMap(key => {
+      const job = this.jobs.get(key);
+      return job?.running === undefined ? [] : [{ key, done: job.running.catch(() => undefined) }];
+    });
+    if (running.length === 0) return;
+    const finished = new Set<string>();
+    await new Promise<void>(resolve => {
+      const give = this.clock.after(milliseconds(this.options.stopDeadlineMs ?? DEFAULT_STOP_DEADLINE_MS), () => {
+        for (const { key } of running)
+          if (!finished.has(key)) this.log.warn('a job ignored its stop signal and was left running', { job: key });
+        resolve();
+      });
+      let left = running.length;
+      for (const { key, done } of running)
+        void done.then(() => {
+          finished.add(key);
+          left -= 1;
+          if (left === 0) {
+            give();
+            resolve();
+          }
+        });
+    });
   }
 
   private available(job: Job): boolean {

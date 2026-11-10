@@ -4,6 +4,8 @@ import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { optionalSecretReference, type SecretName } from '@ferretry/core-vault/contract';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
+import type { RuntimeId } from '@ferretry/plugin-runtimes/contract';
+import { fakeRuntimes } from '@ferretry/plugin-runtimes/contract/testing';
 import { ok } from '@ferretry/std';
 import { MCP_OAUTH_SECRETS, MCP_OAUTH_STATE, type McpItem, mcpOAuthSecretNames } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
@@ -24,8 +26,10 @@ const ITEMS: ReadonlyMap<string, McpItem> = new Map<string, McpItem>([
   ['linear', { url: SERVER, auth: 'oauth' }],
   ['lint', { command: 'npx', args: ['lint-mcp'] }],
 ]);
+const SPEC_RUNTIME = 'claude-default' as RuntimeId;
 const SPEC = {
   ferret: ferretId('f1'),
+  runtime: SPEC_RUNTIME,
   name: 'one',
   role: 'lead',
   harness: 'claude-code',
@@ -51,6 +55,7 @@ function source(w: World, project: ProjectMcpLaunchShare = NO_PROJECT) {
       return new Set(w.secrets.entries.keys());
     },
     renewal: w.service,
+    layered: async () => new Set(ITEMS.keys()),
     project: async () => project,
   });
   return { launch, seen };
@@ -272,6 +277,8 @@ describe('MCP launch renewal through the daemon half', () => {
     const sealed = new FakeSealedDocuments();
     await sealed.open(state as never, MCP_OAUTH_SECRETS).put(NAMES.refresh as never, refreshToken);
     const fetched: string[] = [];
+    const runtimes = fakeRuntimes();
+    runtimes.setProfiles([], [{ runtime: SPEC_RUNTIME, profile: 'work', mcp: ['linear', 'lint'], skills: [] }]);
     const ferrets = new FakeFerrets();
     ferrets.add({ id: ferretId('f1'), folder: '/work/app' });
     const half = daemon.build?.({
@@ -280,6 +287,8 @@ describe('MCP launch renewal through the daemon half', () => {
       uses: {
         claudeCode: { current: () => undefined },
         projects: { current: () => undefined },
+        // The launch's runtime carries both items, so the sign-in is renewed.
+        runtimes: { current: () => runtimes },
       },
       hooks: {} as never,
       kernel: {
@@ -296,7 +305,7 @@ describe('MCP launch renewal through the daemon half', () => {
       } as unknown as DaemonContext<typeof manifest>['kernel'],
     } as DaemonContext<typeof manifest>);
     if (half?.hooks === undefined) throw new Error('the MCP daemon half offers no hooks');
-    const hooks = half.hooks as Record<string, () => readonly { id: string; item: LaunchPartSource }[]>;
+    const hooks = half.hooks as unknown as Record<string, () => readonly { id: string; item: LaunchPartSource }[]>;
     const contributions = hooks['launch.parts']?.() ?? [];
     const launch = contributions[0]?.item;
     if (launch === undefined) throw new Error('MCP contributes no launch.parts source');

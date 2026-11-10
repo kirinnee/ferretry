@@ -660,6 +660,17 @@ by name against the host `PATH`. Three rules now hold, and each has a mechanism 
   was started with `FERRETRY_TEST=1`, checks every pane launch: if the program, `claude` or `codex`
   resolves into a real install, the launch fails with `test mode refused to launch a real harness`
   (`packages/daemon/src/lib/tmux/harness-guard.ts`).
+  In 5.0 the Terminals plugin owns this guard
+  (`packages/plugins/terminals/daemon/adapters/tmux/harness-launch-guard.ts`), armed by the kernel's
+  `hostFacts.launchGuard()`, and it is **stricter than today in two declared ways**. A launch whose
+  environment sets its own `PATH` is refused whatever that PATH holds, because the value lives in a
+  Vault handle the guard cannot read — and that is **every ferret with a Shells launch part**, since
+  Shells always sets `PATH`. A launch with no search path at all is refused too. In both the runner refuses with
+  `real_harness`, which Ferrets answers as a `409` (code `refused`) whose reason ends "and set no PATH
+  of its own, before it starts a session". So an armed SIT
+  that starts a ferret must not give it a shell or a `PATH` env part: put the fake `claude`/`codex`
+  first on the daemon's `PATH` instead. Judging a shell-backed launch on its real PATH waits for a
+  kernel-side resolve (the `GAP(kernel)` line under `terminals` in `ports-pending.json`).
 - **A leak fails the run.** `scripts/ci/test.sh` and the `task test*` targets run every unit, int and
   SIT invocation through
   `scripts/test/swept.sh`, which gives the run its own `TMPDIR`, exports `FERRETRY_TEST=1`, and kills

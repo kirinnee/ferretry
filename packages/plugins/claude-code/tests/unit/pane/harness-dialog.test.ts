@@ -207,6 +207,58 @@ describe('parseHarnessDialog — shapes no fixture draws', () => {
     });
   });
 
+  it('joins the description lines under a numbered row into that row’s one detail', () => {
+    const frame = [
+      RULE,
+      '  Pick a plan',
+      '',
+      '❯ 1. Pay as you go',
+      '     Pay for what you use',
+      '     and nothing more',
+      '  2. Subscribe',
+      '',
+      '  Enter to confirm · Esc to cancel',
+    ].join('\n');
+    const dialog = parseHarnessDialog(frame) as HarnessDialog;
+    should(dialog.options.map(option => [option.label, option.detail])).deepEqual([
+      ['Pay as you go', 'Pay for what you use and nothing more'],
+      ['Subscribe', undefined],
+    ]);
+  });
+
+  it('with no rule over it, takes the header up to two blank lines in a row, keeping a single blank inside it', () => {
+    const frame = [
+      '  earlier agent output that is not part of the dialog',
+      '',
+      '',
+      '  Pick a flavour',
+      '',
+      '  Only one is mild.',
+      '',
+      '❯ 1. Vanilla',
+      '  2. Chocolate',
+      '',
+      '  Enter to confirm · Esc to cancel',
+    ].join('\n');
+    const dialog = parseHarnessDialog(frame) as HarnessDialog;
+    should([dialog.title, dialog.body]).deepEqual(['Pick a flavour', 'Only one is mild.']);
+  });
+
+  it('with no rule over it, stops the header at the edge of a box', () => {
+    const frame = [
+      '╭──────────────╮',
+      '│ some tool    │',
+      '  Pick a flavour',
+      '  Only one is mild.',
+      '❯ 1. Vanilla',
+      '  2. Chocolate',
+      '',
+      '  Enter to confirm · Esc to cancel',
+    ].join('\n');
+    const dialog = parseHarnessDialog(frame) as HarnessDialog;
+    should([dialog.title, dialog.body]).deepEqual(['Pick a flavour', 'Only one is mild.']);
+  });
+
   it('clips a long title to its limit, ending in an ellipsis', () => {
     const frame = [RULE, `  ${'T'.repeat(400)}`, '', '❯ 1. A', '  2. B', '', '  Enter to confirm · Esc to cancel'].join(
       '\n',

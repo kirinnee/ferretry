@@ -231,17 +231,30 @@ export class StepUpRegistry {
    *
    * Given an `act`, only a proof stamped for exactly that act is taken: a leftover proof for another act
    * (or none) stays where it is and does not count.
+   *
+   * Given `notAfterMs`, a proof proved AFTER that instant (epoch ms) stays where it is and does not count: every
+   * standing's claim names the instant its call was admitted (inside the request or in work the call spawns), so it
+   * does not take a proof the owner gave afterwards. The comparison is of wall-clock milliseconds: a proof made in the
+   * same millisecond as the admission, or after the clock stepped back, is not told apart from an earlier one.
    */
-  claimFresh(subject: StepUpSubject, nowMs: number, act?: MachineSkippableStepUpAct): boolean;
+  claimFresh(
+    subject: StepUpSubject,
+    nowMs: number,
+    act?: MachineSkippableStepUpAct,
+    bound?: undefined,
+    notAfterMs?: number,
+  ): boolean;
   /**
    * An act every caller must prove takes only a proof stamped with that act AND bound to exactly `bound`, within a
    * challenge's life, on a copy of the app with a live session. A proof bound to anything else stays where it is.
    */
   claimFresh(subject: StepUpSubject, nowMs: number, act: SpentProofStepUpAct, bound: string): boolean;
-  claimFresh(subject: StepUpSubject, nowMs: number, act?: StepUpAct, bound?: string): boolean {
+  claimFresh(subject: StepUpSubject, nowMs: number, act?: StepUpAct, bound?: string, notAfterMs?: number): boolean {
     if (act !== undefined && !stepUpSkippableAtMachine(act)) return this.#claimBound(subject, nowMs, act, bound);
     if (!this.freshlyHeld(subject, nowMs)) return false;
-    if (act !== undefined && this.#fresh.get(key(subject))?.act !== act) return false;
+    const proof = this.#fresh.get(key(subject));
+    if (notAfterMs !== undefined && (proof === undefined || proof.provedAtMs > notAfterMs)) return false;
+    if (act !== undefined && proof?.act !== act) return false;
     this.#fresh.delete(key(subject));
     return true;
   }

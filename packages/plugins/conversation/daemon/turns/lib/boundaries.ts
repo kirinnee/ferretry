@@ -31,9 +31,13 @@ export class TurnBoundaries {
 
   constructor(private readonly emit: (boundary: TurnBoundary) => void) {}
 
-  /** The owner interrupted this ferret's round; however it settles, it ends as interrupted. */
+  /**
+   * The owner interrupted this ferret's round; however it settles, it ends as interrupted. Only a round in progress is
+   * marked: a stop at a ferret with no working round interrupted nothing, and a mark left behind would end the NEXT
+   * round as interrupted when nobody stopped it.
+   */
   markInterrupted(ferret: string): void {
-    this.#interrupted.add(ferret);
+    if (this.#held.get(ferret)?.phase === 'working') this.#interrupted.add(ferret);
   }
 
   /** One look at a ferret's phase. Emits when a round that was working has ended. */

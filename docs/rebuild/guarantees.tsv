@@ -178,9 +178,9 @@ G168	removed	access	-	-	grants	-
 G169	kept	gate	-	behaviour as written	grants	G169
 G170	kept	catalogs	gate	`STEP_UP_ACTS.catalogInstall`	grants	G170
 G171	kept	catalogs	gate	behaviour as written	grants	G171
-G172	kept	skills	gate	behaviour as written	grants	G172
-G173	kept	skills	gate	behaviour as written	grants	G173
-G174	kept	skills	gate	behaviour as written	grants	G174
+G172	removed	skills	-	-	grants	-
+G173	removed	skills	-	-	grants	-
+G174	removed	skills	-	-	grants	-
 G175	kept	skills	gate	behaviour as written	grants	G175
 G176	kept	mcp	gate	`session-mcp.ts`	grants	G176
 G177	kept	mcp	gate	behaviour as written	grants	G177
@@ -587,12 +587,12 @@ S17	kept	terminals	vault	behaviour as written	secrets	S17
 S18	kept	vault	-	behaviour as written	secrets	S18
 S19	kept	vault	-	behaviour as written	secrets	S19
 S20	kept	vault	-	`SecretRedactor.batch`	secrets	S20
-S21	kept	vault	-	`redactText`	secrets	S21
-S22	kept	vault	-	`redactText`	secrets	S22
-S23	kept	vault	-	`redactText`	secrets	S23
-S24	kept	vault	-	behaviour as written	secrets	S24
-S25	kept	vault	-	behaviour as written	secrets	S25
-S26	kept	vault	-	`redact-differential.test.ts`	secrets	S26
+S21	kept	runtimes	-	`redactText`	secrets	S21
+S22	kept	runtimes	-	`redactText`	secrets	S22
+S23	kept	runtimes	-	`redactText`	secrets	S23
+S24	kept	runtimes	-	behaviour as written	secrets	S24
+S25	kept	runtimes	-	behaviour as written	secrets	S25
+S26	kept	runtimes	-	`redact-differential.test.ts`	secrets	S26
 S27	kept	vault	-	behaviour as written	secrets	S27
 S28	kept	vault	-	behaviour as written	secrets	S28
 S29	kept	vault	-	behaviour as written	secrets	S29
@@ -610,7 +610,7 @@ S40	kept	kernel	-	`fenceOf`, `fencedReal`	secrets	S40
 S41	kept	kernel	-	behaviour as written	secrets	S41
 S42	kept	kernel	-	behaviour as written	secrets	S42
 S43	kept	kernel	-	provisioner; opening `<fleet>/assets`	secrets	S43
-S44	kept	kernel	-	Linux `/proc`, macOS `fchdir`	secrets	S44
+S44	kept	kernel	-	Linux `/proc`; macOS descriptor bracket not built yet	secrets	S44
 S45	kept	kernel	-	`stateHomeFence`, `fy history claim`	secrets	S45
 S46	kept	kernel	-	`stateHomeFence`	secrets	S46
 S47	kept	ferrets	-	`/v1/sessions/:id/fs/*`, opening `scope=media`	secrets	S47
@@ -744,6 +744,7 @@ S174	kept	mcp	-	`MCP_<NAME>_<HASH>_ACCESS`	secrets	S174
 S175	kept	usage	logins,vault	`GET /api/oauth/usage`, `GET /backend-api/wham/usage`	secrets	S175
 S176	kept	usage	logins,vault	type test	secrets	S176
 S177	kept	usage	logins,vault	diet test	secrets	S177
+S179	kept	kernel	-	`project-files` root, `permissions.projectFiles`	secrets	S179
 S178	kept	usage	logins,vault	`FY_USAGE_PROBE_ORIGIN`	secrets	S178
 R1	kept	kernel	-	behaviour as written	relay-protocol	R1
 R2	kept	kernel	-	behaviour as written	relay-protocol	R2
@@ -812,7 +813,7 @@ R64	kept	connections	worker:relay	behaviour as written	relay-protocol	R64
 R65	kept	kernel	-	`hs1` / `hs2`	relay-protocol	R65
 R66	kept	kernel	-	behaviour as written	relay-protocol	R66
 R67	kept	kernel	-	behaviour as written	relay-protocol	R67
-R68	kept	connections	-	`sessionProtocol`	relay-protocol	R68
+R68	removed	connections	-	-	relay-protocol	-
 R69	kept	kernel	-	behaviour as written	relay-protocol	R69
 R70	kept	kernel	-	behaviour as written	relay-protocol	R70
 R71	kept	kernel	-	behaviour as written	relay-protocol	R71
@@ -926,7 +927,7 @@ R178	removed	connections	-	-	relay-protocol	-
 R179	removed	connections	-	-	relay-protocol	-
 R180	removed	connections	-	-	relay-protocol	-
 R181	removed	connections	-	-	relay-protocol	-
-R182	kept	connections	-	`bindUrl`, `publicUrl`	relay-protocol	R182
+R182	kept	connections	-	`publishedDaemonCarriers`, `PublishedCarrierSet`	relay-protocol	R182
 R183	kept	connections	-	behaviour as written	relay-protocol	R183
 R184	kept	connections	-	behaviour as written	relay-protocol	R184
 R185	kept	connections	gate	behaviour as written	relay-protocol	R185
@@ -954,7 +955,7 @@ R206	kept	connections	worker:relay	`fyd --check`	relay-protocol	R206
 R207	kept	connections	worker:relay	`packages/daemon/src/lib/relay`, `packages/daemon/src/adapters/relay`	relay-protocol	R207
 R208	kept	connections	worker:relay	`relay-session.ts`, `relay-carrier.ts`, `DaemonConnection`, `connections.ts`	relay-protocol	R208
 R209	kept	connections	worker:relay	`relay-carrier-end-to-end.test.ts`, `RendezvousDurableObject`, `RelayLink`	relay-protocol	R209
-R210	kept	connections	worker:relay	behaviour as written	relay-protocol	R210
+R210	split	connections	worker:relay	behaviour as written	relay-protocol	R210
 R211	kept	connections	-	`refusalUpgrade`	relay-protocol	R211
 R212	kept	connections	-	behaviour as written	relay-protocol	R212
 R213	kept	connections	worker:relay	`src/adapters/relay/hosted-relay-directory.ts`	relay-protocol	R213
@@ -962,12 +963,12 @@ R214	kept	connections	worker:relay	behaviour as written	relay-protocol	R214
 R215	kept	connections	worker:relay	behaviour as written	relay-protocol	R215
 R216	kept	connections	worker:relay	behaviour as written	relay-protocol	R216
 R217	kept	kernel	gate	behaviour as written	relay-protocol	R217
-R218	kept	connections	worker:relay	`PAIRING_REACH_NOTICE`, `discoverableRelayUrl`, `localOnlyNotice`	relay-protocol	R218
+R218	kept	connections	worker:relay	`PAIRING_REACH_NOTICE`, `discoveredRelayUrl`	relay-protocol	R218
 R219	kept	connections	worker:relay	`DaemonCarrierRouter.openStream`	relay-protocol	R219
 R220	kept	access	connections	`scripts/validate/cli-contracts.sh`	relay-protocol	R220
 R221	kept	connections	worker:relay	`discoveredRelayUrl`	relay-protocol	R221
 R222	kept	connections	worker:relay	behaviour as written	relay-protocol	R222
-R223	kept	connections	worker:relay	`useDaemonFetch()`	relay-protocol	R223
+R223	kept	connections	worker:relay	`CarrierDialer`	relay-protocol	R223
 R224	kept	connections	worker:relay	`ActiveCarrierCard`, `chooseConnection().reason`, `describeConnectionMethod`, `DaemonCarrierRouter.choice`, `connection-health.ts`	relay-protocol	R224
 R225	split	connections	worker:relay	-	relay-protocol	R225
 R226	kept	connections	worker:relay	behaviour as written	relay-protocol	R226

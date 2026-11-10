@@ -42,15 +42,15 @@ const refuse = (response: ApiResponse): ConfigAccessVerdict => ({ allowed: false
  * Gate's judge of the kernel's config routes (`Admission.judgeConfigAccess`, today's `mounts/config-files.ts`): the
  * FILE's own capability — `warden` for `warden.yaml`, `fleet` for everything else — on the axis the act needs, never an
  * agent for an act that changes, and a loosening put into effect in the same act only for somebody at this machine or a
- * device with a passkey proved for the act.
+ * device with a fresh passkey proof that already existed when the request was admitted.
  *
  * - `read`: the file's capability on `use`.
  * - `write`: its `configure`, then the fleet's `use` (a device the owner kept off the fleet may change no file); the
  *   verdict says whether this call may put a loosening into effect (`mayLoosen`: somebody at this machine). A governed
  *   caller gets `claimLoosening` instead, which the writer asks ONLY when the text really loosens and which takes the
  *   one passkey proof atomically (G126: of two requests admitted on one proof exactly one loosens).
- * - `confirm`: the same asks, and — from a governed device — a passkey proved for THIS act (`loosen-config`), which
- *   is CLAIMED here, atomically, never read from the admission snapshot (so a confirm that finds nothing still used
+ * - `confirm`: the same asks, and — from a governed device — a passkey that already existed when the request was
+ *   admitted (`loosen-config`), which is CLAIMED here, atomically, never read from the admission snapshot (so a confirm that finds nothing still used
  *   its proof — stricter than the snapshot-and-spend it replaces).
  *
  * Anything undetermined (no standing, no grant standing) refuses.

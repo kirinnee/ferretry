@@ -1,8 +1,10 @@
 import type { Duration, Instant, JsonValue, Result } from '@ferretry/std';
 import type {
   ApiOf,
+  ConfigFileDef,
   ContributeHook,
   Contribution,
+  DecideAnswer,
   DecideHook,
   EventDef,
   HookDecision,
@@ -45,8 +47,10 @@ export type PreflightIdsOf<M> = M extends { readonly preflight: readonly (infer 
 export type SelftestIdsOf<M> = M extends { readonly selftest: readonly (infer D extends string)[] } ? D : never;
 export type WorkerIdsOf<M> = M extends { readonly workers: readonly (infer D extends string)[] } ? D : never;
 type NetworkEntryOf<M> = M extends { readonly permissions: { readonly network: readonly (infer E)[] } } ? E : never;
+type SpawnEntryOf<M> = M extends { readonly permissions: { readonly spawn: readonly (infer E)[] } } ? E : never;
 export type ResolverIdsOf<M> =
-  NetworkEntryOf<M> extends infer E ? (E extends { readonly resolver: infer R extends string } ? R : never) : never;
+  | (NetworkEntryOf<M> extends infer E ? (E extends { readonly resolver: infer R extends string } ? R : never) : never)
+  | (SpawnEntryOf<M> extends infer E ? (E extends { readonly resolver: infer R extends string } ? R : never) : never);
 
 type TokensOf<M, K extends 'needs' | 'uses' | 'provides'> = M extends { readonly [P in K]: infer T } ? T : {};
 
@@ -122,6 +126,12 @@ type Section<Name extends string, T> = [keyof T] extends [never]
 export interface HookInvoker {
   observe<P>(hook: ObserveHook<string, P>, payload: P): void;
   decide<I>(hook: DecideHook<string, I>, input: I): Promise<HookDecision>;
+  /**
+   * `decide`, by the same rule and with the same decision, plus how each live taker answered on the way (ADDITIVE). It
+   * is how an offerer learns that a NAMED taker said yes, rather than that nobody said no: Ferrets' helper admission
+   * is Packs' own `allowed` on `start.decide`, and no answer from Packs refuses the child.
+   */
+  decideAnswered<I>(hook: DecideHook<string, I>, input: I): Promise<DecideAnswer>;
   transform<V>(hook: TransformHook<string, V>, value: V): Promise<Result<V, string>>;
   provider<K extends string, V>(hook: ProvideHook<string, K, V>, key: K): V | 'unavailable';
   /** The declaring plugin id, even when off, failed or skeleton; undefined when nobody declares that key. */
@@ -148,7 +158,7 @@ export interface ToolResult {
 
 export type ToolHandler = (call: CallContext, input: unknown) => Promise<ToolResult>;
 
-/** A declared network resolver: the hosts it allows right now, from the plugin's own config/state only. */
+/** A declared resolver: the hosts (`network`) or programs (`spawn`) it allows right now, from the plugin's own config/state only. */
 export type NetworkResolver = () => readonly string[];
 
 /** One declared `fy doctor` check: reads only the plugin's own ports; never a secret in `detail` or `fix`. */
@@ -248,6 +258,21 @@ export interface SelftestProbe {
    * only these (a name the manifest does not declare grants nothing); absent, every declared program.
    */
   readonly programs?: readonly string[];
+  /**
+   * The probe runs only when this plugin's OWN config file, as in effect, says on (today's `webrtc … switched off in
+   * <config>`). The kernel reads the file read-only, as boot would put it into effect (its last good version, the
+   * schema's defaults when there is no file), calls the pure `on` with that value, and on an exact `false` prints
+   * `<label> switched off in <path>` (then ` — <consequence>`) without running the probe. The probe itself is given
+   * nothing more than without it: no config port. A file with nothing in effect, `on` throwing or answering anything
+   * but a boolean, or no reader in this check, runs the probe: `--check` never claims "off" on a broken file. A def
+   * that is not one of the manifest's own `data.config` file defs is a failed line, and the probe does not run.
+   */
+  readonly enabledBy?: {
+    // biome-ignore lint/suspicious/noExplicitAny: any file def of the plugin's own; `on` judges the value
+    readonly def: ConfigFileDef<any>;
+    readonly on: (value: unknown) => boolean;
+    readonly consequence?: string;
+  };
   readonly run: (environment: SelftestEnvironment) => Promise<string>;
 }
 
@@ -446,6 +471,11 @@ export interface CliContext<M extends Manifest> {
    * (a sign-in recipe, for example, must be 1–4000 characters).
    */
   readText?(path: string): Promise<string>;
+  /**
+   * The raw bytes of a path (an image, a PDF, a document), by the same rules as `readText`: relative to the CLI working
+   * directory, '-' reads stdin, no reader size cap (the receiving route bounds what it takes). Nothing is decoded.
+   */
+  readBytes?(path: string): Promise<Uint8Array>;
   /**
    * Whether a path exists, resolved against the CLI working directory (never stdin: `-` is a file named `-`).
    * As today's `existsSync`: a directory counts, and so does a file that exists but cannot be read. It reads no

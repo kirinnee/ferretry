@@ -2,19 +2,17 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { createSkillReference, proveSkill } from '../../../app/views/skill-reference.tsx';
 import { createSkillsSettings } from '../../../app/views/skills-settings.tsx';
 import { asView, click, closeAll, pageText, q, settle, show } from './dom-support.tsx';
-import { installRecord, machineInventory, refusal, scripted, skill } from './skills-support.ts';
+import { machineInventory, refusal, scripted, skill } from './skills-support.ts';
 
 afterEach(closeAll);
 
 const MACHINE = 'GET /v1/skills';
 const FILE = 'GET /v1/skills/file';
-const INSTALLS = 'GET /v1/skill-installs/local';
 const FERRET_SKILLS = 'GET /v1/ferrets/:ferretId/skills';
-const REMOVE_PROJECT = 'DELETE /v1/skill-installs/local/project/:installId';
 
 describe('DOM tests: Settings › Skills', () => {
-  it('lists every account and project on the machine, with Open, and the copies made from it', async () => {
-    const { client } = scripted({ [MACHINE]: machineInventory(), [INSTALLS]: { installs: [installRecord()] } });
+  it('lists every account and project on the machine, with Open', async () => {
+    const { client } = scripted({ [MACHINE]: machineInventory() });
     const Settings = asView(createSkillsSettings(client));
     await show(<Settings />);
     await settle(() => q('[data-settings="skills"]') !== null, 'the tab');
@@ -22,13 +20,11 @@ describe('DOM tests: Settings › Skills', () => {
       [...document.querySelectorAll('[data-skills-group]')].map(node => node.getAttribute('data-skills-group')),
     ).toEqual(['claude-work account', 'Project dojo']);
     expect(document.querySelectorAll('[data-skills-open]').length).toBe(2);
-    expect(q('[data-skills-install]')?.textContent).toContain('review · /work/dojo/.claude/skills/review');
   });
 
   it('opens a listed skill’s SKILL.md by its listed path, machine-wide', async () => {
     const { client, calls } = scripted({
       [MACHINE]: machineInventory(),
-      [INSTALLS]: { installs: [] },
       [FILE]: (init: unknown) => ({ path: (init as { query: { path: string } }).query.path, content: '# Deploy it' }),
     });
     const Settings = asView(createSkillsSettings(client));
@@ -37,41 +33,6 @@ describe('DOM tests: Settings › Skills', () => {
     await click(document.querySelectorAll('[data-skills-open]')[1] ?? null, 'Open deploy');
     await settle(() => pageText().includes('Deploy it'), 'the SKILL.md');
     expect(calls.at(-1)?.init).toEqual({ query: { path: '/work/dojo/.claude/skills/deploy/SKILL.md' } });
-  });
-
-  it('G173 removes a copy through the route of its scope, then reads the copies again', async () => {
-    let installs = [installRecord()];
-    const { client, calls } = scripted({
-      [MACHINE]: machineInventory(),
-      [INSTALLS]: () => ({ installs }),
-      [REMOVE_PROJECT]: () => {
-        installs = [];
-        return { installId: installRecord().installId, name: 'review', destination: '/d' };
-      },
-    });
-    const Settings = asView(createSkillsSettings(client));
-    await show(<Settings />);
-    await settle(() => q('[data-skills-install-remove]') !== null, 'Remove');
-    await click(q('[data-skills-install-remove]'), 'Remove');
-    await settle(() => q('[data-skills-installs-none]') !== null, 'the empty copies line');
-    expect(calls.find(call => call.route === REMOVE_PROJECT)?.init).toEqual({
-      params: { installId: installRecord().installId },
-    });
-  });
-
-  it('says a refused removal in the machine’s words and keeps the copy listed', async () => {
-    const { client } = scripted({
-      [MACHINE]: machineInventory(),
-      [INSTALLS]: { installs: [installRecord()] },
-      [REMOVE_PROJECT]: refusal(409, 'local_skill_conflict', 'SKILL.md was edited here'),
-    });
-    const Settings = asView(createSkillsSettings(client));
-    await show(<Settings />);
-    await settle(() => q('[data-skills-install-remove]') !== null, 'Remove');
-    await click(q('[data-skills-install-remove]'), 'Remove');
-    await settle(() => q('[data-skill-failure]') !== null, 'the refusal');
-    expect(q('[data-skill-failure]')?.textContent).toContain('SKILL.md was edited here');
-    expect(q('[data-skills-install]')).not.toBeNull();
   });
 
   it('says a failed read in plain words', async () => {

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import manifest from '../../manifest.ts';
 
 describe('connections manifest', () => {
@@ -28,5 +30,22 @@ describe('connections manifest', () => {
       'webrtc',
     ]);
     expect(manifest.hooks.takes.some(take => take.hook.name === 'doctor.checks')).toBe(true);
+  });
+  test('R225 first run has no carrier chooser: Connections offers a machine tab and a status panel, nothing on the onboarding rail', () => {
+    // What Connections contributes to any screen: one settings tab (a machine already paired) and one status panel.
+    expect(manifest.ui.settings).toHaveLength(1);
+    expect(manifest.ui.settings[0]).toMatchObject({ id: 'connection' });
+    expect(manifest.ui.panels).toHaveLength(1);
+    expect(JSON.stringify(manifest.ui)).not.toMatch(/onboarding|first-run|setup/iu);
+    // And the first-run screen, in the package that owns it, never mounts the chooser: it states the carrier order.
+    const onboarding = join(import.meta.dir, '..', '..', '..', 'onboarding', 'app');
+    const sources = [...new Bun.Glob('**/*.{ts,tsx}').scanSync({ cwd: onboarding })].map(path =>
+      readFileSync(join(onboarding, path), 'utf8'),
+    );
+    expect(sources.length).toBeGreaterThan(3);
+    for (const source of sources) {
+      expect(source).not.toContain('CarrierPreferenceSelector');
+      expect(source).not.toContain('carrier-preference');
+    }
   });
 });
