@@ -215,10 +215,15 @@ describe('held-edit patch: a held secret reference stays held (the secret rules)
 
   test('held-edit patch: the owner’s own Y beside a reference already in effect in another key: only Y is credited', async () => {
     const h = harness();
-    await h.stage();
+    await h.files.reload();
+    h.verdicts.other = true;
+    expect((await h.port.write(capsDef, undefined, START)).kind).toBe('written');
+    // the owner puts FAKE_OLD into effect, then a ferret's WHOLE text (which does not name it) is held beside it
     expect((await h.port.writeAsCaller(capsDef, undefined, { patch: { note: '${secret:FAKE_OLD}' } })).kind).toBe(
       'written',
     );
+    h.verdicts.other = false;
+    expect((await h.port.write(capsDef, undefined, FERRET_RAISE)).kind).toBe('held');
     h.log.lines.length = 0;
     const outcome = await h.port.writeAsCaller(capsDef, undefined, { patch: { env: { MINE: '${secret:FAKE_Y}' } } });
     expect(outcome.kind).toBe('written');
