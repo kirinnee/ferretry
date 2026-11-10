@@ -3,10 +3,10 @@ import { GatePort } from '@ferretry/core-gate/contract';
 import { accountDefaultsDifferences } from './contract/defaults-differences.ts';
 import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
-import { FerretsPort } from '@ferretry/core-ferrets/contract';
+import { FerretsChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { BoardPort } from '@ferretry/plugin-board/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
-import { RedactionSources, SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
+import { InputPhoneApprovals, RedactionSources, SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
@@ -690,12 +690,14 @@ export default definePlugin({
     readModels: ['sign-ins'],
     publishes: [SignInsChanged],
     /** A revoked or idle-expired device's standing rules are suspended (P124); Access's event, read through its contract. */
-    subscribes: [DevicesChanged],
+    subscribes: [DevicesChanged, FerretsChanged],
   },
 
   hooks: {
     takes: [
       { hook: RedactionSources, key: 'source' },
+      /** The Vault's `push: true` raise and `input_wait` on a `pa_` id are answered here: an approval is a sign-in's. */
+      { hook: InputPhoneApprovals, key: 'phone' },
       { hook: AskSources, key: 'sign-in-approval' satisfies string as SourceKey, schema: SignInApprovalRefSchema },
     ],
   },

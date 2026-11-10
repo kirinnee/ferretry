@@ -13,6 +13,7 @@ import { KernelFrameClock } from './stream/frame-clock.ts';
 import { heldViewerHost } from './stream/held-host.ts';
 import { BrowserViewerStream } from './stream/viewer-stream.ts';
 import { pageTarget, TypedIdentities } from './target/index.ts';
+import { VaultPageApprovals } from './target/tools/phone-approvals.ts';
 import { nodeStagedFiles } from './tools/adapters/staged-files.ts';
 import { SurfaceControl } from './tools/control.ts';
 import { rootFiles } from './tools/files.ts';
@@ -250,6 +251,8 @@ export function buildBrowsers(
     host: pageToolHost(tools),
     identities,
     vault,
+    // Approve on your phone: the raise is the Vault's, answered by Accounts (docs/input-requests.md).
+    approvals: new VaultPageApprovals(() => vault),
     acts: { acted: (ferret, script) => vault.pageActed?.(ferret, script) },
   });
 

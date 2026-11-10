@@ -8,16 +8,21 @@
  * - passkeys and stored proofs use Access's approved additive reads (a local adapter until its port reaches the base).
  *   A missing or unreadable provider verifies nothing. Gate keeps the service's complete audit evidence.
  * - secure copies (the Vault's child runner and folders): no copy exists, so the copy routes list none.
- * - phone approval from a terminal (DECISIONS-2 #6): TODO(contract): the Vault's additive push raise (`raiseInput` with a
- *   push variant, today's agent-tools service :793/:1629) is not on the Vault contract of this base, so no approval is
- *   raised here; the `input.targets` push look (`pushNumber`) is already declared.
+ * - phone approval (DECISIONS-2 #6): the RAM service is built here over the Vault's additive looks (page number, terminal
+ *   prompt, "did the ferret steer it"), Asks (the card), Access (the push and its clear) and Gate (the log), and is
+ *   PROVIDED to the Vault under `input.phone-approval:phone`, which is how a ferret's `push: true` raise reaches it. A look
+ *   the Vault does not offer fails the approval closed.
  * - the passkeys-changed signal and pairing's purge: Access's `DevicesChanged` subscriber is the one live path.
  */
 import { gateAuditSink } from './adapters/gate-audit.ts';
+import { machineName } from './adapters/host.ts';
+import { PhoneApprovalAuditAdapter } from './adapters/phone-approval/audit.ts';
+import { AccessPhoneApprovalPush } from './adapters/phone-approval/push.ts';
+import { VaultPhoneLooks } from './adapters/phone-approval/vault-reach.ts';
 import { accountSecurity } from './adapters/access-security.ts';
 import { randomUUID } from 'node:crypto';
 import type { StateFileDef } from '@ferretry/kernel/contract';
-import { seconds } from '@ferretry/std';
+import { milliseconds, seconds } from '@ferretry/std';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { AccountKeySchema } from '../contract/routes/index.ts';
 import type manifest from '../manifest.ts';
@@ -26,9 +31,11 @@ import type { AccountsCore } from './accounts.ts';
 import { type HalfB, halfB } from './half-b.ts';
 import { LoginEntryError } from './lib/accounts.ts';
 import type { AuditSink } from './lib/local-ports.ts';
+import { PhoneApprovalService } from './lib/phone-approval/service.ts';
 import { LoginRecipeService } from './lib/secrets/login-recipes.ts';
 import { PasteRuleService, PasteRuleStages } from './lib/secure-copy/index.ts';
 import {
+  PhoneApprovalAsksAdapter,
   RecipeAsksAdapter,
   SignInApprovalAsks,
   SignInRuleSuggestionAsksAdapter,
@@ -126,6 +133,24 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     clock: isoClock,
   });
   const pasteRuleStages = new PasteRuleStages({ rules: pasteRules, clock });
+  // APPROVE ON YOUR PHONE: RAM only (I205). Every look goes through the Vault, which hands them to Accounts alone and
+  // offers each only while it can answer; a look it does not offer fails the approval closed.
+  const looks = new VaultPhoneLooks(() => ctx.needs.vault);
+  const phone = new PhoneApprovalService({
+    pages: looks,
+    terminals: looks,
+    observer: looks,
+    asks: new PhoneApprovalAsksAdapter(ctx.needs.asks),
+    push: new AccessPhoneApprovalPush(ctx.uses.access),
+    audit: new PhoneApprovalAuditAdapter(audit),
+    clock,
+    timers: { after: async ms => await kernel.clock.sleep(milliseconds(ms)) },
+    ids: () => `pa_${randomUUID().replaceAll('-', '').slice(0, 24)}`,
+    logins: { listing: async () => await accounts.list() },
+    // The sign-in fact `secondFactor: 'push'` is kept by Accounts' own directory, never through the Vault.
+    facts: accounts,
+    hostName: machineName(),
+  });
 
   kernel.jobs.add({
     id: 'accounts.paste-rules',
@@ -133,6 +158,12 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     run: async () => pasteRules.load(),
   });
   kernel.jobs.add({ id: 'accounts.sign-in-rules', schedule: { onceAfterStart: true }, run: async () => rules.load() });
+  // No approval survives a restart (I205): any card still presenting one is closed.
+  kernel.jobs.add({
+    id: 'accounts.phone-approvals-restore',
+    schedule: { onceAfterStart: true },
+    run: async () => phone.restore(),
+  });
   kernel.jobs.add({
     id: 'accounts.sweep-stages',
     schedule: { every: SWEEP_EVERY },
@@ -148,6 +179,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     rules,
     suggestions,
     plans,
+    phone,
     copies: { list: () => [] },
     pasteRules,
     pasteRuleStages,
