@@ -213,6 +213,16 @@ export function findRawSecrets(document: unknown): readonly SecretFinding[] {
   return findings;
 }
 
+/** A raw secret given to a flag, found by the write rule (CFG-LEAK-W): where it is, and a digest of it. Placeholder. */
+export interface FlagFinding {
+  readonly path: readonly (string | number)[];
+  readonly digest: string;
+}
+
+export function findFlagSecrets(_document: unknown): readonly FlagFinding[] {
+  return [];
+}
+
 /** Whether `character` is one character of whitespace (what `\s` and `trim` both mean). */
 const isBlank = (character: string): boolean => character !== '' && character.trim() === '';
 

@@ -16,6 +16,9 @@ import { captureLog, HOME, loginsDef, manualClock, updatesDef } from './support.
  */
 const UPDATES = `${HOME}/config/updates.yaml`;
 const LOGIN_A = `${HOME}/config/logins/a.yaml`;
+const LOGIN_B = `${HOME}/config/logins/b.yaml`;
+/** Fake only: a value past every length and entropy gate, no known shape. */
+const FLAG_VALUE = 'Zk3pQ9vXw2LmN7rT';
 const JOURNAL = `${HOME}/state/kernel/config-write-set.json`;
 const RAW_SECRET = 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
@@ -121,6 +124,37 @@ describe('writeAll: all or none', () => {
     expect(JSON.stringify(outcome)).not.toContain(RAW_SECRET);
     expect(JSON.stringify(h.log.lines)).not.toContain(RAW_SECRET);
     expect(h.disk(UPDATES)).toBe('limit: 5\n');
+  });
+
+  test('CFG-LEAK-W writeAll refuses a document that adds one; nothing in the set is written', async () => {
+    const h = harness();
+    await h.start();
+    const before = new Map(h.base.snapshot());
+    const outcome = await h.port.writeAll([
+      { def: updatesDef, edit: { patch: { limit: 3 } } },
+      { def: loginsDef, name: 'b', edit: `budget: 1\nmodel: "srv --token ${FLAG_VALUE}"\n` },
+    ]);
+    expect(outcome).toMatchObject({ kind: 'refused', reason: 'raw_secret', document: { path: 'logins/b.yaml' } });
+    expect(JSON.stringify(outcome)).not.toContain(FLAG_VALUE);
+    expect(JSON.stringify(h.log.lines)).not.toContain(FLAG_VALUE);
+    // Nothing in the set landed: the first document is as it was, the second was never created, no journal is left.
+    expect(h.port.file(updatesDef)).toEqual({ limit: 5 });
+    expect(h.disk(LOGIN_B)).toBeUndefined();
+    expect(new Map(h.base.snapshot())).toEqual(before);
+  });
+
+  test('CFG-LEAK-W writeAll keeps a pair the file on disk already holds: a set that changes only another key is written', async () => {
+    const h = harness();
+    await h.start();
+    h.base.seed(LOGIN_A, `budget: 5\nmodel: "srv --token ${FLAG_VALUE}"\n`);
+    await h.files.reload();
+    const outcome = await h.port.writeAll([
+      { def: loginsDef, name: 'a', edit: { patch: { budget: 2 } } },
+      { def: updatesDef, edit: { patch: { limit: 3 } } },
+    ]);
+    expect(outcome.kind).toBe('written');
+    expect(h.disk(LOGIN_A)).toContain(FLAG_VALUE);
+    expect(h.port.collection(loginsDef).get('a')).toMatchObject({ budget: 2 });
   });
 
   test('a file on disk that holds a raw secret refuses the set, so the intent record never copies it', async () => {

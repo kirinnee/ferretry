@@ -21,6 +21,7 @@ import { currentActor, currentStanding } from '../call-scope.ts';
 import { countProblems } from './check.ts';
 import { type ConfigDeclaration, targetOfPath } from './claims.ts';
 import { schemaFileName, schemaModeline } from './schemas.ts';
+import { shownConfigText } from './shown-text.ts';
 
 /** The largest configuration file read or written over the wire (today's `CONFIG_FILE_MAX_BYTES`). */
 const FILE_MAX_BYTES = 256 * 1024;
@@ -41,6 +42,8 @@ export interface ConfigRouteSources {
   admission(): Admission | undefined;
   /** The home, absolute: a file's `absolutePath` is `<home>/config/<path>`. */
   readonly home: string;
+  /** The binary's name, for the sentences that name a command. */
+  readonly binary: string;
 }
 
 const PathSchema = z.string().min(1);
@@ -132,6 +135,8 @@ export function configRoutes(sources: ConfigRouteSources): Readonly<{
       const read = await writerOrFail().read(target);
       if (read === undefined) return unresolved(path.data, 'bad_request');
       const state = read.status.state === 'invalid' ? 'invalid' : read.status.state === 'held' ? 'pending' : 'ok';
+      const shown =
+        read.text === undefined ? undefined : shownConfigText(target.def, read.path, read.text, sources.binary);
       return jsonResponse({
         path: read.path,
         absolutePath: `${sources.home}/config/${read.path}`,
@@ -139,7 +144,7 @@ export function configRoutes(sources: ConfigRouteSources): Readonly<{
         schema: schemaFileName(target.def),
         exists: read.exists,
         // A file that is not there yet begins as its schema's modeline, so an editor offers the schema's help.
-        text: read.text ?? `${schemaModeline(target.def, read.path)}\n`,
+        text: shown?.kind === 'shown' ? shown.text : (read.text ?? `${schemaModeline(target.def, read.path)}\n`),
         etag: read.etag,
         state,
         issues: read.issues ?? [],
