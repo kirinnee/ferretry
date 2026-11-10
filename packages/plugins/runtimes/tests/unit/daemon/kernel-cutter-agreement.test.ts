@@ -54,6 +54,7 @@ const VALUE_LEADS: readonly ((value: string) => readonly string[])[] = [
 /** A value that holds a pointer and raw text in ANOTHER piece of it (before, glued, a harmless key's value, a `#` after). */
 const POINTER_VALUES: readonly ((mark: string) => string)[] = [
   mark => `a${mark}${VALUE}${mark}${POINTER}`,
+  mark => `a${mark}${POINTER}${mark}${VALUE}`,
   mark => `a=1${mark}${POINTER}${mark}${VALUE}`,
   mark => `x${POINTER}${mark}${VALUE}`,
   mark => `prefix${POINTER}${mark}${VALUE}`,
@@ -63,6 +64,7 @@ const POINTER_VALUES: readonly ((mark: string) => string)[] = [
   mark => `${POINTER}${mark}b=x${VALUE}`,
   mark => `${POINTER}${mark}b="${VALUE}"`,
   mark => `${POINTER}${mark}${VALUE}=x`,
+  mark => `${POINTER}${mark}${VALUE}:x`,
   mark => `${POINTER}${mark}${mark}${VALUE}`,
   mark => `${POINTER}${POINTER}${mark}${VALUE}`,
   mark => `${POINTER}${mark}#${VALUE}`,
