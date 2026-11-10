@@ -161,6 +161,22 @@ describe.each([
     await side.stop();
   });
 
+  test('a file with an edit held answers `held` to fileState, the tighter version still in effect, with the sentences the write named', async () => {
+    const side = await make();
+    await side.config.write(capDef, undefined, { patch: { limit: 3 } });
+    expect(side.config.fileState(capDef)).toEqual({ state: 'valid', inEffect: true, sentences: [] });
+
+    const held = (await side.config.write(capDef, undefined, { patch: { limit: 50 } })) as {
+      kind: string;
+      sentences: readonly string[];
+    };
+
+    expect(held.kind).toBe('held');
+    expect(held.sentences.length).toBeGreaterThan(0);
+    expect(side.config.fileState(capDef)).toEqual({ state: 'held', inEffect: true, sentences: held.sentences });
+    await side.stop();
+  });
+
   test('the absent etag is accepted as ifMatch for a file that is not there yet', async () => {
     const side = await make();
     const written = await side.config.write(itemsDef, 'beta', { patch: { budget: 1 } }, { ifMatch: 'absent' });
@@ -224,6 +240,61 @@ describe('ConfigPort.etag — the real config service only', () => {
     expect(again).toBe(first);
     expect(moved).not.toBe(first);
     expect(moved).toBe(new Bun.CryptoHasher('sha256').update('limit: 9\n').digest('hex'));
+  });
+
+  /** The service on a disk that says which files were read, and the world's two items already there. */
+  async function spied() {
+    const fs = createMemoryHostFs();
+    const reads: string[] = [];
+    const watched = new Proxy(fs, {
+      get(target, key) {
+        const value = (target as never)[key] as unknown;
+        if (key === 'readTail')
+          return async (path: string, max: number) => {
+            reads.push(path);
+            return await target.readTail(path, max);
+          };
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    fs.seed(`${HOME}/config/items/alpha.yaml`, 'budget: 1\n');
+    fs.seed(`${HOME}/config/items/beta.yaml`, 'budget: 2\n');
+    const files = createConfigFiles({
+      home: HOME,
+      fs: watched,
+      clock: manualClock(),
+      log: captureLog(),
+      binary: 'fy',
+      defs: [
+        { plugin: 'runtimes', def: limitsDef },
+        { plugin: 'runtimes', def: itemsDef },
+      ],
+    });
+    await files.reload();
+    return { config: files.port('runtimes'), fs, reads };
+  }
+
+  test('it reads the one file asked about and no other: the etag a load settled is answered without a reload of every file', async () => {
+    const side = await spied();
+    await side.config.write(limitsDef, undefined, { patch: { limit: 3 } });
+    await side.config.etag(limitsDef);
+    side.reads.length = 0;
+
+    await side.config.etag(limitsDef);
+
+    expect(side.reads).toEqual([`${HOME}/config/limits.yaml`]);
+  });
+
+  test('a file edited to the text ANOTHER file holds is read afresh: a write pinned to its etag lands, never a spurious conflict', async () => {
+    const side = await spied();
+    // beta goes behind the service's back to exactly the text alpha settled with, so alpha's etag is beta's new one.
+    side.fs.seed(`${HOME}/config/items/beta.yaml`, 'budget: 1\n');
+
+    const etag = await side.config.etag(itemsDef, 'beta');
+    const landed = await side.config.write(itemsDef, 'beta', { patch: { budget: 7 } }, { ifMatch: etag });
+
+    expect(etag).toBe(new Bun.CryptoHasher('sha256').update('budget: 1\n').digest('hex'));
+    expect(landed.kind).toBe('written');
   });
 
   test('it hands back the etag and nothing of the file: no text, value or planted secret', async () => {

@@ -2772,10 +2772,14 @@ scoped handle:
   file indexed, only when its slice comes round — at 512 folders a look and 250 ms a look, 5,000 sessions are all looked
   at in 2.5 s and 20,000 in 10 s, 65,000 in 32 s, and under steady churn up to about twice that — so an alias of the NEW
   folder made after the replace (a privileged bind mount, or a path-following alias) reads what it holds for that long;
-  an alias made BEFORE the replace follows the old inode, which is the class of (6). What is closed: an alias of any
-  member folder the index holds (one that holds the file, one that rests empty, one whose session ended and was
-  resumed), made at any time before or after the rotation or the resume, is fenced at once, because the folder's own pin
-  does not wait for its slice; (9) a tree is closed on the devices its INDEXED places answer with (a pinned member folder's own device included; plus the first member past its budget
+  an alias made BEFORE the replace follows the old inode, which is the class of (6). Two more shapes reach the same
+  window and are part of this GAP: a privileged bind mount OVER a resting member folder placed BEFORE the credential is
+  written (the mount is made, then a resume writes into its source, which a root reads at the member's own name), and
+  the whole `sessions` folder swapped for another (a restore): every member is then a new folder at once, each pinned
+  when its slice comes round. Each needs privilege or a same-user act, and a privileged actor can read the file anyway.
+  What is closed: an alias of any member folder the index holds (one that holds the file, one that rests empty, one
+  whose session ended and was resumed), made at any time before or after the rotation or the resume, is fenced at once,
+  because the folder's own pin does not wait for its slice; (9) a tree is closed on the devices its INDEXED places answer with (a pinned member folder's own device included; plus the first member past its budget
   that a `*` collection looks at), so an alias of an UNINDEXED member that sits on a device no indexed place of that tree
   answers with is allowed: an overlay's lower layer against its upper one (members written at run time sit on the
   upper, a baked one on the lower), a member folder past the budget that is a mountpoint or a btrfs subvolume, or a

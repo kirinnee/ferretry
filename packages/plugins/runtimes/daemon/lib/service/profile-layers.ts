@@ -228,7 +228,12 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
     );
   };
 
-  /** Every profile naming the layer loses it in ONE set: all of them, or (a conflict, a refusal) none. */
+  /**
+   * Every profile naming the layer loses it in ONE set: all of them, or (a conflict, a refusal) none. The profiles are
+   * the ones the service knows when the list is read: a profile file made on the disk behind the service, and not yet
+   * reloaded, is not in it and keeps the layer. Nothing is written to it, so nothing is lost; once the service has
+   * reloaded it (its watcher, or a reload that anything causes), asking again removes the layer from it too.
+   */
   const removeEverywhere = async (layer: ProfileLayerName): Promise<ProfileLayerOutcome> => {
     // For EVERY profile the etag comes first and the value after it (the same rule as `add`): which profiles name the
     // layer, and what each is rewritten to, is decided from a value at least as new as the etag it is pinned to, so an
