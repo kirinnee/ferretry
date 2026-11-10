@@ -4,7 +4,7 @@
  * check proves it. Every value here is FAKE; nothing real is read, and no program but the stubs below is run.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { credentialCheck, credentialNames, readDaemonEnviron, type Inspected } from '../../preview/credential-check.ts';
@@ -198,7 +198,7 @@ describe('NHC-1 the daemon environment holds no host credential', () => {
 });
 
 describe('NHC-2 stop removes the stand-ins', () => {
-  test('NHC-2a a stopped daemon, and a daemon that was not running, both remove the folder', async () => {
+  test('NHC-2a a stopped daemon, and a daemon that was not running, both remove the stand-ins and never the folder or the shim', async () => {
     const removed: string[] = [];
     let held = [4];
     const ports = {
@@ -211,7 +211,8 @@ describe('NHC-2 stop removes the stand-ins', () => {
     };
     expect((await stopPreview('/h/p', ports)).stopped).toBe(true);
     expect((await stopPreview('/h/p', ports)).stopped).toBe(true);
-    expect(removed).toEqual(['/h/p/no-host-creds', '/h/p/no-host-creds']);
+    const standIns = ['/h/p/no-host-creds/home', '/h/p/no-host-creds/gh', '/h/p/no-host-creds/gitconfig'];
+    expect(removed).toEqual([...standIns, ...standIns]);
     // A holder that stays is not "stopped": nothing is removed from under it.
     removed.length = 0;
     const stuck = await stopPreview('/h/p', { ...ports, holders: async () => [9], attempts: 1 });
@@ -448,10 +449,68 @@ describe('NHC-5 ssh through a child of the daemon reads no user config and no ke
     const shim = join(folder, 'ssh');
     expect((await stat(shim)).mode & 0o777).toBe(0o700);
     expect(await readFile(shim, 'utf8')).toContain(`exec "${join(stubs, 'ssh')}" -F /dev/null`);
-    // Fresh for every daemon start: what was left in the folder is gone, and a pre-existing name is not reused.
+    // Replaced (not deleted) by every daemon start: a crashed start's temp file is cleared, nothing else is touched.
     await writeFile(join(folder, 'left-behind'), 'x');
+    await writeFile(join(folder, '.ssh.new.999'), 'x');
     spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
-    expect(await readdir(folder)).toEqual(['ssh']);
+    expect((await readdir(folder)).sort()).toEqual(['left-behind', 'ssh']);
+  });
+
+  test('NHC-5g a folder that is not ours-0700, or a symlink, is refused rather than deleted or followed', async () => {
+    const { home, hostile } = await previewHome();
+    const base = join(home, PREVIEW.noCredsFolder);
+    await mkdir(base, { mode: 0o755 });
+    await chmod(base, 0o755);
+    const open = spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
+    expect(open.exitCode).toBe(1);
+    expect(open.stderr.toString()).toContain('not a private (0700) folder');
+    expect(await stat(base)).toBeDefined();
+    await rm(base, { recursive: true });
+    await mkdir(join(root, 'elsewhere'), { mode: 0o700 });
+    await symlink(join(root, 'elsewhere'), base);
+    expect(spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile).exitCode).toBe(1);
+    expect((await lstat(base)).isSymbolicLink()).toBe(true);
+    await rm(base);
+    await mkdir(base, { mode: 0o700 });
+    await mkdir(join(base, 'bin'), { mode: 0o755 });
+    await chmod(join(base, 'bin'), 0o755);
+    expect(spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile).exitCode).toBe(1);
+  });
+
+  test('NHC-5h NEW-2 a live pane resolves ssh to the shim before stop, after stop and all through a restart', async () => {
+    const { home, hostile } = await previewHome();
+    const path = startAndPath(home, hostile);
+    const shim = join(home, PREVIEW.noCredsFolder, 'bin', 'ssh');
+    // The pane: a child whose environment is the kernel's rule for a tmux server (PATH and HOME only).
+    const pane = kernelChild('tmux', { PATH: path, HOME: join(home, PREVIEW.noCredsFolder, 'home') });
+    const resolves = () => Bun.spawnSync(['/bin/sh', '-c', 'command -v ssh'], { env: pane }).stdout.toString().trim();
+    expect(resolves()).toBe(shim);
+    // Stop (the real function, the real removal): the daemon is not running, so the stand-ins go. The shim stays.
+    const done = await stopPreview(home, {
+      holders: async () => [],
+      kill: () => {},
+      sleep: async () => {},
+      remove: path => rm(path, { recursive: true, force: true }),
+    });
+    expect(done.stopped).toBe(true);
+    expect(await stat(join(home, PREVIEW.noCredsFolder, 'home')).catch(() => undefined)).toBeUndefined();
+    expect(resolves()).toBe(shim);
+    // A restart replaces the shim by rename: at no instant is it missing, and no half-written file is ever its name.
+    for (let round = 0; round < 3; round++) {
+      const child = Bun.spawn([join(home, 'bin/fy5'), 'daemon', 'start'], { env: hostile, stdout: 'ignore' });
+      let seen = 0;
+      let exited = false;
+      void child.exited.then(() => (exited = true));
+      while (!exited) {
+        const text = await readFile(shim, 'utf8');
+        expect(text).toContain('exec "');
+        expect(text.endsWith('"$@"\n')).toBe(true);
+        seen++;
+      }
+      await child.exited;
+      expect(seen).toBeGreaterThan(0);
+      expect(resolves()).toBe(shim);
+    }
   });
 
   test('NHC-5c the check says an ssh through a child environment shows no identity and no user config', async () => {
@@ -460,7 +519,8 @@ describe('NHC-5 ssh through a child of the daemon reads no user config and no ke
     const done = await credentialCheck({ ...realWorld(home), callerEnv: hostile });
     expect(done.problems).toEqual([]);
     expect(done.passed.join('\n')).toContain('reads no user config and offers no key');
-    expect(done.passed.join('\n')).toContain('/usr/bin/ssh by absolute path is not covered');
+    expect(done.passed.join('\n')).toContain('a pane or launch that sets its own PATH');
+    expect(done.passed.join('\n')).toContain('/usr/bin/ssh by absolute path');
   });
 
   test('NHC-5d without the shim the check refuses, naming ssh and the shim', async () => {

@@ -173,7 +173,7 @@ export async function credentialCheck(input: CredentialCheckInput): Promise<Star
       lines.includes(`hostname ${SSH_CHECK_ALIAS}`)
     )
       passed.push(
-        "`ssh` found on the PATH of a child of the preview daemon (the preview's shim) reads no user config and offers no key; a program that calls /usr/bin/ssh by absolute path is not covered",
+        "`ssh` found on the daemon's PATH by a child of the preview daemon (the preview's shim) reads no user config and offers no key; a pane or launch that sets its own PATH, a program that calls /usr/bin/ssh by absolute path and one that names ~/.ssh by absolute path is not covered",
       );
     else
       problems.push(

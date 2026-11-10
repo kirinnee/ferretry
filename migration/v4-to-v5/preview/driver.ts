@@ -458,7 +458,7 @@ export function wrapperText(home: string, v4Home: string): string {
     'fi',
     "# PATH: the preview's own bin first (every bare fy, fyd and fyd-browser-worker is then the preview's), and nothing",
     "# under v4's home or its worktree folder.",
-    '# The `ssh` shim folder (made below, fresh for each daemon start) comes first of all: the daemon gives every child only',
+    '# The `ssh` shim folder (made below, its shim replaced by each daemon start) comes first of all: the daemon gives every child only',
     '# PATH and HOME, so a PATH entry is the one way a child finds the shim. The first real `ssh` on the rest of the PATH is',
     '# what the shim runs.',
     `nocreds="${home}/${PREVIEW.noCredsFolder}"`,
@@ -495,17 +495,32 @@ export function wrapperText(home: string, v4Home: string): string {
     "# No host credential: HOME, gh's config folder and git's global config are EMPTY ones under the preview home, git reads",
     '# no system config (no credential helper) and never prompts. A daemon start makes them fresh; `preview.sh stop` removes',
     '# them. The names the allowlist above never passes (GH_TOKEN, SSH_AUTH_SOCK, AWS_*, ...) are simply absent.',
-    'if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then rm -rf "$nocreds"; fi',
+    '# The folder itself is never deleted: it also holds the `ssh` shim, which live ferret panes (their tmux server outlives the',
+    '# daemon) keep finding first on their PATH. It is made 0700 when missing and CHECKED when present (ours, 0700, no symlink).',
+    'private_dir() {',
+    '  if [ -L "$1" ] || [ ! -d "$1" ] || [ ! -O "$1" ] || [ "$(ls -ld "$1" | cut -c1-10)" != "drwx------" ]; then',
+    '    echo "fy5: refusing to go on: $1 is not a private (0700) folder of mine; move it aside and start again" >&2; exit 1',
+    '  fi',
+    '}',
+    '(umask 077; mkdir -p "$nocreds")',
+    'private_dir "$nocreds"',
+    `if [ "$daemon" = 1 ] && [ "$probe" = 0 ]; then rm -rf "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}" "$nocreds/${NO_CREDS_ENV.gitConfig}"; fi`,
     `(umask 077; mkdir -p "$nocreds/${NO_CREDS_ENV.home}" "$nocreds/${NO_CREDS_ENV.gh}"; : >"$nocreds/${NO_CREDS_ENV.gitConfig}")`,
     "# The `ssh` shim: the first `ssh` on a child's PATH. It runs the real one (found above, by absolute path) with no config",
     '# file, no key, no agent and no prompt, and its own empty known_hosts. A caller that names /usr/bin/ssh is not covered.',
-    '# Only a daemon START writes it (a probe or another verb never does), so the start check sees what the daemon has.',
+    '# Only a daemon START writes it (a probe or another verb never does), so the start check sees what the daemon has. It is',
+    '# written to a temp name in the same 0700 folder and renamed over bin/ssh, so a live pane never sees it missing or half written.',
     '# A path with a quote, $, backtick or backslash is not written into the shim: no shim means the start check refuses.',
     'case "$real_ssh" in',
     String.raw`*"'"*|*'"'*|*'$'*|*'${'`'}'*|*'\'*) real_ssh="" ;;`,
     'esac',
     'if [ "$daemon" = 1 ] && [ "$probe" = 0 ] && [ -n "$real_ssh" ]; then',
-    String.raw`  (umask 077; mkdir -p "$nocreds/bin"; printf '%s\n' '#!/bin/sh' "exec \"$real_ssh\" ${SSH_SHIM_OPTIONS} -o UserKnownHostsFile=\"$nocreds/known_hosts\" \"\$@\"" >"$nocreds/bin/ssh"; chmod 700 "$nocreds/bin/ssh")`,
+    String.raw`  (umask 077; mkdir -p "$nocreds/bin")
+  private_dir "$nocreds/bin"
+  rm -f "$nocreds/bin/.ssh.new."*
+  tmp="$nocreds/bin/.ssh.new.$$"
+  (umask 077; printf '%s\n' '#!/bin/sh' "exec \"$real_ssh\" ${SSH_SHIM_OPTIONS} -o UserKnownHostsFile=\"$nocreds/known_hosts\" \"\$@\"" >"$tmp"; chmod 700 "$tmp")
+  mv -f "$tmp" "$nocreds/bin/ssh"`,
     'fi',
     `exec env -i ${Object.entries(noCredsValues(home))
       .map(([name, value]) => `${name}="${value}"`)
