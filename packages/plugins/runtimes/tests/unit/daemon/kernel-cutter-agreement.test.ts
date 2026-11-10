@@ -79,6 +79,8 @@ const POINTER_CLASS_LINES: readonly (readonly string[])[] = [',', ';', '&'].flat
 /** The cases the kernel's own `secret-words.test.ts` pins, and the lines a person writes. */
 const OWN_LINES: readonly (readonly string[])[] = [
   ...POINTER_CLASS_LINES,
+  // No pointer, so no whole-value cut: a quoted value's own cut ends at its closing quote (`,b=2` after it stays shown).
+  [`--set=API_KEY="${VALUE},more${OTHER_VALUE}",b=2`, '--key', `"${VALUE},more${OTHER_VALUE}",b=2`],
   ['--token', VALUE],
   ['--token', '${secret:GH_TOKEN}'],
   ['--token-file', '~/.config/tool/token'],
