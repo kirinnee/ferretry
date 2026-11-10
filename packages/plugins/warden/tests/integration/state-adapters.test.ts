@@ -6,7 +6,7 @@ import { StateWardenJevCheckLog } from '../../daemon/adapters/jev-checks.ts';
 import { FileWardenArtifacts } from '../../daemon/adapters/artifacts.ts';
 import { StateWardenReportFiles, reportInstantMs } from '../../daemon/adapters/report-files.ts';
 import { WardenReportReader } from '../../daemon/adapters/report-reader.ts';
-import { StateAutoMoveLedger, StateWardenStateStore } from '../../daemon/adapters/state-store.ts';
+import { StateAutoMoveLedger, StateMachineMembers, StateWardenStateStore } from '../../daemon/adapters/state-store.ts';
 import { WARDEN_STATE, effectiveWardenConfig } from '../../contract/index.ts';
 import { applyWardenConfigPatch, type WardenConfigPatch } from '../../daemon/lib/index.ts';
 import { wardenConfig, wardenState } from '../support/kernel.ts';
@@ -53,6 +53,49 @@ describe('the sweep memory and the move ledger', () => {
 
     // Assert
     await writing.then(
+      () => should.fail('', '', 'the write should have been refused'),
+      (error: Error) => should(error.name).equal('WardenStateDamaged'),
+    );
+  });
+});
+
+describe('B187 the members a machine notice listed', () => {
+  it('B187 each notice keeps its own members beside the sweep memory and the move ledger', async () => {
+    // Arrange
+    const state = wardenState();
+    const input = new StateMachineMembers(state, 'warden:input-stuck');
+    const inbox = new StateMachineMembers(state, 'warden:inbox-stuck');
+    const store = new StateWardenStateStore(state);
+    const ledger = new StateAutoMoveLedger(state);
+
+    // Act: every writer in turn, so each must keep what the others wrote.
+    should(await input.read()).eql({});
+    await input.write({ nelly: ['nelly', 'a line', '2026-11-06T09:00:00.000Z'] });
+    await inbox.write({ ryu: ['ryu', 'another line', '2026-11-06T09:05:00.000Z'] });
+    await store.write({ lastSweepAt: '2026-11-06T09:10:00.000Z' } as never);
+    await ledger.write({ moves: [] } as never);
+
+    // Assert
+    should(await input.read()).eql({ nelly: ['nelly', 'a line', '2026-11-06T09:00:00.000Z'] });
+    should(await inbox.read()).eql({ ryu: ['ryu', 'another line', '2026-11-06T09:05:00.000Z'] });
+    const sweep = (await store.read()) as Record<string, unknown>;
+    should(sweep.lastSweepAt).equal('2026-11-06T09:10:00.000Z');
+    should(sweep).not.have.property('machineNotices');
+    should(await ledger.read()).eql({ moves: [] });
+  });
+
+  it('B187 a damaged file is never read as no members, and never written over', async () => {
+    // Arrange
+    const state = wardenState();
+    state.folder.plant(WARDEN_STATE, '{not json');
+    const members = new StateMachineMembers(state, 'warden:input-stuck');
+
+    // Act, Assert
+    await members.read().then(
+      () => should.fail('', '', 'the read should have been refused'),
+      (error: Error) => should(error.name).equal('WardenStateDamaged'),
+    );
+    await members.write({}).then(
       () => should.fail('', '', 'the write should have been refused'),
       (error: Error) => should(error.name).equal('WardenStateDamaged'),
     );

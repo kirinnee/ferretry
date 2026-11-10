@@ -38,6 +38,7 @@ import {
   type ComposerDraftOutcome,
   type ComposerSubmitOutcome,
   dispositionOf,
+  isUnconfirmedTyping,
   type PeerWaitEnder,
   ReviveRefusedForSend,
   type SendChannel,
@@ -1273,8 +1274,7 @@ export class SessionSendService {
     });
     const turn = record.turn;
     // A turn an unconfirmed typing RESERVED (`reserveTurn`) has its number already and has not started yet.
-    const reserved =
-      target.turn === turn && record.fate === 'unaccounted' && record.unaccountedReason === 'landing_unconfirmed';
+    const reserved = target.turn === turn && isUnconfirmedTyping(record);
     if (
       turn !== undefined &&
       (record.path === 'turn-file' || record.path === 'direct') &&

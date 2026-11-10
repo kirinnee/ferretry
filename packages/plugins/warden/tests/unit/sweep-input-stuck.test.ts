@@ -117,6 +117,23 @@ describe('a ferret stuck behind its own unsent message (B144)', () => {
     should(journalTypes(subject).filter(type => type === 'fleet.warden_input_noticed')).have.length(1);
   });
 
+  it('B187 the sweep flags a working ferret whose typed send the tracker saw, presses once and names it', async () => {
+    const stuckInput = new FakeStuckInput();
+    stuckInput.sendsBy = { annabeth: [pointer] };
+    const subject = harness({
+      config: enabled(),
+      fleet: [idle({ turnState: 'working', turnStateAt: iso(NOW - 40 * MINUTE) })],
+      stuckInput,
+      now: () => NOW,
+    });
+
+    const run = await subject.service.run({ force: false });
+
+    should(run.stuckInput?.map(anomaly => [anomaly.kind, anomaly.sessionId])).eql([['input_stuck', 'annabeth']]);
+    should(stuckInput.pressed).eql(['annabeth:send-63']);
+    should(stuckInput.notices.has('annabeth')).be.true();
+  });
+
   it('should notice nothing when the Enter took, and clear the ferret once it has moved on', async () => {
     let now = NOW;
     const stuckInput = new FakeStuckInput();
@@ -126,6 +143,8 @@ describe('a ferret stuck behind its own unsent message (B144)', () => {
 
     await subject.service.run({ force: false });
     fleet = [idle({ turnState: 'working', turnStateAt: iso(NOW + MINUTE) })];
+    // The tracker no longer sees the text in the box; a working ferret is judged by its ledger too (B187 C3).
+    stuckInput.sendsBy = { annabeth: [{ ...pointer, fate: 'delivered', typedNotSent: undefined }] };
     const recovered = harness({ config: enabled(), fleet, stuckInput, now: () => now, state: subject.state() });
     now = NOW + 5 * MINUTE;
     await recovered.service.run({ force: false });
@@ -142,6 +161,7 @@ describe('a ferret stuck behind its own unsent message (B144)', () => {
     const subject = harness({ config: enabled(), fleet: [idle()], stuckInput });
     await subject.service.run({ force: false });
 
+    stuckInput.sendsBy = { annabeth: [{ ...pointer, fate: 'delivered', typedNotSent: undefined }] };
     const moved = harness({
       config: enabled(),
       fleet: [idle({ turnState: 'working' })],
@@ -187,6 +207,7 @@ describe('a ferret stuck behind its own unsent message (B144)', () => {
     await subject.service.run({ force: false });
 
     stuckInput.removeFails = true;
+    stuckInput.sendsBy = { annabeth: [{ ...pointer, fate: 'delivered', typedNotSent: undefined }] };
     const moved = harness({
       config: enabled(),
       fleet: [idle({ turnState: 'working' })],
