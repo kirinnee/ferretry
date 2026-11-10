@@ -336,6 +336,14 @@ export interface PublicFileDecl {
  * the one list its fence reads (no kernel → plugin import): each `private` entry is pinned by IDENTITY, so a bind mount
  * or alias of it is refused under any name, through any root. A state file named like a secret (key, secret, token,
  * passkey, credential, oauth) must be declared one way or the other, or the manifest is refused.
+ *
+ * Each `private` entry is pinned by IDENTITY (device and inode) from the first look of the fence index after boot, and
+ * a file a plugin CREATES (or replaces) later is pinned before that write returns: the state port and the internal
+ * roots' writers ask the index to look again first, so a first write has no window. An entry met through any root
+ * under another name, a bind mount included, is refused `fenced` (fail closed). A look that cannot be made fails
+ * closed too: the write rejects with `private_unpinned` and every root refuses until a look can be made, and the daemon
+ * says once "A private file of <plugin> could not be pinned, so no folder is opened until it can be: <reason>."
+ * There is no second field for this: `private` is the declaration.
  */
 export interface PrivacyDecl {
   /** Paths relative to `state/<id>/`: a file, a folder, or a collection (`credentials/*` pins the folder). */

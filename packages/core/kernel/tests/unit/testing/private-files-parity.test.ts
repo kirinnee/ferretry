@@ -274,3 +274,70 @@ test('PF-loud the real host says so when a private place passes its budget: one 
     await outcome.host.stop();
   }
 }, 30_000);
+
+test('S40 PF-parity a private file created through the state port is pinned before the write returns, on both hosts', async () => {
+  const seen: { holder?: KernelPorts; stranger?: KernelPorts } = {};
+  const both = (privacy: Manifest['privacy']) => [
+    implementDaemon(holder(privacy) as unknown as Manifest, {
+      build: ({ kernel }) => {
+        seen.holder = kernel;
+        return {};
+      },
+    }),
+    implementDaemon(definePlugin({ ...base, id: 'stranger', permissions: { roots: ['agent-homes'] } }), {
+      build: ({ kernel }) => {
+        seen.stranger = kernel;
+        return {};
+      },
+    }),
+  ];
+  // The testing host takes the same write and keeps it: it has no disk to pin, and it does not refuse the create.
+  const fake = await testHost({ plugins: both(SOUND) });
+  await (seen.holder as KernelPorts).state.write(KEY, 'signing-fixture');
+  await fake.stop();
+  const parent = await realpath(await mkdtemp(`${tmpdir()}/private-parity-`));
+  parents.push(parent);
+  const home = `${parent}/home`;
+  const real = realAdapters(home, () => {}, { binary: 'fy' });
+  // Every look at a folder of the state tree is counted: the index lists `state` each time it builds.
+  let lists = 0;
+  const outcome = await bootHost({
+    home,
+    version: '5.0.0',
+    adapters: {
+      ...real,
+      fs: {
+        ...real.fs,
+        list: async path => {
+          if (path === `${home}/state` || path.endsWith('/state')) lists += 1;
+          return await real.fs.list(path);
+        },
+      },
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => {} }),
+    },
+    implementations: both(SOUND),
+  });
+  if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+  try {
+    const agentHome = (seen.stranger as KernelPorts).roots.root('agent-homes', { subfolder: 'F1' });
+    const own = agentHome.resolve('own.txt');
+    if (!own.ok) throw new Error(own.error);
+    await agentHome.writeText(own.value, 'own');
+    await agentHome.readText(own.value);
+    const before = lists;
+    await (seen.holder as KernelPorts).state.write(KEY, 'signing-fixture');
+    // The write itself looked at the state tree again (the host's 250 ms interval had not passed).
+    expect(lists).toBeGreaterThan(before);
+    await link(`${home}/state/holder/signing.key`, `${home}/state/stranger/agent-homes/F1/borrowed.json`);
+    const borrowed = agentHome.resolve('borrowed.json');
+    if (!borrowed.ok) throw new Error(borrowed.error);
+    const refusal = await agentHome.readText(borrowed.value).then(
+      () => 'allowed',
+      (error: unknown) => (error instanceof RootError ? error.refusal : String(error)),
+    );
+    expect(refusal).toBe('fenced');
+  } finally {
+    await outcome.host.stop();
+  }
+});

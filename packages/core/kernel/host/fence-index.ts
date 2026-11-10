@@ -498,6 +498,12 @@ export interface PrivateIndex {
   /** The places now: the kept snapshot when its folders are unchanged, else a fresh one. Throws when the home cannot be looked at. */
   readonly snapshot: () => Promise<PrivateSnapshot>;
   /**
+   * Looks at the folders again NOW, whatever the look interval says, so the next {@link snapshot} holds a place created
+   * a moment ago. The interval is forgotten BEFORE the look: when the look fails this rejects and the next
+   * {@link snapshot} looks again (and throws while it still cannot), never answering from a snapshot older than the create.
+   */
+  readonly renew: () => Promise<void>;
+  /**
    * Tells `watcher` every time what is truncated changes (the same function is told once however often it is added).
    * A place already past its budget is announced to it at once.
    */
@@ -562,6 +568,16 @@ export function privateIndexOf(fs: HostFs, real: string, input: IndexInput, opti
       const run = tail.then(refresh, refresh);
       tail = run.catch(() => undefined);
       return run;
+    },
+    renew: async () => {
+      // Queued behind a look already running, then forced: the look that answers started after the create returned.
+      const forced = async (): Promise<PrivateSnapshot> => {
+        lookedAt = Number.NEGATIVE_INFINITY;
+        return await refresh();
+      };
+      const run = tail.then(forced, forced);
+      tail = run.catch(() => undefined);
+      await run;
     },
     watch: watcher => {
       if (watchers.has(watcher)) return;

@@ -48,6 +48,19 @@ export interface StatePortOptions {
   readonly sqliteFiles?: SqliteFiles;
   /** Told each time a file is found damaged (logging, audit). */
   readonly report?: (event: StateDamageEvent) => void;
+  /**
+   * The fence's pin on the home's private places. Absent: nothing is private here (the kernel's own state, a unit test).
+   * Present: a create of a private place is pinned by identity before the create is reported done (§7.7).
+   */
+  readonly pin?: PrivatePin;
+}
+
+/** What the state port asks of the fence about the private places; paths are `<plugin>/<path>`, below the home's `state`. */
+export interface PrivatePin {
+  /** Whether the path is, holds or is held by a private place (synchronous, no disk). */
+  readonly holds: (relativeToState: string) => boolean;
+  /** Looks at the fence index again; rejects (`private_unpinned`) when the look cannot be made. */
+  readonly created: (relativeToState: string) => Promise<void>;
 }
 
 /** The contract's {@link StatePort} plus what only the host needs. */
@@ -182,6 +195,14 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     healthy(at.label);
   };
 
+  /**
+   * A private place was just made or replaced: the fence index looks again before the caller is told it is done, so the
+   * first write has no window in which the new file (a new inode on every atomic replace) is not yet pinned.
+   */
+  const pinned = async (at: Located): Promise<void> => {
+    await options.pin?.created(`${pluginId}/${at.relative}`);
+  };
+
   const fileMode = (def: StateFileDef): number =>
     def.store === 'secret' ? PRIVATE_FILE_MODE : (def.mode ?? PRIVATE_FILE_MODE);
 
@@ -232,6 +253,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       const at = locateTree(def, name);
       await treeParents(at.path, true);
       await fs.createPrivateDirectory(at.path);
+      await pinned(at);
     },
     async removeEmptyDirectory(def, name) {
       const at = locateTree(def, name);
@@ -268,6 +290,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
             throw new TypeError(`state ${def.name}: a ${def.store} file holds bytes`);
           await fs.writeAtomic(at.path, value, fileMode(def));
         }
+        await pinned(at);
       });
     },
 
@@ -290,6 +313,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
         // Declined: the transform answered the very value it was given, so nothing is written.
         if (current.value !== undefined && next === current.value) return ok(next);
         await fs.writeAtomic(at.path, `${encodeDocument(def, next, true)}\n`, fileMode(def));
+        await pinned(at);
         return ok(next);
       });
     },
@@ -301,7 +325,11 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       assertRecordSize(line);
       await serial.run(at.path, async () => {
         await guardWrite(def, at);
+        // An append keeps its file's inode: only the one that makes the file is a new place to pin.
+        const made =
+          options.pin?.holds(`${pluginId}/${at.relative}`) === true && (await fs.info(at.path)) === undefined;
         await fs.appendLine(at.path, line, fileMode(def));
+        if (made) await pinned(at);
       });
     },
 
@@ -360,6 +388,12 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       const at = locate(def, name);
       if (def.store !== 'sqlite' && def.store !== 'sqlite-cache')
         throw new TypeError(`state ${def.name}: not a sqlite file`);
+      // The handle is returned at once, so the file it makes cannot be pinned before the caller has it: a private place
+      // that is a database is refused rather than left in the window (no manifest declares one).
+      if (options.pin?.holds(`${pluginId}/${at.relative}`) === true)
+        throw new TypeError(
+          `state ${def.name}: a database cannot be a private place, as it cannot be pinned before it opens`,
+        );
       try {
         return openSqlite(def, at.path, at.label, sqliteFiles);
       } catch (error) {

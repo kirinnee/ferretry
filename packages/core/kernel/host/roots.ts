@@ -43,6 +43,7 @@ import {
   HARD_LINK_ROOTS,
   hardLinkAllowed,
   hopsThroughFence,
+  pinCreated,
   type PrivateGuard,
   privateGuardOf,
   privatelyHeld,
@@ -1590,6 +1591,18 @@ function rootHandle(setup: HandleSetup): RootHandle {
     }
   };
   const ownerRoot = OWNER_ROOTS.has(name);
+  /**
+   * A file or folder this handle just made or replaced under the home's `state` may be a private place (a ferret's
+   * `sessions/<id>/environment.json`): the index is looked at again before the write returns, so the very first write
+   * has no window in which the new inode is not yet pinned. An owner's root is fenced out of the home and a path outside
+   * `state` touches no place; both cost nothing.
+   */
+  const pinned = async (full: string): Promise<void> => {
+    if (ownerRoot || privateFiles.files.length === 0) return;
+    const state = join(await fs.realpath(home), 'state');
+    if (!within(state, full) || full === state) return;
+    await pinCreated(fs, home, privateFiles.files, relative(state, full), privateFiles.recheckMs, privateFiles.watch);
+  };
   const readOnly = READ_ONLY_ROOTS.has(name);
   const projectRoot = name === 'project-files';
   /**
@@ -1757,6 +1770,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     const { full, scope } = leafOnly ? await realParent(path, true) : await real(path, true);
     await leafWritable(scope, full);
     await writeChecked(scope, full, data, random, privateWrite(options));
+    await pinned(full);
   };
   /**
    * Copies `from` (a folder of `source`) into the NEW folder `to`: each name checked against the source's own fence,
@@ -1858,7 +1872,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
       gate(path, 'file');
       const { full, scope } = await realParent(path, true);
       await leafWritable(scope, full);
-      return await publishChecked(scope, full, bytes, random, privateWrite(options));
+      const published = await publishChecked(scope, full, bytes, random, privateWrite(options));
+      await pinned(full);
+      return published;
     },
     readDurable: async (path, limit, hold) => {
       gate(path, 'file');
@@ -1909,6 +1925,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
       if ((await leafIdentity(target.scope, target.full)) !== undefined) refuse('outside');
       await copyInto(known, from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+      await pinned(target.full);
     },
     copyShared: async (tree, to, options) => {
       // The destination: an internal root the kernel makes, writable. Checked before the tree is even looked at.
@@ -1936,6 +1953,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
       if ((await leafIdentity(target.scope, target.full)) !== undefined) refuse('outside');
       await copyInto(shared.source, shared.from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+      await pinned(target.full);
       return 'copied';
     },
     ensurePrivateDirectory: async path => {
@@ -1974,6 +1992,8 @@ function rootHandle(setup: HandleSetup): RootHandle {
       } finally {
         await made.folder.close();
       }
+      // A folder made here may be a `*` member of a private place (`sessions/<id>`): pinned before the call returns.
+      await pinned(full);
     },
     lstat: async (path): Promise<RootLstat | undefined> => {
       gate(path, 'probe');
@@ -1987,6 +2007,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const { full, scope } = await real(path, true);
       const made = await openFolderMaking(scope, full, privateFolder ? 0o700 : (options?.mode ?? 0o700), true);
       await made.folder.close();
+      await pinned(full);
     },
     realPath: async path => {
       // `real` resolved every existing component inside the root; the whole must exist (a broken link throws), and a
@@ -2076,6 +2097,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
           refuse('link_escape');
       }
       await renameChecked(source, target);
+      await pinned(target.full);
     },
     unlink: async (linkName: FencedPath) => {
       writable();

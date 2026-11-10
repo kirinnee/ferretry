@@ -1,5 +1,6 @@
 import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { BEFORE_SUFFIX, insideFence, internalRootFolder } from '../contract/home.ts';
+import { ApiError } from '../contract/http.ts';
 import type { FileIdentity, HostFs } from './adapters/node-fs.ts';
 import {
   identityKey,
@@ -132,6 +133,56 @@ function indexOf(
   // Whoever asks may watch: the host hands every root the one watcher, so a truncation is told once, to it.
   if (watcher !== undefined) index.watch(watcher);
   return index;
+}
+
+/**
+ * Whether `path` (segments below `state/`) is, holds, or is held by one of the composed private places: the same `*`
+ * grammar the index reads (one whole segment). The segments are compared as far as both go, so the place itself, a
+ * file inside a private folder, the folder a `*` member lives in and the plugin's own folder above a place all match.
+ */
+export function touchesPrivate(privateFiles: readonly string[], relativeToState: string): boolean {
+  const path = ['state', ...relativeToState.split('/').filter(segment => segment !== '')];
+  return privateFiles.some(place => {
+    const segments = place.split('/');
+    for (let at = 0; at < Math.min(segments.length, path.length); at += 1) {
+      const wanted = segments[at];
+      if (wanted !== '*' && wanted !== path[at]) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * A private place was just CREATED (or replaced) at `relativeToState` (`<plugin>/<path>` below the home's `state`): looks
+ * at the index again before the create is reported done, so a first write has no window in which the new file is not
+ * yet pinned by identity and a root would let an alias of it through. A path no place touches costs nothing. The index
+ * is the very one every root of the host reads (same disk, home, list and look interval), so the next root call
+ * holds the file. A look that fails rejects `ApiError(503, …, 'private_unpinned')`: the file is on disk, but no root
+ * opens anything until a look succeeds, because every later answer looks again and throws too.
+ */
+export async function pinCreated(
+  fs: HostFs,
+  home: string,
+  privateFiles: readonly string[],
+  relativeToState: string,
+  recheckMs = 0,
+  watcher?: TruncationWatcher,
+): Promise<void> {
+  if (!touchesPrivate(privateFiles, relativeToState)) return;
+  const plugin = relativeToState.split('/')[0] ?? '';
+  try {
+    const real = await fs.realpath(absolute(home, 'the home'));
+    await indexOf(fs, real, privateFiles, recheckMs, watcher).renew();
+  } catch (error) {
+    throw new ApiError(503, unpinnedSentence(plugin, error), 'private_unpinned');
+  }
+}
+
+/** The sentence for a look that could not be made: the errno code at most, never the message (it carries a path). */
+export function unpinnedSentence(plugin: string, error: unknown): string {
+  const code = (error as { readonly code?: unknown } | null)?.code;
+  const reason = typeof code === 'string' && /^E[A-Z0-9]{1,15}$/u.test(code) ? code : 'the disk could not be read';
+  return `A private file of ${plugin} could not be pinned, so no folder is opened until it can be: ${reason}.`;
 }
 
 /** What a snapshot's places are as lookups, made once per snapshot: every owner's fence and every guard reads them. */
