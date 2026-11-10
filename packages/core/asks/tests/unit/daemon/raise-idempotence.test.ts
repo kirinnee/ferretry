@@ -43,7 +43,7 @@ it('names the home a redirected raise landed on, now and on every repeat', async
   const redirected = {
     list: (id: string) => inner.list(id),
     raise: (_ferret: string, request: Parameters<typeof inner.raise>[1], actor: Parameters<typeof inner.raise>[2]) =>
-      inner.raise('home-h', request, actor),
+      inner.raise('ferret-own', request, actor),
     resolve: inner.resolve.bind(inner),
     dismiss: inner.dismiss.bind(inner),
     snooze: inner.snooze.bind(inner),
@@ -53,7 +53,7 @@ it('names the home a redirected raise landed on, now and on every repeat', async
   };
   const api = asksPort(redirected, boards, () => 'unavailable');
   const first = await api.raise(draft);
-  expect(first.ferret).toBe('home-h');
+  expect(first.ferret).toBe('ferret-own');
   expect(await api.raise(draft)).toEqual(first);
 });
 

@@ -133,7 +133,7 @@ export class FileAgendaChangeOutbox {
           this.runtime.warn(
             `Agenda change ${sessionId}/${effect.id}: ${retry.error}; attempt ${attempts}/${AGENDA_CHANGE_MAX_ATTEMPTS}; ` +
               (attempts === AGENDA_CHANGE_MAX_ATTEMPTS
-                ? `parked in ${AGENDA_CHANGE_OUTBOX}; repair delivery and remove its retry field to retry`
+                ? `parked in ${AGENDA_CHANGE_OUTBOX}; repair delivery and remove its retry field to rearm it (it is tried again at the next read or change of this agenda, or after a restart)`
                 : `kept in ${AGENDA_CHANGE_OUTBOX}; retry on a drain after ${retry.nextAttemptAt}`),
           );
           continue;
