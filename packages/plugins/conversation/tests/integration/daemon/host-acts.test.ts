@@ -15,6 +15,7 @@ import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
 import { fixtureTexts } from '../../support/fixtures.ts';
 import { memoryStatePort } from '../../support/state.ts';
+import { wardenStandIn } from '../../support/warden-plugin.ts';
 
 /**
  * The acts the send path's host answers beside a send — the queue, the draft, the question, the sitrep and the refusals
@@ -75,11 +76,13 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
     },
   } as typeof daemon;
   const host = await testHost({
-    plugins: [implementation],
+    plugins: [implementation, wardenStandIn],
     fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-08T09:00:00Z'),
   });
   const api = () => host.provided(ConversationPort);
+  /** The port as Ferretry's Warden holds it: the only consumer that may speak as the Warden or press a pane. */
+  const warden = () => host.provided(ConversationPort, 'warden');
   const waiting = async (id: string, state: 'queued' | 'typing' = 'queued') =>
     await new StateQueueStore(inner).append(parseSessionId('f1'), {
       v: 1,
@@ -97,7 +100,7 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
         revision: 1,
       },
     });
-  return { host, ferrets, api, state: inner, broken, built, waiting };
+  return { host, ferrets, api, warden, state: inner, broken, built, waiting };
 }
 
 const route = (
@@ -217,7 +220,7 @@ describe('what needs the ferret’s terminal and has none says so', () => {
   });
 
   test('the Warden’s re-submit for a send whose pane cannot be read is refused in the seam’s words, not thrown', async () => {
-    const { host, api, state } = await world();
+    const { host, warden, state } = await world();
     await new StateSendLedger(state, { now: () => AT }).accept(parseSessionId('f1'), {
       sendId: 's-stuck',
       acceptedAt: AT,
@@ -231,16 +234,16 @@ describe('what needs the ferret’s terminal and has none says so', () => {
       senderKind: 'human',
     });
 
-    const refused = await api().resubmitStuck?.(F1, { kind: 'warden' }, 's-stuck');
+    const refused = await warden().resubmitStuck?.(F1, { kind: 'warden' }, 's-stuck');
 
     expect(refused).toMatchObject({ ok: false, error: { code: 'plugin_unavailable' } });
     await host.stop();
   });
 
   test('the Warden’s re-submit for a send nobody made answers refused, and no other caller may press it', async () => {
-    const { host, api } = await world();
+    const { host, api, warden } = await world();
 
-    expect(await api().resubmitStuck?.(F1, { kind: 'warden' }, 's-none')).toEqual({ ok: true, value: 'refused' });
+    expect(await warden().resubmitStuck?.(F1, { kind: 'warden' }, 's-none')).toEqual({ ok: true, value: 'refused' });
     expect(await api().resubmitStuck?.(F1, { kind: 'owner' }, 's-none')).toMatchObject({
       ok: false,
       error: { code: 'forbidden' },
@@ -249,11 +252,11 @@ describe('what needs the ferret’s terminal and has none says so', () => {
   });
 
   test('cancelling a send nobody made is refused, and Enter and the composer say the same', async () => {
-    const { host, api } = await world();
+    const { host, warden } = await world();
 
-    expect(await api().cancelSend(F1, 's-none')).toMatchObject({ ok: false });
-    expect(await api().enterSend(F1, 's-none')).toMatchObject({ ok: false });
-    expect(await api().composer(F1, 'clear' as never, undefined as never)).toMatchObject({ ok: false });
+    expect(await warden().cancelSend(F1, 's-none')).toMatchObject({ ok: false });
+    expect(await warden().enterSend(F1, 's-none')).toMatchObject({ ok: false });
+    expect(await warden().composer(F1, 'clear' as never, undefined as never)).toMatchObject({ ok: false });
     await host.stop();
   });
 });

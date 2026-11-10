@@ -41,9 +41,13 @@ import {
   SessionLifecycleService,
 } from '../lib/session/lifecycle/index.ts';
 import { SessionProvenanceRecorder, type SessionAncestry } from '../lib/session/provenance/recorder.ts';
+import { resolveWardenLineage } from '../lib/session/provenance/lineage.ts';
 import { SessionProvenanceStamper } from '../lib/session/provenance/stamper.ts';
 import type { SessionSpawnRequest } from '../lib/session/provenance/types.ts';
 import { SessionConfigSchema } from '../lib/protocol/session.ts';
+
+/** The id a lineage question about a ferret that does not exist yet carries; it names no real session. */
+const UNSTARTED_FERRET = '(not started)';
 
 /**
  * A lifecycle launcher that opens nothing: every member answers the spine's 503 when CALLED, so a launch through a
@@ -155,6 +159,10 @@ export class SessionFiles {
       prepare: async ferret => await this.prepare(ferret),
       stamp: async request => await this.stampAtStart(request),
       carry: async ferret => await this.carryOnResume(ferret),
+      // The same source (the ancestor snapshot of the session documents) and the same rule (`resolveWardenLineage`)
+      // the start's stamp uses. A snapshot that throws is not caught: the port refuses on a rejection.
+      inWardenLineage: async parent =>
+        resolveWardenLineage({ id: UNSTARTED_FERRET, parent }, await this.ancestry.snapshot()).wardenLineage,
       readable: async ferret => {
         const own = this.root(parseSessionId(ferret));
         return FERRET_READABLE_FOLDERS.map(folder => {

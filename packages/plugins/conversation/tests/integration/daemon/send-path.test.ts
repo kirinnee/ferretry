@@ -23,6 +23,7 @@ import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
 import { queuedPayloadInstruction, turnInstruction } from '../../../daemon/delivery/lib/index.ts';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
 import { memoryStatePort } from '../../support/state.ts';
+import { wardenStandIn } from '../../support/warden-plugin.ts';
 
 /**
  * The #45 send path through the real daemon half: the turn document a send goes by (BG-051), the send tracker that
@@ -193,13 +194,15 @@ async function conversation(
     },
   } as typeof daemon;
   const host = await testHost({
-    plugins: [implementation],
+    plugins: [implementation, wardenStandIn],
     fakes: { ferrets, asks: new FakeAsks() },
     clock,
     secrets,
   });
   await settle();
   const api = () => host.provided(ConversationPort);
+  /** The port as Ferretry's Warden holds it: the only consumer that may speak as the Warden or press a pane. */
+  const warden = () => host.provided(ConversationPort, 'warden');
   const row = async (sendId: string) => (await api().sends(F1)).sends.find(entry => entry.sendId === sendId);
   /**
    * The row as the ledger holds it, read WITHOUT asking the tracker for a look (a read through the API does ask for one).
@@ -216,7 +219,7 @@ async function conversation(
       await settle();
     }
   };
-  return { host, ferrets, api, state, clock, built, row, stored, advance };
+  return { host, ferrets, api, warden, state, clock, built, row, stored, advance };
 }
 
 const long = (length: number): string => 'x'.repeat(length);
@@ -839,13 +842,13 @@ describe('M2 the --wait long-poll holds a bounded number of waiters', () => {
 
 describe('M1 the Enter that starts a turn clears the markers, through Ferrets', () => {
   test('M1 Enter on a send that went by file answers ok, presses the key for its pointer and clears the markers again', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, ferrets, api, warden } = await conversation();
     await api().send(F1, { kind: 'owner' }, { message: long(600), sendId: 's-enter' });
     const pointer = turnInstruction(ferrets.turnFileOf(2));
     ferrets.draft = pointer;
     const before = ferrets.markersCleared;
 
-    const entered = await api().enterSend(F1, 's-enter');
+    const entered = await warden().enterSend(F1, 's-enter');
 
     expect(entered).toMatchObject({ ok: true, value: { sendId: 's-enter' } });
     expect(ferrets.submitted).toEqual([pointer]);
@@ -854,12 +857,12 @@ describe('M1 the Enter that starts a turn clears the markers, through Ferrets', 
   });
 
   test('M1 the Warden’s re-submit of the same kind of row answers submitted, and clears the markers', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, ferrets, api, warden } = await conversation();
     await api().send(F1, { kind: 'owner' }, { message: long(600), sendId: 's-stuck' });
     ferrets.draft = turnInstruction(ferrets.turnFileOf(2));
     const before = ferrets.markersCleared;
 
-    const pressed = await api().resubmitStuck?.(F1, { kind: 'warden' }, 's-stuck');
+    const pressed = await warden().resubmitStuck?.(F1, { kind: 'warden' }, 's-stuck');
 
     expect(pressed).toEqual({ ok: true, value: 'submitted' });
     expect(ferrets.markersCleared).toBe(before + 1);
@@ -985,9 +988,9 @@ describe('M3 a send to a stopped ferret revives it and carries the message', () 
   });
 
   test('M3 the Warden’s send to a stopped ferret revives it as the Warden, so its words are never the owner’s', async () => {
-    const { host, ferrets, api } = await conversation(stopped);
+    const { host, ferrets, warden } = await conversation(stopped);
 
-    await api().send(F3, { kind: 'warden' }, { message: 'FIXTURE warden wake', sendId: 's-revive-warden' });
+    await warden().send(F3, { kind: 'warden' }, { message: 'FIXTURE warden wake', sendId: 's-revive-warden' });
 
     expect(ferrets.resumed).toEqual([{ ferret: F3, message: 'FIXTURE warden wake', actor: 'warden' }]);
     await host.stop();
@@ -1125,9 +1128,9 @@ describe('m2 a turn document is written once and says whose it is', () => {
   });
 
   test('m2 the Warden’s document is the Warden’s, a peer’s is the peer’s, and the owner’s carries no author', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, ferrets, api, warden } = await conversation();
 
-    await api().send(F1, { kind: 'warden' }, { message: long(600), sendId: 's-by-warden' });
+    await warden().send(F1, { kind: 'warden' }, { message: long(600), sendId: 's-by-warden' });
     await api().send(F1, { kind: 'ferret', ferret: F2 }, { message: long(600), sendId: 's-by-peer' });
     await api().send(F1, { kind: 'owner' }, { message: long(600), sendId: 's-by-owner' });
 
