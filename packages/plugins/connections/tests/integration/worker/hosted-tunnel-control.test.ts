@@ -34,6 +34,7 @@ import {
 import { FAKE_CONNECTOR_TOKEN_PREFIX, FakeCloudflare } from '../../support/worker/fake-cloudflare.ts';
 import { FakeHostedTunnelControlStorage } from '../../support/worker/hosted-control-fakes.ts';
 import { newDaemonIdentity, relayCrypto } from '../../support/worker/identities.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const HOST = 'relay.example.test';
 const OPERATOR = 'operator-bearer-secret';
@@ -543,8 +544,3 @@ describe('the durable tunnel store', () => {
     should(heard).eql(['a line']);
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

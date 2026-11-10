@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type HostedRelayControlNamespace } from '../../../worker/src/adapters/hosted-control.ts';
+import type { HostedRelayControlNamespace } from '../../../worker/src/adapters/hosted-control.ts';
 import { relayFetch, type RelayEnvironment } from '../../../worker/src/adapters/worker.ts';
 import relayWorker, { HostedRelayControlDurableObject } from '../../../worker/src/adapters/worker.ts';
 import {
@@ -13,6 +13,7 @@ import {
 } from '../../../worker/src/lib/index.ts';
 import { FakeHostedRelayControlStorage } from '../../support/worker/hosted-control-fakes.ts';
 import { type TestRuntime, testRuntime } from '../../support/worker/workers-fakes.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const stranger = `fy_daemon_${'b'.repeat(43)}`;
@@ -466,8 +467,3 @@ describe('hosted relay reservations whose answer is lost', () => {
     });
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}
