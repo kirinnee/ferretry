@@ -57,4 +57,28 @@ describe('choosing a connection from what was tried', () => {
     expect(choice.reason).toContain('was not tried (no dialer in this build)');
     expect(choice.passedOver).toHaveLength(2);
   });
+
+  it('R632 an empty walk is a stated failure, never a silent success or a guessed carrier', () => {
+    const choice = chooseConnection([]);
+    expect(choice.ok).toBe(false);
+    expect(choice.reason).toBe('No connection method is configured for this daemon.');
+    expect(choice.passedOver).toEqual([]);
+  });
+
+  it('R632 the walk takes the first reachable carrier in order and says why each earlier one was passed over', () => {
+    const choice = chooseConnection([
+      { method: direct, reachable: false, detail: 'timed out' },
+      { method: relay, reachable: true },
+    ]);
+    expect(choice).toMatchObject({ ok: true, method: relay });
+    expect(choice.reason).toContain('was not reachable (timed out)');
+    expect(choice.passedOver).toHaveLength(1);
+    // A failed walk reports every carrier, in the order it was walked.
+    const failed = chooseConnection([
+      { method: direct, reachable: false, detail: 'timed out' },
+      { method: relay, reachable: false, detail: 'no answer' },
+    ]);
+    expect(failed.ok).toBe(false);
+    expect(failed.passedOver.map(passed => passed.method.kind)).toEqual(['direct', 'relay']);
+  });
 });
