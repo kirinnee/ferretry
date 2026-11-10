@@ -8,7 +8,7 @@ which open routes are stubs (`stub`: a pending or GAP refusal in the handler; `m
 `ports-pending.json` names the route; a row a review traced by hand is a `stub` too) before spending a batch on them.
 `no-marker` means only that the scan found no marker: it does NOT mean the handler works.
 
-Open route rows: 373. Descriptor proven: 354. Not proven: 19 (loosened 2, unpaired 17). Handler a stub: 31. Maybe a stub: 140.
+Open route rows: 369. Descriptor proven: 350. Not proven: 19 (loosened 2, unpaired 17). Handler a stub: 31. Maybe a stub: 140.
 
 <!-- prettier-ignore -->
 | Row | Route | Descriptor | Handler |
@@ -44,8 +44,8 @@ Open route rows: 373. Descriptor proven: 354. Not proven: 19 (loosened 2, unpair
 | R-0173 | `GET /v1/sessions/:sessionId/sends/:sendId` | descriptor proven | maybe: packages/plugins/conversation/daemon/queue/adapters/send-path-delivery.ts:53; "sends" sits beside a pending/GAP marker (key not a literal) |
 | R-0211 | `GET /v1/worktrees/removal` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/worktrees.ts:131 |
 | R-0226 | `PATCH /v1/sessions/:sessionId/compact-at` | descriptor proven | stub: traced by review: conversation host: compact-at get/set are pending() (503 conversation_terminal_unavailable) |
-| R-0227 | `PATCH /v1/sessions/:sessionId/hypermedia` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:721; "hypermedia" sits beside a pending/GAP marker (key not a literal) |
-| R-0335 | `POST /v1/sessions/:sessionId/answer` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:297; "answer" sits beside a pending/GAP marker (key not a literal) |
+| R-0227 | `PATCH /v1/sessions/:sessionId/hypermedia` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:1103; "hypermedia" sits beside a pending/GAP marker (key not a literal) |
+| R-0335 | `POST /v1/sessions/:sessionId/answer` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:1047; "answer" sits beside a pending/GAP marker (key not a literal) |
 | R-0339 | `POST /v1/sessions/:sessionId/composer` | descriptor proven | stub: traced by review: conversation host: composer is pending() |
 | R-0341 | `POST /v1/sessions/:sessionId/conversion-preview` | descriptor proven | stub: stub at packages/core/ferrets/daemon/index.ts:770: return runner !== 'unavailable' && runner.gone !== undefined && (await runner.go |
 | R-0343 | `POST /v1/sessions/:sessionId/dialog` | descriptor proven | no-marker: packages/plugins/claude-code/daemon/index.ts:123 |
@@ -241,18 +241,18 @@ Open route rows: 373. Descriptor proven: 354. Not proven: 19 (loosened 2, unpair
 | R-0099 | `GET /v1/imports/conversations/:harness/:conversationId/preview` | descriptor proven | stub: traced by review: conversation reading: harnesses is harnessPending (503) |
 | R-0100 | `GET /v1/imports/history` | descriptor proven | maybe: packages/plugins/conversation/daemon/links/routes.ts:62; the file carries pending/GAP markers at 70 |
 | R-0101 | `GET /v1/imports/history/:importId` | descriptor proven | stub: stub at packages/plugins/conversation/daemon/links/routes.ts:70: throw new ApiError(404, 'the conversation is unavailable or could not be read',  |
-| R-0126 | `GET /v1/renders/:id` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:41; the file carries pending/GAP markers at 15, 103 |
+| R-0126 | `GET /v1/renders/:id` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:48; the file carries pending/GAP markers at 22, 110 |
 | R-0127 | `GET /v1/renders/:id/meta` | descriptor proven | no-marker: packages/plugins/conversation/daemon/renders/index.ts:26 |
-| R-0129 | `GET /v1/search` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:32; the file carries pending/GAP markers at 15, 103 |
+| R-0129 | `GET /v1/search` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:39; the file carries pending/GAP markers at 22, 110 |
 | R-0143 | `GET /v1/sessions/:sessionId/attachments/:attachmentId` | descriptor proven | no-marker: packages/plugins/conversation/daemon/attachments/index.ts:37 |
 | R-0163 | `GET /v1/sessions/:sessionId/messages` | descriptor proven | stub: traced by review: conversation reading: transcripts is harnessPending (503) |
 | R-0168 | `GET /v1/sessions/:sessionId/queue` | descriptor proven | maybe: packages/plugins/conversation/daemon/delivery/lib/service.ts:56; "queue" sits beside a pending/GAP marker (key not a literal) |
 | R-0174 | `GET /v1/sessions/:sessionId/shared-draft` | descriptor proven | maybe: packages/plugins/conversation/daemon/drafts/lib/stream.ts:276; "shareddraft" sits beside a pending/GAP marker (key not a literal) |
-| R-0186 | `GET /v1/sessions/:sessionId/transcript-images/:handle` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:31; the file carries pending/GAP markers at 15, 103 |
+| R-0186 | `GET /v1/sessions/:sessionId/transcript-images/:handle` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:38; the file carries pending/GAP markers at 22, 110 |
 | R-0230 | `PATCH /v1/sessions/:sessionId/queue/:messageId` | descriptor proven | maybe: packages/plugins/conversation/daemon/delivery/lib/service.ts:56; "queue" sits beside a pending/GAP marker (key not a literal) |
 | R-0298 | `POST /v1/imports/conversations/adopt` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0322 | `POST /v1/renders` | descriptor proven | no-marker: packages/plugins/conversation/daemon/renders/index.ts:25 |
-| R-0324 | `POST /v1/search/related` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:33; the file carries pending/GAP markers at 15, 103 |
+| R-0324 | `POST /v1/search/related` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:40; the file carries pending/GAP markers at 22, 110 |
 | R-0336 | `POST /v1/sessions/:sessionId/attachments` | descriptor proven | no-marker: packages/plugins/conversation/daemon/attachments/index.ts:36 |
 | R-0370 | `POST /v1/sessions/:sessionId/shared-draft` | descriptor proven | maybe: packages/plugins/conversation/daemon/drafts/lib/stream.ts:276; "shareddraft" sits beside a pending/GAP marker (key not a literal) |
 | R-0427 | `WS GET /v1/sessions/:sessionId/shared-draft/stream` | descriptor proven | maybe: packages/plugins/conversation/daemon/drafts/lib/stream.ts:43; "stream" sits beside a pending/GAP marker (key not a literal) |
@@ -378,10 +378,6 @@ Open route rows: 373. Descriptor proven: 354. Not proven: 19 (loosened 2, unpair
 | R-0416 | `PUT /v1/catalog-items/:itemId/current` | descriptor proven | maybe: packages/plugins/catalogs/daemon/lib/catalog-links/service.ts:889; "current" sits beside a pending/GAP marker (key not a literal) |
 | R-0417 | `PUT /v1/catalog-links/:linkId/version` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
 | R-0306 | `POST /v1/mcp/check` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:95 |
-| R-0175 | `GET /v1/sessions/:sessionId/skills` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:21 |
-| R-0176 | `GET /v1/sessions/:sessionId/skills/inventory` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:22 |
-| R-0197 | `GET /v1/skills` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:23 |
-| R-0198 | `GET /v1/skills/file` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:24 |
 | R-0092 | `GET /v1/fleet/setup/scan` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-setup.ts:66 |
 | R-0093 | `GET /v1/gc` | descriptor proven | maybe: packages/plugins/tidy/daemon/lib/routes.ts:66; the file carries pending/GAP markers at 82 |
 | R-0296 | `POST /v1/gc` | descriptor proven | maybe: packages/plugins/tidy/daemon/lib/routes.ts:68; the file carries pending/GAP markers at 82 |
