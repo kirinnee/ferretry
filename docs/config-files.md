@@ -195,6 +195,39 @@ anywhere, or a high-entropy value under a key ending `KEY`, `TOKEN`, `SECRET`, `
 line by line as well as by value, so a key left in a YAML comment or a tag is refused the same way, its issue
 naming only the line. Before 5.0 a comment was not scanned and such a file was accepted.
 
+## What a read shows
+
+`GET /v1/config/file` and the agent's `config_read` ask one function, so every caller is shown the same text: a
+ferret's token, a `--limited` device, the owner's paired device and the host admin alike. Who may read a file is the
+grant's answer; what a read shows has no "raw" class. The owner at the machine reads the raw file in their editor.
+
+- **A value that looks like a credential is replaced by `‹hidden›`.** A launch flag or an MCP argument holding a
+  token, a value after a secret-named flag or key (`--token v`, `API_KEY=v`, `Authorization: Bearer v`), a URL's
+  password and a URL's secret-named query parameter are cut, value only: the flag, the key, the URL's user and host
+  and every `${secret:NAME}` pointer stay. The rule is the one the Runtimes screens follow for a component's flags
+  ([secrets.md](secrets.md#secret-shaped-values-in-a-files-text)).
+- **Comments, key order and layout stay.** Only the changed scalars are rewritten. The YAML library's round trip
+  normalises the spacing of a flow list and the spacing before a trailing comment. A text with nothing to hide is
+  returned byte for byte.
+- **The etag is the sha256 of the text on disk**, not of what is shown, so a read of a masked file still names the
+  file a write must match (`If-Match`).
+- **A masked text saved back is refused.** A write that holds more `‹hidden›` than the file on disk, or a value that
+  holds one where the disk value at the same place does not, is refused as a `schema` issue at its line ("a value hidden
+  from the device or agent that read this file is still ‹hidden› here; nothing was written"), so the mask is never
+  written over a real value. The fix is to type the real value at the machine or replace the mark with
+  `${secret:NAME}`. A patch of another key of such a file is still applied.
+- **Some texts are withheld whole.** The answer is one comment line (a save of it is refused, so it never wipes the
+  file) and the issues say why. The reasons: `raw_secret` (it holds a raw secret, which is also refused on write),
+  `too_large` (over the cap), `unmaskable` (a value in it could not be hidden safely, including a mask that may have
+  missed one) and `unparsed` (the file does not parse as YAML, so the values to hide cannot be told, but only when the
+  raw text holds a word the cutter would cut or a credential after a secret-named key; any other unparsed text is shown
+  as it is).
+
+What this does not do: values shorter than 7 characters in a word, or under 8 as a credential, are never cut
+(`MIN_CUT_WORD`); a JSON document inside a flag and a plain password stuck to a one-letter flag (`-p<password>`) are
+not cut; and a text that does not parse can show what neither check recognised. The full list is in
+[secrets.md](secrets.md#secret-shaped-values-in-a-files-text).
+
 ## Editing
 
 Every program that writes a file computes the value it wants and edits the existing text with the `yaml`

@@ -432,6 +432,58 @@ Named residual heuristic GAPs (declared, not scheduled):
 `config_read`, `config_validate`, `config_write`, a log or a response body, or a false refusal of a real owner setting, and is fixed; anything else (a new way to hide a key from a
 heuristic) is recorded here as a named GAP and is not another round.
 
+## Secret-shaped values in a file's text
+
+A configuration file's text is read by every `fleet.use` caller and every ferret, so what a read shows and what a
+write may add are one pair of rules in the kernel (`host/config/`), and the pair is
+[config-files.md](config-files.md#what-a-read-shows)'s subject too. Plain words: the read hides what looks like a
+credential, and a write may not ADD one.
+
+**The read mask.** `GET /v1/config/file` and `config_read` cut each credential-shaped value in a launch flag, an MCP
+argument or a nested value to `‹hidden›`, for every caller, the owner's paired device and the host admin included
+(the owner at the machine edits the file itself). The cutter is a copy of Runtimes' command-line cutter (the kernel is a
+leaf and imports no plugin); a test over one shared corpus (`kernel-cutter-agreement.test.ts`, in Runtimes) requires the
+two copies to cut every word identically and `HIDDEN_VALUE_TEXT` to equal `HIDDEN_WORD_TEXT`. A pin to the vault
+contract's cutter follows once `rebuild/fix-catalogs-one-rule` lands on 5.0.
+
+**The write rule (W): new only.** A write that gives a raw secret to a flag (`--token v`, `API_KEY=v`,
+`Authorization: Bearer v`, a URL password of 8 or more characters) that the file on disk does not already hold is
+refused as `raw_secret`; the issue names the path to the value, never the value. "Already hold" is by a digest of the
+flag's name and value, so the same value in the same file stays, a patch of another key is applied, and the same
+value moved to another file, or a changed one, is refused. W runs at the four places a text becomes a file: a single
+write, a held-file patch against the version in effect, the same patch against the held version, and `writeAll`'s
+per-document plan (one refused document writes nothing of the set).
+
+**Declared limits.**
+
+- **`MIN_CUT_WORD` is 7.** No word shorter than 7 characters can have anything cut (`a://:p@h` holds a password);
+  a credential value is cut from 8 characters.
+- **Residuals in a broken file.** A file that does not parse cannot be rebuilt around its cuts: it is withheld
+  (`unparsed`) when its raw text holds a word the cutter would cut, and shown as it is when none does. What neither
+  check recognises is shown.
+- **Not cut:** a JSON document inside a flag (its keys are quoted), a plain password stuck to a one-letter flag
+  (`-p<password>`), a value glued to a pointer with no space (`API_KEY=v${secret:X}`), and the other cases named in
+  the header of `host/config/secret-words.ts`.
+- **A flag's value in a file it was already in.** W is new-only, so a file that already holds such a value keeps
+  working and is shown masked on every read; nothing removes it.
+- **E3: a `--token-file` path is cut on read.** The read mask reads `--token-file` as a secret-named flag, so the path
+  after it is shown as `‹hidden›` (checked: `--token-file` then `/home/me/.config/tool/token`), though W accepts a path
+  there. A person sees `‹hidden›` where a path stood, and a text saved back with it is refused until the real text is
+  typed at the machine.
+- **W and the mask do not agree everywhere (declared).** Over the ruling #40 corpus, W refuses some words the mask
+  shows: the harmless key `tokens` with a base64-looking value, a secret-named key whose value glues a `${secret:…}`
+  pointer to other text, and one word of blanks that does not start with a flag (`srv --token v`). A file already
+  holding such a word is shown it. Pinned by `kernel-cutter-agreement.test.ts`; closing it is a kernel change.
+- **GAP: the etag is a digest oracle.** A file's etag is the sha256 of its disk text and goes to every `fleet.use`
+  reader (`GET /v1/config/file`, the `kernel.config-changed` frame, `GET /v1/config/status`). A hidden value that is
+  long and high-entropy cannot be recovered from it; a short or low-entropy one (an 8-14 character password) can be
+  guessed offline when the rest of the file is known. Remedy, after merge: a keyed etag (an HMAC with a daemon-local
+  key), kernel-wide.
+- **GAP: the route descriptor sentence.** The descriptor of `GET /v1/config/file` says a configuration file never
+  holds a raw value. That stays partly false for a file written before the flag rule: it can hold a secret under a
+  flag name, shown masked on every read. The descriptor is hashed (contract 9.6), so the sentence is corrected when the
+  contract next opens.
+
 ## Accounts and sign-ins: the store
 
 The saved logins became **accounts** (one identity: label, plain username, password, 2FA keys) and
