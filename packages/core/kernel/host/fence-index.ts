@@ -504,6 +504,12 @@ export interface PrivateIndex {
    */
   readonly renew: () => Promise<void>;
   /**
+   * Forgets the look interval without looking: the next {@link snapshot} looks again (and throws while it cannot). For a
+   * create whose pin failed before it could ask for a look ({@link renew} never ran), so the snapshot kept from before
+   * the create is not answered from again. Queued behind a look already running, so that look cannot restore the interval.
+   */
+  readonly forget: () => Promise<void>;
+  /**
    * Tells `watcher` every time what is truncated changes (the same function is told once however often it is added).
    * A place already past its budget is announced to it at once.
    */
@@ -577,6 +583,14 @@ export function privateIndexOf(fs: HostFs, real: string, input: IndexInput, opti
       };
       const run = tail.then(forced, forced);
       tail = run.catch(() => undefined);
+      await run;
+    },
+    forget: async () => {
+      const forgotten = (): void => {
+        lookedAt = Number.NEGATIVE_INFINITY;
+      };
+      const run = tail.then(forgotten, forgotten);
+      tail = run;
       await run;
     },
     watch: watcher => {

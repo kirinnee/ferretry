@@ -182,6 +182,11 @@ async function lookAgain(
     await indexOf(fs, real, privateFiles, recheckMs, watcher).renew();
     report?.looked();
   } catch (error) {
+    // A pin that failed before the index was asked to look (the home did not resolve) leaves the look interval running:
+    // the snapshot kept from before the create would answer until it ends. The index is found by the home's REAL path,
+    // which is what could not be had, so every index of this disk forgets its interval: the next root call looks again
+    // and refuses while it cannot. (A look that failed already forgot its own; this is then a no-op.)
+    await Promise.all([...(INDEXES.get(fs)?.values() ?? [])].map(async index => await index.forget()));
     const refusal = new ApiError(503, unpinnedSentence(named, error), 'private_unpinned');
     report?.failed(refusal);
     throw refusal;
