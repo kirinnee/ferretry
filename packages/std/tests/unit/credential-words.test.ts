@@ -9,7 +9,13 @@
  * Fake only: every value is shaped like a credential and is none.
  */
 import { describe, expect, test } from 'bun:test';
-import { HIDDEN_VALUE_TEXT, shownWord, shownWords } from '../../src/credential-words/index.ts';
+import {
+  HIDDEN_VALUE_TEXT,
+  looksSecret,
+  looksSecretShown,
+  shownWord,
+  shownWords,
+} from '../../src/credential-words/index.ts';
 
 /** A fake credential-shaped value (no real secret scanner hit). */
 const VALUE = 'Zk3pQ9vXw2LmN7rT';
@@ -132,5 +138,20 @@ describe('CFG-LEAK-R the cutter, case by case', () => {
     // `first` is the word before the first: a command's own flag.
     expect(shownWords([VALUE], '--token').map(word => word.hidden)).toEqual([true]);
     expect(shownWords([VALUE]).map(word => word.hidden)).toEqual([false]);
+  });
+});
+
+describe('the name and value tests', () => {
+  test('looksSecret: a secret name or a token prefix with a long value; a short value or a reference is none', () => {
+    expect(looksSecret('API_KEY', VALUE)).toBe(true);
+    expect(looksSecret('NOTE', 'ghp_AbCdEfGh12345678')).toBe(true);
+    expect(looksSecret('NOTE', VALUE)).toBe(false);
+    expect(looksSecret('API_KEY', 'short')).toBe(false);
+    expect(looksSecret('API_KEY', '$OTHER_VARIABLE')).toBe(false);
+  });
+
+  test('looksSecretShown is never narrower than looksSecret on a secret name', () => {
+    expect(looksSecretShown('API_KEY', VALUE)).toBe(true);
+    expect(looksSecretShown('API_KEY', '${secret:X}')).toBe(false);
   });
 });
