@@ -25,7 +25,7 @@ import { CarrierRouter } from '../../../app/carriers/router.ts';
 import { pairingWalk } from '../../../app/pairing/walk.ts';
 import { BrowserNetwork, HandTimers } from '../../support/browser-network.ts';
 import { type KernelFixture, kernelFixture, type PairedTestDevice } from '../../support/kernel-session.ts';
-import { carrierLeaks, RELAY_ORIGIN, RendezvousBridge } from '../../support/rendezvous-bridge.ts';
+import { carrierLeaks, dialledProblems, RELAY_ORIGIN, RendezvousBridge } from '../../support/rendezvous-bridge.ts';
 
 const shellCrypto = new WebCryptoRelayCrypto();
 const DIRECT = 'https://laptop.example.test';
@@ -136,6 +136,8 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     // Assert — it was really served, over the relay arrival, by the daemon's own route table...
     expect(fx.requests.map(request => request.path)).toEqual([REQUEST_PATH]);
     expect(fx.requests[0]?.arrival).toMatchObject({ kind: 'carried', carrier: 'relay' });
+    // ...as the device the SESSION proved, not one the request or the rendezvous named (cb4 F4, row 129)...
+    expect(fx.requests[0]?.principal).toMatchObject({ kind: 'device', holder: device.deviceId });
     expect(JSON.stringify(answer)).toContain(SECRET_ANSWER);
     // ...and the rendezvous, which carried every frame, could read none of what mattered.
     expect(bridge.observed.length).toBeGreaterThan(4);
@@ -148,8 +150,11 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
         'the route the request asked for': REQUEST_PATH,
       }),
     ).toEqual([]);
-    // The fingerprint IS visible: it addresses the rendezvous, and the protocol says so.
+    // The fingerprint IS visible: it addresses the rendezvous, and the protocol says so. It is ALL the address holds
+    // (cb4 F2, row 127): the upgrade request the rendezvous reads carries no query, fragment or credentials.
+    expect(bridge.dialled.length).toBeGreaterThan(0);
     expect(bridge.dialled[0]).toContain(fx.daemonId);
+    expect(dialledProblems(bridge.dialled, fx.daemonId)).toEqual([]);
   });
 
   test('R209 the leak search is not vacuous: a value planted in one frame is found, by label and index, never by value', () => {
@@ -162,6 +167,44 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     expect(found.join()).not.toContain(PAIRING_CODE);
     expect(() => carrierLeaks({ observed: [] }, { empty: '' })).toThrow('empty needle');
   });
+
+  test('R209 R201 cb4 F2 the leak search covers the dialled URLs too: a value planted in an address is found, by label and index, never by value', () => {
+    const base = `wss://${'relay.example'}/v1/rendezvous/fy_daemon_x/client`;
+    const found = carrierLeaks(
+      { observed: [new Uint8Array([1, 2, 3])], dialled: [base, `${base}?code=${PAIRING_CODE}`] },
+      { 'the pairing code': PAIRING_CODE },
+    );
+    expect(found).toEqual(['the pairing code appeared in dialled URL #1']);
+    expect(found.join()).not.toContain(PAIRING_CODE);
+    // A base64 spelling in an address is found as well.
+    const encoded = Buffer.from(PAIRING_CODE).toString('base64');
+    expect(
+      carrierLeaks({ observed: [], dialled: [`${base}#${encoded}`] }, { 'the pairing code': PAIRING_CODE }),
+    ).toEqual(['the pairing code appeared in dialled URL #0']);
+  });
+
+  test('R209 R201 cb4 F2 the address check holds a dialled URL to the host and the daemon fingerprint, and names what else it carries', () => {
+    const ok = `wss://${'relay.example'}/v1/rendezvous/fy_daemon_x/client`;
+    expect(dialledProblems([ok], 'fy_daemon_x')).toEqual([]);
+    expect(
+      dialledProblems(
+        [
+          `${ok}?device=fy_device_id_AAAA`,
+          `${ok}#frag`,
+          'wss://user:secret@relay.example/v1/rendezvous/fy_daemon_x/client',
+          'wss://elsewhere.example/v1/rendezvous/fy_daemon_x/client',
+          'wss://relay.example/v1/rendezvous/fy_daemon_x/client/extra',
+        ],
+        'fy_daemon_x',
+      ),
+    ).toEqual([
+      'dialled URL #0 carries a query',
+      'dialled URL #1 carries a fragment',
+      'dialled URL #2 carries credentials',
+      'dialled URL #3 names a host other than the rendezvous',
+      'dialled URL #4 names more than the daemon fingerprint in its path',
+    ]);
+  });
 });
 
 describe('first pairing through the real rendezvous', () => {
@@ -170,12 +213,18 @@ describe('first pairing through the real rendezvous', () => {
     const { fx, bridge } = await relayed();
 
     // Act
-    const { input, outcome } = await pairOver(fx, bridge);
+    const received: unknown[] = [];
+    const { input, outcome } = await pairOver(fx, bridge, async response => {
+      received.push(response);
+    });
     const paired = (await outcome) as { readonly kind: string; readonly via: { readonly kind: string } };
     await bridge.settle();
 
     // Assert — the daemon redeemed exactly what the browser sent, proving the browser holds the key it registered...
     expect(paired).toMatchObject({ kind: 'paired', via: { kind: 'relay' } });
+    // ...and the browser RECEIVED the device id the daemon minted, through the sealed answer, and saved exactly that
+    // (cb4 F4, row 129): the id the leak search below looks for really is what the pair mode answered.
+    expect(received).toEqual([{ deviceId: 'fy_device_id_new' }]);
     expect(fx.pair.attempts).toHaveLength(1);
     expect(fx.pair.attempts[0]).toMatchObject({
       carrier: 'relay',
@@ -191,6 +240,9 @@ describe('first pairing through the real rendezvous', () => {
         'the minted device id': 'fy_device_id_new',
       }),
     ).toEqual([]);
+    // The addresses it dialled are part of what it saw (cb4 F2, row 127): they hold the fingerprint and nothing else.
+    expect(bridge.dialled.length).toBeGreaterThan(0);
+    expect(dialledProblems(bridge.dialled, fx.daemonId)).toEqual([]);
   });
 
   test('R201 the journey — pair, then ask — leaves the code, the key, the grant, the name and the payload out of every rendezvous frame', async () => {
@@ -215,33 +267,57 @@ describe('first pairing through the real rendezvous', () => {
         'the answer payload': SECRET_ANSWER,
       }),
     ).toEqual([]);
+    expect(dialledProblems(bridge.dialled, fx.daemonId)).toEqual([]);
   });
 
-  test('R184 a byte flipped in the sealed paired record by the rendezvous is refused: nothing is saved and no grant is believed', async () => {
-    // Arrange — a rendezvous that edits the first sealed record it hands the browser (the daemon's `paired` answer).
-    const { fx, bridge } = await relayed();
-    let flipped = 0;
-    bridge.meddle = bytes => {
-      if (bytes[2] !== FRAME_KINDS.data || flipped > 0) return undefined;
-      flipped += 1;
-      const edited = Uint8Array.from(bytes);
-      edited[edited.length - 1] = (edited[edited.length - 1] ?? 0) ^ 0xff;
-      return edited;
-    };
-    const saved: string[] = [];
+  // cb4 F3 (row 128): the flip used to be the LAST byte only, which is the AEAD tag. A check that verified nothing but the
+  // tag (or one that decrypts the body whatever the tag says) is caught only by a flip INSIDE the ciphertext body too. A
+  // sealed record is the 28-byte frame header, the ciphertext body, then the 16-byte GCM tag.
+  const HEADER_BYTES = 28;
+  const TAG_BYTES = 16;
+  const flips: readonly (readonly [string, (length: number) => number])[] = [
+    ['the last byte (the AEAD tag)', length => length - 1],
+    ['the first byte of the tag', length => length - TAG_BYTES],
+    ['the last byte of the ciphertext body', length => length - TAG_BYTES - 1],
+    ['the first byte of the ciphertext body', () => HEADER_BYTES],
+    [
+      'a byte in the middle of the ciphertext body',
+      length => HEADER_BYTES + Math.floor((length - HEADER_BYTES - TAG_BYTES) / 2),
+    ],
+  ];
 
-    // Act
-    const { outcome } = await pairOver(fx, bridge, async () => {
-      saved.push('saved');
-    });
-    const failure = await (outcome as Promise<unknown>).catch((error: unknown) => error);
+  test.each(flips)(
+    'R184 a byte flipped in %s of the sealed paired record by the rendezvous is refused: nothing is saved and no grant is believed',
+    async (_where, position) => {
+      // Arrange — a rendezvous that edits the first sealed record it hands the browser (the daemon's `paired` answer).
+      const { fx, bridge } = await relayed();
+      let flipped = 0;
+      bridge.meddle = bytes => {
+        if (bytes[2] !== FRAME_KINDS.data || flipped > 0) return undefined;
+        flipped += 1;
+        const edited = Uint8Array.from(bytes);
+        // The frame must be long enough to have a body byte at this position, or the flip would land in the header.
+        expect(bytes.length).toBeGreaterThan(HEADER_BYTES + TAG_BYTES);
+        const at = position(edited.length);
+        expect(at).toBeGreaterThanOrEqual(HEADER_BYTES);
+        edited[at] = (edited[at] ?? 0) ^ 0xff;
+        return edited;
+      };
+      const saved: string[] = [];
 
-    // Assert — the daemon did redeem (the code is spent), but the browser refused the altered answer: it believes no
-    // pairing, saves no key, and never reads the edit as a published carrier set.
-    expect(flipped).toBe(1);
-    expect(fx.pair.attempts).toHaveLength(1);
-    expect(failure).toBeInstanceOf(PairingOutcomeUnknownError);
-    expect(failure).not.toBeInstanceOf(RelayPairingRefusedError);
-    expect(saved).toEqual([]);
-  });
+      // Act
+      const { outcome } = await pairOver(fx, bridge, async () => {
+        saved.push('saved');
+      });
+      const failure = await (outcome as Promise<unknown>).catch((error: unknown) => error);
+
+      // Assert — the daemon did redeem (the code is spent), but the browser refused the altered answer: it believes no
+      // pairing, saves no key, and never reads the edit as a published carrier set.
+      expect(flipped).toBe(1);
+      expect(fx.pair.attempts).toHaveLength(1);
+      expect(failure).toBeInstanceOf(PairingOutcomeUnknownError);
+      expect(failure).not.toBeInstanceOf(RelayPairingRefusedError);
+      expect(saved).toEqual([]);
+    },
+  );
 });
