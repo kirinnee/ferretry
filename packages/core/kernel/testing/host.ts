@@ -226,10 +226,18 @@ export interface TestHostOptions {
   readonly fenceHome?: string;
   /**
    * A host that cannot reach an entry through a held folder (macOS whose C library or working-directory bracket could
-   * not be loaded): the `project-files` root, an owner's root, refuses every remove `no_descriptor_reach`, as the real
+   * not be loaded): the `project-files` root, an owner's root, refuses every remove AND every write `no_descriptor_reach`, as the real
    * host does there. Default: it has reach, as macOS does when both load (a remove goes through the folder's descriptor).
    */
   readonly noDescriptorReach?: true;
+  /**
+   * Absolute folders of the `project-files` world that are LINKS: the folder → the real path it resolves to (the flat
+   * world has no links at a folder level). The spelling rule of the real host (`realpath(folder)` equal to
+   * `realpath(within)` joined with the folder below `within`; without `within`, the folder equal to its real path) is
+   * then judged over it, so a `project-files` call under a linked folder is refused `link_escape` unless the link is at
+   * or above its `within` anchor. Default: none.
+   */
+  readonly linkedProjectFolders?: ReadonlyMap<string, string>;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
@@ -1291,6 +1299,8 @@ async function start(world: World): Promise<TestHost> {
             plugin: manifest.id,
             patterns: manifest.permissions?.projectFiles,
             folder: anchoredFolder(projectFilesScope(scope?.subfolder)),
+            within: scope?.within,
+            linkedFolders: options.linkedProjectFolders,
             fenceHome: options.fenceHome ?? '/test-home',
             setModeDeclared: manifest.permissions?.setMode === true,
             noDescriptorReach: options.noDescriptorReach === true,
