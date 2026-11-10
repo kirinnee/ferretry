@@ -32,6 +32,8 @@ import type {
   EventPointer,
   IndexedSession,
   JournalFingerprint,
+  IndexRebuildOptions,
+  IndexRebuildResult,
   JournalProblem,
   RebuildResult,
   ReplayPage,
@@ -428,6 +430,69 @@ export class DaemonStorage {
         ...(collected.lostJournalSessionIds.length ? { lostJournalSessionIds: collected.lostJournalSessionIds } : {}),
       };
     });
+  }
+
+  /**
+   * Gives the index a row for every session it lacks, a slice at a time — the boot job's rebuild (BG-049).
+   *
+   * WHY NOT `rebuildIndex`. That is one exclusive pass over the whole fleet: ~0.13 ms of main-thread time per
+   * session, so a single gap of ~310 ms at ~2,400 sessions — over the 208/263 ms stall budget — with every writer
+   * queued behind it. This takes the sessions the index lacks (none: it returns before taking any lane, writing or
+   * yielding), `sliceSize` at a time, and hands the loop back after each slice.
+   *
+   * CONSISTENCY. No exclusive lock is held across slices. Each session is taken under its OWN lane — the lane every
+   * write to it takes — so a write is either wholly before the rebuild's read of the session (and the rebuild finds
+   * its row and leaves it) or wholly after (and updates the row the rebuild made). A reader sees a growing set of
+   * whole rows, never half a session, and a session cannot be duplicated: a row is an upsert on its id. Rows the
+   * index holds for sessions that have since left the survey are left alone: `reconcile` owns those.
+   *
+   * STOP. After `signal` aborts, no further session is taken; what was rebuilt stays, and the next boot, finding
+   * the rest missing, finishes it.
+   */
+  async rebuildIndexYielding(options: IndexRebuildOptions): Promise<IndexRebuildResult> {
+    this.assertOpen();
+    const size = Math.max(1, Math.floor(options.sliceSize));
+    const names = await this.sessionNames();
+    const surveyed: SessionId[] = [];
+    for (const name of names.all) {
+      const id = tryParseSessionId(name);
+      if (id !== undefined && !this.archived.has(id)) surveyed.push(id);
+    }
+    const held = new Set(this.index.listSessions().map(session => session.id));
+    const missing = surveyed.filter(id => !held.has(id));
+    const failedSessionIds: string[] = [];
+    let rebuilt = 0;
+    let slices = 0;
+    const stopped = (): boolean => this.closed || options.signal?.aborted === true;
+    const result = (complete: boolean): IndexRebuildResult => ({
+      surveyed: surveyed.length,
+      missing: missing.length,
+      rebuilt,
+      slices,
+      complete,
+      failedSessionIds,
+    });
+    for (let at = 0; at < missing.length; at += size) {
+      for (const id of missing.slice(at, at + size)) {
+        if (stopped()) return result(false);
+        try {
+          rebuilt += await this.serial.run(id, async () => {
+            // Written, or rebuilt by a feed, since the survey: its row is already the newer one.
+            if (this.closed || this.archived.has(id) || this.index.findSession(id) !== undefined) return 0;
+            return (await this.syncSessionUnlocked(id)).session === undefined ? 0 : 1;
+          });
+        } catch (error) {
+          failedSessionIds.push(id);
+          this.log.warn('a session could not be indexed by the rebuild', {
+            session: id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      slices += 1;
+      await options.yieldToLoop();
+    }
+    return result(!stopped());
   }
 
   /** Whether the index's last pointer for the session is still the event the journal holds at that position. */

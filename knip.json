@@ -49,7 +49,6 @@
         "daemon/adapters/session/observer/session-worker-runtime.ts",
         "daemon/adapters/session/observer/worker-observer-host.ts",
         "daemon/adapters/session/observer/worker-supervisor.ts",
-        "daemon/workers/session-index.worker.ts",
         "daemon/lib/session/peers/turn.ts",
         "daemon/lib/session/peers/transcript.ts",
         "daemon/lib/session/peers/question.ts",

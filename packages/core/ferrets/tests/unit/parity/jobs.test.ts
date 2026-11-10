@@ -32,6 +32,7 @@ import {
   FerretChanged,
   type FerretChangedPayload,
   FerretHistoryFiles,
+  FerretIndexFile,
   HandoverFiles,
   type PackId,
   FerretStateFile,
@@ -57,6 +58,8 @@ import { sessionHandoverNeedsForTest } from '../daemon/modules/session-handover/
 import { fakePacks, host as ferretsHost } from '../daemon/ferrets/route-fixture.ts';
 import { handoverReceiptFor } from '../../support/daemon/parity-fj-docs.ts';
 import { memoryStorage, sessionConfig, sessionState } from '../../support/daemon/storage.ts';
+import { generatedFleet, restartWithCacheLost, sessionIdAt } from '../../support/daemon/index-rebuild-world.ts';
+import { INDEX_REBUILD_JOB } from '../../../daemon/modules/index-rebuild.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import { QUESTION_FILE_VARIABLE } from '../../../daemon/lib/ferrets/service.ts';
 import { ARCHIVE_PASS_JOB } from '../../../daemon/modules/archive.ts';
@@ -818,5 +821,78 @@ describe('the cached document read (J-0259)', () => {
     folder.files.set(`${id}/state.json`, JSON.stringify({ format: 1, ...sessionState(id, { turn: 7 }) }));
     expect(((await storage.readState(id)) as { turn: number }).turn).toBe(7);
     await storage.close();
+  });
+});
+
+describe('the session index is rebuilt at boot (BG-049, J-0159)', () => {
+  const sessionRows = (folder: MemoryStateFolder): readonly unknown[] =>
+    folder.databases.get(FerretIndexFile.path)?.query('SELECT * FROM sessions ORDER BY id').all() ?? [];
+  const eventRows = (folder: MemoryStateFolder): readonly unknown[] =>
+    folder.databases.get(FerretIndexFile.path)?.query('SELECT * FROM events ORDER BY session_id, sequence').all() ?? [];
+  const loseCache = (folder: MemoryStateFolder): void => {
+    folder.databases.get(FerretIndexFile.path)?.close();
+    folder.databases.delete(FerretIndexFile.path);
+  };
+
+  test('J-0159 a session written before a restart is listed after it: the boot job ferrets.index-rebuild rebuilds a lost cache to the index the daemon had', async () => {
+    let h = await ferretsHost([]);
+    const folder = h.state('ferrets');
+    const written = await generatedFleet(60, folder);
+    const sessionsBefore = sessionRows(folder);
+    const eventsBefore = eventRows(folder);
+    expect(sessionsBefore).toHaveLength(60);
+    expect(eventsBefore).toHaveLength(120);
+    await written.storage.close();
+    await h.stop();
+    loseCache(folder);
+
+    h = await h.restart();
+    expect(INDEX_REBUILD_JOB).toBe('ferrets.index-rebuild');
+    expect(h.jobIds()).toContain(INDEX_REBUILD_JOB);
+    // Nothing rebuilds it before the job runs: the state the owner met.
+    expect(sessionRows(folder)).toEqual([]);
+
+    // The host's clock is driven: each slice's yield is a zero-length sleep on it, so the job is run while it is advanced.
+    let finished = false;
+    const running = h.runJob(INDEX_REBUILD_JOB).finally(() => {
+      finished = true;
+    });
+    for (let turns = 0; !finished && turns < 1_000; turns += 1) {
+      await h.clock.advance(0);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    await running;
+    await h.settle();
+
+    expect(sessionRows(folder)).toEqual(sessionsBefore);
+    expect(eventRows(folder)).toEqual(eventsBefore);
+    await h.stop();
+  });
+
+  test('J-0159 there is no write-behind to stall: the rebuild hands the loop back after every slice, and a write between two slices is not held until it ends', async () => {
+    const lost = await restartWithCacheLost(await generatedFleet(60));
+    let yields = 0;
+    let written: Promise<unknown> | undefined;
+
+    const result = await lost.storage.rebuildIndexYielding({
+      sliceSize: 25,
+      yieldToLoop: async () => {
+        yields += 1;
+        // A caller writes a session the rebuild has not reached yet; the write must land before the next slice.
+        if (yields === 1) {
+          written = lost.storage.append(sessionIdAt(59), 'note', { n: 3 });
+          await Promise.race([written, new Promise(resolve => setTimeout(resolve, 1_000))]);
+          expect(lost.storage.listSessions().find(session => session.id === sessionIdAt(59))?.lastSequence).toBe(3);
+        }
+      },
+    });
+
+    // 59: the session written between the slices was indexed by its own write, so the rebuild left its row alone.
+    expect(result).toMatchObject({ missing: 60, rebuilt: 59, complete: true });
+    expect(yields).toBeGreaterThanOrEqual(Math.ceil(60 / 25));
+    await written;
+    expect(lost.storage.listSessions()).toHaveLength(60);
+    expect(lost.storage.listSessions().find(session => session.id === sessionIdAt(59))?.lastSequence).toBe(3);
+    await lost.storage.close();
   });
 });
