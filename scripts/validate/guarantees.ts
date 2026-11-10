@@ -119,17 +119,19 @@ const xmlText = (value: string): string =>
     .replaceAll('&apos;', "'")
     .replaceAll('&amp;', '&');
 
-/** Every test of one JUnit report whose name starts with a row id (`G11 …`). */
+/**
+ * Every test of one JUnit report whose name starts with a row id (`G11 …`). A multi-id title (`P23 P53 …`) proves
+ * each of its ids, exactly as `testIds` reads the same title from source: one result per leading id.
+ */
 export function parseJunit(xml: string): TestResult[] {
   const out: TestResult[] = [];
   for (const match of xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
     const attrs = match[1] ?? '';
     const name = xmlText(/\bname="([^"]*)"/.exec(attrs)?.[1] ?? '');
-    const id = /^([A-Z]+[0-9]+[a-z]?)(?=[\s'"`:.,]|$)/.exec(name)?.[1];
-    if (id === undefined) continue;
     const body = match[2] ?? '';
     const status = /<(?:failure|error)\b/.test(body) ? 'failed' : /<skipped\b/.test(body) ? 'skipped' : 'passed';
-    out.push({ id, name, file: xmlText(/\bfile="([^"]*)"/.exec(attrs)?.[1] ?? '').replace(/^\.\//, ''), status });
+    const file = xmlText(/\bfile="([^"]*)"/.exec(attrs)?.[1] ?? '').replace(/^\.\//, '');
+    for (const id of leadingIds(name)) out.push({ id, name, file, status });
   }
   return out;
 }
@@ -385,7 +387,7 @@ async function ownerFindings(
       findings.push({
         check,
         where: row.id,
-        message: `tested only outside its owner's suite (${folder}): ${files.join(', ')}`,
+        message: `${row.status} row owned by ${row.owner} is tested only outside its owner's suite (${folder}): ${files.join(', ')}`,
       });
     const text = textOf(row.owner);
     for (const symbol of enforcerSymbols(row.enforcer))

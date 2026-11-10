@@ -417,7 +417,7 @@ describe('a card of several fields', () => {
     ]);
   });
 
-  it('should offer only saved accounts that hold every field, and suggest saving the card as one login', async () => {
+  it('I162 should offer only saved accounts that hold every field, and suggest saving the card as one login', async () => {
     const account = (id: string, username: string | undefined) => ({
       id,
       label: id.toLowerCase(),
@@ -761,7 +761,7 @@ describe('Save as on a login card', () => {
     { field: 'password', padded: padInputValue(password) },
   ];
 
-  it('should keep the username and the password together in ONE save, and record one kept field each', async () => {
+  it('I150 should keep the username and the password together in ONE save, and record one kept field each', async () => {
     const { service, request, saves, kept, writes } = await raisedLogin();
 
     const result = await service.deliver(
@@ -781,6 +781,8 @@ describe('Save as on a login card', () => {
       },
     ]);
     should(kept).eql(['username', 'password']);
+    // The record names the fields kept and never carries a value.
+    should(JSON.stringify(kept)).not.containEql(PASSWORD);
     should(writes.length).equal(1);
   });
 
@@ -1065,7 +1067,7 @@ describe('a deliver types a saved account only as the card offers it now (secrev
     ],
   });
 
-  it('should type nothing from the provider on a page that signs in through it, linked or not', async () => {
+  it('I130 should type nothing from the provider on a page that signs in through it, linked or not', async () => {
     for (const linked of [true, false]) {
       const { service, request, writes, fills } = await raisedLogin({ listing: throughProvider(linked) });
       should(request.saved?.offers).eql([]);
@@ -1114,7 +1116,7 @@ describe('a deliver types a saved account only as the card offers it now (secrev
     should(writes).eql([]);
   });
 
-  it("should refuse the account's own sign-in from another place: only the one matched here is its offer's", async () => {
+  it("S86 should refuse the account's own sign-in from another place: only the one matched here is its offer's", async () => {
     const two = {
       accounts: [account('GOOGLE')],
       signIns: [

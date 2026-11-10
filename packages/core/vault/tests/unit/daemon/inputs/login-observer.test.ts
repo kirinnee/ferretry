@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import type { InputRequestField } from '../../../../daemon/lib/inputs/wire.ts';
+import {
+  INPUT_ACTOR_OBSERVER_BY,
+  InputActorSchema,
+  type InputRequestField,
+  observerByOf,
+  ownerTapped,
+} from '../../../../daemon/lib/inputs/wire.ts';
 import type { InputTargetFacts } from '../../../../contract/index.ts';
 import type { LoginObservation } from '../../../../daemon/lib/inputs/borrowed.ts';
 import should from 'should';
@@ -310,7 +316,7 @@ describe('where a delivery’s facts belong', () => {
 describe('what the ferret could have steered', () => {
   const away = { navigationId: 'doc-2', host: 'vercel.com' };
 
-  it('should void the after-submit facts for an act made after the raise, even before the write', async () => {
+  it('I139 should void the after-submit facts for an act made after the raise, even before the write', async () => {
     const w = world({ shows: false, where: () => away });
     w.observer.acted('s1', 'browser');
     await w.observer.delivered(delivery({ since: DELIVERED - 1 }));
@@ -325,7 +331,7 @@ describe('what the ferret could have steered', () => {
     should(facts(w.seen)).containDeep({ noEchoAfterSubmit: true, navigatedAway: true });
   });
 
-  it('should never keep a page fact for a session that ran a page script, whenever it ran', async () => {
+  it('I139 should never keep a page fact for a session that ran a page script, whenever it ran', async () => {
     const w = world({ shows: false, where: () => away });
     w.observer.acted('s1', 'browser', true);
     await w.observer.delivered(delivery({ since: DELIVERED + 1 }));
@@ -335,7 +341,7 @@ describe('what the ferret could have steered', () => {
     should(w.observer.sessions()).deepEqual([]);
   });
 
-  it('should say nothing about the page moving when the page under the name is no longer the one typed into', async () => {
+  it('I139 should say nothing about the page moving when the page under the name is no longer the one typed into', async () => {
     const w = world({ shows: false, where: () => undefined });
     await w.observer.delivered(delivery());
     const kept = facts(w.seen);
@@ -407,7 +413,7 @@ describe('each fact is decided at its own moment', () => {
     should(facts(w.seen)).not.have.property('noEchoAfterSubmit');
   });
 
-  it('should keep no after-submit fact when the raise time cannot be read', async () => {
+  it('I139 should keep no after-submit fact when the raise time cannot be read', async () => {
     const w = world({ shows: false, where: () => ({ navigationId: 'doc-2', host: 'vercel.com' }) });
     await w.observer.delivered(delivery({ since: Number.NaN }));
     should(facts(w.seen)).not.have.property('navigatedAway');
@@ -629,7 +635,7 @@ describe('checked by use: did a code Ferretry made go through?', () => {
     should(w.verdicts).deepEqual([['GITHUB', FACTOR, false]]);
   });
 
-  it('should keep nothing when the ferret acted on a page since the write, ran a script, or the page went away', async () => {
+  it('I171 should keep nothing when the ferret acted on a page since the write, ran a script, or the page went away', async () => {
     const acted = checking({ where: () => ({ navigationId: 'doc-1', host: 'github.com' }) });
     acted.at(500);
     acted.observer.acted('s1', 'browser');
@@ -712,7 +718,7 @@ describe('a terminal write that counts toward a standing rule’s history', () =
     return w.seen[0]?.observation;
   };
 
-  it('should call the owner’s tap on a proved sudo prompt a tap', async () => {
+  it('I137 should call the owner’s tap on a proved sudo prompt a tap', async () => {
     should((await tapOn(proved()))?.tapped).equal(true);
   });
 
@@ -728,7 +734,7 @@ describe('a terminal write that counts toward a standing rule’s history', () =
       should((await tapOn(facts))?.tapped).equal(false);
   });
 
-  it('should say nothing about a tap for a write that is not the owner’s device, or that carries no password', async () => {
+  it('I137 should say nothing about a tap for a write that is not the owner’s device, or that carries no password', async () => {
     for (const by of ['plan', 'rule', 'host'] as const)
       should(await tapOn(proved(), { by })).not.have.property('tapped');
     should(await tapOn(proved(), { by: undefined })).not.have.property('tapped');
@@ -750,5 +756,44 @@ describe('a terminal write that counts toward a standing rule’s history', () =
       }),
     );
     should(w.seen[0]?.observation).not.have.property('tapped');
+  });
+});
+
+describe('the rows of who filled it and what was looked at', () => {
+  it('I136 should record noEchoAfterSubmit only when both looks could tell, and never carry the value out of the daemon', async () => {
+    // Both looks tell: the fact is kept, true when neither look sees the value.
+    const both = world({ shows: false, where: () => ({ navigationId: 'doc-2', host: 'vercel.com' }) });
+    await both.observer.delivered(delivery());
+    should(facts(both.seen).noEchoAfterSubmit).be.true();
+    // Only the second look can tell: nothing is said.
+    const late = world({
+      shows: elapsed => (elapsed < 5_000 ? undefined : false),
+      where: () => ({ navigationId: 'doc-2', host: 'vercel.com' }),
+    });
+    await late.observer.delivered(delivery());
+    should(facts(late.seen)).not.have.property('noEchoAfterSubmit');
+    // A page too large to read answers no text at all: the probe says "cannot tell", never "not shown".
+    const large = new InputLoginProbe({ where: async () => undefined, text: async () => undefined }, undefined);
+    should(await large.shows('s1', { kind: 'page', key: 'app' }, ['page-1'], [PASSWORD])).be.undefined();
+    // The sink is handed a verdict, never the value that was looked for.
+    const everything = JSON.stringify([both.seen, late.seen]);
+    should(everything).not.containEql(PASSWORD);
+  });
+
+  it('I137 should map every actor kind to an observer word, with no default, and write tapped only for a device fill', async () => {
+    const mapped = {
+      device: observerByOf({ kind: 'device', deviceId: 'd1' }),
+      host: observerByOf({ kind: 'host' }),
+      rule: observerByOf({ kind: 'rule', ruleId: 'a'.repeat(32) }),
+      plan: observerByOf({ kind: 'plan', planId: 'p' as never, line: 1 as never }),
+      'sign-in-rule': observerByOf({ kind: 'sign-in-rule', rule: 'r' as never, revision: 1 as never }),
+    };
+    should(mapped).deepEqual({ device: 'device', host: 'host', rule: 'rule', plan: 'plan', 'sign-in-rule': 'rule' });
+    // Exhaustive: the table holds exactly the kinds the actor schema holds.
+    should(Object.keys(INPUT_ACTOR_OBSERVER_BY).sort()).deepEqual(
+      InputActorSchema.options.map(option => option.shape.kind.value).sort(),
+    );
+    // Only the word `device` is an owner's tap; a standing rule's history counts nothing else.
+    should(Object.values(mapped).filter(by => ownerTapped(by))).deepEqual(['device']);
   });
 });
