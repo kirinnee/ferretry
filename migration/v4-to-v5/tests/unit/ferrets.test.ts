@@ -178,6 +178,17 @@ test('does not rewrite a transcript outside the owned home prefix but keeps its 
   expect(report.notCarried.some(item => item.what.includes('transcript pointers outside'))).toBe(true);
 });
 
+test('names the v4 session index sessions.sqlite as not carried: derived, rebuilt by ferrets.index-rebuild on first boot, and no copy of it is written', async () => {
+  await f.session('f1');
+  await f.put('state/index/sessions.sqlite', 'fake index bytes');
+  const report = await ferretsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  const named = report.notCarried.find(item => item.what.includes('sessions.sqlite'));
+  expect(named?.why).toBe('derived; rebuilt by ferrets.index-rebuild on first boot');
+  await expect(stat(join(f.to, 'state/index/sessions.sqlite'))).rejects.toThrow();
+  await expect(stat(join(f.to, 'state/ferrets/index.sqlite'))).rejects.toThrow();
+});
+
 test('a damaged warden provenance stamp fails rather than dropping the lineage fact', async () => {
   await f.session('f1', {
     provenance: { v: 1, at: AT, origin: 'warden', warden: 'FAKE-WARDEN', wardenLineage: false, lineageSource: 'none' },

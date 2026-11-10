@@ -36,7 +36,10 @@ export const ferretsStep: Step = {
   ],
   sealed: [],
   notCarried: [
-    { what: 'derived indexes (SQLite caches)', why: 'v5 rebuilds every cache from the kept files' },
+    {
+      what: 'the session index (state/index/sessions.sqlite) and the other derived SQLite caches',
+      why: 'derived; rebuilt by ferrets.index-rebuild on first boot',
+    },
     { what: 'v4 session-version markers', why: 'v5 files carry their own format' },
     { what: 'per-ferret environment.json', why: 'plaintext credential; never opened; the hash alone is carried' },
     {
