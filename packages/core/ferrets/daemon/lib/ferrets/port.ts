@@ -33,6 +33,7 @@ const START_BY_PLUGIN: Readonly<Partial<Record<StartRequest['by'], string>>> = {
 
 const NOT_THE_WARDEN = 'only the Warden is recorded as the Warden';
 const NOT_THE_WARDEN_LABEL = 'only the Warden starts a ferret under its own label';
+const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent for a ferret it starts';
 
 /**
  * What one plugin holds under `ferrets`: an explicit object naming each member of {@link FerretsApi}, each forwarding
@@ -42,14 +43,18 @@ const NOT_THE_WARDEN_LABEL = 'only the Warden starts a ferret under its own labe
  * - `resume` / `move` with `actor: 'warden'` (or a move `movedBy: 'warden'`), and a start `by: 'warden'`, only from the
  *   Warden; a start `by: 'pack'` only from Packs and `by: 'board'` only from Board. Refused with a sentence, nothing
  *   resumed, moved or started.
- * - a start under the Warden's own label (`options.label`), only from the Warden.
+ * - a consumer's `label` and `parent` are both checked: a start under the Warden's own label (`options.label`), and a
+ *   start with any `parent` (a parent in the Warden's tree gives the new ferret its lineage and so its label), only
+ *   from the Warden.
  * - `systemCallsign` draws only the prefix of the consumer's own kind (`ApiError` 403 otherwise).
+ *
+ * `start` and `move` read the caller's request once and forward a rebuilt copy, never the caller's own object.
  *
  * Whatever else the service has — a stop's end `cause`, a move's `replaceLiveTerminal` and `target`, a route's
  * `confirmRestore`, `revokeToken`, `rename`, the launch and its tokens — is for this plugin's own callers and is not
- * reachable here at runtime, not just refused by the types. `resume` forwards only `automatic`, an `actor` of `warden`
- * (the Warden's alone) or `peer` (attribution only), `decided` and `onCarried`. `effectiveLimits` is optional on the port and the service has none, so it is
- * absent.
+ * reachable here at runtime, not just refused by the types. `resume` forwards only `automatic`, an `actor` of
+ * `warden` (the Warden's alone) or `peer` (attribution only), `decided` and `onCarried`. `effectiveLimits` is optional
+ * on the port and the service has none, so it is absent.
  */
 export function ferretsPort(service: FerretsService, consumer: string): FerretsApi {
   const warden = consumer === WARDEN_PLUGIN;
@@ -61,7 +66,13 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     mayTouch: (caller, target) => service.mayTouch(caller, target),
     children: ferret => service.children(ferret),
     harnesses: () => service.harnesses(),
-    start: async (request): Promise<Result<FerretId, StartFailure>> => {
+    start: async (asked): Promise<Result<FerretId, StartFailure>> => {
+      // Read every member once into a fresh object: the checks and the service see the same values, so a getter cannot
+      // answer one thing to the check and another to the service.
+      const request: StartRequest = {
+        ...asked,
+        ...(asked.options === undefined ? {} : { options: { ...asked.options } }),
+      };
       const owner = START_BY_PLUGIN[request.by];
       if (owner !== undefined && owner !== consumer)
         return refused(
@@ -70,6 +81,9 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       // The Warden's own label marks the Warden's tree (supervision skips it, Packs exempts it from the helper limits,
       // lineage marks it): only the Warden starts under it, the same rule the route applies.
       if (request.options?.label?.trim() === WARDEN_LABEL && !warden) return refused(NOT_THE_WARDEN_LABEL);
+      // A parent in the Warden's tree gives the new ferret the Warden's lineage, and so its label: only the Warden names
+      // a parent through the port (the route forces an agent's parent to itself).
+      if (request.parent !== undefined && !warden) return refused(NOT_THE_WARDEN_PARENT);
       return await service.start(request);
     },
     stop: (ferret, how, reason) => service.stop(ferret, how, reason),
@@ -103,7 +117,8 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     harness: (ferret, caller) => service.harness(ferret, caller),
     turns: (ferret, caller) => service.turns(ferret, caller),
     prompt: (ferret, caller) => service.prompt(ferret, caller),
-    move: async (ferret, runtime, options, caller): Promise<Result<FerretSummary, MoveFailure>> => {
+    move: async (ferret, runtime, asked, caller): Promise<Result<FerretSummary, MoveFailure>> => {
+      const options = asked === undefined ? undefined : { ...asked };
       if ((options?.actor === 'warden' || options?.movedBy === 'warden') && !warden) return refused(NOT_THE_WARDEN);
       return await service.move(ferret, runtime, options, caller);
     },

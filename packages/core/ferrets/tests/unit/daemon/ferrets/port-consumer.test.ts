@@ -78,6 +78,51 @@ test('KCB-S a start under the Warden label is refused from a non-warden consumer
   expect(w.reached).toHaveLength(2);
 });
 
+test('KCB-S a start naming a parent is refused from a non-warden consumer, and nothing is started', async () => {
+  const w = spy();
+  const refusal = {
+    ok: false,
+    error: { code: 'refused', reason: 'only the Warden names a parent for a ferret it starts' },
+  } as const;
+  const parent = 'warden-tree-ferret' as FerretId;
+  for (const consumer of ['board', 'packs', 'lessons', ''])
+    expect(await w.port(consumer).start({ folder: '/work', by: 'owner', parent })).toEqual(refusal);
+  expect(w.reached).toEqual([]);
+
+  expect((await w.port('warden').start({ folder: '/work', by: 'owner', parent })).ok).toBe(true);
+  expect(w.reached.map(r => [r.member, (r.args[0] as { parent?: string }).parent])).toEqual([['start', parent]]);
+});
+
+test('KCB-S a start and a move forward a rebuilt copy, so a getter cannot answer the check and the service differently', async () => {
+  const w = spy();
+  let reads = 0;
+  const label = () => (++reads === 1 ? 'my-label' : 'fleet-warden');
+  const options = {
+    get label() {
+      return label();
+    },
+  };
+  const asked = { folder: '/work', by: 'owner' as const, options };
+  expect((await w.port('board').start(asked)).ok).toBe(true);
+  const sent = w.reached[0]!.args[0] as { options: { label: string } };
+  expect(sent).not.toBe(asked);
+  expect(sent.options).not.toBe(options);
+  expect(sent.options.label).toBe('my-label');
+  expect(sent.options.label).toBe('my-label');
+
+  let moveReads = 0;
+  const moveOptions = {
+    get movedBy() {
+      return ++moveReads === 1 ? 'owner' : 'warden';
+    },
+  };
+  expect((await w.port('board').move!(F1, 'codex-two', moveOptions)).ok).toBe(true);
+  const moved = w.reached[1]!.args[2] as { movedBy: string };
+  expect(moved).not.toBe(moveOptions);
+  expect(moved.movedBy).toBe('owner');
+  expect(moved.movedBy).toBe('owner');
+});
+
 test('KCB-S move actor warden and movedBy warden are refused from a non-warden consumer, and nothing is moved', async () => {
   const w = spy();
   const board = w.port('board');
