@@ -196,8 +196,44 @@ describe('a failed Send, in words', () => {
     expect(inputFailure('boom')).toEqual(unknown);
   });
 
-  it('never carries the typed value, even when the error did', () => {
-    const failure = inputFailure(new Error(`could not type ${FAKE_VALUE}`));
+  it('never carries the typed value when the error had no status: it reads nothing of the message', () => {
+    const failure = inputFailure(new Error(`could not type ${FAKE_VALUE}`), undefined, [FAKE_VALUE]);
     expect(failure.text).not.toContain(FAKE_VALUE);
+  });
+
+  it('I6 never carries a typed value of 8+ characters from a refusal that is not the daemon’s, whatever status it has', () => {
+    for (const status of [400, 413, 422, 500, 502]) {
+      const proxy = refusal(status, undefined, `Bad gateway: upstream echoed body padded=${FAKE_VALUE}= end`);
+      const failure = inputFailure(proxy, 'terminal', [FAKE_VALUE]);
+      // The fixed sentence, never the message cut or masked.
+      expect(failure).toEqual({ kind: 'refused', definitive: true, text: 'The daemon refused this.' });
+    }
+    // Any one of several typed values is enough, and a value in a card with many fields is found in the middle.
+    const many = inputFailure(refusal(502, undefined, `echo ${FAKE_VALUE}`), undefined, [
+      'other-typed-value',
+      FAKE_VALUE,
+    ]);
+    expect(many.text).toBe('The daemon refused this.');
+    expect(many.text).not.toContain(FAKE_VALUE);
+  });
+
+  it('I6 keeps a refusal’s message when it holds no typed value, and when the value is under 8 characters', () => {
+    // Nothing typed, or a message that holds none of it: the daemon's own sentence stays.
+    expect(inputFailure(refusal(422, undefined, 'That value is not allowed here.'), undefined, [FAKE_VALUE]).text).toBe(
+      'That value is not allowed here.',
+    );
+    expect(inputFailure(refusal(422, undefined, 'That value is not allowed here.'), undefined, []).text).toBe(
+      'That value is not allowed here.',
+    );
+    // A short or empty typed value must not blank every message: it is not compared.
+    for (const short of ['', 'a', 'value', '1234567']) {
+      expect(inputFailure(refusal(422, undefined, 'That value is not allowed here.'), undefined, [short]).text).toBe(
+        'That value is not allowed here.',
+      );
+    }
+    // Exactly 8 characters is compared.
+    expect(inputFailure(refusal(422, undefined, 'echo 12345678 end'), undefined, ['12345678']).text).toBe(
+      'The daemon refused this.',
+    );
   });
 });

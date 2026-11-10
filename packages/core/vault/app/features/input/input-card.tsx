@@ -241,6 +241,8 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     setFailure(null);
     setSending(true);
     onSending(true);
+    // Kept in this call only, to check an answer against: never logged, stored or sent.
+    const typed = fields.map(each => values[each.key] ?? '');
     // The body now holds the padded values; the fields do not keep them a moment longer.
     clear();
     try {
@@ -248,7 +250,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
       pending.current = null;
       onSettled(sentWords(request));
     } catch (cause) {
-      const words = inputFailure(cause, request.target.kind);
+      const words = inputFailure(cause, request.target.kind, typed);
       if (words.definitive) pending.current = null;
       setFailure(words.text);
       if (words.kind === 'changed') onRefresh?.();
