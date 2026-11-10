@@ -677,6 +677,33 @@ async function openFolderBelow(
   return { folder, real: parent, created };
 }
 
+/**
+ * The LEAF folder of a `project-files` call (S179), made (when missing) and opened THROUGH the folder `openFolderBelow`
+ * holds, never by a path a link could redirect, then proven to still be at its place. Answers the open folder (the
+ * caller closes it) and whether this call made it. A name that is a file is `outside` (it is no folder of ours); a link
+ * is `link_escape`.
+ */
+async function openLeafBelow(
+  scope: Scope,
+  held: { readonly folder: OpenedDirectory; readonly real: string },
+  leaf: string,
+): Promise<{ readonly folder: OpenedDirectory; readonly created: boolean }> {
+  const child = await held.folder
+    .openChild(leaf, { mode: 0o700 })
+    .catch((error: unknown) => (errnoOf(error) === 'ENOTDIR' ? refuse('outside') : refuseChild(error)));
+  const problem = await folderProblem(scope, join(held.real, leaf), child.folder.identity).catch(
+    async (error: unknown) => {
+      await child.folder.close();
+      throw error;
+    },
+  );
+  if (problem !== undefined) {
+    await child.folder.close();
+    return refuse(problem);
+  }
+  return child;
+}
+
 /** What a folder that could not be opened below another means, by the errno alone (a path is never in the answer). */
 function refuseChild(error: unknown): never {
   switch (errnoOf(error)) {
@@ -1862,9 +1889,17 @@ function rootHandle(setup: HandleSetup): RootHandle {
     const target = await realParent(to, true);
     const made = await openFolderMaking(target.scope, dirname(target.full), 0o700, true);
     try {
-      await fs
-        .mkdir(await entry(target.scope, made.folder, made.real, basename(target.full)), 0o700)
-        .catch(() => refuse('outside'));
+      if (target.scope.descent !== undefined) {
+        // A project folder: the new folder is made through the held one, so a parent swapped for a link after the
+        // check makes nothing outside (macOS has no descriptor path to make it through).
+        const child = await openLeafBelow(target.scope, made, basename(target.full));
+        await child.folder.close();
+        if (!child.created) refuse('outside');
+      } else {
+        await fs
+          .mkdir(await entry(target.scope, made.folder, made.real, basename(target.full)), 0o700)
+          .catch(() => refuse('outside'));
+      }
     } finally {
       await made.folder.close();
     }
@@ -2045,6 +2080,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const { full, scope } = await realParent(path, true);
       const made = await openFolderMaking(scope, dirname(full), 0o700, true);
       try {
+        if (scope.descent !== undefined) {
+          // A project folder: made and opened through the held folder, never by a path (see `openLeafBelow`). It keeps
+          // its mode when it was already there, and one this call makes is `0700`.
+          await (await openLeafBelow(scope, made, basename(full))).folder.close();
+          return;
+        }
         const at = await entry(scope, made.folder, made.real, basename(full));
         const info = await scope.fs.identity(at);
         if (info !== undefined && info.kind !== 'directory') refuse('outside');
