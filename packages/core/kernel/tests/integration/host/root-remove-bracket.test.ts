@@ -20,10 +20,12 @@ import {
   lstatSync,
   openSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmdirSync,
   symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -757,6 +759,107 @@ describe('BG-002 the removal steps refuse a name that is not one plain segment',
     }
     expect(layer.installed).toEqual([]);
     expect(await readFile(`${parent}/keep`, 'utf8')).toBe('K');
+  });
+});
+
+describe('BG-002 the process relative-name calls and the seam clean up after a failure', () => {
+  const identityOfFd = async (fd: number) => {
+    const s = await fstatOf(fd);
+    return {
+      kind: s.isDirectory() ? ('directory' as const) : ('file' as const),
+      device: s.dev,
+      inode: s.ino,
+      links: Number(s.nlink),
+      size: Number(s.size),
+      mtimeMs: Number(s.mtimeMs),
+      mtimeNs: s.mtimeNs,
+      ctimeNs: s.ctimeNs,
+      mode: Number(s.mode) & 0o7777,
+      owner: Number(s.uid),
+      group: Number(s.gid),
+    };
+  };
+  /** A folder held open the way the host holds one, and the steps on it over the stand-in calls. */
+  async function heldFolder(unlinkat?: DescriptorCalls['unlinkat']) {
+    const parent = await realpath(await mkdtemp(`${tmpdir()}/root-remove-bracket-failure-`));
+    parents.push(parent);
+    await mkdir(`${parent}/a`);
+    const fd = openSync(`${parent}/a`, constants.O_RDONLY | constants.O_DIRECTORY | O_CLOEXEC);
+    descriptors.push(fd);
+    const stats = await fstatOf(fd);
+    const layer = fakeLayer(() => undefined);
+    const calls: DescriptorCalls = unlinkat === undefined ? layer.calls : { ...layer.calls, unlinkat };
+    return { parent, fd, layer, calls, folder: { fd, device: stats.dev, inode: stats.ino } };
+  }
+
+  test('BG-002 the process `lstat` answers a missing name as nothing and hands any other failure back', () => {
+    expect(PROCESS_BRACKET_OPS.lstat('bg-002-no-such-entry')).toBeUndefined();
+    expect(() => PROCESS_BRACKET_OPS.lstat('x'.repeat(4096))).toThrow(
+      expect.objectContaining({ code: 'ENAMETOOLONG' }),
+    );
+  });
+
+  test('BG-002 a child folder whose identity cannot be read is closed again and the failure is handed back', async () => {
+    const f = await heldFolder();
+    await mkdir(`${f.parent}/a/child`);
+    const failure = new Error('identity unreadable');
+    const steps = folderSteps(
+      f.calls,
+      f.folder,
+      async () => {
+        throw failure;
+      },
+      { bracket: f.layer.bracket, identityOfStats: () => failure as never },
+    );
+    const before = readdirSync('/proc/self/fd').length;
+    await expect(steps.removal?.openFolder('child')).rejects.toBe(failure);
+    expect(readdirSync('/proc/self/fd').length).toBe(before);
+  });
+
+  test('BG-002 a create that fails after the file exists removes only the file it made, and hands back the original failure', async () => {
+    const f = await heldFolder();
+    const steps = folderSteps(f.calls, f.folder, identityOfFd);
+    const failure = new Error('write refused');
+    const unwritable = Object.defineProperty(new Uint8Array(1), 'byteLength', {
+      get: () => {
+        throw failure;
+      },
+    });
+    const before = readdirSync('/proc/self/fd').length;
+    await expect(steps.writeNew('made', unwritable, 0o600)).rejects.toBe(failure);
+    expect(readdirSync(`${f.parent}/a`)).toEqual([]);
+    expect(readdirSync('/proc/self/fd').length).toBe(before);
+  });
+
+  test('BG-002 a cleanup that itself fails never hides the failure that caused it', async () => {
+    const f = await heldFolder(() => {
+      throw Object.assign(new Error('EPERM: unlink'), { code: 'EPERM' });
+    });
+    const steps = folderSteps(f.calls, f.folder, identityOfFd);
+    const failure = new Error('write refused');
+    const unwritable = Object.defineProperty(new Uint8Array(1), 'byteLength', {
+      get: () => {
+        throw failure;
+      },
+    });
+    await expect(steps.writeNew('made', unwritable, 0o600)).rejects.toBe(failure);
+    expect(readdirSync(`${f.parent}/a`)).toEqual(['made']);
+  });
+
+  test('BG-002 a create that fails removes nothing when the name now belongs to another file', async () => {
+    const f = await heldFolder();
+    const steps = folderSteps(f.calls, f.folder, identityOfFd);
+    const failure = new Error('write refused');
+    const unwritable = Object.defineProperty(new Uint8Array(1), 'byteLength', {
+      get: () => {
+        // a concurrent writer replaces the name between the create and the cleanup
+        renameSync(`${f.parent}/a/made`, `${f.parent}/a/aside`);
+        writeFileSync(`${f.parent}/a/made`, 'theirs');
+        throw failure;
+      },
+    });
+    await expect(steps.writeNew('made', unwritable, 0o600)).rejects.toBe(failure);
+    expect(readFileSync(`${f.parent}/a/made`, 'utf8')).toBe('theirs');
   });
 });
 

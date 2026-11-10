@@ -286,6 +286,27 @@ describe('settleStartup (e) the tmux runner waits out a parked startup and write
     expect(await shell.runner.lastScreen(shell.handle)).toBe('');
     expect(await shell.runner.lastScreen('not-a-pane' as RunnerHandle)).toBe('');
   });
+
+  it('settleStartup the read binding of a pane refuses a keystroke before tmux sees it, and still answers a question', async () => {
+    const world = subject();
+    // The binding is private on purpose: only `observe` and `heldAt` reach it. The test reaches it to prove the narrowing itself.
+    const { tmux, session } = await (
+      world.runner as unknown as {
+        readingPane(handle: RunnerHandle): Promise<{
+          readonly tmux: {
+            sendKey(session: string, key: string): Promise<void>;
+            alive(session: string): Promise<boolean>;
+          };
+          readonly session: string;
+        }>;
+      }
+    ).readingPane(world.handle);
+
+    await expect(tmux.sendKey(session, 'Enter')).rejects.toThrow('a pane read writes nothing');
+    expect(writes(world)).toEqual([]);
+    expect(typedAnything(world)).toBe(false);
+    expect(await tmux.alive(session)).toBe(true);
+  });
 });
 
 /** What a runner rejection says through the contract, or `'resolved'` when it did not reject. */
