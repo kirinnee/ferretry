@@ -235,8 +235,8 @@ digest through the contract's id schemas, and each install must read as `Catalog
 is stored: the signed manifest is rebuilt from unchanged fields and blobs with the unchanged identity key, so nothing
 is re-signed. The sealed `link-keys.json` (AAD `catalog-link:<linkId>`, unstamped, under the vault key) is re-labelled
 with `rewrapSealed` (`v` → `format`, entries unchanged), and a test opens it with v5's own `KernelSealedDocuments`
-and the moved vault key. `local-skill-installs.json` becomes Skills' `state/skills/installs.json`
-(`LocalSkillInstallStateSchema`, harness `claude` → `claude-code`). A former runtime name becomes the current one
+and the moved vault key. `local-skill-installs.json` is not carried over (owner decision !A466: the local skill copy is gone from v5, and the
+step never reads that file). A former runtime name becomes the current one
 (M7). Live member unlocks, the install hold/skip prefs and the upgrade backups are listed in `notCarried`.
 
 Skill folders (`src/steps/skill-folders.ts`): the runtime-installed skills under `fleet/assets/skills/<name>/` are
