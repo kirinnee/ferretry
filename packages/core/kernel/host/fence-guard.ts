@@ -386,6 +386,71 @@ const nested = (a: string, b: string): boolean => {
   return below(a, b) || below(b, a);
 };
 
+/** A snapshot's places by path, made once per snapshot: what finds the places nested with a root without a scan. */
+interface SnapshotPaths {
+  /** The places, sorted by path: the places below a folder are one run of it. */
+  readonly sorted: readonly { readonly path: string; readonly key: string }[];
+  /** The places at each path (a folder above a root is looked up by name, one per level). */
+  readonly at: ReadonlyMap<string, readonly string[]>;
+  /** How many places hold each key: a key leaves a root's guard only when every place holding it is the root's own. */
+  readonly count: ReadonlyMap<string, number>;
+}
+const SNAPSHOT_PATHS = new WeakMap<PrivateSnapshot, SnapshotPaths>();
+
+function pathsOf(snapshot: PrivateSnapshot): SnapshotPaths {
+  const kept = SNAPSHOT_PATHS.get(snapshot);
+  if (kept !== undefined) return kept;
+  const sorted = [...snapshot.places].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const at = new Map<string, string[]>();
+  const count = new Map<string, number>();
+  for (const place of snapshot.places) {
+    const keys = at.get(place.path);
+    if (keys === undefined) at.set(place.path, [place.key]);
+    else keys.push(place.key);
+    count.set(place.key, (count.get(place.key) ?? 0) + 1);
+  }
+  const made = { sorted, at, count };
+  SNAPSHOT_PATHS.set(snapshot, made);
+  return made;
+}
+
+/**
+ * The keys a root at `base` takes out of its guard: those whose every place is nested with `base` ({@link nested}: the
+ * base itself, a folder above it, or anything below it). A key that is also held by a place that is NOT the root's own
+ * stays guarded, as it did when the guard was the set of the other places' keys. Costs one lookup per folder above the
+ * base, a binary search, and the places below it, never a scan of every place.
+ */
+function ownKeysOf(snapshot: PrivateSnapshot, base: string): ReadonlySet<string> {
+  const { sorted, at, count } = pathsOf(snapshot);
+  const nestedPerKey = new Map<string, number>();
+  const take = (key: string): void => {
+    nestedPerKey.set(key, (nestedPerKey.get(key) ?? 0) + 1);
+  };
+  // The base and every folder above it.
+  for (let current = base; ; current = dirname(current)) {
+    for (const key of at.get(current) ?? []) take(key);
+    if (dirname(current) === current) break;
+  }
+  // Every place below the base: a run of the sorted places that starts with `<base>/`.
+  const prefix = base.endsWith(sep) ? base : `${base}${sep}`;
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if ((sorted[middle]?.path ?? '') < prefix) low = middle + 1;
+    else high = middle;
+  }
+  for (let index = low; index < sorted.length; index += 1) {
+    const place = sorted[index];
+    if (place === undefined || !place.path.startsWith(prefix)) break;
+    // The base itself and a folder above it were taken above; `/` is its own prefix and takes nothing twice.
+    if (place.path !== base) take(place.key);
+  }
+  const own = new Set<string>();
+  for (const [key, nestedCount] of nestedPerKey) if (nestedCount === count.get(key)) own.add(key);
+  return own;
+}
+
 /**
  * The guard for a root whose real base is `base`: the identity of each private place that is there, except the
  * places that are the root's own. Recomputed on every ask (a file replaced by a rename has a new inode). A place that
@@ -407,11 +472,14 @@ export async function privateGuardOf(
   const kept = bases.get(base);
   if (kept !== undefined) return kept;
   const indexed = keysOf(snapshot);
-  // Almost every root holds none of the places: then the snapshot's own set is the guard's, not a copy of it.
-  const theirs = snapshot.places.some(place => nested(place.path, base));
-  const keys = theirs
-    ? new Set(snapshot.places.filter(place => !nested(place.path, base)).map(place => place.key))
-    : indexed.keys;
+  // The snapshot's own set, less only the keys EVERY place of which is the root's own. Never a copy of the set: each
+  // ferret's session folder is itself a place, so a copy per session root made the kept guards grow as the square of
+  // the sessions (4,000 sessions held 4,000 sets of 8,000 keys each).
+  const own = ownKeysOf(snapshot, base);
+  const keys: KeyLookup =
+    own.size === 0
+      ? indexed.keys
+      : { has: key => indexed.keys.has(key) && !own.has(key), size: indexed.keys.size - own.size };
   const made = {
     keys,
     closed: new Set(snapshot.closed.filter(tree => !nested(tree.path, base)).flatMap(tree => [...tree.devices])),
