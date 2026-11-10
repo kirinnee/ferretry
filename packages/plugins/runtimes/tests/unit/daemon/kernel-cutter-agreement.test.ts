@@ -9,8 +9,9 @@
  * export list, and a TEST may import both sides where the kernel's own code may not import a plugin.
  *
  * T-B2 holds the write rule (W, `findFlagSecrets`) under BOTH cutters, strictly: EVERY word W refuses is cut by the
- * kernel's mask and by runtimes' copy, residual 0 (a pointer, then keys of its own, then raw text included). Its corpus comes from W's own name tail, not from the mask's name
- * list: a candidate name is in it exactly when W refuses it, so a name only W knows is in it. A W-only widening onto a name outside CANDIDATE_NAMES is not seen.
+ * kernel's mask and by runtimes' copy, residual 0 (a pointer, then keys of its own, then raw text included). Its
+ * corpus comes from W's own name tail, not from the mask's name list: a candidate name is in it exactly when W
+ * refuses it, so a name only W knows is in it. A W-only widening onto a name outside CANDIDATE_NAMES is not seen.
  *
  * Pin to the vault contract's cutter once it lands on 5.0 (`rebuild/fix-catalogs-one-rule`, #41): this file has no
  * vault import until then.

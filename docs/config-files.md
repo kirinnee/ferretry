@@ -226,7 +226,10 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
   `API_KEY=${secret:X}?model=short` and `Authorization: Bearer v${secret:X}` hide the whole value (the raw part is a
   credential written next to a pointer); one pointer alone, quoted or not, stays shown. A `,`, `;` or `&` right after
   the pointer ends the key's value, and the text after it is cut too (`--key ${secret:X},v`), unless a key of its own
-  starts there (`--set=a=1,API_KEY=${secret:X},b=2` is shown). A URL password glued to a pointer
+  starts there (`--set=a=1,API_KEY=${secret:X},b=2` is shown). A key of its own followed by another `,`, `;` or `&`
+  and text with no key (`--key ${secret:X},b=2,v`, also with several keys or quotes) is cut whole; this over-cuts
+  innocent text of that shape too (`${secret:X},b=2,c`); keys only (`${secret:X},a=1,b=2`) or a trailing separator
+  (`${secret:X},b=2,`) stay shown. A URL password glued to a pointer
   (`https://u:${secret:X}abcdefgh@h/p`) is shown, and the write rule accepts it too: a shared GAP.
 - **Some texts are withheld whole.** The route (`GET /v1/config/file`) answers one comment line (a save of it is
   refused, so it never wipes the file) and `config_read` answers an empty `text` with the reason in its summary; the

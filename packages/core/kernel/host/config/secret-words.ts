@@ -329,7 +329,8 @@ function gluedToPointer(text: string, ends: ValueEnds, start: number, end: numbe
   if (!GLUE_FREE_BEFORE.has(before)) return valueTo;
   const next = ends.pointer[at] as number;
   // A `,` `;` `&` right after the pointer ends the key's value, but the text after it is glued to the pointer unless a
-  // key of its own starts there (`${secret:X},v` and `${secret:X},b=2,v` are cut to the end of its part; `${secret:X},b=2` is not).
+  // key of its own starts there (`${secret:X},v` and `${secret:X},b=2,v` are cut to the end of its part, `${secret:X},b=2`
+  // is not).
   const runsOn = next === end && (ends.loose[next] as number) < (ends.partEnd[at] as number);
   const partTo = runsOn ? (ends.partEnd[at] as number) : valueTo;
   const after = next < partTo ? (text[next] as string) : '';
