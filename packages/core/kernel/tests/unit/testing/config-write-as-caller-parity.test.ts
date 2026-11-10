@@ -34,7 +34,10 @@ const manifest = definePlugin({
   data: { config: [mcpDef] },
 });
 
-async function testing(owner: boolean, other: boolean) {
+/** A judge that holds every removal and applies every other loosening (the shape of the held-removal rows). */
+const HOLD_REMOVALS = 'hold-removals';
+
+async function testing(owner: boolean, other: boolean, holdRemovals?: typeof HOLD_REMOVALS) {
   let config: ConfigPort | undefined;
   const half = implementDaemon(manifest, {
     build: ctx => {
@@ -45,15 +48,17 @@ async function testing(owner: boolean, other: boolean) {
   const host = await testHost({
     plugins: [half],
     gate: {
-      judgeConfigWrite: (input: { secretAdd?: true }) =>
-        (input.secretAdd === true ? owner : other) ? 'apply' : 'hold',
+      judgeConfigWrite: (input: { secretAdd?: true; removal?: boolean }) =>
+        (holdRemovals !== undefined ? input.removal !== true : input.secretAdd === true ? owner : other)
+          ? 'apply'
+          : 'hold',
     } as never,
   });
   if (config === undefined) throw new Error('the half was not built');
   return { host, config };
 }
 
-async function real(owner: boolean, other: boolean) {
+async function real(owner: boolean, other: boolean, holdRemovals?: typeof HOLD_REMOVALS) {
   const files = createConfigFiles({
     home: HOME,
     fs: createMemoryHostFs(),
@@ -61,7 +66,7 @@ async function real(owner: boolean, other: boolean) {
     log: captureLog(),
     binary: 'fy',
     defs: [{ plugin: 'mcp', def: mcpDef }],
-    judge: input => (input.secretAdd === true ? owner : other),
+    judge: input => (holdRemovals !== undefined ? input.removal !== true : input.secretAdd === true ? owner : other),
   });
   await files.reload();
   return files.port('mcp');
@@ -262,6 +267,88 @@ test('the testing host makes a patch over a held file to both versions, as the r
           }
           await host.stop();
         }
+});
+
+/**
+ * [followups rows 64 / 163] A REMOVAL held for the owner is a held edit too: the file's state is `held` (with what the
+ * removal widens) while the file stays in effect, and a patch beside it is made to the version in effect alone (a held
+ * removal has no text to carry it), the removal staying held. The testing host answers all of that as the real writer does.
+ */
+test('the testing host keeps a REMOVAL held for the owner held, as the real writer does: its state, and a patch beside it', async () => {
+  const patches: readonly Record<string, unknown>[] = [
+    { note: 'x' },
+    { limit: 3 },
+    { limit: 10 },
+    { limit: 50 },
+    { env: { OWN: '${secret:OWN_TOKEN}' } },
+    { limit: 'many' },
+  ];
+  for (const via of ['write', 'writeAsCaller', 'writeAsOwner'] as const)
+    for (const owner of [true, false])
+      for (const other of [true, false])
+        for (const patch of patches) {
+          const port = await real(owner, other);
+          const { host, config } = await testing(owner, other);
+          const base = { via, owner, other, patch };
+          // in effect at a limit under the default, so removing it (back to the default) raises the limit: judged by `other`
+          for (const target of [port, config]) await target.write(mcpDef, 'acme', 'limit: 5\n');
+          const realRemoved = await port.remove(mcpDef, 'acme');
+          const testRemoved = await config.remove(mcpDef, 'acme');
+          expect({ ...base, ...shaped(testRemoved) }).toEqual({ ...base, ...shaped(realRemoved) });
+          expect({ ...base, state: config.fileState(mcpDef, 'acme') }).toEqual({
+            ...base,
+            state: port.fileState(mcpDef, 'acme'),
+          });
+          expect({ ...base, etag: await config.etag(mcpDef, 'acme') }).toEqual({
+            ...base,
+            etag: await port.etag(mcpDef, 'acme'),
+          });
+          const realOutcome = await port[via](mcpDef, 'acme', { patch });
+          const testOutcome = await config[via](mcpDef, 'acme', { patch });
+          expect({ ...base, ...shaped(testOutcome) }).toEqual({ ...base, ...shaped(realOutcome) });
+          expect({ ...base, value: config.collection(mcpDef).get('acme') }).toEqual({
+            ...base,
+            value: port.collection(mcpDef).get('acme'),
+          });
+          expect({ ...base, state: config.fileState(mcpDef, 'acme') }).toEqual({
+            ...base,
+            state: port.fileState(mcpDef, 'acme'),
+          });
+          // The etag beside a held removal is still the disk's (absent) after the patch: nothing else pins it.
+          expect({ ...base, absent: (await config.etag(mcpDef, 'acme')) === 'absent' }).toEqual({
+            ...base,
+            absent: (await port.etag(mcpDef, 'acme')) === 'absent',
+          });
+          await host.stop();
+        }
+});
+
+/**
+ * [followups rows 64 / 163] A confirmed patch that makes a held REMOVAL harmless (removing 50 back to the default 10 no
+ * longer loosens) puts the removal into effect on both hosts: the file is gone, the defaults apply, the etag is absent.
+ */
+test('[followups rows 64 / 163] a patch that makes a held removal harmless puts the removal into effect on both hosts', async () => {
+  for (const via of ['write', 'writeAsCaller', 'writeAsOwner'] as const) {
+    const port = await real(true, true, HOLD_REMOVALS);
+    const { host, config } = await testing(true, true, HOLD_REMOVALS);
+    for (const target of [port, config])
+      expect((await target.write(mcpDef, 'acme', 'limit: 5\n')).kind).toBe('written');
+    const realRemoved = await port.remove(mcpDef, 'acme');
+    const testRemoved = await config.remove(mcpDef, 'acme');
+    expect({ via, kind: testRemoved.kind }).toEqual({ via, kind: 'held' });
+    expect({ via, kind: realRemoved.kind }).toEqual({ via, kind: 'held' });
+    const realOutcome = await port[via](mcpDef, 'acme', { patch: { limit: 50 } });
+    const testOutcome = await config[via](mcpDef, 'acme', { patch: { limit: 50 } });
+    expect({ via, ...shaped(testOutcome) }).toEqual({ via, ...shaped(realOutcome) });
+    expect({ via, value: config.collection(mcpDef).get('acme') }).toEqual({
+      via,
+      value: port.collection(mcpDef).get('acme'),
+    });
+    expect({ via, state: config.fileState(mcpDef, 'acme') }).toEqual({ via, state: port.fileState(mcpDef, 'acme') });
+    expect({ via, absent: (await config.etag(mcpDef, 'acme')) === 'absent' }).toEqual({ via, absent: true });
+    expect({ via, absent: (await port.etag(mcpDef, 'acme')) === 'absent' }).toEqual({ via, absent: true });
+    await host.stop();
+  }
 });
 
 test('the testing host answers a stale ifMatch on writeAsCaller as a conflict, as write does', async () => {

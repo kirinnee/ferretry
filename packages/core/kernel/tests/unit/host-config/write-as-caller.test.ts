@@ -363,4 +363,17 @@ describe('writeAsCaller C1: the owner question covers only what the caller’s e
     expect(h.files.port('mcp').collection(mcpDef).get('acme')).toBeUndefined();
     expect(h.files.held()).toEqual([]);
   });
+
+  // [kcw n3, followups row 13] The failed write must leave NO acknowledgement behind: the very same text arriving on the
+  // disk afterwards (a ferret at the machine, a hand edit) was never confirmed by anyone, so it is held.
+  test('writeAsCaller C1 the same text written on disk after a failed owner write is held, not acknowledged', async () => {
+    const h = harness({ owner: true, other: false });
+    await h.files.reload();
+    h.fs.failNextWrite(new Error('the disk is full'));
+    await expect(h.files.port('mcp').writeAsCaller(mcpDef, 'acme', ADD)).rejects.toThrow('the disk is full');
+    await h.fs.writeAtomic(h.path('mcp/acme.yaml'), ADD, 0o600);
+    await h.files.reload();
+    expect(h.files.port('mcp').collection(mcpDef).get('acme')).toBeUndefined();
+    expect(h.files.held().map(edit => edit.path)).toEqual(['mcp/acme.yaml']);
+  });
 });
