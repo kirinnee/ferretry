@@ -11,10 +11,12 @@ type Job = {
   name: string;
   'runs-on'?: string[] | string;
   permissions?: Record<string, string>;
+  env?: Record<string, string>;
   steps?: { name?: string; env?: Record<string, string> }[];
 };
 type Workflow = {
   jobs: Record<string, Job>;
+  env?: Record<string, string>;
   concurrency: { group: string; 'cancel-in-progress': string };
 };
 const load = (name: string) => Bun.YAML.parse(readFileSync(`.github/workflows/${name}.yaml`, 'utf8')) as Workflow;
@@ -202,13 +204,14 @@ assert.ok(
   'the verdict reads the PR head and labels: it needs pull-requests: read',
 );
 
-const judge = (needs: object, macos = '', eventName = 'pull_request') =>
+const judge = (needs: object, macos = '', eventName = 'pull_request', strictSwitch = '') =>
   Bun.spawnSync(['./scripts/ci/full-status.sh', 'judge'], {
     env: {
       ...process.env,
       NEEDS: JSON.stringify(needs),
       MACOS_SMOKE: macos,
       EVENT_NAME: eventName,
+      FY_STRICT_GUARANTEES_BLOCKING: strictSwitch,
       GITHUB_STEP_SUMMARY: '/dev/null',
     },
     stdout: 'pipe',
@@ -220,6 +223,21 @@ for (const name of needsOf('full')) {
     assert.notEqual(judge({ ...successful, [name]: { result } }), 0, `gate accepted ${name} ${result}`);
   }
 }
+// The strict-guarantee report is report-only while the ONE switch (workflow env) is 'false': the job's own setup steps
+// or timeout cannot turn Full CI red then. At 'true' it is judged like every other job, and only it is relaxed.
+assert.equal(ci.env?.FY_STRICT_GUARANTEES_BLOCKING, 'false', 'the strict report ships non-blocking');
+assert.equal(
+  jobOf(ci, 'strict-guarantees').env,
+  undefined,
+  'the switch lives at workflow level, one value for both readers',
+);
+for (const result of ['failure', 'cancelled', 'skipped']) {
+  const needs = { ...successful, 'strict-guarantees': { result } };
+  assert.equal(judge(needs, '', 'pull_request', 'false'), 0, `non-blocking switch rejected a ${result} strict report`);
+  assert.notEqual(judge(needs, '', 'pull_request', 'true'), 0, `blocking switch accepted a ${result} strict report`);
+  assert.notEqual(judge({ ...needs, quick: { result: 'failure' } }, '', 'pull_request', 'false'), 0);
+}
+assert.equal(judge(successful, '', 'pull_request', 'true'), 0);
 const darwinSkipped = { ...successful, 'smoke-darwin': { result: 'skipped' } };
 assert.equal(judge(darwinSkipped, 'skip'), 0);
 assert.equal(judge(darwinSkipped, 'SKIP'), 0);
