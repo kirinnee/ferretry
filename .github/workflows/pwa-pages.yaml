@@ -148,7 +148,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          if nix develop .#ci -c bunx wrangler pages project list | grep -qE '(^|[[:space:]])ferretry([[:space:]]|$)'; then
+          projects="$(nix develop .#ci -c bunx wrangler pages project list)"
+          if grep -qE '(^|[[:space:]])ferretry([[:space:]]|$)' <<<"${projects}"; then
             echo "project ferretry already exists"
           else
             nix develop .#ci -c bunx wrangler pages project create ferretry --production-branch=main

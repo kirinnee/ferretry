@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { hostLockProbe } from '../src/preflight.ts';
-import { clearYamlLogSwitches } from '../src/v4/config.ts';
+import { clearYamlLogSwitches } from '@ferretry/std/yaml';
 import { cleanPreview, dryRun, PREVIEW_PROGRAMS, prepare, proofNow, shimText, wrapperText } from './driver.ts';
 import { guardTarget } from './paths.ts';
 import { PREVIEW } from './plan.ts';
