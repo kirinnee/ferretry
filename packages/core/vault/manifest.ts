@@ -3,7 +3,7 @@ import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import type { ConfigDef } from '@ferretry/kernel/contract';
-import { definePlugin, route, tool } from '@ferretry/kernel/manifest';
+import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
 import {
   ChildEnvironmentPort,
   HoldsChanged,
@@ -170,6 +170,12 @@ export default definePlugin({
           'wait for the owner to answer your input card, or approve a sign-in on their phone (a pa_ id): where it stands, never the value or the number',
       }),
     ],
+    /** `fy secret set <name>` takes the value from stdin only, never from an argument (S1, S33). */
+    cli: [verb('secret set', { summary: 'store or replace a secret, reading its VALUE from stdin' })],
+  },
+  ui: {
+    settings: [settingsTab('secrets', { label: 'Secrets', order: 42 })],
+    renderers: [renderer('ask', { source: 'input' })],
   },
   provides: {
     vault: VaultPort,

@@ -126,12 +126,17 @@
       "name": "@ferretry/core-vault",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/app": "workspace:*",
         "@ferretry/core-asks": "workspace:*",
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "react": "^19.0.0",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@types/react": "^19.0.0",
       },
     },
     "packages/plugins/access": {
