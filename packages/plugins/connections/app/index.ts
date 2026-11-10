@@ -1,6 +1,6 @@
 import { type ConnectPorts, daemonOfClient, provideToShell } from '@ferretry/app';
 import { implementApp, type AppContext } from '@ferretry/kernel/manifest';
-import { createElement, useEffect, useState, useSyncExternalStore } from 'react';
+import { createElement, useSyncExternalStore } from 'react';
 import { CarriersChanged, CarriersViewSchema, type PublishedCarriers } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { CarrierRouter } from './carriers/router.ts';
@@ -8,6 +8,7 @@ import { bundledRelayDirectory, documentRelayDiscovery } from './discovery/hoste
 import { ActiveCarrierCard } from './features/carrier/active-carrier-card.tsx';
 import { CarrierPreferenceSelector } from './features/carrier/carrier-preference-selector.tsx';
 import { CarrierPreferenceStore } from './lib/carrier-preference.ts';
+import { type CarrierWriteBack, carrierWriteBack } from './lib/carrier-write-back.ts';
 import {
   browserConnectionSignals,
   type ConnectionSignalEnvironment,
@@ -83,36 +84,51 @@ export function buildConnect(
   });
   ports.daemons.registerCache({ clearDaemon: daemonId => router.clearDaemon(daemonId) });
   const pairing = pairingWalk({ openSocket: ports.openSocket, after: ports.after, hostedRelay: discovery.hostedRelay });
-  return { router, preferences, discovery, pairing };
+  // The daemon's answer to `GET /v1/carriers` REPLACES what this device stores for it (P51, R170, R186, R210).
+  const carrierSets = carrierWriteBack(ports.daemons);
+  return { router, preferences, discovery, pairing, carrierSets };
 }
 
 export function buildConnectionsApp(
   ctx: AppContext<typeof manifest>,
   measurements: ConnectionMeasurements = connect?.router ?? unmeasured,
   preferences: CarrierPreferenceStore = connect?.preferences ?? new CarrierPreferenceStore(),
+  carrierSets: CarrierWriteBack | undefined = connect?.carrierSets,
 ) {
   const daemonId = daemonOfClient(ctx.client);
+  /**
+   * The published set as the daemon last answered it, for every screen of this half. One refresh path: a successful
+   * answer is the connection proving itself, so it is also written back as this device's stored set. Read when the half
+   * is built for the daemon (whether or not a screen is open), and again whenever the daemon says its carriers changed.
+   */
+  const published = (() => {
+    let latest: PublishedCarriers = [];
+    const listeners = new Set<() => void>();
+    const refresh = () => {
+      const adopt = daemonId === undefined ? undefined : carrierSets?.begin(daemonId);
+      void Promise.resolve()
+        .then(() => ctx.client.call('GET /v1/carriers'))
+        .then(value => {
+          const parsed = CarriersViewSchema.safeParse(value);
+          if (!parsed.success) return;
+          adopt?.(parsed.data.carriers);
+          latest = parsed.data.carriers;
+          for (const listener of [...listeners]) listener();
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    ctx.client.subscribe(CarriersChanged, refresh);
+    return {
+      snapshot: (): PublishedCarriers => latest,
+      subscribe: (listener: () => void): (() => void) => {
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      },
+    };
+  })();
   function useCarriers(): PublishedCarriers {
-    const [carriers, setCarriers] = useState<PublishedCarriers>([]);
-    useEffect(() => {
-      let alive = true;
-      const refresh = () => {
-        void ctx.client
-          .call('GET /v1/carriers')
-          .then(value => {
-            const parsed = CarriersViewSchema.safeParse(value);
-            if (alive && parsed.success) setCarriers(parsed.data.carriers);
-          })
-          .catch(() => undefined);
-      };
-      refresh();
-      const stop = ctx.client.subscribe(CarriersChanged, refresh);
-      return () => {
-        alive = false;
-        stop();
-      };
-    }, []);
-    return carriers;
+    return useSyncExternalStore(published.subscribe, published.snapshot);
   }
   function Preference() {
     const carriers = useCarriers();
