@@ -203,3 +203,68 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
     expect(log).toContain('runner.start');
   });
 });
+
+describe('ci-lane-s F1 (row 55) a start the port admitted as outside the Warden’s tree says so to the stamp', () => {
+  /** The requests the stamp was handed, as the session port saw them. */
+  function stamping(requests: unknown[]): FerretSessionPort {
+    return {
+      prepare: async () => {},
+      stamp: async request => void requests.push(request),
+      carry: async () => {},
+    };
+  }
+
+  test('an admitted start hands the stamp notInWardenTree, and the same start without the admission does not', async () => {
+    const requests: unknown[] = [];
+    const f = fixture(stamping(requests));
+
+    expect((await f.service.start({ folder: '/work', by: 'owner' }, { notInWardenTree: true })).ok).toBe(true);
+    expect((await f.service.start({ folder: '/work', by: 'owner' })).ok).toBe(true);
+
+    expect(requests).toEqual([
+      { id: 'f1', requestedByHuman: true, notInWardenTree: true },
+      { id: 'f2', requestedByHuman: true },
+    ]);
+  });
+
+  test('a stamp that refuses an admitted start refuses the start, with the stamp failure not quoted', async () => {
+    const log: string[] = [];
+    const session: FerretSessionPort = {
+      ...recorder(log),
+      stamp: async request => {
+        if (request.notInWardenTree === true) throw new Error('FIXTURE_SECRET lineage');
+      },
+    };
+    const f = fixture(session, [], log);
+
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, { notInWardenTree: true });
+
+    expect(started.ok).toBe(false);
+    if (!started.ok)
+      expect(started.error.reason).toBe('where this ferret came from could not be recorded, so it was not started');
+    expect(log).not.toContain('runner.start');
+  });
+});
+
+describe('ci-lane-s-r2 N2 (row 59) the lineage question fails closed when the session port cannot answer it', () => {
+  test('a session port that stamps but has no inWardenLineage makes the question reject, never answer false', async () => {
+    const f = fixture(recorder([]));
+    await expect(f.service.inWardenLineage(ferretId('parent'))).rejects.toThrow();
+  });
+
+  test('a session port that answers is asked, and its answer is the answer', async () => {
+    const asked: string[] = [];
+    const f = fixture({
+      ...recorder([]),
+      inWardenLineage: async parent => (asked.push(parent), parent === 'warden-child'),
+    });
+    expect(await f.service.inWardenLineage(ferretId('warden-child'))).toBe(true);
+    expect(await f.service.inWardenLineage(ferretId('other'))).toBe(false);
+    expect(asked).toEqual(['warden-child', 'other']);
+  });
+
+  test('with no session port at all nothing is stamped, so there is no lineage to ask: false', async () => {
+    const f = fixture(undefined as unknown as FerretSessionPort);
+    expect(await f.service.inWardenLineage(ferretId('parent'))).toBe(false);
+  });
+});

@@ -8,7 +8,7 @@ import {
   FileSessionEnvironmentStore,
   FileSessionTaskStore,
 } from '../../../../daemon/adapters/session/lifecycle/index.ts';
-import { SessionFiles } from '../../../../daemon/modules/session-files.ts';
+import { SessionFiles, type SessionFilesDeps } from '../../../../daemon/modules/session-files.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { SessionConfigSchema } from '../../../../daemon/lib/protocol/session.ts';
 import type { RegisteredAncestor } from '../../../../daemon/adapters/session/provenance/storage-session-ancestry.ts';
@@ -64,6 +64,7 @@ async function files(
   roots: Pick<RootsPort, 'root'>,
   warnings: string[] = [],
   fleet: readonly RegisteredAncestor[] = [],
+  seed?: SessionFilesDeps['seed'],
 ) {
   const { storage, folder } = await memoryStorage({ clock: { now: () => NOW } });
   const subject = new SessionFiles({
@@ -73,6 +74,7 @@ async function files(
     sleep: async () => undefined,
     paths: diskPaths(),
     fleet: () => fleet,
+    ...(seed === undefined ? {} : { seed }),
     log: { warn: message => void warnings.push(message) },
   });
   return { subject, storage, folder };
@@ -611,6 +613,88 @@ describe('unbuilt adapters: provenance', () => {
       expect(documented).toContain(OTHER);
       expect(documented).not.toContain('fleet-');
     }
+  });
+});
+
+describe('ci-lane-s F1 (row 55) a start the port admitted as outside the Warden’s tree is refused by the stamp when lineage resolves true', () => {
+  async function under(parentDocument: Record<string, unknown>) {
+    const kernel = await wired();
+    const { subject, storage } = await files(kernel.roots, [], [{ id: OTHER, label: 'team' }]);
+    await storage.writeConfig(FERRET, sessionConfig(FERRET, { parent: OTHER }));
+    await storage.writeConfig(OTHER, sessionConfig(OTHER, parentDocument));
+    return { subject, storage };
+  }
+  const provenanceOf = async (storage: Awaited<ReturnType<typeof files>>['storage']) =>
+    SessionConfigSchema.parse(await storage.readConfig(FERRET)).provenance;
+  const admitted = { id: FERRET, parent: OTHER, requestedByHuman: false, notInWardenTree: true } as const;
+
+  test('a parent whose document marks it in the Warden’s tree refuses the admitted start, and nothing is stamped', async () => {
+    const { subject, storage } = await under({ label: WARDEN_LABEL });
+
+    const refused = await subject.port.stamp(admitted).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+
+    expect(refused).toBe('a start the port admitted as outside the Warden’s tree would be stamped into it');
+    expect(await provenanceOf(storage)).toBeUndefined();
+  });
+
+  test('the same start without the admission is stamped into the Warden’s lineage, as the route’s start is', async () => {
+    const { subject, storage } = await under({ label: WARDEN_LABEL });
+
+    await subject.port.stamp({ id: FERRET, parent: OTHER, requestedByHuman: false });
+
+    expect(await provenanceOf(storage)).toMatchObject({ origin: 'warden', wardenLineage: true });
+  });
+
+  test('an admitted start under an ordinary parent is stamped as before', async () => {
+    const { subject, storage } = await under({ label: 'team' });
+
+    await subject.port.stamp(admitted);
+
+    expect(await provenanceOf(storage)).toMatchObject({ origin: 'session', wardenLineage: false, parent: OTHER });
+  });
+});
+
+describe('ci-lane-s-r2 N1 (row 58) the lineage question waits for the document backfill, as the start’s stamp does', () => {
+  test('in the boot window an indexed parent with no document yet is answered after the backfill, not refused', async () => {
+    // Arrange: the parent has only a history file (indexed, no document); the registry can seed one for it
+    const kernel = await wired();
+    const { subject, storage, folder } = await files(kernel.roots, [], [{ id: OTHER, label: 'team' }], id => ({
+      record: {
+        format: 1,
+        id: ferretId(id),
+        name: 'parent',
+        role: 'lead',
+        harness: 'claude-code',
+        runner: 'tmux',
+        folder: '/work',
+        state: 'stopped',
+        createdAt: T0,
+        stateAt: T0,
+      },
+      details: undefined,
+    }));
+    await folder
+      .port([FerretHistoryFiles])
+      .append(FerretHistoryFiles, encodeSessionEvent(createSessionEvent(OTHER, 0, NOW, 'ferret.stopped', {})), OTHER);
+    await storage.rebuildIndex();
+    let release: (ferrets: readonly string[]) => void = () => undefined;
+    const backfilling = subject.backfill(
+      () =>
+        new Promise<readonly string[]>(resolve => {
+          release = resolve;
+        }),
+    );
+
+    // Act: asked while the backfill is still running, then the backfill finishes
+    const asked = subject.port.inWardenLineage!(ferretId(OTHER));
+    release([OTHER]);
+    await backfilling;
+
+    // Assert: answered (not in the tree), where an unawaited snapshot would have thrown for the missing document
+    expect(await asked).toBe(false);
   });
 });
 

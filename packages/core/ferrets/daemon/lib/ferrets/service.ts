@@ -318,7 +318,9 @@ export interface FerretSessionPort {
    * Port-only (not on the contract): whether a ferret started under `parent` would be stamped into the Warden's
    * lineage, decided from the SAME source and rule the start's stamp uses (the session documents, `resolveWardenLineage`),
    * not from the registry summary, which does not carry the stamp. Throws when the documents cannot be read; the caller
-   * refuses then. Unbound: the stamp is not written either, so there is no lineage to ask.
+   * refuses then. A session port that binds `stamp` must bind this too: `FerretsService.inWardenLineage` rejects (fails
+   * closed) when it is absent, never answering `false`. With no session port at all the stamp is not written either, so
+   * there is no lineage to ask.
    */
   inWardenLineage?(parent: FerretId): Promise<boolean>;
 }
@@ -333,6 +335,16 @@ export interface OpeningFile {
 interface LaunchExtras {
   readonly attached?: readonly OpeningFile[] | undefined;
   readonly carried?: ResumeOptions['onCarried'] | undefined;
+  readonly notInWardenTree?: true | undefined;
+}
+
+/**
+ * What the port that admitted a start tells the service about it (internal, not a contract; the route passes none):
+ * `notInWardenTree` is set for a start the port let through as outside the Warden's tree, so the spawn stamp can refuse
+ * when lineage resolves true after all (the port's parent check and the stamp read the ancestry separately).
+ */
+export interface StartAdmission {
+  readonly notInWardenTree?: true;
 }
 
 /** What a revive's turn is made from: the message (none: the mode's default), the ferret's mode and who asked. */
@@ -589,10 +601,15 @@ export class FerretsService implements FerretsApi {
   /**
    * Port-only (not a {@link FerretsApi} member): whether a start under `parent` would be stamped into the Warden's
    * lineage, as the session documents say. `false` with the session port unbound (nothing is stamped then). Rejects when
-   * the documents cannot be read.
+   * the documents cannot be read, and when a bound session port (which stamps) has no way to answer: a stamp written
+   * with the lineage check silently off would be the unsafe reading, so the question fails closed.
    */
   async inWardenLineage(parent: FerretId): Promise<boolean> {
-    return (await this.ports.session?.inWardenLineage?.(parent)) ?? false;
+    const session = this.ports.session;
+    if (session === undefined) return false;
+    if (session.inWardenLineage === undefined)
+      throw new Error('the session port stamps but cannot say whether a parent is in the Warden’s tree');
+    return await session.inWardenLineage(parent);
   }
 
   mayTouch(caller: FerretId, target: FerretId): boolean {
@@ -613,7 +630,7 @@ export class FerretsService implements FerretsApi {
     return this.registry.get(ferret)?.handle as RunnerHandle | undefined;
   }
 
-  async start(request: StartRequest): Promise<Result<FerretId, StartFailure>> {
+  async start(request: StartRequest, admission: StartAdmission = {}): Promise<Result<FerretId, StartFailure>> {
     // `by` is closed by the port's type only, and a plugin's cast is not checked by it. A start that reached
     // `start.decide` as `by: 'resume'` would be answered without Packs' limits, so any other `by` is refused here.
     if (!Object.hasOwn(START_ASKERS, request.by)) return failed('refused', START_ASKER_REFUSAL);
@@ -629,7 +646,7 @@ export class FerretsService implements FerretsApi {
       if (this.registry.get(id) === undefined) await this.ports.claims?.release(named.value, id).catch(() => undefined);
     };
     try {
-      const result = await this.startNamed(id, named.value, request);
+      const result = await this.startNamed(id, named.value, request, admission);
       if (!result.ok) await giveBack();
       return result;
     } catch (error) {
@@ -728,7 +745,12 @@ export class FerretsService implements FerretsApi {
     return ok({ prompt: `${prompt}\n${planned.value.section}`, files });
   }
 
-  private async startNamed(id: FerretId, name: string, request: StartRequest): Promise<Result<FerretId, StartFailure>> {
+  private async startNamed(
+    id: FerretId,
+    name: string,
+    request: StartRequest,
+    admission: StartAdmission,
+  ): Promise<Result<FerretId, StartFailure>> {
     // A work folder replaces the folder the ferret works in; it is canonical and goes through the same folder check.
     const anchor = this.ports.folder(request.folder);
     if (!anchor.ok) return failed('folder', anchor.error);
@@ -802,6 +824,7 @@ export class FerretsService implements FerretsApi {
       });
       return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
         attached: opening.value.files,
+        ...(admission.notInWardenTree === true ? { notInWardenTree: true as const } : {}),
       });
     });
   }
@@ -1508,13 +1531,13 @@ export class FerretsService implements FerretsApi {
     revive?: ReviveTurnRequest,
     extras: LaunchExtras = {},
   ): Promise<Result<FerretId, StartFailure>> {
-    const { attached = [], carried } = extras;
+    const { attached = [], carried, notInWardenTree } = extras;
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
     let turn: PendingTurn | undefined;
     try {
-      const session = await this.sessionStep(record, kind, prompt, revive, attached);
+      const session = await this.sessionStep(record, kind, prompt, revive, attached, notInWardenTree);
       if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
       turn = session.value;
       runner = this.ports.runner();
@@ -1664,6 +1687,7 @@ export class FerretsService implements FerretsApi {
     prompt: string | undefined,
     revive: ReviveTurnRequest | undefined,
     attached: readonly OpeningFile[] = [],
+    notInWardenTree?: true,
   ): Promise<Result<PendingTurn | undefined, StartFailure>> {
     const session = this.ports.session;
     if (session === undefined) return ok(undefined);
@@ -1696,6 +1720,7 @@ export class FerretsService implements FerretsApi {
         ...(label === undefined ? {} : { label }),
         ...(record.parent === undefined ? {} : { parent: record.parent }),
         requestedByHuman: record.parent === undefined,
+        ...(notInWardenTree === true ? { notInWardenTree: true as const } : {}),
       };
       try {
         await session.stamp(request);

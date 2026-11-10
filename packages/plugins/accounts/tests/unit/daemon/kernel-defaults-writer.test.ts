@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { ConfigFileDef, ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import should from 'should';
 import type { AccountsConfig } from '../../../contract/index.ts';
+import type { AccountDefaultsFile } from '../../../contract/routes/index.ts';
 import { KernelAccountDefaultsWriter } from '../../../daemon/adapters/kernel-defaults-writer.ts';
 import { AccountDefaultsFileBroken } from '../../../daemon/lib/account-defaults.ts';
 
@@ -21,6 +22,71 @@ function writerOver(outcome: ConfigWriteOutcome) {
   } as unknown as Pick<ConfigPort, 'file' | 'fileState' | 'writeAsOwner'>;
   return new KernelAccountDefaultsWriter(config, {} as ConfigFileDef<AccountsConfig>);
 }
+
+/** A port noting every write-shaped call, answering `written`; `held` makes `accounts.yaml` hold an edit. */
+function portNoting(held: boolean, file: AccountDefaultsFile) {
+  const calls: { readonly call: 'write' | 'writeAsOwner'; readonly edit: unknown }[] = [];
+  const written: ConfigWriteOutcome = { kind: 'written', etag: 'e', loosened: [] };
+  const port = {
+    file: () => file,
+    fileState: () => ({ state: held ? 'held' : 'valid', inEffect: true }),
+    write: async (_def: unknown, _name: unknown, edit: unknown) => (calls.push({ call: 'write', edit }), written),
+    writeAsOwner: async (_def: unknown, _name: unknown, edit: unknown) => (
+      calls.push({ call: 'writeAsOwner', edit }), written
+    ),
+  } as unknown as Pick<ConfigPort, 'file' | 'fileState' | 'writeAsOwner'>;
+  return { writer: new KernelAccountDefaultsWriter(port, {} as ConfigFileDef<AccountsConfig>), calls };
+}
+
+const BEFORE: AccountDefaultsFile = {
+  sites: { 'a.example': 'one', 'b.example': 'two' },
+  projects: { p: { k: 'one' } },
+};
+
+describe('the accounts defaults writer beside a held edit (row 62)', () => {
+  it('M15 should send only the lines the owner changed, each section merged, while accounts.yaml holds an edit', async () => {
+    const { writer, calls } = portNoting(true, BEFORE);
+
+    // 'a.example' is set to a new account and 'b.example' is removed
+    await writer.amend(file => ({ ...file, sites: { 'a.example': 'three' } }), 'refuse');
+
+    should(calls).deepEqual([
+      {
+        call: 'writeAsOwner',
+        edit: { patch: { sites: { 'a.example': 'three', 'b.example': undefined } }, within: ['sites'] },
+      },
+    ]);
+  });
+
+  it('should send the whole sections through writeAsOwner when nothing is held', async () => {
+    const { writer, calls } = portNoting(false, BEFORE);
+
+    await writer.amend(file => ({ ...file, sites: { ...file.sites, 'a.example': 'three' } }), 'refuse');
+
+    should(calls).deepEqual([
+      {
+        call: 'writeAsOwner',
+        edit: {
+          patch: {
+            sites: { 'a.example': 'three', 'b.example': 'two' },
+            projects: { p: { k: 'one' } },
+            folders: undefined,
+          },
+        },
+      },
+    ]);
+  });
+
+  it('M14 should never use a plain write, held or not', async () => {
+    for (const held of [true, false]) {
+      const { writer, calls } = portNoting(held, BEFORE);
+
+      await writer.amend(file => ({ ...file, sites: { ...file.sites, 'a.example': 'three' } }), 'refuse');
+
+      should(calls.map(entry => entry.call)).deepEqual(['writeAsOwner']);
+    }
+  });
+});
 
 const broken = async (work: Promise<unknown>) =>
   (await work.then(
