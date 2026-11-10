@@ -20,7 +20,9 @@ import {
   relayRedialDelayMs,
   relaySocketIsStale,
 } from '../../../daemon/lib/relay/carrier.ts';
+import { dialledRelayUrl, publishedDaemonCarriers } from '../../../daemon/lib/relay/discovery.ts';
 import { DaemonRelayConfigSchema } from '../../../daemon/lib/runtime/relay-config.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const DAEMON_ID = 'fy_daemon_HKk0mHiVBz4CHkYSCYnLK1LZ8xrxsWnkuiwlOihQaN8';
 
@@ -57,6 +59,36 @@ describe('the relay carrier decision', () => {
       relayOrigin: 'https://relay.example:8443',
       reconnectMs: 45_000,
     });
+  });
+
+  guarantee(['R123'], 'should publish the address the daemon dials and sign the host that address names', () => {
+    // Act — for every spelling a relay address takes (default port, explicit port, a path prefix, mixed case),
+    // the browser is handed the published URL; the claim signature covers the host of the SAME URL.
+    for (const url of [
+      'https://relay.example',
+      'https://relay.example:8443',
+      'https://relay.example/hosted',
+      'https://RELAY.Example:8443/hosted/',
+    ]) {
+      const config = relayConfig({ url });
+      const published = publishedDaemonCarriers(undefined, [{ kind: 'configured', config }]);
+      const decision = decideRelayCarrier(config, DAEMON_ID);
+      should(decision.kind).equal('dial');
+      if (decision.kind !== 'dial') continue;
+
+      // Assert — one relay entry, it is the dialled address, and its host is exactly the signed host.
+      const relays = published.filter(carrier => carrier.kind === 'relay');
+      should(relays).have.length(1);
+      should(relays[0]?.url).equal(dialledRelayUrl({ kind: 'configured', config }));
+      should(new URL(relays[0]?.url ?? '').host).equal(decision.relayHost);
+      // The daemon's socket is on the same host the browser will dial.
+      should(new URL(decision.socketUrl).host).equal(decision.relayHost);
+    }
+
+    // A switched-off relay publishes no address, so there is no host for a browser to dial unsigned.
+    const off = relayConfig({ enabled: false });
+    should(publishedDaemonCarriers(undefined, [{ kind: 'configured', config: off }])).deepEqual([]);
+    should(decideRelayCarrier(off, DAEMON_ID).kind).equal('none');
   });
 
   it('should ask a rendezvous for its features in the query, leaving the route untouched', () => {

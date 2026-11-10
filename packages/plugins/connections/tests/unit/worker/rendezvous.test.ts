@@ -1,4 +1,6 @@
 import { describe, it } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   CLAIM_DEADLINE_SECONDS,
   CONNECTION_RATE_LIMIT,
@@ -297,43 +299,47 @@ describe('rendezvous: claiming the slot', () => {
     should(messagesTo(laterDaemon.effects, 'late')[0]).match({ t: 'challenge' });
   });
 
-  it('should bound daemon arrivals in a window of their own, and read stored state that has none', () => {
-    // State an earlier deploy stored has no daemon window; it reads as empty.
-    let state: RendezvousState = { daemonId, daemon: null, pending: [], sessions: [], arrivals: [] };
-    for (let index = 0; index < CONNECTION_RATE_LIMIT; index += 1) {
-      const step = reduceRendezvous(state, {
+  guarantee(
+    ['R115'],
+    'should bound daemon arrivals in a window of their own, and read stored state that has none',
+    () => {
+      // State an earlier deploy stored has no daemon window; it reads as empty.
+      let state: RendezvousState = { daemonId, daemon: null, pending: [], sessions: [], arrivals: [] };
+      for (let index = 0; index < CONNECTION_RATE_LIMIT; index += 1) {
+        const step = reduceRendezvous(state, {
+          kind: 'daemon-arrived',
+          socketId: `redial-`,
+          challenge: new Uint8Array(32),
+          host,
+          at: 1_000 + index,
+        });
+        // Refused for want of a pending slot after the first few, and every refusal still counts.
+        state = { ...step.state, pending: [] };
+      }
+      const flooding = reduceRendezvous(state, {
         kind: 'daemon-arrived',
-        socketId: `redial-`,
+        socketId: 'one-more',
         challenge: new Uint8Array(32),
         host,
-        at: 1_000 + index,
+        at: 1_100,
       });
-      // Refused for want of a pending slot after the first few, and every refusal still counts.
-      state = { ...step.state, pending: [] };
-    }
-    const flooding = reduceRendezvous(state, {
-      kind: 'daemon-arrived',
-      socketId: 'one-more',
-      challenge: new Uint8Array(32),
-      host,
-      at: 1_100,
-    });
-    should(closures(flooding.effects)[0]).match({
-      code: SESSION_CLOSE_CODES.rendezvousBusy,
-      reason: /too many connections/u,
-    });
-    should(flooding.state.arrivals).deepEqual([]);
+      should(closures(flooding.effects)[0]).match({
+        code: SESSION_CLOSE_CODES.rendezvousBusy,
+        reason: /too many connections/u,
+      });
+      should(flooding.state.arrivals).deepEqual([]);
 
-    // The window slides: a minute later the daemon is admitted again.
-    const later = reduceRendezvous(state, {
-      kind: 'daemon-arrived',
-      socketId: 'a-minute-later',
-      challenge: new Uint8Array(32),
-      host,
-      at: 1_100 + CONNECTION_RATE_WINDOW_SECONDS * 1000,
-    });
-    should(messagesTo(later.effects, 'a-minute-later')[0]).match({ t: 'challenge' });
-  });
+      // The window slides: a minute later the daemon is admitted again.
+      const later = reduceRendezvous(state, {
+        kind: 'daemon-arrived',
+        socketId: 'a-minute-later',
+        challenge: new Uint8Array(32),
+        host,
+        at: 1_100 + CONNECTION_RATE_WINDOW_SECONDS * 1000,
+      });
+      should(messagesTo(later.effects, 'a-minute-later')[0]).match({ t: 'challenge' });
+    },
+  );
 });
 
 describe('rendezvous: sessions', () => {
@@ -395,7 +401,84 @@ describe('rendezvous: sessions', () => {
 });
 
 describe('rendezvous: forwarding', () => {
-  guarantee(['R117', 'R120', 'R126', 'R168', 'R169'], 'should move records both ways without decoding them', () => {
+  guarantee(
+    ['R117'],
+    'should store only what a relay can see: the fingerprint, the key claim, counts and timings',
+    () => {
+      // Arrange — a claimed daemon, one session, and a record with a payload the relay must not keep.
+      const target = sessionId(1);
+      const secret = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x13, 0x37]);
+      const sealed: SessionFrame = { kind: FRAME_KINDS.data, sessionId: target, sequence: 1, payload: secret };
+      const opened = withClient(2_000, 'phone', target);
+      const carried = reduceRendezvous(opened.state, { kind: 'frame', socketId: 'phone', frame: sealed, at: 3_000 });
+
+      // Assert — every stored field is on the list of what a relay may see; none is a place for content.
+      const state = carried.state;
+      for (const key of Object.keys(state)) {
+        should(['arrivals', 'daemon', 'daemonArrivals', 'daemonId', 'ended', 'pending', 'sessions']).containEql(key);
+      }
+      should(state.daemonId).equal(daemonId);
+      for (const key of Object.keys(state.daemon ?? {})) {
+        should(['socketId', 'since', 'features', 'handover', 'restored']).containEql(key);
+      }
+      for (const session of state.sessions) {
+        should(Object.keys(session).sort()).deepEqual([
+          'clientSocketId',
+          'fromClient',
+          'fromDaemon',
+          'sessionId',
+          'since',
+        ]);
+        should(Object.keys(session.fromClient).sort()).deepEqual(Object.keys(newSendWindow()).sort());
+      }
+      // Counts and timings, never bytes: the arrival log is plain timestamps.
+      for (const arrival of state.arrivals) should(typeof arrival).equal('number');
+      should(state.sessions[0]?.fromClient.sent).equal(1);
+      // No payload byte sequence survives anywhere in what is stored.
+      const stored = JSON.stringify(state, (_key, value: unknown) =>
+        value instanceof Uint8Array ? Array.from(value).join(',') : value,
+      );
+      should(stored).not.containEql(Array.from(secret).join(','));
+      should(stored).not.containEql(publicKey);
+      should(stored).not.containEql(signature);
+    },
+  );
+
+  guarantee(['R120', 'R124'], 'should forward sealed bytes untouched and keep none of them', () => {
+    // The same reducer runs a self-hosted and a hosted relay: neither holds a key, so neither can read a payload.
+    const target = sessionId(1);
+    const sealed = new Uint8Array(64).map((_value, index) => (index * 37 + 11) & 0xff);
+    const opened = withClient(2_000, 'phone', target);
+    const before = JSON.stringify(opened.state, (_key, value: unknown) =>
+      value instanceof Uint8Array ? Array.from(value) : value,
+    );
+    const up = reduceRendezvous(opened.state, {
+      kind: 'frame',
+      socketId: 'phone',
+      frame: { kind: FRAME_KINDS.data, sessionId: target, sequence: 1, payload: sealed },
+      at: 3_000,
+    });
+    const [carried] = forwarded(up.effects);
+    should(carried?.socketId).equal('daemon');
+    should(Array.from(carried?.frame.payload ?? [])).deepEqual(Array.from(sealed));
+
+    // The only thing that changed in storage is a counter: no payload, no id, no name was written.
+    const afterSession = up.state.sessions[0];
+    const beforeSession = opened.state.sessions[0];
+    should(afterSession?.sessionId.text).equal(beforeSession?.sessionId.text);
+    should(afterSession?.clientSocketId).equal(beforeSession?.clientSocketId);
+    should({ ...up.state, sessions: [] }).deepEqual({ ...opened.state, sessions: [] });
+    const after = JSON.stringify(up.state, (_key, value: unknown) =>
+      value instanceof Uint8Array ? Array.from(value) : value,
+    );
+    should(after).not.containEql(Array.from(sealed.slice(0, 8)).join(','));
+    should(before).not.containEql(Array.from(sealed.slice(0, 8)).join(','));
+
+    // The control messages the relay itself writes carry no content either: `open` has no fields but its tag.
+    should(messagesTo(opened.effects, 'daemon')[0]).deepEqual({ t: 'open' });
+  });
+
+  guarantee(['R168', 'R169'], 'should move records both ways without decoding them', () => {
     const opened = withClient();
     const target = sessionId(1);
 
@@ -457,6 +540,52 @@ describe('rendezvous: forwarding', () => {
     should(overflowing.state.sessions).deepEqual([]);
     // Ending a session reshapes the rendezvous, so it is never written the cheap way.
     should(overflowing.windowOnly).be.undefined();
+  });
+
+  guarantee(['R108'], 'should end the session when counters reset to an older state fall behind the sender', () => {
+    // A credit-only step is written without waiting for the write to be confirmed (R107), so after an object
+    // reset the stored window can be OLDER than what the peers already agreed. Arrange — the daemon grants the
+    // client more credit, and the client spends it; that is the truth the peers hold.
+    let stale = withClient().state;
+    for (let frame = 0; frame < CREDIT_WINDOW_FRAMES; frame += 1) {
+      stale = reduceRendezvous(stale, {
+        kind: 'frame',
+        socketId: 'phone',
+        frame: record(sessionId(1), frame + 1),
+        at: 3_000 + frame,
+      }).state;
+    }
+    const granted = reduceRendezvous(stale, {
+      kind: 'frame',
+      socketId: 'daemon',
+      frame: credit(sessionId(1), CREDIT_WINDOW_FRAMES),
+      at: 3_500,
+    });
+    should(granted.state.sessions[0]?.fromClient.allowed).equal(CREDIT_WINDOW_FRAMES * 2);
+    // With the grant, the next frame is fine: that is the truth the two peers hold.
+    const onward = reduceRendezvous(granted.state, {
+      kind: 'frame',
+      socketId: 'phone',
+      frame: record(sessionId(1), CREDIT_WINDOW_FRAMES + 1),
+      at: 3_600,
+    });
+    should(forwarded(onward.effects)).have.length(1);
+    should(onward.state.sessions).have.length(1);
+
+    // Act — the object resets and reloads the state from BEFORE the grant; the client carries on from its count.
+    const behind = reduceRendezvous(stale, {
+      kind: 'frame',
+      socketId: 'phone',
+      frame: record(sessionId(1), CREDIT_WINDOW_FRAMES + 1),
+      at: 4_000,
+    });
+
+    // Assert — the stale counters end the session with 4430 for both ends; nothing is forwarded.
+    should(closures(behind.effects)[0]?.code).equal(SESSION_CLOSE_CODES.flowViolation);
+    should(SESSION_CLOSE_CODES.flowViolation).equal(4430);
+    should(messagesTo(behind.effects, 'daemon')[0]).match({ code: SESSION_CLOSE_CODES.flowViolation });
+    should(forwarded(behind.effects)).deepEqual([]);
+    should(behind.state.sessions).deepEqual([]);
   });
 
   it('should mark a forwarded frame as a step that moved nothing but a credit window', () => {
@@ -730,12 +859,50 @@ describe('rendezvous: departures and the sweep', () => {
     should(step.effects).deepEqual([]);
   });
 
-  guarantee(['R109', 'R110', 'R140'], 'should end every session when the daemon goes', () => {
+  guarantee(['R109', 'R140'], 'should end every session when the daemon goes', () => {
     const opened = withClient();
     const step = reduceRendezvous(opened.state, { kind: 'socket-closed', socketId: 'daemon', at: 4_000 });
     should(step.state.daemon).be.null();
     should(step.state.sessions).deepEqual([]);
     should(closures(step.effects)[0]).match({ socketId: 'phone', code: SESSION_CLOSE_CODES.daemonAbsent });
+  });
+
+  guarantee(['R110'], 'should make a reconnect a new session with its own id and windows, replaying nothing', () => {
+    // Arrange — a session that has carried frames both ways, then the client drops.
+    const first = sessionId(1);
+    let state = withClient(2_000, 'phone', first).state;
+    state = reduceRendezvous(state, { kind: 'frame', socketId: 'phone', frame: record(first, 1), at: 3_000 }).state;
+    state = reduceRendezvous(state, { kind: 'frame', socketId: 'daemon', frame: record(first, 1), at: 3_100 }).state;
+    const dropped = reduceRendezvous(state, { kind: 'socket-closed', socketId: 'phone', at: 4_000 });
+    should(dropped.state.sessions).deepEqual([]);
+
+    // Act — the same device dials again; the relay mints another session id.
+    const second = sessionId(2);
+    const rejoined = reduceRendezvous(dropped.state, {
+      kind: 'client-arrived',
+      socketId: 'phone-again',
+      sessionId: second,
+      at: 5_000,
+    });
+
+    // Assert — new id, fresh windows, and no frame of the old session carried over or replayed.
+    should(rejoined.state.sessions).have.length(1);
+    const session = rejoined.state.sessions[0];
+    should(session?.sessionId.text).equal(second.text).and.not.equal(first.text);
+    should(session?.fromClient.sent).equal(0);
+    should(session?.fromDaemon.sent).equal(0);
+    should(forwarded(rejoined.effects)).deepEqual([]);
+    should(messagesTo(rejoined.effects, 'phone-again')[0]).match({ t: 'ready' });
+
+    // The old id is not resumable: a frame naming it from the new socket is refused, never forwarded.
+    const stale = reduceRendezvous(rejoined.state, {
+      kind: 'frame',
+      socketId: 'phone-again',
+      frame: record(first, 2),
+      at: 5_100,
+    });
+    should(forwarded(stale.effects)).deepEqual([]);
+    should(closures(stale.effects)[0]).match({ socketId: 'phone-again', code: SESSION_CLOSE_CODES.protocolError });
   });
 
   it('should end a client whose session outlived a forgotten daemon without addressing anyone else', () => {
@@ -747,7 +914,7 @@ describe('rendezvous: departures and the sweep', () => {
     should(step.effects).deepEqual([]);
   });
 
-  it('should tell the daemon when one client goes, and ignore a socket it does not know', () => {
+  guarantee(['R109'], 'should tell the daemon when one client goes, and ignore a socket it does not know', () => {
     const opened = withClient();
     const step = reduceRendezvous(opened.state, { kind: 'socket-closed', socketId: 'phone', at: 4_000 });
     should(messagesTo(step.effects, 'daemon')[0]).match({ t: 'closed', reason: 'the client disconnected' });
@@ -1164,6 +1331,17 @@ describe('rendezvous: handing the claim over to the same daemon', () => {
     should(messagesTo(step.settled.effects, 'phone')).match([{ t: 'closed', code: SESSION_CLOSE_CODES.daemonAbsent }]);
     should(closures(step.settled.effects).map(closure => closure.socketId)).deepEqual(['phone', 'old']);
     should(step.settled.state.sessions).deepEqual([]);
+    // The old socket is closed 4410 and told nothing first: no control message of any kind goes to it.
+    should(closures(step.settled.effects).find(closure => closure.socketId === 'old')?.code).equal(
+      SESSION_CLOSE_CODES.claimLost,
+    );
+    should(SESSION_CLOSE_CODES.claimLost).equal(4410);
+    should(SESSION_CLOSE_CODES.daemonAbsent).equal(4404);
+    should(messagesTo(step.settled.effects, 'old')).deepEqual([]);
+    should(step.settled.effects.some(effect => effect.kind === 'send' && effect.socketId === 'old')).be.false();
+    // The new holder is told `claimed`, and holds the slot.
+    should(messagesTo(step.settled.effects, 'new')).match([{ t: 'claimed' }]);
+    should(step.settled.state.daemon?.socketId).equal('new');
 
     // The old socket's own close, delivered late, must not take the new holder down with it.
     const late = reduceRendezvous(step.settled.state, { kind: 'socket-closed', socketId: 'old', at: 3_100 });
@@ -1192,18 +1370,22 @@ describe('rendezvous: handing the claim over to the same daemon', () => {
     },
   );
 
-  it('should refuse a claim that does not verify, even with the right token, and keep the holder', () => {
-    const state = holding();
-    const step = claim(state, 'new', { handover: tokenTwo, replaces: tokenOne });
-    const refused = reduceRendezvous(step.claiming.state, {
-      kind: 'claim-verdict',
-      socketId: 'new',
-      verdict: { ok: false, reason: 'bad signature' },
-      at: 3_000,
-    });
-    should(closures(refused.effects)[0]?.code).equal(SESSION_CLOSE_CODES.claimRejected);
-    should(refused.state.daemon?.socketId).equal('old');
-  });
+  guarantee(
+    ['R99'],
+    'should refuse a claim that does not verify, even with the right token, and keep the holder',
+    () => {
+      const state = holding();
+      const step = claim(state, 'new', { handover: tokenTwo, replaces: tokenOne });
+      const refused = reduceRendezvous(step.claiming.state, {
+        kind: 'claim-verdict',
+        socketId: 'new',
+        verdict: { ok: false, reason: 'bad signature' },
+        at: 3_000,
+      });
+      should(closures(refused.effects)[0]?.code).equal(SESSION_CLOSE_CODES.claimRejected);
+      should(refused.state.daemon?.socketId).equal('old');
+    },
+  );
 
   guarantee(['R58'], 'should not honour replaces from a socket that did not ask for the feature', () => {
     const arrived = reduceRendezvous(holding(), {
@@ -1239,19 +1421,23 @@ describe('rendezvous: handing the claim over to the same daemon', () => {
     should(step.effects.some(effect => effect.kind === 'verify-claim')).be.false();
   });
 
-  it('should keep the incumbent-wins refusal at arrival for a daemon that did not ask for the feature', () => {
-    const second = reduceRendezvous(holding(), {
-      kind: 'daemon-arrived',
-      socketId: 'other',
-      challenge: new Uint8Array(32),
-      host,
-      features: ['claim-probe'],
-      at: 3_000,
-    });
-    should(closures(second.effects)[0]?.code).equal(SESSION_CLOSE_CODES.rendezvousClaimed);
-  });
+  guarantee(
+    ['R99'],
+    'should keep the incumbent-wins refusal at arrival for a daemon that did not ask for the feature',
+    () => {
+      const second = reduceRendezvous(holding(), {
+        kind: 'daemon-arrived',
+        socketId: 'other',
+        challenge: new Uint8Array(32),
+        host,
+        features: ['claim-probe'],
+        at: 3_000,
+      });
+      should(closures(second.effects)[0]?.code).equal(SESSION_CLOSE_CODES.rendezvousClaimed);
+    },
+  );
 
-  it('should compare tokens of different lengths without throwing, and treat them as different', () => {
+  guarantee(['R99'], 'should compare tokens of different lengths without throwing, and treat them as different', () => {
     should(handoverTokensMatch(tokenOne, tokenOne)).be.true();
     should(handoverTokensMatch(tokenOne, tokenTwo)).be.false();
     should(handoverTokensMatch(tokenOne, tokenOne.slice(1))).be.false();
@@ -1275,4 +1461,66 @@ describe('rendezvous: handing the claim over to the same daemon', () => {
     const superseded = claim(step?.state ?? forgotten, 'new', { handover: tokenTwo, replaces: tokenOne });
     should(superseded.settled.state.daemon?.socketId).equal('new');
   });
+});
+
+describe('rendezvous: neither end knows it is Cloudflare', () => {
+  const connections = join(import.meta.dir, '..', '..', '..');
+
+  function sourcesUnder(...segments: string[]): { file: string; text: string }[] {
+    const root = join(connections, ...segments);
+    return readdirSync(root, { recursive: true, withFileTypes: true })
+      .filter(entry => entry.isFile() && /\.tsx?$/u.test(entry.name))
+      .map(entry => {
+        const file = join(entry.parentPath, entry.name);
+        return { file, text: readFileSync(file, 'utf8') };
+      });
+  }
+
+  // The import specifiers of one file: `import … from 'x'`, `export … from 'x'`, `import('x')` and `require('x')`.
+  function specifiers(text: string): string[] {
+    return [...text.matchAll(/(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/gu)].map(match => match[1] ?? '');
+  }
+
+  guarantee(
+    ['R126'],
+    'should keep the state machine, the daemon relay link and the browser carriers free of any Cloudflare import',
+    () => {
+      const layers = [
+        sourcesUnder('worker', 'src', 'lib'),
+        sourcesUnder('daemon', 'lib', 'relay'),
+        sourcesUnder('app', 'carriers'),
+      ];
+      should(layers.every(files => files.length > 0)).be.true();
+      for (const { file, text } of layers.flat()) {
+        for (const specifier of specifiers(text)) {
+          should({ file, specifier }).not.match({
+            specifier: /^cloudflare:|^@cloudflare\/|^wrangler|^miniflare|workerd/u,
+          });
+        }
+        // Nothing in them names the platform's runtime objects either.
+        should({
+          file,
+          uses: /\b(DurableObjectState|DurableObjectNamespace|WebSocketPair|ExecutionContext)\b/u.test(text),
+        }).deepEqual({
+          file,
+          uses: false,
+        });
+      }
+      // The worker's pure layer reaches no adapter: the Worker adapters import it, never the other way round.
+      for (const { file, text } of sourcesUnder('worker', 'src', 'lib')) {
+        for (const specifier of specifiers(text)) {
+          should({ file, specifier }).not.match({ specifier: /adapters\// });
+        }
+      }
+      // The proof can fail: the Worker adapter is where the platform's runtime objects live, and the same
+      // pattern finds them there; and it imports the platform-free lib, never the reverse.
+      const adapters = sourcesUnder('worker', 'src', 'adapters');
+      should(
+        adapters.some(({ text }) =>
+          /\b(DurableObjectState|DurableObjectNamespace|WebSocketPair|ExecutionContext)\b/u.test(text),
+        ),
+      ).be.true();
+      should(adapters.some(({ text }) => specifiers(text).some(specifier => /\/lib\//u.test(specifier)))).be.true();
+    },
+  );
 });
