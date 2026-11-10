@@ -930,11 +930,6 @@ async function start(world: World): Promise<TestHost> {
             ],
           };
         }
-        world.config.set(
-          key,
-          def.shape === 'file' ? effectiveNext : { ...(all ?? {}), [name as string]: effectiveNext },
-        );
-        for (const listener of configListeners.get(key) ?? []) listener();
         // The held version stays held while it still loosens what is now in effect; a held removal, while removing the
         // file would still loosen it (judged against the defaults, as `remove` judges it).
         const defaults = def.schema.safeParse({});
@@ -945,6 +940,22 @@ async function start(world: World): Promise<TestHost> {
                 ...judgeLoosening(def, effective.data, heldChecked.data),
                 ...addedSecretReferenceSentences(effective.data, heldChecked.data),
               ];
+        // A held REMOVAL the patch made harmless goes into effect, as the real load accepts the file's absence: the
+        // file is gone and the defaults apply.
+        if (heldChecked === undefined && still.length === 0) {
+          const { [name as string]: _gone, ...rest } = all ?? {};
+          if (def.shape === 'file') world.config.delete(key);
+          else world.config.set(key, rest);
+          for (const listener of configListeners.get(key) ?? []) listener();
+          heldValues.delete(path);
+          restamp(key, subject);
+          return { kind: 'written', etag: ABSENT_STAMP.etag, loosened: confirmed ? sentences : [] };
+        }
+        world.config.set(
+          key,
+          def.shape === 'file' ? effectiveNext : { ...(all ?? {}), [name as string]: effectiveNext },
+        );
+        for (const listener of configListeners.get(key) ?? []) listener();
         if (still.length === 0) {
           heldValues.delete(path);
           restamp(key, subject);
