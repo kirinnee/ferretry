@@ -103,16 +103,18 @@ that is not there). Three rules, in order:
    there, the owner's mapping is merged into the mapping already in each version **one level deep** — a sub-key
    it names is replaced whole (`undefined` removes it), and every sub-key it does not name is kept, so the held
    version's own sub-keys survive. A named key whose new or current value is not a mapping is replaced, as any
-   patch replaces a key. The schema, the loosening hold and the judge see the merged versions, and both are
-   written or neither. The same is true of every owner's save of a single file, not only Warden's: the lessons
-   settings and the default-account lines (`accounts.yaml`) go through `writeAsOwner` (with only the changed keys, or
-   lines, beside a held edit), and a PATCH through `ConfigPort.writeAsCaller` of a file with an edit held is made to
-   both versions too — the caller's change is judged against the version in effect alone (a loosening of its own
-   still asks Gate's judge, a `${secret:NAME}`reference it adds still asks the owner question, and one that only
-the held version names is never the caller's to confirm), so a person changing one field never puts another
-caller's held edit into effect. When the caller changes the very field the held edit staged, the caller's value
-is the value in both versions. A plain`write` (a ferret's, or a plugin's own) is made to the file as it is on disk,
-   the held text included, and stays held.
+   patch replaces a key. The schema, the loosening hold and the judge see the merged versions. The two versions
+   are two writes (the version in effect is recorded as accepted, then the held text is written), so a crash
+   between them keeps the held edit held and never puts it into effect.
+   Every PATCH of a file with an edit held for the owner — `ConfigPort.write`, `writeAsCaller`, `writeAsOwner` and
+   Gate's own `gate.yaml` saves — is made to BOTH versions: the caller's change is judged against the version in
+   effect alone, and the held edit, changed, stays held. A WHOLE text is the caller's whole text and replaces the held
+   edit. The lessons settings and the default-account lines (`accounts.yaml`) go through `writeAsOwner` (with only
+   the changed keys, or lines, beside a held edit). In every case the caller's change is judged against the version
+   in effect alone (a loosening of its own still asks Gate's judge, a `${secret:NAME}` reference it adds still asks
+   the owner question, and one that only the held version names is never the caller's to confirm), so a person
+   changing one field never puts another caller's held edit into effect. When the caller changes the very field the
+   held edit staged, the caller's value is the value in both versions.
 4. **A change of several files lands whole or not at all.** A change that spans files — a runtime, its profile
    and its model set — is ONE act in the kernel, `ConfigPort.writeAll`, never several writes a reader could see
    half of. Every document of the set is checked as a single write checks one (its own file, its name, YAML, a

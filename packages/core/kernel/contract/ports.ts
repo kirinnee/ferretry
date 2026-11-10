@@ -254,8 +254,8 @@ export type ConfigWriteOutcome =
       readonly etag: string;
       readonly loosened: readonly string[];
       /**
-       * Only on a {@link ConfigPort.writeAsOwner}, or a {@link ConfigPort.writeAsCaller} patch, that left ANOTHER edit of
-       * the same file held: the caller's change is in effect and the held edit (made to both versions, still held)
+       * Only on a PATCH ({@link ConfigPort.write}, {@link ConfigPort.writeAsCaller} or {@link ConfigPort.writeAsOwner})
+       * that left ANOTHER edit of the same file held: the caller's change is in effect and the held edit (made to both versions, still held)
        * waits for the owner.
        */
       readonly stillHeld?: { readonly id: string; readonly sentences: readonly string[] };
@@ -313,6 +313,11 @@ export interface ConfigPort {
    * the last good version is kept, and a loosening is put into effect only when Gate's judge
    * (`Admission.judgeConfigWrite`) says this call may; otherwise it is HELD for the owner. Another plugin's def is
    * refused `not_declared`.
+   *
+   * A PATCH of a file with an edit held for the owner is made to BOTH versions, as {@link writeAsOwner} makes one: the
+   * caller's change is judged against the version in effect alone, and the held edit, changed, stays held (answered as
+   * `stillHeld`), so a caller who may confirm a loosening never confirms the held one with it. A WHOLE text is the
+   * caller's whole text and replaces the held edit.
    */
   write(
     def: ConfigFileDef<any> | ConfigCollectionDef<any>,
