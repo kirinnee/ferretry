@@ -40,7 +40,8 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { looksSecret } from '@ferretry/std/credential-words';
+import { looksSecret, rawTextHoldsSecret } from '@ferretry/std/credential-words';
+import { WITHHELD_LINE } from '../../../daemon/lib/service/catalog.ts';
 import { redactTodayText } from './redact-today.ts';
 import { referenceRedactText } from './redact-reference.ts';
 import { privateKeyShapes } from './redact-private-keys.ts';
@@ -271,6 +272,8 @@ function soup(next: () => number): string {
 
 const BREAK = /\r\n|\r|\n/u;
 const KEPT_BREAK = /(\r\n|\r|\n)/u;
+/** How many lines the write rule's text test netted, over every text judged (the lines the oracle exempts by design). */
+const netted = { count: 0 };
 /** An indicator, with or without a comment after it: `|`, `>-`, `| # note`. */
 const INDICATOR = '[|>][-+0-9]*(?:[ \\t]+#.*)?';
 /** A line that ends in a name and its separator, the indicator of a block after them when there is one. */
@@ -506,11 +509,29 @@ function breach(text: string): string | undefined {
   const shownParts = shown.text.split(KEPT_BREAK);
   if (todays.length !== shownParts.length) return 'breaks its lines apart from today';
   let differs = false;
+  const todayUnits = today.text.split('\n');
+  let unit = 0;
   for (let part = 0; part < todays.length; part += 1) {
     const was = todays[part] ?? '';
     const is = shownParts[part] ?? '';
+    if (part % 2 === 1) {
+      if (was !== is) return 'differs from today outside the tightened lines';
+      if (was.endsWith('\n')) unit += 1;
+      continue;
+    }
     if (was === is) continue;
-    if (part % 2 === 1 || !tightened.has(part / 2)) return 'differs from today outside the tightened lines';
+    // Netted by design (CFG-LEAK ii): a line the write rule's text test refuses is replaced by the withheld line.
+    // Judged from today's own text (what the write rule reads on a line off the tightened ones is today's line, the
+    // two outputs being equal there), never from the code under test; a tightened line may be replaced whole too.
+    if (
+      is === WITHHELD_LINE &&
+      (tightened.has(part / 2) || rawTextHoldsSecret(was) || rawTextHoldsSecret(todayUnits[unit] ?? ''))
+    ) {
+      netted.count += 1;
+      differs = true;
+      continue;
+    }
+    if (!tightened.has(part / 2)) return 'differs from today outside the tightened lines';
     if (!hidesAtLeast(was, is)) return 'shows what today hides';
     differs = true;
   }
@@ -608,6 +629,9 @@ describe('component text redaction never hides less than today', () => {
       should(result.tightened).be.above(0);
       should(result.differed).be.above(0);
       should(result.continued).be.above(0);
+      // The exemption is taken, not only reached: lines the write rule refuses were netted.
+      should(netted.count).be.above(0);
+      if (process.env.REDACT_NETTED_REPORT !== undefined) console.info('netted lines', netted.count);
     },
     FUZZ_TIMEOUT,
   );

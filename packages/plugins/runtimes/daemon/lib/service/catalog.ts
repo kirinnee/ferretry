@@ -41,7 +41,7 @@ import {
 } from '../account/layering.ts';
 import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
 import { freeName } from '../account/import.ts';
-import { looksSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
+import { looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
 import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -932,6 +932,38 @@ function redactText(
   return { text: cut, redacted: redacted || lines.redacted };
 }
 
+/** What stands in place of a line of an instructions or hooks text that the write rule still refuses after the cut. */
+export const WITHHELD_LINE = `${HIDDEN_TEXT}: this line is not shown because it looks like it holds a secret; it stays as written in the file`;
+
+/**
+ * The line net of a component's text: after {@link redactText}, each line (cut at `\n`, the unit the write rule reads)
+ * that the write rule's text test (`rawTextHoldsSecret`) still refuses is replaced by {@link WITHHELD_LINE}, so no
+ * line shown is one the write rule would refuse and every other line stays as the cut left it. A line is judged alone,
+ * as the write rule judges it, and also by its parts when a lone `\r` splits it. Linear: each line is read once.
+ */
+function netTextLines(text: string): { readonly text: string; readonly withheld: boolean } {
+  let withheld = false;
+  const lines = text.split('\n').map(unit => {
+    const carriage = unit.endsWith('\r') ? '\r' : '';
+    const line = carriage === '' ? unit : unit.slice(0, -1);
+    // A lone `\r` is a line break to a reader, not to the write rule: the unit is refused whole, or by a part, and
+    // each part it holds a secret in (all of them, when the whole is refused) is replaced, so the breaks stay.
+    const whole = rawTextHoldsSecret(line);
+    const parts = line.split('\r');
+    if (!whole && (parts.length === 1 || !parts.some(part => rawTextHoldsSecret(part)))) return unit;
+    withheld = true;
+    return `${parts.map(part => (whole || rawTextHoldsSecret(part) ? WITHHELD_LINE : part)).join('\r')}${carriage}`;
+  });
+  return { text: lines.join('\n'), withheld };
+}
+
+/** A component's text as the views show it: cut by {@link redactText}, then netted line by line. */
+function shownComponentText(text: string): { readonly text: string; readonly redacted: boolean } {
+  const cut = redactText(text);
+  const netted = netTextLines(cut.text);
+  return { text: netted.text, redacted: cut.redacted || netted.withheld };
+}
+
 const isTable = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length > 0;
 
@@ -972,7 +1004,7 @@ function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts
   const text =
     kind === 'instructions' ? facts.instructionBodies?.[name] : kind === 'hooks' ? facts.hooksTexts?.[name] : undefined;
   if (text === undefined) return undefined;
-  return { form: 'text', ...redactText(text) };
+  return { form: 'text', ...shownComponentText(text) };
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text (U15's clone uses the same). */
@@ -999,7 +1031,7 @@ function checkPathOf(kind: ComponentKind, name: string, component: Record<string
   }
   const home = facts.userHome;
   for (const text of texts) {
-    for (const match of redactText(text).text.matchAll(HOME_PATH)) {
+    for (const match of shownComponentText(text).text.matchAll(HOME_PATH)) {
       const path = match[0];
       if (path !== home && !path.startsWith(`${home}/`)) return path;
     }
