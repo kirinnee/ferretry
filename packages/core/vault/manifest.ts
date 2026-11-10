@@ -10,6 +10,7 @@ import {
   HoldsFile,
   InputAskRefSchema,
   InputHoldsPort,
+  InputPhoneApprovals,
   InputRequestFiles,
   InputTargets,
   OutputGuardPort,
@@ -165,7 +166,8 @@ export default definePlugin({
         capability: INPUT_USE_TERMINAL,
         audit: { skip: 'a wait on the ferret’s own card: it changes nothing' },
         guard: 'secrets',
-        summary: 'wait for the owner to answer your input card: where it stands, never the value',
+        summary:
+          'wait for the owner to answer your input card, or approve a sign-in on their phone (a pa_ id): where it stands, never the value or the number',
       }),
     ],
   },
@@ -196,7 +198,7 @@ export default definePlugin({
     subscribes: [AsksChanged, FerretsChanged],
   },
   hooks: {
-    offers: [{ hook: InputTargets }, { hook: RedactionSources }],
+    offers: [{ hook: InputTargets }, { hook: InputPhoneApprovals }, { hook: RedactionSources }],
     takes: [{ hook: AskSources, key: 'input', schema: InputAskRefSchema }],
   },
 });
