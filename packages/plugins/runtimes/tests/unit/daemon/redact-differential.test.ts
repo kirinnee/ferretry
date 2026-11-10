@@ -40,7 +40,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { looksSecret, rawTextHoldsSecret } from '@ferretry/std/credential-words';
+import { findFlagSecrets, looksSecret, rawTextHoldsSecret } from '@ferretry/std/credential-words';
 import { WITHHELD_LINE } from '../../../daemon/lib/service/catalog.ts';
 import { redactTodayText } from './redact-today.ts';
 import { referenceRedactText } from './redact-reference.ts';
@@ -495,6 +495,20 @@ function hidesAtLeast(today: string, wider: string): boolean {
 }
 
 /**
+ * Whether the write rule refuses a line of today's text, as an instructions text is read both ways: by the text test
+ * on the line, and as a value in the component YAML (`findFlagSecrets({ text })`, a string with blanks read as words).
+ */
+const refusedToday = (line: string): boolean =>
+  rawTextHoldsSecret(line.replace(/\r$/u, '')) || findFlagSecrets({ text: line }).length > 0;
+
+/** Whether the write rule refuses today's unit `at` only with the last word of the unit before it (`--token⏎value`). */
+function refusedWithPrevious(units: readonly string[], at: number): boolean {
+  const words = (units[at - 1] ?? '').trimEnd().split(/\s+/u);
+  const last = words.at(-1) ?? '';
+  return last !== '' && findFlagSecrets({ text: `${last}\n${units[at] ?? ''}` }).length > 0;
+}
+
+/**
  * Why 5.0's output for `text` breaks the oracle, or undefined when it holds: line by line (nothing generated holds a
  * private-key header, the one cut that can take a line break with it, so the breaks of the two outputs line up), equal
  * to today's off the tightened lines and hiding at least what today hides on them, and redacted exactly when today is
@@ -525,7 +539,10 @@ function breach(text: string): string | undefined {
     // two outputs being equal there), never from the code under test; a tightened line may be replaced whole too.
     if (
       is === WITHHELD_LINE &&
-      (tightened.has(part / 2) || rawTextHoldsSecret(was) || rawTextHoldsSecret(todayUnits[unit] ?? ''))
+      (tightened.has(part / 2) ||
+        refusedToday(was) ||
+        refusedToday(todayUnits[unit] ?? '') ||
+        refusedWithPrevious(todayUnits, unit))
     ) {
       netted.count += 1;
       differs = true;

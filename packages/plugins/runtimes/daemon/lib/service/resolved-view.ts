@@ -21,6 +21,7 @@ import { type Conflict, type FlatLayer, type ResolvedProfile, settingsKey } from
 import { harnessKey } from './foreign.ts';
 import { looksSecret } from '@ferretry/std/credential-words';
 import {
+  commandWithheld,
   commandWordsOf,
   refusedIndexes,
   shownLine,
@@ -84,11 +85,20 @@ function serverLine(server: {
   readonly url?: string | undefined;
 }): string {
   if (server.url !== undefined) return bareUrl(server.url);
-  const words = [...commandWordsOf(server.command ?? ''), ...(server.args ?? [])].filter(word => word !== '');
-  const line = shownLine(words);
+  const command = server.command ?? '';
+  // THE ONE RULE for the command, as the detail: withheld whole when the write rule refuses it or the cutter, run on
+  // it as one string, cuts a value (a header pair across its blanks). Otherwise it is shown as written: what the
+  // cutter cut in it was a pointer, never a value.
+  if (commandWithheld(command)) return WITHHELD_WORDS_TEXT;
+  const words = commandWordsOf(command).map(word => ({ text: word, hidden: false }));
+  const args = shownLine(
+    (server.args ?? []).filter(word => word !== ''),
+    commandWordsOf(command).at(-1),
+  );
   // THE NET: the write rule still refuses a word the cutter showed: the whole line is withheld, never a part of it.
-  if (line.withheld) return WITHHELD_WORDS_TEXT;
-  const text = line.words.map(word => word.text).join(' ');
+  if (args.withheld || refusedIndexes([...words, ...args.words]).size > 0) return WITHHELD_WORDS_TEXT;
+  // The command as written (its blanks too, as the detail shows it), then the arguments as the cutter shows them.
+  const text = [command, ...args.words.map(word => word.text)].filter(word => word !== '').join(' ');
   // The write rule reads the command as one field and the line as the text it makes: a pair across the blanks of a
   // command (`Authorization: v`, one word to the document) or across its end and the first argument is caught here.
   return valueWithheld('command', server.command ?? '') || valueWithheld('line', text) ? WITHHELD_WORDS_TEXT : text;

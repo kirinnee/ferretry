@@ -41,7 +41,8 @@ import {
 } from '../account/layering.ts';
 import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
 import { freeName } from '../account/import.ts';
-import { looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
+import { findFlagSecrets, looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
+import { hooksDocumentRefusedLines } from './hooks-document-net.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -78,6 +79,7 @@ import { runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
 import {
+  commandWithheld,
   commandWordsOf,
   shownLine,
   shownWordsEtag,
@@ -292,7 +294,7 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
     case 'mcp': {
       const args = commandWords(component.args, component.command);
       // THE NET, for the text shown as written: withheld whole, never a part of it.
-      const commandHeld = typeof component.command === 'string' && writtenWithheld('command', component.command);
+      const commandHeld = typeof component.command === 'string' && commandWithheld(component.command);
       const urlHeld = typeof component.url === 'string' && writtenWithheld('url', component.url);
       return {
         kind,
@@ -949,14 +951,26 @@ export const WITHHELD_LINE = `${HIDDEN_TEXT}: this line is not shown because it 
  * line shown is one the write rule would refuse and every other line stays as the cut left it. A line is judged alone,
  * as the write rule judges it, and also by its parts when a lone `\r` splits it. Linear: each line is read once.
  */
-function netTextLines(text: string): { readonly text: string; readonly withheld: boolean } {
+function netTextLines(text: string, mode: TextMode): { readonly text: string; readonly withheld: boolean } {
   let withheld = false;
-  const lines = text.split('\n').map(unit => {
+  // A hooks file is a JSON document the write rule judges by its parsed values: the lines its refused paths stand on.
+  const document = mode === 'hooks' ? hooksDocumentRefusedLines(text) : undefined;
+  // An instructions text is also a VALUE (held in the component YAML): the write rule's flag test reads a string with
+  // blanks as words, and a flag may end one line while its value starts the next.
+  const flagged = (line: string): boolean => mode === 'instructions' && findFlagSecrets({ text: line }).length > 0;
+  let before = '';
+  const lines = text.split('\n').map((unit, index) => {
     const carriage = unit.endsWith('\r') ? '\r' : '';
     const line = carriage === '' ? unit : unit.slice(0, -1);
+    const last = lastWordOf(before);
+    before = line;
+    if (document === 'whole' || document?.has(index) === true) {
+      withheld = true;
+      return `${WITHHELD_LINE}${carriage}`;
+    }
     // A lone `\r` is a line break to a reader, not to the write rule: the unit is refused whole, or by a part, and
     // each part it holds a secret in (all of them, when the whole is refused) is replaced, so the breaks stay.
-    const whole = rawTextHoldsSecret(line);
+    const whole = rawTextHoldsSecret(line) || flagged(line) || (last !== '' && flagged(`${last}\n${line}`));
     const parts = line.split('\r');
     if (!whole && (parts.length === 1 || !parts.some(part => rawTextHoldsSecret(part)))) return unit;
     withheld = true;
@@ -965,10 +979,22 @@ function netTextLines(text: string): { readonly text: string; readonly withheld:
   return { text: lines.join('\n'), withheld };
 }
 
+/** What a text is read as: prose of an instructions file, a hooks JSON document, or any other text. */
+type TextMode = 'instructions' | 'hooks' | 'plain';
+
+/** The last blank-separated word of a line, `''` for a blank one (read from the end, once). */
+function lastWordOf(line: string): string {
+  let end = line.length;
+  while (end > 0 && line.charAt(end - 1).trim() === '') end -= 1;
+  let start = end;
+  while (start > 0 && line.charAt(start - 1).trim() !== '') start -= 1;
+  return line.slice(start, end);
+}
+
 /** A component's text as the views show it: cut by {@link redactText}, then netted line by line. */
-function shownComponentText(text: string): { readonly text: string; readonly redacted: boolean } {
+function shownComponentText(text: string, mode: TextMode): { readonly text: string; readonly redacted: boolean } {
   const cut = redactText(text);
-  const netted = netTextLines(cut.text);
+  const netted = netTextLines(cut.text, mode);
   return { text: netted.text, redacted: cut.redacted || netted.withheld };
 }
 
@@ -1012,7 +1038,7 @@ function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts
   const text =
     kind === 'instructions' ? facts.instructionBodies?.[name] : kind === 'hooks' ? facts.hooksTexts?.[name] : undefined;
   if (text === undefined) return undefined;
-  return { form: 'text', ...shownComponentText(text) };
+  return { form: 'text', ...shownComponentText(text, kind === 'hooks' ? 'hooks' : 'instructions') };
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text (U15's clone uses the same). */
@@ -1024,6 +1050,8 @@ const HOME_PATH = /\/(?:Users|home)\/[^\s"'`,;)}\]]+/gu;
  */
 function checkPathOf(kind: ComponentKind, name: string, component: Record<string, unknown>, facts: CatalogFacts) {
   const texts: string[] = [];
+  // The same text the detail shows: an instructions or a hooks file is netted as its kind, any other text as plain.
+  const mode: TextMode = kind === 'instructions' || kind === 'hooks' ? kind : 'plain';
   if (kind === 'instructions') texts.push(facts.instructionBodies?.[name] ?? '');
   if (kind === 'hooks') texts.push(facts.hooksTexts?.[name] ?? '');
   if (kind === 'settings') {
@@ -1039,7 +1067,7 @@ function checkPathOf(kind: ComponentKind, name: string, component: Record<string
   }
   const home = facts.userHome;
   for (const text of texts) {
-    for (const match of shownComponentText(text).text.matchAll(HOME_PATH)) {
+    for (const match of shownComponentText(text, mode).text.matchAll(HOME_PATH)) {
       const path = match[0];
       if (path !== home && !path.startsWith(`${home}/`)) return path;
     }
@@ -1077,7 +1105,7 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Comp
             // The warning names the command, so it goes through the same net as the detail's `command`.
             warnings: missing
               ? [
-                  command !== undefined && writtenWithheld('command', command)
+                  command !== undefined && commandWithheld(command)
                     ? 'Command not found'
                     : `Command not found: ${command as string}`,
                 ]

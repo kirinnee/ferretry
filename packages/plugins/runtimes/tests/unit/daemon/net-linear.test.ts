@@ -5,16 +5,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { shownLine, writtenWithheld } from '../../../daemon/lib/service/command-line.ts';
-
-const best = (run: () => unknown): number => {
-  let least = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < 5; i++) {
-    const t0 = performance.now();
-    run();
-    least = Math.min(least, performance.now() - t0);
-  }
-  return Math.max(least, 0.01);
-};
+import { best } from './timing-support.ts';
 
 const SHAPES: readonly (readonly [string, (size: number) => string])[] = [
   ['keys and separators', size => 'API_KEY=,'.repeat(Math.ceil(size / 9)).slice(0, size)],

@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Glob } from 'bun';
 import should from 'should';
-import { rawTextHoldsSecret } from '@ferretry/std/credential-words';
+import { findFlagSecrets, rawTextHoldsSecret } from '@ferretry/std/credential-words';
 import { WITHHELD_LINE } from '../../../daemon/lib/service/catalog.ts';
 import { shownFor } from './redact-support.ts';
 
@@ -99,7 +99,9 @@ describe('component text lines the write rule refuses are withheld', () => {
       const shown = shownFor(text).text.split('\n');
       text.split('\n').forEach((line, at) => {
         lines += 1;
-        if (shown[at] === WITHHELD_LINE && !rawTextHoldsSecret(line.replace(/\r$/u, '')))
+        // The write rule reads an instructions text two ways: as lines of text, and as a value (the flag rule).
+        const unit = line.replace(/\r$/u, '');
+        if (shown[at] === WITHHELD_LINE && !rawTextHoldsSecret(unit) && findFlagSecrets({ text: unit }).length === 0)
           overWithheld.push(`${file}:${String(at + 1)}`);
       });
     }

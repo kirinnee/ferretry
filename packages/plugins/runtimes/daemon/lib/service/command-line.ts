@@ -18,7 +18,15 @@
  *
  * Pure.
  */
-import { findFlagSecrets, findRawSecrets, type ShownWord, shownWord, shownWords } from '@ferretry/std/credential-words';
+import {
+  findFlagSecrets,
+  findRawSecrets,
+  HIDDEN_VALUE_TEXT,
+  looksSecret,
+  type ShownWord,
+  shownWord,
+  shownWords,
+} from '@ferretry/std/credential-words';
 import { sha256Hex } from '../foreign.ts';
 
 export { type ShownWord, shownWords } from '@ferretry/std/credential-words';
@@ -67,6 +75,66 @@ export const commandWordsOf = (command: string): readonly string[] => command.sp
  */
 export const writtenWithheld = (name: string, text: string): boolean =>
   valueRefused(name, text) || shownWord(text, undefined).hidden;
+
+/** A pointer to a value, not a value: `$NAME`, `${NAME}`, `${secret:NAME}`, with a pair of quotes around it or not. */
+const POINTER = /^(["']?)\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)\1$/u;
+
+/** A plain word of a command: lowercase letters, dots, slashes and hyphens (`srv`, `npx`, `--stdio`, `bin/run.js`). */
+const PLAIN_WORD = /^-{0,2}[a-z][a-z._/-]*$/u;
+
+/**
+ * Whether a part the cutter cut is a pointer and nothing else: its first word is a pointer, and the words the cutter
+ * took with it (it cuts to the end of the command: `API_KEY=$API_KEY srv` is cut after the `=`) are plain words of a
+ * command, with no digit, case, `=` or `:` in them that a value would have. A part that starts with anything else is
+ * a value.
+ */
+function pointerThenPlainWords(part: string): boolean {
+  const [pointer = '', ...rest] = part.trim().split(/\s+/u);
+  return (
+    pointer === HIDDEN_VALUE_TEXT ||
+    (POINTER.test(pointer) && rest.every(word => PLAIN_WORD.test(word) && !looksSecret('', word)))
+  );
+}
+
+/**
+ * Whether the word cutter, run on `text` AS ONE STRING, cuts a part that is not a pointer: the cut parts are read back
+ * from the text (the shown pieces between the cuts are matched in order), and a part that is not a pointer or already
+ * hidden is a value. A cut that cannot be read back is a value (fail closed).
+ */
+function cutsAValue(text: string, before?: string): boolean {
+  const shown = shownWord(text, before);
+  if (!shown.hidden) return false;
+  const pieces = shown.text.split(HIDDEN_VALUE_TEXT);
+  const first = pieces[0] ?? '';
+  if (!text.startsWith(first)) return true;
+  let at = first.length;
+  for (let index = 1; index < pieces.length; index += 1) {
+    const piece = pieces[index] ?? '';
+    const last = index === pieces.length - 1;
+    const end = last ? text.length - piece.length : text.indexOf(piece, at + 1);
+    if (end < at + 1 || (last && !text.endsWith(piece))) return true;
+    if (!pointerThenPlainWords(text.slice(at, end))) return true;
+    at = end + piece.length;
+  }
+  return false;
+}
+
+/**
+ * Whether an MCP server's `command` must be withheld, in EVERY view that shows it (the detail, the Resolved line, the
+ * warning): the write rule refuses it, as one string or as the words it splits into (so `srv --token` and a first
+ * argument make one pair), or the word cutter, run on the command as one string or word by word, cuts a part that is
+ * a VALUE (`curl -H "Authorization: Bearer v"`). A pointer is not a value: `env API_KEY=$API_KEY srv` is shown as written.
+ */
+export const commandWithheld = (command: string): boolean => {
+  const words = commandWordsOf(command);
+  return (
+    valueRefused('command', command) ||
+    refusedIndexes(words.map(word => ({ text: word, hidden: false }))).size > 0 ||
+    cutsAValue(command) ||
+    // Read word by word too, as a list of arguments is: each word with the one before it.
+    words.some((word, index) => cutsAValue(word, words[index - 1]))
+  );
+};
 
 /** A command line as it may be shown: the cutter's words, and whether the net withheld the whole list. */
 export interface ShownLine {

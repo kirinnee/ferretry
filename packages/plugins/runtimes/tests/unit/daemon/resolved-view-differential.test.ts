@@ -33,7 +33,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { findRawSecrets } from '@ferretry/std/credential-words';
+import { findFlagSecrets, findRawSecrets } from '@ferretry/std/credential-words';
 import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { type ResolvedProfile, type ResolveInput, resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
@@ -72,10 +72,10 @@ function shownFlags(flags: readonly string[]): readonly Shown[] {
 const COMMAND = 'run-server';
 
 /** What 5.0's Resolved view says for an MCP server started as `run-server <args>`. */
-function shownServer(args: readonly string[]): string {
+function shownServer(args: readonly string[], command: string = COMMAND): string {
   const model = parseAccountModel({
     version: 1,
-    components: { mcp: { local: { command: COMMAND, args: [...args] } } },
+    components: { mcp: { local: { command, args: [...args] } } },
     profiles: { p: { layers: ['mcp/local'] } },
   });
   const entry = resolvedEntries(resolved({ model, profile: 'p', harness: 'claude' })).find(
@@ -523,5 +523,53 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
     should(breaches.slice(0, 10)).deepEqual([]);
     should(differed).be.above(0);
     should(harmlessLines).be.above(0);
+  }, 120_000);
+
+  it(`should hide what today hides and show no value when the command is ONE string with blanks in it (${String(CASES)} command lines)`, () => {
+    // Arrange: each generated line is cut in two, its first words the command (joined by one blank, two or a tab) and
+    // the rest the arguments; the command is what the regression of the Resolved line showed in full.
+    const lines = commandLines(SEED + 2, CASES);
+    const blanks = [' ', '  ', '\t'];
+    const breaches: string[] = [];
+    let withheld = 0;
+    let shownAsToday = 0;
+    let harmlessLines = 0;
+
+    // Act
+    for (const [at, { words, harmless }] of lines.entries()) {
+      const split = 1 + (at % Math.max(1, words.length - 1));
+      const command = words.slice(0, split).join(blanks[at % blanks.length] ?? ' ');
+      const args = words.slice(split);
+      if (command === '' || command !== command.trim()) continue;
+      const five = shownServer(args, command);
+      const today = todayServerLine({ command, args });
+      const label = JSON.stringify({ command, args });
+      // The floor: nothing today hides is shown (the withheld sentence hides all of it).
+      if (!lineHidesAtLeast(today, five)) breaches.push(`${label} (floor)`);
+      // The write rule refuses nothing the line shows, as a string and as the words it is made of (the marker is a
+      // low-entropy fake the write rule accepts, so a marker shown in a command is the declared low-entropy limit, as
+      // `MIN_CUT_WORD`: not asserted here; every value the write rule refuses is).
+      if (
+        findFlagSecrets({ line: five }).length > 0 ||
+        findFlagSecrets({ args: five.split(/\s+/u) }).length > 0 ||
+        findRawSecrets({ args: five.split(/\s+/u) }).length > 0
+      )
+        breaches.push(`${label} (refused)`);
+      // A line is either withheld whole (the rule says a value is in it), or shown by the floor and the marker above.
+      if (five === WITHHELD_WORDS_TEXT) {
+        withheld += 1;
+        continue;
+      }
+      if (five === today) shownAsToday += 1;
+      if (harmless.every(Boolean) && five !== [command, ...args].join(' ')) breaches.push(`${label} (harmless)`);
+      if (harmless.every(Boolean)) harmlessLines += 1;
+    }
+
+    // Assert
+    should(breaches.slice(0, 10)).deepEqual([]);
+    should(withheld).be.above(0);
+    should(shownAsToday).be.above(0);
+    should(harmlessLines).be.above(0);
+    if (process.env.REDACT_NETTED_REPORT !== undefined) console.info('command lines withheld', withheld);
   }, 120_000);
 });

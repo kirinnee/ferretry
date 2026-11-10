@@ -18,6 +18,7 @@ import {
   runtimeCatalog,
 } from '../../../daemon/lib/service/catalog.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
+import { best } from './timing-support.ts';
 
 const V = 'Zk3pQ9vXw2LmN7rT';
 const W = 'Hy8cBt4Fg6SdJ1uE';
@@ -339,11 +340,6 @@ describe('(F) a word the raw-secret rule refuses withholds its list in every vie
 });
 
 describe('the batch 2 nets stay linear to 256 KiB', () => {
-  const timed = (run: () => void): number => {
-    const start = performance.now();
-    run();
-    return performance.now() - start;
-  };
   const shapes: Readonly<Record<string, (size: number) => () => void>> = {
     'one long settings value': size => () => valueWithheld('x', 'ab1X'.repeat(size / 4)),
     'a long list of settings words': size => () =>
@@ -370,9 +366,8 @@ describe('the batch 2 nets stay linear to 256 KiB', () => {
   };
   for (const [name, make] of Object.entries(shapes)) {
     it(`should grow under 3x from 128 to 256 KiB: ${name}`, () => {
-      timed(make(16 * 1024));
-      const small = Math.max(timed(make(128 * 1024)), 1);
-      const large = timed(make(256 * 1024));
+      const small = best(make(128 * 1024));
+      const large = best(make(256 * 1024));
       should(large / small).be.below(3);
     }, 60_000);
   }
