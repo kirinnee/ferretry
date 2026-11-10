@@ -24,6 +24,14 @@ const CHECK = 'after-merge';
 /** The one `guarantees` finding this count is about: a kept row with no id-named test. */
 const MISSING_TEST = / has no test named "/;
 
+/**
+ * Items that may enter the list although it only goes down: each was moved from before merge to after it by a named
+ * owner decision, never by a builder. Delete the entry once the base lists the id, so a closed item cannot come back.
+ */
+export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decision: string }[] = [
+  { id: 'differential-harness', decision: '!A481: the harness moves after merge for the Wednesday merge' },
+];
+
 export const COUNT_NAMES = ['parityOpen', 'portsPendingLines', 'guaranteesMissing'] as const;
 export type CountName = (typeof COUNT_NAMES)[number];
 export type Counts = Readonly<Record<CountName, number>>;
@@ -70,11 +78,21 @@ export function parseAfterMerge(source: string, where: string): AfterMerge {
   return { format: 1, end: value.end, counts, items };
 }
 
-/** The base baseline: a git ref's committed file, or `file:<path>`; undefined when the base has none yet. */
-function readBase(root: string, ref: string): AfterMerge | undefined {
+/**
+ * The base baseline: a git ref's committed file, or `file:<path>`; undefined when the base has none yet. A base that
+ * was NAMED (`--base`, or CI's `FY_CHECK_BASE`) but is not in this clone throws: comparing against nothing there
+ * would pass the very change the rule exists to stop. The unnamed default may be absent (a local clone without it).
+ */
+export function readBase(root: string, ref: string, named: boolean): AfterMerge | undefined {
   if (ref.startsWith('file:')) {
     const file = ref.slice(5);
     return existsSync(file) ? parseAfterMerge(readFileSync(file, 'utf8'), file) : undefined;
+  }
+  const known = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: root });
+  if (known.status !== 0) {
+    if (named)
+      throw new Error(`the base ${ref} is not in this clone, so nothing proves the list did not grow; fetch it`);
+    return undefined;
   }
   const shown = spawnSync('git', ['show', `${ref}:${AFTER_MERGE_JSON}`], { cwd: root, encoding: 'utf8' });
   if (shown.status !== 0) return undefined;
@@ -120,7 +138,8 @@ export function afterMergeFindings(head: AfterMerge, base: AfterMerge | undefine
       at(`counts.${name} grew from ${base.counts[name]} to ${head.counts[name]}; the list may only go down`);
   const before = new Set(base.items.map(item => item.id));
   for (const item of head.items)
-    if (item.id !== '' && !before.has(item.id)) at(`${item.id} was added; the list may only go down`);
+    if (item.id !== '' && !before.has(item.id) && !OWNER_MOVED_ITEMS.some(moved => moved.id === item.id))
+      at(`${item.id} was added; the list may only go down`);
   if (head.end > base.end) at(`the end date moved from ${base.end} to ${head.end}; only the owner moves it`);
   return findings;
 }
@@ -133,7 +152,7 @@ export const check: Check = {
     if (!existsSync(file)) return [];
     try {
       const head = parseAfterMerge(readFileSync(file, 'utf8'), AFTER_MERGE_JSON);
-      const base = readBase(ctx.root, ctx.base ?? 'origin/rebuild/5.0');
+      const base = readBase(ctx.root, ctx.base ?? 'origin/rebuild/5.0', ctx.base !== undefined);
       const found = await guarantees.run({
         ...ctx,
         packageId: undefined,

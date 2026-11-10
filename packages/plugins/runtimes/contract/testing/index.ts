@@ -10,6 +10,7 @@ import {
   type ProfileLayerOutcome,
   type ProfileSummary,
   type ResolveResult,
+  type RuntimeAssetSkills,
   type RuntimeHome,
   type RuntimeHomeReader,
   type RuntimeId,
@@ -24,6 +25,8 @@ export interface FakeRuntimes extends RuntimesApi {
   setRuntimes(runtimes: readonly RuntimeSummary[], defaultRuntime?: RuntimeId): void;
   /** The homes `homes()` answers, and the reader `home(id)` hands out for each id (an id with no reader gets none). */
   setHomes(homes: readonly RuntimeHome[], readers?: Readonly<Record<string, RuntimeHomeReader>>): void;
+  /** The fleet's installed skills `assetSkills()` answers (none until set). */
+  setAssetSkills(assetSkills: RuntimeAssetSkills): void;
   /**
    * The profiles the fake holds (what `profiles()` answers and `changeProfileLayers` edits), and the layers `layers(id)`
    * answers for each runtime. The layers are exactly what a test sets: a change edits the PROFILES, not these.
@@ -84,6 +87,7 @@ export function fakeRuntimes(): FakeRuntimes {
   let defaultRuntime: RuntimeId | undefined;
   let homes: readonly RuntimeHome[] = [];
   let readers: Readonly<Record<string, RuntimeHomeReader>> = {};
+  let assetSkills: RuntimeAssetSkills = { skills: async () => [], skillManifest: async () => undefined };
   let profiles: readonly ProfileSummary[] = [];
   let layerSets: ReadonlyMap<RuntimeId, RuntimeLayers> = new Map();
   let forced: Parameters<FakeRuntimes['setChangeOutcome']>[0];
@@ -138,6 +142,8 @@ export function fakeRuntimes(): FakeRuntimes {
     // No fleet is published in memory: there are no homes until a test sets them, and a reader only for a listed id.
     homes: async () => homes,
     home: id => (homes.some(home => home.id === id) ? readers[id] : undefined),
+    // No asset tree is published in memory: it lists nothing until a test sets one.
+    assetSkills: () => assetSkills,
     profiles: async () => byName(),
     layers: async id => layerSets.get(id),
     changeProfileLayers: async (change, governance) => {
@@ -159,6 +165,9 @@ export function fakeRuntimes(): FakeRuntimes {
     setRuntimes: (next, nextDefault) => {
       runtimes = next;
       defaultRuntime = nextDefault;
+    },
+    setAssetSkills: next => {
+      assetSkills = next;
     },
     setHomes: (next, nextReaders = {}) => {
       homes = next;

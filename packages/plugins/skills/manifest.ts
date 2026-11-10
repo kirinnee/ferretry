@@ -2,7 +2,8 @@ import { definePlugin, panel, renderer, route, settingsTab, verb } from '@ferret
 import { cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
-import { PROFILE_COMPONENTS_KEY, ProfileSkillsSource } from '@ferretry/plugin-runtimes/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { PROFILE_COMPONENTS_KEY, ProfileSkillsSource, RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import {
   SKILLS_CONFIG,
   SKILLS_INSTALLED_STATE,
@@ -32,7 +33,9 @@ export default definePlugin({
   needs: { ferrets: FerretsPort },
   // Optional (lead ruling 2026-11-07: a reference.catalog provider takes Conversation as optional `uses`). With Conversation
   // off, Skills boots and nothing asks it for a menu.
-  uses: { conversation: ConversationPort },
+  // Runtimes gives the account homes, the Ferretry skills and the layers a runtime launches with; Projects the registered
+  // roots whose skills the machine view lists. Both optional: with either off that part of the inventory is empty.
+  uses: { conversation: ConversationPort, runtimes: RuntimesPort, projects: ProjectsPort },
   provides: { skills: SkillsPort },
 
   actions: {
@@ -107,6 +110,9 @@ export default definePlugin({
   },
 
   permissions: {
+    // `work`: a ferret's own folder. `imports`: read-only, and ONLY the skills folders (`.claude/skills`,
+    // `.agents/skills`) of a registered project root, each scoped one folder at a time (`adapters/project-skill-files.ts`
+    // narrows the kernel's grant, which would take any folder outside the fence, as MCP's `.mcp.json` reader does).
     roots: ['work', 'imports'],
     // Mints a shared folder of its own installed skills for the harness that links them into a ferret home (kernel batch #10).
     shareTrees: true,

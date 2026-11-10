@@ -38,7 +38,7 @@ describe('listing skill folders', () => {
     await mkdir(join(skills, 'wrong-kind'));
     await mkdir(join(skills, 'wrong-kind', 'SKILL.md'));
 
-    const listed = await files.list(skills, skills, 10);
+    const listed = await files.list(skills, 10);
 
     expect(listed).toEqual([{ manifest: `${skills}/alpha/SKILL.md` }, { manifest: `${skills}/zeta/SKILL.md` }]);
   });
@@ -47,7 +47,7 @@ describe('listing skill folders', () => {
     const { skills, skill, files } = await world();
     for (const name of ['a', 'b', 'c', 'd', 'e']) await skill(name);
 
-    const listed = await files.list(skills, skills, 2);
+    const listed = await files.list(skills, 2);
 
     expect(listed.map(entry => entry.manifest)).toEqual([
       `${skills}/a/SKILL.md`,
@@ -63,9 +63,9 @@ describe('listing skill folders', () => {
     await writeFile(join(parent, 'elsewhere', 'stolen', 'SKILL.md'), '# stolen');
     await symlink(join(parent, 'elsewhere', 'stolen'), join(skills, 'linked-out'));
 
-    expect(await files.list(join(folder, 'no-such-folder'), folder, 10)).toEqual([]);
-    expect(await files.list(parent, parent, 10)).toEqual([]);
-    expect((await files.list(skills, skills, 10)).map(entry => entry.manifest)).toEqual([`${skills}/real/SKILL.md`]);
+    expect(await files.list(join(folder, 'no-such-folder'), 10)).toEqual([]);
+    expect(await files.list(parent, 10)).toEqual([]);
+    expect((await files.list(skills, 10)).map(entry => entry.manifest)).toEqual([`${skills}/real/SKILL.md`]);
   });
 });
 

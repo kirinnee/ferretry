@@ -78,8 +78,8 @@ describe('Skills as a reference.catalog provider', () => {
     for (const host of hosts.splice(0)) await host.stop();
   });
 
-  test('takes Conversation only as an optional use, and the hook for `/` and `$`', () => {
-    expect(Object.keys(manifest.uses ?? {})).toEqual(['conversation']);
+  test('takes Conversation as an optional use (beside Runtimes and Projects), and the hook for `/` and `$`', () => {
+    expect(Object.keys(manifest.uses ?? {})).toEqual(['conversation', 'runtimes', 'projects']);
     expect(Object.keys(manifest.needs ?? {})).toEqual(['ferrets']);
     expect(
       (manifest.hooks?.takes ?? []).flatMap(take =>
