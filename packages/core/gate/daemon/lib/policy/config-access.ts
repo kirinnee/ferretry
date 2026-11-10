@@ -42,7 +42,7 @@ const refuse = (response: ApiResponse): ConfigAccessVerdict => ({ allowed: false
  * Gate's judge of the kernel's config routes (`Admission.judgeConfigAccess`, today's `mounts/config-files.ts`): the
  * FILE's own capability — `warden` for `warden.yaml`, `fleet` for everything else — on the axis the act needs, never an
  * agent for an act that changes, and a loosening put into effect in the same act only for somebody at this machine or a
- * device with a passkey proved for the act.
+ * device with a fresh passkey proof that already existed when the request was admitted.
  *
  * - `read`: the file's capability on `use`.
  * - `write`: its `configure`, then the fleet's `use` (a device the owner kept off the fleet may change no file); the
