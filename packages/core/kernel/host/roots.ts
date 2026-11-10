@@ -1789,8 +1789,10 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * looked at WITHOUT following it, and a link at any of them is refused `link_escape`. The anchor itself and its
    * ancestors are not looked at (a symlinked project folder works). A folder that is not there yet is no link, and
    * nothing below it exists either. An anchor equal to the scoped folder walks nothing. The walk is the EARLY refusal
-   * (a link is told before any descriptor is opened); the descriptors the calls then hold are the PROOF, because a folder
-   * swapped for a link after the walk is still caught by them.
+   * (a link is told before any descriptor is opened). For `imports` and `project-files` the descriptors their calls then
+   * hold are the PROOF, so a folder swapped for a link after the walk is still caught (except where
+   * `descriptorReachNote` says a listing or a stat goes by path); `harness-history` and `harness-home` hold no such
+   * descriptor, and for them this walk is the only link check.
    */
   const anchoredFolders = async (): Promise<void> => {
     for (const folder of setup.linkFreeFolders() ?? []) {
@@ -1805,8 +1807,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
   /**
    * A file or folder this handle just made or replaced under the home's `state` may be a private place (a ferret's
    * `sessions/<id>/environment.json`): the index is looked at again before the write returns, so the very first write
-   * has no window in which the new inode is not yet pinned. An owner's root is fenced out of the home and a path outside
-   * `state` touches no place; both cost nothing.
+   * has no window in which the new inode is not yet pinned. An owner's root is fenced out of the home, so it returns
+   * before anything is asked. For any other root `pinCreatedAt` resolves the home FIRST (it needs the home's real path to
+   * say which path below `state` was made) and only then decides lexically whether a private place touches `full`: a
+   * path outside `state` or touching no place costs one resolve and no look, and a home that cannot be resolved refuses
+   * the create whether or not its path was private. (The state port's `pinCreated` is the other order: it is given the
+   * path below `state`, judges it lexically BEFORE the home is resolved, and a path no place touches resolves nothing.)
    */
   const pinned = async (full: string): Promise<void> => {
     if (ownerRoot || privateFiles.files.length === 0) return;
@@ -1825,7 +1831,14 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * Runs a create and pins what it made. A create can throw AFTER its entry landed (a copy past its budget half way, the
    * folder sync of a publish, a write's directory fsync), so the pin also runs when it threw: the new inode is held at
    * once, not at the next look. The create's own error is the one that comes back; a pin that fails then is told through
-   * the report (it says so once) and every later root call refuses until a look succeeds, so nothing is lost.
+   * the report (it says so once). Whether the index's own look failed or the home could not be resolved for this pin, the
+   * next root call looks again and refuses while it cannot (a failed home resolve makes the index forget its look
+   * interval, fence-guard.ts `lookAgain`), so the kept snapshot from before the create is never answered from after a
+   * failed pin. It is served only within the look interval after a look that succeeded, which a successful pin renews.
+   * Before that fix a failed pin left a window of at most the look interval (250 ms on the host) in which a bind mount
+   * of the new file was served from the old view; it needed mount privilege and a one-off home-resolve failure at the
+   * pin; it is closed. (The old view was never wider in any other way: each call resolves its base and its fence fresh,
+   * and the old view lacks nothing but the identity of the file just made.)
    */
   const pinning = async <T>(full: string, create: () => Promise<T>): Promise<T> => {
     let made: T;
