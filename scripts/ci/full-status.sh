@@ -13,7 +13,7 @@ verdict | judge)
   # the owner's MACOS_SMOKE=skip switch. The reusable darwin verdict already owns PR advisory policy.
   if jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" '
     . as $needs |
-    ["quick", "int", "full-gates", "compile", "smoke"]
+    ["quick", "int", "strict-guarantees", "full-gates", "compile", "smoke"]
       | all(.[]; $needs[.].result == "success")
     and ($needs["full-pending"].result == "success" or
       ($event != "pull_request" and $needs["full-pending"].result == "skipped"))

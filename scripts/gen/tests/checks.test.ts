@@ -1190,6 +1190,66 @@ describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', ()
     });
   });
 
+  // The strict report (scripts/ci/strict-guarantees.ts): every tier's reports at once, --strict, no --tier.
+  describe('--strict over the unit, scripts and integration reports together', () => {
+    const I = 'packages/plugins/alpha/tests/integration/i.test.ts';
+    const S = 'scripts/x.test.ts';
+    const all = { strict: true, results: ['coverage/unit', 'coverage/scripts', 'coverage/int'] };
+    const combined = (reports: Record<string, string>) => {
+      const f = ws([{ id: 'alpha' }], { pending: ['alpha'] });
+      f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept') + row('G2', 'kept'));
+      f.write(A, titled('G1 holds'));
+      f.write(I, titled('G2 holds'));
+      for (const [path, xml] of Object.entries(reports)) f.write(path, xml);
+      return f;
+    };
+
+    test('a row proven by a passing test in EITHER tier is not a miss', async () => {
+      const f = combined({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I }),
+      });
+      expect(messages(await run(guarantees, f, all))).toBe('');
+      // Each alone leaves the other tier's row unproven: the reason the per-tier checks cannot give the count.
+      expect(messages(await run(guarantees, f, { strict: true, results: ['coverage/unit'] }))).toContain('G2');
+      expect(messages(await run(guarantees, f, { strict: true, results: ['coverage/int'] }))).toContain('G1');
+    });
+
+    test('a SKIPPED id test is a miss (the placeholder case)', async () => {
+      const f = combined({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'skipped' }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I }),
+      });
+      const found = await run(guarantees, f, all);
+      expect(found.map(x => x.where)).toEqual(['G1']);
+      expect(messages(found)).toContain('no passing run');
+    });
+
+    test('a FAILED id test is a miss, even when the other tier passes a different row', async () => {
+      const f = combined({
+        'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A }),
+        'coverage/int/junit.xml': junit({ name: 'G2 holds', file: I, status: 'failure' }),
+      });
+      const found = await run(guarantees, f, all);
+      expect(found.map(x => x.where)).toEqual(['G2']);
+      expect(messages(found)).toContain('FAILING test');
+    });
+
+    test('a row in a pending package counts under --strict and not without it', async () => {
+      const f = combined({ 'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'skipped' }) });
+      expect((await run(guarantees, f, all)).map(x => x.where)).toEqual(['G1', 'G2']);
+      expect(messages(await run(guarantees, f, { results: all.results }))).toBe('');
+    });
+
+    test('the scripts report is read like the others (a repo-tooling row)', async () => {
+      const f = ws([{ id: 'alpha' }]);
+      f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept', 'repo-tooling'));
+      f.write(S, titled('G1 holds'));
+      f.write('coverage/scripts/junit.xml', junit({ name: 'G1 holds', file: S }));
+      expect(messages(await run(guarantees, f, all))).toBe('');
+    });
+  });
+
   test("the quarantine's junit.rerun.xml counts: a flake rescued by the rerun does not fail the proof", async () => {
     const f = planted(row('G1', 'kept'), titled('G1 holds'), {
       'coverage/unit/groups/x/junit.xml': junit({ name: 'G1 holds', file: A, status: 'failure' }),
