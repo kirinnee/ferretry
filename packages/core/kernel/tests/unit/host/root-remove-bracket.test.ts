@@ -20,6 +20,7 @@ import {
   lstatSync,
   openSync,
   readdirSync,
+  mkdirSync,
   renameSync,
   rmdirSync,
   symlinkSync,
@@ -77,6 +78,7 @@ const standIn = (): DescriptorCalls => {
     renameat: (from, fromName, to, toName) => renameSync(through(from, fromName), through(to, toName)),
     linkat: (from, fromName, to, toName) => linkSync(through(from, fromName), through(to, toName)),
     unlinkat: (fd, name) => unlinkSync(through(fd, name)),
+    mkdirat: (fd, name, mode) => mkdirSync(through(fd, name), { mode }),
   };
 };
 
@@ -97,6 +99,7 @@ const watchedCalls = (inner: DescriptorCalls, before: Before): DescriptorCalls =
     before('unlinkat', [fd, name]);
     inner.unlinkat(fd, name);
   },
+  mkdirat: (fd, name, mode) => inner.mkdirat(fd, name, mode),
 });
 
 const watchedOps = (inner: BracketOps, before: Before): BracketOps => ({

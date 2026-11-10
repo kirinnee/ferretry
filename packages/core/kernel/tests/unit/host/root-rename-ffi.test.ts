@@ -19,6 +19,7 @@ import {
   linkSync,
   openSync,
   readdirSync,
+  mkdirSync,
   renameSync,
   symlinkSync,
   unlinkSync,
@@ -55,6 +56,7 @@ const standIn = (): DescriptorCalls => {
     renameat: (from, fromName, to, toName) => renameSync(through(from, fromName), through(to, toName)),
     linkat: (from, fromName, to, toName) => linkSync(through(from, fromName), through(to, toName)),
     unlinkat: (fd, name) => unlinkSync(through(fd, name)),
+    mkdirat: (fd, name, mode) => mkdirSync(through(fd, name), { mode }),
   };
 };
 
@@ -78,6 +80,7 @@ const watched = (inner: DescriptorCalls, before: Before): DescriptorCalls => ({
     before('unlinkat', [fd, name]);
     inner.unlinkat(fd, name);
   },
+  mkdirat: (fd, name, mode) => inner.mkdirat(fd, name, mode),
 });
 
 /** What a create looked like when it happened: the umask in force during `openat`, and the new file's mode right after it. */

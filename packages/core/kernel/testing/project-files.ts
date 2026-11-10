@@ -5,7 +5,8 @@
  * lexical half: plain, inside the folder, outside the fence by name) and `permittedMode`.
  *
  * Order, as production: (1) the folder is one the handle was scoped to, (2) the path is plain, inside it and outside the
- * fence by name, (3) the declared set reaches it for this use, (4) a link at any level, (5) a hard-linked file.
+ * fence by name, (3) the declared set reaches it for this use, (3b) the folder is spelled as it resolves below its anchor,
+ * (4) a link at any level, (5) a hard-linked file.
  * The flat world keeps files, links, hard links and modes by key; a name is at `/project-files<absolute path>`.
  */
 import type { Instant } from '@ferretry/std';
@@ -20,7 +21,7 @@ import {
   type RootStat,
 } from '../contract/ports.ts';
 import { lexicalInRoot, RootError } from '../host/roots.ts';
-import { permittedMode } from '../host/root-rules.ts';
+import { permittedMode, spellingHolds } from '../host/root-rules.ts';
 import { refuseShared } from '../host/shared-trees.ts';
 import { type ProjectUse, projectPathRefusal } from '../manifest/project-files.ts';
 
@@ -33,6 +34,14 @@ export interface ProjectFilesTwin {
   readonly patterns: readonly string[] | undefined;
   /** The absolute folder this handle was scoped to, or `undefined` when the scope was refused. */
   readonly folder: string | undefined;
+  /** The scope's `within` anchor as the caller spelled it, or `undefined` when none. */
+  readonly within: string | undefined;
+  /**
+   * Folders the test says are links: an absolute folder → the real path it resolves to. The flat world has no links of
+   * its own at a folder level, so this is how a unit test says "this project folder (or one above it) is a link", and
+   * the spelling rule below the anchor (`spellingHolds`, the one production reads) is judged over it.
+   */
+  readonly linkedFolders: ReadonlyMap<string, string> | undefined;
   /** The kernel home the fence is judged against. */
   readonly fenceHome: string;
   /** Whether the manifest declared `permissions.setMode`. */
@@ -65,6 +74,15 @@ export const PROJECT_SOURCES = new WeakMap<object, (path: string) => void>();
 export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
   const { folder, files, links, hardLinks, modes, inodes } = twin;
   const key = projectFileKey;
+  /** The real path of `path` in the test world: the longest linked folder at or above it is replaced by where it leads. */
+  const realOf = (path: string): string => {
+    const linked = twin.linkedFolders;
+    if (linked === undefined) return path;
+    const hops = [...linked.keys()]
+      .filter(from => path === from || path.startsWith(`${from}/`))
+      .sort((a, b) => b.length - a.length)[0];
+    return hops === undefined ? path : `${linked.get(hops) as string}${path.slice(hops.length)}`;
+  };
   const lexical = (path: string): string => {
     if (folder === undefined) throw new RootError('outside');
     const found = lexicalInRoot(twin.fenceHome, folder, true, path);
@@ -76,6 +94,11 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     const full = lexical(path);
     const refusal = projectPathRefusal(twin.patterns, relative(folder as string, full), use);
     if (refusal !== undefined) throw new RootError(refusal);
+    // The folder resolves to exactly its spelling below the anchor (the anchor itself may be a link), else `link_escape`.
+    if (
+      !spellingHolds(folder as string, twin.within, realOf(folder as string), realOf(twin.within ?? (folder as string)))
+    )
+      throw new RootError('link_escape');
     const steps = relative(folder as string, full).split('/');
     const through = leaf === 'follow' ? steps.length : steps.length - 1;
     for (let index = 1; index <= through; index += 1)
