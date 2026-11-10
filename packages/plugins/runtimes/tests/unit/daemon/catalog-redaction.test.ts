@@ -1412,10 +1412,18 @@ describe('the redaction guarantees', () => {
       (n: number) => 'password\n'.repeat(n / 9),
       (n: number) => `${'-'.repeat(n)}=x`,
     ];
+    // The FASTEST of a few runs, in wall-clock ms (a small run is about 1 ms, which is the CPU clock's own tick, so the
+    // wall clock is the only one that can read it): a collection or a lost moment on a shared runner lands in one run,
+    // a rule that is not linear is slow in every run.
+    const RUNS = 5;
     const timeOf = (text: string): number => {
-      const start = performance.now();
-      shownFor(text);
-      return performance.now() - start;
+      let fastest = Number.POSITIVE_INFINITY;
+      for (let run = 0; run < RUNS; run += 1) {
+        const start = performance.now();
+        shownFor(text);
+        fastest = Math.min(fastest, performance.now() - start);
+      }
+      return fastest;
     };
 
     for (const shape of shapes) {

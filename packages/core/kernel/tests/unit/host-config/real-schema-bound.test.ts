@@ -20,6 +20,12 @@ import { captureLog, HOME, manualClock } from './support.ts';
 
 /** A hard bound per call, far above one linear pass: the shapes this guards took 4–16 s at this size. */
 const BOUND_MS = 1500;
+/**
+ * What one test may take on the wall clock. A door is bounded by CPU (`BOUND_MS`), but a test samples six doors, and a slow
+ * first sample is sampled again from fresh worlds, so on a loaded runner a test that is within every bound can pass bun's
+ * 5 s default. This bounds a hang, not a regression; the regression is the CPU bound.
+ */
+const TEST_TIMEOUT_MS = 60_000;
 const ferretStanding = { credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'wren' } };
 const KINDS = declaredKinds();
 const call = (body: Record<string, unknown>): AgentConfigCall => AgentConfigCallSchema.parse(body);
@@ -52,10 +58,39 @@ function world(kind: DeclaredKind, text?: string) {
   return { fs, files, agent, target };
 }
 
+type World = ReturnType<typeof world>;
+
+/**
+ * What `act` answers and the CPU the main thread spent on it, in ms (everything here is in memory, so all of it is on the
+ * main thread). A bound on the clock measures the box as much as the code, and a call is hundreds of ms, far above the
+ * CPU clock's tick.
+ */
 async function timed<T>(act: () => Promise<T> | T): Promise<{ readonly ms: number; readonly value: T }> {
-  const started = performance.now();
+  if (typeof process.threadCpuUsage !== 'function') throw new Error('process.threadCpuUsage is not available');
+  const before = process.threadCpuUsage();
   const value = await act();
-  return { ms: performance.now() - started, value };
+  const spent = process.threadCpuUsage(before);
+  return { ms: (spent.user + spent.system) / 1_000, value };
+}
+
+/**
+ * The BEST of up to three samples (the same shape as `issue-cap.test.ts`): a quadratic path is slow in every sample and
+ * fails, a collection or a busy moment on a shared runner lands in one and does not. A further sample is taken only
+ * while the best so far is at or over half the bound, so a fast first sample costs nothing more. `sample` is told which
+ * attempt it is: a later one starts from a world of its own, because a check one load made is remembered and a second
+ * call on the same world would measure the memo, not the parse.
+ */
+async function bestOf<T>(
+  sample: (attempt: number) => Promise<{ readonly ms: number; readonly value: T }>,
+): Promise<{ readonly ms: number; readonly value: T }> {
+  let best = Number.POSITIVE_INFINITY;
+  let value: T | undefined;
+  for (let attempt = 0; attempt < 3 && best >= BOUND_MS / 2; attempt += 1) {
+    const taken = await sample(attempt);
+    best = Math.min(best, taken.ms);
+    value = taken.value;
+  }
+  return { ms: best, value: value as T };
 }
 
 /** At most the cap's issues and one more, and a count that is every problem. */
@@ -77,58 +112,99 @@ describe('the kinds swept', () => {
 
 /** Every door, timed, for one kind and one hostile text. */
 async function everyDoor(kind: DeclaredKind, text: string): Promise<void> {
+  const settledText = `${text.slice(0, -1)}\n`;
+  // A world a later sample starts from: the file as the second reload leaves it, loaded.
+  const settled = async (): Promise<World> => {
+    const again = world(kind, settledText);
+    await again.files.reload();
+    return again;
+  };
   // A reload of the file hand-written (the first load of a home that holds it is what boot runs).
-  const { agent, files, fs, target } = world(kind, text);
-  expect((await timed(() => files.reload())).ms).toBeLessThan(BOUND_MS);
-  fs.seed(`${HOME}/config/${kind.path}`, `${text.slice(0, -1)}\n`);
-  expect((await timed(() => files.reload())).ms).toBeLessThan(BOUND_MS);
-  capped(files.status().issues.filter(issue => issue.path === kind.path));
+  const first = world(kind, text);
+  // Every door's CPU, so the slowest can prove the clock reads: a small read or listing is under the clock's 1 ms tick
+  // and may read 0, but the parse of a file at the cap is tens to hundreds of ms.
+  const spent: number[] = [];
+  const within = (ms: number): void => {
+    spent.push(ms);
+    expect(ms).toBeLessThan(BOUND_MS);
+  };
+  within(
+    (await bestOf(async attempt => await timed(() => (attempt === 0 ? first : world(kind, text)).files.reload()))).ms,
+  );
+  let loaded = first;
+  const second = await bestOf(async attempt => {
+    if (attempt === 0) loaded = first;
+    else {
+      loaded = world(kind, text);
+      await loaded.files.reload();
+    }
+    loaded.fs.seed(`${HOME}/config/${kind.path}`, settledText);
+    return await timed(() => loaded.files.reload());
+  });
+  within(second.ms);
+  capped(loaded.files.status().issues.filter(issue => issue.path === kind.path));
+  // Each door below is sampled on the world as it stands, then (if the sample is slow) on a settled one of its own.
+  const door = <T>(act: (at: World) => Promise<T> | T) =>
+    bestOf(async attempt => {
+      const at = attempt === 0 ? loaded : await settled();
+      return await timed(() => act(at));
+    });
   // A text that is not the one on disk, so no check made of it before is reused.
   const fresh = `${text.slice(0, -1)} `;
   if (kind.agentMayName) {
-    const read = await timed(() => agent.run(call({ tool: 'config.read', path: kind.path }), ferretStanding));
-    expect(read.ms).toBeLessThan(BOUND_MS);
+    const read = await door(at => at.agent.run(call({ tool: 'config.read', path: kind.path }), ferretStanding));
+    within(read.ms);
     capped(read.value.issues);
-    const validate = await timed(() =>
-      agent.run(call({ tool: 'config.validate', path: kind.path, text: fresh }), ferretStanding),
+    const validate = await door(at =>
+      at.agent.run(call({ tool: 'config.validate', path: kind.path, text: fresh }), ferretStanding),
     );
-    expect(validate.ms).toBeLessThan(BOUND_MS);
+    within(validate.ms);
     capped(validate.value.issues);
-    const write = await timed(() =>
-      agent.run(call({ tool: 'config.write', path: kind.path, text: `${fresh.slice(0, -1)}\t` }), ferretStanding),
+    const write = await door(at =>
+      at.agent.run(call({ tool: 'config.write', path: kind.path, text: `${fresh.slice(0, -1)}\t` }), ferretStanding),
     );
-    expect(write.ms).toBeLessThan(BOUND_MS);
+    within(write.ms);
     capped(write.value.issues);
   } else {
-    const read = await timed(() => files.writer().read(target));
-    expect(read.ms).toBeLessThan(BOUND_MS);
+    const read = await door(at => at.files.writer().read(at.target));
+    within(read.ms);
     capped(read.value?.issues);
-    const write = await timed(() => files.writer().write(target, fresh, { confirmedLoosening: true }));
-    expect(write.ms).toBeLessThan(BOUND_MS);
+    const write = await door(at => at.files.writer().write(at.target, fresh, { confirmedLoosening: true }));
+    within(write.ms);
     if (write.value.kind === 'refused') capped(write.value.issues);
   }
   // Nothing the listing says grows with the file either.
-  const listing = await timed(() => agent.run(call({ tool: 'config.read' }), ferretStanding));
-  expect(listing.ms).toBeLessThan(BOUND_MS);
+  const listing = await door(at => at.agent.run(call({ tool: 'config.read' }), ferretStanding));
+  within(listing.ms);
   capped(listing.value.issues);
+  // The CPU clock must read something, or every bound above passes on 0.
+  expect(Math.max(...spent)).toBeGreaterThan(0);
 }
 
 describe('every declared kind, its own schema, wrong values at the size cap: every door within the bound', () => {
   for (const kind of KINDS) {
     const [label, text] = sweepTextOf(kind, CONFIG_FILE_MAX_BYTES);
-    test(`T-0032 T-0033 T-0034 ${kind.path} (${label}): reload, read, validate and write each under ${BOUND_MS} ms`, async () => {
-      await everyDoor(kind, text);
-    });
+    test(
+      `T-0032 T-0033 T-0034 ${kind.path} (${label}): reload, read, validate and write each under ${BOUND_MS} ms`,
+      async () => {
+        await everyDoor(kind, text);
+      },
+      TEST_TIMEOUT_MS,
+    );
   }
 });
 
 describe('review round 7: the real mcp/<name>.yaml at the size cap', () => {
   const mcp = KINDS.find(kind => kind.path === 'mcp/sweep.yaml');
   for (const [label, text] of mcpReviewShapes(CONFIG_FILE_MAX_BYTES)) {
-    test(`T-0032 T-0033 T-0034 ${label}: every door under ${BOUND_MS} ms, at most ${MAX_CONFIG_ISSUES} problems listed`, async () => {
-      if (mcp === undefined) throw new Error('mcp/<name>.yaml is not declared');
-      await everyDoor(mcp, text);
-    });
+    test(
+      `T-0032 T-0033 T-0034 ${label}: every door under ${BOUND_MS} ms, at most ${MAX_CONFIG_ISSUES} problems listed`,
+      async () => {
+        if (mcp === undefined) throw new Error('mcp/<name>.yaml is not declared');
+        await everyDoor(mcp, text);
+      },
+      TEST_TIMEOUT_MS,
+    );
   }
 
   test('T-0033 an env of many wrong values: the first problems are located, the rest are one counted sentence', async () => {
