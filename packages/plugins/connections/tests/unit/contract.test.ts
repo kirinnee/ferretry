@@ -51,6 +51,31 @@ describe('connections wire', () => {
     expect(ConnectionsConfigSchema.safeParse({ relay: { url: 'https://one.example' } }).success).toBe(false);
     expect(ConnectionsConfigSchema.parse({ relay: [] }).relay).toEqual([]);
   });
+  test('R171 carriers are a discriminated union of direct, relay and tunnel: one bind, at most four relays', () => {
+    // Discriminated on `kind`: each kind admits exactly its own shape, and an unknown kind names nothing.
+    for (const carrier of [
+      { kind: 'direct', url: 'https://box.example' },
+      { kind: 'relay', url: 'wss://relay.example.test' },
+      { kind: 'tunnel', url: 'https://quiet.example.test' },
+    ])
+      expect(PublishedCarrierSchema.safeParse(carrier).success).toBe(true);
+    for (const carrier of [
+      { kind: 'bind', url: 'https://box.example' },
+      { kind: 'direct' },
+      { url: 'https://box.example' },
+      { kind: 'relay', url: 'wss://relay.example.test', host: 'x' },
+    ])
+      expect(PublishedCarrierSchema.safeParse(carrier).success).toBe(false);
+    // At most one bind: the direct block is ONE object, never a list of binds.
+    expect(ConnectionsConfigSchema.safeParse({ direct: { host: '127.0.0.1', port: 7431 } }).success).toBe(true);
+    expect(ConnectionsConfigSchema.safeParse({ direct: [{ host: '127.0.0.1' }, { host: '10.0.0.1' }] }).success).toBe(
+      false,
+    );
+    // At most four relays: a fifth entry is refused, never truncated.
+    const relays = (n: number) => Array.from({ length: n }, (_, i) => ({ url: `https://r${String(i)}.example` }));
+    expect(ConnectionsConfigSchema.safeParse({ relay: relays(4) }).success).toBe(true);
+    expect(ConnectionsConfigSchema.safeParse({ relay: relays(5) }).success).toBe(false);
+  });
   test('changing an ordered relay set or enabling one is a loosening', () => {
     const off = ConnectionsConfigSchema.parse({ relay: [{ source: 'discovery', enabled: false }] });
     const on = ConnectionsConfigSchema.parse({ relay: [{ source: 'discovery' }] });

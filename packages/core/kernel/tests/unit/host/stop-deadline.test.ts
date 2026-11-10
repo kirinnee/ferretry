@@ -6,7 +6,7 @@ import { AdmissionPort } from '../../../contract/bound.ts';
 import type { Log } from '../../../contract/ports.ts';
 import { bootHost, type HostOptions } from '../../../host/host.ts';
 import { DEFAULT_STOP_DEADLINE_MS, JobRunner } from '../../../host/jobs.ts';
-import { STOP_LIMIT_MS, stopOnSignal, type StopProcess } from '../../../host/stop-signals.ts';
+import { STOP_LIMIT_MS, stopOnSignal, stopOnSignalReporting, type StopProcess } from '../../../host/stop-signals.ts';
 import { realAdapters } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
@@ -246,5 +246,54 @@ describe('the daemon process ends even when a stop never finishes', () => {
     world.signal('SIGTERM');
     await new Promise(resolve => setImmediate(resolve));
     expect(world.exits).toEqual([1]);
+  });
+});
+
+describe('the daemon says why a stop failed', () => {
+  test('a rejected stop writes "fyd: stopping failed: <message>" to the report, then ends the process with 1', async () => {
+    const world = fakeProcess();
+    const lines: string[] = [];
+    void stopOnSignalReporting(
+      () => Promise.reject(new Error('lock busy')),
+      line => lines.push(line),
+      world.proc,
+    );
+    world.signal('SIGTERM');
+    await new Promise(resolve => setImmediate(resolve));
+    expect(lines).toEqual(['fyd: stopping failed: lock busy\n']);
+    expect(world.exits).toEqual([1]);
+  });
+
+  test('a rejection that is no Error is reported as "unknown error"', async () => {
+    const world = fakeProcess();
+    const lines: string[] = [];
+    void stopOnSignalReporting(
+      () => Promise.reject('boom'),
+      line => lines.push(line),
+      world.proc,
+    );
+    world.signal('SIGINT');
+    await new Promise(resolve => setImmediate(resolve));
+    expect(lines).toEqual(['fyd: stopping failed: unknown error\n']);
+    expect(world.exits).toEqual([1]);
+  });
+
+  test('a stop that finishes reports nothing and ends nothing by force; SIGTERM then SIGINT is one stop', async () => {
+    const world = fakeProcess();
+    const lines: string[] = [];
+    let stops = 0;
+    const waiting = stopOnSignalReporting(
+      async () => {
+        stops += 1;
+      },
+      line => lines.push(line),
+      world.proc,
+    );
+    world.signal('SIGTERM');
+    world.signal('SIGINT');
+    await waiting;
+    expect(stops).toBe(1);
+    expect(lines).toEqual([]);
+    expect(world.timers.map(timer => timer.ms)).toEqual([STOP_LIMIT_MS]);
   });
 });

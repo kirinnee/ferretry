@@ -8,22 +8,13 @@ which open routes are stubs (`stub`: a pending or GAP refusal in the handler; `m
 `ports-pending.json` names the route; a row a review traced by hand is a `stub` too) before spending a batch on them.
 `no-marker` means only that the scan found no marker: it does NOT mean the handler works.
 
-Open route rows: 415. Descriptor proven: 364. Not proven: 51 (loosened 2, unpaired 49). Handler a stub: 32. Maybe a stub: 155.
+Open route rows: 369. Descriptor proven: 350. Not proven: 19 (loosened 2, unpaired 17). Handler a stub: 31. Maybe a stub: 140.
 
 <!-- prettier-ignore -->
 | Row | Route | Descriptor | Handler |
 | --- | --- | --- | --- |
 | R-0036 | `GET /healthz` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0072 | `GET /v1/config/file` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0073 | `GET /v1/config/status` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0081 | `GET /v1/doctor` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
 | R-0097 | `GET /v1/health` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0244 | `POST /v1/agent/config` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0246 | `POST /v1/agent/tools` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0274 | `POST /v1/config/confirm` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0401 | `POST /v1/system/open-url` | descriptor proven | no-marker: packages/plugins/browsers/daemon/open-url/routes.ts:26 |
-| R-0419 | `PUT /v1/config/file` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0424 | `WS GET /v1/events` | descriptor proven | stub: traced by review: kernel events socket: ports-pending GAP(kernel), ported but not mounted |
 | R-0048 | `GET /v1/audit` | descriptor proven | maybe: packages/core/gate/daemon/index.ts:219; the file carries pending/GAP markers at 122 |
 | R-0133 | `GET /v1/security` | descriptor proven | maybe: packages/core/gate/daemon/index.ts:220; the file carries pending/GAP markers at 122 |
 | R-0224 | `PATCH /v1/security` | descriptor proven | maybe: packages/core/gate/daemon/index.ts:221; the file carries pending/GAP markers at 122 |
@@ -41,55 +32,34 @@ Open route rows: 415. Descriptor proven: 364. Not proven: 51 (loosened 2, unpair
 | R-0347 | `POST /v1/sessions/:sessionId/input-quarantines/:key/end` | descriptor proven | maybe: packages/core/vault/daemon/lib/runtime/mounts/inputs.ts:221; the file carries pending/GAP markers at 54 |
 | R-0348 | `POST /v1/sessions/:sessionId/input-requests/:requestId/cancel` | descriptor proven | maybe: packages/core/vault/daemon/lib/runtime/mounts/inputs.ts:227; the file carries pending/GAP markers at 54 |
 | R-0349 | `POST /v1/sessions/:sessionId/input-requests/:requestId/deliver` | descriptor proven | maybe: packages/core/vault/daemon/lib/runtime/mounts/inputs.ts:196; the file carries pending/GAP markers at 54 |
-| R-0114 | `GET /v1/names` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1216; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
-| R-0134 | `GET /v1/sessions` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1069; ports-pending names /v1/ferrets |
-| R-0135 | `GET /v1/sessions/:sessionId` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1086; ports-pending names /v1/ferrets/:ferretId |
 | R-0142 | `GET /v1/sessions/:sessionId/attach` | descriptor proven | no-marker: packages/plugins/terminals/daemon/processes.ts:113 |
 | R-0145 | `GET /v1/sessions/:sessionId/compact-at` | descriptor proven | stub: traced by review: conversation host: compact-at get/set are pending() (503 conversation_terminal_unavailable) |
 | R-0147 | `GET /v1/sessions/:sessionId/events` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: session routes renamed to /v1/ferrets/:ferretId/… (design §1.4), but 5.0 declares no per-ferret events route (only the GET /v1/events socket): GAP, the per-ferret event feed is not ported | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0148 | `GET /v1/sessions/:sessionId/fs` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/session-filesystem.ts:289 |
-| R-0149 | `GET /v1/sessions/:sessionId/fs/changes` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/session-filesystem.ts:287 |
-| R-0150 | `GET /v1/sessions/:sessionId/fs/diff` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/session-filesystem.ts:288 |
-| R-0151 | `GET /v1/sessions/:sessionId/fs/file` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/session-filesystem.ts:285 |
-| R-0152 | `GET /v1/sessions/:sessionId/fs/index` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/session-filesystem.ts:286 |
 | R-0153 | `GET /v1/sessions/:sessionId/handoffs/:name` | descriptor proven | stub: traced by review: conversation host: handoffs read is pending() |
-| R-0154 | `GET /v1/sessions/:sessionId/handover` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:707; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
 | R-0158 | `GET /v1/sessions/:sessionId/log-page` | descriptor proven | stub: traced by review: conversation reading: transcripts is harnessPending (503) |
 | R-0159 | `GET /v1/sessions/:sessionId/log-search` | descriptor proven | stub: traced by review: conversation reading: transcripts is harnessPending (503) |
 | R-0160 | `GET /v1/sessions/:sessionId/logs` | descriptor proven | stub: traced by review: conversation reading: transcripts is harnessPending (503) |
-| R-0165 | `GET /v1/sessions/:sessionId/pins` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1065; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
-| R-0169 | `GET /v1/sessions/:sessionId/relaunch-settings` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:709; ports-pending names /v1/ferrets/:ferretId/relaunch-settings |
+| R-0169 | `GET /v1/sessions/:sessionId/relaunch-settings` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:738; ports-pending names /v1/ferrets/:ferretId/relaunch-settings |
 | R-0172 | `GET /v1/sessions/:sessionId/sends` | descriptor proven | maybe: packages/plugins/conversation/daemon/queue/adapters/send-path-delivery.ts:53; "sends" sits beside a pending/GAP marker (key not a literal) |
 | R-0173 | `GET /v1/sessions/:sessionId/sends/:sendId` | descriptor proven | maybe: packages/plugins/conversation/daemon/queue/adapters/send-path-delivery.ts:53; "sends" sits beside a pending/GAP marker (key not a literal) |
-| R-0187 | `GET /v1/sessions/by-request/:requestId` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1162; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
-| R-0210 | `GET /v1/worktrees` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/worktrees.ts:133 |
 | R-0211 | `GET /v1/worktrees/removal` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/worktrees.ts:131 |
 | R-0226 | `PATCH /v1/sessions/:sessionId/compact-at` | descriptor proven | stub: traced by review: conversation host: compact-at get/set are pending() (503 conversation_terminal_unavailable) |
-| R-0227 | `PATCH /v1/sessions/:sessionId/hypermedia` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:598; "hypermedia" sits beside a pending/GAP marker (key not a literal) |
-| R-0332 | `POST /v1/sessions` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1091; ports-pending names /v1/ferrets |
-| R-0335 | `POST /v1/sessions/:sessionId/answer` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:268; "answer" sits beside a pending/GAP marker (key not a literal) |
+| R-0227 | `PATCH /v1/sessions/:sessionId/hypermedia` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:1103; "hypermedia" sits beside a pending/GAP marker (key not a literal) |
+| R-0335 | `POST /v1/sessions/:sessionId/answer` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:1047; "answer" sits beside a pending/GAP marker (key not a literal) |
 | R-0339 | `POST /v1/sessions/:sessionId/composer` | descriptor proven | stub: traced by review: conversation host: composer is pending() |
-| R-0341 | `POST /v1/sessions/:sessionId/conversion-preview` | descriptor proven | stub: stub at packages/core/ferrets/daemon/index.ts:741: return runner !== 'unavailable' && runner.gone !== undefined && (await runner.go |
-| R-0343 | `POST /v1/sessions/:sessionId/dialog` | descriptor proven | no-marker: packages/plugins/claude-code/daemon/index.ts:118 |
-| R-0344 | `POST /v1/sessions/:sessionId/fork` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:705; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
+| R-0341 | `POST /v1/sessions/:sessionId/conversion-preview` | descriptor proven | stub: stub at packages/core/ferrets/daemon/index.ts:770: return runner !== 'unavailable' && runner.gone !== undefined && (await runner.go |
+| R-0343 | `POST /v1/sessions/:sessionId/dialog` | descriptor proven | no-marker: packages/plugins/claude-code/daemon/index.ts:123 |
+| R-0344 | `POST /v1/sessions/:sessionId/fork` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:734; the file carries pending/GAP markers at 200, 432, 437, 452, 533, 534 |
 | R-0345 | `POST /v1/sessions/:sessionId/handover` | descriptor proven | stub: traced by review: ferrets session-handover refuses every request until its seams land |
-| R-0346 | `POST /v1/sessions/:sessionId/handover/cancel` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:708; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
+| R-0346 | `POST /v1/sessions/:sessionId/handover/cancel` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:737; the file carries pending/GAP markers at 200, 432, 437, 452, 533, 534 |
 | R-0350 | `POST /v1/sessions/:sessionId/interrupt` | descriptor proven | maybe: packages/plugins/conversation/daemon/harness-seam.ts:45; "interrupt" sits beside a pending/GAP marker (key not a literal) |
 | R-0355 | `POST /v1/sessions/:sessionId/migrate` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… and migrate to move (design §1.4; migrat* is refused); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0356 | `POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… and migrate to move (design §1.4; migrat* is refused); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0357 | `POST /v1/sessions/:sessionId/permission` | descriptor proven | no-marker: packages/plugins/claude-code/daemon/index.ts:117 |
-| R-0359 | `POST /v1/sessions/:sessionId/pin` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1063; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
-| R-0360 | `POST /v1/sessions/:sessionId/pins` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1066; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
-| R-0362 | `POST /v1/sessions/:sessionId/rename` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1202; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
-| R-0363 | `POST /v1/sessions/:sessionId/resume` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1191; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
-| R-0364 | `POST /v1/sessions/:sessionId/revoke-credential` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1212; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
+| R-0357 | `POST /v1/sessions/:sessionId/permission` | descriptor proven | no-marker: packages/plugins/claude-code/daemon/index.ts:122 |
 | R-0366 | `POST /v1/sessions/:sessionId/send` | descriptor proven | maybe: packages/plugins/conversation/daemon/delivery/lib/service.ts:53; "send" sits beside a pending/GAP marker (key not a literal) |
 | R-0367 | `POST /v1/sessions/:sessionId/sends/:sendId/cancel` | descriptor proven | stub: traced by review: conversation host: send cancel is pending() |
 | R-0368 | `POST /v1/sessions/:sessionId/sends/:sendId/enter` | descriptor proven | stub: traced by review: conversation host: send enter (submit) is pending() |
 | R-0369 | `POST /v1/sessions/:sessionId/sends/:sendId/retry` | descriptor proven | stub: traced by review: conversation host: send retry is pending() |
-| R-0371 | `POST /v1/sessions/:sessionId/signal` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:827; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
-| R-0372 | `POST /v1/sessions/:sessionId/stop` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1183; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
-| R-0382 | `POST /v1/sessions/:sessionId/unpin` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1064; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
 | R-0410 | `POST /v1/worktrees` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/worktrees.ts:134 |
 | R-0411 | `POST /v1/worktrees/remove` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/worktrees.ts:132 |
 | R-0044 | `GET /v1/agenda/open` | descriptor proven | no-marker: packages/plugins/agenda/daemon/routes.ts:120 |
@@ -137,8 +107,8 @@ Open route rows: 415. Descriptor proven: 364. Not proven: 51 (loosened 2, unpair
 | R-0418 | `PUT /v1/catalog-shares/:shareId/new-passkey` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
 | R-0059 | `GET /v1/carriers` | descriptor proven | maybe: packages/plugins/connections/daemon/index.ts:253; the file carries pending/GAP markers at 79, 80, 168, 207, 218, 257 |
 | R-0203 | `GET /v1/tunnel` | descriptor proven | no-marker: packages/plugins/connections/daemon/connection-b.ts:88 |
-| R-0409 | `POST /v1/webrtc/offer` | descriptor proven | maybe: packages/plugins/connections/daemon/compose-b.ts:181; the file carries pending/GAP markers at 64 |
-| R-0423 | `PUT /v1/tunnel` | descriptor proven | maybe: packages/plugins/connections/daemon/compose-b.ts:180; the file carries pending/GAP markers at 64 |
+| R-0409 | `POST /v1/webrtc/offer` | descriptor proven | maybe: packages/plugins/connections/daemon/compose-b.ts:175; the file carries pending/GAP markers at 65 |
+| R-0423 | `PUT /v1/tunnel` | descriptor proven | maybe: packages/plugins/connections/daemon/compose-b.ts:174; the file carries pending/GAP markers at 65 |
 | R-0425 | `WS GET /v1/rendezvous/:daemonId/client` | descriptor proven | stub: stub at packages/plugins/connections/daemon/index.ts:261: sockets: { 'GET /v1/rendezvous/:daemonId/client': direct?.route.accept ?? (async |
 | R-0079 | `GET /v1/daemon/update` | descriptor proven | no-marker: packages/plugins/updates/daemon/lib/routes.ts:54 |
 | R-0096 | `GET /v1/harnesses/update` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
@@ -149,19 +119,19 @@ Open route rows: 415. Descriptor proven: 364. Not proven: 51 (loosened 2, unpair
 | R-0071 | `GET /v1/cgroups/config` | descriptor proven | no-marker: packages/plugins/terminals/daemon/processes.ts:114 |
 | R-0166 | `GET /v1/sessions/:sessionId/processes` | descriptor proven | no-marker: packages/plugins/terminals/daemon/processes.ts:109 |
 | R-0167 | `GET /v1/sessions/:sessionId/processes/:processId/output` | descriptor proven | no-marker: packages/plugins/terminals/daemon/processes.ts:110 |
-| R-0177 | `GET /v1/sessions/:sessionId/snapshot` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:599 |
-| R-0180 | `GET /v1/sessions/:sessionId/surfaces/terminals/control` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:617 |
+| R-0177 | `GET /v1/sessions/:sessionId/snapshot` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:613 |
+| R-0180 | `GET /v1/sessions/:sessionId/surfaces/terminals/control` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:631 |
 | R-0184 | `GET /v1/sessions/:sessionId/terminals` | descriptor proven | maybe: packages/plugins/terminals/daemon/lib/runtime/mounts/terminals.ts:253; the file carries pending/GAP markers at 140 |
 | R-0185 | `GET /v1/sessions/:sessionId/terminals/:terminalId` | descriptor proven | maybe: packages/plugins/terminals/daemon/lib/runtime/mounts/terminals.ts:255; the file carries pending/GAP markers at 140 |
 | R-0202 | `GET /v1/terminals` | descriptor proven | maybe: packages/plugins/terminals/daemon/lib/runtime/mounts/terminals.ts:251; the file carries pending/GAP markers at 140 |
 | R-0231 | `PATCH /v1/sessions/:sessionId/terminals/:terminalId` | descriptor proven | maybe: packages/plugins/terminals/daemon/lib/runtime/mounts/terminals.ts:256; the file carries pending/GAP markers at 140 |
 | R-0340 | `POST /v1/sessions/:sessionId/console/input` | descriptor proven | no-marker: packages/plugins/terminals/daemon/processes.ts:112 |
 | R-0361 | `POST /v1/sessions/:sessionId/processes/:processId/stop` | descriptor proven | no-marker: packages/plugins/terminals/daemon/processes.ts:111 |
-| R-0375 | `POST /v1/sessions/:sessionId/surfaces/terminals/control` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:619 |
-| R-0376 | `POST /v1/sessions/:sessionId/surfaces/terminals/tools` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:623 |
+| R-0375 | `POST /v1/sessions/:sessionId/surfaces/terminals/control` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:633 |
+| R-0376 | `POST /v1/sessions/:sessionId/surfaces/terminals/tools` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:637 |
 | R-0381 | `POST /v1/sessions/:sessionId/terminals` | descriptor proven | maybe: packages/plugins/terminals/daemon/lib/runtime/mounts/terminals.ts:254; the file carries pending/GAP markers at 140 |
 | R-0402 | `POST /v1/terminals/close-finished` | descriptor proven | maybe: packages/plugins/terminals/daemon/lib/runtime/mounts/terminals.ts:252; the file carries pending/GAP markers at 140 |
-| R-0428 | `WS GET /v1/sessions/:sessionId/terminals/:terminalId/stream` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:640 |
+| R-0428 | `WS GET /v1/sessions/:sessionId/terminals/:terminalId/stream` | descriptor proven | no-marker: packages/plugins/terminals/daemon/index.ts:654 |
 | R-0057 | `GET /v1/browser/login` | descriptor proven | maybe: packages/plugins/browsers/daemon/pages/routes.ts:141; ports-pending names /v1/browser/login |
 | R-0058 | `GET /v1/browser/state` | descriptor proven | no-marker: packages/plugins/browsers/daemon/proxy/routes.ts:32 |
 | R-0144 | `GET /v1/sessions/:sessionId/browser` | descriptor proven | no-marker: packages/plugins/browsers/daemon/pages/routes.ts:143 |
@@ -171,32 +141,32 @@ Open route rows: 415. Descriptor proven: 364. Not proven: 51 (loosened 2, unpair
 | R-0338 | `POST /v1/sessions/:sessionId/browser` | descriptor proven | no-marker: packages/plugins/browsers/daemon/pages/routes.ts:145 |
 | R-0373 | `POST /v1/sessions/:sessionId/surfaces/browser/control` | descriptor proven | maybe: packages/plugins/browsers/daemon/tools/index.ts:137; the file carries pending/GAP markers at 42 |
 | R-0374 | `POST /v1/sessions/:sessionId/surfaces/browser/tools` | descriptor proven | maybe: packages/plugins/browsers/daemon/tools/index.ts:143; the file carries pending/GAP markers at 42 |
-| R-0426 | `WS GET /v1/sessions/:sessionId/browser/stream` | descriptor proven | no-marker: packages/plugins/browsers/daemon/index.ts:275 |
-| R-0017 | `DELETE /v1/fleet/login/:flowId` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0083 | `GET /v1/fleet/credentials` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0085 | `GET /v1/fleet/login/:flowId` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0088 | `GET /v1/fleet/presets` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
+| R-0426 | `WS GET /v1/sessions/:sessionId/browser/stream` | descriptor proven | no-marker: packages/plugins/browsers/daemon/index.ts:276 |
+| R-0017 | `DELETE /v1/fleet/login/:flowId` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/sign-in.ts:78 |
+| R-0083 | `GET /v1/fleet/credentials` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/logins.ts:46 |
+| R-0085 | `GET /v1/fleet/login/:flowId` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/sign-in.ts:68 |
+| R-0088 | `GET /v1/fleet/presets` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/logins.ts:75 |
 | R-0113 | `GET /v1/models` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/models.ts:28 |
-| R-0286 | `POST /v1/fleet/credentials/:credentialId/check` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0287 | `POST /v1/fleet/credentials/:credentialId/test` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0288 | `POST /v1/fleet/login` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0289 | `POST /v1/fleet/login/:flowId` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
+| R-0286 | `POST /v1/fleet/credentials/:credentialId/check` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/logins.ts:51 |
+| R-0287 | `POST /v1/fleet/credentials/:credentialId/test` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/logins.ts:61 |
+| R-0288 | `POST /v1/fleet/login` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/sign-in.ts:64 |
+| R-0289 | `POST /v1/fleet/login/:flowId` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/sign-in.ts:74 |
 | R-0307 | `POST /v1/models/local/refresh` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/models.ts:32 |
 | R-0308 | `POST /v1/models/refresh` | descriptor proven | no-marker: packages/plugins/logins/daemon/lib/routes/models.ts:30 |
-| R-0082 | `GET /v1/fleet/components` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0084 | `GET /v1/fleet/export` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0086 | `GET /v1/fleet/machine` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0089 | `GET /v1/fleet/profiles` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0090 | `GET /v1/fleet/proposals/:proposalId` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0091 | `GET /v1/fleet/runtimes` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
+| R-0082 | `GET /v1/fleet/components` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-catalog.ts:107 |
+| R-0084 | `GET /v1/fleet/export` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-setup.ts:71 |
+| R-0086 | `GET /v1/fleet/machine` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-catalog.ts:106 |
+| R-0089 | `GET /v1/fleet/profiles` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-catalog.ts:108 |
+| R-0090 | `GET /v1/fleet/proposals/:proposalId` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-catalog.ts:125 |
+| R-0091 | `GET /v1/fleet/runtimes` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-catalog.ts:114 |
 | R-0171 | `GET /v1/sessions/:sessionId/runtime-models` | descriptor proven | stub: traced by review: runtimes ferret-runtime: unavailableFerretRuntime is never replaced in the assembly |
-| R-0283 | `POST /v1/fleet/clone/forget` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0284 | `POST /v1/fleet/clone/keys` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0285 | `POST /v1/fleet/clone/review` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0290 | `POST /v1/fleet/machine/tools/install` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0293 | `POST /v1/fleet/profiles/preview` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0294 | `POST /v1/fleet/proposals` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0295 | `POST /v1/fleet/proposals/:proposalId/apply` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
+| R-0283 | `POST /v1/fleet/clone/forget` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-setup.ts:79 |
+| R-0284 | `POST /v1/fleet/clone/keys` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-setup.ts:87 |
+| R-0285 | `POST /v1/fleet/clone/review` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-setup.ts:74 |
+| R-0290 | `POST /v1/fleet/machine/tools/install` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-setup.ts:67 |
+| R-0293 | `POST /v1/fleet/profiles/preview` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-catalog.ts:110 |
+| R-0294 | `POST /v1/fleet/proposals` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-catalog.ts:115 |
+| R-0295 | `POST /v1/fleet/proposals/:proposalId/apply` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-catalog.ts:127 |
 | R-0365 | `POST /v1/sessions/:sessionId/runtime` | descriptor proven | stub: traced by review: runtimes ferret-runtime: unavailableFerretRuntime is never replaced in the assembly |
 | R-0001 | `DELETE /v1/accounts/:id` | descriptor proven | maybe: packages/plugins/accounts/daemon/routes/accounts.ts:462; the file carries pending/GAP markers at 263, 372, 373, 376, 395, 418 |
 | R-0002 | `DELETE /v1/accounts/:id/factors/:factor` | descriptor proven | maybe: packages/plugins/accounts/daemon/routes/accounts.ts:602; the file carries pending/GAP markers at 263, 372, 373, 376, 395, 418 |
@@ -271,18 +241,18 @@ Open route rows: 415. Descriptor proven: 364. Not proven: 51 (loosened 2, unpair
 | R-0099 | `GET /v1/imports/conversations/:harness/:conversationId/preview` | descriptor proven | stub: traced by review: conversation reading: harnesses is harnessPending (503) |
 | R-0100 | `GET /v1/imports/history` | descriptor proven | maybe: packages/plugins/conversation/daemon/links/routes.ts:62; the file carries pending/GAP markers at 70 |
 | R-0101 | `GET /v1/imports/history/:importId` | descriptor proven | stub: stub at packages/plugins/conversation/daemon/links/routes.ts:70: throw new ApiError(404, 'the conversation is unavailable or could not be read',  |
-| R-0126 | `GET /v1/renders/:id` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:40; the file carries pending/GAP markers at 14, 102 |
+| R-0126 | `GET /v1/renders/:id` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:48; the file carries pending/GAP markers at 22, 110 |
 | R-0127 | `GET /v1/renders/:id/meta` | descriptor proven | no-marker: packages/plugins/conversation/daemon/renders/index.ts:26 |
-| R-0129 | `GET /v1/search` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:31; the file carries pending/GAP markers at 14, 102 |
+| R-0129 | `GET /v1/search` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:39; the file carries pending/GAP markers at 22, 110 |
 | R-0143 | `GET /v1/sessions/:sessionId/attachments/:attachmentId` | descriptor proven | no-marker: packages/plugins/conversation/daemon/attachments/index.ts:37 |
 | R-0163 | `GET /v1/sessions/:sessionId/messages` | descriptor proven | stub: traced by review: conversation reading: transcripts is harnessPending (503) |
 | R-0168 | `GET /v1/sessions/:sessionId/queue` | descriptor proven | maybe: packages/plugins/conversation/daemon/delivery/lib/service.ts:56; "queue" sits beside a pending/GAP marker (key not a literal) |
 | R-0174 | `GET /v1/sessions/:sessionId/shared-draft` | descriptor proven | maybe: packages/plugins/conversation/daemon/drafts/lib/stream.ts:276; "shareddraft" sits beside a pending/GAP marker (key not a literal) |
-| R-0186 | `GET /v1/sessions/:sessionId/transcript-images/:handle` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:30; the file carries pending/GAP markers at 14, 102 |
+| R-0186 | `GET /v1/sessions/:sessionId/transcript-images/:handle` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:38; the file carries pending/GAP markers at 22, 110 |
 | R-0230 | `PATCH /v1/sessions/:sessionId/queue/:messageId` | descriptor proven | maybe: packages/plugins/conversation/daemon/delivery/lib/service.ts:56; "queue" sits beside a pending/GAP marker (key not a literal) |
 | R-0298 | `POST /v1/imports/conversations/adopt` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0322 | `POST /v1/renders` | descriptor proven | no-marker: packages/plugins/conversation/daemon/renders/index.ts:25 |
-| R-0324 | `POST /v1/search/related` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:32; the file carries pending/GAP markers at 14, 102 |
+| R-0324 | `POST /v1/search/related` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:40; the file carries pending/GAP markers at 22, 110 |
 | R-0336 | `POST /v1/sessions/:sessionId/attachments` | descriptor proven | no-marker: packages/plugins/conversation/daemon/attachments/index.ts:36 |
 | R-0370 | `POST /v1/sessions/:sessionId/shared-draft` | descriptor proven | maybe: packages/plugins/conversation/daemon/drafts/lib/stream.ts:276; "shareddraft" sits beside a pending/GAP marker (key not a literal) |
 | R-0427 | `WS GET /v1/sessions/:sessionId/shared-draft/stream` | descriptor proven | maybe: packages/plugins/conversation/daemon/drafts/lib/stream.ts:43; "stream" sits beside a pending/GAP marker (key not a literal) |
@@ -309,7 +279,7 @@ Open route rows: 415. Descriptor proven: 364. Not proven: 51 (loosened 2, unpair
 | R-0116 | `GET /v1/pack/inventory` | descriptor proven | no-marker: packages/plugins/packs/daemon/lib/routes.ts:92 |
 | R-0117 | `GET /v1/pack/routing/jobs/:jobId` | descriptor proven | no-marker: packages/plugins/packs/daemon/lib/routes.ts:100 |
 | R-0170 | `GET /v1/sessions/:sessionId/result` | descriptor proven | no-marker: packages/plugins/packs/daemon/lib/routes.ts:131 |
-| R-0178 | `GET /v1/sessions/:sessionId/subtree` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1079; the file carries pending/GAP markers at 198, 413, 418, 507, 508, 519 |
+| R-0178 | `GET /v1/sessions/:sessionId/subtree` | descriptor proven | maybe: packages/core/ferrets/daemon/index.ts:1108; the file carries pending/GAP markers at 200, 432, 437, 452, 533, 534 |
 | R-0229 | `PATCH /v1/sessions/:sessionId/pack` | descriptor proven | no-marker: packages/plugins/packs/daemon/lib/routes.ts:146 |
 | R-0309 | `POST /v1/pack/new` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: fy new is Ferrets' verb (lead decision D2 #14): Packs starts no helper and shapes a start only through its start.decide taker and the start options | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0310 | `POST /v1/pack/recommend` | descriptor proven | stub: traced by review: packs: no runtime facts, so "no model is usable now" (degraded) |
@@ -327,13 +297,13 @@ Open route rows: 415. Descriptor proven: 364. Not proven: 51 (loosened 2, unpair
 | R-0408 | `POST /v1/warden/run` | descriptor proven | no-marker: packages/plugins/warden/daemon/routes.ts:80 |
 | R-0037 | `GET /metrics` | not proven (loosened): a recorded change is not a tightening: available true → ∅ | no-marker: packages/plugins/usage/daemon/index.ts:386 |
 | R-0038 | `GET /usage` | not proven (loosened): a recorded change is not a tightening: available true → ∅ | maybe: packages/plugins/usage/daemon/index.ts:377; ports-pending names /usage |
-| R-0045 | `GET /v1/analytics` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0046 | `GET /v1/analytics/pricing` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
+| R-0045 | `GET /v1/analytics` | descriptor proven | no-marker: packages/plugins/usage/daemon/index.ts:393 |
+| R-0046 | `GET /v1/analytics/pricing` | descriptor proven | no-marker: packages/plugins/usage/daemon/index.ts:399 |
 | R-0080 | `GET /v1/diagnostics/profile/:id` | descriptor proven | no-marker: packages/plugins/usage/daemon/index.ts:404 |
 | R-0204 | `GET /v1/usage` | descriptor proven | no-marker: packages/plugins/usage/daemon/index.ts:391 |
-| R-0213 | `PATCH /v1/analytics/pricing` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0247 | `POST /v1/analytics/pricing/sync/apply` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0248 | `POST /v1/analytics/pricing/sync/preview` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
+| R-0213 | `PATCH /v1/analytics/pricing` | descriptor proven | no-marker: packages/plugins/usage/daemon/index.ts:400 |
+| R-0247 | `POST /v1/analytics/pricing/sync/apply` | descriptor proven | no-marker: packages/plugins/usage/daemon/index.ts:402 |
+| R-0248 | `POST /v1/analytics/pricing/sync/preview` | descriptor proven | no-marker: packages/plugins/usage/daemon/index.ts:401 |
 | R-0282 | `POST /v1/diagnostics/profile` | descriptor proven | no-marker: packages/plugins/usage/daemon/index.ts:403 |
 | R-0103 | `GET /v1/learning/config` | descriptor proven | maybe: packages/plugins/lessons/daemon/routes.ts:450; the file carries pending/GAP markers at 215 |
 | R-0104 | `GET /v1/learning/proposals` | descriptor proven | maybe: packages/plugins/lessons/daemon/routes.ts:451; the file carries pending/GAP markers at 215 |
@@ -407,24 +377,8 @@ Open route rows: 415. Descriptor proven: 364. Not proven: 51 (loosened 2, unpair
 | R-0387 | `POST /v1/shared/unlock/options` | descriptor proven | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0416 | `PUT /v1/catalog-items/:itemId/current` | descriptor proven | maybe: packages/plugins/catalogs/daemon/lib/catalog-links/service.ts:889; "current" sits beside a pending/GAP marker (key not a literal) |
 | R-0417 | `PUT /v1/catalog-links/:linkId/version` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0018 | `DELETE /v1/fleet/mcp-auth/:component` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0019 | `DELETE /v1/fleet/mcp-auth/flows/:flowId` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0087 | `GET /v1/fleet/mcp-auth` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0112 | `GET /v1/mcp` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:94 |
-| R-0161 | `GET /v1/sessions/:sessionId/mcp` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:147 |
-| R-0162 | `GET /v1/sessions/:sessionId/mcp/servers` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:96 |
-| R-0291 | `POST /v1/fleet/mcp-auth/:component` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0292 | `POST /v1/fleet/mcp-auth/flows/:flowId` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0306 | `POST /v1/mcp/check` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:95 |
-| R-0351 | `POST /v1/sessions/:sessionId/mcp/login` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:146 |
-| R-0352 | `POST /v1/sessions/:sessionId/mcp/login/preview` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:144 |
-| R-0353 | `POST /v1/sessions/:sessionId/mcp/project` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:145 |
-| R-0354 | `POST /v1/sessions/:sessionId/mcp/project/preview` | descriptor proven | no-marker: packages/plugins/mcp/daemon/routes.ts:143 |
-| R-0175 | `GET /v1/sessions/:sessionId/skills` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:21 |
-| R-0176 | `GET /v1/sessions/:sessionId/skills/inventory` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:22 |
-| R-0197 | `GET /v1/skills` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:23 |
-| R-0198 | `GET /v1/skills/file` | descriptor proven | no-marker: packages/plugins/skills/daemon/routes.ts:24 |
-| R-0092 | `GET /v1/fleet/setup/scan` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
+| R-0092 | `GET /v1/fleet/setup/scan` | descriptor proven | no-marker: packages/plugins/runtimes/daemon/routes/fleet-setup.ts:66 |
 | R-0093 | `GET /v1/gc` | descriptor proven | maybe: packages/plugins/tidy/daemon/lib/routes.ts:66; the file carries pending/GAP markers at 82 |
 | R-0296 | `POST /v1/gc` | descriptor proven | maybe: packages/plugins/tidy/daemon/lib/routes.ts:68; the file carries pending/GAP markers at 82 |
 | R-0403 | `POST /v1/tidy/plan` | descriptor proven | stub: stub at packages/plugins/tidy/daemon/lib/routes.ts:82: throw new ApiError(503, `the tidy plan could not be read: ${result.message}`, TI |

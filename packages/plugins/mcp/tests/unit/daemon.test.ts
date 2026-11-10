@@ -6,7 +6,7 @@ import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/te
 import daemon from '../../daemon/index.ts';
 import manifest from '../../manifest.ts';
 
-test('G177 the daemon refuses project preview and add without a registered-project/worktree contract', async () => {
+test('G177 the daemon refuses project preview and add when Projects answers no registered root and no worktree is managed', async () => {
   const ferrets = new FakeFerrets();
   ferrets.add({ id: ferretId('f1'), folder: '/work/app' });
   let opened = 0;

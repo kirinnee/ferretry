@@ -9,8 +9,14 @@
  */
 
 import { describe, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 const WILDCARD_BIND_HOST = '0.0.0.0';
 import should from 'should';
+import { implementDaemon } from '@ferretry/kernel/manifest';
+import { testHost } from '../../../../../core/kernel/testing/host.ts';
+import { ConnectionsPort, HOSTED_RELAY_DIRECTORY_ORIGIN } from '../../../contract/index.ts';
+import manifest from '../../../manifest.ts';
+import { buildConnections } from '../../../daemon/index.ts';
 import {
   chooseRelayCarrierSources,
   chooseRelayCarrierSource,
@@ -402,5 +408,68 @@ describe('what the daemon says about its carrier', () => {
     should(PAIRING_REACH_NOTICE).match(/cannot yet be found by a device that has never paired/u);
     // The retired claim, named so a rewording cannot bring it back.
     should(PAIRING_REACH_NOTICE).not.match(/always/u);
+  });
+});
+
+describe('the discovery origin both ends read', () => {
+  const connections = new URL('../../../', import.meta.url).pathname;
+  const sourceOf = (relative: string) => readFileSync(`${connections}${relative}`, 'utf8');
+  /** Every non-test source file the daemon and the app half of Connections ship. */
+  const shipped = (): readonly string[] =>
+    ['daemon', 'app', 'contract', 'worker/src'].flatMap(folder =>
+      [...new Bun.Glob('**/*.{ts,tsx}').scanSync({ cwd: `${connections}${folder}` })]
+        .filter(file => !file.includes('/generated/'))
+        .map(file => `${connections}${folder}/${file}`),
+    );
+
+  it('R13 the discovery origin names a service, not a person: a bare https origin, the same string for every daemon', async () => {
+    const origin = new URL(HOSTED_RELAY_DIRECTORY_ORIGIN);
+    should(origin.protocol).equal('https:');
+    should(origin.origin).equal(HOSTED_RELAY_DIRECTORY_ORIGIN);
+    should(`${origin.username}${origin.password}${origin.search}${origin.hash}`).equal('');
+    // No daemon, device or pairing identifier can be part of a shared service address.
+    should(HOSTED_RELAY_DIRECTORY_ORIGIN).not.match(/fy_(daemon|device)|[?#@]/u);
+    // Two daemons with two identities ask and advertise exactly the same directory.
+    const askedBy = async (daemonId: string) => {
+      const host = await testHost({
+        plugins: [
+          implementDaemon(manifest, {
+            build: ctx =>
+              buildConnections(ctx, {
+                identity: { daemonId, sign: async () => Promise.reject(new Error('unused')) },
+                openSession: (layer, key, peer) => layer.open(key, peer),
+              }),
+          }),
+        ],
+      });
+      const advertised = host.provided(ConnectionsPort).advertisement().directoryOrigin;
+      await host.stop();
+      return advertised;
+    };
+    should(await askedBy(`fy_daemon_${'a'.repeat(43)}`)).equal(HOSTED_RELAY_DIRECTORY_ORIGIN);
+    should(await askedBy(`fy_daemon_${'b'.repeat(43)}`)).equal(HOSTED_RELAY_DIRECTORY_ORIGIN);
+  });
+
+  it('R203 both ends import the same discovery origin, it is an origin and never a carrier, and no relay address is compiled in', () => {
+    // The daemon's read, and the app build's define, both come from the one constant of the Connections contract.
+    should(sourceOf('daemon/index.ts')).match(/HOSTED_RELAY_DIRECTORY_ORIGIN[^;]*from '\.\.\/contract\/index\.ts'/su);
+    const vite = readFileSync(new URL('../../../../../app/vite.config.ts', import.meta.url), 'utf8');
+    should(vite).match(
+      /import \{ HOSTED_RELAY_DIRECTORY_ORIGIN \} from '\.\.\/plugins\/connections\/contract\/hosted-directory\.ts'/u,
+    );
+    should(vite).match(/__FY_RELAY_DIRECTORY__/u);
+    // An origin, never a carrier: the daemon reads an advertisement FROM it and publishes only what that says.
+    should(relayAdvertisementAddress(HOSTED_RELAY_DIRECTORY_ORIGIN)).equal(
+      `${HOSTED_RELAY_DIRECTORY_ORIGIN}${RELAY_ADVERTISEMENT_PATH}`,
+    );
+    should(publishedDaemonCarriers('https://box.example', [{ kind: 'direct-only', reason: 'no directory' }])).deepEqual(
+      [{ kind: 'direct', url: 'https://box.example' }],
+    );
+    // No relay address is compiled into either end: the service host is spelled in exactly one module, and no
+    // shipped source writes a rendezvous (`wss://…`) literal.
+    const serviceHost = new URL(HOSTED_RELAY_DIRECTORY_ORIGIN).host;
+    const spelledIn = shipped().filter(file => readFileSync(file, 'utf8').includes(serviceHost));
+    should(spelledIn.map(file => file.slice(connections.length))).deepEqual(['contract/hosted-directory.ts']);
+    for (const file of shipped()) should(readFileSync(file, 'utf8')).not.match(/['"`]wss:\/\/[a-z0-9.-]+\.[a-z]{2,}/u);
   });
 });

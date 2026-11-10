@@ -10,7 +10,14 @@ import { McpProjectFileChanged } from '../../daemon/lib/session/service.ts';
 /** A root handle over a map of absolute path -> text. `outside` prefixes refuse; `dirs` are directories. */
 function memoryRoot(
   files: Record<string, string>,
-  options: { readonly outside?: readonly string[]; readonly dirs?: readonly string[] } = {},
+  options: {
+    readonly outside?: readonly string[];
+    readonly dirs?: readonly string[];
+    /** Paths that are a link to a file inside the root: `stat` follows them, `lstat` says `symlink`. */
+    readonly links?: readonly string[];
+    /** Paths the kernel refuses when asked about the leaf (a link that leaves the folder). */
+    readonly refused?: readonly string[];
+  } = {},
 ): RootHandle & { readonly files: Record<string, string> } {
   const outside = options.outside ?? [];
   const handle: RootHandle = {
@@ -47,7 +54,18 @@ function memoryRoot(
     copyShared: () => Promise.reject(new Error('the fixture has no copyShared')),
     ensurePrivateDirectory: () => Promise.reject(new Error('the fixture has no ensurePrivateDirectory')),
     entries: () => Promise.reject(new Error('the fixture has no entries')),
-    lstat: () => Promise.reject(new Error('the fixture has no lstat')),
+    lstat: async path =>
+      (options.refused ?? []).includes(path)
+        ? Promise.reject(new Error('root refused: link_escape'))
+        : path in files
+          ? {
+              kind: (options.links ?? []).includes(path) ? ('symlink' as const) : ('file' as const),
+              size: files[path]!.length,
+              modified: '2026-01-01T00:00:00Z' as never,
+              mode: 0o600,
+              links: 1,
+            }
+          : undefined,
     makeDirectory: () => Promise.reject(new Error('the fixture has no makeDirectory')),
     realPath: () => Promise.reject(new Error('the fixture has no realPath')),
     pin: () => Promise.reject(new Error('the fixture has no pin')),
@@ -100,6 +118,37 @@ describe('RootMcpProjectFiles', () => {
       message: expect.stringContaining('1 MiB'),
     });
     await expect(files.replace('f1', '/w/out/.mcp.json', 'x', null)).rejects.toBeInstanceOf(McpProjectFileError);
+  });
+
+  test('R-0161 a leaf the kernel refuses (a link out of the folder) is a file Ferretry will not read or replace', async () => {
+    const root = memoryRoot({ '/w/.mcp.json': 'OUT-OF-FOLDER-CONTENT' }, { refused: ['/w/.mcp.json'] });
+    const files = new RootMcpProjectFiles(async () => ({ root, base: '/w' }));
+
+    const read = await files.read('f1', '/w/.mcp.json').catch((error: unknown) => error);
+    const replace = await files.replace('f1', '/w/.mcp.json', 'two', null).catch((error: unknown) => error);
+
+    for (const refusal of [read, replace]) {
+      expect(refusal).toBeInstanceOf(McpProjectFileError);
+      expect((refusal as Error).message).toBe(
+        '/w/.mcp.json is not a regular file, so Ferretry will not read or replace it.',
+      );
+    }
+    expect(root.files['/w/.mcp.json']).toBe('OUT-OF-FOLDER-CONTENT');
+  });
+
+  test('R-0161 refuses a .mcp.json that is a link, even to a file inside the folder, and never swaps it for a file', async () => {
+    const root = memoryRoot({ '/w/.mcp.json': 'LINKED-CONTENT' }, { links: ['/w/.mcp.json'] });
+    const files = new RootMcpProjectFiles(async () => ({ root, base: '/w' }));
+
+    const read = files.read('f1', '/w/.mcp.json').catch((error: unknown) => error);
+    const replace = files.replace('f1', '/w/.mcp.json', 'two', null).catch((error: unknown) => error);
+
+    for (const refusal of [await read, await replace]) {
+      expect(refusal).toBeInstanceOf(McpProjectFileError);
+      expect((refusal as Error).message).toContain('is a link');
+      expect((refusal as Error).message).not.toContain('LINKED-CONTENT');
+    }
+    expect(root.files['/w/.mcp.json']).toBe('LINKED-CONTENT');
   });
 });
 
