@@ -481,8 +481,9 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
     expect(text).toContain('config/runtimes/r.yaml: command');
     expect(text).not.toContain(SENTINEL);
     expect(text).toContain('KNOWN GAPS');
-    expect(text).toContain('limits.yaml is NOT read for launches');
-    expect(text).toContain('RESOURCE LIMITS: limits.yaml is NOT read');
+    expect(text).toContain('5.0 reads limits.yaml for launches');
+    expect(text).toContain('RESOURCE LIMITS: 5.0 reads limits.yaml for launches');
+    expect(text).not.toContain('NOT read');
   });
 
   test('MAJOR-2 the runtimes limits config says enabled: false, whatever v4 said', async () => {
