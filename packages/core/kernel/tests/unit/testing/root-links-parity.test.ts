@@ -350,6 +350,32 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
         }
       }),
     ],
+    // BG-016: a link whose target is a link (a chain A -> B -> C) is followed to its end, as `realpath` does
+    [
+      'BG-016 a file at the end of the chain',
+      await answer(() => fleet.writeText(at(fleet, 'homes/chain-c/f.txt'), 'c')),
+    ],
+    [
+      'BG-016 a file at the middle of the chain',
+      await answer(() => fleet.writeText(at(fleet, 'homes/chain-b/x.txt'), 'b')),
+    ],
+    [
+      'BG-016 linkTo the head of the chain',
+      await answer(() => fleet.linkTo(at(fleet, 'homes/chain-a'), { root: fleet, path: at(fleet, 'homes/chain-b') })),
+    ],
+    ['BG-016 remove the middle of the chain', await answer(() => fleet.remove(at(fleet, 'homes/chain-b')))],
+    [
+      'BG-016 linkTo the end of the chain from the middle',
+      await answer(() => fleet.linkTo(at(fleet, 'homes/chain-b'), { root: fleet, path: at(fleet, 'homes/chain-c') })),
+    ],
+    [
+      'BG-016 rename into a folder reached through a link to a link',
+      await answer(() => fleet.rename(at(fleet, 'homes/claude-a/extra.txt'), at(fleet, 'homes/chain-a/moved.txt'))),
+    ],
+    [
+      'BG-016 rename from a path through a link to a link',
+      await answer(() => fleet.rename(at(fleet, 'homes/chain-a/f.txt'), at(fleet, 'homes/claude-a/moved2.txt'))),
+    ],
     ['unlink a file', await answer(() => fleet.unlink(settings))],
     ['the file is still there', { ok: await kindAt(settings) }],
     ['unlink a missing name', await answer(() => fleet.unlink(at(fleet, 'homes/claude-a/none')))],
@@ -534,6 +560,8 @@ test('roots part 2 parity: linkTo, setMode and harnessFile answer every case ali
   expect(byCase['BG-016 list through that link']).toEqual({ ok: ['lonely', 'sub', 'top.txt'] });
   expect(byCase['BG-016 realPath of a dangling link']).toEqual({ ok: 'threw' });
   expect(byCase['BG-016 realPath of a link that leaves the root']).toEqual({ refused: 'link_escape' });
+  expect(byCase['BG-016 rename into a folder reached through a link to a link']).toEqual({ refused: 'link_escape' });
+  expect(byCase['BG-016 rename from a path through a link to a link']).toEqual({ refused: 'link_escape' });
   expect(byCase['rename a folder holding only a link']).toEqual({ ok: null });
   expect(byCase['the only link is at the new place']).toEqual({ ok: 'symlink' });
   expect(byCase['the only link is gone from the old place']).toEqual({ ok: null });
