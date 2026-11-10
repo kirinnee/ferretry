@@ -32,7 +32,9 @@ set -euo pipefail
 #             the compiled binaries name that origin, and only then install them into <target>/libexec (bin holds shims
 #             that pin the preview). Refuses unless the preview signing key is committed on that checkout
 #             (packages/app/release-signing-key.preview.pub, from setup-pwa-release-v5.sh).
-#   start     two read-only checks, then fy5 daemon start (port 7458, own home, own terminal socket, no service unit).
+#   start     two read-only checks, then fy5 daemon start (port 7458, own home, own terminal socket, no service unit),
+#             then waits up to 180 s for the daemon to SERVE (GET /healthz on the preview port answers 200; a miss names
+#             the deadline and the last answer, and goes no further).
 #             The daemon runs with NO reachable user systemd manager (a private XDG_RUNTIME_DIR, no session bus), so 5.0 runs
 #             launches directly and never reconfigures v4's slices; start REFUSES if a manager is still reachable, or if a
 #             login shell with the guard environment finds a `fy` other than the preview's. Once the daemon is up, start
@@ -189,7 +191,28 @@ start)
     exit 1
   }
   run_tool start-checks
-  fy5 daemon start
+  # `fy5 daemon start` stops waiting after its own 30 s, and a daemon on the owner's home can take longer to serve (38 s
+  # on 2026-11-10). Its "not answering" is not the end ONLY when the preview's own daemon is booting (a process holds
+  # the preview home's daemon lock); any other failure (a held lock, a taken port, a refused config) is the answer.
+  start_code=0
+  fy5 daemon start || start_code=$?
+  if [ "${start_code}" -ne 0 ]; then
+    if ! run_tool booting; then
+      echo "refusing to go on: fy5 daemon start failed (exit ${start_code}) and no preview daemon is booting (nothing holds ${target}/run/daemon.lock); nothing was proved." >&2
+      exit "${start_code}"
+    fi
+    echo "fy5 daemon start stopped waiting before the daemon answered; the preview daemon is booting, waiting for it to serve (wait-serving)" >&2
+  fi
+  # 2b. The daemon SERVES: GET /healthz on the preview port answers 200 (it answers 503 while the plugins start), while
+  # the preview's own lock is still held. On a miss the unproven daemon is stopped again, as on a terminal-proof miss.
+  if ! run_tool wait-serving; then
+    if run_tool stop; then
+      echo "refusing to go on: the preview daemon did not serve in time, so it was stopped (nothing was proved through it, nothing is left running). Look at its log under the preview home's logs/." >&2
+    else
+      echo "refusing to go on: the preview daemon did not serve in time AND could not be stopped; run '$0 stop' now (nothing was proved through it)." >&2
+    fi
+    exit 1
+  fi
   # 3. A terminal the daemon opens carries the preview environment: proved through the daemon's own route.
   # On ANY miss the daemon just started is stopped again: terminals it opens may reach v4's `fy`.
   if ! run_tool terminal-check; then

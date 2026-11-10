@@ -12,7 +12,7 @@ import { NODE_WORKER_FLAGS } from '../../../daemon/worker/program.ts';
  */
 describe('browser worker — loads under node', () => {
   it('should reach its endpoint check, with no browser, instead of crashing on load', () => {
-    const worker = fileURLToPath(new URL('../../../daemon/worker/adapters/main.ts', import.meta.url));
+    const worker = fileURLToPath(new URL('../../../daemon/worker/main.ts', import.meta.url));
 
     const run = spawnSync('node', [...NODE_WORKER_FLAGS, worker], { encoding: 'utf8', timeout: 30_000 });
 
