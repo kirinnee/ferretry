@@ -303,8 +303,8 @@ describe('first pairing through the real rendezvous', () => {
         // One low bit, not the whole byte: under a check that decrypts the body whatever the tag says, 0xff turns a
         // JSON text into invalid UTF-8 that is refused for the wrong reason, where one bit often leaves a valid text
         // that says something else, which a tamper-accepting check would believe. (Measured against that check, the
-        // last quarter of this record's body is where a flip is read as a different, valid answer; the first part of it
-        // is structure the parser refuses anyway, so the body rows sit at the end and three quarters in.)
+        // later part of this record's body is where a flip is read as a different, valid answer; a flip in the first
+        // part is refused by the parser anyway, so the body rows sit at the end and three quarters in.)
         edited[at] = (edited[at] ?? 0) ^ 0x01;
         return edited;
       };
