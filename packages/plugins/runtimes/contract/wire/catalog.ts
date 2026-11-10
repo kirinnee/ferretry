@@ -234,6 +234,12 @@ export const ComponentDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('mcp'),
     command: NonEmptyStringSchema.optional(),
+    /**
+     * As `argsWithheld`, for the text shown as written: the write rule still refuses the command (alone or with its
+     * arguments) or the word cutter would cut part of it, so `command` is absent and nothing of it is shown. An edit
+     * retypes the whole command line.
+     */
+    commandWithheld: z.literal(true).optional(),
     args: z.array(CommandWordSchema).readonly().optional(),
     /** The etag of `args` as read, present with them: an edit that keeps a hidden argument sends it back. */
     argsEtag: NonEmptyStringSchema.optional(),
@@ -243,6 +249,8 @@ export const ComponentDetailSchema = z.discriminatedUnion('kind', [
      */
     argsWithheld: z.literal(true).optional(),
     url: NonEmptyStringSchema.optional(),
+    /** As `commandWithheld`, for the server's web address (a user or a `?token=` in it): `url` is absent. */
+    urlWithheld: z.literal(true).optional(),
     /** `oauth`: the server is signed in to from Ferretry (docs/mcp-oauth.md). */
     auth: z.literal('oauth').optional(),
     env: z.array(EnvEntrySchema).readonly(),

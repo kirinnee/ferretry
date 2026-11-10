@@ -20,6 +20,8 @@
  *      left, in the flow list form and the block list form.
  * (ii) THE RUNTIMES VIEWS. The Resolved view (an MCP server's line, a settings component's flags), a component's detail
  *      (MCP args, settings flags: the WHOLE list is withheld) and the runtime list's overridden flags show no raw part.
+ *      A component's MCP `command` and `url` are netted too (`commandWithheld`, `urlWithheld`): the sample of these
+ *      families placed in `command` is `net-written-fields.test.ts`.
  *
  * Rows, no skip and no todo. Every value is fake: it is shaped like a credential and is none.
  */

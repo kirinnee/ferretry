@@ -184,6 +184,8 @@ export interface ComponentDraft {
    * cutter showed): nothing of it was sent, so no word of it can be kept, and the form says so in words.
    */
   readonly wordsWithheld: boolean;
+  /** An MCP server's command or web address the daemon withheld: nothing of it was sent, so the form asks for it again. */
+  readonly commandWithheld: boolean;
   /** Instructions or hooks text the daemon cut a secret out of: it cannot be saved from here. */
   readonly redacted: boolean;
   /** Hooks read from a folder rather than one file: edited in that folder. */
@@ -203,6 +205,7 @@ export const blankDraft = (kind: ComponentKind): ComponentDraft => ({
   flags: [],
   hiddenArgs: [],
   wordsWithheld: false,
+  commandWithheld: false,
   redacted: false,
   directory: false,
   oauth: false,
@@ -219,6 +222,7 @@ const shownText = (word: CommandWord): string => (typeof word === 'string' ? wor
 
 /** An MCP server's command line: `npx -y @modelcontextprotocol/server-github`, or its URL. */
 export function mcpCommandLine(detail: Extract<ComponentView['detail'], { kind: 'mcp' }>): string {
+  if (detail.commandWithheld === true || detail.urlWithheld === true) return '';
   if (detail.command === undefined) return detail.url ?? '';
   return [detail.command, ...(detail.args ?? []).map(shownText)].map(shellWord).join(' ');
 }
@@ -310,16 +314,20 @@ export function draftFromComponent(component: ComponentView): ComponentDraft {
         redacted: content?.form === 'text' && content.redacted,
         directory: detail.kind === 'hooks' && detail.directory !== undefined,
       };
-    case 'mcp':
+    case 'mcp': {
+      // A withheld command or address is retyped whole, with its arguments: nothing of the line can be kept by position.
+      const startWithheld = detail.commandWithheld === true || detail.urlWithheld === true;
       return {
         ...base,
         body: mcpCommandLine(detail),
         keptEnv: detail.env.map(entry => entry.name),
-        hiddenArgs: hiddenWords(detail.args),
+        hiddenArgs: startWithheld ? [] : hiddenWords(detail.args),
         wordsWithheld: detail.argsWithheld === true,
-        ...(detail.argsEtag === undefined ? {} : { wordsEtag: detail.argsEtag }),
+        commandWithheld: startWithheld,
+        ...(detail.argsEtag === undefined || startWithheld ? {} : { wordsEtag: detail.argsEtag }),
         oauth: detail.auth === 'oauth',
       };
+    }
     case 'skills':
       return { ...base, body: detail.items.join('\n') };
     case 'settings': {
@@ -376,6 +384,10 @@ export function settingsEntries(body: string): {
 export const WITHHELD_ARGS_PROBLEM =
   'The arguments are not shown because they may hold a credential, so they can’t be kept. Type the whole command line again, or edit the file at this machine.';
 
+/** The form's words for an MCP server's command or web address the daemon withheld (it was sent nothing of it). */
+export const WITHHELD_COMMAND_PROBLEM =
+  'The command is not shown because it may hold a credential, so it can’t be kept. Type the whole command line again, or edit the file at this machine.';
+
 /** The form's words for launch flags the daemon withheld: the form has no place to type flags, so it cannot save them. */
 export const WITHHELD_FLAGS_PROBLEM =
   'The launch flags are not shown because they may hold a credential, so this form can’t keep them. Edit the file at this machine.';
@@ -396,7 +408,8 @@ export function draftProblem(
   switch (draft.kind) {
     case 'mcp': {
       const words = splitCommandLine(draft.body);
-      if (words.length === 0) return 'Type the command that starts the server.';
+      if (words.length === 0)
+        return draft.commandWithheld ? WITHHELD_COMMAND_PROBLEM : 'Type the command that starts the server.';
       if (draft.wordsWithheld && words.length === 1) return WITHHELD_ARGS_PROBLEM;
       const bad = mcpArguments(draft, words.slice(1)).bad;
       return bad === undefined ? undefined : `Type the hidden value again, or put “${bad}” back as it was.`;

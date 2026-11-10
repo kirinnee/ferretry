@@ -77,7 +77,7 @@ import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.t
 import { runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
-import { shownLine, shownWordsEtag } from './command-line.ts';
+import { shownLine, shownWordsEtag, valueRefused, writtenWithheld } from './command-line.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
@@ -248,7 +248,9 @@ const KIND_GROUPS: readonly { readonly kind: ComponentKind; readonly label: stri
 const envEntries = (env: Readonly<Record<string, string>> | undefined): EnvEntry[] =>
   Object.entries(env ?? {})
     .toSorted(([left], [right]) => byName(left, right))
-    .map(([name, value]) => (looksSecret(name, value) ? { name, hidden: true as const } : { name, value }));
+    .map(([name, value]) =>
+      looksSecret(name, value) || valueRefused(name, value) ? { name, hidden: true as const } : { name, value },
+    );
 
 /**
  * A component's launch flags or MCP arguments as they may travel (rulings #39, #40): each word through the one
@@ -281,15 +283,18 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
       return { kind, file: typeof component.file === 'string' ? component.file : 'config/instructions' };
     case 'mcp': {
       const args = commandWords(component.args, component.command);
+      // THE NET, for the text shown as written: withheld whole, never a part of it.
+      const commandHeld = typeof component.command === 'string' && writtenWithheld('command', component.command);
+      const urlHeld = typeof component.url === 'string' && writtenWithheld('url', component.url);
       return {
         kind,
-        ...text('command'),
+        ...(commandHeld ? { commandWithheld: true as const } : text('command')),
         ...(args === undefined
           ? {}
           : args.withheld
             ? { argsWithheld: true as const }
             : { args: args.words, argsEtag: args.etag }),
-        ...text('url'),
+        ...(urlHeld ? { urlWithheld: true as const } : text('url')),
         ...(component.auth === 'oauth' ? { auth: 'oauth' as const } : {}),
         env: envEntries(env),
       };

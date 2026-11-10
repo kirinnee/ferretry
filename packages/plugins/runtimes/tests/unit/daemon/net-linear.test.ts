@@ -4,7 +4,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { shownLine } from '../../../daemon/lib/service/command-line.ts';
+import { shownLine, writtenWithheld } from '../../../daemon/lib/service/command-line.ts';
 
 const best = (run: () => unknown): number => {
   let least = Number.POSITIVE_INFINITY;
@@ -28,6 +28,12 @@ describe('CFG-LEAK (ii) the Runtimes net is linear at 256 KiB', () => {
       const small = make(128 * 1024);
       const large = make(256 * 1024);
       const ratio = best(() => shownLine([large])) / best(() => shownLine([small]));
+      should(ratio).be.below(3);
+    });
+    it(`should judge a command shown as written in linear time: ${label}`, () => {
+      const small = make(128 * 1024);
+      const large = make(256 * 1024);
+      const ratio = best(() => writtenWithheld('command', large)) / best(() => writtenWithheld('command', small));
       should(ratio).be.below(3);
     });
   }

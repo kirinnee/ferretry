@@ -12,9 +12,13 @@
  * with a plain sentence and never partial text. The same shape as the kernel's `unmaskable` withheld reason, so a word W
  * refuses is a word no Runtimes view shows, whatever the cutter learned or forgot.
  *
+ * A text shown AS WRITTEN (an MCP server's `command` and `url`) is netted by {@link writtenWithheld}, and a value shown
+ * under a name (an environment value, a settings value) is hidden when {@link valueRefused} says W refuses it: so every
+ * field a Runtimes view shows is netted or is a name or a path (docs/secrets.md lists them).
+ *
  * Pure.
  */
-import { findFlagSecrets, type ShownWord, shownWords } from '@ferretry/std/credential-words';
+import { findFlagSecrets, findRawSecrets, type ShownWord, shownWord, shownWords } from '@ferretry/std/credential-words';
 import { sha256Hex } from '../foreign.ts';
 
 export { type ShownWord, shownWords } from '@ferretry/std/credential-words';
@@ -27,6 +31,18 @@ export function refusedIndexes(shown: readonly ShownWord[]): ReadonlySet<number>
   const found = findFlagSecrets({ args: shown.map(word => word.text) });
   return new Set(found.map(finding => finding.path[1]).filter((at): at is number => typeof at === 'number'));
 }
+
+/** Whether the write rule refuses `text` as the value of a field called `name` (a token shape, a flag secret in it). */
+export const valueRefused = (name: string, text: string): boolean =>
+  findRawSecrets({ [name]: text }).length > 0 || findFlagSecrets({ [name]: text }).length > 0;
+
+/**
+ * Whether a text that would be shown AS WRITTEN must be withheld whole: the write rule refuses it, or the word cutter
+ * would cut any part of it. A part is never shown. (The write rule reads a command and its arguments as two fields, so
+ * the arguments are judged by their own net, not here.)
+ */
+export const writtenWithheld = (name: string, text: string): boolean =>
+  valueRefused(name, text) || shownWord(text, undefined).hidden;
 
 /** A command line as it may be shown: the cutter's words, and whether the net withheld the whole list. */
 export interface ShownLine {

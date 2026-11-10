@@ -20,7 +20,7 @@
 import { type Conflict, type FlatLayer, type ResolvedProfile, settingsKey } from '../account/layering.ts';
 import { harnessKey } from './foreign.ts';
 import { looksSecret } from '@ferretry/std/credential-words';
-import { refusedIndexes, shownLine, shownWords } from './command-line.ts';
+import { refusedIndexes, shownLine, shownWords, valueRefused } from './command-line.ts';
 import {
   HIDDEN_WORD_TEXT,
   type ResolvedEntry,
@@ -39,7 +39,9 @@ const shown = (value: unknown): string => (typeof value === 'string' ? value : J
 /** A value in words, hidden when it looks like a credential under this name. */
 function said(name: string, value: unknown): Pick<ResolvedSetter, 'value' | 'hidden'> {
   const text = shown(value);
-  return looksSecret(name, text) ? { value: RESOLVED_HIDDEN_TEXT, hidden: true } : { value: text };
+  return looksSecret(name, text) || valueRefused(name, text)
+    ? { value: RESOLVED_HIDDEN_TEXT, hidden: true }
+    : { value: text };
 }
 
 /** Where a server is reached, without a query, a fragment or a user in it. */
