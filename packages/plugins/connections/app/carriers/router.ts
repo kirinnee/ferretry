@@ -45,6 +45,7 @@ import {
   describeConnectionMethod,
   publishedConnectionMethods,
 } from '../lib/connection.ts';
+import { hostedAllowanceSentence } from '../lib/relay-allowance.ts';
 import { noTunnelReason, type TunnelServiceState } from '../lib/tunnel-service.ts';
 import {
   type CarrierSocketDependencies,
@@ -173,6 +174,14 @@ const HOSTED_ONLY_CODES: ReadonlySet<number> = new Set([
   RELAY_CLOSE_CODES.hostedBandwidth,
 ]);
 
+/**
+ * The line one failed leg is reported as. A spent hosted data allowance is said in the person's words, with its reset
+ * in this device's local time (R159); every other failure keeps the words the carrier gave, and its close code.
+ */
+const legDetail = (failure: LegFailure): string =>
+  (failure.code === RELAY_CLOSE_CODES.hostedBandwidth ? hostedAllowanceSentence(failure.reason) : undefined) ??
+  `${failure.reason} (${String(failure.code)})`;
+
 /** What a walk observed, in the terms the connection model reads (today's `carrierOutage`). */
 const carrierOutage = (seen: readonly LegFailure[]): CarrierOutage => {
   const relays = seen.filter(failure => failure.method.kind === 'relay');
@@ -183,7 +192,7 @@ const carrierOutage = (seen: readonly LegFailure[]): CarrierOutage => {
           ? { ...failure.method, operator: 'hosted' }
           : failure.method,
       ).label,
-      detail: `${failure.reason} (${String(failure.code)})`,
+      detail: legDetail(failure),
     })),
     daemonAbsent: seen.some(failure => failure.code === RELAY_CLOSE_CODES.daemonAbsent),
     relaysNeverOpened: relays.length > 0 && relays.every(failure => !failure.opened),
@@ -469,7 +478,7 @@ export class CarrierRouter {
         probes.push(
           carrierProbe(failure.method, {
             kind: 'transport-failure',
-            detail: `${failure.reason} (${String(failure.code)})`,
+            detail: legDetail(failure),
             ...(failure.opened ? { connected: true as const } : {}),
           }),
         );
