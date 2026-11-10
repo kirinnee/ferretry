@@ -193,6 +193,11 @@ interface ValueEnds {
   readonly heldEnd: Int32Array;
   /** The start of the next part that is a key and its `:` and nothing else (`X-Trace:`), or the text's end. */
   readonly bareKey: Int32Array;
+  /**
+   * The next parameter separator, not between quotes, that is followed by text no key of its own starts and that is
+   * more than the separator in its part: where raw text is glued after keys (`,b=2,<v>`); the text's end when none.
+   */
+  readonly loose: Int32Array;
 }
 
 /**
@@ -215,6 +220,7 @@ function valueEnds(text: string, keyStarts: ReadonlyMap<number, number>, emptyKe
   const heldStart = new Int32Array(length + 1);
   const heldEnd = new Int32Array(length + 1);
   const bareKey = new Int32Array(length + 2).fill(length);
+  const loose = new Int32Array(length + 1).fill(length);
   const pointerEnds = new Map(
     matchesOf(secretReferencePattern(), text).map(found => [found.index, found.index + found[0].length]),
   );
@@ -232,24 +238,28 @@ function valueEnds(text: string, keyStarts: ReadonlyMap<number, number>, emptyKe
       value[at] = at;
       piece[at] = at;
       tail[at] = at;
+      loose[at] =
+        at + 1 < (partEnd[at] as number) && (tail[at + 1] as number) > at + 1 ? at : (loose[at + 1] as number);
     } else if (char === '"' || char === "'") {
       const match = char === '"' ? nextDouble : nextSingle;
       value[at] = match >= length ? length : (value[match + 1] as number);
       piece[at] = match >= length ? length : (piece[match + 1] as number);
       tail[at] = match >= length ? length : (tail[match + 1] as number);
+      loose[at] = match >= length ? length : (loose[match + 1] as number);
       if (char === '"') nextDouble = at;
       else nextSingle = at;
     } else {
       value[at] = value[at + 1] as number;
       piece[at] = keyStarts.has(at) ? at : (piece[at + 1] as number);
       tail[at] = keyStarts.has(at) && !emptyKeys.has(at) ? at : (tail[at + 1] as number);
+      loose[at] = loose[at + 1] as number;
     }
   }
   for (let at = 0; at < length; at++)
     shownEnd[at + 1] = /\s/u.test(text[at] as string) ? (shownEnd[at] as number) : at + 1;
   const ends = {
     ...{ value, piece, tail, pointer, pointerStart, close, shownEnd },
-    ...{ partEnd, partStart, nameEnd, heldStart, heldEnd, bareKey },
+    ...{ partEnd, partStart, nameEnd, heldStart, heldEnd, bareKey, loose },
   };
   let held: Cut | undefined;
   for (let at = 0; at <= length; at++) {
@@ -359,8 +369,8 @@ function gluedToPointer(text: string, ends: ValueEnds, start: number, end: numbe
   if (!GLUE_FREE_BEFORE.has(before)) return valueTo;
   const next = ends.pointer[at] as number;
   // A `,` `;` `&` right after the pointer ends the key's value, but the text after it is glued to the pointer unless a
-  // key of its own starts there (`${secret:X},v` is cut to the end of its part; `${secret:X},b=2` is not).
-  const runsOn = next === end && next + 1 < (ends.partEnd[at] as number) && (ends.tail[next + 1] as number) > next + 1;
+  // key of its own starts there (`${secret:X},v` and `${secret:X},b=2,v` are cut to the end of its part; `${secret:X},b=2` is not).
+  const runsOn = next === end && (ends.loose[next] as number) < (ends.partEnd[at] as number);
   const partTo = runsOn ? (ends.partEnd[at] as number) : valueTo;
   const after = next < partTo ? (text[next] as string) : '';
   return after === '' || (next === partTo - 1 && QUOTE_MARKS.has(after) && QUOTE_MARKS.has(before)) ? start : partTo;

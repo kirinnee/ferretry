@@ -9,7 +9,7 @@
  * export list, and a TEST may import both sides where the kernel's own code may not import a plugin.
  *
  * T-B2 holds the write rule (W, `findFlagSecrets`) under BOTH cutters, strictly: EVERY word W refuses is cut by the
- * kernel's mask and by runtimes' copy, residual 0. Its corpus comes from W's own name tail, not from the mask's name
+ * kernel's mask and by runtimes' copy, residual 0 (a pointer, then keys of its own, then raw text included). Its corpus comes from W's own name tail, not from the mask's name
  * list: a candidate name is in it exactly when W refuses it, so a name only W knows is in it. A W-only widening onto a name outside CANDIDATE_NAMES is not seen.
  *
  * Pin to the vault contract's cutter once it lands on 5.0 (`rebuild/fix-catalogs-one-rule`, #41): this file has no
@@ -97,6 +97,18 @@ const OWN_LINES: readonly (readonly string[])[] = [
     [`--header=Authorization: Bearer ${POINTER}${mark}${VALUE}`],
     ['--key', `${POINTER}${mark}gsk_AbCdEfGhIjKlMnOpQrSt12`],
     [`--set=a=1,API_KEY=${POINTER}${mark}b=2`],
+    // …and one, two or three keys of its own after it, then raw text: the text after a key's value is glued all the same.
+    ['--key', `${POINTER}${mark}b=2${mark}${VALUE}`],
+    [`--token=${POINTER}${mark}b=2${mark}${VALUE}`],
+    ['-e', `KEY=${POINTER}${mark}b=2${mark}${VALUE}`],
+    [`Authorization: ${POINTER}${mark}b=2${mark}${VALUE}`],
+    [`--header=Authorization: Bearer ${POINTER}${mark}b=2${mark}${VALUE}`],
+    ['--key', `${POINTER}${mark}k=v${mark}k2=v2${mark}${VALUE}`],
+    ['--key', `${POINTER}${mark}k=v${mark}k2=v2${mark}k3=v3${mark}${VALUE}`],
+    ['--key', `${POINTER}${mark}b="x${mark}y"${mark}${VALUE}`],
+    ['--key', `${POINTER}${mark}b='x${mark}y'${mark}gsk_AbCdEfGhIjKlMnOpQrSt12`],
+    [`--set=a=1,API_KEY=${POINTER}${mark}b=2${mark}${VALUE}`],
+    [`-cAPI_KEY:${POINTER}${mark}b=2${mark}c=3${mark}${VALUE}`],
   ]),
 ];
 
@@ -303,16 +315,13 @@ describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => 
       should([name, refusedNames.has(name)]).eql([name, false]);
   });
 
-  it('S6 CFG-LEAK-W GAP pinned: a pointer, then a key of its own, then raw text is refused by W and shown by both', () => {
-    // `${secret:X},b=2,<v>`: the text after `b=2,` belongs to key `b`, which no name rule reads, so neither cutter cuts it.
-    // Not declared yet (a ports-pending line is the owner's call). This test pins the gap so it cannot grow: a fix turns
-    // it RED, and the line then moves to T-B2.
-    for (const mark of [',', ';', '&']) {
-      const words = ['--key', `${POINTER}${mark}b=2${mark}${VALUE}`];
-      should(findFlagSecrets({ args: words }).length).equal(1);
-      should(kernelShownWords(words)[1]?.hidden).equal(false);
-      should(runtimesShownWords(words)[1]?.hidden).equal(false);
-    }
+  it('S6 CFG-LEAK-W the ruled controls stay shown: a pointer, then a key of its own and no raw text, is no glue', () => {
+    for (const mark of [',', ';', '&'])
+      for (const words of [['--key', `${POINTER}${mark}b=2`], [`--set=a=1,API_KEY=${POINTER}${mark}b=2`]]) {
+        should(findFlagSecrets({ args: words }).length).equal(0);
+        should([words, kernelShownWords(words).map(word => word.hidden)]).eql([words, words.map(() => false)]);
+        should([words, runtimesShownWords(words).map(word => word.hidden)]).eql([words, words.map(() => false)]);
+      }
   });
 
   it('CFG-LEAK-R HIDDEN_VALUE_TEXT === HIDDEN_WORD_TEXT', () => {
