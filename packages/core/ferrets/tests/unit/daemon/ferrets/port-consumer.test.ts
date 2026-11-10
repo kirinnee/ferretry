@@ -273,6 +273,16 @@ test('KCB-S2 F2 (row 17) a move names who moved it only as owner, session:<ferre
       });
   expect(w.reached).toEqual([]);
 
+  // A caller that casts past `movedBy?: string` gets the same fixed refusal, never a throw and never a pass.
+  const cast = [42, { startsWith: () => true, slice: () => 'abc' }, new String('owner')];
+  for (const consumer of ['board', 'warden'])
+    for (const movedBy of cast)
+      expect(await w.port(consumer).move!(F1, 'codex-two', { movedBy: movedBy as unknown as string })).toEqual({
+        ok: false,
+        error: { code: 'refused', reason: 'a move names who moved it as owner, session:<ferret id> or warden' },
+      });
+  expect(w.reached).toEqual([]);
+
   // The three spellings go through; 'warden' only from the Warden (unchanged).
   expect((await w.port('board').move!(F1, 'codex-two', { movedBy: 'owner' })).ok).toBe(true);
   expect((await w.port('board').move!(F1, 'codex-two', { movedBy: 'session:mw7bp88g-50e00159' })).ok).toBe(true);
