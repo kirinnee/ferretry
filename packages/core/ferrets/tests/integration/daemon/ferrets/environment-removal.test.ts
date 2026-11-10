@@ -139,3 +139,39 @@ describe('BG-036 a session’s environment.json is deleted when it ends', () => 
     expect(held(second, id)).toBeUndefined();
   });
 });
+
+describe('M20 the boot reconcile never revives an ended document', () => {
+  test('M20 a held ferret the registry left starting whose document says failed stays failed after a restart and the turn-watch job', async () => {
+    // Arrange: a ferret whose document is made `failed` as a lifecycle failure would, and whose registry record a crash
+    // left `starting`. `starting` is the only registry state where the arm's `'reconcile'` and a lifecycle edge differ
+    // (`lifecycleStatus` revives an ended document only on a lifecycle `starting`); at `working` both leave it alone.
+    const first = await boot(new SeedingHarness());
+    const started = await start(first);
+    expect(started.status).toBeLessThan(300);
+    const { id } = started.json<{ id: string }>();
+    await first.settle();
+    const files = first.state('ferrets').files;
+    const statusOf = (host: TestHost): unknown =>
+      JSON.parse(host.state('ferrets').files.get(`${id}/state.json`) as string).status;
+    const raw = JSON.parse(files.get(`${id}/state.json`) as string);
+    files.set(`${id}/state.json`, JSON.stringify({ ...raw, status: 'failed' }));
+    const record = JSON.parse(files.get(`${id}/ferret.json`) as string);
+    files.set(`${id}/ferret.json`, JSON.stringify({ ...record, state: 'starting' }));
+    expect(statusOf(first)).toBe('failed');
+
+    // Act: the daemon restarts holding the registry's record, and the arm job reconciles every held document.
+    const second = await first.restart();
+    await second.settle();
+    const listed = await second.request('GET', '/v1/ferrets', {});
+    await second.runJob(TURN_WATCH_JOB);
+    await second.settle();
+    // The status lane is fire-and-forget: give the reconcile its turn before looking.
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    // Assert: the restarted registry still says `starting` (so the reconcile ran on the one state a lifecycle edge
+    // would revive from), and the document was not brought back.
+    expect(JSON.stringify(listed.json())).toContain(`"id":"${id}"`);
+    expect(JSON.stringify(listed.json())).toContain('"state":"starting"');
+    expect(statusOf(second)).toBe('failed');
+  });
+});

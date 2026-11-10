@@ -44,8 +44,6 @@ export const KNOWN = 'scripts/validate/parity-ticks-known.tsv';
 
 /** The ids `${KNOWN}` may list. It only shrinks: delete an id here when its row is fixed; never add one. */
 export const FROZEN_IDS: ReadonlySet<string> = new Set([
-  'F-0305',
-  'F-0422',
   'S-0010',
   'S-0255',
   'S-0262',
@@ -85,7 +83,6 @@ export const FROZEN_IDS: ReadonlySet<string> = new Set([
   'V-0297',
   'V-0301',
   'V-0302',
-  'V-0452',
 ]);
 
 export interface LedgerRow {

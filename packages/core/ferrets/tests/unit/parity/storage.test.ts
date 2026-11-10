@@ -159,18 +159,28 @@ describe('session-private files parity (the internal sessions root, state/ferret
     expect(await readFile(file, 'utf8')).toBe('Again.\n');
   });
 
-  for (const [row, marker] of [
-    ['F-0305 F-0322', 'done'],
-    ['F-0305 F-0329', 'needs-help'],
-    ['F-0305', 'process-exit'],
-  ] as const)
-    test(`${row} FY_HOME/state/ferrets/sessions/{ferret}/${marker}.marker is cleared before every relaunch`, async () => {
-      const { root, folder } = await sessionsRoot();
-      await mkdir(folder, { recursive: true, mode: 0o700 });
-      await writeFile(`${folder}/${marker}.marker`, `${marker}\n`);
-      await new FileResumeTurnStore(root, FERRET).clearMarkers(FERRET);
-      await expect(lstat(`${folder}/${marker}.marker`)).rejects.toThrow();
-    });
+  // Each title names F-0305 literally (the tick gate reads the title, not a template). The done and needs-help markers
+  // are also the files of F-0322 / F-0329; those rows stay open (nothing writes the marker yet), so their ids are
+  // deliberately NOT in these titles.
+  async function markerIsCleared(marker: string): Promise<void> {
+    const { root, folder } = await sessionsRoot();
+    await mkdir(folder, { recursive: true, mode: 0o700 });
+    await writeFile(`${folder}/${marker}.marker`, `${marker}\n`);
+    await new FileResumeTurnStore(root, FERRET).clearMarkers(FERRET);
+    await expect(lstat(`${folder}/${marker}.marker`)).rejects.toThrow();
+  }
+
+  test('F-0305 FY_HOME/state/ferrets/sessions/{ferret}/done.marker is cleared before every relaunch', async () => {
+    await markerIsCleared('done');
+  });
+
+  test('F-0305 FY_HOME/state/ferrets/sessions/{ferret}/needs-help.marker is cleared before every relaunch', async () => {
+    await markerIsCleared('needs-help');
+  });
+
+  test('F-0305 FY_HOME/state/ferrets/sessions/{ferret}/process-exit.marker is cleared before every relaunch', async () => {
+    await markerIsCleared('process-exit');
+  });
 
   test('F-0326 FY_HOME/state/ferrets/sessions/{ferret}/last-snapshot.txt: the screen a stop looked at, masked, 0600', async () => {
     const { root, folder } = await sessionsRoot();
