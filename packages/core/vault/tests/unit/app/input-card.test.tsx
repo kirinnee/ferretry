@@ -186,6 +186,13 @@ describe('the input card keeps the value nowhere but its field', () => {
     const stored = spyOn(Storage.prototype, 'setItem');
     const pushed = spyOn(history, 'pushState');
     const replaced = spyOn(history, 'replaceState');
+    // Earlier files in the same run may have left keys behind, so compare against what was there before the card.
+    const contents = (store: Storage): Record<string, string | null> =>
+      Object.fromEntries(
+        Array.from({ length: store.length }, (_, i) => store.key(i) ?? '').map(k => [k, store.getItem(k)]),
+      );
+    const localBefore = contents(localStorage);
+    const sessionBefore = contents(sessionStorage);
     const titleBefore = document.title;
     const hrefBefore = location.href;
     const nowhere = (): void => {
@@ -193,8 +200,9 @@ describe('the input card keeps the value nowhere but its field', () => {
       expect(stored.mock.calls).toEqual([]);
       expect(pushed.mock.calls).toEqual([]);
       expect(replaced.mock.calls).toEqual([]);
-      expect(localStorage.length).toBe(0);
-      expect(sessionStorage.length).toBe(0);
+      expect(contents(localStorage)).toEqual(localBefore);
+      expect(contents(sessionStorage)).toEqual(sessionBefore);
+      expect(JSON.stringify([contents(localStorage), contents(sessionStorage)])).not.toContain(FAKE_VALUE);
       expect(location.href).toBe(hrefBefore);
       expect(location.href).not.toContain(FAKE_VALUE);
       expect(document.title).toBe(titleBefore);

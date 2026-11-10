@@ -302,3 +302,97 @@ describe('componentBadges · where a copy came from', () => {
     });
   });
 });
+
+describe('componentChange · a hidden flag or argument (ruling #39)', () => {
+  const valid = (change: unknown) => AccountChangeSchema.parse(change);
+  const ETAG = 'e'.repeat(64);
+  const hiddenServer = component({
+    reference: 'mcp/remote',
+    kind: 'mcp',
+    name: 'remote',
+    detail: {
+      kind: 'mcp',
+      command: 'npx',
+      args: [
+        'mcp-remote',
+        '--header',
+        { shown: 'Authorization: ‹hidden›', hidden: true },
+        { shown: '--api-key=‹hidden›', hidden: true },
+        { shown: '‹hidden›', hidden: true },
+      ],
+      argsEtag: ETAG,
+      env: [],
+    },
+  });
+  const hiddenSettings = component({
+    ...claudeSettings,
+    detail: {
+      kind: 'settings',
+      file: 'components/settings/x.json',
+      flags: ['--verbose', '--token', { shown: '‹hidden›', hidden: true }],
+      flagsEtag: ETAG,
+      env: [],
+    },
+  });
+
+  it('shows a hidden argument by its shown text and keeps it by its position with the etag, never a value', () => {
+    // Arrange
+    const draft = draftFromComponent(hiddenServer);
+
+    // Act
+    const change = changeOf(valid(componentChange(draft, false)), 'component.put').component;
+
+    // Assert
+    expect(draft.body).toBe('npx mcp-remote --header "Authorization: ‹hidden›" --api-key=‹hidden› ‹hidden›');
+    expect(change).toEqual({
+      kind: 'mcp',
+      command: 'npx',
+      args: ['mcp-remote', '--header', { keep: true, at: 2 }, { keep: true, at: 3 }, { keep: true, at: 4 }],
+      argsEtag: ETAG,
+    });
+  });
+
+  it('moves a kept argument with the words a person moved, and sends a retyped one as typed', () => {
+    // Arrange
+    const draft = { ...draftFromComponent(hiddenServer), body: 'npx --api-key=‹hidden› mcp-remote --header x-new' };
+
+    // Act
+    const change = changeOf(valid(componentChange(draft, false)), 'component.put').component;
+
+    // Assert
+    expect(change).toEqual({
+      kind: 'mcp',
+      command: 'npx',
+      args: [{ keep: true, at: 3 }, 'mcp-remote', '--header', 'x-new'],
+      argsEtag: ETAG,
+    });
+  });
+
+  it('refuses to save a hidden word a person edited, since its value was never here to send', () => {
+    // Arrange
+    const edited = { ...draftFromComponent(hiddenServer), body: 'npx --api-key=‹hidden›x' };
+    const twice = { ...draftFromComponent(hiddenServer), body: 'npx --api-key=‹hidden› --api-key=‹hidden›' };
+
+    // Assert
+    expect(draftProblem(edited, [hiddenServer], 'remote')).toBe(
+      'Type the hidden value again, or put “--api-key=‹hidden›x” back as it was.',
+    );
+    expect(draftProblem(twice, [hiddenServer], 'remote')).toBe(
+      'Type the hidden value again, or put “--api-key=‹hidden›” back as it was.',
+    );
+    expect(draftProblem(draftFromComponent(hiddenServer), [hiddenServer], 'remote')).toBeUndefined();
+  });
+
+  it('keeps a hidden launch flag by its position, sending the etag only with a kept word', () => {
+    // Act
+    const kept = changeOf(valid(componentChange(draftFromComponent(hiddenSettings), false)), 'component.put');
+    const plain = changeOf(valid(componentChange(draftFromComponent(claudeSettings), false)), 'component.put');
+
+    // Assert
+    expect(kept.component).toMatchObject({ flags: ['--verbose', '--token', { keep: true, at: 2 }], flagsEtag: ETAG });
+    expect(plain.component).not.toHaveProperty('flagsEtag');
+    expect(changeOf(componentChange(draftFromComponent(github), false), 'component.put').component).not.toHaveProperty(
+      'argsEtag',
+    );
+  });
+});
