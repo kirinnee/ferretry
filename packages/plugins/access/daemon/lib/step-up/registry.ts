@@ -232,9 +232,10 @@ export class StepUpRegistry {
    * Given an `act`, only a proof stamped for exactly that act is taken: a leftover proof for another act
    * (or none) stays where it is and does not count.
    *
-   * Given `notAfterMs`, a proof proved AFTER that instant (epoch ms) stays where it is and does not count: a claim that
-   * outlives its request (work a call spawns) names the instant the call was admitted, so it never takes a proof the
-   * owner gave afterwards for something else.
+   * Given `notAfterMs`, a proof proved AFTER that instant (epoch ms) stays where it is and does not count: every
+   * standing's claim names the instant its call was admitted (inside the request or in work the call spawns), so it
+   * does not take a proof the owner gave afterwards. The comparison is of wall-clock milliseconds: a proof made in the
+   * same millisecond as the admission, or after the clock stepped back, is not told apart from an earlier one.
    */
   claimFresh(
     subject: StepUpSubject,
