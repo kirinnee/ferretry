@@ -525,7 +525,12 @@ async function openLeaf(scope: Scope, real: string): Promise<OpenedFile> {
  * whole, up to a limit, a window or a tail: every read of a root goes through here.
  */
 async function withCheckedFile<T>(scope: Scope, full: string, use: (file: OpenedFile) => Promise<T>): Promise<T> {
-  const real = literalReal(scope, full, await scope.fs.realpath(full));
+  // The errno stays (`readDurable` goes by `ENOENT`); the system's message names the absolute path, so it does not.
+  const resolved = await scope.fs.realpath(full).catch((error: unknown) => {
+    const code = errnoOf(error);
+    throw code === undefined ? error : Object.assign(new Error(`${code}: the file could not be resolved`), { code });
+  });
+  const real = literalReal(scope, full, resolved);
   const before = await scope.fs.identity(real);
   if (before === undefined) return refuse('changed');
   const judged = await fileProblem(scope, real, before);
