@@ -780,8 +780,8 @@ describe('resolvedEntries — the #40 rule after review r1 (F2, F3)', () => {
     should(actual).deepEqual([
       hid(`--hdr,api_key:${HIDDEN}`),
       hid(`--hdr;password:${HIDDEN}`),
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
-      hid(`--x&X-Api-Key=${HIDDEN},\${secret:API_TOKEN}`),
+      // W refuses the whole value (a pointer and raw text), so the pointer in it is cut with the rest.
+      hid(`--x&X-Api-Key=${HIDDEN}`),
       hid(`--name&?API_KEY:${HIDDEN};Bearer ${HIDDEN}`),
       // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
       hid(`--hdr,api_key:${HIDDEN} x=\${secret:Y},token=${HIDDEN}`),
@@ -827,7 +827,8 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
     // Assert
     should(actual).deepEqual([
       hid(`--env API_KEY=${P} CLIENT_SECRET=${HIDDEN}`),
-      hid(`--x=password=${P}?password:${HIDDEN}`),
+      // CFG-LEAK-R (ii): the query is glued to the pointer, so the whole value of `password=` is cut with it.
+      hid(`--x=password=${HIDDEN}`),
       hid(`--header=Authorization: ${HIDDEN} LOG_LEVEL=${P}`),
       as('-c'),
       hid(`mcp_servers.x.env.API_KEY=${HIDDEN}`),
@@ -845,7 +846,8 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
 
     // Assert
     should(actual).deepEqual([
-      hid(`-eAPI_KEY=${HIDDEN},token=${HIDDEN}`),
+      // CFG-LEAK-R (i): `-eAPI_KEY` is a flag named by its tail (`KEY`), so its whole value is cut, `,token=<v>` with it.
+      hid(`-eAPI_KEY=${HIDDEN}`),
       hid(`-HAuthorization: ${HIDDEN}, X-Api-Key: ${HIDDEN}`),
       hid(`-eapiKey=${HIDDEN}`),
     ]);
@@ -857,8 +859,9 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
 
     // Assert
     should(actual).deepEqual([
-      hid(`--hdr,api_key=${HIDDEN};y=${P};token=${HIDDEN}`),
-      hid(`--x&X-Api-Key=${HIDDEN},y=${P},token=${HIDDEN}`),
+      // W refuses the whole value (it holds a pointer and raw text), so it is cut whole, value start to word end.
+      hid(`--hdr,api_key=${HIDDEN}`),
+      hid(`--x&X-Api-Key=${HIDDEN}`),
     ]);
   });
 
@@ -892,26 +895,35 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
 
     // Assert
     should(actual).equal(
-      `run-server API_KEY=${P} CLIENT_SECRET=${HIDDEN} -eAPI_KEY=${HIDDEN},token=${HIDDEN} --hdr,api_key=${HIDDEN};y=${P};token=${HIDDEN} -H${HIDDEN}`,
+      `run-server API_KEY=${P} CLIENT_SECRET=${HIDDEN} -eAPI_KEY=${HIDDEN} --hdr,api_key=${HIDDEN} -H${HIDDEN}`,
     );
   });
 
   it('should keep a value composed with a pointer, a pointer beside a harmless key and a flag a token is glued to as before (control)', () => {
-    // Arrange
+    // Arrange — CFG-LEAK-R (ii): `API_KEY=prefix<pointer>` and `API_KEY=<pointer>?model=short` were controls; text glued to
+    // a pointer is cut now, so they are asserted below as cut.
     const words = [
       `--header=Authorization: Bearer ${P}`,
-      `--env=API_KEY=prefix${P}`,
-      `--env=API_KEY=${P}?model=short`,
       `--env=API_KEY=${P} ${P}`,
       `LOG_LEVEL=${P} model=${FAKE_SECRET}`,
       `-emodel=claude-opus-5-5,LOG_LEVEL=${P}`,
     ];
 
     // Act
-    const actual = shownFlags([...words, `-password=${FAKE_TOKEN}`]);
+    const actual = shownFlags([
+      ...words,
+      `--env=API_KEY=prefix${P}`,
+      `--env=API_KEY=${P}?model=short`,
+      `-password=${FAKE_TOKEN}`,
+    ]);
 
     // Assert
-    should(actual).deepEqual([...words.map(as), hid(`-password=${HIDDEN}`)]);
+    should(actual).deepEqual([
+      ...words.map(as),
+      hid(`--env=API_KEY=${HIDDEN}`),
+      hid(`--env=API_KEY=${HIDDEN}`),
+      hid(`-password=${HIDDEN}`),
+    ]);
   });
 
   it("should cut a URL user's password whole, and as r2 did, when the user is itself a secret name and a key follows it", () => {
@@ -946,7 +958,14 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
     const actual = shownFlags([glued, spaced, defaults, quotes]);
 
     // Assert
-    should(actual.map(word => word.value)).deepEqual([glued, spaced, defaults, quotes]);
+    // CFG-LEAK-R (ii): a `?` glues the next key to the pointer, so the first value is cut whole; and each `P'x` glues a
+    // quote and text to its pointer, so each of those is cut. The two that hold no glue are shown exactly as before.
+    should(actual.map(word => word.value)).deepEqual([
+      `--set=password=${HIDDEN}`,
+      spaced,
+      defaults,
+      `--set=${`api_key=${HIDDEN} `.repeat(20_000)}`,
+    ]);
     should(performance.now() - started).be.below(2_000);
   });
 });
@@ -1114,8 +1133,6 @@ describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
       '--token',
       `Bearer ${P}`,
       '--token',
-      `prefix${P}`,
-      '--token',
       `${P} short`,
       '--token',
       `${P}`,
@@ -1134,6 +1151,8 @@ describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
 
     // Assert
     should(actual).deepEqual(words.map(as));
+    // CFG-LEAK-R (ii): `prefix<pointer>` after a secret flag was a control here; text glued to a pointer is cut now.
+    should(shownFlags(['--token', `prefix${P}`])).deepEqual([as('--token'), hid(HIDDEN)]);
   });
 
   it('#40 B2 should hide base64 padding after a pointer, in a secret-named key’s value', () => {
