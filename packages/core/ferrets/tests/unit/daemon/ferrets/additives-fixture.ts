@@ -6,6 +6,7 @@ import type {
   DeliveryOutcome,
   FerretRecord,
   FerretsApi,
+  LimitsFile,
   RunnerDelivery,
   RunnerHandle,
   RunnerStop,
@@ -83,6 +84,8 @@ export interface AdditivesOptions {
   readonly queueing?: { readonly held: Set<string>; readonly code?: 'held' | 'quarantined' | 'input_pending' };
   /** The ferret's session files, when a test binds them (unbound by default, as before). */
   readonly session?: FerretSessionPort;
+  /** `limits.yaml` as the kernel config port answers it, read on every call (unbound by default). */
+  readonly limits?: () => LimitsFile | undefined;
 }
 
 /** A Ferrets service over fakes; with `queueing`, a runner that acts per write on the kernel's real act rules. */
@@ -128,6 +131,7 @@ export function additivesFixture(options: AdditivesOptions = {}) {
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
     asks: { open: async () => [] },
     ...(options.session === undefined ? {} : { session: options.session }),
+    ...(options.limits === undefined ? {} : { limits: options.limits }),
   };
   const service = new FerretsService(registry, tokens, ports);
   return {

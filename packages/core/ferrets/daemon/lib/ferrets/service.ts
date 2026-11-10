@@ -1106,6 +1106,14 @@ export class FerretsService implements FerretsApi {
     return effectiveAgentControl(this.ports.limits?.());
   }
 
+  /**
+   * `limits.yaml` as it is in effect now: the kernel's config file, read fresh on every call, so a launch reads the file
+   * as it stands (a broken file reads its last good version). No limits port bound: the empty file, so the defaults.
+   */
+  async effectiveLimits(): Promise<LimitsFile> {
+    return this.ports.limits?.() ?? {};
+  }
+
   /** Revokes a ferret's token (owner only at the route); it can no longer call the daemon until it restarts. */
   async revokeToken(ferret: FerretId): Promise<boolean> {
     return await this.serial.run(ferret, async () => {

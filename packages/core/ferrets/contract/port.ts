@@ -450,7 +450,7 @@ export interface Sitrep {
  * nowhere else.
  */
 export interface FerretsApi {
-  /** The effective `limits.yaml` settings, read fresh; absent until Ferrets supplies this configuration read. */
+  /** The effective `limits.yaml` settings, read fresh on every call; Ferrets serves it (a consumer may still bind it optionally). */
   effectiveLimits?(): Promise<LimitsFile>;
   get(ferret: FerretId): Promise<FerretSummary | undefined>;
   list(filter?: {

@@ -197,6 +197,40 @@ test('KCB-S a start and a move forward a rebuilt copy, so a getter cannot answer
   expect(moved.movedBy).toBe('owner');
 });
 
+test('KCB-S a start reads options once, so a getter on options itself cannot answer the check and the service differently', async () => {
+  const w = spy();
+  // Answers its first object once, then a different one: a second read would see the Warden's label (or nothing).
+  const first = { label: 'my-label' };
+  let reads = 0;
+  const asked = {
+    folder: '/work',
+    by: 'owner' as const,
+    get options() {
+      return ++reads === 1 ? first : { label: 'fleet-warden' };
+    },
+  };
+  expect((await w.port('board').start(asked)).ok).toBe(true);
+  const sent = w.reached[0]!.args[0] as { options: { label: string } };
+  expect(reads).toBe(1);
+  expect(sent.options).not.toBe(first);
+  expect(sent.options.label).toBe('my-label');
+
+  // First answer an object, then undefined: the forwarded options are still a copy of the first, never the caller's own.
+  let reads2 = 0;
+  const vanishing = {
+    folder: '/work',
+    by: 'owner' as const,
+    get options() {
+      return ++reads2 === 1 ? first : undefined;
+    },
+  };
+  expect((await w.port('board').start(vanishing)).ok).toBe(true);
+  const sent2 = w.reached[1]!.args[0] as { options: { label: string } };
+  expect(reads2).toBe(1);
+  expect(sent2.options).not.toBe(first);
+  expect(sent2.options).toEqual(first);
+});
+
 test('KCB-S move actor warden and movedBy warden are refused from a non-warden consumer, and nothing is moved', async () => {
   const w = spy();
   const board = w.port('board');
