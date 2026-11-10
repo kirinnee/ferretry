@@ -25,7 +25,7 @@ const daemonSideModules = (): readonly string[] =>
     .sort();
 
 describe('the worker adapter tree — the daemon loads nothing from it', () => {
-  it('should import nothing under daemon/worker/adapters/ from any daemon-side module', () => {
+  it('should import nothing under daemon/worker/adapters/ or the worker entry from any daemon-side module', () => {
     // Arrange
     const modules = daemonSideModules();
 
@@ -34,7 +34,10 @@ describe('the worker adapter tree — the daemon loads nothing from it', () => {
       [...readFileSync(file, 'utf8').matchAll(SPECIFIER)]
         .map(match => match[1] ?? '')
         .filter(specifier => specifier.startsWith('.'))
-        .filter(specifier => resolve(dirname(file), specifier).startsWith(EXEMPT + '/'))
+        .filter(specifier => {
+          const target = resolve(dirname(file), specifier);
+          return target.startsWith(EXEMPT + '/') || target === ENTRY;
+        })
         .map(specifier => `${relative(DAEMON, file)} -> ${specifier}`),
     );
 
