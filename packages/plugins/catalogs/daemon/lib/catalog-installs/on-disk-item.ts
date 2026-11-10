@@ -7,7 +7,7 @@
  * otherwise every environment line would show as changed. And a file too big to show is not read, so it is put
  * back into the answer as an entry that says so.
  */
-import { envEntryHidden, shownWords } from '@ferretry/core-vault/contract';
+import { envEntryRefused, firstRefusedWord } from '@ferretry/core-vault/contract';
 import type { McpComponentRecord } from '../shared-catalogs/mcp-source.ts';
 import {
   type CatalogChanges,
@@ -55,16 +55,17 @@ export const mcpAsInstalled = (item: McpItem, version: number, mcp: CatalogMcpSe
  */
 const STAND_IN = '*';
 
-/** The words of a command line with each one the rule hides replaced by {@link STAND_IN}. */
+/** The words of a command line with each one a catalog refuses replaced by {@link STAND_IN}. */
 const withoutCredentialWords = (args: readonly string[], command: string | undefined): readonly string[] => {
-  const shown = shownWords(args, command);
-  return args.map((arg, index) => (shown[index]?.hidden === true ? STAND_IN : arg));
+  const refused = (arg: string, index: number): boolean =>
+    firstRefusedWord([arg], index === 0 ? command : args[index - 1]) !== -1;
+  return args.map((arg, index) => (refused(arg, index) ? STAND_IN : arg));
 };
 
 /** An environment with each value that holds a credential written out replaced by {@link STAND_IN}; a pointer stays. */
 const withoutCredentialValues = (env: Readonly<Record<string, string>>): Record<string, string> =>
   Object.fromEntries(
-    Object.entries(env).map(([name, value]) => [name, envEntryHidden(name, value) ? STAND_IN : value]),
+    Object.entries(env).map(([name, value]) => [name, envEntryRefused(name, value) ? STAND_IN : value]),
   );
 
 /** A server this machine holds, as the installed side of a diff: no credential in its arguments or environment. */

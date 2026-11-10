@@ -46,9 +46,18 @@ export {
   type TargetRef,
   WITHHELD_SENTENCE,
 } from '@ferretry/kernel/contract';
-export * from './command-line.ts';
 export * from './config.ts';
-export * from './credential-words.ts';
+// The one command-line rule and its vocabulary, by NAME: the strength helpers stay package-private to `lib/`.
+export { looksSecret, pointsElsewhere, SECRET_TOKEN_SOURCE, secretNamed } from './lib/credential-words.ts';
+export {
+  envEntryRefused,
+  firstRefusedWord,
+  HIDDEN_WORD_TEXT,
+  refusedLine,
+  type ShownWord,
+  shownWord,
+  shownWords,
+} from './lib/command-line.ts';
 export * from './inputs.ts';
 export * from './masks.ts';
 export * from './phone.ts';

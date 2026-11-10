@@ -35,7 +35,7 @@ import { canonicalJson } from '@ferretry/std';
 import { isCanonicalAssetPath } from './foreign.ts';
 import { InstantSchema } from './foreign.ts';
 import { DaemonIdSchema } from './foreign.ts';
-import { envEntryHidden, firstHiddenWord, SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
+import { envEntryRefused, firstRefusedWord, refusedLine, SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
 import { mcpServerRefusal, SessionMcpEnvNameSchema, SessionMcpNameSchema } from './foreign.ts';
 import {
   SharedCatalogIdSchema,
@@ -305,12 +305,12 @@ const RAW_KEY =
   'this holds a credential written out, so a catalog refuses it rather than hiding it: put the value in the secret store and name it as a whole environment value, ${secret:NAME}, instead';
 
 /**
- * Whether a piece of text a person reads as a command line holds a credential: the ONE rule Runtimes hides a flag or an
- * MCP argument by, run over the text's words. A catalog is read by people who are not your devices, so a credential is
+ * Whether a piece of text a person reads as a command, an address or an id holds a credential: the ONE rule Runtimes
+ * hides a flag or an MCP argument by, at its publish strength (at least what Runtimes hides, and what a v4 catalog
+ * refused), run over the text's words. A catalog is read by people who are not your devices, so a credential is
  * REFUSED, never masked: a mask in a shared catalog protects nobody. Never repeats the text.
  */
-export const holdsCredential = (text: string): boolean =>
-  firstHiddenWord(text.split(/\s+/u).filter(word => word !== '')) !== -1;
+export const holdsCredential = (text: string): boolean => refusedLine(text);
 
 /** One line a person reads as a command, an address or an id. */
 const plainLine = (max: number) =>
@@ -362,8 +362,9 @@ const CatalogMcpUrlSchema = z.strictObject({
 /**
  * One MCP server definition, as McpComponentSchema's fields, minus everything that would carry a
  * credential. Refused when it looks like it holds a raw key: by the rule the MCP forms run, and by the ONE rule
- * Runtimes hides a command-line word by ({@link firstHiddenWord}, {@link envEntryHidden}) on the command, every
- * argument, every environment value, the address and the OAuth client id. Both are heuristics; the guarantee is only
+ * Runtimes hides a command-line word by, at its publish strength ({@link firstRefusedWord}, {@link envEntryRefused}),
+ * on every argument and every environment value, and the same rule over the command, the address and the OAuth client
+ * id ({@link refusedLine}). Both are heuristics; the guarantee is only
  * that no FIELD exists for a secret value, and that `${` reaches nothing but a placeholder the installer fills.
  */
 export const CatalogMcpSetupSchema = z
@@ -381,12 +382,12 @@ export const CatalogMcpSetupSchema = z
     }
     const refusal = mcpServerRefusal('login', setup);
     if (refusal !== null) return issue(refusal, []);
-    const args = firstHiddenWord(setup.args, setup.command);
+    const args = firstRefusedWord(setup.args, setup.command);
     if (args !== -1) return issue(RAW_KEY, ['args', args]);
     // A placeholder is a NAME, never a key, however long or secret-sounding it is.
     const name = Object.keys(setup.env).find(key => {
       const value = setup.env[key] ?? '';
-      return !WHOLE_SECRET_PLACEHOLDER.test(value) && envEntryHidden(key, value);
+      return !WHOLE_SECRET_PLACEHOLDER.test(value) && envEntryRefused(key, value);
     });
     if (name !== undefined) issue(`${name}: ${RAW_KEY}`, ['env', name]);
   });

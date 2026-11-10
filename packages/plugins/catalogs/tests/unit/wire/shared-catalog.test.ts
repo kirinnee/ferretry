@@ -300,6 +300,8 @@ describe('MCP setup rules', () => {
         withArgs(['--token', 'fake-tok-0000']),
         withArgs(['postgres://person:fake-pw-0000@db/x']),
         { ...COMMAND, env: { PASSWORD: 'fake-pw-0000' } },
+        // An older publisher's --key with a 22-character value (C8).
+        withArgs(['--key', 'fakevalue0000000000000']),
       ]) {
         const read = readSharedCatalogFile(JSON.stringify(file([mcpItem(mcp)])));
         expect(read.ok).toBe(false);
@@ -324,6 +326,86 @@ describe('MCP setup rules', () => {
         CatalogMcpSetupSchema.safeParse({ transport: 'url', url: 'https://x.example/oauth/authorize?state=abc' })
           .success,
       ).toBe(true);
+    });
+
+    // Fake values only: V is a 22-character value, T the body of a 20-character token.
+    const V = 'fakevalue0000000000000';
+    const T = 'aaaaaaaaaaaaaaaaaaaa';
+    const withEnv = (env: Record<string, string>) => ({ ...COMMAND, env });
+    const withUrl = (url: string) => ({ transport: 'url', url });
+    const refused = (setup: unknown): boolean => !CatalogMcpSetupSchema.safeParse(setup).success;
+
+    it('R-0261 should refuse the KEY, PASS, PWD and BEARER names a v4 catalog refused', () => {
+      for (const flag of [
+        '--key',
+        '--license-key',
+        '--signing-key',
+        '--master-key',
+        '--client-key',
+        '--pass',
+        '--pwd',
+        '--bearer',
+      ])
+        expect(refusal(withArgs([flag, V]))?.path).toEqual(['args', 1]);
+      for (const name of ['DB_PASS', 'PASS', 'PWD', 'BEARER'])
+        expect(refusal(withEnv({ [name]: V }))?.path).toEqual(['env', name]);
+      for (const query of ['?key', '?pass', '?pwd', '#key'])
+        expect(refused(withUrl(`https://h.example.invalid/x${query}=${V}`))).toBe(true);
+    });
+
+    it('R-0261 should refuse rk_live_ and sk_test_ tokens anywhere', () => {
+      expect(refused(withArgs([`x:rk_live_${T}`]))).toBe(true);
+      expect(refused(withArgs([`--stripe=sk_test_${T}`]))).toBe(true);
+      expect(refused(withEnv({ NOTE: `x rk_live_${T}` }))).toBe(true);
+    });
+
+    it('R-0261 should refuse a token after / ? & #', () => {
+      expect(refused(withUrl(`https://h.example.invalid/p/ghp_${T}`))).toBe(true);
+      for (const arg of [`x/ghp_${T}`, `x?ghp_${T}`, `x#ghp_${T}`]) expect(refused(withArgs([arg]))).toBe(true);
+      expect(refused({ ...COMMAND, command: `npx/ghp_${T}` })).toBe(true);
+    });
+
+    it('R-0261 should refuse a multi-word environment value and a line break in an argument', () => {
+      expect(refused(withEnv({ OPTS: `--token ${V}` }))).toBe(true);
+      expect(refused(withArgs([`--port 1\n--token ${V}`]))).toBe(true);
+    });
+
+    it('R-0261 should refuse a flag joined to its value by a slash, a comma, a quote or a line break (G-B1 closed)', () => {
+      for (const arg of [`--token,${V}`, `--key#${V}`, `x/key/${V}`, `x\ntoken\n${V}`, `--token"${V}`, `--token'${V}`])
+        expect(refused(withArgs([arg]))).toBe(true);
+    });
+
+    it('R-0261 should keep accepting the plain fields v4 accepted', () => {
+      for (const args of [
+        ['--model', 'claude-opus-5-5'],
+        ['--port', '8080'],
+        ['--keyboard', 'us-international'],
+        ['--sort-key', 'modified_time'],
+        ['--key-file', '/etc/ssl/server.pem'],
+        ['-c', 'model_providers.kimi.env_key="KIMI_API_KEY"'],
+        ['-y', '@acme/sk-mcp-server'],
+        ['line one\nline two'],
+        // Prose that merely names a token, with no value-shaped piece after it, breaks no setup.
+        ['Authorization token required'],
+      ])
+        expect(refused(withArgs(args))).toBe(false);
+      const envs: Record<string, string>[] = [
+        { PORT: '8080808080' },
+        { PASSENGER_NAME: 'person-seat-0012' },
+        { SSH_KEY_PATH: '/home/person/.ssh/id_ed25519' },
+        { PWD: '/srv/app/current' },
+        { PRIMARY_KEY: 'created_at_id' },
+        { NODE_OPTIONS: '--max-old-space-size=4096' },
+        { OPTS: '--port 8080 --verbose' },
+      ];
+      for (const env of envs) expect(refused(withEnv(env))).toBe(false);
+      for (const url of [
+        'https://h.example.invalid/hf_transfer',
+        'https://h.example.invalid/oauth/token/refresh-endpoint',
+        'https://h.example.invalid/v1/auth/session-management',
+        'https://h.example.invalid/x?model=claude-opus-5-5',
+      ])
+        expect(refused(withUrl(url))).toBe(false);
     });
   });
 

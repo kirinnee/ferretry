@@ -7,7 +7,7 @@
  *
  * Pure. It never repeats a value.
  */
-import { MIN_SECRET_VALUE_LENGTH, secretReferencesIn } from './secrets.ts';
+import { MIN_SECRET_VALUE_LENGTH, secretReferencesIn } from '../secrets.ts';
 
 /** Name words that say a variable holds a credential. Matched per `_`-separated word. */
 const SECRET_NAME_WORDS: ReadonlySet<string> = new Set([
@@ -47,6 +47,9 @@ const TOKEN_FORMATS: readonly (readonly [prefix: string, body: string])[] = [
   ['AIza', TOKEN_BODY],
   ['npm_', TOKEN_BODY],
   ['hf_', TOKEN_BODY],
+  ['sk_test_', TOKEN_BODY],
+  ['rk_(?:live|test)_', TOKEN_BODY],
+  ['pk_live_', TOKEN_BODY],
 ];
 
 /** Value prefixes of well-known token formats, and of two more whose body is not a plain run (a Google OAuth token, a JWT). */
@@ -65,10 +68,30 @@ const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
  * that is only a reference to another variable is not a secret, because it holds none, and a value
  * shorter than the secret store accepts is a flag rather than a credential (`AUTH=1`).
  */
-export function looksSecret(name: string, value: string): boolean {
+export const looksSecret = (name: string, value: string): boolean => looksSecretAt(name, value, 'hide');
+
+/**
+ * How much a reader refuses: `hide` is what Runtimes hides on a display; `publish` is what a catalog refuses, which is
+ * `hide` plus five more name words that count only for a value shaped like a credential. One vocabulary, two strengths:
+ * whatever `hide` hides, `publish` refuses. Package-private (not in the contract index).
+ */
+export type CredentialStrength = 'hide' | 'publish';
+
+/**
+ * Name words that say a credential only at the `publish` strength. At `hide` they would hide a variable's NAME
+ * (`env_key="OPENROUTER_API_KEY"`) and a path (`SSH_KEY_PATH=/home/…`) that Runtimes shows by design.
+ */
+const PUBLISH_NAME_WORDS: ReadonlySet<string> = new Set(['KEY', 'PASS', 'PWD', 'BEARER', 'BASIC']);
+
+/** What a `publish`-only name's value must be: ONE unbroken piece of 16 or more, the shape a v4 catalog refused. */
+export const PUBLISH_ANNOUNCED_VALUE = /^[^\s=&?#/:,;"'`]{16,}$/u;
+
+/** {@link looksSecret} at a strength. */
+export function looksSecretAt(name: string, value: string, strength: CredentialStrength): boolean {
   if (value.length < MIN_SECRET_VALUE_LENGTH || pointsElsewhere(value)) return false;
   if (SECRET_VALUE_PREFIX.test(value)) return true;
-  return secretNamed(name);
+  if (secretNamedAt(name, 'hide')) return true;
+  return strength === 'publish' && secretNamedAt(name, 'publish') && PUBLISH_ANNOUNCED_VALUE.test(value);
 }
 
 /** Whether a value only points at one (`$NAME`, `${NAME}`, a `${secret:NAME}` in it), and so holds none. */
@@ -76,11 +99,15 @@ export const pointsElsewhere = (value: string): boolean =>
   INDIRECT_VALUE.test(value) || secretReferencesIn(value).length > 0;
 
 /** Whether a name says it holds a credential: a word such as `TOKEN`, or a pair such as `API_KEY` ({@link looksSecret}). */
-export function secretNamed(name: string): boolean {
+export const secretNamed = (name: string): boolean => secretNamedAt(name, 'hide');
+
+/** {@link secretNamed} at a strength: `publish` also reads KEY, PASS, PWD, BEARER and BASIC, on word boundaries. */
+export function secretNamedAt(name: string, strength: CredentialStrength): boolean {
   const words = name
     .toUpperCase()
     .split(/[^A-Z0-9]+/u)
     .filter(Boolean);
   if (words.some(word => SECRET_NAME_WORDS.has(word))) return true;
+  if (strength === 'publish' && words.some(word => PUBLISH_NAME_WORDS.has(word))) return true;
   return words.some((word, index) => SECRET_NAME_PAIRS.has(`${word}_${words[index + 1] ?? ''}`));
 }

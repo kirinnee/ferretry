@@ -4,6 +4,12 @@
  * a credential a person wrote into a flag is cut the same way on every read, for every caller, the edit form's owner
  * included.
  *
+ * It is read at two strengths: `hide` is what Runtimes cuts on a display; `publish` is what a catalog refuses, and is
+ * `hide` plus the names KEY, PASS, PWD, BEARER and BASIC (for a value of one unbroken piece of 16 or more) and, for an
+ * argument or an environment value, a split reading that joins an announcing word to the value after it across
+ * `/ , ; ? & # " '`. Whatever `hide` hides, `publish` refuses, so a setup that reads clean on the installer's machine
+ * reads clean here.
+ *
  * A credential sits in a word in four ways:
  * - a word that IS a token (`sk-…`), anywhere, also quoted;
  * - a value glued to a secret-named flag (`--token=v`, `-k=v`, `--token v` in one word, `-Hv`), or the word after one
@@ -43,8 +49,15 @@
  *
  * Pure.
  */
-import { looksSecret, pointsElsewhere, secretNamed } from './credential-words.ts';
-import { MIN_SECRET_VALUE_LENGTH, secretReferencePattern } from './secrets.ts';
+import {
+  type CredentialStrength,
+  looksSecretAt,
+  PUBLISH_ANNOUNCED_VALUE,
+  pointsElsewhere,
+  secretNamedAt,
+  SECRET_TOKEN_SOURCE,
+} from './credential-words.ts';
+import { MIN_SECRET_VALUE_LENGTH, secretReferencePattern } from '../secrets.ts';
 
 /** What stands in a command-line word for the value that is not shown, and so can never be typed as one. */
 export const HIDDEN_WORD_TEXT = '‹hidden›';
@@ -71,8 +84,11 @@ const QUOTED = /^(["'])([\s\S]*)\1$/u;
 const unquoted = (value: string): string => QUOTED.exec(value)?.[2] ?? value;
 
 /** Whether a flag's value looks like a credential under the flag's name, or holds a token. */
-function secretValue(name: string, value: string): boolean {
-  return looksSecret(name, unquoted(value)) || value.split(PIECE_BREAK).some(piece => looksSecret('', piece));
+function secretValue(name: string, value: string, strength: CredentialStrength): boolean {
+  return (
+    looksSecretAt(name, unquoted(value), strength) ||
+    value.split(PIECE_BREAK).some(piece => looksSecretAt('', piece, strength))
+  );
 }
 
 // ── Cuts ─────────────────────────────────────────────────────────────────────────────────────────
@@ -247,6 +263,14 @@ function valueEnds(text: string, keyStarts: ReadonlyMap<number, number>, emptyKe
  * Whether the part `[from, to)` of a secret-named key's value, before the first `${secret:…}` pointer in it, looks
  * like a credential, read from the tables: exactly `looksSecret` of it unquoted, which under a secret name is long
  * enough and no pointer (not one `$NAME` or `${…}`; it holds no `${secret:…}`, as it stands before the first).
+ *
+ * At the `publish` strength this path is never reached: `partHeld` and `heldBeforePointer` judge the parts before a
+ * `${secret:…}` pointer without `looksSecretAt`, but a catalog field refuses `${` everywhere except a whole
+ * `${secret:NAME}` environment value, which is skipped before the rule is asked.
+ *
+ * At the `publish` strength this path is never reached: `partHeld` and `heldBeforePointer` judge the parts before a
+ * `${secret:…}` pointer without `looksSecretAt`, but a catalog field refuses `${` everywhere except a whole
+ * `${secret:NAME}` environment value, which is skipped before the rule is asked. Declared, not tested at publish.
  */
 function partHeld(text: string, ends: ValueEnds, from: number, to: number): boolean {
   const quote = text[from];
@@ -285,11 +309,18 @@ function heldBeforePointer(text: string, ends: ValueEnds, start: number, end: nu
  * except that a key with no value (`<b64>=` of `<b64>==`) does not end it, so padding after a pointer is cut with the
  * rest. A text with no such key has the same piece as the one `heldInPiece` already judged. `start` when none does.
  */
-function heldAfterPointer(text: string, ends: ValueEnds, name: string, start: number, end: number): number {
+function heldAfterPointer(
+  text: string,
+  ends: ValueEnds,
+  name: string,
+  range: readonly [start: number, end: number],
+  strength: CredentialStrength,
+): number {
+  const [start, end] = range;
   const pointerEnd = ends.pointer[start] as number;
   if (pointerEnd > end) return start;
   const after = text.slice(pointerEnd, ends.tail[pointerEnd]).trimEnd();
-  return heldParts(name, after) ? pointerEnd + after.length : start;
+  return heldParts(name, after, strength) ? pointerEnd + after.length : start;
 }
 
 /**
@@ -297,10 +328,17 @@ function heldAfterPointer(text: string, ends: ValueEnds, name: string, start: nu
  * as always. The answers a value many keys share would make slow are read from the tables first, and are the ones
  * `looksSecret` gives: a pointer in it, too short, or one `${…}` pointer and nothing else.
  */
-function heldAt(text: string, ends: ValueEnds, name: string, start: number, end: number): boolean {
+function heldAt(
+  text: string,
+  ends: ValueEnds,
+  name: string,
+  range: readonly [start: number, end: number],
+  strength: CredentialStrength,
+): boolean {
+  const [start, end] = range;
   if ((ends.pointer[start] as number) <= end || end - start < MIN_SECRET_VALUE_LENGTH) return false;
   if (text.startsWith('${', start) && ends.close[start + 2] === (ends.shownEnd[end] as number) - 1) return false;
-  return looksSecret(name, unquoted(text.slice(start, end).trim()));
+  return looksSecretAt(name, unquoted(text.slice(start, end).trim()), strength);
 }
 
 /**
@@ -310,13 +348,13 @@ function heldAt(text: string, ends: ValueEnds, name: string, start: number, end:
  * (`KEY=v ${secret:X}`, `?token=v#${secret:Y}`). A part with a pointer in it is that pointer (`Bearer ${secret:X}`,
  * `prefix${secret:X}`), and one too short to be a secret is none.
  */
-function heldInPiece(name: string, piece: string): boolean {
-  return looksSecret(name, unquoted(piece.trim())) || heldParts(name, piece);
+function heldInPiece(name: string, piece: string, strength: CredentialStrength): boolean {
+  return looksSecretAt(name, unquoted(piece.trim()), strength) || heldParts(name, piece, strength);
 }
 
 /** Whether any part of a text that a space or `#` sets apart looks like a credential, each judged on its own. */
-const heldParts = (name: string, text: string): boolean =>
-  text.split(PART_BREAK).some(part => looksSecret(name, unquoted(part)));
+const heldParts = (name: string, text: string, strength: CredentialStrength): boolean =>
+  text.split(PART_BREAK).some(part => looksSecretAt(name, unquoted(part), strength));
 
 /** A quote mark: a closing one right after a padded `=` ends the value (`"Basic <b64>="`). */
 const QUOTE_MARKS = new Set(['"', "'", '`']);
@@ -348,7 +386,7 @@ function emptyValueKey(text: string, key: RegExpExecArray): boolean {
  * ({@link heldBeforePointer}, review r3 N1), and the keys inside it are read on (review r2 M1:
  * `API_KEY=${secret:X} CLIENT_SECRET=v`, `password=${secret:X}?password:v`).
  */
-function nestedValueCuts(text: string): readonly Cut[] {
+function nestedValueCuts(text: string, strength: CredentialStrength): readonly Cut[] {
   const keys = matchesOf(NESTED_NAME, text);
   if (keys.length === 0) return [];
   const emptyKeys = new Set(keys.filter(key => emptyValueKey(text, key)).map(key => key.index));
@@ -357,21 +395,21 @@ function nestedValueCuts(text: string): readonly Cut[] {
   let covered = 0;
   for (const key of keys) {
     const name = key[1] ?? '';
-    if (!secretNamed(name)) continue;
+    if (!secretNamedAt(name, strength)) continue;
     const start = key.index + key[0].length;
     const end = ends.value[start] as number;
     if (end <= covered) continue;
-    if (heldAt(text, ends, name, start, end)) {
+    if (heldAt(text, ends, name, [start, end], strength)) {
       cuts.push([start, end]);
       covered = end;
       continue;
     }
     const piece = text.slice(start, ends.piece[start]).trimEnd();
-    const pieceEnd = heldInPiece(name, piece) ? start + piece.length : start;
+    const pieceEnd = heldInPiece(name, piece, strength) ? start + piece.length : start;
     const to = Math.max(
       pieceEnd,
       heldBeforePointer(text, ends, start, end),
-      heldAfterPointer(text, ends, name, start, end),
+      heldAfterPointer(text, ends, name, [start, end], strength),
     );
     if (to === start) continue;
     cuts.push([start, to]);
@@ -417,26 +455,40 @@ function throughPasswords(cuts: readonly Cut[], passwords: readonly Cut[]): read
 }
 
 /** The cuts of a value: each URL user's password, and each nested credential (inside one pair of quotes, kept). */
-function nestedCuts(value: string): readonly Cut[] {
+function nestedCuts(value: string, strength: CredentialStrength): readonly Cut[] {
   const quoted = QUOTED.exec(value);
   const inner = quoted?.[2] ?? value;
   const offset = quoted === null ? 0 : 1;
   const passwords = urlPasswordCuts(inner);
   const nested =
     passwords.length === 0
-      ? nestedValueCuts(inner)
-      : throughPasswords(nestedValueCuts(withCuts(inner, passwords)), passwords);
-  return [...passwords, ...nested].map(([from, to]) => [from + offset, to + offset] as const);
+      ? nestedValueCuts(inner, strength)
+      : throughPasswords(nestedValueCuts(withCuts(inner, passwords), strength), passwords);
+  return [...passwords, ...afterBreakTokens(inner), ...nested].map(
+    ([from, to]) => [from + offset, to + offset] as const,
+  );
 }
+
+/** A well-known token right after `/`, `?`, `&` or `#`, where no piece of a value starts (`x/ghp_…`, `…/p/ghp_…`). */
+const TOKEN_AFTER_BREAK = new RegExp(`(?<=[/?&#])(?:${SECRET_TOKEN_SOURCE})`, 'gu');
+
+/** The shortest token {@link TOKEN_AFTER_BREAK} cuts: a path segment such as `/hf_transfer` is not a key. */
+const TOKEN_AFTER_BREAK_MIN = 20;
+
+/** The cut of each token of {@link TOKEN_AFTER_BREAK_MIN} characters or more that follows `/`, `?`, `&` or `#`. */
+const afterBreakTokens = (text: string): readonly Cut[] =>
+  matchesOf(TOKEN_AFTER_BREAK, text)
+    .filter(found => found[0].length >= TOKEN_AFTER_BREAK_MIN)
+    .map(found => [found.index, found.index + found[0].length] as const);
 
 /**
  * Whether a word holds a secret-named key, with its separator, that starts before `limit`: in a glued flag's own part
  * (`--hdr,api_key:v more`), or as its last name, whose separator is the glued one (`--x&X-Api-Key=v,${secret:Y}`).
  */
-function keyStartsBefore(word: string, limit: number): boolean {
+function keyStartsBefore(word: string, limit: number, strength: CredentialStrength): boolean {
   NESTED_NAME.lastIndex = 0;
   for (let found = NESTED_NAME.exec(word); found !== null && found.index < limit; found = NESTED_NAME.exec(word)) {
-    if (secretNamed(found[1] ?? '')) return true;
+    if (secretNamedAt(found[1] ?? '', strength)) return true;
   }
   return false;
 }
@@ -449,8 +501,8 @@ export interface ShownWord {
 }
 
 /** The cuts of a part of a word that starts `offset` characters into it, as places in the word. */
-const cutsAt = (offset: number, part: string): readonly Cut[] =>
-  nestedCuts(part).map(([from, to]) => [from + offset, to + offset] as const);
+const cutsAt = (offset: number, part: string, strength: CredentialStrength): readonly Cut[] =>
+  nestedCuts(part, strength).map(([from, to]) => [from + offset, to + offset] as const);
 
 /**
  * The cuts of a secret-named flag's value that starts `offset` characters into a word, when the value is no
@@ -460,16 +512,16 @@ const cutsAt = (offset: number, part: string): readonly Cut[] =>
  * secret, so a harmless flag's value stays exactly as written; nor for a "flag" that holds a separator
  * (`-Hclient.secret:v`), which is a nested key of its own and is read as one.
  */
-function flagValueCuts(flag: string, value: string, offset: number): readonly Cut[] {
-  if (!PLAIN_FLAG.test(flag) || !secretNamed(flag)) return [];
+function flagValueCuts(flag: string, value: string, offset: number, strength: CredentialStrength): readonly Cut[] {
+  if (!PLAIN_FLAG.test(flag) || !secretNamedAt(flag, strength)) return [];
   const head = `${flag}=`;
-  return nestedCuts(`${head}${value}`).map(
+  return nestedCuts(`${head}${value}`, strength).map(
     ([from, to]) => [from - head.length + offset, to - head.length + offset] as const,
   );
 }
 
 /** One command-line word as it may be shown, judged with the word before it. */
-export function shownWord(word: string, before: string | undefined): ShownWord {
+function judgedWord(word: string, before: string | undefined, strength: CredentialStrength): ShownWord {
   const hidden = (text: string): ShownWord => ({ text, hidden: true });
   const glued = GLUED_VALUE.exec(word);
   const stuck = STUCK_VALUE.exec(word);
@@ -478,23 +530,23 @@ export function shownWord(word: string, before: string | undefined): ShownWord {
   // #37 first, whole: a value glued on or stuck to its flag, then the word under the flag before it. A nested cut
   // (#40) is only ever a FURTHER cut of a word #37 would show, so it never shows what #37 hid: `-H<token> KEY=v` is a
   // flag `-H<token>` with a value after a space, and stays `-H‹hidden›`.
-  const stuckHidden = stuck !== null && secretValue('', stuckValue);
-  if (glued !== null && secretValue(gluedFlag, gluedValue)) {
+  const stuckHidden = stuck !== null && secretValue('', stuckValue, strength);
+  if (glued !== null && secretValue(gluedFlag, gluedValue, strength)) {
     // A token in what the glued reading calls the flag (`-H<token>,API_KEY=v`) is cut with everything after the letter,
     // as the stuck reading cuts it (review r2 G1).
-    if (stuckHidden && secretValue('', gluedFlag.slice(stuckFlag.length)))
+    if (stuckHidden && secretValue('', gluedFlag.slice(stuckFlag.length), strength))
       return hidden(`${stuckFlag}${HIDDEN_WORD_TEXT}`);
     // A glued flag's own part may hold a nested key of its own (`--x&API_KEY:v;Bearer sk-…`), also one stuck to its
     // letter (`-cAPI_KEY:v,PASSWORD=w`, review r2 M2): it is cut too.
     const flagCuts = [
-      ...cutsAt(0, gluedFlag),
-      ...(stuck === null ? [] : cutsAt(stuckFlag.length, gluedFlag.slice(stuckFlag.length))),
+      ...cutsAt(0, gluedFlag, strength),
+      ...(stuck === null ? [] : cutsAt(stuckFlag.length, gluedFlag.slice(stuckFlag.length), strength)),
     ];
     return hidden(`${withCuts(gluedFlag, flagCuts)}${separator}${HIDDEN_WORD_TEXT}`);
   }
   if (stuckHidden) return hidden(`${stuckFlag}${HIDDEN_WORD_TEXT}`);
   const name = before !== undefined && FLAG_WORD.test(before) && !word.startsWith('-') ? before : '';
-  if (secretValue(name, word)) return hidden(HIDDEN_WORD_TEXT);
+  if (secretValue(name, word, strength)) return hidden(HIDDEN_WORD_TEXT);
   // #40: every reading of the word is searched, and what any of them cuts is cut (review r2 M2, M3): a glued flag's own
   // part and its value; the value stuck to a one-letter flag, where a key the glued reading fuses with the letter is
   // seen (`-eAPI_KEY=v,token=w`); and the whole word, when it is no flag with a value, or when its flag part holds a
@@ -503,34 +555,101 @@ export function shownWord(word: string, before: string | undefined): ShownWord {
     ...(glued === null
       ? []
       : [
-          ...cutsAt(0, gluedFlag),
-          ...cutsAt(gluedFlag.length + separator.length, gluedValue),
-          ...flagValueCuts(gluedFlag, gluedValue, gluedFlag.length + separator.length),
+          ...cutsAt(0, gluedFlag, strength),
+          ...cutsAt(gluedFlag.length + separator.length, gluedValue, strength),
+          ...flagValueCuts(gluedFlag, gluedValue, gluedFlag.length + separator.length, strength),
         ]),
-    ...(name === '' ? [] : flagValueCuts(name, word, 0)),
-    ...(stuck === null ? [] : cutsAt(stuckFlag.length, stuckValue)),
-    ...((glued === null && stuck === null) || keyStartsBefore(word, gluedFlag.length) ? cutsAt(0, word) : []),
+    ...(name === '' ? [] : flagValueCuts(name, word, 0, strength)),
+    ...(stuck === null ? [] : cutsAt(stuckFlag.length, stuckValue, strength)),
+    ...((glued === null && stuck === null) || keyStartsBefore(word, gluedFlag.length, strength)
+      ? cutsAt(0, word, strength)
+      : []),
   ];
   return cuts.length === 0 ? { text: word, hidden: false } : hidden(withCuts(word, cuts));
 }
+
+/** One command-line word as it may be shown (the `hide` strength Runtimes shows by), judged with the word before it. */
+export const shownWord = (word: string, before: string | undefined): ShownWord => judgedWord(word, before, 'hide');
 
 /** A command line's words as they may be shown, in order; `first` is the word before the first (an MCP command). */
 export const shownWords = (words: readonly string[], first?: string): readonly ShownWord[] =>
   words.map((word, index) => shownWord(word, index === 0 ? first : words[index - 1]));
 
-/**
- * Whether a command line holds a credential ANYWHERE: the index of the first word the rule hides, or -1. `first` is the
- * word before the first (an MCP command). What Catalogs refuses on publish is exactly what Runtimes hides on read, so a
- * setup that reads clean on this machine reads clean on the installer's.
- */
-export const firstHiddenWord = (words: readonly string[], first?: string): number =>
-  shownWords(words, first).findIndex(word => word.hidden);
+// ── What a catalog refuses (the `publish` strength) ──────────────────────────────────────────────
 
 /**
- * Whether one environment entry holds a credential written out. The entry is read as the flag `--x-NAME=value`, the
- * glued reading a launch flag has (the `x-` only so a name that starts with `_` is still a flag's), so its name is judged
- * as a flag's name is, a token anywhere in the value is cut, and a secret-named key nested in the value counts
- * (`NAME=Authorization: Bearer v`). A whole `${secret:NAME}` pointer holds none.
+ * The pieces a v4 catalog read a value in: split at white space and `= & ? # / : , ; " ' \``. The SAME characters the
+ * 16-character value shape excludes, so a piece is always one unbroken run.
  */
-export const envEntryHidden = (name: string, value: string): boolean =>
-  shownWord(`--x-${name}=${value}`, undefined).hidden;
+const PUBLISH_PIECES = /[\s=&?#/:,;"'`]+/u;
+
+/** One run of white space. */
+const WHITE_SPACE = /\s+/u;
+
+/** A text's words: what white space sets apart. */
+const wordsOf = (text: string): readonly string[] => text.split(WHITE_SPACE).filter(word => word !== '');
+
+/**
+ * Whether a word the rule reads at `publish` holds a credential, however its words are glued: a bare secret-named piece
+ * announces the unbroken piece of 16 or more after it, wherever a separator sets them apart (`--token,v`, `x/key/v`,
+ * `x token v`). Only an ARG or an ENV value is read this way: an address or a command keeps the reading of its
+ * words ({@link refusedLine}), so `/oauth/token/refresh-endpoint` is a path, not a key. A piece that only points
+ * elsewhere (`$NAME`) holds none.
+ */
+function announcedPiece(text: string): boolean {
+  const pieces = text.split(PUBLISH_PIECES).filter(piece => piece !== '');
+  return pieces.some(
+    (piece, index) =>
+      index > 0 &&
+      PUBLISH_ANNOUNCED_VALUE.test(piece) &&
+      secretNamedAt(pieces[index - 1] as string, 'publish') &&
+      !pointsElsewhere(piece),
+  );
+}
+
+/**
+ * Whether the words of a text, each judged at `publish` with the word before it (the first with `first`), hold a
+ * credential. The words are what white space sets apart, so a line break in an argument (`--port 1\n--token v`) does
+ * not hide a flag from the rule.
+ */
+const wordsRefused = (text: string, first: string | undefined): boolean =>
+  wordsOf(text).some((word, index, all) => judgedWord(word, index === 0 ? first : all[index - 1], 'publish').hidden);
+
+/**
+ * Whether a command line holds a credential ANYWHERE, as a catalog reads it: the index of the first word refused, or
+ * -1. `first` is the word before the first (an MCP command).
+ *
+ * This is the rule Runtimes hides by, at the `publish` strength: it refuses AT LEAST what Runtimes hides (a word the
+ * `hide` strength cuts is cut here too), and also what a v4 catalog refused: KEY, PASS, PWD, BEARER and BASIC names with
+ * a value of 16 or more characters, a word that holds white space read as the words it holds, and an announcing word
+ * joined to its value by `/ , ; ? & # " '`. A catalog is read by people who are not your devices, so a credential is
+ * REFUSED, never masked.
+ */
+export const firstRefusedWord = (words: readonly string[], first?: string): number =>
+  words.findIndex((word, index) => {
+    const before = index === 0 ? first : words[index - 1];
+    return (
+      judgedWord(word, before, 'publish').hidden ||
+      wordsRefused(word, before) ||
+      announcedPiece(before === undefined ? word : `${before} ${word}`)
+    );
+  });
+
+/**
+ * Whether one environment entry holds a credential written out, at the `publish` strength. The entry is read as the flag
+ * `--x-NAME=value`, the glued reading a launch flag has (the `x-` only so a name that starts with `_` is still a flag's),
+ * so its name is judged as a flag's name is, a token anywhere in the value is cut, and a secret-named key nested in the
+ * value counts (`NAME=Authorization: Bearer v`); and the value is also read as the words it holds and as the pieces
+ * after the name. A whole `${secret:NAME}` pointer holds none.
+ */
+export const envEntryRefused = (name: string, value: string): boolean =>
+  judgedWord(`--x-${name}=${value}`, undefined, 'publish').hidden ||
+  wordsRefused(value, undefined) ||
+  announcedPiece(`${name} ${value}`);
+
+/**
+ * Whether a text a person reads as one command, address or id holds a credential, at the `publish` strength: its
+ * words judged one by one, WITHOUT the split reading of an argument. A path that merely contains a secret-named
+ * segment (`/oauth/token/refresh-endpoint`) is accepted; `?key=v` and a token are refused.
+ */
+export const refusedLine = (text: string): boolean => wordsRefused(text, undefined);

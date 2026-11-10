@@ -117,6 +117,22 @@ describe('withoutCredentials', () => {
     });
   });
 
+  it('R-0261 should stand in an installed entry the publish rule refuses, so the diff still reads', () => {
+    const fake = 'fakevalue0000000000000';
+    should(
+      withoutCredentials({
+        command: 'acme-mcp',
+        // A publish-only name (--key, DB_PASS), a multi-word environment value, and a plain pair kept as written.
+        args: ['--key', fake, '--sort-key', 'modified_time'],
+        env: { DB_PASS: fake, OPTS: `--token ${fake}`, NOTE: 'plain' },
+      }),
+    ).deepEqual({
+      command: 'acme-mcp',
+      args: ['--key', '*', '--sort-key', 'modified_time'],
+      env: { DB_PASS: '*', OPTS: '*', NOTE: 'plain' },
+    });
+  });
+
   it('should leave a record with no arguments and no environment as it is', () => {
     should(withoutCredentials({ url: 'https://mcp.example.com/x' })).deepEqual({ url: 'https://mcp.example.com/x' });
   });
