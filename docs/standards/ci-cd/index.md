@@ -114,8 +114,10 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   events, and after a red test job too) downloads the `coverage-unit`, `coverage-scripts` and `coverage-int` artifacts and runs
   `bun scripts/ci/strict-guarantees.ts` over all three at once, with `--strict` and no `--tier`: a passing
   id-named test in either tier proves a row, a skipped or failed one does not. The job summary shows the miss count and
-  the ids by owner. It counts a kept row whose id tests all sit outside its owner's suite as a miss too (the
-  `guarantee-owner` finding), and a multi-id title (`P23 P53 …`) proves each of its ids. The one switch is
+  the ids by owner. It counts EVERY finding of `guarantees --strict` and `guarantee-owner --strict` (none filtered): a
+  kept row whose id tests all sit outside its owner's suite, and an enforcer symbol in the row that resolves to nothing
+  in the owner or a contract it consumes, count too, so a count of 0 is exactly what the flip needs. A row with several
+  findings is one row in the count, and a multi-id title (`P23 P53 …`) proves each of its ids. The one switch is
   `FY_STRICT_GUARANTEES_BLOCKING` in the workflow `env` of `ci.yaml`, and both the job and `full-status.sh` read it:
   while it is `'false'` the job never turns CI red, and the `Full CI` verdict accepts the job whatever it ended as
   (a failed setup step or the timeout included). The flip is ONE change that takes the count to 0, per
