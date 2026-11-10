@@ -18,6 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { check as actRunner } from '../validate/act-runner.ts';
+import { check as afterMerge } from '../validate/after-merge.ts';
 import { check as appHooks } from '../validate/app-hooks.ts';
 import { check as bannedGlobals } from '../validate/banned-globals.ts';
 import { check as contextImports } from '../validate/context-imports.ts';
@@ -56,6 +57,7 @@ export const CHECKS: readonly Check[] = [
   manifestMatch,
   screenPaths,
   portsPending,
+  afterMerge,
   descriptorParity,
   parityTicks,
   readScoped,

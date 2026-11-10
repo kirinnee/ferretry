@@ -23,6 +23,7 @@ import {
   moveStateAside,
   openPluginState,
 } from './state/index.ts';
+import type { PrivatePin } from './state/state-port.ts';
 import type { Clock, Log, StateDamage } from '../contract/ports.ts';
 import type { ConfigDef } from '../contract/define.ts';
 
@@ -42,14 +43,21 @@ export function stateOpener(
   fs: StateFs,
   clock: Clock,
   log: Log,
-): (manifest: Manifest) => PluginStateHandle {
-  return manifest => {
+): (manifest: Manifest, pin?: PrivatePin) => PluginStateHandle {
+  return (manifest, pin) => {
     const files = manifest.data?.state ?? [];
     const listeners = new Set<(damage: readonly StateDamage[]) => void>();
     const changed = (damage: readonly StateDamage[]): void => {
       for (const listener of listeners) listener(damage);
     };
-    let port = createStatePort({ home, pluginId: manifest.id, files, fs, clock });
+    let port = createStatePort({
+      home,
+      pluginId: manifest.id,
+      files,
+      fs,
+      clock,
+      ...(pin === undefined ? {} : { pin }),
+    });
     return {
       get port() {
         return port;
@@ -84,6 +92,7 @@ export function stateOpener(
           clock,
           initialDamage: opening.damaged,
           initialNarrowed: opening.narrowed,
+          ...(pin === undefined ? {} : { pin }),
           changed,
           report: ({ damage, policy }) =>
             log.warn('a state file cannot be read', {

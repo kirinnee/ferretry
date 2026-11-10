@@ -169,6 +169,23 @@ function onceHomes(make: () => RuntimeHomesApi): RuntimeHomesApi {
         return undefined;
       }
     },
+    // The asset tree answers through the same built service; a fleet that cannot be opened lists and reads nothing.
+    assetSkills: () => ({
+      skills: async limit => {
+        try {
+          return (await built().assetSkills?.().skills(limit)) ?? [];
+        } catch {
+          return [];
+        }
+      },
+      skillManifest: async (name, maxBytes) => {
+        try {
+          return await built().assetSkills?.().skillManifest(name, maxBytes);
+        } catch {
+          return undefined;
+        }
+      },
+    }),
   };
 }
 
@@ -203,7 +220,11 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     catalog: deferred(() => assembled().catalog),
     setup: deferred(() => assembled().setup),
     ended: deferred(() => assembled().ended),
-    homes: onceHomes(() => fleetHomes(ctx.kernel.roots, publication)),
+    homes: onceHomes(() =>
+      fleetHomes(ctx.kernel.roots, publication, sentence => {
+        ctx.kernel.log.warn(sentence);
+      }),
+    ),
     profileEtag: async profile => await assembled().profileEtag(profile),
     probe: () => {
       assembled();

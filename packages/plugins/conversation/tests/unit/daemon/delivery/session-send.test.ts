@@ -298,6 +298,30 @@ describe('the send ledger and the queue', () => {
     );
   });
 
+  it('M2 a send read with waitMs hands the daemon the bound and the caller it keys the waiter by, and refuses any other bound or parameter', async () => {
+    const { subsystem, calls } = build();
+    const routes = sessionSendRoutes(subsystem);
+    const path = `${SENDS}/:sendId`;
+    const params = { ferretId: 'f1', sendId: 's1' };
+
+    await answerOf(routes, 'GET', path, { params, query: { waitMs: '30000' }, actor: 'device:d1' });
+    await answerOf(routes, 'GET', path, { params, query: { waitMs: '1' } });
+    await answerOf(routes, 'GET', path, {
+      params,
+      query: { waitMs: '5000' },
+      standing: ferretStanding('f9' as FerretId),
+    });
+
+    expect(calls.map(call => call.args)).toEqual([
+      ['f1', 's1', { waitMs: 30_000, caller: 'device:d1' }],
+      ['f1', 's1', { waitMs: 1, caller: 'caller' }],
+      ['f1', 's1', { waitMs: 5_000, caller: 'f9' }],
+    ]);
+    for (const waitMs of ['0', '30001', 'abc', '1.5'])
+      expect((await refusalOf(routes, 'GET', path, { params, query: { waitMs } })).code).toBe('invalid_wait');
+    expect((await refusalOf(routes, 'GET', path, { params, query: { wait: '5' } })).code).toBe('unknown_parameter');
+  });
+
   it('reads a hand-off document by name, and refuses a name that is not one', async () => {
     const { subsystem, calls } = build();
     const routes = sessionSendRoutes(subsystem);

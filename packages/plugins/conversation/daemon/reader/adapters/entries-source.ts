@@ -11,6 +11,7 @@ import type {
   TranscriptTailResult,
 } from '../lib/reads.ts';
 import { portableConversationRows } from '../lib/session/digest.ts';
+import { isInputProofEntry } from './input-proof.ts';
 import type { TranscriptProvenance } from '../lib/session/protocol.ts';
 import type {
   TranscriptBatch,
@@ -90,7 +91,8 @@ async function readWhole(ferret: FerretId, transcript: HarnessTranscript): Promi
   let after: string | undefined;
   for (;;) {
     const page = await transcript.reader.read(ferret, after, ENTRY_PAGE);
-    entries.push(...page);
+    // A harness's queue record is input evidence for the send tracker (`input-proof.ts`), not a message of the conversation.
+    entries.push(...page.filter(entry => !isInputProofEntry(entry)));
     if (page.length < ENTRY_PAGE) break;
     if (entries.length > MAX_ENTRIES) return 'unreadable';
     after = page[page.length - 1]?.id;

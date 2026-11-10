@@ -88,8 +88,22 @@ export interface RuntimeHomeReader {
   skillFile(name: string, relativePath: string, maxBytes: number): Promise<RuntimeHomeFileRead>;
 }
 
+/**
+ * The fleet's own installed skills, one plain folder each directly under `<fleet>/assets/skills` (today's v4 install
+ * tree). Read-only and bounded; only a plain folder holding a regular, singly-named `SKILL.md` is listed, a name that
+ * could not be one folder is skipped, and nothing is ever followed. An answer names no file content.
+ */
+export interface RuntimeAssetSkills {
+  /** At most `limit + 1` plain folders, in name order, `managed` always true; an over-bound `limit` lists nothing. */
+  skills(limit: number): Promise<readonly RuntimeHomeSkillEntry[]>;
+  /** The text of a LISTED skill's `SKILL.md`, or `undefined` (not listed, absent, a link, too large). */
+  skillManifest(name: string, maxBytes: number): Promise<string | undefined>;
+}
+
 /** The homes half of `RuntimesApi`. */
 export interface RuntimeHomesApi {
+  /** The fleet's own installed skills; absent on a runtime provider that has no asset tree. */
+  assetSkills?(): RuntimeAssetSkills;
   homes(): Promise<readonly RuntimeHome[]>;
   /**
    * `undefined` for an id `homes()` does not answer. Call `homes()` first: this answers from the last read of the

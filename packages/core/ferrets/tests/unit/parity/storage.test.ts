@@ -35,7 +35,7 @@ import {
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { AUTO_RESUME_JOB } from '../../../daemon/modules/auto-resume.ts';
 import manifest from '../../../manifest.ts';
-import { as, host, record } from '../daemon/ferrets/route-fixture.ts';
+import { as, host, portConsumer, record } from '../daemon/ferrets/route-fixture.ts';
 import { AT as forkAt, command as forkCommand, plan as forkPlan } from '../daemon/forks/fixtures.ts';
 import { handoverReceiptFor } from '../../support/daemon/parity-fj-docs.ts';
 import { memoryStorage, RecordingLog, sessionState } from '../../support/daemon/storage.ts';
@@ -75,7 +75,8 @@ import {
   tickArchive,
 } from '../../support/daemon/archive-world.ts';
 
-const fresh = async () => await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+const fresh = async () =>
+  await host([], { harness: new FakeHarness(), runner: new FakeRunner(), plugins: [portConsumer('lessons')] });
 
 describe('storage parity', () => {
   test('F-0232 a started ferret lands in state/ferrets/names.json as { format: 1, claims: [{ callsign, ownerId }] }', async () => {
@@ -99,7 +100,7 @@ describe('storage parity', () => {
 
   test('F-0349 the first system callsign for a prefix lands in state/ferrets/system-callsigns.json as { learning: 1 }', async () => {
     const h = await fresh();
-    expect(await h.provided(FerretsPort).systemCallsign?.('learning')).toBe('learning-000001');
+    expect(await h.provided(FerretsPort, 'lessons').systemCallsign?.('learning')).toBe('learning-000001');
     const stored = JSON.parse(h.state('ferrets').files.get('system-callsigns.json') as string) as Record<
       string,
       number

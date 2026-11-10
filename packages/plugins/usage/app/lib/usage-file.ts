@@ -7,7 +7,7 @@
  * mapping of keys — which a person fixes by hand; a verb never overwrites it.
  */
 
-import { readConfigValue, setConfigKey } from './config-text.ts';
+import { readConfigText, setConfigKey } from '@ferretry/std/yaml';
 import type { BudgetLimits } from './budget-model.ts';
 
 const editKey = (text: string, key: string, value: unknown): string | null => {
@@ -19,7 +19,8 @@ const editKey = (text: string, key: string, value: unknown): string | null => {
 };
 
 const budgetsOf = (text: string): Readonly<Record<string, unknown>> | null => {
-  const value = readConfigValue(text);
+  const read = readConfigText(text);
+  const value = read.ok ? read.read.value : null;
   if (value === null || typeof value !== 'object') return null;
   const budgets = (value as { readonly budgets?: unknown }).budgets;
   return typeof budgets === 'object' && budgets !== null ? (budgets as Record<string, unknown>) : {};
@@ -42,7 +43,8 @@ export const withMachineTimeZone = (text: string, zone: string): string | null =
  * `null` when the file does not parse.
  */
 export const readMachineTimeZone = (text: string): string | undefined | null => {
-  const value = readConfigValue(text);
+  const read = readConfigText(text);
+  const value = read.ok ? read.read.value : null;
   if (value === null || typeof value !== 'object') return null;
   const zone = (value as { readonly timeZone?: unknown }).timeZone;
   return typeof zone === 'string' && zone !== '' ? zone : undefined;

@@ -125,7 +125,8 @@ import {
   restrictWebSocket,
   workersFor,
 } from './permissions.ts';
-import type { HostStatePort } from './state/state-port.ts';
+import type { HostStatePort, PrivatePin } from './state/state-port.ts';
+import { type PinReport, pinCreated, touchesPrivate } from './fence-guard.ts';
 import { openHome, probeHome } from './home.ts';
 import { composePrivateFiles, privacyRefusals } from '../manifest/privacy.ts';
 import { ensureInternalRootBases, ownFolderSpellings, rootsPortFor } from './roots.ts';
@@ -206,6 +207,8 @@ export type ConfigJudge = (input: {
   readonly path: string;
   readonly removal: boolean;
   readonly sentences: readonly string[];
+  /** Only a `ConfigPort.writeAsCaller` sets it: `sentences` are the secret references the edit adds. */
+  readonly secretAdd?: true;
 }) => boolean;
 
 export interface HostAdapters {
@@ -213,7 +216,8 @@ export interface HostAdapters {
   readonly logSink: LogSink;
   readonly fs: HostFs;
   readonly random: () => string;
-  readonly state: (manifest: Manifest) => PluginStateHandle;
+  /** `pin`: how a create of a private place is pinned by identity before it returns (§7.7); absent, none is. */
+  readonly state: (manifest: Manifest, pin?: PrivatePin) => PluginStateHandle;
   /** The config service over every started plugin's declared files (§7.2); reloaded once before build. */
   readonly config: (
     declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
@@ -640,11 +644,33 @@ async function bootLocked(
   const unwatchState: (() => void)[] = [];
 
   // 3. Open state: every declared file's format.
+  /**
+   * The state port's pin on the private places (§7.7): a created or replaced private file is pinned by identity, in the
+   * very index every root reads, before the write returns. A look that cannot be made rejects the write (the file is on
+   * disk, but every root refuses until a look succeeds) and the daemon says so once.
+   */
+  let toldUnpinned = false;
+  const pinReport: PinReport = {
+    failed: refusal => {
+      if (toldUnpinned) return;
+      toldUnpinned = true;
+      log.warn(refusal.message);
+    },
+    // A look that succeeds ends the outage: a second one is said again.
+    looked: () => {
+      toldUnpinned = false;
+    },
+  };
+  const privatePin: PrivatePin = {
+    holds: relativeToState => touchesPrivate(privateFiles, relativeToState),
+    created: relativeToState =>
+      pinCreated(adapters.fs, home, privateFiles, relativeToState, PRIVATE_RECHECK_MS, watchPrivate, pinReport),
+  };
   for (const manifest of order) {
     const record = records.get(manifest.id) as PluginRecord;
     if (manifest.id === 'kernel') continue;
     trace.push(`state:${manifest.id}`);
-    const state = adapters.state(manifest);
+    const state = adapters.state(manifest, privatePin);
     record.state = state;
     own(() => state.close());
     record.damage = await state.open();
@@ -785,6 +811,7 @@ async function bootLocked(
         privateFiles,
         privateRecheckMs: PRIVATE_RECHECK_MS,
         privateWatch: watchPrivate,
+        privateReport: pinReport,
         ...(pins === undefined ? {} : { pins }),
         ...(manifest.permissions?.harnessFiles === undefined
           ? {}

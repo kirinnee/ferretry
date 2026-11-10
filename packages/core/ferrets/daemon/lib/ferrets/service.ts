@@ -13,6 +13,7 @@ import type {
   FerretHarness,
   FerretTurnAuthor,
   FerretTurnDocument,
+  FerretTurnWritten,
   FerretTurns,
   FerretPrompt,
   HarnessDeliveryFailure,
@@ -59,7 +60,7 @@ import { claimStartName, displayAgentName, type SessionNameClaims } from '../nam
 import { normalizeCallsign } from '../names/policy.ts';
 import type { NameAllocationErrorCode } from '../names/types.ts';
 import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
-import { isFileBackedQueue, queuedMessageInstruction } from '../protocol/turn-handoff.ts';
+import { isFileBackedQueue, queuedMessageInstruction, queuedPayloadFile } from '../protocol/turn-handoff.ts';
 import {
   diedParked,
   FerretDetailsSchema,
@@ -295,6 +296,13 @@ export interface FerretSessionPort {
    */
   queued?(ferret: FerretId, payload: string, sendId?: string): Promise<string>;
   /**
+   * Additive (#45 BG-051, `FerretTurns.write`): the next numbered turn document of THIS ferret, written durably with its
+   * author beside it and counted, as a revive's turn is. Answers its number and absolute path.
+   */
+  writeTurn?(ferret: FerretId, document: string, by?: FerretTurnAuthor): Promise<FerretTurnWritten>;
+  /** Additive (#45 BG-051, `FerretTurns.clearMarkers`): clears the completion markers a previous turn left. */
+  clearMarkers?(ferret: FerretId): Promise<void>;
+  /**
    * The absolute folders of THIS ferret's own session folder its agent may read without asking
    * (`FERRET_READABLE_FOLDERS`, today's `handoffFolders`), handed to the harness as `LaunchSpec.readable`. Unbound:
    * nothing is pre-allowed.
@@ -306,12 +314,25 @@ export interface FerretSessionPort {
    * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
    */
   questionFile?(ferret: FerretId): Promise<FencedPath>;
+  /**
+   * Port-only (not on the contract): whether a ferret started under `parent` would be stamped into the Warden's
+   * lineage, decided from the SAME source and rule the start's stamp uses (the session documents, `resolveWardenLineage`),
+   * not from the registry summary, which does not carry the stamp. Throws when the documents cannot be read; the caller
+   * refuses then. Unbound: the stamp is not written either, so there is no lineage to ask.
+   */
+  inWardenLineage?(parent: FerretId): Promise<boolean>;
 }
 
 /** One file of a start's opening attachments, as the ferret's `attachments/` folder holds it. */
 export interface OpeningFile {
   readonly name: string;
   readonly contents: Uint8Array | string;
+}
+
+/** The optional tail of a launch (internal, not a contract): a start's opening files, a revive's carried-turn callback. */
+interface LaunchExtras {
+  readonly attached?: readonly OpeningFile[] | undefined;
+  readonly carried?: ResumeOptions['onCarried'] | undefined;
 }
 
 /** What a revive's turn is made from: the message (none: the mode's default), the ferret's mode and who asked. */
@@ -324,6 +345,8 @@ export interface ReviveTurnRequest {
 /** A revive's turn, written: its number and the one line typed into the new pane so the agent reads it. */
 export interface ReviveTurn {
   readonly turn: number;
+  /** The absolute path of the numbered document the agent is pointed at. */
+  readonly file: string;
   readonly instruction: string;
 }
 
@@ -353,16 +376,28 @@ function tellDecided(options: ServiceResumeOptions | undefined, disposition: 'ru
   }
 }
 
+/** Tells a resume's caller what was typed for its message; a caller's own failure there never changes the resume. */
+function tellCarried(
+  carried: ResumeOptions['onCarried'],
+  typed: { readonly text: string; readonly turn: number; readonly file: string },
+): void {
+  try {
+    carried?.(typed);
+  } catch {
+    // The caller's bookkeeping; the pointer is typed all the same.
+  }
+}
+
 /**
  * Who may ask for a START (`StartRequest.by`), as a closed table checked at run time. A resume is not here: it goes
  * through `resume()`, which asks `start.decide` itself with `by: 'resume'`.
  */
-const START_ASKERS = { owner: true, ferret: true, pack: true, board: true } as const satisfies Record<
+const START_ASKERS = { owner: true, ferret: true, pack: true, board: true, warden: true } as const satisfies Record<
   StartRequest['by'],
   true
 >;
 const START_ASKER_REFUSAL =
-  'a start is asked for by the owner, a ferret, a pack or the board; a resume is asked for through resume';
+  'a start is asked for by the owner, a ferret, a pack, the board or the Warden; a resume is asked for through resume';
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
@@ -549,6 +584,15 @@ export class FerretsService implements FerretsApi {
   /** The managed worktree registry, durable facts only (the contract's `managedWorktrees()`). */
   async managedWorktrees(): Promise<readonly ManagedWorktreeSummary[]> {
     return (await this.ports.managedWorktrees?.()) ?? [];
+  }
+
+  /**
+   * Port-only (not a {@link FerretsApi} member): whether a start under `parent` would be stamped into the Warden's
+   * lineage, as the session documents say. `false` with the session port unbound (nothing is stamped then). Rejects when
+   * the documents cannot be read.
+   */
+  async inWardenLineage(parent: FerretId): Promise<boolean> {
+    return (await this.ports.session?.inWardenLineage?.(parent)) ?? false;
   }
 
   mayTouch(caller: FerretId, target: FerretId): boolean {
@@ -756,14 +800,9 @@ export class FerretsService implements FerretsApi {
         ...(request.options?.label === undefined ? {} : { label: request.options.label }),
         ...(request.options?.card === undefined ? {} : { card: request.options.card }),
       });
-      return await this.launch(
-        record,
-        opening.value.prompt,
-        record.harnessConversation,
-        'start',
-        undefined,
-        opening.value.files,
-      );
+      return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
+        attached: opening.value.files,
+      });
     });
   }
 
@@ -947,11 +986,18 @@ export class FerretsService implements FerretsApi {
     // any, is the relaunch's own turn from here on.
     tellDecided(options, 'relaunching');
     const author = resumeTurnAuthor(options?.actor ?? 'unknown');
-    const resumed = await this.launch(starting, undefined, record.harnessConversation, 'resume', {
-      ...(message === undefined ? {} : { message }),
-      mode: starting.mode ?? 'auto',
-      ...(author === undefined ? {} : { by: author }),
-    });
+    const resumed = await this.launch(
+      starting,
+      undefined,
+      record.harnessConversation,
+      'resume',
+      {
+        ...(message === undefined ? {} : { message }),
+        mode: starting.mode ?? 'auto',
+        ...(author === undefined ? {} : { by: author }),
+      },
+      { carried: options?.onCarried },
+    );
     if (resumed.ok) {
       const text = message?.trim();
       await this.ports.history?.(ferret, 'session.resumed', {
@@ -1058,6 +1104,14 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     if (this.registry.get(ferret) === undefined) return NO_AGENT_CONTROL;
     return effectiveAgentControl(this.ports.limits?.());
+  }
+
+  /**
+   * `limits.yaml` as it is in effect now: the kernel's config file, read fresh on every call, so a launch reads the file
+   * as it stands (a broken file reads its last good version). No limits port bound: the empty file, so the defaults.
+   */
+  async effectiveLimits(): Promise<LimitsFile> {
+    return this.ports.limits?.() ?? {};
   }
 
   /** Revokes a ferret's token (owner only at the route); it can no longer call the daemon until it restarts. */
@@ -1341,8 +1395,29 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     if (this.registry.get(ferret) === undefined) return undefined;
     this.requireMayTouch(caller, ferret);
+    const session = this.ports.session;
+    const writeTurn = session?.writeTurn?.bind(session);
+    const queued = session?.queued?.bind(session);
+    const clearMarkers = session?.clearMarkers?.bind(session);
     return {
-      list: async options => (await this.ports.session?.turns?.(ferret, { strict: options?.strict === true })) ?? [],
+      list: async options => (await session?.turns?.(ferret, { strict: options?.strict === true })) ?? [],
+      // Unbound session files: no member, so a caller that needs one answers its own "cannot write" (never an inline paste).
+      ...(writeTurn === undefined
+        ? {}
+        : {
+            write: async (request: { readonly document: string; readonly by?: FerretTurnAuthor }) =>
+              await writeTurn(ferret, request.document, request.by),
+          }),
+      ...(queued === undefined
+        ? {}
+        : {
+            writeQueued: async (sendId: string, payload: string) => {
+              if (queuedPayloadFile(sendId) === undefined)
+                throw new Error('a send id outside the queued-message grammar names no file');
+              return await queued(ferret, payload, sendId);
+            },
+          }),
+      ...(clearMarkers === undefined ? {} : { clearMarkers: async () => await clearMarkers(ferret) }),
     };
   }
 
@@ -1431,8 +1506,9 @@ export class FerretsService implements FerretsApi {
     conversation: string | undefined,
     kind: 'start' | 'resume',
     revive?: ReviveTurnRequest,
-    attached: readonly OpeningFile[] = [],
+    extras: LaunchExtras = {},
   ): Promise<Result<FerretId, StartFailure>> {
+    const { attached = [], carried } = extras;
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
@@ -1458,7 +1534,7 @@ export class FerretsService implements FerretsApi {
       const result = await this.launchAttempt(record, prompt, conversation, tracked);
       if (!result.ok) failure = result.error;
       else if (turn === undefined) return result;
-      else if (turn.kind === 'revive') return await this.deliverTurn(record.id, runner, turn.turn);
+      else if (turn.kind === 'revive') return await this.deliverTurn(record.id, runner, turn.turn, carried);
       else {
         // Today's `deliverFirstTurn`: a start whose task never arrives is an agent sitting at an idle prompt, so a
         // first turn that does not land fails the start (the pane is stopped and the credential revoked below).
@@ -1653,11 +1729,13 @@ export class FerretsService implements FerretsApi {
     ferret: FerretId,
     runner: Runner,
     turn: ReviveTurn,
+    carried: ResumeOptions['onCarried'],
   ): Promise<Result<FerretId, StartFailure>> {
     const handle = this.registry.get(ferret)?.handle as RunnerHandle | undefined;
     try {
       if (handle === undefined) throw new Error('no pane');
       await runner.deliver(handle, { text: turn.instruction });
+      tellCarried(carried, { text: turn.instruction, turn: turn.turn, file: turn.file });
     } catch {
       return failed(
         'failed',

@@ -429,16 +429,22 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
   test('M2 F-0002 the Warden’s in-process resume, through the Ferrets port, writes a turn from the Warden; no other caller can name an author there', async () => {
     const w = await world();
     const id = await started(w);
-    const port = ferretsPort(w.service);
+    const port = ferretsPort(w.service, 'warden');
     await w.service.stop(id as never, 'now');
 
     expect((await port.resume(id as never, 'Carry on.', { automatic: true, actor: 'warden' })).ok).toBe(true);
     await w.service.stop(id as never, 'now');
-    // Only `warden` is forwarded: anything else a caller puts there names nobody.
+    // Only `warden` and `peer` are forwarded: anything else a caller puts there names nobody.
     expect((await port.resume(id as never, 'Again.', { actor: 'admin-ui' } as never)).ok).toBe(true);
+    await w.service.stop(id as never, 'now');
+    expect((await port.resume(id as never, 'A peer woke it.', { actor: 'peer' })).ok).toBe(true);
 
     const turns = await w.files.port.turns?.(id as never, { strict: true });
-    expect(turns?.map(turn => turn.by)).toEqual([{ kind: 'ferretry', feature: 'Warden' }, undefined]);
+    expect(turns?.map(turn => turn.by)).toEqual([
+      { kind: 'ferretry', feature: 'Warden' },
+      undefined,
+      { kind: 'ferret' },
+    ]);
   });
 
   test('GAP(deliver) a delivery that does not land says so, leaves the ferret running and its turn counted (today’s order)', async () => {
@@ -706,6 +712,66 @@ describe('m2 a resume tells its caller what it decided, under the ferret’s own
 
     const resumed = await w.service.resume(id as never, undefined, {
       decided: () => {
+        throw new Error('the caller broke');
+      },
+    });
+
+    expect(resumed.ok).toBe(true);
+    expect(w.registry.get(id as never)?.state).toBe('working');
+  });
+});
+
+describe('M3 a resume tells its caller what it typed for the message (ResumeOptions.onCarried)', () => {
+  test('M3 a relaunch with a message tells the caller the pointer it typed, the turn and the file, once and after the typing', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    await w.service.stop(id as never, 'now');
+    const typedBefore = w.runner.deliveries.length;
+    const told: { text: string; turn: number; file: string }[] = [];
+
+    const resumed = await w.service.resume(id as never, 'Carry on.', {
+      onCarried: typed => {
+        // Told AFTER the pointer reached the pane, never before.
+        expect(w.runner.deliveries).toHaveLength(typedBefore + 1);
+        told.push(typed);
+      },
+    });
+
+    expect(resumed.ok).toBe(true);
+    expect(told).toEqual([{ text: turnFileInstruction(turnFile(w, id, 2)), turn: 2, file: turnFile(w, id, 2) }]);
+    expect(w.runner.deliveries.at(-1)?.delivery.text).toBe(told[0]?.text);
+  });
+
+  test('M3 a running ferret was relaunched with nothing, so nothing is told', async () => {
+    const w = await world();
+    const id = await started(w);
+    const told: unknown[] = [];
+
+    await w.service.resume(id as never, 'Again.', { onCarried: typed => void told.push(typed) });
+
+    expect(told).toEqual([]);
+  });
+
+  test('M3 a relaunch that fails tells nothing: no pointer was typed', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    w.runner.refuseStarts = 1;
+    const told: unknown[] = [];
+
+    const resumed = await w.service.resume(id as never, 'Again.', { onCarried: typed => void told.push(typed) });
+
+    expect(resumed.ok).toBe(false);
+    expect(told).toEqual([]);
+  });
+
+  test('M3 a caller whose answer throws never changes the resume', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+
+    const resumed = await w.service.resume(id as never, 'Again.', {
+      onCarried: () => {
         throw new Error('the caller broke');
       },
     });
@@ -1019,6 +1085,177 @@ describe('ruling #31b: the start writes the session document, and strict ancestr
       expect(child.error.reason).toBe('where this ferret came from could not be recorded, so it was not started');
       expect(child.error.reason).not.toContain('FIXTURE_SECRET');
     }
+  });
+});
+
+describe('KCB-S B1 a non-warden consumer cannot stamp a ferret into the Warden’s lineage through the Ferrets port, decided from the session documents', () => {
+  const REFUSED = {
+    ok: false,
+    error: { code: 'refused', reason: 'only the Warden names a parent in its own tree' },
+  } as const;
+
+  /** The Warden's own ferret W, its unlabelled child C (a Warden ferret's helper), and C's child D: all started by the Warden. */
+  async function wardenTree(w: World) {
+    const warden = ferretsPort(w.service, 'warden');
+    const start = async (extra: Record<string, unknown>) => {
+      const result = await warden.start({ folder: '/work', by: 'warden', ...extra } as never);
+      if (!result.ok) throw new Error(`start refused: ${result.error.reason}`);
+      return result.value as string;
+    };
+    const root = await start({ options: { label: 'fleet-warden' } });
+    const child = await start({ parent: root });
+    const grandchild = await start({ parent: child });
+    return { root, child, grandchild };
+  }
+
+  test('KCB-S B1 the registry does not say it, the documents do: C is unlabelled in the summary and stamped into the lineage on disk', async () => {
+    const w = await world();
+    const { child } = await wardenTree(w);
+    expect(w.registry.summary(child as never)?.label).toBeUndefined();
+    const document = SessionConfigSchema.parse(await w.storage.readConfig(parseSessionId(child)));
+    expect(document.provenance).toMatchObject({ origin: 'warden', wardenLineage: true });
+  });
+
+  test('KCB-S B1 a packs start under the Warden’s unlabelled child, or its grandchild, is refused, and nothing is started', async () => {
+    const w = await world();
+    const { child, grandchild } = await wardenTree(w);
+    const records = w.registry.list().length;
+    const starts = w.runner.starts;
+    const names = w.registry
+      .list()
+      .map(ferret => ferret.name)
+      .sort();
+    const packs = ferretsPort(w.service, 'packs');
+
+    for (const parent of [child, grandchild])
+      expect(await packs.start({ folder: '/work', by: 'pack', parent: parent as never })).toEqual(REFUSED);
+
+    expect(w.registry.list()).toHaveLength(records);
+    expect(w.runner.starts).toBe(starts);
+    // No name was claimed: the next ordinary start takes the very next one.
+    const lead = await started(w);
+    expect(w.registry.get(lead as never)?.name).toBe(`fern${records + 1}`);
+    expect(names).toEqual(['fern1', 'fern2', 'fern3']);
+  });
+
+  test('J-0057 KCB-S B1 a packs start under an ordinary lead still starts', async () => {
+    const w = await world();
+    const lead = await started(w);
+    const result = await ferretsPort(w.service, 'packs').start({ folder: '/work', by: 'pack', parent: lead as never });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const stamped = SessionConfigSchema.parse(await w.storage.readConfig(parseSessionId(result.value)));
+      expect(stamped.provenance).toMatchObject({ wardenLineage: false });
+    }
+  });
+
+  test('KCB-S B1 a lineage that cannot be read refuses the start (fail closed), and nothing is started', async () => {
+    const w = await world();
+    const lead = await started(w);
+    const starts = w.runner.starts;
+    const records = w.registry.list().length;
+    // The ancestor documents cannot be read for the check (the same strict snapshot the stamp takes).
+    w.state.plant(FerretConfigFile, '{"format": 1, "label": "FIXTURE_SECRET-', lead);
+
+    expect(await ferretsPort(w.service, 'packs').start({ folder: '/work', by: 'pack', parent: lead as never })).toEqual(
+      REFUSED,
+    );
+    expect(w.runner.starts).toBe(starts);
+    expect(w.registry.list()).toHaveLength(records);
+  });
+});
+
+describe('ruling #45 BG-051 / BG-053: Conversation writes a send’s turn document and queued file through FerretTurns', () => {
+  const channelFile = (w: World, id: string, sendId: string) => `${w.folderOf(id)}/channel/queued-${sendId}.md`;
+
+  test('BG-051 FerretTurns.write numbers a send’s turn after the start’s and the revive’s, writes it 0600 and counts it', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    const turns = (await w.service.turns(id as never))!;
+
+    const first = await turns.write!({ document: 'FIXTURE first send\n' });
+
+    // The start's prompt is turn one, so a send is turn two; the answer names the very file the agent is pointed at.
+    expect(first).toEqual({ turn: 2, file: turnFile(w, id, 2) });
+    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe('FIXTURE first send\n');
+    expect((await stat(turnFile(w, id, 2))).mode & 0o777).toBe(0o600);
+    // Counted, so a revive after it numbers past it and never rewrites it.
+    expect(SessionStateSchema.parse(await w.storage.readState(parseSessionId(id))).turn).toBe(2);
+    expect((await turns.write!({ document: 'FIXTURE second send\n' })).turn).toBe(3);
+    await w.service.stop(id as never, 'now');
+    expect((await revive(w, id, 'Carry on.')).ok).toBe(true);
+    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe('FIXTURE first send\n');
+    expect((await turns.list()).map(document => document.turn)).toEqual([1, 2, 3, 4]);
+  });
+
+  test('BG-051 FerretTurns.write keeps its author beside the document, and none at all when it names none', async () => {
+    const w = await world();
+    const id = await started(w, 'Build the thing.');
+    const turns = (await w.service.turns(id as never))!;
+
+    await turns.write!({ document: 'FIXTURE from a peer\n', by: { kind: 'ferret', name: 'wren' } });
+    await turns.write!({ document: 'FIXTURE from the owner\n' });
+
+    const names = await readdir(`${w.folderOf(id)}/turns`);
+    expect(names).toContain('turn-002.by.json');
+    expect(names).not.toContain('turn-003.by.json');
+    expect((await turns.list()).map(document => document.by?.kind)).toEqual([undefined, 'ferret', undefined]);
+  });
+
+  test('BG-051 FerretTurns.clearMarkers removes the markers a previous turn left, and only those', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+    for (const name of ['done.marker', 'needs-help.marker', 'process-exit.marker', 'summary.md'])
+      await writeFile(`${w.folderOf(id)}/${name}`, 'x');
+
+    await turns.clearMarkers!();
+
+    const left = await readdir(w.folderOf(id));
+    for (const marker of ['done.marker', 'needs-help.marker', 'process-exit.marker'])
+      expect(left).not.toContain(marker);
+    expect(left).toContain('summary.md');
+  });
+
+  test('BG-053 FerretTurns.writeQueued writes channel/queued-<send id>.md 0600, rewrites the same id, and answers the path', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+
+    const file = await turns.writeQueued!('send-mw7a-0007', `${'x'.repeat(1_200)}`);
+
+    expect(file).toBe(channelFile(w, id, 'send-mw7a-0007'));
+    expect(await readFile(file, 'utf8')).toBe(`${'x'.repeat(1_200)}\n`);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(await turns.writeQueued!('send-mw7a-0007', 'FIXTURE again')).toBe(file);
+    expect(await readFile(file, 'utf8')).toBe('FIXTURE again\n');
+    expect(await readdir(`${w.folderOf(id)}/channel`)).toEqual(['queued-send-mw7a-0007.md']);
+  });
+
+  test('BG-053 FerretTurns.writeQueued refuses an id outside the grammar and writes nothing (the row names the file; none is invented)', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+
+    for (const sendId of ['../../escape', 'Send-Upper', '', 'a'.repeat(129)])
+      await expect(turns.writeQueued!(sendId, 'FIXTURE words')).rejects.toThrow('queued-message grammar');
+
+    await expect(readdir(`${w.folderOf(id)}/channel`)).rejects.toThrow();
+  });
+
+  test('BG-051 a daemon whose session files are unbound offers no writer, so a caller types the message as it is', async () => {
+    const w = await world();
+    const id = await started(w);
+    const bare = new FerretsService(w.registry, w.tokens, {
+      ...(w.service as unknown as { ports: FerretsPorts }).ports,
+      session: undefined,
+    });
+
+    const turns = (await bare.turns(id as never))!;
+
+    expect(turns.write).toBeUndefined();
+    expect(turns.writeQueued).toBeUndefined();
+    expect(turns.clearMarkers).toBeUndefined();
   });
 });
 

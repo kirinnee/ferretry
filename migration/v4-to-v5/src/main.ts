@@ -16,7 +16,7 @@ import { parseArgs } from 'node:util';
 import { convert } from './convert.ts';
 import { hostLockProbe } from './preflight.ts';
 import { summarise } from './report.ts';
-import { clearYamlLogSwitches } from './v4/config.ts';
+import { clearYamlLogSwitches } from '@ferretry/std/yaml';
 
 const USAGE =
   'usage: bun src/main.ts --from <stopped v4 home> --to <new v5 home> [--report <file>] [--dry-run] [--drop-uncarried]';

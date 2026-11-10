@@ -1,6 +1,7 @@
 import { posix } from 'node:path';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
+import { absolute } from '../host/fence-guard.ts';
 import { isKernelMadeRoot } from '../host/internal-roots.ts';
 import {
   DEFAULT_COPY_ENTRIES,
@@ -11,9 +12,11 @@ import {
   scopedSubfolder,
 } from '../host/roots.ts';
 import {
+  anchorWalk,
   harnessFileRefusal,
   permittedMode,
   renameNamesRefusal,
+  takesAnchor,
   takesLinks,
   takesRenames,
   takesUnlinks,
@@ -95,7 +98,7 @@ import type {
   WebSocketClient,
   CarrierListenerPort,
 } from '../contract/ports.ts';
-import { readConfigText } from '../host/config/yaml-text.ts';
+import { readConfigText } from '@ferretry/std/yaml';
 import { isWithinList, patchedValue } from '../host/config/patch.ts';
 import {
   ABSENT_STAMP,
@@ -223,10 +226,18 @@ export interface TestHostOptions {
   readonly fenceHome?: string;
   /**
    * A host that cannot reach an entry through a held folder (macOS whose C library or working-directory bracket could
-   * not be loaded): the `project-files` root, an owner's root, refuses every remove `no_descriptor_reach`, as the real
+   * not be loaded): the `project-files` root, an owner's root, refuses every remove AND every write `no_descriptor_reach`, as the real
    * host does there. Default: it has reach, as macOS does when both load (a remove goes through the folder's descriptor).
    */
   readonly noDescriptorReach?: true;
+  /**
+   * Absolute folders of the `project-files` world that are LINKS: the folder → the real path it resolves to (the flat
+   * world has no links at a folder level). The spelling rule of the real host (`realpath(folder)` equal to
+   * `realpath(within)` joined with the folder below `within`; without `within`, the folder equal to its real path) is
+   * then judged over it, so a `project-files` call under a linked folder is refused `link_escape` unless the link is at
+   * or above its `within` anchor. Default: none.
+   */
+  readonly linkedProjectFolders?: ReadonlyMap<string, string>;
   /** The directories `kernel.paths.checkDirectory` accepts: the absolute path asked → its real path. Default: none. */
   readonly directories?: Readonly<Record<string, string>>;
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
@@ -492,6 +503,8 @@ async function start(world: World): Promise<TestHost> {
   const stopController = new AbortController();
   const jobs = new Map<string, (signal: AbortSignal) => Promise<void>>();
   const configListeners = new Map<string, Set<() => void>>();
+  /** The value of the edit held at each config path (`write` keeps it so the next edit is made to it, as on a disk). */
+  const heldValues = new Map<string, { readonly etag: string; readonly value: unknown }>();
   // `watchState` over the in-memory world: by file or collection key, the moves the shared rule finds there. The world
   // holds values, not texts, so a file's etag is its value's JSON (as this host's writes answer) and a held edit (which
   // the world never holds) is a stamp kept for its path until that path is written, removed or set again.
@@ -781,7 +794,13 @@ async function start(world: World): Promise<TestHost> {
     };
   };
 
-  const judged = (plugin: string, path: string, removal: boolean, sentences: readonly string[]): boolean => {
+  const judged = (
+    plugin: string,
+    path: string,
+    removal: boolean,
+    sentences: readonly string[],
+    secretAdd?: true,
+  ): boolean => {
     try {
       return (
         admission.judgeConfigWrite?.({
@@ -789,6 +808,7 @@ async function start(world: World): Promise<TestHost> {
           path,
           removal,
           sentences,
+          ...(secretAdd === true ? { secretAdd } : {}),
           actor: actorScope.getStore()?.actor ?? 'ferret',
           standing: actorScope.getStore()?.standing,
         }) === 'apply'
@@ -816,6 +836,14 @@ async function start(world: World): Promise<TestHost> {
       const stamp = configStamps.get(keyOf(def))?.get(path)?.stamp;
       return stamp?.state === 'held' && stamp.etag !== ABSENT_STAMP.etag ? stamp.etag : etagOfValue(inEffect);
     };
+    /** The value of the edit held at `path`, when one is held now (its stamp is held and names that very edit). */
+    const heldValueAt = (key: string, path: string): { readonly held: boolean; readonly value?: unknown } => {
+      const stamp = configStamps.get(key)?.get(path)?.stamp;
+      const saved = heldValues.get(path);
+      return stamp?.state === 'held' && saved !== undefined && saved.etag === stamp.etag
+        ? { held: true, value: saved.value }
+        : { held: false };
+    };
     const assertDeclared = (def: ConfigFileDef<any> | ConfigCollectionDef<any>): void => {
       if (!declared.includes(def)) throw new Error(`${manifest.id}: config ${keyOf(def)} is not declared`);
     };
@@ -823,21 +851,36 @@ async function start(world: World): Promise<TestHost> {
     // the admission in use (Gate's, when given) judges this call may apply it. `within` is the owner's only (the
     // real writer's one-level merge, `host/config/patch.ts`).
     const write: (
-      ...args: [...Parameters<ConfigPort['write']>, within?: readonly string[]]
-    ) => ReturnType<ConfigPort['write']> = async (def, name, edit, writeOptions = {}, within = undefined) => {
+      ...args: [...Parameters<ConfigPort['write']>, within?: readonly string[], asCaller?: true]
+    ) => ReturnType<ConfigPort['write']> = async (
+      def,
+      name,
+      edit,
+      writeOptions = {},
+      within = undefined,
+      asCaller = undefined,
+    ) => {
       if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
       const key = keyOf(def);
       if (def.shape === 'collection' && (name === undefined || !def.name.test(name)))
         return { kind: 'refused', reason: 'bad_name', issues: [] };
       const all = world.config.get(key) as Record<string, unknown> | undefined;
       const before = def.shape === 'file' ? all : name === undefined ? undefined : all?.[name];
+      const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
+      // As the real writer: an edit is made to the DISK text, which for a file with an edit held is the HELD one.
+      const onDisk = heldValueAt(key, path);
       let next: unknown;
       if (typeof edit === 'string') {
-        // The kernel's bounded reader, as the real writer reads an edit: never a raw parse of a text a test hands in.
+        // The shared bounded reader, as the real writer reads an edit: never a raw parse of a text a test hands in.
         const read = readConfigText(edit);
         if (!read.ok) return { kind: 'refused', reason: 'yaml', issues: [{ path: key, message: 'this is not YAML' }] };
         next = read.read.value ?? {};
-      } else next = patchedValue((before as Record<string, unknown> | undefined) ?? {}, edit.patch, within);
+      } else
+        next = patchedValue(
+          ((onDisk.held ? onDisk.value : before) as Record<string, unknown> | undefined) ?? {},
+          edit.patch,
+          within,
+        );
       const checked = def.schema.safeParse(next);
       if (!checked.success)
         return {
@@ -852,10 +895,22 @@ async function start(world: World): Promise<TestHost> {
       const priorValue = prior?.success === true ? prior.data : undefined;
       // as the real port: a plugin's own write that adds a secret reference is held for the owner, judge or not
       const added = addedSecretReferenceSentences(priorValue, checked.data);
-      const sentences = [...judgeLoosening(def, priorValue, checked.data), ...added];
-      const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
+      const other = judgeLoosening(def, priorValue, checked.data);
+      const sentences = [...other, ...added];
       const subject = { path, ...(name === undefined ? {} : { name }) };
-      if (added.length > 0 || (sentences.length > 0 && !judged(manifest.id, path, false, sentences))) {
+      // `writeAsCaller` only: the added secret references go into effect when the ambient call is the owner, as the
+      // real writer asks it (the same admission, the same `secretAdd` question) and about the same references: only the
+      // ones the caller's edit introduces. One that only an edit already held on the disk names keeps the write held.
+      const byCaller =
+        added.length === 0 ? [] : addedSecretReferenceSentences([priorValue, onDisk.value], checked.data);
+      const ownerAdds =
+        asCaller === true &&
+        byCaller.length > 0 &&
+        byCaller.length === added.length &&
+        judged(manifest.id, path, false, byCaller, true);
+      const heldAdds = added.length > 0 && !ownerAdds;
+      if (heldAdds || (other.length > 0 && !judged(manifest.id, path, false, other))) {
+        heldValues.set(path, { etag, value: next });
         restamp(key, { ...subject, held: etag });
         return { kind: 'held', etag, id: `${path}@held`, sentences };
       }
@@ -925,6 +980,18 @@ async function start(world: World): Promise<TestHost> {
       },
       // The in-memory world holds no edit held for the owner, so the owner's patch is a write of that patch (merged
       // one level deep into the keys `within` names, as the real writer merges it).
+      // As `write`, except that the secret references the edit adds go into effect when the AMBIENT call is the owner,
+      // asked of the admission in use exactly as the real writer asks it. Only `ifMatch` is read from the options.
+      async writeAsCaller(def, name, edit, writeOptions = {}) {
+        return await write(
+          def,
+          name,
+          edit,
+          writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch },
+          undefined,
+          true,
+        );
+      },
       async writeAsOwner(def, name, edit, writeOptions = {}) {
         // As the real writer, in its order: an undeclared def and a bad name are answered first, then a `within` that is
         // not a list is refused, never read as something else.
@@ -1218,12 +1285,22 @@ async function start(world: World): Promise<TestHost> {
           if (name === 'project-files') throw new RootError('not_declared');
           throw new Error(`${manifest.id}: root ${name} is not declared`);
         }
+        // A `within` anchor is judged by the one rule production reads (`anchorWalk`): the folder itself or an ancestor of
+        // it, compared by component, on a root that takes an absolute folder. Anything else names no folder here either.
+        // The world holds no real disk folders for an absolute scope, so the lstat walk itself is production's alone.
+        const anchoredFolder = (folder: string | undefined): string | undefined =>
+          scope?.within === undefined ||
+          (folder !== undefined && takesAnchor(name) && anchorWalk(folder, scope.within) !== undefined)
+            ? folder
+            : undefined;
         if (name === 'project-files') {
           // The real host's rules over the flat world (`testing/project-files.ts`), with the same refusals.
           const project = projectFilesHandle({
             plugin: manifest.id,
             patterns: manifest.permissions?.projectFiles,
-            folder: projectFilesScope(scope?.subfolder),
+            folder: anchoredFolder(projectFilesScope(scope?.subfolder)),
+            within: scope?.within,
+            linkedFolders: options.linkedProjectFolders,
             fenceHome: options.fenceHome ?? '/test-home',
             setModeDeclared: manifest.permissions?.setMode === true,
             noDescriptorReach: options.noDescriptorReach === true,
@@ -1247,7 +1324,16 @@ async function start(world: World): Promise<TestHost> {
         // The same scope rule as production (`scopedSubfolder`): a `sessions` handle is one minted ferret folder, an
         // `agent-homes` handle one relative path. Each scope is its own namespace, so a test can prove two ferrets do not
         // see each other; a refused scope resolves nothing.
-        const below = scopedSubfolder(name, scope?.subfolder);
+        const scoped = scopedSubfolder(name, scope?.subfolder);
+        // The folder named as production names it (`absolute()`: `./`, `//`, `x/..` and a trailing slash resolved) and
+        // only by the roots that take an absolute folder, so a spelling production accepts is accepted here too.
+        const named =
+          (name === 'imports' || name === 'harness-history' || name === 'harness-home') &&
+          scope?.subfolder?.startsWith('/') === true &&
+          !scope.subfolder.includes('\0')
+            ? absolute(scope.subfolder, 'a root')
+            : undefined;
+        const below = anchoredFolder(named) === undefined && scope?.within !== undefined ? undefined : scoped;
         const prefix = below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`;
         const fileStat = (path: string) => ({
           kind: 'file' as const,

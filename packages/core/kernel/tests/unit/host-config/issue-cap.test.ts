@@ -21,7 +21,7 @@ import {
   MAX_SYNTAX_ERRORS,
   readConfigText,
   setConfigKey,
-} from '../../../host/config/yaml-text.ts';
+} from '@ferretry/std/yaml';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { filled } from './schema-texts.ts';
 import { captureLog, HOME, manualClock } from './support.ts';

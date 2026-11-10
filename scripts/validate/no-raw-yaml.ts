@@ -4,7 +4,7 @@
  *
  * WHY. A hand-written YAML file is the most hostile input the daemon reads: one long string aliased many times made
  * `Bun.YAML.parse` of a 256 KiB `gate.yaml` take 2.3 s and 5.4 GB at every boot (kac2 review round 8), while the
- * kernel's own reader (`packages/core/kernel/host/config/yaml-text.ts`: the size cap, the alias budget by length, no
+ * shared bounded reader (`packages/std/src/yaml-text.ts`, imported as `@ferretry/std/yaml`: the size cap, the alias budget by length, no
  * YAML 1.1 tags, duplicate keys in one pass) refused the same file in one linear pass. Every daemon-side reader of
  * text a person or an agent can write must go through that one reader — or through the value the kernel already
  * checked — so a new parse of its own is refused here until somebody says, in the ledger, why it is safe.
@@ -45,18 +45,18 @@
  * - `path  # reason`: the FILE may parse YAML itself;
  * - `path::name  <- caller.ts, other.ts  # reason`: an EXPORT of that file reaches a parse (its body calls one, or a
  *   function of the file that does). The callers are the only files that may import it — laundering a ledgered parser
- *   through a new importer is a use too. `<- *` (open to every caller) is the kernel's bounded reader alone: that
+ *   through a new importer is a use too. `<- *` (open to every caller) is the shared bounded reader (`@ferretry/std/yaml`) alone: that
  *   file is the sanctioned door, and everybody else's parser is reached only by name;
  * - EXACT BOTH WAYS: a file that parses and is not listed fails; a listed file that no longer parses fails; an exported
  *   parser without a line fails; a line whose export, or whose listed caller, is gone fails; a line without a reason
  *   fails. So the ledger stays the true inventory of who can reach a raw parser.
  *
- * DECLARED GAPS (a tree walk is not an interpreter; the real guard is the kernel's one bounded reader): `Bun` or
+ * DECLARED GAPS (a tree walk is not an interpreter; the real guard is the shared bounded reader (`@ferretry/std/yaml`)): `Bun` or
  * `globalThis` handed on whole (a call argument, a literal, a parameter default, a field: `Reflect.get(Bun, 'YAML')`,
  * `const g = globalThis; g.Bun`), `eval` and `new Function` of a string, `require.resolve` and a loader reached
  * through a destructure of `import.meta`, a ledgered file that parks its parser on `globalThis` or exports it by a later
- * assignment or a `namespace`, an import by absolute path, a package name or a `Worker` URL (only relative paths are
- * followed), a YAML library whose name has no `yaml` in it, and a ledgered parser reached through a function of an
+ * assignment or a `namespace`, an import by absolute path, a package name other than `@ferretry/std/yaml` or a `Worker` URL (only relative paths and
+ * that subpath are followed), a YAML library whose name has no `yaml` in it, and a ledgered parser reached through a function of an
  * allowed caller that itself is exported (the caller's ledger line is the review; its own importers are not followed),
  * `createRequire` itself handed on as a value (`[u].map(cr)`), and a loader made through a sequence callee
  * (`(0, createRequire)(import.meta.url)`), and the loader reached through another object (`module.constructor._load`,
@@ -71,8 +71,11 @@ import { parseSync } from 'oxc-parser';
 
 export const LEDGER = 'scripts/validate/raw-yaml-allowlist.txt';
 
-/** The kernel's bounded reader: the one file whose parsing exports are open to every caller. */
-export const KERNEL_READER = 'packages/core/kernel/host/config/yaml-text.ts';
+/** The shared bounded reader (it lives in `@ferretry/std`, the kernel and the plugins both import it): the one file whose parsing exports are open to every caller. */
+export const KERNEL_READER = 'packages/std/src/yaml-text.ts';
+
+/** The package subpath that file is imported by: the sanctioned door, so importing it is not a use of a YAML library. */
+export const KERNEL_READER_SPECIFIER = '@ferretry/std/yaml';
 
 /** What a YAML module (or Bun's `YAML`) offers that reads text. `stringify` and the `is…` helpers read nothing. */
 const PARSE_NAMES: ReadonlySet<string> = new Set([
@@ -201,8 +204,12 @@ const keyName = (property: Node): string | undefined =>
     ? undefined
     : staticName(property.key);
 
-/** A module specifier of a YAML library: bare (not a path) and with `yaml` in its name. */
-const isYamlLibrary = (specifier: string): boolean => !/^[./]/u.test(specifier) && /yaml/iu.test(specifier);
+/**
+ * A module specifier of a YAML library: bare (not a path) and with `yaml` in its name. The bounded reader's own
+ * subpath is the one bare name with `yaml` in it that is NOT a library: it is the door the ledger sanctions.
+ */
+const isYamlLibrary = (specifier: string): boolean =>
+  specifier !== KERNEL_READER_SPECIFIER && !/^[./]/u.test(specifier) && /yaml/iu.test(specifier);
 
 /** Whether an identifier found under `parent.key` only NAMES something a declaration introduces. */
 function declaresOnly(parent: Node | undefined, key: string): boolean {
@@ -1012,8 +1019,12 @@ export function parseLedger(text: string): {
   return { files, exports, problems };
 }
 
-/** The ledgered file a relative specifier lands on, if it lands on one. */
+/**
+ * The ledgered file a specifier lands on, if it lands on one: a relative path, or the shared reader's package subpath
+ * (the same file, so an import by the subpath is an edge to it and the ledger's caller check sees it).
+ */
 function resolveSpecifier(from: string, specifier: string, known: ReadonlySet<string>): string | undefined {
+  if (specifier === KERNEL_READER_SPECIFIER) return known.has(KERNEL_READER) ? KERNEL_READER : undefined;
   if (!specifier.startsWith('.')) return undefined;
   const base = posix.normalize(posix.join(posix.dirname(from), specifier));
   const stem = base.replace(/\.(?:[cm]?[jt]sx?)$/u, '');
@@ -1028,8 +1039,8 @@ function resolveSpecifier(from: string, specifier: string, known: ReadonlySet<st
 }
 
 const useMessage = (path: string, use: RawYamlUse): string =>
-  `${path}:${String(use.line)}: a YAML reader of its own (${use.text}). Read the text with the kernel's ` +
-  'bounded reader (or the value the kernel checked), or list the file in the ledger with why it is safe';
+  `${path}:${String(use.line)}: a YAML reader of its own (${use.text}). Read the text with the shared ` +
+  'bounded reader (`@ferretry/std/yaml`, or a value it already checked), or list the file in the ledger with why it is safe';
 
 /** Every finding over the given files and ledger. Pure: the tests drive it with planted files. */
 export function findings(
@@ -1089,7 +1100,7 @@ export function findings(
         if (!entry.callers.includes(caller))
           found.push(
             `${caller}:${String(edge.line)}: loads ${key}, a raw YAML parser the ledger does not open to it. ` +
-              "Read the text with the kernel's bounded reader, or add the caller to that ledger line",
+              'Read the text with the shared bounded reader (`@ferretry/std/yaml`), or add the caller to that ledger line',
           );
       }
     }
@@ -1099,6 +1110,32 @@ export function findings(
         if (!called.has(`${key}<-${caller}`))
           found.push(`${LEDGER}: ${caller} no longer loads ${key}; remove it from that line`);
   return found;
+}
+
+/** The package that owns the shared reader, and the subpath key its `exports` map must give the reader's file. */
+export const KERNEL_READER_PACKAGE = 'packages/std/package.json';
+
+/**
+ * The finding (if any) when the shared reader's package subpath does not point at {@link KERNEL_READER}: the gate
+ * trusts that specifier to be that one file, so a package that answers it with another file would be a door the ledger
+ * never saw. Pure: the text of `packages/std/package.json` in, findings out.
+ */
+export function readerDoorFindings(packageJsonText: string): readonly string[] {
+  // `@ferretry/std/yaml` is the scope, the package, then the subpath: `./yaml`.
+  const subpath = `./${KERNEL_READER_SPECIFIER.split('/').slice(2).join('/')}`;
+  let target: unknown;
+  try {
+    target = (JSON.parse(packageJsonText) as { exports?: Record<string, unknown> }).exports?.[subpath];
+  } catch {
+    return [`${KERNEL_READER_PACKAGE}: is not JSON, so the exports of ${KERNEL_READER_SPECIFIER} cannot be checked`];
+  }
+  const expected = `./${posix.relative(posix.dirname(KERNEL_READER_PACKAGE), KERNEL_READER)}`;
+  return target === expected
+    ? []
+    : [
+        `${KERNEL_READER_PACKAGE}: exports["${subpath}"] must be "${expected}" (${KERNEL_READER}), the file the ledger opens ` +
+          `to every caller as ${KERNEL_READER_SPECIFIER}`,
+      ];
 }
 
 function main(root: string): number {
@@ -1125,7 +1162,13 @@ function main(root: string): number {
         return [];
       }
     });
-  const found = findings(files, ledgerText);
+  let packageText = '';
+  try {
+    packageText = readFileSync(resolve(root, KERNEL_READER_PACKAGE), 'utf8');
+  } catch {
+    // Said by the door check below: an unreadable package file is not JSON.
+  }
+  const found = [...findings(files, ledgerText), ...readerDoorFindings(packageText)];
   for (const finding of found) console.error(`❌ ${finding}`);
   return found.length === 0 ? 0 : 1;
 }

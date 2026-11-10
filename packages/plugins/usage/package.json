@@ -24,7 +24,6 @@
     "@ferretry/plugin-conversation": "workspace:*",
     "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/core-vault": "workspace:*",
-    "yaml": "2.9.0",
     "react": "^19.0.0",
     "lucide-react": "^0.468.0",
     "@ferretry/app": "workspace:*"

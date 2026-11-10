@@ -200,7 +200,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Ferretry 5.0 checks";
       entry = bun-script "scripts/validate/rebuild-checks.sh";
-      files = "^(packages/.*|scripts/(gen|validate)/.*|ports-pending\\.json|release\\.json|docs/rebuild/guarantees\\.tsv|docs/design/rebuild-parity\\.tsv|package\\.json)$";
+      files = "^(packages/.*|scripts/(gen|validate)/.*|ports-pending\\.json|release\\.json|docs/rebuild/guarantees\\.tsv|docs/rebuild/after-merge\\.json|docs/design/rebuild-parity\\.tsv|package\\.json)$";
       pass_filenames = false;
       language = "system";
     };
@@ -275,7 +275,7 @@ pre-commit-lib.run {
 
     # No product code parses YAML with a reader of its own unless the ledger says why it is safe. One long
     # string aliased many times made `Bun.YAML.parse` of a 256 KiB gate.yaml cost 2.3 s and 5.4 GB at every
-    # boot; the kernel's bounded reader refuses it in one pass. See scripts/validate/no-raw-yaml.sh and
+    # boot; the shared bounded reader (@ferretry/std/yaml) refuses it in one pass. See scripts/validate/no-raw-yaml.sh and
     # scripts/validate/raw-yaml-allowlist.txt.
     a-no-raw-yaml = {
       enable = true;

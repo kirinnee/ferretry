@@ -116,7 +116,14 @@ export class VirtualFs {
       openDirectory: async path => {
         const identity = this.#identity(path);
         if (identity === undefined || identity.kind !== 'directory') throw missing(path);
-        return { identity, entryPath: () => undefined, chmod: unused, sync: unused, close: async () => undefined };
+        return {
+          identity,
+          entryPath: () => undefined,
+          openChild: unused,
+          chmod: unused,
+          sync: unused,
+          close: async () => undefined,
+        };
       },
       list: async path => {
         const real = this.#resolve(path, true);

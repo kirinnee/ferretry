@@ -282,6 +282,34 @@ describe('the analytics store on disk', () => {
     should(second.store.rows()).deepEqual([syncedSession()]);
   });
 
+  it('should keep a price that came from a model catalog with the catalog and address it was read from', async () => {
+    // Arrange
+    const paths = await temporaryPaths();
+    const base = syncedSession();
+    if (base.pricing?.kind !== 'priced') throw new Error('expected a priced fixture');
+    const fromCatalog: AnalyticsStoredSession = {
+      ...base,
+      pricing: {
+        ...base.pricing,
+        rate: {
+          ...base.pricing.rate,
+          source: { kind: 'model_catalog', catalog: 'hosted-models', sourceUrl: 'https://prices.example/catalog.json' },
+          // A catalog price never synced from a provider feed, exactly as a manual one never did.
+          lastSyncedAt: null,
+        },
+      },
+    };
+    const first = await open(paths);
+    first.store.upsert([fromCatalog]);
+    await closeStore(first.store);
+
+    // Act — a SECOND open of the same file, as a restarted daemon would do.
+    const second = await open(paths);
+
+    // Assert
+    should(second.store.rows()).deepEqual([fromCatalog]);
+  });
+
   it('should drop a priced row whose stored provenance is not a fact the protocol allows', async () => {
     // A CAST IS NOT A READ. These columns are bytes another process, a restore or a half-finished
     // write could have left in any state, and a row claiming EUR, a unit nothing multiplies, or a

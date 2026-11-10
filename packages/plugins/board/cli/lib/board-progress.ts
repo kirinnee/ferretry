@@ -22,10 +22,8 @@ export function parseProgressFile(text: string, path: string): Required<Progress
   if (text.trim() === '') return refuse(`${path} is empty: it must hold { now, doneSoFar, next }`);
   const read = readPatchText(text, path);
   if (!read.ok) {
-    if (read.problem.includes('is not YAML or JSON'))
-      return refuse(read.problem.replace(' is not YAML or JSON', ' cannot be read as YAML or JSON'));
-    // A document that parsed but would not become a value (an alias bomb) keeps the reader's own sentence.
-    if (read.problem.includes('could not be read as a patch')) return refuse(read.problem);
+    if (read.problem.includes(' cannot be read:'))
+      return refuse(read.problem.replace(' cannot be read:', ' cannot be read as YAML or JSON:'));
     return refuse(`${path} must hold { now, doneSoFar, next }, each a Markdown string`);
   }
   const value = read.value;

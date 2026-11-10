@@ -13,7 +13,7 @@ import type { ConfigTarget } from '../../../contract/ports.ts';
 import { agentConfig } from '../../../host/config/agent.ts';
 import { countProblems, MAX_CONFIG_ISSUES } from '../../../host/config/check.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
-import { CONFIG_FILE_MAX_BYTES, configTextTooLarge } from '../../../host/config/yaml-text.ts';
+import { CONFIG_FILE_MAX_BYTES, configTextTooLarge } from '@ferretry/std/yaml';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { type DeclaredKind, declaredKinds, mcpReviewShapes, sweepTextOf } from './real-schemas.ts';
 import { captureLog, HOME, manualClock } from './support.ts';

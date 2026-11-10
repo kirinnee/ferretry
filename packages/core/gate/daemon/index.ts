@@ -89,7 +89,7 @@ export default implementDaemon(manifest, {
       if (configFiles === undefined) return;
       try {
         const read = await configFiles.read(target);
-        // The version in effect as written, read by the kernel's bounded reader: never a parse of the disk text here,
+        // The version in effect as written, read by the shared bounded reader: never a parse of the disk text here,
         // which a hand-written file can make cost gigabytes (one long string aliased many times).
         namedGrants = grantsNamedIn(read?.written);
       } catch {

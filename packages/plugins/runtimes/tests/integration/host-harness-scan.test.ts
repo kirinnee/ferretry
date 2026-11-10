@@ -214,6 +214,23 @@ describe('HostHarnessScanner — logins', () => {
     const [claude] = await scanner(user, { logins }).scan();
     should(claude?.login.state).equal('unknown');
   });
+  it('should say not-signed-in for a host login that needs sign-in, and unknown for one still being checked', async () => {
+    // Arrange
+    const user = await home();
+    const row = sampleLogin('you', { email: 'person@example.test' });
+
+    // Act
+    const [needs] = await scanner(user, {
+      logins: fakeLogins([{ ...row, status: { ...row.status, word: 'needs_sign_in' } }]),
+    }).scan();
+    const [checking] = await scanner(user, {
+      logins: fakeLogins([{ ...row, status: { ...row.status, word: 'checking' } }]),
+    }).scan();
+
+    // Assert
+    should(needs?.login).deepEqual({ state: 'not-signed-in', email: 'person@example.test' });
+    should(checking?.login).match({ state: 'unknown', email: 'person@example.test' });
+  });
   it('should read email only from safe Logins facts', async () => {
     const user = await home();
     const row = sampleLogin('codex-you', { harness: 'codex', harnesses: ['codex'] });
@@ -287,6 +304,63 @@ describe('HostHarnessScanner — where the setup lives', () => {
     const [claude] = await scanner(user).scan();
     should(claude?.skills).deepEqual([]);
     should(claude?.problems).deepEqual([]);
+  });
+
+  it('should name a skill that is a link as a problem and import the others, never reading through the link', async () => {
+    // Arrange
+    const user = await home();
+    await put(path.join(user, '.claude/skills/fine/SKILL.md'), 'fine');
+    await put(path.join(user, 'elsewhere/SKILL.md'), 'elsewhere');
+    await symlink(path.join(user, 'elsewhere'), path.join(user, '.claude/skills/linked'));
+
+    // Act
+    const [claude] = await scanner(user).scan();
+
+    // Assert
+    should(claude?.skills.map(skill => skill.item)).deepEqual(['fine']);
+    should(claude?.problems).deepEqual([
+      `Skill "linked" at ${path.join(user, '.claude/skills/linked')} could not be read (symbolic links are not readable setup paths).`,
+    ]);
+  });
+
+  it('should say the skills folder could not be read when the folder itself is a link', async () => {
+    // Arrange
+    const user = await home();
+    await put(path.join(user, 'elsewhere/review/SKILL.md'), 'review');
+    await mkdir(path.join(user, '.claude'), { recursive: true });
+    await symlink(path.join(user, 'elsewhere'), path.join(user, '.claude/skills'));
+
+    // Act
+    const [claude] = await scanner(user).scan();
+
+    // Assert
+    should(claude?.skills).deepEqual([]);
+    should(claude?.problems).deepEqual([
+      `Your skills folder ${path.join(user, '.claude/skills')} could not be read (symbolic links are not readable setup paths).`,
+    ]);
+  });
+
+  it('should refuse a skill entry whose name climbs out of the harness home', async () => {
+    // Arrange
+    const user = await home();
+    await put(path.join(user, '.claude/skills/fine/SKILL.md'), 'fine');
+    await put(path.join(user, 'outside/SKILL.md'), 'outside');
+    const files: HostFiles = {
+      ...nodeHostFiles,
+      list: async directory =>
+        directory.endsWith(path.join('.claude', 'skills'))
+          ? ['fine', ['x', '..', '..', '..', 'outside'].join(path.sep)]
+          : await nodeHostFiles.list(directory),
+    };
+
+    // Act
+    const [claude] = await scanner(user, { files }).scan();
+
+    // Assert
+    should(claude?.skills.map(skill => skill.item)).deepEqual(['fine']);
+    should(claude?.problems).deepEqual([
+      `Skill "${['x', '..', '..', '..', 'outside'].join(path.sep)}" at ${path.join(user, 'outside')} could not be read (the path is outside its harness home).`,
+    ]);
   });
 
   it('should take the login only from Logins facts, whatever the settings file holds', async () => {
