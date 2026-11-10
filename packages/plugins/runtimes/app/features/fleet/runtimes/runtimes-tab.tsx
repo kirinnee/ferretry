@@ -354,8 +354,9 @@ function RuntimePage({
             </ul>
             {runtime.fixedLayer.overridden.length === 0 ? null : (
               <ul className="m-0 flex list-none flex-col gap-1 p-0" data-runtime-overridden="">
-                {runtime.fixedLayer.overridden.map(entry => (
-                  <li key={entry.key} className="flex min-w-0 flex-col px-3 py-1 text-cell">
+                {runtime.fixedLayer.overridden.map((entry, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: withheld rows share one text, so only the position tells them apart; the list is read-only
+                  <li key={`${entry.from}:${index}`} className="flex min-w-0 flex-col px-3 py-1 text-cell">
                     <s className="break-all font-mono text-muted">
                       {entry.key} = {entry.value}
                     </s>
