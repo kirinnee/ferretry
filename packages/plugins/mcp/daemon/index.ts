@@ -29,6 +29,7 @@ import { accountsOf, componentsOf, layeredMcp } from './lib/inventory/runtime-wi
 import { McpLaunchParts } from './lib/launch-parts.ts';
 import { mcpComponentSource } from './lib/profile-component-source.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
+import { runtimesLoginTarget } from './lib/session/login-target.ts';
 import { SessionMcpService } from './lib/session/service.ts';
 import { inventoryRoutes, oauthRoutes, sessionRoutes } from './routes.ts';
 
@@ -44,8 +45,12 @@ const NOT_YET = (what: string): never => {
  * - Runtimes (an optional `uses`) answers the accounts (one per runtime a published home lists), which MCP items each
  *   runtime's profile stack carries, and the bounded read of a home's `.claude.json`, `settings.json` and
  *   `config.toml` (`lib/inventory/home-documents.ts`: exactly those three names, nothing else of a home). A launch
- *   carries only the items its runtime's profile names. Runtimes off: no accounts and no item on any launch. The
- *   login scope's write and Catalogs belong to later units; a login add answers `mcp_runtime_unknown`.
+ *   carries only the items its runtime's profile names. Runtimes off: no accounts and no item on any launch, and a
+ *   login add answers `mcp_runtime_unknown`. A login add reads the ferret's runtime and profile from it, writes the
+ *   item to this plugin's own `config/mcp/<name>.yaml`, and Runtimes adds the one `mcp/<name>` layer under the
+ *   caller's own standing; Catalogs belongs to a later unit. A project add lands only at a known root (below),
+ *   through the ferret's own `work` root, so a ferret in a SUBFOLDER of a registered project is told in words that the
+ *   root's file is outside its folder (declared GAP: it needs the kernel's `project-files` root, the M5 unit).
  * - Projects (an optional `uses`) gives the registered roots and Ferrets' `managedWorktrees()` the managed worktrees
  *   (`<home>-worktrees`), so a subfolder of a registered project, a worktree kept inside it, and a managed worktree
  *   of it are that project, under its root's subject digest, as today. Projects off: a managed worktree belongs to
@@ -230,21 +235,33 @@ export default implementDaemon(manifest, {
           }));
         },
       },
-      // Catalogs exposes installs only, Projects' contract is empty, and there is no managed-worktree port.
-      // G177: refuse project adds until registered projects and worktrees can supply the known-root set.
-      projectRoots: async () => [],
+      // G177: a project add lands only at a known root: a registered project or a live managed worktree.
+      projectRoots: async () => (await known()).map(folder => folder.root),
       files: new RootMcpProjectFiles(async ferret => {
         const summary = await ferrets.get(ferret as FerretId);
         if (summary === undefined) throw new McpDocumentUnreadable(`no ferret ${ferret}`);
         return { root: kernel.roots.root('work', { ferret: summary.id }), base: summary.folder };
       }),
-      login: {
-        runtime: async () => undefined,
-        profile: async () => undefined,
-        hasItem: async name => items().has(name),
-        putItem: async () => NOT_YET('A runtime profile'),
-        layerProfile: async () => NOT_YET('A runtime profile'),
-      },
+      // The login add: the item in this plugin's own file, the layer through Runtimes (R-0351, R-0352).
+      login: runtimesLoginTarget({
+        runtimes: () => runtimes.current(),
+        hasItem: name => items().has(name),
+        // The person's own Add form: a `${secret:NAME}` env goes into effect at once when the AMBIENT call is the owner
+        // (host, or a governed device holding fleet.configure); a ferret's credential never reaches this route
+        // (`caller: 'person'`), and any other caller keeps the kernel's hold. The kernel decides; nothing here can.
+        writeItem: async (name, patch, ifMatch) =>
+          await kernel.config.writeAsCaller(
+            MCP_CONFIG,
+            name,
+            { patch },
+            ifMatch === undefined ? undefined : { ifMatch },
+          ),
+        held: name => {
+          const status = kernel.config.fileState(MCP_CONFIG, name);
+          return status.state === 'held' ? status.sentences : undefined;
+        },
+        removeItem: async (name, ifMatch) => await kernel.config.remove(MCP_CONFIG, name, { ifMatch }),
+      }),
     });
     async function inventoryFerret(id: string) {
       const ferret = await ferrets.get(id as FerretId);
@@ -298,8 +315,8 @@ export default implementDaemon(manifest, {
             kernel.events.publish(McpServerAdded, { name: request.name, scope: 'project' });
             return added;
           },
-          addLogin: async (id, request) => {
-            const added = await session.addLogin(id, request);
+          addLogin: async (id, request, governance) => {
+            const added = await session.addLogin(id, request, governance);
             kernel.events.publish(McpServerAdded, { name: request.name, scope: 'login' });
             return added;
           },

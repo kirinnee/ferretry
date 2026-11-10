@@ -59,7 +59,7 @@ export interface SessionMcpSubsystem {
   previewProject(ferretId: string, request: SessionMcpPreviewRequest): Promise<SessionMcpPreview>;
   addProject(ferretId: string, request: SessionMcpAddRequest): Promise<SessionMcpAdded>;
   previewLogin(ferretId: string, request: SessionMcpPreviewRequest): Promise<SessionMcpPreview>;
-  addLogin(ferretId: string, request: SessionMcpPreviewRequest): Promise<SessionMcpAdded>;
+  addLogin(ferretId: string, request: SessionMcpPreviewRequest, governance?: unknown): Promise<SessionMcpAdded>;
 }
 
 function ferretId(call: CallContext): string {
@@ -165,7 +165,7 @@ export function sessionRoutes(subsystem: SessionMcpSubsystem): {
     'POST /v1/ferrets/:ferretId/mcp/login': async call => {
       const id = ferretId(call);
       const request = await parseBody(call.request, SessionMcpPreviewRequestSchema);
-      return await answer(() => subsystem.addLogin(id, request));
+      return await answer(() => subsystem.addLogin(id, request, call.governance));
     },
     'GET /v1/ferrets/:ferretId/mcp': async call => {
       const id = ferretId(call);

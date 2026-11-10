@@ -42,7 +42,7 @@ describe('adding an MCP server for one ferret', () => {
     expect(await post('login/preview', 'fleet.use')).toBe(409);
   });
 
-  test('G177 project adds fail closed until registered projects and managed worktrees have a contract', async () => {
+  test('G177 a project add refuses a ferret whose folder is no registered project or managed worktree', async () => {
     const h = await host();
     const device = as('filesystem.use', 'filesystem.configure');
 
@@ -60,7 +60,7 @@ describe('adding an MCP server for one ferret', () => {
     expect(nobody.status).toBe(404);
   });
 
-  test('G178 a login add is two changes through the runtime, so with no runtime bound it is refused in words', async () => {
+  test('G178 a login add is two changes through the runtime, so a ferret with no runtime is refused in words', async () => {
     expect(route('POST /v1/ferrets/:ferretId/mcp/login')?.caller).toBe('person');
     const h = await host();
     const refused = await h.request('POST', '/v1/ferrets/f1/mcp/login', { body: ADD, as: as('fleet.configure') });
