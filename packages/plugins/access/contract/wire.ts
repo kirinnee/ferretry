@@ -22,5 +22,10 @@ export const BuzzSchema = z.strictObject({
   urgency: z.literal('high').optional(),
   /** How long a push service may hold it undelivered, when it is about something that ends sooner (an approval's seconds left; the daemon clamps it to a high push's own limit). */
   ttlSeconds: z.number().int().min(0).max(3_600).optional(),
+  /**
+   * The ferret (session id) the buzz is about. Only the hourly cap on high-priority pushes reads it: three an hour per
+   * ferret, twelve across the daemon. A high buzz that names none counts against the daemon's twelve only.
+   */
+  ferret: z.string().min(1).max(200).optional(),
 });
 export type Buzz = z.infer<typeof BuzzSchema>;

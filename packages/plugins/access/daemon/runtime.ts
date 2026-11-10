@@ -72,7 +72,7 @@ import {
   type Ed25519Verifier,
   verifyDeviceProof,
 } from './lib/proof/device-proof.ts';
-import { buzzPayload, clearPayload, PairedPushDevices, PushService } from './lib/push/index.ts';
+import { buzzPayload, clearPayload, HighPushCap, PairedPushDevices, PushService } from './lib/push/index.ts';
 import { pairingRoutes } from './lib/routes/pairing.ts';
 import { pushRoutes } from './lib/routes/push.ts';
 import { stepUpRoutes } from './lib/routes/step-up.ts';
@@ -128,6 +128,8 @@ export class AccessRuntime {
   readonly #stepUpRegistry: StepUpRegistry;
   readonly #connections: LiveDeviceConnections;
   readonly #verifier: PasskeyVerifier;
+  /** The hourly cap on high-priority pushes: RAM, owned by this runtime, read through the kernel's clock. */
+  readonly #highPushes: HighPushCap;
   #wired: Promise<Wired> | undefined;
   #current: Wired | undefined;
   #generation = 0;
@@ -142,6 +144,7 @@ export class AccessRuntime {
       { nowMs: () => deps.kernel.clock.nowMs() },
       () => this.settings().stepUpWindowMinutes,
     );
+    this.#highPushes = new HighPushCap({ nowMs: () => deps.kernel.clock.nowMs() });
     this.#connections = new LiveDeviceConnections(this.#stepUpRegistry);
     this.#verifier = passkeyVerifier(new WebCryptoPasskeyCrypto()) as unknown as PasskeyVerifier;
   }
@@ -478,12 +481,22 @@ export class AccessRuntime {
       const { push } = await this.ready();
       // Parsed here, not trusted: an urgency or a hold time outside the schema is refused at the sender.
       const buzz = BuzzSchema.parse(message);
-      const result = await push.notify({
-        payload: buzzPayload(buzz),
-        ...(buzz.urgency === undefined ? {} : { urgency: buzz.urgency }),
-        ...(buzz.ttlSeconds === undefined ? {} : { ttlSeconds: Math.min(buzz.ttlSeconds, PUSH_URGENT_TTL_SECONDS) }),
-      });
-      return result.delivered;
+      // The hourly cap on high pushes, for EVERY plugin that buzzes: counted and decided in one synchronous step (no
+      // `await` between them); past a cap the push still goes, at normal priority.
+      const slot = buzz.urgency === 'high' ? this.#highPushes.take(buzz.ferret) : undefined;
+      let delivered = 0;
+      try {
+        const result = await push.notify({
+          payload: buzzPayload(buzz),
+          ...(slot?.high === true ? { urgency: 'high' as const } : {}),
+          ...(buzz.ttlSeconds === undefined ? {} : { ttlSeconds: Math.min(buzz.ttlSeconds, PUSH_URGENT_TTL_SECONDS) }),
+        });
+        delivered = result.delivered;
+        return delivered;
+      } finally {
+        // A slot is spent only on a push that reached a device.
+        if (delivered === 0) slot?.refund();
+      }
     },
     clear: async (tags, except, ferret) => {
       const { push } = await this.ready();
