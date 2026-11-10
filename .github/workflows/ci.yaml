@@ -83,6 +83,14 @@ jobs:
           cache: nix
           path: ~/.cache/ferretry-tsc
       - uses: ./.github/actions/install-nix
+      # The only-down checks (ports-pending, after-merge) need the commit they may not grow from; a one-commit
+      # checkout has none. The repository is public, so this fetch needs no credentials.
+      - name: Fetch the base the only-down checks compare against
+        env:
+          FY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Only a push's `before`: a pull request's own earlier head is never the base (check-base.sh says why).
+          FY_PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        run: ./scripts/ci/check-base.sh
       - name: Run the quick set
         env:
           FY_CI_QUICK_PARALLEL: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8')) && '3' || '6' }}

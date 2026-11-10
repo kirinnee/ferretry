@@ -91,6 +91,8 @@ export function parseArgs(args: readonly string[]): {
       tier = value;
     } else rest.push(arg);
   }
+  // CI names the commit the only-down checks compare against (scripts/ci/check-base.sh); `--base` still wins.
+  base ??= process.env.FY_CHECK_BASE || undefined;
   return {
     root,
     ...(packageId === undefined ? {} : { packageId }),
