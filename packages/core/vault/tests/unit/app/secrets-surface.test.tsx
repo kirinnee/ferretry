@@ -4,7 +4,6 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { SecretsSurface } from '../../../app/features/secrets/secrets-surface.tsx';
-import { SECRET_MASK } from '../../../app/features/secrets/secrets-api.ts';
 import { click, settle, typeInto } from '../../support/app/dom-form.ts';
 import { interact, mount, must } from '../../support/app/dom.ts';
 import { FAKE_VALUE, recordingClient } from '../../support/app/input-fixtures.ts';
@@ -60,13 +59,28 @@ describe('the Secrets page', () => {
     try {
       const row = q(mounted.container, '[data-secret="ANTHROPIC_KEY"]');
       expect(row.textContent).toContain('ANTHROPIC_KEY');
-      expect(row.textContent).toContain(SECRET_MASK);
+      expect(row.textContent).toContain('••••••••••••');
       expect(row.textContent).toContain('changed 2026-08-05');
       // The only controls on a listed secret replace it or delete it: nothing reveals, copies or reads it back.
       expect([...row.querySelectorAll('button')].map(each => each.getAttribute('aria-label'))).toEqual([
         'Replace ANTHROPIC_KEY',
         'Delete ANTHROPIC_KEY',
       ]);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('S4 refuses a listing that carries a value rather than draw any of it', async () => {
+    const { client } = recordingClient(async () =>
+      list([{ name: 'ANTHROPIC_KEY', createdAt: CREATED, updatedAt: CHANGED, value: FAKE_VALUE } as never]),
+    );
+    const mounted = await mount(<SecretsSurface client={client} />);
+    await settle();
+    try {
+      expect(mounted.container.textContent).toContain('Secrets unavailable');
+      expect(mounted.container.querySelector('[data-secret]')).toBeNull();
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
     } finally {
       await mounted.unmount();
     }

@@ -51,21 +51,27 @@ export function isAskRequest(
 export function InputCardHost({ client, value, agentName, onDone, onHold }: InputCardHostProps) {
   const ask = AskOnScreenSchema.safeParse(value);
   const ferret = ask.success ? ask.data.ferret : undefined;
-  const askRef = ask.success ? ask.data.ref : undefined;
+  const isAsk = ask.success;
+  const askRequest = ask.success && typeof ask.data.ref.request === 'string' ? ask.data.ref.request : undefined;
   const askContext = ask.success ? ask.data.context : undefined;
   const name = agentName ?? (ask.success ? ask.data.ferretName : undefined);
   const [read, setRead] = useState<Read>({ kind: 'loading' });
   const settled = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (ferret === undefined || askRef === undefined || settled.current) return;
+    if (ferret === undefined || !isAsk || settled.current) return;
     try {
       const listed = await listInputRequests(client, ferret);
       const open = listed.find(
-        each => each.kind === 'open' && isAskRequest(each.request, { ref: askRef, context: askContext }),
+        each =>
+          each.kind === 'open' &&
+          isAskRequest(each.request, {
+            ref: askRequest === undefined ? {} : { request: askRequest },
+            context: askContext,
+          }),
       );
       const unreadable = listed.find(
-        each => each.kind === 'unreadable' && (typeof askRef.request !== 'string' || each.id === askRef.request),
+        each => each.kind === 'unreadable' && (askRequest === undefined || each.id === askRequest),
       );
       setRead(previous =>
         open?.kind === 'open'
@@ -83,7 +89,7 @@ export function InputCardHost({ client, value, agentName, onDone, onHold }: Inpu
           : { kind: 'failed', text: cause instanceof Error ? cause.message : String(cause) },
       );
     }
-  }, [client, ferret, askRef, askContext]);
+  }, [client, ferret, isAsk, askRequest, askContext]);
 
   useEffect(() => {
     void refresh();
