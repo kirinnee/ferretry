@@ -20,11 +20,16 @@ export async function stopOnSignal(
   limitMs: number = STOP_LIMIT_MS,
 ): Promise<void> {
   await new Promise<void>(resolve => {
+    // Both `once` handlers stay armed after the first signal; only the first one begins the stop.
+    let begun = false;
     const begin = (): void => {
+      if (begun) return;
+      begun = true;
       proc.on('SIGTERM', () => proc.exit(1));
       proc.on('SIGINT', () => proc.exit(1));
       proc.after(limitMs, () => proc.exit(1));
-      void stop().then(resolve);
+      // A stop that rejects ends the process with 1 as well, rather than as an unhandled rejection.
+      void stop().then(resolve, () => proc.exit(1));
     };
     proc.once('SIGTERM', begin);
     proc.once('SIGINT', begin);

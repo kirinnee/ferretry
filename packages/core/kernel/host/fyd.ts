@@ -136,12 +136,19 @@ async function main(): Promise<number> {
   for (const line of await host.doctor()) if (line.state === 'fail') process.stderr.write(`fyd: ${line.detail}\n`);
   process.stderr.write(`fyd ${VERSION} ready (${host.identity.fingerprint.slice(0, 12)})\n`);
   // The stop is bounded (jobs.ts, stop-signals.ts); a job that ignored its signal never keeps the process alive.
-  await stopOnSignal(() => host.stop(), {
-    once: (signal, handler) => process.once(signal, handler),
-    on: (signal, handler) => process.on(signal, handler),
-    exit: code => process.exit(code),
-    after: (ms, fn) => setTimeout(fn, ms).unref(),
-  });
+  await stopOnSignal(
+    () =>
+      host.stop().catch((error: unknown) => {
+        process.stderr.write(`fyd: stopping failed: ${error instanceof Error ? error.message : 'unknown error'}\n`);
+        throw error;
+      }),
+    {
+      once: (signal, handler) => process.once(signal, handler),
+      on: (signal, handler) => process.on(signal, handler),
+      exit: code => process.exit(code),
+      after: (ms, fn) => setTimeout(fn, ms).unref(),
+    },
+  );
   process.exit(0);
 }
 

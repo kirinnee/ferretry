@@ -1522,7 +1522,9 @@ async function bootLocked(
           await record.state?.close().catch(() => undefined);
         }
       } finally {
-        // Last, even when a step above threw: the home is free only once nothing of this daemon still writes in it.
+        // Last, even when a step above threw. The home is free once the jobs have stopped OR were given up on at the
+        // deadline (jobs.ts): a given-up job's JS never runs again, but a file-system call it had already issued may
+        // still land after the lock is released (the writes are atomic renames, so at worst a stray temp file).
         trace.push('stop:lock');
         await lease.release();
       }

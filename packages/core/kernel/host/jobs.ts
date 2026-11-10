@@ -224,6 +224,8 @@ export class JobRunner {
         job.runs += 1;
         job.consecutive = 0;
       } catch (error) {
+        // A job that answers its own abort by throwing (`throwIfAborted`) is the stop working, not a failure.
+        if (job.controller.signal.aborted) return;
         job.failures += 1;
         job.consecutive += 1;
         job.lastError = error instanceof Error ? error.message.slice(0, 200) : 'failed';
