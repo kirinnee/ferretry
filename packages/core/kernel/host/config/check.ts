@@ -204,7 +204,20 @@ export function checkConfigText(
       issues: [{ path, severity: 'error', message: CONFIG_TOO_LARGE, fix: 'make the file smaller' }],
     };
   }
-  const read = readConfigText(text);
+  return checkReadConfigText(def, path, text, binary, readConfigText(text));
+}
+
+/**
+ * {@link checkConfigText} of a text under the cap that the caller has already read: a read that both checks and masks a
+ * text (`shown-text.ts`) parses it once, whether the check passes or not.
+ */
+export function checkReadConfigText(
+  def: ConfigDef,
+  path: string,
+  text: string,
+  binary: string,
+  read: ReturnType<typeof readConfigText>,
+): CheckedConfigText | RefusedConfigText {
   if (!read.ok) {
     // A key in text that does not parse (in an undeclared tag handle, say) is refused as a key, by line only: the
     // first thing said about such a file is that it holds one, never anything quoted from around it.
@@ -291,11 +304,6 @@ function lineOfNth(text: string, mark: string, nth: number): number {
   return text.slice(0, at).split('\n').length;
 }
 
-/**
- * W0: the mask is never written back. A text that holds MORE `‹hidden›` than the text on disk was made from a read that
- * hid a value, and saving it would write the mask over the value. "More", not "any": a file that already holds the
- * literal (in a comment, say) stays editable. Refused as `schema` with the line of the first one in excess.
- */
 /** A string of a value that holds `‹hidden›` (a key's own name included), and the place it is at. */
 interface MarkedString {
   readonly place: string;
@@ -326,6 +334,13 @@ function markedStrings(value: unknown): readonly MarkedString[] {
   return found;
 }
 
+/**
+ * W0: the mask is never written back. A text that holds MORE `‹hidden›` than the text on disk was made from a read that
+ * hid a value, and saving it would write the mask over the value. "More", not "any": a file that already holds the
+ * literal (in a comment, say) stays editable. A value that holds one where the disk value at the same place does not is
+ * refused too, so a mark in a comment on disk never lets a mask through. Refused as `schema` at the line of the first one
+ * in excess.
+ */
 function hiddenMarkRefusal(
   path: string,
   text: string,

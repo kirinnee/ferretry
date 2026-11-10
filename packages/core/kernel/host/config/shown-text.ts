@@ -18,7 +18,7 @@
  * Pure.
  */
 import { configTextTooLarge, editConfigText, readConfigText } from '@ferretry/std/yaml';
-import { checkConfigText, type ConfigIssue, MAX_CONFIG_ISSUES, moreIssues } from './check.ts';
+import { checkReadConfigText, type ConfigIssue, MAX_CONFIG_ISSUES, moreIssues } from './check.ts';
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
 import { HIDDEN_VALUE_TEXT, looksSecret, shownWord, shownWords } from './secret-words.ts';
 import { rawTextHoldsSecret } from './secrets.ts';
@@ -182,7 +182,7 @@ const RAW_WORD_BREAK = /[\s,[\]"']+/u;
 /**
  * Whether a text that does not parse holds a word the word cutter would cut, or a value after a secret-named key
  * (`DB_PASSWORD: v`) that looks like a credential: none of its values can be cut and rebuilt, so such a text is
- * withheld (`unmaskable`) rather than shown raw. A pointer (`apiKey: ${secret:NAME}`) is no credential. Linear.
+ * withheld (`unparsed`) rather than shown raw. A pointer (`apiKey: ${secret:NAME}`) is no credential. Linear.
  */
 function rawTextMayHold(text: string): boolean {
   const words = text.split(RAW_WORD_BREAK).filter(word => word !== '' && word !== '-');
@@ -204,14 +204,18 @@ const MIN_CUT_WORD = 7;
  * The text as a read of it may show it.
  *
  * 1. Over the cap: withheld, unread. 2. It fails its check because it holds a raw secret, or its def is credential
- * records, or it does not parse and its raw text holds a secret: withheld. 3. Otherwise each string is cut where it
+ * records, or it does not parse and its raw text holds a secret: withheld. A text that
+ * does not parse and holds a word the cutter would cut, or a credential after a secret-named key, is withheld too
+ * (`unparsed`); any other text that does not parse is shown as it is. 3. Otherwise each string is cut where it
  * looks like a credential, and the text is rebuilt around the cut values. 4. If any cut part is still anywhere in the
  * shown text (an alias, a comment, a quoting quirk) the text is withheld too: a mask that may have missed something
  * shows nothing at all.
  */
 export function shownConfigText(def: ConfigDef, path: string, text: string, binary: string): ShownConfigText {
   if (configTextTooLarge(text)) return { kind: 'withheld', reason: 'too_large' };
-  const checked = checkConfigText(def, path, text, binary);
+  // One parse: the check and the mask read the same text, whether it passes its check or not.
+  const read = readConfigText(text);
+  const checked = checkReadConfigText(def, path, text, binary, read);
   if (
     !checked.ok &&
     (checked.reason === 'raw_secret' ||
@@ -222,12 +226,10 @@ export function shownConfigText(def: ConfigDef, path: string, text: string, bina
       (checked.reason === 'yaml' && rawTextHoldsSecret(text)))
   )
     return { kind: 'withheld', reason: 'raw_secret' };
-  // The check has parsed a text that passed it: its plain value is the one to mask, so the text is not parsed twice.
-  const read = checked.ok ? undefined : readConfigText(text);
   // A text that does not parse cannot be cut and rebuilt: it is shown only when no word in it looks like a credential.
-  if (read !== undefined && !read.ok)
+  if (!read.ok)
     return rawTextMayHold(text) ? { kind: 'withheld', reason: 'unparsed' } : { kind: 'shown', text, hidden: [] };
-  const written = checked.ok ? checked.written : read?.ok === true ? read.read.value : undefined;
+  const written = read.read.value;
   const { value, cuts } = maskedValue(written);
   if (cuts.length === 0) return { kind: 'shown', text, hidden: [] };
   if (!isPlainObject(value)) return { kind: 'withheld', reason: 'unmaskable' };
