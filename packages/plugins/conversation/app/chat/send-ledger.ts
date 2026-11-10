@@ -226,6 +226,7 @@ const REASONS: ReadonlySet<string> = new Set<SendUnaccountedReason>([
   'blocked_by_prompt',
   'revive_unconfirmed',
   'landing_unconfirmed',
+  'typed_not_submitted',
   'not_delivered',
 ]);
 const CANCEL_EFFECTS: ReadonlySet<string> = new Set<SendCancelEffect>([

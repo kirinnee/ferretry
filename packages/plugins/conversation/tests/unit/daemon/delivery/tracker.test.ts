@@ -1210,6 +1210,20 @@ describe('a pointer of ours left typed in the composer', () => {
 });
 
 describe('B144: text of ours left unsubmitted, the ferret idle', () => {
+  const DIRECT_TEXT = '[message · from :ireland · peer]\nplease keep the queue ordering as v4';
+  const directUnconfirmed = (overrides: Partial<SendRecord> = {}) =>
+    record({
+      path: 'direct',
+      message: DIRECT_TEXT,
+      matchText: DIRECT_TEXT,
+      senderKind: 'agent',
+      from: SENDER,
+      fate: 'unaccounted',
+      unaccountedReason: 'landing_unconfirmed',
+      fateAt: at(6_000),
+      ...overrides,
+    });
+
   const POINTER = turnFileInstruction('/state/sessions/session-1/turns/turn-063.md');
   const unconfirmed = (overrides: Partial<SendRecord> = {}) =>
     record({
@@ -1255,13 +1269,110 @@ describe('B144: text of ours left unsubmitted, the ferret idle', () => {
     should(world.retyped).be.empty();
   });
 
-  it('stops looking once its keys could no longer plausibly be arriving', async () => {
-    const world = new World(unconfirmed());
+  it('B187 an unconfirmed direct send first seen after strandedWatchMs is still looked at, on a back-off', async () => {
+    // nelly: a two-line direct send settled unconfirmed; the pane drew it long after the old 10-minute look ended.
+    const world = new World(directUnconfirmed());
+    world.inPane = false;
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    const settings = defaultSendTrackerSettings;
+
+    await world.checkAt(settings.strandedWatchMs - 1_000);
+    should(world.scheduled.at(-1)?.delayMs).equal(settings.busyExtensionMs);
+    // Past the fast window: the wait starts at 60 s and doubles, never beyond the back-off ceiling.
+    const delays: number[] = [];
+    let ms = settings.strandedWatchMs + 1_000;
+    for (let look = 0; look < 8; look += 1) {
+      await world.checkAt(ms);
+      const delay = world.scheduled.at(-1)?.delayMs as number;
+      delays.push(delay);
+      ms += delay;
+    }
+    should(delays).eql([60_000, 61_000, 122_000, 244_000, 488_000, 600_000, 600_000, 600_000]);
+    should(world.resubmitted).be.empty();
+
+    world.inPane = 'composer';
+    world.enterTakes = true;
+    await world.checkAt(ms);
+
+    should(world.events).containEql('control.send_typed_not_sent');
+    should(world.resubmitted).eql(['send-1']);
+    should(world.only.fate).equal('accepted');
+  });
+
+  it('B187 an unconfirmed send seen late gets exactly one Enter', async () => {
+    const world = new World(directUnconfirmed());
+    world.inPane = 'composer';
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    const first = defaultSendTrackerSettings.strandedWatchMs + 1_000;
+
+    await world.checkAt(first);
+    should(world.resubmitted).eql(['send-1']);
+    // The one Enter has not had `typedStableMs` yet: neither pressed again nor raised, and the next look is set for its end.
+    await world.checkAt(first + 2_000);
+    should(world.resubmitted).eql(['send-1']);
+    should(world.only.unaccountedReason).equal('landing_unconfirmed');
+    should(world.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.typedStableMs - 2_000);
+    for (const extra of [5_000, 60_000, 120_000]) await world.checkAt(first + extra);
+
+    should(world.resubmitted).eql(['send-1']);
+  });
+
+  it('B187 still in the box after its one Enter, it is raised typed_not_submitted and journalled send_stranded', async () => {
+    const world = new World(directUnconfirmed());
+    world.inPane = 'composer';
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    const first = defaultSendTrackerSettings.strandedWatchMs + 1_000;
+
+    await world.checkAt(first);
+    await world.checkAt(first + defaultSendTrackerSettings.typedStableMs);
+    for (const extra of [10_000, 70_000]) await world.checkAt(first + extra);
+
+    should(world.only).match({ fate: 'unaccounted', unaccountedReason: 'typed_not_submitted', typedNotSent: true });
+    should(world.events.filter(event => event === 'control.send_stranded')).have.length(1);
+    should(world.journal.find(entry => entry.event === 'control.send_stranded')?.data).eql({ sendId: 'send-1' });
+    should(world.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.busyExtensionMs);
+  });
+
+  it('B187 a restart between the Enter and the raise raises at once: the Enter is long past', async () => {
+    const world = new World(directUnconfirmed({ typedNotSent: true, submitNudges: 1 }));
+    world.inPane = 'composer';
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    await world.checkAt(defaultSendTrackerSettings.strandedWatchMs + 5_000);
+
+    should(world.resubmitted).be.empty();
+    should(world.only.unaccountedReason).equal('typed_not_submitted');
+  });
+
+  it('B187 gone from the box after its Enter, it re-opens and is proven from the transcript', async () => {
+    const world = new World(directUnconfirmed());
+    world.inPane = 'composer';
+    world.enterTakes = true;
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    const first = defaultSendTrackerSettings.strandedWatchMs + 1_000;
+
+    await world.checkAt(first);
+    should(world.only).match({ fate: 'accepted', submitNudges: 1 });
+    should(world.events).not.containEql('control.send_stranded');
+
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user(DIRECT_TEXT, first + 1_000)]);
+    await world.checkAt(first + 2_000);
+
+    should(world.only.fate).equal('delivered');
+    should(world.resubmitted).eql(['send-1']);
+  });
+
+  it('B187 never seen and past holdLimitMs, it is no longer looked at', async () => {
+    const world = new World(directUnconfirmed());
     world.inPane = false;
     world.evidence(new ClaudeObservedInputObserver(), []);
 
-    await world.checkAt(defaultSendTrackerSettings.strandedWatchMs + 1_000);
+    await world.checkAt(defaultSendTrackerSettings.holdLimitMs - 1_000);
+    should(world.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.strandedBackoffMaxMs);
+    world.scheduled.length = 0;
+    await world.checkAt(defaultSendTrackerSettings.holdLimitMs + 1_000);
 
+    should(await world.tracker.watching(ID)).be.false();
     should(world.scheduled).be.empty();
     should(world.resubmitted).be.empty();
   });
