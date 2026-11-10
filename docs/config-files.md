@@ -216,17 +216,26 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
   from the device or agent that read this file is still ‹hidden› here; nothing was written"), so the mask is never
   written over a real value. The fix is to type the real value at the machine or replace the mark with
   `${secret:NAME}`. A patch of another key of such a file is still applied.
-- **Some texts are withheld whole.** The answer is one comment line (a save of it is refused, so it never wipes the
-  file) and the issues say why. The reasons: `raw_secret` (it holds a raw secret, which is also refused on write),
-  `too_large` (over the cap), `unmaskable` (a value in it could not be hidden safely, including a mask that may have
-  missed one) and `unparsed` (the file does not parse as YAML, so the values to hide cannot be told, but only when the
-  raw text holds a word the cutter would cut or a credential after a secret-named key; any other unparsed text is shown
-  as it is).
+- **A name is read the way the write rule reads it.** A flag or key is a credential's when its name ENDS in `key`,
+  `token`, `secret`, `password`, `passwd` (plural too) or `credential(s)`, dashes ignored (`--key`, `--tokens`,
+  `--apitoken`, `--clientsecret`, `--ssh-key`, `SIGNING_KEY`), or holds a word such as `AUTH` or a pair such as
+  `API_KEY`. It over-hides on purpose (`--model-key v` is cut), and every flag secret the write rule refuses is cut.
+- **Text glued to a `${secret:NAME}` pointer is cut.** `API_KEY=prefix${secret:X}`, `--token prefix${secret:X}`,
+  `API_KEY=${secret:X}?model=short` and `Authorization: Bearer v${secret:X}` hide the whole value (the raw part is a
+  credential written next to a pointer); one pointer alone, quoted or not, stays shown.
+- **Some texts are withheld whole.** The route (`GET /v1/config/file`) answers one comment line (a save of it is
+  refused, so it never wipes the file) and `config_read` answers an empty `text` with the reason in its summary; the
+  route's issues say why too. The reasons: `raw_secret` (it holds a raw secret, which is also refused on write),
+  `too_large` (over the cap), `unmaskable` (a value in it could not be hidden safely: a cut value still written
+  somewhere, or a text in which the write rule still finds a raw flag secret after the mask, so a mask that missed
+  something shows nothing) and `unparsed` (the file does not parse as YAML, so the values to hide cannot be told, but
+  only when the raw text holds a word the cutter would cut or a credential after a secret-named key; any other
+  unparsed text is shown as it is).
 
-What this does not do: values shorter than 7 characters in a word, or under 8 as a credential, are never cut
-(`MIN_CUT_WORD`); a JSON document inside a flag and a plain password stuck to a one-letter flag (`-p<password>`) are
-not cut; and a text that does not parse can show what neither check recognised. The full list is in
-[secrets.md](secrets.md#secret-shaped-values-in-a-files-text).
+What this does not do: a word shorter than 7 characters is never searched for a cut (`MIN_CUT_WORD`), and a value
+under 8 characters is no credential by a secret name (a URL's password is cut at any length); a JSON document inside a
+flag and a plain password stuck to a one-letter flag (`-p<password>`) are not cut; and a text that does not parse can
+show what neither check recognised. The full list is in [secrets.md](secrets.md#secret-shaped-values-in-a-files-text).
 
 ## Editing
 
