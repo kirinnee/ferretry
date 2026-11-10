@@ -30,10 +30,22 @@ export function tomlString(value: string): string {
   return `"${escaped}"`;
 }
 
+/**
+ * A number as a TOML value. NaN and the infinities have TOML spellings of their own (`nan`, `inf`, `-inf`: TOML 1.0
+ * floats), so they are written as themselves and read back as themselves; they are never turned into another number,
+ * because a YAML `.inf` timeout that became `0` would silently mean something else to Codex.
+ */
+function number(input: number): string {
+  if (Number.isNaN(input)) return 'nan';
+  if (input === Number.POSITIVE_INFINITY) return 'inf';
+  if (input === Number.NEGATIVE_INFINITY) return '-inf';
+  return String(input);
+}
+
 /** One JSON value as a TOML value. `null` has no TOML spelling and is left out by the caller. */
 function value(input: unknown): string {
   if (typeof input === 'string') return tomlString(input);
-  if (typeof input === 'number') return Number.isFinite(input) ? String(input) : '0';
+  if (typeof input === 'number') return number(input);
   if (typeof input === 'boolean') return input ? 'true' : 'false';
   if (Array.isArray(input))
     return `[${input

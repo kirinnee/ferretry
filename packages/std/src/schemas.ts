@@ -9,6 +9,14 @@ export const NonNegativeFiniteSchema = z.number().finite().nonnegative();
 export const KEBAB_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 export const KebabNameSchema = z.string().regex(KEBAB_NAME);
 
+/**
+ * The name of an item in a configuration collection (a profile, a runtime, an MCP server, a skill, a settings or hooks
+ * item): ASCII letters and digits in words joined by single dashes, case kept. It allows no slash, dot, space, control
+ * character or look-alike of any of them, so a name can never be read as a path. This is the ONE copy: every collection
+ * that names its items this way imports it, and none declares its own.
+ */
+export const ITEM_NAME_PATTERN = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u;
+
 const SMALL_NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 
 /** A short span in words: "two minutes", "one minute", "90 seconds". */

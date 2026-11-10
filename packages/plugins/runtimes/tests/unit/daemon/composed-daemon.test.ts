@@ -17,7 +17,8 @@ import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
-import { RuntimeHomeUnreadable, RuntimesPort } from '../../../contract/index.ts';
+import type { KernelPorts } from '@ferretry/kernel/contract';
+import { PROFILE_ITEMS, RuntimeHomeUnreadable, RuntimesPort } from '../../../contract/index.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
@@ -456,6 +457,143 @@ describe('a real apply through the composed daemon', () => {
     // A proposal is single use: the apply that landed spent it.
     const again = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
     expect(JSON.stringify(again.json())).toContain('already been applied');
+  });
+
+  it('S67 a first-run setup apply and a profile layer change take turns on the real writer: the layer added in the same instant stands', async () => {
+    // Arrange — the setup import is staged for real; its executor is held inside the apply and then patches the
+    // profile's `contents` key with no etag, as a first-run import does.
+    let kernel: KernelPorts | undefined;
+    let enter: () => void = () => undefined;
+    const inside = new Promise<void>(resolve => {
+      enter = resolve;
+    });
+    let release: () => void = () => undefined;
+    const holding = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const { host } = await compose({
+      assemble: ctx => {
+        kernel = ctx.kernel;
+        const assembly = hostAssembly(ctx);
+        Object.assign(assembly.setup.executors.setup, {
+          describe: async () => 'import',
+          execute: async () => {
+            enter();
+            await holding;
+            await ctx.kernel.config.write(PROFILE_ITEMS as never, 'default', {
+              patch: { contents: ['modelSets/heavy', 'skills/imported'] },
+            });
+            return 'imported';
+          },
+        });
+        return assembly;
+      },
+    });
+    const writer = (kernel as KernelPorts).config;
+    let reachWriter: () => void = () => undefined;
+    const layerAtWriter = new Promise<void>(resolve => {
+      reachWriter = resolve;
+    });
+    const realWriteAll = writer.writeAll.bind(writer);
+    (writer as { writeAll: typeof writer.writeAll }).writeAll = async documents => {
+      reachWriter();
+      return await realWriteAll(documents);
+    };
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: { change: { kind: 'setup.import' } } });
+    expect(staged.status).toBe(200);
+    const applying = host.request('POST', `/v1/runtimes/proposals/${staged.json<{ id: string }>().id}/apply`, {
+      body: {},
+    });
+    await inside;
+
+    // Act — the layer change arrives while the setup apply is mid-flight; give it every chance to reach the writer.
+    const change = host
+      .provided(RuntimesPort)
+      .changeProfileLayers(
+        { kind: 'add', profile: 'default', layer: 'mcp/notes' },
+        { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) },
+      );
+    let reached = false;
+    void layerAtWriter.then(() => {
+      reached = true;
+    });
+    for (let turn = 0; turn < 50; turn += 1) await new Promise(resolve => setImmediate(resolve));
+    const reachedWhileHeld = reached;
+    release();
+    const applied = await applying;
+    const outcome = await change;
+
+    // Assert — the layer change did not touch the writer while the apply held the section; afterwards BOTH edits stand.
+    expect(reachedWhileHeld).toBe(false);
+    expect(applied.status).toBe(200);
+    expect(outcome).toEqual({ kind: 'written', profiles: ['default'] });
+    expect((writer.collection(PROFILE_ITEMS as never).get('default') as { contents: string[] }).contents).toEqual([
+      'modelSets/heavy',
+      'skills/imported',
+      'mcp/notes',
+    ]);
+  });
+
+  it('M3 reads the same pause with its fields in another order as the same hold, so the apply is not stale', async () => {
+    const built = {
+      period: 'daily',
+      level: 'over_trigger',
+      limitUsd: 40,
+      resetsAtMs: 1_800_000_000_000,
+      timeZone: 'UTC',
+    };
+    // The same five facts, built in the opposite order (a later read of Usage's pauses need not build them alike).
+    const reordered = {
+      timeZone: 'UTC',
+      resetsAtMs: 1_800_000_000_000,
+      limitUsd: 40,
+      level: 'over_trigger',
+      period: 'daily',
+    };
+    let pauses = [{ login: 'claude-you', pause: built, phrase: '' }];
+    const { host } = await compose({
+      assemble: ctx =>
+        hostAssembly({ ...ctx, uses: { usage: { current: () => ({ pauses: () => pauses }) } } } as never),
+    });
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+    const id = staged.json<{ id: string }>().id;
+
+    pauses = [{ login: 'claude-you', pause: reordered, phrase: '' }];
+    const applied = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+
+    expect(applied.status).toBe(200);
+    expect(JSON.stringify(applied.json())).not.toContain('spend budget changed');
+  });
+
+  it('M3 still refuses the apply when one field of the same login’s pause moved, whatever order it is built in', async () => {
+    const built = {
+      period: 'daily',
+      level: 'over_trigger',
+      limitUsd: 40,
+      resetsAtMs: 1_800_000_000_000,
+      timeZone: 'UTC',
+    };
+    const moved = {
+      timeZone: 'UTC',
+      resetsAtMs: 1_800_000_000_000,
+      limitUsd: 55,
+      level: 'over_trigger',
+      period: 'daily',
+    };
+    let pauses = [{ login: 'claude-you', pause: built, phrase: '' }];
+    const { host } = await compose({
+      assemble: ctx =>
+        hostAssembly({ ...ctx, uses: { usage: { current: () => ({ pauses: () => pauses }) } } } as never),
+    });
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: put('claude-work') });
+
+    pauses = [{ login: 'claude-you', pause: moved, phrase: '' }];
+    const applied = await host.request('POST', `/v1/runtimes/proposals/${staged.json<{ id: string }>().id}/apply`, {
+      body: {},
+    });
+
+    expect(applied.status).toBe(409);
+    expect(JSON.stringify(applied.json())).toContain('spend budget changed');
   });
 
   it('M3 a budget hold that starts or stops publishes the fleet again, so its wrappers follow Usage’s pause', async () => {

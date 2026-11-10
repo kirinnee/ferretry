@@ -1,9 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { SkillsItemSchema } from '../../contract/index.ts';
+import { ITEM_NAME_PATTERN } from '@ferretry/std';
+import { SKILLS_CONFIG, SkillsItemSchema } from '../../contract/index.ts';
 import { fakeSkills, skillsConformance } from '../../contract/testing/index.ts';
 import manifest from '../../manifest.ts';
 
 describe('skills contract', () => {
+  test('the skills collection names its items by the one shared item-name pattern, never a copy of it', () => {
+    expect((SKILLS_CONFIG as unknown as { name: RegExp }).name).toBe(ITEM_NAME_PATTERN);
+  });
+
   test('the fake passes the conformance suite', async () => {
     expect((await skillsConformance(fakeSkills)).ok).toBe(true);
   });

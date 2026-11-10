@@ -4,10 +4,11 @@
  * skills folder that is itself a link reads nothing, and a file beside the skills folder is unreachable.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { renameSync, symlinkSync } from 'node:fs';
+import { link, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
+import { type HostFs, nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
 import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 import { ProjectSkillFiles } from '../../daemon/adapters/project-skill-files.ts';
 
@@ -31,18 +32,17 @@ async function world() {
   await writeFile(join(project, 'secret.txt'), SECRET);
   await mkdir(join(parent, 'outside', 'steal'), { recursive: true });
   await writeFile(join(parent, 'outside', 'steal', 'SKILL.md'), doc('steal'));
-  const roots = rootsPortFor(
-    nodeFs(() => crypto.randomUUID()),
-    { home, plugin: 'skills', worktrees: `${home}-w` },
-    ['imports'],
-    () => undefined,
-  );
-  const files = (known: readonly string[] = [project]) =>
-    new ProjectSkillFiles(
-      async () => known,
-      folder => roots.root('imports', { subfolder: folder }),
-    );
-  return { parent, project, skills: join(project, '.claude', 'skills'), files };
+  const rootsOver = (disk: HostFs) =>
+    rootsPortFor(disk, { home, plugin: 'skills', worktrees: `${home}-w` }, ['imports'], () => undefined);
+  const roots = rootsOver(nodeFs(() => crypto.randomUUID()));
+  /** Opens exactly as the daemon half wires it: the registered project folder is the `within` anchor. */
+  const opened = (port: typeof roots) => (folder: string, within: string) =>
+    port.root('imports', { subfolder: folder, within });
+  const files = (known: readonly string[] = [project]) => new ProjectSkillFiles(async () => known, opened(roots));
+  /** The same reader over a disk seam of the test's own (a swap that lands at an exact step). */
+  const filesOver = (disk: HostFs, known: readonly string[] = [project]) =>
+    new ProjectSkillFiles(async () => known, opened(rootsOver(disk)));
+  return { parent, project, skills: join(project, '.claude', 'skills'), files, filesOver };
 }
 
 describe('a registered project’s skills over the real imports root', () => {
@@ -86,9 +86,8 @@ describe('a registered project’s skills over the real imports root', () => {
     expect(await files.read(`${w.skills}/soft/SKILL.md`, 1000)).toBeUndefined();
   });
 
-  // The kernel follows a link in the scoped folder's own path (probed on this very root with the adapter check removed:
-  // it lists and reads the outside tree), so these two tests are the only proof of the adapter's `realPath` guard. Each
-  // link points at a REAL skills tree (`<name>/SKILL.md`), so with the guard gone the stolen skill is listed and read.
+  // The kernel refuses a link below the project folder (the `within` anchor) at every call. Each link points at a REAL
+  // skills tree (`<name>/SKILL.md`), so without the anchor the stolen skill would be listed and read.
   test('R-0198 a skills folder that is itself a link to a real skills tree answers nothing', async () => {
     const w = await world();
     await mkdir(join(w.parent, 'outside', 'skills', 'stolen'), { recursive: true });
@@ -110,6 +109,124 @@ describe('a registered project’s skills over the real imports root', () => {
     const files = w.files();
     expect(await files.list(w.skills, 10)).toEqual([]);
     expect(await files.read(`${w.skills}/stolen/SKILL.md`, 1000)).toBeUndefined();
+  });
+
+  test.each([
+    ['.claude', 'at .claude'],
+    ['.agents', 'at .agents'],
+  ])('R-0198 a link %s in the middle of the path answers nothing, whichever skills folder it holds', async dir => {
+    const w = await world();
+    const outside = join(w.parent, 'outside', 'hold');
+    await mkdir(join(outside, 'skills', 'stolen'), { recursive: true });
+    await writeFile(join(outside, 'skills', 'stolen', 'SKILL.md'), doc('stolen'));
+    await rm(join(w.project, '.claude'), { recursive: true });
+    await symlink(outside, join(w.project, dir));
+    const skills = join(w.project, dir, 'skills');
+    const files = w.files();
+    expect(await files.list(skills, 10)).toEqual([]);
+    expect(await files.read(`${skills}/stolen/SKILL.md`, 1000)).toBeUndefined();
+  });
+
+  test('R-0198 a skills folder that is a dangling link, or a link in a loop, answers nothing', async () => {
+    const w = await world();
+    await rm(join(w.project, '.claude'), { recursive: true });
+    await mkdir(join(w.project, '.claude'));
+    await symlink(join(w.parent, 'nowhere'), w.skills);
+    const files = w.files();
+    expect(await files.list(w.skills, 10)).toEqual([]);
+    expect(await files.read(`${w.skills}/good/SKILL.md`, 1000)).toBeUndefined();
+    await rm(w.skills);
+    await symlink(w.skills, w.skills);
+    expect(await files.list(w.skills, 10)).toEqual([]);
+  });
+
+  test('R-B1 a project registered through a link, or under a linked parent, still lists and reads its skills', async () => {
+    const w = await world();
+    const linked = join(w.parent, 'linked-project');
+    await symlink(w.project, linked);
+    const parentLink = join(w.parent, 'linked-parent');
+    await symlink(w.parent, parentLink);
+    for (const root of [linked, join(parentLink, 'project')]) {
+      const skills = join(root, '.claude', 'skills');
+      const files = w.files([root]);
+      expect((await files.list(skills, 10)).map(entry => entry.manifest)).toEqual([`${skills}/good/SKILL.md`]);
+      expect(await files.read(`${skills}/good/SKILL.md`, 1000)).toBe(doc('good'));
+    }
+  });
+
+  test('R-0198 the reader anchors the kernel at the registered project folder, whatever trailing slash it was registered with', async () => {
+    const w = await world();
+    const asked: { folder: string; within: string }[] = [];
+    const spy = new ProjectSkillFiles(
+      async () => [`${w.project}/`],
+      (folder, within) => {
+        asked.push({ folder, within });
+        throw new Error('stop');
+      },
+    );
+    await spy.list(w.skills, 10);
+    await spy.read(`${w.skills}/good/SKILL.md`, 1000);
+    expect(asked).toEqual([
+      { folder: w.skills, within: w.project },
+      { folder: w.skills, within: w.project },
+    ]);
+  });
+
+  test('R-0198 a skills folder swapped for a link after an earlier answer is refused at the next call', async () => {
+    const w = await world();
+    const files = w.files();
+    expect(await files.read(`${w.skills}/good/SKILL.md`, 1000)).toBe(doc('good'));
+    await mkdir(join(w.parent, 'outside', 'skills', 'good'), { recursive: true });
+    await writeFile(join(w.parent, 'outside', 'skills', 'good', 'SKILL.md'), doc('stolen'));
+    await rename(w.skills, join(w.project, '.claude', 'skills-moved'));
+    await symlink(join(w.parent, 'outside', 'skills'), w.skills);
+    expect(await files.read(`${w.skills}/good/SKILL.md`, 1000)).toBeUndefined();
+    expect(await files.list(w.skills, 10)).toEqual([]);
+  });
+
+  test('R-0198 a skills folder swapped for a link during an earlier call is refused at the read: no outside text', async () => {
+    const w = await world();
+    await mkdir(join(w.parent, 'outside', 'skills', 'good'), { recursive: true });
+    await writeFile(join(w.parent, 'outside', 'skills', 'good', 'SKILL.md'), doc('stolen'));
+    const inner = nodeFs(() => crypto.randomUUID());
+    let swapped = false;
+    const racing = {
+      ...inner,
+      lstat: async (path: string) => {
+        const found = await inner.lstat(path);
+        if (!swapped && path === w.skills) {
+          swapped = true;
+          renameSync(w.skills, join(w.project, '.claude', 'skills-moved'));
+          symlinkSync(join(w.parent, 'outside', 'skills'), w.skills);
+        }
+        return found;
+      },
+    } as HostFs;
+    const text = await w.filesOver(racing).read(`${w.skills}/good/SKILL.md`, 1000);
+    expect(swapped).toBe(true);
+    expect(text).not.toBe(doc('stolen'));
+  });
+
+  test('GAP [kernel: imports scoped folder link] a swap inside the read call itself reads one outside SKILL.md', async () => {
+    const w = await world();
+    await mkdir(join(w.parent, 'outside', 'skills', 'good'), { recursive: true });
+    await writeFile(join(w.parent, 'outside', 'skills', 'good', 'SKILL.md'), doc('stolen'));
+    const inner = nodeFs(() => crypto.randomUUID());
+    let seen = 0;
+    const racing = {
+      ...inner,
+      lstat: async (path: string) => {
+        const found = await inner.lstat(path);
+        if (path === w.skills && ++seen === 2) {
+          // The second walk is the readText call's own: the swap lands after its lstat, before its open.
+          renameSync(w.skills, join(w.project, '.claude', 'skills-moved'));
+          symlinkSync(join(w.parent, 'outside', 'skills'), w.skills);
+        }
+        return found;
+      },
+    } as HostFs;
+    // Today's behaviour, declared: one bounded read of one outside SKILL.md goes through the link.
+    expect(await w.filesOver(racing).read(`${w.skills}/good/SKILL.md`, 1000)).toBe(doc('stolen'));
   });
 
   test('R-0198 a kernel that refuses to open the folder reads nothing, and never throws', async () => {
