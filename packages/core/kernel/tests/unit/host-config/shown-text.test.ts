@@ -229,7 +229,7 @@ describe('when the text is not shown at all', () => {
     ];
     for (const def of [fileDef, openDef]) {
       for (const text of texts)
-        expect([text, read(text, def)]).toEqual([text, { kind: 'withheld', reason: 'unmaskable' }]);
+        expect([text, read(text, def)]).toEqual([text, { kind: 'withheld', reason: 'unparsed' }]);
     }
     // Broken YAML with nothing to cut is still shown, so a person can fix it.
     expect(shownOf('note: [unclosed\n').text).toBe('note: [unclosed\n');

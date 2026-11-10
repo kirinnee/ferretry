@@ -217,6 +217,26 @@ describe('GET /v1/config/file shows the masked text to every caller', () => {
   });
 });
 
+describe('a withheld file that does not parse says the cause and the remedy', () => {
+  test('S6 CFG-LEAK-R a withheld file that does not parse names the cause (it does not parse, so values cannot be told apart) and the remedy (fix the YAML at the machine); comment line + reason, never ""', async () => {
+    const w = world();
+    w.fs.seed(FILE, `args: [--token, ${VALUE}]\nnote: a\nnote: b\n`);
+    await w.files.reload();
+    const response = await get(w.handlers);
+    const body = json(response);
+    expect(body.text).not.toBe('');
+    expect(String(body.text)).toStartWith(`# ${HIDDEN}: `);
+    const sentence = String(issuesOf(response).at(-1)?.message);
+    expect(sentence).toContain('does not parse');
+    expect(sentence).toContain('cannot tell which values to hide');
+    expect(sentence).toContain('fix the YAML on disk, at the machine');
+    expect(sentence).not.toContain('unmaskable');
+    expect(String(body.text)).toContain('does not parse');
+    expect(String(body.text)).toContain('fix the YAML on disk, at the machine');
+    expect(response.body).not.toContain(VALUE);
+  });
+});
+
 describe('PUT /v1/config/file refuses what would write the mask, or a raw secret, into a file', () => {
   test('S6 CFG-LEAK-W R-0419 PUT of a masked text with one more ‹hidden› than disk is 422 config_invalid; disk untouched', async () => {
     const w = world();

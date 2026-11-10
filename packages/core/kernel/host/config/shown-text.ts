@@ -24,7 +24,7 @@ import { HIDDEN_VALUE_TEXT, looksSecret, shownWord, shownWords } from './secret-
 import { rawTextHoldsSecret } from './secrets.ts';
 
 /** Why a text is not shown at all. */
-export type WithheldReason = 'raw_secret' | 'too_large' | 'unmaskable';
+export type WithheldReason = 'raw_secret' | 'too_large' | 'unmaskable' | 'unparsed';
 
 export type ShownConfigText =
   /** The text as it may be shown; `hidden` is where a value was cut (the line in the SHOWN text), one per scalar. */
@@ -36,6 +36,8 @@ export const WITHHELD_WORDS: Readonly<Record<WithheldReason, string>> = {
   raw_secret: 'it holds a raw secret, which the owner must move into the secret store',
   too_large: 'it is larger than a configuration file may be',
   unmaskable: 'a value in it could not be hidden safely',
+  unparsed:
+    'the file does not parse as YAML, so the app cannot tell which values to hide; fix the YAML on disk, at the machine',
 };
 
 /** What `config_read` adds to its summary when it hid values: how many, and that they stay unless the edit changes them. */
@@ -100,15 +102,27 @@ interface Cut {
   readonly shown: string;
 }
 
-/** A string outside a list: cut whole under a secret name, else read as a word and, with blanks in it, as a command line. */
-function shownString(value: string, key: string | undefined): string {
-  if (key !== undefined && !SECRET_NAME_GRAMMAR.test(value) && looksSecret(key, value)) return HIDDEN_VALUE_TEXT;
-  const whole = shownWord(value, undefined).text;
+/**
+ * A word judged with the word before it and, with blanks in it, also as the command line its own words make: a list
+ * item `sh -c "srv --token v"` hides `v` as the same words outside a list do (every pair the write rule finds is cut).
+ */
+function shownItem(value: string, before: string | undefined): string {
+  const whole = shownWord(value, before).text;
   if (!HAS_BLANK.test(whole)) return whole;
   const parts = whole.split(BLANK_RUN);
   const words = shownWords(parts.filter((_, index) => index % 2 === 0));
   return parts.map((part, index) => (index % 2 === 0 ? (words[index / 2]?.text ?? part) : part)).join('');
 }
+
+/** A string outside a list: cut whole under a secret name, else read as a word and, with blanks in it, as a command line. */
+function shownString(value: string, key: string | undefined): string {
+  if (key !== undefined && !SECRET_NAME_GRAMMAR.test(value) && looksSecret(key, value)) return HIDDEN_VALUE_TEXT;
+  return shownItem(value, undefined);
+}
+
+/** A scalar as the words a mask judges: a string, or a number as it is written (`DB_PASSWORD: 93817263540`). */
+const scalarText = (node: unknown): string | undefined =>
+  typeof node === 'string' ? node : typeof node === 'number' || typeof node === 'bigint' ? String(node) : undefined;
 
 /** The value with every string as it may be shown, and the scalars that changed. */
 function maskedValue(value: unknown): { readonly value: unknown; readonly cuts: readonly Cut[] } {
@@ -119,19 +133,20 @@ function maskedValue(value: unknown): { readonly value: unknown; readonly cuts: 
   };
   const walk = (node: unknown, path: readonly (string | number)[]): unknown => {
     const key = path.findLast(part => typeof part === 'string');
-    if (typeof node === 'string') return record(path, node, shownString(node, key));
+    const text = scalarText(node);
+    if (text !== undefined) {
+      const shown = shownString(text, key);
+      return shown === text ? node : record(path, text, shown);
+    }
     if (Array.isArray(node)) {
       // A list of strings is read as a command line: each word is judged with the word before it.
       return node.map((item: unknown, index) => {
         const here = [...path, index];
-        if (typeof item !== 'string') return walk(item, here);
-        const before = node[index - 1];
-        const secretKey = key !== undefined && !SECRET_NAME_GRAMMAR.test(item) && looksSecret(key, item);
-        return record(
-          here,
-          item,
-          secretKey ? HIDDEN_VALUE_TEXT : shownWord(item, typeof before === 'string' ? before : undefined).text,
-        );
+        const word = scalarText(item);
+        if (word === undefined) return walk(item, here);
+        const secretKey = key !== undefined && !SECRET_NAME_GRAMMAR.test(word) && looksSecret(key, word);
+        const shown = secretKey ? HIDDEN_VALUE_TEXT : shownItem(word, scalarText(node[index - 1]));
+        return shown === word ? item : record(here, word, shown);
       });
     }
     if (node !== null && typeof node === 'object')
@@ -161,6 +176,30 @@ function removedParts(original: string, shown: string): readonly string[] {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
+/** What splits a text that does not parse into the words a mask would judge: blanks, a flow list's marks and quotes. */
+const RAW_WORD_BREAK = /[\s,[\]"']+/u;
+
+/**
+ * Whether a text that does not parse holds a word the word cutter would cut, or a value after a secret-named key
+ * (`DB_PASSWORD: v`) that looks like a credential: none of its values can be cut and rebuilt, so such a text is
+ * withheld (`unmaskable`) rather than shown raw. A pointer (`apiKey: ${secret:NAME}`) is no credential. Linear.
+ */
+function rawTextMayHold(text: string): boolean {
+  const words = text.split(RAW_WORD_BREAK).filter(word => word !== '' && word !== '-');
+  return words.some((word, index) => {
+    // No shorter word can be cut: a credential is at least 8 characters, a URL with a password at least 7.
+    if (word.length < MIN_CUT_WORD) return false;
+    const before = words[index - 1];
+    return (
+      shownWord(word, before).hidden ||
+      (before !== undefined && before.endsWith(':') && looksSecret(before.slice(0, -1), word))
+    );
+  });
+}
+
+/** The shortest word the word cutter can cut anything in (`a://:p@h` holds a password). */
+const MIN_CUT_WORD = 7;
+
 /**
  * The text as a read of it may show it.
  *
@@ -183,12 +222,16 @@ export function shownConfigText(def: ConfigDef, path: string, text: string, bina
       (checked.reason === 'yaml' && rawTextHoldsSecret(text)))
   )
     return { kind: 'withheld', reason: 'raw_secret' };
-  const read = readConfigText(text);
-  if (!read.ok) return { kind: 'shown', text, hidden: [] };
-  const { value, cuts } = maskedValue(read.read.value);
+  // The check has parsed a text that passed it: its plain value is the one to mask, so the text is not parsed twice.
+  const read = checked.ok ? undefined : readConfigText(text);
+  // A text that does not parse cannot be cut and rebuilt: it is shown only when no word in it looks like a credential.
+  if (read !== undefined && !read.ok)
+    return rawTextMayHold(text) ? { kind: 'withheld', reason: 'unparsed' } : { kind: 'shown', text, hidden: [] };
+  const written = checked.ok ? checked.written : read?.ok === true ? read.read.value : undefined;
+  const { value, cuts } = maskedValue(written);
   if (cuts.length === 0) return { kind: 'shown', text, hidden: [] };
   if (!isPlainObject(value)) return { kind: 'withheld', reason: 'unmaskable' };
-  const shown = editConfigText(text, value, read.read.value, undefined);
+  const shown = editConfigText(text, value, written, undefined);
   const searched = new Set(
     cuts
       .flatMap(cut => removedParts(cut.original, cut.shown))

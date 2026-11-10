@@ -240,25 +240,25 @@ describe('T-A10 the kernel word cutter and the flag rule stay linear on hostile 
     }
   }
 
-  test('T-A10 CFG-LEAK-W the write door answers a hostile text at the cap within the bound, and the read door after it', async () => {
-    const files = createConfigFiles({
-      home: HOME,
-      fs: createMemoryHostFs(),
-      clock: manualClock(),
-      log: captureLog(),
-      binary: 'fy',
-      defs: [{ plugin: 'mcp', def: mcpDef }],
-    });
-    const agent = agentConfig({
-      writer: () => files.writer(),
-      control: () => ({ allows: async () => true }),
-      status: () => files.status(),
-      home: HOME,
-      binary: 'fy',
-      now: () => '2026-01-01T00:00:00.000Z',
-    });
-    await files.reload();
-    for (const [, unit] of UNITS) {
+  for (const [label, unit] of UNITS)
+    test(`T-A10 CFG-LEAK-W ${label}: the write door answers a hostile text at the cap within the bound, and the read door after it`, async () => {
+      const files = createConfigFiles({
+        home: HOME,
+        fs: createMemoryHostFs(),
+        clock: manualClock(),
+        log: captureLog(),
+        binary: 'fy',
+        defs: [{ plugin: 'mcp', def: mcpDef }],
+      });
+      const agent = agentConfig({
+        writer: () => files.writer(),
+        control: () => ({ allows: async () => true }),
+        status: () => files.status(),
+        home: HOME,
+        binary: 'fy',
+        now: () => '2026-01-01T00:00:00.000Z',
+      });
+      await files.reload();
       for (const [, text] of shapes(unit)) {
         const write = await timed(() =>
           agent.run(call({ tool: 'config.write', path: 'mcp/srv.yaml', text }), ferretStanding),
@@ -267,8 +267,7 @@ describe('T-A10 the kernel word cutter and the flag rule stay linear on hostile 
         const read = await timed(() => agent.run(call({ tool: 'config.read', path: 'mcp/srv.yaml' }), ferretStanding));
         expect(read).toBeLessThan(BOUND_MS);
       }
-    }
-  });
+    });
 });
 
 function timedSync(act: () => void): number {

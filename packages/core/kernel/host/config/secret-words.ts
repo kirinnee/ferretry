@@ -5,8 +5,8 @@
  *
  * This is runtimes' `command-line.ts` and the `looksSecret` family of its `account/import.ts`, copied word for word
  * (security code is copied, not redesigned), minus `shownWordsEtag`, and rewired to the kernel's own constants because
- * the kernel is a leaf and imports no plugin. The two copies are pinned equal over one corpus by the runtimes
- * agreement test (a declared GAP, `GAP(kernel: ...)` in docs/rebuild/ports-pending). Below, "the Resolved view" and
+ * the kernel is a leaf and imports no plugin. Nothing yet pins the two copies equal: the agreement test over one shared corpus (T-B1) is Unit B's, on the runtimes
+ * side, and is not written; until it lands, a change to one copy does not fail against the other. Below, "the Resolved view" and
  * "a component's detail" are runtimes' two readers of the same rule.
  *
  * The rule: a launch flag and an MCP argument, wherever one travels.

@@ -296,16 +296,63 @@ function lineOfNth(text: string, mark: string, nth: number): number {
  * hid a value, and saving it would write the mask over the value. "More", not "any": a file that already holds the
  * literal (in a comment, say) stays editable. Refused as `schema` with the line of the first one in excess.
  */
-function hiddenMarkRefusal(path: string, text: string, prior: string | undefined): RefusedConfigText | undefined {
+/** A string of a value that holds `‹hidden›` (a key's own name included), and the place it is at. */
+interface MarkedString {
+  readonly place: string;
+  readonly path: readonly (string | number)[];
+  readonly text: string;
+}
+
+/** Every string of a value that holds `‹hidden›`, a key's name included. Linear in the value. */
+function markedStrings(value: unknown): readonly MarkedString[] {
+  const found: MarkedString[] = [];
+  const visit = (node: unknown, path: readonly (string | number)[]): void => {
+    if (typeof node === 'string') {
+      if (node.includes(HIDDEN_VALUE_TEXT)) found.push({ place: JSON.stringify(['value', path]), path, text: node });
+    } else if (Array.isArray(node)) {
+      node.forEach((item: unknown, index) => {
+        visit(item, [...path, index]);
+      });
+    } else if (node !== null && typeof node === 'object') {
+      for (const [key, item] of Object.entries(node)) {
+        const here = [...path, key];
+        if (key.includes(HIDDEN_VALUE_TEXT))
+          found.push({ place: JSON.stringify(['key', here]), path: here, text: key });
+        visit(item, here);
+      }
+    }
+  };
+  visit(value, []);
+  return found;
+}
+
+function hiddenMarkRefusal(
+  path: string,
+  text: string,
+  written: unknown,
+  prior: string | undefined,
+): RefusedConfigText | undefined {
+  if (!text.includes(HIDDEN_VALUE_TEXT)) return undefined;
   const before = prior === undefined ? 0 : countOf(prior, HIDDEN_VALUE_TEXT);
-  if (countOf(text, HIDDEN_VALUE_TEXT) <= before) return undefined;
+  // Fewer or as many marks as on disk is not enough: one in a comment on disk must not let a value that holds one
+  // where the disk value did not (the mask of a value the reader was shown) through. Each value that holds one is the
+  // same string at the same place on disk, or the text is refused at its line.
+  const readPrior = prior === undefined ? undefined : readConfigText(prior);
+  const onDisk = new Map(
+    (readPrior?.ok === true ? markedStrings(readPrior.read.value) : []).map(marked => [marked.place, marked.text]),
+  );
+  const excess = markedStrings(written).find(marked => onDisk.get(marked.place) !== marked.text);
+  const counted = countOf(text, HIDDEN_VALUE_TEXT) > before;
+  if (!counted && excess === undefined) return undefined;
+  const read = excess === undefined ? undefined : readConfigText(text);
+  const located = read?.ok === true && excess !== undefined ? read.read.locate(excess.path) : undefined;
   return {
     ok: false,
     reason: 'schema',
     issues: [
       {
         path,
-        line: lineOfNth(text, HIDDEN_VALUE_TEXT, before + 1),
+        line: located?.line ?? lineOfNth(text, HIDDEN_VALUE_TEXT, before + 1),
         column: 1,
         severity: 'error',
         message: `a value hidden from the device or agent that read this file is still ${HIDDEN_VALUE_TEXT} here; nothing was written`,
@@ -362,7 +409,7 @@ export function writeRefusal(
   prior: string | undefined,
   binary: string,
 ): RefusedConfigText | undefined {
-  return hiddenMarkRefusal(path, text, prior) ?? flagSecretRefusal(path, text, written, prior, binary);
+  return hiddenMarkRefusal(path, text, written, prior) ?? flagSecretRefusal(path, text, written, prior, binary);
 }
 
 /** A raw key anywhere in the text — a comment, a tag, an anchor, a line that does not parse — refused by its line alone. */
