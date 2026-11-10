@@ -5,12 +5,15 @@ import { fileURLToPath } from 'node:url';
 import should from 'should';
 
 /**
- * `daemon/worker/adapters/` runs only inside the browser worker process, so the banned-globals check exempts it
+ * `daemon/worker/adapters/` and the entry `daemon/worker/main.ts` run only inside the browser worker process, so the
+ * banned-globals check exempts them
  * (scripts/validate/banned-globals.ts `OUTSIDE_KERNEL_TREES`). That holds only while the daemon loads nothing from it:
  * one daemon-side import would carry an unchecked global timer or socket into the daemon, unseen.
  */
 const DAEMON = fileURLToPath(new URL('../../../daemon/', import.meta.url));
 const EXEMPT = join(DAEMON, 'worker', 'adapters');
+/** The worker entry is the other half of that exemption: it too runs only inside the worker process. */
+const ENTRY = join(DAEMON, 'worker', 'main.ts');
 
 /** Every module specifier a file names: static and type imports, re-exports, and dynamic `import()`. */
 const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"]+)['"]/gm;
@@ -18,7 +21,7 @@ const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"]+)['"]/
 const daemonSideModules = (): readonly string[] =>
   [...new Bun.Glob('**/*.{ts,tsx}').scanSync({ cwd: DAEMON })]
     .map(path => join(DAEMON, path))
-    .filter(path => !path.startsWith(EXEMPT + '/'))
+    .filter(path => !path.startsWith(EXEMPT + '/') && path !== ENTRY)
     .sort();
 
 describe('the worker adapter tree — the daemon loads nothing from it', () => {

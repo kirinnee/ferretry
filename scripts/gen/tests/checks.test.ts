@@ -473,7 +473,7 @@ describe('source scans', () => {
       {
         id: 'browsers',
         files: {
-          'daemon/worker/adapters/main.ts': 'const endpoint = process.argv[2]; setTimeout(() => {}, 1);',
+          'daemon/worker/main.ts': 'const endpoint = process.argv[2]; setTimeout(() => {}, 1);',
           'daemon/worker/launcher.ts': 'await fetch("http://127.0.0.1:9222/json/version");',
         },
       },
@@ -483,7 +483,7 @@ describe('source scans', () => {
     expect(found).toHaveLength(4);
     expect(messages(found)).toContain('connections/daemon/worker.ts');
     expect(messages(found)).toContain('browsers/daemon/worker/launcher.ts');
-    expect(messages(found)).not.toContain('browsers/daemon/worker/adapters/');
+    expect(messages(found)).not.toContain('browsers/daemon/worker/main.ts');
     expect(messages(found)).toContain('connections/daemon/adapters/webrtc/other.ts');
     expect(messages(found)).toContain('other/worker/src/worker.ts');
   });
