@@ -6,7 +6,12 @@
  * serving" on 2026-11-10). So the wait is for the daemon's own answer, never a sleep: `GET /healthz` on the preview
  * port answers `503` while the plugins start and `200` once the daemon serves (the moment it logs "the daemon is
  * serving"). The deadline is stated in every sentence, with the last answer seen, so a miss says what it waited for.
+ *
+ * An answer on the preview port proves nothing by itself: anything else on loopback can own that port. So a `200` is
+ * trusted only while a process still holds the preview home's own `run/daemon.lock` (the proof `stop` uses), and
+ * `previewBooting` is the same question asked before the wait, after a `daemon start` that failed.
  */
+import { lockFileOf, pidsHolding } from './stop.ts';
 
 /** How long `start` waits for the daemon to serve. The owner's home took 38 s on 2026-11-10; a grown one may take more. */
 export const SERVING_DEADLINE_MS = 180_000;
@@ -21,7 +26,23 @@ export interface WaitServingInput {
   readonly fetch: (url: string, init: { readonly signal: AbortSignal }) => Promise<{ readonly status: number }>;
   readonly sleep: (ms: number) => Promise<void>;
   readonly nowMs: () => number;
+  /** The pids that hold the preview home's own daemon lock (`pidsHolding(lockFileOf(target))`). */
+  readonly holders: () => Promise<readonly number[]>;
   readonly deadlineMs?: number;
+}
+
+/** The ports `previewBooting` reads: the preview home and who holds its lock. */
+export interface BootingInput {
+  readonly target: string;
+  readonly holders?: (lockFile: string) => Promise<readonly number[]>;
+}
+
+/**
+ * Whether the preview's OWN daemon is booting: some process holds `<target>/run/daemon.lock`. After a failed
+ * `daemon start` this is the only reason to go on waiting; otherwise the failure is the answer.
+ */
+export async function previewBooting(input: BootingInput): Promise<boolean> {
+  return (await (input.holders ?? pidsHolding)(lockFileOf(input.target))).length > 0;
 }
 
 export interface WaitServing {
@@ -44,6 +65,12 @@ export async function waitServing(input: WaitServingInput): Promise<WaitServing>
     try {
       const response = await input.fetch(url, { signal: AbortSignal.timeout(ASK_MS) });
       if (response.status === 200) {
+        // Something answered. It is the preview daemon only while the preview's own lock is still held.
+        if ((await input.holders()).length === 0)
+          return {
+            ok: false,
+            sentence: `${url} answered 200, but no process holds the preview daemon's lock (run/daemon.lock): the answer is not the preview daemon's (another process owns port ${String(input.port)}, or the daemon died), so it is not trusted.`,
+          };
         const seconds = Math.round((input.nowMs() - started) / 100) / 10;
         return { ok: true, sentence: `the preview daemon serves (GET ${url} answered 200 after ${String(seconds)} s)` };
       }
