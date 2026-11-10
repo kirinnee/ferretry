@@ -181,13 +181,15 @@ describe('route parity', () => {
   });
 
   test("R-0232 an owner save beside an edit the kernel HOLDS (one a ferret could have made) is in effect at once in both versions, as today, and never puts the held edit into effect, even where Gate's judge would apply the owner's call", async () => {
-    // The risk: the kernel patches the DISK text, so the judge is asked about the whole patched file, held edit included.
-    const exposed = realWardenConfig({ judge: 'owner-at-machine' });
-    await exposed.handEdit('caps:\n  jevUsdPerDay: 0.5\n');
-    await exposed.handEdit('caps:\n  jevUsdPerDay: 5\n');
-    const direct = await exposed.port.write(WARDEN_CONFIG, undefined, { patch: { maxAssignedWardens: 1 } });
+    // A plain write patch is made to both versions too: the judge is asked about the caller's patch alone, so the held
+    // edit is never confirmed with it.
+    const direct0 = realWardenConfig({ judge: 'owner-at-machine' });
+    await direct0.handEdit('caps:\n  jevUsdPerDay: 0.5\n');
+    await direct0.handEdit('caps:\n  jevUsdPerDay: 5\n');
+    const direct = await direct0.port.write(WARDEN_CONFIG, undefined, { patch: { maxAssignedWardens: 1 } });
     expect(direct.kind).toBe('written');
-    expect(exposed.port.file(WARDEN_CONFIG)).toMatchObject({ caps: { jevUsdPerDay: 5 } });
+    expect(direct0.port.file(WARDEN_CONFIG)).toMatchObject({ maxAssignedWardens: 1, caps: { jevUsdPerDay: 0.5 } });
+    expect(direct0.port.fileState(WARDEN_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
 
     // Through Warden's route the owner's save is written to both versions (writeAsOwner): only the owner's patch is judged.
     const real = realWardenConfig({ judge: 'owner-at-machine' });

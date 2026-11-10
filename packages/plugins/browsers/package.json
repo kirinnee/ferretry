@@ -5,7 +5,7 @@
   "description": "Browsers (plugins piece of Ferretry 5)",
   "type": "module",
   "bin": {
-    "fyd-browser-worker": "daemon/worker/adapters/main.ts"
+    "fyd-browser-worker": "daemon/worker/main.ts"
   },
   "ferretry": {
     "id": "browsers",

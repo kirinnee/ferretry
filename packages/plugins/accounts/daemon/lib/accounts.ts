@@ -476,6 +476,16 @@ export class AccountDirectory {
         if (options.sealedOptional === true) return undefined;
         throw error;
       });
+      // S76: an index that names a value the Vault does not hold is DAMAGED, and a damaged store takes no change: a
+      // write over it would sweep or re-point against an index that cannot be trusted. Naming no value in the words.
+      if (sealed !== undefined) {
+        const missing = missingFrom(referencedSeals(read.document), sealed);
+        if (missing > 0)
+          throw new SecretStoreError(
+            'unreadable',
+            `the index names ${String(missing)} sealed value(s) that are not there`,
+          );
+      }
       const draft: AccountDraft = {
         accounts: { ...read.document.accounts },
         signIns: { ...read.document.signIns },

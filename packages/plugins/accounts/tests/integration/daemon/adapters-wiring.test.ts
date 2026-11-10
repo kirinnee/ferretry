@@ -123,6 +123,8 @@ if (DEFINITION === undefined) throw new Error('accounts declares no config file'
 async function defaults(options: { readonly judge: boolean; readonly text?: string }) {
   const fs = state.createMemoryHostFs();
   if (options.text !== undefined) fs.seed(`${HOME}/config/accounts.yaml`, options.text);
+  // Flipped by a test that needs a ferret's edit held first and the owner's own act confirmed after.
+  const verdict = { allow: options.judge };
   const files = config.createConfigFiles({
     home: HOME,
     fs,
@@ -130,11 +132,11 @@ async function defaults(options: { readonly judge: boolean; readonly text?: stri
     log: quiet,
     binary: 'fy',
     defs: [{ plugin: 'accounts', def: DEFINITION }],
-    judge: () => options.judge,
+    judge: () => verdict.allow,
   });
   await files.reload();
   const port = files.port('accounts');
-  return { port, writer: new KernelAccountDefaultsWriter(port, DEFINITION as never) };
+  return { port, files, fs, verdict, writer: new KernelAccountDefaultsWriter(port, DEFINITION as never) };
 }
 
 describe('KernelAccountDefaultsWriter', () => {
@@ -147,6 +149,55 @@ describe('KernelAccountDefaultsWriter', () => {
 
     // Assert
     should((port.file(DEFINITION as never) as { sites?: unknown }).sites).deepEqual({ 'github.com': 'WORK' });
+  });
+
+  it('held-edit patch should put the owner’s one line into effect and leave a ferret’s held line held, then confirm both', async () => {
+    // Arrange — a ferret suggests a line for github.com: held, nothing in effect.
+    const { port, files, fs, verdict, writer } = await defaults({ judge: false });
+    const ferret = await port.write(DEFINITION as never, undefined, 'sites:\n  github.com: GITHUB\n');
+    should(ferret.kind).equal('held');
+    verdict.allow = true;
+
+    // Act — the owner sets a different line.
+    await writer.amend(file => ({ ...file, sites: { ...file.sites, 'app.clickup.com': 'CLICKUP_A' } }), 'refuse');
+
+    // Assert — the owner's line is in effect; the ferret's is neither in effect nor discarded.
+    should((port.file(DEFINITION as never) as { sites?: unknown }).sites).deepEqual({ 'app.clickup.com': 'CLICKUP_A' });
+    should(port.fileState(DEFINITION as never).state).equal('held');
+    const onDisk = String(fs.snapshot().get(`${HOME}/config/accounts.yaml`));
+    should(onDisk).containEql('github.com: GITHUB');
+    should(onDisk).containEql('app.clickup.com: CLICKUP_A');
+
+    // Act — the owner confirms the ferret's line.
+    const [held] = files.held();
+    should(await files.confirm(held?.id as string)).equal(true);
+
+    // Assert — both lines are in effect.
+    should((port.file(DEFINITION as never) as { sites?: unknown }).sites).deepEqual({
+      'github.com': 'GITHUB',
+      'app.clickup.com': 'CLICKUP_A',
+    });
+  });
+
+  it('held-edit patch should take the owner’s removed line out of both versions and keep the ferret’s other line held', async () => {
+    // Arrange — one line in effect, then a ferret adds another: held.
+    const { port, verdict, writer } = await defaults({ judge: true });
+    await writer.amend(file => ({ ...file, sites: { 'github.com': 'GITHUB' } }), 'refuse');
+    verdict.allow = false;
+    const ferret = await port.write(
+      DEFINITION as never,
+      undefined,
+      'sites:\n  github.com: GITHUB\n  app.clickup.com: CLICKUP_B\n',
+    );
+    should(ferret.kind).equal('held');
+    verdict.allow = true;
+
+    // Act — the owner removes github.com.
+    await writer.amend(() => ({}), 'refuse');
+
+    // Assert — nothing in effect, and the ferret's other line is still waiting.
+    should((port.file(DEFINITION as never) as { sites?: unknown }).sites ?? {}).deepEqual({});
+    should(port.fileState(DEFINITION as never).state).equal('held');
   });
 
   it('should say a default waits for the owner when Gate holds it', async () => {
@@ -200,7 +251,7 @@ describe('KernelAccountDefaultsWriter', () => {
       {
         file: def => port.file(def),
         fileState: def => port.fileState(def),
-        write: async () => ({ kind: 'conflict' }) as never,
+        writeAsOwner: async () => ({ kind: 'conflict' }) as never,
       },
       DEFINITION as never,
     );

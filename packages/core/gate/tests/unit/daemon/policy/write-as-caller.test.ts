@@ -585,13 +585,16 @@ describe('writeAsCaller: the owner answers only for the references its own edit 
     const owner = await runInCall(callOf(world(), atMachine), async () =>
       port.writeAsCaller(mcpDef, 'acme', { patch: { note: 'owner renamed it' } }),
     );
-    expect(owner.kind).toBe('held');
-    expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+    // the owner's one field is in effect (made to the version in effect AND the held text); the ferret's reference is not
+    expect(owner.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toEqual({ env: {}, note: 'owner renamed it', limit: 10 });
+    expect(JSON.stringify(port.collection(mcpDef).get('acme'))).not.toContain('GITHUB_TOKEN');
     expect(OWNER_NAMES(lines)).toEqual([]);
-    // visibly held, with the existing held sentence
+    // visibly held, with the existing held sentence, and the owner is told another edit still waits
     expect(lines.some(line => line.includes('an edit is held for the owner') && line.includes('GITHUB_TOKEN'))).toBe(
       true,
     );
+    expect(port.fileState(mcpDef, 'acme').state).toBe('held');
   });
 
   test('writeAsCaller C1 an owner who adds its OWN secret over a ferret’s held one still leaves the whole write held', async () => {
@@ -615,7 +618,9 @@ describe('writeAsCaller: the owner answers only for the references its own edit 
       port.writeAsCaller(mcpDef, 'acme', { patch: { env: { OWN: '${secret:OWN_TOKEN}' } } }),
     );
     expect(owner.kind).toBe('written');
-    expect(port.collection(mcpDef).get('acme')).toMatchObject({ env: { OWN: '${secret:OWN_TOKEN}' } });
+    // the ferret's `limit: 99` is NOT written into effect with the owner's reference (the V3 hole), and stays held
+    expect(port.collection(mcpDef).get('acme')).toEqual({ env: { OWN: '${secret:OWN_TOKEN}' }, limit: 10 });
+    expect(port.fileState(mcpDef, 'acme').state).toBe('held');
     expect(OWNER_NAMES(lines)).toEqual([
       'config mcp/acme.yaml: the owner put a secret reference into effect (OWN_TOKEN)',
     ]);
@@ -630,5 +635,129 @@ describe('writeAsCaller: the owner answers only for the references its own edit 
     expect(OWNER_NAMES(lines)).toEqual([
       'config mcp/acme.yaml: the owner put a secret reference into effect (OWN_TOKEN)',
     ]);
+  });
+});
+
+describe('writeAsCaller held-edit patch: one field patched beside a held edit never puts the held edit into effect', () => {
+  const ferretCall = (w: World = world()): Call =>
+    callOf(w, { bearer: ADMIN, arrival: local(), headers: { [SESSION_ID_HEADER]: 'F12', [CLIENT_HEADER]: 'cli' } });
+  const ownerLines = (lines: readonly string[]) => lines.filter(line => line.includes('the owner put a secret'));
+  const stagedLimit = async () => {
+    const world0 = await realPort();
+    const staged = await runInCall(ferretCall(), async () => world0.port.writeAsCaller(mcpDef, 'acme', 'limit: 99\n'));
+    expect(staged.kind).toBe('held');
+    return world0;
+  };
+
+  test('held-edit patch: the host admin patching another field leaves a ferret’s held `limit: 99` out of effect', async () => {
+    const { port } = await stagedLimit();
+    const owner = await runInCall(callOf(world(), atMachine), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { note: 'owner note' } }),
+    );
+    expect(owner.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toEqual({ env: {}, note: 'owner note', limit: 10 });
+    expect(port.fileState(mcpDef, 'acme').state).toBe('held');
+  });
+
+  test('held-edit patch: the host admin changing the very field a ferret staged makes its own value the value in both versions', async () => {
+    const { port } = await stagedLimit();
+    const owner = await runInCall(callOf(world(), atMachine), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { limit: 20 } }),
+    );
+    // 20 is the owner's own number; 99 is not, and nothing stays held
+    expect(owner.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toMatchObject({ limit: 20 });
+    expect(port.fileState(mcpDef, 'acme').state).toBe('valid');
+  });
+
+  test('held-edit patch: a relayed admin token is remote, so its loosening waits WITH the held edit and nothing changes', async () => {
+    const { port } = await stagedLimit();
+    const remote = await runInCall(callOf(world(), relayed), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { limit: 20 } }),
+    );
+    expect(remote.kind).toBe('held');
+    expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+  });
+
+  test('held-edit patch: a governed device with only the unlock is held for a loosening, and its tightening is in effect', async () => {
+    const w = world();
+    w.enrol('phone');
+    const { port } = await stagedLimit();
+    const loosening = await runInCall(callOf(w, { device: 'phone' }), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { limit: 30 } }),
+    );
+    expect(loosening.kind).toBe('held');
+    const tightening = await runInCall(callOf(w, { device: 'phone' }), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { note: 'device note' } }),
+    );
+    expect(tightening.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toMatchObject({ note: 'device note', limit: 10 });
+  });
+
+  test('held-edit patch: a ferret’s own patch beside its held edit puts its non-loosening field in effect and nothing loosening', async () => {
+    const { port } = await stagedLimit();
+    const note = await runInCall(ferretCall(), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { note: 'f' } }),
+    );
+    expect(note.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toMatchObject({ note: 'f', limit: 10 });
+    const raise = await runInCall(ferretCall(), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { limit: 50 } }),
+    );
+    expect(raise.kind).toBe('held');
+    expect(port.collection(mcpDef).get('acme')).toMatchObject({ limit: 10 });
+  });
+
+  test('held-edit patch: a plain patch by a ferret beside its own held edit is judged alone: its non-loosening field is in effect, the held edit stays held, a loosening patch is itself held', async () => {
+    const { port } = await stagedLimit();
+    const plain = await runInCall(ferretCall(), async () => port.write(mcpDef, 'acme', { patch: { note: 'f' } }));
+    expect(plain.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toEqual({ env: {}, note: 'f', limit: 10 });
+    expect(port.fileState(mcpDef, 'acme').state).toBe('held');
+    const raise = await runInCall(ferretCall(), async () => port.write(mcpDef, 'acme', { patch: { limit: 50 } }));
+    expect(raise.kind).toBe('held');
+    expect(port.collection(mcpDef).get('acme')).toMatchObject({ limit: 10 });
+    expect(port.fileState(mcpDef, 'acme').state).toBe('held');
+  });
+
+  test('held-edit patch: V1 and V2 secret cases stay held: the host admin’s one field is in effect, the reference never, no owner line', async () => {
+    const { port, lines } = await realPort();
+    const staged = await runInCall(ferretCall(), async () =>
+      port.writeAsCaller(mcpDef, 'acme', 'limit: 99\nenv:\n  EVIL: ${secret:GITHUB_TOKEN}\n'),
+    );
+    expect(staged.kind).toBe('held');
+    const one = await runInCall(callOf(world(), atMachine), async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { note: 'n' } }),
+    );
+    expect(one.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toEqual({ env: {}, note: 'n', limit: 10 });
+    const again = await runInCall(callOf(world(), atMachine), async () =>
+      port.writeAsCaller(mcpDef, 'acme', {
+        patch: { env: { EVIL: '${secret:GITHUB_TOKEN}', MINE: '${secret:OWN_TOKEN}' } },
+      }),
+    );
+    expect(again.kind).toBe('held');
+    expect(JSON.stringify(port.collection(mcpDef).get('acme'))).not.toContain('secret:');
+    expect(ownerLines(lines)).toEqual([]);
+  });
+
+  test('held-edit patch: a governed device with a proof adds its own secret beside a held loosening, the proof spent once', async () => {
+    const w = world();
+    w.enrol('phone');
+    w.stepUps.grant(subjectOf('phone'));
+    const { port } = await stagedLimit();
+    const call = callOf(w, { device: 'phone' });
+    const first = await runInCall(call, async () =>
+      port.writeAsCaller(mcpDef, 'acme', { patch: { env: { OWN: '${secret:OWN_TOKEN}' } } }),
+    );
+    expect(first.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toEqual({ env: { OWN: '${secret:OWN_TOKEN}' }, limit: 10 });
+    const second = await runInCall(call, async () =>
+      port.writeAsCaller(mcpDef, 'acme', {
+        patch: { env: { OWN: '${secret:OWN_TOKEN}', TWO: '${secret:TWO_TOKEN}' } },
+      }),
+    );
+    expect(second.kind).toBe('held');
+    expect(JSON.stringify(port.collection(mcpDef).get('acme'))).not.toContain('TWO_TOKEN');
   });
 });

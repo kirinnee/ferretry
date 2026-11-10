@@ -6,11 +6,13 @@ import type { ConfigPort } from '@ferretry/kernel/contract';
  * because "could not be written" alone names no cause.
  */
 export async function writeTunnelSetting(
-  config: Pick<ConfigPort, 'write'>,
+  config: Pick<ConfigPort, 'writeAsOwner'>,
   def: Parameters<ConfigPort['write']>[0],
   enabled: boolean,
 ): Promise<void> {
-  const outcome = await config.write(def, undefined, { patch: { tunnel: { enabled } } });
+  // The owner's patch: made to both versions of a file with an edit held, so switching the tunnel never puts another
+  // caller's held edit of this file into effect (docs/config-files.md rule 3).
+  const outcome = await config.writeAsOwner(def, undefined, { patch: { tunnel: { enabled } } });
   if (outcome.kind === 'held')
     throw new Error('turning the tunnel on widens how this daemon is reached: it waits for the owner to confirm');
   if (outcome.kind === 'written') return;
