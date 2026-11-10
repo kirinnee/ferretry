@@ -37,4 +37,10 @@ export interface SessionSpawnRequest {
   readonly parent?: string;
   /** Whether a person asked for this session directly. */
   readonly requestedByHuman: boolean;
+  /**
+   * Set only by Ferrets' port for a start it admitted as OUTSIDE the Warden's tree (a consumer other than the Warden):
+   * the stamp then refuses when lineage resolves true after all, rather than record the new ferret as the Warden's
+   * descendant behind the port's back (the parent check and the stamp read the ancestry separately).
+   */
+  readonly notInWardenTree?: true;
 }
