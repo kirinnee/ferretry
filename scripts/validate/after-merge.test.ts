@@ -93,6 +93,24 @@ describe('after-merge', () => {
     ]);
   });
 
+  test('only an item an owner decision moved may enter, and only that id', () => {
+    const moved = { id: 'differential-harness', what: 'the harness', owner: 'britnee' };
+    expect(afterMergeFindings({ ...BASE, items: [...BASE.items, moved] }, BASE, AT_BASE)).toEqual([]);
+    const other = { id: 'differential-harness-2', what: 'more', owner: 'britnee' };
+    expect(
+      afterMergeFindings({ ...BASE, items: [...BASE.items, moved, other] }, BASE, AT_BASE).map(f => f.message),
+    ).toEqual(['differential-harness-2 was added; the list may only go down']);
+    // The decision is about the item, never about its counts: they still only go down.
+    const grown: AfterMerge = {
+      ...BASE,
+      counts: { ...BASE.counts, portsPendingLines: 6 },
+      items: [...BASE.items, moved],
+    };
+    expect(afterMergeFindings(grown, BASE, AT_BASE).map(f => f.message)).toEqual([
+      'counts.portsPendingLines grew from 5 to 6; the list may only go down',
+    ]);
+  });
+
   test('with no base yet, the tree is still held to the baseline', () => {
     expect(afterMergeFindings(BASE, undefined, AT_BASE)).toEqual([]);
     expect(afterMergeFindings(BASE, undefined, { ...AT_BASE, guaranteesMissing: 2 })).toHaveLength(1);

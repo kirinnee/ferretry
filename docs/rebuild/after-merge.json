@@ -33,6 +33,11 @@
       "owner": "britnee"
     },
     {
+      "id": "differential-harness",
+      "what": "(A)+(E) the v4-vs-5.0 differential harness: core, CI job and mutation check, then the R/V row tables and the J cadence tests, per the reviewed plan (moved after merge by the owner, !A481)",
+      "owner": "britnee"
+    },
+    {
       "id": "darwin-smoke",
       "what": "the darwin (macOS) smoke run; no paid macOS run was booked before merge (owner, !A480)",
       "owner": "gustavo"
