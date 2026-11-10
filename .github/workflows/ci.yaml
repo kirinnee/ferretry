@@ -88,7 +88,8 @@ jobs:
       - name: Fetch the base the only-down checks compare against
         env:
           FY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          FY_PUSH_BEFORE: ${{ github.event.before }}
+          # Only a push's `before`: a pull request's own earlier head is never the base (check-base.sh says why).
+          FY_PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: ./scripts/ci/check-base.sh
       - name: Run the quick set
         env:
