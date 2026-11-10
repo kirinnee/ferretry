@@ -351,6 +351,8 @@ export function noCredsValues(home: string): Readonly<Record<string, string>> {
     GIT_CONFIG_SYSTEM: '/dev/null',
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_TERMINAL_PROMPT: '0',
+    // OpenSSH takes its home from the passwd entry, not HOME: without these git over ssh would read ~/.ssh.
+    GIT_SSH_COMMAND: 'ssh -F /dev/null -o IdentityFile=none -o IdentityAgent=none -o BatchMode=yes',
   };
 }
 

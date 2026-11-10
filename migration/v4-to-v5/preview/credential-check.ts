@@ -42,31 +42,56 @@ export interface CredentialCheckInput {
   readonly callerEnv: Readonly<Record<string, string | undefined>>;
   readonly run: Run;
   readonly inspect: (path: string) => Promise<Inspected | undefined>;
+  /**
+   * The RUNNING daemon's own environment as NUL-separated `NAME=value` text (`/proc/<pid>/environ`), or `undefined` where
+   * there is no such file (macOS) or no daemon holds the lock. Read only for names and the wrapper's fixed values.
+   */
+  readonly daemonEnviron?: () => Promise<string | undefined>;
 }
 
-const pick = (env: Readonly<Record<string, string | undefined>>, names: readonly string[]): Record<string, string> =>
-  Object.fromEntries(names.flatMap(name => (env[name] === undefined ? [] : [[name, env[name] as string]])));
+/** The environment `fy5 daemon start` is given by `preview.sh`: the caller's WHOLE environment, never a trimmed copy. */
+const wholeEnv = (env: Readonly<Record<string, string | undefined>>): Record<string, string> =>
+  Object.fromEntries(Object.entries(env).flatMap(([name, value]) => (value === undefined ? [] : [[name, value]])));
+
+/** The environment text of the process that holds the preview's daemon lock; `undefined` when there is none to read. */
+export async function readDaemonEnviron(
+  lockFile: string,
+  ports: {
+    readonly holders: (lockFile: string) => Promise<readonly number[]>;
+    readonly environOf: (pid: number) => Promise<string | undefined>;
+  },
+): Promise<string | undefined> {
+  const [pid] = await ports.holders(lockFile);
+  return pid === undefined ? undefined : ports.environOf(pid);
+}
 
 export async function credentialCheck(input: CredentialCheckInput): Promise<StartChecks> {
   const { target, callerEnv, run, inspect } = input;
   const fy5 = join(target, 'bin', PREVIEW.wrapper);
-  const asCaller = pick(callerEnv, ['USER', 'PATH']);
+  // The probes run in the caller's WHOLE environment, as `preview.sh` gives `fy5 daemon start`, so a name the wrapper's
+  // allow-list lets through that the caller holds is seen here exactly as the daemon had it.
+  const asCaller = wholeEnv(callerEnv);
   const problems: string[] = [];
   const passed: string[] = [];
   const probe = (argv: readonly string[]) => run([fy5, '__daemon-probe', ...argv], asCaller);
 
-  // 1. The daemon's own environment, read as names and the fixed values the wrapper sets (a value is never printed).
-  const printed = await probe(['env', '-0']);
-  if (printed.code !== 0)
-    return {
-      ok: false,
-      problems: [
-        `could not read the daemon's environment: ${fy5} __daemon-probe env answered ${String(printed.code)}.`,
-      ],
-      passed,
-    };
+  // 1. The daemon's own environment, read as names and the fixed values the wrapper sets (a value is never printed): from
+  // the running daemon's /proc/<pid>/environ where it exists, else from the wrapper's probe in the caller's environment.
+  let environ = await input.daemonEnviron?.();
+  if (environ === undefined) {
+    const printed = await probe(['env', '-0']);
+    if (printed.code !== 0)
+      return {
+        ok: false,
+        problems: [
+          `could not read the daemon's environment: ${fy5} __daemon-probe env answered ${String(printed.code)}.`,
+        ],
+        passed,
+      };
+    environ = printed.stdout;
+  }
   const have = new Map(
-    printed.stdout
+    environ
       .split('\0')
       .filter(entry => entry.includes('='))
       .map((entry): [string, string] => [entry.slice(0, entry.indexOf('=')), entry.slice(entry.indexOf('=') + 1)]),
@@ -83,7 +108,9 @@ export async function credentialCheck(input: CredentialCheckInput): Promise<Star
       `refusing to go on: the preview daemon's environment does not hold the preview's own ${wrong.join(', ')} (it must be the empty ones under ${join(target, PREVIEW.noCredsFolder)}). Run preview.sh prepare again, or fix the wrapper.`,
     );
   if (named.length === 0 && wrong.length === 0)
-    passed.push('the preview daemon environment carries no credential-shaped variable and no SSH agent');
+    passed.push(
+      'the preview daemon environment carries no credential-shaped variable, no SSH agent, and git over ssh gets no user config and no keys',
+    );
 
   // 2. What stands in the credentials' place is EMPTY and private.
   const base = join(target, PREVIEW.noCredsFolder);

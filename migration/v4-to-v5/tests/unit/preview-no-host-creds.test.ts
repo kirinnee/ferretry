@@ -4,10 +4,10 @@
  * check proves it. Every value here is FAKE; nothing real is read, and no program but the stubs below is run.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { credentialCheck, credentialNames, type Inspected } from '../../preview/credential-check.ts';
+import { credentialCheck, credentialNames, readDaemonEnviron, type Inspected } from '../../preview/credential-check.ts';
 import { noCredsValues, shimText, wrapperText } from '../../preview/driver.ts';
 import { PREVIEW } from '../../preview/plan.ts';
 import type { Run } from '../../preview/start-checks.ts';
@@ -315,5 +315,144 @@ describe('NHC-3 the start check proves the daemon reaches no credential, and ref
     });
     expect(done.ok).toBe(false);
     expect(done.problems.join('\n')).toContain('could not read the daemon');
+  });
+});
+
+/** The wrapper with a leaky allow-list: GH_TOKEN passes from the caller to the daemon (the bug the start check must see). */
+const leakyWrapper = (home: string): string =>
+  wrapperText(home, '/nonexistent-v4/.ferretry').replace('for name in USER ', 'for name in GH_TOKEN USER ');
+
+describe('NHC-4 the check sees the environment the daemon really has (B1)', () => {
+  test('NHC-4a a leaky allow-list and a hostile caller environment: the check refuses, names GH_TOKEN, never the value', async () => {
+    const { home, stubs, hostile } = await previewHome();
+    await writeFile(join(home, 'bin/fy5'), leakyWrapper(home), { mode: 0o755 });
+    await writeFile(join(stubs, 'gh'), GH_STUB, { mode: 0o755 });
+    spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
+    const done = await credentialCheck({ ...realWorld(home), callerEnv: hostile });
+    expect(done.ok).toBe(false);
+    const said = done.problems.join('\n');
+    expect(said).toContain('GH_TOKEN');
+    expect(said).toContain('IS signed in');
+    expect(said).not.toContain(FAKE);
+  });
+
+  test('NHC-4b the running daemon environment, when readable, is what is judged; the probe is not asked for it', async () => {
+    const { home, hostile } = await previewHome();
+    spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
+    const asked: string[] = [];
+    const real = realWorld(home);
+    const own = Object.entries(noCredsValues(home)).map(([name, value]) => `${name}=${value}`);
+    const done = await credentialCheck({
+      ...real,
+      run: async (argv, env) => {
+        asked.push(argv.join(' '));
+        return real.run(argv, env);
+      },
+      callerEnv: hostile,
+      daemonEnviron: async () => [...own, `GH_TOKEN=${FAKE}`, 'PATH=/usr/bin'].join('\0'),
+    });
+    expect(done.ok).toBe(false);
+    expect(done.problems.join('\n')).toContain('GH_TOKEN');
+    expect(done.problems.join('\n')).not.toContain(FAKE);
+    expect(asked.some(line => line.endsWith('env -0'))).toBe(false);
+  });
+
+  test('NHC-4c the daemon environment is read from the pid that holds the lock, and from none when nothing does', async () => {
+    const holders = async (lock: string) => (lock === '/l/held' ? [7, 8] : []);
+    const environOf = async (pid: number) => `PID=${String(pid)}`;
+    expect(await readDaemonEnviron('/l/held', { holders, environOf })).toBe('PID=7');
+    expect(await readDaemonEnviron('/l/free', { holders, environOf })).toBeUndefined();
+  });
+});
+
+describe('NHC-5 git over ssh reads no user config and no keys (B2)', () => {
+  test('NHC-5a git over ssh through the wrapper runs ssh with no config file, no identity, no agent', async () => {
+    const { home, stubs, hostile } = await previewHome();
+    const log = join(root, 'ssh.log');
+    await writeFile(join(stubs, 'ssh'), `#!/bin/sh\necho "$@" >> "${log}"\nexit 1\n`, { mode: 0o755 });
+    spawn([join(home, 'bin/fy5'), '__daemon-probe', 'git', 'ls-remote', 'ssh://example.invalid/repo'], hostile);
+    const seen = await readFile(log, 'utf8');
+    expect(seen).toContain('-F /dev/null');
+    expect(seen).toContain('IdentityFile=none');
+    expect(seen).toContain('IdentityAgent=none');
+    expect(seen).toContain('BatchMode=yes');
+  });
+
+  test('NHC-5b a daemon environment without the ssh options refuses, and the passing check says git over ssh is closed', async () => {
+    const { home, hostile } = await previewHome();
+    spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
+    const good = await credentialCheck({ ...realWorld(home), callerEnv: hostile });
+    expect(good.passed.join('\n')).toContain('git over ssh gets no user config and no keys');
+    const options = noCredsValues(home).GIT_SSH_COMMAND as string;
+    await writeFile(
+      join(home, 'bin/fy5'),
+      wrapperText(home, '/nonexistent-v4/.ferretry').replace(`GIT_SSH_COMMAND="${options}" `, ''),
+      { mode: 0o755 },
+    );
+    const done = await credentialCheck({ ...realWorld(home), callerEnv: hostile });
+    expect(done.ok).toBe(false);
+    expect(done.problems.join('\n')).toContain('GIT_SSH_COMMAND');
+  });
+});
+
+describe('NHC-6 a miss in the credential check stops the daemon, and says so (B3)', () => {
+  const script = join(import.meta.dir, '../../preview/preview.sh');
+
+  /** A fake `bun` that records its arguments and fails `credential-check` only. */
+  const start = async (stopCode: number) => {
+    const bin = join(root, 'fakebin');
+    const target = join(root, 'v5');
+    const log = join(root, 'bun.log');
+    await mkdir(bin, { recursive: true });
+    await mkdir(join(target, 'bin'), { recursive: true });
+    await writeFile(
+      join(bin, 'bun'),
+      [
+        '#!/bin/sh',
+        'echo "$@" >> "$FAKE_LOG"',
+        'case "$2" in',
+        '  guard) printf "%s\\n%s\\n" "$FAKE_V4" "$FAKE_TARGET" ;;',
+        '  credential-check) exit 1 ;;',
+        '  stop) exit "$FAKE_STOP_CODE" ;;',
+        '  *) exit 0 ;;',
+        'esac',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    await writeFile(join(target, 'bin', 'fy5'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const result = Bun.spawnSync([script, 'start', '--v4', join(root, 'v4'), '--target', target], {
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        HOME: root,
+        FAKE_LOG: log,
+        FAKE_V4: join(root, 'v4'),
+        FAKE_TARGET: target,
+        FAKE_STOP_CODE: String(stopCode),
+      },
+    });
+    const calls = (await readFile(log, 'utf8'))
+      .split('\n')
+      .filter(line => line !== '')
+      .map(line => line.split(' ')[1]);
+    return { result, calls };
+  };
+
+  test('NHC-6a the daemon is stopped, the sentence says it was, and the exit is 1', async () => {
+    const { result, calls } = await start(0);
+    expect(calls.at(-2)).toBe('credential-check');
+    expect(calls.at(-1)).toBe('stop');
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'the preview daemon was stopped because it could reach a host credential',
+    );
+  });
+
+  test('NHC-6b when stop itself fails the sentence says the daemon could not be stopped and names the command', async () => {
+    const { result, calls } = await start(1);
+    expect(calls.at(-1)).toBe('stop');
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain('could reach a host credential AND could not be stopped');
+    expect(result.stderr.toString()).toContain("preview.sh stop' now");
   });
 });
