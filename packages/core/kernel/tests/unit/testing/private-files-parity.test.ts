@@ -8,6 +8,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { link, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { AdmissionPort } from '../../../contract/bound.ts';
+import { ApiError } from '../../../contract/http.ts';
 import type { LogRecord } from '../../../host/log.ts';
 import { recordingAdmission, request } from '../host/fixtures.ts';
 import { tmpdir } from 'node:os';
@@ -337,6 +338,62 @@ test('S40 PF-parity a private file created through the state port is pinned befo
       (error: unknown) => (error instanceof RootError ? error.refusal : String(error)),
     );
     expect(refusal).toBe('fenced');
+  } finally {
+    await outcome.host.stop();
+  }
+});
+
+test('S40 PF-loud the host says a failed pin once per outage and says it again after a look has succeeded', async () => {
+  const seen: { holder?: KernelPorts } = {};
+  const parent = await realpath(await mkdtemp(`${tmpdir()}/private-parity-`));
+  parents.push(parent);
+  const home = `${parent}/home`;
+  const records: LogRecord[] = [];
+  const real = realAdapters(home, record => records.push(record), { binary: 'fy' });
+  let broken = false;
+  const outcome = await bootHost({
+    home,
+    version: '5.0.0',
+    adapters: {
+      ...real,
+      fs: {
+        ...real.fs,
+        // Every look resolves the home first, so this fails each look (a later look may skip an unchanged folder's list).
+        realpath: async path => {
+          if (broken && path === home) throw Object.assign(new Error(`cannot resolve ${path}`), { code: 'EIO' });
+          return await real.fs.realpath(path);
+        },
+      },
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => {} }),
+    },
+    implementations: [
+      implementDaemon(holder(SOUND) as unknown as Manifest, {
+        build: ({ kernel }) => {
+          seen.holder = kernel;
+          return {};
+        },
+      }),
+    ],
+  });
+  if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+  try {
+    const state = (seen.holder as KernelPorts).state;
+    const told = (): number => records.filter(record => record.message.includes('could not be pinned')).length;
+    const failing = (): Promise<unknown> =>
+      state.write(KEY, 'signing-fixture').then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    broken = true;
+    expect(await failing()).toBeInstanceOf(ApiError);
+    expect(await failing()).toBeInstanceOf(ApiError);
+    expect(told()).toBe(1);
+    broken = false;
+    await state.write(KEY, 'signing-fixture');
+    broken = true;
+    expect(await failing()).toBeInstanceOf(ApiError);
+    expect(told()).toBe(2);
   } finally {
     await outcome.host.stop();
   }

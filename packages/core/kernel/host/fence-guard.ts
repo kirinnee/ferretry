@@ -152,13 +152,50 @@ export function touchesPrivate(privateFiles: readonly string[], relativeToState:
   });
 }
 
+/** What the host is told of the looks a create makes: a failed one (to say it once) and a good one (to say it again). */
+export interface PinReport {
+  readonly failed: (refusal: ApiError) => void;
+  readonly looked: () => void;
+}
+
+/**
+ * The one look: resolves the home, asks `at` (given the home's real path) for the path below `state/`, and, when a
+ * private place touches it, looks at the index again. The home's resolving is inside the same try as the look, so a home
+ * that vanished answers the sentence below and never a system error that quotes its path.
+ */
+async function lookAgain(
+  fs: HostFs,
+  home: string,
+  privateFiles: readonly string[],
+  recheckMs: number,
+  watcher: TruncationWatcher | undefined,
+  report: PinReport | undefined,
+  plugin: string,
+  at: (real: string) => string | undefined,
+): Promise<void> {
+  let named = plugin;
+  try {
+    const real = await fs.realpath(absolute(home, 'the home'));
+    const relativeToState = at(real);
+    if (relativeToState === undefined || !touchesPrivate(privateFiles, relativeToState)) return;
+    named = relativeToState.split('/')[0] ?? plugin;
+    await indexOf(fs, real, privateFiles, recheckMs, watcher).renew();
+    report?.looked();
+  } catch (error) {
+    const refusal = new ApiError(503, unpinnedSentence(named, error), 'private_unpinned');
+    report?.failed(refusal);
+    throw refusal;
+  }
+}
+
 /**
  * A private place was just CREATED (or replaced) at `relativeToState` (`<plugin>/<path>` below the home's `state`): looks
  * at the index again before the create is reported done, so a first write has no window in which the new file is not
  * yet pinned by identity and a root would let an alias of it through. A path no place touches costs nothing. The index
  * is the very one every root of the host reads (same disk, home, list and look interval), so the next root call
- * holds the file. A look that fails rejects `ApiError(503, …, 'private_unpinned')`: the file is on disk, but no root
- * opens anything until a look succeeds, because every later answer looks again and throws too.
+ * holds the file. A root call already running alongside the write is not covered; calls made after it returns are. A
+ * look that fails rejects `ApiError(503, …, 'private_unpinned')`: the file is on disk, but no root opens anything until
+ * a look succeeds, because every later answer looks again and throws too.
  */
 export async function pinCreated(
   fs: HostFs,
@@ -167,19 +204,36 @@ export async function pinCreated(
   relativeToState: string,
   recheckMs = 0,
   watcher?: TruncationWatcher,
+  report?: PinReport,
 ): Promise<void> {
   if (!touchesPrivate(privateFiles, relativeToState)) return;
   const plugin = relativeToState.split('/')[0] ?? '';
-  try {
-    const real = await fs.realpath(absolute(home, 'the home'));
-    await indexOf(fs, real, privateFiles, recheckMs, watcher).renew();
-  } catch (error) {
-    throw new ApiError(503, unpinnedSentence(plugin, error), 'private_unpinned');
-  }
+  await lookAgain(fs, home, privateFiles, recheckMs, watcher, report, plugin, () => relativeToState);
+}
+
+/**
+ * {@link pinCreated} for a root's writer, which knows the absolute `full` path it made and not the path below `state/`:
+ * the home is resolved in the same try as the look, and a path outside the home's `state` (or `state` itself) is not a
+ * private place. `plugin` is named when the home itself cannot be resolved.
+ */
+export async function pinCreatedAt(
+  fs: HostFs,
+  home: string,
+  privateFiles: readonly string[],
+  full: string,
+  plugin: string,
+  recheckMs = 0,
+  watcher?: TruncationWatcher,
+  report?: PinReport,
+): Promise<void> {
+  await lookAgain(fs, home, privateFiles, recheckMs, watcher, report, plugin, real => {
+    const state = join(real, 'state');
+    return !within(state, full) || full === state ? undefined : relative(state, full);
+  });
 }
 
 /** The sentence for a look that could not be made: the errno code at most, never the message (it carries a path). */
-export function unpinnedSentence(plugin: string, error: unknown): string {
+function unpinnedSentence(plugin: string, error: unknown): string {
   const code = (error as { readonly code?: unknown } | null)?.code;
   const reason = typeof code === 'string' && /^E[A-Z0-9]{1,15}$/u.test(code) ? code : 'the disk could not be read';
   return `A private file of ${plugin} could not be pinned, so no folder is opened until it can be: ${reason}.`;

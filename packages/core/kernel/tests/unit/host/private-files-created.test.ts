@@ -29,9 +29,11 @@ const KEY = defineState({ name: 'signing', path: 'signing.key', store: 'secret',
 const DOCUMENT = defineState({ name: 'tokens', path: 'tokens.json', store: 'json', format: 1 });
 const JOURNAL = defineState({ name: 'journal', path: 'journal.jsonl', store: 'jsonl', format: 1 });
 const VAULT = defineState({ name: 'vault', path: 'vault/*', store: 'opaque', format: 1 });
+const INDEX = defineState({ name: 'index', path: 'index.sqlite', store: 'sqlite', format: 1 });
+const OTHER = defineState({ name: 'other', path: 'other.sqlite', store: 'sqlite', format: 1 });
 
 const LIST = composePrivateFiles([
-  { id: 'holder', privacy: { private: ['signing.key', 'tokens.json', 'journal.jsonl', 'vault'] } },
+  { id: 'holder', privacy: { private: ['signing.key', 'tokens.json', 'journal.jsonl', 'vault', 'index.sqlite'] } },
   { id: 'ferrets', privacy: { private: ['sessions/*/environment.json'] } },
 ]);
 
@@ -77,7 +79,7 @@ function holderPort(fs: HostFs, home: string) {
   return createStatePort({
     home,
     pluginId: 'holder',
-    files: [KEY, DOCUMENT, JOURNAL, VAULT],
+    files: [KEY, DOCUMENT, JOURNAL, VAULT, INDEX, OTHER],
     fs: createNodeHostFs(),
     pin,
   });
@@ -165,6 +167,66 @@ test('S40 a look that fails after a create refuses every root until a look succe
   expect(await readOf(stranger, 'own.txt')).toBe('refused:fenced');
   broken = false;
   expect(await readOf(stranger, 'own.txt')).toBe('served:own');
+});
+
+test('S40 sqliteGrant refuses a private database exactly as sqlite() does, and grants one that is not private', async () => {
+  const fs = nodeFs(() => 'r');
+  const { home } = await layout(fs);
+  const port = holderPort(fs, home);
+  const sentence = 'state index: a database cannot be a private place, as it cannot be pinned before it opens';
+  expect(() => port.sqlite(INDEX)).toThrow(sentence);
+  expect(() => port.sqliteGrant(INDEX)).toThrow(sentence);
+  expect(port.sqliteGrant(OTHER).path).toBe(`${home}/state/holder/other.sqlite`);
+});
+
+test('S40 a home that vanished answers the 503 sentence from a root write, with no path in it, and tells the report', async () => {
+  const real = nodeFs(() => 'r');
+  // One write resolves the home several times; only the LAST resolving (the pin's) fails, so the write itself lands.
+  let resolvings = 0;
+  let failAt = Number.POSITIVE_INFINITY;
+  let home = '';
+  const fs: HostFs = {
+    ...real,
+    realpath: async path => {
+      if (path === home) {
+        resolvings += 1;
+        if (resolvings === failAt) throw Object.assign(new Error(`ENOENT: no such file ${path}`), { code: 'ENOENT' });
+      }
+      return await real.realpath(path);
+    },
+  };
+  const laid = await layout(fs);
+  home = laid.home;
+  const told: ApiError[] = [];
+  const layoutOf = { home, plugin: 'ferrets', worktrees: `${home}-worktrees` };
+  const roots = rootsPortFor(fs, layoutOf, ['sessions'], () => undefined, {
+    random: () => 'r',
+    privateFiles: LIST,
+    privateRecheckMs: LOOK_MS,
+    privateReport: { failed: refusal => told.push(refusal), looked: () => undefined },
+  });
+  const session = roots.root('sessions', { subfolder: SESSION });
+  const environment = session.resolve('environment.json');
+  if (!environment.ok) throw new Error(environment.error);
+  // The first write makes the session folder; the second is a plain replace, the same shape as the one that fails.
+  await session.writeText(environment.value, 'FAKE-credential');
+  const before = resolvings;
+  await session.writeText(environment.value, 'FAKE-credential');
+  const perWrite = resolvings - before;
+  resolvings = 0;
+  failAt = perWrite;
+  const failure = await session.writeText(environment.value, 'FAKE-credential').then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(failure).toBeInstanceOf(ApiError);
+  expect((failure as ApiError).status).toBe(503);
+  expect((failure as ApiError).code).toBe('private_unpinned');
+  expect((failure as ApiError).message).toBe(
+    'A private file of ferrets could not be pinned, so no folder is opened until it can be: ENOENT.',
+  );
+  expect((failure as ApiError).message).not.toContain(home);
+  expect(told).toHaveLength(1);
 });
 
 test('S40 a write to a path no private place touches asks for no look', async () => {

@@ -264,6 +264,11 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       const at = locate(def, name);
       if (def.store !== 'sqlite' && def.store !== 'sqlite-cache')
         throw new TypeError(`state ${def.name}: only a sqlite file is opened on a worker`);
+      // The worker creates the file with no pin, so a private place that is a database is refused, as sqlite() does.
+      if (options.pin?.holds(`${pluginId}/${at.relative}`) === true)
+        throw new TypeError(
+          `state ${def.name}: a database cannot be a private place, as it cannot be pinned before it opens`,
+        );
       return { path: at.path, label: at.label };
     },
     async read<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>> {

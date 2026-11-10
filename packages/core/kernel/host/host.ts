@@ -126,7 +126,7 @@ import {
   workersFor,
 } from './permissions.ts';
 import type { HostStatePort, PrivatePin } from './state/state-port.ts';
-import { pinCreated, touchesPrivate, unpinnedSentence } from './fence-guard.ts';
+import { type PinReport, pinCreated, touchesPrivate } from './fence-guard.ts';
 import { openHome, probeHome } from './home.ts';
 import { composePrivateFiles, privacyRefusals } from '../manifest/privacy.ts';
 import { ensureInternalRootBases, ownFolderSpellings, rootsPortFor } from './roots.ts';
@@ -650,21 +650,21 @@ async function bootLocked(
    * disk, but every root refuses until a look succeeds) and the daemon says so once.
    */
   let toldUnpinned = false;
+  const pinReport: PinReport = {
+    failed: refusal => {
+      if (toldUnpinned) return;
+      toldUnpinned = true;
+      log.warn(refusal.message);
+    },
+    // A look that succeeds ends the outage: a second one is said again.
+    looked: () => {
+      toldUnpinned = false;
+    },
+  };
   const privatePin: PrivatePin = {
     holds: relativeToState => touchesPrivate(privateFiles, relativeToState),
-    created: async relativeToState => {
-      try {
-        await pinCreated(adapters.fs, home, privateFiles, relativeToState, PRIVATE_RECHECK_MS, watchPrivate);
-      } catch (error) {
-        if (!toldUnpinned) {
-          toldUnpinned = true;
-          log.warn(
-            error instanceof ApiError ? error.message : unpinnedSentence(relativeToState.split('/')[0] ?? '', error),
-          );
-        }
-        throw error;
-      }
-    },
+    created: relativeToState =>
+      pinCreated(adapters.fs, home, privateFiles, relativeToState, PRIVATE_RECHECK_MS, watchPrivate, pinReport),
   };
   for (const manifest of order) {
     const record = records.get(manifest.id) as PluginRecord;
@@ -811,6 +811,7 @@ async function bootLocked(
         privateFiles,
         privateRecheckMs: PRIVATE_RECHECK_MS,
         privateWatch: watchPrivate,
+        privateReport: pinReport,
         ...(pins === undefined ? {} : { pins }),
         ...(manifest.permissions?.harnessFiles === undefined
           ? {}

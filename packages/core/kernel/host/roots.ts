@@ -43,7 +43,8 @@ import {
   HARD_LINK_ROOTS,
   hardLinkAllowed,
   hopsThroughFence,
-  pinCreated,
+  pinCreatedAt,
+  type PinReport,
   type PrivateGuard,
   privateGuardOf,
   privatelyHeld,
@@ -205,6 +206,8 @@ interface PrivatePlaces {
   readonly recheckMs: number;
   /** Told when a private place reaches its budget, or fits again: the one watcher the host gives every root. */
   readonly watch?: TruncationWatcher;
+  /** Told how each look a create makes went, so the host says a failure once and again after a good look. */
+  readonly report?: PinReport;
 }
 
 const NO_PRIVATE: PrivatePlaces = { files: [], recheckMs: 0 };
@@ -1599,9 +1602,16 @@ function rootHandle(setup: HandleSetup): RootHandle {
    */
   const pinned = async (full: string): Promise<void> => {
     if (ownerRoot || privateFiles.files.length === 0) return;
-    const state = join(await fs.realpath(home), 'state');
-    if (!within(state, full) || full === state) return;
-    await pinCreated(fs, home, privateFiles.files, relative(state, full), privateFiles.recheckMs, privateFiles.watch);
+    await pinCreatedAt(
+      fs,
+      home,
+      privateFiles.files,
+      full,
+      plugin,
+      privateFiles.recheckMs,
+      privateFiles.watch,
+      privateFiles.report,
+    );
   };
   const readOnly = READ_ONLY_ROOTS.has(name);
   const projectRoot = name === 'project-files';
@@ -2324,6 +2334,8 @@ export interface RootsOptions {
    * when it fits again. The host gives every plugin's roots the same function, so it is told once per change.
    */
   readonly privateWatch?: TruncationWatcher;
+  /** Told how each look a create makes went (see {@link PinReport}); the host gives every plugin's roots the same one. */
+  readonly privateReport?: PinReport;
   /** Told the plugin's stop: every tree it minted is revoked then. Absent, its trees live as long as the port. */
   readonly onStop?: (fn: () => void) => void;
 }
@@ -2346,6 +2358,7 @@ export function rootsPortFor(
     files: options.privateFiles ?? [],
     recheckMs: options.privateRecheckMs ?? 0,
     ...(options.privateWatch === undefined ? {} : { watch: options.privateWatch }),
+    ...(options.privateReport === undefined ? {} : { report: options.privateReport }),
   };
   // Every tree this plugin mints lives until it stops.
   const life = { live: true };
