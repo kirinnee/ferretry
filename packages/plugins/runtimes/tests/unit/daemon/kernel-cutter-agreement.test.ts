@@ -290,9 +290,12 @@ function refusedWords(
   lines: readonly (readonly string[])[],
 ): readonly (readonly [words: readonly string[], at: number, kernel: boolean, runtimes: boolean])[] {
   return lines.flatMap(words => {
+    // W first, then both copies only on a line W refuses a word of: the other lines were 2.4 s of T-B2's 3 s (now 0.7).
+    const findings = findFlagSecrets({ args: words });
+    if (findings.length === 0) return [];
     const kernel = kernelShownWords(words);
     const runtimes = runtimesShownWords(words);
-    return findFlagSecrets({ args: words }).map(finding => {
+    return findings.map(finding => {
       const at = finding.path[1] as number;
       return [words, at, kernel[at]?.hidden === true, runtimes[at]?.hidden === true] as const;
     });
@@ -300,6 +303,8 @@ function refusedWords(
 }
 
 describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => {
+  // Measured alone with --coverage (bun 1.4.4, 3 runs, one other bun process running): 2.75 / 2.88 / 3.31 s. The limit is
+  // 3x the worst, 10 s: the corpus is thousands of lines cut twice, and the cost is the cutters, not a wait.
   it('CFG-LEAK-R the kernel and runtimes cut every corpus word identically', () => {
     const lines = corpus();
     should(nestedFamily().length).be.above(500);
@@ -313,8 +318,9 @@ describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => 
     }
     // …and the corpus really cuts: the two are not agreeing on "nothing".
     should(kernel.filter(shown => shown.some(word => word.hidden)).length).be.above(400);
-  });
+  }, 10_000);
 
+  // Measured alone with --coverage (same conditions): 2.60 / 2.64 / 2.70 s, under the 5 s default.
   it('CFG-LEAK-R a command’s own flag before the first word is read the same by both', () => {
     const lines = corpus().filter(line => line.length > 0);
     const kernel = lines.map(words => kernelShownWords(words.slice(1), words[0]));
@@ -328,11 +334,12 @@ describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => 
   it('S6 CFG-LEAK-W every word W refuses is cut by the kernel mask AND by the runtimes copy: residual 0', () => {
     // One word with blanks that does not start with a flag (`srv --token v`) is read as a command line by the kernel's
     // `shownItem`, not by `shownWord`, so it is T-B1's (both cutters show it alike), not this test's.
-    const lines = [...nestedFamily().map(item => item.words), ...OWN_LINES, ...GENERATED_LINES, ...writeRuleLines()];
+    const writeRule = writeRuleLines();
+    const lines = [...nestedFamily().map(item => item.words), ...OWN_LINES, ...GENERATED_LINES, ...writeRule];
     const refused = refusedWords(lines);
     // W refuses a good share of the corpus, and the names only W's tail knows are in it (--key, --ssh-key, --tokens …).
     should(refused.length).be.above(1000);
-    const names = new Set(writeRuleLines().map(words => words.join(' ')));
+    const names = new Set(writeRule.map(words => words.join(' ')));
     should(names.size).be.above(60);
     const missed = refused
       .filter(([, , kernel, runtimes]) => !kernel || !runtimes)
