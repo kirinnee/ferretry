@@ -3,6 +3,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
 import {
+  COMPACTING_LINE,
+  idlePromptShown,
   paneActiveWork,
   paneBlockingPrompt,
   paneShowsActiveWork,
@@ -340,5 +342,105 @@ describe('pane readiness under the feedback-draft panel', () => {
 
     // Assert
     should(actual).deepEqual({ boxedPhrase: false, boxedMark: false, indentedPhrase: true, laterLinePhrase: true });
+  });
+});
+
+describe('B188 a compaction is work, whatever the tick glyph', () => {
+  const FIXTURES = join(import.meta.dir, '../../../fixtures/composer');
+  const START = readFileSync(join(FIXTURES, 'claude-2.1.30x-compacting-start-middot.txt'), 'utf8');
+  const [cursorX, cursorY] = readFileSync(join(FIXTURES, 'claude-2.1.30x-compacting-start-middot.cursor'), 'utf8')
+    .trim()
+    .split('|')
+    .map(Number);
+  /** The same frame with its compaction line replaced. */
+  const withLine = (line: string): string => START.replace('· Compacting conversation…', line);
+
+  it('B188 a Compacting line on a · tick reads as status, and the empty composer is not ready', () => {
+    // Act
+    const actual = {
+      work: paneActiveWork(START),
+      ready: promptIsReady(START, cursorY, cursorX),
+      idle: idlePromptShown(START),
+    };
+
+    // Assert
+    should(actual).deepEqual({ work: 'status', ready: false, idle: false });
+  });
+
+  it('B188 a Compacting line on an ASCII * tick reads as status', () => {
+    // Act
+    const actual = paneActiveWork(withLine('* Compacting conversation…'));
+
+    // Assert
+    should(actual).equal('status');
+  });
+
+  it('B188 a Compacting line with (3s) and no counter reads as status', () => {
+    // Act
+    const actual = {
+      middot: paneActiveWork(withLine('· Compacting conversation… (3s)')),
+      star: paneActiveWork(withLine('✶ Compacting conversation… (3s)')),
+      bullet: paneActiveWork(withLine('• Compacting conversation… (3s)')),
+      ink: ['✻', '✳', '✶', '✽', '✢', '∗'].map(glyph => paneActiveWork(withLine(`${glyph} Compacting conversation…`))),
+    };
+
+    // Assert
+    should(actual).deepEqual({
+      middot: 'status',
+      star: 'status',
+      bullet: 'status',
+      ink: ['status', 'status', 'status', 'status', 'status', 'status'],
+    });
+  });
+
+  it('B188 a "· Compacting the notes…" bullet in prose far above the composer does not', () => {
+    // Arrange — thirteen rows of conversation sit between the bullet and the bottom of the frame.
+    const prose = ['· Compacting the notes…', ...Array.from({ length: 13 }, (_, row) => `  line ${row + 1}`)].join(
+      '\n',
+    );
+
+    // Act
+    const actual = {
+      far: paneActiveWork(`${prose}\n❯ `),
+      noEllipsis: paneActiveWork(withLine('· Compacting conversation')),
+      boxed: paneActiveWork(withLine('│ · Compacting conversation… │')),
+    };
+
+    // Assert
+    should(actual).deepEqual({ far: undefined, noEllipsis: undefined, boxed: undefined });
+  });
+
+  it('B188 a bullet prose line that is not a compaction still reads idle (the general spinner phrase is unchanged)', () => {
+    // Act
+    const actual = {
+      middot: paneActiveWork('· Reading the notes… and more\n❯ '),
+      star: paneActiveWork('* Reading the notes… and more\n❯ '),
+      ready: promptIsReady('· Reading the notes…\n❯ ', 1, 2),
+    };
+
+    // Assert
+    should(actual).deepEqual({ middot: undefined, star: undefined, ready: true });
+  });
+
+  it('B188 the exported compaction pattern is anchored to the start of a line', () => {
+    // Act
+    const actual = {
+      line: COMPACTING_LINE.test('  ✢ Compacting conversation…'),
+      inProse: COMPACTING_LINE.test('we were · Compacting conversation…'),
+    };
+
+    // Assert
+    should(actual).deepEqual({ line: true, inProse: false });
+  });
+
+  it('B188 idlePromptShown is true for an idle composer holding a draft; promptIsReady stays false', () => {
+    // Arrange
+    const idle = '✻ Compacted while idle · done 10:56 AM\n\n────\n❯ a draft left in the box\n────\n';
+
+    // Act
+    const actual = { idle: idlePromptShown(idle), ready: promptIsReady(idle, 3, 12) };
+
+    // Assert
+    should(actual).deepEqual({ idle: true, ready: false });
   });
 });
