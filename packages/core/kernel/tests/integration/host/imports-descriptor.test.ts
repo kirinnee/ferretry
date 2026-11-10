@@ -261,6 +261,29 @@ describe('R-0198 imports reaches its scoped folder by descriptor: a folder swapp
   }
 });
 
+describe('R-0198 each folder below the anchor is opened from its parent without following a link', () => {
+  for (const host of ['linux', 'macOS'] as const) {
+    test(`R-0198 ${host}: the scoped folder swapped for a link right after its parent was opened is link_escape, not a followed link`, async () => {
+      for (const verb of VERBS) {
+        const w = await world(disks[host]());
+        const inner = disks[host]();
+        const watched = (folder: OpenedDirectory): OpenedDirectory => ({
+          ...folder,
+          openChild: async (leaf, make) => {
+            const child = await folder.openChild(leaf, make);
+            // Right after the parent of the scoped folder (`b`) was opened, before the scoped folder (`c`) is.
+            if (leaf === 'b') w.swap('c');
+            return { ...child, folder: watched(child.folder) };
+          },
+        });
+        const racing = { ...inner, openDirectory: async (path: string) => watched(await inner.openDirectory(path)) };
+        const seen = await observe(w.rootFor(racing as HostFs), w.scoped, verb);
+        expect(seen).toEqual({ kind: 'refused', refusal: 'link_escape' });
+      }
+    });
+  }
+});
+
 describe('R-0198 the anchor is proven once and held', () => {
   test('R-0198 the anchor swapped for a link to a same-shaped tree right after it was opened reads nothing outside (changed)', async () => {
     const w = await world();
