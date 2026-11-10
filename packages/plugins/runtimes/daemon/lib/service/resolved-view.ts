@@ -88,7 +88,10 @@ function serverLine(server: {
   const line = shownLine(words);
   // THE NET: the write rule still refuses a word the cutter showed: the whole line is withheld, never a part of it.
   if (line.withheld) return WITHHELD_WORDS_TEXT;
-  return line.words.map(word => word.text).join(' ');
+  const text = line.words.map(word => word.text).join(' ');
+  // The write rule reads the command as one field and the line as the text it makes: a pair across the blanks of a
+  // command (`Authorization: v`, one word to the document) or across its end and the first argument is caught here.
+  return valueWithheld('command', server.command ?? '') || valueWithheld('line', text) ? WITHHELD_WORDS_TEXT : text;
 }
 
 /**

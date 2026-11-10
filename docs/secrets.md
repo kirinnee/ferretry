@@ -493,22 +493,38 @@ per-document plan (one refused document writes nothing of the set).
   (`--key a,v,${secret:X}`, `--key ${secret:X},b=v`); the pointer in it is cut with the rest. The families F1-F7 (a
   look-alike of a pointer, a blank and a token shape, a pointer in a URL's user part, a value starting `.`, a pointer never
   closed, past W's 4096-character window, one item holding blanks) are held by the net, not by the cutter
-  (`kernel-cutter-f1-f7-pin.test.ts`). **Every value Runtimes shows is netted**: the arguments, the launch flags, an MCP
-  server's `command` (`commandWithheld`) and `url` (`urlWithheld`: withheld whole when W refuses it or the cutter would cut any
-  part of it; the form asks for the whole line again), an environment or settings value shown under its name (hidden when W
-  refuses it, as when the name or shape says credential), and the "command not found" warning, which names the command only
-  when the detail shows it. The text of an instructions or hooks file is cut by its own line rule (`redactText`), which is
-  pinned equal to v4 outside its tightened lines, and then netted line by line: a line W's text test still refuses after
-  that cut (a long bare value under a plain key) is withheld, replaced by one plain sentence (`WITHHELD_LINE`) while every
-  other line and the line count stay. v4 showed those lines; the S26 pin exempts exactly the lines it replaces. The fields shown as written without a net are names and paths, not
-  values: a component's `file` and `directory`, a skill's items, a model set's models and default, a profile, runtime or
-  login label, and the home-directory path a component points at (`checkPath`). W refuses one only when a credential is
+  (`kernel-cutter-f1-f7-pin.test.ts`). **Every value Runtimes shows is netted**, place by place (one rule for a value of any shape beside its name,
+  `valueWithheld` / `valueSaid` in `command-line.ts`, judging the PARSED value under the name the document holds it by, the last
+  path segment, never the quoted display key):
+  - **Arguments and launch flags**, in the detail, the Resolved view and the runtime list's overridden flags: each list is
+    cut, then judged by W's flag rule AND its raw-secret rule (a token shape in a word withholds the list); a refused word
+    withholds the whole list in words.
+  - **An MCP server's `command`** (`commandWithheld`) and **`url`** (`urlWithheld`: withheld whole when W refuses it or the cutter
+    would cut any part of it; the form asks for the whole line again). The command is split at its blanks, so `srv --token`
+    beside the argument `v` is one pair; the Resolved MCP line withholds when W refuses the command or the line it makes,
+    and a Resolved url whose path W refuses (`/mcp --token v`, shown %-encoded) is withheld as the detail's is.
+  - **An environment or settings value shown under its name** (hidden when W refuses it, as when the name or shape says
+    credential), including a list or a nested table (`{x: ['--token', v]}`, `{servers: [{token: v}]}`), in the detail and in the
+    Resolved rows, and the Resolved model row.
+  - **A conflict sentence** (`GET /v1/runtimes/profiles`, the preview, `GET /v1/runtimes`, `fy profile` and `fy runtime` "Overrides:"): a
+    value W refuses, the winner or a beaten one, is replaced by "(a value that is not shown)" and the sentence stays readable.
+  - **A fixed-layer overridden setting row** (`GET /v1/runtimes`): the same rule on its value.
+  - **The text of an instructions or hooks file**: cut by its own line rule (`redactText`), pinned equal to v4 outside its
+    tightened lines, and then netted line by line: a line W's text test still refuses after that cut (a long bare value
+    under a plain key) is withheld, replaced by one plain sentence (`WITHHELD_LINE`) while every other line and the line
+    count stay. v4 showed those lines; the S26 pin exempts exactly the lines it replaces.
+  - **The "command not found" warning** names the command only when the detail shows it.
+
+  The fields shown as written without a net are names and paths, not values: a component's `file` and `directory`, a skill's items,
+  a model set's models and default (the Resolved model row and a conflict sentence are netted), a profile, runtime or login
+  label, and the home-directory path a component points at (`checkPath`). W refuses one only when a credential is
   typed AS that name or path, which v4 showed the same way, and none of them can hold a flag secret, a URL's user or a
   token in a query by design. Measured over the 85,848-line review corpus (69,474 refused by W): 0 shown that W
   refuses on the masked text; 57 listed low-entropy values that W accepts bare (see `MIN_CUT_WORD` above). The
   price is over-redaction: the mask cuts every value under a name W reads as a credential, a path after `--token-file`
   (E3) and the whole value of a word that glues text to a pointer. A word of blanks that does not start with a flag
   (`srv --token v`) is no gap: the read splits it into words and cuts `v`.
+
 - **GAP: the etag is a digest oracle.** A file's etag is the sha256 of its disk text and goes to every `fleet.use`
   reader (`GET /v1/config/file`, the `kernel.config-changed` frame, `GET /v1/config/status`). A hidden value that is
   long and high-entropy cannot be recovered from it; a short or low-entropy one (an 8-14 character password) can be

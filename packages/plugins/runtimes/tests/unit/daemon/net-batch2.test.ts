@@ -377,3 +377,39 @@ describe('the batch 2 nets stay linear to 256 KiB', () => {
     }, 60_000);
   }
 });
+
+describe('controls in the views: nothing the write rule accepts is withheld by the batch 2 nets', () => {
+  it('should show these as written in the Resolved view, the detail and a conflict sentence', () => {
+    // Arrange
+    const parsed = model(
+      {
+        mcp: {
+          srv: {
+            command: '/usr/bin/node',
+            args: ['-y', '@scope/pkg'],
+            env: { NODE_OPTIONS: '--max-old-space-size=4096' },
+          },
+        },
+        settings: {
+          base: { harness: 'claude', file: 'base.json', env: { PATH: '/usr/bin', GREETING: 'hello there' } },
+        },
+        modelSets: { m: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
+      },
+      { p: { layers: ['mcp/srv', 'settings/base', 'modelSets/m'] } },
+    );
+
+    // Act
+    const resolved = resolveProfile({ model: parsed, profile: 'p', harness: 'claude', settingsBodies: { base: {} } });
+    if (!resolved.ok) throw new Error('expected a resolution');
+    const entries = resolvedEntries(resolved.resolved);
+    const detail = JSON.stringify(componentCatalog(parsed, FACTS).kinds);
+
+    // Assert
+    should(entries.find(entry => entry.field === 'mcp')?.value).equal('/usr/bin/node -y @scope/pkg');
+    should(entries.find(entry => entry.key.endsWith('PATH'))?.value).equal('/usr/bin');
+    should(entries.find(entry => entry.key.endsWith('GREETING'))?.value).equal('hello there');
+    should(entries.find(entry => entry.field === 'model')?.value).equal('claude-opus-5-5');
+    should(detail).containEql('--max-old-space-size=4096');
+    should(entries.some(entry => entry.hidden === true)).be.false();
+  });
+});
