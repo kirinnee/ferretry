@@ -429,7 +429,7 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
   test('M2 F-0002 the Warden’s in-process resume, through the Ferrets port, writes a turn from the Warden; no other caller can name an author there', async () => {
     const w = await world();
     const id = await started(w);
-    const port = ferretsPort(w.service);
+    const port = ferretsPort(w.service, 'warden');
     await w.service.stop(id as never, 'now');
 
     expect((await port.resume(id as never, 'Carry on.', { automatic: true, actor: 'warden' })).ok).toBe(true);

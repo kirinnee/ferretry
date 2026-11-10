@@ -11,7 +11,7 @@ import {
   type PinnedWorkingDirectory,
   queryValue,
 } from '@ferretry/kernel/contract';
-import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/kernel/manifest';
+import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { err, milliseconds, ok } from '@ferretry/std';
 import {
   type FerretId,
@@ -1054,7 +1054,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
 
   return {
     provides: {
-      ferrets: ferretsPort(service),
+      ferrets: perNeeder(needer => ferretsPort(service, needer.id)),
       workFolders,
       agentControl: agentControlReader(ferret => service.agentControl(ferret)),
     },
