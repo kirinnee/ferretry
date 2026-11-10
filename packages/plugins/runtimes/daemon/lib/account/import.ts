@@ -364,9 +364,17 @@ const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
  * shorter than the secret store accepts is a flag rather than a credential (`AUTH=1`).
  */
 export function looksSecret(name: string, value: string): boolean {
-  if (value.length < MIN_SECRET_VALUE_LENGTH || INDIRECT_VALUE.test(value)) return false;
-  if (secretReferencesIn(value).length > 0) return false;
+  if (value.length < MIN_SECRET_VALUE_LENGTH || pointsElsewhere(value)) return false;
   if (SECRET_VALUE_PREFIX.test(value)) return true;
+  return secretNamed(name);
+}
+
+/** Whether a value only points at one (`$NAME`, `${NAME}`, a `${secret:NAME}` in it), and so holds none. */
+export const pointsElsewhere = (value: string): boolean =>
+  INDIRECT_VALUE.test(value) || secretReferencesIn(value).length > 0;
+
+/** Whether a name says it holds a credential: a word such as `TOKEN`, or a pair such as `API_KEY` ({@link looksSecret}). */
+export function secretNamed(name: string): boolean {
   const words = name
     .toUpperCase()
     .split(/[^A-Z0-9]+/u)
