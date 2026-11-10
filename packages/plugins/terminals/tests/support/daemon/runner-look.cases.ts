@@ -35,6 +35,7 @@ function subject(
   let activityAt = NOW_SECONDS - 5;
   let dead = false;
   let held = false;
+  let captureFails = false;
   /** The next tmux question of each kind waits for its release (`facts`: the pane-facts question). */
   const gates = new Map<'capture-pane' | 'facts', Promise<void>>();
   const gate = async (kind: 'capture-pane' | 'facts') => {
@@ -73,6 +74,7 @@ function subject(
           return { code: 0, stdout: `${dead ? 1 : 0}||1|22|40|120|${activityAt}|0|%7|4242\n`, stderr: '' };
         if (args[0] === 'capture-pane') {
           await gate('capture-pane');
+          if (captureFails) return { code: 1, stdout: '', stderr: "can't find pane: %7" };
           return { code: 0, stdout: screen, stderr: '' };
         }
         if (args[0] === 'send-keys' || args[0] === 'kill-session') return { code: 0, stdout: '', stderr: '' };
@@ -122,6 +124,10 @@ function subject(
     },
     hold: () => {
       held = true;
+    },
+    /** The next capture of the screen fails (the pane went away between the question and the capture). */
+    failCapture: () => {
+      captureFails = true;
     },
     /** Holds the next question of that kind until the answer is called. */
     holdNext: (kind: 'capture-pane' | 'facts') => {
@@ -351,6 +357,21 @@ export function runnerLookCases(): void {
       // Assert
       should(look).be.undefined();
       should(pane.captures()).equal(0);
+    });
+
+    it('should answer nothing when the screen cannot be captured, and capture again on the next look rather than reuse a frame', async () => {
+      // Arrange
+      const pane = subject();
+      pane.failCapture();
+
+      // Act
+      const failed = await pane.runner.look(pane.handle);
+      const again = await pane.runner.look(pane.handle);
+
+      // Assert: nothing was kept from the failed capture, so the second look asked tmux for the screen again
+      should(failed).equal(undefined);
+      should(again).equal(undefined);
+      should(pane.captures()).equal(2);
     });
 
     it('should answer nothing for a dead pane, a handle that is not a pane id, or a runner with no watch', async () => {
