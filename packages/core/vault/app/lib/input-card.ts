@@ -207,14 +207,34 @@ const reboundWords = (kind: InputRequestView['target']['kind'] | undefined): str
       ? 'The secret store changed. Check the card and send again.'
       : 'The page changed. Check the card and send again.';
 
+const REFUSED_WORDS = 'The daemon refused this.';
+
+/** A typed value shorter than this is not compared with a message: a one-letter value would blank every sentence. */
+const MIN_GUARDED_VALUE_LENGTH = 8;
+
+/**
+ * Whether a message holds a value the owner typed, compared in memory only (the values are never logged, stored or
+ * sent): any typed value of {@link MIN_GUARDED_VALUE_LENGTH} characters or more that appears in it, however it is
+ * surrounded.
+ */
+const carriesTypedValue = (message: string, typed: readonly string[]): boolean =>
+  typed.some(value => value.length >= MIN_GUARDED_VALUE_LENGTH && message.includes(value));
+
 /**
  * A failed Send as a sentence, and what kind it is: each needs a different next step from the owner. `kind` is the
- * card's target, so a sentence names the page or the terminal it is about. The daemon's own message is shown only for a
- * refusal it answered, and it never carries a value.
+ * card's target, so a sentence names the page or the terminal it is about. The message of a refusal that carries a
+ * status is shown as it came, unless it holds a value the owner typed (`typed`, values of 8+ characters): then the
+ * card says the fixed sentence instead, never the message cut or masked. The daemon's own message never carries a
+ * value; the guard is for an answer that is not the daemon's (a proxy, an intermediary) and echoes the body.
  */
-export const inputFailure = (error: unknown, kind?: InputRequestView['target']['kind']): InputFailure => {
+export const inputFailure = (
+  error: unknown,
+  kind?: InputRequestView['target']['kind'],
+  typed: readonly string[] = [],
+): InputFailure => {
   const failure = (error !== null && typeof error === 'object' ? error : {}) as HttpFailure;
-  const message = typeof failure.message === 'string' && failure.message !== '' ? failure.message : undefined;
+  const said = typeof failure.message === 'string' && failure.message !== '' ? failure.message : undefined;
+  const message = said !== undefined && carriesTypedValue(said, typed) ? undefined : said;
   const surface = kind === undefined ? 'target' : SURFACE_WORDS[kind];
   if (failure.status === 409 && failure.code === CODES.targetRebound)
     return { kind: 'changed', definitive: true, text: reboundWords(kind) };
@@ -234,8 +254,7 @@ export const inputFailure = (error: unknown, kind?: InputRequestView['target']['
     return { kind: 'already', definitive: true, text: 'This was already sent.' };
   if (failure.status === 410)
     return { kind: 'gone', definitive: true, text: 'This request expired or was cancelled. Nothing was typed.' };
-  if (typeof failure.status === 'number')
-    return { kind: 'refused', definitive: true, text: message ?? 'The daemon refused this.' };
+  if (typeof failure.status === 'number') return { kind: 'refused', definitive: true, text: message ?? REFUSED_WORDS };
   return {
     kind: 'unknown',
     definitive: false,
