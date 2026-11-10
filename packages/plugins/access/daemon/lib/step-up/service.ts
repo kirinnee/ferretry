@@ -297,18 +297,27 @@ export class StepUpService {
     return this.deps.registry.freshlyHeld(subject, this.deps.clock.nowMs());
   }
 
-  /** Takes the fresh proof for an act, atomically: of concurrent acts on one proof, one gets `true`. */
-  claimFresh(subject: StepUpSubject, act?: MachineSkippableStepUpAct): boolean;
+  /**
+   * Takes the fresh proof for an act, atomically: of concurrent acts on one proof, one gets `true`. With `notAfterMs`,
+   * only a proof proved at or before that instant (epoch ms) is taken; a later one stays where it is.
+   */
+  claimFresh(subject: StepUpSubject, act?: MachineSkippableStepUpAct, bound?: undefined, notAfterMs?: number): boolean;
   /**
    * An act every caller must prove takes only a proof proved for it AND bound to `bound` (the staged save it is for):
    * there is no way to ask for one without naming what it is bound to.
    */
   claimFresh(subject: StepUpSubject, act: SpentProofStepUpAct, bound: string): boolean;
-  claimFresh(subject: StepUpSubject, act?: StepUpAct, bound?: string): boolean {
+  claimFresh(subject: StepUpSubject, act?: StepUpAct, bound?: string, notAfterMs?: number): boolean {
     const now = this.deps.clock.nowMs();
     if (act !== undefined && !stepUpSkippableAtMachine(act))
       return bound !== undefined && !stepUpKeepsProof(act) && this.deps.registry.claimFresh(subject, now, act, bound);
-    return this.deps.registry.claimFresh(subject, now, act as MachineSkippableStepUpAct | undefined);
+    return this.deps.registry.claimFresh(
+      subject,
+      now,
+      act as MachineSkippableStepUpAct | undefined,
+      undefined,
+      notAfterMs,
+    );
   }
 
   /**

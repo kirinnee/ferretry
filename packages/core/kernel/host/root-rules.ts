@@ -114,3 +114,37 @@ export function unlinkNameRefusal(name: string): 'outside' | undefined {
     ? 'outside'
     : undefined;
 }
+
+/**
+ * The roots that take an ABSOLUTE folder the caller names and so may also take `within`, the anchor above it
+ * (`RootsPort.root(name, { subfolder, within })`). Any other root given a `within` resolves nothing.
+ */
+const ANCHORED_ROOTS: ReadonlySet<RootName> = new Set(['imports', 'harness-history', 'harness-home', 'project-files']);
+
+/** Whether this root may be scoped with a `within` anchor. */
+export function takesAnchor(name: RootName): boolean {
+  return ANCHORED_ROOTS.has(name);
+}
+
+/**
+ * The folders, from the anchor's FIRST CHILD down to the scoped `folder` (the folder included, the anchor NOT), that the
+ * kernel must find to be no link; `undefined` when `within` is not `folder` itself or one of its ancestors, or is not a
+ * plain absolute folder (no NUL, no `.`, `..` or empty segment, never the filesystem root). Compared COMPONENT by
+ * component: `/p/.claud` and `/p/.claude2` are not ancestors of `/p/.claude/skills`, whatever their spelling shares.
+ * The anchor is the caller's own named base and is never looked at (a symlinked project folder works, as it did
+ * where `checkedFolder` looked only at the parts below its root), and neither are the anchor's ancestors. When `within`
+ * IS `folder` the walk is empty: it checks nothing, exactly as no `within` at all — allowed, never refused.
+ * One fact, read by the real roots port and by the testing host.
+ */
+export function anchorWalk(folder: string, within: string): readonly string[] | undefined {
+  const plain = (path: string): readonly string[] | undefined => {
+    if (typeof path !== 'string' || path === '/' || !path.startsWith('/') || path.includes('\0')) return undefined;
+    const parts = path.slice(1).split('/');
+    return parts.some(part => part === '' || part === '.' || part === '..') ? undefined : parts;
+  };
+  const below = plain(folder);
+  const anchor = plain(within);
+  if (below === undefined || anchor === undefined || anchor.length > below.length) return undefined;
+  if (anchor.some((part, index) => part !== below[index])) return undefined;
+  return below.slice(anchor.length).map((_, index) => `/${below.slice(0, anchor.length + index + 1).join('/')}`);
+}

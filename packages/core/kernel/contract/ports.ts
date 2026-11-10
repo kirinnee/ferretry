@@ -320,6 +320,33 @@ export interface ConfigPort {
     options?: { readonly ifMatch?: string },
   ): Promise<ConfigWriteOutcome>;
   /**
+   * The CALLER's own write of one of this plugin's declared files, for a route whose person authored the edit (an Add
+   * form). Judged exactly as {@link write} — the same validation, `ifMatch`, size cap, hold rules, raw-secret refusal
+   * and every other check — except for NN2: a `${secret:NAME}` reference the CALLER'S edit adds goes into effect (not
+   * held) only when the AMBIENT call, which the kernel carries and a plugin can neither pass nor set, is the owner: the
+   * host admin where the request arrived on the host (a relayed loopback is remote), or a governed device that holds the
+   * file's configure capability and a passkey that already existed when the call was admitted, claimed once — what
+   * `PUT /v1/config/file` asks of an add (`loosen-config`); the unlock alone is not enough, and a passkey proved
+   * AFTER the call was admitted is never taken by the call or by work it spawns. A ferret's session credential, a job, a member call and a caller
+   * outside a call keep the hold exactly as {@link write} holds it; no option can switch it off for an agent. The act is
+   * logged with the file and the secret NAME, never a value, and the kernel never reads a value to judge it.
+   *
+   * The owner's answer covers ONLY the references the caller's own edit introduces relative to the text it edits (the
+   * disk text, which for a file with an edit held is the held text). A reference that only an edit already held names
+   * keeps the WHOLE write held, whoever asks, and the log credits the owner for its own references alone. The question
+   * is SYNCHRONOUS (nothing can time out; a missing judge, a throw or no answer holds) and is asked of the standing as
+   * it is WHEN THE WRITE HAPPENS, not as it was when the call was admitted: the ambient scope also covers work the call
+   * spawns (a timer, a listener) long after it ended, so a device revoked, locked or narrowed since holds. A route that
+   * declares no capability and does not consult the grants (`consultsGrants`) gives the call no grant standing, so it
+   * holds every caller's add, the host admin's too.
+   */
+  writeAsCaller(
+    def: ConfigFileDef<any> | ConfigCollectionDef<any>,
+    name: string | undefined,
+    edit: ConfigEdit,
+    options?: { readonly ifMatch?: string },
+  ): Promise<ConfigWriteOutcome>;
+  /**
    * The OWNER's own patch of one of its own files (today's rule 3, docs/config-files.md: "a save never discards a
    * held edit"). A patch only — top-level keys, `undefined` removes one — because the owner's act is the keys they
    * changed, never a whole text rendered from what is in effect.
@@ -863,7 +890,29 @@ export interface RootHandle {
 
 export interface RootsPort {
   /** Only roots the manifest declared in `permissions.roots`; anything else throws at build. */
-  root(name: RootName, scope?: { readonly ferret?: FerretId; readonly subfolder?: string }): RootHandle;
+  root(
+    name: RootName,
+    scope?: {
+      readonly ferret?: FerretId;
+      readonly subfolder?: string;
+      /**
+       * Optional ANCHOR, for the roots scoped to an absolute folder the caller names (`imports`, `harness-history`,
+       * `harness-home`, `project-files`): the folder itself or one of its ancestors (compared component by component,
+       * never by string prefix; plain, absolute, never `/`). With one, every folder from the anchor's FIRST CHILD down
+       * to `subfolder` (the anchor itself excluded) is looked at without being followed, and a link at any of them (a
+       * project's `.claude -> elsewhere`, a `skills -> elsewhere`, or the folder itself) is refused `link_escape` by
+       * every call that reaches the disk (`resolve` is lexical and answers `ok` under a link; its disk doors refuse).
+       * The anchor and its ancestors are not looked at: a symlinked project folder, or a project under a linked
+       * workspace folder, is fine; only what lies below the anchor is. An anchor equal to `subfolder` is allowed and
+       * walks nothing (it checks nothing, as no anchor). An anchor that is not the folder or its ancestor, or is given
+       * to a root that takes no absolute folder, names no folder: every call is refused `outside`. Without one the
+       * handle is exactly what it was (a link in the folder's path is resolved, and the walk below it never leaves it).
+       * The check is made at each call, then the walk proceeds, so a folder swapped for a link in between is the same
+       * declared window as any base the kernel judges by path.
+       */
+      readonly within?: string;
+    },
+  ): RootHandle;
   /**
    * A read-only handle on exactly ONE file beside a harness home (`~/.claude.json`, which sits BESIDE `~/.claude`, so
    * no `harness-home` scope reaches it): only for a plugin that may hold `harness-home` (Runtimes) and declared it in

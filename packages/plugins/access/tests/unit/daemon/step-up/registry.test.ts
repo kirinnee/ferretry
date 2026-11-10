@@ -117,6 +117,28 @@ describe('StepUpRegistry fresh proof (acts that add access)', () => {
     should(registry.claimFresh(phone, NOW + 1)).be.true();
   });
 
+  it('K1 should never claim a proof proved after the instant a claim is bounded by, and should leave it in place', () => {
+    // Arrange — a call admitted at NOW; the owner proves a passkey a minute later.
+    const registry = openRegistry();
+    registry.grant(phone, NOW + 60_000);
+
+    // Act / Assert — the bounded claim refuses it and spends nothing; an unbounded one still takes it.
+    should(registry.claimFresh(phone, NOW + 61_000, undefined, undefined, NOW)).be.false();
+    should(registry.freshlyHeld(phone, NOW + 61_000)).be.true();
+    should(registry.claimFresh(phone, NOW + 61_000, undefined, undefined, NOW + 60_000)).be.true();
+    should(registry.claimFresh(phone, NOW + 61_000, undefined, undefined, NOW + 60_000)).be.false();
+  });
+
+  it('K1 should take a proof proved before the bound exactly once', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW - 1_000);
+
+    // Act / Assert
+    should(registry.claimFresh(phone, NOW, undefined, undefined, NOW)).be.true();
+    should(registry.claimFresh(phone, NOW, undefined, undefined, NOW)).be.false();
+  });
+
   it('should claim a proof for an act only when it was proved for that very act', () => {
     // Arrange
     const registry = openRegistry();
