@@ -90,7 +90,7 @@ describe('CFG-LEAK (ii) a sample of the acceptance corpus: F1-F7 × leads × mar
     should(LINES.length).be.above(2000);
   });
 
-  // Limit 10 s: 3x the worst measured alone with --coverage (see the report's timing table); ~2,000 lines × 5 views.
+  // Limit 10 s: the file runs in about 1.4 s alone (3 runs: 1.37, 1.39, 1.36 s), the slowest test about 0.5 s; ~2,000 lines × 5 views.
   it('no Runtimes view shows a part of a secret: Resolved view, component detail, runtime list', () => {
     const leaked = LINES.flatMap(line =>
       viewsOf(line).some(view => showsSecret(view.text)) ? [JSON.stringify(line).slice(0, 120)] : [],
