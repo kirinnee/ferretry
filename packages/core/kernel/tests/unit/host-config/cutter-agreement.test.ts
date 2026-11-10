@@ -26,6 +26,8 @@ const OWN_LINES: readonly (readonly string[])[] = [
   [`https://alice:${SHORT_PASSWORD}@host.example/path?token=${OTHER_VALUE}`],
   ['--api-key=$MY_KEY', '--password=${DB_PASS}', '--password', '${secret:DB_PW}'],
   [`srv --token ${VALUE}`],
+  // A token in what the glued reading calls the flag, with a token as its value (`-H` and a token, glued by `=`).
+  ['-Hghp_AbCdEfGh12345678=sk-AbCdEfGh12345678'],
   ['sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 'plain', ''],
   [],
 ];
