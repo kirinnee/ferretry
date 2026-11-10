@@ -281,8 +281,8 @@ describe('first pairing through the real rendezvous', () => {
     ['the last byte of the ciphertext body', length => length - TAG_BYTES - 1],
     ['the first byte of the ciphertext body', () => HEADER_BYTES],
     [
-      'a byte in the middle of the ciphertext body',
-      length => HEADER_BYTES + Math.floor((length - HEADER_BYTES - TAG_BYTES) / 2),
+      'a byte three quarters into the ciphertext body',
+      length => HEADER_BYTES + Math.floor(((length - HEADER_BYTES - TAG_BYTES) * 3) / 4),
     ],
   ];
 
@@ -302,7 +302,9 @@ describe('first pairing through the real rendezvous', () => {
         expect(at).toBeGreaterThanOrEqual(HEADER_BYTES);
         // One low bit, not the whole byte: under a check that decrypts the body whatever the tag says, 0xff turns a
         // JSON text into invalid UTF-8 that is refused for the wrong reason, where one bit often leaves a valid text
-        // that says something else, which a tamper-accepting check would believe.
+        // that says something else, which a tamper-accepting check would believe. (Measured against that check, the
+        // last quarter of this record's body is where a flip is read as a different, valid answer; the first part of it
+        // is structure the parser refuses anyway, so the body rows sit at the end and three quarters in.)
         edited[at] = (edited[at] ?? 0) ^ 0x01;
         return edited;
       };
