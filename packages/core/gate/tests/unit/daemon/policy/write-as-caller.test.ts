@@ -708,11 +708,16 @@ describe('writeAsCaller held-edit patch: one field patched beside a held edit ne
     expect(port.collection(mcpDef).get('acme')).toMatchObject({ limit: 10 });
   });
 
-  test('held-edit patch: a plain write by a ferret over its own held edit is still made to the held text only', async () => {
+  test('held-edit patch: a plain patch by a ferret beside its own held edit is judged alone: its non-loosening field is in effect, the held edit stays held, a loosening patch is itself held', async () => {
     const { port } = await stagedLimit();
     const plain = await runInCall(ferretCall(), async () => port.write(mcpDef, 'acme', { patch: { note: 'f' } }));
-    expect(plain.kind).toBe('held');
-    expect(port.collection(mcpDef).get('acme')).toBeUndefined();
+    expect(plain.kind).toBe('written');
+    expect(port.collection(mcpDef).get('acme')).toEqual({ env: {}, note: 'f', limit: 10 });
+    expect(port.fileState(mcpDef, 'acme').state).toBe('held');
+    const raise = await runInCall(ferretCall(), async () => port.write(mcpDef, 'acme', { patch: { limit: 50 } }));
+    expect(raise.kind).toBe('held');
+    expect(port.collection(mcpDef).get('acme')).toMatchObject({ limit: 10 });
+    expect(port.fileState(mcpDef, 'acme').state).toBe('held');
   });
 
   test('held-edit patch: V1 and V2 secret cases stay held: the host admin’s one field is in effect, the reference never, no owner line', async () => {

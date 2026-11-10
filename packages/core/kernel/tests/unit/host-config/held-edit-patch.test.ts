@@ -211,14 +211,64 @@ describe('held-edit patch: what does not change', () => {
     expect(viaCaller.disk()).toBe(viaWrite.disk());
   });
 
-  test('held-edit patch: a PLAIN write (a ferret’s) over a held file is still made to the held text only and stays held', async () => {
+  test('held-edit patch: a ferret’s PLAIN non-loosening patch beside a held edit is judged alone, goes into effect, and the held edit stays held', async () => {
     const h = harness();
     await h.stage();
     const outcome = await h.port.write(capsDef, undefined, { patch: { note: 'ferret note' } });
-    expect(outcome.kind).toBe('held');
-    expect(h.port.file(capsDef)).toEqual({ capA: 5, capB: 5, env: {} });
+    expect(outcome.kind).toBe('written');
+    expect(h.port.file(capsDef)).toEqual({ capA: 5, capB: 5, note: 'ferret note', env: {} });
     expect(h.disk()).toContain('capA: 50');
     expect(h.disk()).toContain('note: ferret note');
+    expect(h.port.fileState(capsDef).state).toBe('held');
+    expect(h.files.held().map(edit => edit.path)).toEqual(['caps.yaml']);
+  });
+
+  test('held-edit patch: a ferret’s PLAIN loosening patch beside a held edit is itself held, nothing goes into effect, the held edit stays held', async () => {
+    const h = harness();
+    await h.stage();
+    const outcome = await h.port.write(capsDef, undefined, { patch: { capB: 40 } });
+    expect(outcome.kind).toBe('held');
+    expect(h.port.file(capsDef)).toEqual({ capA: 5, capB: 5, env: {} });
+    expect(h.port.fileState(capsDef).state).toBe('held');
+    expect(h.disk()).toContain('capA: 50');
+    expect(h.disk()).toContain('capB: 40');
+  });
+
+  test('held-edit patch: a PLAIN patch under a confirming caller (host admin, proved device) never puts the held loosening into effect', async () => {
+    const h = harness();
+    await h.stage();
+    h.verdicts.other = true;
+    const outcome = await h.port.write(capsDef, undefined, { patch: { note: 'plain' } });
+    expect(outcome.kind).toBe('written');
+    expect(h.port.file(capsDef)).toEqual({ capA: 5, capB: 5, note: 'plain', env: {} });
+    expect(h.port.fileState(capsDef).state).toBe('held');
+    expect(h.disk()).toContain('capA: 50');
+  });
+
+  test('held-edit patch: the shared file writer (Gate’s, confirmedLoosening) patching one key never puts a held loosening into effect', async () => {
+    const h = harness();
+    await h.stage();
+    const outcome = await h.files.writer().write(
+      { plugin: 'caps', def: capsDef },
+      { patch: { note: 'gate owner' } },
+      {
+        confirmedLoosening: true,
+      },
+    );
+    expect(outcome.kind).toBe('written');
+    expect(h.port.file(capsDef)).toEqual({ capA: 5, capB: 5, note: 'gate owner', env: {} });
+    expect(h.files.held().map(edit => edit.path)).toEqual(['caps.yaml']);
+    expect(h.disk()).toContain('capA: 50');
+  });
+
+  test('held-edit patch: a WHOLE text from a plain write replaces the held edit, as for any write', async () => {
+    const h = harness();
+    await h.stage();
+    h.verdicts.other = true;
+    const outcome = await h.port.write(capsDef, undefined, 'capA: 6\ncapB: 5\n');
+    expect(outcome.kind).toBe('written');
+    expect(h.port.file(capsDef)).toMatchObject({ capA: 6, capB: 5 });
+    expect(h.files.held()).toEqual([]);
   });
 
   test('held-edit patch: the etag is the disk’s: the held text’s etag lands the patch, a stale one is a conflict', async () => {

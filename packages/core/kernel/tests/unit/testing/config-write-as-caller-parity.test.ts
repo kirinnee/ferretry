@@ -184,8 +184,8 @@ test('the testing host never asks the owner question for a plain write, for writ
 });
 
 /**
- * [kernel: config held-edit patch] A patch over a held file is made to BOTH versions, by writeAsCaller and by
- * writeAsOwner alike. The outcome is compared without its etag and id (the writer digests a text, the testing host
+ * [kernel: config held-edit patch] A patch over a held file is made to BOTH versions, by the plain write,
+ * writeAsCaller and writeAsOwner alike. The outcome is compared without its etag and id (the writer digests a text, the testing host
  * stamps a value): the kind, what the owner's patch loosened, and what is still held. The value in effect is compared
  * as a value, and a follow-up edit pinned to the answer's etag must land the same way on both.
  */
@@ -220,7 +220,7 @@ const shaped = (outcome: Awaited<ReturnType<ConfigPort['write']>>) => ({
 });
 
 test('the testing host makes a patch over a held file to both versions, as the real writer does', async () => {
-  for (const via of ['writeAsCaller', 'writeAsOwner'] as const)
+  for (const via of ['write', 'writeAsCaller', 'writeAsOwner'] as const)
     for (const owner of [true, false])
       for (const other of [true, false])
         for (const { label, held, patch } of HELD_BOTH_WAYS) {

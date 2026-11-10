@@ -1041,7 +1041,8 @@ async function start(world: World): Promise<TestHost> {
         return diskEtagOf(def, name, value);
       },
       async write(def, name, edit, writeOptions = {}) {
-        return await write(def, name, edit, writeOptions);
+        // As the real writer: a PATCH beside a held edit is made to both versions, judged as the caller's change alone.
+        return await write(def, name, edit, writeOptions, undefined, undefined, true);
       },
       // As `write`, except that the secret references the edit adds go into effect when the AMBIENT call is the owner,
       // asked of the admission in use exactly as the real writer asks it, and that a PATCH of a file with an edit held

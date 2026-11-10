@@ -1056,7 +1056,15 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (declaration === undefined) return { kind: 'refused', reason: 'not_declared', issues: [] };
     const slot = slotFor(declaration, name);
     if (slot === undefined) return { kind: 'refused', reason: 'bad_name', issues: [] };
-    return await serial(async () => await writeLocked(slot, def, edit, writeOptions));
+    // A PATCH of a file with an edit held is made to BOTH versions (as `writeAsOwner`), judged as the caller's change
+    // alone: a plain write patch applied to the held disk text would let a caller who may confirm a loosening confirm
+    // the held one too. A whole text is the caller's whole text and stays on `writeLocked`.
+    return await serial(async () => {
+      const entry = settled.get(slot.path);
+      if (typeof edit === 'string' || entry?.evaluated.held === undefined)
+        return await writeLocked(slot, def, edit, writeOptions);
+      return await patchBothVersions(slot, def, entry, edit.patch, undefined, writeOptions, false);
+    });
   };
 
   /**
