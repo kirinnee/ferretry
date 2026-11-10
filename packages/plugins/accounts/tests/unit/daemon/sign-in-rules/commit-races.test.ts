@@ -227,6 +227,29 @@ describe('a suspension raises nothing in a ferret’s session (R3c §18, secrev-
     should(Object.keys(every)).eql([...ports]);
   });
 
+  it('I227 should raise no card in a ferret’s session when a rule is suspended: the service has no way to reach one', async () => {
+    // Every port the rule service is built from; none can raise an agenda card, a notice or a message.
+    const every: Record<keyof SignInRulePorts, true> = {
+      store: true,
+      accounts: true,
+      proofs: true,
+      passkeys: true,
+      devices: true,
+      audit: true,
+      clock: true,
+      ids: true,
+      warn: true,
+      terminalRules: true,
+    };
+    for (const port of Object.keys(every))
+      should(port).not.match(/agenda|ask|card|notice|message|session|raise|push/iu);
+    // And a suspension that really happens writes the store and the audit alone.
+    const w = await world();
+    const { view } = await approved(w);
+    await w.service.suspend(view.id, 'did-not-move-on');
+    should(w.store.document?.rules[0]?.suspended?.because).equal('did-not-move-on');
+  });
+
   it('I231 S122 should record a fill-caused suspension only in the owner’s audit, with the session as a detail', async () => {
     const w = await world();
     const { view } = await approved(w);

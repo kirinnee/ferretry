@@ -312,3 +312,36 @@ describe('TwoFactorSeedController a refused stage', () => {
     should(message).containEql("this is the owner's command").and.containEql('(owner only)');
   });
 });
+
+describe('Appendix D: factor add --totp', () => {
+  it('I177 should read the accounts as the owner before it prompts, and let the typed key go once the stage request is answered', async () => {
+    // Refused first: a caller who may not read accounts is asked for nothing.
+    const refused = rig({ accountsFail: new FyHttpError('owner only', 403, 'owner_only') });
+    await rejection(() => refused.controller.add('GITHUB_WORK', { totp: true }));
+    should([refused.said, refused.asked, refused.askedHidden]).eql([[], [], []]);
+    // The key travels in the stage request alone: later calls and every line said carry none of it, and nothing the
+    // controller keeps holds it.
+    const { controller, calls, said } = rig({ views: [view('waiting'), view('saved')] });
+    await controller.add('GITHUB_WORK', { totp: true });
+    should(calls[0]?.[0]).equal('list');
+    const after = calls.slice(calls.findIndex(call => call[0] === 'stage') + 1);
+    should(after.length).be.greaterThan(1);
+    should(JSON.stringify(after)).not.containEql(KEY).and.not.containEql(padInputValue(KEY));
+    should(said.join('\n')).not.containEql(KEY);
+    should(JSON.stringify(Object.values(controller))).not.containEql(KEY);
+  });
+
+  it('S100 should take the key at a hidden prompt, save no seed itself, and refuse away from a terminal', async () => {
+    const { controller, calls, asked, askedHidden } = rig();
+    await controller.add('GITHUB_WORK', { totp: true });
+    should(askedHidden).eql(['2FA key, or its otpauth://totp link (hidden): ']);
+    should(asked.join('\n')).not.containEql(KEY);
+    // It only stages, asks the app to confirm, and reads the stage: there is no call that saves a seed.
+    should(new Set(calls.map(call => call[0]))).eql(new Set(['list', 'stage', 'confirmInApp', 'view']));
+    // No flag carries the key either: the command takes none.
+    should(await rejection(() => rig({ interactive: false }).controller.add('GITHUB_WORK', { totp: true }))).containEql(
+      'this needs a terminal you are sitting at',
+    );
+    should(await rejection(() => rig().controller.add('GITHUB_WORK', {}))).containEql('--totp');
+  });
+});
