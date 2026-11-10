@@ -557,9 +557,9 @@ function flagValueCuts(flag: string, value: string, offset: number): readonly Cu
 
 /**
  * The write rule's value test past its name gate (`write-rule.ts` `looksLikeRawSecret`): what it refuses whole.
- * A copy of the test, not the whole rule: the F1-F7 families W refuses and this cutter still shows are a counted GAP
- * (`ports-pending.json`, pinned by `kernel-cutter-f1-f7-pin.test.ts`), so "cut what W refuses" holds over the closed
- * corpus only.
+ * A copy of the test, not the whole rule: the F1-F7 families W refuses and this cutter still shows are held by each
+ * consumer's net (`kernel-cutter-f1-f7-pin.test.ts`), so the cutter alone cuts what W refuses over the closed corpus
+ * only.
  */
 const WHOLE_SCHEME = /^(?:bearer|basic|token)[ \t]+/iu;
 const WHOLE_REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;

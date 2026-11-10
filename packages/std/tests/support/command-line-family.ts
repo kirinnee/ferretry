@@ -35,7 +35,7 @@ export const HIDDEN = '‹hidden›';
 /**
  * What a Runtimes view says instead of a word the write rule still refuses once the cutter has had its say (the net):
  * it hides the whole word, which is at least what any cutter hides. A copy of `WITHHELD_WORDS_TEXT`, pinned equal by
- * `net-views.test.ts` in the Runtimes tests (a std test may not import a plugin).
+ * `net-words-keep.test.ts` in the Runtimes tests (a std test may not import a plugin).
  */
 export const WITHHELD = 'Not shown: this may hold a credential. Open the file at this machine to read it.';
 

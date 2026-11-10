@@ -7,8 +7,8 @@
  *
  * - A text that holds a raw secret, or is over the cap, or that no mask can prove safe, is WITHHELD whole.
  * - Any other text is shown with each value that a credential name or a token shape marks cut to `‹hidden›`: per part,
- *   value only (a flag's spelling, a key's name, a URL's user and host stay). The words are cut by the kernel's copy of
- *   runtimes' word cutter ({@link shownWord}); the rest of the text is rebuilt by `editConfigText`, which sets only the
+ *   value only (a flag's spelling, a key's name, a URL's user and host stay). The words are cut by the one word cutter,
+ *   `@ferretry/std/credential-words` ({@link shownWord}); the rest of the text is rebuilt by `editConfigText`, which sets only the
  *   scalars that changed: every comment, the key order and the block layout stay, and the YAML library's round trip
  *   normalises the spacing of a flow list and before a trailing comment. A text with nothing to hide is returned as it
  *   is, byte for byte.
