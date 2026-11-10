@@ -68,7 +68,7 @@ const POINTER_CLASS_LINES: readonly (readonly string[])[] = [',', ';', '&'].flat
   POINTER_VALUES.flatMap(shape => VALUE_LEADS.map(lead => lead(shape(mark)))),
 );
 
-/** The cases the kernel's own `secret-words.test.ts` pins, and the lines a person writes. */
+/** The cases `credential-words.test.ts` pins, and the lines a person writes. */
 const OWN_LINES: readonly (readonly string[])[] = [
   ...POINTER_CLASS_LINES,
   // No pointer, so no whole-value cut: a quoted value's own cut ends at its closing quote (`,b=2` after it stays shown).

@@ -1,11 +1,10 @@
 /**
- * CFG-LEAK-R: the kernel's COPY of the word cutter, on the hard cases its header names — a quoted value that holds the
+ * CFG-LEAK-R: the one word cutter, on the hard cases its header names — a quoted value that holds the
  * separator, a pointer beside a secret on either side, base64 padding, a user password inside a secret-named value, a
  * flag whose value has a pointer in it. Each case is one command-line word (or a flag and its value), and what a
  * person must see of it: the key, the flag and the pointer stay, the value goes.
  *
- * The copy is pinned equal to runtimes' original over its whole generated family by the runtimes agreement test (a
- * kernel test may not import a plugin: Unit B). These cases are what holds the copy's own branches here.
+ * The whole generated family is held by `credential-words-corpus.test.ts`; these cases hold the cutter's own branches.
  *
  * Fake only: every value is shaped like a credential and is none.
  */
@@ -19,7 +18,7 @@ const POINTER = '${secret:X}';
 
 const shown = (...words: readonly string[]): readonly string[] => shownWords(words).map(word => word.text);
 
-describe('CFG-LEAK-R the copied cutter, case by case', () => {
+describe('CFG-LEAK-R the cutter, case by case', () => {
   const HIDE: readonly (readonly [label: string, words: readonly string[], seen: readonly string[]])[] = [
     ['a quoted value that holds the separator', [`API_KEY="${VALUE},${VALUE}"`], [`API_KEY=${HIDDEN_VALUE_TEXT}`]],
     ['a single-quoted value after a part', [`API_KEY=a:'${VALUE},x'`], [`API_KEY=${HIDDEN_VALUE_TEXT}`]],

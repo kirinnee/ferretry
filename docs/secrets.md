@@ -441,17 +441,17 @@ credential, and a write may not ADD one.
 
 **The read mask.** `GET /v1/config/file` and `config_read` cut each credential-shaped value in a launch flag, an MCP
 argument or a nested value to `‹hidden›`, for every caller, the owner's paired device and the host admin included
-(the owner at the machine edits the file itself). The cutter is a copy of Runtimes' command-line cutter (the kernel is a
-leaf and imports no plugin); a test over one shared corpus (`kernel-cutter-agreement.test.ts`, in Runtimes) requires the
-two copies to cut every word of that corpus identically and `HIDDEN_VALUE_TEXT` to equal `HIDDEN_WORD_TEXT`. The
-corpus holds every name the write rule's own tail test refuses, so a name only the write rule knows is in it. A pin to
-the vault contract's cutter follows once `rebuild/fix-catalogs-one-rule` lands on 5.0.
+(the owner at the machine edits the file itself). The cutter and the write rule are ONE implementation in
+`@ferretry/std/credential-words` (with the `${secret:NAME}` grammar in `@ferretry/std/secret-reference`), imported by the
+kernel's read mask and by Runtimes' views; there is no second copy to keep equal, and `HIDDEN_WORD_TEXT` is std's
+`HIDDEN_VALUE_TEXT`. The std corpus test (`credential-words-corpus.test.ts`) holds the cutter to every name the write
+rule's own tail test refuses, so a name only the write rule knows is in it. A pin to the vault contract's cutter follows
+once `rebuild/fix-catalogs-one-rule` lands on 5.0.
 
 **The mask and W read a name the same way.** One name test, in the kernel, decides whether a flag or a key is a
 credential's for both: its name ENDS in `key`, `token`, `secret`, `password`, `passwd` (plural too) or
 `credential(s)`, dashes ignored (`--key`, `--tokens`, `--apitoken`, `--ssh-key`, `-e SIGNING_KEY=v`); the mask also
-keeps its older words (`AUTH`, `COOKIE`, a pair such as `API_KEY`). Runtimes' copy carries the same test, pinned equal by
-the agreement test. A text that glues raw text to a `${secret:…}` pointer (`API_KEY=prefix${secret:X}`,
+keeps its older words (`AUTH`, `COOKIE`, a pair such as `API_KEY`). Runtimes imports the same test. A text that glues raw text to a `${secret:…}` pointer (`API_KEY=prefix${secret:X}`,
 `--token prefix${secret:X}`, `API_KEY=${secret:X}?model=short`, `Authorization: Bearer v${secret:X}`) has the whole
 value cut, from the start of the value to the end of the word with the pointer; one pointer alone stays shown. And a
 net sits under the mask: when the text the mask leaves still holds a raw flag secret by W's rule, the file is
@@ -469,11 +469,15 @@ per-document plan (one refused document writes nothing of the set).
 
 - **`MIN_CUT_WORD` is 7.** A word shorter than 7 characters is never searched for a cut (`a://:p@h` is the shortest
   that holds a password); a value under a secret name is cut from 8 characters, and a URL's password at any length.
+  The entropy gate decides, on write and read alike: a 16-character value of entropy under 3.5 (`abababab12121212`) is
+  no credential to the write rule, so the mask and the net leave it shown, and 57 such lines of the 85,848-line review
+  corpus are listed and pinned (`net-low-entropy-pin.test.ts`): 0 shown that W refuses on the masked text; 57 listed
+  low-entropy values that W accepts bare.
 - **Residuals in a broken file.** A file that does not parse cannot be rebuilt around its cuts: it is withheld
   (`unparsed`) when its raw text holds a word the cutter would cut, and shown as it is when none does. What neither
   check recognises is shown.
 - **Not cut:** a JSON document inside a flag (its keys are quoted), a plain password stuck to a one-letter flag
-  (`-p<password>`), and the other cases named in the header of `host/config/secret-words.ts`. (A value glued to a
+  (`-p<password>`), and the other cases named in the header of `packages/std/src/credential-words/words.ts`. (A value glued to a
   pointer is cut, see above.)
 - **A flag's value in a file it was already in.** W is new-only, so a file that already holds such a value keeps
   working and is shown masked on every read; nothing removes it.
@@ -481,22 +485,19 @@ per-document plan (one refused document writes nothing of the set).
   after it is shown as `‹hidden›` (checked: `--token-file` then `/home/me/.config/tool/token`), though W accepts a path
   there. A person sees `‹hidden›` where a path stood, and a text saved back with it is refused until the real text is
   typed at the machine.
-- **W and the mask agree: residual 0.** Every raw flag secret W refuses is cut by the kernel mask and by Runtimes'
-  copy (a value after `${secret:X},` or `${secret:X},b=2,` is cut too), over the generated ruling #40 corpus, the
-  hand-written lines and every name W's tail test refuses (pinned by `kernel-cutter-agreement.test.ts`, strict): residual
-  0 over that closed corpus (the 8,304-line corpus of the review rounds), and not over every line W can refuse. A
-  credential value that holds a pointer and that W refuses whole is cut whole, value start to word end, in the shapes
-  that corpus holds (`--key a,v,${secret:X}`, `--key ${secret:X},b=v`); the pointer in it is cut with the rest. **The
-  open GAP is the families F1-F7**: values W refuses whole that both cutters still show (a look-alike of a pointer, a
-  blank and a token shape, a pointer in a URL's user part, a value starting `.`, a pointer never closed, past W's
-  4096-character window, one item holding blanks). The kernel doors (`GET /v1/config/file`, `config_read`) leak none of
-  them, because the net withholds what W still refuses; Runtimes' Resolved view and a component's detail have no such
-  net. It is the counted `GAP(runtimes: Resolved view and component detail)` line in `ports-pending.json` (who can reach
-  those views, the remedy and the owner are there) and `kernel-cutter-f1-f7-pin.test.ts` pins it. The
+- **W and the mask agree by construction.** The cutter and W are one implementation, and each consumer runs W on what
+  its cutter shows and withholds what W still refuses: the kernel doors withhold the file (`unmaskable`), and
+  Runtimes' views withhold the item in words (the Resolved view's server line or flag, a component's whole args or flags
+  list, the runtime list's overridden flag; an edit that keeps a word of a withheld list is refused, "retype the whole
+  list"). A credential value that holds a pointer and that W refuses whole is cut whole, value start to word end
+  (`--key a,v,${secret:X}`, `--key ${secret:X},b=v`); the pointer in it is cut with the rest. The families F1-F7 (a
+  look-alike of a pointer, a blank and a token shape, a pointer in a URL's user part, a value starting `.`, a pointer never
+  closed, past W's 4096-character window, one item holding blanks) are held by the net, not by the cutter
+  (`kernel-cutter-f1-f7-pin.test.ts`). Measured over the 85,848-line review corpus (69,474 refused by W): 0 shown that W
+  refuses on the masked text; 57 listed low-entropy values that W accepts bare (see `MIN_CUT_WORD` above). The
   price is over-redaction: the mask cuts every value under a name W reads as a credential, a path after `--token-file`
-  (E3) and the whole value of a word that glues text to a pointer.
-  And should the mask ever miss a name W knows, the net withholds the file (`unmaskable`) instead of showing it. A word
-  of blanks that does not start with a flag (`srv --token v`) is no gap: the read splits it into words and cuts `v`.
+  (E3) and the whole value of a word that glues text to a pointer. A word of blanks that does not start with a flag
+  (`srv --token v`) is no gap: the read splits it into words and cuts `v`.
 - **GAP: the etag is a digest oracle.** A file's etag is the sha256 of its disk text and goes to every `fleet.use`
   reader (`GET /v1/config/file`, the `kernel.config-changed` frame, `GET /v1/config/status`). A hidden value that is
   long and high-entropy cannot be recovered from it; a short or low-entropy one (an 8-14 character password) can be

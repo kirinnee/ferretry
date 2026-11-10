@@ -1,16 +1,15 @@
 /**
- * The kernel's COPY of the rule for what a command-line word may show (cfg-leak, CFG-LEAK-R): a configuration file's
- * text is read by every `fleet.use` caller and every ferret, so a credential a person wrote into a flag, an MCP
- * argument or a nested value is cut the same way on every read, for every caller, the edit form's owner included.
+ * THE rule for what a command-line word may show (cfg-leak, CFG-LEAK-R), declared once: a configuration file's text is
+ * read by every `fleet.use` caller and every ferret, so a credential a person wrote into a flag, an MCP argument or a
+ * nested value is cut the same way on every read, for every caller, the edit form's owner included. The kernel's read
+ * mask (`shownConfigText`) and Runtimes' views (Resolved view, component detail, runtime list) both import it, and each
+ * runs the write rule W (`./write-rule.ts`) on what this cuts and withholds what W still refuses (the net), so a word W
+ * refuses is a word no consumer shows by construction.
  *
- * This is runtimes' `command-line.ts` and the `looksSecret` family of its `account/import.ts`, copied word for word
- * (security code is copied, not redesigned), minus `shownWordsEtag`, and rewired to the kernel's own constants because
- * the kernel is a leaf and imports no plugin. The two copies are pinned equal by the agreement test over one shared
- * corpus, `packages/plugins/runtimes/tests/unit/daemon/kernel-cutter-agreement.test.ts` (T-B1), which also holds the
- * write rule (`findFlagSecrets`) under both (T-B2). They differ in ONE place on purpose: runtimes' `looksSecret` is the
- * fleet's (also used to refuse a secret written into an environment), so its copy widens the NAME test locally;
- * here {@link namesCredential} is that test, shared with the write rule. Below, "the Resolved view" and
- * "a component's detail" are runtimes' two readers of the same rule.
+ * It holds the fleet's word tests too (`looksSecret`, `secretNamed`, `pointsElsewhere`, the token formats), which the
+ * fleet import rules also use: {@link looksSecret} is the fleet's, {@link looksSecretShown} widens its NAME test to
+ * {@link namesCredential} for a word that is only being SHOWN. Below, "the Resolved view" and "a component's detail" are
+ * Runtimes' two readers of the same rule.
  *
  * The rule: a launch flag and an MCP argument, wherever one travels.
  *
@@ -49,9 +48,10 @@
  * it is cut whole, value start to word end ({@link refusedCuts}), over-cutting the pointer in it. That is the closed
  * corpus (residual 0 over it), not every value W refuses: the families F1-F7 (a look-alike of a pointer, a blank and a
  * token shape, a pointer in a URL's user part, a value starting `.`, a pointer never closed, past W's 4096-character
- * window, one item holding blanks) are refused by W and still shown by BOTH cutters. The kernel doors stay safe
- * because `shownConfigText` withholds what W still refuses; Runtimes' views have no such net (the counted GAP in
- * `ports-pending.json`, pinned by `kernel-cutter-f1-f7-pin.test.ts`). A name is a credential's by the tail test ({@link namesCredential}) or by the older words below.
+ * window, one item holding blanks) are refused by W and not cut here; they are held by the NET in each consumer
+ * (`shownConfigText` withholds the file, Runtimes' views withhold the item; `kernel-cutter-f1-f7-pin.test.ts`). The one
+ * limit of the net: a refused line whose masked text W accepts bare (a 16-character value of entropy under 3.5), 57 lines
+ * of the review corpus, pinned in `net-low-entropy-pin.test.ts`. A name is a credential's by the tail test ({@link namesCredential}) or by the older words below.
  * Also GAPs, each the same text as a harmless one (review r4): `user:pass` AFTER a pointer
  * (`API_KEY=${secret:X} person:<v>`, as `MODEL=gpt-4o-mini` is its own key, G5b); a quoted value of short words before
  * a pointer (`API_KEY="my pass phrase" ${secret:X}`, G6); and text under a harmless bare key before a pointer
@@ -556,7 +556,7 @@ function flagValueCuts(flag: string, value: string, offset: number): readonly Cu
 }
 
 /**
- * The write rule's value test past its name gate, copied (`secrets.ts` `looksLikeRawSecret`): what it refuses whole.
+ * The write rule's value test past its name gate (`write-rule.ts` `looksLikeRawSecret`): what it refuses whole.
  * A copy of the test, not the whole rule: the F1-F7 families W refuses and this cutter still shows are a counted GAP
  * (`ports-pending.json`, pinned by `kernel-cutter-f1-f7-pin.test.ts`), so "cut what W refuses" holds over the closed
  * corpus only.
@@ -650,7 +650,7 @@ export function shownWord(word: string, before: string | undefined): ShownWord {
 export const shownWords = (words: readonly string[], first?: string): readonly ShownWord[] =>
   words.map((word, index) => shownWord(word, index === 0 ? first : words[index - 1]));
 
-// ── The name and value tests (runtimes' `account/import.ts`, copied) ──────────────────────────────────────────────
+// ── The name and value tests ──────────────────────────────────────────────
 
 /** Name words that say a variable holds a credential. Matched per `_`-separated word. */
 const SECRET_NAME_WORDS: ReadonlySet<string> = new Set([
