@@ -23,6 +23,7 @@ import {
 } from '../../../worker/src/lib/index.ts';
 import should from 'should';
 import { newDaemonIdentity, relayCrypto } from '../../support/worker/identities.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const host = 'tunnels.example.test';
 const account = {
@@ -176,8 +177,3 @@ describe('tunnel account pool', () => {
     should(TunnelAccountPoolSchema.safeParse(many).success).be.false();
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

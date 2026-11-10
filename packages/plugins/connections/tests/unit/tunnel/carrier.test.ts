@@ -27,6 +27,7 @@ import {
   registered,
   unregistered,
 } from './support.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 /** The entry an operator writes to turn the tunnel on: no `enabled` key means on. */
 const TUNNEL_ON = DaemonTunnelCarrierSchema.parse({ kind: 'tunnel', source: 'discovery', enabled: true });
@@ -714,8 +715,3 @@ describe('the tunnel posture', () => {
     should(posture({ availability: undefined })).equal('tunnel       off — the hosted service was not asked');
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

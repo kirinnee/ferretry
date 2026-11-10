@@ -21,10 +21,11 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
-import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
+import { type Check, type Finding, parseFile, runMain, walk } from '../gen/lib/check.ts';
 import type { Workspace } from '../gen/lib/workspace.ts';
 import { contractPath, loadWorkspace, sourceFiles } from '../gen/lib/workspace.ts';
 import { readPending } from './ports-pending.ts';
+import { GUARANTEE_HELPER, helperBinding, helperCallTitles, leadingIds } from './test-titles.ts';
 
 export const GUARANTEES_TSV = 'docs/rebuild/guarantees.tsv';
 const HEADER = 'id\tstatus\towner\twith\tenforcer\tdoc\ttest';
@@ -59,8 +60,10 @@ export function parseTsv(text: string): GuaranteeRow[] {
   });
 }
 
+// The ids a literal title starts with: `'R42 R43 …'` names both (`leadingIds` splits them). The helper form is read
+// from the AST (`test-titles.ts`), only in a file that imports the helper.
 const TEST_NAME =
-  /\b(?:test|it)(\.(?:only|skip|todo|failing|serial|concurrent|if\([^)]*\)))?\(\s*(['"`])([A-Z]+[0-9]+[a-z]?)(?=[\s'"`:.,])/g;
+  /\b(?:test|it)(\.(?:only|skip|todo|failing|serial|concurrent|if\([^)]*\)))?\(\s*(['"`])([A-Z]+[0-9]+[a-z]?(?: [A-Z]+[0-9]+[a-z]?)*)(?=[\s'"`:.,])/g;
 
 /** Every row id a test name starts with → the files holding such a test. */
 export function testIds(root: string, ws: Workspace): Map<string, string[]> {
@@ -76,14 +79,25 @@ export function testIds(root: string, ws: Workspace): Map<string, string[]> {
     const rel = relative(root, file).split(sep).join('/');
     if (rel.includes('node_modules/') || rel.includes('.tmp/')) continue;
     const source = readFileSync(file, 'utf8');
+    const add = (id: string): void => {
+      const list = ids.get(id) ?? [];
+      if (!list.includes(rel)) list.push(rel);
+      ids.set(id, list);
+    };
     for (const match of source.matchAll(TEST_NAME)) {
       const modifier = match[1] ?? '';
       // `.failing` passes when the body THROWS: it is a known bug, never proof that a guarantee holds.
       if (modifier.startsWith('.skip') || modifier.startsWith('.todo') || modifier.startsWith('.failing')) continue;
-      const id = match[3] as string;
-      const list = ids.get(id) ?? [];
-      if (!list.includes(rel)) list.push(rel);
-      ids.set(id, list);
+      for (const id of leadingIds(match[3] as string)) add(id);
+    }
+    // The one helper, read by the shared parser: only a call of the function this file imports from the support module.
+    if (source.includes(`${GUARANTEE_HELPER}(`) && source.includes('support/guarantee')) {
+      const { program } = parseFile(file);
+      const binding = helperBinding(program, file);
+      if (binding !== undefined)
+        walk(program, node => {
+          for (const title of helperCallTitles(node, binding) ?? []) for (const id of leadingIds(title)) add(id);
+        });
     }
   }
   return ids;
