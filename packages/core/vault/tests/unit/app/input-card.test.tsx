@@ -2,7 +2,7 @@
  * The input card's value path (I6) and its Enter default (I51), driven through the real card over a recording client.
  * The only values here are the obvious fakes in `input-fixtures.ts`.
  */
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 import { InputCard } from '../../../app/features/input/input-card.tsx';
 import { padInputValue } from '../../../app/lib/input-wire.ts';
 import { click, press, settle, typeInto } from '../../support/app/dom-form.ts';
@@ -177,6 +177,79 @@ describe('the input card holds a typed value only in its field', () => {
       expect(call.route + JSON.stringify(call.init?.params)).not.toContain(FAKE_VALUE);
     } finally {
       await mounted.unmount();
+    }
+  });
+});
+
+describe('the input card keeps the value nowhere but its field', () => {
+  it('I6 never writes the value to localStorage, sessionStorage or the URL', async () => {
+    const stored = spyOn(Storage.prototype, 'setItem');
+    const pushed = spyOn(history, 'pushState');
+    const replaced = spyOn(history, 'replaceState');
+    const titleBefore = document.title;
+    const hrefBefore = location.href;
+    const nowhere = (): void => {
+      // Not one write of any kind, and nothing derived from the value either: the card has no reason to write at all.
+      expect(stored.mock.calls).toEqual([]);
+      expect(pushed.mock.calls).toEqual([]);
+      expect(replaced.mock.calls).toEqual([]);
+      expect(localStorage.length).toBe(0);
+      expect(sessionStorage.length).toBe(0);
+      expect(location.href).toBe(hrefBefore);
+      expect(location.href).not.toContain(FAKE_VALUE);
+      expect(document.title).toBe(titleBefore);
+    };
+    try {
+      const { mounted } = await card();
+      try {
+        // Type, and keep typing: every keystroke goes through onChange.
+        await typeInto(field(mounted.container), 'fake-sec');
+        await typeInto(field(mounted.container), FAKE_VALUE);
+        nowhere();
+        // Send.
+        await click(q(mounted.container, '[data-input-send]'));
+        await settle();
+        nowhere();
+      } finally {
+        await mounted.unmount();
+      }
+      nowhere();
+      // Typed again, then the page is hidden, then the card goes.
+      const again = await card();
+      try {
+        await typeInto(field(again.mounted.container), FAKE_VALUE);
+        const restore = await hidePage();
+        restore();
+        nowhere();
+      } finally {
+        await again.mounted.unmount();
+      }
+      nowhere();
+    } finally {
+      stored.mockRestore();
+      pushed.mockRestore();
+      replaced.mockRestore();
+    }
+  });
+
+  it('I6 cancelling a request writes no value anywhere and typed nothing', async () => {
+    const stored = spyOn(Storage.prototype, 'setItem');
+    try {
+      const { mounted, calls, done } = await card();
+      try {
+        await click(q(mounted.container, '[data-input-cancel]'));
+        await settle();
+        const call = must(calls[0], 'a cancel');
+        expect(call.route).toBe('POST /v1/ferrets/:ferretId/input-requests/:requestId/cancel');
+        expect(call.init).toEqual({ params: { ferretId: 'hadi', requestId: REQUEST_ID }, body: {} });
+        expect(q(mounted.container, '[data-input-settled]').textContent).toContain('Cancelled. Nothing was typed.');
+        expect(done).toEqual(['done']);
+        expect(stored.mock.calls).toEqual([]);
+      } finally {
+        await mounted.unmount();
+      }
+    } finally {
+      stored.mockRestore();
     }
   });
 });

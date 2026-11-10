@@ -85,6 +85,20 @@ describe('fy secret set', () => {
     expect(r.err.join('')).not.toContain('fake-sh');
   });
 
+  it('S1 refuses a value over 16 KiB, without naming it', async () => {
+    const r = rig(`${'z'.repeat(16 * 1024 + 1)}\n`);
+    expect(await r.verb(['ANTHROPIC_KEY'])).toBe(1);
+    expect(r.calls).toEqual([]);
+    expect(r.err.join('')).toBe('error: a secret must be at most 16384 characters\n');
+    expect([...r.out, ...r.err].join('')).not.toContain('zzzz');
+  });
+
+  it('S1 takes a value of exactly 16 KiB', async () => {
+    const r = rig(`${'z'.repeat(16 * 1024)}\n`);
+    expect(await r.verb(['ANTHROPIC_KEY'])).toBe(0);
+    expect(r.calls).toHaveLength(1);
+  });
+
   it('S1 refuses a name a shell could not export before it reads stdin', async () => {
     const r = rig(`${FAKE}\n`);
     expect(await r.verb(['not-a-name'])).toBe(1);
