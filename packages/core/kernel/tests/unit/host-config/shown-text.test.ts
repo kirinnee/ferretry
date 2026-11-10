@@ -73,6 +73,11 @@ describe('what is cut, and what stays', () => {
     expect(result.hidden).toEqual([]);
   });
 
+  test('CFG-LEAK-R a token stuck to a one-letter flag and a token as its glued value are cut with everything after the letter', () => {
+    const result = shownOf('args:\n  - -Hghp_AbCdEfGh1234=sk-AbCdEfGh1234\n');
+    expect(result.text).toBe(`args:\n  - -H${HIDDEN}\n`);
+  });
+
   test('CFG-LEAK-R E3: the mask is the broad net — a word after a flag whose name holds TOKEN is cut even when it is a path', () => {
     // The write rule (flag-secrets.test.ts) lets `--token-file ~/.x` save; the read mask may over-hide, and says so.
     const result = shownOf('args:\n  - --token-file\n  - ~/.config/tool/token\n');
