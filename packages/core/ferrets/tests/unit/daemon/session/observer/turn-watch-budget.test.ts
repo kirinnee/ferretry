@@ -242,6 +242,8 @@ describe('the inline turn watch budget on 30 panes (RULING #44)', () => {
 
     // Assert
     should(best.looks).equal(FERRETS * MEASURED_TICKS * ROUNDS);
+    // The CPU clock must read something: a drawing round is 60+ ms, so a clock stuck at 0 would pass the ceiling.
+    should(best.cpuMsPerTick).be.above(0);
     should(best.cpuMsPerTick).be.below(DRAWING_CPU_MS_PER_TICK_CEILING);
     should(best.sliceMs).be.below(SLICE_MS_CEILING);
     // A tail is parsed when its transcript moved (a third of the looks), never on the two looks between.

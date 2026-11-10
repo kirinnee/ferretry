@@ -135,6 +135,7 @@ describe('R6: the stored rule is linear and reads headers and addresses under an
   const key = 'q7Zk'.repeat(10);
 
   it('should judge a 256 KiB value of one repeated character in well under 100 ms, stored and prefilled', () => {
+    let worst = 0;
     for (const character of [':', '@', '=', '%', ' ', ',', '\n', '?', '#', '/', '[', '$']) {
       const value = character.repeat(256 * 1024);
       for (const name of ['GATEWAY_TOKEN', 'GATEWAY_NOTE', 'ANTHROPIC_CUSTOM_HEADERS']) {
@@ -143,9 +144,12 @@ describe('R6: the stored rule is linear and reads headers and addresses under an
           plainPaste(name, value, false);
           urlCarries(value);
         }, 100);
+        worst = Math.max(worst, ms);
         expect(ms).toBeLessThan(100);
       }
     }
+    // The CPU clock must read something: the slowest pair takes tens of ms, so a clock stuck at 0 would pass anything.
+    expect(worst).toBeGreaterThan(0);
   });
 
   it('R7: should judge 256 KiB of key runs, PEM openings, schemes, queries and header names in under 250 ms', () => {

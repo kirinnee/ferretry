@@ -115,9 +115,16 @@ async function everyDoor(kind: DeclaredKind, text: string): Promise<void> {
   };
   // A reload of the file hand-written (the first load of a home that holds it is what boot runs).
   const first = world(kind, text);
-  expect(
+  // Every door's CPU, so the slowest can prove the clock reads: a small read or listing is under the clock's 1 ms tick
+  // and may read 0, but the parse of a file at the cap is tens to hundreds of ms.
+  const spent: number[] = [];
+  const within = (ms: number): void => {
+    spent.push(ms);
+    expect(ms).toBeLessThan(BOUND_MS);
+  };
+  within(
     (await bestOf(async attempt => await timed(() => (attempt === 0 ? first : world(kind, text)).files.reload()))).ms,
-  ).toBeLessThan(BOUND_MS);
+  );
   let loaded = first;
   const second = await bestOf(async attempt => {
     if (attempt === 0) loaded = first;
@@ -128,7 +135,7 @@ async function everyDoor(kind: DeclaredKind, text: string): Promise<void> {
     loaded.fs.seed(`${HOME}/config/${kind.path}`, settledText);
     return await timed(() => loaded.files.reload());
   });
-  expect(second.ms).toBeLessThan(BOUND_MS);
+  within(second.ms);
   capped(loaded.files.status().issues.filter(issue => issue.path === kind.path));
   // Each door below is sampled on the world as it stands, then (if the sample is slow) on a settled one of its own.
   const door = <T>(act: (at: World) => Promise<T> | T) =>
@@ -140,30 +147,32 @@ async function everyDoor(kind: DeclaredKind, text: string): Promise<void> {
   const fresh = `${text.slice(0, -1)} `;
   if (kind.agentMayName) {
     const read = await door(at => at.agent.run(call({ tool: 'config.read', path: kind.path }), ferretStanding));
-    expect(read.ms).toBeLessThan(BOUND_MS);
+    within(read.ms);
     capped(read.value.issues);
     const validate = await door(at =>
       at.agent.run(call({ tool: 'config.validate', path: kind.path, text: fresh }), ferretStanding),
     );
-    expect(validate.ms).toBeLessThan(BOUND_MS);
+    within(validate.ms);
     capped(validate.value.issues);
     const write = await door(at =>
       at.agent.run(call({ tool: 'config.write', path: kind.path, text: `${fresh.slice(0, -1)}\t` }), ferretStanding),
     );
-    expect(write.ms).toBeLessThan(BOUND_MS);
+    within(write.ms);
     capped(write.value.issues);
   } else {
     const read = await door(at => at.files.writer().read(at.target));
-    expect(read.ms).toBeLessThan(BOUND_MS);
+    within(read.ms);
     capped(read.value?.issues);
     const write = await door(at => at.files.writer().write(at.target, fresh, { confirmedLoosening: true }));
-    expect(write.ms).toBeLessThan(BOUND_MS);
+    within(write.ms);
     if (write.value.kind === 'refused') capped(write.value.issues);
   }
   // Nothing the listing says grows with the file either.
   const listing = await door(at => at.agent.run(call({ tool: 'config.read' }), ferretStanding));
-  expect(listing.ms).toBeLessThan(BOUND_MS);
+  within(listing.ms);
   capped(listing.value.issues);
+  // The CPU clock must read something, or every bound above passes on 0.
+  expect(Math.max(...spent)).toBeGreaterThan(0);
 }
 
 describe('every declared kind, its own schema, wrong values at the size cap: every door within the bound', () => {

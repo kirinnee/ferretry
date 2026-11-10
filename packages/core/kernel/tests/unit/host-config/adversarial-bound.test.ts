@@ -63,7 +63,10 @@ async function timed(act: () => Promise<unknown> | unknown): Promise<number> {
   const before = process.threadCpuUsage();
   await act();
   const spent = process.threadCpuUsage(before);
-  return (spent.user + spent.system) / 1_000;
+  const ms = (spent.user + spent.system) / 1_000;
+  // The CPU clock must read something: every call here is tens to hundreds of ms, so a clock stuck at 0 would pass.
+  expect(ms).toBeGreaterThan(0);
+  return ms;
 }
 
 /**
