@@ -70,11 +70,21 @@ export function parseAfterMerge(source: string, where: string): AfterMerge {
   return { format: 1, end: value.end, counts, items };
 }
 
-/** The base baseline: a git ref's committed file, or `file:<path>`; undefined when the base has none yet. */
-function readBase(root: string, ref: string): AfterMerge | undefined {
+/**
+ * The base baseline: a git ref's committed file, or `file:<path>`; undefined when the base has none yet. A base that
+ * was NAMED (`--base`, or CI's `FY_CHECK_BASE`) but is not in this clone throws: comparing against nothing there
+ * would pass the very change the rule exists to stop. The unnamed default may be absent (a local clone without it).
+ */
+export function readBase(root: string, ref: string, named: boolean): AfterMerge | undefined {
   if (ref.startsWith('file:')) {
     const file = ref.slice(5);
     return existsSync(file) ? parseAfterMerge(readFileSync(file, 'utf8'), file) : undefined;
+  }
+  const known = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: root });
+  if (known.status !== 0) {
+    if (named)
+      throw new Error(`the base ${ref} is not in this clone, so nothing proves the list did not grow; fetch it`);
+    return undefined;
   }
   const shown = spawnSync('git', ['show', `${ref}:${AFTER_MERGE_JSON}`], { cwd: root, encoding: 'utf8' });
   if (shown.status !== 0) return undefined;
@@ -133,7 +143,7 @@ export const check: Check = {
     if (!existsSync(file)) return [];
     try {
       const head = parseAfterMerge(readFileSync(file, 'utf8'), AFTER_MERGE_JSON);
-      const base = readBase(ctx.root, ctx.base ?? 'origin/rebuild/5.0');
+      const base = readBase(ctx.root, ctx.base ?? 'origin/rebuild/5.0', ctx.base !== undefined);
       const found = await guarantees.run({
         ...ctx,
         packageId: undefined,
