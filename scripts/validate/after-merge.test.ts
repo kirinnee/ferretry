@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -9,6 +10,7 @@ import {
   parityOpen,
   parseAfterMerge,
   portsPendingLines,
+  readBase,
 } from './after-merge.ts';
 
 const roots: string[] = [];
@@ -117,5 +119,20 @@ describe('after-merge', () => {
     });
     expect(parityOpen(root)).toBe(3);
     expect(portsPendingLines(root)).toBe(3);
+  });
+
+  test('reads the base from a git ref or a file, and a NAMED base that is missing fails', () => {
+    const root = fixture({ [AFTER_MERGE_JSON]: JSON.stringify(BASE) });
+    const git = (...args: string[]): void => {
+      const run = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], { cwd: root });
+      expect(run.status).toBe(0);
+    };
+    git('init', '--quiet');
+    git('add', AFTER_MERGE_JSON);
+    git('-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-m', 'base');
+    expect(readBase(root, 'HEAD', true)?.counts).toEqual(BASE.counts);
+    expect(readBase(root, `file:${join(root, AFTER_MERGE_JSON)}`, true)?.end).toBe(BASE.end);
+    expect(readBase(root, 'origin/nowhere', false)).toBeUndefined();
+    expect(() => readBase(root, 'origin/nowhere', true)).toThrow('the base origin/nowhere is not in this clone');
   });
 });

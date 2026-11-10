@@ -57,9 +57,10 @@ What 5.0 merges without is [after-merge.json](after-merge.json): three counts an
 - **The list only goes down.** The `after-merge` check (`bun scripts/validate/after-merge.ts`, part of `fy check`)
   fails when a count or the end date grows against the base ref, when an item is added, when the tree holds more than
   the baseline says, or when an item has no owner. Closing work lowers the numbers in the same change. When 5.0
-  merges, the base default (`origin/rebuild/5.0`, shared with `ports-pending`) moves to `origin/main`. Known gap: CI
-  checks out one commit, so in CI only the tree-against-baseline rule runs; the against-base rules run in the commit
-  hook, which no change may skip.
+  merges, the base default (`origin/rebuild/5.0`, shared with `ports-pending`) moves to `origin/main`. CI runs
+  the against-base rules too: `scripts/ci/check-base.sh` fetches the pull request's base once it holds this list,
+  otherwise the commit before the update, and names it as `FY_CHECK_BASE`; a named base CI cannot find is a finding.
+  A run with no earlier commit (a label event) says so and holds the tree to its baseline only.
 - Every row and item keeps its owner.
 - One end date, `end` in the file. Only the owner moves it.
 - A daily report to the lead: parity settled and total, the Appendix D missing count, the smoke list pass and fail.
