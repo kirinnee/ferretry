@@ -33,20 +33,20 @@ export interface SkillsFerret {
   readonly runtime?: string;
 }
 
-/** One skill folder: a directory, or a link to one, holding a SKILL.md. */
+/** One skill folder: a directory, or a link the home's reader says is Ferretry's own, holding a SKILL.md. */
 export interface SkillDirectoryEntry {
-  /** Absolute path of the SKILL.md as seen from the listed directory (the link path, not its target). */
+  /** Absolute path of the SKILL.md as listed (the link path, not its target). */
   readonly manifest: string;
-  /** Where the link points (the link's own text, resolved), when the folder is a link. */
-  readonly linkTarget?: string;
+  /** The folder is Ferretry's own (an asset the fleet linked, an asset listed straight, or an installed item). */
+  readonly managed?: boolean;
 }
 
 export interface SkillFilesPort {
   /**
-   * Skill folders directly inside `directory`, at most `limit + 1`, skipping dot-entries and any link whose
-   * target is not inside `confinedTo`. An unreadable or missing directory is an empty list.
+   * Skill folders directly inside `directory`, at most `limit + 1`, skipping dot-entries. What a link may point at is
+   * the reader's decision, never the service's. An unreadable or missing directory is an empty list.
    */
-  list(directory: string, confinedTo: string, limit: number): Promise<readonly SkillDirectoryEntry[]>;
+  list(directory: string, limit: number): Promise<readonly SkillDirectoryEntry[]>;
   /** The text of a file no larger than `maxBytes`, or `undefined` when it is absent or too large. */
   read(path: string, maxBytes: number): Promise<string | undefined>;
 }
@@ -63,12 +63,14 @@ export interface SkillsInventoryPorts {
   readonly files: SkillFilesPort;
   readonly homes: () => Promise<readonly SkillRuntimeHome[]>;
   readonly projects: () => Promise<readonly { readonly id: string; readonly name: string; readonly path: string }[]>;
-  /** `<FY_HOME>/fleet`: the only place a link inside a home may point. */
-  readonly fleetDirectory: string;
-  /** `<FY_HOME>/fleet/assets`: a link into here is a Ferretry component. */
-  readonly assetsDirectory: string;
-  /** The daemon's own harness homes, used only when a session runs no fleet account. */
-  readonly userHome: string;
+  /**
+   * The v4-installed skills, listed straight from the fleet's `assets/skills/<name>` (source `ferretry`), because a
+   * link from a home into `assets/` is never followed: it is the same skill listed once here. Unbound until Runtimes
+   * offers that tree.
+   */
+  readonly ferretry?: () => Promise<readonly SkillDirectoryEntry[]>;
+  /** The skill items a runtime's profile selects, resolved to Skills' own store: what the launch hands over. */
+  readonly selected?: (runtime: string) => Promise<readonly SkillDirectoryEntry[]>;
 }
 
 /**
@@ -123,7 +125,7 @@ export class SkillsInventoryService {
     let truncated = false;
     const homeListings = await Promise.all(
       homes.map(async entry => {
-        const listed = await this.homeSkills(entry.harness, entry.home, entry.runtimes);
+        const listed = await this.homeSkills(entry.harness, entry.home, entry.runtimes, entry.runtimes[0]);
         truncated ||= listed.truncated;
         return {
           runtime: entry.runtimes[0] ?? basename(entry.home),
@@ -153,9 +155,10 @@ export class SkillsInventoryService {
     const { harness, folder: cwd, runtime: runtimeName = '' } = ferret;
     const homes = await this.ports.homes();
     const runtimeHome = homes.find(entry => entry.harness === harness && entry.runtimes.includes(runtimeName));
-    const homePath = runtimeHome?.home ?? join(this.ports.userHome, harness === 'claude-code' ? '.claude' : '.codex');
     const runtimes = runtimeName === '' ? [] : [runtimeName];
-    const fromHome = await this.homeSkills(harness, homePath, runtimes, runtimeHome === undefined);
+    // A ferret that runs no published account lists no home (a 5.0 ferret never reads the daemon user's own harness
+    // home); the skill items its runtime's profile selects are still what its launch carries, so they are still listed.
+    const fromHome = await this.homeSkills(harness, runtimeHome?.home, runtimes, runtimeName);
     const homeScopes = new Map(fromHome.skills.map(skill => [skill.name, skill.scope]));
     const fromProject = await this.projectSkills(harness, cwd, runtimes, undefined, homeScopes);
     return {
@@ -180,19 +183,30 @@ export class SkillsInventoryService {
     return [...inventory.homes.flatMap(home => home.skills), ...inventory.projects.flatMap(project => project.skills)];
   }
 
+  /**
+   * One account's skills: the folders of its home (when it has a published one), then Ferretry's own, each listed once.
+   * Ferretry's own are the v4-installed skills read straight from the fleet's asset tree (a link from a home into it is
+   * a duplicate, never followed) and the skill items the runtime's profile selects. A name the home already lists, its
+   * own plain folder or a managed link alike, is not listed a second time: the harness loads the one the home holds.
+   * The asset tree reaches a launch only through a runtime home, so an account with no published home lists none of it.
+   */
   private async homeSkills(
     harness: Harness,
-    home: string,
+    home: string | undefined,
     runtimes: readonly string[],
-    fallback = false,
+    runtime: string | undefined,
   ): Promise<Listed> {
-    const directory = join(home, 'skills');
-    // A fallback home is the daemon's own, outside the fleet: its links may point anywhere inside it.
-    const confinedTo = fallback ? home : this.ports.fleetDirectory;
-    const entries = await this.ports.files.list(directory, confinedTo, MAX_SKILLS_PER_ROOT);
-    return await this.read(harness, entries, runtimes, entry =>
-      entry.linkTarget !== undefined && isInside(this.ports.assetsDirectory, entry.linkTarget) ? 'ferretry' : 'user',
-    );
+    const own = home === undefined ? [] : await this.ports.files.list(join(home, 'skills'), MAX_SKILLS_PER_ROOT);
+    const asset = home === undefined ? [] : ((await this.ports.ferretry?.()) ?? []);
+    const chosen = runtime === undefined || runtime === '' ? [] : ((await this.ports.selected?.(runtime)) ?? []);
+    const entries: SkillDirectoryEntry[] = [...own];
+    const taken = new Set(own.map(folderOf));
+    for (const entry of [...asset, ...chosen]) {
+      if (taken.has(folderOf(entry))) continue;
+      taken.add(folderOf(entry));
+      entries.push({ ...entry, managed: true });
+    }
+    return await this.read(harness, entries, runtimes, entry => (entry.managed === true ? 'ferretry' : 'user'));
   }
 
   private async projectSkills(
@@ -202,7 +216,7 @@ export class SkillsInventoryService {
     id: string | undefined,
     homeScopes: ReadonlyMap<string, SkillScope>,
   ): Promise<Listed> {
-    const entries = await this.ports.files.list(projectSkillsDirectory(harness, root), root, MAX_SKILLS_PER_ROOT);
+    const entries = await this.ports.files.list(projectSkillsDirectory(harness, root), MAX_SKILLS_PER_ROOT);
     const project = { ...(id === undefined ? {} : { id }), root };
     const listed = await this.read(harness, entries, runtimes, () => 'project', project);
     return {
@@ -248,12 +262,7 @@ export class SkillsInventoryService {
   }
 }
 
-function isInside(parent: string, child: string): boolean {
-  let current = child;
-  for (;;) {
-    if (current === parent) return true;
-    const up = dirname(current);
-    if (up === current) return false;
-    current = up;
-  }
+/** The skill's folder name: the segment above its SKILL.md. */
+function folderOf(entry: SkillDirectoryEntry): string {
+  return basename(dirname(entry.manifest));
 }

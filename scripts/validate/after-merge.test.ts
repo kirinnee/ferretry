@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -9,6 +10,7 @@ import {
   parityOpen,
   parseAfterMerge,
   portsPendingLines,
+  readBase,
 } from './after-merge.ts';
 
 const roots: string[] = [];
@@ -91,6 +93,24 @@ describe('after-merge', () => {
     ]);
   });
 
+  test('only an item an owner decision moved may enter, and only that id', () => {
+    const moved = { id: 'differential-harness', what: 'the harness', owner: 'britnee' };
+    expect(afterMergeFindings({ ...BASE, items: [...BASE.items, moved] }, BASE, AT_BASE)).toEqual([]);
+    const other = { id: 'differential-harness-2', what: 'more', owner: 'britnee' };
+    expect(
+      afterMergeFindings({ ...BASE, items: [...BASE.items, moved, other] }, BASE, AT_BASE).map(f => f.message),
+    ).toEqual(['differential-harness-2 was added; the list may only go down']);
+    // The decision is about the item, never about its counts: they still only go down.
+    const grown: AfterMerge = {
+      ...BASE,
+      counts: { ...BASE.counts, portsPendingLines: 6 },
+      items: [...BASE.items, moved],
+    };
+    expect(afterMergeFindings(grown, BASE, AT_BASE).map(f => f.message)).toEqual([
+      'counts.portsPendingLines grew from 5 to 6; the list may only go down',
+    ]);
+  });
+
   test('with no base yet, the tree is still held to the baseline', () => {
     expect(afterMergeFindings(BASE, undefined, AT_BASE)).toEqual([]);
     expect(afterMergeFindings(BASE, undefined, { ...AT_BASE, guaranteesMissing: 2 })).toHaveLength(1);
@@ -117,5 +137,20 @@ describe('after-merge', () => {
     });
     expect(parityOpen(root)).toBe(3);
     expect(portsPendingLines(root)).toBe(3);
+  });
+
+  test('reads the base from a git ref or a file, and a NAMED base that is missing fails', () => {
+    const root = fixture({ [AFTER_MERGE_JSON]: JSON.stringify(BASE) });
+    const git = (...args: string[]): void => {
+      const run = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], { cwd: root });
+      expect(run.status).toBe(0);
+    };
+    git('init', '--quiet');
+    git('add', AFTER_MERGE_JSON);
+    git('-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-m', 'base');
+    expect(readBase(root, 'HEAD', true)?.counts).toEqual(BASE.counts);
+    expect(readBase(root, `file:${join(root, AFTER_MERGE_JSON)}`, true)?.end).toBe(BASE.end);
+    expect(readBase(root, 'origin/nowhere', false)).toBeUndefined();
+    expect(() => readBase(root, 'origin/nowhere', true)).toThrow('the base origin/nowhere is not in this clone');
   });
 });
