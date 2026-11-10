@@ -317,7 +317,10 @@ export class GitHubWatcher {
       for (const pr of card.links.prs) {
         const key = prKey(pr.repo, pr.number);
         if (pr.state !== 'unknown' || this.looked.has(key)) continue;
-        fresh.set(repoKey(pr.repo), [...(fresh.get(repoKey(pr.repo)) ?? []), key]);
+        const repository = repoKey(pr.repo);
+        const asked = fresh.get(repository);
+        if (asked === undefined) fresh.set(repository, [key]);
+        else asked.push(key);
       }
     }
     return fresh;
