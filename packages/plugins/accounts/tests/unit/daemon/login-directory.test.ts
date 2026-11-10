@@ -5,6 +5,8 @@
 
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { passwordProblem } from '../../../app/lib/login-form.ts';
+import { LOGIN_PASSWORD_MIN_LENGTH, PutAccountRequestSchema } from '../../../contract/routes/index.ts';
 import { LoginDirectory } from '../../../daemon/lib/logins.ts';
 import { CLOCK, CountingSealed, FakeSecretCipher, MemoryLoginIndex } from './support.ts';
 
@@ -70,6 +72,95 @@ describe('saving what a login card typed', () => {
     );
 
     should([otherBox.refusal, otherPage.refusal]).eql(['invalid_change', 'invalid_change']);
+  });
+});
+
+describe('Appendix D: Save as, through the login directory', () => {
+  it('S136 should make a new account or an explicit Update of the same username, never one with another username', async () => {
+    const w = world();
+    await w.logins.saveFields('GITHUB', 'GitHub', 'github.com', { username: 'kirinnee', password: PASSWORD }, 'new');
+    // The same username (however it is cased) is the same person: Update replaces the password.
+    await w.logins.saveFields(
+      'GITHUB',
+      'GitHub',
+      'github.com',
+      { username: 'KirinNee', password: 'synthetic-card-password-2' },
+      'update',
+      'kirinnee',
+    );
+    should(Object.keys(w.index.accounts.accounts)).eql(['GITHUB']);
+    // Another username is never an Update of this account: not from the box, not from the page.
+    for (const refused of [
+      await refusal(w.logins.saveFields('GITHUB', 'GitHub', undefined, { username: 'someone-else' }, 'update')),
+      await refusal(
+        w.logins.saveFields('GITHUB', 'GitHub', undefined, { password: PASSWORD }, 'update', 'someone-else'),
+      ),
+    ])
+      should(refused.refusal).equal('invalid_change');
+    should(w.index.accounts.accounts.GITHUB?.username).equal('KirinNee');
+  });
+
+  it('I144 should start on new: a handle an account already has is refused, and only Update overwrites a saved password', async () => {
+    const w = world();
+    await w.logins.saveFields('GITHUB', 'GitHub', 'github.com', { username: 'kirinnee', password: PASSWORD }, 'new');
+    const seal = w.index.accounts.accounts.GITHUB?.seals;
+    const clash = await refusal(
+      w.logins.saveFields(
+        'GITHUB',
+        'GitHub',
+        'github.com',
+        { username: 'kirinnee', password: 'synthetic-new-password' },
+        'new',
+      ),
+    );
+    should(clash.refusal).equal('login_exists');
+    should(w.index.accounts.accounts.GITHUB?.seals).eql(seal);
+    await w.logins.saveFields(
+      'GITHUB',
+      'GitHub',
+      'github.com',
+      { password: 'synthetic-new-password' },
+      'update',
+      'kirinnee',
+    );
+    should(w.index.accounts.accounts.GITHUB?.seals).not.eql(seal);
+  });
+
+  it('I146 should never offer an Update for someone that account is not, and never let a typed username choose the account', async () => {
+    const w = world();
+    await w.logins.saveFields('GITHUB', 'GitHub', 'github.com', { username: 'kirinnee', password: PASSWORD }, 'new');
+    await w.logins.saveFields('NOUSER', 'No user', 'example.com', { password: PASSWORD }, 'new');
+    // The page signs in someone else; an account with no username saved cannot be told to be the same person.
+    should(
+      (await refusal(w.logins.saveFields('GITHUB', 'GitHub', undefined, { password: PASSWORD }, 'update', 'other')))
+        .refusal,
+    ).equal('invalid_change');
+    should(
+      (await refusal(w.logins.saveFields('NOUSER', 'No user', undefined, { password: PASSWORD }, 'update', 'anyone')))
+        .refusal,
+    ).equal('invalid_change');
+    // The account is the handle the card named: a second account typed with the same username is its own account.
+    await w.logins.saveFields(
+      'GITHUB_WORK',
+      'GitHub work',
+      'github.com',
+      { username: 'kirinnee', password: PASSWORD },
+      'new',
+    );
+    should(Object.keys(w.index.accounts.accounts).sort()).eql(['GITHUB', 'GITHUB_WORK', 'NOUSER']);
+  });
+
+  it('I148 should keep no password under 8 characters and no code: the write schema refuses it and the app warns first', () => {
+    const short = 'x'.repeat(LOGIN_PASSWORD_MIN_LENGTH - 1);
+    should(LOGIN_PASSWORD_MIN_LENGTH).be.aboveOrEqual(8);
+    should(PutAccountRequestSchema.safeParse({ password: short }).success).be.false();
+    should(PutAccountRequestSchema.safeParse({ password: `${short}x` }).success).be.true();
+    // The app says so before anything is sent, so a short password is never dropped silently.
+    should(passwordProblem(short)).equal(`At least ${LOGIN_PASSWORD_MIN_LENGTH} characters.`);
+    // What an account keeps from a card is a username and a password: no field a code could be saved in.
+    const fields: Parameters<LoginDirectory['saveFields']>[3] = { username: 'kirinnee', password: PASSWORD };
+    should(Object.keys(fields)).eql(['username', 'password']);
+    should(PutAccountRequestSchema.safeParse({ code: '123456' }).success).be.false();
   });
 });
 

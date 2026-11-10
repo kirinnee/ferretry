@@ -211,6 +211,22 @@ describe('writeLessonsSettings over the kernel’s configuration service', () =>
     expect(text).toContain('passiveDefault: false');
   });
 
+  it('held-edit patch: the owner’s one key is in effect and a hand edit that raised a cap stays held, not reset and not in effect', async () => {
+    const { port, path } = await configWorld('maxFerretsPerRun: 9999\n');
+    expect(port.fileState(LESSONS_CONFIG).state).toBe('held');
+
+    const outcome = await writeLessonsSettings(port, { passiveDefault: false });
+
+    expect(outcome.kind).toBe('written');
+    expect(port.file(LESSONS_CONFIG)).toMatchObject({ passiveDefault: false });
+    expect((port.file(LESSONS_CONFIG) as Record<string, unknown>).maxFerretsPerRun).toBeUndefined();
+    // the held version keeps its own raised cap, with the owner's key made to it as well
+    const text = await readFile(path, 'utf8');
+    expect(text).toContain('maxFerretsPerRun: 9999');
+    expect(text).toContain('passiveDefault: false');
+    expect(port.fileState(LESSONS_CONFIG).state).toBe('held');
+  });
+
   it('drops a key that is neither stated nor different from its default', async () => {
     const { port, path } = await configWorld('passiveDefault: false\n');
 

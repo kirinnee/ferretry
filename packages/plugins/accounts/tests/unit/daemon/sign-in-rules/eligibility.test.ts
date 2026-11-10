@@ -19,6 +19,22 @@ describe('who may have a rule at all', () => {
     should(tappedIdentities(signIn())).eql(['0123456789abcdef']);
   });
 
+  it('S114 should count a sign-in as the owner’s own only from a tapped fact: a verified, masked or moved-on one is not', () => {
+    const owner = tappedFact('github.com');
+    // Without the `tapped` fact (a plan fill, a rule fill or an admin-token delivery writes none) nothing qualifies.
+    const others = { ...owner, tapped: undefined };
+    should(tappedIdentities(signIn({ observed: [others] }))).eql([]);
+    should(tappedCount(signIn({ observed: [others] }))).equal(0);
+    should(
+      tappedIdentities(signIn({ observed: [{ ...owner, tapped: { ...owner.tapped, value: false } }] } as never)),
+    ).eql([]);
+    // A terminal fact counts only with the owner's tap: the proof is the gate, not a page move.
+    const terminalFact = { ...owner, at: 'sudo@kirin-box', surface: 'terminal', navigatedAway: undefined };
+    const place = { kind: 'terminal', tool: 'sudo', host: 'kirin-box' };
+    should(tappedIdentities(signIn({ place, observed: [terminalFact] } as never))).have.length(1);
+    should(tappedIdentities(signIn({ place, observed: [{ ...terminalFact, tapped: undefined }] } as never))).eql([]);
+  });
+
   it('should count the owner’s own hand sign-ins at the sign-in’s own places, the most of them, and none otherwise', () => {
     should(
       tappedCount(signIn({ observed: [tappedFact('github.com', 5), tappedFact('github.com', 3, 'other')] })),
