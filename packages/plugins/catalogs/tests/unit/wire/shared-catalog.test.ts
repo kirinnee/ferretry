@@ -367,6 +367,7 @@ describe('MCP setup rules', () => {
 
     it('R-0261 should refuse a multi-word environment value and a line break in an argument', () => {
       expect(refused(withEnv({ OPTS: `--token ${V}` }))).toBe(true);
+      expect(refused(withEnv({ OPTS: '--port 1 --token=fake-tok-0000' }))).toBe(true);
       expect(refused(withArgs([`--port 1\n--token ${V}`]))).toBe(true);
     });
 

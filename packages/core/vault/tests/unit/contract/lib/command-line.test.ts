@@ -152,6 +152,9 @@ describe('the publish strength', () => {
   it('R-0261 should read an argument or an environment value that holds white space as the words it holds', () => {
     expect(firstRefusedWord([`--port 1\n--token ${V}`])).toBe(0);
     expect(envEntryRefused('OPTS', `--token ${V}`)).toBe(true);
+    // A word inside is judged on its own: a short value glued to a flag is no 16-character piece, yet it is a credential.
+    expect(envEntryRefused('OPTS', '--port 1 --token=fake-tok-0000')).toBe(true);
+    expect(firstRefusedWord(['--port 1\n--token=fake-tok-0000'])).toBe(0);
     expect(envEntryRefused('LICENSE_KEY', `--auth ${V}`)).toBe(true);
     expect(envEntryRefused('OPTS', '--port 8080 --verbose')).toBe(false);
     expect(firstRefusedWord(['line one\nline two'])).toBe(-1);
