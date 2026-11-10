@@ -52,6 +52,20 @@ const runnerPlugin = (runner: FakeRunner) =>
     { build: () => ({ hooks: { 'runners:tmux': runner } }) },
   );
 
+/** A stand-in for Ferretry's Warden (its real id): the only consumer that may resume as `actor: 'warden'`, so a test takes the port as it. */
+const wardenPlugin = implementDaemon(
+  definePlugin({
+    id: 'warden',
+    title: 'Warden (fake)',
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: [],
+    needs: { ferrets: FerretsPort },
+  }),
+  { build: () => ({}) },
+);
+
 async function boot(packs: boolean, runner: FakeRunner): Promise<TestHost> {
   return await testHost({
     plugins: [
@@ -59,6 +73,7 @@ async function boot(packs: boolean, runner: FakeRunner): Promise<TestHost> {
       ...(packs ? [real('packs')] : []),
       harnessPlugin(new FakeHarness()),
       runnerPlugin(runner),
+      wardenPlugin,
     ],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
@@ -117,7 +132,7 @@ describe('G12 helper admission through the daemon: the real Packs answers start.
     expect(await stop(second, childId)).toBeLessThan(300);
     await second.settle();
     const resumed = await second
-      .provided(FerretsPort)
+      .provided(FerretsPort, 'warden')
       .resume(ferretId(childId), 'carry on', { automatic: true, actor: 'warden' });
     expect(resumed.ok).toBe(true);
   });

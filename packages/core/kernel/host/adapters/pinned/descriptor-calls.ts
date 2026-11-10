@@ -10,17 +10,21 @@ import { LIBC } from './directory-syscalls.ts';
  * rename between two held folders is only half of a write: the temp file must be created, looked at and removed
  * through the held folder too, or a parent swapped for a link after the check plants it outside.
  *
- * SIGNATURES (POSIX.1-2008 `<unistd.h>` / `<fcntl.h>` / `<stdio.h>`; macOS ships all four in libSystem since 10.10):
+ * SIGNATURES (POSIX.1-2008 `<unistd.h>` / `<fcntl.h>` / `<stdio.h>` / `<sys/stat.h>`; macOS ships all five in libSystem since 10.10):
  *
  *   int openat  (int fd, const char *path, int oflag, ...);    // the variadic `mode` is read only with O_CREAT
  *   int renameat(int fromfd, const char *from, int tofd, const char *to);
  *   int linkat  (int fd1, const char *name1, int fd2, const char *name2, int flag);
  *   int unlinkat(int fd, const char *path, int flag);
+ *   int mkdirat (int fd, const char *path, mode_t mode);       // `mode_t` is narrower than `int`, passed in a register
  *
  * Each is declared below with exactly those argument types (`FFIType.i32` for `int`, `FFIType.ptr` for the NUL-ended
- * names). On a Linux box these are the same symbols in `libc.so.6`, so `loadDescriptorCalls` is exercised for real
- * there too; what only a Mac can prove (the `libSystem.B.dylib` name, the `__error` symbol) is covered by the
- * `skipIf(process.platform !== 'darwin')` tests alone, which cannot run on the CI/Linux box (a declared GAP).
+ * names). `mkdirat` is the one NEW symbol (a `project-files` write makes a missing folder below the project through
+ * its parent's descriptor); like the other four it is exercised for real on Linux and its darwin symbol only by the
+ * darwin-only tests (the same declared limit, runtimes: "[kernel: macOS descriptor calls]"). On a Linux box these are
+ * the same symbols in `libc.so.6`, so `loadDescriptorCalls` is exercised for real there too; what only a Mac can prove
+ * (the `libSystem.B.dylib` name, the `__error` symbol) is covered by the `skipIf(process.platform !== 'darwin')` tests
+ * alone, which cannot run on the CI/Linux box (a declared GAP).
  *
  * WHICH FLAG KEEPS A LEAF FROM BEING FOLLOWED. `rename(2)`, `link(2)` (with `flag` 0) and `unlinkat(2)` act on the
  * final component itself and never follow a link there, on macOS as on Linux, so no `RENAME_NOFOLLOW_ANY` is needed:
@@ -47,6 +51,8 @@ export interface DescriptorCalls {
   linkat(fromFd: number, fromName: string, toFd: number, toName: string): void;
   /** Removes the non-folder `name` from `folderFd`. */
   unlinkat(folderFd: number, name: string): void;
+  /** Makes the folder `name` in `folderFd` with `mode` (the umask filters it); refused `EEXIST` when `name` is taken. */
+  mkdirat(folderFd: number, name: string, mode: number): void;
 }
 
 /** Where the C library keeps this thread's `errno`, by the name each platform exports it under. */
@@ -83,6 +89,7 @@ export function loadDescriptorCalls(library: string = LIBC, errnoSymbol: string 
       renameat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
       linkat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
       unlinkat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+      mkdirat: { args: [FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
       [errnoSymbol]: { args: [], returns: FFIType.ptr },
     }).symbols as unknown as Record<string, (...args: never[]) => unknown>;
   } catch (error) {
@@ -100,6 +107,7 @@ export function loadDescriptorCalls(library: string = LIBC, errnoSymbol: string 
     renameat(from: number, fromName: Uint8Array, to: number, toName: Uint8Array): number;
     linkat(from: number, fromName: Uint8Array, to: number, toName: Uint8Array, flag: number): number;
     unlinkat(fd: number, name: Uint8Array, flag: number): number;
+    mkdirat(fd: number, name: Uint8Array, mode: number): number;
   };
   return {
     openat: (folderFd, name, flags, mode) => {
@@ -114,6 +122,9 @@ export function loadDescriptorCalls(library: string = LIBC, errnoSymbol: string 
     },
     unlinkat: (folderFd, name) => {
       if (call.unlinkat(folderFd, cString(name, 'unlink'), 0) !== 0) refused('unlink');
+    },
+    mkdirat: (folderFd, name, mode) => {
+      if (call.mkdirat(folderFd, cString(name, 'make a folder'), mode) !== 0) refused('make a folder');
     },
   };
 }

@@ -33,7 +33,24 @@ const START_BY_PLUGIN: Readonly<Partial<Record<StartRequest['by'], string>>> = {
 
 const NOT_THE_WARDEN = 'only the Warden is recorded as the Warden';
 const NOT_THE_WARDEN_LABEL = 'only the Warden starts a ferret under its own label';
-const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent for a ferret it starts';
+const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent in its own tree';
+
+/**
+ * Whether a start under `ferret` would put the new ferret in the Warden's tree. It does when the parent's registry
+ * label trims to the Warden's, or its summary says it descends from it, or the session documents say so: the same source
+ * and rule the start's stamp uses (the registry summary does not carry the stamp). Fails closed: a parent that cannot
+ * be read, is unknown, or whose documents cannot be read counts as in the tree.
+ */
+async function inWardenTree(service: FerretsService, ferret: FerretId): Promise<boolean> {
+  const parent = await service.get(ferret).catch(() => undefined);
+  if (parent === undefined) return true;
+  if (parent.label?.trim() === WARDEN_LABEL || parent.provenance?.wardenLineage === true) return true;
+  try {
+    return await service.inWardenLineage(ferret);
+  } catch {
+    return true;
+  }
+}
 
 /**
  * What one plugin holds under `ferrets`: an explicit object naming each member of {@link FerretsApi}, each forwarding
@@ -44,8 +61,12 @@ const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent for a ferret it st
  *   Warden; a start `by: 'pack'` only from Packs and `by: 'board'` only from Board. Refused with a sentence, nothing
  *   resumed, moved or started.
  * - a consumer's `label` and `parent` are both checked: a start under the Warden's own label (`options.label`), and a
- *   start with any `parent` (a parent in the Warden's tree gives the new ferret its lineage and so its label), only
- *   from the Warden.
+ *   start whose `parent` is in the Warden's tree (a parent in it gives the new ferret its lineage and so its label),
+ *   only from the Warden. Any other parent is admitted: a lead starts its helpers through the port (parity J-0057).
+ *   A parent is in the Warden's tree when its registry label trims to the Warden's label, or the session documents
+ *   say so (`FerretSessionPort.inWardenLineage`, the same source and rule the start's stamp uses); a parent that cannot
+ *   be read, or whose documents cannot, is refused (fail closed), and nothing is started. With the session port
+ *   unbound no stamp is written, so the label check is all there is to make.
  * - `systemCallsign` draws only the prefix of the consumer's own kind (`ApiError` 403 otherwise).
  *
  * `start` and `move` read the caller's request once and forward a rebuilt copy, never the caller's own object.
@@ -53,14 +74,15 @@ const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent for a ferret it st
  * Whatever else the service has — a stop's end `cause`, a move's `replaceLiveTerminal` and `target`, a route's
  * `confirmRestore`, `revokeToken`, `rename`, the launch and its tokens — is for this plugin's own callers and is not
  * reachable here at runtime, not just refused by the types. `resume` forwards only `automatic`, an `actor` of
- * `warden` (the Warden's alone) or `peer` (attribution only), `decided` and `onCarried`. `effectiveLimits` is optional
- * on the port and the service has none, so it is absent.
+ * `warden` (the Warden's alone) or `peer` (attribution only), `decided` and `onCarried`. `effectiveLimits` is served: it
+ * answers `limits.yaml` as in effect, read fresh on every call.
  */
 export function ferretsPort(service: FerretsService, consumer: string): FerretsApi {
   const warden = consumer === WARDEN_PLUGIN;
   const refused = (reason: string): Result<never, { readonly code: 'refused'; readonly reason: string }> =>
     err({ code: 'refused', reason });
   return {
+    effectiveLimits: () => service.effectiveLimits(),
     get: ferret => service.get(ferret),
     list: filter => service.list(filter),
     mayTouch: (caller, target) => service.mayTouch(caller, target),
@@ -69,9 +91,11 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     start: async (asked): Promise<Result<FerretId, StartFailure>> => {
       // Read every member once into a fresh object: the checks and the service see the same values, so a getter cannot
       // answer one thing to the check and another to the service.
+      // `options` is read ONCE into a local, and the copy is built from that local alone.
+      const { options, ...rest } = asked;
       const request: StartRequest = {
-        ...asked,
-        ...(asked.options === undefined ? {} : { options: { ...asked.options } }),
+        ...rest,
+        ...(options === undefined ? {} : { options: { ...options } }),
       };
       const owner = START_BY_PLUGIN[request.by];
       if (owner !== undefined && owner !== consumer)
@@ -81,9 +105,11 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       // The Warden's own label marks the Warden's tree (supervision skips it, Packs exempts it from the helper limits,
       // lineage marks it): only the Warden starts under it, the same rule the route applies.
       if (request.options?.label?.trim() === WARDEN_LABEL && !warden) return refused(NOT_THE_WARDEN_LABEL);
-      // A parent in the Warden's tree gives the new ferret the Warden's lineage, and so its label: only the Warden names
-      // a parent through the port (the route forces an agent's parent to itself).
-      if (request.parent !== undefined && !warden) return refused(NOT_THE_WARDEN_PARENT);
+      // A parent in the Warden's tree gives the new ferret the Warden's lineage, and so its label: only the Warden
+      // names one through the port. Any other parent is admitted (a lead starts its helpers). A parent that cannot be
+      // read is refused, never assumed ordinary.
+      if (request.parent !== undefined && !warden && (await inWardenTree(service, request.parent)))
+        return refused(NOT_THE_WARDEN_PARENT);
       return await service.start(request);
     },
     stop: (ferret, how, reason) => service.stop(ferret, how, reason),

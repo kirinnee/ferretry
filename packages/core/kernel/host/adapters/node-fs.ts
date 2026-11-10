@@ -1,4 +1,4 @@
-import { type BigIntStats, constants } from 'node:fs';
+import { type BigIntStats, constants, fchmod, fsync } from 'node:fs';
 import {
   access,
   chmod,
@@ -20,8 +20,8 @@ import {
 import { userInfo } from 'node:os';
 import { dirname } from 'node:path';
 import { type DescriptorBracket, loadProcessBracket } from './pinned/descriptor-bracket.ts';
-import { type DescriptorCalls, loadDescriptorCalls } from './pinned/descriptor-calls.ts';
-import { type FolderSteps, folderSteps, fstatOf, holdFolder } from './pinned/descriptor-folder.ts';
+import { type DescriptorCalls, isSingleName, loadDescriptorCalls } from './pinned/descriptor-calls.ts';
+import { type FolderSteps, folderSteps, fstatOf, type HeldChild, holdFolder } from './pinned/descriptor-folder.ts';
 
 /**
  * Which entry a path names: what kind, and the device and inode that name it whatever path reached it (copied from
@@ -76,6 +76,18 @@ export interface OpenedDirectory {
    * Additive.
    */
   readonly at?: FolderSteps;
+  /**
+   * The folder `leaf` BELOW this one, opened from this folder's descriptor and never by a path that a link could
+   * redirect: `O_DIRECTORY | O_NOFOLLOW` through `entryPath` (Linux) or through `at` (macOS). With `make` a missing
+   * folder is made first the same way (`mkdir` through the descriptor, mode as given) and `created` says whether THIS
+   * call made it. Throws the errno's `code` (`ELOOP` for a link, `ENOTDIR` for a file, `ENOENT` for nothing, without
+   * `make`); a host with neither a descriptor path nor the C library's calls throws `ENOSYS`. The caller closes
+   * the returned folder, and this one stays open.
+   */
+  openChild(
+    leaf: string,
+    make?: { readonly mode: number },
+  ): Promise<{ readonly folder: OpenedDirectory; readonly created: boolean }>;
   /** Sets this folder's permission bits through the descriptor (`fchmod`), never by name. */
   chmod(mode: number): Promise<void>;
   /**
@@ -249,7 +261,7 @@ export function nodeFs(
     /**
      * Where a host without `descriptorFolder` gets the C library's descriptor calls (`openat`, `renameat`, `linkat`,
      * `unlinkat`): asked once, on the first folder opened, and a throw means none (a rename and a folder remove then
-     * refuse `no_descriptor_reach`; a write and a publish re-prove the folder once and go by path). Default: loaded from the platform's C library on macOS, none elsewhere.
+     * refuse `no_descriptor_reach`, and so does every `project-files` write; a write or a publish in any other root re-proves the folder once and goes by path). Default: loaded from the platform's C library on macOS, none elsewhere.
      */
     readonly descriptorCalls?: () => DescriptorCalls;
     /**
@@ -299,6 +311,98 @@ export function nodeFs(
       () => false,
     ));
   const groupDatabase = options.groupDatabase ?? '/etc/group';
+  const noReach = (): Error =>
+    Object.assign(new Error('ENOSYS: this host reaches no folder through a held folder'), { code: 'ENOSYS' });
+  /** `leaf` of a macOS held folder: made (`mkdirat`) when asked, then opened from its descriptor without following. */
+  const childThroughSteps = async (
+    steps: FolderSteps,
+    leaf: string,
+    make: { readonly mode: number } | undefined,
+  ): Promise<{ readonly folder: OpenedDirectory; readonly created: boolean }> => {
+    const created = make === undefined ? false : await steps.makeFolder(leaf, make.mode);
+    return { folder: heldDirectory(await steps.openFolder(leaf)), created };
+  };
+  /** A folder opened by `steps` (no path reaches it): the same `OpenedDirectory` over its own descriptor. */
+  const heldDirectory = (child: HeldChild): OpenedDirectory => {
+    const directory: OpenedDirectory = {
+      identity: child.identity,
+      entryPath: () => undefined,
+      at: child.steps,
+      openChild: async (leaf, make) => await childThroughSteps(child.steps, leaf, make),
+      chmod: async mode =>
+        await new Promise<void>((resolve, reject) => {
+          fchmod(child.fd, mode, error => (error === null ? resolve() : reject(error)));
+        }),
+      sync: async () => {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            fsync(child.fd, error => (error === null ? resolve() : reject(error)));
+          });
+        } catch (error) {
+          if (!unsupportedDirectorySync(error)) throw error;
+        }
+      },
+      close: async () => await child.close(),
+    };
+    holdFolder(directory, { fd: child.fd, device: child.identity.device, inode: child.identity.inode });
+    return directory;
+  };
+  const openDirectory = async (path: string): Promise<OpenedDirectory> => {
+    const reached = await throughDescriptors();
+    const [handle, identity] = await opened(path, READ_DIRECTORY);
+    const descriptorCalls = reached ? undefined : callsOrNone();
+    const workingDirectory = descriptorCalls === undefined ? undefined : bracketOrNone();
+    const at =
+      descriptorCalls === undefined
+        ? undefined
+        : folderSteps(
+            descriptorCalls,
+            { fd: handle.fd, device: identity.device, inode: identity.inode },
+            async fd => fileIdentityOf(await fstatOf(fd)),
+            workingDirectory === undefined ? undefined : { bracket: workingDirectory, identityOfStats: fileIdentityOf },
+          );
+    const directory: OpenedDirectory = {
+      identity,
+      entryPath: leaf => (reached ? `${descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined),
+      at,
+      openChild: async (leaf, make) => {
+        if (!isSingleName(leaf))
+          throw Object.assign(new Error('EINVAL: that is not one plain name'), { code: 'EINVAL' });
+        if (!reached) {
+          if (at === undefined) throw noReach();
+          return await childThroughSteps(at, leaf, make);
+        }
+        // This descriptor must still be the folder it was opened on before its number is used as a path.
+        const now = await handle.stat({ bigint: true });
+        if (now.dev !== identity.device || now.ino !== identity.inode)
+          throw Object.assign(new Error('EBADF: a held folder is no longer the one it was opened on'), {
+            code: 'EBADF',
+          });
+        const through = `${descriptorFolder}/${String(handle.fd)}/${leaf}`;
+        let created = false;
+        if (make !== undefined) {
+          try {
+            await mkdir(through, { mode: make.mode });
+            created = true;
+          } catch (error) {
+            if (codeOf(error) !== 'EEXIST') throw error;
+          }
+        }
+        return { folder: await openDirectory(through), created };
+      },
+      chmod: async mode => await handle.chmod(mode),
+      sync: async () => {
+        try {
+          await handle.sync();
+        } catch (error) {
+          if (!unsupportedDirectorySync(error)) throw error;
+        }
+      },
+      close: async () => await handle.close(),
+    };
+    holdFolder(directory, { fd: handle.fd, device: identity.device, inode: identity.inode });
+    return directory;
+  };
   return {
     realpath: path => realpath(path),
     lstat: async path => {
@@ -343,38 +447,7 @@ export function nodeFs(
         close: async () => await handle.close(),
       };
     },
-    openDirectory: async path => {
-      const reached = await throughDescriptors();
-      const [handle, identity] = await opened(path, READ_DIRECTORY);
-      const descriptorCalls = reached ? undefined : callsOrNone();
-      const workingDirectory = descriptorCalls === undefined ? undefined : bracketOrNone();
-      const directory: OpenedDirectory = {
-        identity,
-        entryPath: leaf => (reached ? `${descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined),
-        at:
-          descriptorCalls === undefined
-            ? undefined
-            : folderSteps(
-                descriptorCalls,
-                { fd: handle.fd, device: identity.device, inode: identity.inode },
-                async fd => fileIdentityOf(await fstatOf(fd)),
-                workingDirectory === undefined
-                  ? undefined
-                  : { bracket: workingDirectory, identityOfStats: fileIdentityOf },
-              ),
-        chmod: async mode => await handle.chmod(mode),
-        sync: async () => {
-          try {
-            await handle.sync();
-          } catch (error) {
-            if (!unsupportedDirectorySync(error)) throw error;
-          }
-        },
-        close: async () => await handle.close(),
-      };
-      holdFolder(directory, { fd: handle.fd, device: identity.device, inode: identity.inode });
-      return directory;
-    },
+    openDirectory,
     writeNew: async (path, data, mode) => {
       const [handle, identity] = await opened(path, NEW_FILE, mode);
       try {

@@ -127,6 +127,22 @@ export function takesAnchor(name: RootName): boolean {
 }
 
 /**
+ * Whether a `project-files` scope folder resolves to exactly its spelling BELOW the anchor (S179): `realFolder` (the
+ * folder's real path) equals `realAnchor` (the real path of `within`) joined with the folder's path relative to
+ * `within`. Without `within` the folder is its own anchor and must be its own real path (`realFolder === folder`). The
+ * anchor and everything above it may be links; a link BELOW it makes the two differ. One fact, read by the real roots
+ * port (disk answers) and by the testing host (its flat world's answers).
+ */
+export function spellingHolds(
+  folder: string,
+  within: string | undefined,
+  realFolder: string,
+  realAnchor: string,
+): boolean {
+  return realFolder === (within === undefined ? folder : posix.join(realAnchor, posix.relative(within, folder)));
+}
+
+/**
  * The folders, from the anchor's FIRST CHILD down to the scoped `folder` (the folder included, the anchor NOT), that the
  * kernel must find to be no link; `undefined` when `within` is not `folder` itself or one of its ancestors, or is not a
  * plain absolute folder (no NUL, no `.`, `..` or empty segment, never the filesystem root). Compared COMPONENT by

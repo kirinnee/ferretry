@@ -732,9 +732,9 @@ export async function buildPlan(
   for (const file of ordered) await planFile(ctx, plan, file, resolve);
   if (ctx.preview === true) {
     // The preview never resumes a ferret by itself, whatever v4's machine.yaml said (or did not say). `limits.yaml` is
-    // written off too, but NOTHING relies on it: 5.0 does not read that file for launches (Ferrets offers no
-    // `effectiveLimits`), so what keeps the preview off v4's systemd slices is its daemon having no reachable user
-    // systemd manager (preview/driver.ts `wrapperText`, checked by `preview.sh start`).
+    // written off too (5.0 reads that file for launches, so once accepted it is a third layer); what the preview
+    // relies on first is its daemon having no reachable user systemd manager (preview/driver.ts `wrapperText`, checked
+    // by `preview.sh start`).
     forceFlag(plan, RUNTIMES_CONFIG, 'autoResume', false);
     forceFlag(plan, LimitsConfigFile, 'enabled', false);
     if (ctx.previewShellEnv !== undefined) {

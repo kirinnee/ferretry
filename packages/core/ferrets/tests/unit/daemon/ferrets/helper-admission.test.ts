@@ -3,7 +3,7 @@ import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { FerretsPort, FerretTokensFile, StartDecide } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner, ferretId } from '../../../../contract/testing/index.ts';
 import { HELPER_ADMISSION_ANSWERER } from '../../../../daemon/lib/ferrets/helper-admission.ts';
-import { fakePacks, host as plainHost, record } from './route-fixture.ts';
+import { fakePacks, host as plainHost, portConsumer, record } from './route-fixture.ts';
 
 /**
  * RULING #43: a helper's admission is Packs' OWN answer on the kernel's `start.decide`; Ferrets only consumes it. No
@@ -50,10 +50,11 @@ const expectUnanswered = (answer: { status: number; json: <T>() => T }) => {
 
 test('G12 R-0332 helper starts fail closed when Packs is absent, including the provided port', async () => {
   const runner = new FakeRunner();
-  const h = await host([record('lead')], { harness: new FakeHarness(), runner });
+  // Packs is absent, but a consumer named packs is there to take the port as (a pack start is Packs' alone to make).
+  const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [portConsumer('packs')] });
   expectUnanswered(await childStart(h));
   await expect(
-    h.provided(FerretsPort).start({
+    h.provided(FerretsPort, 'packs').start({
       folder: '/work/child',
       parent: ferretId('lead'),
       by: 'pack',
@@ -205,19 +206,23 @@ test('G12 a Warden resume of a child goes through the same admission (Packs abse
   // Arrange: a stopped child under a lead, once with no Packs and once with an admitting one.
   const child = { ...record('child', 'lead'), state: 'stopped' as const };
   const absentRunner = new FakeRunner();
-  const absent = await host([record('lead'), child], { harness: new FakeHarness(), runner: absentRunner });
+  const absent = await host([record('lead'), child], {
+    harness: new FakeHarness(),
+    runner: absentRunner,
+    plugins: [portConsumer('warden')],
+  });
   const runner = new FakeRunner();
   const packs = fakePacks();
   const present = await host([record('lead'), child], {
     harness: new FakeHarness(),
     runner,
-    plugins: [packs.plugin],
+    plugins: [packs.plugin, portConsumer('warden')],
   });
   const warden = { automatic: true, actor: 'warden' } as const;
 
   // Act
-  const refused = absent.provided(FerretsPort).resume(ferretId('child'), 'carry on', warden);
-  const resumed = await present.provided(FerretsPort).resume(ferretId('child'), 'carry on', warden);
+  const refused = absent.provided(FerretsPort, 'warden').resume(ferretId('child'), 'carry on', warden);
+  const resumed = await present.provided(FerretsPort, 'warden').resume(ferretId('child'), 'carry on', warden);
 
   // Assert
   await expect(refused).rejects.toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
@@ -312,8 +317,12 @@ test('G12 R-0332 a resume whose Packs hangs is refused at the bound, so a stop q
     asked();
     return await new Promise<never>(() => {});
   });
-  const h = await host([record('lead'), child], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
-  const port = h.provided(FerretsPort);
+  const h = await host([record('lead'), child], {
+    harness: new FakeHarness(),
+    runner,
+    plugins: [packs.plugin, portConsumer('warden')],
+  });
+  const port = h.provided(FerretsPort, 'warden');
 
   // Act: a Warden revive waits on Packs; a stop of the same ferret queues behind it.
   const resumed = port.resume(ferretId('child'), 'carry on', { automatic: true, actor: 'warden' });

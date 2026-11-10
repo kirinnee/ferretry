@@ -8,6 +8,7 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import {
   FerretFiles,
+  FerretsPort,
   type FerretId,
   type FerretRecord,
   Harnesses,
@@ -90,8 +91,27 @@ export const fakeAttachmentsOwner = (source: OpeningAttachmentsSource, id = 'con
   );
 
 /**
+ * A stand-in consumer of the Ferrets port with a real plugin id (`warden`, `packs`, `lessons`…): the kernel binds the
+ * port per consumer, so a test that acts as that plugin takes it with `host.provided(FerretsPort, id)`. It takes no hook.
+ */
+export const portConsumer = (id: string) =>
+  implementDaemon(
+    definePlugin({
+      id,
+      title: `${id} (fake consumer)`,
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      needs: { ferrets: FerretsPort },
+    }),
+    { build: () => ({}) },
+  );
+
+/**
  * A stand-in for Packs: a plugin with Packs' real id that takes `start.decide` and answers `answer` (anything, garbage
- * included), recording what it was asked. Its own yes on `start.decide` is what admits a child (RULING #43).
+ * included), recording what it was asked. It also needs the Ferrets port, so a test takes the port as Packs with
+ * `host.provided(FerretsPort, 'packs')`. Its own yes on `start.decide` is what admits a child (RULING #43).
  */
 export const fakePacks = (answer: (input: StartDecideInput) => unknown = () => ({ allow: true })) => {
   const asked: StartDecideInput[] = [];
@@ -104,6 +124,7 @@ export const fakePacks = (answer: (input: StartDecideInput) => unknown = () => (
       api: 5,
       core: false,
       kinds: [],
+      needs: { ferrets: FerretsPort },
       hooks: { takes: [{ hook: StartDecide }] },
     }),
     {

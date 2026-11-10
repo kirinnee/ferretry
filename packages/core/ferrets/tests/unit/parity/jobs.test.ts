@@ -135,6 +135,7 @@ const admitting = () =>
       api: 5,
       core: false,
       kinds: [],
+      needs: { ferrets: FerretsPort },
       hooks: { takes: [{ hook: StartDecide }] },
     }),
     { build: () => ({ hooks: { 'start.decide': async (): Promise<HookDecision> => ({ allow: true }) } }) },
@@ -423,7 +424,7 @@ describe('the live readout and the transcript signal (U5, G161)', () => {
     const { h, runner, harness } = await host(() => standing, [admitting()]);
     const a = await start(h, 'ada');
     const b = await start(h, 'bea');
-    const started = await h.provided(FerretsPort).start({ folder: '/work/cleo', parent: a, by: 'pack' });
+    const started = await h.provided(FerretsPort, 'packs').start({ folder: '/work/cleo', parent: a, by: 'pack' });
     if (!started.ok) throw new Error('the helper starts');
     const helper = started.value;
     const handleOf = async (id: FerretId) => (await h.provided(FerretsPort).handle(id)) as RunnerHandle;
@@ -605,8 +606,8 @@ describe('pack starts (J-0057 J-0084)', () => {
       pack: 'pack-1' as PackId,
       prompt: 'tidy the notes',
     };
-    const first = await h.provided(FerretsPort).start(request);
-    const second = await h.provided(FerretsPort).start(request);
+    const first = await h.provided(FerretsPort, 'packs').start(request);
+    const second = await h.provided(FerretsPort, 'packs').start(request);
     if (!first.ok || !second.ok) throw new Error('both pack starts are admitted');
     expect(first.value).not.toBe(second.value);
     const helpers = packs.asked.filter(asked => asked.parent === lead);
@@ -618,8 +619,9 @@ describe('pack starts (J-0057 J-0084)', () => {
   });
 
   test('J-0084 the pack clean-up starts under the next system callsign (pack-000001, then pack-000002), with no parent and no delegation', async () => {
-    const { h } = await host();
-    const port = h.provided(FerretsPort);
+    // The clean-up is Packs': the port is taken as it, so the `pack` prefix and a `by: 'pack'` start are its own.
+    const { h } = await host(() => ownerStanding(), [admitting()]);
+    const port = h.provided(FerretsPort, 'packs');
     const callsign = (await port.systemCallsign?.('pack')) ?? '';
     expect(callsign).toBe('pack-000001');
     const started = await port.start({ folder: '/work/cleanup', by: 'pack', name: callsign });

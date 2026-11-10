@@ -156,6 +156,13 @@ build)
     exit 1
   fi
   app_origin="$(fact appOrigin)"
+  # The compile imports the workspace's own dependencies (std imports yaml), so the checkout's root install comes first,
+  # from its lockfile only; a failure names the command.
+  echo "installing ${source_dir}'s workspace dependencies (bun install --frozen-lockfile)"
+  if ! (cd "${source_dir}" && bun install --frozen-lockfile >/dev/null); then
+    echo "could not install ${source_dir}'s dependencies; run: cd '${source_dir}' && bun install --frozen-lockfile" >&2
+    exit 1
+  fi
   out="$(mktemp -d)"
   trap 'rm -rf "${out}"' EXIT
   (cd "${source_dir}" && FY_HOSTED_APP_ORIGIN="${app_origin}" COMPILE_TARGETS=linux-x64-baseline COMPILE_OUTDIR="${out}" ./scripts/release/compile.sh)

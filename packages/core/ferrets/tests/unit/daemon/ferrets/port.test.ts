@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import type { LimitsFile } from '../../../../contract/index.ts';
 import { ferretsPort } from '../../../../daemon/lib/ferrets/port.ts';
 import { additivesFixture } from './additives-fixture.ts';
 
@@ -20,6 +21,29 @@ test('through the port, a live ferret keeps its pane and runtime even when a plu
   expect(f.runner.starts).toBe(1);
   expect(f.registry.get(f.id)?.runtime).toBeUndefined();
   expect(f.registry.get(f.id)?.harness).toBe('claude-code');
+});
+
+test('KCB-F effectiveLimits answers limits.yaml as in effect, read fresh', async () => {
+  let file: LimitsFile = { enabled: true, perFerret: { memoryMax: '512M' } };
+  let reads = 0;
+  const f = additivesFixture({
+    limits: () => {
+      reads += 1;
+      return file;
+    },
+  });
+  const port = ferretsPort(f.service, 'terminals');
+
+  expect(await port.effectiveLimits!()).toEqual({ enabled: true, perFerret: { memoryMax: '512M' } });
+  file = { enabled: false };
+  expect(await port.effectiveLimits!()).toEqual({ enabled: false });
+  expect(reads).toBe(2);
+
+  // No limits port bound (or nothing answered): the empty file, so the defaults.
+  expect(await ferretsPort(additivesFixture().service, 'terminals').effectiveLimits!()).toEqual({});
+  expect(
+    await ferretsPort(additivesFixture({ limits: () => undefined }).service, 'terminals').effectiveLimits!(),
+  ).toEqual({});
 });
 
 test('through the port, automatic still reaches a stopped ferret’s resume, and the service’s other methods are bound', async () => {
@@ -74,6 +98,7 @@ test('through the port, the service’s own members are not there: revokeToken, 
       'agentControl',
       'attach',
       'children',
+      'effectiveLimits',
       'get',
       'handle',
       'harness',
