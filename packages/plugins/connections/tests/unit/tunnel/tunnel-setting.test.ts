@@ -11,7 +11,7 @@ const UNREADABLE =
   'connections.yaml cannot be read (a link, not a regular file, or larger than a config file may be), so nothing was written over it';
 const FIX = 'replace the file with an ordinary one, then make the change again';
 
-const over = (outcome: ConfigWriteOutcome): Pick<ConfigPort, 'write'> => ({ write: async () => outcome });
+const over = (outcome: ConfigWriteOutcome): Pick<ConfigPort, 'writeAsOwner'> => ({ writeAsOwner: async () => outcome });
 const def = manifest.data.config[0]!;
 
 it('BG-012 m-3 a refused tunnel setting write names the kernel’s sentence and its fix', async () => {
