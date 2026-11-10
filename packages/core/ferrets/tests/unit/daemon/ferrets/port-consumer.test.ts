@@ -46,6 +46,38 @@ test('KCB-S resume actor warden is accepted from the Warden, and a plain resume 
   ]);
 });
 
+test('KCB-S resume actor peer is forwarded from any consumer, unbound, while warden from the same consumer is refused', async () => {
+  const w = spy();
+  for (const consumer of ['board', 'lessons', 'warden'])
+    expect((await w.port(consumer).resume(F1, 'carry on', { actor: 'peer' })).ok).toBe(true);
+  expect(w.reached.map(r => [r.member, r.args[2]])).toEqual([
+    ['resume', { actor: 'peer' }],
+    ['resume', { actor: 'peer' }],
+    ['resume', { actor: 'peer' }],
+  ]);
+  w.reached.length = 0;
+  expect(await w.port('board').resume(F1, 'carry on', { actor: 'warden' })).toEqual(REFUSED_RESUME);
+  expect(w.reached).toEqual([]);
+});
+
+test('KCB-S a start under the Warden label is refused from a non-warden consumer, and nothing is started', async () => {
+  const w = spy();
+  const refusal = {
+    ok: false,
+    error: { code: 'refused', reason: 'only the Warden starts a ferret under its own label' },
+  } as const;
+  for (const consumer of ['board', 'packs', 'lessons', ''])
+    for (const label of ['fleet-warden', '  fleet-warden  '])
+      expect(await w.port(consumer).start({ folder: '/work', by: 'owner', options: { label } })).toEqual(refusal);
+  expect(w.reached).toEqual([]);
+
+  expect((await w.port('warden').start({ folder: '/work', by: 'owner', options: { label: 'fleet-warden' } })).ok).toBe(
+    true,
+  );
+  expect((await w.port('board').start({ folder: '/work', by: 'owner', options: { label: 'my-label' } })).ok).toBe(true);
+  expect(w.reached).toHaveLength(2);
+});
+
 test('KCB-S move actor warden and movedBy warden are refused from a non-warden consumer, and nothing is moved', async () => {
   const w = spy();
   const board = w.port('board');

@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "end": "2026-11-22",
+  "counts": {
+    "parityOpen": 1626,
+    "portsPendingLines": 243,
+    "guaranteesMissing": 213
+  },
+  "items": [
+    {
+      "id": "kernel-lane-p",
+      "what": "kernel lane P: fileEvents (inotify + Bun port), push envelope eventKey and subject {ferret}, the Warden investigator folder (stays outside FY_HOME, S40)",
+      "owner": "gustavo"
+    },
+    {
+      "id": "seam-f1-f2",
+      "what": "Ferrets/Conversation seam lanes F1 and F2, except effectiveLimits (before merge)",
+      "owner": "britnee"
+    },
+    {
+      "id": "followup-sweep",
+      "what": "the review follow-up sweep: one Sonnet sweep plus one Opus review of every open follow-up line",
+      "owner": "britnee"
+    },
+    {
+      "id": "s-render-diff",
+      "what": "(D) the S render diff of the high-fit S rows, after the (A) harness and its mutation check hold",
+      "owner": "britnee"
+    },
+    {
+      "id": "launch-renewal",
+      "what": "launch renewal (deferred by ruling)",
+      "owner": "britnee"
+    },
+    {
+      "id": "darwin-smoke",
+      "what": "the darwin (macOS) smoke run; no paid macOS run was booked before merge (owner, !A480)",
+      "owner": "gustavo"
+    },
+    {
+      "id": "ffi-descriptor-verify",
+      "what": "the FFI descriptor verify line, which needs the darwin run",
+      "owner": "gustavo"
+    }
+  ]
+}

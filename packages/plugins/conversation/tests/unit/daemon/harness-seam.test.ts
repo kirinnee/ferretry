@@ -871,15 +871,16 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     await host.stop();
   });
 
-  test('D2 #19 a Warden send to a ferret with no live pane types nothing, and its record is taken back', async () => {
+  test('D2 #19 a Warden send to a stopped ferret revives it rather than typing at a pane; a relaunch that carries nothing types nothing and its record is taken back', async () => {
     const ferrets = new HarnessFerrets();
-    ferrets.script.deliver = async () => err({ refused: 'no_pane' });
     const { host, api } = await conversation(ferrets, OPEN, { state: 'stopped' });
 
     const sent = await api().send(F1, { kind: 'warden' }, { message: 'are you stuck?', sendId: 's-w' });
 
+    // The fake Ferrets relaunches without typing a pointer, so nothing was carried: refused, nothing typed.
     expect(sent.ok).toBe(false);
-    expect(ferrets.delivered).toHaveLength(1);
+    expect(ferrets.delivered).toEqual([]);
+    expect(ferrets.resumes).toEqual([{ ferret: F1, message: 'are you stuck?' }]);
     expect(await live(api)).toEqual([]);
     await host.stop();
   });

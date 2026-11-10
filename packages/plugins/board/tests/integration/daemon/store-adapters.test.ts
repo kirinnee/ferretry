@@ -10,7 +10,7 @@ import { KernelSweepMemory } from '../../../daemon/adapters/store/sweep-memory.t
 import { BoardUnavailableError, EMPTY_SWEEP_MEMORY } from '../../../daemon/lib/board/index.ts';
 import { KeyedSerial } from '../../../daemon/lib/lanes/index.ts';
 import manifest from '../../../manifest.ts';
-import { card } from '../../unit/board/support.ts';
+import { card } from '../../support/board.ts';
 
 const file = (name: string): StateFileDef<string, never> =>
   manifest.data.state.find(candidate => candidate.name === name) as never;

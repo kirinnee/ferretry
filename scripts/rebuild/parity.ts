@@ -322,6 +322,13 @@ const REOWNED: Readonly<Record<string, string>> = {
   'J-0234': 'logins',
   // The transcript follower: each harness implements `TranscriptReader.follow` (Claude's is claude-code's).
   'J-0237': 'claude-code',
+  // The send path (#45, britnee ruling in send-path-fix4): the turn files a send writes are Ferrets' session files,
+  // and the look scheduler that follows a send is Conversation's.
+  'F-0306': 'ferrets',
+  'F-0307': 'ferrets',
+  'F-0317': 'ferrets',
+  'F-0318': 'ferrets',
+  'J-0230': 'conversation',
   'F-0006': 'skills',
   'F-0018': 'cli',
   // The shared-history lease lock: the lease store stays Conversation's.
@@ -433,7 +440,14 @@ function checkOf(kind: Kind, what: string, file: string, actualOwner: string): s
               ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
               : kind === 'R'
                 ? 'descriptor-parity'
-                : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+                : parityFileOf(actualOwner, kind);
+}
+/** The owner's parity file for a kind: the unit tier's, unless that file lives in the integration tier (real disk). */
+function parityFileOf(actualOwner: string, kind: Exclude<Kind, 'R'>): string {
+  const name = `${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+  const unit = `${packagePath(actualOwner)}/tests/unit/parity/${name}`;
+  const integration = `${packagePath(actualOwner)}/tests/integration/parity/${name}`;
+  return !existsSync(join(root, unit)) && existsSync(join(root, integration)) ? integration : unit;
 }
 function add(kind: Kind, what: string, file: string, line: number, descriptor = '', owner?: string) {
   let actualOwner = owner ?? ownerOf(file, what);

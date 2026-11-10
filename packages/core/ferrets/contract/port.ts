@@ -193,9 +193,10 @@ export interface ResumeOptions {
   /**
    * Additive (U3 fix1): who asked, for the author recorded beside the revive's turn document — the Warden's revive is
    * Ferretry's Warden (today's `resumeTurnAuthor('warden')`), so its words are never drawn as the owner's. ATTRIBUTION
-   * only, never authority: it changes no policy, admission or refusal. Absent: the turn names no author.
+   * only, never authority: it changes no policy, admission or refusal. `peer` is a ferret's send that revived this
+   * one (today's `resumeTurnAuthor('peer')`): the turn names a ferret as its author. Absent: the turn names no author.
    */
-  readonly actor?: 'warden';
+  readonly actor?: 'warden' | 'peer';
   /**
    * Additive (U3 fix2): told, ONCE and under the ferret's own queue, what this resume decided — `running`: the ferret
    * was not stopped, so nothing was relaunched and a message was NOT handed over (the send shortcut); `relaunching`: it
@@ -205,6 +206,16 @@ export interface ResumeOptions {
    * before it decided. Attribution of nothing: it changes no policy, admission or refusal.
    */
   readonly decided?: (disposition: 'running' | 'relaunching') => void;
+  /**
+   * Additive (#45 revive-on-send, today's `reviver.revive` answer): told, ONCE, what the relaunch typed into the new pane
+   * for the message — the one line pointing at the numbered turn document it was written to (`text`), that turn's number
+   * and the document's absolute path — right after it was typed. A message handed to a resume is carried as that pointer,
+   * so it is the pointer, not the message, that the transcript will record; a caller that must prove the message landed
+   * looks for exactly this text. Not called when nothing was typed (a ferret that was already running, a relaunch that
+   * failed, an interactive resume with no message). A caller's own failure here never changes the resume. Attribution of
+   * nothing: it changes no policy, admission or refusal; `resume`'s answer type is unchanged.
+   */
+  readonly onCarried?: (typed: { readonly text: string; readonly turn: number; readonly file: string }) => void;
 }
 
 /**
@@ -364,6 +375,28 @@ export interface FerretTurnDocument {
  */
 export interface FerretTurns {
   list(options?: { readonly strict?: boolean }): Promise<readonly FerretTurnDocument[]>;
+  /**
+   * Additive (#45 BG-051, today's `writeTurn`): writes the NEXT numbered turn document `turns/turn-NNN.md` (`0600`,
+   * through a temporary name, its author beside it as `turn-NNN.by.json`), numbered after the higher of the session
+   * counter and the documents on disk, and counts it so a later revive numbers after it. Answers its number and the
+   * absolute path the agent is pointed at. The same store the revive writes.
+   */
+  write?(request: { readonly document: string; readonly by?: FerretTurnAuthor }): Promise<FerretTurnWritten>;
+  /**
+   * Additive (#45 BG-053, today's `writeQueuedPayload`): writes a message too long to type into a busy pane to
+   * `channel/queued-<send id>.md` (`0600`, through a temporary name; the same id rewrites the same file) and answers
+   * its absolute path. Rejects for an id outside `[a-z0-9_-]{1,128}`: the caller does not substitute one, because the
+   * send's row names the file.
+   */
+  writeQueued?(sendId: string, payload: string): Promise<string>;
+  /** Additive (#45 BG-051, today's `clearMarkers`): clears the completion markers a previous turn left. */
+  clearMarkers?(): Promise<void>;
+}
+
+/** A turn document Ferrets wrote: its number and the absolute file the agent is pointed at. */
+export interface FerretTurnWritten {
+  readonly turn: number;
+  readonly file: string;
 }
 
 /**

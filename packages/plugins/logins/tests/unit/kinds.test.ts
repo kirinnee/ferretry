@@ -62,4 +62,35 @@ describe('the five login kinds', () => {
   test('a kind refuses a login of another kind rather than answering for it', async () => {
     await expect(kinds.anthropic.status('team')).rejects.toThrow('no anthropic login named team');
   });
+
+  test('a login the owner must sign in to again reads as signed out, with the sentence the check gave', async () => {
+    const needsSignIn = (id: string) =>
+      sampleLogin(id, {
+        status: {
+          word: 'needs_sign_in',
+          label: 'Sign in',
+          reason: 'access_expired_no_refresh',
+          explanation: 'The access token has expired.',
+          lastCheckInconclusive: false,
+        },
+      });
+    const signedOut = loginKinds({
+      clock: { sleep: async () => undefined },
+      files: () => files,
+      view: async id => needsSignIn(id),
+      check: async id => needsSignIn(id),
+      startSignIn: async () => {
+        throw new Error('not used');
+      },
+      signInStatus: async () => {
+        throw new Error('not used');
+      },
+    });
+
+    expect(await signedOut.anthropic.status('work')).toEqual({
+      state: 'signed-out',
+      sentence: 'The access token has expired.',
+    });
+    expect(await kinds.anthropic.status('work')).toEqual({ state: 'signed-in' });
+  });
 });

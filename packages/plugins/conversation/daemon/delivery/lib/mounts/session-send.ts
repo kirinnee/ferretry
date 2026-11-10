@@ -101,7 +101,7 @@ export interface SessionSendSubsystem {
   /** Every send this session's ledger holds, newest first, each with the fate proven so far. */
   sends(sessionId: string): Promise<readonly SendRecord[]>;
   /** One send by its id — how a sender learns where its message settled. */
-  sendStatus(sessionId: string, sendId: string): Promise<SendRecord>;
+  sendStatus(sessionId: string, sendId: string, options?: SendStatusWait): Promise<SendRecord>;
   /** Every message the session's durable queue holds, oldest first (`lib/session/queue`). */
   queue(sessionId: string): Promise<readonly QueuedMessage[]>;
   /** New words for a queued message that is still waiting; refused once a key has gone to the pane. */
@@ -320,6 +320,30 @@ function pathMessageId(context: RouteContext): string {
   return decoded;
 }
 
+/** The longest a `GET …/sends/:sendId` is held open for its fate (`fy send --wait` asks again, ten rounds at most). */
+const MAX_STATUS_WAIT_MS = 30_000;
+
+/** A send-status read that waits for the send's fate to settle: for how long, and who is waiting. */
+interface SendStatusWait {
+  readonly waitMs: number;
+  /** The waiter: the calling ferret, or the kind of caller. One waiter per caller and send. */
+  readonly caller: string;
+}
+
+/** `?waitMs=` of a send-status read: a whole number from 1 to {@link MAX_STATUS_WAIT_MS}, or none. */
+function statusWait(context: RouteContext): number | undefined {
+  const { query } = context.request;
+  for (const [name] of query) {
+    if (name !== 'waitMs') throw new ApiError(400, `unknown send parameter ${name}`, 'unknown_parameter');
+  }
+  const raw = query.get('waitMs')?.[0];
+  if (raw === undefined) return undefined;
+  const waitMs = Number(raw);
+  if (!Number.isSafeInteger(waitMs) || waitMs < 1 || waitMs > MAX_STATUS_WAIT_MS)
+    throw new ApiError(400, `waitMs must be a whole number from 1 to ${MAX_STATUS_WAIT_MS}`, 'invalid_wait');
+  return waitMs;
+}
+
 /** The page a sends or queue read asks for: `limit` (1 to {@link MAX_SEND_PAGE}) and `before`, the cursor a previous page named. */
 function pageQuery(context: RouteContext, noun: string): SendPageQuery {
   const { query } = context.request;
@@ -397,8 +421,20 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly MountRoute[
     {
       method: 'GET',
       path: '/v1/ferrets/:ferretId/sends/:sendId',
-      handle: async context =>
-        jsonResponse(await subsystem.sendStatus(pathSessionId(context), pathSendId(context)).catch(refuse)),
+      handle: async context => {
+        const waitMs = statusWait(context);
+        // One waiter per caller and send: a ferret is named by the credential it came with, anyone else by its kind.
+        const caller = senderSessionId(context) ?? context.actor ?? 'caller';
+        return jsonResponse(
+          await subsystem
+            .sendStatus(
+              pathSessionId(context),
+              pathSendId(context),
+              waitMs === undefined ? undefined : { waitMs, caller },
+            )
+            .catch(refuse),
+        );
+      },
     },
     // The message behind a pointer the transcript records. It is the same words the send row above
     // carries — the turn document is where a send writes them — so it takes the same minimum.

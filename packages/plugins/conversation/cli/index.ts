@@ -7,7 +7,7 @@ import { ClientConversationGateway, NO_FILE_ACCESS } from './lib/gateway.ts';
 import { queueCancelVerb, queueEditVerb, queueVerb } from './lib/queue/commands.ts';
 import { ClientQueueGateway } from './lib/queue/gateway.ts';
 import { SendMessageController } from './lib/send/controller.ts';
-import type { ConversationOutput, SendFiles, SendWaitClock } from './lib/send/ports.ts';
+import type { ConversationOutput, SendFiles } from './lib/send/ports.ts';
 // The reading verbs: logs, search, render, link and transcript.
 import { readingVerbs } from './reading/verbs.ts';
 
@@ -41,7 +41,8 @@ const joinedFrom = (parts: readonly string[]): string | undefined => {
  * Conversation's cli half: `send`, `reply`, `answer`, `interrupt`, `compact-at` and the `queue` verbs.
  *
  * The shell hands a half no environment: no files (so `--message-file` and `--file` say so), no clock to rest on (so
- * `--wait` says so) and no caller ferret (so `--ask` takes `--session <ferret>`). Write positionals before options.
+ * `--wait` has the DAEMON hold each status read open, ten rounds at most) and no caller ferret (so `--ask` takes
+ * `--session <ferret>`). Write positionals before options.
  */
 export default implementCli(manifest, {
   build: ctx => {
@@ -53,14 +54,6 @@ export default implementCli(manifest, {
     const files: SendFiles = {
       readText: async () => {
         throw new CommandError(NO_FILE_ACCESS);
-      },
-    };
-    const clock: SendWaitClock = {
-      nowMs: () => 0,
-      sleep: async () => {
-        throw new CommandError(
-          '--wait needs a clock the shell does not give a plugin yet; look with `fy queue <ferret>` instead',
-        );
       },
     };
     const guarded =
@@ -92,7 +85,6 @@ export default implementCli(manifest, {
           files,
           output,
           caller === undefined ? {} : { callerFerret: caller },
-          clock,
         );
         await controller.execute(ferret, {
           ...(message === undefined ? {} : { message }),

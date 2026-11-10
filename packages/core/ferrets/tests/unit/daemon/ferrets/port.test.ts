@@ -30,6 +30,30 @@ test('through the port, automatic still reaches a stopped ferret’s resume, and
   expect((await port.get(f.id))?.id).toBe(f.id);
 });
 
+test('M3 through the port, the callbacks a resume may carry reach the service, and nothing else does', async () => {
+  const seen: unknown[] = [];
+  const port = ferretsPort(
+    {
+      resume: async (_ferret: unknown, _message: unknown, options: unknown) => {
+        seen.push(options);
+        return { ok: true, value: 'f1' };
+      },
+    } as never,
+    'board',
+  );
+  const decided = () => undefined;
+  const onCarried = () => undefined;
+
+  await (port.resume as unknown as (...args: unknown[]) => Promise<unknown>)('f1', 'hi', {
+    decided,
+    onCarried,
+    confirmRestore: () => undefined,
+  });
+  await port.resume('f1' as never, 'hi');
+
+  expect(seen).toEqual([{ decided, onCarried }, undefined]);
+});
+
 test('through the port, stop’s 4th cause argument is ignored: a plugin cannot stamp an end cause', async () => {
   const f = additivesFixture();
   await f.service.resume(f.id);
