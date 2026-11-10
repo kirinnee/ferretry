@@ -226,7 +226,7 @@ export interface TestHostOptions {
   readonly fenceHome?: string;
   /**
    * A host that cannot reach an entry through a held folder (macOS whose C library or working-directory bracket could
-   * not be loaded): the `project-files` root, an owner's root, refuses every remove `no_descriptor_reach`, as the real
+   * not be loaded): the `project-files` root, an owner's root, refuses every remove AND every write `no_descriptor_reach`, as the real
    * host does there. Default: it has reach, as macOS does when both load (a remove goes through the folder's descriptor).
    */
   readonly noDescriptorReach?: true;

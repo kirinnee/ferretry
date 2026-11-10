@@ -261,7 +261,7 @@ export function nodeFs(
     /**
      * Where a host without `descriptorFolder` gets the C library's descriptor calls (`openat`, `renameat`, `linkat`,
      * `unlinkat`): asked once, on the first folder opened, and a throw means none (a rename and a folder remove then
-     * refuse `no_descriptor_reach`; a write and a publish re-prove the folder once and go by path). Default: loaded from the platform's C library on macOS, none elsewhere.
+     * refuse `no_descriptor_reach`, and so does every `project-files` write; a write or a publish in any other root re-proves the folder once and goes by path). Default: loaded from the platform's C library on macOS, none elsewhere.
      */
     readonly descriptorCalls?: () => DescriptorCalls;
     /**
