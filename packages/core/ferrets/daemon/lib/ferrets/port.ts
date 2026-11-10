@@ -37,10 +37,11 @@ const START_BY_PLUGIN: Readonly<Partial<Record<StartRequest['by'], string>>> = {
  * id's grammar (`FerretIdSchema`), which is how the route spells a calling ferret.
  */
 const SESSION_MOVER = 'session:';
-const isMover = (movedBy: string): boolean =>
-  movedBy === 'owner' ||
-  movedBy === 'warden' ||
-  (movedBy.startsWith(SESSION_MOVER) && FerretIdSchema.safeParse(movedBy.slice(SESSION_MOVER.length)).success);
+const isMover = (movedBy: unknown): boolean =>
+  typeof movedBy === 'string' &&
+  (movedBy === 'owner' ||
+    movedBy === 'warden' ||
+    (movedBy.startsWith(SESSION_MOVER) && FerretIdSchema.safeParse(movedBy.slice(SESSION_MOVER.length)).success));
 const NOT_A_MOVER = 'a move names who moved it as owner, session:<ferret id> or warden';
 
 const NOT_THE_WARDEN = 'only the Warden is recorded as the Warden';
