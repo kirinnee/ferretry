@@ -55,6 +55,11 @@ concurrency:
     }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
 
+# THE ONE SWITCH of the strict Appendix D report (the `strict-guarantees` job below). Workflow-level, so the job that
+# counts and the `Full CI` verdict (scripts/ci/full-status.sh) read the same value. See docs/standards/ci-cd.
+env:
+  FY_STRICT_GUARANTEES_BLOCKING: 'false'
+
 jobs:
   # Shared setup once, then independent processes with separate logs and coverage directories.
   quick:
@@ -107,6 +112,15 @@ jobs:
         with:
           name: coverage-unit
           path: coverage/unit/
+          if-no-files-found: warn
+      # The repository tooling's own JUnit report: the strict guarantee report below counts its tests too.
+      - name: Upload scripts test results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-scripts
+          path: coverage/scripts/
           if-no-files-found: warn
       - name: Upload quick part results
         if: always()
@@ -191,6 +205,66 @@ jobs:
             coverage/ci/int/*.log
             coverage/ci/int/*.tsv
           if-no-files-found: warn
+
+  # THE STRICT APPENDIX D COUNT (docs/rebuild/merge-bar.md line 1). Quick and Integration each judge their own tier's
+  # JUnit report without `--strict`; a row's test may live in either, so only the reports together can say how many kept
+  # rows (pending packages included) still have no id-named test that PASSED. This job downloads the unit, scripts and
+  # integration reports and prints that count and the ids by owner in the job summary. It runs on the full set's events
+  # only (a pull request without the `full-ci` label has no integration report, so no honest count), and after a red
+  # test job too, since the count is the point then.
+  #
+  # THE ONE SWITCH: `FY_STRICT_GUARANTEES_BLOCKING` in the workflow `env` above. 'false' (today) reports and never turns
+  # CI red; 'true' makes a miss fail the job. Flip it in the change that takes the count to 0 (docs/standards/ci-cd,
+  # "Strict guarantee report"). The job is in `full.needs` and the verdict (scripts/ci/full-status.sh) reads the same
+  # switch: while it is 'false' the verdict accepts this job whatever its result, so even a failed setup step or the
+  # timeout cannot turn Full CI red.
+  strict-guarantees:
+    name: Strict Guarantees
+    needs: [quick, int]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    runs-on: >-
+      ${{
+        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
+        && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+      }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
+      - uses: ./.github/actions/install-nix
+      # A report the earlier jobs failed to upload is a missing artifact here, not a reason to stop: the count then
+      # says "no JUnit report found" rather than guessing.
+      - name: Download the unit report
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-unit
+          path: coverage/unit
+      - name: Download the scripts report
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-scripts
+          path: coverage/scripts
+      - name: Download the integration report
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-int
+          path: coverage/int
+      - name: Count the kept rows without a passing id-named test
+        # Non-blocking unless the workflow-level switch says 'true'; `continue-on-error` also covers a crash of the script itself.
+        continue-on-error: ${{ env.FY_STRICT_GUARANTEES_BLOCKING != 'true' }}
+        run: ./scripts/ci/in-devshell.sh bash -c './scripts/ci/setup.sh && bun scripts/ci/strict-guarantees.ts --results coverage/unit --results coverage/scripts --results coverage/int'
 
   # Knip (twice): the gates that need more than 4GB, so they are not in Quick's
   # per-hook buckets and not in compile, which runs SIT and whose binaries the smokes and darwin wait for. A job of
@@ -342,7 +416,7 @@ jobs:
 
   full:
     name: Full CI
-    needs: [quick, full-pending, int, full-gates, compile, smoke, smoke-darwin]
+    needs: [quick, full-pending, int, strict-guarantees, full-gates, compile, smoke, smoke-darwin]
     if: ${{ always() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
     timeout-minutes: 5
     permissions:
