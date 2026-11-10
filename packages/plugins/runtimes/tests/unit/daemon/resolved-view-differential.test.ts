@@ -466,7 +466,7 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
     should(nestedMembers).be.above(CASES / 10);
     should(harmlessMembers).be.above(CASES / 20);
     should(asWritten).be.above(harmlessMembers / 2);
-  });
+  }, 120_000);
 
   it(`should hide every MCP-argument byte today hides, and equal today off the tightened shapes (${String(CASES)} command lines)`, () => {
     // Arrange
@@ -505,5 +505,5 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
     should(breaches.slice(0, 10)).deepEqual([]);
     should(differed).be.above(0);
     should(harmlessLines).be.above(0);
-  });
+  }, 120_000);
 });

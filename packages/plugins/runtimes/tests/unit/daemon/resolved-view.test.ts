@@ -1180,6 +1180,9 @@ describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
       `API_KEY=${P} short==`,
       `LOG_LEVEL=${P} ${B64}==`,
       `API_KEY=${P} x= y`,
+      // A pointer past the end of the secret-named key's value (`,` ends it) is a harmless key's, and the text after it
+      // is that key's own.
+      `API_KEY=short,LOG_LEVEL=${P} ${B64}==`,
     ];
 
     // Act
