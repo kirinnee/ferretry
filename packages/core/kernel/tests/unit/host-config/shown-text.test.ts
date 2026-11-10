@@ -304,6 +304,13 @@ describe('what the write rule refuses is never shown (CFG-LEAK-R, the mask reads
     expect(shownOf(alone).text).toBe(alone);
   });
 
+  test('S6 CFG-LEAK-R a pointer, then a key of its own and no raw text, stays shown (the ruled control): --set=a=1,API_KEY=${secret:X},b=2', () => {
+    for (const mark of [',', ';', '&']) {
+      const text = listOf([`--set=a=1,API_KEY=\${secret:X}${mark}b=2`, '--key', `\${secret:X}${mark}b=2`]);
+      expect(shownOf(text).text).toBe(text);
+    }
+  });
+
   test('CFG-LEAK-R a name W does not read as a credential stays: --model, --signing, --level', () => {
     const text = listOf(['--model', VALUE, '--signing', VALUE, '--level', VALUE]);
     expect(shownOf(text).text).toBe(text);

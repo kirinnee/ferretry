@@ -35,8 +35,50 @@ const OTHER_VALUE = 'Hy8cBt4Fg6SdJ1uE';
 const SHORT_PASSWORD = 'hunter2024';
 const POINTER = '${secret:X}';
 
+/** Where a credential's value goes: the flag forms and the key forms W reads (review r3: B1, the class). */
+const VALUE_LEADS: readonly ((value: string) => readonly string[])[] = [
+  value => ['--key', value],
+  value => ['--ssh-key', value],
+  value => ['--token', value],
+  value => [`--token=${value}`],
+  value => [`--api-key=${value}`],
+  value => ['-e', `KEY=${value}`],
+  value => ['-e', `API_KEY=${value}`],
+  value => [`-eAPI_KEY=${value}`],
+  value => [`API_KEY=${value}`],
+  value => [`Authorization: ${value}`],
+  value => [`--header=Authorization: Bearer ${value}`],
+  value => [`--env=SIGNING_KEY=${value}`],
+];
+
+/** A value that holds a pointer and raw text in ANOTHER piece of it (before, glued, a harmless key's value, a `#` after). */
+const POINTER_VALUES: readonly ((mark: string) => string)[] = [
+  mark => `a${mark}${VALUE}${mark}${POINTER}`,
+  mark => `a=1${mark}${POINTER}${mark}${VALUE}`,
+  mark => `x${POINTER}${mark}${VALUE}`,
+  mark => `prefix${POINTER}${mark}${VALUE}`,
+  mark => `${POINTER}x${mark}${VALUE}`,
+  mark => `${POINTER}${mark}b=${VALUE}`,
+  mark => `${POINTER}${mark}b:${VALUE}`,
+  mark => `${POINTER}${mark}b=x${VALUE}`,
+  mark => `${POINTER}${mark}b="${VALUE}"`,
+  mark => `${POINTER}${mark}${VALUE}=x`,
+  mark => `${POINTER}${mark}${mark}${VALUE}`,
+  mark => `${POINTER}${POINTER}${mark}${VALUE}`,
+  mark => `${POINTER}${mark}#${VALUE}`,
+  mark => `${POINTER}#${mark}${VALUE}`,
+  mark => `${POINTER}${mark}b=2#${VALUE}`,
+  mark => `${POINTER}?b=2${mark}${VALUE}`,
+];
+
+/** Every value shape x mark x lead: W refuses each whole, so each is cut whole by both cutters (the class, not one shape). */
+const POINTER_CLASS_LINES: readonly (readonly string[])[] = [',', ';', '&'].flatMap(mark =>
+  POINTER_VALUES.flatMap(shape => VALUE_LEADS.map(lead => lead(shape(mark)))),
+);
+
 /** The cases the kernel's own `secret-words.test.ts` pins, and the lines a person writes. */
 const OWN_LINES: readonly (readonly string[])[] = [
+  ...POINTER_CLASS_LINES,
   ['--token', VALUE],
   ['--token', '${secret:GH_TOKEN}'],
   ['--token-file', '~/.config/tool/token'],

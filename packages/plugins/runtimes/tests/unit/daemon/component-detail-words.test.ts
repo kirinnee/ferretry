@@ -258,7 +258,8 @@ describe('componentDetail — the #40 rule after review r2 (R-0082, M1, M2, M3, 
       // CFG-LEAK-R (i): `-eAPI_KEY` is a flag named by its tail (`KEY`), so its whole value is cut, `,token=<v>` with it.
       hid(`-eAPI_KEY=${HIDDEN}`),
       hid(`-HAuthorization: ${HIDDEN}, X-Api-Key: ${HIDDEN}`),
-      hid(`--hdr,api_key=${HIDDEN};y=${POINTER};token=${HIDDEN}`),
+      // W refuses the whole value (a pointer and raw text), so it is cut whole, value start to word end.
+      hid(`--hdr,api_key=${HIDDEN}`),
     ];
 
     // Assert

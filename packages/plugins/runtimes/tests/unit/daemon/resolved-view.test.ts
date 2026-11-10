@@ -780,8 +780,8 @@ describe('resolvedEntries — the #40 rule after review r1 (F2, F3)', () => {
     should(actual).deepEqual([
       hid(`--hdr,api_key:${HIDDEN}`),
       hid(`--hdr;password:${HIDDEN}`),
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
-      hid(`--x&X-Api-Key=${HIDDEN},\${secret:API_TOKEN}`),
+      // W refuses the whole value (a pointer and raw text), so the pointer in it is cut with the rest.
+      hid(`--x&X-Api-Key=${HIDDEN}`),
       hid(`--name&?API_KEY:${HIDDEN};Bearer ${HIDDEN}`),
       // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
       hid(`--hdr,api_key:${HIDDEN} x=\${secret:Y},token=${HIDDEN}`),
@@ -859,8 +859,9 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
 
     // Assert
     should(actual).deepEqual([
-      hid(`--hdr,api_key=${HIDDEN};y=${P};token=${HIDDEN}`),
-      hid(`--x&X-Api-Key=${HIDDEN},y=${P},token=${HIDDEN}`),
+      // W refuses the whole value (it holds a pointer and raw text), so it is cut whole, value start to word end.
+      hid(`--hdr,api_key=${HIDDEN}`),
+      hid(`--x&X-Api-Key=${HIDDEN}`),
     ]);
   });
 
@@ -894,7 +895,7 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
 
     // Assert
     should(actual).equal(
-      `run-server API_KEY=${P} CLIENT_SECRET=${HIDDEN} -eAPI_KEY=${HIDDEN} --hdr,api_key=${HIDDEN};y=${P};token=${HIDDEN} -H${HIDDEN}`,
+      `run-server API_KEY=${P} CLIENT_SECRET=${HIDDEN} -eAPI_KEY=${HIDDEN} --hdr,api_key=${HIDDEN} -H${HIDDEN}`,
     );
   });
 

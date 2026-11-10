@@ -44,7 +44,9 @@
  * quoted) and a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name). A value
  * glued to a pointer with no space or `#` between them (`API_KEY=v${secret:X}`, `prefix${secret:X}`,
  * `${secret:X}?model=short`) is NOT one: CFG-LEAK-R cuts the whole value ({@link gluedToPointer}), because the write
- * rule refuses it. A name is a credential's by the tail test ({@link namesCredential}) or by the older words below.
+ * rule refuses it. The same holds for raw text in ANY piece of a credential's value that holds a pointer
+ * (`prefix${secret:X},<v>`, `a,<v>,${secret:X}`, `${secret:X},b=<v>`): where the write rule refuses that value whole,
+ * it is cut whole, value start to word end ({@link refusedCuts}), over-cutting the pointer in it. A name is a credential's by the tail test ({@link namesCredential}) or by the older words below.
  * Also GAPs, each the same text as a harmless one (review r4): `user:pass` AFTER a pointer
  * (`API_KEY=${secret:X} person:<v>`, as `MODEL=gpt-4o-mini` is its own key, G5b); a quoted value of short words before
  * a pointer (`API_KEY="my pass phrase" ${secret:X}`, G6); and text under a harmless bare key before a pointer
@@ -556,6 +558,43 @@ function flagValueCuts(flag: string, value: string, offset: number): readonly Cu
   );
 }
 
+/** The write rule's value test past its name gate, copied (`secrets.ts` `looksLikeRawSecret`): what it refuses whole. */
+const WHOLE_SCHEME = /^(?:bearer|basic|token)[ \t]+/iu;
+const WHOLE_REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
+const WHOLE_PLACE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu;
+const WHOLE_PAIR = /^([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[:=][ \t]*/u;
+const WHOLE_HEADER = /^(?:authorization|cookie)$/iu;
+function refusedWhole(value: string): boolean {
+  if (!value.includes('${secret:')) return false;
+  const inner = unquoted(value).trim().replace(WHOLE_SCHEME, '');
+  if (inner.length < 16 || /\s/u.test(inner) || WHOLE_REFERENCE.test(inner) || WHOLE_PLACE.test(inner)) return false;
+  const counts = new Map<string, number>();
+  for (const char of inner) counts.set(char, (counts.get(char) ?? 0) + 1);
+  const length = [...inner].length;
+  return [...counts.values()].reduce((bits, count) => bits - (count / length) * Math.log2(count / length), 0) >= 3.5;
+}
+
+/**
+ * The cuts of what the write rule judges WHOLE in a word, where a pointer in it kept the rules above from cutting it
+ * (review r3: `--key ${secret:X},b=2,v`, `KEY=a,v,${secret:X}`): a credential-named flag's value (glued, or the word
+ * after it), and the value of a credential-named key that starts the word or the glued value. Value start to word end.
+ */
+function refusedCuts(word: string, flag: string, valueAt: number): readonly Cut[] {
+  const cuts: Cut[] = [];
+  if (flag !== '' && namesCredential(flag) && refusedWhole(word.slice(valueAt))) cuts.push([valueAt, word.length]);
+  for (const at of new Set([0, valueAt])) {
+    const pair = WHOLE_PAIR.exec(word.slice(at));
+    const name = pair?.[1] ?? '';
+    if (
+      pair !== null &&
+      (namesCredential(name) || WHOLE_HEADER.test(name)) &&
+      refusedWhole(word.slice(at + pair[0].length))
+    )
+      cuts.push([at + pair[0].length, word.length]);
+  }
+  return cuts;
+}
+
 /** One command-line word as it may be shown, judged with the word before it. */
 export function shownWord(word: string, before: string | undefined): ShownWord {
   const hidden = (text: string): ShownWord => ({ text, hidden: true });
@@ -600,6 +639,7 @@ export function shownWord(word: string, before: string | undefined): ShownWord {
     ...(name === '' ? [] : flagValueCuts(name, word, 0)),
     ...(stuck === null ? [] : cutsAt(stuckFlag.length, stuckValue)),
     ...((glued === null && stuck === null) || keyStartsBefore(word, gluedFlag.length) ? cutsAt(0, word) : []),
+    ...refusedCuts(word, glued === null ? name : gluedFlag, glued === null ? 0 : gluedFlag.length + separator.length),
   ];
   return cuts.length === 0 ? { text: word, hidden: false } : hidden(withCuts(word, cuts));
 }

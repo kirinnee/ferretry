@@ -482,9 +482,12 @@ per-document plan (one refused document writes nothing of the set).
   there. A person sees `‹hidden›` where a path stood, and a text saved back with it is refused until the real text is
   typed at the machine.
 - **W and the mask agree: residual 0.** Every raw flag secret W refuses is cut by the kernel mask and by Runtimes'
-  copy (a value after `${secret:X},` or after `${secret:X},b=2,` is cut too), over the generated ruling #40 corpus, the hand-written lines and every name W's tail test refuses (pinned by
-  `kernel-cutter-agreement.test.ts`, strict). The price is over-redaction: the mask cuts every value under a name W
-  reads as a credential, a path after `--token-file` (E3) and the whole value of a word that glues text to a pointer.
+  copy (a value after `${secret:X},` or `${secret:X},b=2,` is cut too), over the generated ruling #40 corpus, the
+  hand-written lines and every name W's tail test refuses (pinned by `kernel-cutter-agreement.test.ts`, strict). A
+  credential value that holds a pointer and that W refuses whole is cut whole, value start to word end, whatever piece
+  the raw text is in (`--key a,v,${secret:X}`, `--key ${secret:X},b=v`); the pointer in it is cut with the rest. The
+  price is over-redaction: the mask cuts every value under a name W reads as a credential, a path after `--token-file`
+  (E3) and the whole value of a word that glues text to a pointer.
   And should the mask ever miss a name W knows, the net withholds the file (`unmaskable`) instead of showing it. A word
   of blanks that does not start with a flag (`srv --token v`) is no gap: the read splits it into words and cuts `v`.
 - **GAP: the etag is a digest oracle.** A file's etag is the sha256 of its disk text and goes to every `fleet.use`
