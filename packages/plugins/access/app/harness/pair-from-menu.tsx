@@ -24,7 +24,7 @@ import { type DaemonId, daemonConnection, SessionsBar, useAppViewport, useLayout
 
 /**
  * `?pair-from-menu` names this page.
- * @pending access: app/harness/pair-from-menu.tsx is not reached by the pairing screen
+ * @pending access: app/harness/pair-from-menu.tsx is not reached
  */
 export const isPairFromMenuPage = (search: string): boolean => new URLSearchParams(search).has('pair-from-menu');
 
@@ -87,7 +87,7 @@ const MACHINES = [
   { daemonId: `fy_daemon_${'Ll'.repeat(21)}A` as DaemonId, name: 'laptop' },
 ];
 
-/** @pending access: app/harness/pair-from-menu.tsx is not reached by the pairing screen */
+/** @pending access: app/harness/pair-from-menu.tsx is not reached */
 export function PairFromMenuHarness() {
   useAppViewport();
   const phone = useLayoutMode() === 'drawer';

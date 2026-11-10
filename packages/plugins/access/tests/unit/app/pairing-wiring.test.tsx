@@ -47,7 +47,7 @@ describe('what Access contributes for pairing', () => {
       client: { call: async () => ({}) },
     });
     expect(Object.keys(built.panels ?? {})).toContain('new-devices');
-    expect(Object.keys(built.settings ?? {})).toEqual(['devices']);
+    expect(Object.keys(built.settings ?? {})).toEqual(['devices', 'grants', 'security', 'audit']);
     expect(Object.keys(built.screens ?? {})).toEqual(['pair']);
   });
 });

@@ -75,14 +75,18 @@ export function routeRequestClient(
 ): IFyApiClient {
   return {
     async request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
-      const line = `${(init.method ?? 'GET').toUpperCase()} ${path}`;
+      // A query string is not part of the route key: it rides as the call's `query`.
+      const [pathOnly = path, search = ''] = path.split('?', 2);
+      const line = `${(init.method ?? 'GET').toUpperCase()} ${pathOnly}`;
       const matched = matchTemplate(line, templates);
       const route = matched?.route ?? line;
       const body = bodyOf(init.body);
+      const query = Object.fromEntries(new URLSearchParams(search));
       let answer: unknown;
       try {
         answer = await client.call(route, {
           ...(matched === undefined ? {} : { params: matched.params }),
+          ...(search === '' ? {} : { query }),
           ...(body === undefined ? {} : { body }),
         });
       } catch (reason) {
