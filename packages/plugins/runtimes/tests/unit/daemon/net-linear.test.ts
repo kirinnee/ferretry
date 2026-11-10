@@ -18,13 +18,16 @@ describe('CFG-LEAK (ii) the Runtimes net is linear at 256 KiB', () => {
     it(`should cut and check one word in linear time: ${label}`, () => {
       const small = make(128 * 1024);
       const large = make(256 * 1024);
-      const ratio = best(() => shownLine([large])) / best(() => shownLine([small]));
+      // The small text is read first: it warms the code up, so the large one is not timed cold.
+      const base = best(() => shownLine([small]));
+      const ratio = best(() => shownLine([large])) / base;
       should(ratio).be.below(3);
     });
     it(`should judge a command shown as written in linear time: ${label}`, () => {
       const small = make(128 * 1024);
       const large = make(256 * 1024);
-      const ratio = best(() => writtenWithheld('command', large)) / best(() => writtenWithheld('command', small));
+      const base = best(() => writtenWithheld('command', small));
+      const ratio = best(() => writtenWithheld('command', large)) / base;
       should(ratio).be.below(3);
     });
   }
