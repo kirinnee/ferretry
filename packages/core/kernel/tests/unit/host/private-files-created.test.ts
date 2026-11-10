@@ -229,6 +229,53 @@ test('S40 a home that vanished answers the 503 sentence from a root write, with 
   expect(told).toHaveLength(1);
 });
 
+test('S40 row 32: a publish that throws AFTER its entry landed (the folder sync) still pins it', async () => {
+  const real = nodeFs(() => 'r');
+  let syncs = 0;
+  let failAt = Number.POSITIVE_INFINITY;
+  // The session folder is the root's own base, so the folders a publish syncs are opened by the disk itself.
+  const fs: HostFs = {
+    ...real,
+    openDirectory: async path => {
+      const opened = await real.openDirectory(path);
+      return {
+        ...opened,
+        sync: async () => {
+          syncs += 1;
+          if (syncs === failAt) throw Object.assign(new Error(`cannot sync ${path}`), { code: 'EIO' });
+          await opened.sync();
+        },
+      };
+    },
+  };
+  const { home, roots, stranger } = await layout(fs);
+  const session = roots('ferrets', ['sessions']).root('sessions', { subfolder: SESSION });
+  const environment = session.resolve('environment.json');
+  const plain = session.resolve('notes.txt');
+  if (!environment.ok || !plain.ok) throw new Error('unresolved');
+  // A plain publish in the same folder counts the syncs one publish makes (the first also makes the session folder);
+  // the LAST sync is the one after the entry landed.
+  await session.publish(plain.value, new TextEncoder().encode('plain'));
+  syncs = 0;
+  await session.publish(plain.value, new TextEncoder().encode('plain'));
+  const perPublish = syncs;
+  syncs = 0;
+  failAt = perPublish;
+  const failure = await session.publish(environment.value, new TextEncoder().encode('FAKE-credential')).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  failAt = Number.POSITIVE_INFINITY;
+  // The write's own error comes back unchanged (never the pin's), and the entry is on disk.
+  expect((failure as { code?: string }).code).toBe('EIO');
+  // The file landed although the publish threw; an alias made now must meet a fence that already holds it.
+  await link(
+    `${home}/state/ferrets/sessions/${SESSION}/environment.json`,
+    `${home}/state/stranger/agent-homes/F1/stolen.json`,
+  );
+  expect(await readOf(stranger, 'stolen.json')).toBe('refused:fenced');
+});
+
 test('S40 a write to a path no private place touches asks for no look', async () => {
   const real = nodeFs(() => 'r');
   let lists = 0;
