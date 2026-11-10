@@ -2,8 +2,9 @@
  * The read-only checks `preview.sh start` runs BEFORE it starts the preview daemon, and refuses to start when one fails.
  * Nothing here changes anything: each is a question put to the host with the exact environment the preview will use.
  *
- * 1. NO USER SYSTEMD MANAGER (MAJOR-A). 5.0 does not read `limits.yaml` for launches (Ferrets offers no
- *    `effectiveLimits`, so Terminals launches with the defaults), and with those defaults a daemon that can reach the
+ * 1. NO USER SYSTEMD MANAGER (MAJOR-A). 5.0 reads `limits.yaml` for launches. The preview writes
+ *    `enabled: false` (in effect once the owner runs `prepare --owner`; until then the defaults apply, with limits on),
+ *    and with limits on a daemon that can reach the
  *    user manager runs `systemctl --user set-property --runtime ferretry_fleet.slice ...` and the same on each ferret's
  *    slice: names v4's live daemon uses too. 5.0 falls back to direct execution only when its probe
  *    (`systemctl --user show-environment`, packages/plugins/terminals/daemon/lib/cgroups/enforcement.ts) fails. That
@@ -105,7 +106,7 @@ export async function startChecks(input: StartChecksInput): Promise<StartChecks>
     const manager = await run([fy5, '__daemon-probe', 'systemctl', '--user', 'show-environment'], asCaller);
     if (manager.code === 0)
       problems.push(
-        "refusing to start: with the preview daemon's exact environment `systemctl --user show-environment` still reaches your user systemd manager, so the preview would reconfigure v4's live `ferretry_fleet.slice` and its per-ferret slices (5.0 does not read limits.yaml for launches). Nothing was started.",
+        "refusing to start: with the preview daemon's exact environment `systemctl --user show-environment` still reaches your user systemd manager, so the preview would reconfigure v4's live `ferretry_fleet.slice` and its per-ferret slices (limits are on until the preview's `enabled: false` is accepted). Nothing was started.",
       );
     else passed.push('no user systemd manager is reachable from the preview daemon (launches run directly, no slice)');
   }

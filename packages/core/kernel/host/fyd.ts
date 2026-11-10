@@ -2,6 +2,7 @@
  * `fyd` — the daemon entry (§8: at most 150 lines, names no subsystem; `host-files`). Everything a plugin adds comes
  * from the generated registry; everything IO from the kernel's adapters.
  */
+import { clearYamlLogSwitches } from '@ferretry/std/yaml';
 import { appendFileSync } from 'node:fs';
 import { chmod, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -28,6 +29,8 @@ const VERSION = '5.0.0';
 const BINARY = process.env.FY_BINARY_NAME ?? PRODUCT_BINARIES.client;
 
 async function main(): Promise<number> {
+  // FIRST: the yaml library prints what it parses when these are set, and a config may hold a credential.
+  clearYamlLogSwitches();
   // The command line is answered BEFORE anything with a side effect: a query (--version, --help) stays a query.
   const usage = { daemonName: PRODUCT_BINARIES.daemon, clientName: BINARY, version: VERSION };
   const answer = answerArguments(process.argv.slice(2), usage);

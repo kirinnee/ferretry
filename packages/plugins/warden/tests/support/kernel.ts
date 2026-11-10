@@ -60,7 +60,9 @@ export function wardenState(folder = new MemoryStateFolder()): StatePort & { rea
 export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(value: unknown): void } {
   let current = initial;
   const listeners = new Set<() => void>();
-  const port: Omit<ConfigPort, 'write' | 'writeAsOwner' | 'remove' | 'writeAll'> & { set(value: unknown): void } = {
+  const port: Omit<ConfigPort, 'write' | 'writeAsOwner' | 'writeAsCaller' | 'remove' | 'writeAll'> & {
+    set(value: unknown): void;
+  } = {
     file: (_def: ConfigFileDef<unknown>) => current as never,
     collection: (_def: ConfigCollectionDef<unknown>) => new Map() as never,
     fileState: () =>
@@ -78,7 +80,7 @@ export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(v
       for (const listener of listeners) listener();
     },
   };
-  // Reads only: a test that needs the kernel config write adds `write`, `writeAsOwner`, `remove` and `writeAll` itself.
+  // Reads only: a test that needs the kernel config write adds `write`, `writeAsCaller`, `writeAsOwner`, `remove` and `writeAll` itself.
   return port as ConfigPort & { set(value: unknown): void };
 }
 

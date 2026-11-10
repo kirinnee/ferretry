@@ -314,6 +314,13 @@ export interface FerretSessionPort {
    * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
    */
   questionFile?(ferret: FerretId): Promise<FencedPath>;
+  /**
+   * Port-only (not on the contract): whether a ferret started under `parent` would be stamped into the Warden's
+   * lineage, decided from the SAME source and rule the start's stamp uses (the session documents, `resolveWardenLineage`),
+   * not from the registry summary, which does not carry the stamp. Throws when the documents cannot be read; the caller
+   * refuses then. Unbound: the stamp is not written either, so there is no lineage to ask.
+   */
+  inWardenLineage?(parent: FerretId): Promise<boolean>;
 }
 
 /** One file of a start's opening attachments, as the ferret's `attachments/` folder holds it. */
@@ -385,12 +392,12 @@ function tellCarried(
  * Who may ask for a START (`StartRequest.by`), as a closed table checked at run time. A resume is not here: it goes
  * through `resume()`, which asks `start.decide` itself with `by: 'resume'`.
  */
-const START_ASKERS = { owner: true, ferret: true, pack: true, board: true } as const satisfies Record<
+const START_ASKERS = { owner: true, ferret: true, pack: true, board: true, warden: true } as const satisfies Record<
   StartRequest['by'],
   true
 >;
 const START_ASKER_REFUSAL =
-  'a start is asked for by the owner, a ferret, a pack or the board; a resume is asked for through resume';
+  'a start is asked for by the owner, a ferret, a pack, the board or the Warden; a resume is asked for through resume';
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
@@ -577,6 +584,15 @@ export class FerretsService implements FerretsApi {
   /** The managed worktree registry, durable facts only (the contract's `managedWorktrees()`). */
   async managedWorktrees(): Promise<readonly ManagedWorktreeSummary[]> {
     return (await this.ports.managedWorktrees?.()) ?? [];
+  }
+
+  /**
+   * Port-only (not a {@link FerretsApi} member): whether a start under `parent` would be stamped into the Warden's
+   * lineage, as the session documents say. `false` with the session port unbound (nothing is stamped then). Rejects when
+   * the documents cannot be read.
+   */
+  async inWardenLineage(parent: FerretId): Promise<boolean> {
+    return (await this.ports.session?.inWardenLineage?.(parent)) ?? false;
   }
 
   mayTouch(caller: FerretId, target: FerretId): boolean {
@@ -1088,6 +1104,14 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     if (this.registry.get(ferret) === undefined) return NO_AGENT_CONTROL;
     return effectiveAgentControl(this.ports.limits?.());
+  }
+
+  /**
+   * `limits.yaml` as it is in effect now: the kernel's config file, read fresh on every call, so a launch reads the file
+   * as it stands (a broken file reads its last good version). No limits port bound: the empty file, so the defaults.
+   */
+  async effectiveLimits(): Promise<LimitsFile> {
+    return this.ports.limits?.() ?? {};
   }
 
   /** Revokes a ferret's token (owner only at the route); it can no longer call the daemon until it restarts. */

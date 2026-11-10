@@ -21,6 +21,7 @@ import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { ferretActor } from '@ferretry/core-gate/contract';
 import { ferretStanding, ownerStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
 import { ApiError, type CallStanding, REFUSAL_SENTENCES, type RouteHandler } from '@ferretry/kernel/contract';
+import { definePlugin, implementDaemon, type Needer } from '@ferretry/kernel/manifest';
 import { ferret as asFerret, fixedClock, owner, testHost, type TestCaller } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { err, ok, type Result } from '@ferretry/std';
@@ -40,6 +41,25 @@ import { writeAskedQuestion } from '../../../daemon/questions/adapters/state-ask
 import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
 import { fixtureTexts } from '../../support/fixtures.ts';
 import { memoryStatePort } from '../../support/state.ts';
+
+/** A plugin as the kernel hands it to a provider's per-consumer factory (its manifest id, nothing declared). */
+const consumer = (id: string): Needer => ({ id, permissions: {}, ownedSecretReferences: () => new Set() });
+const WARDEN = consumer('warden');
+
+/** A plugin that only needs the conversation port: the kernel binds the port for it by its manifest id. */
+const consumerPlugin = (id: string) =>
+  implementDaemon(
+    definePlugin({
+      id,
+      title: id,
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      needs: { conversation: ConversationPort },
+    }),
+    { build: () => ({}) },
+  );
 
 const OPEN: HarnessGate = HARNESS_OPEN;
 /** Both actions held back: what a gate that is not open answers. */
@@ -167,6 +187,8 @@ async function conversation(
      * stand-in admission stamps no actor and no credential at all, so the send route is wrapped to carry this one.
      */
     readonly sendStanding?: CallStanding;
+    /** Plugin ids that need the conversation port and nothing else, so `apiFor(id)` is what the kernel binds for them. */
+    readonly consumers?: readonly string[];
   } = {},
 ) {
   ferrets.add({ id: F1, state: 'working', ...f1 });
@@ -203,7 +225,7 @@ async function conversation(
     },
   } as typeof served;
   const host = await testHost({
-    plugins: [implementation],
+    plugins: [implementation, ...(options.consumers ?? []).map(consumerPlugin)],
     fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-08T09:00:00Z'),
   });
@@ -216,7 +238,17 @@ async function conversation(
       '2026-11-08T08:59:00.000Z' as Instant,
       '/home/user/.claude/projects/-work-repro/48fa096f-185c-42e1-b456-33dd3c77c5ce.jsonl',
     );
-  return { host, ferrets, acted, asking, writes, api: () => host.provided(ConversationPort) };
+  return {
+    host,
+    ferrets,
+    acted,
+    asking,
+    writes,
+    // The Warden's view: the one consumer that may press the composer, a send's Enter and cancel, and speak as itself.
+    api: () => host.provided(ConversationPort, WARDEN),
+    // Any other plugin's view of the same Conversation.
+    apiFor: (id: string) => host.provided(ConversationPort, id),
+  };
 }
 
 /** The sends a ferret still holds: a refusal before any key leaves only a withdrawn tombstone, which this leaves out. */
@@ -1966,5 +1998,74 @@ describe('send path: the Warden’s one verified Enter and the taken-back pointe
     expect(await api().retractedDraft!(F1)).toBeUndefined();
     expect(ferrets.composerKeys).toEqual([]);
     await host.stop();
+  });
+});
+
+describe('the port binds the Warden claim to the consumer the kernel built it for (perNeeder)', () => {
+  const DRAFT = 'half a thought';
+  /** Real Conversation, a recording pane, and two plugins that need the port: the Warden and Board. */
+  const world = async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.script.observe = async () =>
+      ok({ alive: true, dead: false, promptReady: true, activeWork: false, draft: DRAFT });
+    const built = await conversation(ferrets, OPEN, {}, { consumers: ['warden', 'board'] });
+    return { ...built, ferrets };
+  };
+  /** Nothing reached the pane or the ledger: no key, no delivery, no look at the ferret, no record. */
+  const untouched = async (w: Awaited<ReturnType<typeof world>>) => {
+    expect(w.ferrets.composerKeys).toEqual([]);
+    expect(w.ferrets.delivered).toEqual([]);
+    expect(w.ferrets.opens).toEqual([]);
+    expect((await w.apiFor('warden').sends(F1)).sends).toEqual([]);
+  };
+
+  test('KCB-S a non-warden consumer claiming the Warden is refused forbidden and nothing is typed', async () => {
+    const w = await world();
+    const board = w.apiFor('board');
+
+    expect(await board.send(F1, { kind: 'warden' }, { message: 'I am the daemon', sendId: 's-b' })).toEqual({
+      ok: false,
+      error: { code: 'forbidden', message: "only Ferretry's Warden may speak as the Warden" },
+    });
+    expect(await board.resubmitStuck!(F1, { kind: 'warden' }, 's-b')).toMatchObject({
+      ok: false,
+      error: { code: 'forbidden' },
+    });
+    await untouched(w);
+    await w.host.stop();
+  });
+
+  test('KCB-S the warden consumer speaks as the daemon, and a non-warden consumer still speaks as the owner or a ferret', async () => {
+    const w = await world();
+
+    const sent = await w.apiFor('warden').send(F1, { kind: 'warden' }, { message: 'are you stuck?', sendId: 's-w' });
+    expect(sent.ok).toBe(true);
+    expect((await w.apiFor('warden').sendRecord(F1, 's-w'))?.senderKind).toBe('daemon');
+
+    expect((await w.apiFor('board').send(F1, { kind: 'owner' }, { message: 'hi', sendId: 's-o' })).ok).toBe(true);
+    expect((await w.apiFor('board').sendRecord(F1, 's-o'))?.senderKind).toBe('human');
+    await w.host.stop();
+  });
+
+  test('G33 the port composer, a send’s Enter and its cancel are the Warden’s alone: any other consumer is refused forbidden and no key is pressed', async () => {
+    const w = await world();
+    const board = w.apiFor('board');
+
+    for (const refused of [
+      await board.composer(F1, 'submit', DRAFT),
+      await board.composer(F1, 'clear', DRAFT),
+      await board.enterSend(F1, 's-1'),
+      await board.cancelSend(F1, 's-1'),
+    ])
+      expect(refused).toMatchObject({ ok: false, error: { code: 'forbidden' } });
+    await untouched(w);
+
+    // The Warden's own view is the real one: the draft is submitted while the composer still holds exactly it.
+    expect(await w.apiFor('warden').composer(F1, 'submit', DRAFT)).toEqual({
+      ok: true,
+      value: { action: 'submit', outcome: 'submitted' },
+    });
+    expect(w.ferrets.composerKeys).toEqual([`submit:${DRAFT}`]);
+    await w.host.stop();
   });
 });

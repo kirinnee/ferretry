@@ -74,7 +74,17 @@ that is not there). Three rules, in order:
    is HELD and the tighter version stays in effect: a Warden layer that spends switched on (Jev, LLM),
    a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; Pack mode switched on, Jev choosing sub-ferret models, a sub-ferret limit or depth raised; an agent control turned on (Ferretry
    settings and Page scripts included); Agent permissions set to `skip`; the public usage feed switched on; dictated text sent to a provider; a login's budget limit raised or removed, a budgeted login deleted or a runtime moved off one, or `timeZone` set or changed ([budgets.md](budgets.md)). Tightening always
-   applies at once. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
+   applies at once. A plugin's own write holds every `${secret:NAME}` reference it adds; its one exception is
+   `ConfigPort.writeAsCaller`, judged exactly as `write` except that the reference goes into effect when the
+   ambient call (read by the kernel, never passed by the plugin, and judged from the standing as it is when the write
+   happens — the scope includes work the call spawns) is the owner: the host admin where the request arrived on the
+   host, or a governed device holding the file's `configure` and a passkey that already existed when its call was
+   admitted, which the add claims once — what `PUT /v1/config/file` asks of an add (`loosen-config`; the unlock alone is
+   not enough). A passkey proved after the call was admitted is never taken by that call or by work it spawns, even
+   after a lock and an unlock: the add stays held and the later proof stays for the act it was given for. The same
+   bound applies to a plain `write` loosening from work a call spawned. Only
+   the references the caller's own edit adds are the owner's to answer for: one that only an edit already held names
+   keeps the whole write held. An agent's session credential, a job and a member call keep the hold. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
    a held edit by its etag — at the machine with `fy config confirm <file>`, in the app with a passkey
    proved for that act (`loosen-config`), or by answering **Allow** on the agenda card a ferret raised with
    `fy agenda add --confirms <file>` ([agenda.md](agenda.md#confirming-a-configuration-change)) — so a

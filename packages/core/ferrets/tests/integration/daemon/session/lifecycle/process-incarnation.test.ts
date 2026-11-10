@@ -75,6 +75,14 @@ describe('processIncarnationFor', () => {
     should(await processIncarnationFor(host, never).startOf(0)).be.undefined();
   });
 
+  it('should answer nothing when ps cannot be run at all', async () => {
+    // Arrange: `never` throws as a spawn that cannot start would.
+    const host = { platform: 'darwin', procFile: never.run as never };
+
+    // Act / Assert
+    should(await processIncarnationFor(host, never).startOf(77)).be.undefined();
+  });
+
   it('should refuse to start sessions on a platform it cannot prove processes on, saying which', async () => {
     // Arrange
     const subject = processIncarnationFor({ platform: 'freebsd', procFile: never.run as never }, never);

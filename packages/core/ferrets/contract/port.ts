@@ -146,7 +146,7 @@ export interface StartRequest {
   readonly prompt?: string;
   /** Start bound to an existing harness conversation (§6.2). */
   readonly harnessConversation?: string;
-  readonly by: 'owner' | 'ferret' | 'pack' | 'board';
+  readonly by: 'owner' | 'ferret' | 'pack' | 'board' | 'warden';
   /** How to start it beyond who and where ({@link StartOptionsSchema}). */
   readonly options?: StartOptions;
 }
@@ -450,7 +450,7 @@ export interface Sitrep {
  * nowhere else.
  */
 export interface FerretsApi {
-  /** The effective `limits.yaml` settings, read fresh; absent until Ferrets supplies this configuration read. */
+  /** The effective `limits.yaml` settings, read fresh on every call; Ferrets serves it (a consumer may still bind it optionally). */
   effectiveLimits?(): Promise<LimitsFile>;
   get(ferret: FerretId): Promise<FerretSummary | undefined>;
   list(filter?: {

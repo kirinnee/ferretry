@@ -429,7 +429,7 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
   test('M2 F-0002 the Warden’s in-process resume, through the Ferrets port, writes a turn from the Warden; no other caller can name an author there', async () => {
     const w = await world();
     const id = await started(w);
-    const port = ferretsPort(w.service);
+    const port = ferretsPort(w.service, 'warden');
     await w.service.stop(id as never, 'now');
 
     expect((await port.resume(id as never, 'Carry on.', { automatic: true, actor: 'warden' })).ok).toBe(true);
@@ -1085,6 +1085,83 @@ describe('ruling #31b: the start writes the session document, and strict ancestr
       expect(child.error.reason).toBe('where this ferret came from could not be recorded, so it was not started');
       expect(child.error.reason).not.toContain('FIXTURE_SECRET');
     }
+  });
+});
+
+describe('KCB-S B1 a non-warden consumer cannot stamp a ferret into the Warden’s lineage through the Ferrets port, decided from the session documents', () => {
+  const REFUSED = {
+    ok: false,
+    error: { code: 'refused', reason: 'only the Warden names a parent in its own tree' },
+  } as const;
+
+  /** The Warden's own ferret W, its unlabelled child C (a Warden ferret's helper), and C's child D: all started by the Warden. */
+  async function wardenTree(w: World) {
+    const warden = ferretsPort(w.service, 'warden');
+    const start = async (extra: Record<string, unknown>) => {
+      const result = await warden.start({ folder: '/work', by: 'warden', ...extra } as never);
+      if (!result.ok) throw new Error(`start refused: ${result.error.reason}`);
+      return result.value as string;
+    };
+    const root = await start({ options: { label: 'fleet-warden' } });
+    const child = await start({ parent: root });
+    const grandchild = await start({ parent: child });
+    return { root, child, grandchild };
+  }
+
+  test('KCB-S B1 the registry does not say it, the documents do: C is unlabelled in the summary and stamped into the lineage on disk', async () => {
+    const w = await world();
+    const { child } = await wardenTree(w);
+    expect(w.registry.summary(child as never)?.label).toBeUndefined();
+    const document = SessionConfigSchema.parse(await w.storage.readConfig(parseSessionId(child)));
+    expect(document.provenance).toMatchObject({ origin: 'warden', wardenLineage: true });
+  });
+
+  test('KCB-S B1 a packs start under the Warden’s unlabelled child, or its grandchild, is refused, and nothing is started', async () => {
+    const w = await world();
+    const { child, grandchild } = await wardenTree(w);
+    const records = w.registry.list().length;
+    const starts = w.runner.starts;
+    const names = w.registry
+      .list()
+      .map(ferret => ferret.name)
+      .sort();
+    const packs = ferretsPort(w.service, 'packs');
+
+    for (const parent of [child, grandchild])
+      expect(await packs.start({ folder: '/work', by: 'pack', parent: parent as never })).toEqual(REFUSED);
+
+    expect(w.registry.list()).toHaveLength(records);
+    expect(w.runner.starts).toBe(starts);
+    // No name was claimed: the next ordinary start takes the very next one.
+    const lead = await started(w);
+    expect(w.registry.get(lead as never)?.name).toBe(`fern${records + 1}`);
+    expect(names).toEqual(['fern1', 'fern2', 'fern3']);
+  });
+
+  test('J-0057 KCB-S B1 a packs start under an ordinary lead still starts', async () => {
+    const w = await world();
+    const lead = await started(w);
+    const result = await ferretsPort(w.service, 'packs').start({ folder: '/work', by: 'pack', parent: lead as never });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const stamped = SessionConfigSchema.parse(await w.storage.readConfig(parseSessionId(result.value)));
+      expect(stamped.provenance).toMatchObject({ wardenLineage: false });
+    }
+  });
+
+  test('KCB-S B1 a lineage that cannot be read refuses the start (fail closed), and nothing is started', async () => {
+    const w = await world();
+    const lead = await started(w);
+    const starts = w.runner.starts;
+    const records = w.registry.list().length;
+    // The ancestor documents cannot be read for the check (the same strict snapshot the stamp takes).
+    w.state.plant(FerretConfigFile, '{"format": 1, "label": "FIXTURE_SECRET-', lead);
+
+    expect(await ferretsPort(w.service, 'packs').start({ folder: '/work', by: 'pack', parent: lead as never })).toEqual(
+      REFUSED,
+    );
+    expect(w.runner.starts).toBe(starts);
+    expect(w.registry.list()).toHaveLength(records);
   });
 });
 
