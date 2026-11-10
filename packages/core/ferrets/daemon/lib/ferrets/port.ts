@@ -53,14 +53,15 @@ const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent for a ferret it st
  * Whatever else the service has — a stop's end `cause`, a move's `replaceLiveTerminal` and `target`, a route's
  * `confirmRestore`, `revokeToken`, `rename`, the launch and its tokens — is for this plugin's own callers and is not
  * reachable here at runtime, not just refused by the types. `resume` forwards only `automatic`, an `actor` of
- * `warden` (the Warden's alone) or `peer` (attribution only), `decided` and `onCarried`. `effectiveLimits` is optional
- * on the port and the service has none, so it is absent.
+ * `warden` (the Warden's alone) or `peer` (attribution only), `decided` and `onCarried`. `effectiveLimits` is served: it
+ * answers `limits.yaml` as in effect, read fresh on every call.
  */
 export function ferretsPort(service: FerretsService, consumer: string): FerretsApi {
   const warden = consumer === WARDEN_PLUGIN;
   const refused = (reason: string): Result<never, { readonly code: 'refused'; readonly reason: string }> =>
     err({ code: 'refused', reason });
   return {
+    effectiveLimits: () => service.effectiveLimits(),
     get: ferret => service.get(ferret),
     list: filter => service.list(filter),
     mayTouch: (caller, target) => service.mayTouch(caller, target),
@@ -69,9 +70,11 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     start: async (asked): Promise<Result<FerretId, StartFailure>> => {
       // Read every member once into a fresh object: the checks and the service see the same values, so a getter cannot
       // answer one thing to the check and another to the service.
+      // `options` is read ONCE into a local, and the copy is built from that local alone.
+      const { options, ...rest } = asked;
       const request: StartRequest = {
-        ...asked,
-        ...(asked.options === undefined ? {} : { options: { ...asked.options } }),
+        ...rest,
+        ...(options === undefined ? {} : { options: { ...options } }),
       };
       const owner = START_BY_PLUGIN[request.by];
       if (owner !== undefined && owner !== consumer)
