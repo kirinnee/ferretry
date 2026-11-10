@@ -384,11 +384,8 @@ export const CatalogMcpSetupSchema = z
     if (refusal !== null) return issue(refusal, []);
     const args = firstRefusedWord(setup.args, setup.command);
     if (args !== -1) return issue(RAW_KEY, ['args', args]);
-    // A placeholder is a NAME, never a key, however long or secret-sounding it is.
-    const name = Object.keys(setup.env).find(key => {
-      const value = setup.env[key] ?? '';
-      return !WHOLE_SECRET_PLACEHOLDER.test(value) && envEntryRefused(key, value);
-    });
+    // A placeholder is a NAME, never a key: the one rule skips a whole one itself.
+    const name = Object.keys(setup.env).find(key => envEntryRefused(key, setup.env[key] ?? ''));
     if (name !== undefined) issue(`${name}: ${RAW_KEY}`, ['env', name]);
   });
 export type CatalogMcpSetup = z.infer<typeof CatalogMcpSetupSchema>;

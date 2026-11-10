@@ -59,6 +59,22 @@ describe('the one command-line rule', () => {
     expect(envEntryRefused('MODEL', 'gpt-4o-mini')).toBe(false);
     expect(envEntryRefused('PASSWORD', '${secret:PASSWORD}')).toBe(false);
   });
+
+  it('R-0261 should keep a whole placeholder with a long name as written, a short one too', () => {
+    // The GitHub MCP server's own variable name is 29 characters: split at the colon it read as `${secret` + a long run.
+    expect(envEntryRefused('GITHUB_PERSONAL_ACCESS_TOKEN', '${secret:GITHUB_PERSONAL_ACCESS_TOKEN}')).toBe(false);
+    expect(envEntryRefused('TOKEN', '${secret:SHORT_TOKEN}')).toBe(false);
+  });
+
+  it('R-0261 should still refuse a raw token glued to a placeholder', () => {
+    const token = `ghp_${T}`;
+    expect(envEntryRefused('NOTE', `\${secret:X}${token}`)).toBe(true);
+    expect(envEntryRefused('NOTE', `${token}\${secret:X}`)).toBe(true);
+    expect(envEntryRefused('NOTE', `prefix \${secret:X} ${token}`)).toBe(true);
+    expect(envEntryRefused('GITHUB_PERSONAL_ACCESS_TOKEN', `\${secret:GITHUB_PERSONAL_ACCESS_TOKEN}${token}`)).toBe(
+      true,
+    );
+  });
 });
 
 describe('what reads as a credential', () => {

@@ -57,7 +57,10 @@ import {
   secretNamedAt,
   SECRET_TOKEN_SOURCE,
 } from './credential-words.ts';
-import { MIN_SECRET_VALUE_LENGTH, secretReferencePattern } from '../secrets.ts';
+import { MIN_SECRET_VALUE_LENGTH, SECRET_REFERENCE_SOURCE, secretReferencePattern } from '../secrets.ts';
+
+/** A whole environment value that names a secret, and nothing else: a NAME, never a key, however long it is. */
+const WHOLE_SECRET_PLACEHOLDER = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
 
 /** What stands in a command-line word for the value that is not shown, and so can never be typed as one. */
 export const HIDDEN_WORD_TEXT = '‹hidden›';
@@ -640,12 +643,14 @@ export const firstRefusedWord = (words: readonly string[], first?: string): numb
  * `--x-NAME=value`, the glued reading a launch flag has (the `x-` only so a name that starts with `_` is still a flag's),
  * so its name is judged as a flag's name is, a token anywhere in the value is cut, and a secret-named key nested in the
  * value counts (`NAME=Authorization: Bearer v`); and the value is also read as the words it holds and as the pieces
- * after the name. A whole `${secret:NAME}` pointer holds none.
+ * after the name. A whole `${secret:NAME}` pointer holds none, checked BEFORE the split reading (which would cut it at
+ * the colon and read a long name as a key); a placeholder with anything glued to it is still read in full.
  */
 export const envEntryRefused = (name: string, value: string): boolean =>
-  judgedWord(`--x-${name}=${value}`, undefined, 'publish').hidden ||
-  wordsRefused(value, undefined) ||
-  announcedPiece(`${name} ${value}`);
+  !WHOLE_SECRET_PLACEHOLDER.test(value) &&
+  (judgedWord(`--x-${name}=${value}`, undefined, 'publish').hidden ||
+    wordsRefused(value, undefined) ||
+    announcedPiece(`${name} ${value}`));
 
 /**
  * Whether a text a person reads as one command, address or id holds a credential, at the `publish` strength: its

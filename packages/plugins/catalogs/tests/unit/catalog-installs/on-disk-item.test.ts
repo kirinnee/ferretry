@@ -100,6 +100,42 @@ describe('setupOfProjectEntry', () => {
   });
 });
 
+describe('a placeholder with a long name on disk', () => {
+  it('R-0261 should keep a placeholder as written however long its name is', () => {
+    should(
+      setupOfProjectEntry({
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-github'],
+        env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${GITHUB_PERSONAL_ACCESS_TOKEN}' },
+      }),
+    ).deepEqual({
+      transport: 'command',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-github'],
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${secret:GITHUB_PERSONAL_ACCESS_TOKEN}' },
+    });
+    should(
+      withoutCredentials({
+        command: 'npx',
+        env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${secret:GITHUB_PERSONAL_ACCESS_TOKEN}', SHORT: '${secret:SHORT_TOKEN}' },
+      }),
+    ).deepEqual({
+      command: 'npx',
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${secret:GITHUB_PERSONAL_ACCESS_TOKEN}', SHORT: '${secret:SHORT_TOKEN}' },
+    });
+  });
+
+  it('R-0261 should still star a raw token glued to a placeholder', () => {
+    const token = 'ghp_aaaaaaaaaaaaaaaaaaaa';
+    should(
+      withoutCredentials({ command: 'npx', env: { NOTE: `\${secret:X}${token}`, OTHER: `${token}\${secret:X}` } }),
+    ).deepEqual({
+      command: 'npx',
+      env: { NOTE: '*', OTHER: '*' },
+    });
+  });
+});
+
 describe('withoutCredentials', () => {
   it('R-0261 should put one star where an argument or an environment value holds a credential, and nothing else', () => {
     should(
