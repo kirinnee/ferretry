@@ -23,7 +23,11 @@ import {
 import { type KernelFixture, kernelCrypto } from './kernel-session.ts';
 
 export type ScriptedHost =
-  | { readonly kind: 'carries'; readonly carrier: 'direct' | 'relay' | 'tunnel'; readonly dropAfterFrames?: number }
+  | {
+      readonly kind: 'carries';
+      readonly carrier: 'direct' | 'relay' | 'tunnel' | 'webrtc';
+      readonly dropAfterFrames?: number;
+    }
   | { readonly kind: 'dead' }
   | { readonly kind: 'silent' }
   | { readonly kind: 'absent'; readonly code: number; readonly reason?: string }

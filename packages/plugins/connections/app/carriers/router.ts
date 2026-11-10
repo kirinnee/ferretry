@@ -24,8 +24,18 @@ import {
   type PairedDaemon,
   RELAY_CLOSE_CODES,
 } from '@ferretry/app';
-import { PublishedCarrierSchema } from '../../contract/index.ts';
+import {
+  PublishedCarrierSchema,
+  TUNNEL_PATH,
+  TunnelStatusViewSchema,
+  WEBRTC_CONNECT_DEADLINE_MS,
+  WEBRTC_GATHER_CAP_MS,
+} from '../../contract/index.ts';
 import { type BrowserSocket, createBrowserRelayDial } from '../adapters/browser-relay-dial.ts';
+import type { IntroducerRequest } from '../lib/introducers.ts';
+import { keptTunnel, type TunnelCarrier } from '../lib/tunnel-switch.ts';
+import type { WebRtcDialer } from '../lib/webrtc-carrier.ts';
+import { deferredSocket } from './deferred-socket.ts';
 import type { CarrierDropLog } from '../lib/carrier-drops.ts';
 import {
   type CarrierPreference,
@@ -46,7 +56,7 @@ import {
   publishedConnectionMethods,
 } from '../lib/connection.ts';
 import { hostedAllowanceSentence } from '../lib/relay-allowance.ts';
-import { noTunnelReason, type TunnelServiceState } from '../lib/tunnel-service.ts';
+import { noTunnelReason, TUNNEL_SWITCHED_OFF, type TunnelServiceState } from '../lib/tunnel-service.ts';
 import {
   type CarrierSocketDependencies,
   DIRECT_SESSION_DEADLINE_MS,
@@ -72,8 +82,29 @@ const STALE_WALK_REASON =
   'this daemon was re-paired, unpaired or republished, or its connection preference changed, while this request was in flight, so it was not carried to another carrier';
 /** Said to a session on a carrier the daemon's republished set no longer names (today's `#refreshed` sentence). */
 export const WITHDRAWN_CARRIER_REASON = 'this rendezvous is not named in the carriers this daemon publishes';
-/** The request paths that are carrier control (§15): they ride {@link CarrierRouter.control}. */
-const CONTROL_PATHS: readonly string[] = Object.freeze(['/v1/tunnel']);
+/**
+ * The request paths that are carrier control (§15): they ride {@link CarrierRouter.control}, the introducers only.
+ * `/v1/tunnel` is the tunnel's switch and where it is now (the tunnel lookup reads it); `/v1/webrtc/offer` is
+ * WebRTC's signalling (§16) — an offer that rode the WebRTC or tunnel path it asks for would have nothing to ride.
+ */
+const CONTROL_PATHS: readonly string[] = Object.freeze(['/v1/tunnel', '/v1/webrtc/offer']);
+
+/**
+ * How long one tunnel lookup's answer stands before a walk may ask again (R636).
+ *
+ * Every panel of an open page walks on its own, and under "Tunnel only" with the tunnel down each of them would ask the
+ * same question of the same machine at the same moment; one answer is shared for this long.
+ */
+export const TUNNEL_LOOKUP_REUSE_MS = 30_000;
+/** How long a tunnel lookup may wait for the introducer's answer: a lookup that hangs is a lookup that found nothing. */
+const TUNNEL_LOOKUP_TIMEOUT_MS = 10_000;
+/**
+ * A WebRTC leg's own deadline: the gathering cap, the ICE deadline from the answer, and the session's handshake. The
+ * leg is abandoned (and the walk moves on to the relay) at the latest then; ICE's own 8 s sentence usually comes first.
+ */
+const WEBRTC_LEG_DEADLINE_MS = WEBRTC_GATHER_CAP_MS + WEBRTC_CONNECT_DEADLINE_MS + DIRECT_SESSION_DEADLINE_MS;
+/** Said when WebRTC has no introducer to signal through. */
+const NO_WEBRTC_INTRODUCER = 'no carrier can introduce WebRTC to this machine';
 
 const WEBRTC: ConnectionMethod = { kind: 'webrtc' };
 
@@ -93,6 +124,20 @@ export interface CarrierRouterDependencies extends CarrierSocketDependencies {
   readonly tunnelService?: () => Promise<TunnelServiceState>;
   readonly health?: CarrierHealthReporter;
   readonly drops?: Pick<CarrierDropLog, 'dropped' | 'reconnected'>;
+  /**
+   * This browser's WebRTC dialer (R677). Absent where the browser has no `RTCPeerConnection`: WebRTC is then passed
+   * over untried, and the choice says so.
+   */
+  readonly webrtc?: Pick<WebRtcDialer, 'dial' | 'release'>;
+  /**
+   * One request about how this device reaches a machine, over the introducers (the control lane): the tunnel lookup
+   * and WebRTC's signalling. `undefined` while no half of Connections holds a client for that machine.
+   */
+  readonly introduce?: (daemonId: string) => IntroducerRequest | undefined;
+  /** Told a tunnel a lookup found, so the stored set keeps it for the next load (R635). */
+  readonly learned?: (daemonId: string, tunnel: TunnelCarrier) => void;
+  /** Whether the machine itself said its tunnel is switched off — the reason "Tunnel only" names first. */
+  readonly tunnelSwitchedOff?: (daemonId: string) => boolean;
 }
 
 /** The session URL for one carrier, or `null` for a fingerprint no session can check (today's `connectionSocketUrl`). */
@@ -159,9 +204,21 @@ interface WalkPlan {
   why?: string;
 }
 
+/**
+ * A carrier that won AFTER WebRTC was tried and failed carries WebRTC's own sentence as the reason a faster one is not
+ * carrying (`docs/relay-protocol.md` §16, "What the browser shows") — "no direct path found in 8 s…", the daemon's
+ * refusal, or a daemon too old to offer it. A WebRTC that was never tried (no dialer in this build, a preference that
+ * left it out) is no fallback at all, and nothing outranked by WebRTC (direct, or WebRTC itself) has one to give.
+ */
+const withWebRtcFallbackReason = (chosen: ConnectionChoice & { readonly ok: true }): ConnectionChoice => {
+  const missed = chosen.passedOver.find(skip => skip.method.kind === 'webrtc' && skip.untried !== true);
+  if (missed === undefined || chosen.method.kind === 'direct' || chosen.method.kind === 'webrtc') return chosen;
+  return { ...chosen, fallbackReason: missed.detail };
+};
+
 const choiceFor = (probes: readonly ConnectionProbe[], plan: WalkPlan): ConnectionChoice => {
   const chosen = chooseConnection(probes);
-  if (chosen.ok) return chosen;
+  if (chosen.ok) return withWebRtcFallbackReason(chosen);
   const nothingTried = probes.every(probe => probe.untried === true);
   if (plan.why === undefined || plan.preference === 'auto' || !nothingTried) return chosen;
   const passedOver: readonly ConnectionSkip[] = chosen.passedOver;
@@ -240,11 +297,19 @@ class Generation {
   }
 }
 
+/** One tunnel lookup: when it was asked, and what it found — a tunnel, or nothing. */
+interface TunnelLookup {
+  readonly at: number;
+  readonly answer: Promise<TunnelCarrier | undefined>;
+}
+
 interface CarrierEntry {
   /** The published set this entry was walked against, to tell a republish from the same set. */
   readonly published: string;
   choice: ConnectionChoice | undefined;
   readonly generation: Generation;
+  /** The last tunnel lookup for this daemon, reused for {@link TUNNEL_LOOKUP_REUSE_MS}. */
+  lookup: TunnelLookup | undefined;
 }
 
 export class CarrierRouter {
@@ -307,8 +372,15 @@ export class CarrierRouter {
   rewalk(daemonId: string): void {
     const entry = this.#entries.get(daemonId);
     if (entry === undefined) return;
-    this.#entries.set(daemonId, { published: entry.published, choice: undefined, generation: new Generation() });
+    this.#entries.set(daemonId, {
+      published: entry.published,
+      choice: undefined,
+      generation: new Generation(),
+      lookup: entry.lookup,
+    });
     entry.generation.end(PREFERENCE_CHANGED_REASON);
+    // A peer connection found under the old preference is not kept open for a person who may have just excluded it.
+    this.deps.webrtc?.release(daemonId);
     this.#announce();
   }
 
@@ -318,6 +390,8 @@ export class CarrierRouter {
     if (entry === undefined) return;
     this.#entries.delete(daemonId);
     entry.generation.end(PAIRING_CLEARED_REASON);
+    // Nothing keeps a peer-to-peer path open to a machine this browser no longer means to reach.
+    this.deps.webrtc?.release(daemonId);
     this.#announce();
   }
 
@@ -374,7 +448,7 @@ export class CarrierRouter {
     const current = this.#entries.get(daemon.daemon);
     if (current !== undefined && current.published === published) return current;
     if (current === undefined) {
-      const entry: CarrierEntry = { published, choice: undefined, generation: new Generation() };
+      const entry: CarrierEntry = { published, choice: undefined, generation: new Generation(), lookup: undefined };
       this.#entries.set(daemon.daemon, entry);
       return entry;
     }
@@ -390,6 +464,7 @@ export class CarrierRouter {
       published,
       choice: winner !== undefined && (named(winner) || outlivesRepublish(winner)) ? chosen : undefined,
       generation: current.generation,
+      lookup: current.lookup,
     };
     this.#entries.set(daemon.daemon, entry);
     current.generation.withdraw(method => named(method) || outlives(method), WITHDRAWN_CARRIER_REASON);
@@ -397,7 +472,36 @@ export class CarrierRouter {
     return entry;
   }
 
+  /**
+   * WebRTC as a leg (R677): one data channel on the connection to this daemon, signalled through an introducer. The
+   * channel is a socket like any other, so the same session runs over it; a dial that fails or finds no path in 8 s
+   * ends the leg with the sentence the dial gave, and the walk goes on to the relay.
+   */
+  #webrtcLeg(daemon: PairedDaemon, dialer: NonNullable<CarrierRouterDependencies['webrtc']>): WalkLeg {
+    return {
+      method: WEBRTC,
+      deadlineMs: WEBRTC_LEG_DEADLINE_MS,
+      open: () => {
+        const abort = new AbortController();
+        const request: IntroducerRequest =
+          this.deps.introduce?.(daemon.daemon) ??
+          (async () => {
+            throw new Error(NO_WEBRTC_INTRODUCER);
+          });
+        return deferredSocket(dialer.dial({ daemon: { daemonId: daemon.daemon }, request, signal: abort.signal }), () =>
+          abort.abort(),
+        );
+      },
+    };
+  }
+
   #leg(daemon: PairedDaemon, method: ConnectionMethod): WalkStep {
+    if (method.kind === 'webrtc') {
+      const dialer = this.deps.webrtc;
+      return dialer === undefined
+        ? { kind: 'untried', method, detail: WEBRTC_UNAVAILABLE }
+        : { kind: 'leg', leg: this.#webrtcLeg(daemon, dialer) };
+    }
     const url = carrierSocketUrl(method, daemon.daemon);
     if (url === null) return { kind: 'untried', method, detail: 'this daemon fingerprint cannot address a session' };
     const leg: WalkLeg = {
@@ -415,17 +519,29 @@ export class CarrierRouter {
     const authored = daemonCarriers(daemon, this.#hostedLabel);
     for (const kind of carrierOrder(plan.preference)) {
       if (kind === 'webrtc') {
-        plan.why = WEBRTC_UNAVAILABLE;
-        yield { kind: 'untried', method: WEBRTC, detail: WEBRTC_UNAVAILABLE };
+        if (this.deps.webrtc === undefined) plan.why = WEBRTC_UNAVAILABLE;
+        if (winner === undefined || !sameCarrier(WEBRTC, winner)) yield this.#leg(daemon, WEBRTC);
         continue;
       }
       const ofKind = authored.filter(method => method.kind === kind);
       for (const method of ofKind)
         if (winner === undefined || !sameCarrier(method, winner)) yield this.#leg(daemon, method);
       if (kind === 'tunnel') {
-        if (plan.preference === 'tunnel' && ofKind.length === 0) {
-          plan.why = noTunnelReason((await this.deps.tunnelService?.()) ?? 'unavailable');
+        if (plan.preference !== 'tunnel') continue;
+        // A tunnel is TRIED when the daemon published one (the kept one first). Under "Tunnel only", when there is none
+        // or the one kept did not carry (the walk only gets here once it did not), the daemon is ASKED before the walk
+        // gives up: a hostname re-provisioned since, or a tunnel this browser never heard of, is dialled straight away.
+        const tried = winner?.kind === 'tunnel' ? [...ofKind, winner] : ofKind;
+        const learned = await this.#lookupTunnel(daemon, entry);
+        if (learned !== undefined && !tried.some(method => sameCarrier(method, learned))) {
+          this.deps.learned?.(daemon.daemon, learned);
+          yield this.#leg(daemon, learned);
+          continue;
         }
+        if (tried.length === 0)
+          plan.why = this.deps.tunnelSwitchedOff?.(daemon.daemon)
+            ? TUNNEL_SWITCHED_OFF
+            : noTunnelReason((await this.deps.tunnelService?.()) ?? 'unavailable');
         continue;
       }
       if (ofKind.length > 0 || kind === 'direct') continue;
@@ -434,6 +550,37 @@ export class CarrierRouter {
         if (winner === undefined || !sameCarrier(hosted, winner)) yield this.#leg(daemon, hosted);
       } else plan.why = RELAY_UNAVAILABLE;
     }
+  }
+
+  /**
+   * WHERE IS THIS DAEMON'S TUNNEL NOW? Asked of the daemon itself, over an introducer (R636, §15 "Tunnel only"): one
+   * `GET /v1/tunnel` (carrier control, so it never rides the tunnel it asks about, whatever the preference), whose
+   * answer says where the tunnel is when it is up. Under "Tunnel only" there is nothing else to ask: a tunnel this
+   * browser lost, or one the daemon re-provisioned, is found here.
+   *
+   * Asked once per {@link TUNNEL_LOOKUP_REUSE_MS}, joined while in flight, and never thrown: a lookup that fails
+   * answers nothing, and a tunnel this browser already keeps is not dropped because of it. With no client to ask
+   * through yet nothing is asked and nothing is remembered, so the first walk after one arrives asks.
+   */
+  async #lookupTunnel(daemon: PairedDaemon, entry: CarrierEntry): Promise<TunnelCarrier | undefined> {
+    const request = this.deps.introduce?.(daemon.daemon);
+    if (request === undefined) return undefined;
+    const now = this.deps.now();
+    const held = entry.lookup;
+    if (held !== undefined && now - held.at < TUNNEL_LOOKUP_REUSE_MS) return await held.answer;
+    const answer = this.#readTunnel(request).catch(() => undefined);
+    entry.lookup = { at: now, answer };
+    return await answer;
+  }
+
+  async #readTunnel(request: IntroducerRequest): Promise<TunnelCarrier | undefined> {
+    const timeout = new AbortController();
+    this.deps.after(TUNNEL_LOOKUP_TIMEOUT_MS, () => timeout.abort());
+    const response = await request(TUNNEL_PATH, { cache: 'no-store', signal: timeout.signal });
+    if (!response.ok) return undefined;
+    const view = TunnelStatusViewSchema.safeParse(await response.json().catch(() => undefined));
+    // An answer that is not a tunnel status finds nothing, and keeps nothing.
+    return view.success ? (keptTunnel(view.data) ?? undefined) : undefined;
   }
 
   /** The carriers that introduce (today's `#introducers`): direct and relay, the hosted one when none is published. */
