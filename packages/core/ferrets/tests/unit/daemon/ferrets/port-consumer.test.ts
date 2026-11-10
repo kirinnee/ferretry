@@ -7,7 +7,7 @@ import type { FerretsService } from '../../../../daemon/lib/ferrets/service.ts';
 const F1 = 'f1' as FerretId;
 
 /** A service that records what reached it; the port is what is under test, not the service. */
-function spy() {
+function spy(records: Readonly<Record<string, unknown>> = {}) {
   const reached: { readonly member: string; readonly args: readonly unknown[] }[] = [];
   const note =
     (member: string, answer: unknown) =>
@@ -20,6 +20,12 @@ function spy() {
     resume: note('resume', ok(F1)),
     move: note('move', ok({})),
     systemCallsign: note('systemCallsign', 'warden-000001'),
+    // The registry read the port makes of a parent: a record, `undefined` (unknown) or a throw (unreadable).
+    get: async (id: string) => {
+      const record = records[id];
+      if (record instanceof Error) throw record;
+      return record;
+    },
   } as unknown as FerretsService;
   return { service, reached, port: (consumer: string): FerretsApi => ferretsPort(service, consumer) };
 }
@@ -78,19 +84,45 @@ test('KCB-S a start under the Warden label is refused from a non-warden consumer
   expect(w.reached).toHaveLength(2);
 });
 
-test('KCB-S a start naming a parent is refused from a non-warden consumer, and nothing is started', async () => {
-  const w = spy();
-  const refusal = {
-    ok: false,
-    error: { code: 'refused', reason: 'only the Warden names a parent for a ferret it starts' },
-  } as const;
-  const parent = 'warden-tree-ferret' as FerretId;
+const PARENT_REFUSAL = {
+  ok: false,
+  error: { code: 'refused', reason: 'only the Warden names a parent in its own tree' },
+} as const;
+
+test('J-0057 KCB-S a packs start with an ordinary parent is admitted, and the service gets that parent', async () => {
+  const lead = 'lead' as FerretId;
+  const w = spy({ lead: { id: lead, label: 'my-lead', provenance: { wardenLineage: false } }, bare: { id: 'bare' } });
+  for (const consumer of ['packs', 'board', 'lessons', ''])
+    expect((await w.port(consumer).start({ folder: '/work', by: 'ferret', parent: lead })).ok).toBe(true);
+  expect((await w.port('packs').start({ folder: '/work', by: 'pack', parent: 'bare' as FerretId })).ok).toBe(true);
+  expect(w.reached.map(r => (r.args[0] as { parent?: string }).parent)).toEqual([lead, lead, lead, lead, 'bare']);
+});
+
+test('KCB-S a start under a Warden-labelled or Warden-lineage parent is refused from a non-warden consumer, and nothing is started', async () => {
+  const w = spy({
+    labelled: { id: 'labelled', label: 'fleet-warden' },
+    padded: { id: 'padded', label: '  fleet-warden  ' },
+    stamped: { id: 'stamped', label: 'helper', provenance: { wardenLineage: true } },
+  });
   for (const consumer of ['board', 'packs', 'lessons', ''])
-    expect(await w.port(consumer).start({ folder: '/work', by: 'owner', parent })).toEqual(refusal);
+    for (const parent of ['labelled', 'padded', 'stamped'] as const)
+      expect(await w.port(consumer).start({ folder: '/work', by: 'owner', parent: parent as FerretId })).toEqual(
+        PARENT_REFUSAL,
+      );
   expect(w.reached).toEqual([]);
 
-  expect((await w.port('warden').start({ folder: '/work', by: 'owner', parent })).ok).toBe(true);
-  expect(w.reached.map(r => [r.member, (r.args[0] as { parent?: string }).parent])).toEqual([['start', parent]]);
+  for (const parent of ['labelled', 'stamped'] as const)
+    expect((await w.port('warden').start({ folder: '/work', by: 'owner', parent: parent as FerretId })).ok).toBe(true);
+  expect(w.reached.map(r => (r.args[0] as { parent?: string }).parent)).toEqual(['labelled', 'stamped']);
+});
+
+test('KCB-S a start under a parent that cannot be read is refused from a non-warden consumer (fail closed), and nothing is started', async () => {
+  const w = spy({ broken: new Error('registry unavailable') });
+  for (const parent of ['broken', 'unknown'] as const)
+    expect(await w.port('packs').start({ folder: '/work', by: 'pack', parent: parent as FerretId })).toEqual(
+      PARENT_REFUSAL,
+    );
+  expect(w.reached).toEqual([]);
 });
 
 test('KCB-S a start and a move forward a rebuilt copy, so a getter cannot answer the check and the service differently', async () => {

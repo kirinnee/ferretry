@@ -33,7 +33,14 @@ const START_BY_PLUGIN: Readonly<Partial<Record<StartRequest['by'], string>>> = {
 
 const NOT_THE_WARDEN = 'only the Warden is recorded as the Warden';
 const NOT_THE_WARDEN_LABEL = 'only the Warden starts a ferret under its own label';
-const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent for a ferret it starts';
+const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent in its own tree';
+
+/** Whether a ferret is in the Warden's tree: its label trims to the Warden's, or it is stamped as descending from it. Fails closed: a ferret that cannot be read counts as in it. */
+async function inWardenTree(service: FerretsService, ferret: FerretId): Promise<boolean> {
+  const parent = await service.get(ferret).catch(() => undefined);
+  if (parent === undefined) return true;
+  return parent.label?.trim() === WARDEN_LABEL || parent.provenance?.wardenLineage === true;
+}
 
 /**
  * What one plugin holds under `ferrets`: an explicit object naming each member of {@link FerretsApi}, each forwarding
@@ -44,8 +51,10 @@ const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent for a ferret it st
  *   Warden; a start `by: 'pack'` only from Packs and `by: 'board'` only from Board. Refused with a sentence, nothing
  *   resumed, moved or started.
  * - a consumer's `label` and `parent` are both checked: a start under the Warden's own label (`options.label`), and a
- *   start with any `parent` (a parent in the Warden's tree gives the new ferret its lineage and so its label), only
- *   from the Warden.
+ *   start whose `parent` is in the Warden's tree (a parent in it gives the new ferret its lineage and so its label),
+ *   only from the Warden. Any other parent is admitted: a lead starts its helpers through the port (parity J-0057).
+ *   A parent is in the Warden's tree when its label trims to the Warden's label or its provenance says
+ *   `wardenLineage`; a parent that cannot be read is refused (fail closed), and nothing is started.
  * - `systemCallsign` draws only the prefix of the consumer's own kind (`ApiError` 403 otherwise).
  *
  * `start` and `move` read the caller's request once and forward a rebuilt copy, never the caller's own object.
@@ -81,9 +90,11 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       // The Warden's own label marks the Warden's tree (supervision skips it, Packs exempts it from the helper limits,
       // lineage marks it): only the Warden starts under it, the same rule the route applies.
       if (request.options?.label?.trim() === WARDEN_LABEL && !warden) return refused(NOT_THE_WARDEN_LABEL);
-      // A parent in the Warden's tree gives the new ferret the Warden's lineage, and so its label: only the Warden names
-      // a parent through the port (the route forces an agent's parent to itself).
-      if (request.parent !== undefined && !warden) return refused(NOT_THE_WARDEN_PARENT);
+      // A parent in the Warden's tree gives the new ferret the Warden's lineage, and so its label: only the Warden
+      // names one through the port. Any other parent is admitted (a lead starts its helpers). A parent that cannot be
+      // read is refused, never assumed ordinary.
+      if (request.parent !== undefined && !warden && (await inWardenTree(service, request.parent)))
+        return refused(NOT_THE_WARDEN_PARENT);
       return await service.start(request);
     },
     stop: (ferret, how, reason) => service.stop(ferret, how, reason),
