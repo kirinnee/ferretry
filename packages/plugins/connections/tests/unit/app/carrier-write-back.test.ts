@@ -134,6 +134,66 @@ describe('the stored carrier set is replaced by the daemon’s answer', () => {
   });
 });
 
+describe('R635 a refresh that omits the tunnel does not erase it; only the daemon’s own word forgets it', () => {
+  const TUNNEL = { kind: 'tunnel', url: 'https://k3x9.tunnels.example.com' } as const;
+  const MOVED = { kind: 'tunnel', url: 'https://n3w.tunnels.example.com' } as const;
+
+  test('R635 a set read while the connector reconnects (no tunnel in it) keeps the last tunnel the daemon published', () => {
+    const p = paired([DIRECT, SELF, TUNNEL]);
+    const writeBack = carrierWriteBack(p.list);
+
+    expect(writeBack.begin(DAEMON)([DIRECT, HOSTED])).toBe(true);
+
+    // The relay it withdrew is gone, as ever (R198); the tunnel is the one entry omission does not withdraw.
+    expect(stored(p.list)).toEqual([DIRECT, HOSTED, TUNNEL]);
+    expect(writeBack.holdsTunnel(DAEMON)).toBe(true);
+    // The same omission again is no new snapshot.
+    expect(writeBack.begin(DAEMON)([DIRECT, HOSTED])).toBe(false);
+  });
+
+  test('R635 a different tunnel the daemon publishes replaces the kept one, and the kept one is never doubled', () => {
+    const p = paired([DIRECT, TUNNEL]);
+    const writeBack = carrierWriteBack(p.list);
+
+    writeBack.begin(DAEMON)([DIRECT, MOVED]);
+    expect(stored(p.list)).toEqual([DIRECT, MOVED]);
+
+    writeBack.begin(DAEMON)([DIRECT, MOVED, SELF]);
+    expect(stored(p.list)).toEqual([DIRECT, MOVED, SELF]);
+  });
+
+  test('R635 off or unable to run forgets the tunnel; a daemon that says it is on keeps it; neither is a write for a pairing that moved', () => {
+    const p = paired([DIRECT, TUNNEL]);
+    const writeBack = carrierWriteBack(p.list);
+
+    // The daemon says its tunnel is up somewhere else: that one is kept in place of the old.
+    expect(writeBack.replaceTunnel(DAEMON, { kind: 'tunnel', tunnelUrl: MOVED.url })).toBe(true);
+    expect(stored(p.list)).toEqual([DIRECT, MOVED]);
+    // Off or unable to run: forgotten, and the refresh that follows no longer brings it back.
+    expect(writeBack.replaceTunnel(DAEMON, undefined)).toBe(true);
+    expect(stored(p.list)).toEqual([DIRECT]);
+    expect(writeBack.holdsTunnel(DAEMON)).toBe(false);
+    writeBack.begin(DAEMON)([DIRECT, HOSTED]);
+    expect(stored(p.list)).toEqual([DIRECT, HOSTED]);
+    // Nothing to forget is no write; an unpaired daemon has nothing to write to.
+    const before = p.writes();
+    expect(writeBack.replaceTunnel(DAEMON, undefined)).toBe(false);
+    expect(p.writes()).toBe(before);
+    p.unpair();
+    expect(writeBack.replaceTunnel(DAEMON, { kind: 'tunnel', tunnelUrl: TUNNEL.url })).toBe(false);
+    expect(writeBack.holdsTunnel(DAEMON)).toBe(false);
+  });
+
+  test('R635 a stored set the contract no longer admits is left alone rather than rewritten around', () => {
+    const p = paired([DIRECT, TUNNEL]);
+    p.pair({ carriers: [DIRECT, { kind: 'carrier-from-the-future' }, TUNNEL] });
+    const writeBack = carrierWriteBack(p.list);
+
+    expect(writeBack.replaceTunnel(DAEMON, undefined)).toBe(false);
+    expect(stored(p.list)).toEqual([DIRECT, { kind: 'carrier-from-the-future' }, TUNNEL]);
+  });
+});
+
 describe('the background view writes back after the daemon answers, with no Connections screen drawn', () => {
   /** A client whose `CarriersChanged` and feed-live listeners are counted, so a leak is a number. */
   function fakeClient(answers: unknown[]) {

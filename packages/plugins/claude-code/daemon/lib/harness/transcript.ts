@@ -212,6 +212,8 @@ export function parseTail(text: string, partial: boolean): readonly HarnessTailR
       continue;
     }
     if (typeof record.type !== 'string' || !TAIL_USER_ROLES.has(record.type)) continue;
+    // The summary Claude writes after compaction is the harness tidying its context, never a turn boundary or work.
+    if (record.isCompactSummary === true) continue;
     const message = asObject(record.message);
     const content = message?.content;
     const blocks = Array.isArray(content) ? content.map(asObject) : [];
@@ -222,7 +224,6 @@ export function parseTail(text: string, partial: boolean): readonly HarnessTailR
     const origin = asObject(record.origin)?.kind;
     const harnessWrote =
       record.isMeta === true ||
-      record.isCompactSummary === true ||
       record.isSidechain === true ||
       record.isVisibleInTranscriptOnly === true ||
       (typeof origin === 'string' && origin !== '' && origin !== 'human');

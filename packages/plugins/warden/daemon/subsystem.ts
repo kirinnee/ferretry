@@ -15,6 +15,7 @@ import {
   ConfigWardenConfigStore,
   FileWardenArtifacts,
   kernelSecretSender,
+  StateMachineMembers,
   StateWardenJevCheckLog,
   StateWardenReportFiles,
   StateWardenStateStore,
@@ -30,8 +31,13 @@ import {
   withLiveness,
 } from './fleet.ts';
 import { createWardenRemedies } from './remedies.ts';
+import { conversationStuckInbox, conversationStuckInput } from './stuck-ports.ts';
 import {
+  INBOX_STUCK_REF,
+  INPUT_STUCK_REF,
   type LivenessSample,
+  StuckInboxList,
+  StuckInputList,
   type WardenAgentInventory,
   WardenLivenessMonitor,
   WardenReviveService,
@@ -105,6 +111,8 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const turns = new TurnOrdinals();
   const entries = new NoticeEntries();
   const agenda = new AsksWardenAgenda(asks, entries);
+  const machineNotices = agenda.machineNotices();
+  const nowIso = (): string => new Date(kernel.clock.nowMs()).toISOString();
   const files = new StateWardenReportFiles(kernel.state);
   const reader = new WardenReportReader(files, REPORTS_DIRECTORY);
   const artifacts = new FileWardenArtifacts(files, reader, REPORTS_DIRECTORY);
@@ -276,6 +284,17 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       // The send ledgers: a sub-ferret overdue on a report its parent asked for is flagged `report_overdue`, nudged
       // once, and its parent told (a ferret that declared a wait or said `signal done` is skipped).
       exchanges: { sends: async ferret => await exchangeSends(conversation, ferret as FerretId) },
+      // A message of ours typed and never sent, and a queue stuck far past due (B187): both checks read Conversation's
+      // ledger and queue, act only through its verified paths, and list a ferret on ONE machine notice each.
+      stuckInput: conversationStuckInput(
+        conversation,
+        new StuckInputList(new StateMachineMembers(kernel.state, INPUT_STUCK_REF), machineNotices, nowIso),
+        { record: (type, data) => kernel.log.info(type, data) },
+      ),
+      stuckInbox: conversationStuckInbox(
+        conversation,
+        new StuckInboxList(new StateMachineMembers(kernel.state, INBOX_STUCK_REF), machineNotices, nowIso),
+      ),
       nowMs,
       capabilities: () => `${crypto.randomUUID()}${crypto.randomUUID().replaceAll('-', '')}`,
     },

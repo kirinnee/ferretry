@@ -5,6 +5,7 @@ import {
   limitPatch,
   observeTurn,
   parseContinueAt,
+  settleTurnState,
   transcriptTurnPhase,
   type TurnEvidence,
   usageLimitOf,
@@ -159,5 +160,29 @@ describe('the status and quota to record beside a turn change', () => {
     const patch = limitPatch({ status: 'running', quota: undefined, harnessDialog: undefined }, dialog(), now);
     expect(patch?.status).toBe('rate_limited');
     expect(patch?.quota).toMatchObject({ atLimit: true, limitNotice: "You've hit your org's usage limit" });
+  });
+});
+
+describe('B187 an idle pane that holds a draft after idle compaction', () => {
+  test('B187 an idle prompt holding a draft after idle compaction settles your-turn in two looks', () => {
+    // The compaction summary is skipped from the tail (B1), so the transcript tail no longer reads `working`,
+    // and the idle composer holding a draft is at the prompt (B2): the same weak your-turn twice settles.
+    const look = observeTurn(evidence({ transcript: 'ended', pane: { atPrompt: true } }));
+    expect(look).toEqual({ state: 'your-turn', confirmed: true });
+    const harnessOnly = observeTurn(evidence({ transcript: 'unknown', pane: { atPrompt: true } }));
+    expect(harnessOnly).toEqual({ state: 'your-turn', confirmed: true });
+    // The case the incident pinned: a transcript still saying `working` is only weakly overruled by the prompt,
+    // and a second look agrees.
+    const weak = observeTurn(evidence({ transcript: 'working', pane: { atPrompt: true } }));
+    expect(weak).toEqual({ state: 'your-turn', confirmed: false });
+    expect(settleTurnState('working', weak, undefined, true)).toBe('working');
+    expect(settleTurnState('working', weak, weak, true)).toBe('your-turn');
+  });
+
+  test('B187 a working line with a draft in the box is still working', () => {
+    expect(observeTurn(evidence({ transcript: 'working', pane: { working: true, atPrompt: true } }))).toEqual({
+      state: 'working',
+      confirmed: true,
+    });
   });
 });

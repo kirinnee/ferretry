@@ -365,6 +365,7 @@ export function withLivenessLedger(
     lastSubprocessAt: later(state.lastSubprocessAt, ledger.lastSubprocessAt),
     lastPaneAt: later(state.lastPaneAt, ledger.lastPaneChangeAt),
     lastMeaningfulPaneAt: ledger.lastMeaningfulPaneAt,
+    frameQuietSince: ledger.lastMeaningfulPaneAt,
     subprocessSince: ledger.subprocessSince,
     subprocessKey: ledger.subprocessKey,
   };
