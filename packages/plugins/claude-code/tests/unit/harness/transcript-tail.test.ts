@@ -147,10 +147,30 @@ describe('parseTail', () => {
 
   test('text the harness wrote into the user channel is marked, and a window cut mid-record skips its first line', () => {
     const cut = parseTail(
-      `{"type":"user","uuid":"x","timest\n${user(2, 'CONTINUED', { isCompactSummary: true })}\nnot json`,
+      `{"type":"user","uuid":"x","timest\n${user(2, 'CONTINUED', { isMeta: true })}\nnot json`,
       true,
     );
     expect(cut).toEqual([{ kind: 'message', role: 'user', at: AT(2), inputSource: 'harness' }]);
     expect(parseTail('{"type":"user","uuid":"x","timest', false)).toEqual([]);
+  });
+});
+
+describe('B187 compaction is not turn work', () => {
+  test('B187 an isCompactSummary user record is not a message or work in the tail', () => {
+    const boundary = line({
+      type: 'system',
+      subtype: 'compact_boundary',
+      timestamp: AT(1),
+      compactMetadata: { trigger: 'auto', preTokens: 900, postTokens: 90 },
+    });
+    const records = parseTail(
+      [
+        boundary,
+        user(2, 'This session is being continued from a previous conversation…', { isCompactSummary: true }),
+        user(3, [{ type: 'tool_result', tool_use_id: 't1', content: 'x' }], { isCompactSummary: true }),
+      ].join('\n'),
+      false,
+    );
+    expect(records).toEqual([{ kind: 'compaction', at: AT(1), trigger: 'auto', tokensBefore: 900, tokensAfter: 90 }]);
   });
 });

@@ -76,7 +76,9 @@ const REVIVE_PATHS = new Set(['revive', 'revive-queue']);
 
 /**
  * The ferrets whose ledgers are worth reading this sweep: autonomous, not a warden's, still running, at their
- * prompt for at least `stuckMs`. An interactive session is the owner's own terminal, watched by its owner.
+ * prompt for at least `stuckMs` — or (B187) reading `working`, whose ledger can still show a send of ours seen typed in
+ * its box: a turn marker the harness wrote while idle pins that reading, and the verified resubmit refuses a pane
+ * that really is busy. An interactive session is the owner's own terminal, watched by its owner.
  */
 export function stuckInputCandidates(
   fleet: readonly WardenSessionView[],
@@ -86,7 +88,9 @@ export function stuckInputCandidates(
   const byId = new Map(fleet.map(view => [view.config.id, view]));
   return fleet.filter(view => {
     const { config, state } = view;
-    if (config.mode !== 'auto' || isTerminalStatus(state.status) || state.turnState !== 'your-turn') return false;
+    if (config.mode !== 'auto' || isTerminalStatus(state.status)) return false;
+    if (state.turnState === 'working') return !inWardenLineage(view, byId);
+    if (state.turnState !== 'your-turn') return false;
     const ended = latestInstantMs(state.turnStateAt);
     if (ended === undefined || nowMs - ended < stuckMs) return false;
     return !inWardenLineage(view, byId);
@@ -154,12 +158,16 @@ export function detectStuckInput(
     if (sends === undefined) continue;
     const typed = stuckSendOf(sends, nowMs, stuckMs);
     const takenBack = retracted.get(view.config.id);
-    const stuck = typed ?? sends.find(send => send.sendId === takenBack);
+    // A working ferret is flagged only for a send the tracker has seen typed in its box (B187 C3), never for a taken-back pointer.
+    const working = view.state.turnState === 'working';
+    const stuck = typed ?? (working ? undefined : sends.find(send => send.sendId === takenBack));
     if (stuck === undefined) continue;
     const anchor =
       (typed === undefined
         ? latestInstantMs(view.state.turnStateAt)
-        : latestInstantMs(view.state.turnStateAt, stuck.attemptAt ?? stuck.acceptedAt)) ?? nowMs;
+        : working
+          ? latestInstantMs(stuck.attemptAt ?? stuck.acceptedAt)
+          : latestInstantMs(view.state.turnStateAt, stuck.attemptAt ?? stuck.acceptedAt)) ?? nowMs;
     const idleMinutes = Math.floor((nowMs - anchor) / 60_000);
     const from = stuck.fromName === undefined ? 'a message' : `a message from ${stuck.fromName}`;
     anomalies.push({
@@ -168,7 +176,7 @@ export function detectStuckInput(
       ...(view.config.teammate === undefined ? {} : { teammate: view.config.teammate }),
       ...(view.config.label === undefined ? {} : { label: view.config.label }),
       status: view.state.status,
-      detail: `idle at its prompt for ${idleMinutes}m while ${from} (send ${stuck.sendId}) sits typed in its input box, not sent — everything sent after it waits behind it`,
+      detail: `${working ? 'reads as working' : 'idle at its prompt'} for ${idleMinutes}m while ${from} (send ${stuck.sendId}) sits typed in its input box, not sent — everything sent after it waits behind it`,
       since: isoFromMs(anchor),
       idleMinutes,
       subject: stuckInputEpisode(view.config.id, stuck.sendId),

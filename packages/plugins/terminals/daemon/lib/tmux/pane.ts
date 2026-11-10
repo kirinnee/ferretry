@@ -97,6 +97,8 @@ const SPINNER_MARK = /^[^\S\n]*⏺\s*\S+…/mu;
 const INTERRUPTED_BANNER = 'tell the model what to do differently';
 
 const PROMPT = /^\s*[│|]?\s*[>›❯»](?:[\s ].*)?$/u;
+/** A numbered selector row (`❯ 1. Yes`) is a dialog's, never a composer's. */
+const SELECTOR_ROW = /^\s*[│|]?\s*[>›❯»]\s*\d+[.)]/u;
 
 export function parsePaneMetadata(value: string): PaneMetadata {
   const [dead, exitCode, cursorX, cursorY, height, width] = value.trimEnd().split('|');
@@ -212,20 +214,41 @@ export function paneShowsStartupWait(pane: string): boolean {
   return CODEX_STARTUP_WAIT.test((lines.at(-1) ?? '').toLowerCase());
 }
 
+/** Whether the pane is working, parked, or on a modal: it shows no idle composer however it is drawn. */
+function paneIsBusyOrBlocked(pane: string, lower: string): boolean {
+  if (STARTUP_BLOCKERS.some(marker => lower.includes(marker)) || paneShowsActiveWork(pane)) return true;
+  // A parked submission is drawn in the composer, and the composer is not idle until Codex sends it.
+  if (paneShowsStartupWait(pane)) return true;
+  // A permission prompt's cursor row reads as a prompt line, and a message typed into it picks a row.
+  if (parsePermissionPrompt(pane) !== undefined) return true;
+  // So does a harness dialog's: Codex's `› 1. Review hooks` is shaped like a composer line.
+  return parseHarnessDialog(pane) !== undefined;
+}
+
+/**
+ * Whether the pane shows an IDLE composer — no working line, dialog or permission prompt — whatever the
+ * box holds. Unlike {@link promptIsReady} it does not ask whether a send would be accepted: a composer
+ * holding an unsent draft is idle, though its cursor is on the draft and not at the prompt's first
+ * column. The turn look reads this, so a quiet pane with a draft in it settles `your-turn` (B187).
+ */
+export function idlePromptShown(pane: string): boolean {
+  const lower = pane.toLowerCase();
+  if (paneIsBusyOrBlocked(pane, lower)) return false;
+  if (lower.includes(INTERRUPTED_BANNER)) return true;
+  return pane
+    .split('\n')
+    .slice(-30)
+    .some(line => PROMPT.test(line) && !SELECTOR_ROW.test(line));
+}
+
 export function promptIsReady(pane: string, cursorY?: number, cursorX?: number): boolean {
   const lower = pane.toLowerCase();
-  if (STARTUP_BLOCKERS.some(marker => lower.includes(marker)) || paneShowsActiveWork(pane)) return false;
-  // A parked submission is drawn in the composer, and the composer is not idle until Codex sends it.
-  if (paneShowsStartupWait(pane)) return false;
-  // A permission prompt's cursor row reads as a prompt line, and a message typed into it picks a row.
-  if (parsePermissionPrompt(pane) !== undefined) return false;
-  // So does a harness dialog's: Codex's `› 1. Review hooks` is shaped like a composer line.
-  if (parseHarnessDialog(pane) !== undefined) return false;
+  if (paneIsBusyOrBlocked(pane, lower)) return false;
   if (lower.includes(INTERRUPTED_BANNER)) return true;
   const lines = pane.split('\n');
   if (cursorY !== undefined && cursorY >= 0 && cursorY < lines.length) {
     const line = lines[cursorY]!;
-    return (cursorX === undefined || cursorX <= 2) && PROMPT.test(line) && !/^\s*[│|]?\s*[>›❯»]\s*\d+[.)]/u.test(line);
+    return (cursorX === undefined || cursorX <= 2) && PROMPT.test(line) && !SELECTOR_ROW.test(line);
   }
   return lines.slice(-30).some(line => PROMPT.test(line));
 }

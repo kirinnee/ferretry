@@ -117,12 +117,37 @@ export interface ComposerRows {
   readonly last: number;
 }
 
+/** A rule drawn flush left, the way Claude draws the rules above and below its composer. */
+const FLUSH_RULE = /^[─━]{3,}/u;
+/** A Claude prompt line: the glyph in the first column. */
+const FLUSH_PROMPT = /^[❯>](?:[\s ].*)?$/u;
+
 function lineIndexOfComposer(lines: readonly string[]): number | undefined {
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index] as string;
-    if (PROMPT_LINE.test(line) && !SELECTOR_ROW.test(line)) return index;
+    if (PROMPT_LINE.test(line) && !SELECTOR_ROW.test(line)) return promptRowOfRuledDraft(lines, index);
   }
   return undefined;
+}
+
+/**
+ * The prompt row of the Claude draft that the prompt-shaped row at `at` belongs to, or `at` itself.
+ *
+ * Claude draws a draft's wrapped and later lines indented under the prompt glyph, so a body line that
+ * itself starts with `>` (a quotation) is drawn `  > …` and looks like a prompt. Inside a composer that
+ * a flush-left rule opens, the prompt line is the row right under that rule and every indented
+ * prompt-shaped row below it is a continuation. The bottom-most prompt-shaped row used to win, so a
+ * daemon's own quoted message was read as its tail and was never seen as its own (B187).
+ */
+function promptRowOfRuledDraft(lines: readonly string[], at: number): number {
+  if (!CLAUDE_QUEUE_CONTINUATION.test(lines[at] as string)) return at;
+  for (let index = at - 1; index >= 1; index -= 1) {
+    const line = lines[index] as string;
+    if (FLUSH_RULE.test(line)) return at;
+    if (FLUSH_PROMPT.test(line)) return FLUSH_RULE.test(lines[index - 1] as string) ? index : at;
+    if (line.trim() !== '' && !CLAUDE_QUEUE_CONTINUATION.test(line)) return at;
+  }
+  return at;
 }
 
 /**
@@ -161,7 +186,8 @@ function ruledEnd(lines: readonly string[], at: number): number | undefined {
   let end = at;
   for (let index = at + 1; index < lines.length; index += 1) {
     const line = lines[index] as string;
-    if (CLOSER.test(line)) return end;
+    // Only a flush-left rule closes the draft: an indented `└` or `───` is a row of the message.
+    if (FLUSH_RULE.test(line)) return end;
     if (line.trim() === '') continue;
     if (!CLAUDE_QUEUE_CONTINUATION.test(line)) return undefined;
     end = index;

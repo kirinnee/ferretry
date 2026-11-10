@@ -99,6 +99,11 @@ export const SendUnaccountedReasonSchema = z.enum([
    * still draw it, or the keys were lost. It was not typed again, so it is unconfirmed, never a copy.
    */
   'landing_unconfirmed',
+  /**
+   * Its text sits in the agent's composer and the one Enter the daemon pressed for it did not take (B187): the agent
+   * is idle with the message typed and not submitted. Raised once; the Warden's input-stuck takes it from there.
+   */
+  'typed_not_submitted',
   /** Proven absent after every attempt. */
   'not_delivered',
 ]);
