@@ -657,6 +657,35 @@ it('I192 an issuer/account mismatch requires the owner’s explicit save-here-an
   }
 });
 
+it('S93 a key whose issuer or account does not fit is refused 409 factor_mismatch unless the owner ticked save-it-here-anyway', async () => {
+  const h = await host();
+  try {
+    await signIn(h);
+    const padded = padInputValue(`otpauth://totp/Elsewhere%3Aanother-person?secret=${SEED}&issuer=Elsewhere`);
+    const refused = await h.request('POST', '/v1/accounts/REVIEW/factors/seed', {
+      body: { padded, totpAcknowledged: true },
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.json<{ code: string }>().code).toBe('factor_mismatch');
+    // A refused key stages nothing: the same cap-free stage is still available, and only the second tick stages it.
+    expect(
+      (
+        await h.request('POST', '/v1/accounts/REVIEW/factors/seed', {
+          body: { padded, totpAcknowledged: true, mismatchAcknowledged: false },
+        })
+      ).status,
+    ).toBe(409);
+    const staged = await h.request('POST', '/v1/accounts/REVIEW/factors/seed', {
+      body: { padded, totpAcknowledged: true, mismatchAcknowledged: true },
+    });
+    expect(staged.status).toBe(201);
+    expect(staged.body).not.toContain(SEED);
+    expect(readIndex(h).accounts.REVIEW!.factors ?? []).toHaveLength(0);
+  } finally {
+    await h.stop();
+  }
+});
+
 it('S95 the staging route caps one caller at two waiting seeds', async () => {
   const h = await host();
   try {
