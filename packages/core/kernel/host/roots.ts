@@ -1561,12 +1561,16 @@ async function linkTargetOf(checked: Checked, dangling: boolean): Promise<string
 /**
  * `setMode` through the checked folder: the leaf is looked at without following it (a link is refused), opened by the
  * kind it showed (`O_NOFOLLOW` either way), proven to be the very object looked at, and `fchmod`ed through that
- * descriptor. A file with a second name is refused: its mode is that other name's too.
+ * descriptor. A file with a second name is refused: its mode is that other name's too. The leaf is reached through
+ * `entry`, which on a host with no descriptor path (macOS) is a plain path a swapped parent could redirect: a
+ * `project-files` scope (the owner's folder, where a write is refused on such a host too) therefore refuses
+ * `no_descriptor_reach` there.
  */
 async function setModeChecked(scope: Scope, full: string, bits: number): Promise<void> {
   const parent = dirname(full);
   const folder = await openCheckedFolder(scope, parent);
   try {
+    if (scope.literal === true && folder.entryPath('') === undefined) return refuse('no_descriptor_reach');
     const at = await entry(scope, folder, parent, basename(full));
     const found = await scope.fs.identity(at);
     if (found === undefined) return refuse('outside');
