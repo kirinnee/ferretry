@@ -449,4 +449,56 @@ describe('R-B1 the project .mcp.json over the kernel’s real imports root on a 
     expect(swapped).toBe(true);
     expect(read).not.toEqual(JSON.parse(OUTSIDE_TEXT));
   });
+
+  // ilr F3 (row 105): THE WINDOW BETWEEN THE ADAPTER'S LOOK AND THE KERNEL'S RESOLUTION. The adapter looks at the leaf
+  // (`lstat`, refuses a link) and then asks the kernel to read it: two steps. The kernel's read resolves the name afresh
+  // (`realpath`, the first time the host is asked about the leaf in the read) and then, once it holds the file open,
+  // resolves it again to prove nothing moved. So a leaf swapped for a link INTO the project after the adapter's look and
+  // before the kernel's first resolution is followed (its project target is read); one swapped after that first
+  // resolution is refused (`changed`); one pointing OUT is refused in every case. The swap lands on the Nth host
+  // `realpath` of the leaf; `swapped` fails the test loudly if the kernel's steps ever change.
+  const swapAtResolution = async (nth: number, target: (project: string) => string) => {
+    let project = '';
+    let swapped = false;
+    let resolutions = 0;
+    const w = await world(inner => ({
+      ...inner,
+      realpath: async (path: string) => {
+        if (path === `${project}/.mcp.json`) resolutions += 1;
+        if (!swapped && path === `${project}/.mcp.json` && resolutions === nth) {
+          swapped = true;
+          unlinkSync(path);
+          symlinkSync(target(project), path);
+        }
+        return await inner.realpath(path);
+      },
+    }));
+    project = w.project;
+    await writeFile(join(w.project, '.mcp.json'), FILES['.mcp.json']!);
+    await writeFile(join(w.project, 'other.json'), INSIDE_TEXT);
+    const read = await w.documents.read(`${w.project}/.mcp.json`, 'json').catch((error: unknown) => error);
+    expect(swapped).toBe(true);
+    return read;
+  };
+  const INSIDE_TEXT = JSON.stringify({
+    mcpServers: { inside: { type: 'http', url: 'https://inside.example.invalid' } },
+  });
+
+  test('ilr F3 the named window: a .mcp.json swapped for a link to another file INSIDE the project before the kernel resolves it is followed, and only that project file is read', async () => {
+    const read = await swapAtResolution(1, project => join(project, 'other.json'));
+    expect(read).toEqual(JSON.parse(INSIDE_TEXT));
+  });
+
+  test('ilr F3 a .mcp.json swapped for a link after the kernel resolved it is refused as unreadable (changed), whatever it points at', async () => {
+    const inside = await swapAtResolution(2, project => join(project, 'other.json'));
+    expect(inside).toBeInstanceOf(McpDocumentUnreadable);
+    const outside = await swapAtResolution(2, project => join(project, '..', '..', 'outside', 'mcp.json'));
+    expect(outside).toBeInstanceOf(McpDocumentUnreadable);
+  });
+
+  test('ilr F3 a .mcp.json swapped for a link OUT of the project before the kernel resolves it is refused too, and its text is never returned', async () => {
+    const read = await swapAtResolution(1, project => join(project, '..', '..', 'outside', 'mcp.json'));
+    expect(read).toBeInstanceOf(McpDocumentUnreadable);
+    expect(read).not.toEqual(JSON.parse(OUTSIDE_TEXT));
+  });
 });

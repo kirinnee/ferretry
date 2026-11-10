@@ -417,7 +417,7 @@ describe('a card of several fields', () => {
     ]);
   });
 
-  it('should offer only saved accounts that hold every field, and suggest saving the card as one login', async () => {
+  it('I162 should offer only saved accounts that hold every field, and suggest saving the card as one login', async () => {
     const account = (id: string, username: string | undefined) => ({
       id,
       label: id.toLowerCase(),
@@ -761,7 +761,7 @@ describe('Save as on a login card', () => {
     { field: 'password', padded: padInputValue(password) },
   ];
 
-  it('should keep the username and the password together in ONE save, and record one kept field each', async () => {
+  it('I150 should keep the username and the password together in ONE save, and record one kept field each', async () => {
     const { service, request, saves, kept, writes } = await raisedLogin();
 
     const result = await service.deliver(
@@ -781,6 +781,8 @@ describe('Save as on a login card', () => {
       },
     ]);
     should(kept).eql(['username', 'password']);
+    // The record names the fields kept and never carries a value.
+    should(JSON.stringify(kept)).not.containEql(PASSWORD);
     should(writes.length).equal(1);
   });
 
@@ -1065,7 +1067,7 @@ describe('a deliver types a saved account only as the card offers it now (secrev
     ],
   });
 
-  it('should type nothing from the provider on a page that signs in through it, linked or not', async () => {
+  it('I130 should type nothing from the provider on a page that signs in through it, linked or not', async () => {
     for (const linked of [true, false]) {
       const { service, request, writes, fills } = await raisedLogin({ listing: throughProvider(linked) });
       should(request.saved?.offers).eql([]);
@@ -1114,7 +1116,7 @@ describe('a deliver types a saved account only as the card offers it now (secrev
     should(writes).eql([]);
   });
 
-  it("should refuse the account's own sign-in from another place: only the one matched here is its offer's", async () => {
+  it("S86 should refuse the account's own sign-in from another place: only the one matched here is its offer's", async () => {
     const two = {
       accounts: [account('GOOGLE')],
       signIns: [
@@ -1134,6 +1136,42 @@ describe('a deliver types a saved account only as the card offers it now (secrev
     should(fills).eql([]);
     should(writes).eql([]);
     await tap('si_0000000000000a04');
+    should(writes).have.length(1);
+  });
+
+  it('I161 should redraw the offers at Send and refuse an account not offered now, or a mismatched signIn, typing nothing', async () => {
+    const signIns = [
+      site('si_0000000000000b01', 'GOOGLE', 'accounts.google.com'),
+      site('si_0000000000000b02', 'OTHER', 'mail.example.test'),
+    ];
+    const options: Parameters<typeof build>[0] = {
+      listing: { accounts: [account('GOOGLE'), account('OTHER')], signIns },
+    };
+    const { service, request, writes, fills } = await raisedLogin(options);
+    // The card offered it when it was drawn, and the offer carries no value, only who and what it fills.
+    should(request.saved?.offers.map(offer => offer.id)).eql(['GOOGLE', 'OTHER']);
+    should(JSON.stringify(request.saved)).not.containEql(PASSWORD);
+    const tap = (body: Partial<InputDeliverBody>) =>
+      service.deliver(SESSION, request.id, send(request.observedDigest ?? '', body), HOST);
+
+    // A sign-in that is another account's, and one that is no one's, get the SAME refusal, before anything is typed.
+    const another = await refused(tap({ entry: 'GOOGLE', signIn: 'si_0000000000000b02' }));
+    const nobody = await refused(tap({ entry: 'GOOGLE', signIn: 'si_0000000000000bff' }));
+    should(another.code).equal('bad_request');
+    should(another.message).equal('that sign-in is not one of GOOGLE; nothing was typed');
+    should(nobody.message).equal(another.message);
+
+    // The store changes after the card was drawn: the account no longer holds a password. The offers are redrawn now,
+    // from the store and the page, and the account is not among them, so nothing is opened or typed.
+    options.listing = { accounts: [account('GOOGLE', { password: false }), account('OTHER')], signIns };
+    const stale = await refused(tap({ entry: 'GOOGLE' }));
+    should(stale.code).equal('bad_request');
+    should(stale.message).equal('GOOGLE is not offered for this target; nothing was typed');
+    should(fills).eql([]);
+    should(writes).eql([]);
+
+    // The account that is still offered types as before: the refusals spent nothing and changed nothing.
+    await tap({ entry: 'OTHER' });
     should(writes).have.length(1);
   });
 

@@ -121,6 +121,11 @@ export interface WardenSessionState {
   readonly lastPaneAt?: string;
   /** A frame change that is not the harness's own spinner, clock or status line. */
   readonly lastMeaningfulPaneAt?: string;
+  /**
+   * Since when the pane's frame has not changed (B187): the monitor's last meaningful screen change. Read with
+   * `turnState: 'working'` it says a turn that never ends; absent when no monitor has looked.
+   */
+  readonly frameQuietSince?: string;
   /** The turn the session is on. */
   readonly turn?: number;
   /**

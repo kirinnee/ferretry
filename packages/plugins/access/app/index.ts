@@ -7,9 +7,12 @@ import { daemonlessPlaceholder, PAIR_SCREEN_ID, pairPage } from './pair-page.tsx
 import { pairPhoneCommands } from './pair-phone-host.tsx';
 import {
   devicesTab,
+  grantsTab,
   newDevicesPanel,
   NotificationsDevicePanel,
   notificationsOffPanel,
+  securityLogTab,
+  securityTab,
   UnlockPanel,
 } from './surfaces.tsx';
 
@@ -24,7 +27,12 @@ export default provideToShell(
     build: ({ client }) => ({
       // `pair` is daemon-less: the shell draws it from `shell.daemonless`, never from a machine's half.
       screens: { pair: daemonlessPlaceholder },
-      settings: { devices: devicesTab(client) },
+      settings: {
+        devices: devicesTab(client),
+        grants: grantsTab(client),
+        security: securityTab(client),
+        audit: securityLogTab(client),
+      },
       panels: {
         'new-devices': newDevicesPanel(client),
         unlock: UnlockPanel,

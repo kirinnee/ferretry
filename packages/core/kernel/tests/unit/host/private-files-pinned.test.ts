@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readlink, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
@@ -18,7 +18,7 @@ import { platformRootPinner } from '../../../host/adapters/pinned/index.ts';
 import { type FileIdentity, type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { fenceOf } from '../../../host/fence-guard.ts';
 import { PinRegistry } from '../../../host/pins.ts';
-import { RootError, rootsPortFor } from '../../../host/roots.ts';
+import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
 import { composePrivateFiles } from '../../../manifest/privacy.ts';
 
 /**
@@ -431,4 +431,49 @@ describe('PF-budget the tree that is the root’s own is never closed against it
       await ownPin.close();
     }
   }, 60_000);
+});
+
+/**
+ * The disk as a REMOVE sees it: a recursive remove asks `identity` of `/proc/self/fd/<n>/<name>`, a path through a held
+ * descriptor, never of the folder's own spelling. This answers such a path as the name it reaches (the descriptor's link
+ * read back), so a fake that is keyed on names applies to the descriptor walk too (row 166).
+ */
+function descriptorAware(inner: HostFs): HostFs {
+  return {
+    ...inner,
+    identity: async path => {
+      const through = /^\/proc\/self\/fd\/(\d+)(\/.*)?$/u.exec(path);
+      if (through === null) return await inner.identity(path);
+      const folder = await readlink(`/proc/self/fd/${through[1] as string}`);
+      return await inner.identity(`${folder}${through[2] ?? ''}`);
+    },
+  };
+}
+
+describe('PF-budget an internal root’s recursive remove refuses a member on a closed device (rows 165, 166)', () => {
+  test('rows 165 166 a remove of a folder that holds a bind-mounted file is refused fenced, through the descriptor walk, and the file stays', async () => {
+    const l = await layout();
+    const here = ((await REAL.identity(l.work)) as FileIdentity).device;
+    const devices: Devices = { folder: here + 4242n, file: here + 4249n };
+    const closed = closedDisk(l, devices);
+    const layoutOf = { home: l.home, plugin: 'codex', worktrees: `${l.home}-worktrees` };
+    await ensureInternalRootBases(REAL, layoutOf, ['agent-homes']);
+    const folder = `${l.home}/state/codex/agent-homes/F1/sub`;
+    await mkdir(folder, { recursive: true, mode: 0o700 });
+    await writeFile(`${folder}/mounted.txt`, 'on the closed device');
+    // The member shows the closed device the way a bind mount of a file would; the folder around it does not.
+    const fs = descriptorAware({
+      ...closed,
+      identity: async path =>
+        path === `${folder}/mounted.txt`
+          ? { ...((await REAL.identity(path)) as FileIdentity), device: devices.file, links: 1 }
+          : await closed.identity(path),
+    });
+    const root = rootsPortFor(fs, layoutOf, ['agent-homes'], () => undefined, {
+      random: () => 'r',
+      privateFiles: LIST,
+    }).root('agent-homes', { subfolder: 'F1' });
+    expect(await outcome(() => root.remove(named(root, 'sub')))).toBe('refused:fenced');
+    expect(await Bun.file(`${folder}/mounted.txt`).exists()).toBe(true);
+  }, 120_000);
 });

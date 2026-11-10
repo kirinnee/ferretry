@@ -72,7 +72,8 @@ describe('which ferrets are looked at', () => {
       ferret('warden', {}, { label: 'fleet-warden' }),
     ];
 
-    should(stuckInputCandidates(fleet, NOW).map(view => view.config.id)).eql(['idle']);
+    // A working ferret is read too (B187 C3): its ledger decides, and the verified resubmit refuses a busy pane.
+    should(stuckInputCandidates(fleet, NOW).map(view => view.config.id)).eql(['idle', 'working']);
   });
 });
 
@@ -277,5 +278,33 @@ describe('&B153: a delivered pointer the harness took back into the box', () => 
       new Map([['marge', 'turn-007']]),
     );
     should(flag?.sendId).equal('send-63');
+  });
+});
+
+describe('B187 a ferret that reads as working while a message of ours sits typed in its box', () => {
+  it('B187 a working ferret with a fresh typedNotSent send is a candidate', () => {
+    const working = ferret('nelly', { turnState: 'working', turnStateAt: iso(NOW - 50 * MINUTE) });
+    const candidates = stuckInputCandidates([working], NOW);
+    should(candidates.map(view => view.config.id)).eql(['nelly']);
+
+    const found = detectStuckInput(candidates, new Map([['nelly', [pointer()]]]), NOW);
+    should(found).have.length(1);
+    should(found[0]).match({ kind: 'input_stuck', sessionId: 'nelly', sendId: 'send-63', idleMinutes: 10 });
+    should(found[0]?.detail).match(/reads as working for 10m/);
+    // The clock is the send's own typing, not the working turn's start: a long turn alone flags nothing.
+    should(detectStuckInput(candidates, new Map([['nelly', [pointer({ typedNotSent: false })]]]), NOW)).be.empty();
+    should(detectStuckInput(candidates, new Map([['nelly', []]]), NOW)).be.empty();
+    should(
+      detectStuckInput(candidates, new Map([['nelly', [pointer({ attemptAt: iso(NOW - MINUTE) })]]]), NOW),
+    ).be.empty();
+  });
+
+  it('B187 a working ferret is never flagged for a delivered pointer the harness took back', () => {
+    const working = ferret('nelly', { turnState: 'working', turnStateAt: iso(NOW - 50 * MINUTE) });
+    const delivered = pointer({ fate: 'delivered', typedNotSent: undefined });
+
+    should(
+      detectStuckInput([working], new Map([['nelly', [delivered]]]), NOW, undefined, new Map([['nelly', 'send-63']])),
+    ).be.empty();
   });
 });

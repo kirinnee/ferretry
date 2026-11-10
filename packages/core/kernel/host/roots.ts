@@ -525,7 +525,12 @@ async function openLeaf(scope: Scope, real: string): Promise<OpenedFile> {
  * whole, up to a limit, a window or a tail: every read of a root goes through here.
  */
 async function withCheckedFile<T>(scope: Scope, full: string, use: (file: OpenedFile) => Promise<T>): Promise<T> {
-  const real = literalReal(scope, full, await scope.fs.realpath(full));
+  // The errno stays (`readDurable` goes by `ENOENT`); the system's message names the absolute path, so it does not.
+  const resolved = await scope.fs.realpath(full).catch((error: unknown) => {
+    const code = errnoOf(error);
+    throw code === undefined ? error : Object.assign(new Error(`${code}: the file could not be resolved`), { code });
+  });
+  const real = literalReal(scope, full, resolved);
   const before = await scope.fs.identity(real);
   if (before === undefined) return refuse('changed');
   const judged = await fileProblem(scope, real, before);
@@ -743,8 +748,9 @@ async function openFolderBelow(
 /**
  * The LEAF folder of a `project-files` call (S179), made (when missing) and opened THROUGH the folder `openFolderBelow`
  * holds, never by a path a link could redirect, then proven to still be at its place. Answers the open folder (the
- * caller closes it) and whether this call made it. A name that is a file is `outside` (it is no folder of ours); a link
- * is `link_escape`.
+ * caller closes it) and whether this call made it. A name that is a file, a link or a dangling link is `outside`: the
+ * open (`O_DIRECTORY | O_NOFOLLOW`) answers `ENOTDIR` for each, so a link at the LEAF is told from a file by neither
+ * (nothing is written either way). A link met on the way DOWN to the leaf is `link_escape` (`openFolderBelow`).
  */
 async function openLeafBelow(
   scope: Scope,
@@ -1309,7 +1315,8 @@ const fenceNow = async (setup: PinFenceSetup): Promise<Fence | undefined> =>
  * (a private tree that was not indexed whole: an entry there cannot be proven not to be an alias of an unindexed
  * member, and an alias keeps its source's device). THE rule, asked by every door of an owner's root — the unpinned
  * root's members and the held (pinned) root's walk alike, and an internal root's guard ({@link PrivateCheck}), which has
- * the same `keys` and `closed` — so no two doors can disagree about a closed device.
+ * the same shape (`keys` and `closed`; its `closed` leaves out the root's own trees) — so no two doors can disagree
+ * about a closed device.
  */
 function heldByIdentity(
   places: Pick<Fence, 'keys' | 'closed'>,
@@ -1561,12 +1568,16 @@ async function linkTargetOf(checked: Checked, dangling: boolean): Promise<string
 /**
  * `setMode` through the checked folder: the leaf is looked at without following it (a link is refused), opened by the
  * kind it showed (`O_NOFOLLOW` either way), proven to be the very object looked at, and `fchmod`ed through that
- * descriptor. A file with a second name is refused: its mode is that other name's too.
+ * descriptor. A file with a second name is refused: its mode is that other name's too. The leaf is reached through
+ * `entry`, which on a host with no descriptor path (macOS) is a plain path a swapped parent could redirect: a
+ * `project-files` scope (the owner's folder, where a write is refused on such a host too) therefore refuses
+ * `no_descriptor_reach` there.
  */
 async function setModeChecked(scope: Scope, full: string, bits: number): Promise<void> {
   const parent = dirname(full);
   const folder = await openCheckedFolder(scope, parent);
   try {
+    if (scope.literal === true && folder.entryPath('') === undefined) return refuse('no_descriptor_reach');
     const at = await entry(scope, folder, parent, basename(full));
     const found = await scope.fs.identity(at);
     if (found === undefined) return refuse('outside');
@@ -1777,7 +1788,11 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * A scope that names an anchor (`within`): every folder from the anchor's first child down to the scoped folder is
    * looked at WITHOUT following it, and a link at any of them is refused `link_escape`. The anchor itself and its
    * ancestors are not looked at (a symlinked project folder works). A folder that is not there yet is no link, and
-   * nothing below it exists either. An anchor equal to the scoped folder walks nothing.
+   * nothing below it exists either. An anchor equal to the scoped folder walks nothing. The walk is the EARLY refusal
+   * (a link is told before any descriptor is opened). For `imports` and `project-files` the descriptors their calls then
+   * hold are the PROOF, so a folder swapped for a link after the walk is still caught (except where
+   * `descriptorReachNote` says a listing or a stat goes by path); `harness-history` and `harness-home` hold no such
+   * descriptor, and for them this walk is the only link check.
    */
   const anchoredFolders = async (): Promise<void> => {
     for (const folder of setup.linkFreeFolders() ?? []) {
@@ -1792,8 +1807,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
   /**
    * A file or folder this handle just made or replaced under the home's `state` may be a private place (a ferret's
    * `sessions/<id>/environment.json`): the index is looked at again before the write returns, so the very first write
-   * has no window in which the new inode is not yet pinned. An owner's root is fenced out of the home and a path outside
-   * `state` touches no place; both cost nothing.
+   * has no window in which the new inode is not yet pinned. An owner's root is fenced out of the home, so it returns
+   * before anything is asked. For any other root `pinCreatedAt` resolves the home FIRST (it needs the home's real path to
+   * say which path below `state` was made) and only then decides lexically whether a private place touches `full`: a
+   * path outside `state` or touching no place costs one resolve and no look, and a home that cannot be resolved refuses
+   * the create whether or not its path was private. (The state port's `pinCreated` is the other order: it is given the
+   * path below `state`, judges it lexically BEFORE the home is resolved, and a path no place touches resolves nothing.)
    */
   const pinned = async (full: string): Promise<void> => {
     if (ownerRoot || privateFiles.files.length === 0) return;
@@ -1807,6 +1826,30 @@ function rootHandle(setup: HandleSetup): RootHandle {
       privateFiles.watch,
       privateFiles.report,
     );
+  };
+  /**
+   * Runs a create and pins what it made. A create can throw AFTER its entry landed (a copy past its budget half way, the
+   * folder sync of a publish, a write's directory fsync), so the pin also runs when it threw: the new inode is held at
+   * once, not at the next look. The create's own error is the one that comes back; a pin that fails then is told through
+   * the report (it says so once). Whether the index's own look failed or the home could not be resolved for this pin, the
+   * next root call looks again and refuses while it cannot (a failed home resolve makes the index forget its look
+   * interval, fence-guard.ts `lookAgain`), so the kept snapshot from before the create is never answered from after a
+   * failed pin. It is served only within the look interval after a look that succeeded, which a successful pin renews.
+   * Before that fix a failed pin left a window of at most the look interval (250 ms on the host) in which a bind mount
+   * of the new file was served from the old view; it needed mount privilege and a one-off home-resolve failure at the
+   * pin; it is closed. (The old view was never wider in any other way: each call resolves its base and its fence fresh,
+   * and the old view lacks nothing but the identity of the file just made.)
+   */
+  const pinning = async <T>(full: string, create: () => Promise<T>): Promise<T> => {
+    let made: T;
+    try {
+      made = await create();
+    } catch (error) {
+      await pinned(full).catch(() => undefined);
+      throw error;
+    }
+    await pinned(full);
+    return made;
   };
   const readOnly = READ_ONLY_ROOTS.has(name);
   const projectRoot = name === 'project-files';
@@ -2003,8 +2046,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     const leafOnly = options?.exclusive === true || options?.replaceExisting === true || projectRoot;
     const { full, scope } = leafOnly ? await realParent(path, true) : await real(path, true);
     await leafWritable(scope, full);
-    await writeChecked(scope, full, data, random, privateWrite(options));
-    await pinned(full);
+    await pinning(full, async () => await writeChecked(scope, full, data, random, privateWrite(options)));
   };
   /**
    * Copies `from` (a folder of `source`) into the NEW folder `to`: each name checked against the source's own fence,
@@ -2114,9 +2156,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       gate(path, 'file');
       const { full, scope } = await realParent(path, true);
       await leafWritable(scope, full);
-      const published = await publishChecked(scope, full, bytes, random, privateWrite(options));
-      await pinned(full);
-      return published;
+      return await pinning(full, async () => await publishChecked(scope, full, bytes, random, privateWrite(options)));
     },
     readDurable: async (path, limit, hold) => {
       gate(path, 'file');
@@ -2166,8 +2206,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
       }
       // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
       if ((await leafIdentity(target.scope, target.full)) !== undefined) refuse('outside');
-      await copyInto(known, from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
-      await pinned(target.full);
+      await pinning(target.full, async () => {
+        await copyInto(known, from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+      });
     },
     copyShared: async (tree, to, options) => {
       // The destination: an internal root the kernel makes, writable. Checked before the tree is even looked at.
@@ -2194,8 +2235,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
       }
       // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
       if ((await leafIdentity(target.scope, target.full)) !== undefined) refuse('outside');
-      await copyInto(shared.source, shared.from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
-      await pinned(target.full);
+      await pinning(target.full, async () => {
+        await copyInto(shared.source, shared.from, to, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+      });
       return 'copied';
     },
     ensurePrivateDirectory: async path => {
@@ -2215,33 +2257,35 @@ function rootHandle(setup: HandleSetup): RootHandle {
         return;
       }
       const { full, scope } = await realParent(path, true);
-      const made = await openFolderMaking(scope, dirname(full), 0o700, true);
-      try {
-        if (scope.descent !== undefined) {
-          // A project folder: made and opened through the held folder, never by a path (see `openLeafBelow`). It keeps
-          // its mode when it was already there, and one this call makes is `0700`.
-          await (await openLeafBelow(scope, made, basename(full))).folder.close();
-          return;
-        }
-        const at = await entry(scope, made.folder, made.real, basename(full));
-        const info = await scope.fs.identity(at);
-        if (info !== undefined && info.kind !== 'directory') refuse('outside');
-        if (info === undefined) await scope.fs.mkdir(at, 0o700).catch(() => refuse('changed'));
-        const folder = await scope.fs.openDirectory(at).catch(() => refuse('changed'));
+      // A folder made here may be a `*` member of a private place (`sessions/<id>`): pinned before the call returns, even
+      // when a step after the make throws.
+      await pinning(full, async () => {
+        const made = await openFolderMaking(scope, dirname(full), 0o700, true);
         try {
-          const problem = await folderProblem(scope, join(made.real, basename(full)), folder.identity);
-          if (problem !== undefined) refuse(problem);
-          // A project folder is the owner's: one this call makes is created `0700`, one that is already there (`.claude`
-          // above a grant) keeps its mode. Making is the most this root does to a folder above a grant (§7.7).
-          if (!projectRoot) await folder.chmod(0o700);
+          if (scope.descent !== undefined) {
+            // A project folder: made and opened through the held folder, never by a path (see `openLeafBelow`). It keeps
+            // its mode when it was already there, and one this call makes is `0700`.
+            await (await openLeafBelow(scope, made, basename(full))).folder.close();
+            return;
+          }
+          const at = await entry(scope, made.folder, made.real, basename(full));
+          const info = await scope.fs.identity(at);
+          if (info !== undefined && info.kind !== 'directory') refuse('outside');
+          if (info === undefined) await scope.fs.mkdir(at, 0o700).catch(() => refuse('changed'));
+          const folder = await scope.fs.openDirectory(at).catch(() => refuse('changed'));
+          try {
+            const problem = await folderProblem(scope, join(made.real, basename(full)), folder.identity);
+            if (problem !== undefined) refuse(problem);
+            // A project folder is the owner's: one this call makes is created `0700`, one that is already there (`.claude`
+            // above a grant) keeps its mode. Making is the most this root does to a folder above a grant (§7.7).
+            if (!projectRoot) await folder.chmod(0o700);
+          } finally {
+            await folder.close();
+          }
         } finally {
-          await folder.close();
+          await made.folder.close();
         }
-      } finally {
-        await made.folder.close();
-      }
-      // A folder made here may be a `*` member of a private place (`sessions/<id>`): pinned before the call returns.
-      await pinned(full);
+      });
     },
     lstat: async (path): Promise<RootLstat | undefined> => {
       gate(path, 'probe');
@@ -2253,9 +2297,10 @@ function rootHandle(setup: HandleSetup): RootHandle {
       writable();
       gate(path, 'make');
       const { full, scope } = await real(path, true);
-      const made = await openFolderMaking(scope, full, privateFolder ? 0o700 : (options?.mode ?? 0o700), true);
-      await made.folder.close();
-      await pinned(full);
+      await pinning(full, async () => {
+        const made = await openFolderMaking(scope, full, privateFolder ? 0o700 : (options?.mode ?? 0o700), true);
+        await made.folder.close();
+      });
     },
     realPath: async path => {
       // `real` resolved every existing component inside the root; the whole must exist (a broken link throws), and a
@@ -2344,8 +2389,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
           refuse('link_escape');
       }
-      await renameChecked(source, target);
-      await pinned(target.full);
+      await pinning(target.full, async () => await renameChecked(source, target));
     },
     unlink: async (linkName: FencedPath) => {
       writable();

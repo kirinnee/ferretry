@@ -131,7 +131,12 @@
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "react": "^19.0.0",
         "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@ferretry/app": "workspace:*",
+        "@types/react": "^19.0.0",
       },
     },
     "packages/plugins/access": {

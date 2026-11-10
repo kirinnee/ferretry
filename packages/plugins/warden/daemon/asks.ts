@@ -17,6 +17,7 @@ import type {
   WardenEscalationRaise,
 } from './lib/index.ts';
 import type { AgendaSource } from './lib/protocol.ts';
+import type { MachineAgendaPort, MachineRaise } from './lib/machine-notices.ts';
 import { parseWardenEscalationSourceRef } from './lib/escalation.ts';
 
 const DAEMON = 'daemon' as SourceKey;
@@ -215,6 +216,45 @@ export class AsksWardenAgenda implements WardenAgendaPort {
       return;
     }
     for (const ask of await open()) await this.asks.close({ ferret: MACHINE_AGENDA_ID, id: ask.id }, 'source-gone');
+  }
+
+  /**
+   * The machine notices the Warden keeps ONE of per cause (`machine-notices.ts`): "these ferrets are stuck on an unsent
+   * message", "these ferrets have stuck inboxes". Each is one standing item on the machine board, keyed by its ref: the
+   * same item while the list changes, nothing written when it is the same, raised again after the owner closed it only
+   * when a member JOINED (one this process had not listed before), and closed when the cause clears. A refusal throws.
+   */
+  machineNotices(): MachineAgendaPort {
+    const listed = new Map<string, ReadonlySet<string>>();
+    const open = async (entry: EntryId): Promise<readonly AskSummary[]> =>
+      await this.asks.open({ source: DAEMON, entry, ferret: MACHINE_AGENDA_ID as FerretId, state: 'open' });
+    return {
+      raiseOrUpdate: async (ref: string, request: MachineRaise, members: readonly string[] = []) => {
+        const entry = EntryIdSchema.parse(ref);
+        const before = listed.get(ref) ?? new Set<string>();
+        const announce = members.some(member => !before.has(member));
+        if (!announce && (await open(entry)).length === 0) return;
+        await this.asks.standing({
+          source: DAEMON,
+          entry,
+          ref: {},
+          subject: oneLine(request.title ?? request.subject, 240),
+          why: oneLine(request.why, 2_048),
+          howToResolve: oneLine(request.howToResolve, 2_048),
+          context: [request.subject, request.context].filter(part => part !== undefined && part !== '').join('\n\n'),
+          raisedBy: { kind: 'daemon' },
+          ferret: MACHINE_AGENDA_ID,
+          blocking: true,
+        });
+        listed.set(ref, new Set(members));
+      },
+      resolve: async (ref: string) => {
+        const entry = EntryIdSchema.parse(ref);
+        for (const ask of await open(entry))
+          await this.asks.close({ ferret: MACHINE_AGENDA_ID, id: ask.id }, 'source-gone');
+        listed.delete(ref);
+      },
+    };
   }
 
   async resolveSource(sessionId: string, source: AgendaSource, sourceRef: string, _note: string): Promise<boolean> {

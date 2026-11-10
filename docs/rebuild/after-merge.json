@@ -54,7 +54,7 @@
     },
     {
       "id": "followups-sweep-after-merge",
-      "what": "the non-security follow-ups of the core lane, kept in the Follow-ups list, are swept after the merge: fresh Sonnet units, Opus review READY, Haiku merge, 5.0 CI on the merge sha; ports-pending closed/added reported per unit (britnee 2026-11-10: \"The rest of the followups sweep moves to after merge, so add it to docs/rebuild/after-merge.json with you as owner.\")",
+      "what": "the non-security follow-ups of the core lane, kept in the Follow-ups list, are swept after the merge: fresh Sonnet units, Opus review READY, Haiku merge, 5.0 CI on the merge sha; ports-pending closed/added reported per unit (britnee 2026-11-10: \"The rest of the followups sweep moves to after merge, so add it to docs/rebuild/after-merge.json with you as owner.\") Decided after merge (britnee 2026-11-10): Q28 monotonic admission-proof sequence (access registry.ts:255); the REAL-SERVICE fix so a confirmed patch beside a held removal does not put the removal into effect (kernel config service.ts ~1197); Q19 conversation consumer.ts members unwrapped (contract change); Q17 movedBy type narrowing (contract change); Q65/Q89 read-outside-the-queue in the accounts, lessons and warden held-edit writers (a held edit's lines can be reset if a held write queues between the read and the write; no held loosening can take effect); Q53 linux variants of project-files-race (a GAP).",
       "owner": "gustavo"
     },
     {

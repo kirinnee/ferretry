@@ -198,7 +198,13 @@ export default definePlugin({
   ui: {
     // Daemon-less on purpose: the page a pairing link opens on a device that has no daemon yet (first contact is direct).
     screens: [screen('pair', { path: '/pair', daemonless: true })],
-    settings: [settingsTab('devices', { label: 'Devices', order: 20 })],
+    settings: [
+      settingsTab('devices', { label: 'Devices', order: 20 }),
+      // v4's order: Devices, then the limits that explain a refused control, then passkeys, then the log.
+      settingsTab('grants', { label: 'What devices may do', order: 21 }),
+      settingsTab('security', { label: 'Security', order: 22 }),
+      settingsTab('audit', { label: 'Audit log', order: 23 }),
+    ],
     panels: [
       panel('daemon.status', { id: 'new-devices', order: 5 }),
       panel('daemon.status', { id: 'unlock', order: 10 }),

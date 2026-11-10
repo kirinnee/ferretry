@@ -47,9 +47,10 @@ bun scripts/ci/unit-timings.ts || status=1
 # unit tier's JUnit reports (the unit groups, and the repository tooling's own `scripts` part). Judged after every part, so a
 # red run still reports it, and ANY default-mode finding fails the job. `--tier unit` leaves the rows tested only in the
 # integration tier to the integration job (scripts/ci/integration.sh), which judges them from its own report.
-# STRICT MODE becomes required once `ports-pending.json` is empty: add `--strict` here and in integration.sh. It also checks the rows of
-# the packages still pending, which are skipped by design until then.
-bun scripts/gen/check.ts guarantees --tier unit --results coverage/unit --results coverage/scripts || status=1
+# STRICT MODE is required (the count reached 0, merge-bar line 1): `--strict` also checks the rows of the packages still
+# pending, which were skipped by design until then, and check.ts passes it to `guarantee-owner` too (enforcer symbols
+# and the owner's own suite). integration.sh judges its own tier the same way.
+bun scripts/gen/check.ts guarantees --strict --tier unit --results coverage/unit --results coverage/scripts || status=1
 # THE TICK PROOF: every `[x]` parity row names a test that exists AND passed in these same reports (integration.sh judges its own tier).
 # LOAD-BEARING: a row whose test is under tests/integration/ is skipped here by design and judged only by the integration job, which
 # a pull request runs only with the `full-ci` label. Without that label such a tick is not proven by any run; keep the label on

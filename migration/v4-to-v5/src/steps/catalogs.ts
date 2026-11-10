@@ -30,8 +30,8 @@
  *
  * The v5 Catalogs contract declares these files (`format: 1`) but not yet their bodies: its port "copies the schemas
  * with the code that answers them" from v4. So the bodies keep v4's field names and values, and the landing check
- * here is every id and digest that joins one file to another, through the contract's own id schemas. Skills declares
- * its schema; the only change there is v4's harness `claude` → v5's `claude-code`. A runtime named by a former name
+ * here is every id and digest that joins one file to another, through the contract's own id schemas. v4's
+ * `state/local-skill-installs.json` is not carried (owner decision !A466: the local skill copy is gone). A runtime named by a former name
  * (`fleet/ids.json` `formerNames`) is named by its current one, as Settings names it (M7).
  */
 import {
@@ -185,6 +185,10 @@ const STATIC_NOT_CARRIED: readonly NotCarried[] = [
   {
     what: 'install hold and skip choices (state/catalog-install-prefs.json)',
     why: 'v5 Catalogs declares no file for them; they only changed what a reader said, never acted, and an install stays at its pin either way (a skipped version is offered again)',
+  },
+  {
+    what: 'local skill copies (state/local-skill-installs.json)',
+    why: 'v5 has no local skill copy (owner decision !A466); the file is not carried and never read',
   },
   {
     what: 'the link store’s copy of each public link',

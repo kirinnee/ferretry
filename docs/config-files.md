@@ -111,10 +111,21 @@ that is not there). Three rules, in order:
    effect alone, and the held edit, changed, stays held. A WHOLE text is the caller's whole text and replaces the held
    edit. The lessons settings and the default-account lines (`accounts.yaml`) go through `writeAsOwner` (with only
    the changed keys, or lines, beside a held edit). In every case the caller's change is judged against the version
-   in effect alone (a loosening of its own still asks Gate's judge, a `${secret:NAME}` reference it adds still asks
-   the owner question, and one that only the held version names is never the caller's to confirm), so a person
-   changing one field never puts another caller's held edit into effect. When the caller changes the very field the
-   held edit staged, the caller's value is the value in both versions.
+   in effect alone. The held edit, changed too, is then judged afresh against the new version in effect and stays held
+   while it still loosens it, so a person changing one field puts another caller's held edit into effect only by making
+   it harmless — never by confirming it. Beside a held REMOVAL that happens when the change leaves removing the file no
+   longer a loosening (a confirmed raise of a limit, after which removing the file would lower it): the caller's change
+   is answered written, naming what it loosened, but it does not stay in effect — the other caller's held removal goes
+   into effect instead, the file stays gone and the defaults apply, never anything looser than the caller's change. A
+   patch made beside a held NEW file (no version in effect yet) is judged against no version, as the new file was. When
+   it is not held, it creates the version in effect from the defaults plus that patch, and the held new file, patched
+   too, stays held while it still loosens that version; when it is held, it waits with the held new file and nothing is
+   in effect. What is asked of that change differs by call. `writeAsCaller`: a loosening of its own asks Gate's judge, a secret reference it
+   adds asks the owner question, and one that only the held version names is never the caller's to confirm. `write`
+   and `writeAsOwner`: a loosening of their own asks Gate's judge, and a secret reference they add is always held
+   (they ask no owner question). Gate's own `gate.yaml` saves: Gate's routes have already decided the caller may
+   make the change and pass it as confirmed (`confirmedLoosening`), so the kernel asks no judge. When the caller
+   changes the very field the held edit staged, the caller's value is the value in both versions.
 4. **A change of several files lands whole or not at all.** A change that spans files — a runtime, its profile
    and its model set — is ONE act in the kernel, `ConfigPort.writeAll`, never several writes a reader could see
    half of. Every document of the set is checked as a single write checks one (its own file, its name, YAML, a

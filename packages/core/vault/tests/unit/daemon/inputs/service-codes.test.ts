@@ -82,7 +82,7 @@ describe('typing a code Ferretry makes', () => {
     should(w.cards[0]?.title).equal('One-time code for github.com, by SMS');
   });
 
-  it('should refuse a key the card does not offer, a key on a card with no code field, and a sign-in that is not the account’s', async () => {
+  it('S86 should refuse a key the card does not offer, a key on a card with no code field, and a sign-in that is not the account’s', async () => {
     const w = world(withKey());
     await w.service.raise(SESSION, CODE_RAISE);
     const request = await w.pending();
@@ -171,6 +171,77 @@ describe('typing a code Ferretry makes', () => {
 
     should(w.writes).eql([]);
     should(error).be.instanceOf(Error);
+  });
+
+  it('I169 should refuse a code deliver for each way it can be wrong, opening no key and typing nothing', async () => {
+    const gitlab = account({ id: 'GITLAB' as never, label: 'gitlab', factors: [SEEDED] });
+    const raiseCode = async (options: WorldOptions) => {
+      const w = world(options);
+      await w.service.raise(SESSION, CODE_RAISE);
+      return { w, request: await w.pending() };
+    };
+    const refuseWith = async (
+      { w, request }: Awaited<ReturnType<typeof raiseCode>>,
+      body: Record<string, unknown> = useCode(),
+    ) => {
+      const error = await refusal(w.service.deliver(SESSION, request.id, w.send(request, body), OWNER));
+      should([w.fills, w.writes]).eql([[], []]);
+      return error;
+    };
+
+    // A key the offer does not hold.
+    const wrongKey = await refuseWith(await raiseCode(withKey()), useCode({ factor: 'tf_000000000099' }));
+    should(wrongKey.message).containEql('is not one GITHUB makes codes from for this target');
+    // An account that signs in nowhere here: never a hand pick.
+    const byHand = await refuseWith(
+      await raiseCode(withKey({ accounts: { accounts: [account({ factors: [SEEDED] }), gitlab], signIns: [site()] } })),
+      useCode({ entry: 'GITLAB' }),
+    );
+    should(byHand.message).containEql('GITLAB is not offered for this target');
+    // A card with no code field.
+    const login = world({ facts: page(), accounts: { accounts: [account({ factors: [SEEDED] })], signIns: [site()] } });
+    await login.service.raise(SESSION, {
+      target: { kind: 'page', key: 'app' },
+      prompt: 'GitHub login',
+      fields: [
+        { id: 'user', sensitivity: 'plain', element: { kind: 'selector', selector: '#login_field' } },
+        { id: 'pass', sensitivity: 'secret', element: { kind: 'selector', selector: '#password' } },
+      ],
+      submit: 'owner-default',
+    });
+    const loginCard = await login.pending();
+    const noField = await refuseWith({ w: login, request: loginCard });
+    should(noField.message).containEql('this card has no code field for a 2FA key to fill');
+    // A forbidden target: a page that is not https is never typed a code Ferretry made.
+    const plain = await raiseCode(
+      withKey({
+        facts: page({ secure: false, origin: 'http://github.com' }, [
+          pageField('code', { frameOrigin: 'http://github.com' }),
+        ]),
+      }),
+    );
+    const forbidden = await refuseWith(plain);
+    should(forbidden.message).containEql('is not offered for this target');
+    // A code field that now looks like a password.
+    const prompt = world({
+      facts: terminal({
+        foreground: { pid: 11, pgid: 11, comm: 'ssh', argv: 'ssh bastion' },
+        program: 'ssh',
+        promptLine: 'Verification code:',
+      }),
+      accounts: { accounts: [account({ factors: [SEEDED] })], signIns: [sudoSignIn()] },
+    });
+    prompt.state.codeProgram = true;
+    await prompt.service.raise(SESSION, {
+      target: { kind: 'terminal', key: 'dev' },
+      prompt: 'the bastion wants the 2FA code',
+      sensitivity: 'code',
+      submit: 'owner-default',
+    });
+    const bastion = await prompt.pending();
+    prompt.state.codeProgram = false;
+    const looksLikeAPassword = await refuseWith({ w: prompt, request: bastion });
+    should(looksLikeAPassword.message).containEql('Ferretry never types a code it made into one');
   });
 });
 
@@ -262,7 +333,7 @@ describe('a code that did not go through', () => {
     return request;
   };
 
-  it('should open the card again for the owner to type the code, and tell the agent which card to wait on', async () => {
+  it('I172 should open the card again for the owner to type the code, and tell the agent which card to wait on', async () => {
     const w = world(withKey());
     w.state.codeWorked = false;
 
@@ -313,7 +384,7 @@ describe('a code that did not go through', () => {
     should(blind.codesChecked).eql([]);
   });
 
-  it('should only tell the agent, raising no card, when another request waits on the same target', async () => {
+  it('I172 should only tell the agent, raising no card, when another request waits on the same target', async () => {
     const w = world(withKey());
     w.state.codeWorked = false;
     let release: () => void = () => undefined;
@@ -331,7 +402,7 @@ describe('a code that did not go through', () => {
     should(w.told.at(-1)).containEql('the code Ferretry made did not go through on %browser:app');
   });
 
-  it('should only tell the agent when the target is gone, or when the agenda takes no new card', async () => {
+  it('I172 should only tell the agent when the target is gone, or when the agenda takes no new card', async () => {
     const gone = world(withKey());
     gone.state.codeWorked = false;
     gone.state.onType = () => {

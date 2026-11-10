@@ -17,8 +17,11 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
 2. **Security work merged on READY:** kernel-contract lanes S and K; kernel-caller-write; the held-edit regression
    fix; the send path (BG-051, BG-052, BG-053); `LOG_TOKENS` cleared in `fy` and `fyd`; the token-shape digit
    residual; the `pipefail` sites; effectiveLimits (`limits.yaml` read at launch).
-3. **The v4-to-v5 converter**, including the J-0052 prompt, green on the two-release fixture, plus one dry run on a
-   COPY of a v4 home on the preview.
+3. **The v4-to-v5 converter**, including the J-0052 prompt, green on a real v4 fixture home in CI (the
+   `migration-v4-to-v5.yaml` job "v4 fixture home and converter": it builds a 4.291.5 home, dry-runs and converts it,
+   then boots v5 on the result; green on 5.0 in
+   [run 42824937527](https://github.com/kirinnee/ferretry/actions/runs/42824937527)), plus one dry run on a COPY of a
+   v4 home on the preview.
 4. **The preview smoke list** (rules of !A469), each step pass or fail:
 
    | #   | Step                                                        |

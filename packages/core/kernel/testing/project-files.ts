@@ -216,12 +216,15 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     },
     copyTree: async (source, from, to, options) => {
       const known = twin.known(source);
-      reachForWrite(to, 'tree', 'follow');
+      // As production, in its order: the destination's name and links, then the source handle (`not_declared`), then the
+      // source's own gate, then the link refusal; only then the host that has no reach to a held folder refuses.
+      reach(to, 'tree', 'follow');
       if (known === undefined || known.plugin !== twin.plugin) throw new RootError('not_declared');
       // The source is gated by ITS handle (a project folder: the declared set, no link on the way), as production does.
       PROJECT_SOURCES.get(source)?.(from);
       // No link is made into a project folder (`linkTo`'s refusal): a copy is the only door.
       if (options?.link === true) throw new RootError('read_only');
+      if (twin.noDescriptorReach) throw new RootError('no_descriptor_reach');
       const fromKey = known.keyOf?.(from) ?? from;
       const toKey = key(lexical(to));
       for (const [name, text] of [...files])

@@ -346,7 +346,8 @@ export interface PublicFileDecl {
  * inside a private folder. An entry met through any root under another name, a bind mount included, is refused
  * `fenced` (fail closed). A look that cannot be made fails closed too: the write rejects with `private_unpinned` and
  * every root refuses until a look can be made, and the daemon says once "A private file of <plugin> could not be
- * pinned, so no folder is opened until it can be: <reason>." (again after a look has succeeded in between).
+ * pinned, so no folder is opened until it can be: <reason>." (again after a private write's look has succeeded in
+ * between; the index's own looks do not end the outage for this sentence).
  * There is no second field for this: `private` is the declaration.
  */
 export interface PrivacyDecl {

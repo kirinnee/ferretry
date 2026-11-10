@@ -163,11 +163,7 @@
     "packages/plugins/connections": {
       "entry": ["worker/src/adapters/worker.ts"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "app/lib/tunnel-switch.ts",
-        "app/lib/webrtc-carrier.ts",
-        "daemon/adapters/tunnel/cloudflared-locator.ts"
-      ]
+      "ignore": ["daemon/adapters/tunnel/cloudflared-locator.ts"]
     },
     "packages/plugins/catalogs": {
       "entry": ["worker/src/adapters/link-store-worker.ts"],
@@ -237,10 +233,6 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
         "app/features/onboarding/device-kind.ts",
-        "app/features/settings/capability-list.tsx",
-        "app/features/settings/grants-settings.tsx",
-        "app/features/settings/security-api.ts",
-        "app/features/settings/security-log-settings.tsx",
         "app/harness/pair-from-menu.tsx",
         "app/lib/device-preference.ts",
         "app/lib/push-seen.ts",

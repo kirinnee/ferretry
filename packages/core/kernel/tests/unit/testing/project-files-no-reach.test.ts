@@ -46,7 +46,10 @@ async function rootOf(noDescriptorReach: boolean): Promise<{ root: RootHandle; s
     ],
   });
   if (seen === undefined) throw new Error('the half was not built');
-  return { root: seen.roots.root('project-files', { subfolder: PROJECT }), stop: async () => await host.stop() };
+  return {
+    root: seen.roots.root('project-files', { subfolder: PROJECT }),
+    stop: async () => await host.stop(),
+  };
 }
 
 const at = (root: RootHandle, path: string) => {
@@ -77,6 +80,34 @@ test('S179 the testing twin refuses every project-files write no_descriptor_reac
     expect(await root.lstat(at(root, '.mcp.json'))).toBeUndefined();
     // a name outside the declared set is still refused for that reason first
     expect(await refusalOf(() => root.writeText(at(root, 'other.txt'), 'FIXTURE'))).toBe('not_declared');
+  } finally {
+    await world.stop();
+  }
+});
+
+// followups row 54 (kcb-kb-r2 N3): copyTree is a write too, and, as production, it judges the SOURCE handle (`not_declared`)
+// before it meets the host's missing reach: both refuse, but the sentence a plugin's test sees is production's.
+test('S179 the testing twin refuses a project-files copyTree no_descriptor_reach, after the source handle is judged', async () => {
+  const world = await rootOf(true);
+  try {
+    const { root } = world;
+    // a declared source (another handle of the same plugin) with a destination the host cannot reach
+    expect(await refusalOf(() => root.copyTree(root, at(root, '.claude/skills/a'), at(root, '.claude/skills/b')))).toBe(
+      'no_descriptor_reach',
+    );
+    // a source that is no handle of this plugin is `not_declared` first, whatever the host can reach
+    const foreign = {} as RootHandle;
+    expect(
+      await refusalOf(() => root.copyTree(foreign, at(root, '.claude/skills/a'), at(root, '.claude/skills/b'))),
+    ).toBe('not_declared');
+    // a link into a project folder is refused `read_only` before the reach, as `linkTo` refuses it
+    expect(
+      await refusalOf(() =>
+        root.copyTree(root, at(root, '.claude/skills/a'), at(root, '.claude/skills/b'), { link: true }),
+      ),
+    ).toBe('read_only');
+    // nothing was written
+    expect(await root.lstat(at(root, '.claude/skills/b'))).toBeUndefined();
   } finally {
     await world.stop();
   }

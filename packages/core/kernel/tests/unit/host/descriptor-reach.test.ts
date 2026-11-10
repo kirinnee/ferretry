@@ -31,7 +31,8 @@ describe('R-0198 the descriptor reach of the host is said once at boot', () => {
     const note = await descriptorReachNote(fsReaching({ path: false, calls: false, bracket: false }));
     expect(note).toMatchObject({ plugin: 'kernel', state: 'warn' });
     expect(note?.detail).toContain('read by path after the link check');
-    expect(note?.detail).toContain("the outside folder's names and sizes");
+    // Row 148: this host answers a stat and a file identity by path too, so its line names sizes and inodes.
+    expect(note?.detail).toContain("the outside folder's names, sizes and inodes");
     expect(note?.detail).toContain("no file's text is read through it");
     expect(note?.detail).not.toContain('/home');
   });
@@ -40,6 +41,8 @@ describe('R-0198 the descriptor reach of the host is said once at boot', () => {
     const note = await descriptorReachNote(fsReaching({ path: false, calls: true, bracket: false }));
     expect(note).toMatchObject({ plugin: 'kernel', state: 'warn' });
     expect(note?.detail).toContain('listed by path');
+    // Row 148: stats go by descriptor here, so only the listing's names are named, and no size or inode.
+    expect(note?.detail).toContain("one listing show the outside folder's names (no size, inode or file text");
   });
 
   test('R-0198 a host with the C calls and the bracket says nothing', async () => {

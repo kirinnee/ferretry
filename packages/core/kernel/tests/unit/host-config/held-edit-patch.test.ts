@@ -185,6 +185,69 @@ describe('held-edit patch: a held secret reference stays held (the secret rules)
     ]);
   });
 
+  // [held-edit-r1 F1, followups row 60] the owner's credit line names ONLY the references the caller's own patch added.
+  test('held-edit patch: the owner’s own Y beside a held X in the SAME top-level key: Y in effect and credited, X never', async () => {
+    const h = harness();
+    await h.stage('capA: 5\ncapB: 5\nenv:\n  EVIL: ${secret:FAKE_X}\n');
+    const outcome = await h.port.writeAsCaller(capsDef, undefined, { patch: { env: { MINE: '${secret:FAKE_Y}' } } });
+    expect(outcome.kind).toBe('written');
+    expect(JSON.stringify(h.port.file(capsDef))).not.toContain('FAKE_X');
+    expect(h.port.file(capsDef)).toEqual({ capA: 5, capB: 5, env: { MINE: '${secret:FAKE_Y}' } });
+    expect(ownerLines(h.log.lines)).toEqual([
+      'info config caps.yaml: the owner put a secret reference into effect (FAKE_Y)',
+    ]);
+  });
+
+  test('held-edit patch: the owner’s own Y beside a held X that survives in another key: only Y is credited', async () => {
+    const h = harness();
+    await h.stage('capA: 5\ncapB: 5\nnote: ${secret:FAKE_X}\n');
+    const outcome = await h.port.writeAsCaller(capsDef, undefined, { patch: { env: { MINE: '${secret:FAKE_Y}' } } });
+    expect(outcome.kind).toBe('written');
+    expect(JSON.stringify(h.port.file(capsDef))).not.toContain('FAKE_X');
+    // the held version keeps its X (and gains the patch), and stays held
+    expect(h.disk()).toContain('FAKE_X');
+    expect(h.disk()).toContain('FAKE_Y');
+    expect(h.port.fileState(capsDef).state).toBe('held');
+    expect(ownerLines(h.log.lines)).toEqual([
+      'info config caps.yaml: the owner put a secret reference into effect (FAKE_Y)',
+    ]);
+  });
+
+  test('held-edit patch: the owner’s own Y beside a reference already in effect in another key: only Y is credited', async () => {
+    const h = harness();
+    await h.files.reload();
+    h.verdicts.other = true;
+    expect((await h.port.write(capsDef, undefined, START)).kind).toBe('written');
+    // the owner puts FAKE_OLD into effect, then a ferret's WHOLE text (which does not name it) is held beside it
+    expect((await h.port.writeAsCaller(capsDef, undefined, { patch: { note: '${secret:FAKE_OLD}' } })).kind).toBe(
+      'written',
+    );
+    h.verdicts.other = false;
+    expect((await h.port.write(capsDef, undefined, FERRET_RAISE)).kind).toBe('held');
+    h.log.lines.length = 0;
+    const outcome = await h.port.writeAsCaller(capsDef, undefined, { patch: { env: { MINE: '${secret:FAKE_Y}' } } });
+    expect(outcome.kind).toBe('written');
+    expect(h.port.file(capsDef)).toMatchObject({ note: '${secret:FAKE_OLD}', env: { MINE: '${secret:FAKE_Y}' } });
+    expect(ownerLines(h.log.lines)).toEqual([
+      'info config caps.yaml: the owner put a secret reference into effect (FAKE_Y)',
+    ]);
+  });
+
+  // [held-edit-r2 F4, followups row 88] the PLAIN write is not the owner's: it never asks the owner question.
+  test('held-edit patch: a PLAIN patch adding its own reference beside a held edit is held, whatever the owner would say, and asks no owner question', async () => {
+    for (const other of [false, true]) {
+      const h = harness();
+      await h.stage();
+      h.verdicts.owner = true;
+      h.verdicts.other = other;
+      const outcome = await h.port.write(capsDef, undefined, { patch: { env: { OWN: OWN_REF } } });
+      expect({ other, kind: outcome.kind }).toEqual({ other, kind: 'held' });
+      expect(h.port.file(capsDef)).toEqual({ capA: 5, capB: 5, env: {} });
+      expect(h.asked.some(input => input.secretAdd === true)).toBe(false);
+      expect(ownerLines(h.log.lines)).toEqual([]);
+    }
+  });
+
   test('held-edit patch: the owner’s own reference when the owner question says no is held, the held loosening beside it', async () => {
     const h = harness();
     await h.stage();
@@ -298,5 +361,80 @@ describe('held-edit patch: what does not change', () => {
     const outcome = await h.port.writeAsCaller(capsDef, undefined, { patch: { note: 'n' } });
     expect(outcome.kind).toBe('written');
     expect(h.port.file(capsDef)).toMatchObject({ capA: 5, capB: 5, note: 'n' });
+  });
+});
+
+/** Fake only: a value past every length and entropy gate, no known shape. */
+const FLAG_VALUE = 'Zk3pQ9vXw2LmN7rT';
+const FLAG_NOTE = `note: "srv --token ${FLAG_VALUE}"\n`;
+
+describe('held-edit patch: the write rule (CFG-LEAK-W) judges both versions, and never a confirmation', () => {
+  test('CFG-LEAK-W a held-file patch that adds one is refused at the version in effect; nothing is written, the edit stays held', async () => {
+    const h = harness();
+    await h.stage();
+    const before = h.disk();
+    const outcome = await h.port.writeAsCaller(capsDef, undefined, { patch: { note: `srv --token ${FLAG_VALUE}` } });
+    expect(outcome).toMatchObject({ kind: 'refused', reason: 'raw_secret' });
+    expect(JSON.stringify(outcome)).not.toContain(FLAG_VALUE);
+    expect(h.disk()).toBe(before);
+    expect(h.files.held().map(edit => edit.path)).toEqual(['caps.yaml']);
+  });
+
+  test('CFG-LEAK-W a held-file patch judges the version in effect too: a pair only the held text holds is new to the version in effect', async () => {
+    const h = harness();
+    await h.files.reload();
+    h.verdicts.other = true;
+    expect((await h.port.write(capsDef, undefined, START)).kind).toBe('written');
+    h.verdicts.other = false;
+    // Held before the rule: a hand-written loosening that already carries the pair. In effect: START, which has none.
+    h.fs.seed(PATH, `${FERRET_RAISE}${FLAG_NOTE}`);
+    await h.files.reload();
+    expect(h.port.fileState(capsDef).state).toBe('held');
+    const before = h.disk();
+    // The held text already holds the pair, so the patch adds nothing there; the version in effect has none, so it is new.
+    const outcome = await h.port.writeAsCaller(capsDef, undefined, { patch: { note: `srv --token ${FLAG_VALUE}` } });
+    expect(outcome).toMatchObject({ kind: 'refused', reason: 'raw_secret' });
+    expect(h.disk()).toBe(before);
+    expect(h.port.file(capsDef)).toEqual({ capA: 5, capB: 5, env: {} });
+    expect(h.files.held().map(edit => edit.path)).toEqual(['caps.yaml']);
+  });
+
+  test('CFG-LEAK-W a held-file patch judges the held version too: a pair only the version in effect holds is new to the held text', async () => {
+    const h = harness();
+    await h.files.reload();
+    // In effect: a file that already holds the pair (hand-written before the rule). Held: a ferret's edit that drops it.
+    h.fs.seed(PATH, `${START}${FLAG_NOTE}`);
+    await h.files.reload();
+    h.verdicts.other = false;
+    expect((await h.port.write(capsDef, undefined, FERRET_RAISE)).kind).toBe('held');
+    expect(h.port.file(capsDef)).toMatchObject({ note: `srv --token ${FLAG_VALUE}` });
+    const before = h.disk();
+    // The version in effect already holds the pair, so the patch adds nothing there; the held text has no such pair.
+    const outcome = await h.port.writeAsCaller(capsDef, undefined, { patch: { note: `srv --token ${FLAG_VALUE}` } });
+    expect(outcome).toMatchObject({ kind: 'refused', reason: 'raw_secret' });
+    expect(h.disk()).toBe(before);
+    expect(h.files.held().map(edit => edit.path)).toEqual(['caps.yaml']);
+  });
+
+  test('CFG-LEAK-W an edit held before the rule that carries one is confirmed unchanged, and a patch of another key of it is applied', async () => {
+    const h = harness();
+    await h.files.reload();
+    h.verdicts.other = true;
+    expect((await h.port.write(capsDef, undefined, START)).kind).toBe('written');
+    h.verdicts.other = false;
+    // Held before the rule shipped: a hand-written loosening that also carries a pair.
+    h.fs.seed(PATH, `${FERRET_RAISE}${FLAG_NOTE}`);
+    await h.files.reload();
+    expect(h.port.fileState(capsDef).state).toBe('held');
+    // A patch of another key passes at both versions: the pair is already in the held text, and the version in effect has none.
+    const patch = await h.port.writeAsCaller(capsDef, undefined, { patch: { capB: 4 } });
+    expect(patch.kind).toBe('written');
+    expect(h.disk()).toContain(FLAG_VALUE);
+    expect(h.port.fileState(capsDef).state).toBe('held');
+    // Confirming puts the held text into effect as it is: confirm is not a write of new text, so the rule does not run.
+    const [held] = h.files.held();
+    expect(await h.files.confirm(held?.id as string)).toBe(true);
+    expect(h.port.file(capsDef)).toMatchObject({ capA: 50, note: `srv --token ${FLAG_VALUE}` });
+    expect(h.port.fileState(capsDef).state).toBe('valid');
   });
 });

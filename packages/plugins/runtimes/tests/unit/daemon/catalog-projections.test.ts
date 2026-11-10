@@ -25,6 +25,7 @@ import {
 } from '../../../daemon/lib/service/catalog.ts';
 import { type AccountModel, type AccountModelDocument, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { MachineAuthority } from '../../../contract/index.ts';
+import { shownWords, shownWordsEtag } from '../../../daemon/lib/service/command-line.ts';
 import { builtInModelCatalogs, builtInPresets } from '../lib/fixtures/built-ins.ts';
 
 const DIGEST = `sha256:${'0'.repeat(64)}`;
@@ -253,6 +254,7 @@ describe('componentCatalog', () => {
       kind: 'mcp',
       command: 'srv-bin',
       args: ['--x'],
+      argsEtag: shownWordsEtag(shownWords(['--x'], 'srv-bin')),
       env: [
         { name: 'API_TOKEN', hidden: true },
         { name: 'PLAIN', value: 'visible' },
@@ -270,6 +272,7 @@ describe('componentCatalog', () => {
       kind: 'settings',
       file: 'components/settings/cl-settings.json',
       flags: ['--verbose'],
+      flagsEtag: shownWordsEtag(shownWords(['--verbose'])),
       env: [
         { name: 'KEPT', value: 'old' },
         { name: 'SECRET_TOKEN', hidden: true },
@@ -759,6 +762,61 @@ describe('runtimeCatalog', () => {
     ]);
     should(overridden.some(entry => entry.key === '--permission-mode')).be.true();
     should(overridden.find(entry => entry.key === '--permission-mode')?.value).match(/^--permission-mode/u);
+  });
+
+  it('R-0082 should name a dropped flag through the one command-line rule, so its key and value show no credential (review r1 F5)', () => {
+    // Arrange — flags the fixed layer supersedes, each carrying an obviously fake credential.
+    const secret = 'not-a-real-secret-0000';
+    const token = 'sk-not-a-real-key-0000';
+    const model = modelOf({
+      profiles: {
+        ...documentOf().profiles,
+        tuned: { layers: ['settings/cl-settings'] },
+        cx: { layers: ['settings/cx-settings'] },
+      },
+      runtimes: {
+        'claude-default': { credential: 'claude-a', profile: 'tuned', agent: true },
+        'codex-run': { credential: 'codex-a', profile: 'cx', agent: true },
+      },
+      components: {
+        ...documentOf().components,
+        settings: {
+          'cl-settings': {
+            harness: 'claude',
+            file: 'components/settings/cl-settings.json',
+            flags: ['--permission-mode', token, `--permission-mode=${token}`, '--permission-mode', 'plan'],
+          },
+          'cx-settings': {
+            harness: 'codex',
+            file: 'components/settings/cx-settings.toml',
+            flags: [
+              '-c',
+              `mcp_servers.ferretry.env.API_KEY=${secret}`,
+              `--config=mcp_servers.ferretry.env.API_KEY=${secret}`,
+            ],
+          },
+        },
+      },
+    });
+    const facts: Partial<CatalogFacts> = { tools: { claude: '/usr/bin/claude', codex: '/usr/bin/codex' } };
+
+    // Act
+    const claude = runtime('claude-default', facts, model).fixedLayer?.overridden ?? [];
+    const codex = runtime('codex-run', facts, model).fixedLayer?.overridden ?? [];
+
+    // Assert
+    const text = JSON.stringify([claude, codex]);
+    should(text).not.containEql(secret);
+    should(text).not.containEql('not-a-real-key-0000');
+    should(claude.map(entry => [entry.key, entry.value])).deepEqual([
+      ['--permission-mode', '--permission-mode ‹hidden›'],
+      ['--permission-mode=‹hidden›', '--permission-mode=‹hidden›'],
+      ['--permission-mode', '--permission-mode plan'],
+    ]);
+    should(codex.map(entry => [entry.key, entry.value])).deepEqual([
+      ['-c', '-c mcp_servers.ferretry.env.API_KEY=‹hidden›'],
+      ['--config=mcp_servers.ferretry.env.API_KEY=‹hidden›', '--config=mcp_servers.ferretry.env.API_KEY=‹hidden›'],
+    ]);
   });
 
   it('should say a switched-off runtime is off, by its own switch, its login’s, or a budget', () => {

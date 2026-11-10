@@ -241,6 +241,7 @@ async function fullHome(): Promise<void> {
   await f.put('state/catalogs/catalogs.v2.json', { FAKE: 'backup' });
   await f.put('state/catalog-installs.json', catalogInstalls);
   await f.put('state/catalog-install-prefs.json', { schemaVersion: 1, installs: { [INSTALL]: { hold: true } } });
+  await f.put('state/local-skill-installs.json', { schemaVersion: 1, installs: [] });
   await f.put('fleet/ids.json', {
     version: 1,
     runtimes: { 'new-name': { id: RUNTIME_ID, formerNames: ['old-name'] } },
@@ -291,6 +292,10 @@ test('every catalog file keeps every value; only the envelope changes and the bl
   for (const name of ['member-unlocks.json', 'catalogs.v2.json', 'catalog-install-prefs.json'])
     expect(await exists(join('state/catalogs', name))).toBe(false);
   expect(report.notCarried.map(item => item.what).join('\n')).toContain('member-unlocks.json');
+  // The local skill copies file is named in the report with its plain reason, and is not written to v5.
+  const skillCopies = report.notCarried.find(item => item.what.includes('state/local-skill-installs.json'));
+  expect(skillCopies?.why).toContain('v5 has no local skill copy (owner decision !A466)');
+  expect(await exists('state/local-skill-installs.json')).toBe(false);
   expect(report.note).toContain('1 install hold/skip choice(s) not carried');
 
   expect(report.kept).toEqual([

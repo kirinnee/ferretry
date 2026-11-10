@@ -6,7 +6,7 @@
  * (`Admission.judgeConfigAccess`), asked per file before the act.
  *
  * A loosening is put into effect at once only when Gate says this call may (`mayLoosen`: somebody at this machine, or
- * a device with a passkey proved for the act); anyone else's is written and HELD, the tighter version in effect. No
+ * a device with a fresh passkey proof that already existed when the request was admitted); anyone else's is written and HELD, the tighter version in effect. No
  * raw secret is accepted: the writer refuses it like a file that does not parse, and no issue repeats the value.
  *
  * `noStore` on all four: every answer is a statement about now.
@@ -21,6 +21,7 @@ import { currentActor, currentStanding } from '../call-scope.ts';
 import { countProblems } from './check.ts';
 import { type ConfigDeclaration, targetOfPath } from './claims.ts';
 import { schemaFileName, schemaModeline } from './schemas.ts';
+import { hiddenValueIssues, shownConfigText, withheldComment, withheldIssue } from './shown-text.ts';
 
 /** The largest configuration file read or written over the wire (today's `CONFIG_FILE_MAX_BYTES`). */
 const FILE_MAX_BYTES = 256 * 1024;
@@ -41,6 +42,8 @@ export interface ConfigRouteSources {
   admission(): Admission | undefined;
   /** The home, absolute: a file's `absolutePath` is `<home>/config/<path>`. */
   readonly home: string;
+  /** The binary's name, for the sentences that name a command. */
+  readonly binary: string;
 }
 
 const PathSchema = z.string().min(1);
@@ -132,17 +135,28 @@ export function configRoutes(sources: ConfigRouteSources): Readonly<{
       const read = await writerOrFail().read(target);
       if (read === undefined) return unresolved(path.data, 'bad_request');
       const state = read.status.state === 'invalid' ? 'invalid' : read.status.state === 'held' ? 'pending' : 'ok';
+      // What a read SHOWS is the kernel's, the same for every caller (S6): Gate decided WHO may read, not what they see.
+      // A file that is not there yet begins as its schema's modeline, so an editor offers the schema's help.
+      const shown =
+        read.text === undefined ? undefined : shownConfigText(target.def, read.path, read.text, sources.binary);
+      const found = read.issues ?? [];
+      const [text, issues] =
+        shown === undefined
+          ? [`${schemaModeline(target.def, read.path)}\n`, found]
+          : shown.kind === 'shown'
+            ? [shown.text, [...found, ...hiddenValueIssues(read.path, shown.hidden, sources.binary)]]
+            : [withheldComment(shown.reason), [...found, withheldIssue(read.path, shown.reason)]];
       return jsonResponse({
         path: read.path,
         absolutePath: `${sources.home}/config/${read.path}`,
         kind: target.plugin,
         schema: schemaFileName(target.def),
         exists: read.exists,
-        // A file that is not there yet begins as its schema's modeline, so an editor offers the schema's help.
-        text: read.text ?? `${schemaModeline(target.def, read.path)}\n`,
+        text,
+        // The etag stays the digest of the disk text, so `If-Match` keeps working for every editor.
         etag: read.etag,
         state,
-        issues: read.issues ?? [],
+        issues,
       });
     },
 

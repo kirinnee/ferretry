@@ -20,12 +20,15 @@ import { memoryStorage, RecordingLog, sessionConfig } from '../../../../support/
  *
  * What is counted is what Ferrets itself runs on the main thread per 2 s tick — the roster, the fold, the pacing, the
  * writer — over the real session store in memory. The pane read is the runner's (`FakeRunner.look` here; Terminals'
- * own parse has its budget beside its parser). Measured on the reference host (32 cores, Bun 1.4.4), three runs: idle
- * 0.23–0.34 ms and drawing 0.35–0.42 ms of CPU per tick, 180 idle looks a minute (900 unpaced), the longest slice
- * between two hand-backs under 0.1 ms. The transcript tail is the REAL `HarnessTranscript.tail` over a harness whose tail
- * does what Claude's does (a 512 KB window of ~300 records, each JSON-parsed on every read), so a tail read on every look
- * is a cost this test sees (U5 fix1, RULING #27 Q4). The ceilings below are about ten times that, for a slower CI runner, and leave
- * nothing for a regression: the old unpaced look count, a per-tick parse of every document, or one long slice fails.
+ * own parse has its budget beside its parser). Measured on the reference host (32 cores, Bun 1.4.4), best of five
+ * rounds of main-thread CPU: idle about 0.07 ms and drawing about 2.1 ms per tick (1.6–1.9 ms in the best round),
+ * 180 idle looks a minute (900 unpaced), the longest slice between two hand-backs under 0.1 ms. The transcript tail is
+ * the REAL `HarnessTranscript.tail` over a harness whose tail does what Claude's does (a 512 KB window of ~300 records,
+ * each JSON-parsed on every read), so a tail read on every look is a cost this test sees (U5 fix1, RULING #27 Q4).
+ * About 75% of the drawing figure is that fixture's own JSON parse, which is garbage-heavy, so a collection can land
+ * in a round. The idle ceiling is far above its measure; the drawing ceiling is about twice its measure and leaves
+ * room for slow-runner noise, not for a regression: the old unpaced look count, a per-tick parse of every document, or
+ * one long slice fails.
  */
 const FERRETS = 30;
 const WARM_TICKS = 10;
@@ -35,10 +38,10 @@ const IDLE_LOOKS_CEILING = FERRETS * (MEASURED_TICKS / 5 + 1);
 const IDLE_CPU_MS_PER_TICK_CEILING = 3;
 const DRAWING_CPU_MS_PER_TICK_CEILING = 4;
 /**
- * Each budget is the BEST of three rounds: CPU is counted for the whole process, so a collection left over from an
- * earlier test lands in one round; a regression is in every round, and fails.
+ * Each budget is the BEST of five rounds: a collection left over from an earlier test, or one the fixture's own garbage
+ * causes, lands in one round; a regression is in every round, and fails.
  */
-const ROUNDS = 3;
+const ROUNDS = 5;
 /** "No single synchronous slice over ~5 ms" (condition 2). */
 const SLICE_MS_CEILING = 5;
 
@@ -174,11 +177,15 @@ async function bestOf(
   return { cpuMsPerTick, sliceMs, looks: fleet.runner.looked.length - looksBefore };
 }
 
-/** CPU (user + system) this process spent running `work`, in ms. */
+/**
+ * CPU (user + system) the MAIN THREAD spent running `work`, in ms. RULING #44 budgets what Ferrets runs on the main
+ * thread; the whole process would also count the collector's and the compiler's threads. A round is dozens of ms, far
+ * above the clock's tick.
+ */
 async function cpuMs(work: () => Promise<void>): Promise<number> {
-  const before = process.cpuUsage();
+  const before = process.threadCpuUsage();
   await work();
-  const spent = process.cpuUsage(before);
+  const spent = process.threadCpuUsage(before);
   return (spent.user + spent.system) / 1_000;
 }
 
@@ -205,7 +212,7 @@ describe('the inline turn watch budget on 30 panes (RULING #44)', () => {
     const fleet = await fleetOf('your-turn');
     const quiet = () => undefined;
 
-    // Act: the warm-up ticks and three rounds of a minute.
+    // Act: the warm-up ticks and five rounds of a minute.
     for (let n = 0; n < WARM_TICKS; n += 1) await fleet.tick(quiet, n);
     const best = await bestOf(fleet, async first => {
       for (let n = first; n < first + MEASURED_TICKS; n += 1) await fleet.tick(quiet, n);
@@ -235,6 +242,8 @@ describe('the inline turn watch budget on 30 panes (RULING #44)', () => {
 
     // Assert
     should(best.looks).equal(FERRETS * MEASURED_TICKS * ROUNDS);
+    // The CPU clock must read something: a drawing round is 60+ ms, so a clock stuck at 0 would pass the ceiling.
+    should(best.cpuMsPerTick).be.above(0);
     should(best.cpuMsPerTick).be.below(DRAWING_CPU_MS_PER_TICK_CEILING);
     should(best.sliceMs).be.below(SLICE_MS_CEILING);
     // A tail is parsed when its transcript moved (a third of the looks), never on the two looks between.

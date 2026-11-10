@@ -81,6 +81,13 @@ export interface ShellsService {
   nix(): Promise<NixFacts>;
   preview(request: ShellAddRequest): Promise<Outcome<ShellPreview>>;
   add(request: ShellAddRequest): Promise<Outcome<Added>>;
+  /**
+   * Resolves the shell again and, when the lock moved (or there is none) and the owner has not approved that hash,
+   * writes `approvedHash` into the shell's own config item (`shells/<name>`) as a WHOLE text. That whole text replaces
+   * any edit already held for the owner on that same item: the dropped edit is the one held on `<name>`'s own config
+   * file, never another shell's. A held edit never took effect, so dropping it loosens nothing, and the answer does not
+   * list it; `held` lists only the edit this relock itself leaves held.
+   */
   relock(name: ShellName, request: ShellRelockRequest): Promise<Outcome<ShellPreview>>;
   build(name: ShellName): Promise<Outcome<ShellBuildResult>>;
   remove(name: ShellName): Promise<Outcome<ShellName>>;

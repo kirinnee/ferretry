@@ -19,7 +19,8 @@ const component = {
   detail: {
     kind: 'mcp',
     command: 'uvx',
-    args: ['notes-server'],
+    args: ['notes-server', '--token', { shown: '‹hidden›', hidden: true }],
+    argsEtag: 'e'.repeat(64),
     env: [
       { name: 'NOTES_DIR', value: '/srv/notes' },
       { name: 'NOTES_TOKEN', hidden: true },
@@ -188,6 +189,11 @@ const cases: readonly SchemaCase[] = [
     value: { terminals: true, browsers: false, files: true, ferretrySettings: true, pageScripts: false },
   },
   { name: 'EnvEntrySchema', schema: catalog.EnvEntrySchema, value: { name: 'API_KEY', hidden: true } },
+  { name: 'HiddenWordSchema', schema: catalog.HiddenWordSchema, value: { shown: '--token=‹hidden›', hidden: true } },
+  { name: 'CommandWordSchema', schema: catalog.CommandWordSchema, value: '--verbose' },
+  { name: 'KeptWordSchema', schema: catalog.KeptWordSchema, value: { keep: true, at: 2 } },
+  { name: 'FlagInputSchema', schema: catalog.FlagInputSchema, value: '--model=claude-opus-5-5' },
+  { name: 'ArgInputSchema', schema: catalog.ArgInputSchema, value: { keep: true, at: 0 } },
   { name: 'ComponentDetailSchema', schema: catalog.ComponentDetailSchema, value: component.detail },
   { name: 'ComponentUsageSchema', schema: catalog.ComponentUsageSchema, value: component.usedBy },
   { name: 'PartialSupportSchema', schema: catalog.PartialSupportSchema, value: component.partial[0] },
@@ -281,7 +287,13 @@ const cases: readonly SchemaCase[] = [
   {
     name: 'ComponentInputSchema',
     schema: catalog.ComponentInputSchema,
-    value: { kind: 'settings', harness: 'claude-code', flags: ['--verbose'], env: { LOG: 'debug' } },
+    value: {
+      kind: 'settings',
+      harness: 'claude-code',
+      flags: ['--verbose', { keep: true, at: 1 }],
+      flagsEtag: 'e'.repeat(64),
+      env: { LOG: 'debug' },
+    },
   },
   { name: 'AccountChangeSchema', schema: catalog.AccountChangeSchema, value: change },
   { name: 'AccountChangeRequestSchema', schema: catalog.AccountChangeRequestSchema, value: { change } },
@@ -554,6 +566,48 @@ describe('the account-model catalogue wire contract', () => {
         agentControl: { ...MACHINE_SETTINGS.agentControl, ferretrySettings: 'yes' },
       }),
     ]);
+  });
+
+  it('should never take the hidden marker as a typed flag or argument, and keep a hidden word only by its position (#39)', () => {
+    // Arrange / Act / Assert — the mask is un-typeable: the schema cannot express it as a value.
+    assertRejects([
+      rejects('a hidden word that also carries its value', catalog.HiddenWordSchema, {
+        shown: '--token=‹hidden›',
+        hidden: true,
+        value: 'fake',
+      }),
+      rejects('a kept word with no position', catalog.KeptWordSchema, { keep: true }),
+      rejects('a kept word at a negative position', catalog.KeptWordSchema, { keep: true, at: -1 }),
+      rejects('a typed flag holding the hidden marker', catalog.FlagInputSchema, '--token=‹hidden›'),
+      rejects('a typed argument that is the hidden marker', catalog.ArgInputSchema, '‹hidden›'),
+      rejects('a settings edit sending the marker back as a flag', catalog.ComponentInputSchema, {
+        kind: 'settings',
+        harness: 'claude-code',
+        flags: ['--api-key', '‹hidden›'],
+      }),
+      rejects('an MCP edit sending the marker back as an argument', catalog.ComponentInputSchema, {
+        kind: 'mcp',
+        command: 'srv',
+        args: ['--header=Authorization: ‹hidden›'],
+      }),
+    ]);
+    // Control — the same edits keeping the hidden words by position are accepted.
+    should(
+      catalog.ComponentInputSchema.safeParse({
+        kind: 'settings',
+        harness: 'claude-code',
+        flags: ['--api-key', { keep: true, at: 1 }],
+        flagsEtag: 'e'.repeat(64),
+      }).success,
+    ).be.true();
+    should(
+      catalog.ComponentInputSchema.safeParse({
+        kind: 'mcp',
+        command: 'srv',
+        args: [{ keep: true, at: 0 }],
+        argsEtag: 'e'.repeat(64),
+      }).success,
+    ).be.true();
   });
 
   it('should refuse a component name with a slash, a file path in a change, and an unknown field', () => {

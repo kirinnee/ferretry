@@ -274,7 +274,7 @@ P84	kept	access	-	`localOnlyNotice`, `refusalNotice` in `@ferretry/protocol`	pai
 P85	kept	access	-	behaviour as written	pairing	P85
 P86	kept	access	-	behaviour as written	pairing	P86
 P87	kept	access	-	behaviour as written	pairing	P87
-P88	kept	connections	-	`advertisesForeignAddress`	pairing	P88
+P88	kept	connections	-	`decideAdvertisement`	pairing	P88
 P89	kept	kernel	-	`recordedBindAddress`	pairing	P89
 P90	kept	gate	fy-shell	`authenticate`; the shell reads FY_URL and FY_TOKEN	pairing	P90
 P91	kept	access	-	`ApiRequest.loopback`	pairing	P91
@@ -451,49 +451,49 @@ I126	kept	accounts	-	`[redacted:login:<ID>:password]`	input-requests	I126
 I127	kept	accounts	-	`via`	input-requests	I127
 I128	kept	accounts	-	`namesPasskey`	input-requests	I128
 I129	kept	accounts	-	behaviour as written	input-requests	I129
-I130	kept	accounts	-	`InputSaved.signIn`	input-requests	I130
+I130	kept	vault	-	`InputSaved.signIn`	input-requests	I130
 I131	split	accounts	vault	-	input-requests	I131
 I132	kept	accounts	-	`hidesCharacters`	input-requests	I132
 I133	kept	accounts	-	`recipe_holds_value`	input-requests	I133
 I134	kept	accounts	-	`recipeBy: ferret`	input-requests	I134
 I135	kept	accounts	-	`LoginFactSink.observeSignIn`	input-requests	I135
-I136	kept	accounts	-	behaviour as written	input-requests	I136
-I137	kept	accounts	-	`observerByOf`	input-requests	I137
+I136	kept	vault	-	behaviour as written	input-requests	I136
+I137	kept	vault	-	`observerByOf`	input-requests	I137
 I138	kept	accounts	-	behaviour as written	input-requests	I138
-I139	kept	accounts	-	`actsOn`	input-requests	I139
+I139	kept	vault	-	`tainted`	input-requests	I139
 I140	kept	accounts	-	`account_propose`, `stale_proposal`, `login-recipe-auto`	input-requests	I140
 I141	kept	accounts	-	`recipeVersion`	input-requests	I141
 I142	kept	accounts	-	behaviour as written	input-requests	I142
-I143	kept	accounts	-	behaviour as written	input-requests	I143
+I143	kept	vault	-	behaviour as written	input-requests	I143
 I144	kept	accounts	-	`InputSaved.update`	input-requests	I144
 I145	kept	accounts	-	behaviour as written	input-requests	I145
 I146	kept	accounts	-	`InputSaved.update`	input-requests	I146
 I147	kept	accounts	-	`LoginDirectory.saveFields`	input-requests	I147
 I148	kept	accounts	-	`LOGIN_PASSWORD_MIN_LENGTH`	input-requests	I148
-I149	kept	accounts	-	`saved: { ok: false }`	input-requests	I149
-I150	kept	accounts	-	`login-save`	input-requests	I150
+I149	kept	vault	-	`saved: { ok: false }`	input-requests	I149
+I150	kept	vault	-	`login-save`	input-requests	I150
 I151	kept	accounts	-	`LoginStoreLock`	input-requests	I151
 I152	kept	accounts	-	`LoginDirectory.sweepUnreferenced`	input-requests	I152
 I153	kept	accounts	-	`LoginDirectory.saveFields`	input-requests	I153
 I154	kept	browsers	accounts	`TypedIdentities`, `identifierFieldHost`, `clickedIdentityOf`	input-requests	I154
 I155	kept	browsers	accounts	`BrowserSignInWatch`	input-requests	I155
-I156	kept	accounts	-	`InputSaved.typedUsername`	input-requests	I156
-I157	kept	accounts	-	`differentFrom`	input-requests	I157
+I156	kept	vault	-	`InputSaved.typedUsername`	input-requests	I156
+I157	kept	vault	-	`differentFrom`	input-requests	I157
 I158	kept	accounts	-	`GET /v1/accounts`	input-requests	I158
 I159	kept	accounts	-	`signInMatches`, `offer.primary`	input-requests	I159
-I160	kept	accounts	-	behaviour as written	input-requests	I160
-I161	kept	accounts	-	`savedForFields`, `bad_request`	input-requests	I161
-I162	kept	accounts	-	behaviour as written	input-requests	I162
+I160	kept	vault	-	behaviour as written	input-requests	I160
+I161	kept	vault	accounts	`savedForFields`, `bad_request`	input-requests	I161
+I162	kept	vault	-	behaviour as written	input-requests	I162
 I163	kept	accounts	-	behaviour as written	input-requests	I163
 I164	kept	accounts	-	`elsewhere`	input-requests	I164
 I165	kept	accounts	-	`secretHint`	input-requests	I165
-I166	kept	accounts	-	behaviour as written	input-requests	I166
-I167	kept	accounts	-	`factorAskWords`	input-requests	I167
+I166	kept	vault	-	behaviour as written	input-requests	I166
+I167	kept	vault	-	`factorAskWords`	input-requests	I167
 I168	kept	accounts	-	`codeTargetProblem`	input-requests	I168
-I169	kept	accounts	-	`bad_request`	input-requests	I169
+I169	kept	vault	-	`bad_request`	input-requests	I169
 I170	kept	accounts	-	`fill(account, 'totp', now, { factor })`, `input.delivered`	input-requests	I170
-I171	kept	accounts	-	`LoginObserver.codeTyped`, `verified`	input-requests	I171
-I172	kept	accounts	-	behaviour as written	input-requests	I172
+I171	kept	vault	-	`LoginObserver.codeTyped`, `verified`	input-requests	I171
+I172	kept	vault	-	behaviour as written	input-requests	I172
 I173	kept	accounts	-	`TwoFactorSeedSaved.typed`	input-requests	I173
 I174	kept	accounts	-	`LOGIN_TOTP_WARNING`, `add-2fa-key`	input-requests	I174
 I175	kept	accounts	-	`LOGIN_TOTP_WARNING`, `AUTOMATED_CODE_WARNING`	input-requests	I175
@@ -652,7 +652,7 @@ S82	kept	accounts	-	`GET /v1/accounts/look-alike`	secrets	S82
 S83	kept	accounts	-	behaviour as written	secrets	S83
 S84	split	accounts	vault	-	secrets	S84
 S85	kept	accounts	-	`AccountDirectory.observeSignIn` (sole writer)	secrets	S85
-S86	kept	accounts	-	behaviour as written	secrets	S86
+S86	kept	vault	-	behaviour as written	secrets	S86
 S87	kept	accounts	-	`two-factor-seeds.ts`	secrets	S87
 S88	kept	accounts	-	behaviour as written	secrets	S88
 S89	kept	accounts	-	`POST /v1/accounts/:id/factors/seed`	secrets	S89
@@ -680,7 +680,7 @@ S110	kept	accounts	-	behaviour as written	secrets	S110
 S111	kept	accounts	-	`tool_not_covered`, `via_provider`, `not_password`, `no_history`, `passkey_required`, `no_code_key`, `terminal_off`	secrets	S111
 S112	kept	accounts	-	`SIGN_IN_RULE_REFUSAL_WORDS`	secrets	S112
 S113	kept	accounts	-	behaviour as written	secrets	S113
-S114	kept	accounts	terminals	`observerByOf`, `rootPromptProved`	secrets	S114
+S114	kept	vault	accounts,terminals	`observerByOf`, `rootPromptProved`	secrets	S114
 S115	kept	accounts	-	behaviour as written	secrets	S115
 S116	kept	accounts	-	behaviour as written	secrets	S116
 S117	kept	accounts	-	`AccountDirectory.followRulesWith`	secrets	S117
@@ -724,7 +724,7 @@ S154	kept	vault	-	`POST /v1/secrets/exports/:importId`	secrets	S154
 S155	kept	vault	-	`POST /v1/secrets/imports/:importId`	secrets	S155
 S156	kept	vault	-	`secrets.used` (`clone-export`), `secrets.changed` (`clone-import`)	secrets	S156
 S157	kept	vault	-	`SecretImportService`, `SecretExportService` (`packages/daemon/src/lib/secrets/clone.ts`)	secrets	S157
-S158	kept	catalogs	-	`link-keys.json`, `FileSecretKey`	secrets	S158
+S158	kept	catalogs	-	`link-keys.json`, `CatalogLinkKeys`	secrets	S158
 S159	kept	vault	gate	`clone-secrets` in `STEP_UP_ACTS`	secrets	S159
 S160	kept	vault	-	behaviour as written	secrets	S160
 S161	kept	vault	-	behaviour as written	secrets	S161
@@ -948,7 +948,7 @@ R199	kept	connections	-	behaviour as written	relay-protocol	R199
 R200	kept	connections	-	behaviour as written	relay-protocol	R200
 R201	kept	connections	worker:relay	`tests/e2e/relay-browser-pairing.e2e.test.ts`	relay-protocol	R201
 R202	kept	connections	worker:relay	`HOSTED_RELAY_DIRECTORY_ORIGIN`	relay-protocol	R202
-R203	kept	connections	worker:relay	`packages/daemon/src/lib/relay/discovery.ts`, `FY_RELAY_DIRECTORY_ORIGIN`, `vite.config.ts`	relay-protocol	R203
+R203	kept	connections	worker:relay	`packages/plugins/connections/daemon/lib/relay/discovery.ts`, `HOSTED_RELAY_DIRECTORY_ORIGIN`, `vite.config.ts`	relay-protocol	R203
 R204	kept	connections	worker:relay	behaviour as written	relay-protocol	R204
 R205	kept	connections	worker:relay	behaviour as written	relay-protocol	R205
 R206	kept	connections	worker:relay	`fyd --check`	relay-protocol	R206
@@ -1103,12 +1103,12 @@ R587	kept	access	kernel	fixed-window limiter	relay-protocol	R587
 R588	kept	access	kernel	behaviour as written	relay-protocol	R588
 R589	kept	access	kernel	behaviour as written	relay-protocol	R589
 R590	kept	access	kernel	behaviour as written	relay-protocol	R590
-R591	kept	catalogs	kernel	`catalog-members/join.ts`, `shared-routes.ts`, `MemberDispatcher`, `passkeys.ts`	relay-protocol	R591
+R591	kept	catalogs	kernel	`catalog-members/join.ts`, `shared-routes.ts`, `memberMode`, `passkeys.ts`	relay-protocol	R591
 R592	kept	catalogs	kernel	behaviour as written	relay-protocol	R592
-R593	kept	connections	catalogs	`discoverableRelayUrl`	relay-protocol	R593
+R593	kept	app-shell	connections,catalogs	`memberWalk` (`packages/app/src/connect/member.ts`, the app shell's dial order; the daemon half stays Catalogs': a share link names no rendezvous for a loopback url)	relay-protocol	R593
 R594	kept	catalogs	kernel	`member-session.ts`; labels `ferretry-member-*-v1`, `ferretry-catalog-*-v1`, `ferretry-link-*-v1`	relay-protocol	R594
 R595	kept	catalogs	kernel	behaviour as written	relay-protocol	R595
-R596	kept	catalogs	kernel	`MEMBER_JOIN_OUTCOME_BYTES`, `padJoinOutcome`	relay-protocol	R596
+R596	kept	kernel	catalogs	`MEMBER_JOIN_OUTCOME_BYTES`, `padJoinOutcome`	relay-protocol	R596
 R597	kept	catalogs	kernel	behaviour as written	relay-protocol	R597
 R598	kept	catalogs	kernel	behaviour as written	relay-protocol	R598
 R599	kept	catalogs	kernel	behaviour as written	relay-protocol	R599
@@ -1179,7 +1179,7 @@ R663	kept	connections	-	`redirect: 'error'`	relay-protocol	R663
 R664	kept	connections	-	`state/tunnel.json`	relay-protocol	R664
 R665	kept	connections	-	`packages/daemon/src/lib/tunnel/session-log.ts`	relay-protocol	R665
 R666	kept	connections	-	behaviour as written	relay-protocol	R666
-R667	kept	connections	-	`KNOWN_CARRIER_KINDS`, `packages/daemon/src/lib/runtime/published-carriers.ts`	relay-protocol	R667
+R667	kept	connections	-	`PublishedCarrierSet`, `publishedDaemonCarriers`, `packages/plugins/connections/daemon/lib/runtime/published-carriers.ts`	relay-protocol	R667
 R668	kept	connections	-	behaviour as written	relay-protocol	R668
 R669	kept	connections	-	behaviour as written	relay-protocol	R669
 R670	kept	connections	-	behaviour as written	relay-protocol	R670
@@ -1206,7 +1206,7 @@ R690	kept	connections	-	`WEBRTC_ENGINE_LINGER_MS`, `cleanup`	relay-protocol	R690
 R691	kept	connections	-	`packages/daemon/tests/realworld/runtime/shutdown-time.test.ts`	relay-protocol	R691
 R692	kept	connections	-	`WebRtcCarrier`, `webrtc-carrier.test.ts`, `WebRtcDialer`, `CarrierDialers.webrtc`, `useCarrierRtt`	relay-protocol	R692
 R693	kept	catalogs	worker:catalogs-link-store	`ferretry-link-envelope-v1`, `src/lib/link-bundle.ts`, `link-store.ts`, `link-store-reducer.ts`, `link-store-worker.ts`	relay-protocol	R693
-R694	kept	catalogs	worker:catalogs-link-store	`LINK_STORE`, `workers_dev: false`	relay-protocol	R694
+R694	kept	catalogs	worker:catalogs-link-store	`wrangler.link-store.hosted.json`, `workers_dev: false`	relay-protocol	R694
 R695	kept	catalogs	worker:catalogs-link-store	`LINK_STORE_DEPLOY_UNATTENDED=1`	relay-protocol	R695
 R696	kept	catalogs	worker:catalogs-link-store	`LINK_ENVELOPE_MAX_BYTES`	relay-protocol	R696
 R697	kept	catalogs	worker:catalogs-link-store	`link_bad_request`	relay-protocol	R697

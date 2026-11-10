@@ -32,6 +32,7 @@ import {
 import type { RelayCarrierSocket } from '../adapters/browser-relay-dial.ts';
 import type { CarrierSessionEnd } from '../lib/carrier-drops.ts';
 import type { ConnectionMethod } from '../lib/connection.ts';
+import { rendezvousRefusal } from '../lib/rendezvous-refusal.ts';
 
 /** How long a DIRECT session may take to answer before the walk moves on to a rendezvous (today's value). */
 export const DIRECT_SESSION_DEADLINE_MS = 4_000;
@@ -392,20 +393,34 @@ class WalkingSocket implements ScopedSocket {
         this.events.onText(text);
       };
       socket.onBinary = bytes => {
+        // The rendezvous explains a refusal (a control `error` on its own id) BEFORE it hangs up: while dialling that is
+        // the leg's refusal, not a leg carrying — else the session fails inside the shell with the operator's words.
+        if (stage === 'dialling') {
+          const refusal = rendezvousRefusal(bytes);
+          if (refusal !== undefined) {
+            socket.close(refusal.code, refusal.reason);
+            refuseWhileDialling(refusal.code, refusal.reason);
+            return;
+          }
+        }
         if (!inbound()) return;
         this.#alive();
         this.events.onBinary(bytes);
       };
-      socket.onClose = (code, reason) => {
-        if (stage === 'dialling' && this.#streamRefused(code)) {
+      /** The rendezvous refused this leg: a stream's ceiling ends the stream, anything else moves the walk on. */
+      const refuseWhileDialling = (code: number, reason: string): void => {
+        if (this.#streamRefused(code)) {
           stage = 'over';
           cancelDeadline();
           this.#end(code, reason);
           resolve(false);
           return;
         }
+        passOver(code, reason);
+      };
+      socket.onClose = (code, reason) => {
         if (stage === 'dialling') {
-          passOver(code, reason);
+          refuseWhileDialling(code, reason);
           return;
         }
         if (stage !== 'carrying' || !current()) return;

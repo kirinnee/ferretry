@@ -11,7 +11,11 @@
  * - every name but `.mcp.json` at the root itself is refused before the kernel is asked, and so is every list, write,
  *   copy, folder-make, pin and remove;
  * - a `.mcp.json` that is a LINK (wherever it points, inside the root included) is refused: the kernel's `lstat` names
- *   the leaf itself;
+ *   the leaf itself. THE WINDOW (named, not closed): that look and the kernel's read are two steps, so a `.mcp.json`
+ *   swapped for a link to ANOTHER FILE INSIDE the project after the look and before the kernel first resolves the name
+ *   in the read is followed, and that project file is what is read (v4 followed every leaf link; the kernel keeps the
+ *   read inside the project's real folder). Swapped after that first resolution it is refused (`changed`), and a link
+ *   OUT of the project is refused in every case (`link_escape`): so a file outside the project is never read;
  * - the kernel is asked for the root with the project folder as both the scoped folder and its `within` anchor: the
  *   anchor itself may be a link, so a project registered through a link (the folder or any parent) reads its
  *   `.mcp.json` as v4 did. A link the kernel refuses (`link_escape`: the `.mcp.json` leaf pointing out of the project)

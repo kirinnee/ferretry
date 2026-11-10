@@ -663,7 +663,8 @@ async function bootLocked(
       toldUnpinned = true;
       log.warn(refusal.message);
     },
-    // A look that succeeds ends the outage: a second one is said again.
+    // A private write's look that succeeds ends the outage: a second one is said again. The index's own looks do not
+    // re-arm it (`looked` is asked only by a create's pin).
     looked: () => {
       toldUnpinned = false;
     },
@@ -1191,7 +1192,12 @@ async function bootLocked(
         name !== ConfigChanged.name || configFrameShown(bound.admission, request, payload, CONFIG_FILE_READ),
     },
     snapshot: () => frozen as PostBuildSnapshot,
-    config: { writer: () => configWriter, admission: () => bound.admission, home },
+    config: {
+      writer: () => configWriter,
+      admission: () => bound.admission,
+      home,
+      binary: options.binaries?.client ?? PRODUCT_BINARIES.client,
+    },
     agentConfig: {
       writer: () => configWriter,
       control: () => bound.agentControl,

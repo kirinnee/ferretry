@@ -251,6 +251,76 @@ test('KCB-S move by the Warden reaches the service, and another consumer’s own
   expect(w.reached.map(r => r.member)).toEqual(['move', 'move', 'move']);
 });
 
+test('KCB-S2 F2 (row 17) a move names who moved it only as owner, session:<ferret id> or warden; any other spelling is refused, nothing is moved', async () => {
+  const w = spy();
+  const odd = [
+    'Warden',
+    'warden ',
+    ' owner',
+    'OWNER',
+    'session:',
+    'session: f1',
+    'session:a/b',
+    'session:f1 x',
+    'x',
+    '',
+  ];
+  for (const consumer of ['board', 'warden'])
+    for (const movedBy of odd)
+      expect(await w.port(consumer).move!(F1, 'codex-two', { movedBy })).toEqual({
+        ok: false,
+        error: { code: 'refused', reason: 'a move names who moved it as owner, session:<ferret id> or warden' },
+      });
+  expect(w.reached).toEqual([]);
+
+  // A caller that casts past `movedBy?: string` gets the same fixed refusal, never a throw and never a pass.
+  const cast = [42, { startsWith: () => true, slice: () => 'abc' }, new String('owner')];
+  for (const consumer of ['board', 'warden'])
+    for (const movedBy of cast)
+      expect(await w.port(consumer).move!(F1, 'codex-two', { movedBy: movedBy as unknown as string })).toEqual({
+        ok: false,
+        error: { code: 'refused', reason: 'a move names who moved it as owner, session:<ferret id> or warden' },
+      });
+  expect(w.reached).toEqual([]);
+
+  // The three spellings go through; 'warden' only from the Warden (unchanged).
+  expect((await w.port('board').move!(F1, 'codex-two', { movedBy: 'owner' })).ok).toBe(true);
+  expect((await w.port('board').move!(F1, 'codex-two', { movedBy: 'session:mw7bp88g-50e00159' })).ok).toBe(true);
+  expect((await w.port('warden').move!(F1, 'codex-two', { movedBy: 'warden' })).ok).toBe(true);
+  expect(w.reached.map(r => (r.args[2] as { movedBy: string }).movedBy)).toEqual([
+    'owner',
+    'session:mw7bp88g-50e00159',
+    'warden',
+  ]);
+});
+
+test('KCB-S3 F3 (row 18) the refusal of a callsign prefix does not quote the prefix the caller supplied', async () => {
+  const w = spy();
+  const hostile = 'SECRET-looking <b>text' as unknown as 'warden';
+  const error = await w.port('board').systemCallsign!(hostile).then(
+    () => undefined,
+    (thrown: unknown) => thrown as Error,
+  );
+  expect(error).toMatchObject({ status: 403, code: 'forbidden' });
+  expect(error?.message).not.toContain('SECRET');
+  expect(error?.message).toBe('the board plugin may not draw that kind of callsign');
+});
+
+test('ci-lane-s F1 (row 55) a start through the port as a non-warden consumer is admitted as outside the Warden’s tree, and the Warden’s own start is not', async () => {
+  const w = spy({ lead: { id: 'lead', label: 'my-lead' } });
+  const ordinary = { folder: '/work', by: 'ferret' as const, parent: 'lead' as FerretId };
+  for (const consumer of ['packs', 'board', 'lessons', '']) {
+    w.reached.length = 0;
+    expect((await w.port(consumer).start(ordinary)).ok).toBe(true);
+    // the start is also admitted as such when it names no parent (a label alone could mark the tree)
+    expect((await w.port(consumer).start({ folder: '/work', by: 'owner' })).ok).toBe(true);
+    expect(w.reached.map(r => r.args[1])).toEqual([{ notInWardenTree: true }, { notInWardenTree: true }]);
+  }
+  w.reached.length = 0;
+  expect((await w.port('warden').start(ordinary)).ok).toBe(true);
+  expect(w.reached.map(r => r.args[1])).toEqual([undefined]);
+});
+
 test('KCB-S systemCallsign draws only the prefix of the consumer’s own kind', async () => {
   const w = spy();
   expect(await w.port('warden').systemCallsign!('warden')).toBe('warden-000001');

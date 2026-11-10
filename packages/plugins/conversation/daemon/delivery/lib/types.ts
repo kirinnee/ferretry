@@ -294,6 +294,20 @@ export const IDLE_SEND_STATUSES: ReadonlySet<SessionStatus> = new Set([
   'interrupted',
 ]);
 
+/**
+ * Whether a send is TYPED and NOT PROVEN: the keys reached the pane and no proof of them arrived, so the message may be
+ * sitting in the composer. Two reasons say it: `landing_unconfirmed` (the fill saw no frame with the text) and
+ * `typed_not_submitted` (the tracker saw it in the box, pressed Enter once, and it was still there — B187). The second
+ * REPLACES the first on the same row, so every reader of the unconfirmed state asks this one predicate; a second string
+ * compare would answer a raised send as if it were delivered.
+ */
+export function isUnconfirmedTyping(record: Pick<SendRecord, 'fate' | 'unaccountedReason'> | undefined): boolean {
+  return (
+    record?.fate === 'unaccounted' &&
+    (record.unaccountedReason === 'landing_unconfirmed' || record.unaccountedReason === 'typed_not_submitted')
+  );
+}
+
 /** One durable state change a send or an interrupt makes, named by the event it journals. */
 export interface SendTransition {
   /** `control.input_stuck` / `control.input_unstuck`: the Warden's health mark for a ferret stuck on an unsent message. */

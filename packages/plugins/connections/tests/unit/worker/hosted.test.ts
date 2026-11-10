@@ -82,6 +82,12 @@ describe('hosted relay runtime configuration', () => {
 
   guarantee(['R153'], "should size the default byte ceilings for a working day of one person's machines", () => {
     const gibibyte = 1024 * 1024 * 1024;
+    // The connection and census ceilings, not only the byte ones: 16 sockets per machine, 512 in all, 10 000 rows.
+    should(DEFAULT_HOSTED_RELAY_LIMITS).match({
+      maxConcurrentConnectionsPerDaemon: 16,
+      maxConcurrentConnectionsGlobal: 512,
+      maxTrackedDaemons: 10_000,
+    });
     should(DEFAULT_HOSTED_RELAY_LIMITS).match({
       maxBytesPerMinutePerDaemon: gibibyte / 2,
       maxBytesPerMinuteGlobal: 4 * gibibyte,
@@ -535,7 +541,7 @@ describe('hosted relay daemon row reclamation', () => {
 });
 
 describe('hosted relay live reservation checks', () => {
-  guarantee(['R146'], 'should release a reservation exactly once and refuse damaged evidence', () => {
+  it('should release a reservation exactly once and refuse damaged evidence', () => {
     const base = admitted();
     const released = releaseHostedRelayConnection(base.global, base.daemon, at + 2);
     should(released.decision).deepEqual({ ok: true });
@@ -643,18 +649,28 @@ describe('hosted relay reservation audit', () => {
   const old = at - HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS;
   const young = at - HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS + 1;
 
-  guarantee(
-    ['R149', 'R167'],
-    'should reclaim every reservation whose lease nobody renewed, the 2026-10-19 lockout',
-    () => {
-      const stuck = Array.from({ length: 16 }, (_, index) => reservation(`stuck_reservation_${index}`, daemonId, old));
-      const audit = auditHostedRelayReservations(stuck, null, at);
-      should(audit.reclaimed).have.length(16);
-      should(audit.heldGlobal).equal(0);
-      should(audit.heldByDaemon.get(daemonId)).equal(0);
-      should(audit.renewed).deepEqual([]);
-    },
-  );
+  guarantee(['R167'], 'should reclaim every reservation whose lease nobody renewed, the 2026-10-19 lockout', () => {
+    const stuck = Array.from({ length: 16 }, (_, index) => reservation(`stuck_reservation_${index}`, daemonId, old));
+    const audit = auditHostedRelayReservations(stuck, null, at);
+    should(audit.reclaimed).have.length(16);
+    should(audit.heldGlobal).equal(0);
+    should(audit.heldByDaemon.get(daemonId)).equal(0);
+    should(audit.renewed).deepEqual([]);
+  });
+
+  guarantee(['R149'], 'should expire an unrenewed reservation after exactly ten minutes, to the millisecond', () => {
+    should(HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS).equal(10 * 60 * 1000);
+    const lease = HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS;
+    // With no rendezvous evidence the lease is the only clock: one millisecond short is held, the tenth minute is not.
+    const justShort = reservation('just_short_of_lease', daemonId, at - lease + 1);
+    const atLease = reservation('exactly_at_the_lease', daemonId, at - lease);
+    should(auditHostedRelayReservations([justShort], null, at).reclaimed).deepEqual([]);
+    should(auditHostedRelayReservations([atLease], null, at).reclaimed).deepEqual([atLease.reservationId]);
+    // A renewal restarts the clock from the renewal, not from the opening.
+    const renewed = reservation('renewed_inside_lease', daemonId, at - lease * 3, at - lease + 1);
+    should(auditHostedRelayReservations([renewed], null, at).reclaimed).deepEqual([]);
+    should(auditHostedRelayReservations([renewed], null, at + 1).reclaimed).deepEqual([renewed.reservationId]);
+  });
 
   it('should keep a reservation inside its lease when no rendezvous gave evidence', () => {
     const renewedRecently = reservation('renewed_reservation_', daemonId, old, at - 1);

@@ -36,6 +36,12 @@ describe('the route request client', () => {
     expect(calls).toEqual([{ route: 'GET /v1/security', init: {} }]);
   });
 
+  it('should keep a query string out of the route key and hand it over as the call’s query', async () => {
+    const { client, calls } = recorder(async () => ({ ok: true }));
+    await client.request('/v1/audit?limit=100&keptOffset=5', z.strictObject({ ok: z.boolean() }));
+    expect(calls).toEqual([{ route: 'GET /v1/audit', init: { query: { limit: '100', keptOffset: '5' } } }]);
+  });
+
   it('should turn a refusal into today’s FyHttpError, with its status, code and whole body', async () => {
     const body = { error: 'Not verified.', code: 'step_up_not_verified' };
     const { client } = recorder(async () => {

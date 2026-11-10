@@ -18,8 +18,13 @@
  * WHAT IT NEVER DOES is repeat the value: an issue names where the value is and how to fix it, so a
  * secret that was pasted by mistake travels no further than the file it was pasted into.
  *
+ * A third test, for the write path only, is {@link findFlagSecrets}: a raw secret given to a FLAG (`--token <v>`).
+ *
  * Pure: no IO.
  */
+import { createHash } from 'node:crypto';
+import { urlPasswordCuts } from './secret-words.ts';
+
 /**
  * A located finding: the path to the value inside the document, never the value.
  *
@@ -211,6 +216,154 @@ export function findRawSecrets(document: unknown): readonly SecretFinding[] {
   };
   visit(document, []);
   return findings;
+}
+
+// ── A raw secret given to a flag (CFG-LEAK-W) ────────────────────────────────────────────────────────────────────────
+
+/**
+ * A raw secret given to a flag, found by the write rule: where it is, and a digest of `<name>\0<value>`. The digest is
+ * in memory only — it tells a write whether a finding is one the file on disk already holds — and is never returned,
+ * logged or put in an issue.
+ */
+export interface FlagFinding {
+  readonly path: readonly (string | number)[];
+  readonly digest: string;
+}
+
+/** A word that is exactly a flag: one or two dashes and a name, no value in it. */
+const FLAG_ONLY = /^-{1,2}([A-Za-z0-9][A-Za-z0-9_.-]*)$/u;
+
+/** A flag glued to its value by `=`: `--token=v`, `-k=v`. */
+const FLAG_GLUED = /^-{1,2}([A-Za-z0-9][^=\s]*)=([\s\S]*)$/u;
+
+/** A word that starts with `NAME=` or `NAME:` and a value: `API_KEY=v`, `Authorization: Bearer v`. */
+const NESTED_PAIR = /^([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[:=][ \t]*([\s\S]*)$/u;
+
+/** A header's name that is a credential by itself, whatever it ends in. */
+const CREDENTIAL_HEADER = /^(?:authorization|cookie)$/iu;
+
+/** The scheme word an `Authorization` value may start with; the credential is what follows it. */
+const AUTH_SCHEME = /^(?:bearer|basic|token)[ \t]+/iu;
+
+/** One pair of matching quotes around a value. */
+const QUOTED_VALUE = /^(["'])([\s\S]*)\1$/u;
+
+/** The shortest URL password the rule judges: a URL password has no entropy convention (E6). */
+const MIN_URL_PASSWORD = 8;
+
+/** White space in a string, and a run of it to split at. */
+const ANY_BLANK = /\s/u;
+const BLANK_RUNS = /\s+/u;
+
+const flagDigest = (name: string, value: string): string =>
+  createHash('sha256').update(`${name.toLowerCase()}\0${value}`, 'utf8').digest('hex');
+
+/** Whether a flag or a key is named for a credential: the end of its name (dashes stripped) is the one a raw-secret key ends in. */
+const namesCredential = (name: string): boolean =>
+  CREDENTIAL_KEY.test(name.replaceAll('-', '').slice(-CREDENTIAL_KEY_TAIL));
+
+/** The value as the secret test reads it: unquoted, and past an `Authorization` scheme word. */
+function secretPart(value: string): string {
+  const inner = QUOTED_VALUE.exec(value)?.[2] ?? value;
+  return inner.trim().replace(AUTH_SCHEME, '');
+}
+
+/** The pairs of one word: `[name, value]` of each raw secret it gives to a flag. `next` is the word after it, if any. */
+function pairsOf(
+  word: string,
+  next: string | undefined,
+): readonly { readonly name: string; readonly value: string; readonly onNext: boolean }[] {
+  const pairs: { name: string; value: string; onNext: boolean }[] = [];
+  const judged = (name: string, value: string, onNext = false): void => {
+    const secret = secretPart(value);
+    if (looksLikeRawSecret('token', secret)) pairs.push({ name, value: secret, onNext });
+  };
+  // A value that holds a nested key, from a flag or on its own: `--header=Authorization: Bearer v`, `API_KEY=v`.
+  const nested = (text: string): void => {
+    const pair = NESTED_PAIR.exec(text);
+    const name = pair?.[1] ?? '';
+    if (namesCredential(name) || CREDENTIAL_HEADER.test(name)) judged(name, pair?.[2] ?? '');
+  };
+  const glued = FLAG_GLUED.exec(word);
+  if (glued !== null) {
+    const [, name = '', value = ''] = glued;
+    if (namesCredential(name)) judged(name, value);
+    nested(value);
+  }
+  const flag = FLAG_ONLY.exec(word);
+  if (flag !== null && next !== undefined && !next.startsWith('-') && namesCredential(flag[1] ?? ''))
+    judged(flag[1] ?? '', next, true);
+  nested(word);
+  for (const [from, to] of urlPasswordCuts(word)) {
+    if (to - from >= MIN_URL_PASSWORD) pairs.push({ name: 'password', value: word.slice(from, to), onNext: false });
+  }
+  return pairs;
+}
+
+/**
+ * Every raw secret a document gives to a FLAG (CFG-LEAK-W), by place and digest.
+ *
+ * Every list of strings, at any key and any depth, is a command line read as words; every string with blanks outside a
+ * list is split into words at them; every other string is one word. A string with blanks is judged as a whole too, so
+ * a nested key written with its blank (`Authorization: Bearer v`) is seen. Per word:
+ * - **W1** `--token=v`, **W2** `--token` then `v` (the next word does not start with `-`);
+ * - **W3** a nested `NAME=v` or `NAME: v` (`-e API_KEY=v`, `Authorization: Bearer v`), also inside a W1 or W2 value;
+ * - **W4** a URL's user password (`scheme://user:PASS@host`) of at least {@link MIN_URL_PASSWORD} characters.
+ *
+ * The NAME test is the one a raw-secret key uses ({@link CREDENTIAL_KEY}) on the name with its dashes stripped, or
+ * `Authorization` / `Cookie` as a nested key: `--token`, `--api-key`, `--client-secret`, `--password`, `--key` count;
+ * `--token-file`, `--auth`, `--auth-mode`, `--header` and a one-letter flag do not. The VALUE test is
+ * {@link looksLikeRawSecret} past its name gate: unquoted, at least 16 characters, no white space, no pointer
+ * (`${secret:NAME}`, `$NAME`, `${NAME}`), no path or URL, entropy 3.5. A read mask may over-hide; a write rule must not
+ * over-refuse, so this is the narrow, certain one, and every pair it finds is also cut by the read mask.
+ *
+ * Linear in the document: each word is read a bounded number of times, whatever it holds.
+ */
+export function findFlagSecrets(document: unknown): readonly FlagFinding[] {
+  const found = new Map<string, FlagFinding>();
+  const add = (path: readonly (string | number)[], name: string, value: string): void => {
+    const digest = flagDigest(name, value);
+    found.set(JSON.stringify([path, digest]), { path, digest });
+  };
+  const judge = (
+    word: string,
+    next: string | undefined,
+    path: readonly (string | number)[],
+    nextPath: readonly (string | number)[],
+  ): void => {
+    for (const pair of pairsOf(word, next)) add(pair.onNext ? nextPath : path, pair.name, pair.value);
+  };
+  /** One string: as a whole, and — with blanks in it — as the words it is made of. */
+  const judgeString = (
+    text: string,
+    next: string | undefined,
+    path: readonly (string | number)[],
+    nextPath: readonly (string | number)[],
+  ): void => {
+    judge(text, next, path, nextPath);
+    if (!ANY_BLANK.test(text)) return;
+    const words = text.split(BLANK_RUNS).filter(word => word !== '');
+    words.forEach((word, index) => {
+      judge(word, words[index + 1], path, path);
+    });
+  };
+  const visit = (value: unknown, path: readonly (string | number)[]): void => {
+    if (typeof value === 'string') {
+      judgeString(value, undefined, path, path);
+    } else if (Array.isArray(value)) {
+      value.forEach((item: unknown, index) => {
+        const here = [...path, index];
+        if (typeof item === 'string') {
+          const after = value[index + 1];
+          judgeString(item, typeof after === 'string' ? after : undefined, here, [...path, index + 1]);
+        } else visit(item, here);
+      });
+    } else if (value !== null && typeof value === 'object') {
+      for (const [key, item] of Object.entries(value)) visit(item, [...path, key]);
+    }
+  };
+  visit(document, []);
+  return [...found.values()];
 }
 
 /** Whether `character` is one character of whitespace (what `\s` and `trim` both mean). */
