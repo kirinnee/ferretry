@@ -481,8 +481,9 @@ describe('the preview is a clean copy (C1, M1, M2, M3)', () => {
     expect(text).toContain('config/runtimes/r.yaml: command');
     expect(text).not.toContain(SENTINEL);
     expect(text).toContain('KNOWN GAPS');
-    expect(text).toContain('limits.yaml is NOT read for launches');
-    expect(text).toContain('RESOURCE LIMITS: limits.yaml is NOT read');
+    expect(text).toContain('5.0 reads limits.yaml for launches');
+    expect(text).toContain('RESOURCE LIMITS: 5.0 reads limits.yaml for launches');
+    expect(text).not.toContain('NOT read');
   });
 
   test('MAJOR-2 the runtimes limits config says enabled: false, whatever v4 said', async () => {
@@ -699,6 +700,33 @@ describe('build needs the preview signing key (m6)', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain('release-signing-key.preview.pub is missing');
     expect(result.stderr.toString()).toContain('Owner step');
+  });
+});
+
+describe('build installs the checkout workspace first', () => {
+  test('a checkout whose root install fails is refused with the command, and nothing is compiled or installed', async () => {
+    const script = join(import.meta.dir, '../../preview/preview.sh');
+    const repo = join(root, 'src');
+    await mkdir(join(repo, 'packages/app'), { recursive: true });
+    await writeFile(join(repo, 'packages/app/release-signing-key.preview.pub'), 'stand-in public key\n');
+    // A package.json that does not parse: `bun install` refuses it before it resolves anything (no network).
+    await writeFile(join(repo, 'package.json'), '{"name": "stand-in",\n');
+    const git = (...args: string[]) => Bun.spawnSync(['git', '-C', repo, ...args]);
+    git('init', '-q', '-b', 'rebuild/5.0');
+    git('add', '-A');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'c');
+    const home = join(root, 'home');
+    const target = join(home, '.ferretry-v5');
+    const result = Bun.spawnSync(
+      [script, 'build', '--v4', join(home, '.ferretry'), '--target', target, '--source', repo],
+      {
+        env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home },
+      },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout.toString()).toContain('workspace dependencies (bun install --frozen-lockfile)');
+    expect(result.stderr.toString()).toContain(`run: cd '${repo}' && bun install --frozen-lockfile`);
+    expect(statSync(target, { throwIfNoEntry: false })?.isDirectory() ?? false).toBe(false);
   });
 });
 
