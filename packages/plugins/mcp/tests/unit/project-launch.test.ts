@@ -509,9 +509,24 @@ describe('the .mcp.json at a known root, read through the kernel (lead ruling (B
     expect(s.trace.reads).toEqual([]);
   });
 
+  test('a project root that is a link is the kernel’s anchor: its .mcp.json is read and bound as any root’s', async () => {
+    // Arrange
+    const s = await setup(
+      { claudeCode: approving(), projects: await registered() },
+      { leadAtRoot: false, linkedRoots: [REPO] },
+    );
+
+    // Act
+    const parts = await s.launch.parts(spec(SUBFOLDER));
+
+    // Assert
+    expect(s.fetched).toEqual([s.tokenEndpoint]);
+    expect(envOf(parts)).toEqual({ [s.variable]: optionalSecretReference(s.access) });
+    expect(s.trace.reads).toEqual([`imports:${REPO}/.mcp.json`]);
+  });
+
   test.each<[string, SetupOptions]>([
     ['a .mcp.json that is a link (even to a file inside the root)', { links: [`${REPO}/.mcp.json`] }],
-    ['a project root that is a link', { linkedRoots: [REPO] }],
   ])('%s is refused: nothing is read, renewed or bound', async (_what, disk) => {
     // Arrange
     const s = await setup({ claudeCode: approving(), projects: await registered() }, { leadAtRoot: false, ...disk });
