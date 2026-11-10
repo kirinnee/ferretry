@@ -743,6 +743,27 @@ describe('B187: a daemon message drawn with a quoted or tree line is still read 
     should(heldAt(draft, cursor, ENVELOPE, true)).equal('composer');
   });
 
+  it('B187 a plain multi-line direct paste drawn in full is proven landing, so landing_unconfirmed means no frame showed it', () => {
+    // nelly's send was plain (no quoted line): the reader proves it from a frame that shows it, which pins the 6.16 s
+    // unconfirmed settle on a pane that drew nothing within the fill's window, not on how the text was read.
+    const rows = draft.split('\n');
+    const plain = [...rows.slice(0, 8), ...rows.slice(9)].join('\n');
+    const text =
+      '[message · from :ireland · peer · 520e638b]\nPlease keep the queue ordering as v4, like this:\n' +
+      'and tell me when the change is in.';
+    const frame: DeliveryFrame = {
+      alive: true,
+      dead: false,
+      promptReady: false,
+      visible: plain,
+      cursorX: 36,
+      cursorY: 8,
+    };
+
+    should(composerLanding(frame, text, true)).equal('chars');
+    should(composerLanding({ ...frame, visible: rows.slice(0, 5).join('\n') }, text, true)).not.equal('chars');
+  });
+
   it('B187 an indented › row outside any rule is still not a prompt line', () => {
     const codex = '› fix the flaky test\n\n  › a quoted line the assistant drew\n  gpt-5 default · ~/work\n';
     should(composerRows(codex)?.first).equal(2);
