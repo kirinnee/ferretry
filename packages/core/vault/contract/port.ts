@@ -2,6 +2,8 @@ import { defineEvent, definePort, type FerretId, type TargetRef } from '@ferretr
 import type { Result } from '@ferretry/std';
 import { z } from 'zod';
 import type { InputRaise, InputRequestId, InputRequestState } from './inputs.ts';
+import type { PhoneApprovalAgentView, PhoneApprovalAsk } from './phone.ts';
+import type { ObserveResult, PushNumberRead } from './targets.ts';
 import type {
   AuthorizedOutcome,
   CredentialPlacement,
@@ -104,6 +106,31 @@ export interface VaultApi {
       readonly actor: { readonly kind: 'host' } | { readonly kind: 'device'; readonly deviceId: string };
     },
   ): Promise<boolean>;
+  /**
+   * APPROVE ON YOUR PHONE, the reads Accounts' approval makes (docs/input-requests.md). Additive and optional, and
+   * ABSENT for every needer but Accounts: the Vault owns the `input.targets` adapters and the sign-in lock, and an
+   * approval looks at them only through these. An absent member means no approval is raised (fail closed).
+   *
+   * The push number the ferret's page `key` shows now, read in the page's own queue from a provider's own challenge
+   * view only, never an element a ferret points at. Nothing: no such page, or the target cannot read one.
+   */
+  pushNumber?(
+    ferret: FerretId,
+    key: string,
+  ): Promise<{ readonly pageId: string; readonly read: PushNumberRead } | undefined>;
+  /** What the input bridge observes at the ferret's terminal `key` (its prompt line and program); never its screen. */
+  observeTerminal?(ferret: FerretId, key: string): Promise<ObserveResult>;
+  /**
+   * Whether the ferret could have steered a surface of `kind` (today's `LoginObserver.tainted`): for a page, it ran a
+   * page script in this session; or it acted on that kind of surface at or after `since` (ms; unreadable counts as acted).
+   */
+  tainted?(ferret: FerretId, kind: 'browser' | 'terminal', since: number): boolean;
+  /**
+   * A ferret's `push: true` raise on a request tool (Browsers' `browser_request_input`): handed to whichever service
+   * provides `input.phone-approval` (Accounts). Refused with {@link PHONE_APPROVAL_UNAVAILABLE} while none is bound.
+   * Present only for the plugins whose tools carry the raise; the ferret is the CALLER's credential, never a body.
+   */
+  raisePhoneApproval?(ferret: FerretId, ask: PhoneApprovalAsk): Promise<Result<PhoneApprovalAgentView, string>>;
 }
 
 export const VaultPort = definePort<VaultApi>('vault');

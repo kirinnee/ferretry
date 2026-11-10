@@ -2,7 +2,7 @@
  * @ferretry/plugin-codex/contract — wire schemas, port + token, events, state and config declarations, words.
  * Codex is a harness (§4.3): it takes `harnesses:codex` from Ferrets and offers nothing but a read port.
  */
-import { InstantSchema } from '@ferretry/std';
+import { InstantSchema, ITEM_NAME_PATTERN } from '@ferretry/std';
 import {
   type FerretId,
   defineConfig,
@@ -167,13 +167,11 @@ export const CODEX_CONFIG = configDef(
   }),
 );
 
-const ITEM_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
-
 /** `config/codex/settings/<name>.yaml`. Today a component edit changes what an agent runs with, never what it may spend. */
 export const CODEX_SETTINGS = configDef(
   defineConfig({
     collection: 'codex/settings',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: SettingsItemSchema,
     axis: 'configure',
     loosens: neverLoosens,
@@ -184,7 +182,7 @@ export const CODEX_SETTINGS = configDef(
 export const CODEX_HOOKS = configDef(
   defineConfig({
     collection: 'codex/hooks',
-    name: ITEM_NAME,
+    name: ITEM_NAME_PATTERN,
     schema: HooksItemSchema,
     axis: 'configure',
     loosens: neverLoosens,

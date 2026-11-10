@@ -49,6 +49,7 @@ export {
 export * from './config.ts';
 export * from './inputs.ts';
 export * from './masks.ts';
+export * from './phone.ts';
 export * from './port.ts';
 export * from './sealed.ts';
 export * from './secret-wire.ts';

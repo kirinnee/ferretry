@@ -10,9 +10,11 @@ import {
   copyPlanOf,
   GRANT_MISS_REASONS,
   GRANT_STOPPING_REASONS,
+  grantFilledLineFor,
   grantMissLine,
   grantMissLineFor,
   grantMissWords,
+  ruleMissSuspends,
   ruleMissWords,
   TASK_PLAN_MISS_AGENT_NOTE,
   TASK_PLAN_UNAVAILABLE_REASONS,
@@ -769,6 +771,48 @@ describe('why a line did not apply', () => {
     // Scope and history are not drift: a ferret outside the scope, or a form with no taps yet, suspends nothing.
     should(GRANT_STOPPING_REASONS).not.containEql('out-of-scope');
     should(GRANT_STOPPING_REASONS).not.containEql('no-history');
+  });
+
+  it('I216 should word a filled card for the owner only, naming its source and the place, never an account or a value', () => {
+    should(grantFilledLineFor({ by: 'plan', line: 1 }, 'github.com')).equal(
+      'Filled under your task plan (line 2) on github.com.',
+    );
+    should(grantFilledLineFor({ by: 'rule' }, 'sudo@kirin-box')).equal(
+      'Filled under your standing sign-in rule on sudo@kirin-box.',
+    );
+    should(grantFilledLineFor({ by: 'rule' })).equal('Filled under your standing sign-in rule.');
+    // A fill is not a miss: it draws no miss line, so nothing buzzes for it.
+    should(grantMissLineFor({ by: 'rule', outcome: 'filled' })).be.undefined();
+    should(grantMissLineFor({ by: 'plan', line: 0, outcome: 'filled' })).be.undefined();
+  });
+
+  it('I226 should tell the ferret one fixed sentence whatever the reason, and never a word about a rule', () => {
+    should(TASK_PLAN_MISS_AGENT_NOTE).equal("Your task plan didn't cover this, so the owner was asked.");
+    should(TASK_PLAN_MISS_AGENT_NOTE).not.match(/rule|suspend|form|script|passkey|proof/iu);
+    // The reasons the owner reads are never the ferret's: every one of them differs from the ferret's sentence.
+    for (const reason of GRANT_MISS_REASONS) {
+      const owner = grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason });
+      if (owner !== undefined) should(owner).not.equal(TASK_PLAN_MISS_AGENT_NOTE);
+    }
+  });
+
+  it('I228 should buzz once for a miss and say nothing for a fill or a card that was not about this place', () => {
+    for (const reason of GRANT_MISS_REASONS) {
+      const line = grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason });
+      if (reason === 'not-here') should(line).be.undefined();
+      else should(line).be.a.String().and.startWith("Your standing rule for this sign-in didn't apply:");
+    }
+    should(grantMissLineFor({ by: 'rule', outcome: 'filled' })).be.undefined();
+    // The filled line is the owner's card only: it never rides on the agenda, which every ferret reads.
+    should(grantFilledLineFor({ by: 'rule' }, 'github.com')).not.match(/Input request delivered/u);
+  });
+
+  it('I225 should name a field left filled as a reason that stops and suspends the rule', () => {
+    should(GRANT_STOPPING_REASONS).containEql('did-not-move-on');
+    should(ruleMissSuspends('did-not-move-on')).be.true();
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason: 'did-not-move-on' })).equal(
+      "Your standing rule for this sign-in didn't apply: the page didn't move on, so Ferretry emptied the password field. The rule is suspended until you approve it again.",
+    );
   });
 
   it("should say a plan line's miss by its line, and a rule's by the rule, suspended where it stops", () => {

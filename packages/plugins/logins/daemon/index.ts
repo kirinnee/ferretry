@@ -282,7 +282,9 @@ export function buildLoginsDaemon() {
         },
         view: id => api.get(id as LoginId),
         signOut: id => credentials.signOut(id),
-        write: (id, patch) => config.write(LOGINS_CONFIG, id, { patch }),
+        // The owner's reviewed change: made to both versions of a login with an edit held, so it never puts another
+        // caller's held edit (a raised budget) into effect.
+        write: (id, patch) => config.writeAsOwner(LOGINS_CONFIG, id, { patch }),
         // A removal that the kernel would hold is refused instead: a held removal would leave the login in effect and be
         // put through later by a path that does not ask what uses it.
         remove: id => config.remove(LOGINS_CONFIG, id, { refuseIfHeld: true }),

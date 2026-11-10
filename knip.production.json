@@ -58,7 +58,6 @@
         "daemon/adapters/session/observer/worker-observer-host.ts",
         "daemon/adapters/session/observer/worker-supervisor.ts",
         "daemon/workers/session.worker.ts",
-        "daemon/workers/session-index.worker.ts",
         "daemon/lib/session/peers/harness-observation.ts",
         "daemon/lib/session/peers/send-lifecycle.ts",
         "daemon/lib/session/restart/index.ts",

@@ -17,8 +17,8 @@ function writerOver(outcome: ConfigWriteOutcome) {
   const config = {
     file: () => undefined,
     fileState: () => ({ state: 'valid', inEffect: true }),
-    write: async () => outcome,
-  } as unknown as Pick<ConfigPort, 'file' | 'fileState' | 'write'>;
+    writeAsOwner: async () => outcome,
+  } as unknown as Pick<ConfigPort, 'file' | 'fileState' | 'writeAsOwner'>;
   return new KernelAccountDefaultsWriter(config, {} as ConfigFileDef<AccountsConfig>);
 }
 

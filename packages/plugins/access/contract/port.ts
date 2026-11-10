@@ -51,6 +51,13 @@ export interface AccessApi {
   /** Sends one push to every live enrolment; resolves how many devices it reached (Agenda's buzz). */
   buzz(message: Buzz): Promise<number>;
   /**
+   * Takes buzzes down on every enrolled device but `except`'s (a paired device's id): the lines named by `tags`
+   * (`pa-<id>`, `attention-<ferret>:<ask>`), each bounded by the push clear's own cap. A clear carries NO content, only
+   * tags. `ferret` names the ferret the clear is about (absent: the machine). Resolves how many devices were told.
+   * Additive: a caller that finds it absent cannot take a line down, and says nothing it did not do.
+   */
+  clear?(tags: readonly string[], except?: string, ferret?: string): Promise<number>;
+  /**
    * Whether this paired device holds at least one passkey (S92: a 2FA seed save answers `409 passkey_required` for a
    * device that holds none). Unknown or revoked devices hold none. Never a credential id or key.
    */

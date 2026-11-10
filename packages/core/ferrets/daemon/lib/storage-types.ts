@@ -58,6 +58,32 @@ export interface RebuildResult {
   readonly lostJournalSessionIds?: readonly string[];
 }
 
+/** How a yielding rebuild of the session index is run. */
+export interface IndexRebuildOptions {
+  /** Sessions taken per slice; the loop is handed back after every slice. At least one. */
+  readonly sliceSize: number;
+  /** Hands the event loop back (a macrotask turn on the kernel clock). Called once after every slice. */
+  readonly yieldToLoop: () => Promise<void>;
+  /** The daemon's stop: no further session is taken once it is aborted. */
+  readonly signal?: AbortSignal;
+}
+
+/** What a yielding rebuild of the session index did. */
+export interface IndexRebuildResult {
+  /** Sessions the state folder holds a file for (archived ones excepted). */
+  readonly surveyed: number;
+  /** Surveyed sessions the index held no row for when the rebuild began. */
+  readonly missing: number;
+  /** Sessions the rebuild wrote a row for. */
+  readonly rebuilt: number;
+  /** Slices taken (each followed by one yield). */
+  readonly slices: number;
+  /** False when a stop, or a closed storage, ended the rebuild before every missing session was taken. */
+  readonly complete: boolean;
+  /** Sessions whose files could not be read; they stay unindexed and the next boot tries them again. */
+  readonly failedSessionIds: readonly string[];
+}
+
 export interface ReplayPage {
   readonly events: readonly SessionEvent[];
   readonly rows: number;

@@ -183,6 +183,87 @@ test('the testing host never asks the owner question for a plain write, for writ
   await host.stop();
 });
 
+/**
+ * [kernel: config held-edit patch] A patch over a held file is made to BOTH versions, by the plain write,
+ * writeAsCaller and writeAsOwner alike. The outcome is compared without its etag and id (the writer digests a text, the testing host
+ * stamps a value): the kind, what the owner's patch loosened, and what is still held. The value in effect is compared
+ * as a value, and a follow-up edit pinned to the answer's etag must land the same way on both.
+ */
+const HELD_BOTH_WAYS: readonly {
+  readonly label: string;
+  readonly held: string;
+  readonly patch: Record<string, unknown>;
+}[] = [
+  { label: 'a held loosening, another field patched', held: 'limit: 99\n', patch: { note: 'x' } },
+  { label: 'a held loosening, the owner tightens', held: 'limit: 99\n', patch: { limit: 3 } },
+  { label: 'a held loosening, the owner loosens another way', held: 'limit: 99\nnote: a\n', patch: { limit: 50 } },
+  { label: 'a held loosening, the owner saves the held value', held: 'limit: 99\n', patch: { limit: 99 } },
+  {
+    label: 'a held secret, another field patched',
+    held: 'env:\n  EVIL: ${secret:GITHUB_TOKEN}\n',
+    patch: { note: 'x' },
+  },
+  {
+    label: 'a held loosening, the owner adds its own secret',
+    held: 'limit: 99\n',
+    patch: { env: { OWN: '${secret:OWN_TOKEN}' } },
+  },
+];
+
+const shaped = (outcome: Awaited<ReturnType<ConfigPort['write']>>) => ({
+  kind: outcome.kind,
+  ...(outcome.kind === 'written'
+    ? { loosened: outcome.loosened, stillHeld: outcome.stillHeld?.sentences }
+    : outcome.kind === 'held'
+      ? { sentences: outcome.sentences }
+      : {}),
+});
+
+test('the testing host makes a patch over a held file to both versions, as the real writer does', async () => {
+  for (const via of ['write', 'writeAsCaller', 'writeAsOwner'] as const)
+    for (const owner of [true, false])
+      for (const other of [true, false])
+        for (const { label, held, patch } of HELD_BOTH_WAYS) {
+          const port = await real(owner, other);
+          const { host, config } = await testing(owner, other);
+          // held first by a plain write that asks only the plain question, in effect from a tighter start
+          for (const target of [port, config]) await target.write(mcpDef, 'acme', 'limit: 5\n');
+          const realHeld = await port.write(mcpDef, 'acme', held);
+          const testHeld = await config.write(mcpDef, 'acme', held);
+          expect({ label, kind: testHeld.kind }).toEqual({ label, kind: realHeld.kind });
+          const base = { label, via, owner, other };
+          const realOutcome = await port[via](mcpDef, 'acme', { patch });
+          const testOutcome = await config[via](mcpDef, 'acme', { patch });
+          expect({ ...base, ...shaped(testOutcome) }).toEqual({ ...base, ...shaped(realOutcome) });
+          expect({ ...base, value: config.collection(mcpDef).get('acme') }).toEqual({
+            ...base,
+            value: port.collection(mcpDef).get('acme'),
+          });
+          // the answer's etag is the file's now on both: a patch pinned to it lands, one pinned to the old text conflicts
+          if (realOutcome.kind !== 'refused' && testOutcome.kind !== 'refused') {
+            const stale = await config[via](mcpDef, 'acme', { patch: { note: 'z' } }, { ifMatch: 'stale-etag' });
+            expect({ ...base, stale: stale.kind }).toEqual({
+              ...base,
+              stale: (await port[via](mcpDef, 'acme', { patch: { note: 'z' } }, { ifMatch: 'stale-etag' })).kind,
+            });
+            const realNext = await port[via](
+              mcpDef,
+              'acme',
+              { patch: { note: 'z' } },
+              { ifMatch: await port.etag(mcpDef, 'acme') },
+            );
+            const testNext = await config[via](
+              mcpDef,
+              'acme',
+              { patch: { note: 'z' } },
+              { ifMatch: await config.etag(mcpDef, 'acme') },
+            );
+            expect({ ...base, next: testNext.kind }).toEqual({ ...base, next: realNext.kind });
+          }
+          await host.stop();
+        }
+});
+
 test('the testing host answers a stale ifMatch on writeAsCaller as a conflict, as write does', async () => {
   const { host, config } = await testing(true, true);
   expect((await config.writeAsCaller(mcpDef, 'acme', 'note: a\n', { ifMatch: 'absent' })).kind).toBe('written');

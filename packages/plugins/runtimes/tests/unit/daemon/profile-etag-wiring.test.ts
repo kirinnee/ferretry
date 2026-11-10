@@ -246,6 +246,33 @@ describe('R2 the profile layers over the kernel’s real config service, nothing
     expect(outcome).toEqual({ kind: 'written', profiles: ['plain'] });
   });
 
+  it('R2 (b) should WRITE an add of a layer an unreloaded edit removed, never answer a no-op from the layers it had loaded', async () => {
+    // Arrange — the kernel loaded `plain` with `mcp/one`; the owner then removes it by hand, with no reload event yet.
+    const world = await realWorld(await fleetWorld());
+    const removedBehind = 'contents:\n  - mcp/theirs\n';
+    await world.editBehind('plain', removedBehind);
+
+    // Act
+    const outcome = await world.api.changeProfileLayers({ kind: 'add', profile: 'plain', layer: 'mcp/one' }, owner);
+
+    // Assert — written on the edited file, not a false "already there"; the owner's own edit is kept.
+    expect(outcome).toEqual({ kind: 'written', profiles: ['plain'] });
+    expect((await world.onDisk('plain')).split('contents:\n')[1]).toBe('  - mcp/theirs\n  - mcp/one\n');
+  });
+
+  it('R2 (b) should still answer a no-op, writing nothing, for a layer the file really holds', async () => {
+    // Arrange
+    const world = await realWorld(await fleetWorld());
+    const before = await world.onDisk('plain');
+
+    // Act
+    const outcome = await world.api.changeProfileLayers({ kind: 'add', profile: 'plain', layer: 'mcp/one' }, owner);
+
+    // Assert
+    expect(outcome).toEqual({ kind: 'written', profiles: [] });
+    expect(await world.onDisk('plain')).toBe(before);
+  });
+
   it('R2 should answer the absent sentinel for a profile that has no file', async () => {
     // Arrange
     const world = await realWorld(await fleetWorld());

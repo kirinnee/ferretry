@@ -739,10 +739,14 @@ Installing is two steps and every route has exactly one capability. A project wr
   says so); a bound runtime server gets `${secret:OWN}`. No secret value crosses any route.
 - **It writes only through existing paths**: the project `.mcp.json` compare-and-swap, a project skill
   folder (a new port that never follows a symbolic link and refuses one on the path), and for a runtime
-  the fleet catalogue (an INTERNAL change, `catalog.install`: the component, its skill files and the
-  profile entry are one change). That kind is not in the wire schema, so `POST /v1/fleet/proposals`
-  refuses it; only the installer produces one, after its checks. The fleet executor also resolves every
-  file path and refuses any write outside the skill's own folder in the assets directory. Anything already at the destination that B's install record did not write is
+  the plugin that owns the item's kind (MCP for a server, Skills for a skill). The installer, after its checks,
+  hands that owner an INTERNAL `catalog.install` change (the component, its skill files and the profile entry)
+  through the `catalog.items` hook's `runtime.installCatalogItem`. It is Catalogs' own shape, not a Runtimes change:
+  Runtimes' change kinds (`component.put`, `profile.put` and the rest of `POST /v1/runtimes/proposals`) do not
+  include it, so no route can submit one; only the installer produces it. The owner must resolve every
+  file path and refuse any write outside the skill's own folder in the assets directory. While no owner offers
+  that hook, an install into a runtime answers `503 catalog_kind_unavailable` and writes nothing (a declared GAP
+  in `ports-pending.json`). Anything already at the destination that B's install record did not write is
   `catalog_install_conflict`. An update replaces an install only when every file it wrote still has the
   hash B recorded (files are compared by exact relative path); a file edited by hand is refused as
   `catalog_install_edited` (see [Updating an install](#updating-an-install-catalogs-3d-3)). A runtime component is compared by a hash of what it holds, recorded at install, so a hand

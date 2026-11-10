@@ -96,6 +96,8 @@ function world(
     readonly stages?: AccessRuntimeDeps['stages'];
     /** Makes the unlock ledger's writes reject while this answers true (a disk that refuses the write). */
     readonly unlockWritesFail?: () => boolean;
+    /** What a push service answers (and is shown) when a push is posted; absent is a unit test that reaches no network. */
+    readonly request?: (init: { readonly headers: Headers }) => Response;
   } = {},
 ): World {
   const folder = options.folder ?? new MemoryStateFolder();
@@ -124,8 +126,9 @@ function world(
       publish: (event: EventDef<string, unknown>, payload: unknown) => published.push({ event, payload }),
     },
     fetch: {
-      request: async () => {
-        throw new Error('a unit test reaches no network');
+      request: async (_input: unknown, init: { readonly headers: HeadersInit }) => {
+        if (options.request === undefined) throw new Error('a unit test reaches no network');
+        return options.request({ headers: new Headers(init.headers) });
       },
     },
   } as unknown as KernelPorts;
@@ -1178,5 +1181,105 @@ describe('the buzz port', () => {
     await expect(w.runtime.port.buzz({ ...buzz, url: `/${'x'.repeat(1_024)}` })).rejects.toThrow();
     // Within the caps it is delivered to nobody (no enrolment), and throws nothing.
     expect(await w.runtime.port.buzz(buzz)).toBe(0);
+  });
+
+  test('a high-priority buzz that expires carries its urgency and seconds left, and still reaches no one without an enrolment', async () => {
+    const w = world();
+    const buzz = { tag: 'pa-pa_0123456789abcdef01234567', title: 'Approve on your phone', body: 'Tap 42', url: '/' };
+
+    expect(await w.runtime.port.buzz({ ...buzz, urgency: 'high', ttlSeconds: 90 })).toBe(0);
+    await expect(w.runtime.port.buzz({ ...buzz, ttlSeconds: -1 })).rejects.toThrow();
+  });
+
+  /** A paired device with one real push enrolment, and the `Urgency` header of every push the "push service" received. */
+  async function enrolled(status = 201) {
+    const urgencies: (string | null)[] = [];
+    const w = world({
+      request: ({ headers }) => {
+        urgencies.push(headers.get('urgency'));
+        return new Response(null, { status });
+      },
+    });
+    const { deviceId } = await paired(w);
+    const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const point = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+    const at = instantFromEpochMs(Date.parse('2026-11-10T09:00:00.000Z'));
+    w.folder.plant(
+      PushFile,
+      JSON.stringify({
+        format: 1,
+        subscriptions: [
+          {
+            id: 'push-aaaaaaaa-1111-4111-8111-111111111111',
+            deviceId,
+            deviceName: 'Phone',
+            subscription: {
+              endpoint: 'https://fcm.googleapis.com/send/abc',
+              expirationTime: null,
+              keys: {
+                p256dh: Buffer.from(point).toString('base64url'),
+                auth: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url'),
+              },
+            },
+            createdAt: at,
+            updatedAt: at,
+          },
+        ],
+      }),
+    );
+    return { w, urgencies };
+  }
+  const approval = (id: string) => ({
+    tag: `pa-pa_${id.repeat(24).slice(0, 24)}`,
+    title: 'Approve on your phone',
+    body: 'Tap 42',
+    url: '/',
+    urgency: 'high' as const,
+  });
+
+  test('B1 the 4th high buzz in an hour from one ferret goes out at normal priority, and an hour later the cap resets', async () => {
+    const { w, urgencies } = await enrolled();
+    for (const n of ['1', '2', '3', '4'])
+      expect(await w.runtime.port.buzz({ ...approval(n), ferret: 'ferret-a' })).toBe(1);
+    expect(urgencies).toEqual(['high', 'high', 'high', null]);
+
+    await w.clock.advance(3_600_001);
+    expect(await w.runtime.port.buzz({ ...approval('5'), ferret: 'ferret-a' })).toBe(1);
+    expect(urgencies.at(-1)).toBe('high');
+  });
+
+  test('B1 the 13th high buzz across ferrets goes out at normal priority, and one that names no ferret counts there only', async () => {
+    const { w, urgencies } = await enrolled();
+    for (let n = 0; n < 12; n += 1)
+      await w.runtime.port.buzz({ ...approval(String(n)), ...(n % 2 === 0 ? {} : { ferret: `ferret-${n}` }) });
+    expect(urgencies).toEqual(Array.from({ length: 12 }, () => 'high'));
+    await w.runtime.port.buzz({ ...approval('x'), ferret: 'ferret-new' });
+    expect(urgencies.at(-1)).toBeNull();
+  });
+
+  test('B1 a high buzz that reached no device is refunded, so the next one still goes high', async () => {
+    const down = await enrolled(500);
+    for (const n of ['1', '2', '3', '4', '5'])
+      expect(await down.w.runtime.port.buzz({ ...approval(n), ferret: 'ferret-a' })).toBe(0);
+    // Five pushes that reached no one spent nothing: every one of them asked for high.
+    expect(down.urgencies).toEqual(Array.from({ length: 5 }, () => 'high'));
+  });
+
+  test('B1 a normal buzz is never counted against the cap', async () => {
+    const { w, urgencies } = await enrolled();
+    const { urgency: _urgency, ...plain } = approval('1');
+    for (let n = 0; n < 5; n += 1) await w.runtime.port.buzz({ ...plain, ferret: 'ferret-a' });
+    await w.runtime.port.buzz({ ...approval('2'), ferret: 'ferret-a' });
+    expect(urgencies).toEqual([null, null, null, null, null, 'high']);
+  });
+
+  test('a clear names tags and nothing else, and sends nothing when no tag fits', async () => {
+    const w = world();
+    const clear = w.runtime.port.clear;
+    if (clear === undefined) throw new Error('Access takes a line down');
+
+    expect(await clear(['pa-pa_0123456789abcdef01234567'], undefined, 'f1')).toBe(0);
+    expect(await clear(['two words'])).toBe(0);
+    expect(await clear([], 'device_1')).toBe(0);
   });
 });

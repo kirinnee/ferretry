@@ -3,7 +3,7 @@
  * contract's journal, index and archive registry, and nothing on disk. The folder outlives the storage, so a test can
  * open a second storage on the same files (a restart), plant a damaged file, or read what was written.
  */
-import type { Log, LogFields } from '@ferretry/kernel/contract';
+import type { Log, LogFields, StatePort } from '@ferretry/kernel/contract';
 import { state as hostState } from '@ferretry/kernel/host';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import {
@@ -56,6 +56,8 @@ export interface MemoryStorageOptions {
   readonly log?: Log;
   readonly index?: (folder: MemoryStateFolder) => SessionIndex;
   readonly serial?: YieldingSerialExecutor;
+  /** Wraps the state port the storage reads and writes through (a read that fails on cue). */
+  readonly wrapState?: (port: StatePort) => StatePort;
 }
 
 export interface MemoryStorage {
@@ -68,9 +70,9 @@ export interface MemoryStorage {
 export async function memoryStorage(options: MemoryStorageOptions = {}): Promise<MemoryStorage> {
   const folder = options.folder ?? new MemoryStateFolder();
   const log = options.log ?? new RecordingLog();
-  const state = folder.port(SESSION_STORE_FILES);
+  const port = folder.port(SESSION_STORE_FILES);
   const storage = new DaemonStorage(
-    state,
+    options.wrapState?.(port) ?? port,
     options.clock ?? { now: () => T0 },
     log,
     options.index?.(folder),
