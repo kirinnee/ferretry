@@ -111,7 +111,13 @@ that is not there). Three rules, in order:
    effect alone, and the held edit, changed, stays held. A WHOLE text is the caller's whole text and replaces the held
    edit. The lessons settings and the default-account lines (`accounts.yaml`) go through `writeAsOwner` (with only
    the changed keys, or lines, beside a held edit). In every case the caller's change is judged against the version
-   in effect alone, so a person changing one field never puts another caller's held edit into effect. What is asked
+   in effect alone. The held edit, changed too, is then judged afresh against the new version in effect and stays held
+   while it still loosens it, so a person changing one field puts another caller's held edit into effect only by making
+   it harmless — never by confirming it. Beside a held REMOVAL that happens when the change leaves removing the file no
+   longer a loosening (a confirmed raise of a limit the removal would lower): the caller's change is answered written,
+   but the other caller's held removal goes into effect with it, and the file ends at the defaults, never at a
+   loosening. A patch made beside a held NEW file (no version in effect yet) creates the version in effect from the
+   defaults plus that patch. What is asked
    of that change differs by call. `writeAsCaller`: a loosening of its own asks Gate's judge, a secret reference it
    adds asks the owner question, and one that only the held version names is never the caller's to confirm. `write`
    and `writeAsOwner`: a loosening of their own asks Gate's judge, and a secret reference they add is always held
