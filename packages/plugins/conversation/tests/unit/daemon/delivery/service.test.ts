@@ -2109,6 +2109,18 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
     should(built.repository.transitions.at(-1)).match({ event: 'turn.started', turn: 5 });
   });
 
+  for (const reason of ['landing_unconfirmed', 'typed_not_submitted'] as const) {
+    it(`B187 starts the reserved turn when an Enter takes a send unconfirmed as ${reason}, the session already on that turn`, async () => {
+      // `reserved` only matters when the session's counter already equals the send's turn (target.turn === turn).
+      const built = parts(target({ status: 'running', turn: 5 }), [pane({ draft: POINTER })]);
+      built.ledger.records.set('send-0', unconfirmed({ unaccountedReason: reason, typedNotSent: true }));
+
+      await built.service.finishOwnDraft(ID);
+
+      should(built.repository.transitions.at(-1)).match({ event: 'turn.started', turn: 5 });
+    });
+  }
+
   it('presses nothing when another unsettled send could equally be what the box holds (review)', async () => {
     const paste = (sendId: string, message: string) =>
       unconfirmed({ sendId, path: 'native-inline', message, matchText: message, turn: undefined });

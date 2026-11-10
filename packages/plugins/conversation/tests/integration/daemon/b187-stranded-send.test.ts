@@ -225,4 +225,24 @@ describe('B187 a stranded direct send', () => {
     expect(world.events().filter(event => event === 'control.send_typed_not_sent')).toHaveLength(1);
     await world.host.stop();
   });
+
+  test('B187 a retry of a raised send id still answers send_unconfirmed, never delivered, and types nothing again', async () => {
+    const world = await rig();
+    const { ferrets, advance } = world;
+    const row = await strandedSend(world, 's-nelly');
+    const text = row?.matchText ?? MESSAGE;
+    ferrets.pane.enterTakes = false;
+    await advance(11 * MINUTE);
+    ferrets.pane.draft = text;
+    await advance(10 * MINUTE);
+    expect(await world.stored('s-nelly')).toMatchObject({ unaccountedReason: 'typed_not_submitted' });
+    const typedBefore = ferrets.pane.typed.length;
+
+    // The sender never saw an answer and sends the SAME id again: the message is still unsent in the box.
+    const again = await world.api().send(F1, { kind: 'ferret', ferret: F2 }, { message: MESSAGE, sendId: 's-nelly' });
+
+    expect(again).toMatchObject({ ok: false, error: { code: 'send_unconfirmed' } });
+    expect(ferrets.pane.typed).toHaveLength(typedBefore);
+    await world.host.stop();
+  });
 });
