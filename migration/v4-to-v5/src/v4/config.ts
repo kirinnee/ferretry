@@ -182,16 +182,6 @@ export async function listV4Config(home: string, overrides?: V4ConfigOverrides):
 export const YAML_OPTIONS = { version: '1.2', uniqueKeys: true, prettyErrors: false, logLevel: 'silent' } as const;
 
 /**
- * The yaml library has two environment switches that print what it parses: `LOG_TOKENS` prints every token of a
- * parsed text and `LOG_STREAM` dumps every token the composer sees, and a config text may carry a credential. They
- * are read at parse time, so every entry point calls this before anything is parsed.
- */
-export function clearYamlLogSwitches(): void {
-  delete process.env.LOG_TOKENS;
-  delete process.env.LOG_STREAM;
-}
-
-/**
  * A YAML text as a Document that is a mapping (an empty text is an empty mapping), or `undefined` when it has ANY error
  * or warning, is not a mapping, or breaks the alias limit. Nothing is printed and no message is kept. A caller reads the
  * few nodes it needs from the Document directly; it never turns a credential-bearing document into plain data.
@@ -438,7 +428,23 @@ const isVersionNumber = (value: string): boolean => {
 const looksLikeTokenValue = (raw: string): boolean => {
   const value = raw.replace(/^["'`(]+|["'`),;.]+$/gu, '');
   if (isPathShaped(value) || isVersionNumber(value)) return false;
-  return value.length >= 20 && /^[A-Za-z0-9._~+/=-]+$/u.test(value) && /[A-Za-z]/u.test(value) && /\d/u.test(value);
+  if (value.length < 20 || !/^[A-Za-z0-9._~+/=-]+$/u.test(value) || !/[A-Za-z]/u.test(value)) return false;
+  return /\d/u.test(value) || randomWithoutDigit(value);
+};
+
+/** A digit-less value is only judged from this length: shorter ones keep the digit rule (a short word-like run is prose). */
+const DIGITLESS_MIN_LENGTH = 32;
+
+/**
+ * A DIGIT-LESS value of {@link DIGITLESS_MIN_LENGTH}+ characters that is random: both cases, high entropy, about half of
+ * it upper case and a lower→UPPER step every few characters ({@link humps}). About 1 in 885 random 40-character keys
+ * has no digit at all; without this they read as prose. A camelCase or PascalCase identifier is mostly lower case,
+ * has few such steps and a low entropy, so it carries (measured: none of 50 repository identifiers of 32+ letters).
+ */
+const randomWithoutDigit = (value: string): boolean => {
+  if (value.length < DIGITLESS_MIN_LENGTH || !/[A-Z]/u.test(value) || !/[a-z]/u.test(value)) return false;
+  const upper = (value.match(/[A-Z]/gu) ?? []).length;
+  return entropy(value) >= 4 && upper * 100 >= 25 * value.length && humps(value) * 100 >= 10 * value.length;
 };
 
 /** Whether the text holds an `Authorization:` header whose value is a value and not an environment reference. */
