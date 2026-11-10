@@ -32,9 +32,8 @@
  *    sign-in file. What it lists is a SUPERSET of today's machine skill inventory of such a home (a plain folder and an
  *    inside link are extra: the inventory listed neither), EXCEPT where that inventory followed a link into `fleet/`:
  *    a link into the fleet's `assets/` it listed as Ferretry's, and here it is skipped (waived, because no root can name both
- *    the home and `assets/`; once Skills binds the homes (Skills unit S1) and lists `fleet/assets/skills/<name>` itself as
- *    Ferretry's, such a link is a duplicate path to the same skill and never needs following: ports-pending
- *    BEFORE-GREEN(runtimes)). It is also NARROWER than the session skill picker (that listed store links). A skill folder
+ *    the home and `assets/`; Skills lists `fleet/assets/skills/<name>` itself as Ferretry's, so such a link is a duplicate
+ *    path to the same skill and never needs following). It is also NARROWER than the session skill picker (that listed store links). A skill folder
  *    whose `SKILL.md` is a hard link is not listed: nothing could read it.
  *  - `skillManifest()` reads `SKILL.md` plain or through a link inside the home; a link out of the home is not read.
  *  - `document()` follows a link for the three documents ONLY, wherever it leads (a home-manager link into a store), as

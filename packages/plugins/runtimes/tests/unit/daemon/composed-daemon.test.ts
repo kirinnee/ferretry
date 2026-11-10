@@ -775,7 +775,7 @@ describe('the homes the composed daemon provides', () => {
     expect(port.home('00000000-0000-4000-8000-0000000000ff')).toBeUndefined();
   });
 
-  it('S1the provided port lists and reads the fleet’s installed skills through assetSkills()', async () => {
+  it('S1 the provided port lists and reads the fleet’s installed skills through assetSkills()', async () => {
     const { host, world } = await compose();
     await mkdir(join(world.fleet, 'assets', 'skills', 'review'), { recursive: true });
     await writeFile(join(world.fleet, 'assets', 'skills', 'review', 'SKILL.md'), '# review\n');
