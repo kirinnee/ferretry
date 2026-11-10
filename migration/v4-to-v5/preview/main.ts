@@ -1,10 +1,10 @@
 /**
- * bun migration/v4-to-v5/preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|wait-serving|terminal-check|proof|clean|stop> [--v4 <home>] [--target <home>]
+ * bun migration/v4-to-v5/preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|wait-serving|booting|terminal-check|proof|clean|stop> [--v4 <home>] [--target <home>]
  *
  * `guard` prints the resolved preview home after refusing one that could reach v4. `dry-run` touches nothing.
  * `start-checks` asks the host two read-only questions with the preview's exact environments and exits non-zero when either
  * fails (see start-checks.ts). `wait-serving` waits (with a stated deadline) for the preview port's `GET /healthz` to answer
- * 200, the daemon's own "serving" (see wait-serving.ts). `prepare` makes the preview home (OWNER-run, after review). `wrapper` writes `<target>/bin/fy5` and the `fy`, `fyd` and `fyd-browser-worker` shims. `proof` compares v4 with the snapshot `prepare` took. `clean` removes a
+ * 200 while the preview's own daemon lock is still held (see wait-serving.ts); `booting` exits 0 only when a process holds that lock. `prepare` makes the preview home (OWNER-run, after review). `wrapper` writes `<target>/bin/fy5` and the `fy`, `fyd` and `fyd-browser-worker` shims. `proof` compares v4 with the snapshot `prepare` took. `clean` removes a
  * marked preview home. `stop` SIGTERMs the process that holds the preview home's daemon lock. Nothing here starts a
  * daemon, a service or a terminal.
  */
@@ -19,11 +19,11 @@ import { guardTarget } from './paths.ts';
 import { PREVIEW } from './plan.ts';
 import { realRun } from './real-run.ts';
 import { startChecks, terminalCheck } from './start-checks.ts';
-import { pidsHolding, stopPreview } from './stop.ts';
-import { waitServing } from './wait-serving.ts';
+import { lockFileOf, pidsHolding, stopPreview } from './stop.ts';
+import { previewBooting, waitServing } from './wait-serving.ts';
 
 const USAGE =
-  'usage: bun preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|wait-serving|terminal-check|proof|clean|stop> [--v4 <v4 home>] [--target <preview home>]';
+  'usage: bun preview/main.ts <guard|dry-run|prepare|wrapper|start-checks|wait-serving|booting|terminal-check|proof|clean|stop> [--v4 <v4 home>] [--target <preview home>]';
 
 async function main(argv: readonly string[]): Promise<number> {
   let parsed: ReturnType<
@@ -125,10 +125,13 @@ async function main(argv: readonly string[]): Promise<number> {
         fetch: async (url, init) => await fetch(url, init),
         sleep: ms => Bun.sleep(ms),
         nowMs: () => Date.now(),
+        holders: () => pidsHolding(lockFileOf(target)),
       });
       (done.ok ? console.log : console.error)(done.sentence);
       return done.ok ? 0 : 1;
     }
+    case 'booting':
+      return (await previewBooting({ target })) ? 0 : 1;
     case 'terminal-check': {
       const done = await terminalCheck({
         target,
