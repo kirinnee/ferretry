@@ -223,6 +223,94 @@ describe('MCP setup rules', () => {
     refuses({ ...COMMAND, args: ['sk-live-abc'] });
   });
 
+  describe('one hide rule with Runtimes (R-0082 britnee #41: a catalog never carries what a runtime hides)', () => {
+    /** The message of the first issue and where it is, or null when the setup is taken. */
+    const refusal = (setup: unknown) => {
+      const result = CatalogMcpSetupSchema.safeParse(setup);
+      if (result.success) return null;
+      const issue = result.error.issues[0];
+      return { path: issue?.path ?? [], message: issue?.message ?? '' };
+    };
+    const withArgs = (args: readonly string[]) => ({ ...COMMAND, args });
+
+    it('R-0082 should refuse a URL whose user holds a password, naming the argument and never the value', () => {
+      const found = refusal(withArgs(['postgres://person:fake-pw-0000@db/x']));
+      expect(found?.path).toEqual(['args', 0]);
+      expect(found?.message).not.toContain('fake-pw-0000');
+    });
+
+    it('R-0082 should refuse a header value under a secret-named key, that is shorter than a provider key', () => {
+      for (const args of [['--header', 'X-Api-Key: fake-key-0000'], ['--header=Authorization: Basic ZmFrZTpmYWtl']]) {
+        expect(refusal(withArgs(args))?.path[0]).toBe('args');
+      }
+    });
+
+    it('R-0082 should refuse the word after a secret-named flag, whatever its length', () => {
+      const found = refusal(withArgs(['--token', 'fake-tok-0000']));
+      expect(found?.path).toEqual(['args', 1]);
+      expect(found?.message).not.toContain('fake-tok-0000');
+    });
+
+    it('R-0082 should refuse a secret-named key nested in a list, and in a config override', () => {
+      expect(refusal(withArgs(['--set=a=1,client.secret=fake-0000x,b=2']))?.path).toEqual(['args', 0]);
+      expect(refusal(withArgs(['-c', 'mcp_servers.x.env.ACCESS_TOKEN=fake-tok-000']))?.path).toEqual(['args', 1]);
+    });
+
+    it('R-0082 should refuse a secret-named flag even when a pointer comes later in the same argument', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer, written out
+      const found = refusal(withArgs(['--token', 'fake-tok-0000 ${secret:OTHER}']));
+      expect(found?.path[0]).toBe('args');
+    });
+
+    it('R-0082 should refuse a value padded after a pointer', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer, written out
+      expect(refusal({ ...COMMAND, env: { API_KEY: '${secret:X} ZmFrZTpmYWtlZmFrZQ==' } })?.path).toEqual([
+        'env',
+        'API_KEY',
+      ]);
+    });
+
+    it('R-0082 should refuse a credential written in an environment value, the address and the command', () => {
+      expect(refusal({ ...COMMAND, env: { NOTE: 'Authorization: Bearer fake-tok-0000' } })?.path).toEqual([
+        'env',
+        'NOTE',
+      ]);
+      expect(refusal({ ...COMMAND, env: { PASSWORD: 'fake-pw-0000' } })?.path).toEqual(['env', 'PASSWORD']);
+      expect(
+        refusal({ transport: 'url', url: 'https://h.example.invalid/x?sig=fake-sig-0000&token=fake-tok-000' })?.path,
+      ).toEqual(['url']);
+      expect(refusal({ ...COMMAND, command: 'run --token fake-tok-0000' })?.path).toEqual(['command']);
+      expect(
+        refusal({ transport: 'url', url: 'https://h.example.invalid', oauth: { clientId: 'ghp_aaaaaaaaaaaaaaaa' } })
+          ?.path,
+      ).toEqual(['oauth', 'clientId']);
+    });
+
+    it('R-0082 should say to use the secret store and a ${secret:NAME} environment value, in every refusal', () => {
+      const messages = [
+        refusal(withArgs(['--token', 'fake-tok-0000']))?.message,
+        refusal({ ...COMMAND, env: { PASSWORD: 'fake-pw-0000' } })?.message,
+        refusal({ transport: 'url', url: 'https://h.example.invalid/x?token=fake-tok-0000' })?.message,
+      ];
+      for (const message of messages) expect(message).toContain('${secret:NAME}');
+    });
+
+    it('R-0082 should take a whole ${secret:NAME} environment value, a clean setup, and plain flags and addresses', () => {
+      expect(CatalogMcpSetupSchema.safeParse(COMMAND).success).toBe(true);
+      expect(
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer, written out
+        CatalogMcpSetupSchema.safeParse({ ...COMMAND, env: { API_KEY: '${secret:API_KEY}', MODE: 'fast' } }).success,
+      ).toBe(true);
+      expect(
+        CatalogMcpSetupSchema.safeParse(withArgs(['--port', '8080', '--author', 'someone-long-named'])).success,
+      ).toBe(true);
+      expect(
+        CatalogMcpSetupSchema.safeParse({ transport: 'url', url: 'https://x.example/oauth/authorize?state=abc' })
+          .success,
+      ).toBe(true);
+    });
+  });
+
   it('refuses an address that is not plain http(s), or that carries a user name or password', () => {
     for (const url of [
       'javascript:alert(1)',
@@ -474,13 +562,13 @@ describe('what the security review found (PR #1166)', () => {
         false,
       ]);
     }
-    // Ordinary flags and values pass: the heuristic needs a key-like prefix, or a long value after a secret-sounding word.
-    for (const args of [
-      ['--read-only', '--title', 'a long title for this server'],
-      ['--token-file', '/run/token'],
-    ]) {
+    // Ordinary flags and values pass: the heuristic needs a key-like prefix, or a value after a secret-named flag.
+    for (const args of [['--read-only', '--title', 'a long title for this server'], ['--token-ttl']]) {
       expect(CatalogMcpSetupSchema.safeParse({ ...COMMAND, args }).success).toBe(true);
     }
+    // One rule with Runtimes, which hides the word after ANY secret-named flag, a path to a token file included:
+    // a catalog carries no such word either (the way out is an environment value, ${secret:NAME}).
+    expect(CatalogMcpSetupSchema.safeParse({ ...COMMAND, args: ['--token-file', '/run/token'] }).success).toBe(false);
   });
 
   it('binds the harness an item says it is for to its manifest line', () => {

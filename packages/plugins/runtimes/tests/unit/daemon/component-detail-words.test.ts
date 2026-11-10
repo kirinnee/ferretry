@@ -13,7 +13,8 @@ import { type CatalogFacts, componentCatalog } from '../../../daemon/lib/service
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
-import { shownWords, shownWordsEtag } from '../../../daemon/lib/service/command-line.ts';
+import { shownWords } from '@ferretry/core-vault/contract';
+import { shownWordsEtag } from '../../../daemon/lib/service/shown-words-etag.ts';
 import { HIDDEN, nestedBreach, nestedFamily } from './command-line-family.ts';
 
 const FAKE_SECRET = 'not-a-real-secret-0000';

@@ -7,9 +7,14 @@
  *
  * Do not edit this to follow 5.0. It is a floor.
  */
-import { MIN_SECRET_VALUE_LENGTH, secretReferencePattern } from '@ferretry/core-vault/contract';
+import {
+  looksSecret,
+  MIN_SECRET_VALUE_LENGTH,
+  pointsElsewhere,
+  secretNamed,
+  secretReferencePattern,
+} from '@ferretry/core-vault/contract';
 import { HIDDEN_WORD_TEXT } from '../../../contract/index.ts';
-import { looksSecret, pointsElsewhere, secretNamed } from '../../../daemon/lib/account/import.ts';
 
 /** A word that is a flag on its own: one or two dashes and a name, with no value in it. */
 const FLAG_WORD = /^-{1,2}[A-Za-z0-9][^=\s]*$/u;

@@ -15,6 +15,7 @@
  * edit keeps it with `{ keep: true, at }` against the list's etag.
  * Every object is strict. Shapes owned by other subsystems come from `./shared.ts`.
  */
+import { HIDDEN_WORD_TEXT } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import { ApplyOutcomeSchema, DocumentSummarySchema, ProposalIdSchema, WriteOperationSchema } from './changes.ts';
 import {
@@ -205,8 +206,8 @@ export const EnvEntrySchema = z.union([
 ]);
 export type EnvEntry = z.infer<typeof EnvEntrySchema>;
 
-/** What stands in a command-line word for the value that is not shown, and so can never be typed as one. */
-export const HIDDEN_WORD_TEXT = '‹hidden›';
+/** What stands in a command-line word for the value that is not shown, and so can never be typed as one (the Vault contract's). */
+export { HIDDEN_WORD_TEXT };
 
 /**
  * One launch flag or MCP argument as it may travel: as written, or — when it carries a credential — the fact that it

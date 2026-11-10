@@ -43,10 +43,11 @@
  *
  * Pure.
  */
-import { MIN_SECRET_VALUE_LENGTH, secretReferencePattern } from '@ferretry/core-vault/contract';
-import { HIDDEN_WORD_TEXT } from '../../../contract/index.ts';
-import { looksSecret, pointsElsewhere, secretNamed } from '../account/import.ts';
-import { sha256Hex } from '../foreign.ts';
+import { looksSecret, pointsElsewhere, secretNamed } from './credential-words.ts';
+import { MIN_SECRET_VALUE_LENGTH, secretReferencePattern } from './secrets.ts';
+
+/** What stands in a command-line word for the value that is not shown, and so can never be typed as one. */
+export const HIDDEN_WORD_TEXT = '‹hidden›';
 
 /** A word that is a flag on its own: one or two dashes and a name, with no value in it. */
 const FLAG_WORD = /^-{1,2}[A-Za-z0-9][^=\s]*$/u;
@@ -518,10 +519,18 @@ export const shownWords = (words: readonly string[], first?: string): readonly S
   words.map((word, index) => shownWord(word, index === 0 ? first : words[index - 1]));
 
 /**
- * The etag of a list of words AS SHOWN: what an edit that keeps a hidden word by its position is checked against. It
- * is made of the shown words only, so it carries nothing the same read does not already show; it moves when a word is
- * added, removed, moved or changed where it can be seen. A hidden value retyped in place is kept as it now is, as an
- * environment `{ keep: true }` keeps the value the component has when the edit lands.
+ * Whether a command line holds a credential ANYWHERE: the index of the first word the rule hides, or -1. `first` is the
+ * word before the first (an MCP command). What Catalogs refuses on publish is exactly what Runtimes hides on read, so a
+ * setup that reads clean on this machine reads clean on the installer's.
  */
-export const shownWordsEtag = (shown: readonly ShownWord[]): string =>
-  sha256Hex(JSON.stringify(shown.map(word => [word.text, word.hidden])));
+export const firstHiddenWord = (words: readonly string[], first?: string): number =>
+  shownWords(words, first).findIndex(word => word.hidden);
+
+/**
+ * Whether one environment entry holds a credential written out. The entry is read as the flag `--x-NAME=value`, the
+ * glued reading a launch flag has (the `x-` only so a name that starts with `_` is still a flag's), so its name is judged
+ * as a flag's name is, a token anywhere in the value is cut, and a secret-named key nested in the value counts
+ * (`NAME=Authorization: Bearer v`). A whole `${secret:NAME}` pointer holds none.
+ */
+export const envEntryHidden = (name: string, value: string): boolean =>
+  shownWord(`--x-${name}=${value}`, undefined).hidden;

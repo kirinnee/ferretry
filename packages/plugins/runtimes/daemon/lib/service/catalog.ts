@@ -40,7 +40,7 @@ import {
   type SkippedLayer,
 } from '../account/layering.ts';
 import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
-import { freeName, looksSecret, SECRET_TOKEN_SOURCE } from '../account/import.ts';
+import { freeName } from '../account/import.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -69,13 +69,13 @@ import type {
   SettingsEntry,
   StackView,
 } from '../../../contract/index.ts';
-import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
+import { looksSecret, MIN_SECRET_VALUE_LENGTH, SECRET_TOKEN_SOURCE, shownWords } from '@ferretry/core-vault/contract';
 import { claudeFastSupport, harnessKey, scopeKey } from './foreign.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
 import { runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
-import { shownWords, shownWordsEtag } from './command-line.ts';
+import { shownWordsEtag } from './shown-words-etag.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 

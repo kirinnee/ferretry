@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { looksSecret } from '@ferretry/core-vault/contract';
 import should from 'should';
 import {
   declaredModelIds,
@@ -7,7 +8,6 @@ import {
   type HostDocumentRead,
   type HostHarnessScan,
   type ImportPlan,
-  looksSecret,
   mergeImport,
   mergeImportRecord,
   planImport,

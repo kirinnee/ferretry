@@ -14,7 +14,7 @@ import {
   isRuntimeName,
   resolveDefaultRuntime,
 } from '../account/schema.ts';
-import { componentFilePath, freeName, looksSecret } from '../account/import.ts';
+import { componentFilePath, freeName } from '../account/import.ts';
 import { credentialHarnesses } from '../account/halves.ts';
 import {
   describeScopeConflict,
@@ -29,7 +29,8 @@ import {
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
-import { type ShownWord, shownWords, shownWordsEtag } from './command-line.ts';
+import { looksSecret, type ShownWord, shownWords } from '@ferretry/core-vault/contract';
+import { shownWordsEtag } from './shown-words-etag.ts';
 import { slugName } from '../account/document.ts';
 import { holdsControlCharacter, INSTRUCTIONS_TEXT_LIMIT } from '../../../contract/index.ts';
 import type {

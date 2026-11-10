@@ -7,7 +7,7 @@
  *
  * Do not edit this to follow 5.0. It is a floor.
  */
-import { looksSecret } from '../../../daemon/lib/account/import.ts';
+import { looksSecret } from '@ferretry/core-vault/contract';
 
 const RESOLVED_HIDDEN_TEXT = '‹hidden›';
 

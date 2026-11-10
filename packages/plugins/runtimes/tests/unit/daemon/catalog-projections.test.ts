@@ -25,7 +25,8 @@ import {
 } from '../../../daemon/lib/service/catalog.ts';
 import { type AccountModel, type AccountModelDocument, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { MachineAuthority } from '../../../contract/index.ts';
-import { shownWords, shownWordsEtag } from '../../../daemon/lib/service/command-line.ts';
+import { shownWords } from '@ferretry/core-vault/contract';
+import { shownWordsEtag } from '../../../daemon/lib/service/shown-words-etag.ts';
 import { builtInModelCatalogs, builtInPresets } from '../lib/fixtures/built-ins.ts';
 
 const DIGEST = `sha256:${'0'.repeat(64)}`;

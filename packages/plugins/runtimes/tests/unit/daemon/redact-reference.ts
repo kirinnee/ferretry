@@ -1,4 +1,4 @@
-import { looksSecret } from '../../../daemon/lib/account/import.ts';
+import { looksSecret } from '@ferretry/core-vault/contract';
 
 /**
  * `redactText` exactly as it stood in 4.291.5 before the line-break and linearity work

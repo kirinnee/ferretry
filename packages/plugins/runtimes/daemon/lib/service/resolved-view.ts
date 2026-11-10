@@ -19,8 +19,7 @@
  */
 import { type Conflict, type FlatLayer, type ResolvedProfile, settingsKey } from '../account/layering.ts';
 import { harnessKey } from './foreign.ts';
-import { looksSecret } from '../account/import.ts';
-import { shownWord, shownWords } from './command-line.ts';
+import { looksSecret, shownWord, shownWords } from '@ferretry/core-vault/contract';
 import type { ResolvedEntry, ResolvedField, ResolvedSetter } from '../../../contract/index.ts';
 
 /** What a hidden value is replaced by. */
