@@ -1179,4 +1179,22 @@ describe('the buzz port', () => {
     // Within the caps it is delivered to nobody (no enrolment), and throws nothing.
     expect(await w.runtime.port.buzz(buzz)).toBe(0);
   });
+
+  test('a high-priority buzz that expires carries its urgency and seconds left, and still reaches no one without an enrolment', async () => {
+    const w = world();
+    const buzz = { tag: 'pa-pa_0123456789abcdef01234567', title: 'Approve on your phone', body: 'Tap 42', url: '/' };
+
+    expect(await w.runtime.port.buzz({ ...buzz, urgency: 'high', ttlSeconds: 90 })).toBe(0);
+    await expect(w.runtime.port.buzz({ ...buzz, ttlSeconds: -1 })).rejects.toThrow();
+  });
+
+  test('a clear names tags and nothing else, and sends nothing when no tag fits', async () => {
+    const w = world();
+    const clear = w.runtime.port.clear;
+    if (clear === undefined) throw new Error('Access takes a line down');
+
+    expect(await clear(['pa-pa_0123456789abcdef01234567'], undefined, 'f1')).toBe(0);
+    expect(await clear(['two words'])).toBe(0);
+    expect(await clear([], 'device_1')).toBe(0);
+  });
 });

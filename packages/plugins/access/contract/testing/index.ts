@@ -20,11 +20,15 @@ const refusingVerifier: PasskeyVerifier = {
 };
 
 /** An in-memory `AccessApi` that records every buzz. */
-export function fakeAccess(options: FakeAccessOptions = {}): AccessApi & { readonly buzzes: readonly unknown[] } {
+export function fakeAccess(
+  options: FakeAccessOptions = {},
+): AccessApi & { readonly buzzes: readonly unknown[]; readonly clears: readonly unknown[] } {
   const devices = (options.devices ?? []).map(device => PairedDeviceSchema.parse(device));
   const buzzes: unknown[] = [];
+  const clears: unknown[] = [];
   return {
     buzzes,
+    clears,
     devices: async () => [...devices],
     passkeys: options.passkeys ?? refusingVerifier,
     holdsPasskey: async deviceId => (options.withPasskeys ?? []).includes(deviceId),
@@ -45,6 +49,14 @@ export function fakeAccess(options: FakeAccessOptions = {}): AccessApi & { reado
     },
     buzz: async message => {
       buzzes.push(BuzzSchema.parse(message));
+      return options.enrolments ?? 0;
+    },
+    clear: async (tags, except, ferret) => {
+      clears.push({
+        tags: [...tags],
+        ...(except === undefined ? {} : { except }),
+        ...(ferret === undefined ? {} : { ferret }),
+      });
       return options.enrolments ?? 0;
     },
   };

@@ -33,6 +33,8 @@ import {
   type AccessApi,
   type ConnectionAdvertisement,
   type Buzz,
+  BuzzSchema,
+  PUSH_URGENT_TTL_SECONDS,
   DevicesChanged,
   PairedDeviceIdSchema,
   PairingDeviceNameSchema,
@@ -70,7 +72,7 @@ import {
   type Ed25519Verifier,
   verifyDeviceProof,
 } from './lib/proof/device-proof.ts';
-import { buzzPayload, PairedPushDevices, PushService } from './lib/push/index.ts';
+import { buzzPayload, clearPayload, PairedPushDevices, PushService } from './lib/push/index.ts';
 import { pairingRoutes } from './lib/routes/pairing.ts';
 import { pushRoutes } from './lib/routes/push.ts';
 import { stepUpRoutes } from './lib/routes/step-up.ts';
@@ -474,7 +476,20 @@ export class AccessRuntime {
       await (await this.ready()).stepUp.verifyStoredProof(proof, expectedChallenge),
     buzz: async (message: Buzz) => {
       const { push } = await this.ready();
-      const result = await push.notify({ payload: buzzPayload(message) });
+      // Parsed here, not trusted: an urgency or a hold time outside the schema is refused at the sender.
+      const buzz = BuzzSchema.parse(message);
+      const result = await push.notify({
+        payload: buzzPayload(buzz),
+        ...(buzz.urgency === undefined ? {} : { urgency: buzz.urgency }),
+        ...(buzz.ttlSeconds === undefined ? {} : { ttlSeconds: Math.min(buzz.ttlSeconds, PUSH_URGENT_TTL_SECONDS) }),
+      });
+      return result.delivered;
+    },
+    clear: async (tags, except, ferret) => {
+      const { push } = await this.ready();
+      const payload = clearPayload(tags, ferret);
+      if (payload === undefined) return 0;
+      const result = await push.notify({ payload, ...(except === undefined ? {} : { exceptDevice: except }) });
       return result.delivered;
     },
   };
