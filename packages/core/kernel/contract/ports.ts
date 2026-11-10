@@ -882,7 +882,9 @@ export interface RootHandle {
    * descriptors), so a host with neither refuses `no_descriptor_reach` and moves nothing. `from` must exist and nothing may be at `to`
    * (`outside`, never overwritten; a look then the move, a declared GAP). Each end's parent folder must already exist
    * (`rename` makes none, as `writeText` does): a missing parent, or one that is a file, is `changed`, and a link on
-   * the way to either end is `link_escape`, on the testing host as on the real one. There is no copy fallback: a
+   * the way to either end is `link_escape` (both ends' links are judged before either parent is opened), except a link
+   * that reaches nothing, which is `changed` (its parent cannot be opened), on the testing host as on the real one.
+   * There is no copy fallback: a
    * refused move (another device, a folder into itself) is `changed`, with no path or content in it.
    */
   rename(from: FencedPath, to: FencedPath): Promise<void>;

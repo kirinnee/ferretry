@@ -257,6 +257,125 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
       await answer(() => fleet.rename(at(fleet, 'homes/alias/extra.txt'), at(fleet, 'homes/claude-a/moved.txt'))),
     ],
     ['the file stayed where it was', { ok: await kindAt(at(fleet, 'homes/claude-a/extra.txt')) }],
+    // BG-016: a link at one end beats a bad parent at the other (both ends' links are judged first), on both hosts
+    [
+      'BG-016 rename from a missing parent to a path through a link',
+      await answer(() => fleet.rename(at(fleet, 'homes/nope/extra.txt'), at(fleet, 'homes/alias/via'))),
+    ],
+    [
+      'BG-016 rename from a file used as a folder to a path through a link',
+      await answer(() => fleet.rename(at(fleet, 'homes/claude-a/settings.json/x'), at(fleet, 'homes/alias/via'))),
+    ],
+    // BG-016: a link on the way that reaches nothing is `changed`: the parent cannot be opened
+    [
+      'BG-016 linkTo a missing folder, dangling',
+      await answer(() =>
+        fleet.linkTo(at(fleet, 'homes/dangle'), {
+          root: fleet,
+          path: at(fleet, 'homes/ghost'),
+          dangling: true,
+        }),
+      ),
+    ],
+    [
+      'BG-016 rename into a folder reached through a dangling link',
+      await answer(() => fleet.rename(at(fleet, 'homes/claude-a/extra.txt'), at(fleet, 'homes/dangle/x'))),
+    ],
+    [
+      'BG-016 rename from a path through a dangling link',
+      await answer(() => fleet.rename(at(fleet, 'homes/dangle/x'), at(fleet, 'homes/claude-a/moved.txt'))),
+    ],
+    ['BG-016 the file still stayed where it was', { ok: await kindAt(at(fleet, 'homes/claude-a/extra.txt')) }],
+    // BG-016: list and entries give the DIRECT children of a folder (an empty folder made by makeDirectory too), sorted
+    [
+      'BG-016 a folder with a file, a nested file and an empty folder',
+      await answer(async () => {
+        await fleet.writeText(at(fleet, 'homes/claude-e/top.txt'), 't');
+        await fleet.writeText(at(fleet, 'homes/claude-e/sub/deep.txt'), 'd');
+        await fleet.makeDirectory(at(fleet, 'homes/claude-e/lonely'));
+      }),
+    ],
+    ['BG-016 list gives the direct children only', await answer(() => fleet.list(at(fleet, 'homes/claude-e')))],
+    [
+      'BG-016 entries give the direct children only',
+      await answer(async () => (await fleet.entries(at(fleet, 'homes/claude-e'))).map(item => [item.name, item.kind])),
+    ],
+    ['BG-016 list a nested folder', await answer(() => fleet.list(at(fleet, 'homes/claude-e/sub')))],
+    // BG-016: realPath resolves a link to where it points; one that reaches nothing, or leaves the root, is refused
+    [
+      'BG-016 linkTo a folder inside, for the realPath rows',
+      await answer(() => fleet.linkTo(at(fleet, 'homes/inside'), { root: fleet, path: at(fleet, 'homes/claude-e') })),
+    ],
+    [
+      'BG-016 realPath of a link to a folder is the folder’s',
+      await answer(
+        async () =>
+          (await fleet.realPath(at(fleet, 'homes/inside'))) === (await fleet.realPath(at(fleet, 'homes/claude-e'))),
+      ),
+    ],
+    [
+      'BG-016 realPath of a path through that link is the real file’s',
+      await answer(
+        async () =>
+          (await fleet.realPath(at(fleet, 'homes/inside/top.txt'))) ===
+          (await fleet.realPath(at(fleet, 'homes/claude-e/top.txt'))),
+      ),
+    ],
+    ['BG-016 list through that link', await answer(() => fleet.list(at(fleet, 'homes/inside')))],
+    [
+      'BG-016 realPath of a dangling link',
+      await answer(async () => {
+        try {
+          await fleet.realPath(at(fleet, 'homes/dangle'));
+          return 'resolved';
+        } catch (error) {
+          if (error instanceof RootError) throw error;
+          return 'threw';
+        }
+      }),
+    ],
+    [
+      'BG-016 linkTo a harness file, for the leaving-the-root row',
+      await answer(() => fleet.linkTo(at(fleet, 'homes/outward'), credential)),
+    ],
+    [
+      'BG-016 realPath of a link that leaves the root',
+      await answer(async () => {
+        try {
+          await fleet.realPath(at(fleet, 'homes/outward'));
+          return 'resolved';
+        } catch (error) {
+          if (error instanceof RootError) throw error;
+          return 'threw';
+        }
+      }),
+    ],
+    // BG-016: a link whose target is a link (a chain A -> B -> C) is followed to its end, as `realpath` does
+    [
+      'BG-016 a file at the end of the chain',
+      await answer(() => fleet.writeText(at(fleet, 'homes/chain-c/f.txt'), 'c')),
+    ],
+    [
+      'BG-016 a file at the middle of the chain',
+      await answer(() => fleet.writeText(at(fleet, 'homes/chain-b/x.txt'), 'b')),
+    ],
+    [
+      'BG-016 linkTo the head of the chain',
+      await answer(() => fleet.linkTo(at(fleet, 'homes/chain-a'), { root: fleet, path: at(fleet, 'homes/chain-b') })),
+    ],
+    ['BG-016 remove the middle of the chain', await answer(() => fleet.remove(at(fleet, 'homes/chain-b')))],
+    [
+      'BG-016 linkTo the end of the chain from the middle',
+      await answer(() => fleet.linkTo(at(fleet, 'homes/chain-b'), { root: fleet, path: at(fleet, 'homes/chain-c') })),
+    ],
+    [
+      'BG-016 rename into a folder reached through a link to a link',
+      await answer(() => fleet.rename(at(fleet, 'homes/claude-a/extra.txt'), at(fleet, 'homes/chain-a/moved.txt'))),
+    ],
+    [
+      'BG-016 rename from a path through a link to a link',
+      await answer(() => fleet.rename(at(fleet, 'homes/chain-a/f.txt'), at(fleet, 'homes/claude-a/moved2.txt'))),
+    ],
     ['unlink a file', await answer(() => fleet.unlink(settings))],
     ['the file is still there', { ok: await kindAt(settings) }],
     ['unlink a missing name', await answer(() => fleet.unlink(at(fleet, 'homes/claude-a/none')))],
@@ -419,6 +538,30 @@ test('roots part 2 parity: linkTo, setMode and harnessFile answer every case ali
   expect(byCase['rename into a folder reached through a link']).toEqual({ refused: 'link_escape' });
   expect(byCase['rename from a path through a link']).toEqual({ refused: 'link_escape' });
   expect(byCase['the file stayed where it was']).toEqual({ ok: 'file' });
+  // BG-016: the real host's order and codes, so the testing host cannot drift from them
+  expect(byCase['BG-016 rename from a missing parent to a path through a link']).toEqual({ refused: 'link_escape' });
+  expect(byCase['BG-016 rename from a file used as a folder to a path through a link']).toEqual({
+    refused: 'link_escape',
+  });
+  expect(byCase['BG-016 rename into a folder reached through a dangling link']).toEqual({ refused: 'changed' });
+  expect(byCase['BG-016 rename from a path through a dangling link']).toEqual({ refused: 'changed' });
+  expect(byCase['BG-016 the file still stayed where it was']).toEqual({ ok: 'file' });
+  expect(byCase['BG-016 list gives the direct children only']).toEqual({ ok: ['lonely', 'sub', 'top.txt'] });
+  expect(byCase['BG-016 entries give the direct children only']).toEqual({
+    ok: [
+      ['lonely', 'directory'],
+      ['sub', 'directory'],
+      ['top.txt', 'file'],
+    ],
+  });
+  expect(byCase['BG-016 list a nested folder']).toEqual({ ok: ['deep.txt'] });
+  expect(byCase['BG-016 realPath of a link to a folder is the folder’s']).toEqual({ ok: true });
+  expect(byCase['BG-016 realPath of a path through that link is the real file’s']).toEqual({ ok: true });
+  expect(byCase['BG-016 list through that link']).toEqual({ ok: ['lonely', 'sub', 'top.txt'] });
+  expect(byCase['BG-016 realPath of a dangling link']).toEqual({ ok: 'threw' });
+  expect(byCase['BG-016 realPath of a link that leaves the root']).toEqual({ refused: 'link_escape' });
+  expect(byCase['BG-016 rename into a folder reached through a link to a link']).toEqual({ refused: 'link_escape' });
+  expect(byCase['BG-016 rename from a path through a link to a link']).toEqual({ refused: 'link_escape' });
   expect(byCase['rename a folder holding only a link']).toEqual({ ok: null });
   expect(byCase['the only link is at the new place']).toEqual({ ok: 'symlink' });
   expect(byCase['the only link is gone from the old place']).toEqual({ ok: null });
