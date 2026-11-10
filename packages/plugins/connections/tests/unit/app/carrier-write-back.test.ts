@@ -9,11 +9,12 @@
  * the stored set is proved against the real `daemonCarriers`.
  */
 import { describe, expect, test } from 'bun:test';
-import type { PairedDaemon } from '@ferretry/app';
-import { noteClientDaemon } from '@ferretry/app/testing';
+import type { ConnectPorts, PairedDaemon } from '@ferretry/app';
+import { noteClientDaemon, render, run, runAsync } from '@ferretry/app/testing';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { createElement } from 'react';
 import { daemonCarriers } from '../../../app/carriers/router.ts';
-import { buildConnectionsApp } from '../../../app/index.ts';
+import connections, { buildConnectionsApp, carrierWriteBackView } from '../../../app/index.ts';
 import { carrierWriteBack, type StoredCarrierSets } from '../../../app/lib/carrier-write-back.ts';
 import { CarriersChanged, type PublishedCarriers } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
@@ -133,10 +134,12 @@ describe('the stored carrier set is replaced by the daemon’s answer', () => {
   });
 });
 
-describe('the app half writes back after the daemon answers', () => {
+describe('the background view writes back after the daemon answers, with no Connections screen drawn', () => {
+  /** A client whose `CarriersChanged` and feed-live listeners are counted, so a leak is a number. */
   function fakeClient(answers: unknown[]) {
     const calls: string[] = [];
-    let changed: (() => void) | undefined;
+    const changed = new Set<() => void>();
+    const live = new Set<(live: boolean) => void>();
     const client = {
       call: async (route: string) => {
         calls.push(route);
@@ -145,35 +148,123 @@ describe('the app half writes back after the daemon answers', () => {
         return next;
       },
       subscribe: (event: { readonly name: string }, listener: () => void) => {
-        if (event.name === CarriersChanged.name) changed = listener;
-        return () => undefined;
+        if (event.name !== CarriersChanged.name) return () => undefined;
+        changed.add(listener);
+        return () => void changed.delete(listener);
+      },
+      feed: {
+        isLive: () => true,
+        subscribeLive: (listener: (live: boolean) => void) => {
+          live.add(listener);
+          return () => void live.delete(listener);
+        },
       },
     } as unknown as PluginClient;
-    return { client, calls, change: () => changed?.() };
+    return {
+      client,
+      calls,
+      change: () => void [...changed].forEach(listener => void listener()),
+      feed: (isLive: boolean) => void [...live].forEach(listener => void listener(isLive)),
+      listeners: () => changed.size + live.size,
+    };
   }
-  const settle = () => new Promise(resolve => setTimeout(resolve, 5));
+  const settle = () => runAsync(async () => void (await new Promise(resolve => setTimeout(resolve, 5))));
+  /** The background view as the shell mounts it for one paired daemon: nothing else of Connections is drawn. */
+  const mountWatcher = (fake: ReturnType<typeof fakeClient>, list: StoredCarrierSets) => {
+    const View = carrierWriteBackView(() => carrierWriteBack(list));
+    return render(createElement(View, { daemon: DAEMON, client: fake.client }));
+  };
 
-  test('P51 R186 R210 building the half reads GET /v1/carriers and replaces the stored set; a change event refreshes it again', async () => {
+  test('P51 R186 R198 R210 the stored set is replaced on mount, on a change event and when the feed goes live again, with no view drawn', async () => {
     const p = paired([DIRECT, SELF]);
-    const fake = fakeClient([{ carriers: [DIRECT, HOSTED] }, { carriers: [DIRECT, SECOND] }]);
-    noteClientDaemon(fake.client, DAEMON);
-    buildConnectionsApp({ manifest, client: fake.client }, undefined, undefined, carrierWriteBack(p.list));
+    const fake = fakeClient([{ carriers: [DIRECT, HOSTED] }, { carriers: [DIRECT, SECOND] }, { carriers: [DIRECT] }]);
+    mountWatcher(fake, p.list);
     await settle();
+    // On mount: the daemon's answer replaces the set, and the relay it withdrew (SELF) is pruned (R198).
     expect(fake.calls).toEqual(['GET /v1/carriers']);
     expect(stored(p.list)).toEqual([DIRECT, HOSTED]);
+    expect(daemonCarriers(p.list.get(DAEMON)!).some(m => m.kind === 'relay' && m.relayUrl === SELF.url)).toBe(false);
+    // The daemon says its carriers changed.
     fake.change();
     await settle();
     expect(stored(p.list)).toEqual([DIRECT, SECOND]);
+    // The feed drops (nothing to read) and comes back live (v4's `carrier.onConnected`): the answer is read again.
+    fake.feed(false);
+    await settle();
+    expect(fake.calls).toHaveLength(2);
+    fake.feed(true);
+    await settle();
+    expect(fake.calls).toHaveLength(3);
+    expect(stored(p.list)).toEqual([DIRECT]);
+  });
+
+  test('P51 R186 R198 R210 the half Connections hands the shell mounts the write-back as a background view, wired to the shell’s stored list', async () => {
+    const p = paired([DIRECT, SELF]);
+    const ports = {
+      openSocket: () => {
+        throw new Error('nothing dials here');
+      },
+      after: () => {},
+      now: () => 0,
+      daemons: { registerCache: () => () => {}, get: p.list.get, setCarriers: p.list.setCarriers },
+    } as unknown as ConnectPorts;
+    const shell = (connections as unknown as { shell: import('@ferretry/app').ShellProvides }).shell;
+    // The shell builds the half's connect parts once per document, and mounts what it provides as a background view.
+    (shell as Required<import('@ferretry/app').ShellProvides>).carriers(ports);
+    const view = shell.background?.['carrier-set'];
+    if (view === undefined)
+      throw new Error('Connections provides no background view: the stored set refreshes only when a screen is drawn');
+    const fake = fakeClient([{ carriers: [DIRECT, HOSTED] }]);
+    render(createElement(view, { daemon: DAEMON, client: fake.client }));
+    await settle();
+    expect(fake.calls).toEqual(['GET /v1/carriers']);
+    expect(stored(p.list)).toEqual([DIRECT, HOSTED]);
+  });
+
+  test('P51 R186 the background view unsubscribes everything on unmount, and an answer still in flight writes nothing', async () => {
+    const p = paired([DIRECT, SELF]);
+    const fake = fakeClient([{ carriers: [DIRECT, HOSTED] }]);
+    const mounted = mountWatcher(fake, p.list);
+    expect(fake.listeners()).toBe(2);
+    // Unmounted before the answer lands: the listeners are gone and the late answer is dropped.
+    run(() => mounted.unmount());
+    expect(fake.listeners()).toBe(0);
+    await settle();
+    expect(stored(p.list)).toEqual([DIRECT, SELF]);
+    // Mounting again after an unmount leaves exactly one set of listeners, not an accumulation.
+    for (let n = 0; n < 3; n += 1) {
+      const again = mountWatcher(fake, p.list);
+      expect(fake.listeners()).toBe(2);
+      run(() => again.unmount());
+    }
+    expect(fake.listeners()).toBe(0);
   });
 
   test('P51 a failed or unreadable answer leaves the stored set alone', async () => {
     const p = paired([DIRECT, SELF]);
     for (const answer of [new Error('offline'), { carriers: 'nope' }, { carriers: [], extra: 1 }]) {
       const fake = fakeClient([answer]);
-      noteClientDaemon(fake.client, DAEMON);
-      buildConnectionsApp({ manifest, client: fake.client }, undefined, undefined, carrierWriteBack(p.list));
+      mountWatcher(fake, p.list);
       await settle();
       expect(stored(p.list)).toEqual([DIRECT, SELF]);
     }
+  });
+
+  test('P51 a half rebuilt on every reconnect leaves no CarriersChanged listener, and its panel watches only while drawn', async () => {
+    const fake = fakeClient([{ carriers: [DIRECT, HOSTED] }]);
+    noteClientDaemon(fake.client, DAEMON);
+    const halves = Array.from({ length: 3 }, () => buildConnectionsApp({ manifest, client: fake.client }));
+    // Building a half reads nothing and listens to nothing: no screen is drawn.
+    await settle();
+    expect(fake.calls).toEqual([]);
+    expect(fake.listeners()).toBe(0);
+    // A drawn panel watches (one set of listeners); closing it releases them.
+    const Panel = halves[0]!.panels.carrier;
+    const mounted = render(createElement(Panel));
+    await settle();
+    expect(fake.calls).toEqual(['GET /v1/carriers']);
+    expect(fake.listeners()).toBe(2);
+    run(() => mounted.unmount());
+    expect(fake.listeners()).toBe(0);
   });
 });

@@ -1,13 +1,14 @@
-import { type ConnectPorts, daemonOfClient, provideToShell } from '@ferretry/app';
+import { type BackgroundViewProps, type ConnectPorts, daemonOfClient, provideToShell } from '@ferretry/app';
 import { implementApp, type AppContext } from '@ferretry/kernel/manifest';
-import { createElement, useSyncExternalStore } from 'react';
-import { CarriersChanged, CarriersViewSchema, type PublishedCarriers } from '../contract/index.ts';
+import { createElement, useEffect, useSyncExternalStore } from 'react';
+import type { PublishedCarriers } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { CarrierRouter } from './carriers/router.ts';
 import { bundledRelayDirectory, documentRelayDiscovery } from './discovery/hosted-relay.ts';
 import { ActiveCarrierCard } from './features/carrier/active-carrier-card.tsx';
 import { CarrierPreferenceSelector } from './features/carrier/carrier-preference-selector.tsx';
 import { CarrierPreferenceStore } from './lib/carrier-preference.ts';
+import { watchCarriers } from './lib/carrier-watch.ts';
 import { type CarrierWriteBack, carrierWriteBack } from './lib/carrier-write-back.ts';
 import {
   browserConnectionSignals,
@@ -93,37 +94,35 @@ export function buildConnectionsApp(
   ctx: AppContext<typeof manifest>,
   measurements: ConnectionMeasurements = connect?.router ?? unmeasured,
   preferences: CarrierPreferenceStore = connect?.preferences ?? new CarrierPreferenceStore(),
-  carrierSets: CarrierWriteBack | undefined = connect?.carrierSets,
 ) {
   const daemonId = daemonOfClient(ctx.client);
   /**
-   * The published set as the daemon last answered it, for every screen of this half. One refresh path: a successful
-   * answer is the connection proving itself, so it is also written back as this device's stored set. Read when the half
-   * is built for the daemon (whether or not a screen is open), and again whenever the daemon says its carriers changed.
+   * The published set as the daemon last answered it, for the screens of this half. It watches the daemon only while a
+   * screen is subscribed to it, and stops with the last one, so a half rebuilt on every reconnect leaves no listener
+   * behind. It stores nothing: the stored set is refreshed by {@link carrierWriteBackView}, which runs whatever screen
+   * is open.
    */
   const published = (() => {
     let latest: PublishedCarriers = [];
+    let stop: (() => void) | undefined;
     const listeners = new Set<() => void>();
-    const refresh = () => {
-      const adopt = daemonId === undefined ? undefined : carrierSets?.begin(daemonId);
-      void Promise.resolve()
-        .then(() => ctx.client.call('GET /v1/carriers'))
-        .then(value => {
-          const parsed = CarriersViewSchema.safeParse(value);
-          if (!parsed.success) return;
-          adopt?.(parsed.data.carriers);
-          latest = parsed.data.carriers;
-          for (const listener of [...listeners]) listener();
-        })
-        .catch(() => undefined);
-    };
-    refresh();
-    ctx.client.subscribe(CarriersChanged, refresh);
     return {
       snapshot: (): PublishedCarriers => latest,
       subscribe: (listener: () => void): (() => void) => {
         listeners.add(listener);
-        return () => void listeners.delete(listener);
+        stop ??= watchCarriers({
+          client: ctx.client,
+          onAnswer: carriers => {
+            latest = carriers;
+            for (const each of [...listeners]) each();
+          },
+        });
+        return () => {
+          listeners.delete(listener);
+          if (listeners.size > 0) return;
+          stop?.();
+          stop = undefined;
+        };
       },
     };
   })();
@@ -155,7 +154,26 @@ export function buildConnectionsApp(
   return { panels: { carrier: Panel }, settings: { connection: Preference } };
 }
 
+/**
+ * THE STORED CARRIER SET IS REFRESHED FOR EVERY PAIRED DAEMON, WHATEVER SCREEN IS OPEN (P51, R186, R198, R210).
+ *
+ * A background view: the shell mounts it ONCE PER PAIRED DAEMON at the frame root, outside the router, so it does not
+ * wait for a Connections panel or tab to be drawn (a half is built only when one of its views is). It reads
+ * `GET /v1/carriers` on mount, when the daemon says its carriers changed and when the feed comes back live (v4's
+ * `carrier.onConnected`), and replaces what this device stores for that daemon with the answer. It renders nothing, and
+ * its effect unsubscribes everything on unmount.
+ */
+export function carrierWriteBackView(
+  writeBack: () => CarrierWriteBack | undefined,
+): (props: BackgroundViewProps) => null {
+  return function CarrierWriteBackWatcher({ daemon, client }) {
+    useEffect(() => watchCarriers({ client, daemon, writeBack: writeBack() }), [client, daemon]);
+    return null;
+  };
+}
+
 export default provideToShell(implementApp(manifest, { build: ctx => buildConnectionsApp(ctx) }), {
+  background: { 'carrier-set': carrierWriteBackView(() => connect?.carrierSets) },
   carriers: ports => [connectFor(ports).router.dialer()],
   pairing: ports => connectFor(ports).pairing,
 });
