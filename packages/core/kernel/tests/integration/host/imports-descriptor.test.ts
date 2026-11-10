@@ -313,6 +313,57 @@ describe('R-0198 a folder missing at the walk and planted as a link right after 
   }
 });
 
+describe('R-0198 a base whose real path is not its spelling below the anchor is refused', () => {
+  /**
+   * The spelling check (`spellingHolds`) judged in isolation: the swap puts a link to a SIBLING folder INSIDE the project
+   * where a folder was, so the real path stays below the anchor (no "outside" proof can object) but is not the spelled
+   * path. On a host that reaches no folder by descriptor nothing else refuses a listing or a stat; the spelling rule is
+   * the guard, and its answer is `link_escape`, never the sibling's names, size or text.
+   */
+  const SIBLING = 'sibling';
+  /** The project folder at `which` and the sibling beside it holding the hostile (fake) tree of the same shape. */
+  const sibling = async (w: Awaited<ReturnType<typeof world>>, which: 'a' | 'b' | 'c'): Promise<string> => {
+    const tail = { a: 'b/c', b: 'c', c: '' }[which];
+    const beside = `${w.folders[which]}-${SIBLING}`;
+    const leaf = tail === '' ? beside : `${beside}/${tail}`;
+    await mkdir(leaf, { recursive: true });
+    await writeFile(`${leaf}/f.txt`, OUTSIDE);
+    await writeFile(`${leaf}/OUTSIDE.txt`, OUTSIDE);
+    return beside;
+  };
+  /** `planted`: when the link lands: after the look found the folder missing, or after it found the folder in place. */
+  for (const planted of ['missing', 'present'] as const) {
+    for (const host of ['noReach', 'macOSNoBracket', 'macOS', 'linux'] as const) {
+      for (const which of ['a', 'b', 'c'] as const) {
+        test(`R-0198 a base whose real path is not its spelling below the anchor is refused on every verb (${host}, ${which} ${planted} at the look, swapped for a sibling inside the project)`, async () => {
+          for (const verb of VERBS) {
+            const w = await world(disks[host]());
+            const beside = await sibling(w, which);
+            if (planted === 'missing') renameSync(w.folders[which], `${w.folders[which]}-moved`);
+            const inner = disks[host]();
+            let swapped = false;
+            const racing = {
+              ...inner,
+              lstat: async (path: string) => {
+                const found = await inner.lstat(path);
+                if (!swapped && path === w.folders[which]) {
+                  swapped = true;
+                  if (planted === 'present') renameSync(w.folders[which], `${w.folders[which]}-moved`);
+                  symlinkSync(beside, w.folders[which]);
+                }
+                return found;
+              },
+            } as HostFs;
+            const seen = await observe(w.rootFor(racing), w.scoped, verb);
+            expect(swapped).toBe(true);
+            expect(seen).toEqual({ kind: 'refused', refusal: 'link_escape' });
+          }
+        });
+      }
+    }
+  }
+});
+
 describe('R-0198 the anchor is proven once and held', () => {
   test('R-0198 the anchor swapped for a link to a same-shaped tree right after it was opened reads nothing outside (changed)', async () => {
     const w = await world();
