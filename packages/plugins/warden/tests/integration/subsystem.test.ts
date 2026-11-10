@@ -202,3 +202,76 @@ describe('the warden over the ports it is handed', () => {
     should(status.blessings.map((blessing: { ferret: string }) => blessing.ferret)).eql(['f1']);
   });
 });
+
+describe('B187 the stuck-message checks run in the sweep', () => {
+  const MINUTE = 60_000;
+
+  it('B187 the sweep runs detectStuckInput and detectInboxStuck', async () => {
+    // Arrange: nelly is idle at its prompt with a direct send of ours typed in its box (the tracker saw it), and a
+    // message waiting in Ferretry's queue long past due behind it.
+    const world = warden({ config: { enabled: true } });
+    world.ferrets.add({ id: ferretId('nelly'), name: 'nelly', mode: 'auto', state: 'idle', stateAt: T0 });
+    const typedAt = new Date(Date.parse(T0) + MINUTE).toISOString();
+    const queuedAt = new Date(Date.parse(T0) + 2 * MINUTE).toISOString();
+    const pressed: Array<{ ferret: string; caller: unknown; sendId: string }> = [];
+    Object.assign(world.conversation, {
+      sends: async () => ({
+        sends: [
+          {
+            v: 1,
+            sendId: 'send-direct',
+            acceptedAt: typedAt,
+            acceptedTurn: 1,
+            path: 'direct',
+            message: 'a message of ours',
+            attachmentIds: [],
+            fate: 'unaccounted',
+            unaccountedReason: 'landing_unconfirmed',
+            typedNotSent: true,
+            attemptAt: typedAt,
+          },
+        ],
+      }),
+      resubmitStuck: async (ferret: string, caller: unknown, sendId: string) => {
+        pressed.push({ ferret, caller, sendId });
+        return { ok: true, value: 'holding' };
+      },
+      queue: async () => ({
+        messages: [
+          {
+            v: 1,
+            id: 'queued-1',
+            sender: 'agent',
+            fromName: 'jaeda',
+            text: 'please look at this',
+            attachmentIds: [],
+            enqueuedAt: queuedAt,
+            state: 'queued',
+            stateAt: queuedAt,
+            revision: 1,
+            waitReason: 'draft',
+          },
+        ],
+      }),
+    });
+    await world.clock.advance(60 * MINUTE);
+
+    // Act: the inbox is re-checked once, and named on its notice a sweep later when that did not move it.
+    await world.routes['POST /v1/warden/run'](call('POST', '/v1/warden/run'));
+    const run = json(await world.routes['POST /v1/warden/run'](call('POST', '/v1/warden/run')));
+
+    // Assert: both checks ran through the daemon's wiring — flags, the one verified Enter by the Warden's own caller,
+    // and each notice raised as ONE standing item on the machine board.
+    const kinds = run.flags.map((flag: { kind: string; ferret: string }) => `${flag.kind}:${flag.ferret}`);
+    should(kinds).containEql('input_stuck:nelly');
+    should(kinds).containEql('inbox_stuck:nelly');
+    // The sweep's own press, and the inbox check's verified finish of the box (an unattributed draft's act).
+    should(pressed.length).be.aboveOrEqual(1);
+    for (const press of pressed)
+      should(press).eql({ ferret: 'nelly', caller: { kind: 'warden' }, sendId: 'send-direct' });
+    const notices = await world.asks.open({ source: sourceKey('daemon') });
+    const entries = notices.map(notice => notice.entry);
+    should(entries).containEql(entryId('warden:input-stuck'));
+    should(entries).containEql(entryId('warden:inbox-stuck'));
+  });
+});
