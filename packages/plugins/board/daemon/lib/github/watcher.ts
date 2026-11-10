@@ -188,10 +188,11 @@ export class GitHubWatcher {
     const claimed = new Set(cards.flatMap(card => card.links.prs.map(pr => prKey(pr.repo, pr.number))));
     const budget = { compares: MAX_COMPARES_PER_TICK };
     const written: string[] = [];
+    const index = new BoardIndex(cards, '');
     for (const card of watched) {
       if (this.stopped) break;
       const update = await this.updateFor(card, candidates.get(card.id) ?? NO_CANDIDATES, answers, claimed, budget);
-      if (!this.wouldChange(card, update, cards, laneSets)) continue;
+      if (!this.wouldChange(card, update, index, laneSets)) continue;
       if (await this.record(card, update)) written.push(card.id);
     }
     const refiled = this.stopped ? [] : await this.ports.unfiled.run(projects);
@@ -464,7 +465,7 @@ export class GitHubWatcher {
    * Whether an update would change the card, decided by the same rules the write applies, on the card as
    * this tick read it. It keeps a poll that learned nothing from costing a card write.
    */
-  private wouldChange(card: Card, update: PrUpdate, cards: readonly Card[], laneSets: LaneSets): boolean {
+  private wouldChange(card: Card, update: PrUpdate, index: BoardIndex, laneSets: LaneSets): boolean {
     const laneSet = laneSets.get(card.projectId);
     if (laneSet === undefined || cardCategory(card, laneSets) === null) return false;
     const dry = applyPrUpdate(card, update, {
@@ -472,7 +473,7 @@ export class GitHubWatcher {
       actor: { kind: 'daemon' },
       standing: 'daemon',
       laneSet,
-      index: new BoardIndex(cards, ''),
+      index,
       laneSets,
     });
     return dry.task !== null;
