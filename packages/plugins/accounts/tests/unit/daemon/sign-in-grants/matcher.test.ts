@@ -712,3 +712,89 @@ describe('matchSignInGrant: a standing rule’s own checks (R3c-4)', () => {
     should(match.ok && match.joinOnly).not.be.ok();
   });
 });
+
+describe('Appendix D: what a grant may type, and where', () => {
+  const sudoGrant = (make: typeof grant | typeof ruleGrant = ruleGrant): SignInGrant =>
+    make({
+      surface: 'terminal',
+      fields: new Set(['password']),
+      pins: {
+        placeKeys: ['sudo@kirin-box'],
+        recipeVersion: undefined,
+        identities: make === grant ? undefined : [identityOf(terminal(), 'sudo@kirin-box') as string],
+      },
+    });
+  const sudoListing = { signIns: [site({ place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } })] };
+  const secretField = [{ id: 'value', label: 'Password', sensitivity: 'secret' as const }];
+  const sudoSeen = (facts: TerminalFacts, matchKey: string | null = 'sudo@kirin-box'): GrantSighting =>
+    sighting({ facts, matchKey: matchKey ?? undefined, fields: secretField }, sudoListing);
+
+  it('I212 should type only after every check passes, and a code only when its tick is on the grant', () => {
+    // Every check but one holds and the fill still misses: nothing is typed on a partial pass.
+    for (const [seen, reason] of [
+      [{ scripted: true }, 'scripted'],
+      [{ facts: page({ challenge: { provider: 'cloudflare' } }) }, 'challenge'],
+      [{ facts: page({}, [pageField('user', { visible: false }), pageField('pass')]) }, 'field-hidden'],
+    ] as const)
+      for (const make of [grant, ruleGrant])
+        should(matchSignInGrant(make(), sighting(seen), new Map())).match({ ok: false, reason });
+    // A code card is filled only by a grant that ticked the code: without it the field is not covered.
+    const factor = {
+      id: 'tf_0123456789abcdef01234567',
+      kind: 'totp' as const,
+      label: 'App',
+      automatic: true,
+      addedAt: AT,
+      addedBy: 'owner' as const,
+    };
+    const codeCard = sighting(
+      {
+        facts: page({}, [
+          pageField('otp', { frameOrigin: 'https://github.com' }, { type: 'text', autocomplete: 'one-time-code' }),
+        ]),
+        fields: [{ id: 'otp', label: 'Code', sensitivity: 'code' }],
+      },
+      { accounts: [account({ factors: [factor] as AccountSummary['factors'] })] },
+    );
+    should(matchSignInGrant(grant({ fields: new Set(['username', 'password', 'totp']) }), codeCard, new Map())).match({
+      ok: true,
+      fills: ['totp'],
+    });
+    should(reasonOf(grant({ fields: new Set(['username', 'password']) }), codeCard)).equal('code-not-ticked');
+  });
+
+  it('I229 should fill a terminal only for sudo, su or doas on this host, password only, with the kernel proof', () => {
+    for (const make of [grant, ruleGrant]) {
+      should(reasonOf(sudoGrant(make), sudoSeen(terminal()))).equal('filled');
+      // Another program, another host, or no proof of which program: never filled.
+      should(reasonOf(sudoGrant(make), sudoSeen(terminal({ program: 'su' }), 'su@kirin-box'))).equal('not-here');
+      should(reasonOf(sudoGrant(make), sudoSeen(terminal({ program: 'ssh' }), 'ssh@kirin-box'))).oneOf(
+        'not-here',
+        'not-proved',
+      );
+      should(reasonOf(sudoGrant(make), sudoSeen(terminal(), 'sudo@other-box'))).equal('not-here');
+      should(reasonOf(sudoGrant(make), sudoSeen(terminal({ program: undefined }), null))).equal('not-here');
+      should(reasonOf(sudoGrant(make), sudoSeen(terminal({ echo: 'on' })))).equal('not-proved');
+      should(reasonOf(sudoGrant(make), sudoSeen(terminal({ trustedProgram: undefined })))).equal('not-system');
+      // Password only: a username box is never typed into a terminal.
+      const wide = { ...sudoGrant(make), fields: new Set(['username', 'password'] as const) } as SignInGrant;
+      const username = sighting(
+        {
+          facts: terminal(),
+          matchKey: 'sudo@kirin-box',
+          fields: [{ id: 'value', label: 'User', sensitivity: 'plain' }],
+        },
+        sudoListing,
+      );
+      should(reasonOf(wide, username)).equal('field-not-covered');
+    }
+  });
+
+  it('I244 should give an unverified terminal no key, so a renamed shell never becomes the one-tap', () => {
+    // A shell renamed sudo has no proved program: no match key, so no sign-in is "here" and nothing fills.
+    const renamed = terminal({ program: undefined, trustedProgram: undefined });
+    for (const make of [grant, ruleGrant]) should(reasonOf(sudoGrant(make), sudoSeen(renamed, null))).equal('not-here');
+    // With a key but no proof it still does not fill.
+    should(reasonOf(sudoGrant(), sudoSeen(renamed))).equal('not-proved');
+  });
+});
