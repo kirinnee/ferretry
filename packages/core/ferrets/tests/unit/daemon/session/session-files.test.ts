@@ -127,6 +127,36 @@ describe('GAP(composition) the environment store, task store and effect ledger a
     expect(await subject.environmentStore(FERRET).read(FERRET)).toEqual({ A: 'new-credential-fixture' });
   });
 
+  test('M6b removeEnvironment waits on the ferret’s serial queue: a start that is still writing its new environment is not undone', async () => {
+    // Arrange: a start holds the ferret's queue. It writes the new credential, then (still inside the queue) the
+    // registry flips to running, but only once the gate opens.
+    const kernel = await wired();
+    const { subject } = await files(kernel.roots);
+    let ended = true;
+    let openGate: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => (openGate = resolve));
+    let written: () => void = () => undefined;
+    const wroteNew = new Promise<void>(resolve => (written = resolve));
+    const starting = subject.serial.run(FERRET, async () => {
+      await subject.environmentStore(FERRET).write(FERRET, { A: 'new-credential-fixture' });
+      written();
+      await gate;
+      ended = false;
+    });
+    await wroteNew;
+
+    // Act: the end path asks to remove the file while the start is still in the queue, then the start finishes.
+    const removing = subject.removeEnvironment(FERRET, () => ended);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const whileGated = await subject.environmentStore(FERRET).read(FERRET);
+    openGate();
+    await Promise.all([starting, removing]);
+
+    // Assert: the remove ran after the start, saw the ferret running, and left the new credential alone.
+    expect(whileGated).toEqual({ A: 'new-credential-fixture' });
+    expect(await subject.environmentStore(FERRET).read(FERRET)).toEqual({ A: 'new-credential-fixture' });
+  });
+
   test('GAP(composition) 3: a work handle passed to any of the three constructors throws at construction', async () => {
     // Arrange
     const { work } = await wired();

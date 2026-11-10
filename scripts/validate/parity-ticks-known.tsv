@@ -1,8 +1,6 @@
 # Ticked parity rows that parity-ticks.ts cannot prove yet: id<TAB>reason. TEMPORARY - this list must shrink to empty
 # before 5.0 is green. Its ids are pinned in FROZEN_IDS (scripts/validate/parity-ticks.ts): an id not in that set fails, an
 # entry whose row passes (or is unticked) fails, so the list can only shrink, and the two sets must stay equal. Fix a row, then delete it from both.
-F-0305	no live test(), it() or describe() title in packages/core/ferrets/tests/unit/parity/storage.test.ts names F-0305 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
-F-0422	no live test(), it() or describe() title in packages/core/ferrets/tests/unit/parity/storage.test.ts names F-0422 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
 S-0010	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
 S-0255	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
 S-0262	check path does not exist: packages/plugins/catalogs/tests/unit/parity/app.test.tsx
@@ -42,4 +40,3 @@ V-0295	no live test(), it() or describe() title in packages/plugins/lessons/test
 V-0297	no live test(), it() or describe() title in packages/plugins/lessons/tests/unit/parity/commands.test.ts names V-0297 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
 V-0301	no live test(), it() or describe() title in packages/plugins/lessons/tests/unit/parity/commands.test.ts names V-0301 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
 V-0302	no live test(), it() or describe() title in packages/plugins/lessons/tests/unit/parity/commands.test.ts names V-0302 (a comment, a string elsewhere, or a skipped, todo or only title does not count)
-V-0452	no live test(), it() or describe() title in packages/core/ferrets/tests/unit/parity/commands.test.ts names V-0452 (a comment, a string elsewhere, or a skipped, todo or only title does not count)

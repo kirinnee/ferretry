@@ -10,10 +10,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { FerretsChanged } from '@ferretry/core-ferrets/contract';
+import { AutoResumeDecide, FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
-import type { DaemonImplementation } from '@ferretry/kernel/manifest';
+import { type DaemonImplementation, definePlugin, type HookInvoker, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
@@ -22,6 +22,7 @@ import { PROFILE_ITEMS, RuntimeHomeUnreadable, RuntimesPort } from '../../../con
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
+import { AUTO_RESUME_SWITCH_UNREAD } from '../../../daemon/lib/service/auto-resume-answer.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
@@ -965,5 +966,65 @@ describe('the homes the composed daemon provides', () => {
     // `home()` is `RuntimeHomeReader | undefined`: it never throws, not even on the first call.
     expect(() => port.home(HOME_ID)).not.toThrow();
     expect(port.home(HOME_ID)).toBeUndefined();
+  });
+});
+
+describe('M2b the auto-resume switch through the composed daemon', () => {
+  /** Asks Runtimes' `auto-resume.decide` the way Ferrets does, through the kernel's hook walk. */
+  async function askSwitch(options: {
+    readonly autoResume?: () => boolean | undefined;
+    readonly file: Record<string, unknown>;
+  }) {
+    let hooks: HookInvoker | undefined;
+    const asker = implementDaemon(
+      definePlugin({
+        id: 'resume-asker',
+        title: 'Resume asker',
+        version: '1.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        hooks: { offers: [{ hook: AutoResumeDecide }] },
+      }),
+      {
+        build: ctx => {
+          hooks = ctx.hooks;
+          return {};
+        },
+      },
+    );
+    const world = await fleetWorld();
+    const assemble: RuntimesAssembler = ctx => ({ ...hostAssembly(ctx), autoResume: options.autoResume });
+    const host = await testHost({
+      plugins: [
+        runtimesDaemon(ctx =>
+          assemble({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
+        ) as DaemonImplementation<any>,
+        asker as DaemonImplementation<any>,
+      ],
+      fakes: {
+        ferrets: new FakeFerrets(),
+        logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
+        loginChanges: fakeLoginChanges(),
+      },
+      gate: new StandInAdmission(() => ownerStanding()),
+      config: { ...CONFIG, 'runtimes.yaml': options.file },
+      ownerHome: world.person,
+    });
+    const answered = await hooks?.decideAnswered(AutoResumeDecide, { ask: 'switch' });
+    await host.stop();
+    return answered;
+  }
+
+  it('M2b the assembly gives no answer for the switch while runtimes.yaml has it on: the answer is no, not the file’s yes', async () => {
+    const answered = await askSwitch({ autoResume: () => undefined, file: { autoResume: true } });
+    expect(answered?.decision).toEqual({ allow: false, reason: AUTO_RESUME_SWITCH_UNREAD });
+    expect(answered?.answers).toEqual([{ plugin: 'runtimes', outcome: 'refused' }]);
+  });
+
+  it('M2b with no assembly answer at all the file decides: runtimes.yaml on is a yes, and off is a no', async () => {
+    expect((await askSwitch({ file: { autoResume: true } }))?.decision).toEqual({ allow: true });
+    const off = await askSwitch({ file: { autoResume: false } });
+    expect(off?.decision).toEqual({ allow: false, reason: 'Auto-resume after restart is off on this machine' });
   });
 });
