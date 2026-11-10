@@ -25,8 +25,8 @@ const CHECK = 'after-merge';
 const MISSING_TEST = / has no test named "/;
 
 /**
- * Items that may enter the list once although it only goes down: each was moved from before merge to after it by a
- * named owner decision, never by a builder. An entry is inert once the base lists the id.
+ * Items that may enter the list although it only goes down: each was moved from before merge to after it by a named
+ * owner decision, never by a builder. Delete the entry once the base lists the id, so a closed item cannot come back.
  */
 export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decision: string }[] = [
   { id: 'differential-harness', decision: '!A481: the harness moves after merge for the Wednesday merge' },
