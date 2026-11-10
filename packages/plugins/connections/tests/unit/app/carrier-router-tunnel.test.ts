@@ -240,6 +240,21 @@ describe('R636 tunnel lookup: one question over an introducer, answered for 30 s
     coming.r.fx.layer.close();
   });
 
+  test('R636 a tunnel the daemon names that does not answer either ends the walk, saying what it learned and tried', async () => {
+    const t = await tunnelOnly({
+      hosts: { [DIRECT_HOST]: { kind: 'carries', carrier: 'direct' }, [MOVED_HOST]: { kind: 'dead' } },
+      status: upAt(MOVED_URL),
+      service: 'available',
+    });
+
+    const reason = await t.failure();
+
+    expect(t.learned.map(each => each.tunnel.tunnelUrl)).toEqual([MOVED_URL]);
+    expect(t.dialledHosts()).toContain(MOVED_HOST);
+    expect(reason).toContain('Cloudflare tunnel was not reachable');
+    t.r.fx.layer.close();
+  });
+
   test('R636 a machine that switched its tunnel off is named before the service is, and nothing is dialled for it', async () => {
     const t = await tunnelOnly({
       hosts: { [DIRECT_HOST]: { kind: 'carries', carrier: 'direct' } },

@@ -2,6 +2,7 @@ import { expect, it } from 'bun:test';
 import type { ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import manifest from '../../../manifest.ts';
 import { writeTunnelSetting } from '../../../daemon/tunnel-setting.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 /**
  * BG-012 m-3: a refused write of the tunnel setting says the kernel's own sentence (a link, a file that is not UTF-8),
@@ -37,6 +38,30 @@ it('BG-012 m-3 a refusal whose fix is the empty string ends in the kernel’s se
   );
   expect(error?.message).toBe(`the tunnel setting could not be written to its document: ${UNREADABLE}`);
 });
+
+guarantee(
+  ['R656'],
+  'should keep the tunnel setting as ONE object that names no address, so a machine has at most one tunnel',
+  async () => {
+    // Arrange
+    const patches: unknown[] = [];
+    const config: Pick<ConfigPort, 'writeAsOwner'> = {
+      writeAsOwner: async (_def, _etag, write) => {
+        patches.push((write as { patch: unknown }).patch);
+        return { kind: 'written', etag: 'e', loosened: [] };
+      },
+    };
+
+    // Act
+    await writeTunnelSetting(config, def, true);
+    await writeTunnelSetting(config, def, false);
+
+    // Assert — each write is the one `tunnel` object holding only `enabled`: no list, no hostname, no second tunnel.
+    expect(patches).toEqual([{ tunnel: { enabled: true } }, { tunnel: { enabled: false } }]);
+    // And the machine keeps ONE tunnel record: a single declared state document, not one per tunnel.
+    expect(manifest.data.state.filter(state => state.name === 'tunnel')).toHaveLength(1);
+  },
+);
 
 it('BG-012 m-3 a refusal with nothing to say keeps the plain sentence, and a held write says it waits for the owner', async () => {
   await expect(writeTunnelSetting(over({ kind: 'conflict' }), def, true)).rejects.toThrow(

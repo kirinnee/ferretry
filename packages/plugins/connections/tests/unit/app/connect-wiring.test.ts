@@ -10,10 +10,12 @@ import { noteClientDaemon, render, run, runAsync } from '@ferretry/app/testing';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { createElement } from 'react';
 import { buildConnect, buildConnectionsApp, carrierWriteBackView } from '../../../app/index.ts';
+import { CarrierPreferenceStore } from '../../../app/lib/carrier-preference.ts';
 import type { ConnectionSignal } from '../../../app/lib/connection-signals.ts';
 import type { ConnectionChoice } from '../../../app/lib/connection.ts';
 import type { WebRtcDialer } from '../../../app/lib/webrtc-carrier.ts';
 import { CarriersChanged, TUNNEL_OFF_SENTENCE, type TunnelStatusView } from '../../../contract/index.ts';
+import { TUNNEL_SWITCHED_OFF } from '../../../app/lib/tunnel-service.ts';
 import manifest from '../../../manifest.ts';
 
 const DAEMON = `fy_daemon_${'A'.repeat(43)}`;
@@ -72,7 +74,11 @@ function storedList(carriers: readonly unknown[]) {
   };
 }
 
-function connectWith(list: ReturnType<typeof storedList>, webrtc?: WebRtcDialer) {
+function connectWith(
+  list: ReturnType<typeof storedList>,
+  webrtc?: WebRtcDialer,
+  preferences?: Parameters<typeof buildConnect>[1],
+) {
   const listeners: Array<(signal: ConnectionSignal) => void> = [];
   const ports = {
     openSocket: () => {
@@ -84,7 +90,7 @@ function connectWith(list: ReturnType<typeof storedList>, webrtc?: WebRtcDialer)
   } as unknown as ConnectPorts;
   const connect = buildConnect(
     ports,
-    undefined,
+    preferences,
     {
       listen: listener => {
         listeners.push(listener);
@@ -221,6 +227,39 @@ describe('the background view and the clients the router asks through', () => {
     // The daemon saying the tunnel is up at a hostname is kept in the stored set.
     expect(list.carriers()).toEqual([DIRECT, TUNNEL]);
   });
+
+  test('R636 a "Tunnel only" walk names a switched-off tunnel when the machine said so, and the service when it said nothing', async () => {
+    const tunnelOnly = new CarrierPreferenceStore({
+      getItem: () => JSON.stringify({ [DAEMON]: 'tunnel' }),
+      setItem: () => undefined,
+    });
+    const walkFailure = async (
+      connect: ReturnType<typeof connectWith>['connect'],
+      list: ReturnType<typeof storedList>,
+    ) =>
+      await new Promise<string>(resolve => {
+        const daemon = list.get(DAEMON) as PairedDaemon;
+        connect.router.dial(daemon)({
+          onBinary: () => undefined,
+          onText: () => undefined,
+          onClose: (_code, reason) => resolve(reason),
+        });
+      });
+
+    // The machine answered "off": the sentence is the switch's, whatever the service would have said.
+    const offList = storedList([DIRECT]);
+    const off = connectWith(offList, undefined, tunnelOnly).connect;
+    off.introducers.attach(DAEMON, fakeClient({ 'GET /v1/tunnel': OFF }).client);
+    await off.tunnelSwitch.refresh({ daemonId: DAEMON });
+    expect(await walkFailure(off, offList)).toContain(TUNNEL_SWITCHED_OFF);
+
+    // Nothing is known about the machine's switch, and no directory is reachable: the service's own absence is said.
+    const quietList = storedList([DIRECT]);
+    const quiet = connectWith(quietList, undefined, tunnelOnly).connect;
+    const reason = await walkFailure(quiet, quietList);
+    expect(reason).toContain('Tunnel only: ');
+    expect(reason).not.toContain(TUNNEL_SWITCHED_OFF);
+  });
 });
 
 describe('the new network and the Connection panel', () => {
@@ -295,6 +334,20 @@ describe('the new network and the Connection panel', () => {
     await settle();
     run(() => other.unmount());
     expect(log.asked).toBe(before);
+  });
+
+  test('R635 before the shell has built the connect half the preference screen offers no tunnel switch and says nothing false', async () => {
+    const fake = fakeClient({ 'GET /v1/carriers': { carriers: [DIRECT] } });
+    const chosen = { [DAEMON]: 'relay' };
+    const preferences = { snapshot: () => chosen, subscribe: () => () => undefined, set: () => undefined };
+    const unbuilt = buildConnectionsApp({ manifest, client: fake.client }, undefined, preferences as never, {} as never)
+      .settings.connection;
+
+    const shown = render(createElement(unbuilt));
+    await settle();
+    expect(JSON.stringify(shown.toJSON())).toContain('This machine has no tunnel yet.');
+    expect(fake.calls).not.toContain('GET /v1/tunnel');
+    run(() => shown.unmount());
   });
 
   test('R677 a build with no WebRTC dialer says so under "WebRTC only"; one with a dialer does not', async () => {
