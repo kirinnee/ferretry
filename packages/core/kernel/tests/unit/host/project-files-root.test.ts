@@ -712,6 +712,15 @@ describe('S179 a link swapped in after the judge (Md1) and the writes without de
     await writeFile(`${f.proj}/.mcp.json`, 'z');
     expect(await f.root.readText(at(f.root, '.mcp.json'))).toBe('z');
   });
+
+  test('S179 row 44: a setMode without descriptor reach is refused no_descriptor_reach and changes no mode', async () => {
+    const f = await fresh({
+      disk: nodeFs(() => crypto.randomUUID(), { descriptorFolder: '/nonexistent-descriptor-folder' }),
+    });
+    await writeFile(`${f.proj}/.mcp.json`, 'z', { mode: 0o600 });
+    expect(await refusalOf(() => f.root.setMode(at(f.root, '.mcp.json'), 0o644))).toBe('no_descriptor_reach');
+    expect((await stat(`${f.proj}/.mcp.json`)).mode & 0o777).toBe(0o600);
+  });
 });
 
 describe('S179 review minors: links to a same-named place, remove of a link, folders above a grant', () => {
