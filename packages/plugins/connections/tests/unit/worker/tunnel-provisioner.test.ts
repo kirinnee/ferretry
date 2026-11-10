@@ -374,6 +374,24 @@ describe('releasing a tunnel', () => {
     }
   });
 
+  guarantee(
+    ['R642'],
+    'should refuse every call, and store no challenge, while the pool secret is unusable',
+    async () => {
+      const test = world(poolAccount(1));
+      const daemon = await newDaemonIdentity();
+      const bad = parseTunnelAccountPool('not json at all');
+      should(bad.kind).equal('invalid');
+      should(await test.provisioner.challenge(bad, { daemonId: daemon.daemonId })).match({
+        ok: false,
+        code: 'tunnel_unavailable',
+      });
+      const request = { ...(await test.signed(daemon, 'provision', 4000)), originPort: 4000 };
+      should(await test.provisioner.provision(bad, HOST, request)).match({ code: 'tunnel_unavailable' });
+      should(test.cloudflare.liveTunnels()).be.empty();
+    },
+  );
+
   it('should refuse a release when no pool is set up', async () => {
     const test = world(poolAccount(1));
     const daemon = await newDaemonIdentity();
