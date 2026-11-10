@@ -25,7 +25,7 @@ import {
   type ScopedRoute,
   type SessionPrincipal,
 } from '@ferretry/kernel/contract';
-import type { Instant } from '@ferretry/std';
+import { epochMs, type Instant } from '@ferretry/std';
 import {
   type ApiActor,
   type AuditDraft,
@@ -559,15 +559,21 @@ export class GateAdmission implements Admission {
       spendFreshStepUp: () => {
         if (subject !== undefined) this.deps.stepUps.spendFresh(subject);
       },
-      claimFreshStepUp: this.#claimFresh(subject),
+      claimFreshStepUp: this.#claimFresh(subject, now),
       claimStoredProof: this.#claimStored(subject),
     };
     return { outcome: 'admitted', standing, actor: actOf(authentication, actor) };
   }
 
-  /** A route's claim on the caller's fresh proof: a caller with no proved device holds none and is answered `false`. */
-  #claimFresh(subject: StepUpSubject | undefined): ClaimFreshStepUp {
+  /**
+   * A route's claim on the caller's fresh proof: a caller with no proved device holds none and is answered `false`.
+   * The claim takes only a proof that ALREADY EXISTED when the call was admitted (`admittedAt`): a passkey proved
+   * after that instant is never taken by this standing, however long its continuations outlive the request, and stays
+   * where it is for the act it was given for.
+   */
+  #claimFresh(subject: StepUpSubject | undefined, admittedAt: Instant): ClaimFreshStepUp {
     const registry = this.deps.stepUps;
+    const notAfterMs = epochMs(admittedAt);
     return ((act?: StepUpAct, bound?: string): boolean => {
       if (subject === undefined) return false;
       if (act !== undefined && !stepUpSkippableAtMachine(act))
@@ -577,7 +583,7 @@ export class GateAdmission implements Admission {
           !stepUpKeepsProof(act) &&
           registry.claimFresh(subject, act as Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, bound)
         );
-      return registry.claimFresh(subject, act as MachineSkippableStepUpAct | undefined);
+      return registry.claimFresh(subject, act as MachineSkippableStepUpAct | undefined, undefined, notAfterMs);
     }) as ClaimFreshStepUp;
   }
 

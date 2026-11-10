@@ -128,8 +128,9 @@ export interface ConfigWriteJudgement {
    * Set by the kernel ONLY for a `ConfigPort.writeAsCaller`, never by a plugin: `sentences` are then the
    * `${secret:NAME}` references the caller's edit adds (names, never a value), and the question is whether the call in
    * progress IS the owner as the route would have it: the host admin where it arrived on the host, or a governed device
-   * whose grants hold the file's configure capability and which proves a passkey for this act (`loosen-config`), claimed
-   * once. The kernel sets it alone: a plugin's input that carries it is never read. The judge is synchronous.
+   * whose grants hold the file's configure capability and which holds a passkey that already existed when the call was
+   * admitted (`loosen-config`), claimed once; a passkey proved after the admission is never claimed by the call or by
+   * work it spawns. The kernel sets it alone: a plugin's input that carries it is never read. The judge is synchronous.
    */
   readonly secretAdd?: true;
   /** Who the call in progress runs as. */

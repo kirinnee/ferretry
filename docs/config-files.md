@@ -78,8 +78,11 @@ that is not there). Three rules, in order:
    `ConfigPort.writeAsCaller`, judged exactly as `write` except that the reference goes into effect when the
    ambient call (read by the kernel, never passed by the plugin, and judged from the standing as it is when the write
    happens — the scope includes work the call spawns) is the owner: the host admin where the request arrived on the
-   host, or a governed device holding the file's `configure` that proves a passkey for the act, which is what
-   `PUT /v1/config/file` asks of an add (`loosen-config`; the unlock alone is not enough, and one proof is one act). Only
+   host, or a governed device holding the file's `configure` and a passkey that already existed when its call was
+   admitted, which the add claims once — what `PUT /v1/config/file` asks of an add (`loosen-config`; the unlock alone is
+   not enough). A passkey proved after the call was admitted is never taken by that call or by work it spawns, even
+   after a lock and an unlock: the add stays held and the later proof stays for the act it was given for. The same
+   bound applies to a plain `write` loosening from work a call spawned. Only
    the references the caller's own edit adds are the owner's to answer for: one that only an edit already held names
    keeps the whole write held. An agent's session credential, a job and a member call keep the hold. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
    a held edit by its etag — at the machine with `fy config confirm <file>`, in the app with a passkey

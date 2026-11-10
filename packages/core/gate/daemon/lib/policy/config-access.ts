@@ -49,8 +49,8 @@ const refuse = (response: ApiResponse): ConfigAccessVerdict => ({ allowed: false
  *   verdict says whether this call may put a loosening into effect (`mayLoosen`: somebody at this machine). A governed
  *   caller gets `claimLoosening` instead, which the writer asks ONLY when the text really loosens and which takes the
  *   one passkey proof atomically (G126: of two requests admitted on one proof exactly one loosens).
- * - `confirm`: the same asks, and — from a governed device — a passkey proved for THIS act (`loosen-config`), which
- *   is CLAIMED here, atomically, never read from the admission snapshot (so a confirm that finds nothing still used
+ * - `confirm`: the same asks, and — from a governed device — a passkey that already existed when the request was
+ *   admitted (`loosen-config`), which is CLAIMED here, atomically, never read from the admission snapshot (so a confirm that finds nothing still used
  *   its proof — stricter than the snapshot-and-spend it replaces).
  *
  * Anything undetermined (no standing, no grant standing) refuses.

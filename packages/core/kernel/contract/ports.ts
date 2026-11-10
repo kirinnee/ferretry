@@ -325,8 +325,9 @@ export interface ConfigPort {
    * and every other check — except for NN2: a `${secret:NAME}` reference the CALLER'S edit adds goes into effect (not
    * held) only when the AMBIENT call, which the kernel carries and a plugin can neither pass nor set, is the owner: the
    * host admin where the request arrived on the host (a relayed loopback is remote), or a governed device that holds the
-   * file's configure capability and a passkey proved for this act — what `PUT /v1/config/file` asks of an add
-   * (`loosen-config`); the unlock alone is not enough. A ferret's session credential, a job, a member call and a caller
+   * file's configure capability and a passkey that already existed when the call was admitted, claimed once — what
+   * `PUT /v1/config/file` asks of an add (`loosen-config`); the unlock alone is not enough, and a passkey proved
+   * AFTER the call was admitted is never taken by the call or by work it spawns. A ferret's session credential, a job, a member call and a caller
    * outside a call keep the hold exactly as {@link write} holds it; no option can switch it off for an agent. The act is
    * logged with the file and the secret NAME, never a value, and the kernel never reads a value to judge it.
    *

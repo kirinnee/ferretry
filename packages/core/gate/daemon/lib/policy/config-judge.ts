@@ -19,8 +19,10 @@ const spent = new WeakSet<object>();
  *
  * The caller must be a person (an agent, a warden and a job never confirm), hold the `configure` grant of the file's
  * own capability and the fleet's `use` grant, and then either be at this machine (`governance.governed === false`:
- * the admin token that arrived on the host) or hold a step-up proved for the act, which this loosening CLAIMS at
- * judge time (one proof, one act). The claim is atomic (Access's `claimFresh`), so the admission snapshot's
+ * the admin token that arrived on the host) or hold a passkey proof that already existed when its call was admitted,
+ * which this loosening CLAIMS at judge time (claimed once). A proof made AFTER the admission is never taken, by the
+ * call or by work it spawns, however long after: the loosening is then held and that proof stays for its own act.
+ * The claim is atomic (Access's `claimFresh`), so the admission snapshot's
  * `freshStepUp` is never read: of two requests admitted on ONE proof — whatever their acts — exactly one takes it.
  * A standing whose proof an owner-only act (`claimOwnerOnly`) already claimed for THIS request is accepted without
  * a second claim, once: that claim is the act's own, and its loosening write rides on it.
@@ -45,8 +47,10 @@ export function claimLooseningProof(standing: CallStanding): boolean {
  * (`ConfigPort.writeAsCaller`, NN2): the SAME rule `PUT /v1/config/file` applies to an add (Appendix D G129, G131) and
  * to any other loosening — the host admin where the request ARRIVED on the host (`governance.governed === false`,
  * decided from the carrier, so a relayed loopback is governed), or a governed device that holds the file's
- * `configure` capability and the fleet's `use` AND a passkey proved for THIS act (`loosen-config`), which the add
- * CLAIMS (one proof, one act). The unlock alone is not enough. When the owner asks a step-up per act
+ * `configure` capability and the fleet's `use` AND a passkey that already existed when its call was admitted
+ * (`loosen-config`), which the add CLAIMS once (claimed once, bounded by the admission instant: a passkey proved after
+ * it is never taken by the call or its continuations, even after a lock and an unlock). The unlock alone is not
+ * enough. When the owner asks a step-up per act
  * (`stepUpOnActions`, G79) the step-up that admitted the configure decision is spent by the add, so one step-up buys
  * one act. A ferret, a warden, a job (no standing) and anything undetermined hold. The question is SYNCHRONOUS (a
  * kernel judge that cannot answer in time is not a thing: there is nothing to time out), and it is asked of the LIVE
