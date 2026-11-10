@@ -167,7 +167,7 @@ describe('CFG-LEAK (ii) an MCP server command and url are netted in the componen
     should(env.find(entry => entry.key.endsWith('HOME'))?.hidden).be.undefined();
   });
 
-  it('hides a settings value the write rule refuses, and the text of a file whose cut text it still refuses', () => {
+  it('hides a settings value the write rule refuses', () => {
     const parsed = model({
       settings: { base: { harness: 'claude', file: 'base.json' } },
       instructions: { notes: { text: 'x' } },
@@ -185,12 +185,6 @@ describe('CFG-LEAK (ii) an MCP server command and url are netted in the componen
       key: 'name',
       value: 'plain',
     });
-    const text = found.find(component => component.kind === 'instructions')?.content;
-    should(text).eql({ form: 'text', text: '‹hidden›', redacted: true });
-    const plain = shown({ instructionBodies: { notes: '# How we work\n- Small PRs.' } }).find(
-      component => component.kind === 'instructions',
-    )?.content;
-    should(plain).eql({ form: 'text', text: '# How we work\n- Small PRs.', redacted: false });
   });
 
   it('the "command not found" warning does not name a command the detail withholds', () => {

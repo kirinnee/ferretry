@@ -41,7 +41,7 @@ import {
 } from '../account/layering.ts';
 import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
 import { freeName } from '../account/import.ts';
-import { looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
+import { looksSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
 import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -972,10 +972,7 @@ function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts
   const text =
     kind === 'instructions' ? facts.instructionBodies?.[name] : kind === 'hooks' ? facts.hooksTexts?.[name] : undefined;
   if (text === undefined) return undefined;
-  const cut = redactText(text);
-  // THE NET: when the write rule's text test still refuses the text the cutter shows, none of it is shown (the form
-  // says it cannot be saved from here, as for any text that held a value).
-  return { form: 'text', ...(rawTextHoldsSecret(cut.text) ? { text: HIDDEN_TEXT, redacted: true } : cut) };
+  return { form: 'text', ...redactText(text) };
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text (U15's clone uses the same). */

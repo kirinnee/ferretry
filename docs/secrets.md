@@ -496,9 +496,10 @@ per-document plan (one refused document writes nothing of the set).
   (`kernel-cutter-f1-f7-pin.test.ts`). **Every value Runtimes shows is netted**: the arguments, the launch flags, an MCP
   server's `command` (`commandWithheld`) and `url` (`urlWithheld`: withheld whole when W refuses it or the cutter would cut any
   part of it; the form asks for the whole line again), an environment or settings value shown under its name (hidden when W
-  refuses it, as when the name or shape says credential), the text of an instructions or hooks file (shown `‹hidden›` and
-  not saveable from here when W's text test still refuses what the cutter shows), and the "command not found" warning, which
-  names the command only when the detail shows it. The fields shown as written without a net are names and paths, not
+  refuses it, as when the name or shape says credential), and the "command not found" warning, which names the command only
+  when the detail shows it. The text of an instructions or hooks file is cut by its own line rule (`redactText`), which is
+  pinned equal to v4 outside its tightened lines; a line W's text test still refuses after that cut (a long bare value
+  under a plain key) is a declared residual, not netted. The fields shown as written without a net are names and paths, not
   values: a component's `file` and `directory`, a skill's items, a model set's models and default, a profile, runtime or
   login label, and the home-directory path a component points at (`checkPath`). W refuses one only when a credential is
   typed AS that name or path, which v4 showed the same way, and none of them can hold a flag secret, a URL's user or a
