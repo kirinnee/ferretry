@@ -27,6 +27,7 @@ export const SendUnaccountedReasonSchema = z.enum([
   'blocked_by_prompt',
   'revive_unconfirmed',
   'landing_unconfirmed',
+  'typed_not_submitted',
   'not_delivered',
 ]);
 export type SendUnaccountedReason = z.infer<typeof SendUnaccountedReasonSchema>;

@@ -709,3 +709,71 @@ describe('a submission Codex 0.166 parked until its startup ends', () => {
     should(held('startup-queued-message', 'something else entirely')).equal('absent');
   });
 });
+
+describe('B187: a daemon message drawn with a quoted or tree line is still read as the whole draft', () => {
+  const draft = readFileSync(join(FIXTURES, 'claude-2.1.30x-idle-draft-quote.txt'), 'utf8');
+  const [x, y] = readFileSync(join(FIXTURES, 'claude-2.1.30x-idle-draft-quote.cursor'), 'utf8').trim().split('|');
+  const cursor = { x: Number(x), y: Number(y) };
+  const ENVELOPE =
+    '[message · from :ireland · peer · 520e638b]\n' +
+    'Please keep the queue ordering as v4, like this:\n' +
+    '> keep the queue ordering as v4\n' +
+    'and tell me when the change is in.';
+
+  it('B187 a quoted body line inside a ruled Claude draft is a continuation, not the prompt line', () => {
+    should(composerRows(draft)).deepEqual({ first: 6, last: 9 });
+    const composer = readComposer(draft, cursor);
+    should(composer?.text).equal(
+      '[message · from :ireland · peer · 520e638b]\nPlease keep the queue ordering as v4, like this:\n' +
+        '> keep the queue ordering as v4\nand tell me when the change is in.',
+    );
+    should(composer?.placeholder).be.false();
+  });
+
+  it('B187 a └ or ─── body line does not close a ruled Claude draft', () => {
+    for (const row of ['└ keep the queue ordering', '─── keep the queue ordering']) {
+      const frame = draft.replace('> keep the queue ordering as v4', row);
+      should(composerRows(frame)).deepEqual({ first: 6, last: 9 });
+      should(readComposer(frame, cursor)?.text).endWith('and tell me when the change is in.');
+    }
+  });
+
+  it('B187 paneHoldOf finds a direct paste with a quoted line in the composer', () => {
+    should(paneHoldOf(draft, cursor, ENVELOPE, true)).equal('composer');
+    should(heldAt(draft, cursor, ENVELOPE, true)).equal('composer');
+  });
+
+  it('B187 a plain multi-line direct paste drawn in full is proven landing, so landing_unconfirmed means no frame showed it', () => {
+    // nelly's send was plain (no quoted line): the reader proves it from a frame that shows it, which pins the 6.16 s
+    // unconfirmed settle on a pane that drew nothing within the fill's window, not on how the text was read.
+    const rows = draft.split('\n');
+    const plain = [...rows.slice(0, 8), ...rows.slice(9)].join('\n');
+    const text =
+      '[message · from :ireland · peer · 520e638b]\nPlease keep the queue ordering as v4, like this:\n' +
+      'and tell me when the change is in.';
+    const frame: DeliveryFrame = {
+      alive: true,
+      dead: false,
+      promptReady: false,
+      visible: plain,
+      cursorX: 36,
+      cursorY: 8,
+    };
+
+    should(composerLanding(frame, text, true)).equal('chars');
+    should(composerLanding({ ...frame, visible: rows.slice(0, 5).join('\n') }, text, true)).not.equal('chars');
+  });
+
+  it('B187 an indented › row outside any rule is still not a prompt line', () => {
+    const codex = '› fix the flaky test\n\n  › a quoted line the assistant drew\n  gpt-5 default · ~/work\n';
+    should(composerRows(codex)?.first).equal(2);
+    const noRule = '  ❯ a quoted line\n────────\n';
+    should(composerRows(noRule)).deepEqual({ first: 0, last: 0 });
+    const notUnderRule = '────────\n⏺ assistant\n  > quoted\n────────\n';
+    should(composerRows(notUnderRule)).deepEqual({ first: 2, last: 2 });
+    const rowBetween = '────────\n❯ ask\n⏺ assistant\n  > quoted\n────────\n';
+    should(composerRows(rowBetween)).deepEqual({ first: 3, last: 3 });
+    const promptNotUnderRule = 'text\n❯ ask\n  > quoted\n────────\n';
+    should(composerRows(promptNotUnderRule)).deepEqual({ first: 2, last: 2 });
+  });
+});

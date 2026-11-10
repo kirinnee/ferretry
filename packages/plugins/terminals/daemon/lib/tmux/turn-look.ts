@@ -2,7 +2,7 @@ import { RUNNER_LOOK_STATUS_BYTES, RUNNER_LOOK_STATUS_LINES, type RunnerLook } f
 import type { JsonValue } from '@ferretry/std';
 import type { PaneState } from './contracts.ts';
 import { parseHarnessDialog } from './harness-dialog.ts';
-import { paneActiveWork, paneBlockingPrompt, paneShowsPermissionPrompt } from './pane.ts';
+import { idlePromptShown, paneActiveWork, paneBlockingPrompt, paneShowsPermissionPrompt } from './pane.ts';
 import { parsePermissionPrompt } from './permission-prompt.ts';
 
 /** A digest of a text: equal texts, equal digests; the text cannot be read back from it. */
@@ -30,7 +30,8 @@ export function turnLookOf(pane: PaneState, digest: FrameDigest): RunnerLook {
     frame: digest(pane.visible),
     working: work !== undefined,
     ...(work === 'spinner' ? { spinnerOnly: true } : {}),
-    atPrompt: pane.promptReady,
+    // An idle composer holding a draft is still an idle prompt; `promptReady` (accepts a send) says no to it.
+    atPrompt: pane.promptReady || (!pane.dead && idlePromptShown(pane.visible)),
     permission: request !== undefined || paneShowsPermissionPrompt(pane.visible),
     ...(prompt === undefined ? {} : { prompt }),
     ...(request === undefined ? {} : { request: request as unknown as JsonValue }),

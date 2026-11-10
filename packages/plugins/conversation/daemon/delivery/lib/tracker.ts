@@ -132,6 +132,8 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   private readonly unpaid = new Set<SessionId>();
   /** Consecutive looks that left a debt unpaid, per session; the backoff and its cap. Cleared when the debt is. */
   private readonly debtLooks = new Map<SessionId, number>();
+  /** When this process last pressed Enter for an unconfirmed send seen late in the composer, by send id (B187). */
+  private readonly pressedAt = new Map<string, number>();
   /** Set by a disarm: nothing is scheduled, and no scheduled look fires, until `arm` runs again. */
   private disarmed = false;
 
@@ -472,26 +474,33 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
    * (`landing_unconfirmed`) at once, and the tracker used to look at such a send only for a transcript record
    * proving it delivered. But a stalled pane draws the keys LATER: on 2026-11-02 a ferret's turn pointer
    * appeared in its composer after the fill had stopped looking, nothing ever pressed Enter on it, and the
-   * ferret sat idle for five hours with it typed there. So while the send is young enough for its keys to
-   * still be arriving, its composer is looked at, and its own text found there exactly gets the same
-   * verified, counted Enter an open send's does (`resubmit`, which re-opens it once the text leaves).
+   * ferret sat idle for five hours with it typed there. So the send's composer is looked at, and its own text
+   * found there exactly gets a verified, counted Enter (`resubmit`, which re-opens it once the text leaves).
    *
-   * Answers when to look again, or `undefined` when there is nothing left to wait for here: no Enters
-   * left, or the send older than `strandedWatchMs` — the Warden watches the long tail (`input-stuck.ts`).
+   * B187 — NO BLIND SPOT, AND ONE ENTER THEN A RAISE. The look used to end `strandedWatchMs` after the typing: a
+   * message nelly's pane drew later than that sat in its box for two days, because nothing looked again. Now the
+   * fast cadence ends there and a back-off takes over (the wait doubles from `busyExtensionMs` to
+   * `strandedBackoffMaxMs`) for as long as the send is watched at all. A send seen in the box that late has
+   * every one of its scheduled Enters overdue, so it gets exactly ONE verified Enter instead; if its text is
+   * still there `typedStableMs` later the Enter did not take, and the send is RAISED: it keeps `typedNotSent`,
+   * reads `typed_not_submitted`, and the journal says `control.send_stranded` — the Warden's input-stuck reads it
+   * from there, and the app row and the sender say it in words.
+   *
+   * Answers when to look again, or `undefined` when there is nothing left to wait for here.
    */
   private async unconfirmedInComposer(id: SessionId, record: SendRecord, now: number): Promise<number | undefined> {
     if (record.fate !== 'unaccounted' || record.held === true || strandableText(record) === undefined) return undefined;
     const seen = record.typedNotSent === true;
-    // Seen in the composer, it is watched as long as a repair is; never seen, only while its keys could still
-    // be arriving.
-    const window = seen ? this.settings.repairLimitMs : this.settings.strandedWatchMs;
-    if (now - this.typedSince(record) > window) return undefined;
+    const age = now - this.typedSince(record);
+    // Seen in the composer, it is watched as long as a repair is; never seen, as long as `watches` keeps it.
+    if (seen && age > this.settings.repairLimitMs) return undefined;
     const hold = await this.paneHold(id, record);
     if (hold === 'unreadable') return now + this.settings.busyExtensionMs;
     if (hold !== 'composer') {
       // Gone from the composer: the flag the app and the Warden read is dropped, so neither calls it stuck.
       if (seen) await this.ports.ledger.settle(id, record.sendId, { typedNotSent: undefined });
-      return seen ? undefined : now + this.settings.busyExtensionMs;
+      this.pressedAt.delete(record.sendId);
+      return seen ? undefined : now + this.unseenLookDelay(age);
     }
     // There: said so on the record, so the Warden reads a fresh fact rather than a guess from the turn clock.
     let current = record;
@@ -499,15 +508,50 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       current = (await this.ports.ledger.settle(id, record.sendId, { typedNotSent: true })) ?? record;
       await this.ports.repository.journal(id, 'control.send_typed_not_sent', { sendId: record.sendId });
     }
+    // Seen past its whole Enter schedule, it has one Enter, not the overdue three.
+    const late = age >= this.lateAfterMs();
     const due = this.nudgeDue(current);
-    if (due !== undefined && now >= due) {
+    if (due !== undefined && now >= due && (!late || (current.submitNudges ?? 0) < 1)) {
       const after = (await this.ports.attempts.resubmit(id, record.sendId).catch(() => undefined)) ?? current;
       // Entered: it is an open send again, and `resubmit` asked for the look that follows it.
       if (isOpenSend(after)) return undefined;
       current = after;
+      this.pressedAt.set(record.sendId, now);
     }
-    // No Enter left: still looked at, slowly, so the flag stays true to the screen until it goes.
-    return this.pressLookAt(current, now) ?? now + this.settings.busyExtensionMs;
+    if (!late) return this.pressLookAt(current, now) ?? now + this.settings.busyExtensionMs;
+    return await this.raisedOrWatched(id, current, now);
+  }
+
+  /**
+   * A late send's text is still in the box. Once its one Enter has had `typedStableMs` to take (a daemon that
+   * restarted since has no press time, and its Enter is long past) it is raised; before that, the look is
+   * set for when the wait ends. A send already raised is looked at slowly so the flag stays true to the screen.
+   */
+  private async raisedOrWatched(id: SessionId, record: SendRecord, now: number): Promise<number> {
+    if ((record.submitNudges ?? 0) < 1 || record.unaccountedReason === 'typed_not_submitted')
+      return now + this.settings.busyExtensionMs;
+    const pressed = this.pressedAt.get(record.sendId);
+    if (pressed !== undefined && now - pressed < this.settings.typedStableMs)
+      return pressed + this.settings.typedStableMs;
+    await this.ports.ledger.settle(id, record.sendId, { unaccountedReason: 'typed_not_submitted' });
+    await this.ports.repository.journal(id, 'control.send_stranded', { sendId: record.sendId });
+    return now + this.settings.busyExtensionMs;
+  }
+
+  /** How long after its typing a send counts as late when first seen in the composer: past its whole Enter schedule. */
+  private lateAfterMs(): number {
+    return (this.settings.submitNudgesMs.at(-1) ?? 0) + this.settings.typedStableMs;
+  }
+
+  /**
+   * How long until the next look at an unconfirmed send never yet seen in the composer, given its age: the fast
+   * cadence while its keys may still be arriving, then a wait that doubles from that cadence to the back-off
+   * ceiling (each look waits as long as the send has been past the fast window).
+   */
+  private unseenLookDelay(age: number): number {
+    const past = age - this.settings.strandedWatchMs;
+    if (past <= 0) return this.settings.busyExtensionMs;
+    return Math.min(this.settings.strandedBackoffMaxMs, Math.max(this.settings.busyExtensionMs, past));
   }
 
   /**

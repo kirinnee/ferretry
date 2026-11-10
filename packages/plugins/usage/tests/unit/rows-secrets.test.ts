@@ -229,8 +229,8 @@ const browserRepo = (name: string, source: string): string => {
 
 const WORKER_TOKEN_FIELD = /token|secret|password|credential|digest|apikey|api_key|bearer/iu;
 
-describe('S176 S177 the worker sandbox rests on the lints: they refuse, and Usage’s own source passes', () => {
-  it('S176 a worker that reaches the network or the world around the kernel ports is refused, and nothing crosses back but facts', async () => {
+describe('S176 S177 the worker sandbox rests on the lints: they refuse, and Usage’s own source passes (proxy until the housekeeping worker lands)', () => {
+  it('S176 a worker that reaches the network or the world around the kernel ports is refused, and nothing crosses back but facts (proxy until the housekeeping worker lands)', async () => {
     // banned-globals refuses the ways a worker could carry a token out of its job: the network, the environment,
     // the file system, a child process, a timer that outlives the job.
     const refused = bannedNames(
@@ -294,7 +294,7 @@ describe('S176 S177 the worker sandbox rests on the lints: they refuse, and Usag
     should(JSON.stringify(reading).includes('socket closed')).be.false();
   });
 
-  it('S177 a worker that blocks on a file call or binds a vault-side file API is refused, and Usage’s own source holds no vault, store or redactor', () => {
+  it('S177 a worker that blocks on a file call or binds a vault-side file API is refused, and Usage’s own source holds no vault, store or redactor (proxy until the housekeeping worker lands)', () => {
     // no-sync-io counts every blocking file function a daemon-half file uses and refuses a rebinding outright.
     const blocking = scanSource(
       'worker-fixture.ts',

@@ -168,6 +168,32 @@ describe('the hosted tunnel service through the Worker', () => {
     should(preflight.status).equal(204);
     should(preflight.headers.get('Access-Control-Allow-Methods')).equal('GET, OPTIONS');
     should(await refusalCode(await test.call(TUNNEL_SERVICE_PATH, { method: 'POST' }))).equal('tunnel_bad_request');
+
+    // `available` is whether the operator set the service up, NOT whether there is room: a pool whose only account
+    // is full still advertises available, and the refusal for no room comes at provision time (tunnel_capacity).
+    const full = harness({ accounts: [poolAccount(1, { maxTunnels: 1 })] });
+    should((await full.provision(await newDaemonIdentity())).status).equal(200);
+    should(await (await full.call(TUNNEL_SERVICE_PATH)).json()).eql({ version: 1, available: true });
+  });
+
+  guarantee(['R638'], 'should compile no tunnel service address into any end that reads it', async () => {
+    // The advertisement is read at the relay directory's own origin, which arrives at runtime: no source that serves,
+    // reads or signs against the tunnel service carries a URL literal of its own (the one `.invalid` is the Worker's
+    // in-process hop to its control object, which no network resolves).
+    const files = [
+      '../../../worker/src/adapters/hosted-tunnel-routes.ts',
+      '../../../worker/src/adapters/hosted-tunnel-control.ts',
+      '../../../worker/src/lib/tunnel-pool.ts',
+      '../../../contract/tunnel-service.ts',
+      '../../../app/lib/tunnel-service.ts',
+      '../../../daemon/lib/tunnel/service.ts',
+    ];
+    for (const file of files) {
+      const source = await Bun.file(new URL(file, import.meta.url)).text();
+      const literals = [...source.matchAll(/['"`](https?:\/\/[^'"`]*)['"`]/gu)].map(match => match[1] as string);
+      should(literals.filter(literal => !literal.endsWith('.invalid'))).eql([]);
+      should(source).not.containEql('workers.dev');
+    }
   });
 
   it('should advertise unavailable when no pool, no binding, or no answer', async () => {
@@ -194,6 +220,10 @@ describe('the hosted tunnel service through the Worker', () => {
     const again = TunnelProvisionSchema.parse(await (await test.provision(daemon, 41_234)).json());
     should(again.tunnelUrl).equal(first.tunnelUrl);
     should(test.cloudflare.liveTunnels()).have.length(1);
+    // The provisioner has its OWN control object: every call the Worker made for the challenge, the provision and the
+    // renewal named the tunnel object, never the relay's hosted control object or a rendezvous.
+    should(test.named.length).be.above(3);
+    should([...new Set(test.named)]).eql([HOSTED_TUNNEL_CONTROL_OBJECT_NAME]);
     // The object stores the tunnel, never its connector token.
     should(JSON.stringify([...test.storage.values.values()])).not.containEql(FAKE_CONNECTOR_TOKEN_PREFIX);
   });

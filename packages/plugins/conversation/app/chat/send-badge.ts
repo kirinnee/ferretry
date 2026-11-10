@@ -33,6 +33,7 @@ const REASONS: Readonly<Record<SendUnaccountedReason, string>> = {
   blocked_by_prompt: 'a prompt on the agent’s screen is waiting for an answer, so it could not be typed',
   revive_unconfirmed: 'the session was revived to hand it over, but its transcript never showed it arriving',
   landing_unconfirmed: 'it was typed into the agent’s box, but the agent didn’t show it there in time',
+  typed_not_submitted: 'it is typed into the agent’s box but was not sent: the Enter did not take',
   not_delivered: 'it never reached the agent',
 };
 

@@ -25,74 +25,13 @@ import { DIRECT_SESSION_DEADLINE_MS, RELAY_SESSION_DEADLINE_MS } from '../../../
 import { documentRelayDiscovery } from '../../../app/discovery/hosted-relay.ts';
 import type { CarrierPreference } from '../../../app/lib/carrier-preference.ts';
 import { BrowserNetwork, HandTimers, type ScriptedHost } from '../../support/browser-network.ts';
-import { type KernelFixture, kernelFixture } from '../../support/kernel-session.ts';
+import { kernelFixture } from '../../support/kernel-session.ts';
+import { carriedOver, rig } from '../../support/router-rig.ts';
 
 const shellCrypto = new WebCryptoRelayCrypto();
 const DIRECT = 'https://laptop.example.test';
 const TUNNEL = 'https://abc.tunnel.example';
 const RELAY = 'wss://relay.example';
-
-interface Rig {
-  readonly fx: KernelFixture;
-  readonly network: BrowserNetwork;
-  readonly timers: HandTimers;
-  readonly router: CarrierRouter;
-  readonly daemon: PairedDaemon;
-  readonly connect: (target?: PairedDaemon) => ReturnType<ReturnType<typeof connector>>;
-}
-
-async function rig(
-  hosts: Record<string, ScriptedHost>,
-  carriers: readonly unknown[],
-  preference: CarrierPreference | (() => CarrierPreference) = 'auto',
-  hosted: string | null = null,
-  openSocket?: (network: BrowserNetwork, fx: KernelFixture) => (url: string) => BrowserSocket,
-): Promise<Rig> {
-  const fx = await kernelFixture();
-  const device = await fx.paired();
-  const network = new BrowserNetwork(fx, hosts);
-  const timers = new HandTimers();
-  const router = new CarrierRouter({
-    openSocket: openSocket?.(network, fx) ?? network.openSocket,
-    after: timers.after,
-    now: () => 0,
-    preference: typeof preference === 'function' ? preference : () => preference,
-    hostedRelay: async () => hosted ?? undefined,
-  });
-  const daemon: PairedDaemon = {
-    daemon: fx.daemonId,
-    machine: 'laptop',
-    deviceId: device.deviceId,
-    address: DIRECT,
-    carriers: [...carriers],
-    pairedAt: 1,
-    lastSelectedAt: 1,
-  };
-  const claims = fakeDeviceClaims({
-    claims: {
-      [fx.daemonId]: {
-        deviceId: device.deviceId,
-        key: shellCrypto.deviceKeyHandle(device.privateKey),
-        appSession: device.appSession,
-      },
-    },
-  });
-  const connect = (target: PairedDaemon = daemon) =>
-    connector({
-      crypto: shellCrypto,
-      claims,
-      carriers: [router.dialer()],
-      direct: () => {
-        throw new Error('the shell’s own direct dial is not used once Connections registered a carrier');
-      },
-    })(target);
-  return { fx, network, timers, router, daemon, connect };
-}
-
-const carriedOver = (fx: KernelFixture): readonly string[] =>
-  fx.requests.map(
-    request => `${request.path} ${request.arrival.kind === 'carried' ? request.arrival.carrier : 'local'}`,
-  );
 
 describe('carrier control (R634)', () => {
   test('R634 GET and PUT /v1/tunnel ride the direct address even under "Tunnel only", and remember no winner', async () => {

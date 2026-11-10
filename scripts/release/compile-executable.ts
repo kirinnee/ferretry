@@ -52,6 +52,7 @@ import { createRequire } from 'node:module';
 import { basename, dirname, join, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { BunPlugin } from 'bun';
+import { installedPrebuild, nodeDataChannelPrebuild } from './node-datachannel-prebuild.ts';
 import { pluginRegistryFor, pluginWorkers, type WorkerHalf } from './plugin-workers.ts';
 
 interface Rewrite {
@@ -101,31 +102,6 @@ const NODE_DATACHANNEL_LOADER = /node-datachannel[\\/]dist[\\/]esm[\\/]lib[\\/]n
 /** The anchor the replaced loader is pinned to: an upgrade that stops computing its path is noticed here. */
 const NODE_DATACHANNEL_ANCHOR = 'function loadBinding()';
 
-/**
- * The `@node-datachannel/*` prebuild for a Bun compile target, or for this machine when there is no
- * target (the Nix build compiles natively). glibc for Linux: every Linux target this repository ships
- * is a glibc one, and a musl target is mapped explicitly rather than guessed.
- */
-function nodeDataChannelPrebuild(target: string | undefined): string {
-  const host = `bun-${process.platform}-${process.arch}`;
-  const named = (target ?? host).replace(/-(baseline|modern)$/u, '');
-  const prebuilds: Record<string, string> = {
-    'bun-linux-x64': 'linux-x64-gnu',
-    'bun-linux-arm64': 'linux-arm64-gnu',
-    'bun-linux-x64-musl': 'linux-x64-musl',
-    'bun-linux-arm64-musl': 'linux-arm64-musl',
-    'bun-darwin-arm64': 'darwin-arm64',
-    'bun-darwin-x64': 'darwin-x64',
-  };
-  const prebuild = prebuilds[named];
-  if (prebuild === undefined) {
-    throw new Error(
-      `no node-datachannel prebuild is mapped for ${target ?? host}; add it to scripts/release/compile-executable.ts`,
-    );
-  }
-  return `@node-datachannel/${prebuild}/node_datachannel.node`;
-}
-
 const nodeDataChannelEmbedded = (target: string | undefined): BunPlugin => ({
   name: 'node-datachannel-embedded',
   setup(build) {
@@ -136,15 +112,8 @@ const nodeDataChannelEmbedded = (target: string | undefined): BunPlugin => ({
           `${args.path} no longer contains ${NODE_DATACHANNEL_ANCHOR}; re-measure the compiled WebRTC engine and update scripts/release/compile-executable.ts`,
         );
       }
-      const specifier = nodeDataChannelPrebuild(target);
-      let addon: string;
-      try {
-        addon = createRequire(args.path).resolve(specifier);
-      } catch {
-        throw new Error(
-          `${specifier} is not installed beside ${dirname(args.path)}; a cross-compile needs every target's prebuild (scripts/release/compile.sh installs them)`,
-        );
-      }
+      const specifier = nodeDataChannelPrebuild(target, `bun-${process.platform}-${process.arch}`);
+      const addon = installedPrebuild(specifier, args.path, name => createRequire(args.path).resolve(name));
       return {
         contents: [
           `import addon from ${JSON.stringify(addon)} with { type: 'file' };`,

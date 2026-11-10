@@ -99,6 +99,22 @@ describe('the input card holds a typed value only in its field', () => {
     }
   });
 
+  it('I6 shows the fixed sentence, not a refusal’s message, when that message echoes the typed value (8+ characters)', async () => {
+    const { mounted } = await card(terminalRequest(), async () => {
+      throw Object.assign(new Error(`Bad gateway: upstream echoed ${FAKE_VALUE} back`), { status: 502 });
+    });
+    try {
+      await typeInto(field(mounted.container), FAKE_VALUE);
+      await click(q(mounted.container, '[data-input-send]'));
+      await settle();
+      expect(q(mounted.container, '[data-input-failure]').textContent).toBe('The daemon refused this.');
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
+      expect(mounted.container.textContent).not.toContain(FAKE_VALUE);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('I6 clears the field when the card unmounts', async () => {
     const { mounted } = await card();
     const input = field(mounted.container);
