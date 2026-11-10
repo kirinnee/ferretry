@@ -23,7 +23,10 @@ const withoutTrailingSlash = (path: string): string => path.replace(/(?<=.)\/+$/
  *   `.claude`, at `.claude/skills` or anywhere between the project folder and the skills folder makes every call on the
  *   root refuse `link_escape`, which this reader shows as nothing (an empty listing, no text). The kernel judges that
  *   at every call, right before the folder is touched, so a skills folder swapped for a link after an earlier call is
- *   refused at the next one. The kernel also keeps every listed folder and file INSIDE the scoped folder
+ *   refused at the next one. Residual: the `imports` root's `within` walk lstats each folder below the anchor by path and
+ *   the read then opens the scoped folder by path, so a skills folder swapped for a link after that lstat and before
+ *   the open, inside ONE call, lets one bounded read (at most the caller's `maxBytes`, one `SKILL.md`) through the link;
+ *   it closes when `imports` reaches its folder by descriptor as `project-files` does. The kernel also keeps every listed folder and file INSIDE the scoped folder
  *   (`link_escape`, `hard_link`).
  */
 export class ProjectSkillFiles implements SkillFilesPort {

@@ -184,7 +184,7 @@ describe('a registered project’s skills over the real imports root', () => {
     expect(await files.list(w.skills, 10)).toEqual([]);
   });
 
-  test('R-0198 a skills folder swapped for a link right after the kernel looked at it reads no outside text', async () => {
+  test('R-0198 a skills folder swapped for a link during an earlier call is refused at the read: no outside text', async () => {
     const w = await world();
     await mkdir(join(w.parent, 'outside', 'skills', 'good'), { recursive: true });
     await writeFile(join(w.parent, 'outside', 'skills', 'good', 'SKILL.md'), doc('stolen'));
@@ -205,6 +205,28 @@ describe('a registered project’s skills over the real imports root', () => {
     const text = await w.filesOver(racing).read(`${w.skills}/good/SKILL.md`, 1000);
     expect(swapped).toBe(true);
     expect(text).not.toBe(doc('stolen'));
+  });
+
+  test('GAP [kernel: imports scoped folder link] a swap inside the read call itself reads one outside SKILL.md', async () => {
+    const w = await world();
+    await mkdir(join(w.parent, 'outside', 'skills', 'good'), { recursive: true });
+    await writeFile(join(w.parent, 'outside', 'skills', 'good', 'SKILL.md'), doc('stolen'));
+    const inner = nodeFs(() => crypto.randomUUID());
+    let seen = 0;
+    const racing = {
+      ...inner,
+      lstat: async (path: string) => {
+        const found = await inner.lstat(path);
+        if (path === w.skills && ++seen === 2) {
+          // The second walk is the readText call's own: the swap lands after its lstat, before its open.
+          renameSync(w.skills, join(w.project, '.claude', 'skills-moved'));
+          symlinkSync(join(w.parent, 'outside', 'skills'), w.skills);
+        }
+        return found;
+      },
+    } as HostFs;
+    // Today's behaviour, declared: one bounded read of one outside SKILL.md goes through the link.
+    expect(await w.filesOver(racing).read(`${w.skills}/good/SKILL.md`, 1000)).toBe(doc('stolen'));
   });
 
   test('R-0198 a kernel that refuses to open the folder reads nothing, and never throws', async () => {
