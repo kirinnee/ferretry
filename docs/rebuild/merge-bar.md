@@ -61,8 +61,8 @@ What 5.0 merges without is [after-merge.json](after-merge.json): three counts an
   the against-base rules too: `scripts/ci/check-base.sh` fetches the pull request's base once it holds this list
   (or the commit before a push to main), and otherwise the anchor commit that set this baseline, and names it as
   `FY_CHECK_BASE`. A base CI cannot fetch fails the job, and `after-merge` fails on a named base it cannot read.
-  Before merge, CI therefore holds 5.0 to the approved baseline itself; the commit hook holds each commit to the one
-  before it.
+  Before merge, CI therefore holds 5.0 to the approved baseline itself; the commit hook holds each commit to the last fetched
+  `origin/rebuild/5.0` tip.
 - Every row and item keeps its owner.
 - One end date, `end` in the file. Only the owner moves it.
 - A daily report to the lead: parity settled and total, the Appendix D missing count, the smoke list pass and fail.
