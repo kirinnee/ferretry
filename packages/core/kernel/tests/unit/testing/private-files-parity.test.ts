@@ -398,3 +398,77 @@ test('S40 PF-loud the host says a failed pin once per outage and says it again a
     await outcome.host.stop();
   }
 });
+
+test('S40 row 49 PF-loud the booted host hands its pin report to every plugin root: a root write that cannot be pinned is told once', async () => {
+  const seen: { ferrets?: KernelPorts } = {};
+  const parent = await realpath(await mkdtemp(`${tmpdir()}/private-parity-`));
+  parents.push(parent);
+  const home = `${parent}/home`;
+  const records: LogRecord[] = [];
+  const real = realAdapters(home, record => records.push(record), { binary: 'fy' });
+  // One write resolves the home several times; only the LAST resolving (the pin's) fails, so the write itself lands.
+  let resolvings = 0;
+  let failAt = Number.POSITIVE_INFINITY;
+  const outcome = await bootHost({
+    home,
+    version: '5.0.0',
+    adapters: {
+      ...real,
+      fs: {
+        ...real.fs,
+        realpath: async path => {
+          if (path === home) {
+            resolvings += 1;
+            if (resolvings === failAt) throw Object.assign(new Error(`cannot resolve ${path}`), { code: 'EIO' });
+          }
+          return await real.fs.realpath(path);
+        },
+      },
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => {} }),
+    },
+    implementations: [
+      implementDaemon(
+        {
+          ...base,
+          id: 'ferrets',
+          permissions: { roots: ['sessions'] },
+          privacy: { private: ['sessions/*/environment.json'] },
+        } as unknown as Manifest,
+        {
+          build: ({ kernel }) => {
+            seen.ferrets = kernel;
+            return {};
+          },
+        },
+      ),
+    ],
+  });
+  if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+  try {
+    const session = (seen.ferrets as KernelPorts).roots.root('sessions', { subfolder: 'mw7bp88g-50e00159' });
+    const environment = session.resolve('environment.json');
+    if (!environment.ok) throw new Error(environment.error);
+    const told = (): number => records.filter(record => record.message.includes('could not be pinned')).length;
+    const write = (): Promise<unknown> =>
+      session.writeText(environment.value as FencedPath, 'FAKE-credential').then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    // The first write makes the session folder; the second is a plain replace, the same shape as the failing ones.
+    await write();
+    const before = resolvings;
+    await write();
+    const perWrite = resolvings - before;
+    const failing = async (): Promise<unknown> => {
+      resolvings = 0;
+      failAt = perWrite;
+      return await write();
+    };
+    expect(await failing()).toBeInstanceOf(ApiError);
+    expect(await failing()).toBeInstanceOf(ApiError);
+    expect(told()).toBe(1);
+  } finally {
+    await outcome.host.stop();
+  }
+});
