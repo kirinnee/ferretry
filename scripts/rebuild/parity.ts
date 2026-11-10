@@ -433,7 +433,14 @@ function checkOf(kind: Kind, what: string, file: string, actualOwner: string): s
               ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
               : kind === 'R'
                 ? 'descriptor-parity'
-                : `${packagePath(actualOwner)}/tests/unit/parity/${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+                : parityFileOf(actualOwner, kind);
+}
+/** The owner's parity file for a kind: the unit tier's, unless that file lives in the integration tier (real disk). */
+function parityFileOf(actualOwner: string, kind: Exclude<Kind, 'R'>): string {
+  const name = `${{ V: 'commands', T: 'agent-tools', S: 'app', J: 'jobs', F: 'storage' }[kind]}.test.${kind === 'S' ? 'tsx' : 'ts'}`;
+  const unit = `${packagePath(actualOwner)}/tests/unit/parity/${name}`;
+  const integration = `${packagePath(actualOwner)}/tests/integration/parity/${name}`;
+  return !existsSync(join(root, unit)) && existsSync(join(root, integration)) ? integration : unit;
 }
 function add(kind: Kind, what: string, file: string, line: number, descriptor = '', owner?: string) {
   let actualOwner = owner ?? ownerOf(file, what);

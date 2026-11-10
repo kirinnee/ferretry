@@ -43,6 +43,7 @@ import {
   unlock,
   unlockOnly,
 } from '../../support/daemon-host.ts';
+import { everyUnusableKeyEndsTheSame, joinChallengeIsSpentByTheJoin } from '../../support/member-mode-cases.ts';
 
 const { MEMBER_JOIN_OUTCOME_BYTES, SESSION_CLOSE_CODES, SESSION_PROTOCOL_ID } = session;
 const CONCLUDED = 4440;
@@ -473,33 +474,8 @@ describe('catalog member sessions on the kernel session layer', () => {
   });
 
   it('R609 should issue a challenge on join-options that a join spends, so a replay is refused', async () => {
-    // Arrange — a person with a passkey, invited onto a second browser
-    const { fx, joined } = await unlockedMember();
-    const second = await browser();
-    const share = await mintShare(fx, {
-      catalogIds: [await makeCatalog(fx, 'Third')],
-      member: { kind: 'existing', memberId: joined.memberId },
-    });
-
-    // Act
-    const options = await fx.open().handshake();
-    await options.joinOptions(second, share.code);
-    const challenge = options.records[0]?.message;
-    const passkey = {
-      credentialId: b64(CREDENTIAL),
-      clientDataJSON: b64('client'),
-      authenticatorData: b64('authenticator'),
-      signature: b64('signature'),
-    };
-    const join = await fx.open().handshake();
-    await join.join(second, share.code, { passkey });
-    const replay = await fx.open().handshake();
-    await replay.join(second, share.code, { passkey });
-
-    // Assert
-    expect(challenge?.t).toBe('join-challenge');
-    expect(join.records[0]?.message.t).toBe('joined');
-    expect(replay.records[0]?.message.t).toBe('join-refused');
+    // The arrangement and the assertions are the shared case, which the integration tier runs too.
+    await joinChallengeIsSpentByTheJoin();
   });
 
   it('R610 should refuse a join with no passkey proof for a person who has one, and leave the code live', async () => {
@@ -531,32 +507,8 @@ describe('catalog member sessions on the kernel session layer', () => {
   });
 
   it('R612 should end an unknown key, a removed key, an idle key and a bad proof with the same 4403', async () => {
-    // Arrange
-    const { fx, catalog } = await publisher();
-    const share = await mintShare(fx, { catalogIds: [catalog], uses: { kind: 'multi', cap: 100 } });
-    const who = await browser();
-    const gone = await browser();
-    const idle = await browser();
-    const joined = await joinWith(fx, who, share.code);
-    const removed = await joinWith(fx, gone, share.code);
-    const idleKey = await joinWith(fx, idle, share.code);
-    await unlock(await memberSession(fx, idle, idleKey.keyId));
-    await fx.host.request('DELETE', `/v1/catalog-members/${removed.memberId}`);
-
-    // Act
-    const unknown = await memberSession(fx, who, `mk_${'Z'.repeat(22)}`);
-    const forged = await fx.open().handshake();
-    await forged.member(who, joined.keyId, await browser());
-    const revoked = await memberSession(fx, gone, removed.keyId);
-    await fx.clock.advance(91 * DAY);
-    const expired = await memberSession(fx, idle, idleKey.keyId);
-
-    // Assert
-    for (const end of [unknown, forged, revoked, expired]) {
-      expect(end.end?.code).toBe(SESSION_CLOSE_CODES.authRejected);
-      expect(end.records).toEqual([]);
-    }
-    expect(new Set([unknown, forged, revoked, expired].map(end => end.end?.reason)).size).toBe(1);
+    // The arrangement and the assertions are the shared case, which the integration tier runs too.
+    await everyUnusableKeyEndsTheSame();
   });
 
   it('R613 should end a revoked browser with the same cleartext 4403 an unknown one gets, sealing no reason', async () => {

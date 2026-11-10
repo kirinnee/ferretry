@@ -34,6 +34,7 @@ import type {
   Redaction,
   RootHandle,
   RootsPort,
+  RootStat,
   SpawnPort,
   StatePort,
 } from '@ferretry/kernel/contract';
@@ -414,10 +415,7 @@ export class ClaudeHarness implements Harness {
   async transcriptStamp(ferret: FerretId): Promise<HarnessTranscriptStamp | undefined> {
     const found = await this.transcriptFile(ferret);
     if (found === undefined) return undefined;
-    const stat = await found.home.stat(found.file).catch(() => undefined);
-    return stat?.kind === 'file'
-      ? { file: found.file, size: stat.size, mtimeMs: Date.parse(stat.modified) }
-      : undefined;
+    return { file: found.file, size: found.stat.size, mtimeMs: Date.parse(found.stat.modified) };
   }
 
   /** The newest `limit` records of that transcript, without their text (`Harness.transcriptTail`). */
@@ -488,7 +486,7 @@ export class ClaudeHarness implements Harness {
   /** The exact transcript of the assigned id in its encoded cwd, including after a daemon restart; never one found by guessing. */
   private async transcriptFile(
     ferret: FerretId,
-  ): Promise<{ readonly home: RootHandle; readonly file: FencedPath } | undefined> {
+  ): Promise<{ readonly home: RootHandle; readonly file: FencedPath; readonly stat: RootStat } | undefined> {
     const home = this.home(ferret);
     const binding = home.resolve(HOME_FILES.conversation);
     if (!binding.ok) return undefined;
@@ -502,8 +500,10 @@ export class ClaudeHarness implements Harness {
     const { format, id, cwd } = identity as { format?: unknown; id?: unknown; cwd?: unknown };
     if (format !== 1 || !isConversationId(id) || typeof cwd !== 'string' || !cwd.startsWith('/')) return undefined;
     const file = home.resolve(claudeTranscriptPath(cwd, id));
-    if (!file.ok || (await home.stat(file.value))?.kind !== 'file') return undefined;
-    return { home, file: file.value };
+    if (!file.ok) return undefined;
+    const stat = await home.stat(file.value);
+    if (stat?.kind !== 'file') return undefined;
+    return { home, file: file.value, stat };
   }
 
   /** Read only the assigned id in its encoded cwd, including after a daemon restart. */

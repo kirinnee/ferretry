@@ -55,6 +55,21 @@ describe('a card gate as an obligation in Asks', () => {
     expect(one).toEqual([{ entry: gate('F2'), ask: expect.any(String), ferret: 'f2', cardId: 'F2' }]);
   });
 
+  test('every open gate is grouped under the card it names, and a card with two gates holds both', async () => {
+    const asks = new FakeAsks();
+    const obligations = new AsksCardObligations(asks);
+    await obligations.raise(gateDraft('F1', 1));
+    await obligations.raise(gateDraft('F1', 2));
+    await obligations.raise(gateDraft('F2', 1, 'f2'));
+    await asks.raise({ ...gateDraft('F3'), entry: entryId('not-a-gate') });
+
+    const byCard = await obligations.openAll();
+
+    expect([...byCard.keys()].sort()).toEqual(['F1', 'F2']);
+    expect(byCard.get('F1' as never)?.map(entry => entry.entry)).toEqual([gate('F1', 1), gate('F1', 2)]);
+    expect(byCard.get('F2' as never)?.map(entry => entry.ferret)).toEqual(['f2']);
+  });
+
   test('withdrawing a gate closes its open ask, for the reason given, and leaves other gates open', async () => {
     const asks = new FakeAsks();
     const obligations = new AsksCardObligations(asks);
