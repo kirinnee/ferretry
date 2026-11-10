@@ -26,9 +26,9 @@ const withoutTrailingSlash = (path: string): string => path.replace(/(?<=.)\/+$/
  *   refused at the next one. The root reaches the skills folder BY DESCRIPTOR: the project folder is opened once and
  *   proven, and each folder below it is opened from its parent's descriptor without following a link, so a skills
  *   folder swapped for a link at any step of ONE call is refused (`link_escape`) and reads nothing. Residual: a host that
- *   reaches an open folder by neither `/proc/self/fd` nor the C library's descriptor calls keeps the by-path read after
- *   the link walk, where one bounded read (at most the caller's `maxBytes`, one `SKILL.md`) could pass a swap landing
- *   inside one call; the daemon's doctor says so once at boot. The kernel also keeps every listed folder and file INSIDE
+ *   reaches an open folder by neither `/proc/self/fd` nor the C library's descriptor calls lists and stats by path after
+ *   the link walk, where a swap landing inside one call can show the outside folder's names and sizes (never a file's
+ *   text); the daemon's doctor says so once at boot. The kernel also keeps every listed folder and file INSIDE
  *   the scoped folder (`link_escape`, `hard_link`).
  */
 export class ProjectSkillFiles implements SkillFilesPort {

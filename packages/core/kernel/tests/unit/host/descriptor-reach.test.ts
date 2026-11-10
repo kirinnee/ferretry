@@ -31,7 +31,8 @@ describe('R-0198 the descriptor reach of the host is said once at boot', () => {
     const note = await descriptorReachNote(fsReaching({ path: false, calls: false, bracket: false }));
     expect(note).toMatchObject({ plugin: 'kernel', state: 'warn' });
     expect(note?.detail).toContain('read by path after the link check');
-    expect(note?.detail).toContain('one bounded read');
+    expect(note?.detail).toContain("the outside folder's names and sizes");
+    expect(note?.detail).toContain("no file's text is read through it");
     expect(note?.detail).not.toContain('/home');
   });
 

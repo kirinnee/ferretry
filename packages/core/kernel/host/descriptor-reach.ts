@@ -12,8 +12,8 @@ export async function descriptorReachNote(fs: HostFs): Promise<DoctorLine | unde
   const reach = await fs.descriptorReach?.().catch(() => undefined);
   if (reach === undefined || reach.path) return undefined;
   const consequence =
-    'a folder swapped for a link in the instant between the link check and the read can let one bounded read through ' +
-    '(nothing is written through it, and a swap between two calls is refused at the next one)';
+    "a folder swapped for a link in the instant between the link check and the look can let one listing or stat show the outside folder's names and sizes " +
+    "(no file's text is read through it, nothing is written through it, and a swap between two calls is refused at the next one)";
   if (!reach.calls)
     return {
       plugin: 'kernel',

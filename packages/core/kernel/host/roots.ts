@@ -378,9 +378,12 @@ interface Scope {
    * `imports` with a `within` anchor only: the REAL path of the anchor. Every folder a READ reaches (the scoped folder
    * and any folder inside it) is opened from the anchor's descriptor down, each from its parent's, with
    * `O_DIRECTORY | O_NOFOLLOW`, and the file is opened from its folder's descriptor (`openFile`), so a folder swapped
-   * for a link at any step of one call reads, stats and lists nothing outside it. A host that reaches an open folder by
-   * neither a descriptor path nor the C library's calls keeps the by-path read (the lstat walk stays its only link
-   * check): it never refuses a read that works today. Unlike `descent`, nothing is made or written through it.
+   * for a link at any step of one call reads, stats and lists nothing outside it, WHETHER OR NOT the lstat walk found
+   * every folder (the base must be exactly its spelling below the anchor). A host that reaches an open folder by neither
+   * a descriptor path nor the C library's calls keeps the by-path read: there a swap inside ONE call can let a listing,
+   * a stat or an identity answer the outside folder's names and metadata, while a file's bytes stay refused by the
+   * spelling and identity proofs; it never refuses a read that works today. Unlike `descent`, nothing is made or
+   * written through it.
    */
   readonly heldFrom?: string;
 }
@@ -1765,19 +1768,16 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * A scope that names an anchor (`within`): every folder from the anchor's first child down to the scoped folder is
    * looked at WITHOUT following it, and a link at any of them is refused `link_escape`. The anchor itself and its
    * ancestors are not looked at (a symlinked project folder works). A folder that is not there yet is no link, and
-   * nothing below it exists either. An anchor equal to the scoped folder walks nothing. Answers whether every folder
-   * was there: `imports` then reads by descriptor (`heldFrom`), the walk being the early refusal and the descriptors the
-   * proof.
+   * nothing below it exists either. An anchor equal to the scoped folder walks nothing.
    */
-  const anchoredFolders = async (): Promise<boolean> => {
+  const anchoredFolders = async (): Promise<void> => {
     for (const folder of setup.linkFreeFolders() ?? []) {
       // A folder the walk cannot look at (no permission, a file where a folder should be) is one it cannot prove to be
       // no link: it fails closed as a link does, with the refusal alone — the system's error names an absolute path.
       const found = await fs.lstat(folder).catch(() => refuse('link_escape'));
-      if (found === undefined) return false;
+      if (found === undefined) return;
       if (found.kind === 'link') refuse('link_escape');
     }
-    return true;
   };
   const ownerRoot = OWNER_ROOTS.has(name);
   /**
@@ -1914,10 +1914,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
     const root = base();
     if (root === undefined) refuse(name === 'work' ? 'unknown_ferret' : 'outside');
     const descent = projectRoot ? await spelledBelowAnchor(root as string) : undefined;
-    const walked = await anchoredFolders();
-    // `imports` with an anchor and every folder below it present: its reads go by descriptor from the anchor's real path.
+    await anchoredFolders();
+    // `imports` with an anchor: its reads go by descriptor from the anchor's real path, and the base must be exactly its
+    // spelling below the anchor, WHETHER OR NOT the walk found every folder: a folder missing at the walk and planted
+    // as a link right after it would otherwise become the base every later check is relative to.
     const anchorReal =
-      name === 'imports' && walked && setup.within !== undefined && setup.linkFreeFolders() !== undefined
+      name === 'imports' && setup.within !== undefined && setup.linkFreeFolders() !== undefined
         ? await fs.realpath(setup.within).catch(() => refuse('outside'))
         : undefined;
     if (create && scopedParent !== undefined) {
