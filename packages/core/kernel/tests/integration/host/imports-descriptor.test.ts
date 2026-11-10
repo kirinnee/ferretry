@@ -9,11 +9,22 @@
  * the outside names and the outside size are never answered.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { linkSync, mkdirSync, openSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
+import {
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  renameSync,
+  rmdirSync,
+  symlinkSync,
+  unlinkSync,
+} from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { RootHandle } from '../../../contract/ports.ts';
 import { type HostFs, type OpenedDirectory, nodeFs } from '../../../host/adapters/node-fs.ts';
+import { type BracketOps, type DescriptorBracket } from '../../../host/adapters/pinned/descriptor-bracket.ts';
 import { type DescriptorCalls, isSingleName } from '../../../host/adapters/pinned/descriptor-calls.ts';
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
 
@@ -41,9 +52,41 @@ const standIn = (): DescriptorCalls => {
   };
 };
 
+/** The working-directory bracket's one step a listing needs, spelled over `/proc/self/fd` (the real one is `fchdir`). */
+const bracketStandIn = (): DescriptorBracket => {
+  const here = (fd: number, name: string): string => `/proc/self/fd/${String(fd)}/${name}`;
+  return {
+    run: (fd: number, _folder: unknown, act: (ops: BracketOps) => unknown) =>
+      act({
+        here: () => lstatSync(here(fd, '.'), { bigint: true }),
+        lstat: name => {
+          try {
+            return lstatSync(here(fd, name), { bigint: true });
+          } catch (error) {
+            const code = (error as { code?: string }).code;
+            if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+            throw error;
+          }
+        },
+        list: () => readdirSync(here(fd, '.')).sort(),
+        rmdir: name => {
+          rmdirSync(here(fd, name));
+        },
+      }),
+  } as unknown as DescriptorBracket;
+};
+
 const disks = {
   linux: (): HostFs => nodeFs(() => crypto.randomUUID()),
-  macOS: (): HostFs => nodeFs(() => crypto.randomUUID(), { descriptorFolder: NO_PROC, descriptorCalls: standIn }),
+  macOS: (): HostFs =>
+    nodeFs(() => crypto.randomUUID(), {
+      descriptorFolder: NO_PROC,
+      descriptorCalls: standIn,
+      bracket: bracketStandIn,
+    }),
+  /** The C calls loaded but not the working-directory bracket (a listing then goes by path once the folder is proven). */
+  macOSNoBracket: (): HostFs =>
+    nodeFs(() => crypto.randomUUID(), { descriptorFolder: NO_PROC, descriptorCalls: standIn }),
   noReach: (): HostFs =>
     nodeFs(() => crypto.randomUUID(), {
       descriptorFolder: NO_PROC,
@@ -219,7 +262,7 @@ describe('R-0198 imports reaches its scoped folder by descriptor: a folder swapp
 });
 
 describe('R-0198 the anchor is proven once and held', () => {
-  test('R-0198 the anchor swapped for a link to a same-shaped tree right after it was opened keeps reading the original', async () => {
+  test('R-0198 the anchor swapped for a link to a same-shaped tree right after it was opened reads nothing outside (changed)', async () => {
     const w = await world();
     const hostileProject = `${w.parent}/out-project`;
     await mkdir(`${hostileProject}/a/b/c`, { recursive: true });
@@ -239,9 +282,10 @@ describe('R-0198 the anchor is proven once and held', () => {
       },
     } as HostFs;
     const seen = await observe(w.rootFor(racing), w.scoped, 'readText');
-    // The anchor is opened by descriptor: the swap after that open is not followed.
+    // The anchor is opened by descriptor and proven once: the swap after that open is not followed (the descriptor
+    // keeps pointing at the original), and the closing look that finds the project's path elsewhere now is `changed`.
     expect(fired).toBe(true);
-    expect(seen).toMatchObject({ kind: 'answer', leak: false, inside: true });
+    expect(seen).toEqual({ kind: 'refused', refusal: 'changed' });
   });
 });
 
@@ -299,6 +343,12 @@ describe('R-0198 a link anywhere below the anchor is refused; the project folder
 describe('R-0198 a host that reaches no folder by descriptor path', () => {
   test('R-0198 macOS (no /proc/self/fd, the C calls loaded) reads, stats and lists every verb', async () => {
     const w = await world(disks.macOS());
+    for (const verb of VERBS)
+      expect(await observe(w.rootFor(), w.scoped, verb)).toMatchObject({ kind: 'answer', leak: false, inside: true });
+  });
+
+  test('R-0198 macOS with the C calls but no working-directory bracket still reads, stats and lists every verb', async () => {
+    const w = await world(disks.macOSNoBracket());
     for (const verb of VERBS)
       expect(await observe(w.rootFor(), w.scoped, verb)).toMatchObject({ kind: 'answer', leak: false, inside: true });
   });

@@ -21,7 +21,14 @@ import { userInfo } from 'node:os';
 import { dirname } from 'node:path';
 import { type DescriptorBracket, loadProcessBracket } from './pinned/descriptor-bracket.ts';
 import { type DescriptorCalls, isSingleName, loadDescriptorCalls } from './pinned/descriptor-calls.ts';
-import { type FolderSteps, folderSteps, fstatOf, type HeldChild, holdFolder } from './pinned/descriptor-folder.ts';
+import {
+  type FolderSteps,
+  folderSteps,
+  fstatOf,
+  type HeldChild,
+  type HeldFile,
+  holdFolder,
+} from './pinned/descriptor-folder.ts';
 
 /**
  * Which entry a path names: what kind, and the device and inode that name it whatever path reached it (copied from
@@ -88,6 +95,14 @@ export interface OpenedDirectory {
     leaf: string,
     make?: { readonly mode: number },
   ): Promise<{ readonly folder: OpenedDirectory; readonly created: boolean }>;
+  /**
+   * The file `leaf` BELOW this folder, opened to read from this folder's descriptor and never by a path a link could
+   * redirect: `O_RDONLY | O_NOFOLLOW | O_NONBLOCK` through `entryPath` (Linux) or through `at` (macOS), after the
+   * folder is proven to still be the one it was opened on. Throws the errno's `code` (`ELOOP` for a link, `ENOENT` for
+   * nothing, `EACCES` for a file it may not read); a host with neither a descriptor path nor the C library's calls
+   * throws `ENOSYS`. The caller closes the returned file. Additive.
+   */
+  openFile(leaf: string): Promise<OpenedFile>;
   /** Sets this folder's permission bits through the descriptor (`fchmod`), never by name. */
   chmod(mode: number): Promise<void>;
   /**
@@ -154,6 +169,12 @@ export interface HostFs {
   groups(): Promise<readonly number[]>;
   /** Whether this process may write in `path` (`access(W_OK)`). */
   writable(path: string): Promise<boolean>;
+  /**
+   * How this host reaches an open folder, asked once at boot so the doctor can say what a host without it gives up:
+   * `path` (a descriptor is a path, Linux `/proc/self/fd`), `calls` (the C library's descriptor calls loaded) and
+   * `bracket` (the working-directory bracket a listing and a remove go through, loaded). Only the real disk answers.
+   */
+  descriptorReach?(): Promise<{ readonly path: boolean; readonly calls: boolean; readonly bracket: boolean }>;
 }
 
 const codeOf = (error: unknown): string | undefined => (error as { code?: string }).code;
@@ -212,16 +233,27 @@ async function opened(path: string, flags: number, mode?: number): Promise<[File
 
 /** Reads `handle` from its start, at most `limit` bytes. */
 async function readAll(handle: FileHandle, limit: number | undefined): Promise<Uint8Array> {
+  return await readChunks(async (position, length) => {
+    const buffer = new Uint8Array(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, position);
+    return buffer.subarray(0, bytesRead);
+  }, limit);
+}
+
+/** The reads of {@link readAll} over any positional read (a file held below a folder reads through its own descriptor). */
+async function readChunks(
+  readAt: (position: number, length: number) => Promise<Uint8Array>,
+  limit: number | undefined,
+): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
     const want = limit === undefined ? READ_CHUNK_BYTES : Math.min(READ_CHUNK_BYTES, limit - total);
     if (want <= 0) break;
-    const buffer = new Uint8Array(want);
-    const { bytesRead } = await handle.read(buffer, 0, want, total);
-    if (bytesRead === 0) break;
-    chunks.push(buffer.subarray(0, bytesRead));
-    total += bytesRead;
+    const chunk = await readAt(total, want);
+    if (chunk.byteLength === 0) break;
+    chunks.push(chunk);
+    total += chunk.byteLength;
   }
   const out = new Uint8Array(total);
   let at = 0;
@@ -313,6 +345,38 @@ export function nodeFs(
   const groupDatabase = options.groupDatabase ?? '/etc/group';
   const noReach = (): Error =>
     Object.assign(new Error('ENOSYS: this host reaches no folder through a held folder'), { code: 'ENOSYS' });
+  const openReadAt = async (path: string): Promise<OpenedFile> => {
+    const [handle, identity] = await opened(path, READ_FILE);
+    return {
+      identity,
+      read: async limit => await readAll(handle, limit),
+      readWindow: async (offset, length) => {
+        const size = Number((await handle.stat({ bigint: true })).size);
+        const from = offset < 0 ? Math.max(0, size + offset) : offset;
+        const buffer = new Uint8Array(Math.max(0, Math.min(length, size - from)));
+        const { bytesRead } =
+          buffer.length === 0 ? { bytesRead: 0 } : await handle.read(buffer, 0, buffer.length, from);
+        return { bytes: buffer.subarray(0, bytesRead), size };
+      },
+      sync: async () => await handle.sync(),
+      chmod: async mode => await handle.chmod(mode),
+      close: async () => await handle.close(),
+    };
+  };
+  /** A file opened by `steps` (no path reaches it): the same `OpenedFile` over its own descriptor. */
+  const heldFile = (file: HeldFile): OpenedFile => ({
+    identity: file.identity,
+    read: async limit => await readChunks(file.readAt, limit),
+    readWindow: async (offset, length) => {
+      const size = await file.size();
+      const from = offset < 0 ? Math.max(0, size + offset) : offset;
+      const wanted = Math.max(0, Math.min(length, size - from));
+      return { bytes: wanted === 0 ? new Uint8Array(0) : await file.readAt(from, wanted), size };
+    },
+    sync: async () => await file.sync(),
+    chmod: async mode => await file.chmod(mode),
+    close: async () => await file.close(),
+  });
   /** `leaf` of a macOS held folder: made (`mkdirat`) when asked, then opened from its descriptor without following. */
   const childThroughSteps = async (
     steps: FolderSteps,
@@ -329,6 +393,7 @@ export function nodeFs(
       entryPath: () => undefined,
       at: child.steps,
       openChild: async (leaf, make) => await childThroughSteps(child.steps, leaf, make),
+      openFile: async leaf => heldFile(await child.steps.openFile(leaf)),
       chmod: async mode =>
         await new Promise<void>((resolve, reject) => {
           fchmod(child.fd, mode, error => (error === null ? resolve() : reject(error)));
@@ -390,6 +455,21 @@ export function nodeFs(
         }
         return { folder: await openDirectory(through), created };
       },
+      openFile: async leaf => {
+        if (!isSingleName(leaf))
+          throw Object.assign(new Error('EINVAL: that is not one plain name'), { code: 'EINVAL' });
+        if (!reached) {
+          if (at === undefined) throw noReach();
+          return heldFile(await at.openFile(leaf));
+        }
+        // This descriptor must still be the folder it was opened on before its number is used as a path.
+        const now = await handle.stat({ bigint: true });
+        if (now.dev !== identity.device || now.ino !== identity.inode)
+          throw Object.assign(new Error('EBADF: a held folder is no longer the one it was opened on'), {
+            code: 'EBADF',
+          });
+        return await openReadAt(`${descriptorFolder}/${String(handle.fd)}/${leaf}`);
+      },
       chmod: async mode => await handle.chmod(mode),
       sync: async () => {
         try {
@@ -429,24 +509,7 @@ export function nodeFs(
         throw error;
       }
     },
-    openRead: async path => {
-      const [handle, identity] = await opened(path, READ_FILE);
-      return {
-        identity,
-        read: async limit => await readAll(handle, limit),
-        readWindow: async (offset, length) => {
-          const size = Number((await handle.stat({ bigint: true })).size);
-          const from = offset < 0 ? Math.max(0, size + offset) : offset;
-          const buffer = new Uint8Array(Math.max(0, Math.min(length, size - from)));
-          const { bytesRead } =
-            buffer.length === 0 ? { bytesRead: 0 } : await handle.read(buffer, 0, buffer.length, from);
-          return { bytes: buffer.subarray(0, bytesRead), size };
-        },
-        sync: async () => await handle.sync(),
-        chmod: async mode => await handle.chmod(mode),
-        close: async () => await handle.close(),
-      };
-    },
+    openRead: openReadAt,
     openDirectory,
     writeNew: async (path, data, mode) => {
       const [handle, identity] = await opened(path, NEW_FILE, mode);
@@ -515,6 +578,11 @@ export function nodeFs(
       const live = [...(process.getgroups?.() ?? []), ...(process.getegid === undefined ? [] : [process.getegid()])];
       return [...new Set([...live, ...(await listedGroups(groupDatabase, userInfo().username))])];
     },
+    descriptorReach: async () => ({
+      path: await throughDescriptors(),
+      calls: callsOrNone() !== undefined,
+      bracket: bracketOrNone() !== undefined,
+    }),
     writable: async path => {
       try {
         await access(path, constants.W_OK);

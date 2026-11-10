@@ -374,6 +374,15 @@ interface Scope {
    * folder swapped for a link after the checks reaches nothing. The anchor is the one folder reached by path.
    */
   readonly descent?: string;
+  /**
+   * `imports` with a `within` anchor only: the REAL path of the anchor. Every folder a READ reaches (the scoped folder
+   * and any folder inside it) is opened from the anchor's descriptor down, each from its parent's, with
+   * `O_DIRECTORY | O_NOFOLLOW`, and the file is opened from its folder's descriptor (`openFile`), so a folder swapped
+   * for a link at any step of one call reads, stats and lists nothing outside it. A host that reaches an open folder by
+   * neither a descriptor path nor the C library's calls keeps the by-path read (the lstat walk stays its only link
+   * check): it never refuses a read that works today. Unlike `descent`, nothing is made or written through it.
+   */
+  readonly heldFrom?: string;
 }
 
 /** `real` is what the disk resolved `path` to: a literal scope refuses a name that resolved elsewhere (a link swapped in). */
@@ -398,6 +407,10 @@ async function openCheckedFolder(
   tolerateUnsupported = false,
 ): Promise<OpenedDirectory | undefined> {
   if (!within(scope.base.real, real)) refuse('link_escape');
+  if (scope.heldFrom !== undefined && !tolerateUnsupported) {
+    const held = await openHeldFolder(scope, scope.heldFrom, real);
+    if (held !== undefined) return held;
+  }
   const folder = await scope.fs.openDirectory(real).catch((error: unknown) => {
     // Today's `fsync*Directory` tolerated EINVAL/ENOTSUP/EPERM at the OPEN too: only the sync asks for this.
     if (tolerateUnsupported && ['EINVAL', 'ENOTSUP', 'EPERM'].includes(errnoOf(error) ?? '')) return undefined;
@@ -410,6 +423,21 @@ async function openCheckedFolder(
     refuse(problem);
   }
   return folder;
+}
+
+/**
+ * A READ of an `imports` scope with an anchor (`Scope.heldFrom`): the folder at `real` opened from the anchor's
+ * descriptor down, through `openFolderBelow` (the walk `project-files` writes through), so a link swapped in at any
+ * level is `link_escape`. `undefined` only on a host that reaches an open folder by neither a descriptor path nor the C
+ * library's calls: the caller then opens it by path, as that host always did.
+ */
+async function openHeldFolder(scope: Scope, anchor: string, real: string): Promise<OpenedDirectory | undefined> {
+  try {
+    return (await openFolderBelow(scope, anchor, real, 0o700, false)).folder;
+  } catch (error) {
+    if (error instanceof RootError && error.refusal === 'no_descriptor_reach') return undefined;
+    throw error;
+  }
 }
 
 async function folderProblem(scope: Scope, real: string, opened: FileIdentity): Promise<RootRefusal | undefined> {
@@ -461,6 +489,33 @@ async function fileProblem(scope: Scope, real: string, opened: FileIdentity): Pr
 }
 
 /**
+ * The file at `real` opened once to read. A scope that reads by descriptor (`Scope.heldFrom`) opens the file from its
+ * folder's descriptor, the folder itself reached from the anchor (`openHeldFolder`); the folder is let go as soon as the
+ * file is open. What an open that failed means is the errno alone (a path is never in the answer): a link or a file where
+ * a folder should be is `link_escape`, anything else `changed`. A folder that reaches nothing by descriptor (`ENOSYS`)
+ * opens the file by path.
+ */
+async function openLeaf(scope: Scope, real: string): Promise<OpenedFile> {
+  if (scope.heldFrom === undefined) return await scope.fs.openRead(real).catch(() => refuse('changed'));
+  const folder = await openCheckedFolder(scope, dirname(real));
+  try {
+    return await folder.openFile(basename(real));
+  } catch (error) {
+    switch (errnoOf(error)) {
+      case 'ENOSYS':
+        return await scope.fs.openRead(real).catch(() => refuse('changed'));
+      case 'ELOOP':
+      case 'ENOTDIR':
+        return refuse('link_escape');
+      default:
+        return refuse('changed');
+    }
+  } finally {
+    await folder.close();
+  }
+}
+
+/**
  * Today's `openOutsideStateHomes`: judged by real path and identity BEFORE the open (so a device is never opened),
  * opened once without following a link, proven to be the file that was checked, then read through THAT descriptor —
  * whole, up to a limit, a window or a tail: every read of a root goes through here.
@@ -471,7 +526,7 @@ async function withCheckedFile<T>(scope: Scope, full: string, use: (file: Opened
   if (before === undefined) return refuse('changed');
   const judged = await fileProblem(scope, real, before);
   if (judged !== undefined) refuse(judged);
-  const handle = await scope.fs.openRead(real).catch(() => refuse('changed'));
+  const handle = await openLeaf(scope, real);
   try {
     const problem = await fileProblem(scope, real, handle.identity);
     if (problem !== undefined) refuse(problem);
@@ -1068,10 +1123,9 @@ async function entriesChecked(
   const real = literalReal(scope, full, resolved);
   const folder = await openCheckedFolder(scope, real);
   try {
-    const names = await scope.fs.list(await entry(scope, folder, real, ''));
+    const names = await namesIn(scope, folder, real);
     const out = [];
-    for (const name of names)
-      out.push({ name, identity: await scope.fs.identity(await entry(scope, folder, real, name)) });
+    for (const name of names) out.push({ name, identity: await lookIn(scope, folder, real, name) });
     return out;
   } finally {
     await folder.close();
@@ -1084,21 +1138,52 @@ async function listChecked(scope: Scope, full: string): Promise<readonly string[
   const real = literalReal(scope, full, resolved);
   const folder = await openCheckedFolder(scope, real);
   try {
-    return await scope.fs.list(await entry(scope, folder, real, ''));
+    return await namesIn(scope, folder, real);
   } finally {
     await folder.close();
   }
 }
 
+/**
+ * The names in a checked folder, sorted. A scope that reads by descriptor (`Scope.heldFrom`) on a host with no descriptor
+ * path lists through the held folder's own steps (the working-directory bracket); everywhere else, through `entry`.
+ */
+async function namesIn(scope: Scope, folder: OpenedDirectory, real: string): Promise<readonly string[]> {
+  const removal = scope.heldFrom !== undefined && folder.entryPath('') === undefined ? folder.at?.removal : undefined;
+  if (removal !== undefined) return await removal.list();
+  return await scope.fs.list(await entry(scope, folder, real, ''));
+}
+
+/** What is at `leaf` in a checked folder, never followed: through its descriptor, or (a held read with no path) its held steps. */
+async function lookIn(
+  scope: Scope,
+  folder: OpenedDirectory,
+  real: string,
+  leaf: string,
+): Promise<FileIdentity | undefined> {
+  if (scope.heldFrom !== undefined && folder.at !== undefined && folder.entryPath('') === undefined)
+    return await folder.at.identity(leaf);
+  return await scope.fs.identity(await entry(scope, folder, real, leaf));
+}
+
 /** The leaf at `full` itself (never followed), reached through its checked folder. */
 async function leafIdentity(scope: Scope, full: string): Promise<FileIdentity | undefined> {
-  if (full === scope.base.real) return await scope.fs.identity(full);
+  if (full === scope.base.real && scope.heldFrom === undefined) return await scope.fs.identity(full);
   const resolved = await scope.fs.realpath(dirname(full)).catch(() => undefined);
+  if (full === scope.base.real) {
+    // The scoped folder itself: the descriptor it was reached by says what it is, not a second look by path.
+    const held = await openCheckedFolder(scope, full);
+    try {
+      return held.identity;
+    } finally {
+      await held.close();
+    }
+  }
   if (resolved === undefined) return undefined;
   const parent = literalReal(scope, dirname(full), resolved);
   const folder = await openCheckedFolder(scope, parent);
   try {
-    const found = await scope.fs.identity(await entry(scope, folder, parent, basename(full)));
+    const found = await lookIn(scope, folder, parent, basename(full));
     // What a name IS is not told about a private place either: a size, a mode or an inode is still a fact about it.
     if (found !== undefined && (await heldPlace(scope, join(parent, basename(full))))) refuse('fenced');
     return found;
@@ -1680,16 +1765,19 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * A scope that names an anchor (`within`): every folder from the anchor's first child down to the scoped folder is
    * looked at WITHOUT following it, and a link at any of them is refused `link_escape`. The anchor itself and its
    * ancestors are not looked at (a symlinked project folder works). A folder that is not there yet is no link, and
-   * nothing below it exists either. An anchor equal to the scoped folder walks nothing.
+   * nothing below it exists either. An anchor equal to the scoped folder walks nothing. Answers whether every folder
+   * was there: `imports` then reads by descriptor (`heldFrom`), the walk being the early refusal and the descriptors the
+   * proof.
    */
-  const anchoredFolders = async (): Promise<void> => {
+  const anchoredFolders = async (): Promise<boolean> => {
     for (const folder of setup.linkFreeFolders() ?? []) {
       // A folder the walk cannot look at (no permission, a file where a folder should be) is one it cannot prove to be
       // no link: it fails closed as a link does, with the refusal alone — the system's error names an absolute path.
       const found = await fs.lstat(folder).catch(() => refuse('link_escape'));
-      if (found === undefined) return;
+      if (found === undefined) return false;
       if (found.kind === 'link') refuse('link_escape');
     }
+    return true;
   };
   const ownerRoot = OWNER_ROOTS.has(name);
   /**
@@ -1826,7 +1914,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
     const root = base();
     if (root === undefined) refuse(name === 'work' ? 'unknown_ferret' : 'outside');
     const descent = projectRoot ? await spelledBelowAnchor(root as string) : undefined;
-    await anchoredFolders();
+    const walked = await anchoredFolders();
+    // `imports` with an anchor and every folder below it present: its reads go by descriptor from the anchor's real path.
+    const anchorReal =
+      name === 'imports' && walked && setup.within !== undefined && setup.linkFreeFolders() !== undefined
+        ? await fs.realpath(setup.within).catch(() => refuse('outside'))
+        : undefined;
     if (create && scopedParent !== undefined) {
       // A forged path outside this scope must not create even an empty directory.
       const lexical = lexicalInRoot(home, root as string, ownerRoot, path);
@@ -1836,6 +1929,10 @@ function rootHandle(setup: HandleSetup): RootHandle {
     const resolved = await resolveChecked(fs, home, root as string, ownerRoot, path, anchor, privateFiles);
     if (!resolved.ok) return refuse(resolved.error);
     linkFree(root as string, path, resolved.value);
+    // The folder the base resolved to must be exactly its spelling BELOW the anchor, else a folder swapped for a link
+    // between the walk and this look would make the outside folder the base every later check is relative to.
+    if (anchorReal !== undefined && !spellingHolds(root as string, setup.within, resolved.value.base.real, anchorReal))
+      refuse('link_escape');
     return {
       full: resolved.value.full,
       scope: {
@@ -1845,6 +1942,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         immutable,
         ...(projectRoot ? { literal: true as const } : {}),
         ...(descent === undefined ? {} : { descent }),
+        ...(anchorReal === undefined ? {} : { heldFrom: anchorReal }),
       },
     };
   };
@@ -1966,7 +2064,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     if (full === undefined || (await scope.fs.identity(dirname(full))) === undefined) return undefined;
     const folder = await openCheckedFolder(scope, dirname(full));
     try {
-      const found = await scope.fs.identity(await entry(scope, folder, dirname(full), basename(full)));
+      const found = await lookIn(scope, folder, dirname(full), basename(full));
       // An inode is a fact about a private place too: the name that IS one is not told.
       if (found !== undefined && (await heldPlace(scope, full))) refuse('fenced');
       return found === undefined ? undefined : identityOfEntry(found);

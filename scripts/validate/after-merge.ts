@@ -30,6 +30,11 @@ const MISSING_TEST = / has no test named "/;
  */
 export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decision: string }[] = [
   { id: 'differential-harness', decision: '!A481: the harness moves after merge for the Wednesday merge' },
+  {
+    id: 'imports-descriptor-darwin',
+    decision:
+      'britnee 2026-11-10: the imports descriptor read ships with its darwin run after merge (no paid macOS run)',
+  },
 ];
 
 export const COUNT_NAMES = ['parityOpen', 'portsPendingLines', 'guaranteesMissing'] as const;

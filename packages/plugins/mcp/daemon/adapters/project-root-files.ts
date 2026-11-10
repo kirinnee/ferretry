@@ -15,7 +15,10 @@
  * - the kernel is asked for the root with the project folder as both the scoped folder and its `within` anchor: the
  *   anchor itself may be a link, so a project registered through a link (the folder or any parent) reads its
  *   `.mcp.json` as v4 did. A link the kernel refuses (`link_escape`: the `.mcp.json` leaf pointing out of the project)
- *   is shown as an unreadable document, naming the file and never what it points at.
+ *   is shown as an unreadable document, naming the file and never what it points at. The project folder is opened
+ *   once by its descriptor and the `.mcp.json` is opened from it (never by a path a link could redirect), so a swap
+ *   landing inside one call reads nothing outside the project; a host that reaches no open folder by descriptor keeps
+ *   the by-path read, and the daemon's doctor says so once at boot.
  *
  * GAP (declared): every narrowing above is THIS adapter's. The kernel's `imports` root takes any absolute folder
  * outside the fence, so a slip here could read any file there (a harness home's `.claude.json` beside a project
