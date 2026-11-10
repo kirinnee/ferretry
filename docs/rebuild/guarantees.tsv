@@ -451,49 +451,49 @@ I126	kept	accounts	-	`[redacted:login:<ID>:password]`	input-requests	I126
 I127	kept	accounts	-	`via`	input-requests	I127
 I128	kept	accounts	-	`namesPasskey`	input-requests	I128
 I129	kept	accounts	-	behaviour as written	input-requests	I129
-I130	kept	accounts	-	`InputSaved.signIn`	input-requests	I130
+I130	kept	vault	-	`InputSaved.signIn`	input-requests	I130
 I131	split	accounts	vault	-	input-requests	I131
 I132	kept	accounts	-	`hidesCharacters`	input-requests	I132
 I133	kept	accounts	-	`recipe_holds_value`	input-requests	I133
 I134	kept	accounts	-	`recipeBy: ferret`	input-requests	I134
 I135	kept	accounts	-	`LoginFactSink.observeSignIn`	input-requests	I135
-I136	kept	accounts	-	behaviour as written	input-requests	I136
-I137	kept	accounts	-	`observerByOf`	input-requests	I137
+I136	kept	vault	-	behaviour as written	input-requests	I136
+I137	kept	vault	-	`observerByOf`	input-requests	I137
 I138	kept	accounts	-	behaviour as written	input-requests	I138
-I139	kept	accounts	-	`actsOn`	input-requests	I139
+I139	kept	vault	-	`tainted`	input-requests	I139
 I140	kept	accounts	-	`account_propose`, `stale_proposal`, `login-recipe-auto`	input-requests	I140
 I141	kept	accounts	-	`recipeVersion`	input-requests	I141
 I142	kept	accounts	-	behaviour as written	input-requests	I142
-I143	kept	accounts	-	behaviour as written	input-requests	I143
+I143	kept	vault	-	behaviour as written	input-requests	I143
 I144	kept	accounts	-	`InputSaved.update`	input-requests	I144
 I145	kept	accounts	-	behaviour as written	input-requests	I145
 I146	kept	accounts	-	`InputSaved.update`	input-requests	I146
 I147	kept	accounts	-	`LoginDirectory.saveFields`	input-requests	I147
 I148	kept	accounts	-	`LOGIN_PASSWORD_MIN_LENGTH`	input-requests	I148
-I149	kept	accounts	-	`saved: { ok: false }`	input-requests	I149
-I150	kept	accounts	-	`login-save`	input-requests	I150
+I149	kept	vault	-	`saved: { ok: false }`	input-requests	I149
+I150	kept	vault	-	`login-save`	input-requests	I150
 I151	kept	accounts	-	`LoginStoreLock`	input-requests	I151
 I152	kept	accounts	-	`LoginDirectory.sweepUnreferenced`	input-requests	I152
 I153	kept	accounts	-	`LoginDirectory.saveFields`	input-requests	I153
 I154	kept	browsers	accounts	`TypedIdentities`, `identifierFieldHost`, `clickedIdentityOf`	input-requests	I154
 I155	kept	browsers	accounts	`BrowserSignInWatch`	input-requests	I155
-I156	kept	accounts	-	`InputSaved.typedUsername`	input-requests	I156
-I157	kept	accounts	-	`differentFrom`	input-requests	I157
+I156	kept	vault	-	`InputSaved.typedUsername`	input-requests	I156
+I157	kept	vault	-	`differentFrom`	input-requests	I157
 I158	kept	accounts	-	`GET /v1/accounts`	input-requests	I158
 I159	kept	accounts	-	`signInMatches`, `offer.primary`	input-requests	I159
-I160	kept	accounts	-	behaviour as written	input-requests	I160
+I160	kept	vault	-	behaviour as written	input-requests	I160
 I161	kept	accounts	-	`savedForFields`, `bad_request`	input-requests	I161
-I162	kept	accounts	-	behaviour as written	input-requests	I162
+I162	kept	vault	-	behaviour as written	input-requests	I162
 I163	kept	accounts	-	behaviour as written	input-requests	I163
 I164	kept	accounts	-	`elsewhere`	input-requests	I164
 I165	kept	accounts	-	`secretHint`	input-requests	I165
-I166	kept	accounts	-	behaviour as written	input-requests	I166
-I167	kept	accounts	-	`factorAskWords`	input-requests	I167
+I166	kept	vault	-	behaviour as written	input-requests	I166
+I167	kept	vault	-	`factorAskWords`	input-requests	I167
 I168	kept	accounts	-	`codeTargetProblem`	input-requests	I168
-I169	kept	accounts	-	`bad_request`	input-requests	I169
+I169	kept	vault	-	`bad_request`	input-requests	I169
 I170	kept	accounts	-	`fill(account, 'totp', now, { factor })`, `input.delivered`	input-requests	I170
-I171	kept	accounts	-	`LoginObserver.codeTyped`, `verified`	input-requests	I171
-I172	kept	accounts	-	behaviour as written	input-requests	I172
+I171	kept	vault	-	`LoginObserver.codeTyped`, `verified`	input-requests	I171
+I172	kept	vault	-	behaviour as written	input-requests	I172
 I173	kept	accounts	-	`TwoFactorSeedSaved.typed`	input-requests	I173
 I174	kept	accounts	-	`LOGIN_TOTP_WARNING`, `add-2fa-key`	input-requests	I174
 I175	kept	accounts	-	`LOGIN_TOTP_WARNING`, `AUTOMATED_CODE_WARNING`	input-requests	I175
@@ -652,7 +652,7 @@ S82	kept	accounts	-	`GET /v1/accounts/look-alike`	secrets	S82
 S83	kept	accounts	-	behaviour as written	secrets	S83
 S84	split	accounts	vault	-	secrets	S84
 S85	kept	accounts	-	`AccountDirectory.observeSignIn` (sole writer)	secrets	S85
-S86	kept	accounts	-	behaviour as written	secrets	S86
+S86	kept	vault	-	behaviour as written	secrets	S86
 S87	kept	accounts	-	`two-factor-seeds.ts`	secrets	S87
 S88	kept	accounts	-	behaviour as written	secrets	S88
 S89	kept	accounts	-	`POST /v1/accounts/:id/factors/seed`	secrets	S89
