@@ -1404,9 +1404,9 @@ Against the readers of the same homes before, reader by reader:
 - **Skills list.** What `skills()` lists is a **superset** of the machine skill inventory of such a home in what it lists
   (a plain folder and an inside link are extra: that inventory listed neither), **except** where that inventory followed a
   link into `fleet/`: a link into the fleet's `assets/` it listed as Ferretry's, and here it is skipped (waived, because
-  no root can name both the home and `assets/`). Skills unit S1 closes it: once Skills binds the homes and lists
-  `fleet/assets/skills/<name>` itself as Ferretry's, such a link is a duplicate path to the same skill and is never
-  followed; until then it is a before-green line in `ports-pending.json`. The list is also **narrower** than the session
+  no root can name both the home and `assets/`). Skills closes it: it binds the homes and lists
+  `fleet/assets/skills/<name>` itself as Ferretry's, so such a link is a duplicate path to the same skill and is never
+  followed. The list is also **narrower** than the session
   skill picker (which listed store links too). A plain folder in such a home is listed only when it holds a plain,
   single-name, non-sign-in `SKILL.md`.
 - **A skill's `SKILL.md`, and the files inside a skill folder.** The machine inventory followed links into `fleet/`, the
