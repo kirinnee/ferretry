@@ -7,6 +7,8 @@
  * otherwise every environment line would show as changed. And a file too big to show is not read, so it is put
  * back into the answer as an entry that says so.
  */
+import { envEntryHidden, shownWords } from '@ferretry/core-vault/contract';
+import type { McpComponentRecord } from '../shared-catalogs/mcp-source.ts';
 import {
   type CatalogChanges,
   type CatalogMcpSetup,
@@ -45,6 +47,33 @@ export const mcpAsInstalled = (item: McpItem, version: number, mcp: CatalogMcpSe
   mcp,
 });
 
+/**
+ * What stands, on the INSTALLED side of a diff, for a credential the person typed into their own server. A catalog
+ * refuses to carry one (the one hide rule), so the setup read from this machine could not be rebuilt as a setup at all
+ * and the diff would vanish; one star is too short to be a credential, never equals what a catalog offers, and shows
+ * nothing, so the entry reads as changed and hidden, as it always has.
+ */
+const STAND_IN = '*';
+
+/** The words of a command line with each one the rule hides replaced by {@link STAND_IN}. */
+const withoutCredentialWords = (args: readonly string[], command: string | undefined): readonly string[] => {
+  const shown = shownWords(args, command);
+  return args.map((arg, index) => (shown[index]?.hidden === true ? STAND_IN : arg));
+};
+
+/** An environment with each value that holds a credential written out replaced by {@link STAND_IN}; a pointer stays. */
+const withoutCredentialValues = (env: Readonly<Record<string, string>>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(env).map(([name, value]) => [name, envEntryHidden(name, value) ? STAND_IN : value]),
+  );
+
+/** A server this machine holds, as the installed side of a diff: no credential in its arguments or environment. */
+export const withoutCredentials = (record: McpComponentRecord): McpComponentRecord => ({
+  ...record,
+  ...(record.args === undefined ? {} : { args: [...withoutCredentialWords(record.args, record.command)] }),
+  ...(record.env === undefined ? {} : { env: withoutCredentialValues(record.env) }),
+});
+
 const mappedEnv = (env: unknown): unknown =>
   isRecord(env)
     ? Object.fromEntries(
@@ -52,13 +81,27 @@ const mappedEnv = (env: unknown): unknown =>
       )
     : {};
 
+const isStrings = (value: unknown): value is readonly string[] =>
+  Array.isArray(value) && value.every(item => typeof item === 'string');
+
 /** A `.mcp.json` entry as the contract's setup, or `undefined` when it is not a shape an install writes. */
 export function setupOfProjectEntry(entry: unknown): CatalogMcpSetup | undefined {
   if (!isRecord(entry)) return undefined;
+  const command = typeof entry.command === 'string' ? entry.command : undefined;
+  const args = entry.args ?? [];
+  const env = mappedEnv(entry.env);
   const candidate =
     entry.type === 'http'
       ? { transport: 'url', url: entry.url }
-      : { transport: 'command', command: entry.command, args: entry.args ?? [], env: mappedEnv(entry.env) };
+      : {
+          transport: 'command',
+          command: entry.command,
+          args: isStrings(args) ? withoutCredentialWords(args, command) : args,
+          env:
+            isRecord(env) && Object.values(env).every(value => typeof value === 'string')
+              ? withoutCredentialValues(env as Record<string, string>)
+              : env,
+        };
   const parsed = CatalogMcpSetupSchema.safeParse(candidate);
   return parsed.success ? parsed.data : undefined;
 }

@@ -1,6 +1,6 @@
 /**
  * The command-line rule as review round r2 left it, FROZEN from rebuild/fix-components-leak-r1 at 3611727ee2
- * (`daemon/lib/service/command-line.ts`: `shownWord` and `shownWords`), so the differential holds the r3 rule to it as
+ * (`core/vault/contract/command-line.ts`: `shownWord` and `shownWords`), so the differential holds the r3 rule to it as
  * a THIRD floor: every word r2 hid must stay at least as hidden (review r2 M1–M3 only ever cut more). Only the imports
  * and the export names are changed, and the etag is left out: it shares the live `looksSecret`, `pointsElsewhere` and
  * `secretNamed`, byte-identical to r2's.

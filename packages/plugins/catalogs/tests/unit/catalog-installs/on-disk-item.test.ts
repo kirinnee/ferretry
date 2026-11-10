@@ -5,6 +5,7 @@ import {
   mcpAsInstalled,
   setupOfProjectEntry,
   skillAsInstalled,
+  withoutCredentials,
   withPlaceholders,
   withUnreadableFiles,
 } from '../../../daemon/lib/catalog-installs/on-disk-item.ts';
@@ -79,6 +80,45 @@ describe('setupOfProjectEntry', () => {
       env: {},
     });
     should(setupOfProjectEntry({ command: 'acme-mcp', env: { A: 5 } })).be.undefined();
+    should(setupOfProjectEntry({ command: 'acme-mcp', args: [5] })).be.undefined();
+  });
+
+  it('R-0261 should read an entry the person typed a credential into, as one star where it stands', () => {
+    // A catalog refuses a credential written out, but a server on this machine may hold one: the diff must still read it.
+    should(
+      setupOfProjectEntry({
+        command: 'acme-mcp',
+        args: ['--token', 'fake-tok-0000', '--stdio'],
+        env: { DB_PASSWORD: 'fake-pw-0000', MODE: 'x', ACME_TOKEN: '${ACME_TOKEN_OWN}' },
+      }),
+    ).deepEqual({
+      transport: 'command',
+      command: 'acme-mcp',
+      args: ['--token', '*', '--stdio'],
+      env: { DB_PASSWORD: '*', MODE: 'x', ACME_TOKEN: '${secret:ACME_TOKEN_OWN}' },
+    });
+  });
+});
+
+describe('withoutCredentials', () => {
+  it('R-0261 should put one star where an argument or an environment value holds a credential, and nothing else', () => {
+    should(
+      withoutCredentials({
+        command: 'acme-mcp',
+        args: ['postgres://person:fake-pw-0000@db/x', '--port', '80'],
+        env: { PASSWORD: 'fake-pw-0000', LOG: 'info', K: '${secret:K}' },
+        harness: 'claude',
+      }),
+    ).deepEqual({
+      command: 'acme-mcp',
+      args: ['*', '--port', '80'],
+      env: { PASSWORD: '*', LOG: 'info', K: '${secret:K}' },
+      harness: 'claude',
+    });
+  });
+
+  it('should leave a record with no arguments and no environment as it is', () => {
+    should(withoutCredentials({ url: 'https://mcp.example.com/x' })).deepEqual({ url: 'https://mcp.example.com/x' });
   });
 });
 

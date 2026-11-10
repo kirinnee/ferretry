@@ -223,7 +223,7 @@ describe('MCP setup rules', () => {
     refuses({ ...COMMAND, args: ['sk-live-abc'] });
   });
 
-  describe('one hide rule with Runtimes (R-0082 britnee #41: a catalog never carries what a runtime hides)', () => {
+  describe('one hide rule with Runtimes (R-0261 britnee #41: a catalog never carries what a runtime hides)', () => {
     /** The message of the first issue and where it is, or null when the setup is taken. */
     const refusal = (setup: unknown) => {
       const result = CatalogMcpSetupSchema.safeParse(setup);
@@ -233,36 +233,36 @@ describe('MCP setup rules', () => {
     };
     const withArgs = (args: readonly string[]) => ({ ...COMMAND, args });
 
-    it('R-0082 should refuse a URL whose user holds a password, naming the argument and never the value', () => {
+    it('R-0261 should refuse a URL whose user holds a password, naming the argument and never the value', () => {
       const found = refusal(withArgs(['postgres://person:fake-pw-0000@db/x']));
       expect(found?.path).toEqual(['args', 0]);
       expect(found?.message).not.toContain('fake-pw-0000');
     });
 
-    it('R-0082 should refuse a header value under a secret-named key, that is shorter than a provider key', () => {
+    it('R-0261 should refuse a header value under a secret-named key, that is shorter than a provider key', () => {
       for (const args of [['--header', 'X-Api-Key: fake-key-0000'], ['--header=Authorization: Basic ZmFrZTpmYWtl']]) {
         expect(refusal(withArgs(args))?.path[0]).toBe('args');
       }
     });
 
-    it('R-0082 should refuse the word after a secret-named flag, whatever its length', () => {
+    it('R-0261 should refuse the word after a secret-named flag, whatever its length', () => {
       const found = refusal(withArgs(['--token', 'fake-tok-0000']));
       expect(found?.path).toEqual(['args', 1]);
       expect(found?.message).not.toContain('fake-tok-0000');
     });
 
-    it('R-0082 should refuse a secret-named key nested in a list, and in a config override', () => {
+    it('R-0261 should refuse a secret-named key nested in a list, and in a config override', () => {
       expect(refusal(withArgs(['--set=a=1,client.secret=fake-0000x,b=2']))?.path).toEqual(['args', 0]);
       expect(refusal(withArgs(['-c', 'mcp_servers.x.env.ACCESS_TOKEN=fake-tok-000']))?.path).toEqual(['args', 1]);
     });
 
-    it('R-0082 should refuse a secret-named flag even when a pointer comes later in the same argument', () => {
+    it('R-0261 should refuse a secret-named flag even when a pointer comes later in the same argument', () => {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer, written out
       const found = refusal(withArgs(['--token', 'fake-tok-0000 ${secret:OTHER}']));
       expect(found?.path[0]).toBe('args');
     });
 
-    it('R-0082 should refuse a value padded after a pointer', () => {
+    it('R-0261 should refuse a value padded after a pointer', () => {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer, written out
       expect(refusal({ ...COMMAND, env: { API_KEY: '${secret:X} ZmFrZTpmYWtlZmFrZQ==' } })?.path).toEqual([
         'env',
@@ -270,7 +270,7 @@ describe('MCP setup rules', () => {
       ]);
     });
 
-    it('R-0082 should refuse a credential written in an environment value, the address and the command', () => {
+    it('R-0261 should refuse a credential written in an environment value, the address and the command', () => {
       expect(refusal({ ...COMMAND, env: { NOTE: 'Authorization: Bearer fake-tok-0000' } })?.path).toEqual([
         'env',
         'NOTE',
@@ -286,7 +286,7 @@ describe('MCP setup rules', () => {
       ).toEqual(['oauth', 'clientId']);
     });
 
-    it('R-0082 should say to use the secret store and a ${secret:NAME} environment value, in every refusal', () => {
+    it('R-0261 should say to use the secret store and a ${secret:NAME} environment value, in every refusal', () => {
       const messages = [
         refusal(withArgs(['--token', 'fake-tok-0000']))?.message,
         refusal({ ...COMMAND, env: { PASSWORD: 'fake-pw-0000' } })?.message,
@@ -295,7 +295,23 @@ describe('MCP setup rules', () => {
       for (const message of messages) expect(message).toContain('${secret:NAME}');
     });
 
-    it('R-0082 should take a whole ${secret:NAME} environment value, a clean setup, and plain flags and addresses', () => {
+    it('R-0261 should refuse, when a catalog file is read, a setup an older publisher signed with a credential in it', () => {
+      for (const mcp of [
+        withArgs(['--token', 'fake-tok-0000']),
+        withArgs(['postgres://person:fake-pw-0000@db/x']),
+        { ...COMMAND, env: { PASSWORD: 'fake-pw-0000' } },
+      ]) {
+        const read = readSharedCatalogFile(JSON.stringify(file([mcpItem(mcp)])));
+        expect(read.ok).toBe(false);
+        const reason = read.ok ? '' : read.reason;
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the reference grammar, written out
+        expect(reason).toContain('${secret:NAME}');
+        expect(reason).not.toContain('fake-tok-0000');
+        expect(reason).not.toContain('fake-pw-0000');
+      }
+    });
+
+    it('R-0261 should take a whole ${secret:NAME} environment value, a clean setup, and plain flags and addresses', () => {
       expect(CatalogMcpSetupSchema.safeParse(COMMAND).success).toBe(true);
       expect(
         // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer, written out
