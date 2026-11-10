@@ -66,7 +66,8 @@ for attempt in attempt-1 attempt-2 attempt-3; do
 done
 for backoff in backoff-1 backoff-2; do
   workflow_job_has "${smoke_workflow}" "${backoff}" "result != 'success' && needs[.]attempt-[12][.]result != 'skipped' && needs[.]attempt-[12][.]outputs[.]started != 'true'" 'must re-queue only an attempt that never started, whatever its result says'
-  if workflow_job_block "${smoke_workflow}" "${backoff}" | rg -q "result == 'cancelled'"; then
+  backoff_block="$(workflow_job_block "${smoke_workflow}" "${backoff}")"
+  if rg -q "result == 'cancelled'" <<<"${backoff_block}"; then
     fail "${smoke_workflow}: job '${backoff}' must not key on result == 'cancelled': GitHub reports a job it never gave a runner as 'abandoned'"
   fi
 done
@@ -77,7 +78,9 @@ rg -q '^  workflow_call:' "${smoke_workflow}" || fail "${smoke_workflow}: must b
 [ "$(rg -c 'runs-on: macos-' "${smoke_workflow}")" = 3 ] || fail "${smoke_workflow}: exactly three attempts may use a macOS runner"
 
 # ci.yaml: Linux smoke stays a required matrix with no macOS leg; Darwin smoke is advisory only on a pull request.
-if workflow_job_block "${ci_workflow}" smoke | rg -v "^[[:space:]]*#" | rg -qi "darwin|macos"; then
+smoke_block="$(workflow_job_block "${ci_workflow}" smoke)"
+smoke_code="$(rg -v "^[[:space:]]*#" <<<"${smoke_block}" || true)"
+if rg -qi "darwin|macos" <<<"${smoke_code}"; then
   fail "${ci_workflow}: the Linux smoke matrix must not carry a macOS leg; Smoke darwin-arm64 is the smoke-darwin job"
 fi
 workflow_job_has "${ci_workflow}" smoke-darwin '^    uses: [.]/[.]github/workflows/smoke-darwin[.]yaml$' 'must call smoke-darwin.yaml'

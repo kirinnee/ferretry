@@ -59,7 +59,9 @@ b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 openssl pkey -in "${key_file}" -pubout -out "${key_dir}/public.pem" 2>/dev/null ||
   fail "the signing key is not a PKCS#8 private key"
-openssl pkey -pubin -in "${key_dir}/public.pem" -noout -text 2>/dev/null | grep -q '^ED25519 Public-Key' ||
+# Capture first, then match: `openssl | grep -q` under pipefail fails with SIGPIPE when grep exits on its first match.
+public_key_text="$(openssl pkey -pubin -in "${key_dir}/public.pem" -noout -text 2>/dev/null)" || public_key_text=''
+grep -q '^ED25519 Public-Key' <<<"${public_key_text}" ||
   fail "the signing key is not an Ed25519 key"
 public="$(openssl pkey -pubin -in "${key_dir}/public.pem" -outform DER | b64url)"
 grep -qF "'${public}'" "${keys_file}" ||

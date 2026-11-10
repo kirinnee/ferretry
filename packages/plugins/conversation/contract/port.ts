@@ -48,10 +48,9 @@ export interface ConversationRefusal {
 
 /**
  * Who is calling a write: the owner, a ferret (named), or the Warden. Gate stamps the caller of a ROUTE; a caller of
- * THIS port is trusted in-process: the kernel hands a provider no consumer id, so Conversation cannot prove which plugin
- * is calling, and any plugin holding the conversation need could pass `warden` (declared in ports-pending as an open
- * GAP; binding it to the Warden's consumer id waits for the kernel). The port's `cancelSend`, `enterSend` and
- * `composer` take no caller at all, and the port's draft action has no `terminal.use` gate (the route does).
+ * THIS port is bound by the kernel instead: Conversation provides through `perNeeder`, so each consumer holds a facade
+ * built from its own manifest id ({@link conversationFor}), and `warden` is accepted only from the Warden's plugin. Any
+ * other consumer naming it is refused `forbidden` before anything is read or typed.
  * `warden` (additive, D2 #19) is Ferretry's own watchdog speaking: its words are typed bare, recorded as the DAEMON's
  * (`senderKind: 'daemon'`, `by` Ferretry's Warden), never as the owner's own message and never as a ferret's:
  * a notice is not kept, retried or counted as the owner's.
@@ -86,8 +85,18 @@ export interface ConversationApi {
   sends(ferret: FerretId, cursor?: string): Promise<SendListResponse>;
   sendRecord(ferret: FerretId, sendId: string): Promise<SendRecord | undefined>;
   retrySend(ferret: FerretId, sendId: string, force?: boolean): Promise<Result<SendRecord, ConversationRefusal>>;
+  /**
+   * Cancels a send's leftover typing (the route's `POST …/sends/:sendId/cancel`). The Warden's alone: any other consumer
+   * is refused `forbidden` (see {@link ConversationCaller}).
+   */
   cancelSend(ferret: FerretId, sendId: string): Promise<Result<SendRecord, ConversationRefusal>>;
+  /** One Enter for a send's own text (the route's `…/enter`), with the rules of {@link cancelSend}. */
   enterSend(ferret: FerretId, sendId: string): Promise<Result<SendRecord, ConversationRefusal>>;
+  /**
+   * Acts on the person's composer draft (the route's `POST …/composer`). The route is person-only and gated by
+   * `terminal.use`; a port consumer carries no such call, so the port serves the Warden alone and refuses any other
+   * consumer `forbidden`.
+   */
   composer(
     ferret: FerretId,
     action: 'submit' | 'clear',

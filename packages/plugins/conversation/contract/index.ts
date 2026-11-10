@@ -1,4 +1,5 @@
 /** @ferretry/plugin-conversation/contract — wire schemas, port + token, events, hook types, ids, policy refs (§2.1). */
+export * from './consumer.ts';
 export * from './events.ts';
 export * from './hooks.ts';
 export * from './lines.ts';

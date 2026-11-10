@@ -28,6 +28,17 @@ import {
   type YAMLSeq,
 } from 'yaml';
 
+/**
+ * The `yaml` library has two environment switches that print what it parses: `LOG_TOKENS` prints every token of a
+ * parsed text and `LOG_STREAM` dumps every token the composer sees, and a configuration text may carry a credential.
+ * They are read at parse time, so every entry point (`fy`, `fyd`, the converter) calls this before anything is parsed.
+ * The environment is a parameter so a test can hand it a copy; it defaults to the process's own.
+ */
+export function clearYamlLogSwitches(environment: Record<string, string | undefined> = process.env): void {
+  delete environment.LOG_TOKENS;
+  delete environment.LOG_STREAM;
+}
+
 /** The folder the generated JSON Schemas go in (`config/.schema/`); never a config path. The kernel's claims re-export it. */
 export const SCHEMA_FOLDER = '.schema';
 

@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
 import {
   CONFIG_FILE_MAX_BYTES,
+  clearYamlLogSwitches,
   editConfigText,
   readConfigText,
   readConfigTextToEdit,
@@ -1107,5 +1108,40 @@ describe('setConfigKey — a key is set and every other byte stays', () => {
     should(() => setConfigKey('#'.repeat(CONFIG_FILE_MAX_BYTES + 1), 'a', 1)).throw(
       /^the file does not parse: the file is larger than the 256 KiB/u,
     );
+  });
+});
+
+describe('clearYamlLogSwitches', () => {
+  it('should delete LOG_TOKENS and LOG_STREAM from the given environment and leave the rest', () => {
+    // Arrange
+    const environment: Record<string, string | undefined> = { LOG_TOKENS: '1', LOG_STREAM: '2', HOME: '/h' };
+
+    // Act
+    clearYamlLogSwitches(environment);
+
+    // Assert
+    should(environment).deepEqual({ HOME: '/h' });
+    should('LOG_TOKENS' in environment).be.false();
+    should('LOG_STREAM' in environment).be.false();
+  });
+
+  it('should clear the process environment when no environment is given, and restore it after the test', () => {
+    // Arrange
+    const before = { tokens: process.env.LOG_TOKENS, stream: process.env.LOG_STREAM };
+    process.env.LOG_TOKENS = '1';
+    process.env.LOG_STREAM = '1';
+    try {
+      // Act
+      clearYamlLogSwitches();
+
+      // Assert
+      should(process.env.LOG_TOKENS).be.undefined();
+      should(process.env.LOG_STREAM).be.undefined();
+    } finally {
+      if (before.tokens === undefined) delete process.env.LOG_TOKENS;
+      else process.env.LOG_TOKENS = before.tokens;
+      if (before.stream === undefined) delete process.env.LOG_STREAM;
+      else process.env.LOG_STREAM = before.stream;
+    }
   });
 });
