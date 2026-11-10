@@ -801,8 +801,9 @@ survivor, including through successive merges; a split child is an independent i
 continue past a failing event. Every
 failure is logged. After the fifth failure the event stays parked in `agenda-changes.pending.json`, with a warning
 naming the session, event and file; it is never silently dropped. After repairing delivery, an operator can remove
-that event's `retry` field to rearm it; the periodic drain no longer visits a parked outbox, so a rearmed event is
-tried at the next read or change of that session's agenda, or at the next restart. Later events remain behind a parked barrier, and each drain logs their
+that event's `retry` field to rearm it; the periodic drain no longer visits an outbox whose every event is parked, so a rearmed event there is
+tried at the next read or change of that session's agenda, or at the next restart (an outbox that still holds an
+event that is not parked stays visited every drain, and a rearmed event in it is tried at the next one). Later events remain behind a parked barrier, and each drain logs their
 session, event and blocking parked event through the same warning sink as the parking diagnostic. An operator who
 explicitly decides that the old instruction is superseded can instead remove that event from the pending array;
 the later instructions then proceed on the next drain. Stop the daemon before editing this file so the drain
@@ -1146,13 +1147,13 @@ fy agenda add "Allow the Jev price correction?" --title "Jev price correction" \
 
 **Who may answer.** Only the owner, enforced in the daemon, never in the app:
 
-| Caller                                                       | Allow / Discard change                                                                                                         |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `fy` at the machine (admin token, ungoverned)                | yes, as `fy config confirm` is                                                                                                 |
-| a paired device (the app), relayed or not                    | the file's grant on `configure`; Allow also a passkey proved for the act (`loosen-config`), which the app asks for and resends |
-| a ferret's own `fy agenda done --choice Allow` (its session) | refused `403`, before the file or the card is touched                                                                          |
-| an agent token (a warden, any `peer:`/`warden:` caller)      | refused `403`                                                                                                                  |
-| a caller nothing can say the grants of                       | refused `403`                                                                                                                  |
+| Caller                                                       | Allow / Discard change                                                                                                                                                     |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fy` at the machine (admin token, ungoverned)                | yes, as `fy config confirm` is                                                                                                                                             |
+| a paired device (the app), relayed or not                    | the file's grant on `configure`; Allow also a fresh passkey proof that already existed when the request was admitted (the app asks for one as `loosen-config` and resends) |
+| a ferret's own `fy agenda done --choice Allow` (its session) | refused `403`, before the file or the card is touched                                                                                                                      |
+| an agent token (a warden, any `peer:`/`warden:` caller)      | refused `403`                                                                                                                                                              |
+| a caller nothing can say the grants of                       | refused `403`                                                                                                                                                              |
 
 The rule is the config files' own (`heldEditRefusal`, shared with `POST /v1/config/confirm`): the fleet's `use`
 grant, the file's grant on `configure`, and for Allow from a governed device the passkey. Allow and Discard

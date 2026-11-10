@@ -102,8 +102,10 @@ export interface StepUpSubject {
 export interface ClaimFreshWitness {
   /**
    * With `notAfterMs`, only a proof proved at or before that instant (epoch ms) is taken: a later proof stays where it
-   * is and is not claimed. A caller whose claim outlives its request (work a call spawns) passes the instant the call
-   * was admitted, so it can never take a proof the owner gives afterwards for another act.
+   * is and is not claimed. Every standing's claim passes the instant its call was admitted, whether it runs inside the
+   * request or in work the call spawns, so it does not take a proof the owner gives afterwards. The instants are wall-clock
+   * milliseconds: a proof made in the same millisecond as the admission, or after the clock stepped back, is not told
+   * apart from an earlier one.
    */
   (subject: StepUpSubject, act?: MachineSkippableStepUpAct, bound?: undefined, notAfterMs?: number): boolean;
   (subject: StepUpSubject, act: Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, bound: string): boolean;
