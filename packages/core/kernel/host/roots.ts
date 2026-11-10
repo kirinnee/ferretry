@@ -378,8 +378,10 @@ interface Scope {
    * `imports` with a `within` anchor only: the REAL path of the anchor. Every folder a READ reaches (the scoped folder
    * and any folder inside it) is opened from the anchor's descriptor down, each from its parent's, with
    * `O_DIRECTORY | O_NOFOLLOW`, and the file is opened from its folder's descriptor (`openFile`), so a folder swapped
-   * for a link at any step of one call reads, stats and lists nothing outside it, WHETHER OR NOT the lstat walk found
-   * every folder (the base must be exactly its spelling below the anchor). A host that reaches an open folder by neither
+   * for a link at any step of one call reads and stats nothing outside it (and lists nothing, where the host has the
+   * working-directory bracket), WHETHER OR NOT the lstat walk found every folder (the base must be exactly its spelling
+   * below the anchor). A host with the calls but not the bracket lists by path once the folder is proven: there a swap
+   * inside ONE call can let a listing answer the outside folder's names. A host that reaches an open folder by neither
    * a descriptor path nor the C library's calls keeps the by-path read: there a swap inside ONE call can let a listing,
    * a stat or an identity answer the outside folder's names and metadata, while a file's bytes stay refused by the
    * spelling and identity proofs; it never refuses a read that works today. Unlike `descent`, nothing is made or

@@ -28,7 +28,8 @@ const withoutTrailingSlash = (path: string): string => path.replace(/(?<=.)\/+$/
  *   folder swapped for a link at any step of ONE call is refused (`link_escape`) and reads nothing. Residual: a host that
  *   reaches an open folder by neither `/proc/self/fd` nor the C library's descriptor calls lists and stats by path after
  *   the link walk, where a swap landing inside one call can show the outside folder's names and sizes (never a file's
- *   text); the daemon's doctor says so once at boot. The kernel also keeps every listed folder and file INSIDE
+ *   text), and a host with the calls but not the working-directory bracket lists by path the same way (its reads and
+ *   stats still go by descriptor); the daemon's doctor says so once at boot. The kernel also keeps every listed folder and file INSIDE
  *   the scoped folder (`link_escape`, `hard_link`).
  */
 export class ProjectSkillFiles implements SkillFilesPort {
