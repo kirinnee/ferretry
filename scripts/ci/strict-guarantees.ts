@@ -5,10 +5,11 @@
  * neither runs `--strict`, so nobody could see how many kept rows still lack an id-named test that PASSES in some run.
  * This reads the unit, scripts and integration reports together (no `--tier`: a passing test in EITHER tier proves a
  * row, a skipped or failed one does not) with `strict: true` (rows of still-pending packages count too), and writes the
- * miss count plus the ids grouped by owner to `$GITHUB_STEP_SUMMARY`.
+ * miss count plus the ids grouped by owner to `$GITHUB_STEP_SUMMARY`. The count is every finding of `guarantees` and of
+ * `guarantee-owner` (enforcer symbols included); a row with several findings is one row in the count.
  *
- * It is a report until the count reaches 0. `FY_STRICT_GUARANTEES_BLOCKING=true` (the one switch, set on the
- * `strict-guarantees` job in `.github/workflows/ci.yaml`) makes a miss exit 1; anything else exits 0.
+ * It was a report until the count reached 0 and is blocking now. `FY_STRICT_GUARANTEES_BLOCKING=true` (the one switch,
+ * the workflow-level `env` of `.github/workflows/ci.yaml`) makes a miss exit 1; anything else exits 0 and only reports.
  *
  * Usage: bun scripts/ci/strict-guarantees.ts --results <junit.xml|folder> [--results …] [--root <dir>]
  */
@@ -20,8 +21,16 @@ import type { Finding } from '../gen/lib/graph.ts';
 /** Findings with no owner in their sentence (a REMOVED row that kept a test) are listed under this heading. */
 export const NO_OWNER = '(no owner)';
 
-/** The owner a `guarantees` finding names: "<status> row owned by <owner> …". */
-export const ownerOf = (finding: Finding): string => /\bowned by (\S+)/.exec(finding.message)?.[1] ?? NO_OWNER;
+/**
+ * The owner a finding names: "<status> row owned by <owner> …" (`guarantees`, and `guarantee-owner`'s "tested only
+ * outside"), "enforcer `x` resolves to no symbol in <owner> or a contract …" or `owner "<owner>" is no package`
+ * (`guarantee-owner`'s other two).
+ */
+export const ownerOf = (finding: Finding): string =>
+  /\bowned by (\S+)/.exec(finding.message)?.[1] ??
+  /\bresolves to no symbol in (\S+) or a contract\b/.exec(finding.message)?.[1] ??
+  /^owner "([^"]+)" is no package/.exec(finding.message)?.[1] ??
+  NO_OWNER;
 
 /** The misses grouped by owner (owners and ids in sorted order, one id once). */
 export function byOwner(findings: readonly Finding[]): Map<string, string[]> {
@@ -57,13 +66,15 @@ export function summary(findings: readonly Finding[], blocking: boolean): string
 }
 
 /**
- * The strict findings: `guarantees` (no id test, or none that passed) plus the `guarantee-owner` ones that say a kept row
- * is tested only outside its owner's suite. The pass proof reads only the owner's own tests, so such a row is neither
- * proven nor missing there; counting it here is what makes a count of 0 mean every kept row has a passing test.
+ * The strict findings: EVERY finding of `guarantees --strict` (no id test, or none that passed) and of
+ * `guarantee-owner --strict` (a row tested only outside its owner's suite, an owner that is no package, and an enforcer
+ * symbol that resolves to nothing in the owner or a contract it consumes), over all the reports at once and with no
+ * tier. This is exactly what the two checks raise once `--strict` is on in `quick.sh` and `integration.sh`, so a count
+ * of 0 here means the flip changes nothing: no check is filtered, so the count cannot be lower than the gate's. A row
+ * proven in the integration tier alone still passes, because no tier narrows the tests or the results.
  */
 export async function strictFindings(ctx: CheckContext): Promise<readonly Finding[]> {
-  const owner = (await ownerCheck.run(ctx)).filter(finding => finding.message.includes('tested only outside'));
-  return [...(await check.run(ctx)), ...owner];
+  return [...(await check.run(ctx)), ...(await ownerCheck.run(ctx))];
 }
 
 if (import.meta.main) {

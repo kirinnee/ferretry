@@ -262,6 +262,22 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   R633: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
   P28: { owner: 'app-shell', reason: 'enforced by the app shell device store' },
   R575: { owner: 'app-shell', reason: 'enforced by the app shell device store' },
+  R593: {
+    owner: 'app-shell',
+    reason:
+      "enforced by the app shell's member dial order (`memberWalk`, packages/app/src/connect/member.ts); Catalogs keeps the daemon half (a share link names no rendezvous for a loopback url)",
+  },
+  R596: { owner: 'kernel', reason: 'enforced by the kernel session layer (`padJoinOutcome`)' },
+  I161: {
+    owner: 'vault',
+    reason:
+      "enforced by the Vault input service (`savedForFields` redraws the offers at Send); Accounts keeps the card's shape (no value on any offer)",
+  },
+  S114: {
+    owner: 'vault',
+    reason:
+      'enforced by the Vault login observer (`rootPromptProved` and `observerByOf` write `tapped`); Accounts only reads the fact',
+  },
   I98: {
     owner: 'vault',
     reason:
