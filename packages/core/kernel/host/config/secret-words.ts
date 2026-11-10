@@ -46,8 +46,12 @@
  * `${secret:X}?model=short`) is NOT one: CFG-LEAK-R cuts the whole value ({@link gluedToPointer}), because the write
  * rule refuses it. The same holds for raw text in ANY piece of a credential's value that holds a pointer
  * (`prefix${secret:X},<v>`, `a,<v>,${secret:X}`, `${secret:X},b=<v>`): where the write rule refuses that value whole,
- * it is cut whole, value start to word end ({@link refusedCuts}), over-cutting the pointer in it. A name is a
- * credential's by the tail test ({@link namesCredential}) or by the older words below.
+ * it is cut whole, value start to word end ({@link refusedCuts}), over-cutting the pointer in it. That is the closed
+ * corpus (residual 0 over it), not every value W refuses: the families F1-F7 (a look-alike of a pointer, a blank and a
+ * token shape, a pointer in a URL's user part, a value starting `.`, a pointer never closed, past W's 4096-character
+ * window, one item holding blanks) are refused by W and still shown by BOTH cutters. The kernel doors stay safe
+ * because `shownConfigText` withholds what W still refuses; Runtimes' views have no such net (the counted GAP in
+ * `ports-pending.json`, pinned by `kernel-cutter-f1-f7-pin.test.ts`). A name is a credential's by the tail test ({@link namesCredential}) or by the older words below.
  * Also GAPs, each the same text as a harmless one (review r4): `user:pass` AFTER a pointer
  * (`API_KEY=${secret:X} person:<v>`, as `MODEL=gpt-4o-mini` is its own key, G5b); a quoted value of short words before
  * a pointer (`API_KEY="my pass phrase" ${secret:X}`, G6); and text under a harmless bare key before a pointer
@@ -559,7 +563,12 @@ function flagValueCuts(flag: string, value: string, offset: number): readonly Cu
   );
 }
 
-/** The write rule's value test past its name gate, copied (`secrets.ts` `looksLikeRawSecret`): what it refuses whole. */
+/**
+ * The write rule's value test past its name gate, copied (`secrets.ts` `looksLikeRawSecret`): what it refuses whole.
+ * A copy of the test, not the whole rule: the F1-F7 families W refuses and this cutter still shows are a counted GAP
+ * (`ports-pending.json`, pinned by `kernel-cutter-f1-f7-pin.test.ts`), so "cut what W refuses" holds over the closed
+ * corpus only.
+ */
 const WHOLE_SCHEME = /^(?:bearer|basic|token)[ \t]+/iu;
 const WHOLE_REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
 const WHOLE_PLACE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu;

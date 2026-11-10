@@ -229,7 +229,8 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
   starts there (`--set=a=1,API_KEY=${secret:X},b=2` is shown). A key of its own followed by another `,`, `;` or `&`
   and text with no key (`--key ${secret:X},b=2,v`, also with several keys or quotes) is cut whole; this over-cuts
   innocent text of that shape too (`${secret:X},b=2,c`); keys only (`${secret:X},a=1,b=2`) or a trailing separator
-  (`${secret:X},b=2,`) stay shown. A value that holds a pointer and raw text in any piece of it and that the write rule
+  (`${secret:X},b=2,`) stay shown where the write rule accepts them (`--set=a=1,API_KEY=${secret:X},a=1,b=2`); under a
+  credential flag (`--key ${secret:X},a=1,b=2`) it refuses them, so they are cut whole. A value that holds a pointer and raw text in any piece of it and that the write rule
   refuses whole is cut whole, value start to word end, so this over-cuts the pointer and innocent text in it too (a
   credential-named `--key prefix${secret:X},v`). A URL password glued to a pointer
   (`https://u:${secret:X}abcdefgh@h/p`) is shown, and the write rule accepts it too: a shared GAP.

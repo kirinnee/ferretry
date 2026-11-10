@@ -9,7 +9,8 @@
  * export list, and a TEST may import both sides where the kernel's own code may not import a plugin.
  *
  * T-B2 holds the write rule (W, `findFlagSecrets`) under BOTH cutters, strictly: EVERY word W refuses is cut by the
- * kernel's mask and by runtimes' copy, residual 0 (a pointer, then keys of its own, then raw text included). Its
+ * kernel's mask and by runtimes' copy, residual 0 over THIS corpus (a pointer, then keys of its own, then raw text
+ * included); the F1-F7 families, which are outside it, are pinned open in `kernel-cutter-f1-f7-pin.test.ts`. Its
  * corpus comes from W's own name tail, not from the mask's name list: a candidate name is in it exactly when W
  * refuses it, so a name only W knows is in it. A W-only widening onto a name outside CANDIDATE_NAMES is not seen.
  *

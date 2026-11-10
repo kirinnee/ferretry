@@ -483,9 +483,16 @@ per-document plan (one refused document writes nothing of the set).
   typed at the machine.
 - **W and the mask agree: residual 0.** Every raw flag secret W refuses is cut by the kernel mask and by Runtimes'
   copy (a value after `${secret:X},` or `${secret:X},b=2,` is cut too), over the generated ruling #40 corpus, the
-  hand-written lines and every name W's tail test refuses (pinned by `kernel-cutter-agreement.test.ts`, strict). A
-  credential value that holds a pointer and that W refuses whole is cut whole, value start to word end, whatever piece
-  the raw text is in (`--key a,v,${secret:X}`, `--key ${secret:X},b=v`); the pointer in it is cut with the rest. The
+  hand-written lines and every name W's tail test refuses (pinned by `kernel-cutter-agreement.test.ts`, strict): residual
+  0 over that closed corpus (the 8,304-line corpus of the review rounds), and not over every line W can refuse. A
+  credential value that holds a pointer and that W refuses whole is cut whole, value start to word end, in the shapes
+  that corpus holds (`--key a,v,${secret:X}`, `--key ${secret:X},b=v`); the pointer in it is cut with the rest. **The
+  open GAP is the families F1-F7**: values W refuses whole that both cutters still show (a look-alike of a pointer, a
+  blank and a token shape, a pointer in a URL's user part, a value starting `.`, a pointer never closed, past W's
+  4096-character window, one item holding blanks). The kernel doors (`GET /v1/config/file`, `config_read`) leak none of
+  them, because the net withholds what W still refuses; Runtimes' Resolved view and a component's detail have no such
+  net. It is the counted `GAP(runtimes: Resolved view and component detail)` line in `ports-pending.json` (who can reach
+  those views, the remedy and the owner are there) and `kernel-cutter-f1-f7-pin.test.ts` pins it. The
   price is over-redaction: the mask cuts every value under a name W reads as a credential, a path after `--token-file`
   (E3) and the whole value of a word that glues text to a pointer.
   And should the mask ever miss a name W knows, the net withholds the file (`unmaskable`) instead of showing it. A word
