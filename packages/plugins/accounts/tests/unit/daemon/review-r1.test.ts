@@ -237,6 +237,43 @@ it('S79 the owner removal-only route needs no passkey while adding a default fro
   }
 });
 
+it('I186 "Always use" writes through an owner-only route: a ferret is refused, a device is asked for its passkey', async () => {
+  let remote = false;
+  const gate = Object.assign(
+    new StandInAdmission(() =>
+      remote
+        ? {
+            ...deviceStanding(DEVICE),
+            governance: { governed: true, decide: () => ({ allowed: true as const, refusal: 'granted' as const }) },
+          }
+        : ownerStanding(),
+    ),
+    { judgeConfigWrite: () => 'apply' as const },
+  );
+  const h = await host([], security, gate);
+  try {
+    await signIn(h);
+    const path = '/v1/accounts/defaults';
+    const line = { scope: 'sites', key: 'example.com', account: 'REVIEW' };
+    const plain = await host();
+    try {
+      const ferretCall = await plain.request('PUT', path, { body: line, as: ferret('F1') });
+      expect(ferretCall.status).toBe(403);
+      expect(ferretCall.json<{ code: string }>().code).toBe('owner_only');
+    } finally {
+      await plain.stop();
+    }
+    remote = true;
+    const added = await h.request('PUT', path, { body: line });
+    expect(added.status).toBe(403);
+    expect(added.json<{ code: string }>().code).toBe(STEP_UP_REQUIRED_CODE);
+    remote = false;
+    expect((await h.request('PUT', path, { body: line })).status).toBe(200);
+  } finally {
+    await h.stop();
+  }
+});
+
 /** ONE fresh passkey proof (Gate's registry): `claim` takes it in one step, so exactly one claim ever wins. */
 function oneFreshProof() {
   let held = true;

@@ -59,6 +59,22 @@ describe('2FA keys in the account store', () => {
     ).equal('no_such_field');
   });
 
+  it('I34 should hand a code it made to the Vault alone: no listing, index or sealed document holds it', async () => {
+    // Arrange
+    const w = await world();
+
+    // Act
+    const code = await w.vault.fill('GITHUB', 'totp', 59_000, { factor: w.first });
+
+    // Assert
+    should(code)
+      .equal(totpCode(ONE, PARAMS, 59_000))
+      .and.match(/^\d{6}$/u);
+    should(JSON.stringify(await w.directory.list())).not.containEql(code as string);
+    should(JSON.stringify(w.index.document)).not.containEql(code as string);
+    should(JSON.stringify((await w.sealed.read())?.entries ?? {})).not.containEql(code as string);
+  });
+
   it('should label every sealed seed and password for the redactor source', async () => {
     // Arrange
     const w = await world();
