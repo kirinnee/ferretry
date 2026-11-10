@@ -63,25 +63,6 @@ const daemonSources = (): readonly { readonly file: string; readonly text: strin
   }));
 };
 
-/**
- * THE SIGN-IN USAGE READ IS NOT HERE YET, SO THE FOUR ROWS BELOW ARE PENDING, NOT PASSING.
- *
- * S175–S178 are about the Claude/Codex sign-in read that runs on the housekeeping worker: a token read from its store
- * for one job and sent as one header, a worker protocol with no token field and a fixed word for a failed job, a worker
- * bundle that holds no vault, and a token that goes only to its provider or the loopback FY_USAGE_PROBE_ORIGIN. That
- * read, its worker and its job runner belong to Logins, Vault and Ferrets, which are still pending ports
- * (ports-pending.json); Usage has no caller of it and no seam to exercise it through. A test of a different thing under
- * those ids would pass without proving them, so each row is a skip that names the seam it waits for. What Usage DOES
- * own and prove today (an environment-key quota read through the Vault, a wire with no token field, a daemon half that
- * imports no vault store, the probe-origin rule) is tested below under what it is.
- */
-describe('the sign-in token rows (pending ports)', () => {
-  it.skip('S175 a sign-in is read only for the usage read on the housekeeping worker and dropped within one job — pending port: the Logins sign-in usage read, the housekeeping job runner (Ferrets) and the Vault sealed read, none bound yet', () => {});
-  it.skip('S176 only facts cross back from the worker and a failed job is answered with a fixed word — pending port: the housekeeping worker protocol and job runner', () => {});
-  it.skip('S177 the housekeeping worker bundle carries no vault, store or redactor — pending port: the worker bundle build (the housekeeping worker is not ported)', () => {});
-  it.skip('S178 a sign-in token goes only to its provider or the loopback FY_USAGE_PROBE_ORIGIN — pending port: the Logins sign-in usage read, which is the production caller of usageProbeUrls', () => {});
-});
-
 describe('what Usage proves of secrets today', () => {
   it('a provider quota is read only through the Vault authorizeFetch, so Usage never holds the key', async () => {
     const vault = new VaultSide();
