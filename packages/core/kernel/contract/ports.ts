@@ -254,8 +254,9 @@ export type ConfigWriteOutcome =
       readonly etag: string;
       readonly loosened: readonly string[];
       /**
-       * Only on an {@link ConfigPort.writeAsOwner} that left ANOTHER edit of the same file held: the owner's change is
-       * in effect and the held edit (made to both versions, still held) waits for the owner.
+       * Only on a {@link ConfigPort.writeAsOwner}, or a {@link ConfigPort.writeAsCaller} patch, that left ANOTHER edit of
+       * the same file held: the caller's change is in effect and the held edit (made to both versions, still held)
+       * waits for the owner.
        */
       readonly stillHeld?: { readonly id: string; readonly sentences: readonly string[] };
     }
@@ -331,9 +332,12 @@ export interface ConfigPort {
    * outside a call keep the hold exactly as {@link write} holds it; no option can switch it off for an agent. The act is
    * logged with the file and the secret NAME, never a value, and the kernel never reads a value to judge it.
    *
-   * The owner's answer covers ONLY the references the caller's own edit introduces relative to the text it edits (the
-   * disk text, which for a file with an edit held is the held text). A reference that only an edit already held names
-   * keeps the WHOLE write held, whoever asks, and the log credits the owner for its own references alone. The question
+   * The owner's answer covers ONLY the references the caller's own edit introduces relative to the text it edits. A
+   * reference that only an edit already held names keeps the WHOLE write held, whoever asks, and the log credits the
+   * owner for its own references alone. A PATCH of a file with an edit held for the owner is made to BOTH versions, as
+   * {@link writeAsOwner} makes one (the version in effect, patched and judged as the caller's own act; the held version,
+   * patched, stays held and is answered as `stillHeld`), so a patch of one field never puts the held edit into effect;
+   * a WHOLE text is the caller's whole text, and replaces the held edit. The question
    * is SYNCHRONOUS (nothing can time out; a missing judge, a throw or no answer holds) and is asked of the standing as
    * it is WHEN THE WRITE HAPPENS, not as it was when the call was admitted: the ambient scope also covers work the call
    * spawns (a timer, a listener) long after it ended, so a device revoked, locked or narrowed since holds. A route that
