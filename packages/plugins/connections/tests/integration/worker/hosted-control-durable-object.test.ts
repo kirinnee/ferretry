@@ -981,7 +981,7 @@ describe('hosted relay reservations heal themselves', () => {
     should((await snapshot(harness)).global.concurrentConnections).equal(16);
   });
 
-  it('should reclaim at once what the rendezvous says no socket holds, renew what it does, and spare a handoff', async () => {
+  it('R167 should reclaim at once what the rendezvous says no socket holds, renew what it does, and spare a handoff', async () => {
     const harness = await lockedOut();
     harness.runtime.clock += HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS;
     should(await reserve(harness, 'other_daemon_reserv1', otherDaemonId)).deepEqual({ ok: true });
@@ -1038,6 +1038,26 @@ describe('hosted relay reservations heal themselves', () => {
     ).equal(0);
   });
 
+  /** Every line the object writes to the Worker log while `run` executes. */
+  async function logged(run: () => Promise<void>): Promise<string[]> {
+    const lines: string[] = [];
+    const methods = ['log', 'info', 'warn', 'error', 'debug'] as const;
+    const originals = methods.map(method => console[method]);
+    for (const method of methods) {
+      console[method] = (...args: unknown[]) => {
+        lines.push(args.map(arg => String(arg)).join(' '));
+      };
+    }
+    try {
+      await run();
+    } finally {
+      methods.forEach((method, index) => {
+        console[method] = originals[index] as never;
+      });
+    }
+    return lines;
+  }
+
   guarantee(
     ['R151'],
     'should fail an audit closed on a reservation it cannot read, and leave the refusal standing',
@@ -1045,12 +1065,48 @@ describe('hosted relay reservations heal themselves', () => {
       const harness = await lockedOut();
       harness.storage.values.set('reservation:unreadable_reservation', { reservationId: 'nope' });
       harness.runtime.clock += HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS;
-      should(await reserve(harness, 'still_refused_reserv')).match({
-        ok: false,
-        code: SESSION_CLOSE_CODES.hostedCapacity,
+      const lines = await logged(async () => {
+        should(await reserve(harness, 'still_refused_reserv')).match({
+          ok: false,
+          code: SESSION_CLOSE_CODES.hostedCapacity,
+        });
+        should((await reconcile(harness, [])).status).equal(503);
       });
-      should((await reconcile(harness, [])).status).equal(503);
       should(reservations(harness)).have.length(17);
+      // The failure is said out loud, and the fingerprint is not part of what is said.
+      should(lines.length).be.above(0);
+      for (const line of lines) {
+        should(line).not.containEql(daemonId);
+        should(line).not.containEql('fy_daemon_');
+      }
+    },
+  );
+
+  guarantee(
+    ['R151'],
+    'should change only the concurrent counts when an audit heals, and log counts without a fingerprint',
+    async () => {
+      const harness = await lockedOut();
+      harness.runtime.clock += HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS;
+      const withoutConcurrency = (value: unknown): unknown =>
+        JSON.parse(JSON.stringify(value), (key, inner: unknown) =>
+          key === 'concurrentConnections' ? undefined : inner,
+        );
+      const before = await snapshot(harness);
+      should(before.global.concurrentConnections).equal(16);
+      const lines = await logged(async () => {
+        should(await (await reconcile(harness, [])).json()).deepEqual({ reclaimed: 16, corrected: 2 });
+      });
+      const after = await snapshot(harness);
+      // Only the derived counters moved; every cumulative total, window, peak and refusal count is as it was.
+      should(after.global.concurrentConnections).equal(0);
+      should(after.daemons[0]?.concurrentConnections).equal(0);
+      should(withoutConcurrency(after.global)).deepEqual(withoutConcurrency(before.global));
+      should(withoutConcurrency(after.daemons)).deepEqual(withoutConcurrency(before.daemons));
+      should(reservations(harness)).deepEqual([]);
+      should(lines).have.length(1);
+      should(lines[0]).match(/reclaimed 16 unheld reservation\(s\), corrected 2 counter\(s\)/u);
+      should(lines[0]).not.containEql(daemonId);
     },
   );
 

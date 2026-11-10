@@ -230,6 +230,37 @@ describe('hosted relay worker routes', () => {
     should(harness.routed).deepEqual([]);
   });
 
+  it('R133 should refuse every arrival with the kill-switch code before any rendezvous object is allocated', async () => {
+    // The real control object, never configured: the runtime kill switch is off, so nothing is admitted.
+    const control = new HostedRelayControlDurableObject(
+      { storage: new FakeHostedRelayControlStorage() },
+      {},
+      { now: () => 1_000 },
+    );
+    const routed: string[] = [];
+    const value: RelayEnvironment = {
+      RELAY_MODE: 'hosted',
+      RELAY_CONTROL: { idFromName: name => name, get: () => ({ fetch: request => control.fetch(request) }) },
+      RENDEZVOUS: {
+        idFromName: name => {
+          routed.push(String(name));
+          return name;
+        },
+        get: () => ({ fetch: async () => new Response('durable', { status: 101 }) }),
+      },
+    };
+    for (const side of ['daemon', 'client'] as const) {
+      const runtime = testRuntime();
+      await relayFetch(upgrade(`/v1/rendezvous/${daemonId}/${side}`), value, runtime);
+      should(refusal(runtime)).match({
+        control: { t: 'error', code: SESSION_CLOSE_CODES.hostedDisabled },
+        code: SESSION_CLOSE_CODES.hostedDisabled,
+      });
+    }
+    // The arrival never reached `RENDEZVOUS`: no object was named, so none was allocated or woken.
+    should(routed).deepEqual([]);
+  });
+
   guarantee(['R134'], 'should make missing, failed or malformed accounting a clear internal refusal', async () => {
     const cases: RelayEnvironment[] = [
       { ...hostedEnvironment().value, RELAY_CONTROL: undefined },
@@ -397,11 +428,16 @@ describe('hosted relay reservations whose answer is lost', () => {
     should(configured.status).equal(200);
 
     let reserves = 0;
+    const reservationIds: string[] = [];
     const namespace: HostedRelayControlNamespace = {
       idFromName: name => name,
       get: () => ({
         fetch: async (request: Request) => {
           const path = new URL(request.url).pathname;
+          if (path === '/internal/reserve') {
+            const sent = (await request.clone().json()) as { reservationId: string };
+            reservationIds.push(sent.reservationId);
+          }
           const response = await control.fetch(request);
           if (path === '/internal/reserve') {
             reserves += 1;
@@ -419,7 +455,7 @@ describe('hosted relay reservations whose answer is lost', () => {
         get: () => ({ fetch: async () => new Response('durable', { status: 101 }) }),
       },
     };
-    return { storage, value, reserves: () => reserves };
+    return { storage, value, reserves: () => reserves, reservationIds: () => reservationIds };
   }
 
   const held = (storage: FakeHostedRelayControlStorage) =>
@@ -427,7 +463,7 @@ describe('hosted relay reservations whose answer is lost', () => {
   const concurrent = (storage: FakeHostedRelayControlStorage) =>
     (storage.values.get('metrics:global') as { concurrentConnections: number }).concurrentConnections;
 
-  it('should recover a committed reservation by asking again with the same identifier', async () => {
+  it('R146 should recover a committed reservation by asking again with the same identifier', async () => {
     let lose = true;
     const hosted = await lossyControl(() => {
       const failing = lose;
@@ -439,6 +475,10 @@ describe('hosted relay reservations whose answer is lost', () => {
     // The retry proved the first attempt had been admitted, so the socket is served, not refused.
     should(response.status).equal(101);
     should(hosted.reserves()).equal(2);
+    // ONE retry, and the SAME reservation identifier: that is what makes the ask idempotent.
+    const [first, second] = hosted.reservationIds();
+    should(hosted.reservationIds()).have.length(2);
+    should(second).equal(first);
     // Exactly one reservation and one connection: a retry must not double count.
     should(held(hosted.storage)).equal(1);
     should(concurrent(hosted.storage)).equal(1);

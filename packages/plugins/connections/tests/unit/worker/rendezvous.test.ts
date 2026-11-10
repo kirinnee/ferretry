@@ -373,7 +373,7 @@ describe('rendezvous: sessions', () => {
     should(closures(reserved.effects)[0]?.code).equal(SESSION_CLOSE_CODES.relayInternal);
   });
 
-  guarantee(['R102', 'R165'], 'should carry several clients at once and then refuse the next', () => {
+  guarantee(['R102'], 'should carry several clients at once and then refuse the next', () => {
     let state = withDaemon().daemon === null ? initialRendezvousState(daemonId) : withDaemon();
     for (let index = 0; index < MAX_SESSIONS_PER_RENDEZVOUS; index += 1) {
       state = reduceRendezvous(state, {
@@ -395,7 +395,7 @@ describe('rendezvous: sessions', () => {
 });
 
 describe('rendezvous: forwarding', () => {
-  guarantee(['R117', 'R120', 'R126', 'R168', 'R169'], 'should move records both ways without decoding them', () => {
+  guarantee(['R117', 'R120', 'R126'], 'should move records both ways without decoding them', () => {
     const opened = withClient();
     const target = sessionId(1);
 
