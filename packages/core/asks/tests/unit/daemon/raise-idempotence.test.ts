@@ -37,6 +37,26 @@ it('keeps the obligation index when closed history is pruned and the service res
   expect(await restarted.raise(draft)).toEqual(first);
 });
 
+it('names the home a redirected raise landed on, now and on every repeat', async () => {
+  const inner = agendaService();
+  // The engine puts a daemon raise about a sub-ferret on its lineage's home, not on the board the draft named.
+  const redirected = {
+    list: (id: string) => inner.list(id),
+    raise: (_ferret: string, request: Parameters<typeof inner.raise>[1], actor: Parameters<typeof inner.raise>[2]) =>
+      inner.raise('ferret-own', request, actor),
+    resolve: inner.resolve.bind(inner),
+    dismiss: inner.dismiss.bind(inner),
+    snooze: inner.snooze.bind(inner),
+    unsnooze: inner.unsnooze.bind(inner),
+    raisedObligation: inner.raisedObligation.bind(inner),
+    raisedObligations: inner.raisedObligations.bind(inner),
+  };
+  const api = asksPort(redirected, boards, () => 'unavailable');
+  const first = await api.raise(draft);
+  expect(first.ferret).toBe('ferret-own');
+  expect(await api.raise(draft)).toEqual(first);
+});
+
 it('coalesces concurrent raises across boards by source and entry', async () => {
   const api = asksPort(agendaService(), boards, () => 'unavailable');
   const refs = await Promise.all([api.raise(draft), api.raise({ ...draft, ferret: 'ferret-own' })]);

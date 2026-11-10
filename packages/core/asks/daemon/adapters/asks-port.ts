@@ -304,17 +304,22 @@ export function asksPort(
     };
     const mutation = await agenda.raise(ferret, request, PORT_ACTOR);
     if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
-    const id = mutation.item?.id ?? (await agenda.raisedObligation(ferret, sourceRef));
+    // The mutation says where the ask landed: a daemon raise about a sub-ferret goes to its lineage's home, not to `ferret`.
+    const landed = mutation.snapshot.sessionId;
+    const id = mutation.item?.id ?? (await agenda.raisedObligation(landed, sourceRef));
     if (id === undefined) throw new AskRefusedError('the board took the ask but named no item for it');
-    held.set(sourceRef, { ferret, id: id as AskId });
-    return { ferret, id: id as AskId };
+    const ref = { ferret: landed, id: id as AskId };
+    held.set(sourceRef, ref);
+    return ref;
   };
   const everyBoard = async <T>(
     read: (ferret: string, board: AgendaSnapshot) => readonly T[],
     only?: string,
   ): Promise<T[]> => {
     const out: T[] = [];
-    for (const ferret of only === undefined ? await boards.ferrets() : [only]) {
+    const listed = await boards.ferrets();
+    // One name is read only when the engine lists it: a file system that folds case would open `alice` for `Alice`.
+    for (const ferret of only === undefined ? listed : listed.filter(name => name === only)) {
       const board = await snapshot(ferret).catch(() => undefined);
       if (board !== undefined) out.push(...read(ferret, board));
     }

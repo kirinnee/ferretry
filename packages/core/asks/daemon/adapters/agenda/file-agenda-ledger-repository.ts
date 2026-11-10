@@ -118,8 +118,10 @@ function archiveRecords(text: string): AgendaArchiveRecord[] {
  * A PARSED COPY IS KEPT PER SESSION, against the identity of the file it was read from. A board read opens
  * the agenda of every ferret on the board — some two hundred — and checking each one's ledger entry by entry
  * was most of what it cost. The file stays the only truth: every write lands on disk first and then drops the
- * copy, every read first asks the file how it stands (the digest of its bytes, through the kernel's state port), and
- * a file changed by anyone — this daemon, a person with an editor — is a new identity, parsed again. The
+ * copy, every read first asks the file how it stands (a stat through the kernel's state port: inode, size and
+ * modified time, not a read of its bytes), and a file whose stat moved — this daemon's write, a person with an
+ * editor — is a new identity, parsed again. A rewrite that kept all three (same inode, same size, same millisecond)
+ * would not be noticed; it has no ctime or device in it. The
  * copy is frozen, because every reader of this session shares it, and lives in memory only: a restart starts
  * from the files.
  */

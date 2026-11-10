@@ -435,8 +435,11 @@ export class GateItems implements CardWriteObserver {
     for (const open of await this.ports.obligations.open())
       byCard.set(open.cardId, [...(byCard.get(open.cardId) ?? []), open]);
     if (byCard.size === 0) return;
-    // The cards come from ONE pass over the board; a derivation per card with an open ask would read the whole board each
-    // time. A card the pass did not have (written since) is looked for on its own.
+    // The cards come from ONE read of the board here, taken AFTER the reconcile above has raised and withdrawn asks (a
+    // second whole-board read per sweep, on purpose: the reconcile's list is older, and judging a card that moved since by
+    // its old lane would withdraw the live ask of its new gate). It is skipped when no card ask is open. A derivation per
+    // card with an open ask would read the whole board each time. A card this read did not have (written since) is looked
+    // for on its own.
     const known = new Map((await this.ports.board.cards()).map(each => [each.task.id, each] as const));
     for (const [cardId, opens] of byCard) {
       signal?.throwIfAborted();

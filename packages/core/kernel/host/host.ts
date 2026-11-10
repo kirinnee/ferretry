@@ -1522,7 +1522,11 @@ async function bootLocked(
           await record.state?.close().catch(() => undefined);
         }
       } finally {
-        // Last, even when a step above threw: the home is free only once nothing of this daemon still writes in it.
+        // Last, even when a step above threw. The lock is released once the jobs have stopped OR were given up on at
+        // the deadline (jobs.ts). A given-up job is not cancelled: its code may still run, and write, during the steps
+        // above, while the lock is held. After the release fyd exits within microtask hops (stop-signals.ts), but a
+        // file-system call the job had already issued may still land after the lock is released (the writes are
+        // atomic renames, so at worst a stray temp file).
         trace.push('stop:lock');
         await lease.release();
       }

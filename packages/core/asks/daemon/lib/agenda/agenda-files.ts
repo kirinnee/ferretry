@@ -17,8 +17,9 @@ export interface AgendaFileStore {
   /** Removes the file; a file already gone is not a failure. */
   remove(sessionId: string, name: string): Promise<void>;
   /**
-   * What the file is now — a value that changes whenever the file does, whoever changes it — or `undefined`
-   * when there is no such file. A store without it is read whole on every read.
+   * What the file is now — a value that changes when the file's stat does (the disk store's is inode, size and
+   * modified time; the contract needs no byte read to answer) — or `undefined` when there is no such file. A store
+   * without it is read whole on every read.
    */
   identity?(sessionId: string, name: string): Promise<string | undefined>;
   /** The file's text and the identity of the very file it was read from, or `undefined` when there is none. */

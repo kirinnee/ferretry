@@ -793,13 +793,16 @@ delivery is acknowledged only after the reply queue durably accepts it. Presenta
 their failure cannot acknowledge a failed delivery or hold an accepted one. Each acknowledged event is removed
 durably. A failed delivery stays pending with its original event and a persisted retry count, deadline and error.
 Delivery is attempted at most five times, with delays of 1, 2, 4 and 8 seconds between attempts; reads and unchanged
-retries before the deadline do not attempt it again. A pending, backing-off or parked event is a FIFO barrier for
+retries before the deadline do not attempt it again. Those delays are earliest times: the periodic drain (the `changes`
+job, every 5 seconds, visiting only sessions that still hold an event) is the next look after the deadline unless a
+read or mutation of that session comes sooner, so the 1 and 2 second delays are in effect up to 5 seconds. A pending, backing-off or parked event is a FIFO barrier for
 its item: later events for that item wait until it is durably accepted. Merged items share that barrier with their
 survivor, including through successive merges; a split child is an independent item. Unrelated eligible events
 continue past a failing event. Every
 failure is logged. After the fifth failure the event stays parked in `agenda-changes.pending.json`, with a warning
 naming the session, event and file; it is never silently dropped. After repairing delivery, an operator can remove
-that event's `retry` field to rearm it. Later events remain behind a parked barrier, and each drain logs their
+that event's `retry` field to rearm it; the periodic drain no longer visits a parked outbox, so a rearmed event is
+tried at the next read or change of that session's agenda, or at the next restart. Later events remain behind a parked barrier, and each drain logs their
 session, event and blocking parked event through the same warning sink as the parking diagnostic. An operator who
 explicitly decides that the old instruction is superseded can instead remove that event from the pending array;
 the later instructions then proceed on the next drain. Stop the daemon before editing this file so the drain
