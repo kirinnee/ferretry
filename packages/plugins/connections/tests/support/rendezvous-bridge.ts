@@ -198,25 +198,56 @@ export class RendezvousBridge {
 }
 
 /**
- * Which secrets the rendezvous could actually READ, searched over the BYTES it handled: each secret as its UTF-8 bytes
- * and as the ASCII of its base64, the two encodings a leak plausibly takes on a wire that carries base64url payloads.
- * A hit names the LABEL and the frame index and never the value.
+ * Which secrets the rendezvous could actually READ, searched over everything it SEES: the BYTES of every frame it
+ * handled AND every URL a browser dialled to reach it (the upgrade request's address is read by the rendezvous too, and
+ * so is by any proxy in front of it; cb4 F2, row 127). Each secret is searched as its UTF-8 bytes and as the ASCII of
+ * its base64, the two encodings a leak plausibly takes on a wire that carries base64url payloads. A hit names the LABEL
+ * and the frame or URL index and never the value.
  */
 export function carrierLeaks(
-  bridge: { readonly observed: readonly Uint8Array[] },
+  bridge: { readonly observed: readonly Uint8Array[]; readonly dialled?: readonly string[] },
   secrets: Readonly<Record<string, string>>,
 ): readonly string[] {
-  const haystack = bridge.observed.map(bytes => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  const seen: { readonly where: string; readonly bytes: Buffer }[] = [
+    ...bridge.observed.map((bytes, index) => ({
+      where: `relay-observable frame #${String(index)}`,
+      bytes: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+    })),
+    ...(bridge.dialled ?? []).map((url, index) => ({
+      where: `dialled URL #${String(index)}`,
+      bytes: Buffer.from(url, 'utf8'),
+    })),
+  ];
   const leaks: string[] = [];
   for (const [label, secret] of Object.entries(secrets)) {
     if (secret === '') throw new Error(`the leak search was given an empty needle for ${label}`);
     const needles = [Buffer.from(secret, 'utf8'), Buffer.from(Buffer.from(secret, 'utf8').toString('base64'), 'utf8')];
-    for (const [index, frame] of haystack.entries()) {
-      if (needles.some(needle => frame.includes(needle))) {
-        leaks.push(`${label} appeared in relay-observable frame #${String(index)}`);
+    for (const entry of seen) {
+      if (needles.some(needle => entry.bytes.includes(needle))) {
+        leaks.push(`${label} appeared in ${entry.where}`);
         break;
       }
     }
   }
   return leaks;
+}
+
+/**
+ * What a dialled URL may name: the rendezvous host and the daemon's fingerprint, which ADDRESSES the slot and is public
+ * by design (protocol §3). Anything more in the address — a query, a fragment, credentials, another path — is something
+ * the rendezvous (and whatever is in front of it) reads, so each is reported by position and never by value.
+ */
+export function dialledProblems(dialled: readonly string[], daemonId: string): readonly string[] {
+  const problems: string[] = [];
+  for (const [index, url] of dialled.entries()) {
+    const parsed = new URL(url);
+    const where = `dialled URL #${String(index)}`;
+    if (parsed.host !== RELAY_HOST) problems.push(`${where} names a host other than the rendezvous`);
+    if (parsed.pathname !== `/v1/rendezvous/${daemonId}/client`)
+      problems.push(`${where} names more than the daemon fingerprint in its path`);
+    if (parsed.search !== '') problems.push(`${where} carries a query`);
+    if (parsed.hash !== '') problems.push(`${where} carries a fragment`);
+    if (parsed.username !== '' || parsed.password !== '') problems.push(`${where} carries credentials`);
+  }
+  return problems;
 }
