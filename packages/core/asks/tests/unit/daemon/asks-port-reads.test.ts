@@ -52,6 +52,13 @@ it('open({ ferret }) reads only the named ferret board, not all 300', async () =
   expect(reads.list).toBe(1);
 });
 
+it('open({ ferret }) names no board the engine does not list, however the file system folds case', async () => {
+  const { agenda, reads } = counted();
+  const api = asksPort(agenda, boards, () => 'unavailable');
+  expect(await api.open({ ferret: 'B7' as FerretId })).toEqual([]);
+  expect(reads.list).toBe(0);
+});
+
 it('open without a ferret still reads every board once', async () => {
   const { agenda, reads } = counted();
   const api = asksPort(agenda, boards, () => 'unavailable');
