@@ -11,10 +11,14 @@ verdict | judge)
   description='one or more checks in the full set did not succeed'
   # Only the documented optional skips pass: Full CI Pending on a non-PR run, and the darwin smoke under
   # the owner's MACOS_SMOKE=skip switch. The reusable darwin verdict already owns PR advisory policy.
-  if jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" '
+  # The strict-guarantee report (ci.yaml `FY_STRICT_GUARANTEES_BLOCKING`, the workflow env this script inherits) is
+  # report-only while the switch is 'false': whatever that job ends as (a failed setup step, the timeout) cannot turn
+  # Full CI red. Once the switch is 'true' it must succeed like every other job.
+  if jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" --arg strict "${FY_STRICT_GUARANTEES_BLOCKING:-}" '
     . as $needs |
     ["quick", "int", "full-gates", "compile", "smoke"]
       | all(.[]; $needs[.].result == "success")
+    and ($strict == "false" or $needs["strict-guarantees"].result == "success")
     and ($needs["full-pending"].result == "success" or
       ($event != "pull_request" and $needs["full-pending"].result == "skipped"))
     and ($needs["smoke-darwin"].result == "success" or
