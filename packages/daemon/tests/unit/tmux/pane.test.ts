@@ -7,6 +7,7 @@ import {
   paneActiveWork,
   paneBlockingPrompt,
   paneShowsActiveWork,
+  paneShowsCompacting,
   paneShowsPermissionPrompt,
   promptIsReady,
 } from '../../../src/lib/index.ts';
@@ -374,13 +375,29 @@ describe('B188 a Compacting line on any spinner tick', () => {
       should(paneActiveWork(fixture(name))).equal('status');
   });
 
-  it('B188 a "· Compacting the notes…" bullet in prose far above the composer does not', () => {
-    const prose = ['· Compacting the notes…', ...Array.from({ length: 24 }, (_, row) => `  detail row ${row}`)].join(
+  it('B188 a "· Compacting conversation…" line far above the composer (scrolled history) does not', () => {
+    const prose = ['· Compacting conversation…', ...Array.from({ length: 24 }, (_, row) => `  detail row ${row}`)].join(
       '\n',
     );
 
     should(paneActiveWork(`${prose}\n${COMPOSER}`)).be.undefined();
     should(promptIsReady(`${prose}\n${COMPOSER}`)).be.true();
+  });
+
+  it('B188 ordinary prose that starts "Compacting" just above a quiet composer is not a compaction', () => {
+    // Inside the window, right over the composer, but not Claude's status wording or its valid suffix.
+    for (const line of [
+      '  * Compacting the notes… is next',
+      '· Compacting the notes…',
+      '* Compacting conversation… is what the log said',
+      '· Compacting conversation… (see the notes)',
+      '· Compacting conversation… and then more',
+    ]) {
+      should(paneActiveWork(frame(line))).be.undefined();
+      should(paneShowsCompacting(frame(line))).be.false();
+      should(promptIsReady(frame(line))).be.true();
+      should(idlePromptShown(frame(line))).be.true();
+    }
   });
 
   it('B188 the word Compacting without a glyph and an ellipsis is not work', () => {

@@ -26,6 +26,7 @@ import {
   paneBlockingPrompt,
   paneHoldOf,
   paneShowsActiveWork,
+  paneShowsCompacting,
   paneShowsStartupWait,
   readComposer,
   showsPayload,
@@ -126,6 +127,7 @@ export class TmuxSendTerminal implements SendTerminal {
       dead: frame.dead,
       promptReady: frame.promptReady,
       activeWork: paneShowsActiveWork(frame.visible),
+      compacting: paneShowsCompacting(frame.visible),
       startupParked: paneShowsStartupWait(frame.visible),
       // A permission prompt blocks a send as surely as a dialog: a message typed into its choice list
       // could pick a row.

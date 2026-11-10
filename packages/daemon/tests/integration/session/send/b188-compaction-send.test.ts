@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionState } from '@ferretry/protocol';
@@ -75,6 +75,8 @@ const summary: TranscriptEvent = {
   kind: 'message',
   text: 'This session is being continued from a previous conversation…',
   inputSource: 'harness',
+  // Claude's own `isCompactSummary` marker, which is what the turn reader keys on.
+  compactSummary: true,
 };
 
 /** The two frames Claude alternates between, from the first second of an idle compaction. */
@@ -277,7 +279,7 @@ describe('B188 an idle ferret starts compacting', () => {
 });
 
 describe('B188 a draft of our own is left in the box, then an idle compaction', () => {
-  it('B188 the turn settles your-turn and the queue drains once the summary lands', async () => {
+  it('B188 peers queued behind the draft during the compaction wait, then the first look after the summary settles your-turn and delivers them in order', async () => {
     const subject = await world();
     // A direct send whose fill is never drawn within its window settles unconfirmed, and is drawn later.
     subject.pane.stalled = true;
@@ -285,23 +287,43 @@ describe('B188 a draft of our own is left in the box, then an idle compaction', 
     subject.pane.wake();
     await subject.run(0, 6_000, () => undefined);
     const unconfirmed = await subject.record('send-63');
+    const tick = (atMs: number): string => TICKS[(atMs / TICK_MS) % 2] as string;
 
-    // Then an idle compaction, with that text still in the composer, and its summary.
-    await subject.run(8_000, WINDOW_MS - TICK_MS, atMs => TICKS[(atMs / TICK_MS) % 2]);
-    subject.events.push(boundary, summary);
-    await subject.run(WINDOW_MS, WINDOW_MS + TICK_MS, () => undefined);
-
-    // `working` is confirmed, forever, today: the summary reads as work and the cursor on the draft reads as no prompt.
-    should(subject.statesFrom(WINDOW_MS + TICK_MS, WINDOW_MS + TICK_MS)).eql(['your-turn']);
-
-    // Two peers arrive; the stranded text is finished once and both are delivered in order.
-    subject.nowMs = T0 + WINDOW_MS + 4_000;
+    // An idle compaction starts with that text still in the composer. Two peers arrive while it runs.
+    await subject.run(8_000, 20_000, tick);
+    const fillsBefore = subject.pane.fills().length;
+    subject.nowMs = T0 + 20_000;
     await subject.enqueue('send-a', `${PEER} (a)`);
     await subject.enqueue('send-b', `${PEER} (b)`);
+    await subject.run(22_000, WINDOW_MS - TICK_MS, tick);
+
+    // They WAIT behind the draft: queued, nothing typed or submitted, and the turn reads working throughout.
+    const waiting = (await subject.queue.list(ID)).filter(message => message.id !== 'send-63');
+    should(waiting.map(message => message.state)).eql(['queued', 'queued']);
+    should(subject.pane.fills()).have.length(fillsBefore);
+    should(subject.pane.submitted).have.length(0);
+    should(subject.statesFrom(8_000, WINDOW_MS - TICK_MS).every(state => state === 'working')).be.true();
+
+    // At +60 s Claude writes the boundary and the summary and draws its idle frame, the draft still in the box.
+    // The state after a previous turn boundary, boundary, summary needs BOTH: the summary skipped as turn work (the
+    // transcript says ended) and the idle prompt read through the draft (the pane agrees), so the FIRST look settles.
+    subject.events.push(boundary, summary);
+    await subject.run(WINDOW_MS, WINDOW_MS, () => undefined);
+    should(subject.statesFrom(WINDOW_MS, WINDOW_MS)).eql(['your-turn']);
+
+    // The next delivery look: the stranded text is finished once, then both peers go, in order.
+    subject.nowMs = T0 + WINDOW_MS + TICK_MS;
+    await subject.deliverer.look(ID);
     const messages = await subject.queue.list(ID);
     should(unconfirmed).match({ fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed' });
-    should(subject.pane.submitted).have.length(3);
-    should(subject.pane.submitted[0]).match(/turn-063\.md now|catalog suite/);
+    // Submitted payloads, in order: the stranded text itself, then ONE combined turn pointing at the peers' file.
+    should(subject.pane.submitted).have.length(2);
+    should(subject.pane.submitted[0]).equal(PEER);
+    const pointer = /Read the file (\S+turn-064\.md) now/.exec(subject.pane.submitted[1] ?? '');
+    should(pointer).not.be.null();
+    const turnFile = await readFile((pointer as RegExpExecArray)[1] as string, 'utf8');
+    should(turnFile.indexOf('(a)')).be.greaterThan(-1);
+    should(turnFile.indexOf('(b)')).be.greaterThan(turnFile.indexOf('(a)'));
     should(messages.filter(message => message.id !== 'send-63').map(message => message.state)).eql([
       'delivered',
       'delivered',

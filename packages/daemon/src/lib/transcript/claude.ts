@@ -325,10 +325,16 @@ export class ClaudeTranscriptParser implements TranscriptParser {
 
     const content = message.content ?? record.content;
     const blocks = Array.isArray(content) ? content : content === undefined ? [] : [content];
-    const source =
+    const harnessSource =
       (role === 'user' && harnessWritten(record)) || (role === 'assistant' && synthetic(message))
         ? ({ inputSource: 'harness' } as const)
         : {};
+    // Claude marks a compaction's summary on the raw record. Every block it splits into carries the marker, so
+    // the turn reader never has to guess the summary from where it sits (&B188).
+    const source =
+      role === 'user' && record.isCompactSummary === true
+        ? { ...harnessSource, compactSummary: true as const }
+        : harnessSource;
     for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
       const value = blocks[blockIndex];
       const blockMetadata = metadata(role, blockIndex);

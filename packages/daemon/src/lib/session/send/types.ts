@@ -231,6 +231,11 @@ export interface SendPaneObservation {
   /** The harness is visibly mid-turn. A pane can be neither prompt-ready nor working: a human's
    *  half-typed draft is exactly that, and it must not be treated as busy. */
   readonly activeWork: boolean;
+  /**
+   * The harness is visibly COMPACTING its context (&B188). A subset of `activeWork` that outranks a stored status:
+   * a person can start `/compact` from `awaiting_user` or `interrupted`, so those records say nothing about it.
+   */
+  readonly compacting?: boolean | undefined;
   /** A harness dialog the pane is parked on, in the words a person is shown for it. */
   readonly blockingPrompt?: string | undefined;
   /**

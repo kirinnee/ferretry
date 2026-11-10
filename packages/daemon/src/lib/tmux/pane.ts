@@ -89,18 +89,21 @@ const TOKEN_COUNTER = /[\d.,]+k?\s*tokens\s*[·•∙]/;
 const SPINNER_PHRASE = /^[^\S\n]*[✻✳✶✽✢∗][^\n…]{1,120}…/mu;
 
 /**
- * Claude's `Compacting conversation…` line on ANY spinner tick — `✶ Compacting conversation… (3s)`, but also the
- * `·` and ASCII `*` frames, with or without the elapsed clock (&B188). Until its counter appears the line has no
- * `Ns ·` and no `tokens ·`, and `·` is not in {@link SPINNER_PHRASE} (a bullet in prose would read busy), so the
- * general readers miss it and an idle-looking composer under it would be typed into.
+ * Claude's compaction status line on ANY spinner tick (&B188): `✶ Compacting conversation… (3s)`, but also the `·`
+ * and ASCII `*` frames, with or without a clock. Until its counter appears the line has no `Ns ·` and no `tokens ·`,
+ * and `·` is not in {@link SPINNER_PHRASE} (a bullet in prose would read busy), so the general readers miss it and an
+ * idle-looking composer under it would be typed into.
  *
- * Read only in the rows just above the composer ({@link COMPACTING_WINDOW_LINES}), so a bullet of prose that merely
- * starts with the word higher up the screen does not count.
+ * Matches the WHOLE line and only Claude's real wording (see `tests/fixtures/compaction`): a spinner glyph, exactly
+ * `Compacting conversation`, an ellipsis, then nothing or a parenthetical that opens on the elapsed clock
+ * (`(3s)`, `(7m 14s · ↓ 37.4k tokens)`, clipped on a narrow pane). Prose such as `  * Compacting the notes… is next`
+ * therefore never reads as a compaction, however close to the composer it sits.
  */
-export const COMPACTING_LINE = /^[^\S\n]*[·*•✻✳✶✽✢∗][^\S\n]+Compacting\b[^\n]{0,80}?(?:…|\.\.\.)/mu;
+export const COMPACTING_LINE =
+  /^[^\S\n]*[·*✻✳✶✽✢∗][^\S\n]+Compacting conversation(?:…|\.\.\.)(?:[^\S\n]*\([^\S\n]*(?:\d+[^\S\n]*[hms]\b|[\d.,]+k?[^\S\n]*tokens)[^\n]*)?[^\S\n]*$/mu;
 
-/** How many rows, counted from the last non-blank one, the Compacting line may sit above. */
-const COMPACTING_WINDOW_LINES = 16;
+/** How many rows, counted from the last non-blank one, the status line may sit above: the status area over the composer. */
+const COMPACTING_WINDOW_LINES = 12;
 
 /** `⏺` also prefixes tool-RESULT lines whose truncation ellipsis must not read as busy, so it keeps
  *  the strict single-word form only the spinner produces — at the left edge, like the phrase. */

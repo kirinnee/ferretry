@@ -91,36 +91,14 @@ export function transcriptTurnPhase(events: readonly TranscriptEvent[]): Transcr
     if (event.kind === 'usage' || event.kind === 'settings' || event.kind === 'attachment' || event.kind === 'error')
       continue;
     if (event.role === 'system' || event.role === 'developer') continue;
-    if (isCompactionSummary(events, index)) continue;
+    // Claude marks a compaction's summary on the raw record (`isCompactSummary`): the harness tidying its own context,
+    // never a person speaking or a turn starting. Read as work it pinned an idle prompt at `working` until some real
+    // boundary came, and on an idle prompt none does (&B188). A harness record WITHOUT the marker (a task
+    // notification) is still work.
+    if (event.compactSummary === true) continue;
     return 'working';
   }
   return 'unknown';
-}
-
-/**
- * Whether the event at `index` is the summary Claude Code writes straight after a compaction boundary
- * (&B188): a harness-written user message whose nearest earlier turn-relevant event is the `compaction`
- * record. It is the harness tidying its own context, never a person speaking or a turn starting, so read
- * as work it pinned an idle prompt at `working` until some real boundary came — and on an idle prompt
- * none does. A harness user record with no compaction before it (a task notification) is still work.
- */
-function isCompactionSummary(events: readonly TranscriptEvent[], index: number): boolean {
-  const event = events[index] as TranscriptEvent;
-  if (event.kind !== 'message' || event.role !== 'user' || event.inputSource !== 'harness') return false;
-  for (let earlier = index - 1; earlier >= 0; earlier -= 1) {
-    const before = events[earlier] as TranscriptEvent;
-    if (
-      before.kind === 'usage' ||
-      before.kind === 'settings' ||
-      before.kind === 'attachment' ||
-      before.kind === 'error'
-    )
-      continue;
-    if (before.kind === 'compaction') return true;
-    if (before.role === 'system' || before.role === 'developer') continue;
-    return false;
-  }
-  return false;
 }
 
 /** Everything one decision reads. */
