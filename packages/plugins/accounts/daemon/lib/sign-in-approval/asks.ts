@@ -23,7 +23,8 @@ import {
 } from '@ferretry/core-asks/contract';
 import type { z } from 'zod';
 import { SignInApprovalRefSchema } from '../../../contract/index.ts';
-import { LoginRecipeProposalIdSchema, SignInIdSchema } from '../../../contract/routes/index.ts';
+import { LoginRecipeProposalIdSchema, PhoneApprovalIdSchema, SignInIdSchema } from '../../../contract/routes/index.ts';
+import type { PhoneApprovalAsksPort, PhoneApprovalCard, PhoneApprovalClose } from '../phone-approval/ports.ts';
 import type { RecipeAgendaPort } from '../secrets/login-recipes.ts';
 import type { SignInRuleSuggestionAgendaPort, SignInRuleSuggestionCard } from '../sign-in-rules/suggestions.ts';
 import type { TaskPlanAgendaPort, TaskPlanCard } from '../task-plans/service.ts';
@@ -43,7 +44,7 @@ export const signInApprovalSource: AskSourceSpec = {
 interface Raise {
   readonly ref: SignInApprovalAskRef;
   readonly entry: string;
-  readonly kind: 'permission' | 'task';
+  readonly kind: 'permission' | 'task' | 'notice';
   readonly subject: string;
   readonly context: string;
   readonly howToResolve: string;
@@ -158,5 +159,46 @@ export class RecipeAsksAdapter implements RecipeAgendaPort {
 
   async close(sessionId: string, id: string, note: string): Promise<void> {
     await this.asks.close(sessionId, id, note === 'Replaced by a newer recipe proposal.' ? 'superseded' : 'answered');
+  }
+}
+
+/**
+ * An approve-on-phone card (docs/input-requests.md, "Approve on your phone"): a notice carrying the approval's ref,
+ * worded by the daemon from what it observed. THE ASK APPROVES NOTHING and the generic answer is never read as an
+ * approval: the owner's only act is "Not me" on the approval's own route, and the sign-in finishes on the phone. Its
+ * words name the place only, never the account or the number (agenda text is every ferret's to read; I198).
+ */
+export class PhoneApprovalAsksAdapter implements PhoneApprovalAsksPort {
+  private readonly base: SignInApprovalAsks;
+
+  constructor(private readonly asks: Pick<AsksApi, 'raise' | 'close' | 'open'>) {
+    this.base = new SignInApprovalAsks(asks);
+  }
+
+  async raise(ferret: string, card: PhoneApprovalCard): Promise<Raised> {
+    const id = PhoneApprovalIdSchema.safeParse(card.approvalId);
+    if (!id.success) return { ok: false, message: 'this approval has no id an ask can name' };
+    return await this.base.raise(ferret, {
+      ref: { kind: 'phone-approval', id: id.data },
+      entry: card.approvalId,
+      kind: 'notice',
+      subject: card.subject,
+      context: card.context,
+      howToResolve: card.howToResolve,
+    });
+  }
+
+  async close(ferret: string, id: string, reason: PhoneApprovalClose): Promise<void> {
+    await this.base.close(ferret, id, reason);
+  }
+
+  /** The open asks that present an approval: no approval outlives a restart, so each is closed at start. */
+  async open(): Promise<readonly { readonly ferret: string; readonly id: string }[]> {
+    const open = await this.asks.open({ source: SIGN_IN_APPROVAL_SOURCE, state: 'open' });
+    return open.flatMap(ask =>
+      ask.ferret !== undefined && PhoneApprovalIdSchema.safeParse(ask.entry).success
+        ? [{ ferret: ask.ferret, id: ask.id }]
+        : [],
+    );
   }
 }

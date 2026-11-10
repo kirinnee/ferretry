@@ -1,5 +1,8 @@
 import {
   type Buzz,
+  PUSH_CLEAR_MAX_TAGS,
+  type PushClearPayload,
+  PushClearPayloadSchema,
   fittingPushCount,
   fittingPushTag,
   type PushDeviceView,
@@ -83,5 +86,27 @@ export function buzzPayload(message: Buzz): PushNotificationPayload {
     ...(tag === undefined ? {} : { tag }),
     url: message.url,
     count: fittingPushCount(1),
+  });
+}
+
+/**
+ * The clear that takes down the lines named by `tags` on every device (docs/notifications.md § When an alert is
+ * cleared). IT CARRIES NO CONTENT: only which of this machine's own tags to take down. A tag that would not fit the
+ * kernel's grammar names no line the worker could find, so it is left out; with none left there is nothing to send.
+ */
+export function clearPayload(tags: readonly string[], ferret?: string): PushClearPayload | undefined {
+  const fitting = tags
+    .flatMap(tag => {
+      const fits = fittingPushTag(tag);
+      return fits === undefined ? [] : [fits];
+    })
+    .slice(0, PUSH_CLEAR_MAX_TAGS);
+  if (fitting.length === 0) return undefined;
+  return PushClearPayloadSchema.parse({
+    version: 1,
+    kind: 'clear',
+    eventKey: `clear:${fitting.join(',')}`.slice(0, 400),
+    sessionId: ferret ?? 'machine',
+    tags: fitting,
   });
 }

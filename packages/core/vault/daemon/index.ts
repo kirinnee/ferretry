@@ -68,6 +68,11 @@ import { SecretDirectory, SecretVault } from './lib/secrets/vault.ts';
  */
 const IDENTITY_NOT_OFFERED: SecretCloneIdentitySource = { load: async () => undefined };
 
+/** The one plugin that looks at a page's number and a terminal's prompt for a phone approval, and may ask whether a ferret steered. */
+const PHONE_APPROVAL_LOOKER = 'accounts';
+/** The plugins whose request tools carry a ferret's `push: true` raise (Terminals' does not serve one yet). */
+const PHONE_APPROVAL_RAISERS: readonly string[] = ['browsers'];
+
 /**
  * The Vault's daemon half (§2.2): the sealed store and key (byte for byte, spine D16), `${secret:NAME}` use, the
  * authorized fetch, the read-scoped redaction and the output guard. Every value-holder is built HERE and nowhere
@@ -237,6 +242,12 @@ export default implementDaemon(manifest, {
           account: use.account as AccountId,
           factor: use.factor as TwoFactorId,
         }),
+      // Approve on your phone: the looks Accounts' approval makes and the raise a request tool hands on. `apiFor`
+      // narrows who is handed which; a needer outside both lists is handed none (fail closed).
+      pushNumber: async (ferret, key) => await inputs.phoneReach.pushNumber(ferret, key),
+      observeTerminal: async (ferret, key) => await inputs.phoneReach.observeTerminal(ferret, key),
+      tainted: (ferret, kind, since) => inputs.phoneReach.tainted(ferret, kind, since),
+      raisePhoneApproval: async (ferret, ask) => await inputs.phoneReach.raisePhoneApproval(ferret, ask),
     };
 
     /**
@@ -251,8 +262,14 @@ export default implementDaemon(manifest, {
       const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env) =>
         await mintChildEnvironment(env, needer.id);
       if (isCoreNeeder(needer)) return { ...full, childEnvironment: ownChildEnvironment };
+      // The phone approval's reach is by name: the service that looks (Accounts) and the tool that raises (Browsers).
+      // Every other needer is handed none of it, so a plugin cannot read a page's number or the prompt of
+      // a terminal, or raise an approval, by holding the Vault port.
+      const { pushNumber, observeTerminal, tainted, raisePhoneApproval, ...rest } = full;
       return {
-        ...full,
+        ...rest,
+        ...(needer.id === PHONE_APPROVAL_LOOKER ? { pushNumber, observeTerminal, tainted } : {}),
+        ...(PHONE_APPROVAL_RAISERS.includes(needer.id) ? { raisePhoneApproval } : {}),
         // LIST reach: the secrets this needer may use or mints itself. WRITE reach is narrower: only the names it MINTS, so a
         // plugin cannot overwrite or delete a secret it merely uses (an owner's GITHUB_TOKEN named in its records), nor see
         // the owner's others (credential substitution, S12).

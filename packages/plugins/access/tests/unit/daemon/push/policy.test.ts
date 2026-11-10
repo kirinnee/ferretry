@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { readPushMessage } from '@ferretry/kernel/contract/push-envelope';
-import { buzzPayload, enrolmentConfirmation, pushDeviceView } from '../../../../daemon/lib/push/index.ts';
+import { buzzPayload, clearPayload, enrolmentConfirmation, pushDeviceView } from '../../../../daemon/lib/push/index.ts';
 import { AT, LATER, pushId, record, subscription } from './support.ts';
 
 describe('pushDeviceView', () => {
@@ -84,5 +84,35 @@ describe('buzzPayload (K-push: a tag is never a reason to lose a buzz)', () => {
 
   it('should still refuse over-cap words at the sender', () => {
     should(() => buzzPayload({ ...words, tag: 'a', title: 'x'.repeat(201) })).throw();
+  });
+});
+
+describe('clearPayload (a clear names tags and nothing else)', () => {
+  it('should name the lines to take down for the ferret, and carry no words', () => {
+    const payload = clearPayload(['pa-pa_0123456789abcdef01234567', 'attention-f1:A3'], 'f1');
+
+    should(payload).eql({
+      version: 1,
+      kind: 'clear',
+      eventKey: 'clear:pa-pa_0123456789abcdef01234567,attention-f1:A3',
+      sessionId: 'f1',
+      tags: ['pa-pa_0123456789abcdef01234567', 'attention-f1:A3'],
+    });
+    if (payload === undefined) throw new Error('expected a clear');
+    should(readPushMessage(payload)).eql({
+      type: 'clear',
+      clear: { kind: 'clear', tags: ['pa-pa_0123456789abcdef01234567', 'attention-f1:A3'] },
+    });
+  });
+
+  it('should name the machine when no ferret is named, and leave out a tag the worker could not find', () => {
+    should(clearPayload(['pa-x', 'two words'])?.tags).eql(['pa-x']);
+    should(clearPayload(['pa-x'])?.sessionId).equal('machine');
+  });
+
+  it('should send nothing when no tag fits, and never more than the sender’s bound', () => {
+    should(clearPayload(['two words', ''])).be.undefined();
+    should(clearPayload([])).be.undefined();
+    should(clearPayload(Array.from({ length: 12 }, (_, index) => `pa-${String(index)}`))?.tags).have.length(8);
   });
 });

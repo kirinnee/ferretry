@@ -3,9 +3,18 @@ import type { GateApi } from '@ferretry/core-gate/contract';
 import type { FerretId, KernelPorts } from '@ferretry/kernel/contract';
 import type { HookInvoker, ToolHandler } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
-import { InputAskRefSchema, type InputTargetAdapter, InputRequestFiles, InputTargets } from '../contract/index.ts';
+import {
+  InputAskRefSchema,
+  InputPhoneApprovals,
+  type InputTargetAdapter,
+  InputRequestFiles,
+  InputTargets,
+  PHONE_APPROVAL_KEY,
+  type PhoneApprovalProvider,
+} from '../contract/index.ts';
 import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
 import { InputGateAudit } from './adapters/inputs/audit.ts';
+import { PhoneApprovalReach } from './adapters/inputs/phone-reach.ts';
 import { type BoundInputHolds, HeardActs, InputHoldsOverService } from './adapters/inputs/holds.ts';
 import { InputStateJournal } from './adapters/inputs/journal.ts';
 import { LoginProbeThroughHook, PageTargetThroughHook, TerminalTargetThroughHook } from './adapters/inputs/targets.ts';
@@ -65,6 +74,10 @@ export interface Inputs {
   readonly service: InputRequestService;
   readonly identities: TypedIdentities;
   readonly observer?: LoginObserver;
+  /** The service providing `input.phone-approval` now, or nothing: a raise is then refused (fail closed). */
+  readonly phone: () => PhoneApprovalProvider | undefined;
+  /** The looks and the raise Accounts' approval and Browsers' tool make through the Vault port, narrowed per needer. */
+  readonly phoneReach: PhoneApprovalReach;
   /** Where page scripts ran across the machine (`VaultApi.scriptRunning` / `scriptedOn`, I98). */
   readonly scripts: MachineScripts;
   /** The owner's input routes, by the keys `manifest.ts` declares: Vault's build spreads them into its `routes`. */
@@ -95,6 +108,11 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
   const { clock, state, jobs } = ctx.kernel;
   const provider = (kind: 'terminal' | 'page'): InputTargetAdapter | undefined => {
     const found = ctx.hooks.provider(InputTargets, kind);
+    return found === 'unavailable' ? undefined : found;
+  };
+  // Accounts' approval service, in effect now: a plugin that is off (or has no provider) leaves a raise refused.
+  const phone = (): PhoneApprovalProvider | undefined => {
+    const found = ctx.hooks.provider(InputPhoneApprovals, PHONE_APPROVAL_KEY);
     return found === 'unavailable' ? undefined : found;
   };
   const cardOf = async (requestId: string) => {
@@ -168,7 +186,9 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     observer,
     scripts,
     routes: inputRequestRoutes(service),
-    tools: inputTools(service),
+    tools: inputTools(service, phone),
+    phone,
+    phoneReach: new PhoneApprovalReach(provider, observer, phone),
     holds: new InputHoldsOverService(service, deps.quarantine, () => clock.nowMs(), acts),
     askSource: INPUT_ASK_SOURCE_SPEC,
   };
