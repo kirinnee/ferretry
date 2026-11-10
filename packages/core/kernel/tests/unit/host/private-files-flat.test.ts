@@ -819,7 +819,30 @@ describe('PF-flat every session folder is pinned by its own identity, holder or 
     expect(places.some(place => place.key === old)).toBe(false);
   });
 
-  test('private-files a pinned member folder on a device of its own closes that device: an alias on it is refused, holder or not', async () => {
+  test('PF-flat a session folder that left is forgotten, not looked at again at every look: a quiet look costs one folder less', async () => {
+    const l = await mixed();
+    const meter = counted(REAL);
+    // Every folder is within each look's slice, so a quiet look looks at every folder the index still remembers.
+    const index = privateIndexOf(meter.fs, l.real, INPUT, {
+      wall: LATER,
+      bounds: { depth: 3, limit: 4096, slice: 1000 },
+    });
+    const quiet = async (): Promise<number> => {
+      const before = meter.calls();
+      await index.snapshot();
+      return meter.calls() - before;
+    };
+    await index.snapshot();
+    const withIt = await quiet();
+    await rm(`${l.sessions}/s11`, { recursive: true, force: true });
+    // The look that finds it gone rebuilds and drops its record; a record kept for a folder that is not there would be
+    // asked about at every look from then on (and count as a change every time).
+    await index.snapshot();
+    expect(await quiet()).toBe(withIt - 1);
+    expect(await quiet()).toBe(withIt - 1);
+  });
+
+  test('PF-budget a pinned member folder on a device of its own closes that device: an alias on it is refused, holder or not', async () => {
     const l = await home();
     await mkdir(`${l.sessions}/e0`, { recursive: true });
     await writeFile(`${l.sessions}/e0/notes.md`, 'x');

@@ -161,7 +161,7 @@ export function buildUpdateMachine(
       standalone: new StandaloneRelease({
         product,
         clientName,
-        platform: process.platform,
+        platform: inputs.platform ?? process.platform,
         arch: process.arch,
         binaries: inputs.binaries,
         keys: DAEMON_RELEASE_KEYS,

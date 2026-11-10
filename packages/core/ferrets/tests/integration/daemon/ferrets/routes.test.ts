@@ -551,6 +551,17 @@ describe('session routes the archive mount builds', () => {
       expect(answer.status).not.toBe(404);
     }
   });
+
+  test('the archive list answers 200 with its count and sessions, and a restart answers a 2xx JSON object', async () => {
+    const h = await host([record('lead')]);
+    const archived = await h.request('GET', '/v1/archived-sessions');
+    expect(archived.status).toBe(200);
+    expect(archived.json<{ count: number; sessions: unknown[] }>()).toEqual({ count: 0, sessions: [] });
+    const restart = await h.request('POST', '/v1/restarts', { body: { scope: 'outdated' } });
+    expect(restart.status).toBeGreaterThanOrEqual(200);
+    expect(restart.status).toBeLessThan(300);
+    expect(typeof restart.json<Record<string, unknown>>()).toBe('object');
+  });
 });
 
 describe('a start’s options reach the launch spec', () => {

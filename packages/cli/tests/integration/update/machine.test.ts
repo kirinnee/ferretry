@@ -6,6 +6,7 @@ import { PassThrough } from 'node:stream';
 import should from 'should';
 import { buildDaemonController } from '../../../src/adapters/daemon/control.ts';
 import { buildUpdateMachine, executable, versionOf } from '../../../src/adapters/update/machine.ts';
+import { StandaloneRelease } from '../../../src/adapters/update/standalone-release.ts';
 import type { DaemonControlReads } from '../../../src/lib/daemon/controller.ts';
 import { capturedIo } from '../../unit/fakes.ts';
 import { HEALTH, standInDaemon } from '../support/stand-in-daemon.ts';
@@ -201,6 +202,17 @@ describe('the update machine a person’s fy builds', () => {
     for (const platform of ['linux', 'darwin', 'freebsd']) {
       const { machine } = await machineIn(h, { platform });
       should(machine.deps.facts).be.ok();
+    }
+  });
+
+  it('should pick the release asset of the platform it is told it is on, not the host’s own', async () => {
+    const h = await aHome();
+    for (const platform of ['linux', 'darwin', 'freebsd']) {
+      const { machine } = await machineIn(h, { platform });
+      should(machine.deps.standalone).be.instanceOf(StandaloneRelease);
+      // The options are private to the adapter and no signing key is compiled in yet, so a refusal cannot show them.
+      const options = (machine.deps.standalone as unknown as { options: { platform: string } }).options;
+      should(options.platform).equal(platform);
     }
   });
 });

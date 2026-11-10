@@ -325,19 +325,20 @@ test('G12 R-0332 a resume whose Packs hangs is refused at the bound, so a stop q
   const port = h.provided(FerretsPort, 'warden');
 
   // Act: a Warden revive waits on Packs; a stop of the same ferret queues behind it.
+  const settled: string[] = [];
   const resumed = port.resume(ferretId('child'), 'carry on', { automatic: true, actor: 'warden' });
+  const resumeEnded = resumed.then(
+    () => settled.push('resume'),
+    () => settled.push('resume'),
+  );
   await wasAsked;
-  let stopped = false;
-  const stop = port.stop(ferretId('child'), 'now').then(() => {
-    stopped = true;
-  });
-  await Promise.resolve();
-  expect(stopped).toBe(false);
+  const stop = port.stop(ferretId('child'), 'now').then(() => settled.push('stop'));
 
-  // Assert: the resume fails closed (nothing relaunched), and the stop behind it ran.
+  // Assert: the resume fails closed (nothing relaunched), and the stop behind it ran only AFTER the resume ended: its
+  // order proves the queue, where a single awaited microtask would prove next to nothing.
   await expect(resumed).rejects.toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
-  await stop;
-  expect(stopped).toBe(true);
+  await Promise.all([resumeEnded, stop]);
+  expect(settled).toEqual(['resume', 'stop']);
   expect(runner.starts).toBe(0);
 });
 

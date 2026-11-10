@@ -1032,8 +1032,28 @@ async function start(world: World): Promise<TestHost> {
             : name === undefined
               ? undefined
               : (all as Record<string, unknown> | undefined)?.[name];
-        if (raw === undefined) return { state: 'absent', inEffect: false, sentences: [] };
-        const parsed = def.schema.safeParse(raw);
+        const parsed = raw === undefined ? undefined : def.schema.safeParse(raw);
+        // An edit held for the owner is on the disk while the tighter version stays in effect: the state is `held`, with
+        // what the whole held version widens beyond the version in effect (the sentences its write answered).
+        const held = heldValueAt(
+          keyOf(def),
+          def.shape === 'file' ? keyOf(def) : `${keyOf(def)}/${name as string}.yaml`,
+        );
+        if (held.held) {
+          const heldChecked = def.schema.safeParse(held.value);
+          const prior = parsed?.success === true ? parsed.data : undefined;
+          return {
+            state: 'held',
+            inEffect: parsed?.success === true,
+            sentences: heldChecked.success
+              ? [
+                  ...judgeLoosening(def, prior, heldChecked.data),
+                  ...addedSecretReferenceSentences(prior, heldChecked.data),
+                ]
+              : [],
+          };
+        }
+        if (parsed === undefined) return { state: 'absent', inEffect: false, sentences: [] };
         return parsed.success
           ? { state: 'valid', inEffect: true, sentences: [] }
           : { state: 'invalid', inEffect: false, sentences: parsed.error.issues.map(issue => issue.message) };

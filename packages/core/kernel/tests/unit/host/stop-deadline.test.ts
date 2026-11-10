@@ -86,6 +86,41 @@ describe('stopping the jobs is bounded', () => {
 
     expect(warned.map(entry => entry.fields)).toEqual([{ job: 'p/stuck' }]);
   });
+
+  test('a job that answers the abort by throwing is not logged as a failure at shutdown', async () => {
+    const clock = fixedClock();
+    const { log, warned } = recordingLog();
+    const jobs = new JobRunner(clock, log);
+    jobs.portFor('board').add({
+      id: 'throws-on-abort',
+      schedule: { every: milliseconds(10) },
+      run: signal =>
+        new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')))),
+    });
+    jobs.start();
+    await clock.advance(0);
+
+    await jobs.stop();
+
+    expect(warned).toEqual([]);
+    expect(jobs.reports().map(job => job.failures)).toEqual([0]);
+  });
+
+  test('a job that throws while it is still wanted is still logged as a failure', async () => {
+    const clock = fixedClock();
+    const { log, warned } = recordingLog();
+    const jobs = new JobRunner(clock, log);
+    jobs.portFor('board').add({
+      id: 'broken',
+      schedule: { every: milliseconds(1_000) },
+      run: () => Promise.reject(new Error('broken')),
+    });
+    jobs.start();
+    await clock.advance(0);
+
+    expect(warned.map(entry => entry.message)).toEqual(['a job failed']);
+    await jobs.stop();
+  });
 });
 
 const roots: string[] = [];
@@ -188,6 +223,28 @@ describe('the daemon process ends even when a stop never finishes', () => {
     void stopOnSignal(() => new Promise<void>(() => {}), world.proc);
     world.signal('SIGTERM');
     world.signal('SIGTERM');
+    expect(world.exits).toEqual([1]);
+  });
+
+  test('SIGTERM then SIGINT begins one stop and one limit timer, never a second of each', () => {
+    const world = fakeProcess();
+    let stops = 0;
+    void stopOnSignal(() => {
+      stops += 1;
+      return new Promise<void>(() => {});
+    }, world.proc);
+    world.signal('SIGTERM');
+    world.signal('SIGINT');
+    expect(stops).toBe(1);
+    expect(world.timers).toHaveLength(1);
+    expect(world.exits).toEqual([1]);
+  });
+
+  test('a stop that rejects ends the process with 1 and is no unhandled rejection', async () => {
+    const world = fakeProcess();
+    void stopOnSignal(() => Promise.reject(new Error('stop failed')), world.proc);
+    world.signal('SIGTERM');
+    await new Promise(resolve => setImmediate(resolve));
     expect(world.exits).toEqual([1]);
   });
 });
