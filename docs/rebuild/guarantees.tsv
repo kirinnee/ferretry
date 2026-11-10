@@ -482,7 +482,7 @@ I157	kept	vault	-	`differentFrom`	input-requests	I157
 I158	kept	accounts	-	`GET /v1/accounts`	input-requests	I158
 I159	kept	accounts	-	`signInMatches`, `offer.primary`	input-requests	I159
 I160	kept	vault	-	behaviour as written	input-requests	I160
-I161	kept	accounts	-	`savedForFields`, `bad_request`	input-requests	I161
+I161	kept	vault	accounts	`savedForFields`, `bad_request`	input-requests	I161
 I162	kept	vault	-	behaviour as written	input-requests	I162
 I163	kept	accounts	-	behaviour as written	input-requests	I163
 I164	kept	accounts	-	`elsewhere`	input-requests	I164
@@ -680,7 +680,7 @@ S110	kept	accounts	-	behaviour as written	secrets	S110
 S111	kept	accounts	-	`tool_not_covered`, `via_provider`, `not_password`, `no_history`, `passkey_required`, `no_code_key`, `terminal_off`	secrets	S111
 S112	kept	accounts	-	`SIGN_IN_RULE_REFUSAL_WORDS`	secrets	S112
 S113	kept	accounts	-	behaviour as written	secrets	S113
-S114	kept	accounts	terminals	`observerByOf`, `rootPromptProved`	secrets	S114
+S114	kept	vault	accounts,terminals	`observerByOf`, `rootPromptProved`	secrets	S114
 S115	kept	accounts	-	behaviour as written	secrets	S115
 S116	kept	accounts	-	behaviour as written	secrets	S116
 S117	kept	accounts	-	`AccountDirectory.followRulesWith`	secrets	S117
@@ -1105,10 +1105,10 @@ R589	kept	access	kernel	behaviour as written	relay-protocol	R589
 R590	kept	access	kernel	behaviour as written	relay-protocol	R590
 R591	kept	catalogs	kernel	`catalog-members/join.ts`, `shared-routes.ts`, `memberMode`, `passkeys.ts`	relay-protocol	R591
 R592	kept	catalogs	kernel	behaviour as written	relay-protocol	R592
-R593	kept	connections	catalogs	`discoverableRelayUrl`	relay-protocol	R593
+R593	kept	app-shell	connections,catalogs	`memberWalk` (`packages/app/src/connect/member.ts`, the app shell's dial order; the daemon half stays Catalogs': a share link names no rendezvous for a loopback url)	relay-protocol	R593
 R594	kept	catalogs	kernel	`member-session.ts`; labels `ferretry-member-*-v1`, `ferretry-catalog-*-v1`, `ferretry-link-*-v1`	relay-protocol	R594
 R595	kept	catalogs	kernel	behaviour as written	relay-protocol	R595
-R596	kept	catalogs	kernel	`MEMBER_JOIN_OUTCOME_BYTES`, `padJoinOutcome`	relay-protocol	R596
+R596	kept	kernel	catalogs	`MEMBER_JOIN_OUTCOME_BYTES`, `padJoinOutcome`	relay-protocol	R596
 R597	kept	catalogs	kernel	behaviour as written	relay-protocol	R597
 R598	kept	catalogs	kernel	behaviour as written	relay-protocol	R598
 R599	kept	catalogs	kernel	behaviour as written	relay-protocol	R599
