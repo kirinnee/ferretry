@@ -430,6 +430,45 @@ describe('a refused or expired approval can never be approved afterwards, and a 
     should(w.told.map(each => each.ferret)).eql([FERRET]);
   });
 
+  /** The two layers of "never approved after refused" (F3): `refuse` does not re-enter `settle`, and `settle` itself ends nothing twice. */
+  type Settling = {
+    held: Map<string, unknown>;
+    settle(held: unknown, state: 'moved-on' | 'gone' | 'refused' | 'timed-out'): Promise<void>;
+  };
+
+  it('F3 should end nothing twice in settle itself, even when it is called on a refused approval directly', async () => {
+    const w = await phoneWorld({ saved: true });
+    const view = await w.raiseBrowser();
+    await w.service.refuse(OWNER, FERRET, view.id);
+    const inner = w.service as unknown as Settling;
+    const held = inner.held.get(view.id);
+
+    await inner.settle(held, 'moved-on');
+
+    should(w.seen(view.id).state).equal('refused');
+    should((await w.service.agentView(FERRET, view.id, 0)).secondFactor).be.undefined();
+    should((await w.directory.list()).signIns.find(each => each.id === w.signIn)?.observed).be.undefined();
+    should(w.audit.map(entry => entry.event)).eql(['phone-approval.raised', 'phone-approval.refused']);
+  });
+
+  it('F3 should not re-enter settle when the owner refuses an approval that is already refused', async () => {
+    const w = await phoneWorld({ saved: true });
+    const view = await w.raiseBrowser();
+    const inner = w.service as unknown as Settling;
+    const settle = inner.settle.bind(inner);
+    let entered = 0;
+    inner.settle = async (held, state) => {
+      entered += 1;
+      await settle(held, state);
+    };
+
+    await w.service.refuse(OWNER, FERRET, view.id);
+    await w.service.refuse(OWNER, FERRET, view.id);
+
+    should(entered).equal(1);
+    should(w.seen(view.id).state).equal('refused');
+  });
+
   it('should leave a timed-out approval timed out, whatever the page does after', async () => {
     const w = await phoneWorld();
     const view = await w.raiseBrowser(FERRET, { waitSeconds: 30 });

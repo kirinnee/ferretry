@@ -19,14 +19,17 @@ export class VaultPhoneLooks implements PhoneApprovalPagePort, PhoneApprovalTerm
   constructor(private readonly vault: () => Looks) {}
 
   async look(ferret: string, key: string) {
-    const page = this.vault().pushNumber;
-    if (page === undefined) throw new PhoneApprovalError('unavailable', PHONE_APPROVAL_UNAVAILABLE);
+    const { pushNumber: page, tainted } = this.vault();
+    // `tainted` absent means no approval is raised, even with the look present (ruling 1: the three come together).
+    if (page === undefined || tainted === undefined)
+      throw new PhoneApprovalError('unavailable', PHONE_APPROVAL_UNAVAILABLE);
     return await page(ferret as FerretId, key);
   }
 
   async observe(ferret: string, key: string) {
-    const terminal = this.vault().observeTerminal;
-    if (terminal === undefined) throw new PhoneApprovalError('unavailable', PHONE_APPROVAL_UNAVAILABLE);
+    const { observeTerminal: terminal, tainted } = this.vault();
+    if (terminal === undefined || tainted === undefined)
+      throw new PhoneApprovalError('unavailable', PHONE_APPROVAL_UNAVAILABLE);
     return await terminal(ferret as FerretId, key);
   }
 

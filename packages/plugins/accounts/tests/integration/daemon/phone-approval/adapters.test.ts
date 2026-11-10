@@ -113,7 +113,7 @@ describe('the push of a phone approval, through Access', () => {
     secondsLeft: 90,
   };
 
-  test('I208 the push goes out under the tag pa-<id>, at high priority, held no longer than the card has left', async () => {
+  test('I208 the push goes out under the tag pa-<id>, at high priority, naming its ferret for the hourly cap, held no longer than the card has left', async () => {
     const access = fakeAccess({ enrolments: 2 });
 
     await new AccessPhoneApprovalPush(handle(access)).push('lizzette', 'ask-1', words);
@@ -125,6 +125,7 @@ describe('the push of a phone approval, through Access', () => {
         body: words.body,
         url: '/ferrets/lizzette/chat?ask=ask-1',
         urgency: 'high',
+        ferret: 'lizzette',
         ttlSeconds: 90,
       },
     ]);
@@ -185,6 +186,23 @@ describe('the push of a phone approval, through Access', () => {
 describe('the Vault’s looks, as an approval asks for them', () => {
   test('a look the Vault does not offer fails the approval closed, in the one fixed sentence', async () => {
     const looks = new VaultPhoneLooks(() => ({}));
+
+    for (const work of [looks.look('lizzette', 'login'), looks.observe('lizzette', 'build')]) {
+      const error = await work.then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+      expect(error).toBeInstanceOf(PhoneApprovalError);
+      expect((error as PhoneApprovalError).code).toBe('unavailable');
+      expect((error as PhoneApprovalError).message).toBe(PHONE_APPROVAL_UNAVAILABLE);
+    }
+  });
+
+  test('F5 an absent tainted look refuses the approval, even when the page and terminal looks are offered', async () => {
+    const looks = new VaultPhoneLooks(() => ({
+      pushNumber: async () => undefined,
+      observeTerminal: async () => ({ ok: false, reason: 'target_gone' }),
+    }));
 
     for (const work of [looks.look('lizzette', 'login'), looks.observe('lizzette', 'build')]) {
       const error = await work.then(
