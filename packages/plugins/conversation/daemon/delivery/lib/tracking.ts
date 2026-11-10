@@ -67,10 +67,14 @@ export interface SendTrackerSettings {
    */
   readonly deferredNudgeMs: number;
   /**
-   * How long after its typing an UNCONFIRMED send's composer is still looked at for its own text to press
-   * Enter on (B144): a stalled pane draws keys late, but not this late. Past it the Warden watches.
+   * How long after its typing an UNCONFIRMED send's composer is looked at on the FAST cadence (`busyExtensionMs`)
+   * for its own text to press Enter on (B144): a stalled pane usually draws keys within this. It is the end of the
+   * fast cadence, not of the watch (B187): past it the composer is still looked at, on a back-off that starts at
+   * `busyExtensionMs`, doubles, and stops at {@link strandedBackoffMaxMs}, for as long as the send is watched.
    */
   readonly strandedWatchMs: number;
+  /** The longest wait between two looks at an unconfirmed send never yet seen in the composer (B187). */
+  readonly strandedBackoffMaxMs: number;
   /** Harness and daemon clocks disagree slightly; a proof this far before acceptance still counts. */
   readonly matchSlackMs: number;
 }
@@ -92,6 +96,7 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   submitNudgesMs: [4_000, 12_000, 30_000],
   deferredNudgeMs: 5_000,
   strandedWatchMs: 10 * 60_000,
+  strandedBackoffMaxMs: 10 * 60_000,
 };
 
 /** Fates still being looked for. */

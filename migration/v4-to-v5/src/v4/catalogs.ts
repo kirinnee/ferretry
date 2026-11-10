@@ -249,30 +249,3 @@ export const V4CatalogInstallPrefsDocument = z.strictObject({
     z.strictObject({ hold: z.literal(true).optional(), skippedVersion: count.optional() }),
   ),
 });
-
-// ─── local-skill-installs.json ────────────────────────────────────────────────────────────────────────────────────
-
-const V4LocalSkillInstall = z.strictObject({
-  installId: z.string(),
-  installedAt: instant,
-  name: z.string(),
-  origin: z.strictObject({
-    kind: z.enum(['account', 'project']),
-    owner: z.string(),
-    harness: z.enum(['claude', 'codex']),
-    path: z.string(),
-  }),
-  provenance: V4Provenance,
-  target: V4Target,
-  destination: z.string(),
-  key: z.string(),
-  files: z.array(z.strictObject({ path: z.string(), sha256: z.string() })),
-  root: z.string().optional(),
-  folder: z.string().optional(),
-  componentSha256: z.string().optional(),
-});
-
-export const V4LocalSkillInstallsDocument = z.strictObject({
-  schemaVersion: z.literal(1),
-  installs: z.array(V4LocalSkillInstall),
-});

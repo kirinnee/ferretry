@@ -806,8 +806,8 @@ ended. Every later message to either waited, the Warden called both `healthy`, a
 four fixes:
 
 1. **The tracker never looked at an unconfirmed send's composer.** It skipped every send that was not open, so
-   a `landing_unconfirmed` send whose keys arrived late got no Enter. Now, for up to `strandedWatchMs`
-   (10 min) after its typing, such a send's composer is looked at (every `busyExtensionMs` while the text is not
+   a `landing_unconfirmed` send whose keys arrived late got no Enter. Now, from its typing on (every `busyExtensionMs` for `strandedWatchMs`, then on the B187 back-off below)
+   such a send's composer is looked at (while the text is not
    there), and its own text found there gets the same bounded, verified nudges. An Enter that takes re-opens it
    (`entered`) and starts the turn it carried; the transcript then proves it. A message typed as itself is now
    nudged too (above), which is braelynn's.
@@ -856,6 +856,34 @@ Jev, an investigation or the spawn fingerprint.
 `stuckInput` list (`WardenStuckInputFlagSchema`), never in `anomalies`: an app or CLI built before the kind
 existed parses `anomalies` against a closed list, and one unknown kind there rejected the whole status. A
 newer reader shows both (`wardenFlags`). For the same reason the kind is never put on a blessing.
+
+## B187: a stranded direct send that nobody looked at again
+
+nelly was blocked for two days with the daemon's own two-line direct send typed in its box, unsubmitted: the fill
+had settled it `unaccounted` (`landing_unconfirmed`), the pane drew it after the 10-minute look (`strandedWatchMs`)
+had ended, so nothing ever pressed Enter; later Claude wrote its idle-compaction summary, which with text in the box
+pinned `turnState` at `working`, so no Warden check could fire either. Fixes (one change per link of the chain):
+
+- **No blind spot (A3).** `strandedWatchMs` ends the FAST look cadence (`busyExtensionMs`), not the watch: past it an
+  unconfirmed send never seen in the box is looked at on a back-off that doubles from 60 s to
+  `strandedBackoffMaxMs` (10 min) for as long as the send is watched at all (`holdLimitMs`). A turn boundary also
+  asks for a look (`turns.look`), so an idle your-turn is looked at at once.
+- **One Enter, then raise (A4).** An unconfirmed send first seen in the box past its whole Enter schedule gets
+  exactly ONE verified `resubmit`, not the three that are all overdue. If its text is still there `typedStableMs`
+  after that Enter, it is RAISED: it keeps `typedNotSent`, its reason becomes **`typed_not_submitted`** (a new value of
+  the unaccounted reason on the wire; the app names it "it is typed into the agent’s box but was not sent: the Enter
+  did not take"), and the journal gets `control.send_stranded {sendId}`. Raised once, never pressed again by the tracker.
+- **Compaction is not turn work (B1).** A Claude `isCompactSummary` user record is skipped by `parseTail`, like
+  `compact_boundary`.
+- **An idle prompt with a draft is an idle prompt (B2).** The turn look's `atPrompt` is "an idle composer is drawn,
+  with no working line, dialog or permission" whatever the box holds (`idlePromptShown`); `promptReady` — "a send
+  would be accepted" — is unchanged.
+- **The reader (A1).** In a ruled Claude composer the prompt line is the row under the upper flush-left rule; a
+  prompt-shaped row indented under it (a quoted `> …` body line) is a continuation, and only a flush-left rule
+  closes the draft, so a body line starting `└` or `───` no longer cuts it short.
+- **The Warden (C1–C3).** `input_stuck` and `inbox_stuck` run in the sweep; a queue behind a `working` turn whose frame
+  has been quiet past the urgency limit is `turn_never_ends`; `input_stuck` accepts a `working` ferret whose
+  `typedNotSent` is fresh (its press is the verified `resubmit`, which already refuses a busy pane).
 
 ## B148: a ferret whose inbox is stuck
 

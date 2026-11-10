@@ -6,8 +6,8 @@
  * (`packages/plugins/runtimes/daemon/adapters/account-model-files.ts`, `skillItemsIn(…, 'skills')` in `setup-files.ts`),
  * with `fleet` = `<home>/fleet` as in v4; only the kernel root that hands it that folder is still a GAP(kernel)
  * (`runtimes/daemon/index.ts`). The kernel never refuses a folder it has not declared, so carrying the folders to the
- * path v5 will read keeps the owner's skills in the new home instead of only in the v4 backup. The Catalogs step carries
- * the install records (`state/skills/installs.json`) that name these folders, with the hash of every file they wrote.
+ * path v5 will read keeps the owner's skills in the new home instead of only in the v4 backup. No install record is
+ * carried for these folders: v4's `state/local-skill-installs.json` is not carried (owner decision !A466).
  *
  * Files are copied byte for byte and never opened (`moveSealed`); a link is never followed or re-made (as for harness
  * folders) and is counted; an unreadable file fails the step with a `chmod u+r` remedy and its path.
