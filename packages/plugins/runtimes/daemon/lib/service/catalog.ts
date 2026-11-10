@@ -77,7 +77,14 @@ import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.t
 import { runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
-import { shownLine, shownWordsEtag, valueRefused, writtenWithheld } from './command-line.ts';
+import {
+  commandWordsOf,
+  shownLine,
+  shownWordsEtag,
+  valueSaid,
+  valueWithheld,
+  writtenWithheld,
+} from './command-line.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
@@ -249,7 +256,7 @@ const envEntries = (env: Readonly<Record<string, string>> | undefined): EnvEntry
   Object.entries(env ?? {})
     .toSorted(([left], [right]) => byName(left, right))
     .map(([name, value]) =>
-      looksSecret(name, value) || valueRefused(name, value) ? { name, hidden: true as const } : { name, value },
+      looksSecret(name, value) || valueWithheld(name, value) ? { name, hidden: true as const } : { name, value },
     );
 
 /**
@@ -266,7 +273,8 @@ function commandWords(
   | { readonly withheld: true }
   | undefined {
   if (!Array.isArray(words)) return undefined;
-  const line = shownLine(words as string[], typeof first === 'string' ? first : undefined);
+  // The word before the arguments is the last word of the command: `srv --token` then `v` is one pair (W reads the blanks).
+  const line = shownLine(words as string[], typeof first === 'string' ? commandWordsOf(first).at(-1) : undefined);
   // THE NET: a word the write rule still refuses once the cutter has had its say withholds the WHOLE list, never a part.
   if (line.withheld) return { withheld: true };
   return {
@@ -992,7 +1000,7 @@ const settingsValueText = (value: unknown): string => (typeof value === 'string'
 function settingsEntries(settings: SettingsObject): SettingsEntry[] {
   return flattenSettings(settings).map(([key, value]) => {
     const text = settingsValueText(value);
-    return looksSecret(key, text) || valueRefused(key, text) ? { key, hidden: true as const } : { key, value: text };
+    return looksSecret(key, text) || valueWithheld(key, value) ? { key, hidden: true as const } : { key, value: text };
   });
 }
 
@@ -1134,7 +1142,10 @@ function conflictView(conflict: Conflict): LayerConflict {
     harness: harnessKey(conflict.harness),
     field: conflict.field,
     key: conflict.key,
-    sentence: describeConflict(conflict),
+    // A value the write rule refuses is not in the sentence (`valueSaid`), judged under the name the document holds it by.
+    sentence: describeConflict(conflict, (found, value) =>
+      valueSaid(found.path.findLast(part => typeof part === 'string') ?? found.key, value),
+    ),
     winner: layerName(conflict.winner.layer),
     overridden: conflict.overridden.map(setter => layerName(setter.layer)),
   };
@@ -1319,7 +1330,7 @@ function fixedLayerView(
           entry.kind === 'setting'
             ? {
                 key: entry.key,
-                value: shown(entry.value),
+                value: valueSaid(entry.key, entry.value),
                 from: entry.layer.name,
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),
               }

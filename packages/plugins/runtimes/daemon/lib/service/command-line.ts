@@ -28,13 +28,37 @@ export { type ShownWord, shownWords } from '@ferretry/std/credential-words';
  * the word before it, so the list is judged as one command line, the way the kernel reads a list of strings.
  */
 export function refusedIndexes(shown: readonly ShownWord[]): ReadonlySet<number> {
-  const found = findFlagSecrets({ args: shown.map(word => word.text) });
+  const args = shown.map(word => word.text);
+  const found = [...findFlagSecrets({ args }), ...findRawSecrets({ args })];
   return new Set(found.map(finding => finding.path[1]).filter((at): at is number => typeof at === 'number'));
 }
 
-/** Whether the write rule refuses `text` as the value of a field called `name` (a token shape, a flag secret in it). */
-export const valueRefused = (name: string, text: string): boolean =>
-  findRawSecrets({ [name]: text }).length > 0 || findFlagSecrets({ [name]: text }).length > 0;
+/**
+ * Whether the write rule refuses `value` as the value of a field called `name` (a token shape, a flag secret in it).
+ * The PARSED value is judged, never its JSON text: a list or a nested document is read by the list and nested-key rules.
+ */
+const valueRefused = (name: string, value: unknown): boolean =>
+  findRawSecrets({ [name]: value }).length > 0 || findFlagSecrets({ [name]: value }).length > 0;
+
+/** What stands in a sentence in place of a value the write rule refuses. */
+export const NOT_SHOWN_VALUE = '(a value that is not shown)';
+
+/**
+ * Whether a value shown under a settings key (`permissions.defaultMode`, `env.API_KEY`) is one the write rule refuses:
+ * judged under the key as written and under its last part, the name the document holds it under. The ONE rule for every
+ * place a value of any shape is shown beside its name (a detail, the Resolved view, a conflict sentence, a fixed row).
+ */
+export const valueWithheld = (key: string, value: unknown): boolean => {
+  const name = key.slice(key.lastIndexOf('.') + 1);
+  return valueRefused(key, value) || (name !== key && valueRefused(name, value));
+};
+
+/** A value in words, as a string or as its JSON text; `NOT_SHOWN_VALUE` when {@link valueWithheld}. */
+export const valueSaid = (key: string, value: unknown): string =>
+  valueWithheld(key, value) ? NOT_SHOWN_VALUE : typeof value === 'string' ? value : JSON.stringify(value);
+
+/** A command split at its blanks: the words the write rule reads, so `srv --token` is two words and not one. */
+export const commandWordsOf = (command: string): readonly string[] => command.split(/\s+/u).filter(word => word !== '');
 
 /**
  * Whether a text that would be shown AS WRITTEN must be withheld whole: the write rule refuses it, or the word cutter

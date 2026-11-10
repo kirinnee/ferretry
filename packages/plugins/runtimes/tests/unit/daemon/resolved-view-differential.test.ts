@@ -33,6 +33,8 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { findRawSecrets } from '@ferretry/std/credential-words';
+import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { type ResolvedProfile, type ResolveInput, resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
@@ -414,6 +416,7 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
     let nestedMembers = 0;
     let harmlessMembers = 0;
     let asWritten = 0;
+    let nettedWords = 0;
 
     // Act
     for (const { words, harmless } of lines) {
@@ -457,6 +460,11 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
           if (ruled.hidden === undefined && shown.value === word) asWritten += 1;
         }
         if (!tightened(word, words[index - 1])) {
+          // Netted by design (CFG-LEAK ii F): a word the write rule's raw-secret test refuses, which today showed.
+          if (shown.value === WITHHELD_WORDS_TEXT && findRawSecrets({ args: [today.value] }).length > 0) {
+            nettedWords += 1;
+            continue;
+          }
           if (shown.value !== today.value || shown.hidden !== today.hidden)
             breaches.push(`${JSON.stringify(words)} @${String(index)}`);
           continue;
@@ -471,6 +479,8 @@ describe('resolvedEntries — today differential for command lines (ruling #37)'
     should(breaches.slice(0, 10)).deepEqual([]);
     should(members).be.above(0);
     should(differed).be.above(0);
+    should(nettedWords).be.above(0);
+    if (process.env.REDACT_NETTED_REPORT !== undefined) console.info('netted words', nettedWords);
     should(nestedMembers).be.above(CASES / 10);
     should(harmlessMembers).be.above(CASES / 20);
     should(asWritten).be.above(harmlessMembers / 2);

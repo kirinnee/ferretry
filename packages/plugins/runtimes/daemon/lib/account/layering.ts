@@ -751,9 +751,12 @@ const layerName = (layer: FlatLayer): string => (parseLayerReference(layer.origi
  * A conflict in the product's words (P4, E18):
  * "`permissions.defaultMode` · Claude Code: acceptEdits (from agent) overrides plan (from default)".
  */
-export function describeConflict(conflict: Conflict): string {
+export function describeConflict(
+  conflict: Conflict,
+  say: (conflict: Conflict, value: unknown) => string = (_, value) => shown(value),
+): string {
   const beaten = conflict.overridden
-    .map(setter => `${shown(setter.value)} (from ${layerName(setter.layer)})`)
+    .map(setter => `${say(conflict, setter.value)} (from ${layerName(setter.layer)})`)
     .join(', ');
-  return `\`${conflict.key}\` · ${HARNESS_DISPLAY_NAMES[conflict.harness]}: ${shown(conflict.winner.value)} (from ${layerName(conflict.winner.layer)}) overrides ${beaten}`;
+  return `\`${conflict.key}\` · ${HARNESS_DISPLAY_NAMES[conflict.harness]}: ${say(conflict, conflict.winner.value)} (from ${layerName(conflict.winner.layer)}) overrides ${beaten}`;
 }
