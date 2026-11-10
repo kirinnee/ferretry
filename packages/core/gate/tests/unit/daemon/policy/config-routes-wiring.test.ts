@@ -63,7 +63,12 @@ const put = (body: unknown): ApiRequest => ({
 });
 
 function routesOver(w: World, recorder: Recorder) {
-  return config.configRoutes({ writer: () => recorder.writer, admission: () => w.gate, home: '/home/fy' });
+  return config.configRoutes({
+    writer: () => recorder.writer,
+    admission: () => w.gate,
+    home: '/home/fy',
+    binary: 'fy',
+  });
 }
 
 /** The route as the kernel declares it asks of admission: the fleet's `use`. */

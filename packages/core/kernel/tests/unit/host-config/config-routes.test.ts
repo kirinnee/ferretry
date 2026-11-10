@@ -60,6 +60,7 @@ function world(
     writer: () => files.writer(),
     admission: () => (admission === 'absent' ? undefined : gate),
     home: HOME,
+    binary: 'fy',
   });
   return { asked, spent, files, fs, handlers };
 }
