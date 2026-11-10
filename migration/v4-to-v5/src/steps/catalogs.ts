@@ -30,8 +30,8 @@
  *
  * The v5 Catalogs contract declares these files (`format: 1`) but not yet their bodies: its port "copies the schemas
  * with the code that answers them" from v4. So the bodies keep v4's field names and values, and the landing check
- * here is every id and digest that joins one file to another, through the contract's own id schemas. Skills declares
- * its schema; the only change there is v4's harness `claude` → v5's `claude-code`. A runtime named by a former name
+ * here is every id and digest that joins one file to another, through the contract's own id schemas. v4's
+ * `state/local-skill-installs.json` is not carried (owner decision !A466: the local skill copy is gone). A runtime named by a former name
  * (`fleet/ids.json` `formerNames`) is named by its current one, as Settings names it (M7).
  */
 import {
