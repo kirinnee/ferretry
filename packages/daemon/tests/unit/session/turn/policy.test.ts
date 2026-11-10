@@ -315,3 +315,32 @@ describe('a rate-limited session', () => {
     should(isTurnStatus('rate_limited')).be.true();
   });
 });
+
+describe('transcriptTurnPhase after a compaction (&B188)', () => {
+  const compaction: TranscriptEvent = { harness: 'claude', role: 'system', kind: 'compaction', trigger: 'auto' };
+  const summary: TranscriptEvent = {
+    harness: 'claude',
+    role: 'user',
+    kind: 'message',
+    text: 'This session is being continued…',
+    inputSource: 'harness',
+  };
+  const notification: TranscriptEvent = { ...summary, text: '<task-notification>done</task-notification>' };
+
+  it('B188 a compaction summary after a compaction event is not turn work', () => {
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, summary])).equal('ended');
+    // Usage and system bookkeeping between the boundary and the summary change nothing.
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, usage, summary])).equal('ended');
+  });
+
+  it('B188 a harness user record with no compaction before it still is', () => {
+    should(transcriptTurnPhase([turn('completed', 'claude'), notification])).equal('working');
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, said('assistant'), notification])).equal(
+      'working',
+    );
+  });
+
+  it('B188 a person speaking after the summary starts a turn', () => {
+    should(transcriptTurnPhase([turn('completed', 'claude'), compaction, summary, said('user')])).equal('working');
+  });
+});

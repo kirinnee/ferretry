@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { holdsExactly, TmuxSendTerminal } from '../../../../src/adapters/session/send/tmux-send-terminal.ts';
+import { PaneStrandedError } from '../../../../src/adapters/tmux/pane-delivery.ts';
+import { SendLandingUnconfirmed } from '../../../../src/lib/session/send/index.ts';
 import { parseSessionId, type TmuxController } from '../../../../src/lib/index.ts';
 import { type DeliveryFrame, promptIsReady } from '../../../../src/lib/tmux/index.ts';
 
@@ -94,5 +96,24 @@ describe('a composer parked under Codex 0.166’s `Waiting for startup` line', (
     should(await clear.terminal.clearComposer(ID, 'say hello')).equal('stuck');
     should(submit.keys).be.empty();
     should(clear.keys).be.empty();
+  });
+});
+
+describe('B188 a fill whose Enter left the text in the composer', () => {
+  it('B188 PaneStrandedError becomes SendLandingUnconfirmed', async () => {
+    // Typed and Enter pressed, text still in the box: typed-but-unproven, so the B144 watch can finish it.
+    const terminal = new TmuxSendTerminal(
+      {} as unknown as TmuxController,
+      async () => 'pane',
+      {
+        deliver: async () => {
+          throw new PaneStrandedError('Enter left the message in the composer');
+        },
+      } as never,
+      {} as never,
+      async () => undefined,
+    );
+
+    await should(terminal.deliver(ID, 'hello')).be.rejectedWith(SendLandingUnconfirmed);
   });
 });

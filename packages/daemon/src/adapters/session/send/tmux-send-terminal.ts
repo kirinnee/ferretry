@@ -38,7 +38,7 @@ import {
   captureFrame,
   type DeliverySleep,
 } from '../../tmux/composer-fill.ts';
-import { PaneNotReadyError, type TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
+import { PaneNotReadyError, PaneStrandedError, type TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 import type { TmuxPaneQueue } from '../../tmux/pane-queue.ts';
 
 /**
@@ -253,6 +253,8 @@ export class TmuxSendTerminal implements SendTerminal {
       if (error instanceof ComposerUnreadableError) throw new SendComposerUnreadable();
       if (error instanceof ComposerUnconfirmedError) throw new SendLandingUnconfirmed(error.message);
       if (error instanceof PaneNotReadyError) throw new SendPaneNotReady(error.message, error.why);
+      // Typed and Enter pressed, and the text is still in the composer: typed-but-unproven, not lost (&B188).
+      if (error instanceof PaneStrandedError) throw new SendLandingUnconfirmed(error.message);
       throw error;
     }
   }

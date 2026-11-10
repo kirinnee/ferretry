@@ -1,6 +1,6 @@
 import type { PaneState } from '../../tmux/contracts.ts';
 import { parseHarnessDialog } from '../../tmux/harness-dialog.ts';
-import { paneActiveWork, paneBlockingPrompt, paneShowsPermissionPrompt } from '../../tmux/pane.ts';
+import { idlePromptShown, paneActiveWork, paneBlockingPrompt, paneShowsPermissionPrompt } from '../../tmux/pane.ts';
 import { parsePermissionPrompt } from '../../tmux/permission-prompt.ts';
 import type { TurnPaneEvidence } from '../turn/policy.ts';
 
@@ -14,7 +14,8 @@ export function turnPaneEvidenceOf(pane: PaneState): TurnPaneEvidence {
   return {
     working: work !== undefined,
     ...(work === 'spinner' ? { spinnerOnly: true } : {}),
-    atPrompt: pane.promptReady,
+    // An idle composer holding a draft is still an idle prompt; `promptReady` (accepts a send) says no to it.
+    atPrompt: pane.promptReady || (!pane.dead && idlePromptShown(pane.visible)),
     permission: request !== undefined || paneShowsPermissionPrompt(pane.visible),
     prompt: paneBlockingPrompt(pane.visible),
     request,

@@ -86,10 +86,16 @@ export type SendRouting =
  * record read `waiting` with `promptReady: false` through eleven stalls. A pane that shows work under it is
  * busy, and the message rides the harness's own queue; one that shows neither work nor a prompt is still
  * taken as idle, because the ghost turn is the worse of the two mistakes.
+ *
+ * THE RECORD'S READY FLAG IS NOT TAKEN AT ITS WORD OVER VISIBLE WORK EITHER (&B188): an idle compaction starts from an
+ * ended turn whose record still says ready, while the pane shows `Compacting…`. That is busy, and the message rides the
+ * harness's own queue instead of being typed into the compacting composer by the idle path.
  */
 export function routeSend(target: SendTarget, pane: SendPaneObservation): SendRouting {
   if (TERMINAL_SEND_STATUSES.has(target.status) || !pane.alive || pane.dead) return 'revive';
-  if (target.promptReady === true || pane.promptReady) return 'idle';
+  // A stale record's ready flag (an ended turn's) counts only while the pane shows no work: a compacting or
+  // otherwise busy composer under it is not somewhere to type as an idle prompt (&B188).
+  if (pane.promptReady || (target.promptReady === true && !pane.activeWork)) return 'idle';
   if (target.status === 'waiting' && pane.activeWork) return 'busy';
   if (IDLE_SEND_STATUSES.has(target.status)) return 'idle';
   return 'busy';
