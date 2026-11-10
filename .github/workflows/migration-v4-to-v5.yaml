@@ -41,7 +41,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v4_dir="$(bash migration/v4-to-v5/fixtures/fetch-v4.sh)"
-          "${v4_dir}/fy" --version | grep -qx '4.291.5'
+          v4_version="$("${v4_dir}/fy" --version)"
+          grep -qx '4.291.5' <<<"${v4_version}"
           echo "FY_V4_DIR=${v4_dir}" >>"${GITHUB_ENV}"
 
       - name: Install the converter's dependencies and the repository's
