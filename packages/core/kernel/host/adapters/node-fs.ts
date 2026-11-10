@@ -79,7 +79,8 @@ export interface OpenedDirectory {
    * and a rename need, each through THIS open folder and proven against its device and inode first. `undefined` on a
    * host with `/proc/self/fd` (it uses `entryPath`) and on one whose calls could not be loaded: there a rename and a
    * folder remove refuse `no_descriptor_reach`, while a write and a publish re-prove the folder once and go by path
-   * (as `roots.ts` says). A remove goes through `at.removal` (the working-directory bracket) when it loaded too.
+   * (as `roots.ts` says), except the `project-files` root, which refuses every write, publish, remove and `setMode`
+   * there. A remove goes through `at.removal` (the working-directory bracket) when it loaded too.
    * Additive.
    */
   readonly at?: FolderSteps;

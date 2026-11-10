@@ -11,16 +11,16 @@ import type { DoctorLine } from './host.ts';
 export async function descriptorReachNote(fs: HostFs): Promise<DoctorLine | undefined> {
   const reach = await fs.descriptorReach?.().catch(() => undefined);
   if (reach === undefined || reach.path) return undefined;
-  const consequence =
-    "a folder swapped for a link in the instant between the link check and the look can let one listing or stat show the outside folder's names and sizes " +
-    "(no file's text is read through it, nothing is written through it, and a swap between two calls is refused at the next one)";
+  const safe = 'nothing is written through it, and a swap between two calls is refused at the next one';
   if (!reach.calls)
     return {
       plugin: 'kernel',
       state: 'warn',
       detail:
         "This host reaches an open folder by neither /proc/self/fd nor the C library's descriptor calls (they could not " +
-        `be loaded), so a project's skills folder and .mcp.json are read by path after the link check: ${consequence}.`,
+        "be loaded), so a project's skills folder and .mcp.json are read by path after the link check: a folder swapped " +
+        'for a link in the instant between the link check and the look can let one listing, stat or file-identity answer ' +
+        `show the outside folder's names, sizes and inodes (no file's text is read through it, ${safe}).`,
       fix: 'Nothing is needed for ordinary use; run the daemon where the C library loads to read them by descriptor.',
     };
   if (!reach.bracket)
@@ -29,7 +29,9 @@ export async function descriptorReachNote(fs: HostFs): Promise<DoctorLine | unde
       state: 'warn',
       detail:
         "This host loaded the C library's descriptor calls but not the working-directory bracket, so a project's skills " +
-        `folder is listed by path once the folder is proven (reads and stats still go by descriptor): ${consequence}.`,
+        'folder is listed by path once the folder is proven (reads and stats still go by descriptor): a folder swapped ' +
+        "for a link in the instant between the link check and the look can let one listing show the outside folder's " +
+        `names (no size, inode or file text comes through it, ${safe}).`,
       fix: 'Nothing is needed for ordinary use; run the daemon where the bracket loads to list them by descriptor.',
     };
   return undefined;

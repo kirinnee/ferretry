@@ -317,8 +317,9 @@ describe('R-0198 a base whose real path is not its spelling below the anchor is 
   /**
    * The spelling check (`spellingHolds`) judged in isolation: the swap puts a link to a SIBLING folder INSIDE the project
    * where a folder was, so the real path stays below the anchor (no "outside" proof can object) but is not the spelled
-   * path. On a host that reaches no folder by descriptor nothing else refuses a listing or a stat; the spelling rule is
-   * the guard, and its answer is `link_escape`, never the sibling's names, size or text.
+   * path. Measured (the check skipped, all seven verbs logged): the spelling rule is the ONLY guard on all four hosts,
+   * Linux and macOS included, and every sweep leaked (168 of 168) without it, which is why the test sweeps every host.
+   * Its answer is `link_escape`, never the sibling's names, size or text.
    */
   const SIBLING = 'sibling';
   /** The project folder at `which` and the sibling beside it holding the hostile (fake) tree of the same shape. */

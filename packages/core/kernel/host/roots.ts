@@ -743,8 +743,9 @@ async function openFolderBelow(
 /**
  * The LEAF folder of a `project-files` call (S179), made (when missing) and opened THROUGH the folder `openFolderBelow`
  * holds, never by a path a link could redirect, then proven to still be at its place. Answers the open folder (the
- * caller closes it) and whether this call made it. A name that is a file is `outside` (it is no folder of ours); a link
- * is `link_escape`.
+ * caller closes it) and whether this call made it. A name that is a file, a link or a dangling link is `outside`: the
+ * open (`O_DIRECTORY | O_NOFOLLOW`) answers `ENOTDIR` for each, so a link at the LEAF is told from a file by neither
+ * (nothing is written either way). A link met on the way DOWN to the leaf is `link_escape` (`openFolderBelow`).
  */
 async function openLeafBelow(
   scope: Scope,
@@ -1309,7 +1310,8 @@ const fenceNow = async (setup: PinFenceSetup): Promise<Fence | undefined> =>
  * (a private tree that was not indexed whole: an entry there cannot be proven not to be an alias of an unindexed
  * member, and an alias keeps its source's device). THE rule, asked by every door of an owner's root — the unpinned
  * root's members and the held (pinned) root's walk alike, and an internal root's guard ({@link PrivateCheck}), which has
- * the same `keys` and `closed` — so no two doors can disagree about a closed device.
+ * the same shape (`keys` and `closed`; its `closed` leaves out the root's own trees) — so no two doors can disagree
+ * about a closed device.
  */
 function heldByIdentity(
   places: Pick<Fence, 'keys' | 'closed'>,
@@ -1781,7 +1783,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * A scope that names an anchor (`within`): every folder from the anchor's first child down to the scoped folder is
    * looked at WITHOUT following it, and a link at any of them is refused `link_escape`. The anchor itself and its
    * ancestors are not looked at (a symlinked project folder works). A folder that is not there yet is no link, and
-   * nothing below it exists either. An anchor equal to the scoped folder walks nothing.
+   * nothing below it exists either. An anchor equal to the scoped folder walks nothing. The walk is the EARLY refusal
+   * (a link is told before any descriptor is opened); the descriptors the calls then hold are the PROOF, because a folder
+   * swapped for a link after the walk is still caught by them.
    */
   const anchoredFolders = async (): Promise<void> => {
     for (const folder of setup.linkFreeFolders() ?? []) {
