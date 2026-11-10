@@ -827,7 +827,8 @@ describe('the fy5 wrapper (M1, M4)', () => {
     await writeFile(probe, '#!/bin/sh\nprintf "path:%s\\n" "$PATH"\ncommand -v fy\n', { mode: 0o755 });
     const out = run(['x'], { PATH: `${v4Bin}:/usr/bin:${wt}/sub:/bin`, HOME: '/h' }).stdout.toString();
     const path = /^path:(.*)$/mu.exec(out)?.[1] ?? '';
-    expect(path.split(':')[0]).toBe(`${home}/bin`);
+    // The ssh shim folder is first of all, then the preview's own bin.
+    expect(path.split(':').slice(0, 2)).toEqual([`${home}/${PREVIEW.noCredsFolder}/bin`, `${home}/bin`]);
     expect(path).not.toContain(v4Bin);
     expect(path).not.toContain(wt);
     expect(path).toContain('/usr/bin');

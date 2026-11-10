@@ -154,8 +154,19 @@ async function main(argv: readonly string[]): Promise<number> {
       return done.ok ? 0 : 1;
     }
     case 'credential-check': {
+      // The kernel's own rule for what a child of the daemon gets (it is not exported from the package).
+      const kernelProcess = new URL('../../../packages/core/kernel/host/adapters/process.ts', import.meta.url).pathname;
+      const { childEnvironment } = (await import(kernelProcess)) as {
+        childEnvironment: (
+          program: string,
+          base: Record<string, string>,
+          tools: Record<string, string>,
+          extra: Record<string, string>,
+        ) => Record<string, string>;
+      };
       const done = await credentialCheck({
         target,
+        childEnvironment: (program, base) => childEnvironment(program, { ...base }, {}, {}),
         callerEnv: process.env,
         run: realRun,
         daemonEnviron: () =>

@@ -7,6 +7,8 @@
  *  - no variable of the daemon's environment has a credential-shaped name (`*_TOKEN`, `AWS_*`, `GH_*`, ...);
  *  - HOME, GH_CONFIG_DIR and GIT_CONFIG_GLOBAL are the preview's own, and the folders are EMPTY, with mode 0700 / 0600;
  *  - git reads no system config and never prompts; there is no SSH agent socket;
+ *  - `ssh -G`, run in the environment a CHILD of the daemon gets (the kernel's PATH and HOME only), shows `identityfile none`:
+ *    the wrapper's `ssh` shim is first on that PATH;
  *  - `gh auth status`, run in that environment, says the daemon is NOT logged in (when a `gh` is on its PATH at all). A
  *    `gh` that is `<home>/bin/gh` is the preview's own (the gh stub) and is accepted without being asked.
  */
@@ -47,7 +49,15 @@ export interface CredentialCheckInput {
    * there is no such file (macOS) or no daemon holds the lock. Read only for names and the wrapper's fixed values.
    */
   readonly daemonEnviron?: () => Promise<string | undefined>;
+  /** The kernel's own rule for what a child of the daemon gets (`childEnvironment`), given the daemon's PATH and HOME. */
+  readonly childEnvironment: (
+    program: string,
+    base: Readonly<Record<string, string>>,
+  ) => Readonly<Record<string, string>>;
 }
+
+/** An alias no config names: with `-F /dev/null` ssh -G prints it back unchanged as the host name. */
+const SSH_CHECK_ALIAS = 'fy-preview-ssh-check.invalid';
 
 /** The environment `fy5 daemon start` is given by `preview.sh`: the caller's WHOLE environment, never a trimmed copy. */
 const wholeEnv = (env: Readonly<Record<string, string | undefined>>): Record<string, string> =>
@@ -90,13 +100,16 @@ export async function credentialCheck(input: CredentialCheckInput): Promise<Star
       };
     environ = printed.stdout;
   }
-  const have = new Map(
-    environ
-      .split('\0')
-      .filter(entry => entry.includes('='))
-      .map((entry): [string, string] => [entry.slice(0, entry.indexOf('=')), entry.slice(entry.indexOf('=') + 1)]),
-  );
-  const named = credentialNames([...have.keys()]);
+  // A VALUE is kept only for the names the wrapper sets (compared with the preview's own, never printed) and for PATH, which
+  // only builds the child environment below. Every other name goes into a names-only set: its value is dropped here.
+  const entries = environ
+    .split('\0')
+    .filter(entry => entry.includes('='))
+    .map((entry): [string, string] => [entry.slice(0, entry.indexOf('=')), entry.slice(entry.indexOf('=') + 1)]);
+  const names = new Set(entries.map(([name]) => name));
+  const have = new Map(entries.filter(([name]) => SET_ON_PURPOSE.has(name)));
+  const daemonPath = entries.find(([name]) => name === 'PATH')?.[1] ?? '';
+  const named = credentialNames([...names]);
   if (named.length > 0)
     problems.push(
       `refusing to go on: the preview daemon's environment carries credential-shaped variables (${named.join(', ')}); a child of the daemon could use your sign-in. Fix the wrapper's allow-list (preview/driver.ts ENV_ALLOWLIST).`,
@@ -108,9 +121,7 @@ export async function credentialCheck(input: CredentialCheckInput): Promise<Star
       `refusing to go on: the preview daemon's environment does not hold the preview's own ${wrong.join(', ')} (it must be the empty ones under ${join(target, PREVIEW.noCredsFolder)}). Run preview.sh prepare again, or fix the wrapper.`,
     );
   if (named.length === 0 && wrong.length === 0)
-    passed.push(
-      'the preview daemon environment carries no credential-shaped variable, no SSH agent, and git over ssh gets no user config and no keys',
-    );
+    passed.push('the preview daemon environment carries no credential-shaped variable and no SSH agent');
 
   // 2. What stands in the credentials' place is EMPTY and private.
   const base = join(target, PREVIEW.noCredsFolder);
@@ -144,6 +155,30 @@ export async function credentialCheck(input: CredentialCheckInput): Promise<Star
         'refusing to go on: `gh auth status` in the preview daemon environment says it IS signed in, so the preview would use your GitHub sign-in. Nothing here says which account.',
       );
     else passed.push('`gh auth status` in the preview daemon environment says it is not signed in');
+  }
+
+  // 4. `ssh -G` in a CHILD of the daemon's environment, built by the kernel's own rule (PATH and HOME only: no
+  // GIT_SSH_COMMAND reaches a child). The wrapper's `ssh` shim, first on that PATH, must have it read no user config and
+  // offer no key: `identityfile none` and the alias unchanged. No `ssh` that starts at all is fine: nothing to read keys with.
+  const child = input.childEnvironment('ssh', { PATH: daemonPath, HOME: wanted.HOME as string });
+  const shown = await run(['ssh', '-G', SSH_CHECK_ALIAS], child);
+  if (shown.code === undefined) passed.push('no `ssh` on the preview daemon PATH');
+  else {
+    const lines = shown.stdout.split('\n').map(line => line.trim());
+    const identities = lines.filter(line => line.startsWith('identityfile '));
+    if (
+      shown.code === 0 &&
+      identities.length === 1 &&
+      identities[0] === 'identityfile none' &&
+      lines.includes(`hostname ${SSH_CHECK_ALIAS}`)
+    )
+      passed.push(
+        "`ssh` found on the PATH of a child of the preview daemon (the preview's shim) reads no user config and offers no key; a program that calls /usr/bin/ssh by absolute path is not covered",
+      );
+    else
+      problems.push(
+        `refusing to go on: \`ssh -G ${SSH_CHECK_ALIAS}\` run with the environment a child of the preview daemon gets (PATH and HOME only) did not show \`identityfile none\` and the alias unchanged, so ssh there reads your ~/.ssh config and keys (exit ${String(shown.code)}). The preview's ssh shim (${join(target, PREVIEW.noCredsFolder, 'bin', 'ssh')}) is missing or not first on PATH. Run preview.sh stop, then start again.`,
+      );
   }
   return { ok: problems.length === 0, problems, passed };
 }

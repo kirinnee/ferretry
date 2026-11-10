@@ -13,6 +13,47 @@ import { PREVIEW } from '../../preview/plan.ts';
 import type { Run } from '../../preview/start-checks.ts';
 import { stopPreview } from '../../preview/stop.ts';
 
+/** The kernel's own rule for what a child of the daemon gets (not exported by the package, so loaded by path). */
+const { childEnvironment } = (await import(
+  join(import.meta.dir, '../../../../packages/core/kernel/host/adapters/process.ts')
+)) as {
+  childEnvironment: (
+    program: string,
+    base: Record<string, string>,
+    tools: Record<string, string>,
+    extra: Record<string, string>,
+  ) => Record<string, string>;
+};
+const kernelChild = (program: string, base: Readonly<Record<string, string>>) =>
+  childEnvironment(program, { ...base }, {}, {});
+
+/**
+ * A FAKE real `ssh`: logs its arguments and answers `-G` the way OpenSSH does: with `-F /dev/null` and `IdentityFile=none`
+ * the alias comes back unchanged and there is no identity; without them a (fake) user config rewrites the host name and
+ * names a key.
+ */
+const fakeSsh = (log: string): string =>
+  [
+    '#!/bin/sh',
+    `echo "$@" >> "${log}"`,
+    'case " $* " in',
+    '  *" -G "*)',
+    '    for last in "$@"; do :; done',
+    '    case " $* " in',
+    '      *" -F /dev/null "*) echo "hostname $last" ;;',
+    '      *) echo "hostname rewritten-by-fake-user-config" ;;',
+    '    esac',
+    '    case " $* " in',
+    '      *" IdentityFile=none "*) echo "identityfile none" ;;',
+    '      *) echo "identityfile ~/.ssh/id_fake" ;;',
+    '    esac',
+    '    exit 0',
+    '    ;;',
+    'esac',
+    'exit 1',
+    '',
+  ].join('\n');
+
 let root = '';
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'preview-no-host-creds-'));
@@ -67,6 +108,7 @@ async function previewHome(): Promise<{ home: string; stubs: string; hostile: Re
   await mkdir(join(home, 'bin'), { recursive: true });
   await mkdir(join(home, 'libexec'), { recursive: true });
   await mkdir(stubs);
+  await writeFile(join(stubs, 'ssh'), fakeSsh(join(root, 'ssh.log')), { mode: 0o755 });
   await writeFile(join(home, 'libexec/fy'), '#!/bin/sh\nprintf "arg:%s\\n" "$@"\nenv\n', { mode: 0o755 });
   await writeFile(join(home, 'bin/fy5'), wrapperText(home, '/nonexistent-v4/.ferretry'), { mode: 0o755 });
   await writeFile(join(home, 'bin/fy'), shimText(home, 'fy'), { mode: 0o755 });
@@ -184,6 +226,7 @@ const realWorld = (home: string, inspectOverride?: (path: string) => Promise<Ins
     const done = spawn([...argv], { ...env });
     return { code: done.exitCode ?? undefined, stdout: done.stdout.toString() };
   }) satisfies Run,
+  childEnvironment: kernelChild,
   inspect:
     inspectOverride ??
     (async (path: string): Promise<Inspected | undefined> => {
@@ -334,6 +377,8 @@ describe('NHC-4 the check sees the environment the daemon really has (B1)', () =
     expect(said).toContain('GH_TOKEN');
     expect(said).toContain('IS signed in');
     expect(said).not.toContain(FAKE);
+    // The whole answer (passed AND problems), not only the problems: no value of the environment is anywhere in it.
+    expect(JSON.stringify(done)).not.toContain(FAKE);
   });
 
   test('NHC-4b the running daemon environment, when readable, is what is judged; the probe is not asked for it', async () => {
@@ -354,6 +399,7 @@ describe('NHC-4 the check sees the environment the daemon really has (B1)', () =
     expect(done.ok).toBe(false);
     expect(done.problems.join('\n')).toContain('GH_TOKEN');
     expect(done.problems.join('\n')).not.toContain(FAKE);
+    expect(JSON.stringify(done)).not.toContain(FAKE);
     expect(asked.some(line => line.endsWith('env -0'))).toBe(false);
   });
 
@@ -365,33 +411,94 @@ describe('NHC-4 the check sees the environment the daemon really has (B1)', () =
   });
 });
 
-describe('NHC-5 git over ssh reads no user config and no keys (B2)', () => {
-  test('NHC-5a git over ssh through the wrapper runs ssh with no config file, no identity, no agent', async () => {
-    const { home, stubs, hostile } = await previewHome();
+/** Starts the daemon through the wrapper and returns the PATH its children are given (read through the wrapper's probe). */
+function startAndPath(home: string, hostile: Record<string, string>): string {
+  spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
+  return spawn([join(home, 'bin/fy5'), '__daemon-probe', 'printenv', 'PATH'], hostile)
+    .stdout.toString()
+    .trim();
+}
+
+describe('NHC-5 ssh through a child of the daemon reads no user config and no keys (B2)', () => {
+  test('NHC-5a a real git over ssh, in the environment the kernel gives a git child, runs ssh through the shim', async () => {
+    const { home, hostile } = await previewHome();
     const log = join(root, 'ssh.log');
-    await writeFile(join(stubs, 'ssh'), `#!/bin/sh\necho "$@" >> "${log}"\nexit 1\n`, { mode: 0o755 });
-    spawn([join(home, 'bin/fy5'), '__daemon-probe', 'git', 'ls-remote', 'ssh://example.invalid/repo'], hostile);
+    const path = startAndPath(home, hostile);
+    const env = kernelChild('git', { PATH: path, HOME: join(home, PREVIEW.noCredsFolder, 'home') });
+    // The kernel's own rule: nothing but PATH and HOME reaches the child (no GIT_SSH_COMMAND can).
+    expect(Object.keys(env).sort()).toEqual(['HOME', 'PATH']);
+    Bun.spawnSync(['git', 'ls-remote', 'ssh://example.invalid/repo'], { env });
     const seen = await readFile(log, 'utf8');
     expect(seen).toContain('-F /dev/null');
-    expect(seen).toContain('IdentityFile=none');
-    expect(seen).toContain('IdentityAgent=none');
-    expect(seen).toContain('BatchMode=yes');
+    expect(seen).toContain('-o IdentityFile=none');
+    expect(seen).toContain('-o IdentitiesOnly=yes');
+    expect(seen).toContain('-o IdentityAgent=none');
+    expect(seen).toContain('-o BatchMode=yes');
+    expect(seen).toContain(`-o UserKnownHostsFile=${join(home, PREVIEW.noCredsFolder, 'known_hosts')}`);
+    expect(seen).toContain('example.invalid');
   });
 
-  test('NHC-5b a daemon environment without the ssh options refuses, and the passing check says git over ssh is closed', async () => {
+  test('NHC-5b the shim is a fresh 0700 file in a fresh 0700 folder, runs the real ssh by absolute path, and skips its own', async () => {
+    const { home, stubs, hostile } = await previewHome();
+    // A (fake) ssh in the preview's own bin is skipped when the real one is looked for.
+    await writeFile(join(home, 'bin/ssh'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
+    startAndPath(home, { ...hostile, PATH: `${join(home, 'bin')}:${hostile.PATH}` });
+    const folder = join(home, PREVIEW.noCredsFolder, 'bin');
+    expect((await stat(folder)).mode & 0o777).toBe(0o700);
+    const shim = join(folder, 'ssh');
+    expect((await stat(shim)).mode & 0o777).toBe(0o700);
+    expect(await readFile(shim, 'utf8')).toContain(`exec "${join(stubs, 'ssh')}" -F /dev/null`);
+    // Fresh for every daemon start: what was left in the folder is gone, and a pre-existing name is not reused.
+    await writeFile(join(folder, 'left-behind'), 'x');
+    spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
+    expect(await readdir(folder)).toEqual(['ssh']);
+  });
+
+  test('NHC-5c the check says an ssh through a child environment shows no identity and no user config', async () => {
     const { home, hostile } = await previewHome();
     spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
-    const good = await credentialCheck({ ...realWorld(home), callerEnv: hostile });
-    expect(good.passed.join('\n')).toContain('git over ssh gets no user config and no keys');
-    const options = noCredsValues(home).GIT_SSH_COMMAND as string;
-    await writeFile(
-      join(home, 'bin/fy5'),
-      wrapperText(home, '/nonexistent-v4/.ferretry').replace(`GIT_SSH_COMMAND="${options}" `, ''),
-      { mode: 0o755 },
-    );
+    const done = await credentialCheck({ ...realWorld(home), callerEnv: hostile });
+    expect(done.problems).toEqual([]);
+    expect(done.passed.join('\n')).toContain('reads no user config and offers no key');
+    expect(done.passed.join('\n')).toContain('/usr/bin/ssh by absolute path is not covered');
+  });
+
+  test('NHC-5d without the shim the check refuses, naming ssh and the shim', async () => {
+    const { home, hostile } = await previewHome();
+    spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
+    await rm(join(home, PREVIEW.noCredsFolder, 'bin/ssh'));
     const done = await credentialCheck({ ...realWorld(home), callerEnv: hostile });
     expect(done.ok).toBe(false);
-    expect(done.problems.join('\n')).toContain('GIT_SSH_COMMAND');
+    const said = done.problems.join('\n');
+    expect(said).toContain('ssh -G fy-preview-ssh-check.invalid');
+    expect(said).toContain('shim');
+  });
+
+  test('NHC-5e a real ssh path with a quote is not written into the shim, so the check refuses', async () => {
+    const { home, hostile } = await previewHome();
+    const odd = join(root, "odd'stubs");
+    await mkdir(odd);
+    await writeFile(join(odd, 'ssh'), fakeSsh(join(root, 'ssh.log')), { mode: 0o755 });
+    const env = { ...hostile, PATH: `${odd}:/usr/bin:/bin` };
+    spawn([join(home, 'bin/fy5'), 'daemon', 'start'], env);
+    expect(await stat(join(home, PREVIEW.noCredsFolder, 'bin')).catch(() => undefined)).toBeUndefined();
+    const done = await credentialCheck({ ...realWorld(home), callerEnv: env });
+    expect(done.ok).toBe(false);
+  });
+
+  test('NHC-5f no ssh that starts, or one that fails, is told apart', async () => {
+    const { home, hostile } = await previewHome();
+    spawn([join(home, 'bin/fy5'), 'daemon', 'start'], hostile);
+    const real = realWorld(home);
+    const only =
+      (answer: { code: number | undefined; stdout: string }): Run =>
+      async (argv, env) =>
+        argv[0] === 'ssh' ? answer : real.run(argv, env);
+    const none = await credentialCheck({ ...real, run: only({ code: undefined, stdout: '' }), callerEnv: hostile });
+    expect(none.passed.join('\n')).toContain('no `ssh` on the preview daemon PATH');
+    const failed = await credentialCheck({ ...real, run: only({ code: 255, stdout: '' }), callerEnv: hostile });
+    expect(failed.ok).toBe(false);
+    expect(failed.problems.join('\n')).toContain('(exit 255)');
   });
 });
 
