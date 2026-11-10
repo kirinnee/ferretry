@@ -225,7 +225,7 @@ for (const name of needsOf('full')) {
 }
 // The strict-guarantee report is report-only while the ONE switch (workflow env) is 'false': the job's own setup steps
 // or timeout cannot turn Full CI red then. At 'true' it is judged like every other job, and only it is relaxed.
-assert.equal(ci.env?.FY_STRICT_GUARANTEES_BLOCKING, 'false', 'the strict report ships non-blocking');
+assert.equal(ci.env?.FY_STRICT_GUARANTEES_BLOCKING, 'true', 'the strict report is blocking (the count reached 0)');
 assert.equal(
   jobOf(ci, 'strict-guarantees').env,
   undefined,

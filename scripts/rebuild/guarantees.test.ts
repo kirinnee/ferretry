@@ -28,6 +28,16 @@ test('every owner in the committed guarantee table survives regeneration (an own
   expect(lost).toEqual([]);
 });
 
+test('R593 R596 I161 S114 regenerate owned by the package that holds their enforcer (strict-11 r2 ruling)', async () => {
+  const fresh = await regenerated();
+  expect([...['R593', 'R596', 'I161', 'S114'].map(id => [id, fresh.get(id)])]).toEqual([
+    ['R593', 'app-shell'],
+    ['R596', 'kernel'],
+    ['I161', 'vault'],
+    ['S114', 'vault'],
+  ]);
+});
+
 test('G33 regenerates as Conversation, with Terminals and Gate as co-owners (port-conversation r3 #5)', async () => {
   expect(OWNER_OVERRIDE.G33?.owner).toBe('conversation');
   expect((await regenerated()).get('G33')).toBe('conversation');

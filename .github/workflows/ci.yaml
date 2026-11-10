@@ -58,7 +58,7 @@ concurrency:
 # THE ONE SWITCH of the strict Appendix D report (the `strict-guarantees` job below). Workflow-level, so the job that
 # counts and the `Full CI` verdict (scripts/ci/full-status.sh) read the same value. See docs/standards/ci-cd.
 env:
-  FY_STRICT_GUARANTEES_BLOCKING: 'false'
+  FY_STRICT_GUARANTEES_BLOCKING: 'true'
 
 jobs:
   # Shared setup once, then independent processes with separate logs and coverage directories.
@@ -213,11 +213,11 @@ jobs:
   # only (a pull request without the `full-ci` label has no integration report, so no honest count), and after a red
   # test job too, since the count is the point then.
   #
-  # THE ONE SWITCH: `FY_STRICT_GUARANTEES_BLOCKING` in the workflow `env` above. 'false' (today) reports and never turns
-  # CI red; 'true' makes a miss fail the job. Flip it in the change that takes the count to 0 (docs/standards/ci-cd,
-  # "Strict guarantee report"). The job is in `full.needs` and the verdict (scripts/ci/full-status.sh) reads the same
-  # switch: while it is 'false' the verdict accepts this job whatever its result, so even a failed setup step or the
-  # timeout cannot turn Full CI red.
+  # THE ONE SWITCH: `FY_STRICT_GUARANTEES_BLOCKING` in the workflow `env` above. It is 'true' now (the change that took
+  # the count to 0 flipped it): a miss fails the job, and the verdict judges the job like every other one. 'false' would
+  # make the job report and never turn CI red (docs/standards/ci-cd, "Strict guarantee report"). The job is in
+  # `full.needs` and the verdict (scripts/ci/full-status.sh) reads the same switch: at 'false' the verdict accepts this
+  # job whatever its result, so even a failed setup step or the timeout cannot turn Full CI red.
   strict-guarantees:
     name: Strict Guarantees
     needs: [quick, int]

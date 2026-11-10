@@ -722,6 +722,49 @@ describe('a terminal write that counts toward a standing rule’s history', () =
     should((await tapOn(proved()))?.tapped).equal(true);
   });
 
+  it('S114 should write tapped only for the owner’s device fill the ferret did not steer, and in a terminal only on a proved root prompt', async () => {
+    // A terminal: true on a kernel-proved setuid-root sudo prompt with echo off, false on every weaker proof.
+    should((await tapOn(proved()))?.tapped).equal(true);
+    for (const weaker of [proved({ echo: 'on' }), proved({ trustedProgram: false }), proved({ canonical: false })])
+      should((await tapOn(weaker))?.tapped).equal(false);
+    // Never set by a plan fill, a rule fill or the admin token's delivery, whatever the prompt proved.
+    for (const by of ['plan', 'rule', 'host'] as const)
+      should(await tapOn(proved(), { by })).not.have.property('tapped');
+    // Nor once the ferret acted on a terminal after the card was raised.
+    const steered = world({ shows: false });
+    steered.observer.acted('s1', 'terminal');
+    await steered.observer.delivered(
+      delivery({
+        target: { kind: 'terminal', key: 'dev' },
+        facts: proved(),
+        matchKey: 'sudo@kirin-box',
+        domains: [],
+        submitted: false,
+        by: 'device',
+        since: 0,
+      }),
+    );
+    should(steered.seen[0]?.observation).not.have.property('tapped');
+
+    // A page: the owner's device fill writes it beside the page moving on; the admin token, a plan or a rule never does.
+    const left = async (by: LoginDelivery['by'], steer = false) => {
+      const w = world({
+        shows: false,
+        where: elapsed => {
+          if (steer) w.observer.acted('s1', 'browser');
+          return elapsed < 3_000
+            ? { navigationId: 'doc-1', host: 'accounts.google.com' }
+            : { navigationId: 'doc-2', host: 'vercel.com' };
+        },
+      });
+      await w.observer.delivered(delivery({ by }));
+      return facts(w.seen);
+    };
+    should((await left('device')).tapped).equal(true);
+    for (const by of ['plan', 'rule', 'host'] as const) should(await left(by)).not.have.property('tapped');
+    should(await left('device', true)).not.have.property('tapped');
+  });
+
   it('should not call it a tap when any fact the matcher asks of a terminal grant fill is missing', async () => {
     for (const facts of [
       proved({ program: undefined }),

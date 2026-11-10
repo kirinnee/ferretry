@@ -1139,6 +1139,42 @@ describe('a deliver types a saved account only as the card offers it now (secrev
     should(writes).have.length(1);
   });
 
+  it('I161 should redraw the offers at Send and refuse an account not offered now, or a mismatched signIn, typing nothing', async () => {
+    const signIns = [
+      site('si_0000000000000b01', 'GOOGLE', 'accounts.google.com'),
+      site('si_0000000000000b02', 'OTHER', 'mail.example.test'),
+    ];
+    const options: Parameters<typeof build>[0] = {
+      listing: { accounts: [account('GOOGLE'), account('OTHER')], signIns },
+    };
+    const { service, request, writes, fills } = await raisedLogin(options);
+    // The card offered it when it was drawn, and the offer carries no value, only who and what it fills.
+    should(request.saved?.offers.map(offer => offer.id)).eql(['GOOGLE', 'OTHER']);
+    should(JSON.stringify(request.saved)).not.containEql(PASSWORD);
+    const tap = (body: Partial<InputDeliverBody>) =>
+      service.deliver(SESSION, request.id, send(request.observedDigest ?? '', body), HOST);
+
+    // A sign-in that is another account's, and one that is no one's, get the SAME refusal, before anything is typed.
+    const another = await refused(tap({ entry: 'GOOGLE', signIn: 'si_0000000000000b02' }));
+    const nobody = await refused(tap({ entry: 'GOOGLE', signIn: 'si_0000000000000bff' }));
+    should(another.code).equal('bad_request');
+    should(another.message).equal('that sign-in is not one of GOOGLE; nothing was typed');
+    should(nobody.message).equal(another.message);
+
+    // The store changes after the card was drawn: the account no longer holds a password. The offers are redrawn now,
+    // from the store and the page, and the account is not among them, so nothing is opened or typed.
+    options.listing = { accounts: [account('GOOGLE', { password: false }), account('OTHER')], signIns };
+    const stale = await refused(tap({ entry: 'GOOGLE' }));
+    should(stale.code).equal('bad_request');
+    should(stale.message).equal('GOOGLE is not offered for this target; nothing was typed');
+    should(fills).eql([]);
+    should(writes).eql([]);
+
+    // The account that is still offered types as before: the refusals spent nothing and changed nothing.
+    await tap({ entry: 'OTHER' });
+    should(writes).have.length(1);
+  });
+
   it('should refuse a sign-in with an account picked by hand, which has none here', async () => {
     const byHand = {
       accounts: [account('GITLAB')],
