@@ -18,27 +18,35 @@ const withoutTrailingSlash = (path: string): string => path.replace(/(?<=.)\/+$/
  * these are THIS adapter's, as MCP's `.mcp.json` reader's are):
  * - the folder must be exactly `<a registered root>/.claude/skills` or `.agents/skills`; any other folder, a folder of
  *   a root nobody registered, and a path that is not `<that folder>/<name>/SKILL.md` answer nothing;
- * - a skills folder that is a link, or sits under one, answers nothing: its real path must be the folder as named.
- *   The kernel keeps every listed folder and file INSIDE the scoped folder (`link_escape`, `hard_link`), but it FOLLOWS a
- *   link in the scoped folder's own path (probed on the real `imports` root), so this `realPath` check is the one guard
- *   for the folder itself. The real-disk test is its proof.
- *
- * Residual: the check runs in `#files()` and the read follows through the same lexical handle, so a skills folder swapped
- * for a link between the two lets one bounded `SKILL.md` read (at most the caller's `maxBytes`) go through the link. The
- * listed-only rule and the fence still apply, and whoever can swap the folder already writes the project on this host.
+ * - the kernel is asked for the `imports` root with the registered project folder as its `within` anchor: the project
+ *   folder itself may be a link (a project reached through a linked workspace still lists and reads), but a link at
+ *   `.claude`, at `.claude/skills` or anywhere between the project folder and the skills folder makes every call on the
+ *   root refuse `link_escape`, which this reader shows as nothing (an empty listing, no text). The kernel judges that
+ *   at every call, right before the folder is touched, so a skills folder swapped for a link after an earlier call is
+ *   refused at the next one. Residual: the `imports` root's `within` walk lstats each folder below the anchor by path and
+ *   the read then opens the scoped folder by path, so a skills folder swapped for a link after that lstat and before
+ *   the open, inside ONE call, lets one bounded read (at most the caller's `maxBytes`, one `SKILL.md`) through the link;
+ *   it closes when `imports` reaches its folder by descriptor as `project-files` does. The kernel also keeps every listed folder and file INSIDE the scoped folder
+ *   (`link_escape`, `hard_link`).
  */
 export class ProjectSkillFiles implements SkillFilesPort {
+  /** `open(folder, within)` is the kernel's `imports` root scoped to `folder`, anchored at the registered project folder `within`. */
   constructor(
     private readonly roots: () => Promise<readonly string[]>,
-    private readonly open: (folder: string) => RootHandle,
+    private readonly open: (folder: string, within: string) => RootHandle,
   ) {}
 
   /** Whether `directory` is a skills folder of a registered root. */
   async claims(directory: string): Promise<boolean> {
+    return (await this.#registeredRoot(directory)) !== undefined;
+  }
+
+  /** The registered project folder `directory` is the skills folder of, as it was registered. */
+  async #registeredRoot(directory: string): Promise<string | undefined> {
     const match = PROJECT_SKILLS.exec(directory);
-    if (match === null) return false;
+    if (match === null) return undefined;
     const root = withoutTrailingSlash(match[1]!);
-    return (await this.roots()).some(known => withoutTrailingSlash(known) === root);
+    return (await this.roots()).some(known => withoutTrailingSlash(known) === root) ? root : undefined;
   }
 
   async list(directory: string, limit: number): Promise<readonly SkillDirectoryEntry[]> {
@@ -52,12 +60,10 @@ export class ProjectSkillFiles implements SkillFilesPort {
   }
 
   async #files(directory: string): Promise<RootSkillFiles | undefined> {
-    if (!(await this.claims(directory))) return undefined;
+    const root = await this.#registeredRoot(directory);
+    if (root === undefined) return undefined;
     try {
-      const handle = this.open(directory);
-      const base = handle.resolve('');
-      if (!base.ok || (await handle.realPath(base.value)) !== base.value) return undefined;
-      return new RootSkillFiles(handle, directory);
+      return new RootSkillFiles(this.open(directory, root), directory);
     } catch {
       return undefined;
     }

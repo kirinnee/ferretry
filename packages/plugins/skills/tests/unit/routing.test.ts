@@ -57,8 +57,8 @@ const listed = (...manifests: string[]): SkillFilesPort => ({
   read: async path => (manifests.includes(path) ? `text of ${path}` : undefined),
 });
 
-/** A scoped project handle over a map of absolute path -> text; `real` is what `realPath` answers for the base. */
-function handleOver(base: string, files: Record<string, string>, real: string = base): RootHandle {
+/** A scoped project handle over a map of absolute path -> text. */
+function handleOver(base: string, files: Record<string, string>): RootHandle {
   const kids = (path: string): string[] => [
     ...new Set(
       Object.keys(files)
@@ -83,7 +83,6 @@ function handleOver(base: string, files: Record<string, string>, real: string = 
     internal: false,
     resolve: (given: string) =>
       given.includes('..') ? err('outside') : ok((given === '' ? base : `${base}/${given}`) as FencedPath),
-    realPath: async () => real,
     list: async (path: string) => kids(path),
     stat,
     readText: async (path: string) => files[path] ?? '',
@@ -236,10 +235,10 @@ describe('Skills’ installed store reader', () => {
 });
 
 describe('a registered project’s skills reader', () => {
-  const open = (real?: string) => (folder: string) =>
-    handleOver(folder, { [`${folder}/pp/SKILL.md`]: 'project text', [`${folder}/pp/notes.md`]: 'secret' }, real);
-  const project = (over: { roots?: string[]; real?: string; open?: (folder: string) => RootHandle } = {}) =>
-    new ProjectSkillFiles(async () => over.roots ?? ['/work/p/'], over.open ?? open(over.real));
+  const open = (folder: string) =>
+    handleOver(folder, { [`${folder}/pp/SKILL.md`]: 'project text', [`${folder}/pp/notes.md`]: 'secret' });
+  const project = (over: { roots?: string[]; open?: (folder: string, within: string) => RootHandle } = {}) =>
+    new ProjectSkillFiles(async () => over.roots ?? ['/work/p/'], over.open ?? open);
 
   test('R-0198 lists and reads only the SKILL.md of a skill folder under a registered root’s skills folder', async () => {
     const files = project();
@@ -261,10 +260,24 @@ describe('a registered project’s skills reader', () => {
     expect(await files.claims('/work/p/.claude/skills/pp')).toBe(false);
   });
 
-  test('a skills folder that is a link, or under one, answers nothing', async () => {
-    const linked = project({ real: '/elsewhere/skills' });
+  test('R-0198 a skills folder the kernel refuses as a link (link_escape) answers nothing, and the root is the anchor', async () => {
+    const refusal = () =>
+      Promise.reject(Object.assign(new Error('root refused: link_escape'), { refusal: 'link_escape' }));
+    const anchors: string[] = [];
+    const linked = project({
+      open: (folder, within) => {
+        anchors.push(within);
+        return {
+          ...handleOver(folder, { [`${folder}/pp/SKILL.md`]: 'project text' }),
+          list: refusal,
+          stat: refusal,
+          readText: refusal,
+        } as unknown as RootHandle;
+      },
+    });
     expect(await linked.list('/work/p/.claude/skills', 10)).toEqual([]);
     expect(await linked.read('/work/p/.claude/skills/pp/SKILL.md', 100)).toBeUndefined();
+    expect(anchors).toEqual(['/work/p', '/work/p']);
   });
 
   test('a folder the kernel refuses to open, or cannot name, answers nothing', async () => {
