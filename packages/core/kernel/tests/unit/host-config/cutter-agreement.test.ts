@@ -30,10 +30,53 @@ const OWN_LINES: readonly (readonly string[])[] = [
   [],
 ];
 
+/** Every word that says a name holds a credential, every pair of words that says so, and every token format by value. */
+const NAME_WORDS = [
+  'token',
+  'secret',
+  'password',
+  'passwd',
+  'apikey',
+  'credential',
+  'credentials',
+  'auth',
+  'authorization',
+  'cookie',
+  'pat',
+];
+const NAME_PAIRS = ['api_key', 'access_key', 'private_key', 'secret_key', 'api-key', 'ACCESS_KEY'];
+const TOKEN_VALUES = [
+  'sk-AbCdEfGh12345678',
+  'sk_live_AbCdEfGh12345678',
+  'ghp_AbCdEfGh12345678',
+  'gho_AbCdEfGh12345678',
+  'github_pat_AbCdEfGh12345678',
+  'glpat-AbCdEfGh12345678',
+  'xoxb-AbCdEfGh12345678',
+  'xoxp-AbCdEfGh12345678',
+  'AKIAABCDEFGHIJKLMNOP',
+  'ASIAABCDEFGHIJKLMNOP',
+  'AIzaAbCdEfGh12345678',
+  'npm_AbCdEfGh12345678',
+  'hf_AbCdEfGh12345678',
+  'ya29.AbCdEfGh12345678',
+  'eyJhbGciOiJIUzI1NiJ9',
+];
+const GENERATED_LINES: readonly (readonly string[])[] = [
+  ...[...NAME_WORDS, ...NAME_PAIRS].flatMap(name => [
+    [`--${name}`, VALUE],
+    [`--${name}=${VALUE}`],
+    [`${name.toUpperCase()}=${VALUE}`],
+    ['-e', `${name}: ${VALUE}`],
+    [`https://u:p@h.example/?${name}=${VALUE}`],
+  ]),
+  ...TOKEN_VALUES.flatMap(token => [[token], ['--anything', token], [`--x=${token}`], [`pre ${token} post`]]),
+];
+
 test('CFG-LEAK-R the kernel and runtimes cut every corpus word identically', () => {
   const family = nestedFamily();
   expect(family.length).toBeGreaterThan(500);
-  const lines = [...family.map(item => item.words), ...OWN_LINES];
+  const lines = [...family.map(item => item.words), ...OWN_LINES, ...GENERATED_LINES];
   for (const words of lines) {
     const kernel = kernelShownWords(words);
     const runtimes = runtimesShownWords(words);

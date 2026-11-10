@@ -380,6 +380,25 @@ describe('held-edit patch: the write rule (CFG-LEAK-W) judges both versions, and
     expect(h.files.held().map(edit => edit.path)).toEqual(['caps.yaml']);
   });
 
+  test('CFG-LEAK-W a held-file patch judges the version in effect too: a pair only the held text holds is new to the version in effect', async () => {
+    const h = harness();
+    await h.files.reload();
+    h.verdicts.other = true;
+    expect((await h.port.write(capsDef, undefined, START)).kind).toBe('written');
+    h.verdicts.other = false;
+    // Held before the rule: a hand-written loosening that already carries the pair. In effect: START, which has none.
+    h.fs.seed(PATH, `${FERRET_RAISE}${FLAG_NOTE}`);
+    await h.files.reload();
+    expect(h.port.fileState(capsDef).state).toBe('held');
+    const before = h.disk();
+    // The held text already holds the pair, so the patch adds nothing there; the version in effect has none, so it is new.
+    const outcome = await h.port.writeAsCaller(capsDef, undefined, { patch: { note: `srv --token ${FLAG_VALUE}` } });
+    expect(outcome).toMatchObject({ kind: 'refused', reason: 'raw_secret' });
+    expect(h.disk()).toBe(before);
+    expect(h.port.file(capsDef)).toEqual({ capA: 5, capB: 5, env: {} });
+    expect(h.files.held().map(edit => edit.path)).toEqual(['caps.yaml']);
+  });
+
   test('CFG-LEAK-W a held-file patch judges the held version too: a pair only the version in effect holds is new to the held text', async () => {
     const h = harness();
     await h.files.reload();
