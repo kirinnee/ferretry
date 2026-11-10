@@ -127,7 +127,10 @@ export default implementDaemon(manifest, {
     // A known root's `.mcp.json` — and nothing else there — is read through the kernel's `imports` root scoped to that
     // folder (lead ruling (B)), so a ferret in a subfolder reads it with no ferret in the project root. Every other
     // document is read through the ferret folder that holds it, as before.
-    const projectFile = projectRootMcpFile(root => kernel.roots.root('imports', { subfolder: root }));
+    // `within` anchors the scope at the project itself: the kernel then looks at every folder from the anchor down (none
+    // here, the scope is the anchor) and refuses a spelling that does not hold. The adapter's own `realPath` guard
+    // (`adapters/project-root-files.ts`) stays as the second layer: the anchor itself MAY be a link to the kernel.
+    const projectFile = projectRootMcpFile(root => kernel.roots.root('imports', { subfolder: root, within: root }));
     // A runtime home Runtimes published is read through its bounded reader, by exact document name; the rest as before.
     const rootDocuments = new RootMcpHarnessDocuments(async path => {
       if (path.endsWith(`/${PROJECT_MCP_FILE}`)) {
@@ -245,8 +248,16 @@ export default implementDaemon(manifest, {
       login: runtimesLoginTarget({
         runtimes: () => runtimes.current(),
         hasItem: name => items().has(name),
+        // The person's own Add form: a `${secret:NAME}` env goes into effect at once when the AMBIENT call is the owner
+        // (host, or a governed device holding fleet.configure); a ferret's credential never reaches this route
+        // (`caller: 'person'`), and any other caller keeps the kernel's hold. The kernel decides; nothing here can.
         writeItem: async (name, patch, ifMatch) =>
-          await kernel.config.write(MCP_CONFIG, name, { patch }, ifMatch === undefined ? undefined : { ifMatch }),
+          await kernel.config.writeAsCaller(
+            MCP_CONFIG,
+            name,
+            { patch },
+            ifMatch === undefined ? undefined : { ifMatch },
+          ),
         held: name => {
           const status = kernel.config.fileState(MCP_CONFIG, name);
           return status.state === 'held' ? status.sentences : undefined;

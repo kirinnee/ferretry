@@ -67,7 +67,8 @@ async function world() {
       layerProfile: async () => undefined,
     },
   });
-  const imports = projectRootMcpFile(folder => roots.root('imports', { subfolder: folder }));
+  // As the daemon opens it: anchored at the project itself (`within`), which lets the kernel treat the anchor as a link.
+  const imports = projectRootMcpFile(folder => roots.root('imports', { subfolder: folder, within: folder }));
   return { parent, project, mcpJson: join(project, '.mcp.json'), files, service, imports };
 }
 
@@ -124,6 +125,39 @@ describe('R-0161 a project whose .mcp.json is a link is refused, on a real disk'
     // Assert
     expect(reading.text).toBe('{"mcpServers":{}}\n');
     expect(await readFile(w.mcpJson, 'utf8')).toContain('"a"');
+  });
+
+  test('the inventory reader still reads a project at its real folder, anchored at itself', async () => {
+    // Arrange
+    const w = await world();
+    await writeFile(w.mcpJson, INSIDE);
+    const held = w.imports(w.mcpJson, [w.project]);
+
+    // Act
+    const resolved = held?.root.resolve('.mcp.json');
+    const text = resolved?.ok === true ? await held?.root.readText(resolved.value) : undefined;
+
+    // Assert
+    expect(text).toBe(INSIDE);
+  });
+
+  test('a project registered THROUGH a link reads nothing: the kernel lets an anchor be a link, so the adapter guard is what refuses', async () => {
+    // Arrange
+    const w = await world();
+    await writeFile(w.mcpJson, INSIDE);
+    const linked = join(w.parent, 'linked-workspace');
+    await symlink(w.project, linked);
+    const held = w.imports(join(linked, '.mcp.json'), [linked]);
+
+    // Act
+    const resolved = held?.root.resolve('.mcp.json');
+    const read = resolved?.ok === true ? held?.root.readText(resolved.value) : undefined;
+
+    // Assert
+    expect(read).toBeDefined();
+    const refusal = await read?.catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(McpDocumentUnreadable);
+    expect((refusal as Error).message).not.toContain(INSIDE_MARK);
   });
 
   test('the inventory reader (imports root) reads nothing through a link out of the project or inside it', async () => {

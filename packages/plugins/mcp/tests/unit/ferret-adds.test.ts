@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
-import { testHost } from '@ferretry/kernel/testing';
+import { ferret, testHost } from '@ferretry/kernel/testing';
 import { RuntimeIdSchema, type RuntimeSummary } from '@ferretry/plugin-runtimes/contract';
 import { fakeRuntimes } from '@ferretry/plugin-runtimes/contract/testing';
 import { fakeProjects } from '@ferretry/plugin-projects/contract/testing';
@@ -35,7 +35,30 @@ interface Options {
   readonly runtimes?: 'off';
   /** The owner's standing on every call (Gate's real standing carries governance), instead of the stand-in's. */
   readonly owner?: true;
+  /**
+   * A governed standing that passes the route but is NOT the owner (a device the kernel's owner question refuses),
+   * instead of the stand-in's. Gate's own judge is tested in core/gate; here the question is answered by `governed`.
+   */
+  readonly notOwner?: true;
 }
+
+/**
+ * The kernel's owner question (`secretAdd`) as Gate answers it for a stand-in standing: the host admin (ungoverned)
+ * applies, a governed caller holds. Anything else the writer asks is applied, as nothing here loosens a limit.
+ */
+const ownerQuestion = (input: { readonly secretAdd?: true; readonly standing?: { readonly governance?: unknown } }) =>
+  input.secretAdd !== true || (input.standing?.governance as { governed?: boolean } | undefined)?.governed === false
+    ? ('apply' as const)
+    : ('hold' as const);
+
+/** A governed device that holds every capability the route asks but is not the owner at the machine. */
+const governedStanding = () => ({
+  ...ownerStanding('ui'),
+  governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' as const }) },
+});
+
+const standIn = (standing: () => ReturnType<typeof ownerStanding>) =>
+  Object.assign(new StandInAdmission(() => standing()), { judgeConfigWrite: ownerQuestion });
 
 async function world(options: Options = {}) {
   const ferrets = new FakeFerrets();
@@ -57,7 +80,8 @@ async function world(options: Options = {}) {
       ...(options.projects === 'off' ? {} : { projects }),
       ...(options.runtimes === 'off' ? {} : { runtimes }),
     },
-    ...(options.owner === true ? { gate: new StandInAdmission(() => ownerStanding()) } : {}),
+    ...(options.owner === true ? { gate: standIn(() => ownerStanding()) } : {}),
+    ...(options.notOwner === true ? { gate: standIn(governedStanding) } : {}),
   });
   return { h, runtimes };
 }
@@ -173,6 +197,48 @@ describe('a login add at the runtime a ferret launches on', () => {
     expect((await runtimes.profiles())[0]?.layers).toEqual(['instructions/base']);
     expect(h.published.filter(entry => entry.event === McpServerAdded.name)).toEqual([]);
     // Refused before any write: no item file was made, so none is left in effect.
+    expect(h.configChanges).toEqual([]);
+    expect(runtimes.changes).toEqual([]);
+  });
+
+  const WITH_SECRET = { name: 'acme', server: { ...COMMAND, env: { TOKEN: '${secret:ACME_TOKEN}' } } };
+
+  test('R-0351 the OWNER adds a server whose env names a secret: the item is in effect and ONE layer is added at once', async () => {
+    const { h, runtimes } = await world({ owner: true });
+
+    const added = await h.request('POST', '/v1/ferrets/f1/mcp/login', { body: WITH_SECRET });
+
+    expect(added.status).toBe(200);
+    expect(added.json()).toEqual({ scope: 'login', name: 'acme', runtime: 'claude-work', profile: 'work' });
+    expect(h.configChanges.map(change => `${change.path}:${change.state}`)).toEqual(['mcp/acme.yaml:valid']);
+    expect(runtimes.changes).toEqual([{ kind: 'add', profile: 'work', layer: 'mcp/acme', ifMatch: 'etag-1' }]);
+    // In effect: the preview now sees it as a replacement.
+    const preview = await h.request('POST', '/v1/ferrets/f1/mcp/login/preview', { body: WITH_SECRET });
+    expect(preview.json<{ replaces: boolean }>().replaces).toBe(true);
+  });
+
+  test('R-0351 a caller who is not the owner keeps the hold on a secret env: nothing in effect and no layer', async () => {
+    const { h, runtimes } = await world({ notOwner: true });
+
+    const held = await h.request('POST', '/v1/ferrets/f1/mcp/login', { body: WITH_SECRET });
+
+    expect(held.status).toBe(409);
+    expect(held.json<{ code: string }>().code).toBe('mcp_change_held');
+    expect(held.json<{ error: string }>().error).toContain('not in effect and the profile was not changed');
+    expect(held.json<{ error: string }>().error).toContain('ACME_TOKEN');
+    expect(runtimes.changes).toEqual([]);
+    expect(h.published.filter(entry => entry.event === McpServerAdded.name)).toEqual([]);
+    const preview = await h.request('POST', '/v1/ferrets/f1/mcp/login/preview', { body: WITH_SECRET });
+    expect(preview.json<{ replaces: boolean }>().replaces).toBe(false);
+  });
+
+  test("R-0351 a ferret's session credential never reaches the login add (the route is a person's), so nothing is written", async () => {
+    const { h, runtimes } = await world();
+
+    const refused = await h.request('POST', '/v1/ferrets/f1/mcp/login', { body: WITH_SECRET, as: ferret('f1') });
+
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.status).not.toBe(409);
     expect(h.configChanges).toEqual([]);
     expect(runtimes.changes).toEqual([]);
   });
