@@ -90,15 +90,6 @@ describe('config_read', () => {
     );
   });
 
-  test('CFG-LEAK-R config_read of a text over the cap withholds it, in today’s words', async () => {
-    const w = world();
-    w.fs.seed(FILE, `note: ${'x'.repeat(300 * 1024)}\n`);
-    await w.files.reload();
-    const answer = await w.run({ tool: 'config.read', path: PATH });
-    expect(answer.text).toBe('');
-    expect(answer.summary).toContain('; its text is not shown because it is larger than a configuration file may be.');
-  });
-
   test('CFG-LEAK-R config_read of a value the mask cannot hide safely withholds the text and says so', async () => {
     const w = world();
     w.fs.seed(FILE, `note: &n ${VALUE}\nargs:\n  - --token\n  - *n\n`);

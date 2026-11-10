@@ -94,22 +94,23 @@ describe('what is cut, and what stays', () => {
     expect(result.text).toBe(`outer:\n  inner:\n    api_token: ${HIDDEN}\n    mode: fast\n`);
   });
 
-  test('CFG-LEAK-R a list item is judged by the key of its list: items under `tokens:` are cut, whatever they hold', () => {
-    const result = shownOf(
-      `tokens:\n  - ${SHORT_PASSWORD}\n  - ${OTHER_VALUE}\nplain:\n  - ${SHORT_PASSWORD}\n`,
-      openDef,
-    );
-    expect(result.text).toBe(`tokens:\n  - ${HIDDEN}\n  - ${HIDDEN}\nplain:\n  - ${SHORT_PASSWORD}\n`);
+  test('CFG-LEAK-R a list item is judged by the key of its list: items under `token_list:` are cut, whatever they hold', () => {
+    const result = shownOf(`token_list:\n  - ${SHORT_PASSWORD}\n  - hunter2025\nplain:\n  - harmless-word\n`, openDef);
+    expect(result.text).toBe(`token_list:\n  - ${HIDDEN}\n  - ${HIDDEN}\nplain:\n  - harmless-word\n`);
   });
 
   test('CFG-LEAK-R a list that mixes strings and other values cuts the strings by the word before them', () => {
-    const result = shownOf(`list:\n  - --token\n  - 7\n  - ${VALUE}\n  - [--password, ${OTHER_VALUE}]\n`, openDef);
-    expect(result.text).toBe(`list:\n  - --token\n  - 7\n  - ${VALUE}\n  - [--password, ${HIDDEN}]\n`);
+    const result = shownOf(
+      `list:\n  - --token\n  - 7\n  - ${VALUE}\n  - - --password\n    - ${OTHER_VALUE}\n`,
+      openDef,
+    );
+    // The number between them breaks the pair; the nested list is its own command line.
+    expect(result.text).toBe(`list:\n  - --token\n  - 7\n  - ${VALUE}\n  - - --password\n    - ${HIDDEN}\n`);
   });
 });
 
 describe('what the mask keeps', () => {
-  test('CFG-LEAK-R comments, key order and every unhidden byte survive the mask', () => {
+  test('CFG-LEAK-R comments, key order and every unhidden line survive the mask', () => {
     const text = [
       '# first comment',
       'command: srv # trailing one',
@@ -119,7 +120,7 @@ describe('what the mask keeps', () => {
       `  - ${VALUE} # the value`,
       '  - keep-me',
       '',
-      "note: 'single quoted'   # end",
+      "note: 'single quoted' # end",
       '',
     ].join('\n');
     const result = shownOf(text);

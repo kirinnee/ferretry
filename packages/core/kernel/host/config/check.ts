@@ -8,7 +8,9 @@
  */
 import type { z } from 'zod';
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
+import { HIDDEN_VALUE_TEXT } from './secret-words.ts';
 import {
+  findFlagSecrets,
   findRawSecrets,
   RAW_SECRET_KEY_MESSAGE,
   RAW_SECRET_MESSAGE,
@@ -269,6 +271,98 @@ export function checkConfigText(
   }
   if (!parsed.success) return schemaIssues(path, parsed.error, read.read.locate);
   return { ok: true, value: parsed.data, written: read.read.value, text };
+}
+
+// ── The rules of a WRITE (CFG-LEAK-W) ────────────────────────────────────────────────────────────────────────────────
+// Not part of `checkConfigText`: that is the check every reload runs, and a rule added there would make a file that
+// already holds one invalid at the next reload. These two run only where a text is about to be put on disk.
+
+/** How many times `mark` is in `text`. */
+function countOf(text: string, mark: string): number {
+  let count = 0;
+  for (let at = text.indexOf(mark); at !== -1; at = text.indexOf(mark, at + mark.length)) count += 1;
+  return count;
+}
+
+/** The line (1-based) of the `nth` (1-based) `mark` in `text`. */
+function lineOfNth(text: string, mark: string, nth: number): number {
+  let at = -mark.length;
+  for (let seen = 0; seen < nth; seen += 1) at = text.indexOf(mark, at + mark.length);
+  return text.slice(0, at).split('\n').length;
+}
+
+/**
+ * W0: the mask is never written back. A text that holds MORE `‹hidden›` than the text on disk was made from a read that
+ * hid a value, and saving it would write the mask over the value. "More", not "any": a file that already holds the
+ * literal (in a comment, say) stays editable. Refused as `schema` with the line of the first one in excess.
+ */
+function hiddenMarkRefusal(path: string, text: string, prior: string | undefined): RefusedConfigText | undefined {
+  const before = prior === undefined ? 0 : countOf(prior, HIDDEN_VALUE_TEXT);
+  if (countOf(text, HIDDEN_VALUE_TEXT) <= before) return undefined;
+  return {
+    ok: false,
+    reason: 'schema',
+    issues: [
+      {
+        path,
+        line: lineOfNth(text, HIDDEN_VALUE_TEXT, before + 1),
+        column: 1,
+        severity: 'error',
+        message: `a value hidden from the device or agent that read this file is still ${HIDDEN_VALUE_TEXT} here; nothing was written`,
+        fix: `type the real value at the machine, or replace ${HIDDEN_VALUE_TEXT} with \${secret:NAME}`,
+      },
+    ],
+  };
+}
+
+/**
+ * W: a raw secret given to a flag (`findFlagSecrets`) that the text on disk does not already hold. NEW-ONLY: a file that
+ * already holds one keeps loading and keeps every write that leaves it as it is; one more, one moved to another file or
+ * one whose value changed is refused `raw_secret`, one issue each (located, capped), never repeating the value.
+ */
+function flagSecretRefusal(
+  path: string,
+  text: string,
+  written: unknown,
+  prior: string | undefined,
+  binary: string,
+): RefusedConfigText | undefined {
+  const found = findFlagSecrets(written);
+  if (found.length === 0) return undefined;
+  const readPrior = prior === undefined ? undefined : readConfigText(prior);
+  const known = new Set(
+    (readPrior?.ok === true ? findFlagSecrets(readPrior.read.value) : []).map(finding => finding.digest),
+  );
+  const added = found.filter(finding => !known.has(finding.digest));
+  if (added.length === 0) return undefined;
+  const read = readConfigText(text);
+  return {
+    ok: false,
+    reason: 'raw_secret',
+    ...cappedIssues(path, added, finding => ({
+      path,
+      ...at(read.ok ? read.read.locate(finding.path) : undefined),
+      severity: 'error' as const,
+      // The path to the value, never the value.
+      message: `${describePath(finding.path)}: this looks like a raw secret given to a flag (an API key, token or password)`,
+      fix: rawSecretFix(binary),
+    })),
+  };
+}
+
+/**
+ * What a text may not be when it is about to be put on disk, beyond {@link checkConfigText}: it writes the read mask back
+ * (W0), or it gives a raw secret to a flag the file on disk does not already hold (W). `written` is the plain value of
+ * the text, which passed its check; `prior` is the text on disk before this write (`undefined` when there is none).
+ */
+export function writeRefusal(
+  path: string,
+  text: string,
+  written: unknown,
+  prior: string | undefined,
+  binary: string,
+): RefusedConfigText | undefined {
+  return hiddenMarkRefusal(path, text, prior) ?? flagSecretRefusal(path, text, written, prior, binary);
 }
 
 /** A raw key anywhere in the text — a comment, a tag, an anchor, a line that does not parse — refused by its line alone. */

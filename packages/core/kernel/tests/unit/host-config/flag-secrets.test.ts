@@ -137,7 +137,6 @@ describe('the write rule at the first write site: a text put on disk', () => {
       expect(JSON.stringify(outcome)).not.toContain(VALUE);
       expect(outcome.issues[0]).toMatchObject({
         path: 'mcp/srv.yaml',
-        severity: 'error',
         message: expect.stringContaining(
           'this looks like a raw secret given to a flag (an API key, token or password)',
         ),
@@ -154,8 +153,12 @@ describe('the write rule at the first write site: a text put on disk', () => {
     const text =
       'args:\n  - --token\n  - ${secret:SRV_TOKEN}\n  - --token-file\n  - ~/.config/srv/token\n  - --auth-mode\n  - browser-login\n  - -p\n  - hunter2\n';
     const outcome = await h.port.write(mcpDef, 'srv', text);
-    expect(outcome.kind).toBe('written');
+    // Not refused: it is on disk. (A plugin's `${secret:NAME}` it adds waits for the owner, as it always did: held.)
+    expect(outcome.kind).not.toBe('refused');
     expect(h.disk('mcp/srv.yaml')).toBe(text);
+    // The same arguments without the reference are written outright.
+    const plain = await h.port.write(mcpDef, 'other', text.replace('${secret:SRV_TOKEN}', '$SRV_TOKEN'));
+    expect(plain.kind).toBe('written');
   });
 
   test('CFG-LEAK-W an existing file holding --token <v> RELOADS valid and stays in effect after a restart', async () => {

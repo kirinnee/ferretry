@@ -14,7 +14,8 @@
  *   `plugins.yaml`) or anything outside the list is refused on read, validate AND write, with today's words.
  * - A raw secret is refused by the writer like a file that does not parse, and no issue repeats the value; one in a
  *   YAML comment or tag counts (the check scans the raw text too). A read never returns the text of a file that holds
- *   one, parsed or not.
+ *   one, parsed or not, and shows any other file with the values a credential marks cut to `‹hidden›`
+ *   (`shown-text.ts`, CFG-LEAK-R); a write of a text that holds more `‹hidden›` than the file is refused.
  */
 import type { AgentConfigAnswer, AgentConfigCall } from '../../contract/agent-config.ts';
 import { type AgentControlReader, agentControlRefusal } from '../../contract/bound.ts';
@@ -24,9 +25,8 @@ import type { ConfigFileIssue, ConfigFilesWriter, ConfigTarget } from '../../con
 import { AGENT_REACH_WORDS, agentMayName } from './agent-reach.ts';
 import { checkConfigText, countProblems, MAX_CONFIG_ISSUES, moreIssues } from './check.ts';
 import { type ConfigDeclaration, targetOfPath } from './claims.ts';
-import { rawTextHoldsSecret } from './secrets.ts';
 import { schemaFileName, schemaModeline } from './schemas.ts';
-import { configTextTooLarge } from '@ferretry/std/yaml';
+import { hiddenCountWords, shownConfigText, WITHHELD_WORDS } from './shown-text.ts';
 import type { ConfigStatus } from './service.ts';
 
 /** What the agent's door reads. */
@@ -167,32 +167,22 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
     const file = await writerOrFail().read(found);
     if (file === undefined) throw new ApiError(400, `${NOT_A_FILE}: ${path}`, 'bad_request');
     const state = file.status.state === 'invalid' ? 'invalid' : file.status.state === 'held' ? 'pending' : 'ok';
-    // A text over the cap is neither checked nor scanned nor shown: nothing could vouch that it holds no secret.
-    const tooLarge = file.text !== undefined && configTextTooLarge(file.text);
-    // A file somebody hand-wrote a raw secret into is shown by its located issue, never by its text.
-    const checked =
-      file.text === undefined || tooLarge ? undefined : checkConfigText(found.def, path, file.text, sources.binary);
-    // A file that does not even parse was never scanned by the check, so its raw text is: a key pasted mid-edit counts.
-    const holdsSecret =
-      checked !== undefined &&
-      !checked.ok &&
-      (checked.reason === 'raw_secret' ||
-        // A def of credential records never shows the text of a file that fails its check, whatever the reason (a parse
-        // fault, an unknown key, a key outside `env`, a throwing schema): the located issues stay, but no check of such a
-        // file can vouch that its text holds no secret. Any other def shows a failing file unless it does not parse and
-        // its raw text holds a secret.
-        found.def.credentialRecords === true ||
-        (checked.reason === 'yaml' && rawTextHoldsSecret(file.text ?? '')));
-    const withheld = holdsSecret
-      ? '; its text is not shown because it holds a raw secret, which the owner must move into the secret store'
-      : tooLarge
-        ? '; its text is not shown because it is larger than a configuration file may be'
-        : '';
+    // What a read shows is the kernel's one rule, the same one `GET /v1/config/file` answers by (`shown-text.ts`): a file
+    // somebody hand-wrote a raw secret into, a text over the cap, or one no mask can prove safe is shown by its located
+    // issues, never by its text; any other file is shown with the values a credential name or a token shape marks hidden.
+    const shown = file.text === undefined ? undefined : shownConfigText(found.def, path, file.text, sources.binary);
+    const note =
+      shown?.kind === 'withheld'
+        ? `; its text is not shown because ${WITHHELD_WORDS[shown.reason]}`
+        : shown !== undefined && shown.hidden.length > 0
+          ? `; ${hiddenCountWords(shown.hidden.length)}`
+          : '';
     return {
       summary: file.exists
-        ? `${file.path} (${state})${withheld}.`
+        ? `${file.path} (${state})${note}.`
         : `${file.path} does not exist yet; this is the starter a new one begins with.`,
-      text: holdsSecret || tooLarge ? '' : (file.text ?? `${schemaModeline(found.def, file.path)}\n`),
+      text:
+        shown === undefined ? `${schemaModeline(found.def, file.path)}\n` : shown.kind === 'shown' ? shown.text : '',
       etag: file.etag,
       issues: issuesOf(file.issues ?? []),
     };

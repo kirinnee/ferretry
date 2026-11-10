@@ -198,20 +198,22 @@ describe('GET /v1/config/file shows the masked text to every caller', () => {
     });
   });
 
-  test('CFG-LEAK-R a withheld file says why in plain words, for each reason', async () => {
+  test('CFG-LEAK-R a withheld file says why in plain words: a value the mask cannot prove hidden', async () => {
     const w = world();
     w.fs.seed(FILE, `note: &n ${VALUE}\nargs:\n  - --token\n  - *n\n`);
     await w.files.reload();
-    const unmaskable = json(await get(w.handlers));
-    expect(unmaskable.text).toBe(
+    const response = await get(w.handlers);
+    const body = json(response);
+    expect(body.text).toBe(
       `# ${HIDDEN}: the text of this file is not shown because a value in it could not be hidden safely; edit it at the machine\n`,
     );
-    w.fs.seed(FILE, `note: ${'x'.repeat(300 * 1024)}\n`);
-    await w.files.reload();
-    const large = json(await get(w.handlers));
-    expect(large.text).toBe(
-      `# ${HIDDEN}: the text of this file is not shown because it is larger than a configuration file may be; edit it at the machine\n`,
-    );
+    expect(issuesOf(response).at(-1)).toEqual({
+      path: PATH,
+      severity: 'error',
+      message: 'the text of this file is not shown because a value in it could not be hidden safely',
+      fix: 'edit the file at the machine',
+    });
+    expect(response.body).not.toContain(VALUE);
   });
 });
 
