@@ -18,10 +18,10 @@ const SIGNED_OUT = /gh auth login|not logged in|authentication required/iu;
 const firstLine = (text: string): string => (text.trim().split('\n')[0] ?? '').slice(0, DETAIL_LENGTH);
 
 /*
- * GAP: the `gh` and `git` children get only the kernel's child environment (`PATH`, `HOME`) plus the few values set
- * here. So they lose `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` (a keyring-backed `gh`
- * sign-in can look signed out), `GH_CONFIG_DIR`, `SSH_AUTH_SOCK` and the proxy variables, until the kernel's
- * child-environment allow-list of non-secret names lands. Nothing here may widen it by hand, and no token
+ * The `gh` and `git` children get the kernel's child environment (`PATH`, `HOME`), the kernel's allow-list of
+ * non-secret names for those two programs (`TOOL_ENVIRONMENT_NAMES`: `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`,
+ * `DBUS_SESSION_BUS_ADDRESS`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK` and the proxy variables, so a keyring-backed `gh`
+ * sign-in still works), and the few values set here. Nothing here may widen that by hand, and no token
  * (`GH_TOKEN`, `GITHUB_TOKEN`, `hosts.yml`) is ever read or passed: `gh` finds its own sign-in.
  */
 const GH_ENVIRONMENT = { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' } as const;
@@ -162,7 +162,7 @@ export class GitSpawnCopies implements WorkingCopies {
     return await asked;
   }
 
-  /** The program's output, trimmed, or `null` when it failed, printed nothing, or could not run. See GAP above. */
+  /** The program's output, trimmed, or `null` when it failed, printed nothing, or could not run. `ssh` gets no allow-listed names (only `git` and `gh` do). */
   private async run(program: 'git' | 'ssh', args: readonly string[]): Promise<string | null> {
     try {
       const result = await this.spawn.run(program, args, { timeout: milliseconds(10_000) });
