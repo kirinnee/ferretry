@@ -63,10 +63,15 @@ async function timed(act: () => Promise<unknown> | unknown): Promise<number> {
   const before = process.threadCpuUsage();
   await act();
   const spent = process.threadCpuUsage(before);
-  const ms = (spent.user + spent.system) / 1_000;
-  // The CPU clock must read something: every call here is tens to hundreds of ms, so a clock stuck at 0 would pass.
-  expect(ms).toBeGreaterThan(0);
-  return ms;
+  return (spent.user + spent.system) / 1_000;
+}
+
+/**
+ * The CPU clock must read something. Only the !!omap shapes (hundreds of ms a call) can say so: a cheap shape, such as a
+ * long comment, costs under the clock's 1 ms tick and reads 0 on a clock that works.
+ */
+function clockReads(label: string, ms: number): void {
+  if (label.includes('!!omap')) expect(ms).toBeGreaterThan(0);
 }
 
 /**
@@ -106,13 +111,16 @@ describe('every hostile shape at the size cap answers within the bound, at every
     test(`T-0033 T-0034 ${label}: validate and write each answer in under ${BOUND_MS} ms`, async () => {
       const first = await prepared();
       let last = first;
+      let slowest = 0;
       for (const tool of ['config.validate', 'config.write'] as const) {
         const spent = await bestOf(async attempt => {
           last = attempt === 0 ? first : await prepared();
           return await timed(() => last.agent.run(call({ tool, path: 'voice.yaml', text }), ferretStanding));
         });
+        slowest = Math.max(slowest, spent);
         expect(spent).toBeLessThan(BOUND_MS);
       }
+      clockReads(label, slowest);
       // Either the text checked and is in effect, or it was refused and the file is as it was.
       const { fs, files } = last;
       const now = await fs.readText(VOICE);
@@ -128,6 +136,7 @@ describe('every hostile shape at the size cap answers within the bound, at every
         last.fs.seed(VOICE, text);
         return await timed(() => last.files.reload());
       });
+      clockReads(label, reloaded);
       expect(reloaded).toBeLessThan(BOUND_MS);
       const { files } = last;
       const state = files.status().files.find(file => file.path === 'voice.yaml')?.state;

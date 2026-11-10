@@ -20,6 +20,12 @@ import { captureLog, HOME, manualClock } from './support.ts';
 
 /** A hard bound per call, far above one linear pass: the shapes this guards took 4–16 s at this size. */
 const BOUND_MS = 1500;
+/**
+ * What one test may take on the wall clock. A door is bounded by CPU (`BOUND_MS`), but a test samples six doors, and a slow
+ * first sample is sampled again from fresh worlds, so on a loaded runner a test that is within every bound can pass bun's
+ * 5 s default. This bounds a hang, not a regression; the regression is the CPU bound.
+ */
+const TEST_TIMEOUT_MS = 60_000;
 const ferretStanding = { credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'wren' } };
 const KINDS = declaredKinds();
 const call = (body: Record<string, unknown>): AgentConfigCall => AgentConfigCallSchema.parse(body);
@@ -178,19 +184,27 @@ async function everyDoor(kind: DeclaredKind, text: string): Promise<void> {
 describe('every declared kind, its own schema, wrong values at the size cap: every door within the bound', () => {
   for (const kind of KINDS) {
     const [label, text] = sweepTextOf(kind, CONFIG_FILE_MAX_BYTES);
-    test(`T-0032 T-0033 T-0034 ${kind.path} (${label}): reload, read, validate and write each under ${BOUND_MS} ms`, async () => {
-      await everyDoor(kind, text);
-    });
+    test(
+      `T-0032 T-0033 T-0034 ${kind.path} (${label}): reload, read, validate and write each under ${BOUND_MS} ms`,
+      async () => {
+        await everyDoor(kind, text);
+      },
+      TEST_TIMEOUT_MS,
+    );
   }
 });
 
 describe('review round 7: the real mcp/<name>.yaml at the size cap', () => {
   const mcp = KINDS.find(kind => kind.path === 'mcp/sweep.yaml');
   for (const [label, text] of mcpReviewShapes(CONFIG_FILE_MAX_BYTES)) {
-    test(`T-0032 T-0033 T-0034 ${label}: every door under ${BOUND_MS} ms, at most ${MAX_CONFIG_ISSUES} problems listed`, async () => {
-      if (mcp === undefined) throw new Error('mcp/<name>.yaml is not declared');
-      await everyDoor(mcp, text);
-    });
+    test(
+      `T-0032 T-0033 T-0034 ${label}: every door under ${BOUND_MS} ms, at most ${MAX_CONFIG_ISSUES} problems listed`,
+      async () => {
+        if (mcp === undefined) throw new Error('mcp/<name>.yaml is not declared');
+        await everyDoor(mcp, text);
+      },
+      TEST_TIMEOUT_MS,
+    );
   }
 
   test('T-0033 an env of many wrong values: the first problems are located, the rest are one counted sentence', async () => {
