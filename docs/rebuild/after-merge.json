@@ -61,6 +61,11 @@
       "id": "ffi-descriptor-verify",
       "what": "the FFI descriptor verify line, which needs the darwin run",
       "owner": "gustavo"
+    },
+    {
+      "id": "coverage-lag",
+      "what": "the 12 unit coverage batches + 40 integration files (#32 CI-only proof), moved after merge by the owner, !A484",
+      "owner": "nelly"
     }
   ]
 }

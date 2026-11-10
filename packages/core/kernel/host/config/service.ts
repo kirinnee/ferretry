@@ -60,7 +60,7 @@ import {
   type ConfigDeclaration,
   claimOf,
 } from './claims.ts';
-import { checkConfigText, type ConfigIssue, type ConfigRefusal } from './check.ts';
+import { checkConfigText, type ConfigIssue, type ConfigRefusal, writeRefusal } from './check.ts';
 import { type ConfigCheckMemo, createConfigCheckMemo } from './check-memo.ts';
 import {
   type AcceptedConfig,
@@ -420,6 +420,18 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   /** A check outside a load: one the last load kept answers, and nothing new is kept. */
   const check = (def: ConfigDef, path: string, text: string): Checked =>
     checks.get(path, digest(text)) ?? checkConfigText(def, path, text, binary);
+  /**
+   * The check of a text about to be PUT ON DISK (CFG-LEAK-W): the check above, then the two rules of a write — the read
+   * mask is never written back (W0), and no raw secret is given to a flag that `prior` does not already give (W). `prior`
+   * is the text on disk before this write, or the version in effect for the patch of a held file; `undefined` for none.
+   * Called at exactly the four places a text lands (`writeLocked`, the two versions of a held-file patch, and a set's
+   * `planDocument`), never by a reload, `confirm`, `discard` or a roll-back: a file that already holds either keeps
+   * loading, and the check memo stays "the reload's check".
+   */
+  const judgeWrite = (def: ConfigDef, path: string, text: string, prior: string | undefined): Checked => {
+    const checked = check(def, path, text);
+    return checked.ok ? (writeRefusal(path, text, checked.written, prior, binary) ?? checked) : checked;
+  };
   /** A check inside a load: kept, since this load settles the file. */
   const checkInLoad = (def: ConfigDef, path: string, text: string): Checked => {
     const key = digest(text);
@@ -998,7 +1010,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (moved !== undefined) return moved;
     const text = typeof edit === 'string' ? edit : patched(slot, existing, edit.patch, within);
     if (text === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-    const checked = check(def, slot.path, text);
+    const checked = judgeWrite(def, slot.path, text, existing);
     if (!checked.ok) return { kind: 'refused', reason: checked.reason, issues: checked.issues };
     const etag = digest(text);
     const before = settled.get(slot.path)?.evaluated.value;
@@ -1161,13 +1173,13 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     // The version in effect, patched: what the caller's act means today.
     const effectiveText = patched(slot, inEffect?.text, patch, within);
     if (effectiveText === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-    const effective = check(def, slot.path, effectiveText);
+    const effective = judgeWrite(def, slot.path, effectiveText, inEffect?.text);
     if (!effective.ok) return { kind: 'refused', reason: effective.reason, issues: effective.issues };
     // The held version (the file on disk), patched. A held REMOVAL has no text to carry the patch.
     const heldText = existing === undefined ? undefined : patched(slot, existing, patch, within);
     if (existing !== undefined && heldText === undefined)
       return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-    const checkedHeld = heldText === undefined ? undefined : check(def, slot.path, heldText);
+    const checkedHeld = heldText === undefined ? undefined : judgeWrite(def, slot.path, heldText, existing);
     if (checkedHeld !== undefined && !checkedHeld.ok)
       return { kind: 'refused', reason: checkedHeld.reason, issues: checkedHeld.issues };
     // Both passed: the load after the write is handed their checks.
@@ -1335,7 +1347,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     }
     const text = typeof edit === 'string' ? edit : patched(slot, prior, edit.patch);
     if (text === undefined) return { verdict: refusedDocument('not_a_mapping', ref) };
-    const checked = check(def, slot.path, text);
+    const checked = judgeWrite(def, slot.path, text, prior);
     if (!checked.ok) return { verdict: refusedDocument(checked.reason, ref, writeIssues(checked.issues)) };
     const unchanged = digest(text) === entry?.evaluated.inEffect?.etag;
     const added = unchanged || !untrusted ? [] : addedSecretReferenceSentences(before, checked.value);

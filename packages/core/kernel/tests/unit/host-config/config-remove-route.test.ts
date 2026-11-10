@@ -35,7 +35,7 @@ function world(answer: (input: ConfigAccessJudgement) => ConfigAccessVerdict = (
       return answer(input);
     },
   } as unknown as Admission;
-  const handlers = configRoutes({ writer: () => files.writer(), admission: () => gate, home: HOME });
+  const handlers = configRoutes({ writer: () => files.writer(), admission: () => gate, home: HOME, binary: 'fy' });
   return { asked, files, fs, handlers };
 }
 
@@ -236,7 +236,12 @@ describe('K-small #11 DELETE /v1/config/file refuses before anything is removed'
       },
     } as unknown as Admission;
     for (const admission of [undefined, throwing]) {
-      const handlers = configRoutes({ writer: () => files.writer(), admission: () => admission, home: HOME });
+      const handlers = configRoutes({
+        writer: () => files.writer(),
+        admission: () => admission,
+        home: HOME,
+        binary: 'fy',
+      });
       const response = await handlers['DELETE /v1/config/file'](
         call(request('DELETE', [['path', 'logins/a.yaml']], { 'if-match': 'x' })),
       );
