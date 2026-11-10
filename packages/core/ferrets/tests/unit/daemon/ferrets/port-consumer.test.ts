@@ -7,8 +7,13 @@ import type { FerretsService } from '../../../../daemon/lib/ferrets/service.ts';
 const F1 = 'f1' as FerretId;
 
 /** A service that records what reached it; the port is what is under test, not the service. */
-function spy(records: Readonly<Record<string, unknown>> = {}) {
+function spy(
+  records: Readonly<Record<string, unknown>> = {},
+  /** What the session documents say of a parent: its lineage, or an `Error` when they cannot be read. Default: not in it. */
+  lineage: Readonly<Record<string, boolean | Error>> = {},
+) {
   const reached: { readonly member: string; readonly args: readonly unknown[] }[] = [];
+  const asked: string[] = [];
   const note =
     (member: string, answer: unknown) =>
     async (...args: unknown[]) => {
@@ -26,8 +31,15 @@ function spy(records: Readonly<Record<string, unknown>> = {}) {
       if (record instanceof Error) throw record;
       return record;
     },
+    // The port-only document check: asked only for a parent the registry read shows to be ordinary.
+    inWardenLineage: async (id: string) => {
+      asked.push(id);
+      const answer = lineage[id] ?? false;
+      if (answer instanceof Error) throw answer;
+      return answer;
+    },
   } as unknown as FerretsService;
-  return { service, reached, port: (consumer: string): FerretsApi => ferretsPort(service, consumer) };
+  return { service, reached, asked, port: (consumer: string): FerretsApi => ferretsPort(service, consumer) };
 }
 
 const REFUSED_RESUME = {
@@ -123,6 +135,36 @@ test('KCB-S a start under a parent that cannot be read is refused from a non-war
       PARENT_REFUSAL,
     );
   expect(w.reached).toEqual([]);
+});
+
+test('KCB-S B1 a start under a parent the session documents put in the Warden’s lineage is refused from a non-warden consumer, and nothing is started', async () => {
+  // The registry summary is ordinary (as production's always is: it does not carry the stamp); the documents say otherwise.
+  const w = spy(
+    { stamped: { id: 'stamped', label: 'helper' }, plain: { id: 'plain', label: 'my-lead' } },
+    { stamped: true },
+  );
+  for (const consumer of ['board', 'packs', 'lessons', ''])
+    expect(await w.port(consumer).start({ folder: '/work', by: 'owner', parent: 'stamped' as FerretId })).toEqual(
+      PARENT_REFUSAL,
+    );
+  expect(w.reached).toEqual([]);
+  expect(w.asked).toEqual(['stamped', 'stamped', 'stamped', 'stamped']);
+
+  // The Warden asks nobody and starts; an ordinary parent is admitted after the same check says no.
+  w.asked.length = 0;
+  expect((await w.port('warden').start({ folder: '/work', by: 'owner', parent: 'stamped' as FerretId })).ok).toBe(true);
+  expect(w.asked).toEqual([]);
+  expect((await w.port('packs').start({ folder: '/work', by: 'pack', parent: 'plain' as FerretId })).ok).toBe(true);
+  expect(w.asked).toEqual(['plain']);
+});
+
+test('KCB-S B1 a start under a parent whose session documents cannot be read is refused from a non-warden consumer (fail closed), and nothing is started', async () => {
+  const w = spy({ torn: { id: 'torn', label: 'helper' } }, { torn: new Error('damaged ancestor') });
+  expect(await w.port('packs').start({ folder: '/work', by: 'pack', parent: 'torn' as FerretId })).toEqual(
+    PARENT_REFUSAL,
+  );
+  expect(w.reached).toEqual([]);
+  expect(w.asked).toEqual(['torn']);
 });
 
 test('KCB-S a start and a move forward a rebuilt copy, so a getter cannot answer the check and the service differently', async () => {

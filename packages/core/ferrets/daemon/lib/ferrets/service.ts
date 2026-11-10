@@ -314,6 +314,13 @@ export interface FerretSessionPort {
    * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
    */
   questionFile?(ferret: FerretId): Promise<FencedPath>;
+  /**
+   * Port-only (not on the contract): whether a ferret started under `parent` would be stamped into the Warden's
+   * lineage, decided from the SAME source and rule the start's stamp uses (the session documents, `resolveWardenLineage`),
+   * not from the registry summary, which does not carry the stamp. Throws when the documents cannot be read; the caller
+   * refuses then. Unbound: the stamp is not written either, so there is no lineage to ask.
+   */
+  inWardenLineage?(parent: FerretId): Promise<boolean>;
 }
 
 /** One file of a start's opening attachments, as the ferret's `attachments/` folder holds it. */
@@ -577,6 +584,15 @@ export class FerretsService implements FerretsApi {
   /** The managed worktree registry, durable facts only (the contract's `managedWorktrees()`). */
   async managedWorktrees(): Promise<readonly ManagedWorktreeSummary[]> {
     return (await this.ports.managedWorktrees?.()) ?? [];
+  }
+
+  /**
+   * Port-only (not a {@link FerretsApi} member): whether a start under `parent` would be stamped into the Warden's
+   * lineage, as the session documents say. `false` with the session port unbound (nothing is stamped then). Rejects when
+   * the documents cannot be read.
+   */
+  async inWardenLineage(parent: FerretId): Promise<boolean> {
+    return (await this.ports.session?.inWardenLineage?.(parent)) ?? false;
   }
 
   mayTouch(caller: FerretId, target: FerretId): boolean {

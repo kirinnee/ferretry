@@ -35,11 +35,21 @@ const NOT_THE_WARDEN = 'only the Warden is recorded as the Warden';
 const NOT_THE_WARDEN_LABEL = 'only the Warden starts a ferret under its own label';
 const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent in its own tree';
 
-/** Whether a ferret is in the Warden's tree: its label trims to the Warden's, or it is stamped as descending from it. Fails closed: a ferret that cannot be read counts as in it. */
+/**
+ * Whether a start under `ferret` would put the new ferret in the Warden's tree. It does when the parent's registry
+ * label trims to the Warden's, or its summary says it descends from it, or the session documents say so: the same source
+ * and rule the start's stamp uses (the registry summary does not carry the stamp). Fails closed: a parent that cannot
+ * be read, is unknown, or whose documents cannot be read counts as in the tree.
+ */
 async function inWardenTree(service: FerretsService, ferret: FerretId): Promise<boolean> {
   const parent = await service.get(ferret).catch(() => undefined);
   if (parent === undefined) return true;
-  return parent.label?.trim() === WARDEN_LABEL || parent.provenance?.wardenLineage === true;
+  if (parent.label?.trim() === WARDEN_LABEL || parent.provenance?.wardenLineage === true) return true;
+  try {
+    return await service.inWardenLineage(ferret);
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -53,8 +63,10 @@ async function inWardenTree(service: FerretsService, ferret: FerretId): Promise<
  * - a consumer's `label` and `parent` are both checked: a start under the Warden's own label (`options.label`), and a
  *   start whose `parent` is in the Warden's tree (a parent in it gives the new ferret its lineage and so its label),
  *   only from the Warden. Any other parent is admitted: a lead starts its helpers through the port (parity J-0057).
- *   A parent is in the Warden's tree when its label trims to the Warden's label or its provenance says
- *   `wardenLineage`; a parent that cannot be read is refused (fail closed), and nothing is started.
+ *   A parent is in the Warden's tree when its registry label trims to the Warden's label, or the session documents
+ *   say so (`FerretSessionPort.inWardenLineage`, the same source and rule the start's stamp uses); a parent that cannot
+ *   be read, or whose documents cannot, is refused (fail closed), and nothing is started. With the session port
+ *   unbound no stamp is written, so the label check is all there is to make.
  * - `systemCallsign` draws only the prefix of the consumer's own kind (`ApiError` 403 otherwise).
  *
  * `start` and `move` read the caller's request once and forward a rebuilt copy, never the caller's own object.
