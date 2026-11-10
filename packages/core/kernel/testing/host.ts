@@ -1692,8 +1692,10 @@ async function start(world: World): Promise<TestHost> {
                 .map((_, index, parts) => parts.slice(0, index + 1).join('/'))
                 .filter(step => step !== '' && testLinks.has(step));
             const reaches = (step: string): boolean => {
-              const pointsAt = testLinks.get(step) as string;
-              return world.roots.has(pointsAt) || testFolderExists(pointsAt);
+              // a link to a link is followed to its end, as `realpath` does; a chain that ends nowhere reaches nothing
+              let end = testLinks.get(step) as string;
+              for (let hops = 0; hops < 40 && testLinks.has(end); hops += 1) end = testLinks.get(end) as string;
+              return !testLinks.has(end) && (world.roots.has(end) || testFolderExists(end));
             };
             for (const parent of parents) if (stepsOf(parent).some(reaches)) throw new RootError('link_escape');
             for (const parent of parents) {
