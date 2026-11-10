@@ -116,7 +116,7 @@ describe('relay worker route', () => {
     },
   );
 
-  it('should serve nobody when the deployment lists nobody', async () => {
+  guarantee(['R122'], 'should serve nobody when the deployment lists nobody', async () => {
     const { value, routed } = environment(undefined);
     should((await relayFetch(upgrade(`/v1/rendezvous/${daemonId}/client`), value)).status).equal(404);
     should(routed).deepEqual([]);
@@ -216,19 +216,25 @@ describe('hosted relay worker routes', () => {
     },
   );
 
-  it('should accept a refusal socket, explain a capacity denial, and allocate no rendezvous', async () => {
-    const harness = hostedEnvironment({
-      controlFetch: async () =>
-        Response.json({ ok: false, code: SESSION_CLOSE_CODES.hostedCapacity, reason: 'global connection ceiling' }),
-    });
-    const runtime = testRuntime();
-    should((await relayFetch(upgrade(`/v1/rendezvous/${daemonId}/client`), harness.value, runtime)).status).equal(200);
-    should(refusal(runtime)).match({
-      control: { t: 'error', code: SESSION_CLOSE_CODES.hostedCapacity, reason: 'global connection ceiling' },
-      code: SESSION_CLOSE_CODES.hostedCapacity,
-    });
-    should(harness.routed).deepEqual([]);
-  });
+  guarantee(
+    ['R114'],
+    'should accept a refusal socket, explain a capacity denial, and allocate no rendezvous',
+    async () => {
+      const harness = hostedEnvironment({
+        controlFetch: async () =>
+          Response.json({ ok: false, code: SESSION_CLOSE_CODES.hostedCapacity, reason: 'global connection ceiling' }),
+      });
+      const runtime = testRuntime();
+      should((await relayFetch(upgrade(`/v1/rendezvous/${daemonId}/client`), harness.value, runtime)).status).equal(
+        200,
+      );
+      should(refusal(runtime)).match({
+        control: { t: 'error', code: SESSION_CLOSE_CODES.hostedCapacity, reason: 'global connection ceiling' },
+        code: SESSION_CLOSE_CODES.hostedCapacity,
+      });
+      should(harness.routed).deepEqual([]);
+    },
+  );
 
   guarantee(['R134'], 'should make missing, failed or malformed accounting a clear internal refusal', async () => {
     const cases: RelayEnvironment[] = [
@@ -291,6 +297,105 @@ describe('hosted relay worker routes', () => {
         .status,
     ).equal(405);
   });
+
+  guarantee(
+    ['R119'],
+    'should keep metrics behind the operator bearer and write no client address into anything it sends on',
+    async () => {
+      const clientIp = '203.0.113.77';
+      const harness = hostedEnvironment({ operatorToken: 'operator-secret' });
+
+      // Metrics: no bearer, a wrong bearer and a bearer-shaped other scheme are all refused, and never reach the object.
+      const asked = (headers: Record<string, string> = {}) =>
+        relayFetch(new Request('https://relay.example/v1/operator/metrics', { headers }), harness.value);
+      const refusedHeaders: Record<string, string>[] = [
+        {},
+        { Authorization: 'Bearer wrong' },
+        { Authorization: 'Basic operator-secret' },
+      ];
+      for (const headers of refusedHeaders) {
+        should((await asked(headers)).status).equal(401);
+      }
+      should(
+        harness.controlRequests.filter(request => new URL(request.url).pathname === '/operator/metrics'),
+      ).deepEqual([]);
+      should((await asked({ Authorization: 'Bearer operator-secret' })).status).equal(200);
+
+      // Against the real control object: the advertisement is no-store and says only version + relay address,
+      // the metrics are no-store, and what the meter stores holds no client address.
+      const storage = new FakeHostedRelayControlStorage();
+      const control = new HostedRelayControlDurableObject({ storage }, {}, { now: () => 1_000 });
+      const real: RelayEnvironment = {
+        RELAY_MODE: 'hosted',
+        RELAY_OPERATOR_TOKEN: 'operator-secret',
+        RELAY_CONTROL: { idFromName: name => name, get: () => ({ fetch: request => control.fetch(request) }) },
+        RENDEZVOUS: {
+          idFromName: name => name,
+          get: () => ({ fetch: async () => new Response('durable', { status: 101 }) }),
+        },
+      };
+      const bearer = { Authorization: 'Bearer operator-secret', 'Content-Type': 'application/json' };
+      should(
+        (
+          await relayFetch(
+            new Request('https://relay.example/v1/operator/config', {
+              method: 'PUT',
+              headers: bearer,
+              body: JSON.stringify({
+                version: 1,
+                relayUrl: 'https://relay.example',
+                limits: DEFAULT_HOSTED_RELAY_LIMITS,
+              }),
+            }),
+            real,
+          )
+        ).status,
+      ).equal(200);
+      const advertised = await relayFetch(new Request('https://relay.example/v1/default-relay'), real);
+      should(advertised.headers.get('Cache-Control')).match(/no-store/u);
+      should(Object.keys((await advertised.json()) as object).sort()).deepEqual(['relayUrl', 'version']);
+      const metrics = await relayFetch(
+        new Request('https://relay.example/v1/operator/metrics', { headers: bearer }),
+        real,
+      );
+      should(metrics.status).equal(200);
+      should(metrics.headers.get('Cache-Control')).match(/no-store/u);
+      const admitted = await relayFetch(
+        new Request(`https://relay.example/v1/rendezvous/${daemonId}/client`, {
+          headers: { Upgrade: 'WebSocket', 'CF-Connecting-IP': clientIp, 'X-Forwarded-For': clientIp },
+        }),
+        real,
+        testRuntime(),
+      );
+      should(admitted.status).equal(101);
+      should(storage.values.size).be.above(0);
+      should(JSON.stringify([...storage.values])).not.containEql(clientIp);
+      should(
+        await (
+          await relayFetch(new Request('https://relay.example/v1/operator/metrics', { headers: bearer }), real)
+        ).text(),
+      ).not.containEql(clientIp);
+
+      // A client's address reaches neither the control object (reserve/meter) nor the rendezvous it is routed to.
+      const response = await relayFetch(
+        new Request(`https://relay.example/v1/rendezvous/${daemonId}/client`, {
+          headers: { Upgrade: 'WebSocket', 'CF-Connecting-IP': clientIp, 'X-Forwarded-For': clientIp },
+        }),
+        harness.value,
+        testRuntime(),
+      );
+      should(response.status).equal(101);
+      // The rendezvous receives the upgrade as it came (it stores no address: see the R117 state-shape test);
+      // the control object, which meters and reserves, is sent none.
+      should(harness.controlRequests.length).be.above(0);
+      for (const request of harness.controlRequests) {
+        should(request.headers.get('CF-Connecting-IP')).be.null();
+        should(request.headers.get('X-Forwarded-For')).be.null();
+        should(await request.clone().text()).not.containEql(clientIp);
+        should(request.url).not.containEql(clientIp);
+      }
+    },
+  );
 
   it('should fail public discovery closed when its control state cannot be read', async () => {
     should(
