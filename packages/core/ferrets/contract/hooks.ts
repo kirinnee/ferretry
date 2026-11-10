@@ -71,7 +71,7 @@ export const StartDecideInputSchema = z.strictObject({
   login: z.string().optional(),
   folder: z.string().min(1),
   /** Who asked for the start. */
-  by: z.enum(['owner', 'ferret', 'pack', 'board', 'resume']),
+  by: z.enum(['owner', 'ferret', 'pack', 'board', 'warden', 'resume']),
   /** The model the start NAMED (`options.model`); absent when it named none (the harness then picks its own). */
   model: z.string().min(1).optional(),
   /** The start asked for the harness's fast mode (`options.fast`); absent when it did not. */
@@ -159,7 +159,7 @@ export const FerretStartedPayloadSchema = z.strictObject({
   parent: FerretIdSchema.optional(),
   pack: z.string().optional(),
   folder: z.string().min(1),
-  by: z.enum(['owner', 'ferret', 'pack', 'board']),
+  by: z.enum(['owner', 'ferret', 'pack', 'board', 'warden']),
   /** The prompt the ferret was started with: its brief. Absent for a start with none (an interactive terminal). */
   brief: z.string().min(1).optional(),
   /** The ownership label given to start (`start --label`). */

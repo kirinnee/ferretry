@@ -1,6 +1,13 @@
 import { ApiError, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
-import { implementDaemon } from '@ferretry/kernel/manifest';
-import { type ConversationApi, LinkKept, QuestionSchema, ReferenceCatalog, SearchSources } from '../contract/index.ts';
+import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
+import {
+  type ConversationApi,
+  conversationFor,
+  LinkKept,
+  QuestionSchema,
+  ReferenceCatalog,
+  SearchSources,
+} from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { PDF_WORKER_URL } from './attachments/adapters/decrypt-pdf.ts';
 import { openingAttachmentsSource } from './attachments/adapters/opening-attachments.ts';
@@ -118,7 +125,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
         tools: {
           search_work: b.tools.search_work,
         },
-        provides: { conversation: api },
+        provides: { conversation: perNeeder(needer => conversationFor(needer.id, api)) },
         hooks: {
           'ask.sources:question': { schema: QuestionSchema, title: 'Question', form: true },
           // What a launch says about hypermedia: only a switch the owner set, so a ferret with none keeps its mode default.

@@ -357,12 +357,12 @@ function tellDecided(options: ServiceResumeOptions | undefined, disposition: 'ru
  * Who may ask for a START (`StartRequest.by`), as a closed table checked at run time. A resume is not here: it goes
  * through `resume()`, which asks `start.decide` itself with `by: 'resume'`.
  */
-const START_ASKERS = { owner: true, ferret: true, pack: true, board: true } as const satisfies Record<
+const START_ASKERS = { owner: true, ferret: true, pack: true, board: true, warden: true } as const satisfies Record<
   StartRequest['by'],
   true
 >;
 const START_ASKER_REFUSAL =
-  'a start is asked for by the owner, a ferret, a pack or the board; a resume is asked for through resume';
+  'a start is asked for by the owner, a ferret, a pack, the board or the Warden; a resume is asked for through resume';
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
