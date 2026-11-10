@@ -140,7 +140,7 @@ describe('RootMcpProjectFiles on a real folder', () => {
     await writeFile(join(parent, 'outside', 'secret.json'), '{"leak":true}');
     await symlink(join(parent, 'outside', 'secret.json'), join(base, '.mcp.json'));
 
-    await expect(files.read('f1', join(base, '.mcp.json'))).rejects.toThrow('not a regular file');
+    await expect(files.read('f1', join(base, '.mcp.json'))).rejects.toThrow('is a link, so Ferretry will not read');
   });
 
   test('a project file larger than 1 MiB is neither read nor replaced', async () => {
