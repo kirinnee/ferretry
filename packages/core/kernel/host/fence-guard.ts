@@ -182,6 +182,11 @@ async function lookAgain(
     await indexOf(fs, real, privateFiles, recheckMs, watcher).renew();
     report?.looked();
   } catch (error) {
+    // A pin that failed before the index was asked to look (the home did not resolve) leaves the look interval running:
+    // the snapshot kept from before the create would answer until it ends. The index is found by the home's REAL path,
+    // which is what could not be had, so every index of this disk forgets its interval: the next root call looks again
+    // and refuses while it cannot. (A look that failed already forgot its own; this is then a no-op.)
+    await Promise.all([...(INDEXES.get(fs)?.values() ?? [])].map(async index => await index.forget()));
     const refusal = new ApiError(503, unpinnedSentence(named, error), 'private_unpinned');
     report?.failed(refusal);
     throw refusal;
@@ -214,7 +219,11 @@ export async function pinCreated(
 /**
  * {@link pinCreated} for a root's writer, which knows the absolute `full` path it made and not the path below `state/`:
  * the home is resolved in the same try as the look, and a path outside the home's `state` (or `state` itself) is not a
- * private place. `plugin` is named when the home itself cannot be resolved.
+ * private place. `plugin` is named when the home itself cannot be resolved. The order differs from {@link pinCreated}:
+ * the home is resolved FIRST (its real path is what says which path below `state` was made), and only then is the path
+ * judged lexically, so a home that cannot be resolved refuses the create whether or not its path was private, while a
+ * path no place touches costs that one resolve and no look. A failed resolve forgets the look interval (see
+ * {@link lookAgain}): the next root call looks again, as it does after a failed look.
  */
 export async function pinCreatedAt(
   fs: HostFs,
