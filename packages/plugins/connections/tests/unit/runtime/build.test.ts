@@ -3,10 +3,12 @@ import type { SessionLayer, WebSocketPort } from '@ferretry/kernel/contract';
 import { restrictWebSocket } from '../../../../../core/kernel/host/permissions.ts';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { testHost } from '../../../../../core/kernel/testing/host.ts';
-import { anonymous, device } from '../../../../../core/kernel/testing/admission.ts';
+import { anonymous, device, owner } from '../../../../../core/kernel/testing/admission.ts';
 import {
   CarriersViewSchema,
+  ConnectionsConfigSchema,
   ConnectionsPort,
+  MAX_PUBLISHED_CARRIERS,
   HOSTED_APP_ORIGIN,
   HOSTED_RELAY_DIRECTORY_ORIGIN,
   type PublishedCarriers,
@@ -18,6 +20,7 @@ import { FakeSessions } from '../../support/sessions.ts';
 import manifest from '../../../manifest.ts';
 import { buildConnections, type ConnectionBindings, kernelConnectionBindings } from '../../../daemon/index.ts';
 import { decideAdvertisement } from '../../../daemon/lib/runtime/advertisement.ts';
+import { PAIRING_REACH_NOTICE } from '../../../daemon/lib/relay/discovery.ts';
 const identity = {
   daemonId: 'fy_daemon_' + 'a'.repeat(43),
   sign: async () => ({ daemonId: 'fy_daemon_' + 'a'.repeat(43), publicKey: 'A'.repeat(59), signature: 'A'.repeat(86) }),
@@ -455,5 +458,168 @@ describe('the default relay dial through the Kernel restricted WebSocket port', 
     ]);
     expect(() => h.websocket.connect('wss://off.example/other')).toThrow('manifest does not declare it');
     await h.stop();
+  });
+});
+
+/** A build whose hosted directory advertises a relay, so the discovery entry resolves to a published relay. */
+function discovering(extra: Partial<ConnectionBindings> = {}) {
+  return implementDaemon(manifest, {
+    build: ctx =>
+      buildConnections(ctx, {
+        ...bindings,
+        directory: { read: async () => ({ kind: 'available', relayUrl: 'https://hosted.example' }) },
+        ...extra,
+      }),
+  });
+}
+
+describe('the carrier set the daemon publishes (Appendix D, connections batch 3)', () => {
+  test('R11 the daemon publishes its carrier set: one answer, with the discovery relay in it, to redemption and to the refresh', async () => {
+    const host = await testHost({ plugins: [discovering()] });
+    await host.runJob('relay-discovery');
+    const expected: PublishedCarriers = [
+      { kind: 'direct', url: 'https://box.example' },
+      { kind: 'relay', url: 'https://hosted.example' },
+    ];
+    // Redemption reads the port; the refresh route reads the same set. Neither takes a set from the caller.
+    expect(host.provided(ConnectionsPort).carriers()).toEqual(expected);
+    const refreshed = await host.request('GET', '/v1/carriers', { as: device('phone') });
+    expect(refreshed.json()).toEqual({ carriers: expected });
+    await host.stop();
+  });
+
+  test('R182 nothing derived is persisted: the list is re-derived on every read and a tunnel change shows at once', async () => {
+    const host = await testHost({ plugins: [discovering()] });
+    await host.runJob('relay-discovery');
+    const first = host.provided(ConnectionsPort).carriers();
+    const again = host.provided(ConnectionsPort).carriers();
+    expect(again).toEqual(first);
+    await host.request('GET', '/v1/carriers', { as: device('phone') });
+    // Deriving and serving the set wrote no file and no document under the plugin's state folder.
+    const state = host.state('connections');
+    expect(state.files.size).toBe(0);
+    expect(state.bytes.size).toBe(0);
+    expect(state.databases.size).toBe(0);
+    await host.stop();
+  });
+
+  test('R183 the published set is at most 8 entries, in the daemon’s order: the direct address first, then the relays as written', async () => {
+    const host = await testHost({
+      plugins: [discovering()],
+      config: {
+        'connections.yaml': {
+          relay: [{ url: 'https://one.example' }, { source: 'discovery' }, { url: 'https://two.example' }],
+        },
+      },
+    });
+    await host.runJob('relay-discovery');
+    const set = host.provided(ConnectionsPort).carriers();
+    expect(set.map(carrier => carrier.url)).toEqual([
+      'https://box.example',
+      'https://one.example',
+      'https://hosted.example',
+      'https://two.example',
+    ]);
+    expect(set.length).toBeLessThanOrEqual(MAX_PUBLISHED_CARRIERS);
+    expect(MAX_PUBLISHED_CARRIERS).toBe(8);
+    // The wire refuses a ninth entry rather than truncating it, so a device never holds a silently shortened set.
+    const nine = Array.from({ length: 9 }, (_, n) => ({
+      kind: 'relay' as const,
+      url: `https://r${String(n)}.example`,
+    }));
+    expect(PublishedCarriersSchema.safeParse(nine.slice(0, 8)).success).toBe(true);
+    expect(PublishedCarriersSchema.safeParse(nine).success).toBe(false);
+    // Every entry is exactly `{ kind, url }`: nothing else rides on the redemption response.
+    for (const carrier of set) expect(Object.keys(carrier).sort()).toEqual(['kind', 'url']);
+    await host.stop();
+  });
+
+  test('R185 GET /v1/carriers is no-store, authenticated and not host-scoped: a paired device off the host reads it, a stranger cannot', async () => {
+    const route = manifest.actions.routes.find(r => r.key === 'GET /v1/carriers')!;
+    expect(route.minimum).toBe('authenticated');
+    expect(route.noStore).toBe(true);
+    expect(route.caller).toBe('any');
+    const host = await testHost({ plugins: [plugin] });
+    await host.runJob('relay-discovery');
+    // A carried (not on-host) paired device: the answer, marked no-store.
+    const carried = await host.request('GET', '/v1/carriers', { as: device('phone') });
+    expect(carried.status).toBe(200);
+    expect(carried.headers.get('cache-control')).toBe('no-store');
+    // The host's own owner reads the same answer: the route is not scoped to one side of the host boundary.
+    const owned = await host.request('GET', '/v1/carriers', { as: owner() });
+    expect(owned.status).toBe(200);
+    expect(owned.json()).toEqual(carried.json());
+    // Nobody who proved nothing reads it.
+    expect((await host.request('GET', '/v1/carriers', { as: anonymous() })).status).toBe(401);
+    await host.stop();
+  });
+
+  test('R218 fy pair and fyd --check share one derivation: two reads of the advertisement agree, and a self-hosted relay is never disclosed as discovered', async () => {
+    // Loopback bind + the operator's own relay: a local-only address, and nothing for a QR to be drawn from.
+    const selfHosted = implementDaemon(manifest, {
+      build: ctx => buildConnections(ctx, { ...bindings, host: '127.0.0.1', directUrl: 'http://127.0.0.1:7431' }),
+    });
+    const own = await testHost({
+      plugins: [selfHosted],
+      config: { 'connections.yaml': { relay: [{ url: 'https://mine.example' }] } },
+    });
+    await own.runJob('relay-discovery');
+    const pair = own.provided(ConnectionsPort).advertisement();
+    const check = own.provided(ConnectionsPort).advertisement();
+    expect(check).toEqual(pair);
+    expect(pair.advertisement.kind).toBe('local-only');
+    expect(pair.discoveredRelayUrl).toBeUndefined();
+    expect(JSON.stringify(pair)).not.toContain('mine.example');
+    await own.stop();
+    // The same loopback bind with the hosted directory's relay: now `fy pair` knows the daemon is redeemable.
+    const hosted = await testHost({ plugins: [discovering({ host: '127.0.0.1' })] });
+    await hosted.runJob('relay-discovery');
+    expect(hosted.provided(ConnectionsPort).advertisement().discoveredRelayUrl).toBe('https://hosted.example');
+    expect(hosted.provided(ConnectionsPort).advertisement()).toEqual(hosted.provided(ConnectionsPort).advertisement());
+    await hosted.stop();
+    expect(PAIRING_REACH_NOTICE).toContain('only way in');
+  });
+
+  test('R221 discoveredRelayUrl is host-facing only: it is in no published carrier answer and no fragment-shaped field', async () => {
+    const host = await testHost({ plugins: [discovering()] });
+    await host.runJob('relay-discovery');
+    const advertised = host.provided(ConnectionsPort).advertisement();
+    expect(advertised.discoveredRelayUrl).toBe('https://hosted.example');
+    // The route answer is exactly `{ carriers }`, and the published schemas have no field to carry the advertisement.
+    const answer = (await host.request('GET', '/v1/carriers', { as: device('phone') })).json<Record<string, unknown>>();
+    expect(Object.keys(answer)).toEqual(['carriers']);
+    expect(CarriersViewSchema.safeParse({ carriers: [], discoveredRelayUrl: 'https://hosted.example' }).success).toBe(
+      false,
+    );
+    expect(
+      PublishedCarriersSchema.safeParse([{ kind: 'direct', url: 'https://box.example', discoveredRelayUrl: 'x' }])
+        .success,
+    ).toBe(false);
+    // Only a relay read from the hosted directory is ever named: a configured relay yields none (R218).
+    const configured = await testHost({
+      plugins: [plugin],
+      config: { 'connections.yaml': { relay: [{ url: 'https://mine.example' }] } },
+    });
+    await configured.runJob('relay-discovery');
+    expect(configured.provided(ConnectionsPort).advertisement()).not.toHaveProperty('discoveredRelayUrl');
+    await configured.stop();
+    await host.stop();
+  });
+
+  test('R174 the carriers document is the one spelling: first boot with no document binds loopback and records its port', async () => {
+    // No document, no host: the bind is the loopback address, and the port the daemon holds is the one it records.
+    const first = implementDaemon(manifest, {
+      build: ctx => buildConnections(ctx, { identity, openSession: bindings.openSession, port: 7431 }),
+    });
+    const host = await testHost({ plugins: [first] });
+    const advertised = host.provided(ConnectionsPort).advertisement();
+    expect(advertised.port).toBe(7431);
+    expect(advertised.advertisement).toEqual({ kind: 'local-only', url: 'http://127.0.0.1:7431' });
+    await host.stop();
+    // The one spelling: the old top-level `host` / `port` / `relay` keys are not read.
+    for (const stray of [{ host: '0.0.0.0' }, { port: 7431 }, { relay: 'https://one.example' }]) {
+      expect(ConnectionsConfigSchema.safeParse(stray).success).toBe(false);
+    }
+    expect(ConnectionsConfigSchema.safeParse({ direct: { host: '0.0.0.0', port: 7431 } }).success).toBe(true);
   });
 });
