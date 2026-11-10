@@ -65,8 +65,14 @@ export class RootMcpProjectFiles implements McpProjectFiles {
   async #text(root: RootHandle, resolved: FencedPath, path: string): Promise<string | null> {
     let info: Awaited<ReturnType<RootHandle['stat']>>;
     try {
+      // The leaf ITSELF first: `stat` follows a link that stays inside the folder, and the atomic replace would then
+      // swap the link for a file. A link is refused wherever it points (as v4 did).
+      const leaf = await root.lstat(resolved);
+      if (leaf?.kind === 'symlink')
+        throw new McpProjectFileError(`${path} is a link, so Ferretry will not read or replace it.`);
       info = await root.stat(resolved);
-    } catch {
+    } catch (error) {
+      if (error instanceof McpProjectFileError) throw error;
       throw new McpProjectFileError(`${path} is not a regular file, so Ferretry will not read or replace it.`);
     }
     if (info === undefined) return null;
