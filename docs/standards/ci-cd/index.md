@@ -104,12 +104,13 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   this ordering rather than a timeout increase. Its summary names each group's
   slowest test and duration from JUnit, with `unit-timings.tsv` in the part artifact.
 - **The guarantee proof reads the JUnit reports.** After its last part, Quick runs
-  `bun scripts/gen/check.ts guarantees --tier unit --results coverage/unit --results coverage/scripts`, and the
-  Integration job ends with `bun scripts/validate/guarantees.ts --tier int --results coverage/int`: every kept
+  `bun scripts/gen/check.ts guarantees --strict --tier unit --results coverage/unit --results coverage/scripts`, and the
+  Integration job ends with `bun scripts/validate/guarantees.ts --strict --tier int --results coverage/int`: every kept
   Appendix D row needs a test named with its id that PASSED in its own tier's report (a quarantine rerun that passed
   counts), and any default-mode finding keeps the job red. `--tier` is why a row tested in one tier alone is never
-  "missing" from the other tier's report. Strict mode (`--strict`, rows of still-pending packages) becomes required
-  once `ports-pending.json` is empty.
+  "missing" from the other tier's report. Strict mode (`--strict`, which also checks the rows of still-pending
+  packages) is required: `quick.sh` and `integration.sh` both pass it, and `check.ts guarantees --strict` passes it to
+  `guarantee-owner` too.
 - **Strict guarantee report.** The `Strict Guarantees` job (needs Quick and Integration, so only on the full set's
   events, and after a red test job too) downloads the `coverage-unit`, `coverage-scripts` and `coverage-int` artifacts and runs
   `bun scripts/ci/strict-guarantees.ts` over all three at once, with `--strict` and no `--tier`: a passing
@@ -119,11 +120,11 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   in the owner or a contract it consumes, count too, so a count of 0 is exactly what the flip needs. A row with several
   findings is one row in the count, and a multi-id title (`P23 P53 …`) proves each of its ids. The one switch is
   `FY_STRICT_GUARANTEES_BLOCKING` in the workflow `env` of `ci.yaml`, and both the job and `full-status.sh` read it:
-  while it is `'false'` the job never turns CI red, and the `Full CI` verdict accepts the job whatever it ended as
-  (a failed setup step or the timeout included). The flip is ONE change that takes the count to 0, per
-  `docs/rebuild/merge-bar.md` line 1, and does three things together: sets the switch to `'true'`, adds `--strict` to
-  the per-tier `guarantees` checks (`quick.sh`, `integration.sh`), and adds `--strict` to `guarantee-owner` (which
-  `check.ts guarantees` in `quick.sh` runs with it).
+  it is `'true'` now, so a miss fails the job and the `Full CI` verdict judges the job like every other one; at `'false'`
+  the job would only report, and the verdict would accept it whatever it ended as (a failed setup step or the timeout
+  included). The flip was ONE change that took the count to 0, per `docs/rebuild/merge-bar.md` line 1, and did three
+  things together: set the switch to `'true'`, added `--strict` to the per-tier `guarantees` checks (`quick.sh`,
+  `integration.sh`), and added `--strict` to `guarantee-owner` (which `check.ts guarantees` in `quick.sh` runs with it).
 - **Parallel read-only hooks.** Quick discovers hooks from the generated pre-commit
   configuration and runs four at a time on PRs (two on main), each with its own output, duration and
   temporary pre-commit cache. Their scripts do not write checkout files; the hook

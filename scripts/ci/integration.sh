@@ -24,7 +24,7 @@ status=0
 # THE GUARANTEE PROOF (redesign §10.5), integration half: the rows with a test in tests/integration/ passed in the
 # JUnit reports this job just wrote (the unit rows are proven by quick.sh from the unit reports). Only the `guarantees` check
 # runs here: `guarantee-owner` reads source alone and quick.sh already judges it.
-# STRICT MODE becomes required once `ports-pending.json` is empty: add `--strict` here too (see quick.sh).
-bun scripts/validate/guarantees.ts --tier int --results coverage/int || status=1
+# STRICT MODE is required here too (see quick.sh): the rows of still-pending packages count.
+bun scripts/validate/guarantees.ts --strict --tier int --results coverage/int || status=1
 bun scripts/validate/parity-ticks.ts --tier int --results coverage/int || status=1
 exit "${status}"

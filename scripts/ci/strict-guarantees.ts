@@ -8,8 +8,8 @@
  * miss count plus the ids grouped by owner to `$GITHUB_STEP_SUMMARY`. The count is every finding of `guarantees` and of
  * `guarantee-owner` (enforcer symbols included); a row with several findings is one row in the count.
  *
- * It is a report until the count reaches 0. `FY_STRICT_GUARANTEES_BLOCKING=true` (the one switch, set on the
- * `strict-guarantees` job in `.github/workflows/ci.yaml`) makes a miss exit 1; anything else exits 0.
+ * It was a report until the count reached 0 and is blocking now. `FY_STRICT_GUARANTEES_BLOCKING=true` (the one switch,
+ * the workflow-level `env` of `.github/workflows/ci.yaml`) makes a miss exit 1; anything else exits 0 and only reports.
  *
  * Usage: bun scripts/ci/strict-guarantees.ts --results <junit.xml|folder> [--results …] [--root <dir>]
  */
