@@ -517,3 +517,35 @@ describe('descriptor-parity: moved pairs', () => {
     expect(movedFindings(today, next, changes).map(f => f.message)).toEqual([expect.stringContaining('claimed by 2')]);
   });
 });
+
+describe('the one guarantee helper names a row like a literal title (test-titles.ts)', () => {
+  const SUPPORT = 'pkg/tests/support/guarantee.ts';
+  const BODY = 'export function guarantee(ids: readonly string[], name: string, run: () => void): void {}\n';
+  const IMPORT = "import { guarantee } from '../support/guarantee.ts';\n";
+  const titles = (source: string, support = true): string[] => {
+    const root = fixture({ [TEST]: source, ...(support ? { [SUPPORT]: BODY } : {}) });
+    return liveTitles(join(root, TEST));
+  };
+
+  test('a call of the imported helper is one live case per id', () => {
+    expect(titles(`${IMPORT}guarantee(['J-0052', 'J-0053'], 'renders it', () => {});`)).toEqual([
+      'J-0052 renders it',
+      'J-0053 renders it',
+    ]);
+  });
+
+  test('inside a skipped describe it is dead, like any other case', () => {
+    expect(titles(`${IMPORT}describe.skip('g', () => { guarantee(['J-0052'], 'x', () => {}); });`)).toEqual([]);
+  });
+
+  test('a stray call, a local declaration, a foreign import or a missing support module names nothing', () => {
+    const strays = [
+      `${IMPORT}function proof(ids: string[], name: string): void {}\nproof(['J-0052'], 'x');`,
+      "function guarantee(ids: string[], name: string): void {}\nguarantee(['J-0052'], 'x');",
+      "import { guarantee } from '../support/other.ts';\nguarantee(['J-0052'], 'x');",
+      "import { guarantee as holds } from '../support/guarantee.ts';\nholds(['J-0052'], 'x');",
+    ];
+    for (const source of strays) expect(titles(source)).toEqual([]);
+    expect(titles(`${IMPORT}guarantee(['J-0052'], 'x', () => {});`, false)).toEqual([]);
+  });
+});

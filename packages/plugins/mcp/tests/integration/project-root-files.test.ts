@@ -321,6 +321,55 @@ describe('GAP (declared): the imports narrowing is MCP-adapter-enforced, not ker
   });
 });
 
+describe('the narrowed root hands the one .mcp.json out as bytes and as a tail, and nothing else', () => {
+  test('on a temp disk readBytes and readTail answer the file it resolved, and refuse a forged path', async () => {
+    // Arrange — fake JSON on a temp disk; no real home.
+    const disk = await mkdtemp(join(tmpdir(), 'mcp-bytes-tail-'));
+    try {
+      const project = join(disk, 'work/repo');
+      await mkdir(project, { recursive: true });
+      await mkdir(join(disk, 'fy-home'), { recursive: true });
+      await writeFile(join(project, '.mcp.json'), FILES['.mcp.json'] ?? '{}');
+      await writeFile(join(project, 'other.json'), '{"fake":"not-for-mcp"}');
+      const roots = rootsPortFor(
+        nodeFs(() => crypto.randomUUID()),
+        { home: join(disk, 'fy-home'), plugin: 'mcp', worktrees: join(disk, 'worktrees') },
+        ['imports'],
+        () => undefined,
+      );
+      const narrowed = mcpFileOnly(roots.root('imports', { subfolder: project, within: project }));
+      const raw = roots.root('imports', { subfolder: project, within: project });
+      const allowed = narrowed.resolve('.mcp.json');
+      const otherPath = raw.resolve('other.json');
+      if (!allowed.ok || !otherPath.ok) throw new Error('setup');
+
+      // Act
+      const bytes = await narrowed.readBytes(allowed.value);
+      const tail = await narrowed.readTail(allowed.value, 1024);
+
+      // Assert
+      expect(new TextDecoder().decode(bytes)).toBe(FILES['.mcp.json']);
+      expect(new TextDecoder().decode(tail.bytes)).toBe(FILES['.mcp.json']);
+      expect(tail.size).toBe(FILES['.mcp.json'].length);
+      await expect(narrowed.readBytes(otherPath.value)).rejects.toThrow(/reads only \.mcp\.json/u);
+      await expect(narrowed.readTail(otherPath.value, 1024)).rejects.toThrow(/reads only \.mcp\.json/u);
+    } finally {
+      await rm(disk, { recursive: true, force: true });
+    }
+  });
+
+  test('a missing .mcp.json is not there for readBytes and readTail either', async () => {
+    // Arrange
+    const narrowed = mcpFileOnly(kernelRoot(REPO, {}, []));
+    const allowed = narrowed.resolve('.mcp.json');
+    if (!allowed.ok) throw new Error('setup');
+
+    // Act / Assert
+    await expect(narrowed.readBytes(allowed.value)).rejects.toBeInstanceOf(McpDocumentUnreadable);
+    await expect(narrowed.readTail(allowed.value, 10)).rejects.toBeInstanceOf(McpDocumentUnreadable);
+  });
+});
+
 describe('R-B1 the project .mcp.json over the kernel’s real imports root on a temp disk, anchored at the project folder', () => {
   const OUTSIDE_TEXT = JSON.stringify({
     mcpServers: { stolen: { type: 'http', url: 'https://stolen.example.invalid' } },

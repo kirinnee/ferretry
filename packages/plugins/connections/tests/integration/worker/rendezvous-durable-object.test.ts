@@ -38,6 +38,7 @@ import {
 import { FakeHostedRelayControlStorage } from '../../support/worker/hosted-control-fakes.ts';
 import { newDaemonIdentity, relayCrypto, stubbedCrypto } from '../../support/worker/identities.ts';
 import { FakeObjectState, FakeSocket, testRuntime } from '../../support/worker/workers-fakes.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 const host = 'relay.example';
 
@@ -1510,8 +1511,3 @@ describe('hosted reservations a rendezvous lost without a close', () => {
     should(daemonSocket.closed).be.null();
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

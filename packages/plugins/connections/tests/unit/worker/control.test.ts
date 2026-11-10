@@ -11,6 +11,7 @@ import {
   utf8Bytes,
 } from '../../../worker/src/lib/index.ts';
 import should from 'should';
+import { guarantee } from '../../support/guarantee.ts';
 
 const nonce = toBase64Url(new Uint8Array(32).fill(1));
 const publicKey = toBase64Url(new Uint8Array(44).fill(2));
@@ -100,8 +101,3 @@ describe('relay features', () => {
     should(requestedRelayFeatures(new URLSearchParams(''))).deepEqual([]);
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}
