@@ -21,6 +21,8 @@ import { readPending } from './ports-pending.ts';
 export const AFTER_MERGE_JSON = 'docs/rebuild/after-merge.json';
 const PARITY_TSV = 'docs/design/rebuild-parity.tsv';
 const CHECK = 'after-merge';
+/** The one `guarantees` finding this count is about: a kept row with no id-named test. */
+const MISSING_TEST = / has no test named "/;
 
 export const COUNT_NAMES = ['parityOpen', 'portsPendingLines', 'guaranteesMissing'] as const;
 export type CountName = (typeof COUNT_NAMES)[number];
@@ -79,14 +81,14 @@ function readBase(root: string, ref: string): AfterMerge | undefined {
   return parseAfterMerge(shown.stdout, `${ref}:${AFTER_MERGE_JSON}`);
 }
 
-/** Parity rows still open (`[ ]`) in the generated parity table. */
+/** Parity rows still open in the generated parity table: a status that starts with `[ ]`, note or not. */
 export function parityOpen(root: string): number {
   const file = join(root, PARITY_TSV);
   if (!existsSync(file)) return 0;
   const [header = '', ...rows] = readFileSync(file, 'utf8').split('\n');
   const status = header.split('\t').indexOf('status');
   if (status < 0) throw new Error(`${PARITY_TSV}: no "status" column`);
-  return rows.filter(row => row.split('\t')[status] === '[ ]').length;
+  return rows.filter(row => (row.split('\t')[status] ?? '').startsWith('[ ]')).length;
 }
 
 /** Every open-gap line `ports-pending.json` states. */
@@ -129,22 +131,26 @@ export const check: Check = {
   async run(ctx) {
     const file = join(ctx.root, AFTER_MERGE_JSON);
     if (!existsSync(file)) return [];
-    let head: AfterMerge;
-    let base: AfterMerge | undefined;
     try {
-      head = parseAfterMerge(readFileSync(file, 'utf8'), AFTER_MERGE_JSON);
-      base = readBase(ctx.root, ctx.base ?? 'origin/rebuild/5.0');
+      const head = parseAfterMerge(readFileSync(file, 'utf8'), AFTER_MERGE_JSON);
+      const base = readBase(ctx.root, ctx.base ?? 'origin/rebuild/5.0');
+      const found = await guarantees.run({
+        ...ctx,
+        packageId: undefined,
+        tier: undefined,
+        strict: true,
+        existenceOnly: true,
+      });
+      return afterMergeFindings(head, base, {
+        parityOpen: parityOpen(ctx.root),
+        portsPendingLines: portsPendingLines(ctx.root),
+        guaranteesMissing: found.filter(finding => MISSING_TEST.test(finding.message)).length,
+      });
     } catch (error) {
       return [
         { check: CHECK, where: AFTER_MERGE_JSON, message: error instanceof Error ? error.message : String(error) },
       ];
     }
-    const missing = await guarantees.run({ ...ctx, packageId: undefined, strict: true, existenceOnly: true });
-    return afterMergeFindings(head, base, {
-      parityOpen: parityOpen(ctx.root),
-      portsPendingLines: portsPendingLines(ctx.root),
-      guaranteesMissing: missing.length,
-    });
   },
 };
 

@@ -44,6 +44,9 @@ describe('after-merge', () => {
       AFTER_MERGE_JSON,
     );
     expect(afterMergeFindings(committed, committed, committed.counts)).toEqual([]);
+    const repo = join(import.meta.dir, '..', '..');
+    expect(parityOpen(repo)).toBeLessThanOrEqual(committed.counts.parityOpen);
+    expect(portsPendingLines(repo)).toBeLessThanOrEqual(committed.counts.portsPendingLines);
     expect(committed.items.map(item => item.id)).toContain('darwin-smoke');
     expect(committed.items.map(item => item.id)).toContain('ffi-descriptor-verify');
   });
@@ -105,14 +108,14 @@ describe('after-merge', () => {
   test('counts open parity rows by the status column and every ports-pending line', () => {
     const root = fixture({
       'docs/design/rebuild-parity.tsv':
-        'id\tkind\tstatus\nV-1\tV\t[ ]\nV-2\tV\t[x]\nV-3\tV\tremoved by design (x)\nV-4\tV\t[ ]\n',
+        'id\tkind\tstatus\nV-1\tV\t[ ]\nV-2\tV\t[x]\nV-3\tV\tremoved by design (x)\nV-4\tV\t[ ]\nV-5\tV\t[ ] pending: a note after the box\n',
       'ports-pending.json': JSON.stringify({
         format: 1,
         pending: ['a', 'b'],
         pendingReasons: { a: ['one', 'two'], b: ['three'] },
       }),
     });
-    expect(parityOpen(root)).toBe(2);
+    expect(parityOpen(root)).toBe(3);
     expect(portsPendingLines(root)).toBe(3);
   });
 });

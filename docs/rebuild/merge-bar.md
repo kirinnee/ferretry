@@ -47,7 +47,8 @@ What 5.0 merges without is [after-merge.json](after-merge.json): three counts an
 
 - `parityOpen`: parity rows outside Appendix D still `[ ]` in `docs/design/rebuild-parity.tsv`.
 - `portsPendingLines`: the open-gap lines in `ports-pending.json`.
-- `guaranteesMissing`: kept Appendix D rows with no id-named test. It is 0 at merge and stays 0.
+- `guaranteesMissing`: kept Appendix D rows with no id-named test. Before-merge line 1 needs it at 0, so the change
+  that closes the last row lowers it to 0, and from then on it stays 0.
 - `items`: lane P of the kernel contract, the Ferrets/Conversation seam lanes F1 and F2, the review follow-up sweep,
   the (D) S render diff, launch renewal, the darwin smoke and the FFI descriptor verify line.
 
@@ -56,7 +57,9 @@ What 5.0 merges without is [after-merge.json](after-merge.json): three counts an
 - **The list only goes down.** The `after-merge` check (`bun scripts/validate/after-merge.ts`, part of `fy check`)
   fails when a count or the end date grows against the base ref, when an item is added, when the tree holds more than
   the baseline says, or when an item has no owner. Closing work lowers the numbers in the same change. When 5.0
-  merges, the base default (`origin/rebuild/5.0`, shared with `ports-pending`) moves to `origin/main`.
+  merges, the base default (`origin/rebuild/5.0`, shared with `ports-pending`) moves to `origin/main`. Known gap: CI
+  checks out one commit, so in CI only the tree-against-baseline rule runs; the against-base rules run in the commit
+  hook, which no change may skip.
 - Every row and item keeps its owner.
 - One end date, `end` in the file. Only the owner moves it.
 - A daily report to the lead: parity settled and total, the Appendix D missing count, the smoke list pass and fail.
