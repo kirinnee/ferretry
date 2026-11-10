@@ -11,6 +11,10 @@ import { docxBytes } from './docx.ts';
 
 const DIRECTORY = '/state/ferrets/sessions/f1/attachments';
 const base64 = (bytes: Uint8Array | string): string => Buffer.from(bytes).toString('base64');
+// Measured: the 32 MiB at-bound case builds and base64-decodes two 32 MiB buffers; on CI it took 2.35 s (run
+// 42833771647) and 6.48 s on a loaded runner (run 42836121089, over bun's 5 s default). It checks a size bound, not
+// a time bound, so its limit is raised to 30 s.
+const AT_BOUND_MS = 30_000;
 
 export function openingAttachmentsCases(): void {
   describe('V-0443 the opening attachments Conversation plans for a start', () => {
@@ -54,26 +58,30 @@ export function openingAttachmentsCases(): void {
       should(empty.ok).be.false();
     });
 
-    it('V-0443 should plan a real file exactly AT the 32 MiB bound and refuse one byte over it with a sentence naming the limit', () => {
-      const source = openingAttachmentsSource();
-      const at = source.plan({
-        directory: DIRECTORY,
-        attachments: [{ filename: 'big.pdf', base64: base64(new Uint8Array(MAX_INITIAL_ATTACHMENT_BYTES).fill(7)) }],
-      });
-      should(at.ok).be.true();
-      if (at.ok) should(at.value.files[0]?.contents).have.length(MAX_INITIAL_ATTACHMENT_BYTES);
-      const over = source.plan({
-        directory: DIRECTORY,
-        attachments: [
-          { filename: 'big.pdf', base64: base64(new Uint8Array(MAX_INITIAL_ATTACHMENT_BYTES + 1).fill(7)) },
-        ],
-      });
-      should(over.ok).be.false();
-      if (!over.ok)
-        should(over.error).equal(
-          `attachment big.pdf is ${MAX_INITIAL_ATTACHMENT_BYTES + 1} bytes, over the ${MAX_INITIAL_ATTACHMENT_BYTES}-byte limit`,
-        );
-    });
+    it(
+      'V-0443 should plan a real file exactly AT the 32 MiB bound and refuse one byte over it with a sentence naming the limit',
+      () => {
+        const source = openingAttachmentsSource();
+        const at = source.plan({
+          directory: DIRECTORY,
+          attachments: [{ filename: 'big.pdf', base64: base64(new Uint8Array(MAX_INITIAL_ATTACHMENT_BYTES).fill(7)) }],
+        });
+        should(at.ok).be.true();
+        if (at.ok) should(at.value.files[0]?.contents).have.length(MAX_INITIAL_ATTACHMENT_BYTES);
+        const over = source.plan({
+          directory: DIRECTORY,
+          attachments: [
+            { filename: 'big.pdf', base64: base64(new Uint8Array(MAX_INITIAL_ATTACHMENT_BYTES + 1).fill(7)) },
+          ],
+        });
+        should(over.ok).be.false();
+        if (!over.ok)
+          should(over.error).equal(
+            `attachment big.pdf is ${MAX_INITIAL_ATTACHMENT_BYTES + 1} bytes, over the ${MAX_INITIAL_ATTACHMENT_BYTES}-byte limit`,
+          );
+      },
+      AT_BOUND_MS,
+    );
 
     it('V-0443 should plan a plain file without ever calling the inflater (only a document is extracted)', () => {
       const source = openingAttachmentsSource({
