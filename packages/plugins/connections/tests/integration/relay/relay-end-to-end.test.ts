@@ -271,58 +271,83 @@ describe('first pairing through the real rendezvous', () => {
   });
 
   // cb4 F3 (row 128): the flip used to be the LAST byte only, which is the AEAD tag. A check that verified nothing but the
-  // tag (or one that decrypts the body whatever the tag says) is caught only by a flip INSIDE the ciphertext body too. A
+  // tag, or one that decrypts the body whatever the tag says, is caught only by a flip INSIDE the ciphertext body too. A
   // sealed record is the 28-byte frame header, the ciphertext body, then the 16-byte GCM tag.
   const HEADER_BYTES = 28;
   const TAG_BYTES = 16;
-  const flips: readonly (readonly [string, (length: number) => number])[] = [
+
+  /**
+   * One pairing in which a rendezvous flips ONE low bit of the byte `position(length)` of the first sealed record it hands
+   * the browser (the daemon's `paired` answer), and what the browser did with it. One low bit, not the whole byte: under a
+   * check that decrypts the body whatever the tag says, 0xff turns a JSON text into invalid UTF-8 that is refused for the
+   * wrong reason, where one bit often leaves a valid text that says something else, which a tamper-accepting check
+   * would believe.
+   */
+  async function pairingWithFlip(position: (length: number) => number) {
+    const { fx, bridge } = await relayed();
+    let flipped = 0;
+    let at = -1;
+    let length = 0;
+    bridge.meddle = bytes => {
+      if (bytes[2] !== FRAME_KINDS.data || flipped > 0) return undefined;
+      flipped += 1;
+      length = bytes.length;
+      at = position(bytes.length);
+      // A position past the body is no flip at all: the caller reads `at` and `length` to know it ran out.
+      if (at < HEADER_BYTES || at >= bytes.length) return undefined;
+      const edited = Uint8Array.from(bytes);
+      edited[at] = (edited[at] ?? 0) ^ 0x01;
+      return edited;
+    };
+    const saved: string[] = [];
+    const { outcome } = await pairOver(fx, bridge, async () => {
+      saved.push('saved');
+    });
+    const failure = await (outcome as Promise<unknown>).catch((error: unknown) => error);
+    return { flipped, at, length, failure, saved, redeemed: fx.pair.attempts.length };
+  }
+
+  /** The browser refused the altered answer: it believes no pairing, saves no key, and reads no grant. */
+  const refused = (run: Awaited<ReturnType<typeof pairingWithFlip>>) =>
+    run.flipped === 1 &&
+    run.redeemed === 1 &&
+    run.failure instanceof PairingOutcomeUnknownError &&
+    !(run.failure instanceof RelayPairingRefusedError) &&
+    run.saved.length === 0;
+
+  const tagFlips: readonly (readonly [string, (length: number) => number])[] = [
     ['the last byte (the AEAD tag)', length => length - 1],
     ['the first byte of the tag', length => length - TAG_BYTES],
-    ['the last byte of the ciphertext body', length => length - TAG_BYTES - 1],
-    ['the first byte of the ciphertext body', () => HEADER_BYTES],
-    [
-      'a byte three quarters into the ciphertext body',
-      length => HEADER_BYTES + Math.floor(((length - HEADER_BYTES - TAG_BYTES) * 3) / 4),
-    ],
   ];
 
-  test.each(flips)(
+  test.each(tagFlips)(
     'R184 a byte flipped in %s of the sealed paired record by the rendezvous is refused: nothing is saved and no grant is believed',
     async (_where, position) => {
-      // Arrange — a rendezvous that edits the first sealed record it hands the browser (the daemon's `paired` answer).
-      const { fx, bridge } = await relayed();
-      let flipped = 0;
-      bridge.meddle = bytes => {
-        if (bytes[2] !== FRAME_KINDS.data || flipped > 0) return undefined;
-        flipped += 1;
-        const edited = Uint8Array.from(bytes);
-        // The frame must be long enough to have a body byte at this position, or the flip would land in the header.
-        expect(bytes.length).toBeGreaterThan(HEADER_BYTES + TAG_BYTES);
-        const at = position(edited.length);
-        expect(at).toBeGreaterThanOrEqual(HEADER_BYTES);
-        // One low bit, not the whole byte: under a check that decrypts the body whatever the tag says, 0xff turns a
-        // JSON text into invalid UTF-8 that is refused for the wrong reason, where one bit often leaves a valid text
-        // that says something else, which a tamper-accepting check would believe. (Measured against that check, the
-        // later part of this record's body is where a flip is read as a different, valid answer; a flip in the first
-        // part is refused by the parser anyway, so the body rows sit at the end and three quarters in.)
-        edited[at] = (edited[at] ?? 0) ^ 0x01;
-        return edited;
-      };
-      const saved: string[] = [];
-
-      // Act
-      const { outcome } = await pairOver(fx, bridge, async () => {
-        saved.push('saved');
+      const run = await pairingWithFlip(position);
+      // The daemon did redeem (the code is spent), but the browser refused the altered answer.
+      expect({ flipped: run.flipped, redeemed: run.redeemed, saved: run.saved }).toEqual({
+        flipped: 1,
+        redeemed: 1,
+        saved: [],
       });
-      const failure = await (outcome as Promise<unknown>).catch((error: unknown) => error);
-
-      // Assert — the daemon did redeem (the code is spent), but the browser refused the altered answer: it believes no
-      // pairing, saves no key, and never reads the edit as a published carrier set.
-      expect(flipped).toBe(1);
-      expect(fx.pair.attempts).toHaveLength(1);
-      expect(failure).toBeInstanceOf(PairingOutcomeUnknownError);
-      expect(failure).not.toBeInstanceOf(RelayPairingRefusedError);
-      expect(saved).toEqual([]);
+      expect(run.failure).toBeInstanceOf(PairingOutcomeUnknownError);
+      expect(run.failure).not.toBeInstanceOf(RelayPairingRefusedError);
     },
   );
+
+  test('R184 cb4 F3 a byte flipped ANYWHERE in the ciphertext body of the sealed paired record is refused too, not only in its tag', async () => {
+    // Every byte of the body in turn: which positions a tamper-accepting check would read as a different, valid answer
+    // is a property of the record's text, so no hand-picked position stands for the body.
+    const accepted: number[] = [];
+    let bodyBytes = 0;
+    for (let offset = 0; ; offset += 1) {
+      const run = await pairingWithFlip(() => HEADER_BYTES + offset);
+      if (run.length === 0 || run.at >= run.length - TAG_BYTES) break;
+      bodyBytes += 1;
+      if (!refused(run)) accepted.push(offset);
+    }
+    // A record this short would make the sweep prove nothing: the paired answer's body is well over forty bytes.
+    expect(bodyBytes).toBeGreaterThan(40);
+    expect(accepted).toEqual([]);
+  }, 120_000);
 });
