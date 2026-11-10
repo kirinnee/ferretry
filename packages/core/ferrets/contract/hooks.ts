@@ -87,7 +87,11 @@ export type StartDecideInput = z.infer<typeof StartDecideInputSchema>;
 export const StartRefusalCodeSchema = z.enum(['unservable_model']);
 export type StartRefusalCode = z.infer<typeof StartRefusalCodeSchema>;
 
-/** Board, Packs, Usage may refuse a start (a budget, a pause, a card rule). Not on the security path. */
+/**
+ * Board, Packs, Usage may refuse a start (a budget, a pause, a card rule). Packs' OWN answer is also a helper's
+ * admission (ruling #43): Ferrets starts a child only on it. No other taker can pose as Packs, because plugin ids are
+ * unique (the graph refuses a duplicate) and the registry is generated at build time.
+ */
 export const StartDecide = defineHook('start.decide', { mode: 'decide', input: StartDecideInputSchema });
 
 /**

@@ -140,6 +140,68 @@ describe('logs/ when the daemon boots', () => {
     );
   });
 
+  test('is refused, saying so, when this user has no search bit in it (the log could not be written)', async () => {
+    const { home } = await setUpHome();
+    await chmod(join(home, 'logs'), 0o600);
+
+    const outcome = await openHome(fs, home, 'fyd 5.0.0', NOW);
+
+    expect(outcome.kind).toBe('logs-refused');
+    if (outcome.kind !== 'logs-refused') return;
+    expect(outcome.sentence).toContain('is a folder this user cannot write in');
+    expect(outcome.sentence).toContain(join(home, 'logs'));
+    expect(await modeOf(join(home, 'logs'))).toBe(0o600);
+  });
+
+  test.skipIf(process.getuid?.() === 0)(
+    'is refused when it is read-only (0500), not accepted and logged nothing',
+    async () => {
+      const { home } = await setUpHome();
+      await chmod(join(home, 'logs'), 0o500);
+
+      const outcome = await openHome(fs, home, 'fyd 5.0.0', NOW);
+
+      expect(outcome.kind).toBe('logs-refused');
+      if (outcome.kind !== 'logs-refused') return;
+      expect(outcome.sentence).toContain('is a folder this user cannot write in');
+      await chmod(join(home, 'logs'), 0o700);
+    },
+  );
+
+  test('is refused when the folder is mode 0700 but not writable by this user (another user’s)', async () => {
+    const { home } = await setUpHome();
+    // The one place the kernel asks: a folder of another user answers not-writable although its mode bits look right.
+    const foreign: typeof fs = { ...fs, writable: async path => !path.endsWith('/logs') && (await fs.writable(path)) };
+
+    const outcome = await openHome(foreign, home, 'fyd 5.0.0', NOW);
+
+    expect(outcome.kind).toBe('logs-refused');
+    if (outcome.kind !== 'logs-refused') return;
+    expect(outcome.sentence).toContain('is a folder this user cannot write in');
+  });
+
+  test('is tightened through the opened folder, so a swap for a link after the look is refused and its target never chmodded', async () => {
+    const { root, home } = await setUpHome();
+    const elsewhere = join(root, 'elsewhere');
+    await mkdir(elsewhere, { mode: 0o755 });
+    await chmod(elsewhere, 0o755);
+    await rm(join(home, 'logs'), { recursive: true });
+    await symlink(elsewhere, join(home, 'logs'));
+    // The look found an open folder (as before the swap); by the time the mode is set, a link is there.
+    const swapped: typeof fs = {
+      ...fs,
+      lstat: async path => {
+        const info = await fs.lstat(path);
+        return path.endsWith('/logs') && info !== undefined ? { ...info, kind: 'directory', mode: 0o755 } : info;
+      },
+    };
+
+    const outcome = await openHome(swapped, home, 'fyd 5.0.0', NOW);
+
+    expect(outcome.kind).toBe('logs-refused');
+    expect(await modeOf(elsewhere)).toBe(0o755);
+  });
+
   test('config/ and state/ are made by the first write when a copied home lacks them (run/ is the home lock’s)', async () => {
     const { home } = await setUpHome();
     for (const folder of ['config', 'state']) await rm(join(home, folder), { recursive: true });
