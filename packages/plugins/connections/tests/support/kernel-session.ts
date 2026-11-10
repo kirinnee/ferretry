@@ -21,6 +21,8 @@ import {
   type SocketDownstream,
 } from '@ferretry/kernel/contract';
 import { session } from '@ferretry/kernel/host';
+import { createIdentitySigner } from '../../../../core/kernel/host/session/signer.ts';
+import type { RendezvousSigner } from '../../daemon/lib/relay/session-ports.ts';
 
 export const kernelCrypto = new session.WebCryptoSessionCrypto();
 
@@ -85,12 +87,16 @@ export interface PairedTestDevice {
   readonly deviceId: string;
   readonly appSession: string;
   readonly privateKey: CryptoKey;
+  /** The public half as the daemon's device table holds it (base64url SPKI), for a leak search. */
+  readonly publicKey: string;
 }
 
 export interface KernelFixture {
   readonly layer: session.SessionLayerHost;
   readonly clock: DrivenKernelClock;
   readonly daemonId: string;
+  /** The identity's claim signer, as a rendezvous link is given it: it signs the claim the Worker verifies. */
+  readonly signer: RendezvousSigner;
   readonly pair: RecordingPairMode;
   readonly requests: ApiRequest[];
   /** What the kernel's dispatcher answers a carried request with. Defaults to echoing its path. */
@@ -120,17 +126,23 @@ export async function kernelFixture(): Promise<KernelFixture> {
     layer: undefined as unknown as session.SessionLayerHost,
     clock,
     daemonId: identity.daemonId,
+    signer: {
+      daemonId: identity.daemonId,
+      sign: createIdentitySigner(session.signingKey(kernelCrypto, identity)).sign,
+    },
     pair,
     requests,
     route: async request => jsonResponse({ path: request.path }),
     paired: async (suffix = 'A') => {
       const key = await kernelCrypto.generateDeviceKey();
       const deviceId = `fy_device_id_${suffix.padEnd(22, 'x')}`;
-      devices.keys.set(deviceId, session.toBase64Url(key.publicKeySpki));
+      const publicKey = session.toBase64Url(key.publicKeySpki);
+      devices.keys.set(deviceId, publicKey);
       return {
         deviceId,
         appSession: session.toBase64Url(kernelCrypto.randomBytes(16)),
         privateKey: key.privateKey,
+        publicKey,
       };
     },
   };

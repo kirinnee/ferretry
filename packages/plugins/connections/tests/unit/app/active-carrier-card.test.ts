@@ -30,3 +30,13 @@ test('R121 the direct carrier discloses only the parties actually on its path', 
   for (const observer of describeConnectionMethod(direct).observers) expect(html).toContain(observer);
   expect(html).not.toContain('fy_daemon_');
 });
+test('R15 the card links the self-hosting runbook and offers no relay setting of its own', () => {
+  const html = renderToStaticMarkup(createElement(ActiveCarrierCard, { choice: undefined, relayAdvertised: true }));
+  expect(html).toContain('Running your own relay is an expert option set on the daemon, not in this app.');
+  expect(html).toContain('href="https://github.com/kirinnee/ferretry/blob/main/docs/cloudflare-relay-self-hosting.md"');
+  expect(html).toContain('rel="noreferrer noopener"');
+  // Nothing on the card can be typed into or pressed: the runbook link is the only way to the topic.
+  expect(html).not.toContain('<input');
+  expect(html).not.toContain('<button');
+  expect(html.match(/<a /gu)).toHaveLength(1);
+});

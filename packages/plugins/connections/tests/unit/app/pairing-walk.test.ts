@@ -6,13 +6,16 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type PairDirectInput,
+  type PairedDaemon,
   PairingOutcomeUnknownError,
   type RelayCrypto,
   RelayPairingRefusedError,
   toBase64Url,
 } from '@ferretry/app';
 import { pairOverCarriers, WebCryptoRelayCrypto } from '@ferretry/app/testing';
+import { daemonCarriers } from '../../../app/carriers/router.ts';
 import { AmbiguousPairingError, pairingCandidates, pairingWalk } from '../../../app/pairing/walk.ts';
+import { guarantee } from '../../support/guarantee.ts';
 import { PairingUnreachableError } from '../../../app/pairing/unreachable.ts';
 import { BrowserNetwork, HandTimers, type ScriptedHost } from '../../support/browser-network.ts';
 import { impostorDaemon, type KernelFixture, kernelFixture } from '../../support/kernel-session.ts';
@@ -91,8 +94,10 @@ const bytesContain = (frames: readonly Uint8Array[], text: string): boolean =>
   frames.some(frame => new TextDecoder().decode(frame).includes(text));
 
 describe('the daemon is proved before anything is sent', () => {
-  for (const row of ['P24', 'R570', 'P135'])
-    test(`${row} a daemon whose signed hello does not hash to the QR-pinned fingerprint is refused before any key, proof or code, on every leg`, async () => {
+  guarantee(
+    ['P24', 'R570', 'P135'],
+    'a daemon whose signed hello does not hash to the QR-pinned fingerprint is refused before any key, proof or code, on every leg',
+    async () => {
       // Arrange — both legs reach a HOSTILE daemon: it claims the pinned fingerprint and answers with a daemon hello
       // properly signed by its OWN identity, so only the browser's own pin check stands between it and the code.
       const impostor = await impostorDaemon();
@@ -124,7 +129,8 @@ describe('the daemon is proved before anything is sent', () => {
       expect(counting.calls).toEqual({ deriveSharedSecret: 0, deriveKey: 0, seal: 0, signEd25519: 0 });
       expect(run.fx.pair.attempts).toEqual([]);
       run.fx.layer.close();
-    });
+    },
+  );
 
   test('P24 the pinned daemon is redeemed over its own address and answers which carrier carried it', async () => {
     const run = await walkOver({ [hostOf(DIRECT)]: { kind: 'carries', carrier: 'direct' } });
@@ -137,8 +143,10 @@ describe('the daemon is proved before anything is sent', () => {
 });
 
 describe('the walk', () => {
-  for (const row of ['R582', 'R633'])
-    test(`${row} redemption walks direct first, always, then the one discovered rendezvous — never a tunnel or WebRTC`, async () => {
+  guarantee(
+    ['R582', 'R633'],
+    'redemption walks direct first, always, then the one discovered rendezvous — never a tunnel or WebRTC',
+    async () => {
       const run = await walkOver({
         [hostOf(DIRECT)]: { kind: 'dead' },
         [hostOf(RELAY)]: { kind: 'carries', carrier: 'relay' },
@@ -155,7 +163,86 @@ describe('the walk', () => {
         'relay',
       ]);
       run.fx.layer.close();
+    },
+  );
+
+  test('P23 P53 a phone that cannot dial the daemon still pairs: its own address first, then the one discovered rendezvous', async () => {
+    // Arrange — the daemon's address is dead from here (a private address from cellular); the rendezvous carries.
+    const run = await walkOver({
+      [hostOf(DIRECT)]: { kind: 'dead' },
+      [hostOf(RELAY)]: { kind: 'carries', carrier: 'relay' },
     });
+
+    // Act
+    const paired = await run.pair(await pairingInput(run.fx.daemonId));
+
+    // Assert — the pre-auth session opened on the daemon's own address FIRST (P23), failed at transport, and the
+    // rendezvous this build discovered carried the one redemption the daemon then redeemed (P53).
+    expect(run.network.dialled.map(url => new URL(url).host)).toEqual([hostOf(DIRECT), hostOf(RELAY)]);
+    expect(paired).toMatchObject({ kind: 'paired', via: { kind: 'relay', address: RELAY } });
+    expect(run.fx.pair.attempts).toHaveLength(1);
+    expect(String(run.fx.pair.attempts[0]?.carrier)).toBe('relay');
+    run.fx.layer.close();
+  });
+
+  test('P78 the discovered rendezvous serves one redemption and is stored nowhere: the walk keeps no memory of it', async () => {
+    // Arrange
+    const run = await walkOver({
+      [hostOf(DIRECT)]: { kind: 'dead' },
+      [hostOf(RELAY)]: { kind: 'carries', carrier: 'relay' },
+    });
+
+    // Act — one relay-leg pairing.
+    const paired = await run.pair(await pairingInput(run.fx.daemonId));
+
+    // Assert — the outcome names the rendezvous once, as the leg that carried it (`via`), and nowhere else; what a
+    // device keeps is `carriers`, so a record built from it navigates by the daemon's published set and, with none
+    // published, by the address it was paired at — never by the rendezvous that happened to serve first contact.
+    const { via, ...kept } = paired;
+    expect(via).toEqual({ kind: 'relay', address: RELAY });
+    expect(JSON.stringify(kept)).not.toContain(hostOf(RELAY));
+    const record: PairedDaemon = {
+      daemon: run.fx.daemonId,
+      machine: 'laptop',
+      deviceId: 'fy_device_id_new',
+      address: DIRECT,
+      carriers: [],
+      pairedAt: 1,
+      lastSelectedAt: 1,
+    };
+    expect(daemonCarriers(record)).toEqual([{ kind: 'direct', daemonUrl: DIRECT }]);
+    // And the walk itself remembers nothing: a later pairing in a document whose directory advertised no rendezvous
+    // dials the daemon's own address alone.
+    const later = await walkOver({ [hostOf(DIRECT)]: { kind: 'dead' } }, null);
+    await later.pair(await pairingInput(later.fx.daemonId)).catch(() => undefined);
+    expect(later.network.dialled.map(url => new URL(url).host)).toEqual([hostOf(DIRECT)]);
+    run.fx.layer.close();
+    later.fx.layer.close();
+  });
+
+  test('R204 a rendezvous the directory diverged from fails closed 4404: the pin keeps the code, the key and the payload at home', async () => {
+    // Arrange — the daemon's own address is dead and the discovered rendezvous holds no slot for this fingerprint.
+    const run = await walkOver({
+      [hostOf(DIRECT)]: { kind: 'dead' },
+      [hostOf(RELAY)]: { kind: 'absent', code: 4404 },
+    });
+    const input = await pairingInput(run.fx.daemonId);
+
+    // Act
+    const failure = await run.pair(input).catch((error: unknown) => error);
+
+    // Assert — a transport failure naming the 4404 on the relay leg, and not one byte of the code, the device key or
+    // a pairing payload went anywhere: the daemon was never proved, so nothing was sent.
+    expect(failure).toBeInstanceOf(PairingUnreachableError);
+    expect((failure as PairingUnreachableError).legs).toContainEqual({ kind: 'relay', address: RELAY, code: 4404 });
+    for (const host of [hostOf(DIRECT), hostOf(RELAY)]) {
+      expect(run.network.records(host)).toEqual([]);
+      expect(bytesContain(run.network.sent.get(host) ?? [], CODE)).toBe(false);
+      expect(bytesContain(run.network.sent.get(host) ?? [], input.key.publicKey)).toBe(false);
+    }
+    expect(run.fx.pair.attempts).toEqual([]);
+    run.fx.layer.close();
+  });
 
   test('R582 a direct address that answers nothing is given up at its deadline and the rendezvous is tried', async () => {
     const run = await walkOver({
