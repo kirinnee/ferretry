@@ -110,6 +110,18 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   counts), and any default-mode finding keeps the job red. `--tier` is why a row tested in one tier alone is never
   "missing" from the other tier's report. Strict mode (`--strict`, rows of still-pending packages) becomes required
   once `ports-pending.json` is empty.
+- **Strict guarantee report.** The `Strict Guarantees` job (needs Quick and Integration, so only on the full set's
+  events, and after a red test job too) downloads the `coverage-unit`, `coverage-scripts` and `coverage-int` artifacts and runs
+  `bun scripts/ci/strict-guarantees.ts` over all three at once, with `--strict` and no `--tier`: a passing
+  id-named test in either tier proves a row, a skipped or failed one does not. The job summary shows the miss count and
+  the ids by owner. It counts a kept row whose id tests all sit outside its owner's suite as a miss too (the
+  `guarantee-owner` finding), and a multi-id title (`P23 P53 …`) proves each of its ids. The one switch is
+  `FY_STRICT_GUARANTEES_BLOCKING` in the workflow `env` of `ci.yaml`, and both the job and `full-status.sh` read it:
+  while it is `'false'` the job never turns CI red, and the `Full CI` verdict accepts the job whatever it ended as
+  (a failed setup step or the timeout included). The flip is ONE change that takes the count to 0, per
+  `docs/rebuild/merge-bar.md` line 1, and does three things together: sets the switch to `'true'`, adds `--strict` to
+  the per-tier `guarantees` checks (`quick.sh`, `integration.sh`), and adds `--strict` to `guarantee-owner` (which
+  `check.ts guarantees` in `quick.sh` runs with it).
 - **Parallel read-only hooks.** Quick discovers hooks from the generated pre-commit
   configuration and runs four at a time on PRs (two on main), each with its own output, duration and
   temporary pre-commit cache. Their scripts do not write checkout files; the hook
