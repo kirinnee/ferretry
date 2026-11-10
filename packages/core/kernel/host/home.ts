@@ -36,11 +36,22 @@ const LOGS_FOLDER = 'logs';
 
 const KIND_WORDS = { file: 'a file', link: 'a link', other: 'not a folder' } as const;
 
+/** `0700` on the folder through a descriptor opened without following a link, so a swap for a link is refused, never chmodded. */
+async function setPrivateMode(fs: HostFs, path: string): Promise<void> {
+  const folder = await fs.openDirectory(path);
+  try {
+    await folder.chmod(0o700);
+  } finally {
+    await folder.close();
+  }
+}
+
 /**
  * `logs/` exists, as a folder only this user may enter, before anything is logged. The daemon's log lines are dropped
  * until it does, so a home that was copied or restored without it logged NOTHING and said nothing. Looked at without
  * following a link: a link or a file in its place is refused by name, never written through. A folder open to others
- * is tightened to `0700` and reported; one that cannot be made is refused with the reason.
+ * is tightened to `0700` and reported; one that cannot be made, or that this user cannot write in (the log would be
+ * lost the same way), is refused with the reason.
  */
 async function ensureLogs(fs: HostFs, home: string): Promise<'present' | 'made' | 'tightened' | { sentence: string }> {
   const path = `${home}/${LOGS_FOLDER}`;
@@ -53,15 +64,16 @@ async function ensureLogs(fs: HostFs, home: string): Promise<'present' | 'made' 
       await fs.mkdirp(path, 0o700);
       const made = await fs.lstat(path);
       if (made?.kind !== 'directory') return refuse('is not a folder after it was made');
-      await fs.chmod(path, 0o700);
+      await setPrivateMode(fs, path);
       return 'made';
     }
     if (info.kind !== 'directory') return refuse(`is ${KIND_WORDS[info.kind]}, not a folder`);
-    if (info.mode !== undefined && (info.mode & 0o077) !== 0) {
-      await fs.chmod(path, 0o700);
-      return 'tightened';
-    }
-    return 'present';
+    const tighten = info.mode !== undefined && (info.mode & 0o077) !== 0;
+    if (tighten) await setPrivateMode(fs, path);
+    // A folder this user cannot write in (owner bits without write or search, or another user's) logs nothing either.
+    const ownerCanUse = tighten || info.mode === undefined || (info.mode & 0o300) === 0o300;
+    if (!ownerCanUse || !(await fs.writable(path))) return refuse('is a folder this user cannot write in');
+    return tighten ? 'tightened' : 'present';
   } catch (error) {
     return refuse(`could not be made (${error instanceof Error ? error.message : 'unknown error'})`);
   }
