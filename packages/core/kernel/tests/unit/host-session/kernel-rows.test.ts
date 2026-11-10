@@ -457,32 +457,40 @@ describe('requests', () => {
     expect(twice.client.end?.code).toBe(4400);
   });
 
-  test('R510 the 32 MiB bound applies to the body as it travels, which is the base64url text', async () => {
-    const fx = await fixture();
-    // A small plain body whose gzip bytes, as base64url TEXT, pass 32 MiB: refused, though the plain body is tiny.
-    const traveling = new Uint8Array(25 * 1024 * 1024);
-    for (let offset = 0; offset < traveling.length; offset += 65_536)
-      traveling.set(relayCrypto.randomBytes(Math.min(65_536, traveling.length - offset)), offset);
-    expect(Math.ceil((traveling.length * 4) / 3)).toBeGreaterThan(MAX_TUNNEL_BODY_BYTES);
-    expect(traveling.length).toBeLessThan(MAX_TUNNEL_BODY_BYTES);
-    fx.dispatch = async () => ({
-      status: 200,
-      headers: new Map([['content-type', 'application/json']]),
-      body: '{"a":1}',
-      gzip: traveling,
-    });
-    const { client } = await serving(fx);
-    await client.send(req(1));
-    await client.pump();
-    const refused = client.last('res');
-    expect(refused?.['status']).toBe(502);
-    expect(String(refused?.['body'])).toContain('answer_too_large');
-    // The same bound on the PLAIN body, as it travels: just over 32 MiB is refused.
-    fx.dispatch = async () => ({ status: 200, headers: new Map(), body: 'x'.repeat(MAX_TUNNEL_BODY_BYTES + 1) });
-    await client.send(req(2));
-    await client.pump();
-    expect(client.records.filter(record => record['t'] === 'res' && record['id'] === 2)[0]?.['status']).toBe(502);
-  });
+  // Measured: this case sends a 25 MiB random gzip body (over 32 MiB as base64url), then a 32 MiB plain one: 3.46 s and
+  // 3.86 s on green CI runs (42841586074, 42833771647) and 5.09 s on a loaded runner (42844730254), over bun's 5 s
+  // default. It checks a size bound, not a time bound, so its limit is raised to 30 s.
+  const R510_BIG_BODY_MS = 30_000;
+  test(
+    'R510 the 32 MiB bound applies to the body as it travels, which is the base64url text',
+    async () => {
+      const fx = await fixture();
+      // A small plain body whose gzip bytes, as base64url TEXT, pass 32 MiB: refused, though the plain body is tiny.
+      const traveling = new Uint8Array(25 * 1024 * 1024);
+      for (let offset = 0; offset < traveling.length; offset += 65_536)
+        traveling.set(relayCrypto.randomBytes(Math.min(65_536, traveling.length - offset)), offset);
+      expect(Math.ceil((traveling.length * 4) / 3)).toBeGreaterThan(MAX_TUNNEL_BODY_BYTES);
+      expect(traveling.length).toBeLessThan(MAX_TUNNEL_BODY_BYTES);
+      fx.dispatch = async () => ({
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        body: '{"a":1}',
+        gzip: traveling,
+      });
+      const { client } = await serving(fx);
+      await client.send(req(1));
+      await client.pump();
+      const refused = client.last('res');
+      expect(refused?.['status']).toBe(502);
+      expect(String(refused?.['body'])).toContain('answer_too_large');
+      // The same bound on the PLAIN body, as it travels: just over 32 MiB is refused.
+      fx.dispatch = async () => ({ status: 200, headers: new Map(), body: 'x'.repeat(MAX_TUNNEL_BODY_BYTES + 1) });
+      await client.send(req(2));
+      await client.pump();
+      expect(client.records.filter(record => record['t'] === 'res' && record['id'] === 2)[0]?.['status']).toBe(502);
+    },
+    R510_BIG_BODY_MS,
+  );
 
   test('R510 a request body streamed in parts whose base64url text passes 32 MiB is answered 413 and never dispatched', async () => {
     const fx = await fixture();
