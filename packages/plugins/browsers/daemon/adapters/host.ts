@@ -106,7 +106,7 @@ export function processHost(source: Readonly<Record<string, string | undefined>>
         executableDirectories: [invoked, resolved],
         platform: process.platform,
         arch: process.arch,
-        sourceEntry: fileURLToPath(new URL('../worker/adapters/main.ts', import.meta.url)),
+        sourceEntry: fileURLToPath(new URL('../worker/main.ts', import.meta.url)),
         exists: existsSync,
       });
     },

@@ -33,9 +33,9 @@ import {
   type BrowserModifier,
   type BrowserMouseButton,
   type BrowserTarget,
-} from '../../../contract/wire/target.ts';
-import { type BrowserInputEvent } from '../../../contract/wire/browser.ts';
-import { BrowserPageLifecycleRequestSchema } from '../../../contract/wire/page-lifecycle.ts';
+} from '../../contract/wire/target.ts';
+import { type BrowserInputEvent } from '../../contract/wire/browser.ts';
+import { BrowserPageLifecycleRequestSchema } from '../../contract/wire/page-lifecycle.ts';
 import {
   type Browser,
   type BrowserContext,
@@ -46,10 +46,10 @@ import {
   type Page,
   type WebSocket,
 } from 'playwright-core';
-import { CDP_PIPE_ENDPOINT, CDP_PIPE_FROM_CHROME_FD, CDP_PIPE_TO_CHROME_FD, CdpPipeTransport } from '../cdp-pipe.ts';
-import { recogniseBrowserChallenge } from '../../challenges/recognise.ts';
-import { type CopyablePage, readCopyElement } from '../copy-read.ts';
-import { DownloadStage } from '../download-stage.ts';
+import { CDP_PIPE_ENDPOINT, CDP_PIPE_FROM_CHROME_FD, CDP_PIPE_TO_CHROME_FD, CdpPipeTransport } from './cdp-pipe.ts';
+import { recogniseBrowserChallenge } from '../challenges/recognise.ts';
+import { type CopyablePage, readCopyElement } from './copy-read.ts';
+import { DownloadStage } from './download-stage.ts';
 import {
   describeInputDocument,
   type InputablePage,
@@ -59,8 +59,8 @@ import {
   type InputLocator,
   type InputSubject,
   playwrightNodeOf,
-} from '../../target/lib/fields.ts';
-import { type InputWorkerPages, isInputMethod, serveInputMethod } from '../../target/lib/worker-serve.ts';
+} from '../target/lib/fields.ts';
+import { type InputWorkerPages, isInputMethod, serveInputMethod } from '../target/lib/worker-serve.ts';
 import {
   browserElementParam,
   browserTargetParam,
@@ -70,7 +70,7 @@ import {
   shootPage,
   typeInto,
   uploadFiles,
-} from '../../pages/page-acts.ts';
+} from '../pages/page-acts.ts';
 import {
   ConsoleLog,
   NetworkLog,
@@ -78,12 +78,12 @@ import {
   PageEmulation,
   runLifecycleRequest,
   type WaitablePage,
-} from './page-lifecycle.ts';
-import { runPageScript } from './page-script.ts';
-import { disablePasskeys } from '../passkeys.ts';
-import { type PointerPosition, pointerAfter, pointerSequence } from '../../pages/pointer.ts';
-import { type PointerPage, performPointerAct, pointerActParam } from '../../pages/pointer-acts.ts';
-import type { PushNumberPage } from '../../challenges/push-number-read.ts';
+} from './adapters/page-lifecycle.ts';
+import { runPageScript } from './adapters/page-script.ts';
+import { disablePasskeys } from './passkeys.ts';
+import { type PointerPosition, pointerAfter, pointerSequence } from '../pages/pointer.ts';
+import { type PointerPage, performPointerAct, pointerActParam } from '../pages/pointer-acts.ts';
+import type { PushNumberPage } from '../challenges/push-number-read.ts';
 
 const endpoint = process.argv[2];
 /** Where downloads and PDFs are staged for the daemon; without it the worker stages nothing. */

@@ -28,7 +28,7 @@ export interface BrowserWorkerSearch {
   readonly executableDirectories: readonly string[];
   readonly platform: string;
   readonly arch: string;
-  /** The TypeScript worker entry in a source checkout (`./adapters/main.ts`); undefined when compiled. */
+  /** The TypeScript worker entry in a source checkout (`./main.ts`); undefined when compiled. */
   readonly sourceEntry?: string;
   readonly exists: (path: string) => boolean;
 }
