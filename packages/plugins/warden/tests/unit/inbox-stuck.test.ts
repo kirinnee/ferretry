@@ -314,3 +314,49 @@ describe('inbox_stuck: what the Warden does', () => {
     );
   });
 });
+
+describe('B187 a queue behind a working turn that never ends', () => {
+  const working = (quietMin: number | undefined): WardenSessionView =>
+    ferret('nelly', {
+      turnState: 'working',
+      turnStateAt: iso(NOW - 50 * MINUTE),
+      ...(quietMin === undefined ? {} : { frameQuietSince: iso(NOW - quietMin * MINUTE) }),
+    });
+
+  it('B187 a queue behind a working turn with a quiet frame is flagged turn_never_ends', () => {
+    const queued = [message('m1', 30)];
+    const flag = inboxStuckOf(working(25), queued, [], NOW);
+
+    should(flag).match({ cause: 'turn_never_ends', messageId: 'm1', waiting: 1 });
+    should(flag?.detail).match(/screen has not changed/);
+    // Named in place of an unattributed draft too, and acted on with a tracker look then a delivery look.
+    should(inboxStuckOf(working(25), [message('m1', 30, { waitReason: 'draft' })], [], NOW)?.cause).equal(
+      'turn_never_ends',
+    );
+    should(unstickActs('turn_never_ends')).eql(['tracker_look', 'delivery_look']);
+    // A draft of ours or a dialog is still named for what it is.
+    should(
+      inboxStuckOf(working(25), [message('m1', 30, { waitReason: 'draft', waitBehind: 's1' })], [], NOW)?.cause,
+    ).equal('draft_own');
+    should(inboxStuckOf(working(25), [message('m1', 30, { waitReason: 'dialog' })], [], NOW)?.cause).equal('dialog');
+  });
+
+  it('B187 a queue behind a working turn whose frame moves is not flagged turn_never_ends', () => {
+    const queued = [message('m1', 30)];
+
+    // Moved within the urgency limit (an action's is 20 m), no frame fact at all, or not working: no new cause.
+    should(inboxStuckOf(working(5), queued, [], NOW)?.cause).equal('no_reason');
+    should(inboxStuckOf(working(undefined), queued, [], NOW)?.cause).equal('no_reason');
+    should(
+      inboxStuckOf(
+        ferret('nelly', { turnState: 'your-turn', frameQuietSince: iso(NOW - 25 * MINUTE) }),
+        queued,
+        [],
+        NOW,
+      )?.cause,
+    ).equal('no_reason');
+    should(
+      inboxStuckOf(ferret('nelly', { turnState: 'working', frameQuietSince: 'not a date' }), queued, [], NOW)?.cause,
+    ).equal('no_reason');
+  });
+});

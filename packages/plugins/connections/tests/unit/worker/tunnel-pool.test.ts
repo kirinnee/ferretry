@@ -211,6 +211,23 @@ describe('tunnel challenges', () => {
     should(spendTunnelChallenge(book, daemonA, 'x', 5_000).book).eql([]);
   });
 
+  guarantee(['R642'], 'should pin the limits at 3 outstanding, 6 per minute per machine and 512 per minute', () => {
+    should({ ...TUNNEL_CHALLENGE_LIMITS }).eql({
+      outstandingPerDaemon: 3,
+      issuedPerDaemonPerWindow: 6,
+      issuedGlobalPerWindow: 512,
+    });
+  });
+
+  guarantee(['R642'], 'should read an unparsable pool as unavailable, never as a pool with no limits', () => {
+    // Not JSON, and JSON of the wrong shape: neither is a pool, so the service advertises unavailable.
+    const broken = [parseTunnelAccountPool('{"nope"'), parseTunnelAccountPool('{"accounts":[]}')];
+    for (const pool of broken) {
+      should(pool.kind).equal('invalid');
+      should(tunnelServiceAvailable(pool, new Map(), 0)).be.false();
+    }
+  });
+
   guarantee(['R642'], 'should bound outstanding nonces per daemon', () => {
     let book: TunnelChallengeBook = [];
     for (let index = 0; index < TUNNEL_CHALLENGE_LIMITS.outstandingPerDaemon; index += 1) {
@@ -223,7 +240,7 @@ describe('tunnel challenges', () => {
     should(issueTunnelChallenge(book, daemonB, nonce(9), 0).ok).be.true();
   });
 
-  it('should bound issues per daemon per window even when every nonce was spent', () => {
+  guarantee(['R642'], 'should bound issues per daemon per window even when every nonce was spent', () => {
     const book: TunnelChallengeBook = Array.from(
       { length: TUNNEL_CHALLENGE_LIMITS.issuedPerDaemonPerWindow },
       (_, at) => ({
@@ -238,7 +255,7 @@ describe('tunnel challenges', () => {
     should(issueTunnelChallenge(book, daemonA, nonce(1), 60_000).ok).be.true();
   });
 
-  it('should bound issues across the whole service per window', () => {
+  guarantee(['R642'], 'should bound issues across the whole service per window', () => {
     const book: TunnelChallengeBook = Array.from(
       { length: TUNNEL_CHALLENGE_LIMITS.issuedGlobalPerWindow },
       (_, at) => ({

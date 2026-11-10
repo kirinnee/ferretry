@@ -58,7 +58,6 @@ interface TunnelSwitchOffer {
 /**
  * A machine's switch as a selector offers it, or nothing until the machine has answered — and nothing
  * for a daemon older than the switch, whose tunnel was never opt-in.
- * @pending connections: GAP(app): app/lib/tunnel-switch.ts and app/lib/webrtc-carrier.ts are ported and tested but the app half builds no tunnel switch or WebRTC dialer yet
  */
 export const tunnelSwitchOffer = (
   state: TunnelSwitchState | undefined,

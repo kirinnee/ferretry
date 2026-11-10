@@ -88,6 +88,9 @@ export interface InboxSend {
  * - `draft_unattributed` — the box holds text nothing proves ours, at a ferret nobody is typing into (elta).
  * - `dialog`, `unreadable`, `launching` — the queue's own wait reason, held far longer than it ever should be;
  *   `unreadable` also for a person's send the screen would not let be typed, which the tracker types once it reads clear.
+ * - `turn_never_ends` (B187) — the ferret reads `working` and its screen has not changed for longer than the oldest
+ *   message's limit: a turn marker the harness wrote while idle (compaction) pinned it, and the queue waits for a
+ *   turn that is not running. Named in place of `no_reason` / `draft_unattributed`.
  * - `no_reason` — waiting with nothing in front of it and no reason given: the deliverer has not looked.
  */
 export type InboxStuckCause =
@@ -98,6 +101,7 @@ export type InboxStuckCause =
   | 'dialog'
   | 'unreadable'
   | 'launching'
+  | 'turn_never_ends'
   | 'no_reason';
 
 /** A stuck inbox: the anomaly, plus what the Warden acts on. */
@@ -161,6 +165,7 @@ function inboxStuckCause(
   messages: readonly QueuedMessage[],
   sends: readonly InboxSend[],
   oldest: QueuedMessage,
+  neverEnds: boolean,
 ): { readonly cause: InboxStuckCause; readonly blockingSendId?: string } {
   const typing = messages.find(message => message.state === 'typing');
   if (typing !== undefined) {
@@ -176,16 +181,30 @@ function inboxStuckCause(
   }
   switch (oldest.waitReason) {
     case 'draft':
-      return oldest.waitBehind === undefined
-        ? { cause: 'draft_unattributed' }
-        : { cause: 'draft_own', blockingSendId: oldest.waitBehind };
+      if (oldest.waitBehind !== undefined) return { cause: 'draft_own', blockingSendId: oldest.waitBehind };
+      return { cause: neverEnds ? 'turn_never_ends' : 'draft_unattributed' };
     case 'dialog':
     case 'unreadable':
     case 'launching':
       return { cause: oldest.waitReason };
     default:
-      return { cause: 'no_reason' };
+      return { cause: neverEnds ? 'turn_never_ends' : 'no_reason' };
   }
+}
+
+/**
+ * Whether the ferret reads `working` on a screen that has not moved for longer than the message's limit (B187).
+ * `frameQuietSince` is the monitor's last meaningful screen change; a ferret without one proves nothing.
+ */
+function turnNeverEnds(
+  view: WardenSessionView,
+  oldest: QueuedMessage,
+  nowMs: number,
+  limits: Readonly<Record<InboxUrgency, number>>,
+): boolean {
+  if (view.state.turnState !== 'working' || view.state.frameQuietSince === undefined) return false;
+  const quietSince = Date.parse(view.state.frameQuietSince);
+  return Number.isFinite(quietSince) && nowMs - quietSince > limits[inboxUrgency(oldest)];
 }
 
 /** The episode a stuck inbox is: its oldest stuck message, for that ferret. */
@@ -202,6 +221,7 @@ const CAUSE_WORDS: Readonly<Record<InboxStuckCause, string>> = {
   dialog: 'a dialog on its screen holds the queue',
   unreadable: 'its screen cannot be read to prove the box empty',
   launching: 'it has been launching all this time',
+  turn_never_ends: 'it reads as working, but its screen has not changed for a long time, so no turn is ending',
   no_reason: 'nothing has looked at its queue',
 };
 
@@ -225,7 +245,12 @@ export function inboxStuckOf(
     if (oldest === undefined || due < inboxDueMs(oldest)) oldest = message;
   }
   if (oldest === undefined) return undefined;
-  const { cause, blockingSendId } = inboxStuckCause(messages, sends, oldest);
+  const { cause, blockingSendId } = inboxStuckCause(
+    messages,
+    sends,
+    oldest,
+    turnNeverEnds(view, oldest, nowMs, limits),
+  );
   const due = inboxDueMs(oldest);
   const idleMinutes = minutes(nowMs, due);
   const from =
@@ -317,6 +342,7 @@ export function unstickActs(cause: InboxStuckCause): readonly InboxUnstickAct[] 
   switch (cause) {
     case 'hung_handover':
     case 'unreadable':
+    case 'turn_never_ends':
       return ['tracker_look', 'delivery_look'];
     case 'draft_unattributed':
       return ['tracker_look', 'finish_own_draft', 'delivery_look'];

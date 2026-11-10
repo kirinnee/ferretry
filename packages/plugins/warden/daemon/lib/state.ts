@@ -535,6 +535,7 @@ const RuntimeStateSchema = z.object({
           'dialog',
           'unreadable',
           'launching',
+          'turn_never_ends',
           'no_reason',
         ]),
         unstuckAt: Instant.optional(),

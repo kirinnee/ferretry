@@ -31,5 +31,9 @@ describe('relay tenancy', () => {
     const tenancy = parseRelayTenancy(first);
     should(servesDaemon(tenancy, second)).be.false();
     should(servesDaemon(tenancy, 'fy_daemon_short')).be.false();
+    // Serving is exact: a fingerprint that merely starts like a listed one, or differs in case, is another daemon.
+    should(servesDaemon(tenancy, `${first}x`)).be.false();
+    should(servesDaemon(tenancy, first.toUpperCase())).be.false();
+    should(servesDaemon(tenancy, first)).be.true();
   });
 });

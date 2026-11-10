@@ -36,6 +36,7 @@ import {
   dispositionOf,
   isDirectSend,
   isFileBackedQueue,
+  isUnconfirmedTyping,
   lookBeforeReading,
   paneMidTurn,
   peerMessageKind,
@@ -907,8 +908,7 @@ export function buildConversationA(deps: {
       (waiting?.deliveredAs === undefined ? undefined : rows.find(entry => entry.sendId === waiting.deliveredAs));
     if (row === undefined && waiting === undefined) return undefined;
     // A send typed and not proven is answered as it was the first time: unconfirmed, with its id, never `sent`.
-    if (row?.fate === 'unaccounted' && row.unaccountedReason === 'landing_unconfirmed')
-      throw new SessionSendError('unconfirmed', UNCONFIRMED_AGAIN, undefined, sendId);
+    if (isUnconfirmedTyping(row)) throw new SessionSendError('unconfirmed', UNCONFIRMED_AGAIN, undefined, sendId);
     const answer = answerOf(row, waiting);
     return {
       ferret,

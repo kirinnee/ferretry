@@ -21,6 +21,7 @@ import {
   type WebRtcTimers,
   webrtcSignaller,
 } from '../../../app/lib/webrtc-carrier.ts';
+import { DEFAULT_WEBRTC_ICE_SERVERS } from '../../../contract/index.ts';
 import { guarantee } from '../../support/guarantee.ts';
 
 class ManualTimers implements WebRtcTimers {
@@ -93,7 +94,10 @@ class FakePeer implements WebRtcPeerLike {
 
   constructor(readonly iceServers: readonly { readonly urls: string }[]) {}
 
-  createDataChannel(): WebRtcDataChannelLike {
+  readonly created: Array<{ readonly label: string; readonly init: unknown }> = [];
+
+  createDataChannel(label: string, init: unknown): WebRtcDataChannelLike {
+    this.created.push({ label, init });
     const channel = new FakeChannel();
     if (this.opensAtOnce) channel.readyState = 'open';
     this.channels.push(channel);
@@ -233,6 +237,31 @@ describe('the WebRTC carrier, browser side', () => {
       // Assert
       should([beforeGrace, viaGrace.offers.length]).deepEqual([0, 1]);
       should([beforeCap, viaCap.offers.length]).deepEqual([0, 1]);
+    },
+  );
+
+  guarantee(
+    ['R679'],
+    'should open every session channel reliable and ordered, one session per channel, labelled for sessions',
+    async () => {
+      // Arrange
+      const built = harness();
+      await connected(built);
+      const peer = built.peers[0];
+      if (peer === undefined) throw new Error('no peer was negotiated');
+      peer.opensAtOnce = true;
+
+      // Act — a second session on the same connection opens its own channel.
+      await built.subject.dial(new AbortController().signal);
+
+      // Assert — both channels are exactly `{ ordered: true }`: no maxRetransmits and no maxPacketLifeTime, which is what
+      // would make a channel unreliable — and one channel per session.
+      should(peer.created).have.length(2);
+      for (const channel of peer.created) {
+        should(channel.label).equal('fy-session');
+        should(channel.init).deepEqual({ ordered: true });
+      }
+      should(peer.channels).have.length(2);
     },
   );
 
@@ -687,6 +716,24 @@ describe('the WebRTC dialer', () => {
     should(peers.map(peer => peer.closed)).deepEqual([true, false]);
   });
 
+  it('should release one daemon’s connection and no other, and release nothing it never held', async () => {
+    // Arrange
+    const { subject, peers, attempt, connectNewest } = dialer();
+    const a = subject.dial(attempt('daemon-a'));
+    await connectNewest();
+    await a;
+    const b = subject.dial(attempt('daemon-b'));
+    await connectNewest();
+    await b;
+
+    // Act
+    subject.release('daemon-a');
+    subject.release('never-dialled');
+
+    // Assert
+    should(peers.map(peer => peer.closed)).deepEqual([true, false]);
+  });
+
   it('should not listen for an abort that already happened', async () => {
     // Arrange
     const { subject, attempt } = dialer();
@@ -725,6 +772,46 @@ describe('the WebRTC dialer', () => {
 });
 
 describe('the browser’s own WebRTC dialer', () => {
+  guarantee(
+    ['R678'],
+    'should ask one STUN server with no credential and never tell it which daemon or session the peer is for',
+    async () => {
+      // Arrange — two daemons with fingerprints, dialled through the real default dialer over a recording constructor.
+      const configurations: unknown[] = [];
+      const subject = browserWebRtcDialer({
+        RTCPeerConnection: class {
+          constructor(configuration: { readonly iceServers: readonly { readonly urls: string }[] }) {
+            configurations.push(configuration);
+            // biome-ignore lint/correctness/noConstructorReturn: the stand-in IS the scripted peer.
+            return new FakePeer(configuration.iceServers);
+          }
+        },
+      });
+      const daemons = [`fy_daemon_${'A'.repeat(43)}`, `fy_daemon_${'B'.repeat(43)}`];
+
+      // Act
+      for (const daemonId of daemons) {
+        void subject
+          ?.dial({
+            daemon: { daemonId },
+            signal: new AbortController().signal,
+            request: async () => new Response(JSON.stringify({ sdp: 'answer' })),
+          })
+          .catch(() => undefined);
+        await settle();
+      }
+
+      // Assert — the same one STUN url and nothing else for both, and neither fingerprint reaches the configuration.
+      should(configurations).have.length(2);
+      should(configurations[0]).deepEqual(configurations[1]);
+      should(configurations[0]).deepEqual({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }] });
+      for (const daemonId of daemons) should(JSON.stringify(configurations)).not.containEql(daemonId);
+      should(JSON.stringify(configurations)).not.match(/turn:|username|credential/u);
+      should(DEFAULT_WEBRTC_ICE_SERVERS).have.length(1);
+      should(DEFAULT_WEBRTC_ICE_SERVERS.every(url => url.startsWith('stun:'))).be.true();
+    },
+  );
+
   it('should be absent where the browser has no RTCPeerConnection', () => {
     // Act + Assert
     should(browserWebRtcDialer({})).be.undefined();
