@@ -44,6 +44,7 @@ import {
   upgradeHostedRelayConfiguration,
 } from '../../../worker/src/lib/index.ts';
 import should from 'should';
+import { guarantee } from '../../support/guarantee.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const otherDaemonId = `fy_daemon_${'b'.repeat(43)}`;
@@ -758,8 +759,3 @@ describe('hosted relay byte-ceiling refusal reasons', () => {
     should(parseHostedBandwidthRefusal('hosted relay is disabled', midnight)).be.null();
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: () => void | Promise<unknown>): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

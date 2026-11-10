@@ -264,6 +264,19 @@ describe('a registered project’s skills over the real imports root', () => {
     expect(await refusing.read(`${w.skills}/good/SKILL.md`, 1000)).toBeUndefined();
   });
 
+  test('R-0198 claims names only the skills folders of a registered project, whatever trailing slash it was registered with', async () => {
+    const w = await world();
+    const agents = join(w.project, '.agents', 'skills');
+    const slashed = w.files([`${w.project}/`]);
+    expect(await w.files().claims(w.skills)).toBe(true);
+    expect(await w.files().claims(agents)).toBe(true);
+    expect(await slashed.claims(w.skills)).toBe(true);
+    expect(await w.files().claims(join(w.skills, 'good'))).toBe(false);
+    expect(await w.files().claims(join(w.project, 'docs'))).toBe(false);
+    expect(await w.files(['/somewhere/else']).claims(w.skills)).toBe(false);
+    expect(await w.files([]).claims(w.skills)).toBe(false);
+  });
+
   test('R-0198 a root nobody registered, and a project with no skills folder, read nothing', async () => {
     const w = await world();
     expect(await w.files([]).list(w.skills, 10)).toEqual([]);

@@ -21,6 +21,7 @@ import {
   type WebRtcTimers,
   webrtcSignaller,
 } from '../../../app/lib/webrtc-carrier.ts';
+import { guarantee } from '../../support/guarantee.ts';
 
 class ManualTimers implements WebRtcTimers {
   #now = 0;
@@ -766,8 +767,3 @@ describe('the browser’s own WebRTC dialer', () => {
     should(made[0]?.closed).be.true();
   });
 });
-
-/** One independently registered scenario per kept Appendix D row. */
-function guarantee(ids: readonly string[], name: string, run: Parameters<typeof it>[1]): void {
-  for (const id of ids) it(`${id} ${name}`, run);
-}

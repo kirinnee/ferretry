@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import type { TerminalFacts } from '@ferretry/core-vault/contract';
 import should from 'should';
 import type { Place } from '../../../../contract/routes/index.ts';
-import { matchSignIn, terminalMatchKey } from '../../../../daemon/lib/phone-approval/match.ts';
+import { approvalFacts, matchSignIn, terminalMatchKey } from '../../../../daemon/lib/phone-approval/match.ts';
 import { CountingSealed, daemonOver, MemoryLoginIndex } from '../support.ts';
 
 /** Which sign-in an approval is for: decided from what the daemon observed, never from the ferret's words. */
@@ -119,6 +119,35 @@ describe('which sign-in an approval is for', () => {
     should(named.factor?.label).equal('Duo');
   });
 
+  it('should match nothing when the provider the chain reaches has no account in the listing', async () => {
+    const w = await accounts();
+    const listing = await w.listing();
+    const withoutOkta = { ...listing, accounts: listing.accounts.filter(each => each.id !== 'OKTA') };
+
+    const matched = matchSignIn('login.company.test', withoutOkta, { secretHint: 'CLICKUP' as never });
+
+    should(matched.signIn).be.undefined();
+    should(matched.via).be.undefined();
+    should(matched.domains.size).equal(0);
+  });
+
+  it('should stop following a via chain that never reaches the key, even when it loops back on itself', async () => {
+    const w = await accounts();
+    const listing = await w.listing();
+    // Okta now goes via ClickUp, and ClickUp via Okta: a loop that never signs in at the key.
+    const looping = {
+      ...listing,
+      signIns: listing.signIns.map(each =>
+        each.id === w.okta.id ? { ...each, via: { account: { id: 'CLICKUP', label: 'ClickUp' } } } : each,
+      ),
+    } as typeof listing;
+
+    const matched = matchSignIn('somewhere.else.test', looping, { secretHint: 'CLICKUP' as never });
+
+    should(matched.signIn).be.undefined();
+    should(matched.via).be.undefined();
+  });
+
   it('should match a terminal sign-in without any login domains', async () => {
     const w = await accounts();
 
@@ -126,5 +155,32 @@ describe('which sign-in an approval is for', () => {
 
     should(matched.signIn).equal(w.shell.id);
     should(matched.domains.size).equal(0);
+  });
+});
+
+describe('the facts an approval card takes from a match', () => {
+  it('should carry only what the daemon matched: sign-in, account, username, provider and factor', async () => {
+    const w = await accounts();
+
+    const facts = approvalFacts(
+      matchSignIn('login.company.test', await w.listing(), { secretHint: 'CLICKUP' as never }),
+    );
+
+    should(facts.signIn).equal(w.clickup.id);
+    should(facts.account).eql({ id: 'CLICKUP', label: 'ClickUp' });
+    should(facts.username).equal('me@clickup.test');
+    should(facts.via).eql({ id: 'OKTA', label: 'Okta' });
+    should(facts.factor).be.undefined();
+  });
+
+  it('should include the push factor when one was matched, and nothing at all for an empty match', async () => {
+    const w = await accounts();
+
+    const factorFacts = approvalFacts(matchSignIn('login.company.test', await w.listing(), {}));
+    const empty = approvalFacts(matchSignIn(undefined, await w.listing(), {}));
+
+    should(factorFacts.factor).match({ label: 'Okta Verify', app: 'okta-verify' });
+    should(factorFacts.via).be.undefined();
+    should(empty).eql({});
   });
 });
