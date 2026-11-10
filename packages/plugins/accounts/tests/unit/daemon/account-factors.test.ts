@@ -59,6 +59,39 @@ describe('2FA keys in the account store', () => {
     ).equal('no_such_field');
   });
 
+  it('I34 should hand a code it made to the Vault alone: no listing, index or sealed document holds it', async () => {
+    // Arrange
+    const w = await world();
+
+    // Act
+    const code = await w.vault.fill('GITHUB', 'totp', 59_000, { factor: w.first });
+
+    // Assert
+    should(code)
+      .equal(totpCode(ONE, PARAMS, 59_000))
+      .and.match(/^\d{6}$/u);
+    should(JSON.stringify(await w.directory.list())).not.containEql(code as string);
+    should(JSON.stringify(w.index.document)).not.containEql(code as string);
+    should(JSON.stringify((await w.sealed.read())?.entries ?? {})).not.containEql(code as string);
+  });
+
+  it('I170 should make a code inside the vault and hand it only to the caller: no listing, index or state it keeps holds one', async () => {
+    // Arrange
+    const w = await world();
+
+    // Act
+    const code = (await w.vault.fill('GITHUB', 'totp', 59_000, { factor: w.first })) as string;
+    const again = (await w.vault.fill('GITHUB', 'totp', 59_000, { factor: w.first })) as string;
+
+    // Assert — the same moment gives the same code, and it is returned to the caller alone
+    should(again).equal(code);
+    should(JSON.stringify(Object.values(w.vault))).not.containEql(code);
+    should(JSON.stringify(Object.values(w.directory))).not.containEql(code);
+    should(JSON.stringify(await w.directory.list())).not.containEql(code);
+    should(JSON.stringify(w.index.document)).not.containEql(code);
+    should([...(await w.vault.values()).values()]).not.containEql(code);
+  });
+
   it('should label every sealed seed and password for the redactor source', async () => {
     // Arrange
     const w = await world();

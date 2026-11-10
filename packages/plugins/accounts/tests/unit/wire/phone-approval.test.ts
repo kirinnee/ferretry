@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
-import { SignInApprovalRefSchema } from '../../../contract/index.ts';
+import { SignInApprovalRefSchema, USE } from '../../../contract/index.ts';
+import manifest from '../../../manifest.ts';
 import {
+  factorAskWords,
   PHONE_APPROVAL_WARNING,
   type PhoneApproval,
   PhoneApprovalAgentViewSchema,
@@ -266,6 +268,39 @@ describe('the words of an approve-on-phone card', () => {
     expect(words.subject.length).toBeLessThanOrEqual(240);
     expect(words.push.length).toBeLessThanOrEqual(240);
     expect(words.push.startsWith('Tap 42 on your phone: ')).toBe(true);
+  });
+
+  it('I195 should never tell the ferret the number: its view holds the id, the state and a push once it moved on', () => {
+    const view = { id: ID, state: 'waiting' };
+    expect(PhoneApprovalAgentViewSchema.safeParse(view).success).toBe(true);
+    // Whatever the card holds, none of it is the ferret's: not the number, the account, the host, the factor.
+    for (const extra of [
+      { number: { value: '42', from: 'okta', direction: 'tap-on-phone', readAt: AT } },
+      { number: '42' },
+      { numberMissing: 'scripted' },
+      { account: { id: 'CLICKUP', label: 'ClickUp' } },
+      { username: 'a@gmail.com' },
+      { origin: 'https://company.okta.com' },
+      { factor: { id: 'tf_000000000001', label: 'Okta Verify' } },
+    ])
+      expect(PhoneApprovalAgentViewSchema.safeParse({ ...view, ...extra }).success).toBe(false);
+    expect(PhoneApprovalAgentViewSchema.safeParse({ ...view, secondFactor: 'push' }).success).toBe(false);
+    expect(PhoneApprovalAgentViewSchema.safeParse({ id: ID, state: 'moved-on', secondFactor: 'push' }).success).toBe(
+      true,
+    );
+  });
+
+  it('I158 should name an account only from the secrets-gated listing: agenda text names the place, never an account or a person', () => {
+    // The only route that lists accounts is gated by `secrets` use, so a device without it cannot draw an account title.
+    const listing = manifest.actions.routes.find(entry => entry.key === 'GET /v1/accounts');
+    expect(listing?.capability).toEqual(USE.secrets);
+    // Every agenda word the daemon writes names the place alone: no label, username or provider.
+    const words = phoneApprovalWords(APPROVAL);
+    for (const text of [words.subject, words.agendaWhy, words.push])
+      for (const name of ['ClickUp', 'a@gmail.com', 'Okta ']) expect(text).not.toContain(name);
+    const card = factorAskWords([], { place: 'github.com' });
+    expect(card).toBe('One-time code for github.com');
+    for (const name of ['kirinnee', 'GitHub ·']) expect(card).not.toContain(name);
   });
 
   it('I198 G90 should name no account label or username in the push, which every subscribed device shows', () => {
