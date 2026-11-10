@@ -512,6 +512,28 @@ test('roots part 2 parity: linkTo, setMode and harnessFile answer every case ali
   expect(byCase['rename into a folder reached through a link']).toEqual({ refused: 'link_escape' });
   expect(byCase['rename from a path through a link']).toEqual({ refused: 'link_escape' });
   expect(byCase['the file stayed where it was']).toEqual({ ok: 'file' });
+  // BG-016: the real host's order and codes, so the testing host cannot drift from them
+  expect(byCase['BG-016 rename from a missing parent to a path through a link']).toEqual({ refused: 'link_escape' });
+  expect(byCase['BG-016 rename from a file used as a folder to a path through a link']).toEqual({
+    refused: 'link_escape',
+  });
+  expect(byCase['BG-016 rename into a folder reached through a dangling link']).toEqual({ refused: 'changed' });
+  expect(byCase['BG-016 rename from a path through a dangling link']).toEqual({ refused: 'changed' });
+  expect(byCase['BG-016 the file still stayed where it was']).toEqual({ ok: 'file' });
+  expect(byCase['BG-016 list gives the direct children only']).toEqual({ ok: ['lonely', 'sub', 'top.txt'] });
+  expect(byCase['BG-016 entries give the direct children only']).toEqual({
+    ok: [
+      ['lonely', 'directory'],
+      ['sub', 'directory'],
+      ['top.txt', 'file'],
+    ],
+  });
+  expect(byCase['BG-016 list a nested folder']).toEqual({ ok: ['deep.txt'] });
+  expect(byCase['BG-016 realPath of a link to a folder is the folder’s']).toEqual({ ok: true });
+  expect(byCase['BG-016 realPath of a path through that link is the real file’s']).toEqual({ ok: true });
+  expect(byCase['BG-016 list through that link']).toEqual({ ok: ['lonely', 'sub', 'top.txt'] });
+  expect(byCase['BG-016 realPath of a dangling link']).toEqual({ ok: 'threw' });
+  expect(byCase['BG-016 realPath of a link that leaves the root']).toEqual({ refused: 'link_escape' });
   expect(byCase['rename a folder holding only a link']).toEqual({ ok: null });
   expect(byCase['the only link is at the new place']).toEqual({ ok: 'symlink' });
   expect(byCase['the only link is gone from the old place']).toEqual({ ok: null });
