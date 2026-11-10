@@ -284,6 +284,35 @@ describe('R-0198 each folder below the anchor is opened from its parent without 
   }
 });
 
+describe('R-0198 a folder missing at the walk and planted as a link right after its look', () => {
+  for (const host of ['linux', 'macOS'] as const) {
+    for (const which of ['a', 'b', 'c'] as const) {
+      test(`R-0198 a folder missing at the walk and planted as a link right after its look is refused on every verb (${host}, ${which})`, async () => {
+        for (const verb of VERBS) {
+          const w = await world(disks[host]());
+          renameSync(w.folders[which], `${w.folders[which]}-moved`);
+          const inner = disks[host]();
+          let planted = false;
+          const racing = {
+            ...inner,
+            lstat: async (path: string) => {
+              const found = await inner.lstat(path);
+              if (!planted && path === w.folders[which] && found === undefined) {
+                planted = true;
+                symlinkSync(w.hostile[which], w.folders[which]);
+              }
+              return found;
+            },
+          } as HostFs;
+          const seen = await observe(w.rootFor(racing), w.scoped, verb);
+          expect(planted).toBe(true);
+          expect(seen).toEqual({ kind: 'refused', refusal: 'link_escape' });
+        }
+      });
+    }
+  }
+});
+
 describe('R-0198 the anchor is proven once and held', () => {
   test('R-0198 the anchor swapped for a link to a same-shaped tree right after it was opened reads nothing outside (changed)', async () => {
     const w = await world();
