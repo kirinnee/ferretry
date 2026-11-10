@@ -6,7 +6,7 @@
  * (where a one-time code or a saved password may be typed), and nothing but a comment said "copied".
  *
  * A TEXT comparison, not a behavioural one: a package reaches another only through its contract (the `context-imports`
- * gate), so a test here cannot import the Vault's daemon code to run both. Each named declaration is read out of its file
+ * gate), so a test here cannot import the Vault's daemon code to run both. Each named declaration, and every helper a named declaration calls, is read out of its file
  * on both sides (a function or a constant, by name, from the syntax tree), comments and layout are removed, and what is
  * left must be the same text. Test-only: neither copy is edited here, and a rule that must change changes in both.
  */
@@ -49,6 +49,14 @@ const COPIED: readonly (readonly [name: string, accounts: string, vault: string]
   ['placeKeys', accountsFile('contract/routes/accounts.ts'), BORROWED],
   ['automaticKeysInOfferOrder', accountsFile('contract/routes/accounts.ts'), BORROWED],
   ['fillRoleFor', accountsFile('contract/routes/login-entries.ts'), BORROWED],
+  ['terminalKey', accountsFile('contract/routes/accounts.ts'), BORROWED],
+  ['VERIFIED_RANK', accountsFile('contract/routes/accounts.ts'), BORROWED],
+  ['sha256Hex', accountsFile('contract/routes/sha256.ts'), BORROWED],
+  ['K', accountsFile('contract/routes/sha256.ts'), BORROWED],
+  ['SIGN_IN_RULE_FACTORS_DOMAIN', accountsFile('contract/routes/sign-in-rules.ts'), BORROWED],
+  ['SIGN_IN_RULE_SUSPENSIONS', accountsFile('contract/routes/sign-in-rules.ts'), BORROWED],
+  ['SignInRuleSuspensionSchema', accountsFile('contract/routes/sign-in-rules.ts'), BORROWED],
+  ['digest', INPUTS, vaultFile('login-observer.ts')],
 ];
 
 /** Comments out, layout and trailing commas gone: what is left is the code the compiler reads. */
