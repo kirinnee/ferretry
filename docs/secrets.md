@@ -482,7 +482,7 @@ per-document plan (one refused document writes nothing of the set).
   there. A person sees `‹hidden›` where a path stood, and a text saved back with it is refused until the real text is
   typed at the machine.
 - **W and the mask agree: residual 0.** Every raw flag secret W refuses is cut by the kernel mask and by Runtimes'
-  copy, over the generated ruling #40 corpus, the hand-written lines and every name W's tail test refuses (pinned by
+  copy (a value after `${secret:X},` is cut too), over the generated ruling #40 corpus, the hand-written lines and every name W's tail test refuses (pinned by
   `kernel-cutter-agreement.test.ts`, strict). The price is over-redaction: the mask cuts every value under a name W
   reads as a credential, a path after `--token-file` (E3) and the whole value of a word that glues text to a pointer.
   And should the mask ever miss a name W knows, the net withholds the file (`unmaskable`) instead of showing it. A word

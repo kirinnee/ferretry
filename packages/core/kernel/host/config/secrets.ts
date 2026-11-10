@@ -302,7 +302,7 @@ function pairsOf(
  * `--token-file`, `--auth`, `--auth-mode`, `--header` and a one-letter flag do not. The VALUE test is
  * {@link looksLikeRawSecret} past its name gate: unquoted, at least 16 characters, no white space, no pointer
  * (`${secret:NAME}`, `$NAME`, `${NAME}`), no path or URL, entropy 3.5. A read mask may over-hide; a write rule must not
- * over-refuse, so this is the narrow, certain one, and every pair it finds is also cut by the read mask.
+ * over-refuse, so this is the narrow, certain one, and every pair it finds is cut by the read mask, or the text holding it is withheld.
  *
  * Linear in the document: each word is read a bounded number of times, whatever it holds.
  */

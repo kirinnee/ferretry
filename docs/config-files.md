@@ -219,10 +219,15 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
 - **A name is read the way the write rule reads it.** A flag or key is a credential's when its name ENDS in `key`,
   `token`, `secret`, `password`, `passwd` (plural too) or `credential(s)`, dashes ignored (`--key`, `--tokens`,
   `--apitoken`, `--clientsecret`, `--ssh-key`, `SIGNING_KEY`), or holds a word such as `AUTH` or a pair such as
-  `API_KEY`. It over-hides on purpose (`--model-key v` is cut), and every flag secret the write rule refuses is cut.
+  `API_KEY`. It over-hides on purpose (`--model-key v` is cut; so are a path after `--ssh-key`, `--public-key` or
+  `--signing-key`, `--monkey`, `--hockey`, `--key <anything of 8 or more characters>` and `--keys a,b,c`), and every
+  flag secret the write rule refuses is cut, or the file is withheld (`unmaskable`).
 - **Text glued to a `${secret:NAME}` pointer is cut.** `API_KEY=prefix${secret:X}`, `--token prefix${secret:X}`,
   `API_KEY=${secret:X}?model=short` and `Authorization: Bearer v${secret:X}` hide the whole value (the raw part is a
-  credential written next to a pointer); one pointer alone, quoted or not, stays shown.
+  credential written next to a pointer); one pointer alone, quoted or not, stays shown. A `,`, `;` or `&` right after
+  the pointer ends the key's value, and the text after it is cut too (`--key ${secret:X},v`), unless a key of its own
+  starts there (`--set=a=1,API_KEY=${secret:X},b=2` is shown). A URL password glued to a pointer
+  (`https://u:${secret:X}abcdefgh@h/p`) is shown, and the write rule accepts it too: a shared GAP.
 - **Some texts are withheld whole.** The route (`GET /v1/config/file`) answers one comment line (a save of it is
   refused, so it never wipes the file) and `config_read` answers an empty `text` with the reason in its summary; the
   route's issues say why too. The reasons: `raw_secret` (it holds a raw secret, which is also refused on write),

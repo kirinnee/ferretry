@@ -313,11 +313,15 @@ function gluedToPointer(text: string, ends: ValueEnds, start: number, end: numbe
   if ((ends.pointer[start] as number) > end) return start;
   const at = ends.pointerStart[start] as number;
   const partFrom = Math.max(start, ends.partStart[at] as number);
-  const partTo = Math.min(end, ends.partEnd[at] as number);
+  const valueTo = Math.min(end, ends.partEnd[at] as number);
   // Text before the pointer is no glue when it is a key's own separator (`X=${secret:X}`, `a:${secret:X}`) or a quote.
   const before = at > partFrom ? (text[at - 1] as string) : '=';
-  if (!GLUE_FREE_BEFORE.has(before)) return partTo;
+  if (!GLUE_FREE_BEFORE.has(before)) return valueTo;
   const next = ends.pointer[at] as number;
+  // A `,` `;` `&` right after the pointer ends the key's value, but the text after it is glued to the pointer unless a
+  // key of its own starts there (`${secret:X},v` is cut to the end of its part; `${secret:X},b=2` is not).
+  const runsOn = next === end && next + 1 < (ends.partEnd[at] as number) && (ends.tail[next + 1] as number) > next + 1;
+  const partTo = runsOn ? (ends.partEnd[at] as number) : valueTo;
   const after = next < partTo ? (text[next] as string) : '';
   return after === '' || (next === partTo - 1 && QUOTE_MARKS.has(after) && QUOTE_MARKS.has(before)) ? start : partTo;
 }

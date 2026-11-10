@@ -10,7 +10,7 @@
  *
  * T-B2 holds the write rule (W, `findFlagSecrets`) under BOTH cutters, strictly: EVERY word W refuses is cut by the
  * kernel's mask and by runtimes' copy, residual 0. Its corpus comes from W's own name tail, not from the mask's name
- * list: a candidate name is in it exactly when W refuses it, so a name only W knows (or one W is widened to) is in it.
+ * list: a candidate name is in it exactly when W refuses it, so a name only W knows is in it. A W-only widening onto a name outside CANDIDATE_NAMES is not seen.
  *
  * Pin to the vault contract's cutter once it lands on 5.0 (`rebuild/fix-catalogs-one-rule`, #41): this file has no
  * vault import until then.
@@ -87,6 +87,17 @@ const OWN_LINES: readonly (readonly string[])[] = [
     'API_KEY=a:${secret:X}',
     'Authorization: Bearer ${secret:X}',
   ],
+  // A pointer, then a `,` `;` or `&` that ends a key's value, then raw text: glued, cut (reviewer r2); a key of its own
+  // after the separator is not glued (`--set=a=1,API_KEY=${secret:X},b=2` stays, ruling #40).
+  ...[',', ';', '&'].flatMap(mark => [
+    ['--key', `${POINTER}${mark}${VALUE}`],
+    [`--token=${POINTER}${mark}${VALUE}`],
+    ['-e', `KEY=${POINTER}${mark}${VALUE}`],
+    [`Authorization: ${POINTER}${mark}${VALUE}`],
+    [`--header=Authorization: Bearer ${POINTER}${mark}${VALUE}`],
+    ['--key', `${POINTER}${mark}gsk_AbCdEfGhIjKlMnOpQrSt12`],
+    [`--set=a=1,API_KEY=${POINTER}${mark}b=2`],
+  ]),
 ];
 
 /** A word with blanks that does not START with a flag: both cutters show it, and W reads its blank-split words. */
@@ -233,20 +244,25 @@ describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => 
   it('CFG-LEAK-R the kernel and runtimes cut every corpus word identically', () => {
     const lines = corpus();
     should(nestedFamily().length).be.above(500);
-    for (const words of lines) {
-      should([words, kernelShownWords(words)]).eql([words, runtimesShownWords(words)]);
+    const kernel = lines.map(words => kernelShownWords(words));
+    const runtimes = lines.map(words => runtimesShownWords(words));
+    // The whole corpus in ONE comparison (a `should(...).eql` per line cost ~1 s of the test's 3 s); on a difference,
+    // the first line that differs, with its words, so the failure still says which.
+    if (JSON.stringify(kernel) !== JSON.stringify(runtimes)) {
+      const at = kernel.findIndex((shown, index) => JSON.stringify(shown) !== JSON.stringify(runtimes[index]));
+      should([lines[at], kernel[at]]).eql([lines[at], runtimes[at]]);
     }
     // …and the corpus really cuts: the two are not agreeing on "nothing".
-    const cut = lines.filter(words => kernelShownWords(words).some(word => word.hidden));
-    should(cut.length).be.above(400);
+    should(kernel.filter(shown => shown.some(word => word.hidden)).length).be.above(400);
   });
 
   it('CFG-LEAK-R a command’s own flag before the first word is read the same by both', () => {
-    for (const words of corpus().filter(line => line.length > 0)) {
-      should([words, kernelShownWords(words.slice(1), words[0])]).eql([
-        words,
-        runtimesShownWords(words.slice(1), words[0]),
-      ]);
+    const lines = corpus().filter(line => line.length > 0);
+    const kernel = lines.map(words => kernelShownWords(words.slice(1), words[0]));
+    const runtimes = lines.map(words => runtimesShownWords(words.slice(1), words[0]));
+    if (JSON.stringify(kernel) !== JSON.stringify(runtimes)) {
+      const at = kernel.findIndex((shown, index) => JSON.stringify(shown) !== JSON.stringify(runtimes[index]));
+      should([lines[at], kernel[at]]).eql([lines[at], runtimes[at]]);
     }
   });
 
@@ -285,6 +301,18 @@ describe('CFG-LEAK-R the kernel copy of the cutter agrees with runtimes', () => 
       should([name, refusedNames.has(name)]).eql([name, true]);
     for (const name of ['model', 'signing', 'level', 'token-file', 'host', 'x'])
       should([name, refusedNames.has(name)]).eql([name, false]);
+  });
+
+  it('S6 CFG-LEAK-W GAP pinned: a pointer, then a key of its own, then raw text is refused by W and shown by both', () => {
+    // `${secret:X},b=2,<v>`: the text after `b=2,` belongs to key `b`, which no name rule reads, so neither cutter cuts it.
+    // Not declared yet (a ports-pending line is the owner's call). This test pins the gap so it cannot grow: a fix turns
+    // it RED, and the line then moves to T-B2.
+    for (const mark of [',', ';', '&']) {
+      const words = ['--key', `${POINTER}${mark}b=2${mark}${VALUE}`];
+      should(findFlagSecrets({ args: words }).length).equal(1);
+      should(kernelShownWords(words)[1]?.hidden).equal(false);
+      should(runtimesShownWords(words)[1]?.hidden).equal(false);
+    }
   });
 
   it('CFG-LEAK-R HIDDEN_VALUE_TEXT === HIDDEN_WORD_TEXT', () => {
