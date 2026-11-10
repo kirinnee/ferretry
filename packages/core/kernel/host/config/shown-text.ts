@@ -21,7 +21,7 @@ import { configTextTooLarge, editConfigText, readConfigText } from '@ferretry/st
 import { checkReadConfigText, type ConfigIssue, MAX_CONFIG_ISSUES, moreIssues } from './check.ts';
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
 import { HIDDEN_VALUE_TEXT, looksSecret, shownWord, shownWords } from './secret-words.ts';
-import { rawTextHoldsSecret } from './secrets.ts';
+import { findFlagSecrets, rawTextHoldsSecret } from './secrets.ts';
 
 /** Why a text is not shown at all. */
 export type WithheldReason = 'raw_secret' | 'too_large' | 'unmaskable' | 'unparsed';
@@ -35,7 +35,8 @@ export type ShownConfigText =
 export const WITHHELD_WORDS: Readonly<Record<WithheldReason, string>> = {
   raw_secret: 'it holds a raw secret, which the owner must move into the secret store',
   too_large: 'it is larger than a configuration file may be',
-  unmaskable: 'a value in it could not be hidden safely',
+  unmaskable:
+    'a value in it could not be hidden safely, so none of the file is shown; move that value into the secret store and write its ${secret:NAME} pointer in its place',
   unparsed:
     'the file does not parse as YAML, so the app cannot tell which values to hide; fix the YAML on disk, at the machine',
 };
@@ -231,6 +232,10 @@ export function shownConfigText(def: ConfigDef, path: string, text: string, bina
     return rawTextMayHold(text) ? { kind: 'withheld', reason: 'unparsed' } : { kind: 'shown', text, hidden: [] };
   const written = read.read.value;
   const { value, cuts } = maskedValue(written);
+  // What the write rule calls a raw flag secret is never shown (every W finding is under the read mask): a text whose
+  // mask leaves one is withheld whole, the safe answer, until the cutter learns that name. `‹hidden›` is 8 characters of
+  // no entropy, so a cut word never trips it.
+  if (findFlagSecrets(value).length > 0) return { kind: 'withheld', reason: 'unmaskable' };
   if (cuts.length === 0) return { kind: 'shown', text, hidden: [] };
   if (!isPlainObject(value)) return { kind: 'withheld', reason: 'unmaskable' };
   const shown = editConfigText(text, value, written, undefined);

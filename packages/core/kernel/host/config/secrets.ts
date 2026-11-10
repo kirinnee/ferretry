@@ -23,7 +23,7 @@
  * Pure: no IO.
  */
 import { createHash } from 'node:crypto';
-import { urlPasswordCuts } from './secret-words.ts';
+import { endsInCredentialWord, HIDDEN_VALUE_TEXT, namesCredential, urlPasswordCuts } from './secret-words.ts';
 
 /**
  * A located finding: the path to the value inside the document, never the value.
@@ -62,12 +62,6 @@ const SCAN_WINDOW = 4096;
 const SCAN_OVERLAP = 64;
 
 /**
- * The longest credential word {@link CREDENTIAL_KEY} ends in (`credentials`), with room to spare: the pattern is
- * anchored at the END of the key, so only this much of the key is ever shown to it.
- */
-const CREDENTIAL_KEY_TAIL = 16;
-
-/**
  * Linear: each is a `\b`, a fixed literal, then ONE character class repeated, and nothing after it but (for AKIA) a
  * `\b`. A start that does not spell the literal fails in a few characters, and the class is never followed by
  * anything it could give characters back to, so no start costs more than the run it reads.
@@ -88,12 +82,6 @@ const KNOWN_SHAPES: readonly RegExp[] = [
 
 /** The same shapes, to list every match in one window from a chosen start (a match a cut may have faked is skipped). */
 const KNOWN_SHAPES_EVERYWHERE: readonly RegExp[] = KNOWN_SHAPES.map(shape => new RegExp(shape.source, 'gu'));
-
-/**
- * A key whose value is a credential by its name. Linear: anchored at the end, every alternative a fixed word, and only
- * the key's last {@link CREDENTIAL_KEY_TAIL} characters are ever tested.
- */
-const CREDENTIAL_KEY = /(?:(?:key|token|secret|password|passwd)s?|credentials?)$/iu;
 
 /**
  * A value that names a secret rather than holding one: `${secret:NAME}`, `${NAME}` or `$NAME`. Linear: anchored at
@@ -175,7 +163,7 @@ function holdsWhitespace(text: string): boolean {
 /** Whether `value`, found under `key`, looks like a raw secret. */
 export function looksLikeRawSecret(key: string | number | undefined, value: string): boolean {
   if (holdsKnownShape(value)) return true;
-  if (typeof key !== 'string' || !CREDENTIAL_KEY.test(key.slice(-CREDENTIAL_KEY_TAIL))) return false;
+  if (typeof key !== 'string' || !endsInCredentialWord(key)) return false;
   const trimmed = value.trim();
   if (trimmed.length < MIN_SECRET_LENGTH || holdsWhitespace(trimmed)) return false;
   if (trimmed.length <= SCAN_WINDOW && REFERENCE.test(trimmed)) return false;
@@ -258,10 +246,6 @@ const BLANK_RUNS = /\s+/u;
 const flagDigest = (name: string, value: string): string =>
   createHash('sha256').update(`${name.toLowerCase()}\0${value}`, 'utf8').digest('hex');
 
-/** Whether a flag or a key is named for a credential: the end of its name (dashes stripped) is the one a raw-secret key ends in. */
-const namesCredential = (name: string): boolean =>
-  CREDENTIAL_KEY.test(name.replaceAll('-', '').slice(-CREDENTIAL_KEY_TAIL));
-
 /** The value as the secret test reads it: unquoted, and past an `Authorization` scheme word. */
 function secretPart(value: string): string {
   const inner = QUOTED_VALUE.exec(value)?.[2] ?? value;
@@ -295,7 +279,10 @@ function pairsOf(
     judged(flag[1] ?? '', next, true);
   nested(word);
   for (const [from, to] of urlPasswordCuts(word)) {
-    if (to - from >= MIN_URL_PASSWORD) pairs.push({ name: 'password', value: word.slice(from, to), onNext: false });
+    const password = word.slice(from, to);
+    // The mask's own stand-in is no password: a cut URL is not a finding (the net in `shownConfigText` reads shown text).
+    if (to - from >= MIN_URL_PASSWORD && password !== HIDDEN_VALUE_TEXT)
+      pairs.push({ name: 'password', value: password, onNext: false });
   }
   return pairs;
 }
@@ -310,7 +297,7 @@ function pairsOf(
  * - **W3** a nested `NAME=v` or `NAME: v` (`-e API_KEY=v`, `Authorization: Bearer v`), also inside a W1 or W2 value;
  * - **W4** a URL's user password (`scheme://user:PASS@host`) of at least {@link MIN_URL_PASSWORD} characters.
  *
- * The NAME test is the one a raw-secret key uses ({@link CREDENTIAL_KEY}) on the name with its dashes stripped, or
+ * The NAME test is the one a raw-secret key uses ({@link endsInCredentialWord}, shared with the read mask) on the name with its dashes stripped, or
  * `Authorization` / `Cookie` as a nested key: `--token`, `--api-key`, `--client-secret`, `--password`, `--key` count;
  * `--token-file`, `--auth`, `--auth-mode`, `--header` and a one-letter flag do not. The VALUE test is
  * {@link looksLikeRawSecret} past its name gate: unquoted, at least 16 characters, no white space, no pointer

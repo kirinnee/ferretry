@@ -45,8 +45,33 @@
  */
 import { MIN_SECRET_VALUE_LENGTH, secretReferencePattern } from '@ferretry/core-vault/contract';
 import { HIDDEN_WORD_TEXT } from '../../../contract/index.ts';
-import { looksSecret, pointsElsewhere, secretNamed } from '../account/import.ts';
+import {
+  looksSecret as looksSecretByWord,
+  pointsElsewhere,
+  secretNamed as secretNamedByWord,
+} from '../account/import.ts';
 import { sha256Hex } from '../foreign.ts';
+
+/** The longest credential word {@link CREDENTIAL_KEY} ends in (`credentials`), with room to spare. */
+const CREDENTIAL_KEY_TAIL = 16;
+
+/** A key whose value is a credential by the END of its name: the write rule's tail test, copied (CFG-LEAK-R). */
+const CREDENTIAL_KEY = /(?:(?:key|token|secret|password|passwd)s?|credentials?)$/iu;
+
+/**
+ * Whether a flag or key is named for a credential by the end of its name, dashes stripped (`--ssh-key`, `--apitoken`,
+ * `SIGNING_KEY`). The kernel's `namesCredential` copied word for word: `kernel-cutter-agreement.test.ts` pins them equal.
+ */
+const namesCredential = (name: string): boolean =>
+  CREDENTIAL_KEY.test(name.replaceAll('-', '').slice(-CREDENTIAL_KEY_TAIL));
+
+/** Whether a name says it holds a credential: its tail, or the fleet's word test (`AUTH`, `API_KEY`). */
+const secretNamed = (name: string): boolean => namesCredential(name) || secretNamedByWord(name);
+
+/** The fleet's `looksSecret`, with the name test widened to {@link secretNamed} for a word that is only being SHOWN. */
+const looksSecret = (name: string, value: string): boolean =>
+  looksSecretByWord(name, value) ||
+  (value.length >= MIN_SECRET_VALUE_LENGTH && !pointsElsewhere(value) && namesCredential(name));
 
 /** A word that is a flag on its own: one or two dashes and a name, with no value in it. */
 const FLAG_WORD = /^-{1,2}[A-Za-z0-9][^=\s]*$/u;
@@ -233,7 +258,7 @@ function valueEnds(text: string, keyStarts: ReadonlyMap<number, number>, emptyKe
     else if (at > 0 && partEnd[at - 1] === at) {
       const from = partStart[at - 1] as number;
       if (text[at - 1] === ':' && keyStarts.get(from) === at - 1) bareKey[from] = from;
-      else if (partHeld(text, ends, from, at)) held = [from, at];
+      else if (partHeldAny(text, ends, from, at)) held = [from, at];
     }
     heldStart[at] = held?.[0] ?? -1;
     heldEnd[at] = held?.[1] ?? -1;
@@ -283,13 +308,62 @@ function heldBeforePointer(text: string, ends: ValueEnds, start: number, end: nu
  * ({@link ValueEnds.tail}), when any part of it looks like a credential. It is the piece {@link heldInPiece} judges,
  * except that a key with no value (`<b64>=` of `<b64>==`) does not end it, so padding after a pointer is cut with the
  * rest. A text with no such key has the same piece as the one `heldInPiece` already judged. `start` when none does.
+ *
+ * Read from the tables, not from a copy of the text (a hostile text of empty keys and pointers would make every key
+ * copy the rest of it): the caller has judged the key's NAME secret, so a part looks like a credential when it is long
+ * enough and no pointer ({@link partHeldAny}), whatever the name is.
  */
-function heldAfterPointer(text: string, ends: ValueEnds, name: string, start: number, end: number): number {
+function heldAfterPointer(text: string, ends: ValueEnds, start: number, end: number): number {
   const pointerEnd = ends.pointer[start] as number;
   if (pointerEnd > end) return start;
-  const after = text.slice(pointerEnd, ends.tail[pointerEnd]).trimEnd();
-  return heldParts(name, after) ? pointerEnd + after.length : start;
+  // Just past the last character that is not white space, where the text after the pointer ends.
+  const stop = Math.max(pointerEnd, ends.shownEnd[ends.tail[pointerEnd] as number] as number);
+  return heldAnyPart(text, ends, pointerEnd, stop) ? stop : start;
 }
+
+/**
+ * Whether any part of `[from, stop)`, split at what {@link PART_BREAK} splits at, looks like a credential: the first part
+ * (cut at `from`) and the last (cut at `stop`) on their own, and every whole part between them from
+ * {@link ValueEnds.heldStart}, the last one that holds.
+ */
+function heldAnyPart(text: string, ends: ValueEnds, from: number, stop: number): boolean {
+  if (from >= stop) return false;
+  const firstEnd = Math.min(ends.partEnd[from] as number, stop);
+  if (partHeldAny(text, ends, from, firstEnd)) return true;
+  if (firstEnd >= stop) return false;
+  const clipped = (ends.partEnd[stop - 1] as number) > stop;
+  const lastStart = clipped ? (ends.partStart[stop - 1] as number) : stop;
+  if (clipped && lastStart > firstEnd && partHeldAny(text, ends, lastStart, stop)) return true;
+  return (ends.heldStart[clipped ? lastStart - 1 : stop] as number) > firstEnd;
+}
+
+/** {@link partHeld} of a part that holds no pointer: a part with one is that pointer's and is no credential. */
+const partHeldAny = (text: string, ends: ValueEnds, from: number, to: number): boolean =>
+  (ends.pointer[from] as number) > to && partHeld(text, ends, from, to);
+
+/**
+ * Where the cut of a secret-named key's value `[start, end)` must reach when the part that holds its first
+ * `${secret:…}` pointer glues text to it (CFG-LEAK-R, `API_KEY=prefix${secret:X}`, `Authorization: Bearer v${secret:X}`,
+ * `API_KEY=${secret:X}?model=short`): to the end of that part, the whole value from its start (over-hiding the words
+ * before the part is accepted). A part that is exactly ONE pointer (`${secret:X}`, `"${secret:X}"`) stays shown, and
+ * so does one that is a key's own value (`X=${secret:X}`); two pointers run together are glued as text is. `start` when
+ * there is no pointer or it stands alone. Reads two characters beside the pointer, so it never costs more than that.
+ */
+function gluedToPointer(text: string, ends: ValueEnds, start: number, end: number): number {
+  if ((ends.pointer[start] as number) > end) return start;
+  const at = ends.pointerStart[start] as number;
+  const partFrom = Math.max(start, ends.partStart[at] as number);
+  const partTo = Math.min(end, ends.partEnd[at] as number);
+  // Text before the pointer is no glue when it is a key's own separator (`X=${secret:X}`, `a:${secret:X}`) or a quote.
+  const before = at > partFrom ? (text[at - 1] as string) : '=';
+  if (!GLUE_FREE_BEFORE.has(before)) return partTo;
+  const next = ends.pointer[at] as number;
+  const after = next < partTo ? (text[next] as string) : '';
+  return after === '' || (next === partTo - 1 && QUOTE_MARKS.has(after) && QUOTE_MARKS.has(before)) ? start : partTo;
+}
+
+/** What may stand right before a pointer without being glued to it: a key's separator or a quote mark. */
+const GLUE_FREE_BEFORE = new Set(['=', ':', '"', "'", '`']);
 
 /**
  * Whether a secret-named key's value `[start, end)` looks like a credential: `looksSecret` of it trimmed and unquoted,
@@ -370,7 +444,8 @@ function nestedValueCuts(text: string): readonly Cut[] {
     const to = Math.max(
       pieceEnd,
       heldBeforePointer(text, ends, start, end),
-      heldAfterPointer(text, ends, name, start, end),
+      heldAfterPointer(text, ends, start, end),
+      gluedToPointer(text, ends, start, end),
     );
     if (to === start) continue;
     cuts.push([start, to]);
@@ -483,6 +558,8 @@ export function shownWord(word: string, before: string | undefined): ShownWord {
     // as the stuck reading cuts it (review r2 G1).
     if (stuckHidden && secretValue('', gluedFlag.slice(stuckFlag.length)))
       return hidden(`${stuckFlag}${HIDDEN_WORD_TEXT}`);
+    // A token in the flag's own part (`--x;ghp_…,tokens v`) is cut with the word, not shown beside the cut value.
+    if (secretValue('', gluedFlag)) return hidden(HIDDEN_WORD_TEXT);
     // A glued flag's own part may hold a nested key of its own (`--x&API_KEY:v;Bearer sk-…`), also one stuck to its
     // letter (`-cAPI_KEY:v,PASSWORD=w`, review r2 M2): it is cut too.
     const flagCuts = [
