@@ -21,6 +21,7 @@ import {
   PREFERENCE_CHANGED_REASON,
   WITHDRAWN_CARRIER_REASON,
 } from '../../../app/carriers/router.ts';
+import { DIRECT_SESSION_DEADLINE_MS, RELAY_SESSION_DEADLINE_MS } from '../../../app/carriers/carrier-socket.ts';
 import { documentRelayDiscovery } from '../../../app/discovery/hosted-relay.ts';
 import type { CarrierPreference } from '../../../app/lib/carrier-preference.ts';
 import { BrowserNetwork, HandTimers, type ScriptedHost } from '../../support/browser-network.ts';
@@ -803,10 +804,14 @@ describe('a stream the rendezvous refuses for its ceiling is not walked onward (
     );
     const transport = await r.connect();
     if (transport === undefined) throw new Error('no transport');
-    const ended = new Promise<string>(resolve => {
-      transport.socket('/v1/example/stream', { onFrame: () => undefined, onClose: resolve });
+    const closed = new Promise<{ readonly reason: string; readonly code: number | undefined }>(resolve => {
+      transport.socket('/v1/example/stream', {
+        onFrame: () => undefined,
+        onClose: (reason, code) => resolve({ reason, code }),
+      });
     });
-    return { r, ended: await Promise.race([ended, sleep(1_000)]) };
+    const end = await Promise.race([closed, sleep(1_000).then(() => undefined)]);
+    return { r, ended: end?.reason, code: end?.code };
   };
 
   test('4429 before any frame: the refusal is the stream’s answer, and the next relay is never dialled', async () => {
@@ -815,6 +820,20 @@ describe('a stream the rendezvous refuses for its ceiling is not walked onward (
       network => network.openSocket,
     );
 
+    expect(ended).toBe('no daemon holds this rendezvous');
+    expect(hostsOf(r.network.dialled)).toEqual([RELAY_HOST]);
+    r.fx.layer.close();
+  });
+
+  test('R219 a rendezvous refusal on a stream reaches it with the rendezvous’s own numeric close code, not a walk failure', async () => {
+    const { r, code, ended } = await streamOver(
+      { kind: 'absent', code: RELAY_CLOSE_CODES.rendezvousBusy },
+      network => network.openSocket,
+    );
+
+    // The stream is told 4429 itself (a number the caller can act on), and the second relay is never dialled.
+    expect(code).toBe(4429);
+    expect(code).toBe(RELAY_CLOSE_CODES.rendezvousBusy);
     expect(ended).toBe('no daemon holds this rendezvous');
     expect(hostsOf(r.network.dialled)).toEqual([RELAY_HOST]);
     r.fx.layer.close();
@@ -836,5 +855,196 @@ describe('a stream the rendezvous refuses for its ceiling is not walked onward (
 
     expect(hostsOf(r.network.dialled)).toEqual([RELAY_HOST, RELAY_TWO_HOST]);
     r.fx.layer.close();
+  });
+});
+
+describe('the walk’s deadlines, winner and failures (R195 R196 R200 R212)', () => {
+  test('R195 a direct address that is not accepted in 4 s is a transport failure while the relay keeps its full grace', async () => {
+    // Arrange — from cellular a private direct address neither answers nor refuses; the relay carries.
+    const r = await rig(
+      { [DIRECT_HOST]: { kind: 'silent' }, [RELAY_HOST]: { kind: 'carries', carrier: 'relay' } },
+      DIRECT_AND_RELAY,
+      'auto',
+    );
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+
+    // Act — the request waits on direct; only its short deadline passes, and nothing else is fired.
+    const pending = transport.request({ method: 'GET', path: '/v1/carriers' });
+    await pause();
+    const armedWhileWaiting = r.timers.pending.map(timer => timer.ms);
+    r.timers.fireExactly(DIRECT_SESSION_DEADLINE_MS);
+    await pending;
+
+    // Assert — direct's deadline is seconds, never the relay's whole grace; the relay carried the request and was
+    // given the full heartbeat grace to accept its own session.
+    expect(armedWhileWaiting).toContain(DIRECT_SESSION_DEADLINE_MS);
+    expect(armedWhileWaiting).not.toContain(RELAY_SESSION_DEADLINE_MS);
+    expect(DIRECT_SESSION_DEADLINE_MS).toBeLessThan(RELAY_SESSION_DEADLINE_MS);
+    expect(carriedOver(r.fx)).toEqual(['/v1/carriers relay']);
+    expect(r.timers.pending.map(timer => timer.ms)).toContain(RELAY_SESSION_DEADLINE_MS);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    r.fx.layer.close();
+  });
+
+  test('R196 the winner is remembered, a round in which nothing worked is not, and a winner that fails is forgotten', async () => {
+    // Arrange — nothing is reachable at first.
+    const hosts: Record<string, ScriptedHost> = { [DIRECT_HOST]: { kind: 'dead' }, [RELAY_HOST]: { kind: 'dead' } };
+    const sockets = new Map<string, BrowserSocket>();
+    const r = await rig(hosts, DIRECT_AND_RELAY, 'auto', null, network => url => {
+      const socket = network.openSocket(url);
+      sockets.set(new URL(url).host, socket);
+      return socket;
+    });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+
+    // An empty round: the request fails and no winner is remembered, so the pairing is not poisoned by it.
+    await expect(transport.request({ method: 'GET', path: '/v1/first' })).rejects.toThrow();
+    expect(r.router.choice(r.fx.daemonId)?.ok).toBe(false);
+
+    // The relay comes up: the next request walks again (not skipped), wins on the relay and remembers it.
+    hosts[RELAY_HOST] = { kind: 'carries', carrier: 'relay' };
+    await transport.request({ method: 'GET', path: '/v1/second' });
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'relay' } });
+    const dialledBefore = r.network.dialled.length;
+    await transport.request({ method: 'GET', path: '/v1/third' });
+    expect(r.network.dialled.length).toBe(dialledBefore);
+
+    // The winner fails under a request still waiting for its answer: it is forgotten, and the walk starts from the top.
+    const route = r.fx.route;
+    r.fx.route = request => (request.method === 'PUT' ? new Promise(() => undefined) : route(request));
+    const put = transport
+      .request({ method: 'PUT', path: '/v1/example', body: { enabled: true } })
+      .catch(error => error);
+    await pause();
+    sockets.get(RELAY_HOST)?.close(1011, 'carrier failed');
+    expect(await put).toBeInstanceOf(Error);
+    expect(r.router.choice(r.fx.daemonId)?.ok).not.toBe(true);
+    hosts[DIRECT_HOST] = { kind: 'carries', carrier: 'direct' };
+    r.fx.route = route;
+    await transport.request({ method: 'GET', path: '/v1/fourth' });
+    expect(carriedOver(r.fx)).toEqual([
+      '/v1/second relay',
+      '/v1/third relay',
+      '/v1/example relay',
+      '/v1/fourth direct',
+    ]);
+    r.fx.layer.close();
+  });
+
+  test('R200 a carrier the browser discovered itself is dialled as a last resort and never promoted into the cache', async () => {
+    // Arrange — the daemon published only a dead direct address; the build's directory advertised a hosted relay.
+    const hosted = 'wss://hosted.example';
+    const r = await rig(
+      { [DIRECT_HOST]: { kind: 'dead' }, 'hosted.example': { kind: 'carries', carrier: 'relay' } },
+      [{ kind: 'direct', url: DIRECT }],
+      'relay',
+      hosted,
+    );
+    const cached = structuredClone(r.daemon.carriers);
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+
+    // Act
+    await transport.request({ method: 'GET', path: '/v1/carriers' });
+
+    // Assert — the discovered rendezvous served the request, and the record the browser keeps is exactly what the
+    // daemon authored: no relay was written into it, so a later walk finds nothing it did not publish.
+    expect(carriedOver(r.fx)).toEqual(['/v1/carriers relay']);
+    expect(r.daemon.carriers).toEqual(cached);
+    expect(daemonCarriers(r.daemon).some(carrier => carrier.kind === 'relay')).toBe(false);
+    // A rendezvous this browser may not dial is not a candidate whatever the directory says; neither is one for a
+    // fingerprint no session can check.
+    const refused = await rig(
+      { [DIRECT_HOST]: { kind: 'dead' } },
+      [{ kind: 'direct', url: DIRECT }],
+      'relay',
+      'http://plaintext.example',
+    );
+    const refusedTransport = await refused.connect();
+    if (refusedTransport === undefined) throw new Error('no transport');
+    await expect(refusedTransport.request({ method: 'GET', path: '/v1/carriers' })).rejects.toThrow();
+    expect(refused.network.dialled.some(url => url.includes('plaintext.example'))).toBe(false);
+    r.fx.layer.close();
+    refused.fx.layer.close();
+  });
+
+  test('R212 carrier failures belong to the request: several requests failing at once name each carrier once', async () => {
+    // Arrange — nothing is reachable and an app load issues several daemon-bound requests at the same time.
+    const r = await rig({ [DIRECT_HOST]: { kind: 'dead' }, [RELAY_HOST]: { kind: 'dead' } }, DIRECT_AND_RELAY, 'auto');
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+
+    // Act
+    const attempts = ['/v1/a', '/v1/b', '/v1/c'].map(path =>
+      transport.request({ method: 'GET', path }).then(
+        () => undefined,
+        (reason: unknown) => reason,
+      ),
+    );
+    const failures = await Promise.all(attempts);
+
+    // Assert — every request failed, and the disclosure a reader sees names each carrier once, not once per request.
+    for (const failure of failures) expect(failure).toBeInstanceOf(Error);
+    const choice = r.router.choice(r.fx.daemonId);
+    expect(choice?.ok).toBe(false);
+    expect(choice?.passedOver.map(skip => skip.method.kind)).toEqual(['direct', 'webrtc', 'relay']);
+    r.fx.layer.close();
+  });
+});
+
+describe('every daemon-bound request goes through the router (R208)', () => {
+  test('R208 the shell’s carrier hook is the router’s dialer: a request reaches the daemon over the router’s walk and no other path', async () => {
+    // Arrange — the shell's ports as Connections' own `carriers` hook receives them; the only way out is `openSocket`.
+    const fx = await kernelFixture();
+    const device = await fx.paired();
+    const network = new BrowserNetwork(fx, { [RELAY_HOST]: { kind: 'carries', carrier: 'relay' } });
+    const timers = new HandTimers();
+    const ports = {
+      openSocket: network.openSocket,
+      after: timers.after,
+      now: () => 0,
+      daemons: { registerCache: () => () => undefined },
+    } as unknown as ConnectPorts;
+    const shell = (connections as unknown as { shell: Required<import('@ferretry/app').ShellProvides> }).shell;
+
+    // Act
+    const dialers = shell.carriers(ports);
+    const daemon: PairedDaemon = {
+      daemon: fx.daemonId,
+      machine: 'laptop',
+      deviceId: device.deviceId,
+      address: DIRECT,
+      carriers: [{ kind: 'relay', url: RELAY }],
+      pairedAt: 1,
+      lastSelectedAt: 1,
+    };
+    const claims = fakeDeviceClaims({
+      claims: {
+        [fx.daemonId]: {
+          deviceId: device.deviceId,
+          key: shellCrypto.deviceKeyHandle(device.privateKey),
+          appSession: device.appSession,
+        },
+      },
+    });
+    const transport = await connector({
+      crypto: shellCrypto,
+      claims,
+      carriers: dialers,
+      direct: () => {
+        throw new Error('a request went around the router: the shell’s own direct dial was used');
+      },
+    })(daemon);
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/carriers' });
+
+    // Assert — exactly one carrier dialer is registered, and the request crossed it: the daemon served it over the
+    // relay arrival its socket was dialled through, with the shell's own dial never reached.
+    expect(dialers).toHaveLength(1);
+    expect(network.dialled.map(url => new URL(url).host)).toEqual([RELAY_HOST]);
+    expect(carriedOver(fx)).toEqual(['/v1/carriers relay']);
+    fx.layer.close();
   });
 });
