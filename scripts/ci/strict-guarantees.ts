@@ -13,8 +13,8 @@
  * Usage: bun scripts/ci/strict-guarantees.ts --results <junit.xml|folder> [--results …] [--root <dir>]
  */
 import { appendFileSync } from 'node:fs';
-import { check } from '../validate/guarantees.ts';
-import { contextFor, parseArgs } from '../gen/lib/check.ts';
+import { check, ownerCheck } from '../validate/guarantees.ts';
+import { type CheckContext, contextFor, parseArgs } from '../gen/lib/check.ts';
 import type { Finding } from '../gen/lib/graph.ts';
 
 /** Findings with no owner in their sentence (a REMOVED row that kept a test) are listed under this heading. */
@@ -56,9 +56,19 @@ export function summary(findings: readonly Finding[], blocking: boolean): string
   return `${lines.join('\n')}\n`;
 }
 
+/**
+ * The strict findings: `guarantees` (no id test, or none that passed) plus the `guarantee-owner` ones that say a kept row
+ * is tested only outside its owner's suite. The pass proof reads only the owner's own tests, so such a row is neither
+ * proven nor missing there; counting it here is what makes a count of 0 mean every kept row has a passing test.
+ */
+export async function strictFindings(ctx: CheckContext): Promise<readonly Finding[]> {
+  const owner = (await ownerCheck.run(ctx)).filter(finding => finding.message.includes('tested only outside'));
+  return [...(await check.run(ctx)), ...owner];
+}
+
 if (import.meta.main) {
   const args = parseArgs(process.argv.slice(2));
-  const findings = await check.run(
+  const findings = await strictFindings(
     contextFor(args.root, { strict: true, ...(args.results === undefined ? {} : { results: args.results }) }),
   );
   const blocking = process.env.FY_STRICT_GUARANTEES_BLOCKING === 'true';

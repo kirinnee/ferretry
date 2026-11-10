@@ -55,6 +55,11 @@ concurrency:
     }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
 
+# THE ONE SWITCH of the strict Appendix D report (the `strict-guarantees` job below). Workflow-level, so the job that
+# counts and the `Full CI` verdict (scripts/ci/full-status.sh) read the same value. See docs/standards/ci-cd.
+env:
+  FY_STRICT_GUARANTEES_BLOCKING: 'false'
+
 jobs:
   # Shared setup once, then independent processes with separate logs and coverage directories.
   quick:
@@ -208,10 +213,11 @@ jobs:
   # only (a pull request without the `full-ci` label has no integration report, so no honest count), and after a red
   # test job too, since the count is the point then.
   #
-  # THE ONE SWITCH: `FY_STRICT_GUARANTEES_BLOCKING` below. 'false' (today) reports and never turns CI red; 'true' makes
-  # a miss fail the job. Flip it in the change that takes the count to 0 (docs/standards/ci-cd, "Strict guarantee
-  # report"). The job is in `full.needs` and the verdict list (scripts/ci/full-status.sh), as test-tiers requires; while the
-  # step is non-blocking the job always succeeds, so the verdict passes whatever the count.
+  # THE ONE SWITCH: `FY_STRICT_GUARANTEES_BLOCKING` in the workflow `env` above. 'false' (today) reports and never turns
+  # CI red; 'true' makes a miss fail the job. Flip it in the change that takes the count to 0 (docs/standards/ci-cd,
+  # "Strict guarantee report"). The job is in `full.needs` and the verdict (scripts/ci/full-status.sh) reads the same
+  # switch: while it is 'false' the verdict accepts this job whatever its result, so even a failed setup step or the
+  # timeout cannot turn Full CI red.
   strict-guarantees:
     name: Strict Guarantees
     needs: [quick, int]
@@ -219,8 +225,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-    env:
-      FY_STRICT_GUARANTEES_BLOCKING: 'false'
     runs-on: >-
       ${{
         (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
@@ -258,7 +262,7 @@ jobs:
           name: coverage-int
           path: coverage/int
       - name: Count the kept rows without a passing id-named test
-        # Non-blocking unless the switch above says 'true'; `continue-on-error` also covers a crash of the script itself.
+        # Non-blocking unless the workflow-level switch says 'true'; `continue-on-error` also covers a crash of the script itself.
         continue-on-error: ${{ env.FY_STRICT_GUARANTEES_BLOCKING != 'true' }}
         run: ./scripts/ci/in-devshell.sh bash -c './scripts/ci/setup.sh && bun scripts/ci/strict-guarantees.ts --results coverage/unit --results coverage/scripts --results coverage/int'
 

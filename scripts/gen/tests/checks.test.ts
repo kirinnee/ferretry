@@ -5,6 +5,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { contextFor, parseArgs } from '../lib/check.ts';
+import { strictFindings } from '../../ci/strict-guarantees.ts';
 import type { Finding } from '../lib/graph.ts';
 import { check as actRunner } from '../../validate/act-runner.ts';
 import { appHookFindings } from '../../validate/app-hooks.ts';
@@ -987,6 +988,7 @@ describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', ()
       'G5:passed:p/a.test.ts',
     ]);
     expect(parseJunit(xml)[1]?.name).toBe('G2 fails & says so');
+    expect(parseJunit('<testcase name="P23 P53 two ids" file="p/b.test.ts" />').map(r => r.id)).toEqual(['P23', 'P53']);
   });
 
   test('a kept row whose id-named test passes is quiet; with no test at all it fails', async () => {
@@ -1239,6 +1241,42 @@ describe('guarantees: a kept row needs a test that PASSES (redesign §10.5)', ()
       const f = combined({ 'coverage/unit/junit.xml': junit({ name: 'G1 holds', file: A, status: 'skipped' }) });
       expect((await run(guarantees, f, all)).map(x => x.where)).toEqual(['G1', 'G2']);
       expect(messages(await run(guarantees, f, { results: all.results }))).toBe('');
+    });
+
+    test('a kept row whose only id test is in another package is a miss (it is neither proven nor missing per tier)', async () => {
+      const B = 'packages/plugins/beta/tests/unit/b.test.ts';
+      const f = ws([{ id: 'alpha' }, { id: 'beta' }]);
+      f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept') + row('G2', 'kept'));
+      f.write(A, titled('G2 holds'));
+      f.write(B, titled('G1 holds'));
+      f.write('coverage/unit/junit.xml', junit({ name: 'G2 holds', file: A }, { name: 'G1 holds', file: B }));
+      // The pass proof alone counts nothing: G1's only test is outside alpha's suite, so it is not alpha's to prove.
+      expect(await run(guarantees, f, all)).toEqual([]);
+      const strictCtx = contextFor(f.root, all);
+      const found = await strictFindings(strictCtx);
+      expect(found.map(x => x.where)).toEqual(['G1']);
+      expect(messages(found)).toContain('owned by alpha is tested only outside its owner');
+      // Non-strict (the per-tier checks today) still ignores nothing it ignored before: pending rows stay skipped.
+      const pending = ws([{ id: 'alpha' }, { id: 'beta' }], { pending: ['alpha'] });
+      pending.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept'));
+      pending.write(B, titled('G1 holds'));
+      pending.write('coverage/unit/junit.xml', junit({ name: 'G1 holds', file: B }));
+      expect(await strictFindings(contextFor(pending.root, { results: all.results }))).toEqual([]);
+      expect((await strictFindings(contextFor(pending.root, all))).map(x => x.where)).toEqual(['G1']);
+    });
+
+    test('a multi-id title proves every id in it, in source and in the report', async () => {
+      const f = ws([{ id: 'alpha' }]);
+      f.write('docs/rebuild/guarantees.tsv', TSV_HEAD + row('G1', 'kept') + row('G2', 'kept') + row('G3', 'kept'));
+      f.write(A, titled('G1 G2 holds'));
+      const I3 = 'packages/plugins/alpha/tests/integration/i3.test.ts';
+      f.write(I3, titled('G3 holds'));
+      f.write('coverage/unit/junit.xml', junit({ name: 'G1 G2 holds', file: A }));
+      f.write('coverage/int/junit.xml', junit({ name: 'G3 holds', file: I3 }));
+      expect(await run(guarantees, f, all)).toEqual([]);
+      // Skipped: both ids are misses, so the second id is judged too, not only the first.
+      f.write('coverage/unit/junit.xml', junit({ name: 'G1 G2 holds', file: A, status: 'skipped' }));
+      expect((await run(guarantees, f, all)).map(x => x.where)).toEqual(['G1', 'G2']);
     });
 
     test('the scripts report is read like the others (a repo-tooling row)', async () => {
