@@ -40,7 +40,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { looksSecret } from '../../../daemon/lib/account/import.ts';
+import { looksSecret } from '@ferretry/std/credential-words';
 import { redactTodayText } from './redact-today.ts';
 import { referenceRedactText } from './redact-reference.ts';
 import { privateKeyShapes } from './redact-private-keys.ts';

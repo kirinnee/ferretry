@@ -37,7 +37,13 @@ import { type ResolvedProfile, type ResolveInput, resolveProfile } from '../../.
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
 import { todayFlag, todayServerLine } from './resolved-view-today.ts';
-import { HIDDEN, hidesAtLeast, hidesAtLeast37, lineHidesAtLeast, type Shown } from './command-line-family.ts';
+import {
+  HIDDEN,
+  hidesAtLeast,
+  hidesAtLeast37,
+  lineHidesAtLeast,
+  type Shown,
+} from '../../../../../std/tests/support/command-line-family.ts';
 import { flags37, serverLine37 } from './command-line-37.ts';
 import { shownWordsR2 } from './command-line-r2.ts';
 import { shownWordsR3 } from './command-line-r3.ts';

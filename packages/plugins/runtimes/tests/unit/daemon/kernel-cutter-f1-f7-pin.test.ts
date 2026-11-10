@@ -1,9 +1,9 @@
 /**
- * S6 CFG-LEAK-W: the F1-F7 OPEN CLASS, pinned so the gap cannot grow and so it cannot close by accident.
+ * S6 CFG-LEAK-W: F1-F7, the class the word cutter does not cut and the write rule (W, `findFlagSecrets`) refuses: the
+ * kernel withholds AND the Runtimes views withhold / hide.
  *
- * The class: a value the write rule (W, `findFlagSecrets`) refuses WHOLE that the word cutter, in the kernel's copy and in
- * Runtimes' copy, still SHOWS. Seven families (the review's B1, `cfg-leak-b-findings4.md`; counted GAP in
- * `config/ports-pending.json`, the `GAP(runtimes: Resolved view and component detail)` line):
+ * The class: a value W refuses WHOLE that the cutter, one implementation in `@ferretry/std/credential-words`, still SHOWS.
+ * Seven families (the review's B1, `cfg-leak-b-findings4.md`):
  *
  * - F1 a credential KEY whose first piece is no secret, or a look-alike of a reference (`${X}`, `$X`, a name past 64)
  * - F2 a blank inside the value, and a known token shape after it
@@ -11,29 +11,25 @@
  * - F4 a value starting `.` (W's place test)
  * - F5 a broken pointer (`${secret:X,…}`, `${secret: X}`)
  * - F6 past W's 4096-character reference window
- * - F7 one list item holding blanks (a command line in one word), which Runtimes' copy is never given
+ * - F7 one list item holding blanks (a command line in one word)
  *
- * Two halves, each row alone:
- * (i)  THE KERNEL DOORS ARE SAFE. `shownConfigText` is the one function `GET /v1/config/file` and `config_read` ask. Its
- *      net withholds a text whose masked value W still refuses (`unmaskable`, or `raw_secret`), or shows it with no raw
- *      part left, in the flow list form and the block list form. Cut that net (the `findFlagSecrets(value)` line in
- *      `shown-text.ts`) and this half goes RED.
- * (ii) THE CUTTERS STILL SHOW IT, the known GAP: both copies leave a slice of the fake secret in the text. THIS HALF
- *      IS THE FLIP SIGNAL: when the single owner of the cutter and W lands in `@ferretry/std` (the remedy, the first
- *      security unit after the merge) a row's cutters hide the line, the half goes RED, and the person who made it
- *      green deletes the row from this file and from the GAP line. A change to a cutter that hides one of these lines
- *      fails here on purpose, until the GAP line is edited with it.
+ * They are held by a NET in each consumer, not by the cutter: each consumer runs W on what its cutter SHOWS and withholds
+ * what W still refuses, in plain words and never as partial text. Each row alone, in each place a person can read it:
+ * (i)  THE KERNEL DOORS. `shownConfigText` is the one function `GET /v1/config/file` and `config_read` ask: it
+ *      withholds a text whose masked value W still refuses (`unmaskable`, or `raw_secret`), or shows it with no raw part
+ *      left, in the flow list form and the block list form.
+ * (ii) THE RUNTIMES VIEWS. The Resolved view (an MCP server's line, a settings component's flags), a component's detail
+ *      (MCP args, settings flags: the WHOLE list is withheld) and the runtime list's overridden flags show no raw part.
  *
  * Rows, no skip and no todo. Every value is fake: it is shaped like a credential and is none.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
-import { shownWords as runtimesShownWords } from '../../../daemon/lib/service/command-line.ts';
+import { findFlagSecrets } from '@ferretry/std/credential-words';
 import { defineConfig } from '../../../../../core/kernel/contract/index.ts';
-import { shownWords as kernelShownWords } from '../../../../../core/kernel/host/config/secret-words.ts';
-import { findFlagSecrets } from '../../../../../core/kernel/host/config/secrets.ts';
 import { shownConfigText } from '../../../../../core/kernel/host/config/shown-text.ts';
+import { VIEW_NAMES, viewsOf } from './net-views.ts';
 
 const V = 'Zk3pQ9vXw2LmN7rT';
 const GSK = 'gsk_AbCdEfGhIjKlMnOpQrSt12';
@@ -87,10 +83,8 @@ const FLOW = (line: readonly string[]): string =>
 const BLOCK = (line: readonly string[]): string =>
   `command: srv\nargs:\n${line.map(word => `  - ${JSON.stringify(word)}\n`).join('')}`;
 
-const GAP = 'GAP: flips when the single owner in @ferretry/std lands';
-
-describe('S6 CFG-LEAK-W the F1-F7 open class: the kernel doors are safe, the cutters still show it', () => {
-  it('every row is a line W refuses (so the class is the one the GAP line counts)', () => {
+describe('S6 CFG-LEAK-W F1-F7: the kernel withholds AND the Runtimes views withhold / hide', () => {
+  it('every row is a line W refuses (so the class is the one the net holds)', () => {
     const notRefused = ROWS.filter(row => findFlagSecrets({ args: row.line }).length === 0).map(row => row.id);
     should(notRefused).eql([]);
   });
@@ -110,14 +104,19 @@ describe('S6 CFG-LEAK-W the F1-F7 open class: the kernel doors are safe, the cut
       }
     });
 
-    it(`${row.family} (${row.id}): both cutters still show a raw part, ${GAP}`, () => {
-      const kernel = kernelShownWords(row.line)
-        .map(word => word.text)
-        .join(' ');
-      const runtimes = runtimesShownWords(row.line)
-        .map(word => word.text)
-        .join(' ');
-      should([showsSecret(kernel), showsSecret(runtimes)]).eql([true, true]);
+    it(`${row.family} (${row.id}): no Runtimes view shows a raw part (Resolved view, component detail, runtime list)`, () => {
+      const shown = viewsOf(row.line).map((view, at) => [VIEW_NAMES[at], showsSecret(view.text)] as const);
+      should(shown.filter(([, leaked]) => leaked)).eql([]);
     });
   }
+
+  it('the net fires in EVERY Runtimes view on this class: each view withholds at least one row, in words', () => {
+    // A view whose net were removed would show these rows raw (the mutation each view is held to): so each view must
+    // answer "withheld" for at least one of them, and say so in plain words rather than blank.
+    const withheldPerView = VIEW_NAMES.map((name, at) => [
+      name,
+      ROWS.filter(row => viewsOf(row.line)[at]?.withheld === true).length,
+    ]);
+    should(withheldPerView.filter(([, count]) => (count as number) === 0)).eql([]);
+  });
 });

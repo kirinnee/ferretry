@@ -10,10 +10,10 @@
  * Fake only: every value is shaped like a credential and is none.
  */
 import { afterAll, describe, expect, mock, test } from 'bun:test';
-import * as realWords from '../../../host/config/secret-words.ts';
+import * as realWords from '@ferretry/std/credential-words';
 import { fileDef, flagForms, VALUE } from './masked-support.ts';
 
-const SECRET_WORDS = '../../../host/config/secret-words.ts';
+const SECRET_WORDS = '@ferretry/std/credential-words';
 const real: object = { ...realWords };
 
 mock.module(SECRET_WORDS, () => ({
@@ -21,7 +21,7 @@ mock.module(SECRET_WORDS, () => ({
   // A cutter that misses everything: the shape of "the mask was changed and no longer knows a name".
   shownWord: (word: string) => ({ text: word, hidden: false }),
   shownWords: (words: readonly string[]) => words.map(word => ({ text: word, hidden: false })),
-  looksSecret: () => false,
+  looksSecretShown: () => false,
 }));
 
 afterAll(() => {

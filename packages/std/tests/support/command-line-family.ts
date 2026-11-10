@@ -32,6 +32,13 @@
 
 export const HIDDEN = '‹hidden›';
 
+/**
+ * What a Runtimes view says instead of a word the write rule still refuses once the cutter has had its say (the net):
+ * it hides the whole word, which is at least what any cutter hides. A copy of `WITHHELD_WORDS_TEXT`, pinned equal by
+ * `net-views.test.ts` in the Runtimes tests (a std test may not import a plugin).
+ */
+export const WITHHELD = 'Not shown: this may hold a credential. Open the file at this machine to read it.';
+
 const FAKE = 'not-a-real-secret-0000';
 
 /** One generated command line, and what must and must not be shown of its word at `at`. */
@@ -612,6 +619,8 @@ export function nestedBreach(
   shown: readonly { readonly value: string; readonly hidden?: boolean }[],
 ): string | undefined {
   if (shown.length !== family.words.length) return `${family.label}: ${String(shown.length)} words shown`;
+  // THE NET, a component's detail: a list the write rule still refused is withheld WHOLE (each word stands as withheld).
+  if (family.secret && shown.every(word => word.hidden === true && word.value === WITHHELD)) return undefined;
   for (const [index, word] of family.words.entries()) {
     if (index === family.at && family.secret) continue;
     if (shown[index]?.value !== word || shown[index]?.hidden === true) return `${family.label}: changed ${word}`;
@@ -619,6 +628,8 @@ export function nestedBreach(
   if (!family.secret) return undefined;
   const value = shown[family.at]?.value ?? '';
   if (shown.some(word => word.value.includes(family.body))) return `${family.label}: shows ${family.body}`;
+  // THE NET: the write rule still refused the word, so a view says so in words and shows none of it: that hides it all.
+  if (shown[family.at]?.hidden === true && value === WITHHELD) return undefined;
   if (shown[family.at]?.hidden !== true) return `${family.label}: not marked hidden`;
   if (!value.includes(HIDDEN)) return `${family.label}: no ${HIDDEN}`;
   const lost = family.kept.find(part => !value.includes(part));
@@ -630,6 +641,8 @@ export function nestedLineBreach(family: NestedCase, command: string, line: stri
   const written = [command, ...family.words].join(' ');
   if (!family.secret) return line === written ? undefined : `${family.label}: changed`;
   if (line.includes(family.body)) return `${family.label}: shows ${family.body}`;
+  // THE NET: the write rule still refused the line, so the view says so in words and shows none of it.
+  if (line === WITHHELD) return undefined;
   if (!line.startsWith(`${command} ${BEFORE} `)) return `${family.label}: lost its start`;
   if (family.words.at(-1) === AFTER && !line.endsWith(` ${AFTER}`)) return `${family.label}: lost ${AFTER}`;
   const lost = family.kept.find(part => !line.includes(part));
@@ -643,6 +656,7 @@ export function nestedLineBreach(family: NestedCase, command: string, line: stri
  * the last ends it, and every piece stands in order in today with something cut before it.
  */
 export function lineHidesAtLeast(today: string, five: string): boolean {
+  if (five === WITHHELD) return true;
   const pieces = five.split(HIDDEN);
   const first = pieces[0] ?? '';
   const last = pieces.at(-1) ?? '';
@@ -668,6 +682,7 @@ export interface Shown {
  * URL's password is cut and what follows is kept (ruling #40: `a=1,api_key=‹hidden›,b=2`, `https://u:‹hidden›@host`).
  */
 export function hidesAtLeast(word: string, today: Shown, five: Shown): boolean {
+  if (five.hidden === true && five.value === WITHHELD) return true;
   if (today.hidden === true) return five.hidden === true && five.value === HIDDEN;
   if (five.hidden !== true) return five.value === word;
   return five.value.includes(HIDDEN) && lineHidesAtLeast(word, five.value);
@@ -679,6 +694,7 @@ export function hidesAtLeast(word: string, today: Shown, five: Shown): boolean {
  * word or at its end, but never shows a byte #37 cut (review r1 F2: `-H<token> KEY=v` must stay `-H‹hidden›`).
  */
 export function hidesAtLeast37(word37: Shown, five: Shown): boolean {
+  if (five.hidden === true && five.value === WITHHELD) return true;
   if (word37.hidden === true && five.hidden !== true) return false;
   if (five.hidden !== true) return five.value === word37.value;
   return five.value.includes(HIDDEN) && lineHidesAtLeast(word37.value, five.value);

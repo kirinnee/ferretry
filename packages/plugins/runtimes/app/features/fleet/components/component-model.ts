@@ -179,6 +179,11 @@ export interface ComponentDraft {
   readonly wordsEtag?: string;
   /** MCP: the arguments the daemon hid, as `body` shows each and where it stood in the list as read. */
   readonly hiddenArgs: readonly { readonly shown: string; readonly at: number }[];
+  /**
+   * The daemon withheld the whole list of MCP arguments or launch flags (the write rule still refuses a word the word
+   * cutter showed): nothing of it was sent, so no word of it can be kept, and the form says so in words.
+   */
+  readonly wordsWithheld: boolean;
   /** Instructions or hooks text the daemon cut a secret out of: it cannot be saved from here. */
   readonly redacted: boolean;
   /** Hooks read from a folder rather than one file: edited in that folder. */
@@ -197,6 +202,7 @@ export const blankDraft = (kind: ComponentKind): ComponentDraft => ({
   keptEnv: [],
   flags: [],
   hiddenArgs: [],
+  wordsWithheld: false,
   redacted: false,
   directory: false,
   oauth: false,
@@ -310,6 +316,7 @@ export function draftFromComponent(component: ComponentView): ComponentDraft {
         body: mcpCommandLine(detail),
         keptEnv: detail.env.map(entry => entry.name),
         hiddenArgs: hiddenWords(detail.args),
+        wordsWithheld: detail.argsWithheld === true,
         ...(detail.argsEtag === undefined ? {} : { wordsEtag: detail.argsEtag }),
         oauth: detail.auth === 'oauth',
       };
@@ -323,6 +330,7 @@ export function draftFromComponent(component: ComponentView): ComponentDraft {
         hiddenKeys: entries.flatMap(entry => ('hidden' in entry ? [entry.key] : [])),
         keptEnv: detail.env.map(entry => entry.name),
         flags: (detail.flags ?? []).map((word, at) => (typeof word === 'string' ? word : { keep: true as const, at })),
+        wordsWithheld: detail.flagsWithheld === true,
         ...(detail.flagsEtag === undefined ? {} : { wordsEtag: detail.flagsEtag }),
       };
     }
@@ -364,6 +372,14 @@ export function settingsEntries(body: string): {
   return { entries };
 }
 
+/** The form's words for an MCP server whose arguments the daemon withheld (it was sent none, so none can be kept). */
+export const WITHHELD_ARGS_PROBLEM =
+  'The arguments are not shown because they may hold a credential, so they can’t be kept. Type the whole command line again, or edit the file at this machine.';
+
+/** The form's words for launch flags the daemon withheld: the form has no place to type flags, so it cannot save them. */
+export const WITHHELD_FLAGS_PROBLEM =
+  'The launch flags are not shown because they may hold a credential, so this form can’t keep them. Edit the file at this machine.';
+
 /** Why the form cannot be saved yet, in one sentence, or `undefined` when it can (the prototype's `draftError`). */
 export function draftProblem(
   draft: ComponentDraft,
@@ -381,12 +397,14 @@ export function draftProblem(
     case 'mcp': {
       const words = splitCommandLine(draft.body);
       if (words.length === 0) return 'Type the command that starts the server.';
+      if (draft.wordsWithheld && words.length === 1) return WITHHELD_ARGS_PROBLEM;
       const bad = mcpArguments(draft, words.slice(1)).bad;
       return bad === undefined ? undefined : `Type the hidden value again, or put “${bad}” back as it was.`;
     }
     case 'skills':
       return lines(draft.body).length === 0 ? 'Name at least one skill.' : undefined;
     case 'settings': {
+      if (draft.wordsWithheld) return WITHHELD_FLAGS_PROBLEM;
       const bad = settingsEntries(draft.body).bad;
       return bad === undefined ? undefined : `Write each setting as key = value: “${bad}”.`;
     }

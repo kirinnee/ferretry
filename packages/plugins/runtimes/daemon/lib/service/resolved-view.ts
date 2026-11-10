@@ -19,12 +19,20 @@
  */
 import { type Conflict, type FlatLayer, type ResolvedProfile, settingsKey } from '../account/layering.ts';
 import { harnessKey } from './foreign.ts';
-import { looksSecret } from '../account/import.ts';
-import { shownWord, shownWords } from './command-line.ts';
-import type { ResolvedEntry, ResolvedField, ResolvedSetter } from '../../../contract/index.ts';
+import { looksSecret } from '@ferretry/std/credential-words';
+import { refusedIndexes, shownLine, shownWords } from './command-line.ts';
+import {
+  HIDDEN_WORD_TEXT,
+  type ResolvedEntry,
+  type ResolvedField,
+  type ResolvedSetter,
+  WITHHELD_WORDS_TEXT,
+} from '../../../contract/index.ts';
+
+type FlagView = Pick<ResolvedSetter, 'value' | 'hidden'>;
 
 /** What a hidden value is replaced by. */
-const RESOLVED_HIDDEN_TEXT = '‹hidden›';
+const RESOLVED_HIDDEN_TEXT = HIDDEN_WORD_TEXT;
 
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 
@@ -52,15 +60,26 @@ function serverLine(server: {
 }): string {
   if (server.url !== undefined) return bareUrl(server.url);
   const words = [server.command ?? '', ...(server.args ?? [])].filter(word => word !== '');
-  return shownWords(words)
-    .map(word => word.text)
-    .join(' ');
+  const line = shownLine(words);
+  // THE NET: the write rule still refuses a word the cutter showed: the whole line is withheld, never a part of it.
+  if (line.withheld) return WITHHELD_WORDS_TEXT;
+  return line.words.map(word => word.text).join(' ');
 }
 
-/** One launch flag as it may be shown, judged with the flag before it on the command line. */
-function flagValue(flag: string, before: string | undefined): Pick<ResolvedSetter, 'value' | 'hidden'> {
-  const word = shownWord(flag, before);
-  return word.hidden ? { value: word.text, hidden: true } : { value: word.text };
+/**
+ * The launch flags as they may be shown, each judged with the flag before it on the command line. THE NET: a flag the
+ * write rule still refuses once the cutter has had its say is withheld, as a hidden value.
+ */
+function flagValues(flags: readonly string[]): readonly Pick<ResolvedSetter, 'value' | 'hidden'>[] {
+  const shown = shownWords(flags);
+  const refused = refusedIndexes(shown);
+  return shown.map((word, index) =>
+    refused.has(index)
+      ? { value: WITHHELD_WORDS_TEXT, hidden: true }
+      : word.hidden
+        ? { value: word.text, hidden: true }
+        : { value: word.text },
+  );
 }
 
 /**
@@ -69,6 +88,7 @@ function flagValue(flag: string, before: string | undefined): Pick<ResolvedSette
  */
 export function resolvedEntries(resolved: ResolvedProfile): readonly ResolvedEntry[] {
   const { harness } = resolved;
+  const flagViews = flagValues(resolved.flags.map(({ flag }) => flag));
   const beaten = (field: Conflict['field'], key: string): readonly ResolvedSetter[] =>
     resolved.conflicts
       .filter(conflict => conflict.field === field && conflict.key === key)
@@ -96,9 +116,7 @@ export function resolvedEntries(resolved: ResolvedProfile): readonly ResolvedEnt
       const key = settingsKey(['env', name]);
       return entry('env', key, said(name, value), layer, beaten('env', key));
     }),
-    ...resolved.flags.map(({ flag, layer }, index) =>
-      entry('flags', 'flag', flagValue(flag, resolved.flags[index - 1]?.flag), layer),
-    ),
+    ...resolved.flags.map(({ layer }, index) => entry('flags', 'flag', flagViews[index] as FlagView, layer)),
     ...resolved.hooks.map(({ layer, component }) =>
       entry('hooks', layer.name, { value: component.file ?? component.directory ?? 'a hooks document' }, layer),
     ),

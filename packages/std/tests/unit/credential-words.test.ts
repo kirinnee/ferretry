@@ -10,8 +10,10 @@
  * Fake only: every value is shaped like a credential and is none.
  */
 import { describe, expect, test } from 'bun:test';
-import { HIDDEN_VALUE_TEXT, shownWord, shownWords } from '../../../host/config/secret-words.ts';
-import { VALUE } from './masked-support.ts';
+import { HIDDEN_VALUE_TEXT, shownWord, shownWords } from '../../src/credential-words/index.ts';
+
+/** A fake credential-shaped value (no real secret scanner hit). */
+const VALUE = 'Zk3pQ9vXw2LmN7rT';
 
 const POINTER = '${secret:X}';
 

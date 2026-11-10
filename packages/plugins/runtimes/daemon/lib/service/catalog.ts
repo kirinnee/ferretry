@@ -40,7 +40,8 @@ import {
   type SkippedLayer,
 } from '../account/layering.ts';
 import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
-import { freeName, looksSecret, SECRET_TOKEN_SOURCE } from '../account/import.ts';
+import { freeName } from '../account/import.ts';
+import { looksSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
 import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -70,12 +71,13 @@ import type {
   StackView,
 } from '../../../contract/index.ts';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
+import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { claudeFastSupport, harnessKey, scopeKey } from './foreign.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
 import { runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
-import { shownWords, shownWordsEtag } from './command-line.ts';
+import { shownLine, shownWordsEtag } from './command-line.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
@@ -257,12 +259,17 @@ const envEntries = (env: Readonly<Record<string, string>> | undefined): EnvEntry
 function commandWords(
   words: unknown,
   first: unknown,
-): { readonly words: CommandWord[]; readonly etag: string } | undefined {
+):
+  | { readonly words: CommandWord[]; readonly etag: string; readonly withheld?: undefined }
+  | { readonly withheld: true }
+  | undefined {
   if (!Array.isArray(words)) return undefined;
-  const shown = shownWords(words as string[], typeof first === 'string' ? first : undefined);
+  const line = shownLine(words as string[], typeof first === 'string' ? first : undefined);
+  // THE NET: a word the write rule still refuses once the cutter has had its say withholds the WHOLE list, never a part.
+  if (line.withheld) return { withheld: true };
   return {
-    words: shown.map(word => (word.hidden ? { shown: word.text, hidden: true as const } : word.text)),
-    etag: shownWordsEtag(shown),
+    words: line.words.map(word => (word.hidden ? { shown: word.text, hidden: true as const } : word.text)),
+    etag: shownWordsEtag(line.words),
   };
 }
 
@@ -277,7 +284,11 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
       return {
         kind,
         ...text('command'),
-        ...(args === undefined ? {} : { args: args.words, argsEtag: args.etag }),
+        ...(args === undefined
+          ? {}
+          : args.withheld
+            ? { argsWithheld: true as const }
+            : { args: args.words, argsEtag: args.etag }),
         ...text('url'),
         ...(component.auth === 'oauth' ? { auth: 'oauth' as const } : {}),
         env: envEntries(env),
@@ -290,7 +301,11 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
       return {
         kind,
         ...text('file'),
-        ...(flags === undefined ? {} : { flags: flags.words, flagsEtag: flags.etag }),
+        ...(flags === undefined
+          ? {}
+          : flags.withheld
+            ? { flagsWithheld: true as const }
+            : { flags: flags.words, flagsEtag: flags.etag }),
         env: envEntries(env),
       };
     }
@@ -1222,7 +1237,10 @@ const OVERRIDE_SENTENCE = (from: string): string => `From your ${from} · Overri
  * the key and the value both, for every caller.
  */
 function overriddenFlag(tokens: readonly string[]): { readonly key: string; readonly value: string } {
-  const shown = shownWords(tokens).map(word => word.text);
+  const line = shownLine(tokens);
+  // THE NET: a flag the write rule still refuses once the cutter has had its say is not shown, key and value both.
+  if (line.withheld) return { key: WITHHELD_WORDS_TEXT, value: WITHHELD_WORDS_TEXT };
+  const shown = line.words.map(word => word.text);
   return { key: shown[0] as string, value: shown.join(' ') };
 }
 

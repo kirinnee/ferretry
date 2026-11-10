@@ -3,13 +3,10 @@ import should from 'should';
 import {
   findRawSecrets,
   looksLikeRawSecret,
-  RAW_SECRET_MESSAGE,
-  RAW_TEXT_SECRET_MESSAGE,
-  rawSecretFix,
   rawTextHoldsSecret,
   rawTextSecretLine,
   shannonEntropy,
-} from '../../../host/config/secrets.ts';
+} from '../../src/credential-words/index.ts';
 
 /**
  * Fixtures are assembled at run time from a prefix and a filler, so no file in the repository ever
@@ -305,15 +302,6 @@ describe('findRawSecrets', () => {
   });
 });
 
-describe('the sentences a finding is reported with', () => {
-  it('should name the fix without ever holding a value', () => {
-    // Assert
-    should(rawSecretFix('fy')).containEql('fy secret set NAME');
-    should(rawSecretFix('fy')).containEql(`${DOLLAR}{secret:NAME}`);
-    should(RAW_SECRET_MESSAGE).containEql('raw secret');
-  });
-});
-
 describe('rawTextSecretLine — the raw text, comments and tags included', () => {
   it('should find a key in a comment, by its line and nothing else', () => {
     // Arrange
@@ -343,12 +331,6 @@ describe('rawTextSecretLine — the raw text, comments and tags included', () =>
     // Act / Assert
     should(rawTextSecretLine(text)).be.undefined();
     should(rawTextHoldsSecret(text)).be.false();
-  });
-
-  it('should say what was found without the value', () => {
-    // Assert
-    should(RAW_TEXT_SECRET_MESSAGE).containEql('a comment or a tag counts');
-    should(RAW_TEXT_SECRET_MESSAGE).not.containEql('sk-');
   });
 });
 

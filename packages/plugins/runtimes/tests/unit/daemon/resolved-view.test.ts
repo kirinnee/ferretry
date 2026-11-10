@@ -2,8 +2,15 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { type ResolvedProfile, type ResolveInput, resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
+import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
-import { hidesAtLeast, lineHidesAtLeast, nestedBreach, nestedFamily, nestedLineBreach } from './command-line-family.ts';
+import {
+  hidesAtLeast,
+  lineHidesAtLeast,
+  nestedBreach,
+  nestedFamily,
+  nestedLineBreach,
+} from '../../../../../std/tests/support/command-line-family.ts';
 import { todayFlag, todayServerLine } from './resolved-view-today.ts';
 import { shownWordsR2 } from './command-line-r2.ts';
 
@@ -959,11 +966,13 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
 
     // Assert
     // CFG-LEAK-R (ii): a `?` glues the next key to the pointer, so the first value is cut whole; and each `P'x` glues a
-    // quote and text to its pointer, so each of those is cut. The two that hold no glue are shown exactly as before.
+    // quote and text to its pointer, so each of those is cut. `spaced` holds no glue and is shown exactly as before.
+    // `defaults` is shown as before by the cutter, but it is an F5 line (a `${A:-` pointer never closed under a credential
+    // key): the write rule refuses it, so the NET (CFG-LEAK ii) withholds it in words rather than show raw text.
     should(actual.map(word => word.value)).deepEqual([
       `--set=password=${HIDDEN}`,
       spaced,
-      defaults,
+      WITHHELD_WORDS_TEXT,
       `--set=${`api_key=${HIDDEN} `.repeat(20_000)}`,
     ]);
     should(performance.now() - started).be.below(2_000);
@@ -1199,16 +1208,18 @@ describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
       `API_KEY=${P} short==`,
       `LOG_LEVEL=${P} ${B64}==`,
       `API_KEY=${P} x= y`,
-      // A pointer past the end of the secret-named key's value (`,` ends it) is a harmless key's, and the text after it
-      // is that key's own.
-      `API_KEY=short,LOG_LEVEL=${P} ${B64}==`,
     ];
+    // A pointer past the end of the secret-named key's value (`,` ends it) is a harmless key's, and the text after it
+    // is that key's own: the CUTTER shows it (it was a control). It is also an F1 line, though: a credential KEY whose
+    // first piece (`short`) is no secret, and the write rule refuses the whole value. So the NET (CFG-LEAK ii)
+    // withholds it in words. State change vs (B): shown -> withheld, because W refuses it.
+    const refused = `API_KEY=short,LOG_LEVEL=${P} ${B64}==`;
 
     // Act
-    const actual = shownFlags(words);
+    const actual = shownFlags([...words, refused]);
 
     // Assert
-    should(actual).deepEqual(words.map(as));
+    should(actual).deepEqual([...words.map(as), hid(WITHHELD_WORDS_TEXT)]);
   });
 
   it('#40 B2 should still show a value with a pointer after it exactly as r4 did where nothing is padded (control)', () => {

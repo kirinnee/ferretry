@@ -12,7 +12,7 @@ import { agentConfig } from '../../../host/config/agent.ts';
 import { checkConfigText } from '../../../host/config/check.ts';
 import { evaluateConfig } from '../../../host/config/evaluate.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
-import { findFlagSecrets } from '../../../host/config/secrets.ts';
+import { findFlagSecrets } from '@ferretry/std/credential-words';
 import { shownConfigText } from '../../../host/config/shown-text.ts';
 import { CONFIG_FILE_MAX_BYTES, CONFIG_TOO_LARGE, configTextTooLarge, readConfigText } from '@ferretry/std/yaml';
 import type { HostFs } from '../../../host/state/host-fs.ts';

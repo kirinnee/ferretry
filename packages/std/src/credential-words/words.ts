@@ -62,22 +62,14 @@
  *
  * Pure.
  */
-import { SECRET_REFERENCE_SOURCE } from '../../contract/secrets.ts';
+import {
+  HIDDEN_VALUE_TEXT,
+  holdsSecretReference,
+  MIN_SECRET_VALUE_LENGTH,
+  secretReferencePattern,
+} from '../secret-reference.ts';
 
-/**
- * What stands in a shown text for a value that is not shown, and so can never be typed as one. The same spelling as
- * runtimes' `HIDDEN_VALUE_TEXT`, so a person sees one spelling everywhere.
- */
-export const HIDDEN_VALUE_TEXT = '‹hidden›';
-
-/** The shortest value the secret store accepts: a shorter one is a flag, not a credential (`AUTH=1`). */
-const MIN_SECRET_VALUE_LENGTH = 8;
-
-/** The `${secret:NAME}` grammar as a fresh global pattern (a global pattern keeps its position between uses). */
-const secretReferencePattern = (): RegExp => new RegExp(SECRET_REFERENCE_SOURCE, 'gu');
-
-/** Whether a text holds a well-formed `${secret:NAME}` reference. */
-const holdsSecretReference = (value: string): boolean => new RegExp(SECRET_REFERENCE_SOURCE, 'u').test(value);
+export { HIDDEN_VALUE_TEXT };
 
 /** A word that is a flag on its own: one or two dashes and a name, with no value in it. */
 const FLAG_WORD = /^-{1,2}[A-Za-z0-9][^=\s]*$/u;
@@ -102,7 +94,7 @@ const unquoted = (value: string): string => QUOTED.exec(value)?.[2] ?? value;
 
 /** Whether a flag's value looks like a credential under the flag's name, or holds a token. */
 function secretValue(name: string, value: string): boolean {
-  return looksSecret(name, unquoted(value)) || value.split(PIECE_BREAK).some(piece => looksSecret('', piece));
+  return looksSecretShown(name, unquoted(value)) || value.split(PIECE_BREAK).some(piece => looksSecretShown('', piece));
 }
 
 // ── Cuts ─────────────────────────────────────────────────────────────────────────────────────────
@@ -394,7 +386,7 @@ const partHeldAny = (text: string, ends: ValueEnds, from: number, to: number): b
 function heldAt(text: string, ends: ValueEnds, name: string, start: number, end: number): boolean {
   if ((ends.pointer[start] as number) <= end || end - start < MIN_SECRET_VALUE_LENGTH) return false;
   if (text.startsWith('${', start) && ends.close[start + 2] === (ends.shownEnd[end] as number) - 1) return false;
-  return looksSecret(name, unquoted(text.slice(start, end).trim()));
+  return looksSecretShown(name, unquoted(text.slice(start, end).trim()));
 }
 
 /**
@@ -405,12 +397,12 @@ function heldAt(text: string, ends: ValueEnds, name: string, start: number, end:
  * `prefix${secret:X}`), and one too short to be a secret is none.
  */
 function heldInPiece(name: string, piece: string): boolean {
-  return looksSecret(name, unquoted(piece.trim())) || heldParts(name, piece);
+  return looksSecretShown(name, unquoted(piece.trim())) || heldParts(name, piece);
 }
 
 /** Whether any part of a text that a space or `#` sets apart looks like a credential, each judged on its own. */
 const heldParts = (name: string, text: string): boolean =>
-  text.split(PART_BREAK).some(part => looksSecret(name, unquoted(part)));
+  text.split(PART_BREAK).some(part => looksSecretShown(name, unquoted(part)));
 
 /** A quote mark: a closing one right after a padded `=` ends the value (`"Basic <b64>="`). */
 const QUOTE_MARKS = new Set(['"', "'", '`']);
@@ -451,7 +443,7 @@ function nestedValueCuts(text: string): readonly Cut[] {
   let covered = 0;
   for (const key of keys) {
     const name = key[1] ?? '';
-    if (!secretNamed(name)) continue;
+    if (!secretNamedShown(name)) continue;
     const start = key.index + key[0].length;
     const end = ends.value[start] as number;
     if (end <= covered) continue;
@@ -531,7 +523,7 @@ function nestedCuts(value: string): readonly Cut[] {
 function keyStartsBefore(word: string, limit: number): boolean {
   NESTED_NAME.lastIndex = 0;
   for (let found = NESTED_NAME.exec(word); found !== null && found.index < limit; found = NESTED_NAME.exec(word)) {
-    if (secretNamed(found[1] ?? '')) return true;
+    if (secretNamedShown(found[1] ?? '')) return true;
   }
   return false;
 }
@@ -556,7 +548,7 @@ const cutsAt = (offset: number, part: string): readonly Cut[] =>
  * (`-Hclient.secret:v`), which is a nested key of its own and is read as one.
  */
 function flagValueCuts(flag: string, value: string, offset: number): readonly Cut[] {
-  if (!PLAIN_FLAG.test(flag) || !secretNamed(flag)) return [];
+  if (!PLAIN_FLAG.test(flag) || !secretNamedShown(flag)) return [];
   const head = `${flag}=`;
   return nestedCuts(`${head}${value}`).map(
     ([from, to]) => [from - head.length + offset, to - head.length + offset] as const,
@@ -698,6 +690,9 @@ const TOKEN_FORMATS: readonly (readonly [prefix: string, body: string])[] = [
   ['hf_', TOKEN_BODY],
 ];
 
+/** The regular expression source of any whole token in a text; a caller builds it with the `g` and `u` flags. */
+export const SECRET_TOKEN_SOURCE: string = TOKEN_FORMATS.map(([prefix, body]) => `${prefix}${body}`).join('|');
+
 /** Value prefixes of well-known token formats, and of two more whose body is not a plain run (a Google OAuth token, a JWT). */
 const SECRET_VALUE_PREFIX = new RegExp(`^(?:${TOKEN_FORMATS.map(([prefix]) => prefix).join('|')}|ya29\\.|eyJ)`, 'u');
 
@@ -705,11 +700,13 @@ const SECRET_VALUE_PREFIX = new RegExp(`^(?:${TOKEN_FORMATS.map(([prefix]) => pr
 const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
 
 /**
- * Whether one environment entry looks like a secret (E7).
+ * Whether one environment entry looks like a secret (E7): the FLEET's rule, which refuses a secret written into an
+ * environment.
  *
- * By NAME (a word such as `TOKEN` or `API_KEY`) or by VALUE (a well-known token prefix). A value that is only a
- * reference to another variable is not a secret, because it holds none, and a value shorter than the secret store
- * accepts is a flag rather than a credential (`AUTH=1`).
+ * By NAME (a word such as `TOKEN` or `API_KEY`, {@link secretNamed}) or by VALUE (a well-known token prefix). A value
+ * that is only a reference to another variable is not a secret, because it holds none, and a value shorter than the
+ * secret store accepts is a flag rather than a credential (`AUTH=1`). What a word may SHOW asks the wider
+ * {@link looksSecretShown}.
  */
 export function looksSecret(name: string, value: string): boolean {
   if (value.length < MIN_SECRET_VALUE_LENGTH || pointsElsewhere(value)) return false;
@@ -717,8 +714,18 @@ export function looksSecret(name: string, value: string): boolean {
   return secretNamed(name);
 }
 
+/**
+ * {@link looksSecret} with the name test widened to {@link secretNamedShown}, for a word that is only being SHOWN: the
+ * mask over-hides, and a name W refuses ({@link namesCredential}) is a name it cuts.
+ */
+export function looksSecretShown(name: string, value: string): boolean {
+  if (value.length < MIN_SECRET_VALUE_LENGTH || pointsElsewhere(value)) return false;
+  if (SECRET_VALUE_PREFIX.test(value)) return true;
+  return secretNamedShown(name);
+}
+
 /** Whether a value only points at one (`$NAME`, `${NAME}`, a `${secret:NAME}` in it), and so holds none. */
-const pointsElsewhere = (value: string): boolean => INDIRECT_VALUE.test(value) || holdsSecretReference(value);
+export const pointsElsewhere = (value: string): boolean => INDIRECT_VALUE.test(value) || holdsSecretReference(value);
 
 /**
  * The longest credential word {@link CREDENTIAL_KEY} ends in (`credentials`), with room to spare: the pattern is
@@ -742,12 +749,11 @@ export const endsInCredentialWord = (key: string): boolean => CREDENTIAL_KEY.tes
  */
 export const namesCredential = (name: string): boolean => endsInCredentialWord(name.replaceAll('-', ''));
 
-/**
- * Whether a name says it holds a credential: its tail ({@link namesCredential}), a word such as `AUTH`, or a pair such as
- * `API_KEY` ({@link looksSecret}).
- */
-function secretNamed(name: string): boolean {
-  if (namesCredential(name)) return true;
+/** Whether a name says it holds a credential: its tail ({@link namesCredential}), or {@link secretNamed}. */
+const secretNamedShown = (name: string): boolean => namesCredential(name) || secretNamed(name);
+
+/** Whether a name says it holds a credential: a word such as `TOKEN`, or a pair such as `API_KEY` ({@link looksSecret}). */
+export function secretNamed(name: string): boolean {
   const words = name
     .toUpperCase()
     .split(/[^A-Z0-9]+/u)
