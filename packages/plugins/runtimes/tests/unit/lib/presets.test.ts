@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { config } from '@ferretry/kernel/host';
+import { readConfigText } from '@ferretry/std/yaml';
 import should from 'should';
 import {
   PresetVariableSchema,
@@ -12,8 +12,6 @@ import { BUILT_IN_PRESET_TEXTS } from './fixtures/built-ins.ts';
 
 // How a preset FILE is checked and read into a preset (daemon/lib/presets/schema.ts). The catalogue
 // itself — which presets a machine offers, and a login made from one — is Logins' own.
-
-const { readConfigText } = config;
 
 describe('ProviderPresetFileSchema', () => {
   it('should refuse a variable that is both a value and a secret, or neither', () => {

@@ -25,6 +25,8 @@ interface World {
   readonly fail?: Error;
   readonly env?: Readonly<Record<string, string>>;
   readonly exists?: NonNullable<CliContext<Manifest>['exists']>;
+  readonly readText?: NonNullable<CliContext<Manifest>['readText']>;
+  readonly readBytes?: NonNullable<CliContext<Manifest>['readBytes']>;
 }
 
 /** The cli half's verbs, run against a recording API: what each asks the daemon, what it prints, how it exits. */
@@ -51,6 +53,8 @@ function run(world: World = {}) {
     },
     ...(world.env === undefined ? {} : { env: world.env }),
     ...(world.exists === undefined ? {} : { exists: world.exists }),
+    ...(world.readText === undefined ? {} : { readText: world.readText }),
+    ...(world.readBytes === undefined ? {} : { readBytes: world.readBytes }),
   });
   if (half === undefined) throw new Error('the cli half is real');
   const verbs = half.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;
@@ -354,14 +358,8 @@ describe('commands parity', () => {
       expect(negated.calls[0]?.init).toMatchObject({ body: { mode: 'interactive', fast: false, remoteControl: true } });
     });
 
-    test('V-0443 fy start refuses, by name and unsent, a flag whose job another plugin took (--compact-at, -f, --prompt-file, --detach, --request-id) and a bad number or mode', async () => {
-      for (const options of [
-        { 'compact-at': '250k' },
-        { file: 'a.md' },
-        { 'prompt-file': 'brief.md' },
-        { detach: true },
-        { 'request-id': 'k' },
-      ] as Options[]) {
+    test('V-0443 fy start refuses, by name and unsent, a flag whose job another plugin took (--compact-at, --detach) and a bad number or mode', async () => {
+      for (const options of [{ 'compact-at': '250k' }, { detach: true }] as Options[]) {
         const refused = run({ answers: startAnswers });
         expect(await refused.verb('start [prompt...]', ['x'], options)).toBe(2);
         expect(refused.err.join('\n')).toContain(`--${Object.keys(options)[0]}`);
@@ -373,6 +371,205 @@ describe('commands parity', () => {
       expect(await bad.verb('start [prompt...]', [], { cwd: '/abs' })).toBe(2);
       expect(bad.err.join('\n')).toContain('provide a prompt');
       expect(bad.calls).toEqual([]);
+    });
+
+    test('V-0443 fy start --prompt-file reads the brief on the caller’s machine and sends its text AFTER the typed words; no path is sent to the daemon', async () => {
+      const files: Record<string, string> = { 'brief.md': '\n  Fix the login page.\n\nThen run the tests.  \n' };
+      const reads: string[] = [];
+      const readText = async (path: string): Promise<string> => {
+        reads.push(path);
+        const found = files[path];
+        if (found === undefined) throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+        return found;
+      };
+      const only = run({ answers: startAnswers, readText });
+      expect(await only.verb('start [prompt...]', [], { cwd: '/abs', 'prompt-file': 'brief.md' })).toBe(0);
+      expect(reads).toEqual(['brief.md']);
+      expect(only.calls[0]?.init).toMatchObject({
+        body: { folder: '/abs', prompt: 'Fix the login page.\n\nThen run the tests.', mode: 'auto' },
+      });
+      expect(JSON.stringify(only.calls)).not.toContain('brief.md');
+      const both = run({ answers: startAnswers, readText });
+      expect(await both.verb('start [prompt...]', ['read', 'this'], { cwd: '/abs', 'prompt-file': 'brief.md' })).toBe(
+        0,
+      );
+      expect(both.calls[0]?.init).toMatchObject({
+        body: { prompt: 'read this\n\nFix the login page.\n\nThen run the tests.' },
+      });
+    });
+
+    test('V-0443 fy start --prompt-file refuses an unreadable path naming it, an empty file with no other prompt, a bare flag, and a shell with no reader; each sends nothing', async () => {
+      const readText = async (path: string): Promise<string> => {
+        if (path === 'empty.md') return '  \n\n';
+        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+      };
+      const missing = run({ answers: startAnswers, readText });
+      expect(await missing.verb('start [prompt...]', ['x'], { cwd: '/abs', 'prompt-file': 'nope.md' })).toBe(2);
+      expect(missing.err.join('\n')).toContain('cannot read nope.md: ENOENT');
+      const empty = run({ answers: startAnswers, readText });
+      expect(await empty.verb('start [prompt...]', [], { cwd: '/abs', 'prompt-file': 'empty.md' })).toBe(2);
+      expect(empty.err.join('\n')).toContain('provide a prompt (arguments and/or --prompt-file)');
+      // An interactive start may be bare, so an empty file there adds nothing and the start goes ahead.
+      const bare = run({ answers: startAnswers, readText });
+      expect(
+        await bare.verb('start [prompt...]', [], { cwd: '/abs', mode: 'interactive', 'prompt-file': 'empty.md' }),
+      ).toBe(0);
+      expect(bare.calls[0]?.init).toEqual({
+        headers: { 'x-fy-request-id': expect.any(String) },
+        body: { folder: '/abs', mode: 'interactive' },
+      });
+      const noPath = run({ answers: startAnswers, readText });
+      expect(await noPath.verb('start [prompt...]', ['x'], { cwd: '/abs', 'prompt-file': true })).toBe(2);
+      expect(noPath.err.join('\n')).toContain('--prompt-file needs the path of a file to read');
+      const noReader = run({ answers: startAnswers });
+      expect(await noReader.verb('start [prompt...]', ['x'], { cwd: '/abs', 'prompt-file': 'brief.md' })).toBe(1);
+      expect(noReader.err.join('\n')).toContain('file reader');
+      for (const refused of [missing, empty, noPath, noReader]) expect(refused.calls).toEqual([]);
+    });
+
+    test('V-0443 fy start -f/--file reads each file as raw bytes on the caller’s machine and sends it inline as base64 (repeatable; a type only for an image); no path reaches the daemon', async () => {
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00]);
+      const docx = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x80]);
+      const reads: string[] = [];
+      const files: Record<string, Uint8Array> = { 'shots/Login.PNG': png, '/abs/brief.docx': docx };
+      const readBytes = async (path: string): Promise<Uint8Array> => {
+        reads.push(path);
+        const found = files[path];
+        if (found === undefined) throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+        return found;
+      };
+      const short = run({ answers: startAnswers, readBytes });
+      expect(
+        await short.verb('start [prompt...]', ['fix', 'it'], {
+          cwd: '/abs',
+          f: ['shots/Login.PNG', '/abs/brief.docx'],
+        }),
+      ).toBe(0);
+      expect(reads).toEqual(['shots/Login.PNG', '/abs/brief.docx']);
+      expect(short.calls[0]?.init).toMatchObject({
+        body: {
+          folder: '/abs',
+          prompt: 'fix it',
+          initialAttachments: [
+            { filename: 'Login.PNG', mime: 'image/png', base64: Buffer.from(png).toString('base64') },
+            { filename: 'brief.docx', base64: Buffer.from(docx).toString('base64') },
+          ],
+        },
+      });
+      expect(JSON.stringify(short.calls)).not.toContain('shots/');
+      const long = run({ answers: startAnswers, readBytes });
+      expect(await long.verb('start [prompt...]', ['x'], { cwd: '/abs', file: '/abs/brief.docx' })).toBe(0);
+      expect(long.calls[0]?.init).toMatchObject({ body: { initialAttachments: [{ filename: 'brief.docx' }] } });
+      // A start with no file sends no member at all.
+      const none = run({ answers: startAnswers, readBytes });
+      expect(await none.verb('start [prompt...]', ['x'], { cwd: '/abs' })).toBe(0);
+      expect(none.calls[0]?.init).not.toHaveProperty('body.initialAttachments');
+    });
+
+    test('V-0443 fy start -f refuses an unreadable path naming it, an empty file, two files of one name, a bare flag, a start with no opening message and a shell with no byte reader; each sends nothing', async () => {
+      const readBytes = async (path: string): Promise<Uint8Array> => {
+        if (path === 'empty.png') return new Uint8Array();
+        if (path !== 'nope.png' && path.endsWith('.png')) return new Uint8Array([1, 2, 3]);
+        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+      };
+      const refusals: readonly [string, readonly string[], Options, string][] = [
+        ['missing', ['x'], { f: 'nope.png', cwd: '/abs' }, 'cannot read attachment nope.png: ENOENT'],
+        ['empty', ['x'], { file: 'empty.png', cwd: '/abs' }, 'attachment empty.png is empty'],
+        ['same name', ['x'], { f: ['a/one.png', 'b/one.png'], cwd: '/abs' }, 'two attachments are named one.png'],
+        ['bare flag', ['x'], { f: true, cwd: '/abs' }, '-f/--file needs the path of a file to attach'],
+        ['no prompt', [], { f: 'a.png', cwd: '/abs', mode: 'interactive' }, 'attachments belong to an opening message'],
+      ];
+      for (const [, args, options, message] of refusals) {
+        const refused = run({ answers: startAnswers, readBytes });
+        expect(await refused.verb('start [prompt...]', args, options)).toBe(2);
+        expect(refused.err.join('\n')).toContain(message);
+        expect(refused.calls).toEqual([]);
+      }
+      const noReader = run({ answers: startAnswers });
+      expect(await noReader.verb('start [prompt...]', ['x'], { f: 'a.png', cwd: '/abs' })).toBe(1);
+      expect(noReader.err.join('\n')).toContain('byte reader');
+      expect(noReader.calls).toEqual([]);
+      // A prompt file is a prompt: files attach to a start whose brief came from a file.
+      const filed = run({ answers: startAnswers, readBytes, readText: async () => 'the brief' });
+      expect(await filed.verb('start [prompt...]', [], { f: 'a.png', 'prompt-file': 'b.md', cwd: '/abs' })).toBe(0);
+      expect(filed.calls[0]?.init).toMatchObject({
+        body: { prompt: 'the brief', initialAttachments: [{ filename: 'a.png' }] },
+      });
+    });
+
+    test('V-0334 fy new takes no attachments: --file and its short spelling -f are both refused by name, as -f/--file, and unsent', async () => {
+      // The shell's parser hands `-f a.png` over under the key `f`: accepted-and-dropped would start a helper without it.
+      const spellings: readonly Readonly<Record<string, string>>[] = [
+        { file: 'a.png' },
+        { f: 'a.png' },
+        { f: 'a.png', file: 'b.png' },
+      ];
+      for (const options of spellings) {
+        const refused = run({ answers: startAnswers });
+        expect(await refused.verb('new [words...]', ['x'], { runtime: 'codex-beta', ...options })).toBe(2);
+        expect(refused.err.join('\n')).toContain(
+          '-f/--file: not taken by `fy new` in this version of Ferretry (another plugin decides it now)',
+        );
+        expect(refused.calls).toEqual([]);
+      }
+    });
+
+    test('V-0443 fy start --request-id sends the caller’s key as the start’s request id, so a retry with it answers the same ferret; a blank key is refused', async () => {
+      const first = run({ answers: startAnswers });
+      expect(await first.verb('start [prompt...]', ['x'], { cwd: '/abs', 'request-id': ' retry-7 ' })).toBe(0);
+      const again = run({ answers: startAnswers });
+      expect(await again.verb('start [prompt...]', ['x'], { cwd: '/abs', 'request-id': 'retry-7' })).toBe(0);
+      for (const sent of [first, again])
+        expect(sent.calls[0]).toEqual({
+          route: 'POST /v1/ferrets',
+          init: {
+            headers: { 'x-fy-request-id': 'retry-7' },
+            body: { folder: '/abs', prompt: 'x', mode: 'auto' },
+          },
+        });
+      const blank = run({ answers: startAnswers });
+      expect(await blank.verb('start [prompt...]', ['x'], { cwd: '/abs', 'request-id': '  ' })).toBe(2);
+      expect(blank.err.join('\n')).toContain('--request-id must not be blank');
+      const bare = run({ answers: startAnswers });
+      expect(await bare.verb('start [prompt...]', ['x'], { cwd: '/abs', 'request-id': true })).toBe(2);
+      expect([...blank.calls, ...bare.calls]).toEqual([]);
+    });
+
+    test('V-0334 fy new --prompt-file takes the file as THE brief (the typed words give way); an unreadable path, an empty file and a bare flag are refused unsent', async () => {
+      const readText = async (path: string): Promise<string> => {
+        if (path === 'brief.md') return '\nLook at the build.\n';
+        if (path === 'empty.md') return '\n';
+        throw new Error(`EACCES: permission denied, open '${path}'`);
+      };
+      const filed = run({ answers: startAnswers, readText });
+      expect(
+        await filed.verb('new [words...]', ['ignored', 'words'], {
+          runtime: 'codex-beta',
+          cwd: '/abs',
+          'prompt-file': 'brief.md',
+        }),
+      ).toBe(0);
+      expect(filed.calls[0]?.init).toMatchObject({
+        body: { folder: '/abs', runtime: 'codex-beta', prompt: 'Look at the build.' },
+      });
+      const refusals: readonly [Options, string][] = [
+        [{ 'prompt-file': 'locked.md' }, 'cannot read locked.md: EACCES'],
+        [{ 'prompt-file': 'empty.md' }, 'provide a prompt (arguments and/or --prompt-file)'],
+        [{ 'prompt-file': true }, '--prompt-file needs the path of a file to read'],
+      ];
+      for (const [options, message] of refusals) {
+        const refused = run({ answers: startAnswers, readText });
+        expect(await refused.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/abs', ...options })).toBe(2);
+        expect(refused.err.join('\n')).toContain(message);
+        expect(refused.calls).toEqual([]);
+      }
+    });
+
+    test('V-0334 fy new has no idempotency key of its own: --request-id is refused by name and unsent', async () => {
+      const refused = run({ answers: startAnswers });
+      expect(await refused.verb('new [words...]', ['x'], { runtime: 'codex-beta', 'request-id': 'k' })).toBe(2);
+      expect(refused.err.join('\n')).toContain('--request-id');
+      expect(refused.calls).toEqual([]);
     });
 
     test('V-0334 fy new starts a helper on a named --runtime or --auto (never both), with --model, --effort, --name, --card, --json', async () => {
@@ -407,7 +604,7 @@ describe('commands parity', () => {
       expect(both.err.join('\n')).toContain('--auto picks the runtime');
       expect(await both.verb('new [words...]', ['look'], { cwd: '/abs' })).toBe(2);
       expect(both.err.join('\n')).toContain('name a --runtime, or pass --auto');
-      for (const flag of ['continue', 'since', 'allow-scratch', 'compact-at', 'prompt-file']) {
+      for (const flag of ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id']) {
         expect(await both.verb('new [words...]', ['look'], { runtime: 'codex-beta', [flag]: 'x' })).toBe(2);
         expect(both.err.at(-1)).toContain(`--${flag}`);
       }
@@ -453,7 +650,7 @@ describe('commands parity', () => {
       expect(none.calls).toEqual([]);
     });
 
-    test('V-0375 fy restart [ids...] reads the queue bare, restarts ids/--outdated/--all, --cancel clears it, one mode at a time, --request-id refused', async () => {
+    test('V-0375 fy restart [ids...] reads the queue bare, restarts ids/--outdated/--all, --cancel clears it, one mode at a time', async () => {
       const result = { restarted: ['lead'], queued: [], skipped: [], failed: [] };
       const answers = {
         [FERRET_ROUTES.restarts]: { outdated: [], queued: [] },
@@ -477,12 +674,33 @@ describe('commands parity', () => {
       expect(JSON.parse(json.out.join('\n'))).toEqual({ cancelled: 2 });
       const refused = run({ answers });
       expect(await refused.verb('restart [ids...]', ['wren'], { all: true })).toBe(2);
-      expect(await refused.verb('restart [ids...]', [], { all: true, 'request-id': 'k' })).toBe(2);
       expect(refused.calls).toEqual([]);
       const failed = run({
         answers: { ...answers, [FERRET_ROUTES.restart]: { ...result, failed: [{ id: 'lead', reason: 'gone' }] } },
       });
       expect(await failed.verb('restart [ids...]', ['wren'])).toBe(1);
+    });
+
+    test('V-0375 fy restart --request-id sends the caller’s key with the restart, so an explicit retry is answered not run again; a blank key is refused unsent', async () => {
+      const result = { restarted: ['lead'], queued: [], skipped: [], failed: [] };
+      const answers = { [FERRET_ROUTES.restart]: result };
+      const keyed = run({ answers });
+      expect(await keyed.verb('restart [ids...]', ['wren'], { 'request-id': ' retry-3 ' })).toBe(0);
+      expect(keyed.calls).toEqual([
+        {
+          route: 'POST /v1/restarts',
+          init: { body: { scope: 'ids', ids: ['wren'] }, headers: { 'x-fy-request-id': 'retry-3' } },
+        },
+      ]);
+      const unkeyed = run({ answers });
+      expect(await unkeyed.verb('restart [ids...]', [], { outdated: true })).toBe(0);
+      expect(unkeyed.calls[0]?.init).toEqual({ body: { scope: 'outdated' } });
+      for (const bad of ['  ', true]) {
+        const blank = run({ answers });
+        expect(await blank.verb('restart [ids...]', ['wren'], { 'request-id': bad })).toBe(2);
+        expect(blank.err.join('\n')).toContain('--request-id must not be blank');
+        expect(blank.calls).toEqual([]);
+      }
     });
 
     test('V-0437 fy signal <kind> [message...] sends done/help/waiting/working for --session, with --until, --on and --peer on waiting only', async () => {
@@ -579,6 +797,27 @@ describe('commands parity', () => {
       for (const mode of ['orphan', 'cascade', 'children', 'label'])
         expect(bare.out.join('\n')).toContain(`fy stop ${mode}`);
       expect(bare.calls).toEqual([]);
+    });
+
+    test('V-0447 fy stop keeps the issuing ferret (FY_SESSION_ID) out of the plan unless --include-caller, and says so', async () => {
+      const env = { FY_SESSION_ID: 'mid' };
+      const without = run({ answers, env });
+      expect(await without.verb('stop cascade <session>', ['wren'], { yes: true })).toBe(0);
+      expect(stops(without.calls).map(call => (call.init as { params: { ferretId: string } }).params.ferretId)).toEqual(
+        ['lead'],
+      );
+      expect(without.out.join('\n')).toContain('--include-caller');
+      const within = run({ answers, env });
+      expect(await within.verb('stop cascade <session>', ['wren'], { yes: true, 'include-caller': true })).toBe(0);
+      expect(
+        stops(within.calls)
+          .map(call => (call.init as { params: { ferretId: string } }).params.ferretId)
+          .sort(),
+      ).toEqual(['lead', 'mid']);
+      // Outside a ferret there is no caller to keep out: both spellings stop the same set.
+      const owner = run({ answers });
+      expect(await owner.verb('stop cascade <session>', ['wren'], { yes: true })).toBe(0);
+      expect(stops(owner.calls)).toHaveLength(2);
     });
 
     test('V-0448 V-0449 V-0451 stop cascade/children/orphan plan from the list; --dry-run stops nothing, no --yes off a terminal refuses with exit 1, --yes stops, -r gives the reason', async () => {

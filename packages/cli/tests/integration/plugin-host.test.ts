@@ -42,6 +42,23 @@ describe('the facilities a plugin half is handed, on the real disk', () => {
     should(outcome).be.a.String();
   });
 
+  it('should read the raw bytes of a real file with no decoding, and refuse a missing one', async () => {
+    const dir = await temp();
+    // Not valid UTF-8 (0xff, 0xfe, a lone continuation byte): a text read would replace them, bytes keep every one.
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x80, 0x00]);
+    await writeFile(join(dir, 'shot.png'), png);
+    const host = createPluginHost({ home: dir });
+    should([...(await host.readBytes(join(dir, 'shot.png')))]).eql([...png]);
+    await host.readBytes(join(dir, 'absent.png')).then(
+      () => should.fail(undefined, undefined, 'a missing file should be refused'),
+      (reason: unknown) => should(reason).be.an.Error(),
+    );
+    // Standard input belongs to whoever runs the suite, so the default reader is only asked and then left to settle.
+    const typed = host.readBytes('-');
+    const outcome = await Promise.race([typed, Bun.sleep(300).then(() => 'still waiting for input')]);
+    should(outcome).not.be.undefined();
+  });
+
   it('should keep a plugin’s own state under its own folder of the home, built on first use', async () => {
     const home = await temp();
     const host = createPluginHost({ home });

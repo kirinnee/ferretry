@@ -66,8 +66,8 @@ class SendFerrets extends FakeFerrets {
   /** Every Enter pressed for a composer's text. */
   readonly submitted: string[] = [];
   /** What a resume does: types its pointer and says so, is refused, comes back with nothing typed, or fails. */
-  resumeAs: 'carries' | 'refuses' | 'nothing' | 'throws' = 'carries';
-  readonly resumed: { readonly ferret: FerretId; readonly message?: string; readonly actor?: 'warden' }[] = [];
+  resumeAs: 'carries' | 'refuses' | 'nothing' | 'throws' | 'writes-then-fails' = 'carries';
+  readonly resumed: { readonly ferret: FerretId; readonly message?: string; readonly actor?: 'warden' | 'peer' }[] = [];
   /** The number the next revive's turn document takes. */
   reviveTurn = 5;
 
@@ -86,6 +86,17 @@ class SendFerrets extends FakeFerrets {
     });
     if (this.resumeAs === 'throws') throw new Error('FIXTURE_SECRET the tokens are unavailable');
     if (this.resumeAs === 'refuses') return err({ code: 'refused', reason: 'no runtime is free to relaunch it' });
+    if (this.resumeAs === 'writes-then-fails') {
+      // Ferrets writes the revive's turn document (with the author the actor maps to) BEFORE the launch, which then fails.
+      const author: FerretTurnAuthor | undefined =
+        options?.actor === 'peer'
+          ? { kind: 'ferret' }
+          : options?.actor === 'warden'
+            ? { kind: 'ferretry', feature: 'Warden' }
+            : undefined;
+      this.stored.push({ turn: this.reviveTurn, text: message ?? '', ...(author === undefined ? {} : { by: author }) });
+      return err({ code: 'failed', reason: 'the relaunch failed' });
+    }
     if (this.resumeAs === 'carries') {
       const turn = this.reviveTurn;
       options?.onCarried?.({ text: turnInstruction(this.turnFileOf(turn)), turn, file: this.turnFileOf(turn) });
@@ -989,6 +1000,41 @@ describe('M3 a send to a stopped ferret revives it and carries the message', () 
 
     expect(ferrets.resumed[0]?.message).toContain('FIXTURE peer wake');
     expect(ferrets.resumed[0]?.message).not.toBe('FIXTURE peer wake');
+    await host.stop();
+  });
+
+  test('M3 a peer’s revive names the peer as its author, so a relaunch that fails leaves its words out of the owner’s', async () => {
+    const { host, ferrets, api } = await conversation(f => {
+      stopped(f);
+      f.resumeAs = 'writes-then-fails';
+    });
+
+    const sent = await api().send(
+      F3,
+      { kind: 'ferret', ferret: F2 },
+      { message: 'FIXTURE peer wake', sendId: 's-peer-fail' },
+    );
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    expect(ferrets.resumed[0]).toMatchObject({ ferret: F3, actor: 'peer' });
+    // The turn list names a ferret as the document's author (v4's `{ kind: 'ferret' }`), and the owner's words do not
+    // carry it: the document stays on disk though the row was taken back.
+    expect(ferrets.stored).toEqual([expect.objectContaining({ turn: 5, by: { kind: 'ferret' } })]);
+    const words = await api().ownerWords(F3);
+    expect(words).toMatchObject({ ok: true });
+    expect((words.ok ? words.value.words : []).join('\n')).not.toContain('FIXTURE peer wake');
+    await host.stop();
+  });
+
+  test('M3 an owner’s revive names no author: the owner’s own words stay the owner’s', async () => {
+    const { host, ferrets, api } = await conversation(f => {
+      stopped(f);
+      f.resumeAs = 'writes-then-fails';
+    });
+
+    await api().send(F3, { kind: 'owner' }, { message: 'FIXTURE owner wake', sendId: 's-owner-fail' });
+
+    expect(ferrets.resumed[0]).not.toHaveProperty('actor');
     await host.stop();
   });
 });

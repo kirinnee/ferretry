@@ -22,6 +22,10 @@ export interface SendCommandFlags extends Omit<SendFlags, 'fileMessage'> {
 export const WAIT_ROUND_MS = 30_000;
 const WAIT_ROUNDS = 10;
 
+/** The daemon's refusal to park one more wait (`429 too_many_waiters`): the send itself had already succeeded. */
+const isTooManyWaiters = (error: unknown): boolean =>
+  (error as { status?: unknown }).status === 429 && (error as { code?: unknown }).code === 'too_many_waiters';
+
 /** Sends a message to a ferret: `fy send` (and its peer-reply spelling, `fy reply`). */
 export class SendMessageController {
   constructor(
@@ -72,7 +76,17 @@ export class SendMessageController {
     // daemon ends early, a second waiter for the same send or a daemon that stops, is a check that waited less).
     let record: SendRecord | undefined;
     for (let round = 0; round < WAIT_ROUNDS; round += 1) {
-      record = await this.gateway.sendStatus(result.ferret, sendId, WAIT_ROUND_MS);
+      try {
+        record = await this.gateway.sendStatus(result.ferret, sendId, WAIT_ROUND_MS);
+      } catch (error) {
+        if (!isTooManyWaiters(error)) throw error;
+        // THE MESSAGE IS ALREADY SENT, so this must not exit non-zero: a script that resent on a failure would make the
+        // agent read it twice. Only the waiting was refused, and saying so is the whole answer.
+        this.output.note(
+          `sent, but too many sends are being waited on right now to wait on this one; read it later with \`fy queue ${reference}\`; do not send it again`,
+        );
+        return;
+      }
       if (record === undefined) {
         // A queued message has a row of its own, so a send the daemon has no row for is one it does not know: it ends the
         // wait at once instead of looping. It does not say the message was lost, so it is no failure a script would answer

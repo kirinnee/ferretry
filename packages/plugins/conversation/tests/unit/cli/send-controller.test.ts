@@ -41,7 +41,7 @@ function parts(
       { out: line => lines.push(line), note: line => lines.push(`note: ${line}`) },
       env,
     );
-  return { sent, parked, lines, controller, asked };
+  return { sent, parked, lines, controller, asked, gateway };
 }
 
 describe('SendMessageController', () => {
@@ -70,6 +70,34 @@ describe('SendMessageController', () => {
     should(lines.some(line => line.startsWith('note: delivered'))).be.true();
     should(asked).deepEqual([WAIT_ROUND_MS, WAIT_ROUND_MS, WAIT_ROUND_MS]);
     should(WAIT_ROUND_MS).equal(30_000);
+  });
+
+  it('should not fail a sent message when the daemon has too many waiters: it says so and not to send it again', async () => {
+    const { lines, controller, gateway } = parts();
+    gateway.sendStatus = async () => {
+      throw Object.assign(new Error('too many sends are being waited on right now'), {
+        status: 429,
+        code: 'too_many_waiters',
+      });
+    };
+    await controller().execute('hadi', { message: 'hi', wait: true });
+    should(
+      lines.some(line => line.includes('too many sends are being waited on') && line.includes('do not send it again')),
+    ).be.true();
+    should(lines.some(line => line.includes('fy queue hadi'))).be.true();
+    should(lines[lines.length - 1]).equal('hadi: delivered');
+  });
+
+  it('should still fail the command on any other error while waiting', async () => {
+    const { controller, gateway } = parts();
+    gateway.sendStatus = async () => {
+      throw Object.assign(new Error('boom'), { status: 500, code: 'internal' });
+    };
+    let thrown: unknown;
+    await controller()
+      .execute('hadi', { message: 'hi', wait: true })
+      .catch((error: unknown) => (thrown = error));
+    should(thrown).be.an.Error();
   });
 
   it('should ask for at most ten rounds of waiting, however long the send takes to settle', async () => {

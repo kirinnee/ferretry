@@ -45,15 +45,17 @@ describe('conversation manifest', () => {
       expect(route.guard).toEqual({ none: expect.stringContaining('positional edits need the raw text') });
     }
   });
-  test('takes the question source, sitrep lines, ferret.changed, ferret.stopping and launch.parts; offers message.before-send, turn.ended, search.sources and reference.catalog', () => {
+  test('takes the question source, sitrep lines, ferret.changed, ferret.stopping, launch.parts and opening.attachments; offers message.before-send, turn.ended, search.sources and reference.catalog', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
       'ask.sources',
       'sitrep.lines',
       'ferret.changed',
       'ferret.stopping',
       'launch.parts',
+      'opening.attachments',
     ]);
     expect(manifest.hooks.takes[0]?.key).toBe('question');
+    expect(manifest.hooks.takes[5]?.key).toBe('opening');
     expect(manifest.hooks.offers.map(offer => offer.hook.name)).toEqual([
       'message.before-send',
       'turn.ended',

@@ -313,6 +313,43 @@ describe('McpInventoryService', () => {
     });
   });
 
+  describe('a request’s reads', () => {
+    it('should go through one scoped view of the documents per request, never the shared one', async () => {
+      // Arrange
+      const w = inventoryWorld();
+      const scopes: string[][] = [];
+      const shared: string[] = [];
+      const service = new McpInventoryService({
+        ...w.deps,
+        documents: {
+          read: async path => {
+            shared.push(path);
+            return null;
+          },
+          scoped: () => {
+            const seen: string[] = [];
+            scopes.push(seen);
+            return {
+              read: async path => {
+                seen.push(path);
+                return await w.documents.read(path);
+              },
+            };
+          },
+        },
+      });
+
+      // Act
+      await service.machine();
+      await service.ferret('s1');
+
+      // Assert
+      should(shared).deepEqual([]);
+      should(scopes).have.length(2);
+      should(scopes.every(seen => seen.length > 0)).equal(true);
+    });
+  });
+
   describe('mcpInventoryFolders', () => {
     it('should join a live worktree to its registered project, and fall back to its repository', async () => {
       // Arrange

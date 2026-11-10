@@ -22,7 +22,7 @@ import {
   MAX_SYNTAX_ERRORS,
   readConfigText,
   type TextPosition,
-} from './yaml-text.ts';
+} from '@ferretry/std/yaml';
 
 /** A located finding. */
 export interface ConfigIssue {

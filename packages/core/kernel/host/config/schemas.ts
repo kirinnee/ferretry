@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
 import type { ConfigDeclaration } from './claims.ts';
-import { CONFIG_EXTENSION, ConfigPathClaimError, claimOf, SCHEMA_FOLDER } from './claims.ts';
+import { SCHEMA_FOLDER } from '@ferretry/std/yaml';
+import { CONFIG_EXTENSION, ConfigPathClaimError, claimOf } from './claims.ts';
 
 /**
  * A schema's file name under `config/.schema/`: the claim with its separators flattened. A file keeps its stem

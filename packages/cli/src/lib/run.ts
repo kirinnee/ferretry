@@ -225,6 +225,7 @@ async function runPluginVerb(
     clock: world.host.clock,
     sleep: (delay, signal) => world.host.sleep(delay, signal),
     readText: path => world.host.readText(path),
+    readBytes: path => world.host.readBytes(path),
     exists: path => world.host.exists(path),
     env: pluginEnvironment(world.environment, world.host.cwd()),
     ownState: world.host.ownState(plugin.manifest),

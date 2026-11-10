@@ -48,7 +48,7 @@ export {
   testHost,
 } from './host.ts';
 export { testPluginClient } from './plugin-client.ts';
-export { testExists, testReadText } from './read-text.ts';
+export { testExists, testReadBytes, testReadText } from './read-text.ts';
 export {
   COMPARED,
   type DescriptorRow,

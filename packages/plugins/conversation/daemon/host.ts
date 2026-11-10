@@ -776,7 +776,12 @@ export function buildConversationA(deps: {
         onCarried: typed => {
           told.typed = typed;
         },
-        ...(request.warden === true ? { actor: 'warden' as const } : {}),
+        // Attribution only (the author beside the revive's turn): the Warden, else a ferret's send; the owner's names none.
+        ...(request.warden === true
+          ? { actor: 'warden' as const }
+          : request.senderSessionId === undefined
+            ? {}
+            : { actor: 'peer' as const }),
       })
       .catch((): undefined => undefined);
     if (told.typed === undefined) {

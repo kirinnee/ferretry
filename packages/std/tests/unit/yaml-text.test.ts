@@ -1,7 +1,13 @@
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
-import { AGENT_CONFIG_TEXT_MAX_BYTES } from '../../../contract/agent-config.ts';
-import { editConfigText, readConfigText, sameConfigValue, setConfigKey } from '../../../host/config/yaml-text.ts';
+import {
+  CONFIG_FILE_MAX_BYTES,
+  editConfigText,
+  readConfigText,
+  readConfigTextToEdit,
+  sameConfigValue,
+  setConfigKey,
+} from '../../src/yaml-text.ts';
 
 const MODELINE = '# yaml-language-server: $schema=../.schema/machine.json';
 
@@ -280,7 +286,7 @@ describe('readConfigText — a file at the size limit is read in ONE pass, whate
   const fill = (head: string, line: (index: number) => string, tail = ''): string => {
     const lines = [head];
     let size = head.length + tail.length;
-    for (let index = 0; size + 32 < AGENT_CONFIG_TEXT_MAX_BYTES; index += 1) {
+    for (let index = 0; size + 32 < CONFIG_FILE_MAX_BYTES; index += 1) {
       const next = line(index);
       lines.push(next);
       size += next.length;
@@ -932,5 +938,174 @@ describe('editConfigText — the file itself', () => {
 
     // Assert
     should(actual).containEql(long);
+  });
+});
+
+/** The directive sentence, and the most directive lines a file may hold before it is refused unparsed. */
+const DIRECTIVE_SENTENCE = 'a % directive line is not one YAML knows';
+const DIRECTIVE_CAP = 64;
+const FLOOD_FAST_MS = 250;
+
+describe('the % directive guard — this module pins it itself', () => {
+  it('should refuse a flood of bare % lines in one fixed sentence at the first line past the cap, without parsing it', () => {
+    // Arrange
+    const flood = '%\n'.repeat(131_072);
+
+    // Act
+    const started = performance.now();
+    const actual = readConfigText(flood);
+    const elapsed = performance.now() - started;
+
+    // Assert
+    should(actual.ok).be.false();
+    if (actual.ok) return;
+    should(actual.errors).deepEqual([
+      { message: DIRECTIVE_SENTENCE, position: { line: DIRECTIVE_CAP + 1, column: 1 } },
+    ]);
+    should(elapsed).be.below(FLOOD_FAST_MS);
+  });
+
+  it('should count the lines of a flood in every line ending YAML knows', () => {
+    // Act
+    const crlf = readConfigText('%\r\n'.repeat(DIRECTIVE_CAP + 10));
+    const cr = readConfigText('%\r'.repeat(DIRECTIVE_CAP + 10));
+
+    // Assert
+    for (const actual of [crlf, cr]) {
+      should(actual.ok).be.false();
+      if (!actual.ok)
+        should(actual.errors[0]).deepEqual({
+          message: DIRECTIVE_SENTENCE,
+          position: { line: DIRECTIVE_CAP + 1, column: 1 },
+        });
+    }
+  });
+
+  it('should let a file that merely holds a % inside a value through the guard', () => {
+    // Arrange
+    const text = `${'a: "100%"\n'.repeat(1)}b: x%y\n${'#%\n'.repeat(DIRECTIVE_CAP + 10)}`;
+
+    // Assert
+    should(meaningOf(text)).deepEqual({ a: '100%', b: 'x%y' });
+  });
+
+  it('should refuse to set a key in a flood, in the same fixed sentence, without parsing it', () => {
+    // Act
+    const started = performance.now();
+    const act = () => setConfigKey('%\n'.repeat(131_072), 'a', 1);
+
+    // Assert
+    should(act).throw(`the file does not parse: ${DIRECTIVE_SENTENCE}`);
+    should(performance.now() - started).be.below(FLOOD_FAST_MS);
+  });
+
+  it('should replace a flood whole when an edit is made to it, never parsing it', () => {
+    // Act
+    const started = performance.now();
+    const actual = editConfigText('%\n'.repeat(131_072), { a: 1 }, {}, MODELINE);
+
+    // Assert
+    should(meaningOf(actual)).deepEqual({ a: 1 });
+    should(actual).not.containEql('%\n');
+    should(performance.now() - started).be.below(FLOOD_FAST_MS);
+  });
+});
+
+describe('readConfigTextToEdit', () => {
+  it('should hand back the text itself as the base of an edit when it reads', () => {
+    // Arrange
+    const text = `${MODELINE}\na: 1\n# kept\nb: 2\n`;
+
+    // Act
+    const actual = readConfigTextToEdit(text);
+
+    // Assert
+    should(actual.base).equal(text);
+    should(actual.read.ok).be.true();
+    if (actual.read.ok) should(actual.read.read.value).deepEqual({ a: 1, b: 2 });
+  });
+
+  it('should read an empty file as an empty mapping with the text as its base', () => {
+    // Act
+    const actual = readConfigTextToEdit('');
+
+    // Assert
+    should(actual.base).equal('');
+    should(actual.read.ok && actual.read.read.value).deepEqual({});
+  });
+
+  const WHOLE: Readonly<Record<string, { readonly text: () => string; readonly sentence: string }>> = {
+    'a text over the size cap': {
+      text: () => '#'.repeat(CONFIG_FILE_MAX_BYTES + 1),
+      sentence: `the file is larger than the ${String(CONFIG_FILE_MAX_BYTES / 1024)} KiB a configuration file may be`,
+    },
+    'a flood of % directive lines': { text: () => '%\n'.repeat(131_072), sentence: DIRECTIVE_SENTENCE },
+    'a text that does not parse': {
+      text: () => 'a: "unclosed\n',
+      sentence: 'a closing quote, bracket or brace is missing',
+    },
+    'a key written twice': { text: () => 'a: 1\na: 2\n', sentence: 'a key is written twice in the same mapping' },
+  };
+  for (const [shape, { text, sentence }] of Object.entries(WHOLE))
+    it(`should have no base to edit, and say why in a fixed sentence, for ${shape}`, () => {
+      // Act
+      const actual = readConfigTextToEdit(text());
+
+      // Assert
+      should(actual.base).be.undefined();
+      should(actual.read.ok).be.false();
+      if (!actual.read.ok) should(actual.read.errors[0]?.message).equal(sentence);
+    });
+
+  it('should read the same errors as readConfigText does for the same text', () => {
+    // Arrange
+    const text = 'a: [unclosed\nb: 2\n';
+
+    // Assert
+    should(readConfigTextToEdit(text).read).deepEqual(readConfigText(text));
+  });
+});
+
+describe('setConfigKey — a key is set and every other byte stays', () => {
+  it('should set one key and keep the note above and every other key, with its comments, exactly as written', () => {
+    // Arrange
+    const text = '# top note\na: 1 # one\n\nb:\n  - x # item\n  - y\n';
+
+    // Act
+    const actual = setConfigKey(text, 'b', 5);
+
+    // Assert
+    should(actual).equal('# top note\na: 1 # one\n\nb: 5\n');
+    should(setConfigKey(text, 'a', 2)).equal('# top note\na: 2\n\nb:\n  - x # item\n  - y\n');
+  });
+
+  it('should add a key that is not there, at the end', () => {
+    // Act
+    const actual = setConfigKey('a: 1\n', 'b', { c: [1, 2] });
+
+    // Assert
+    should(meaningOf(actual)).deepEqual({ a: 1, b: { c: [1, 2] } });
+    should(actual.startsWith('a: 1\n')).be.true();
+  });
+
+  it('should remove a key when the value is undefined, and leave the rest', () => {
+    // Act
+    const actual = setConfigKey('a: 1 # one\nb: 2\nc: 3 # three\n', 'b', undefined);
+
+    // Assert
+    should(actual).equal('a: 1 # one\nc: 3 # three\n');
+  });
+
+  it('should make a mapping of an empty file', () => {
+    // Assert
+    should(meaningOf(setConfigKey('', 'a', 1))).deepEqual({ a: 1 });
+  });
+
+  it('should refuse a text that is not a mapping, and a text over the cap, in fixed sentences', () => {
+    // Assert
+    should(() => setConfigKey('- x\n- y\n', 'a', 1)).throw('the file is not a mapping of keys');
+    should(() => setConfigKey('#'.repeat(CONFIG_FILE_MAX_BYTES + 1), 'a', 1)).throw(
+      /^the file does not parse: the file is larger than the 256 KiB/u,
+    );
   });
 });

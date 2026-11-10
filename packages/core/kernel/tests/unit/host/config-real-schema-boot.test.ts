@@ -11,7 +11,7 @@ import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AdmissionPort } from '../../../contract/bound.ts';
 import { MAX_CONFIG_ISSUES } from '../../../host/config/check.ts';
-import { CONFIG_FILE_MAX_BYTES } from '../../../host/config/yaml-text.ts';
+import { CONFIG_FILE_MAX_BYTES } from '@ferretry/std/yaml';
 import { bootHost, type HostConfig, type RunningHost } from '../../../host/host.ts';
 import { realAdapters } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';

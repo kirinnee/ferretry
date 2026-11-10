@@ -19,7 +19,7 @@ const STATUS: RestartStatus = {
 };
 
 export class RecordingRestartGateway implements IRestartGateway {
-  readonly requests: { request: RestartRequest }[] = [];
+  readonly requests: { request: RestartRequest; requestId?: string }[] = [];
   cancels = 0;
 
   constructor(
@@ -28,8 +28,8 @@ export class RecordingRestartGateway implements IRestartGateway {
     private readonly cancelled: RestartCancelResult = { cancelled: 2 },
   ) {}
 
-  restart(request: RestartRequest): Promise<RestartResult> {
-    this.requests.push({ request });
+  restart(request: RestartRequest, requestId?: string): Promise<RestartResult> {
+    this.requests.push(requestId === undefined ? { request } : { request, requestId });
     return Promise.resolve(this.result);
   }
 

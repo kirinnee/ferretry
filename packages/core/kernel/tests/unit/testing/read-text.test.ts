@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { CliContext } from '../../../manifest/implement.ts';
 import type { Manifest } from '../../../manifest/types.ts';
-import { testExists, testReadText } from '../../../testing/index.ts';
+import { testExists, testReadBytes, testReadText } from '../../../testing/index.ts';
 
 test('CLI readText is optional, decodes UTF-8, reads stdin for dash, and leaves length validation to the caller', async () => {
   const optional: {} extends Pick<CliContext<Manifest>, 'readText'> ? true : false = true;
@@ -30,4 +30,20 @@ test('CLI exists is optional, names files and folders alike, and ignores a trail
   expect(await exists('/abs/marker')).toBe(true);
   expect(await exists('-')).toBe(true);
   expect(await exists('missing')).toBe(false);
+});
+
+test('CLI readBytes is optional, returns the bytes undecoded, reads stdin for dash, and hands back a copy', async () => {
+  const optional: {} extends Pick<CliContext<Manifest>, 'readBytes'> ? true : false = true;
+  const fixture = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00]);
+  const read: NonNullable<CliContext<Manifest>['readBytes']> = testReadBytes(
+    { 'shot.png': fixture, 'note.md': 'é' },
+    new Uint8Array([1, 2, 3]),
+  );
+  expect(optional).toBe(true);
+  expect([...(await read('shot.png'))]).toEqual([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00]);
+  expect([...(await read('note.md'))]).toEqual([0xc3, 0xa9]);
+  expect([...(await read('-'))]).toEqual([1, 2, 3]);
+  (await read('shot.png'))[0] = 0;
+  expect(fixture[0]).toBe(0x89);
+  await expect(read('missing.png')).rejects.toThrow();
 });

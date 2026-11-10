@@ -52,6 +52,32 @@ const NonNegativeIntegerSchema = z.number().int().nonnegative();
 const PositiveIntegerSchema = z.number().int().positive();
 
 /**
+ * Padded standard base64, checked in LINEAR time: whole four-character groups of the base64 alphabet, with at most two
+ * `=` and only at the very end. Today's protocol used one backtracking pattern
+ * (`^(?:[A-Za-z0-9+/]{4})*(?:…==|…=)?$`) that answers false for VALID base64 once the text passes about 6.9 M characters
+ * on Bun (a file of about 5 MiB), so a start under the stated 32 MiB bound was refused as malformed. This check holds
+ * for any length the transport lets through.
+ */
+const isPaddedBase64 = (text: string): boolean => text.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(text);
+
+/**
+ * One file attached to a start's opening message (today's `fy start -f`, `protocol/src/lib/session.ts`
+ * `StartSessionBaseSchema.initialAttachments`): the bytes travel INLINE as base64 in the start body, read by the CLI on
+ * the caller's machine. The count and size bounds are the receiving Conversation's (its `decodeInitialAttachments`:
+ * sixteen files, 32 MiB decoded in all), as today's daemon's were, and their refusal is a sentence naming the limit; the
+ * transport's body cap sits just above one 32 MiB file. The schema states the shape only.
+ */
+export const InitialAttachmentSchema = z.strictObject({
+  filename: z.string().min(1),
+  mime: z.string().min(1).optional(),
+  base64: z
+    .string()
+    .min(1)
+    .refine(isPaddedBase64, { message: 'an attachment must be padded standard base64 (A-Z, a-z, 0-9, +, /, =)' }),
+});
+export type InitialAttachment = z.infer<typeof InitialAttachmentSchema>;
+
+/**
  * How a ferret is started beyond who and where: today's `StartSessionBaseSchema` fields (and `fy new`'s model
  * routing) that are not the ferret's identity. Every field is optional and bounded as today. Ferrets records them in
  * the ferret's `details.json` and shows `model`, `card` and `title` in its summary; the harness, runner and
@@ -91,6 +117,12 @@ export const StartOptionsSchema = z.strictObject({
   remoteControl: z.boolean().optional(),
   /** With a name: take a free callsign instead of failing when the name is held. */
   teammateFallback: z.boolean().optional(),
+  /**
+   * Files attached to the opening message (`start -f`). A start's own request only: the start hands them to the
+   * attachment owner and writes none into the ferret's `details.json` (that file omits this member), so the bytes live
+   * only in the ferret's own `attachments/` folder.
+   */
+  initialAttachments: z.array(InitialAttachmentSchema).optional(),
 });
 export type StartOptions = z.infer<typeof StartOptionsSchema>;
 
@@ -161,9 +193,10 @@ export interface ResumeOptions {
   /**
    * Additive (U3 fix1): who asked, for the author recorded beside the revive's turn document — the Warden's revive is
    * Ferretry's Warden (today's `resumeTurnAuthor('warden')`), so its words are never drawn as the owner's. ATTRIBUTION
-   * only, never authority: it changes no policy, admission or refusal. Absent: the turn names no author.
+   * only, never authority: it changes no policy, admission or refusal. `peer` is a ferret's send that revived this
+   * one (today's `resumeTurnAuthor('peer')`): the turn names a ferret as its author. Absent: the turn names no author.
    */
-  readonly actor?: 'warden';
+  readonly actor?: 'warden' | 'peer';
   /**
    * Additive (U3 fix2): told, ONCE and under the ferret's own queue, what this resume decided — `running`: the ferret
    * was not stopped, so nothing was relaunched and a message was NOT handed over (the send shortcut); `relaunching`: it

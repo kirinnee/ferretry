@@ -2,7 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { findings, inScope, KERNEL_READER, LEDGER, parseLedger, scanFile } from './no-raw-yaml.ts';
+import {
+  findings,
+  inScope,
+  KERNEL_READER,
+  KERNEL_READER_PACKAGE,
+  LEDGER,
+  parseLedger,
+  readerDoorFindings,
+  scanFile,
+} from './no-raw-yaml.ts';
 
 const root = join(import.meta.dir, '../..');
 const PATH = 'packages/plugins/x/daemon/a.ts';
@@ -10,15 +19,13 @@ const PATH = 'packages/plugins/x/daemon/a.ts';
 /** The findings for one planted product file with no ledger at all. */
 const planted = (text: string, path = PATH): readonly string[] => findings([{ path, text }], '');
 
-/** The nine files that were on the ledger when the guard was an eight-pattern grep: all of them still stand. */
+/**
+ * The files on the ledger that are still there after the five plugin readers (logins, browsers, usage x2, voice) were
+ * routed through the shared reader: the reader itself, board's write-only `stringify`, and the two chart fences.
+ */
 const ORIGINAL_LEDGER = [
-  'packages/core/kernel/host/config/yaml-text.ts',
-  'packages/plugins/logins/daemon/lib/shared/yaml-text.ts',
+  'packages/std/src/yaml-text.ts',
   'packages/plugins/board/cli/lib/patch-document.ts',
-  'packages/plugins/usage/cli/lib/config-text.ts',
-  'packages/plugins/usage/app/lib/config-text.ts',
-  'packages/plugins/voice/app/lib/config-text.ts',
-  'packages/plugins/browsers/app/lib/browsers-config.ts',
   'packages/plugins/conversation/app/render/fy-render-chart-model.ts',
   'packages/plugins/conversation/app/render/fy-render-map-model.ts',
 ];
@@ -45,17 +52,24 @@ describe('the raw-YAML gate on this repository', () => {
     WHOLE_TREE_SCAN_MS,
   );
 
-  test('still lists the nine entries it started with, and no reason claims a text was "already checked"', () => {
+  test('still lists the entries that remain, and no reason claims a text was "already checked"', () => {
     const { files, problems } = parseLedger(readFileSync(join(root, LEDGER), 'utf8'));
     expect(problems).toEqual([]);
     for (const path of ORIGINAL_LEDGER) expect(files.has(path), path).toBe(true);
-    // The app copies parse text the daemon SERVES, and it serves a refused text too: "checked" was never true.
+    // A text the daemon SERVES is a refused text too: "checked" was never true.
     for (const [path, reason] of files) expect(reason, path).not.toMatch(/already checked/iu);
-    // And they say what is true of them (kac2 R9 m3): browser side, bounded by the cap, able to stall the tab.
-    for (const app of ['usage', 'voice', 'browsers']) {
-      const [path, reason] = [...files].find(([key]) => key.startsWith(`packages/plugins/${app}/app/`)) ?? [];
-      expect(reason, path).toMatch(/person's own browser.*256 KiB cap.*stall that tab, never the daemon/u);
-    }
+  });
+
+  test('the five plugin readers are gone from the ledger: they read through @ferretry/std/yaml', () => {
+    const { files } = parseLedger(readFileSync(join(root, LEDGER), 'utf8'));
+    for (const gone of [
+      'packages/plugins/logins/daemon/lib/shared/yaml-text.ts',
+      'packages/plugins/browsers/app/lib/browsers-config.ts',
+      'packages/plugins/usage/app/lib/config-text.ts',
+      'packages/plugins/usage/cli/lib/config-text.ts',
+      'packages/plugins/voice/app/lib/config-text.ts',
+    ])
+      expect(files.has(gone), gone).toBe(false);
   });
 });
 
@@ -217,6 +231,8 @@ describe('every way past the old line matcher is found', () => {
     'the word as a string': "const name = 'yaml';",
     'a relative path to a yaml-named file': "import { readConfigText } from './yaml-text.ts';",
     'a relative path, dynamic': "const t = await import('../yaml-text.ts');",
+    'the shared bounded reader, by its package subpath':
+      "import { readConfigText, setConfigKey } from '@ferretry/std/yaml';\nreadConfigText('');",
     'other Bun members': "const f = Bun.file('x'); const { spawn } = Bun;",
     'a property that is only named YAML': 'const o = { YAML: 1 }; o.YAML;',
     'a type that mentions it': "type T = typeof import('yaml');\nconst x: typeof Bun.YAML = 1 as never;",
@@ -274,6 +290,12 @@ describe('every way past the old line matcher is found', () => {
       expect.stringContaining(`${at}:1:`),
     ]);
     expect(planted('const v = Bun.YAML.parse(edit);', 'packages/app/src/testing/dom.ts')).toHaveLength(1);
+  });
+
+  test('the finding sends a plugin author to the shared bounded reader, never to the kernel', () => {
+    const [message] = planted('const v = Bun.YAML.parse(text);');
+    expect(message).toContain('Read the text with the shared bounded reader (`@ferretry/std/yaml`');
+    expect(message).not.toMatch(/kernel/iu);
   });
 
   test('uses are located by line, once per line', () => {
@@ -345,10 +367,10 @@ describe('the ledger', () => {
     ]);
   });
 
-  test('"<- *" is the kernel reader alone', () => {
+  test('"<- *" is the shared bounded reader alone', () => {
     expect(parseLedger(`${KERNEL_READER}::readConfigText  <- *  # the door\n`).problems).toEqual([]);
     expect(parseLedger('packages/plugins/x/daemon/r.ts::read  <- *  # open\n').problems).toEqual([
-      expect.stringContaining('only packages/core/kernel/host/config/yaml-text.ts is open to every caller'),
+      expect.stringContaining('only packages/std/src/yaml-text.ts is open to every caller'),
     ]);
   });
 });
@@ -448,12 +470,12 @@ describe('laundering through a ledgered parser', () => {
     );
   });
 
-  test("the kernel's bounded reader is open to every caller; a file that is not it cannot be", () => {
+  test('the shared bounded reader is open to every caller; a file that is not it cannot be', () => {
     const kernel = reader('export function readConfigText(t: string) { return parseDocument(t); }');
     const door = `${KERNEL_READER}  # the reader\n${KERNEL_READER}::readConfigText  <- *  # the door`;
     const call = {
       path: 'packages/core/gate/daemon/index.ts',
-      text: "import { readConfigText } from '../../kernel/host/config/yaml-text.ts';\nreadConfigText('');",
+      text: "import { readConfigText } from '../../../std/src/yaml-text.ts';\nreadConfigText('');",
     };
     expect(findings([{ path: KERNEL_READER, text: kernel }, call], door)).toEqual([]);
     // Without the line, the export is unlisted: the door is a ledger entry like any other.
@@ -474,5 +496,55 @@ describe('laundering through a ledgered parser', () => {
       ledger,
     );
     expect(found).toEqual([expect.stringContaining(`${second}:1: loads ${READER}::readIt`)]);
+  });
+
+  describe('the shared reader imported by its package subpath', () => {
+    const body = reader('export function readConfigText(t: string) { return parseDocument(t); }');
+    // A narrowed ledger: one named caller instead of `<- *`.
+    const narrowed = `${KERNEL_READER}  # the reader\n${KERNEL_READER}::readConfigText  <- ${OK}  # one caller`;
+    const viaSubpath = "import { readConfigText } from '@ferretry/std/yaml';\nreadConfigText('');";
+    const viaRelative = "import { readConfigText } from '../../../std/src/yaml-text.ts';\nreadConfigText('');";
+    const probe = (strangerText: string): readonly string[] =>
+      findings(
+        [
+          { path: KERNEL_READER, text: body },
+          { path: NEW, text: strangerText },
+          { path: OK, text: viaSubpath },
+        ],
+        narrowed,
+      );
+
+    test('a stranger importing it by the subpath is a finding when the ledger narrows its callers', () => {
+      expect(probe(viaSubpath)).toEqual([
+        expect.stringContaining(`${NEW}:1: loads ${KERNEL_READER}::readConfigText, a raw YAML parser the ledger`),
+      ]);
+    });
+
+    test('a stranger importing it by a relative path is the same finding', () => {
+      expect(probe(viaRelative)).toEqual(probe(viaSubpath));
+    });
+
+    test('the listed caller importing it by the subpath passes', () => {
+      expect(probe('export const unrelated = 1;')).toEqual([]);
+    });
+  });
+
+  test('the std package answers the subpath with the reader file, and a finding says when it does not', () => {
+    expect(readerDoorFindings(readFileSync(join(root, KERNEL_READER_PACKAGE), 'utf8'))).toEqual([]);
+    const pointing = (target: string): string =>
+      JSON.stringify({ exports: { '.': './src/index.ts', './yaml': target } });
+    expect(readerDoorFindings(pointing('./src/yaml-text.ts'))).toEqual([]);
+    expect(readerDoorFindings(pointing('./src/other.ts'))).toEqual([
+      expect.stringContaining('must be "./src/yaml-text.ts"'),
+    ]);
+    expect(readerDoorFindings(JSON.stringify({ exports: { '.': './src/index.ts' } }))).toHaveLength(1);
+    expect(readerDoorFindings('not json')).toEqual([expect.stringContaining('is not JSON')]);
+    expect(readerDoorFindings('')).toHaveLength(1);
+  });
+
+  test('the caller finding names the shared bounded reader, never the kernel', () => {
+    const [message] = run("import { readIt } from './reader.ts';\nreadIt('x');");
+    expect(message).toContain('Read the text with the shared bounded reader (`@ferretry/std/yaml`)');
+    expect(message).not.toMatch(/kernel/iu);
   });
 });

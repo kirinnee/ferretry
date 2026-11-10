@@ -24,7 +24,7 @@ export function ferretsPort(service: FerretsService): FerretsApi {
       // told what the resume decided, and who must be told what it typed for the message.
       const forwarded = {
         ...(options?.automatic === true ? { automatic: true } : {}),
-        ...(options?.actor === 'warden' ? { actor: 'warden' as const } : {}),
+        ...(options?.actor === 'warden' || options?.actor === 'peer' ? { actor: options.actor } : {}),
         ...(options?.decided === undefined ? {} : { decided: options.decided }),
         ...(options?.onCarried === undefined ? {} : { onCarried: options.onCarried }),
       };
