@@ -810,15 +810,21 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         ),
       // As `write`, except that the secret references the edit adds go into effect when the ambient call is the owner.
       // Nothing the plugin passes is read for that: the options carry `ifMatch` alone.
-      writeAsCaller: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
-        writeOutcome(
-          await write(pluginId, def as ConfigDef, name, edit, {
-            byPlugin: true,
-            judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
-            judgeSecretAdds: ownerJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
-            ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
-          }),
-        ),
+      // A whole text is the caller's whole text. A patch of a file with an edit held is made to BOTH versions (the
+      // version in effect and the held one), so it never puts the held edit into effect nor discards it.
+      writeAsCaller: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> => {
+        const callerOptions: ConfigWriteOptions = {
+          byPlugin: true,
+          judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
+          judgeSecretAdds: ownerJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
+          ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
+        };
+        return writeOutcome(
+          typeof edit === 'string'
+            ? await write(pluginId, def as ConfigDef, name, edit, callerOptions)
+            : await writeAsCallerPatch(pluginId, def as ConfigDef, name, { patch: edit.patch }, callerOptions),
+        );
+      },
       writeAsOwner: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
         writeOutcome(
           await writeAsOwner(pluginId, def as ConfigDef, name, edit, {
@@ -1090,69 +1096,125 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       const heldNow = entry?.evaluated.held;
       if (heldNow === undefined || entry === undefined)
         return await writeLocked(slot, def, { patch: edit.patch }, writeOptions, within);
-      const absolute = `${root}/${slot.path}`;
-      const disk = await readDisk(slot.path);
-      const unwritable = unwritableIssues(slot, disk);
-      if (unwritable !== undefined) return { kind: 'refused', reason: 'unreadable', issues: unwritable };
-      const existing = disk.kind === 'text' ? disk.text : undefined;
-      const found = existing === undefined ? ABSENT_CONFIG_ETAG : digest(existing);
-      const moved = conflictOf(slot, found, writeOptions.ifMatch);
-      if (moved !== undefined) return moved;
-      const inEffect = entry.evaluated.inEffect;
-      // The version in effect, patched: what the owner's act means today.
-      const effectiveText = patched(slot, inEffect?.text, edit.patch, within);
-      if (effectiveText === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-      const effective = check(def, slot.path, effectiveText);
-      if (!effective.ok) return { kind: 'refused', reason: effective.reason, issues: effective.issues };
-      // The held version (the file on disk), patched. A held REMOVAL has no text to carry the patch.
-      const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch, within);
-      if (existing !== undefined && heldText === undefined)
-        return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-      const checkedHeld = heldText === undefined ? undefined : check(def, slot.path, heldText);
-      if (checkedHeld !== undefined && !checkedHeld.ok)
-        return { kind: 'refused', reason: checkedHeld.reason, issues: checkedHeld.issues };
-      // Both passed: the load after the write is handed their checks.
-      landing = [
-        { path: slot.path, digest: digest(effectiveText), checked: effective },
-        ...(heldText === undefined || checkedHeld === undefined
-          ? []
-          : [{ path: slot.path, digest: digest(heldText), checked: checkedHeld }]),
-      ];
-      const before = entry.evaluated.value;
-      const unchanged = digest(effectiveText) === inEffect?.etag;
-      const added =
-        unchanged || !untrustedWrite(writeOptions) ? [] : addedSecretReferenceSentences(before, effective.value);
-      const loosens = unchanged ? [] : [...judgeLoosening(def, before, effective.value), ...added];
-      const confirmed =
-        added.length === 0 &&
-        (writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false)));
-      if (loosens.length === 0 || confirmed) {
-        // In effect at once; the held edit, changed, stays in the file and is judged against the new record.
-        await writeAccepted(plugin, slot.path, { etag: digest(effectiveText), text: effectiveText });
-        if (heldText !== undefined) await fs.writeAtomic(absolute, heldText, PRIVATE_FILE_MODE);
-        await load();
-        const still = settled.get(slot.path)?.evaluated.held;
-        return {
-          kind: 'applied',
-          etag: heldText === undefined ? ABSENT_CONFIG_ETAG : digest(heldText),
-          text: heldText ?? effectiveText,
-          loosened: confirmed ? loosens : [],
-          ...(still === undefined
-            ? {}
-            : { stillHeld: { id: idOf(slot.path, still.etag), sentences: still.sentences } }),
-        };
-      }
-      // The owner's patch itself waits: the version in effect is untouched, and the patch rides with the held edit
-      // (a held removal is superseded by the owner's newer act, said by the answer's sentences).
-      const waiting = heldText ?? effectiveText;
-      const etag = digest(waiting);
-      await fs.writeAtomic(absolute, waiting, PRIVATE_FILE_MODE);
-      await load();
-      const held = settled.get(slot.path)?.evaluated.held;
-      return held !== undefined && held.etag === etag
-        ? { kind: 'held', etag, id: idOf(slot.path, etag), sentences: held.sentences }
-        : { kind: 'applied', etag, text: waiting, loosened: [] };
+      return await patchBothVersions(slot, def, entry, edit.patch, within, writeOptions, false);
     });
+  };
+
+  /**
+   * The caller's own PATCH of one of its files (`ConfigPort.writeAsCaller`). With no edit held it is exactly the plain
+   * write of that patch. With an edit of the same file held for the owner it is made to BOTH versions
+   * ({@link patchBothVersions}), so a patch of one field can neither put another caller's held edit into effect nor
+   * discard it; a whole text is the caller's whole text, as for any write.
+   */
+  const writeAsCallerPatch = async (
+    plugin: string,
+    def: ConfigDef,
+    name: string | undefined,
+    edit: { readonly patch: Readonly<Record<string, unknown>> },
+    writeOptions: ConfigWriteOptions,
+  ): Promise<ConfigWriteResult> => {
+    const declaration = declared(plugin, def);
+    if (declaration === undefined) return { kind: 'refused', reason: 'not_declared', issues: [] };
+    const slot = slotFor(declaration, name);
+    if (slot === undefined) return { kind: 'refused', reason: 'bad_name', issues: [] };
+    return await serial(async () => {
+      const entry = settled.get(slot.path);
+      if (entry?.evaluated.held === undefined) return await writeLocked(slot, def, edit, writeOptions);
+      return await patchBothVersions(slot, def, entry, edit.patch, undefined, writeOptions, true);
+    });
+  };
+
+  /**
+   * One patch made to both versions of a file with an edit held, inside the queue (docs/config-files.md rule 3). The
+   * version in effect is patched and judged as the caller's own act; the held version (the file on disk) is patched
+   * and stays held. `asCaller` is `ConfigPort.writeAsCaller`: a `${secret:NAME}` reference the patch adds goes into
+   * effect when the ambient call is the owner, and only a reference the patch itself introduces — one that only the
+   * held version names keeps the whole patch waiting with it, as a whole-text write holds it.
+   */
+  const patchBothVersions = async (
+    slot: Slot,
+    def: ConfigDef,
+    entry: Settled,
+    patch: Readonly<Record<string, unknown>>,
+    within: readonly string[] | undefined,
+    writeOptions: ConfigWriteOptions,
+    asCaller: boolean,
+  ): Promise<ConfigWriteResult> => {
+    const plugin = slot.declaration.plugin;
+    const absolute = `${root}/${slot.path}`;
+    const disk = await readDisk(slot.path);
+    const unwritable = unwritableIssues(slot, disk);
+    if (unwritable !== undefined) return { kind: 'refused', reason: 'unreadable', issues: unwritable };
+    const existing = disk.kind === 'text' ? disk.text : undefined;
+    const found = existing === undefined ? ABSENT_CONFIG_ETAG : digest(existing);
+    const moved = conflictOf(slot, found, writeOptions.ifMatch);
+    if (moved !== undefined) return moved;
+    const inEffect = entry.evaluated.inEffect;
+    // The version in effect, patched: what the caller's act means today.
+    const effectiveText = patched(slot, inEffect?.text, patch, within);
+    if (effectiveText === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
+    const effective = check(def, slot.path, effectiveText);
+    if (!effective.ok) return { kind: 'refused', reason: effective.reason, issues: effective.issues };
+    // The held version (the file on disk), patched. A held REMOVAL has no text to carry the patch.
+    const heldText = existing === undefined ? undefined : patched(slot, existing, patch, within);
+    if (existing !== undefined && heldText === undefined)
+      return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
+    const checkedHeld = heldText === undefined ? undefined : check(def, slot.path, heldText);
+    if (checkedHeld !== undefined && !checkedHeld.ok)
+      return { kind: 'refused', reason: checkedHeld.reason, issues: checkedHeld.issues };
+    // Both passed: the load after the write is handed their checks.
+    landing = [
+      { path: slot.path, digest: digest(effectiveText), checked: effective },
+      ...(heldText === undefined || checkedHeld === undefined
+        ? []
+        : [{ path: slot.path, digest: digest(heldText), checked: checkedHeld }]),
+    ];
+    const before = entry.evaluated.value;
+    const unchanged = digest(effectiveText) === inEffect?.etag;
+    const added =
+      unchanged || !untrustedWrite(writeOptions) ? [] : addedSecretReferenceSentences(before, effective.value);
+    const other = unchanged ? [] : judgeLoosening(def, before, effective.value);
+    const loosens = [...other, ...added];
+    // The owner's yes to a secret reference covers ONLY a reference the patch itself introduces: one the held version
+    // already names (a ferret's) is not the caller's to confirm, and keeps the whole patch waiting with the held edit.
+    const known = [before, existing === undefined ? undefined : heldDiskReferences(def, slot, existing)];
+    const byCaller = !asCaller || added.length === 0 ? [] : addedSecretReferenceSentences(known, effective.value);
+    const fromHeld = added.length > byCaller.length;
+    const ownerAdds = asCaller && byCaller.length > 0 && !fromHeld && askSecretAdds(writeOptions, byCaller);
+    const confirmed =
+      (added.length === 0 || ownerAdds) &&
+      (writeOptions.confirmedLoosening === true ||
+        (loosens.length > 0 && (other.length === 0 || askJudge(writeOptions, other, false))));
+    if (loosens.length === 0 || confirmed) {
+      // In effect at once; the held edit, changed, stays in the file and is judged against the new record.
+      await writeAccepted(plugin, slot.path, { etag: digest(effectiveText), text: effectiveText });
+      if (heldText !== undefined) await fs.writeAtomic(absolute, heldText, PRIVATE_FILE_MODE);
+      // Names only, once the version is in effect, crediting the owner for the references its own patch added.
+      if (ownerAdds && confirmed) {
+        const had = secretReferencesIn(known);
+        const names = [...secretReferencesIn(effective.value)].filter(name => !had.has(name)).sort();
+        log.info(`config ${slot.path}: the owner put a secret reference into effect (${names.join(', ')})`);
+      }
+      await load();
+      const still = settled.get(slot.path)?.evaluated.held;
+      return {
+        kind: 'applied',
+        etag: heldText === undefined ? ABSENT_CONFIG_ETAG : digest(heldText),
+        text: heldText ?? effectiveText,
+        loosened: confirmed ? loosens : [],
+        ...(still === undefined ? {} : { stillHeld: { id: idOf(slot.path, still.etag), sentences: still.sentences } }),
+      };
+    }
+    // The patch itself waits: the version in effect is untouched, and the patch rides with the held edit
+    // (a held removal is superseded by the caller's newer act, said by the answer's sentences).
+    const waiting = heldText ?? effectiveText;
+    const etag = digest(waiting);
+    await fs.writeAtomic(absolute, waiting, PRIVATE_FILE_MODE);
+    await load();
+    const held = settled.get(slot.path)?.evaluated.held;
+    return held !== undefined && held.etag === etag
+      ? { kind: 'held', etag, id: idOf(slot.path, etag), sentences: held.sentences }
+      : { kind: 'applied', etag, text: waiting, loosened: [] };
   };
 
   const remove = async (

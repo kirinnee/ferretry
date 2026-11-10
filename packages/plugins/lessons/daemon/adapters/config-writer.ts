@@ -38,5 +38,13 @@ function wholeLessonsSettings(next: LessonsConfig, inEffect: LessonsFile): Recor
 export async function writeLessonsSettings(config: ConfigPort, patch: LessonsConfigPatch): Promise<ConfigWriteOutcome> {
   const inEffect = (config.file(LESSONS_CONFIG) ?? {}) as LessonsFile;
   const next: LessonsConfig = { ...lessonsConfigFromFile(inEffect), ...patch };
-  return await config.write(LESSONS_CONFIG, undefined, { patch: wholeLessonsSettings(next, inEffect) });
+  const whole = wholeLessonsSettings(next, inEffect);
+  // The owner's patch: made to BOTH versions of a file with an edit held, so the owner's save never puts a held edit
+  // into effect (docs/config-files.md rule 3). Beside a held edit only the keys the owner named are sent, so the held
+  // version keeps its own values for every other key rather than having them reset to the ones in effect.
+  const named = Object.keys(patch).filter(key => (patch as Record<string, unknown>)[key] !== undefined);
+  const beside = config.fileState(LESSONS_CONFIG).state === 'held';
+  return await config.writeAsOwner(LESSONS_CONFIG, undefined, {
+    patch: beside ? Object.fromEntries(named.map(key => [key, whole[key]])) : whole,
+  });
 }

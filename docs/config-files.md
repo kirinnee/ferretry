@@ -84,7 +84,8 @@ that is not there). Three rules, in order:
    after a lock and an unlock: the add stays held and the later proof stays for the act it was given for. The same
    bound applies to a plain `write` loosening from work a call spawned. Only
    the references the caller's own edit adds are the owner's to answer for: one that only an edit already held names
-   keeps the whole write held. An agent's session credential, a job and a member call keep the hold. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
+   keeps the whole write held (a PATCH of a file with an edit held is made to both versions, rule 3, so the caller's
+   one field never puts that held edit into effect; a WHOLE text is the caller's whole text). An agent's session credential, a job and a member call keep the hold. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
    a held edit by its etag — at the machine with `fy config confirm <file>`, in the app with a passkey
    proved for that act (`loosen-config`), or by answering **Allow** on the agenda card a ferret raised with
    `fy agenda add --confirms <file>` ([agenda.md](agenda.md#confirming-a-configuration-change)) — so a
@@ -103,7 +104,15 @@ that is not there). Three rules, in order:
    it names is replaced whole (`undefined` removes it), and every sub-key it does not name is kept, so the held
    version's own sub-keys survive. A named key whose new or current value is not a mapping is replaced, as any
    patch replaces a key. The schema, the loosening hold and the judge see the merged versions, and both are
-   written or neither.
+   written or neither. The same is true of every owner's save of a single file, not only Warden's: the lessons
+   settings and the default-account lines (`accounts.yaml`) go through `writeAsOwner` (with only the changed keys, or
+   lines, beside a held edit), and a PATCH through `ConfigPort.writeAsCaller` of a file with an edit held is made to
+   both versions too — the caller's change is judged against the version in effect alone (a loosening of its own
+   still asks Gate's judge, a `${secret:NAME}`reference it adds still asks the owner question, and one that only
+the held version names is never the caller's to confirm), so a person changing one field never puts another
+caller's held edit into effect. When the caller changes the very field the held edit staged, the caller's value
+is the value in both versions. A plain`write` (a ferret's, or a plugin's own) is made to the file as it is on disk,
+   the held text included, and stays held.
 4. **A change of several files lands whole or not at all.** A change that spans files — a runtime, its profile
    and its model set — is ONE act in the kernel, `ConfigPort.writeAll`, never several writes a reader could see
    half of. Every document of the set is checked as a single write checks one (its own file, its name, YAML, a

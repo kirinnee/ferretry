@@ -843,7 +843,7 @@ async function start(world: World): Promise<TestHost> {
     // the admission in use (Gate's, when given) judges this call may apply it. `within` is the owner's only (the
     // real writer's one-level merge, `host/config/patch.ts`).
     const write: (
-      ...args: [...Parameters<ConfigPort['write']>, within?: readonly string[], asCaller?: true]
+      ...args: [...Parameters<ConfigPort['write']>, within?: readonly string[], asCaller?: true, bothVersions?: true]
     ) => ReturnType<ConfigPort['write']> = async (
       def,
       name,
@@ -851,6 +851,7 @@ async function start(world: World): Promise<TestHost> {
       writeOptions = {},
       within = undefined,
       asCaller = undefined,
+      bothVersions = undefined,
     ) => {
       if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
       const key = keyOf(def);
@@ -861,6 +862,78 @@ async function start(world: World): Promise<TestHost> {
       const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
       // As the real writer: an edit is made to the DISK text, which for a file with an edit held is the HELD one.
       const onDisk = heldValueAt(key, path);
+      // Except the owner's patch (`writeAsOwner`) and a caller's patch (`writeAsCaller`): made to BOTH versions.
+      if (bothVersions === true && typeof edit !== 'string' && onDisk.held) {
+        const effectiveNext = patchedValue((before as Record<string, unknown> | undefined) ?? {}, edit.patch, within);
+        const heldNext = patchedValue((onDisk.value as Record<string, unknown> | undefined) ?? {}, edit.patch, within);
+        const effective = def.schema.safeParse(effectiveNext);
+        const heldChecked = def.schema.safeParse(heldNext);
+        for (const checked of [effective, heldChecked])
+          if (!checked.success)
+            return {
+              kind: 'refused',
+              reason: 'schema',
+              issues: checked.error.issues.map(issue => ({ path: key, message: issue.message })),
+            };
+        if (!effective.success || !heldChecked.success) return { kind: 'refused', reason: 'schema', issues: [] };
+        if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== diskEtagOf(def, name, before))
+          return { kind: 'conflict' };
+        const prior = before === undefined ? undefined : def.schema.safeParse(before);
+        const priorValue = prior?.success === true ? prior.data : undefined;
+        const added = addedSecretReferenceSentences(priorValue, effective.data);
+        const other = judgeLoosening(def, priorValue, effective.data);
+        // As the real writer: the owner's yes covers only a reference the patch itself introduces, never one the held
+        // version names.
+        const byCaller =
+          asCaller === true && added.length > 0
+            ? addedSecretReferenceSentences([priorValue, onDisk.value], effective.data)
+            : [];
+        const ownerAdds =
+          byCaller.length > 0 && byCaller.length === added.length && judged(manifest.id, path, false, byCaller, true);
+        const sentences = [...other, ...added];
+        const confirmed =
+          (added.length === 0 || ownerAdds) && (other.length === 0 || judged(manifest.id, path, false, other));
+        const subject = { path, ...(name === undefined ? {} : { name }) };
+        const heldEtag = JSON.stringify(heldNext);
+        if (sentences.length > 0 && !confirmed) {
+          // The patch itself waits: nothing in effect changes, and it rides with the held version, whose sentences are
+          // what the whole held version widens beyond the version in effect (as the real load says them).
+          heldValues.set(path, { etag: heldEtag, value: heldNext });
+          restamp(key, { ...subject, held: heldEtag });
+          return {
+            kind: 'held',
+            etag: heldEtag,
+            id: `${path}@held`,
+            sentences: [
+              ...judgeLoosening(def, priorValue, heldChecked.data),
+              ...addedSecretReferenceSentences(priorValue, heldChecked.data),
+            ],
+          };
+        }
+        world.config.set(
+          key,
+          def.shape === 'file' ? effectiveNext : { ...(all ?? {}), [name as string]: effectiveNext },
+        );
+        for (const listener of configListeners.get(key) ?? []) listener();
+        // The held version stays held while it still loosens what is now in effect.
+        const still = [
+          ...judgeLoosening(def, effective.data, heldChecked.data),
+          ...addedSecretReferenceSentences(effective.data, heldChecked.data),
+        ];
+        if (still.length === 0) {
+          heldValues.delete(path);
+          restamp(key, subject);
+          return { kind: 'written', etag: JSON.stringify(effectiveNext), loosened: confirmed ? sentences : [] };
+        }
+        heldValues.set(path, { etag: heldEtag, value: heldNext });
+        restamp(key, { ...subject, held: heldEtag });
+        return {
+          kind: 'written',
+          etag: heldEtag,
+          loosened: confirmed ? sentences : [],
+          stillHeld: { id: `${path}@held`, sentences: still },
+        };
+      }
       let next: unknown;
       if (typeof edit === 'string') {
         // The shared bounded reader, as the real writer reads an edit: never a raw parse of a text a test hands in.
@@ -970,20 +1043,22 @@ async function start(world: World): Promise<TestHost> {
       async write(def, name, edit, writeOptions = {}) {
         return await write(def, name, edit, writeOptions);
       },
-      // The in-memory world holds no edit held for the owner, so the owner's patch is a write of that patch (merged
-      // one level deep into the keys `within` names, as the real writer merges it).
       // As `write`, except that the secret references the edit adds go into effect when the AMBIENT call is the owner,
-      // asked of the admission in use exactly as the real writer asks it. Only `ifMatch` is read from the options.
+      // asked of the admission in use exactly as the real writer asks it, and that a PATCH of a file with an edit held
+      // is made to both versions. Only `ifMatch` is read from the options.
       async writeAsCaller(def, name, edit, writeOptions = {}) {
         return await write(
           def,
           name,
-          edit,
+          typeof edit === 'string' ? edit : { patch: edit.patch },
           writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch },
           undefined,
           true,
+          true,
         );
       },
+      // The owner's patch: made to BOTH versions of a file with an edit held (merged one level deep into the keys
+      // `within` names, as the real writer merges it), a plain write of that patch otherwise.
       async writeAsOwner(def, name, edit, writeOptions = {}) {
         // As the real writer, in its order: an undeclared def and a bad name are answered first, then a `within` that is
         // not a list is refused, never read as something else.
@@ -997,7 +1072,7 @@ async function start(world: World): Promise<TestHost> {
             reason: 'schema',
             issues: [{ path: keyOf(def), message: '`within` must be a list of top-level key names' }],
           };
-        return await write(def, name, { patch: edit.patch }, writeOptions, within);
+        return await write(def, name, { patch: edit.patch }, writeOptions, within, undefined, true);
       },
       async remove(def, name, writeOptions = {}) {
         if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
