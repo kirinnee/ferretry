@@ -10,7 +10,7 @@
  * list and read it. Each test names the door it proves.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { FencedPath } from '../../../contract/bound.ts';
 import type { RootHandle, RootName } from '../../../contract/ports.ts';
@@ -441,5 +441,38 @@ describe('the other roots scoped to an absolute folder take the anchor the same 
     await symlink(`${w.parent}/outside/claude`, `${w.project}/.claude`);
     const root = w.handle({ subfolder: `${w.project}/.claude/skills`, within: w.project }, 'harness-history');
     expect(await doors(root)).toEqual(ALL_REFUSED);
+  });
+});
+
+describe('the project-files root takes the anchor the same way (S179)', () => {
+  const projectFiles = async (w: Awaited<ReturnType<typeof world>>, scope: { subfolder: string; within?: string }) =>
+    rootsPortFor(
+      nodeFs(() => crypto.randomUUID()),
+      { home: w.home, plugin: 'mcp', worktrees: `${w.home}-worktrees` },
+      ['project-files'],
+      () => undefined,
+      { random: () => 'rnd', projectFiles: ['.mcp.json'] },
+    ).root('project-files', scope);
+
+  test('S179 a symlinked project folder named as its own anchor still writes .mcp.json', async () => {
+    const w = await world();
+    const linked = `${w.parent}/linked-project`;
+    await symlink(w.project, linked);
+    const root = await projectFiles(w, { subfolder: linked, within: linked });
+    const name = root.resolve('.mcp.json');
+    if (!name.ok) throw new Error(name.error);
+    await root.writeText(name.value, '{"mcpServers":{}}\n');
+    expect(await readFile(`${w.project}/.mcp.json`, 'utf8')).toBe('{"mcpServers":{}}\n');
+  });
+
+  test('S179 the same symlinked project folder with no anchor is refused link_escape: its realpath is not its spelling', async () => {
+    const w = await world();
+    const linked = `${w.parent}/linked-project`;
+    await symlink(w.project, linked);
+    const root = await projectFiles(w, { subfolder: linked });
+    const name = root.resolve('.mcp.json');
+    if (!name.ok) throw new Error(name.error);
+    expect(await refusalOf(() => root.writeText(name.value, 'x'))).toBe('link_escape');
+    expect(await refusalOf(() => root.readText(name.value))).toBe('link_escape');
   });
 });

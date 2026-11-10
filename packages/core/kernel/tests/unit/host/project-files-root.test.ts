@@ -287,10 +287,16 @@ describe('S179 links and hard links', () => {
     expect(await readdir(f.outside)).toEqual([]);
   });
 
-  test('S179 a project folder that is itself reached by a link is judged by where it really is', async () => {
+  test('S179 a project folder that is itself reached by a link is judged by where it really is, and only when it names itself as its anchor', async () => {
     const f = await fresh();
     await symlink(f.proj, `${f.parent}/proj-alias`);
-    const root = f.port().root('project-files', { subfolder: `${f.parent}/proj-alias` });
+    const alias = `${f.parent}/proj-alias`;
+    // No anchor: its realpath is not its spelling, so every call is refused.
+    const bare = f.port().root('project-files', { subfolder: alias });
+    expect(await refusalOf(() => bare.writeText(at(bare, '.mcp.json'), 'no'))).toBe('link_escape');
+    expect(await exists(`${f.proj}/.mcp.json`)).toBe(false);
+    // Named as its own anchor (the anchor itself may be a link), it works.
+    const root = f.port().root('project-files', { subfolder: alias, within: alias });
     await root.writeText(at(root, '.mcp.json'), 'via alias');
     expect(await readFile(`${f.proj}/.mcp.json`, 'utf8')).toBe('via alias');
   });
@@ -377,8 +383,16 @@ describe('S179 the fence', () => {
     const f = await fresh();
     await mkdir(`${f.home}/state/vault`, { recursive: true });
     await symlink(`${f.home}/state/vault`, `${f.parent}/looks-innocent`);
-    const root = f.port().root('project-files', { subfolder: `${f.parent}/looks-innocent` });
-    expect(await refusalOf(() => root.writeText(`${f.parent}/looks-innocent/.mcp.json` as FencedPath, 'no'))).toBe(
+    const bare = f.port().root('project-files', { subfolder: `${f.parent}/looks-innocent` });
+    expect(await refusalOf(() => bare.writeText(`${f.parent}/looks-innocent/.mcp.json` as FencedPath, 'no'))).toBe(
+      'link_escape',
+    );
+    // Named as its own anchor the link is allowed, and then the fence refuses it by where it really is.
+    const anchored = f.port().root('project-files', {
+      subfolder: `${f.parent}/looks-innocent`,
+      within: `${f.parent}/looks-innocent`,
+    });
+    expect(await refusalOf(() => anchored.writeText(`${f.parent}/looks-innocent/.mcp.json` as FencedPath, 'no'))).toBe(
       'fenced',
     );
     expect(await readdir(`${f.home}/state/vault`)).toEqual([]);
@@ -404,8 +418,10 @@ describe('S179 descriptor reach, links, moves and held folders', () => {
     const f = await fresh({
       disk: nodeFs(() => crypto.randomUUID(), { descriptorFolder: '/nonexistent-descriptor-folder' }),
     });
-    await f.root.writeText(at(f.root, '.mcp.json'), 'x');
-    await f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'x');
+    // Writes are refused on such a host (below), so the files are put there by the test.
+    await writeFile(`${f.proj}/.mcp.json`, 'x');
+    await mkdir(`${f.proj}/.claude/skills/x`, { recursive: true });
+    await writeFile(`${f.proj}/.claude/skills/x/a.md`, 'x');
     expect(await refusalOf(() => f.root.remove(at(f.root, '.mcp.json')))).toBe('no_descriptor_reach');
     expect(await refusalOf(() => f.root.remove(at(f.root, '.claude/skills/x')))).toBe('no_descriptor_reach');
     expect(await readFile(`${f.proj}/.mcp.json`, 'utf8')).toBe('x');
@@ -670,7 +686,7 @@ describe('S179 a link swapped in after the judge (Md1) and the writes without de
     expect(await readFile(`${f.home}/config/a.md`, 'utf8')).toBe('victim');
   });
 
-  test('S179 GAP (BEFORE-GREEN, ports-pending writeChecked): without descriptor reach a write is by path, so the two-swap race still lands; this flips when the macOS FFI unit closes it', async () => {
+  test('S179 without descriptor reach the two-swap race writes nothing: the write is refused no_descriptor_reach before any temp is made', async () => {
     const where = { parent: '', proj: '' };
     const noReach = nodeFs(() => crypto.randomUUID(), { descriptorFolder: '/nonexistent-descriptor-folder' });
     const f = await fresh({ disk: twoSwap(noReach, where) });
@@ -678,20 +694,23 @@ describe('S179 a link swapped in after the judge (Md1) and the writes without de
     where.proj = f.proj;
     await mkdir(`${f.proj}/.claude/skills/x`, { recursive: true });
     await writeFile(`${f.home}/config/a.md`, 'victim');
-    expect(await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'plugin'))).toBeUndefined();
-    // the declared residual, stated exactly: a same-named file is overwritten. Nothing else is reached (the name and the
-    // content are the plugin's own), and the registered unit closes it for `work`, MCP and Skills at once.
-    expect(await readFile(`${f.home}/config/a.md`, 'utf8')).toBe('plugin');
+    expect(await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'plugin'))).toBe(
+      'no_descriptor_reach',
+    );
+    expect(await readFile(`${f.home}/config/a.md`, 'utf8')).toBe('victim');
   });
 
-  test('S179 a write without descriptor reach is NOT refused: MCP and Skills keep writing on a host that has none', async () => {
+  test('S179 a write without descriptor reach is refused no_descriptor_reach (fail closed); reads still work', async () => {
     const f = await fresh({
       disk: nodeFs(() => crypto.randomUUID(), { descriptorFolder: '/nonexistent-descriptor-folder' }),
     });
-    await f.root.writeText(at(f.root, '.mcp.json'), 'x');
-    await f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'y');
-    expect(await readFile(`${f.proj}/.mcp.json`, 'utf8')).toBe('x');
-    expect(await readFile(`${f.proj}/.claude/skills/x/a.md`, 'utf8')).toBe('y');
+    expect(await refusalOf(() => f.root.writeText(at(f.root, '.mcp.json'), 'x'))).toBe('no_descriptor_reach');
+    expect(await refusalOf(() => f.root.writeText(at(f.root, '.claude/skills/x/a.md'), 'y'))).toBe(
+      'no_descriptor_reach',
+    );
+    expect(await exists(`${f.proj}/.mcp.json`)).toBe(false);
+    await writeFile(`${f.proj}/.mcp.json`, 'z');
+    expect(await f.root.readText(at(f.root, '.mcp.json'))).toBe('z');
   });
 });
 

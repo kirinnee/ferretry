@@ -36,6 +36,13 @@ export interface FolderSteps {
   /** Removes the non-folder `leaf`. */
   unlink(leaf: string): Promise<void>;
   /**
+   * The folder `leaf`, opened from THIS folder's descriptor without following a link (`O_DIRECTORY | O_NOFOLLOW`): a
+   * link there answers `ELOOP`, a file `ENOTDIR`, nothing `ENOENT`. Held in its own right; the caller closes it.
+   */
+  openFolder(leaf: string): Promise<HeldChild>;
+  /** Makes the folder `leaf` in THIS folder with `mode` (`mkdirat`; the umask filters it): `false` when it was already there (`EEXIST`). */
+  makeFolder(leaf: string, mode: number): Promise<boolean>;
+  /**
    * The steps a folder REMOVE needs, which only the working-directory bracket can take (a directory listing and
    * `rmdir` have no `openat` spelling): `undefined` when the host loaded the descriptor calls but not the bracket, and a
    * remove of a folder then refuses `no_descriptor_reach` as before.
@@ -44,7 +51,9 @@ export interface FolderSteps {
 }
 
 /** A child folder opened below a held one, held in its own right: its steps, what it is, and how to let go of it. */
-interface HeldChild {
+export interface HeldChild {
+  /** The child's open descriptor, for the host to wrap (it stays the folder it was opened on: see {@link HeldFolder}). */
+  readonly fd: number;
   readonly identity: HeldIdentity;
   readonly steps: FolderSteps;
   close(): Promise<void>;
@@ -185,21 +194,30 @@ function removalSteps(
         ops.rmdir(leaf);
       });
     },
-    openFolder: async leaf => {
-      plainName('open', leaf);
-      await proveHeld('open', folder);
-      const fd = calls.openat(folder.fd, leaf, FOLDER_OPEN, 0);
-      let identity: HeldIdentity;
-      try {
-        identity = await identityOf(fd);
-      } catch (error) {
-        await closeOf(fd).catch(() => undefined);
-        throw error;
-      }
-      const child: HeldFolder = { fd, device: identity.device, inode: identity.inode };
-      return { identity, steps: folderSteps(calls, child, identityOf, support), close: async () => await closeOf(fd) };
-    },
+    openFolder: async leaf => await openChild(calls, folder, identityOf, support, leaf),
   };
+}
+
+/** The folder `leaf` of `folder`, opened from its descriptor without following (see {@link FolderSteps.openFolder}). */
+async function openChild(
+  calls: DescriptorCalls,
+  folder: HeldFolder,
+  identityOf: (fd: number) => Promise<HeldIdentity>,
+  support: RemovalSupport | undefined,
+  leaf: string,
+): Promise<HeldChild> {
+  plainName('open', leaf);
+  await proveHeld('open', folder);
+  const fd = calls.openat(folder.fd, leaf, FOLDER_OPEN, 0);
+  let identity: HeldIdentity;
+  try {
+    identity = await identityOf(fd);
+  } catch (error) {
+    await closeOf(fd).catch(() => undefined);
+    throw error;
+  }
+  const child: HeldFolder = { fd, device: identity.device, inode: identity.inode };
+  return { fd, identity, steps: folderSteps(calls, child, identityOf, support), close: async () => await closeOf(fd) };
 }
 
 /**
@@ -305,6 +323,18 @@ export function folderSteps(
     unlink: async leaf => {
       await proveHeld('unlink', folder);
       calls.unlinkat(folder.fd, leaf);
+    },
+    openFolder: async leaf => await openChild(calls, folder, identityOf, support, leaf),
+    makeFolder: async (leaf, mode) => {
+      plainName('make a folder', leaf);
+      await proveHeld('make a folder', folder);
+      try {
+        calls.mkdirat(folder.fd, leaf, mode);
+        return true;
+      } catch (error) {
+        if (codeOf(error) === 'EEXIST') return false;
+        throw error;
+      }
     },
     removal: support === undefined ? undefined : removalSteps(calls, folder, identityOf, support),
   };

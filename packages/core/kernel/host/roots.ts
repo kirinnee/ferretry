@@ -63,6 +63,7 @@ import {
   harnessFileRefusal,
   permittedMode,
   renameNamesRefusal,
+  spellingHolds,
   takesAnchor,
   takesLinks,
   takesRenames,
@@ -367,6 +368,12 @@ interface Scope {
    * judge (to another place inside it, which the declared set never reached) is refused instead of followed.
    */
   readonly literal?: true;
+  /**
+   * `project-files` only (S179): the REAL path of the scope's anchor (`within`, else the scoped folder). Every folder a
+   * write reaches below it is opened from its parent's descriptor without following a link (`openFolderBelow`), so a
+   * folder swapped for a link after the checks reaches nothing. The anchor is the one folder reached by path.
+   */
+  readonly descent?: string;
 }
 
 /** `real` is what the disk resolved `path` to: a literal scope refuses a name that resolved elsewhere (a link swapped in). */
@@ -588,6 +595,7 @@ async function openFolderMaking(
   mode: number,
   make: boolean,
 ): Promise<{ readonly folder: OpenedDirectory; readonly real: string; readonly created: readonly string[] }> {
+  if (scope.descent !== undefined) return await openFolderBelow(scope, scope.descent, full, mode, make);
   let existing = full;
   const created: string[] = [];
   const missing: string[] = [];
@@ -625,6 +633,94 @@ async function openFolderMaking(
     throw error;
   }
   return { folder, real: parent, created };
+}
+
+/**
+ * `openFolderMaking` for a `project-files` scope (S179): the anchor is opened once by its real path and proven (same
+ * device and inode as a fresh look), then EVERY folder below it, down to `full`, is opened from its parent's open
+ * descriptor with `O_DIRECTORY | O_NOFOLLOW` (a missing one made through the same descriptor with `make`), and the
+ * caller's leaf is then acted on through the last folder held. A folder swapped for a link at any level after the
+ * checks therefore answers `ELOOP` (`link_escape`) instead of carrying the write out of the project. A host that
+ * reaches an open folder by neither a descriptor path nor the C library's calls refuses `no_descriptor_reach`: this
+ * root fails closed there, it never falls back to the by-path walk.
+ */
+async function openFolderBelow(
+  scope: Scope,
+  anchor: string,
+  full: string,
+  mode: number,
+  make: boolean,
+): Promise<{ readonly folder: OpenedDirectory; readonly real: string; readonly created: readonly string[] }> {
+  if (!within(anchor, full) || !within(scope.base.real, full)) return refuse('link_escape');
+  const segments = relative(anchor, full)
+    .split('/')
+    .filter(part => part !== '');
+  const named = await scope.fs.identity(anchor).catch(() => undefined);
+  let folder = await scope.fs.openDirectory(anchor).catch(() => refuse('changed'));
+  const created: string[] = [];
+  let parent = anchor;
+  try {
+    if (named === undefined || !same(folder.identity, named)) refuse('changed');
+    // No path and no C calls reach this open folder: the leaf would be acted on by a path a link could redirect.
+    if (folder.entryPath('') === undefined && folder.at === undefined) refuse('no_descriptor_reach');
+    for (const segment of segments) {
+      const child = await folder
+        .openChild(segment, make ? { mode } : undefined)
+        .catch((error: unknown) => refuseChild(error));
+      await folder.close();
+      folder = child.folder;
+      parent = join(parent, segment);
+      if (child.created) created.push(parent);
+    }
+    const problem = await folderProblem(scope, parent, folder.identity);
+    if (problem !== undefined) refuse(problem);
+  } catch (error) {
+    await folder.close();
+    throw error;
+  }
+  return { folder, real: parent, created };
+}
+
+/**
+ * The LEAF folder of a `project-files` call (S179), made (when missing) and opened THROUGH the folder `openFolderBelow`
+ * holds, never by a path a link could redirect, then proven to still be at its place. Answers the open folder (the
+ * caller closes it) and whether this call made it. A name that is a file is `outside` (it is no folder of ours); a link
+ * is `link_escape`.
+ */
+async function openLeafBelow(
+  scope: Scope,
+  held: { readonly folder: OpenedDirectory; readonly real: string },
+  leaf: string,
+): Promise<{ readonly folder: OpenedDirectory; readonly created: boolean }> {
+  const child = await held.folder
+    .openChild(leaf, { mode: 0o700 })
+    .catch((error: unknown) => (errnoOf(error) === 'ENOTDIR' ? refuse('outside') : refuseChild(error)));
+  const problem = await folderProblem(scope, join(held.real, leaf), child.folder.identity).catch(
+    async (error: unknown) => {
+      await child.folder.close();
+      throw error;
+    },
+  );
+  if (problem !== undefined) {
+    await child.folder.close();
+    return refuse(problem);
+  }
+  return child;
+}
+
+/** What a folder that could not be opened below another means, by the errno alone (a path is never in the answer). */
+function refuseChild(error: unknown): never {
+  switch (errnoOf(error)) {
+    case 'ELOOP':
+    case 'ENOTDIR':
+      return refuse('link_escape');
+    case 'ENOENT':
+      return refuse('outside');
+    case 'ENOSYS':
+      return refuse('no_descriptor_reach');
+    default:
+      return refuse('changed');
+  }
 }
 
 /**
@@ -1076,6 +1172,8 @@ interface HandleSetup {
    * link; `undefined` when the scope names no anchor (every call is then judged exactly as before).
    */
   readonly linkFreeFolders: () => readonly string[] | undefined;
+  /** The scope's `within` anchor exactly as the caller spelled it (`project-files` reads it for its descent); `undefined` when none. */
+  readonly within?: string;
   readonly anchor: string | undefined;
   readonly scopedParent: string | undefined;
   readonly check: (path: string) => Result<FencedPath, FolderRefusal> | undefined;
@@ -1709,9 +1807,25 @@ function rootHandle(setup: HandleSetup): RootHandle {
       }
     }
   };
+  /**
+   * `project-files` only (S179): the scoped folder must resolve to exactly its spelling BELOW the anchor, else
+   * `link_escape`: `realpath(base)` equal to `realpath(within)` joined with `base`'s path relative to `within` (without
+   * `within`, the anchor is the folder itself and `realpath(base)` must equal `base`). The anchor itself and everything
+   * above it may be links (a symlinked project folder named as its own anchor works); a link BELOW it is refused, so
+   * the adapter's own compare of the folder against its registry holds at the kernel too. Answers the anchor's real
+   * path, which the descriptor walk starts from.
+   */
+  const spelledBelowAnchor = async (folder: string): Promise<string> => {
+    const anchorFolder = setup.within ?? folder;
+    const realAnchor = await fs.realpath(anchorFolder).catch(() => refuse('outside'));
+    const realFolder = await fs.realpath(folder).catch(() => refuse('outside'));
+    if (!spellingHolds(folder, setup.within, realFolder, realAnchor)) refuse('link_escape');
+    return realAnchor;
+  };
   const real = async (path: FencedPath, create = false): Promise<Checked> => {
     const root = base();
     if (root === undefined) refuse(name === 'work' ? 'unknown_ferret' : 'outside');
+    const descent = projectRoot ? await spelledBelowAnchor(root as string) : undefined;
     await anchoredFolders();
     if (create && scopedParent !== undefined) {
       // A forged path outside this scope must not create even an empty directory.
@@ -1730,6 +1844,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         ownerRoot,
         immutable,
         ...(projectRoot ? { literal: true as const } : {}),
+        ...(descent === undefined ? {} : { descent }),
       },
     };
   };
@@ -1798,9 +1913,17 @@ function rootHandle(setup: HandleSetup): RootHandle {
     const target = await realParent(to, true);
     const made = await openFolderMaking(target.scope, dirname(target.full), 0o700, true);
     try {
-      await fs
-        .mkdir(await entry(target.scope, made.folder, made.real, basename(target.full)), 0o700)
-        .catch(() => refuse('outside'));
+      if (target.scope.descent !== undefined) {
+        // A project folder: the new folder is made through the held one, so a parent swapped for a link after the
+        // check makes nothing outside (macOS has no descriptor path to make it through).
+        const child = await openLeafBelow(target.scope, made, basename(target.full));
+        await child.folder.close();
+        if (!child.created) refuse('outside');
+      } else {
+        await fs
+          .mkdir(await entry(target.scope, made.folder, made.real, basename(target.full)), 0o700)
+          .catch(() => refuse('outside'));
+      }
     } finally {
       await made.folder.close();
     }
@@ -1985,6 +2108,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const { full, scope } = await realParent(path, true);
       const made = await openFolderMaking(scope, dirname(full), 0o700, true);
       try {
+        if (scope.descent !== undefined) {
+          // A project folder: made and opened through the held folder, never by a path (see `openLeafBelow`). It keeps
+          // its mode when it was already there, and one this call makes is `0700`.
+          await (await openLeafBelow(scope, made, basename(full))).folder.close();
+          return;
+        }
         const at = await entry(scope, made.folder, made.real, basename(full));
         const info = await scope.fs.identity(at);
         if (info !== undefined && info.kind !== 'directory') refuse('outside');
@@ -2466,6 +2595,7 @@ export function rootsPortFor(
         plugin: layout.plugin,
         base,
         linkFreeFolders,
+        ...(within === undefined ? {} : { within }),
         anchor,
         scopedParent,
         check,

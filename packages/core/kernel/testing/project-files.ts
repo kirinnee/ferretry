@@ -5,7 +5,8 @@
  * lexical half: plain, inside the folder, outside the fence by name) and `permittedMode`.
  *
  * Order, as production: (1) the folder is one the handle was scoped to, (2) the path is plain, inside it and outside the
- * fence by name, (3) the declared set reaches it for this use, (4) a link at any level, (5) a hard-linked file.
+ * fence by name, (3) the declared set reaches it for this use, (3b) the folder is spelled as it resolves below its anchor,
+ * (4) a link at any level, (5) a hard-linked file.
  * The flat world keeps files, links, hard links and modes by key; a name is at `/project-files<absolute path>`.
  */
 import type { Instant } from '@ferretry/std';
@@ -20,7 +21,7 @@ import {
   type RootStat,
 } from '../contract/ports.ts';
 import { lexicalInRoot, RootError } from '../host/roots.ts';
-import { permittedMode } from '../host/root-rules.ts';
+import { permittedMode, spellingHolds } from '../host/root-rules.ts';
 import { refuseShared } from '../host/shared-trees.ts';
 import { type ProjectUse, projectPathRefusal } from '../manifest/project-files.ts';
 
@@ -33,11 +34,19 @@ export interface ProjectFilesTwin {
   readonly patterns: readonly string[] | undefined;
   /** The absolute folder this handle was scoped to, or `undefined` when the scope was refused. */
   readonly folder: string | undefined;
+  /** The scope's `within` anchor as the caller spelled it, or `undefined` when none. */
+  readonly within: string | undefined;
+  /**
+   * Folders the test says are links: an absolute folder → the real path it resolves to. The flat world has no links of
+   * its own at a folder level, so this is how a unit test says "this project folder (or one above it) is a link", and
+   * the spelling rule below the anchor (`spellingHolds`, the one production reads) is judged over it.
+   */
+  readonly linkedFolders: ReadonlyMap<string, string> | undefined;
   /** The kernel home the fence is judged against. */
   readonly fenceHome: string;
   /** Whether the manifest declared `permissions.setMode`. */
   readonly setModeDeclared: boolean;
-  /** A host that cannot reach an entry through a held folder (macOS today): every remove of an owner root is refused. */
+  /** A host that cannot reach an entry through a held folder (macOS today): every remove of an owner root, and every write a project folder makes, is refused. */
   readonly noDescriptorReach: boolean;
   readonly files: Map<string, string>;
   readonly links: Map<string, string>;
@@ -65,6 +74,15 @@ export const PROJECT_SOURCES = new WeakMap<object, (path: string) => void>();
 export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
   const { folder, files, links, hardLinks, modes, inodes } = twin;
   const key = projectFileKey;
+  /** The real path of `path` in the test world: the longest linked folder at or above it is replaced by where it leads. */
+  const realOf = (path: string): string => {
+    const linked = twin.linkedFolders;
+    if (linked === undefined) return path;
+    const hops = [...linked.keys()]
+      .filter(from => path === from || path.startsWith(`${from}/`))
+      .sort((a, b) => b.length - a.length)[0];
+    return hops === undefined ? path : `${linked.get(hops) as string}${path.slice(hops.length)}`;
+  };
   const lexical = (path: string): string => {
     if (folder === undefined) throw new RootError('outside');
     const found = lexicalInRoot(twin.fenceHome, folder, true, path);
@@ -76,10 +94,25 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     const full = lexical(path);
     const refusal = projectPathRefusal(twin.patterns, relative(folder as string, full), use);
     if (refusal !== undefined) throw new RootError(refusal);
+    // The folder resolves to exactly its spelling below the anchor (the anchor itself may be a link), else `link_escape`.
+    if (
+      !spellingHolds(folder as string, twin.within, realOf(folder as string), realOf(twin.within ?? (folder as string)))
+    )
+      throw new RootError('link_escape');
     const steps = relative(folder as string, full).split('/');
     const through = leaf === 'follow' ? steps.length : steps.length - 1;
     for (let index = 1; index <= through; index += 1)
       if (links.has(key(`${folder}/${steps.slice(0, index).join('/')}`))) throw new RootError('link_escape');
+    return full;
+  };
+  /**
+   * `reach` for a call that MAKES or WRITES something: a host with no way to reach a held folder (macOS whose C calls
+   * could not load) refuses it `no_descriptor_reach`, as production does for every project-files write (it never falls
+   * back to a path), after the name passed every check.
+   */
+  const reachForWrite = (path: string, use: ProjectUse, leaf: Leaf): string => {
+    const full = reach(path, use, leaf);
+    if (twin.noDescriptorReach) throw new RootError('no_descriptor_reach');
     return full;
   };
   const stat = (full: string): RootStat => ({
@@ -111,7 +144,7 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     text: string,
     options: { readonly mode?: number; readonly exclusive?: boolean; readonly replaceExisting?: boolean } | undefined,
   ): string => {
-    const full = reach(path, 'file', 'follow');
+    const full = reachForWrite(path, 'file', 'follow');
     const name = key(full);
     if (hardLinks.has(name) && files.has(name)) throw new RootError('hard_link');
     if (options?.exclusive === true && (files.has(name) || links.has(name))) throw new Error(`${full} already exists`);
@@ -149,7 +182,7 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
       writing(path, new TextDecoder().decode(bytes), options);
     },
     publish: async (path, bytes, options) => {
-      const full = reach(path, 'file', 'follow');
+      const full = reachForWrite(path, 'file', 'follow');
       const name = key(full);
       if (hardLinks.has(name) && files.has(name)) throw new RootError('hard_link');
       if (options?.exclusive === true && files.has(name)) return { outcome: 'exists' };
@@ -183,7 +216,7 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     },
     copyTree: async (source, from, to, options) => {
       const known = twin.known(source);
-      reach(to, 'tree', 'follow');
+      reachForWrite(to, 'tree', 'follow');
       if (known === undefined || known.plugin !== twin.plugin) throw new RootError('not_declared');
       // The source is gated by ITS handle (a project folder: the declared set, no link on the way), as production does.
       PROJECT_SOURCES.get(source)?.(from);
@@ -196,7 +229,7 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     },
     copyShared: async () => refuseShared('not_internal'),
     ensurePrivateDirectory: async path => {
-      reach(path, 'make', 'keep');
+      reachForWrite(path, 'make', 'keep');
     },
     lstat: async (path): Promise<RootLstat | undefined> => {
       const full = reach(path, 'probe', 'keep');
@@ -207,7 +240,7 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
         : undefined;
     },
     makeDirectory: async path => {
-      reach(path, 'make', 'follow');
+      reachForWrite(path, 'make', 'follow');
     },
     realPath: async path => {
       const full = reach(path, 'probe', 'follow');
