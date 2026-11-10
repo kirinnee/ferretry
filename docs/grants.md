@@ -444,10 +444,11 @@ for devices that are still paired. Whether that instant is still inside the peri
 in force, so a shorter period set meanwhile applies at once; revoking a device removes its line; a damaged
 file asks every device again, with one boot notice. A per-act step-up and a fresh "for this act" proof stay
 in memory and end with the process: they are minutes long, and an update is the moment to ask again for one.
-A call claims only a fresh passkey proof that already existed when it was admitted, and claims it once: a proof made
-after the admission is never taken by that call or by work it spawns (a config write that runs after the request
-returned is then held), even after a lock and an unlock.
 Writing that file needs this machine's disk, which already holds the admin token — it widens nothing.
+A call claims only a fresh passkey proof that already existed when it was admitted, and claims it once: a proof made
+after the admission is not taken by that call or by work it spawns (a config write that runs after the request
+returned is then held), even after a lock and an unlock. The admission instant and the proof's are wall-clock
+milliseconds, so a proof made in the very same millisecond as the admission is not told apart from an earlier one.
 **While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
 the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
 with the unlock turned off always asks per act. **Narrowing never asks again** (below). **Adding access always asks:** minting a pairing code,

@@ -77,7 +77,9 @@ function judgeConfirmingCaller(input: ConfigWriteJudgement, secretAdd: boolean):
   if (!governance.decide({ capability: CAPABILITIES.fleet, axis: 'use' }).allowed) return 'hold';
   if (!governance.governed) return 'apply';
   if (!claimLooseningProof(standing)) return 'hold';
-  // A secret add rides no route that spent the step-up at admission, so it spends it here (`G79`): one act, one step-up.
+  // The add is judged against the LIVE standing. A route that already spent the per-act step-up at admission (every
+  // `fleet.configure` route does, under `stepUpOnActions`) leaves none for the live decision to find, so the add is
+  // held; where the step-up is still held the add spends it here (`G79`): one act, one step-up.
   if (secretAdd && configure.steppedUp === true) standing.spendStepUp?.();
   return 'apply';
 }

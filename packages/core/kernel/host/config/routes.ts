@@ -6,7 +6,7 @@
  * (`Admission.judgeConfigAccess`), asked per file before the act.
  *
  * A loosening is put into effect at once only when Gate says this call may (`mayLoosen`: somebody at this machine, or
- * a device with a passkey proved for the act); anyone else's is written and HELD, the tighter version in effect. No
+ * a device with a fresh passkey proof that already existed when the request was admitted); anyone else's is written and HELD, the tighter version in effect. No
  * raw secret is accepted: the writer refuses it like a file that does not parse, and no issue repeats the value.
  *
  * `noStore` on all four: every answer is a statement about now.
