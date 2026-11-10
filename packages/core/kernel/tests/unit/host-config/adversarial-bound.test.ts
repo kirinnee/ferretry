@@ -57,11 +57,47 @@ function world(fs: HostFs & { seed(path: string, data: string): void } = createM
 
 const call = (body: Record<string, unknown>): AgentConfigCall => AgentConfigCallSchema.parse(body);
 
-/** The time `act` takes, in ms. */
+/**
+ * The CPU the main thread spends in `act`, in ms (everything here is in memory, so all of it is on the main thread). A
+ * bound on the clock measures the box as much as the code, and a call is hundreds of ms, far above the CPU clock's tick.
+ */
 async function timed(act: () => Promise<unknown> | unknown): Promise<number> {
-  const started = performance.now();
+  if (typeof process.threadCpuUsage !== 'function') throw new Error('process.threadCpuUsage is not available');
+  const before = process.threadCpuUsage();
   await act();
-  return performance.now() - started;
+  const spent = process.threadCpuUsage(before);
+  return (spent.user + spent.system) / 1_000;
+}
+
+/**
+ * The CPU clock must read something. Only the !!omap shapes (hundreds of ms a call) can say so: a cheap shape, such as a
+ * long comment, costs under the clock's 1 ms tick and reads 0 on a clock that works.
+ */
+function clockReads(label: string, ms: number): void {
+  if (label.includes('!!omap')) expect(ms).toBeGreaterThan(0);
+}
+
+/**
+ * The BEST of up to three samples (the same shape as `issue-cap.test.ts`): a quadratic path is slow in every sample and
+ * fails, a collection or a busy moment on a shared runner lands in one and does not. A further sample is taken only
+ * while the best so far is at or over half the bound, so a fast first sample costs nothing more. `sample` is told which
+ * attempt it is: a later one starts from a world of its own, because a check one load made is remembered and a second
+ * call on the same world would measure the memo, not the parse.
+ */
+async function bestOf(sample: (attempt: number) => Promise<number>): Promise<number> {
+  let best = Number.POSITIVE_INFINITY;
+  for (let attempt = 0; attempt < 3 && best >= BOUND_MS / 2; attempt += 1) {
+    best = Math.min(best, await sample(attempt));
+  }
+  return best;
+}
+
+/** A world holding the last good file, loaded: what every sample starts from. */
+async function prepared(): Promise<ReturnType<typeof world>> {
+  const fresh = world();
+  fresh.fs.seed(VOICE, 'limit: 7\n');
+  await fresh.files.reload();
+  return fresh;
 }
 
 const SHAPES = adversarialTexts(CONFIG_FILE_MAX_BYTES);
@@ -76,30 +112,48 @@ describe('the hostile shapes themselves', () => {
 describe('every hostile shape at the size cap answers within the bound, at every door', () => {
   for (const [label, text] of SHAPES) {
     test(`T-0033 T-0034 ${label}: validate and write each answer in under ${BOUND_MS} ms`, async () => {
-      const { agent, fs, files } = world();
-      fs.seed(VOICE, 'limit: 7\n');
-      await files.reload();
+      const first = await prepared();
+      let last = first;
+      let slowest = 0;
       for (const tool of ['config.validate', 'config.write'] as const) {
-        const spent = await timed(() => agent.run(call({ tool, path: 'voice.yaml', text }), ferretStanding));
+        const spent = await bestOf(async attempt => {
+          last = attempt === 0 ? first : await prepared();
+          return await timed(() => last.agent.run(call({ tool, path: 'voice.yaml', text }), ferretStanding));
+        });
+        slowest = Math.max(slowest, spent);
         expect(spent).toBeLessThan(BOUND_MS);
       }
+      clockReads(label, slowest);
       // Either the text checked and is in effect, or it was refused and the file is as it was.
+      const { fs, files } = last;
       const now = await fs.readText(VOICE);
       expect(now === text || now === 'limit: 7\n').toBe(true);
       if (now !== text) expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
     });
 
     test(`T-0032 ${label}, hand-written: the reload and config_read each answer in under ${BOUND_MS} ms`, async () => {
-      const { agent, fs, files } = world();
-      fs.seed(VOICE, 'limit: 7\n');
-      await files.reload();
-      fs.seed(VOICE, text);
-      expect(await timed(() => files.reload())).toBeLessThan(BOUND_MS);
+      const first = await prepared();
+      let last = first;
+      const reloaded = await bestOf(async attempt => {
+        last = attempt === 0 ? first : await prepared();
+        last.fs.seed(VOICE, text);
+        return await timed(() => last.files.reload());
+      });
+      clockReads(label, reloaded);
+      expect(reloaded).toBeLessThan(BOUND_MS);
+      const { files } = last;
       const state = files.status().files.find(file => file.path === 'voice.yaml')?.state;
       if (state !== 'ok') expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
-      expect(
-        await timed(() => agent.run(call({ tool: 'config.read', path: 'voice.yaml' }), ferretStanding)),
-      ).toBeLessThan(BOUND_MS);
+      const read = await bestOf(async attempt => {
+        let target = last;
+        if (attempt > 0) {
+          target = await prepared();
+          target.fs.seed(VOICE, text);
+          await target.files.reload();
+        }
+        return await timed(() => target.agent.run(call({ tool: 'config.read', path: 'voice.yaml' }), ferretStanding));
+      });
+      expect(read).toBeLessThan(BOUND_MS);
     });
   }
 });

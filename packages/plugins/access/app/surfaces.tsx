@@ -4,7 +4,11 @@ import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { AddDeviceSurface } from './features/settings/add-device-settings.tsx';
 import { pairingClientOf, useMachineOf } from './daemon-scope.tsx';
+import { daemonDisplayName } from './shell-pairing.ts';
 import { DevicePermissionsSetting } from './features/settings/device-permissions-settings.tsx';
+import { GrantsSurface } from './features/settings/grants-settings.tsx';
+import { SecurityLogSurface } from './features/settings/security-log-settings.tsx';
+import { SecuritySurface } from './features/settings/security-settings.tsx';
 import {
   MachinesNotificationsSettings,
   NotificationsOffPanel,
@@ -23,6 +27,44 @@ export function devicesTab(client: PluginClient) {
     const connection = useMachineOf();
     return connection === undefined ? null : (
       <AddDeviceSurface connection={connection} createClient={async () => pairingClientOf(client)} />
+    );
+  };
+}
+
+/**
+ * Settings › ‹machine› › What devices may do (v4's `grants` tab): the operator's per-capability limits for callers that
+ * are not on this machine. It only MOUNTS today's surface — what a device may do is decided by Gate, not here — and reads
+ * Gate's `GET /v1/grants` / `PATCH /v1/grants` through this machine's own client.
+ */
+export function grantsTab(client: PluginClient, useMachine: typeof useMachineOf = useMachineOf) {
+  return function GrantsTab() {
+    const connection = useMachine();
+    return connection === undefined ? null : (
+      <GrantsSurface connection={connection} createClient={async () => pairingClientOf(client)} />
+    );
+  };
+}
+
+/** Settings › ‹machine› › Security (v4's `security` tab): the passkeys this device holds for this machine, and adding another. */
+export function securityTab(client: PluginClient, useMachine: typeof useMachineOf = useMachineOf) {
+  return function SecurityTab() {
+    const connection = useMachine();
+    return connection === undefined ? null : (
+      <SecuritySurface
+        connection={connection}
+        machineName={daemonDisplayName(connection)}
+        createClient={async () => pairingClientOf(client)}
+      />
+    );
+  };
+}
+
+/** Settings › ‹machine› › Audit log (v4's Security log tab; the product word is "audit"): recent pairings, removals and refused attempts. */
+export function securityLogTab(client: PluginClient, useMachine: typeof useMachineOf = useMachineOf) {
+  return function SecurityLogTab() {
+    const connection = useMachine();
+    return connection === undefined ? null : (
+      <SecurityLogSurface connection={connection} createClient={async () => pairingClientOf(client)} />
     );
   };
 }
