@@ -24,6 +24,7 @@ afterEach(async () => {
 });
 
 const LOOK_MS = 5_000;
+const SESSION = 'mw7bp88g-50e00159';
 const KEY = defineState({ name: 'signing', path: 'signing.key', store: 'secret', format: 1 });
 const DOCUMENT = defineState({ name: 'tokens', path: 'tokens.json', store: 'json', format: 1 });
 const JOURNAL = defineState({ name: 'journal', path: 'journal.jsonl', store: 'jsonl', format: 1 });
@@ -124,11 +125,14 @@ test('S40 update, append and createPrivateDirectory pin what they make before th
 test('S41 a private file created after boot through an internal root and aliased under another name is refused fenced', async () => {
   const fs = nodeFs(() => 'r');
   const { home, roots, stranger } = await layout(fs);
-  const session = roots('ferrets', ['sessions']).root('sessions', { subfolder: 'F1' });
+  const session = roots('ferrets', ['sessions']).root('sessions', { subfolder: SESSION });
   const environment = session.resolve('environment.json');
   if (!environment.ok) throw new Error(environment.error);
   await session.writeText(environment.value, 'FAKE-credential');
-  await link(`${home}/state/ferrets/sessions/F1/environment.json`, `${home}/state/stranger/agent-homes/F1/stolen.json`);
+  await link(
+    `${home}/state/ferrets/sessions/${SESSION}/environment.json`,
+    `${home}/state/stranger/agent-homes/F1/stolen.json`,
+  );
   expect(await readOf(stranger, 'stolen.json')).toBe('refused:fenced');
 });
 
