@@ -8,7 +8,7 @@ import { renameSync, symlinkSync } from 'node:fs';
 import { link, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type HostFs, nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
+import { type HostFs, type OpenedDirectory, nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
 import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 import { ProjectSkillFiles } from '../../daemon/adapters/project-skill-files.ts';
 
@@ -207,26 +207,49 @@ describe('a registered project’s skills over the real imports root', () => {
     expect(text).not.toBe(doc('stolen'));
   });
 
-  test('GAP [kernel: imports scoped folder link] a swap inside the read call itself reads one outside SKILL.md', async () => {
-    const w = await world();
-    await mkdir(join(w.parent, 'outside', 'skills', 'good'), { recursive: true });
-    await writeFile(join(w.parent, 'outside', 'skills', 'good', 'SKILL.md'), doc('stolen'));
-    const inner = nodeFs(() => crypto.randomUUID());
-    let seen = 0;
-    const racing = {
-      ...inner,
-      lstat: async (path: string) => {
-        const found = await inner.lstat(path);
-        if (path === w.skills && ++seen === 2) {
-          // The second walk is the readText call's own: the swap lands after its lstat, before its open.
-          renameSync(w.skills, join(w.project, '.claude', 'skills-moved'));
-          symlinkSync(join(w.parent, 'outside', 'skills'), w.skills);
-        }
-        return found;
-      },
-    } as HostFs;
-    // Today's behaviour, declared: one bounded read of one outside SKILL.md goes through the link.
-    expect(await w.filesOver(racing).read(`${w.skills}/good/SKILL.md`, 1000)).toBe(doc('stolen'));
+  test('R-0198 a skills folder swapped for a link inside the read call is refused: no outside text', async () => {
+    // The swap lands after EVERY disk step of one read in turn (before the first, between any two, after the last):
+    // wherever it lands, the outside SKILL.md is never returned.
+    const steps = async (swapAfter: number | undefined): Promise<{ text: string | undefined; calls: number }> => {
+      const w = await world();
+      await mkdir(join(w.parent, 'outside', 'skills', 'good'), { recursive: true });
+      await writeFile(join(w.parent, 'outside', 'skills', 'good', 'SKILL.md'), doc('stolen'));
+      const inner = nodeFs(() => crypto.randomUUID());
+      let calls = 0;
+      const swap = (): void => {
+        renameSync(w.skills, join(w.project, '.claude', 'skills-moved'));
+        symlinkSync(join(w.parent, 'outside', 'skills'), w.skills);
+      };
+      const counted =
+        (name: string, run: (...args: never[]) => unknown) =>
+        async (...args: never[]): Promise<unknown> => {
+          const result = await run(...args);
+          calls += 1;
+          if (calls === swapAfter) swap();
+          return name === 'openDirectory' ? watched(result as OpenedDirectory) : result;
+        };
+      const watched = (folder: OpenedDirectory): OpenedDirectory => ({
+        ...folder,
+        openChild: async (leaf, make) => {
+          const child = await folder.openChild(leaf, make);
+          calls += 1;
+          if (calls === swapAfter) swap();
+          return { ...child, folder: watched(child.folder) };
+        },
+      });
+      const racing = Object.fromEntries(
+        Object.entries(inner).map(([name, run]) => [name, counted(name, run as (...args: never[]) => unknown)]),
+      ) as unknown as HostFs;
+      if (swapAfter === 0) swap();
+      return { text: await w.filesOver(racing).read(`${w.skills}/good/SKILL.md`, 1000), calls };
+    };
+    const dry = await steps(undefined);
+    expect(dry.text).toBe(doc('good'));
+    const outcomes: (string | undefined)[] = [];
+    for (let after = 0; after <= dry.calls + 1; after += 1) outcomes.push((await steps(after)).text);
+    expect(outcomes).not.toContain(doc('stolen'));
+    // The swap did land mid-call somewhere and was refused (an empty answer), not merely missed.
+    expect(outcomes).toContain(undefined);
   });
 
   test('R-0198 a kernel that refuses to open the folder reads nothing, and never throws', async () => {

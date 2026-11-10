@@ -23,11 +23,14 @@ const withoutTrailingSlash = (path: string): string => path.replace(/(?<=.)\/+$/
  *   `.claude`, at `.claude/skills` or anywhere between the project folder and the skills folder makes every call on the
  *   root refuse `link_escape`, which this reader shows as nothing (an empty listing, no text). The kernel judges that
  *   at every call, right before the folder is touched, so a skills folder swapped for a link after an earlier call is
- *   refused at the next one. Residual: the `imports` root's `within` walk lstats each folder below the anchor by path and
- *   the read then opens the scoped folder by path, so a skills folder swapped for a link after that lstat and before
- *   the open, inside ONE call, lets one bounded read (at most the caller's `maxBytes`, one `SKILL.md`) through the link;
- *   it closes when `imports` reaches its folder by descriptor as `project-files` does. The kernel also keeps every listed folder and file INSIDE the scoped folder
- *   (`link_escape`, `hard_link`).
+ *   refused at the next one. The root reaches the skills folder BY DESCRIPTOR: the project folder is opened once and
+ *   proven, and each folder below it is opened from its parent's descriptor without following a link, so a skills
+ *   folder swapped for a link at any step of ONE call is refused (`link_escape`) and reads nothing. Residual: a host that
+ *   reaches an open folder by neither `/proc/self/fd` nor the C library's descriptor calls lists and stats by path after
+ *   the link walk, where a swap landing inside one call can show the outside folder's names and sizes (never a file's
+ *   text), and a host with the calls but not the working-directory bracket lists by path the same way (its reads and
+ *   stats still go by descriptor); the daemon's doctor says so once at boot. The kernel also keeps every listed folder and file INSIDE
+ *   the scoped folder (`link_escape`, `hard_link`).
  */
 export class ProjectSkillFiles implements SkillFilesPort {
   /** `open(folder, within)` is the kernel's `imports` root scoped to `folder`, anchored at the registered project folder `within`. */

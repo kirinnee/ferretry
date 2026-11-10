@@ -120,6 +120,7 @@ export class VirtualFs {
           identity,
           entryPath: () => undefined,
           openChild: unused,
+          openFile: unused,
           chmod: unused,
           sync: unused,
           close: async () => undefined,

@@ -16,7 +16,7 @@ import {
   renameSync,
   unlinkSync,
 } from 'node:fs';
-import { mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import {
@@ -157,6 +157,41 @@ describe('S179 openChild refuses a name that is not one plain name, and a descri
     await expect(top.openChild('made', { mode: 0o700 })).rejects.toMatchObject({ code: 'EBADF' });
     expect(await stat(`${parent}/other/made`).catch(() => undefined)).toBeUndefined();
     expect(await stat(`${parent}/held/made`).catch(() => undefined)).toBeUndefined();
+    await top.close();
+  });
+
+  test('R-0198 openFile refuses a name that is not one plain name (EINVAL) on either host', async () => {
+    const parent = await scratch();
+    await writeFile(`${parent}/f.txt`, 'fixture');
+    for (const disk of [nodeFs(() => crypto.randomUUID()), macOS()]) {
+      const top = await disk.openDirectory(parent);
+      for (const leaf of ['a/b', '..', '.', '', 'a\0b']) {
+        await expect(top.openFile(leaf)).rejects.toMatchObject({ code: 'EINVAL' });
+      }
+      await top.close();
+    }
+  });
+
+  test('R-0198 openFile on a top folder of a host with the C calls reads the file through the held descriptor', async () => {
+    const parent = await scratch();
+    await writeFile(`${parent}/f.txt`, 'fixture');
+    const top = await macOS().openDirectory(parent);
+    const file = await top.openFile('f.txt');
+    expect(new TextDecoder().decode(await file.read())).toBe('fixture');
+    await file.close();
+    await top.close();
+  });
+
+  test('R-0198 a held folder whose descriptor number now names another folder answers EBADF to openFile and opens nothing', async () => {
+    const parent = await scratch();
+    await mkdir(`${parent}/held`);
+    await mkdir(`${parent}/other`);
+    await writeFile(`${parent}/held/f.txt`, 'held');
+    await writeFile(`${parent}/other/f.txt`, 'other');
+    const top = await nodeFs(() => crypto.randomUUID()).openDirectory(`${parent}/held`);
+    const fd = Number(/\/proc\/self\/fd\/(\d+)\//.exec(top.entryPath('x') ?? '')?.[1]);
+    replaceDescriptor(fd, `${parent}/other`);
+    await expect(top.openFile('f.txt')).rejects.toMatchObject({ code: 'EBADF' });
     await top.close();
   });
 });

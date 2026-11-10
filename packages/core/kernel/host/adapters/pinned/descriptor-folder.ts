@@ -1,4 +1,4 @@
-import { type BigIntStats, close, constants, fchmod, fstat, fsync, write } from 'node:fs';
+import { type BigIntStats, close, constants, fchmod, fstat, fsync, read as readFd, write } from 'node:fs';
 import type { DescriptorBracket } from './descriptor-bracket.ts';
 import { type DescriptorCalls, isSingleName, O_CLOEXEC } from './descriptor-calls.ts';
 
@@ -40,6 +40,13 @@ export interface FolderSteps {
    * link there answers `ELOOP`, a file `ENOTDIR`, nothing `ENOENT`. Held in its own right; the caller closes it.
    */
   openFolder(leaf: string): Promise<HeldChild>;
+  /**
+   * The file `leaf`, opened for READING from THIS folder's descriptor without following a link or blocking
+   * (`O_RDONLY | O_NOFOLLOW | O_NONBLOCK`), after proving the descriptor is still the folder it was opened on. Throws the
+   * errno's `code` (`ELOOP` for a link, `ENOENT` for nothing, `EACCES` for a file it may not read); the descriptor is
+   * closed on every path that does not hand it out. Held in its own right; the caller closes it. Additive.
+   */
+  openFile(leaf: string): Promise<HeldFile>;
   /** Makes the folder `leaf` in THIS folder with `mode` (`mkdirat`; the umask filters it): `false` when it was already there (`EEXIST`). */
   makeFolder(leaf: string, mode: number): Promise<boolean>;
   /**
@@ -56,6 +63,20 @@ export interface HeldChild {
   readonly fd: number;
   readonly identity: HeldIdentity;
   readonly steps: FolderSteps;
+  close(): Promise<void>;
+}
+
+/** A file opened below a held folder, held in its own right: what it is and the reads that use ITS descriptor. */
+export interface HeldFile {
+  readonly identity: HeldIdentity;
+  /** Up to `length` bytes starting at `position` (`pread`, through this descriptor); fewer at the end of the file. */
+  readAt(position: number, length: number): Promise<Uint8Array>;
+  /** The file's size now (`fstat` of this descriptor). */
+  size(): Promise<number>;
+  /** `fsync` of this descriptor. */
+  sync(): Promise<void>;
+  /** `fchmod` of this descriptor. */
+  chmod(mode: number): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -220,6 +241,41 @@ async function openChild(
   return { fd, identity, steps: folderSteps(calls, child, identityOf, support), close: async () => await closeOf(fd) };
 }
 
+/** The file `leaf` of `folder`, opened to read from its descriptor without following (see {@link FolderSteps.openFile}). */
+async function openFileBelow(
+  calls: DescriptorCalls,
+  folder: HeldFolder,
+  identityOf: (fd: number) => Promise<HeldIdentity>,
+  leaf: string,
+): Promise<HeldFile> {
+  plainName('open', leaf);
+  await proveHeld('open', folder);
+  const fd = calls.openat(folder.fd, leaf, LOOK, 0);
+  let identity: HeldIdentity;
+  try {
+    identity = await identityOf(fd);
+  } catch (error) {
+    await closeOf(fd).catch(() => undefined);
+    throw error;
+  }
+  return {
+    identity,
+    readAt: async (position, length) => {
+      const buffer = new Uint8Array(length);
+      const count = await new Promise<number>((resolve, reject) => {
+        readFd(fd, buffer, 0, length, position, (error, bytesRead) =>
+          error === null ? resolve(bytesRead) : reject(error),
+        );
+      });
+      return buffer.subarray(0, count);
+    },
+    size: async () => Number((await fstatOf(fd)).size),
+    sync: async () => await settle(done => fsync(fd, done)),
+    chmod: async mode => await settle(done => fchmod(fd, mode, done)),
+    close: async () => await closeOf(fd),
+  };
+}
+
 /**
  * The steps on `folder`, filled with `identityOf` (the host's reading of an `fstat` answer on a descriptor). `support`:
  * the working-directory bracket and what a folder REMOVE needs of it; without it `removal` is `undefined`.
@@ -325,6 +381,7 @@ export function folderSteps(
       calls.unlinkat(folder.fd, leaf);
     },
     openFolder: async leaf => await openChild(calls, folder, identityOf, support, leaf),
+    openFile: async leaf => await openFileBelow(calls, folder, identityOf, leaf),
     makeFolder: async (leaf, mode) => {
       plainName('make a folder', leaf);
       await proveHeld('make a folder', folder);

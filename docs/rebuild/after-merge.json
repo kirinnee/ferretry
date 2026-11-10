@@ -43,6 +43,11 @@
       "owner": "gustavo"
     },
     {
+      "id": "imports-descriptor-darwin",
+      "what": "imports descriptor read on darwin: run the imports/skills/.mcp.json read tests on a real Mac",
+      "owner": "gustavo"
+    },
+    {
       "id": "ffi-descriptor-verify",
       "what": "the FFI descriptor verify line, which needs the darwin run",
       "owner": "gustavo"

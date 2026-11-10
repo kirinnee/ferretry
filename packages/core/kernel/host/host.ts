@@ -112,6 +112,7 @@ import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
+import { descriptorReachNote } from './descriptor-reach.ts';
 import { doctorReport } from './doctor-report.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
@@ -559,6 +560,9 @@ async function bootLocked(
   let enabled = yamlEnabled;
   let plan = planWith(enabled);
   const bootNotes: DoctorLine[] = [];
+  // Said once here, never per call: a host that cannot hold every folder it reads by descriptor.
+  const reachNote = await descriptorReachNote(adapters.fs);
+  if (reachNote !== undefined) bootNotes.push(reachNote);
   /**
    * The private places that are past their budget now (§7.7). Each one makes every other root on that device refuse
    * everything, so it is never silent: one log line per change, and a standing doctor line until it fits again.
