@@ -6,7 +6,10 @@
  */
 
 import { describe, it } from 'bun:test';
+import type { PairedDaemon } from '@ferretry/app';
 import should from 'should';
+import { carrierSocketUrl, daemonCarriers } from '../../../app/carriers/router.ts';
+import type { ConnectionMethod } from '../../../app/lib/connection.ts';
 import {
   decideRelayCarrier,
   RELAY_BANDWIDTH_RECHECK_MS,
@@ -83,6 +86,15 @@ describe('the relay carrier decision', () => {
       should(new URL(relays[0]?.url ?? '').host).equal(decision.relayHost);
       // The daemon's socket is on the same host the browser will dial.
       should(new URL(decision.socketUrl).host).equal(decision.relayHost);
+
+      // THE BROWSER HALF: the published entry goes through the browser's own path (`daemonCarriers` →
+      // `carrierSocketUrl`), and the socket it dials is on the host the claim covers — port, case and prefix included.
+      const paired = { daemon: DAEMON_ID, address: 'https://laptop.example.test', carriers: published } as PairedDaemon;
+      const browserRelays = daemonCarriers(paired).filter(method => method.kind === 'relay');
+      should(browserRelays).have.length(1);
+      const browserSocket = carrierSocketUrl(browserRelays[0] as ConnectionMethod, DAEMON_ID);
+      should(browserSocket).be.a.String();
+      should(new URL(browserSocket ?? '').host).equal(decision.relayHost);
     }
 
     // A switched-off relay publishes no address, so there is no host for a browser to dial unsigned.
