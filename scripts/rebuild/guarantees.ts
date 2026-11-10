@@ -105,6 +105,7 @@ export function normaliseOwner(raw: string): { owner: string; with: string[]; wo
 
 /** REMOVED rows name no owner. Assigned by hand from the row text (documented in docs/rebuild/ports/README.md). */
 export const REMOVED_OWNER: Record<string, string> = {
+  R68: 'connections',
   G69: 'access',
   G70: 'access',
   G71: 'access',
