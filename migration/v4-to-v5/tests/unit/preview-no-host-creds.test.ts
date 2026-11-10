@@ -122,6 +122,24 @@ async function previewHome(): Promise<{ home: string; stubs: string; hostile: Re
 }
 
 const spawn = (argv: string[], env: Record<string, string>) => Bun.spawnSync(argv, { env });
+
+/**
+ * A PATH with the system's programs but no `gh`, on any host: a GitHub runner ships `/usr/bin/gh`, so a bare
+ * `/usr/bin:/bin` is not "no gh" there (CI run 42926458871 failed NHC-3b on exactly that). Every entry of
+ * `/usr/bin` and `/bin` but `gh` is linked into a temp folder, the first one found winning, as PATH order does.
+ */
+async function pathWithoutGh(): Promise<string> {
+  const dir = join(root, 'no-gh-bin');
+  await mkdir(dir);
+  for (const from of ['/usr/bin', '/bin']) {
+    const names = await readdir(from).catch(() => [] as string[]);
+    for (const name of names) {
+      if (name === 'gh') continue;
+      await symlink(join(from, name), join(dir, name)).catch(() => undefined);
+    }
+  }
+  return dir;
+}
 const parseEnv = (out: string): Map<string, string> =>
   new Map(
     out
@@ -270,8 +288,10 @@ describe('NHC-3 the start check proves the daemon reaches no credential, and ref
 
   test('NHC-3b with no gh on the PATH the check passes and says so', async () => {
     const { home, hostile } = await previewHome();
-    spawn([join(home, 'bin/fy5'), 'daemon', 'start'], { ...hostile, PATH: '/usr/bin:/bin' });
-    const done = await credentialCheck({ ...realWorld(home), callerEnv: { ...hostile, PATH: '/usr/bin:/bin' } });
+    const noGh = await pathWithoutGh();
+    expect(await lstat(join(noGh, 'gh')).catch(() => null)).toBeNull();
+    spawn([join(home, 'bin/fy5'), 'daemon', 'start'], { ...hostile, PATH: noGh });
+    const done = await credentialCheck({ ...realWorld(home), callerEnv: { ...hostile, PATH: noGh } });
     expect(done.ok).toBe(true);
     expect(done.passed.join('\n')).toContain('no `gh` on the preview daemon PATH');
   });
