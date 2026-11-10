@@ -300,7 +300,10 @@ describe('first pairing through the real rendezvous', () => {
         expect(bytes.length).toBeGreaterThan(HEADER_BYTES + TAG_BYTES);
         const at = position(edited.length);
         expect(at).toBeGreaterThanOrEqual(HEADER_BYTES);
-        edited[at] = (edited[at] ?? 0) ^ 0xff;
+        // One low bit, not the whole byte: under a check that decrypts the body whatever the tag says, 0xff turns a
+        // JSON text into invalid UTF-8 that is refused for the wrong reason, where one bit often leaves a valid text
+        // that says something else, which a tamper-accepting check would believe.
+        edited[at] = (edited[at] ?? 0) ^ 0x01;
         return edited;
       };
       const saved: string[] = [];
