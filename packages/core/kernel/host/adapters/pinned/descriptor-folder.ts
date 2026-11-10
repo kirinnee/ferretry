@@ -238,7 +238,20 @@ async function openChild(
     throw error;
   }
   const child: HeldFolder = { fd, device: identity.device, inode: identity.inode };
-  return { fd, identity, steps: folderSteps(calls, child, identityOf, support), close: async () => await closeOf(fd) };
+  return { fd, identity, steps: folderSteps(calls, child, identityOf, support), close: closeOnce(fd) };
+}
+
+/**
+ * A close that acts once. The number of a closed descriptor is free for the next open to take, so a second `close(fd)`
+ * would close whatever descriptor now has it: a later call is a no-op.
+ */
+function closeOnce(fd: number): () => Promise<void> {
+  let open = true;
+  return async () => {
+    if (!open) return;
+    open = false;
+    await closeOf(fd);
+  };
 }
 
 /** The file `leaf` of `folder`, opened to read from its descriptor without following (see {@link FolderSteps.openFile}). */
@@ -272,7 +285,7 @@ async function openFileBelow(
     size: async () => Number((await fstatOf(fd)).size),
     sync: async () => await settle(done => fsync(fd, done)),
     chmod: async mode => await settle(done => fchmod(fd, mode, done)),
-    close: async () => await closeOf(fd),
+    close: closeOnce(fd),
   };
 }
 

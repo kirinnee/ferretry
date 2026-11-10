@@ -5,7 +5,7 @@ import type { FencedPath } from '../../../contract/bound.ts';
 import { defineState } from '../../../contract/define.ts';
 import { ApiError } from '../../../contract/http.ts';
 import type { RootHandle } from '../../../contract/ports.ts';
-import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
+import { type FileIdentity, type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { pinCreated, touchesPrivate } from '../../../host/fence-guard.ts';
 import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
 import { createNodeHostFs } from '../../../host/state/host-fs.ts';
@@ -229,6 +229,53 @@ test('S40 a home that vanished answers the 503 sentence from a root write, with 
   expect(told).toHaveLength(1);
 });
 
+test('S40 row 32: a publish that throws AFTER its entry landed (the folder sync) still pins it', async () => {
+  const real = nodeFs(() => 'r');
+  let syncs = 0;
+  let failAt = Number.POSITIVE_INFINITY;
+  // The session folder is the root's own base, so the folders a publish syncs are opened by the disk itself.
+  const fs: HostFs = {
+    ...real,
+    openDirectory: async path => {
+      const opened = await real.openDirectory(path);
+      return {
+        ...opened,
+        sync: async () => {
+          syncs += 1;
+          if (syncs === failAt) throw Object.assign(new Error(`cannot sync ${path}`), { code: 'EIO' });
+          await opened.sync();
+        },
+      };
+    },
+  };
+  const { home, roots, stranger } = await layout(fs);
+  const session = roots('ferrets', ['sessions']).root('sessions', { subfolder: SESSION });
+  const environment = session.resolve('environment.json');
+  const plain = session.resolve('notes.txt');
+  if (!environment.ok || !plain.ok) throw new Error('unresolved');
+  // A plain publish in the same folder counts the syncs one publish makes (the first also makes the session folder);
+  // the LAST sync is the one after the entry landed.
+  await session.publish(plain.value, new TextEncoder().encode('plain'));
+  syncs = 0;
+  await session.publish(plain.value, new TextEncoder().encode('plain'));
+  const perPublish = syncs;
+  syncs = 0;
+  failAt = perPublish;
+  const failure = await session.publish(environment.value, new TextEncoder().encode('FAKE-credential')).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  failAt = Number.POSITIVE_INFINITY;
+  // The write's own error comes back unchanged (never the pin's), and the entry is on disk.
+  expect((failure as { code?: string }).code).toBe('EIO');
+  // The file landed although the publish threw; an alias made now must meet a fence that already holds it.
+  await link(
+    `${home}/state/ferrets/sessions/${SESSION}/environment.json`,
+    `${home}/state/stranger/agent-homes/F1/stolen.json`,
+  );
+  expect(await readOf(stranger, 'stolen.json')).toBe('refused:fenced');
+});
+
 test('S40 a write to a path no private place touches asks for no look', async () => {
   const real = nodeFs(() => 'r');
   let lists = 0;
@@ -245,4 +292,66 @@ test('S40 a write to a path no private place touches asks for no look', async ()
   expect(lists).toBe(before);
   await pinCreated(fs, home, LIST, 'holder/signing.key', LOOK_MS);
   expect(lists).toBeGreaterThan(before);
+});
+
+/**
+ * A private create whose pin cannot RESOLVE THE HOME (one failed `realpath`, the other kind of failed pin: the index's own
+ * look never starts). The write rejects `private_unpinned`; what the next root call then does is the property. An alias
+ * of the new file that only its identity can refuse (a bind mount keeps ONE link, the same device and inode, so no link
+ * count and no name rule sees it) is stood in for by a disk that answers `bound.json` with the file's identity.
+ */
+async function bindMountAfterPin(failHomeResolve: boolean): Promise<{ write: string; alias: string }> {
+  const real = nodeFs(() => 'r');
+  let resolvings = 0;
+  let failAt = Number.POSITIVE_INFINITY;
+  let home = '';
+  let boundAs: FileIdentity | undefined;
+  const fs: HostFs = {
+    ...real,
+    realpath: async path => {
+      if (path === home) {
+        resolvings += 1;
+        if (resolvings === failAt) throw Object.assign(new Error(`EIO: cannot resolve ${path}`), { code: 'EIO' });
+      }
+      return await real.realpath(path);
+    },
+    identity: async path => {
+      const found = await real.identity(path);
+      return path.endsWith('/F1/bound.json') && boundAs !== undefined ? boundAs : found;
+    },
+    openRead: async path => {
+      const opened = await real.openRead(path);
+      return path.endsWith('/F1/bound.json') && boundAs !== undefined ? { ...opened, identity: boundAs } : opened;
+    },
+  };
+  const laid = await layout(fs);
+  home = laid.home;
+  const bound = laid.stranger.resolve('bound.json');
+  if (!bound.ok) throw new Error(bound.error);
+  await laid.stranger.writeText(bound.value, 'DECOY');
+  const session = laid.roots('ferrets', ['sessions']).root('sessions', { subfolder: SESSION });
+  const environment = session.resolve('environment.json');
+  if (!environment.ok) throw new Error(environment.error);
+  // The first write makes the session folder; the second is a plain replace, the same shape as the one that fails.
+  await session.writeText(environment.value, 'FAKE-credential');
+  const before = resolvings;
+  await session.writeText(environment.value, 'FAKE-credential');
+  const perWrite = resolvings - before;
+  resolvings = 0;
+  // The LAST resolving of a write is the pin's.
+  failAt = failHomeResolve ? perWrite : Number.POSITIVE_INFINITY;
+  const write = await session.writeText(environment.value, 'FAKE-credential').then(
+    () => 'ok',
+    (error: unknown) => String((error as { code?: string }).code ?? error),
+  );
+  boundAs = await real.identity(`${home}/state/ferrets/sessions/${SESSION}/environment.json`);
+  return { write, alias: await readOf(laid.stranger, 'bound.json') };
+}
+
+test('S40 row 32 a pin that cannot resolve the home makes the next root call look again: a bind mount of the new private file is refused', async () => {
+  // Control: the pin's look succeeds, so the alias is refused by the identity the look took.
+  expect(await bindMountAfterPin(false)).toEqual({ write: 'ok', alias: 'refused:fenced' });
+  // One failed home resolve at the pin: the write is rejected and the NEXT root call must not be answered from the
+  // snapshot kept before the create (it does not hold the new file's identity, so it would serve this alias).
+  expect(await bindMountAfterPin(true)).toEqual({ write: 'private_unpinned', alias: 'refused:fenced' });
 });

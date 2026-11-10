@@ -28,8 +28,7 @@
   ],
   "pendingReasons": {
     "vault": [
-      "[own] GAP(vault): the app half is still a skeleton, so three guarantee rows have no test yet: I6 (the input card's controlled field is held until Send and cleared on send, unmount and hide), I51 (the input card's default-submit rule: a terminal secret submits on, a browser one stays off) and S4 (the Secrets page); each test lands with the app port",
-      "[own] GAP(vault): the cli half is still a skeleton, so two guarantee rows have no test yet: S1 (`fy secret set` reads the value from stdin only) and S33 (no verb takes a secret value as an argument); each test lands with the cli port",
+      "[own] GAP(vault): the app and cli halves are built only as far as rows I6 I51 S4 S1 S33 need: the input card draws typed fields (no saved logins or sign-ins, 2FA codes or seed setup, page-field picture, secure-copy paste or \"Always use\"; those need Accounts and Browsers seams), the Secrets tab has no \"Copy to another machine\", and `fy secret` declares only `set` (ls, rm, use come after merge, parity V-0426 V-0427 V-0429). Agenda hands the ask:input renderer no request id (only {kind:\"input\"}), so the card finds its request by listing the ferret's open requests and matching the prompt the ask quotes (app/features/input/input-card-host.tsx); the input wire shapes are not in the contract, so the app keeps tolerant readers and a pad copy pinned to the daemon by tests/unit/app/input-wire-agreement.test.ts",
       "[own] GAP(vault): production buildInputs (packages/core/vault/daemon/index.ts:126) wires no accounts/logins port (inputs.ts:129 deps.accounts ?? {}), so on every input card the saved-login half is off and silent: no saved-login offer or Save-as, generic \"Needs a code\" code card, lock facts empty with no unread flag, sign-in facts not recorded; a value typed by hand is still delivered and nothing typed is lost; a client that sends a saved entry gets a refusal sentence; parity gap, after merge (owner nelly)"
     ],
     "runtimes": [
@@ -314,7 +313,6 @@
   },
   "pendingHalves": {
     "gate": ["app"],
-    "vault": ["app", "cli"],
     "browsers": ["cli"],
     "mcp": ["cli"],
     "skills": ["cli"]

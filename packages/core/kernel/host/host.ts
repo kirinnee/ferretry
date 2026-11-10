@@ -663,7 +663,8 @@ async function bootLocked(
       toldUnpinned = true;
       log.warn(refusal.message);
     },
-    // A look that succeeds ends the outage: a second one is said again.
+    // A private write's look that succeeds ends the outage: a second one is said again. The index's own looks do not
+    // re-arm it (`looked` is asked only by a create's pin).
     looked: () => {
       toldUnpinned = false;
     },

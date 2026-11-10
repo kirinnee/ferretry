@@ -1,12 +1,13 @@
 import { ApiError } from '@ferretry/kernel/contract';
 import { err, type Result } from '@ferretry/std';
-import type {
-  FerretId,
-  FerretsApi,
-  FerretSummary,
-  MoveFailure,
-  StartFailure,
-  StartRequest,
+import {
+  type FerretId,
+  FerretIdSchema,
+  type FerretsApi,
+  type FerretSummary,
+  type MoveFailure,
+  type StartFailure,
+  type StartRequest,
 } from '../../../contract/index.ts';
 import { WARDEN_LABEL } from '../session/peers/warden-lifecycle.ts';
 import type { FerretsService } from './service.ts';
@@ -30,6 +31,18 @@ const START_BY_PLUGIN: Readonly<Partial<Record<StartRequest['by'], string>>> = {
   pack: 'packs',
   board: 'board',
 };
+
+/**
+ * Who a move may say moved the ferret: `owner`, `warden` (the Warden's alone, checked apart), or `session:` and a ferret
+ * id's grammar (`FerretIdSchema`), which is how the route spells a calling ferret.
+ */
+const SESSION_MOVER = 'session:';
+const isMover = (movedBy: unknown): boolean =>
+  typeof movedBy === 'string' &&
+  (movedBy === 'owner' ||
+    movedBy === 'warden' ||
+    (movedBy.startsWith(SESSION_MOVER) && FerretIdSchema.safeParse(movedBy.slice(SESSION_MOVER.length)).success));
+const NOT_A_MOVER = 'a move names who moved it as owner, session:<ferret id> or warden';
 
 const NOT_THE_WARDEN = 'only the Warden is recorded as the Warden';
 const NOT_THE_WARDEN_LABEL = 'only the Warden starts a ferret under its own label';
@@ -67,7 +80,13 @@ async function inWardenTree(service: FerretsService, ferret: FerretId): Promise<
  *   say so (`FerretSessionPort.inWardenLineage`, the same source and rule the start's stamp uses); a parent that cannot
  *   be read, or whose documents cannot, is refused (fail closed), and nothing is started. With the session port
  *   unbound no stamp is written, so the label check is all there is to make.
- * - `systemCallsign` draws only the prefix of the consumer's own kind (`ApiError` 403 otherwise).
+ *   Every start the port lets through for a consumer other than the Warden is handed to the service as admitted outside
+ *   the Warden's tree, and the spawn stamp refuses it if lineage resolves true after all (the checks here and the stamp
+ *   read the ancestry separately).
+ * - a move's `movedBy` is `owner`, `warden` (the Warden's alone) or `session:<ferret id>`; any other spelling is refused
+ *   with a fixed sentence, nothing moved.
+ * - `systemCallsign` draws only the prefix of the consumer's own kind (`ApiError` 403 otherwise, in a sentence that does
+ *   not quote the prefix asked for).
  *
  * `start` and `move` read the caller's request once and forward a rebuilt copy, never the caller's own object.
  *
@@ -110,7 +129,10 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       // read is refused, never assumed ordinary.
       if (request.parent !== undefined && !warden && (await inWardenTree(service, request.parent)))
         return refused(NOT_THE_WARDEN_PARENT);
-      return await service.start(request);
+      // Every start admitted here for a consumer other than the Warden is told to the service as outside the Warden's
+      // tree, so the spawn stamp refuses if lineage resolves true after all (the checks above and the stamp read the
+      // ancestry separately, and a resume of the parent can strengthen its stamp in between).
+      return await service.start(request, warden ? undefined : { notInWardenTree: true });
     },
     stop: (ferret, how, reason) => service.stop(ferret, how, reason),
     resume: async (ferret, message, options) => {
@@ -136,7 +158,8 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     managedWorktrees: () => service.managedWorktrees(),
     systemCallsign: async prefix => {
       if (CALLSIGN_PREFIX_OF[consumer] !== prefix)
-        throw new ApiError(403, `the ${consumer} plugin may not draw a ${prefix} callsign`, 'forbidden');
+        // A fixed sentence: the prefix is the caller's own text and is never quoted back.
+        throw new ApiError(403, `the ${consumer} plugin may not draw that kind of callsign`, 'forbidden');
       return await service.systemCallsign(prefix);
     },
     agentControl: ferret => service.agentControl(ferret),
@@ -146,6 +169,9 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     move: async (ferret, runtime, asked, caller): Promise<Result<FerretSummary, MoveFailure>> => {
       const options = asked === undefined ? undefined : { ...asked };
       if ((options?.actor === 'warden' || options?.movedBy === 'warden') && !warden) return refused(NOT_THE_WARDEN);
+      // `movedBy` is journalled as the history's account of who moved the ferret, so it is one of the three spellings
+      // the journal reads, never free text ('Warden', 'warden ', 'session:<anything>').
+      if (options?.movedBy !== undefined && !isMover(options.movedBy)) return refused(NOT_A_MOVER);
       return await service.move(ferret, runtime, options, caller);
     },
   };

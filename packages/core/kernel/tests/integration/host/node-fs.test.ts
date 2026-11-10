@@ -65,6 +65,34 @@ describe('describing entries', () => {
   });
 });
 
+describe('row 144: the LEAF of a read is never followed', () => {
+  test('row 144 openRead of a link answers ELOOP from the open itself (O_NOFOLLOW on the leaf), a dangling link too', async () => {
+    const root = await scratch();
+    await writeFile(`${root}/target`, 'FIXTURE');
+    await symlink(`${root}/target`, `${root}/link`);
+    await symlink(`${root}/absent`, `${root}/dangling`);
+    const host = fsUnderTest();
+    await expect(host.openRead(`${root}/link`)).rejects.toMatchObject({ code: 'ELOOP' });
+    await expect(host.openRead(`${root}/dangling`)).rejects.toMatchObject({ code: 'ELOOP' });
+  });
+
+  test('row 144 openFile of a link BELOW an open folder answers ELOOP too, and the plain file beside it opens', async () => {
+    const root = await scratch();
+    await writeFile(`${root}/target`, 'FIXTURE');
+    await symlink(`${root}/target`, `${root}/link`);
+    const host = fsUnderTest();
+    const folder = await host.openDirectory(root);
+    try {
+      await expect(folder.openFile('link')).rejects.toMatchObject({ code: 'ELOOP' });
+      const plain = await folder.openFile('target');
+      expect(new TextDecoder().decode(await plain.read())).toBe('FIXTURE');
+      await plain.close();
+    } finally {
+      await folder.close();
+    }
+  });
+});
+
 describe('files and folders', () => {
   test('hard link: creates the second name, refuses an occupied one with EEXIST', async () => {
     const root = await scratch();

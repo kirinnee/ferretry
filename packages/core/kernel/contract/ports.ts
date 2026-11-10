@@ -921,7 +921,10 @@ export interface RootsPort {
        * nor the C library's calls lists and stats by path behind the link walk, and a host with the calls but not the
        * working-directory bracket lists by path (a listing there can answer an outside folder's names; file reads are
        * still refused by the spelling and identity proofs). An anchor that is not the folder or its ancestor, or one given to a root that takes no
-       * absolute folder, names no folder: every call is refused `outside`.
+       * absolute folder, names no folder: every call is refused `outside`. A caller that scopes `project-files` to a
+       * project the person named passes THAT folder (or the folder it is reached from, when it is a link such as
+       * `~/code -> /mnt/...`) as `within`: without it a project under a link is refused `link_escape`, and `within`
+       * equal to `subfolder` checks nothing above the folder itself.
        */
       readonly within?: string;
     },

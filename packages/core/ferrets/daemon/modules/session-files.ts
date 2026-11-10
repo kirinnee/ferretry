@@ -161,8 +161,12 @@ export class SessionFiles {
       carry: async ferret => await this.carryOnResume(ferret),
       // The same source (the ancestor snapshot of the session documents) and the same rule (`resolveWardenLineage`)
       // the start's stamp uses. A snapshot that throws is not caught: the port refuses on a rejection.
-      inWardenLineage: async parent =>
-        resolveWardenLineage({ id: UNSTARTED_FERRET, parent }, await this.ancestry.snapshot()).wardenLineage,
+      inWardenLineage: async parent => {
+        // As the stamp does: after the backfill, so an indexed ferret with no document yet (the boot window) is not
+        // read as a damaged ancestor and a non-warden start refused for it.
+        await this.documented.catch(() => undefined);
+        return resolveWardenLineage({ id: UNSTARTED_FERRET, parent }, await this.ancestry.snapshot()).wardenLineage;
+      },
       readable: async ferret => {
         const own = this.root(parseSessionId(ferret));
         return FERRET_READABLE_FOLDERS.map(folder => {
@@ -461,6 +465,11 @@ export class SessionFiles {
       return;
     }
     const stamped = this.stamper.stamp(request, await this.ancestry.snapshot());
+    // The port admitted this start as outside the Warden's tree, reading the ancestry on its own: if lineage resolves
+    // true here after all (a resume of the parent strengthened its stamp in between), the start is refused rather than
+    // recorded as the Warden's descendant. The sentence names nothing the caller supplied.
+    if (request.notInWardenTree === true && stamped.provenance.wardenLineage)
+      throw new Error('a start the port admitted as outside the Warden’s tree would be stamped into it');
     const stored = await this.provenance.read(id);
     // The stored stamp wins: a start over a document that already carries one (a retried start) never rewrites it.
     if (stored.provenance !== undefined) return;

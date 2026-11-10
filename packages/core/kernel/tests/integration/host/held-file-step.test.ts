@@ -109,6 +109,23 @@ describe('R-0198 FolderSteps.openFile reads a file below a held folder without a
     expect(handed.some(isOpen)).toBe(false);
   });
 
+  test('R-0198 row 142: closing a held file twice closes its descriptor once, so a descriptor that reused the number stays open', async () => {
+    const w = await scratch();
+    await writeFile(`${w.parent}/folder/g.txt`, 'SECOND-FIXTURE');
+    const { calls, handed } = trackedCalls();
+    const steps = folderSteps(calls, w.held, identityOf);
+    const first = await steps.openFile('f.txt');
+    await first.close();
+    const second = await steps.openFile('g.txt');
+    // The kernel hands out the lowest free number: the second file now holds the number the first one gave back.
+    expect(handed[1]).toBe(handed[0]);
+    await first.close();
+    expect(isOpen(handed[1] as number)).toBe(true);
+    expect(new TextDecoder().decode(await second.readAt(0, 100))).toBe('SECOND-FIXTURE');
+    await second.close();
+    expect(handed.some(isOpen)).toBe(false);
+  });
+
   test('R-0198 a link at the leaf is ELOOP (never followed), nothing at the leaf is ENOENT, and no descriptor stays open', async () => {
     const w = await scratch();
     symlinkSync(`${w.parent}/folder/f.txt`, `${w.parent}/folder/link`);
@@ -136,6 +153,23 @@ describe('R-0198 FolderSteps.openFile reads a file below a held folder without a
     const file = await folderSteps(calls, w.held, identityOf).openFile('sub');
     expect(file.identity.kind).toBe('directory');
     await file.close();
+    expect(handed.some(isOpen)).toBe(false);
+  });
+
+  test('R-0198 row 142: closing a held child folder twice closes its descriptor once, so a descriptor that reused the number stays open', async () => {
+    const w = await scratch();
+    await mkdir(`${w.parent}/folder/one`);
+    await mkdir(`${w.parent}/folder/two`);
+    const { calls, handed } = trackedCalls();
+    // `openFolder` proves the held folder and calls `openat`; it never runs the bracket, so a stub stands in for it.
+    const steps = folderSteps(calls, w.held, identityOf, { bracket: {} as never, identityOfStats });
+    const first = await steps.removal?.openFolder('one');
+    await first?.close();
+    const second = await steps.removal?.openFolder('two');
+    expect(second?.fd).toBe(first?.fd as number);
+    await first?.close();
+    expect(isOpen(second?.fd as number)).toBe(true);
+    await second?.close();
     expect(handed.some(isOpen)).toBe(false);
   });
 

@@ -168,6 +168,9 @@ async function cases(seen: Seen, places: Places): Promise<readonly (readonly [st
     ['remove through a link to a folder inside the root', await answer(() => fleet.remove(dir('route/only.json')))],
     ['the entry behind that link is gone', { ok: await kindAt(dir('holds-link/only.json')) }],
     ['remove under a folder that is not there', await answer(() => fleet.remove(dir('nope/x.txt')))],
+    // followups row 173 (7.7): a parent that is a FILE used as a folder is `changed`, and the file stays
+    ['remove under a file used as a folder', await answer(() => fleet.remove(dir('nested/deep.txt/x')))],
+    ['the file used as a folder stays', await answer(() => fleet.readText(dir('nested/deep.txt')))],
     ['remove with ..', await answer(() => fleet.remove(`${dir('nested')}/../x` as FencedPath))],
     ['remove a path of another root', await answer(() => fleet.remove(at(downloads, 'a.txt')))],
     // BG-015 m3: a link on the way that LEAVES the root is judged link_escape, and what it points at is untouched
@@ -308,6 +311,8 @@ test.skipIf(process.platform !== 'linux')(
     expect(byCase['remove through a link to a folder inside the root']).toEqual({ ok: null });
     expect(byCase['the entry behind that link is gone']).toEqual({ ok: null });
     expect(byCase['remove under a folder that is not there']).toEqual({ refused: 'changed' });
+    expect(byCase['remove under a file used as a folder']).toEqual({ refused: 'changed' });
+    expect(byCase['the file used as a folder stays']).toEqual({ ok: 'deep' });
     expect(byCase['remove with ..']).toEqual({ refused: 'outside' });
     expect(byCase['remove a path of another root']).toEqual({ refused: 'outside' });
     // BG-006: a forged spelling removes the LINK and never the folder behind it; a NUL is outside on both hosts
